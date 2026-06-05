@@ -3,20 +3,23 @@
 
 #pragma once
 
-#include "hip/HipKernelCompileOptions.hpp"
+#include "compilation/KernelCompileOptions.hpp"
 #include <optional>
 
 namespace hip_kernel_provider::batchnorm
 {
 
-class BatchnormHipKernelCompileOptions : public HipKernelCompileOptions
+using namespace core::utils;
+using namespace compilation;
+
+class BatchnormKernelCompileOptions : public KernelCompileOptions
 {
 public:
-    BatchnormHipKernelCompileOptions(
+    BatchnormKernelCompileOptions(
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* inputTensorAttrs,
         const hipDeviceProp_t& deviceProps,
-        const std::optional<hip_kernel_utils::ActivationMode>& optActivationMode = std::nullopt)
-        : HipKernelCompileOptions(inputTensorAttrs, deviceProps)
+        const std::optional<ActivationMode>& optActivationMode = std::nullopt)
+        : KernelCompileOptions(inputTensorAttrs, deviceProps)
     {
         addBatchnormDefaults();
 
@@ -32,12 +35,12 @@ public:
         }
     }
 
-    ~BatchnormHipKernelCompileOptions() = default;
+    ~BatchnormKernelCompileOptions() = default;
 
-    BatchnormHipKernelCompileOptions(const BatchnormHipKernelCompileOptions&) = delete;
-    BatchnormHipKernelCompileOptions& operator=(const BatchnormHipKernelCompileOptions&) = delete;
-    BatchnormHipKernelCompileOptions(BatchnormHipKernelCompileOptions&&) = default;
-    BatchnormHipKernelCompileOptions& operator=(BatchnormHipKernelCompileOptions&&) = default;
+    BatchnormKernelCompileOptions(const BatchnormKernelCompileOptions&) = delete;
+    BatchnormKernelCompileOptions& operator=(const BatchnormKernelCompileOptions&) = delete;
+    BatchnormKernelCompileOptions(BatchnormKernelCompileOptions&&) = default;
+    BatchnormKernelCompileOptions& operator=(BatchnormKernelCompileOptions&&) = default;
 
 private:
     void addBatchnormDefaults()

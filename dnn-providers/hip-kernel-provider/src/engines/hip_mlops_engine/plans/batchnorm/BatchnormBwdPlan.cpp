@@ -10,9 +10,9 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "BatchnormCommon.hpp"
-#include "BatchnormHipKernelCompileOptions.hpp"
+#include "BatchnormKernelCompileOptions.hpp"
+#include "compilation/IKernelCompiler.hpp"
 #include "core/Utils.hpp"
-#include "hip/IKernelCompiler.hpp"
 
 namespace hip_kernel_provider::batchnorm
 {
@@ -73,13 +73,6 @@ static ProblemDims extractProblemDims(const BatchnormBwdParams& params)
     dims.inChw = static_cast<unsigned int>(dims.c) * dims.inCstride;
     dims.inNchw = static_cast<unsigned int>(dims.n) * dims.inChw;
     dims.isLayoutNHWC = isChannelLastLayout(params.x());
-
-    const std::string archName(deviceProperties.gcnArchName);
-    dims.isGfx103X = archName.find("gfx103") == 0;
-    dims.isGfx110X = archName.find("gfx110") == 0;
-    dims.isGfx115X = archName.find("gfx115") == 0;
-    dims.isGfx120X = archName.find("gfx120") == 0;
-
     return dims;
 }
 
@@ -270,7 +263,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         activationMode = (*_params.optActivation()).mode;
     }
 
-    BatchnormHipKernelCompileOptions options(_params.x(), deviceProperties, activationMode);
+    BatchnormKernelCompileOptions options(_params.x(), deviceProperties, activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", dims.useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", dims.useBfp16Mix);
     // Not using FP16 and BFP16 paths due to affine data type requirements

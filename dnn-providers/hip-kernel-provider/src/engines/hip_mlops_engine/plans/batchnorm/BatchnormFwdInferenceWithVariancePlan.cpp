@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdInferenceWithVariancePlan.hpp"
-#include "BatchnormHipKernelCompileOptions.hpp"
+#include "BatchnormKernelCompileOptions.hpp"
 #include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
 #include "compilation/IKernelCompiler.hpp"
@@ -240,8 +240,7 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
            && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
     // Prepare compilation options
-    BatchnormHipKernelCompileOptions options(
-        _inferenceParams.x(), deviceProperties, activationMode);
+    BatchnormKernelCompileOptions options(_inferenceParams.x(), deviceProperties, activationMode);
     options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
     options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
     options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);

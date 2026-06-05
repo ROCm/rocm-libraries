@@ -3,7 +3,7 @@
 
 #include "BatchnormFwdTrainingPlan.hpp"
 #include "BatchnormCommon.hpp"
-#include "BatchnormHipKernelCompileOptions.hpp"
+#include "BatchnormKernelCompileOptions.hpp"
 
 #include "compilation/IKernelCompiler.hpp"
 #include "core/Utils.hpp"
@@ -386,7 +386,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     // Prepare compilation options
-    BatchnormHipKernelCompileOptions options(_trainingParams.x(), deviceProperties, activationMode);
+    BatchnormKernelCompileOptions options(_trainingParams.x(), deviceProperties, activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
     // Not using FP16 and BFP16 paths due to affine data type requirements
