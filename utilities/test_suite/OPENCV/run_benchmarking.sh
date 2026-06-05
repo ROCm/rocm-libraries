@@ -35,17 +35,6 @@ echo "OpenCV Benchmark - Complete Setup"
 echo "========================================"
 echo ""
 
-# Check if dataset exists
-if [ ! -d "1080p_128images_dataset" ] || [ -z "$(ls -A 1080p_128images_dataset 2>/dev/null)" ]; then
-    echo "Step 1: Generating test dataset..."
-    echo "--------------------------------------"
-    python3 generate_test_dataset.py
-    echo ""
-else
-    echo "✓ Dataset already exists ($(ls -1 1080p_128images_dataset | wc -l) images)"
-    echo ""
-fi
-
 # Check if dependencies are installed
 DEPS_MISSING=0
 if ! pkg-config --exists opencv4 && ! pkg-config --exists opencv; then
@@ -56,7 +45,7 @@ if ! dpkg -l | grep -q libxlsxwriter-dev; then
 fi
 
 if [ $DEPS_MISSING -eq 1 ]; then
-    echo "Step 2: Installing dependencies..."
+    echo "Step 1: Installing system dependencies..."
     echo "--------------------------------------"
     echo "This requires sudo privileges."
     echo ""
@@ -64,14 +53,14 @@ if [ $DEPS_MISSING -eq 1 ]; then
     if [ "$EUID" -ne 0 ]; then
         echo "Please enter your password to install dependencies:"
         sudo apt-get update
-        sudo apt-get install -y libopencv-dev libgomp1 cmake build-essential libxlsxwriter-dev
+        sudo apt-get install -y libopencv-dev libgomp1 cmake build-essential libxlsxwriter-dev python3-pip
     else
         apt-get update
-        apt-get install -y libopencv-dev libgomp1 cmake build-essential libxlsxwriter-dev
+        apt-get install -y libopencv-dev libgomp1 cmake build-essential libxlsxwriter-dev python3-pip
     fi
     echo ""
 else
-    echo "✓ Dependencies already installed"
+    echo "✓ System dependencies already installed"
     if pkg-config --exists opencv4; then
         echo "  OpenCV Version: $(pkg-config --modversion opencv4)"
     else
@@ -81,59 +70,72 @@ else
     echo ""
 fi
 
-# Build the benchmark
-echo "Step 3: Building benchmark with parallel threads..."
+# Install Python dependencies
+echo "Step 2: Installing Python dependencies..."
 echo "--------------------------------------"
-rm -rf build_enabled_pthreads
-mkdir -p build_enabled_pthreads
-cd build_enabled_pthreads
-cmake .. -DENABLE_PARALLEL_THREADS=ON
-make -j$(nproc)
-cd ..
-echo "✓ Build complete"
+if ! python3 -c "import PIL" 2>/dev/null; then
+    pip3 install --user Pillow
+else
+    echo "✓ Pillow already installed"
+fi
 echo ""
 
-# Run the benchmark
-echo "========================================"
-echo "Starting Benchmark"
-echo "========================================"
-echo ""
-echo "This will take several minutes..."
-echo "Running 100 iterations of 50+ operations on 128 1080p images"
-echo ""
+# Check if dataset exists
+if [ ! -d "1080p_128images_dataset" ] || [ -z "$(ls -A 1080p_128images_dataset 2>/dev/null)" ]; then
+    echo "Step 3: Generating test dataset..."
+    echo "--------------------------------------"
+    python3 generate_test_dataset.py
+    echo ""
+else
+    echo "✓ Dataset already exists ($(ls -1 1080p_128images_dataset | wc -l) images)"
+    echo ""
+fi
 
-./build_enabled_pthreads/opencv_vs_rpp_host_benchmarking
+# Function to build benchmark with specified configuration
+build_benchmark() {
+    local pthreads_flag=$1
+    local build_dir=$2
+    local description=$3
 
-echo ""
-echo "========================================"
-echo "Benchmark Complete with parallel threads!"
-echo "========================================"
+    echo "Building benchmark ${description}..."
+    echo "--------------------------------------"
+    mkdir -p "$build_dir"
+    cd "$build_dir"
+    cmake .. -DENABLE_PARALLEL_THREADS="$pthreads_flag"
+    make -j$(nproc)
+    cd ..
+    echo "✓ Build complete"
+    echo ""
+}
 
+# Function to run benchmark
+run_benchmark() {
+    local build_dir=$1
+    local description=$2
 
-# Build the benchmark
-echo "Step 3: Building benchmark without parallel threads..."
+    echo "========================================"
+    echo "Starting Benchmark ${description}"
+    echo "========================================"
+    echo ""
+    echo "This will take several minutes..."
+    echo "Running 100 iterations of 50+ operations on 128 1080p images"
+    echo ""
+
+    "./${build_dir}/opencv_vs_rpp_host_benchmarking"
+
+    echo ""
+    echo "========================================"
+    echo "Benchmark Complete ${description}!"
+    echo "========================================"
+    echo ""
+}
+
+# Build both configurations sequentially for clean output
+echo "Step 4: Building benchmarks..."
 echo "--------------------------------------"
-rm -rf build_disabled_pthreads
-mkdir -p build_disabled_pthreads
-cd build_disabled_pthreads
-cmake .. -DENABLE_PARALLEL_THREADS=OFF
-make -j$(nproc)
-cd ..
-echo "✓ Build complete"
-echo ""
+build_benchmark ON build_enabled_pthreads "with parallel threads"
+build_benchmark OFF build_disabled_pthreads "without parallel threads"
 
-# Run the benchmark
-echo "========================================"
-echo "Starting Benchmark"
-echo "========================================"
-echo ""
-echo "This will take several minutes..."
-echo "Running 100 iterations of 50+ operations on 128 1080p images"
-echo ""
-
-./build_disabled_pthreads/opencv_vs_rpp_host_benchmarking
-
-echo ""
-echo "========================================"
-echo "Benchmark Complete without parallel threads!"
-echo "========================================"
+# Run benchmarks sequentially
+run_benchmark build_enabled_pthreads "with parallel threads"
+run_benchmark build_disabled_pthreads "without parallel threads"

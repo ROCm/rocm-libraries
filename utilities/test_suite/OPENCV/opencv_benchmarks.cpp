@@ -1027,15 +1027,32 @@ void benchmark_OpenCV_SaltAndPepperNoise(const vector<Mat>& imgs, bool isColor, 
             Mat noise(imgs[i].size(), CV_32F);
             randu(noise, 0, 1);
 
-            for (int y = 0; y < out[i].rows; ++y)
+            if (isColor)
             {
-                for (int x = 0; x < out[i].cols; ++x)
+                for (int y = 0; y < out[i].rows; ++y)
                 {
-                    float val = noise.at<float>(y, x);
-                    if (val < noiseProb / 2)
-                        out[i].at<uchar>(y, x) = 0;
-                    else if (val < noiseProb)
-                        out[i].at<uchar>(y, x) = 255;
+                    for (int x = 0; x < out[i].cols; ++x)
+                    {
+                        float val = noise.at<float>(y, x);
+                        if (val < noiseProb / 2)
+                            out[i].at<Vec3b>(y, x) = Vec3b(0, 0, 0);
+                        else if (val < noiseProb)
+                            out[i].at<Vec3b>(y, x) = Vec3b(255, 255, 255);
+                    }
+                }
+            }
+            else
+            {
+                for (int y = 0; y < out[i].rows; ++y)
+                {
+                    for (int x = 0; x < out[i].cols; ++x)
+                    {
+                        float val = noise.at<float>(y, x);
+                        if (val < noiseProb / 2)
+                            out[i].at<uchar>(y, x) = 0;
+                        else if (val < noiseProb)
+                            out[i].at<uchar>(y, x) = 255;
+                    }
                 }
             }
         }
@@ -1627,7 +1644,6 @@ void benchmark_OpenCV_ChannelDropout(const vector<Mat>& imgs, bool isColor, floa
 
     int num_images = (int)imgs.size();
     vector<Mat> out(num_images);
-    mt19937 rng(12345);
 
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k)
@@ -1637,6 +1653,8 @@ void benchmark_OpenCV_ChannelDropout(const vector<Mat>& imgs, bool isColor, floa
 #endif
         for (int i = 0; i < num_images; ++i)
         {
+            // Thread-local RNG with iteration-aware seed for proper randomness
+            mt19937 rng(12345 + i + k * num_images);
             out[i] = imgs[i].clone();
 
             // Randomly determine which channels to drop
@@ -1654,17 +1672,15 @@ void benchmark_OpenCV_ChannelDropout(const vector<Mat>& imgs, bool isColor, floa
             if (!atLeastOne)
                 keepChannel[rng() % 3] = true;
 
-            // Zero out dropped channels
+            // Split once, zero out dropped channels, merge once
+            vector<Mat> channels;
+            split(out[i], channels);
             for (int c = 0; c < 3; ++c)
             {
                 if (!keepChannel[c])
-                {
-                    vector<Mat> channels;
-                    split(out[i], channels);
                     channels[c].setTo(0);
-                    merge(channels, out[i]);
-                }
             }
+            merge(channels, out[i]);
         }
     }
     auto end = high_resolution_clock::now();

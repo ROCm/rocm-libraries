@@ -204,8 +204,7 @@ def main():
     print(f"✓ Location: {output_path}")
     print(f"\nDataset is ready for benchmarking!")
     print("\nTo run the benchmark:")
-    print("  cd /home/svcbuild/repos/rpp_ms_develop/utilities/test_suite/opencv")
-    print("  ./build/opencv_benchmarking_script")
+    print("  ./run_benchmarking.sh")
 
 if __name__ == "__main__":
     main()

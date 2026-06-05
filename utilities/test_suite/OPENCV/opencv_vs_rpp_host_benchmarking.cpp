@@ -28,7 +28,11 @@ int main()
 {
     // Initialize RPP HOST backend handle
     rppHandle_t handle;
+#if ENABLE_PARALLEL_THREADS
     rppCreate(&handle, 1, NUM_THREADS, nullptr, RPP_HOST_BACKEND);
+#else
+    rppCreate(&handle, 1, 1, nullptr, RPP_HOST_BACKEND);
+#endif
 
     int batchSizeGray = 0, maxWidthGray = 0, maxHeightGray = 0;
     int batchSizeRGB  = 0, maxWidthRGB  = 0, maxHeightRGB  = 0;

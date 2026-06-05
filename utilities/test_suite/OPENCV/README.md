@@ -13,7 +13,11 @@ The `opencv_vs_rpp_host_benchmarking` performs side-by-side performance comparis
 
 Each operation is run 100 iterations on a batch of 128 1080p images to provide statistically meaningful performance metrics.
 
-**Results are automatically exported to an Excel file** (`opencv_vs_rpp_benchmark_results.xlsx`) with:
+**Results are automatically exported to Excel files** with:
+- `opencv_vs_rpp_benchmark_results_parallel_threads_ON.xlsx` - When parallel threading is enabled (default)
+- `opencv_vs_rpp_benchmark_results_parallel_threads_OFF.xlsx` - When parallel threading is disabled
+
+Each file contains:
 - **Sheet 1:** System information (RPP version, OpenCV version, CPU, memory, OS)
 - **Sheet 2:** Grayscale image benchmarks (OpenCV vs RPP HOST comparison with speedup)
 - **Sheet 3:** RGB image benchmarks (OpenCV vs RPP HOST comparison with speedup)
@@ -32,7 +36,8 @@ OPENCV/
 ├── generate_test_dataset.py             # Script to create synthetic test images
 ├── run_benchmarking.sh                  # One-command full setup and run
 ├── 1080p_128images_dataset/             # Test image directory (created by generate_test_dataset.py)
-└── build/                                # Build output directory (created by cmake)
+├── build_enabled_pthreads/              # Build output with parallel threads ON (created by run_benchmarking.sh)
+└── build_disabled_pthreads/             # Build output with parallel threads OFF (created by run_benchmarking.sh)
 ```
 
 ## Code Organization
@@ -61,7 +66,7 @@ This modular design separates concerns and makes it easier to:
 - Linux system (tested on Ubuntu 20.04+)
 - CMake 3.10 or higher
 - GCC with C++17 support
-- Python 3 (for dataset generation)
+- Python 3 with Pillow (PIL) library (for dataset generation)
 - Sudo privileges (for installing OpenCV)
 
 ### Required Libraries
