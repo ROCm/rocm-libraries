@@ -30,6 +30,7 @@
 #include <iostream>
 #include <random>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "ProgramOptions.hpp"
@@ -118,6 +119,14 @@ namespace
     };
 #endif
 
+#ifndef _WIN32
+    template <>
+    struct TypeTraits<TensileLite::Float4x2>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::Float4;
+    };
+#endif
+
     // A slow, easy to understand, golden reference implementation of GEMM.
     // Used strictly for validating the correctness of the optimized path.
     // Calculates, for each element (i, j):
@@ -129,7 +138,12 @@ namespace
     //                  * scaleAlphaVec[factorDim == 0 ? i : j]  (if scaleAlphaVec != nullptr)
     //
     // scaleA is always indexed by row (M), scaleB always by col (N).
-    // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).   
+    // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).
+    //
+    // When mxBlock > 0 and mxScaleA/mxScaleB are non-null, the K-reduction is
+    // block-structured: accumulate mxBlock products, then scale by the MX
+    // scale factors before adding to the running sum.
+
     // Quantize a value through `Narrow`, then return as float. This mirrors
     // what the GPU MFMA path does when storage is wider than the MAC input
     // type (e.g. Half stored, F8 used in MFMA).
@@ -170,14 +184,22 @@ namespace
                          bool           transB,
                          float          alpha,
                          float          beta,
-                         const float*   biasVec        = nullptr,
-                         const float*   scaleAlphaVec  = nullptr,
-                         ActivationType activation     = ActivationType::None,
-                         const float*   scaleAVec      = nullptr,
-                         const float*   scaleBVec      = nullptr,
-                         int            factorDim      = 0,
-                         QuantizeFn     quantizeA      = nullptr,
-                         QuantizeFn     quantizeB      = nullptr)
+                         const float*   biasVec       = nullptr,
+                         const float*   scaleAlphaVec = nullptr,
+                         ActivationType activation    = ActivationType::None,
+                         const float*   scaleAVec     = nullptr,
+                         const float*   scaleBVec     = nullptr,
+                         int            factorDim     = 0,
+                         QuantizeFn     quantizeA     = nullptr,
+                         QuantizeFn     quantizeB     = nullptr
+#ifndef _WIN32
+                         ,
+                         const E8*      mxScaleA      = nullptr,
+                         const E8*      mxScaleB      = nullptr,
+                         int            mxBlockA      = 0,
+                         int            mxBlockB      = 0
+#endif
+                         )
     {
 
         switch(activation)
@@ -200,14 +222,66 @@ namespace
             for(size_t j = 0; j < n; j++)
             {
                 float sum = 0.0f;
-                for(size_t l = 0; l < k; l++)
+
+#ifndef _WIN32
+                // MX scale tensor layout (column-major, tight strides):
+                //   !transA: mxsa = {m, k/mxBlockA}, idx = row + block * m
+                //    transA: mxsa = {k/mxBlockA, m}, idx = block + row * (k/mxBlockA)
+                //   !transB: mxsb = {k/mxBlockB, n}, idx = block + col * (k/mxBlockB)
+                //    transB: mxsb = {n, k/mxBlockB}, idx = col + block * n
+                // These formulas assume the same column-major tight-packed layout
+                // produced by setMXScaleA/setMXScaleB in ContractionProblem.
+                //
+                // Both mxBlockA and mxBlockB are required to be > 0 (#1) and
+                // powers of 2 (validated in runGemm). When they differ, one
+                // divides the other; step the inner reduction by the smaller
+                // of the two so each inner segment has constant (sa, sb) and
+                // can pick the correct scale index for each side.
+                if(mxBlockA > 0 && mxBlockB > 0 && mxScaleA && mxScaleB)
                 {
-                    float aVal = a[i * strideAM + l * strideAK];
-                    float bVal = b[l * strideBK + j * strideBN];
-                    if(quantizeA) aVal = quantizeA(aVal);
-                    if(quantizeB) bVal = quantizeB(bVal);
-                    sum += aVal * bVal;
+                    size_t kBlocksA = k / static_cast<size_t>(mxBlockA);
+                    size_t kBlocksB = k / static_cast<size_t>(mxBlockB);
+                    size_t step     = static_cast<size_t>(
+                        std::min(mxBlockA, mxBlockB));
+                    for(size_t lBase = 0; lBase < k; lBase += step)
+                    {
+                        float blockSum = 0.0f;
+                        for(size_t t = 0; t < step; t++)
+                        {
+                            size_t l    = lBase + t;
+                            float  aVal = a[i * strideAM + l * strideAK];
+                            float  bVal = b[l * strideBK + j * strideBN];
+                            if(quantizeA) aVal = quantizeA(aVal);
+                            if(quantizeB) bVal = quantizeB(bVal);
+                            blockSum += aVal * bVal;
+                        }
+
+                        size_t blkA = lBase / static_cast<size_t>(mxBlockA);
+                        size_t blkB = lBase / static_cast<size_t>(mxBlockB);
+
+                        size_t mxsaIdx = transA ? (blkA + i * kBlocksA)
+                                                : (i + blkA * m);
+                        size_t mxsbIdx = transB ? (j + blkB * n)
+                                                : (blkB + j * kBlocksB);
+
+                        float mxScale = static_cast<float>(mxScaleA[mxsaIdx])
+                                      * static_cast<float>(mxScaleB[mxsbIdx]);
+                        sum += blockSum * mxScale;
+                    }
                 }
+                else
+#endif
+                {
+                    for(size_t l = 0; l < k; l++)
+                    {
+                        float aVal = a[i * strideAM + l * strideAK];
+                        float bVal = b[l * strideBK + j * strideBN];
+                        if(quantizeA) aVal = quantizeA(aVal);
+                        if(quantizeB) bVal = quantizeB(bVal);
+                        sum += aVal * bVal;
+                    }
+                }
+
                 float effectiveAlpha = alpha;
                 if(scaleAVec)
                     effectiveAlpha *= scaleAVec[i];
@@ -253,8 +327,16 @@ int runGemm(size_t         m,
             const std::string& useScaleAB,
             int                factorDim,
             rocisa::DataType   computeInputA = rocisa::DataType::None,
-            rocisa::DataType   computeInputB = rocisa::DataType::None)
+            rocisa::DataType   computeInputB = rocisa::DataType::None,
+            int                mxBlockA      = 0,
+            int                mxBlockB      = 0,
+            size_t             batchCount    = 1)
 {
+    if(batchCount < 1)
+    {
+        std::cerr << "Error: batchCount (" << batchCount << ") must be >= 1" << std::endl;
+        return 1;
+    }
     constexpr rocisa::DataType dtypeEnumA = TypeTraits<InputAT>::value;
     constexpr rocisa::DataType dtypeEnumB = TypeTraits<InputBT>::value;
     if(computeInputA == rocisa::DataType::None) computeInputA = dtypeEnumA;
@@ -262,11 +344,74 @@ int runGemm(size_t         m,
     static_assert(std::is_same<AccumulateT, float>::value,
                   "Currently only float accumulation is supported");
 
+#ifndef _WIN32
+    constexpr bool isFP4 = std::is_same_v<InputAT, Float4x2> && std::is_same_v<InputBT, Float4x2>;
+#else
+    constexpr bool isFP4 = false;
+#endif
+
+    if constexpr(!isFP4)
+    {
+        mxBlockA = 0;
+        mxBlockB = 0;
+    }
+
+    if constexpr(isFP4)
+    {
+        // One-sided MX (only A or only B scaled) is not supported by either
+        // reference path; they would disagree about what one-sided MX means.
+        if((mxBlockA > 0) != (mxBlockB > 0))
+        {
+            std::cerr << "Error: one-sided MX is not supported "
+                      << "(mxBlockA=" << mxBlockA << ", mxBlockB=" << mxBlockB
+                      << "); set both > 0 or both 0." << std::endl;
+            return 1;
+        }
+        auto checkSide = [&](const char* name, int b) -> int {
+            if(b <= 0) return 0;
+            if((b & (b - 1)) != 0)
+            {
+                std::cerr << "Error: " << name << " (" << b << ") must be a power of 2"
+                          << std::endl;
+                return 1;
+            }
+            if(k < static_cast<size_t>(b))
+            {
+                std::cerr << "Error: K (" << k << ") must be >= " << name << " (" << b << ")"
+                          << std::endl;
+                return 1;
+            }
+            if(k % static_cast<size_t>(b) != 0)
+            {
+                std::cerr << "Error: K (" << k << ") must be a multiple of " << name
+                          << " (" << b << ")" << std::endl;
+                return 1;
+            }
+            return 0;
+        };
+        if(int rc = checkSide("mxBlockA", mxBlockA)) return rc;
+        if(int rc = checkSide("mxBlockB", mxBlockB)) return rc;
+
+        // Asymmetric MX (mxBlockA != mxBlockB) is only supported on the fast
+        // path. The production slow path's MX inner loop uses a single scale
+        // per max(mxBlockA, mxBlockB)-sized segment, which collapses the
+        // smaller-blocked side's per-segment scales onto the first one and
+        // produces wrong results. Reject the combination at the driver rather
+        // than ship a known-wrong slow path.
+        if(mxBlockA != mxBlockB && !tryFastPath)
+        {
+            std::cerr << "Error: asymmetric MX (mxBlockA=" << mxBlockA
+                      << " != mxBlockB=" << mxBlockB
+                      << ") is only supported on the fast path "
+                      << "(use --tryFastPath)." << std::endl;
+            return 1;
+        }
+    }
+
     // Calculate strides assuming standard column-major packed storage
     size_t lda        = transA ? k : m;
     size_t ldb        = transB ? n : k;
     size_t ldc        = m;
-    size_t batchCount = 1;
 
     // Define the contraction problem (geometry, strides, types)
     ContractionProblemGemm contraction
@@ -275,7 +420,7 @@ int runGemm(size_t         m,
                                                dtypeEnumA,
                                                dtypeEnumB,
                                                rocisa::DataType::Float,
-                                               rocisa::DataType::Float, // A, B, C, D types
+                                               rocisa::DataType::Float,
                                                m,
                                                n,
                                                k,
@@ -295,11 +440,30 @@ int runGemm(size_t         m,
     contraction.setAlphaType(rocisa::DataType::Float);
     contraction.setBetaType(rocisa::DataType::Float);
 
-    // Allocate host memory for inputs and outputs
-    std::vector<InputAT> a(m * k);
-    std::vector<InputBT> b(k * n);
-    std::vector<float>   c(m * n);
-    std::vector<float>   d(m * n);
+    // Allocate host memory for inputs and outputs. Each batch slice is packed.
+    size_t numA = m * k;
+    size_t numB = k * n;
+    size_t numC = m * n;
+
+    size_t storageA, storageB;
+#ifndef _WIN32
+    if constexpr(isFP4)
+    {
+        // Packed batch stride: 2 nibbles per byte, packed per batch slice.
+        storageA = ((numA + 1) / 2) * batchCount;
+        storageB = ((numB + 1) / 2) * batchCount;
+    }
+    else
+#endif
+    {
+        storageA = numA * batchCount;
+        storageB = numB * batchCount;
+    }
+
+    std::vector<InputAT> a(storageA);
+    std::vector<InputBT> b(storageB);
+    std::vector<float>   c(numC * batchCount);
+    std::vector<float>   d(numC * batchCount);
 
     // Initialize inputs with random values. We use ±1 (binary) for A and B by
     // default because it is exactly representable in every supported storage
@@ -311,6 +475,9 @@ int runGemm(size_t         m,
     // are NOT on the F8 grid - otherwise the quantization step has nothing to
     // do and the bug being tested for can't be reproduced. We give an operand
     // such values when its storage type is wider than its computeInput type.
+    //
+    // For FP4 with mxBlock>0 (mxfp4), inputs are drawn from the discrete
+    // E2M1-representable value set so the MX-scale logic is exercised.
     size_t                                seed = 42;
     std::mt19937                          gen(seed);
     std::uniform_int_distribution<>       binary_distribution(0, 1);
@@ -318,27 +485,69 @@ int runGemm(size_t         m,
 
     auto randomGen = [&]() { return binary_distribution(gen) ? 1.0f : -1.0f; };
 
-    auto initOperand = [&](auto& vec, bool quantizes) {
-        using T = typename std::decay_t<decltype(vec)>::value_type;
-        if(quantizes)
-        {
-            // Values representable in storage but not on the compute-input grid -
-            // for storage=Half/compute=F8N, values like 0.7 that Half holds
-            // exactly but F8N rounds to 0.625 or 0.75.
-            std::generate(vec.begin(), vec.end(),
-                          [&]() { return static_cast<T>(realDist(gen)); });
-        }
-        else
-        {
-            std::generate(vec.begin(), vec.end(),
-                          [&]() { return static_cast<T>(randomGen()); });
-        }
-    };
+#ifndef _WIN32
+    if constexpr(isFP4)
+    {
+        // Full E2M1-representable value set: ±0, ±0.5, ±1, ±1.5, ±2, ±3, ±4, ±6.
+        // Drawing from the entire grid (not just the powers of two near zero)
+        // exercises the MX-scale path with values whose products span more of
+        // the FP4 range, while still being exactly representable.
+        constexpr float fp4Values[]
+            = {-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
+                0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
+        constexpr int fp4ValueCount = sizeof(fp4Values) / sizeof(fp4Values[0]);
+        std::uniform_int_distribution<> fp4Dist(0, fp4ValueCount - 1);
+        auto randomFp4 = [&]() { return fp4Values[fp4Dist(gen)]; };
 
-    bool quantizesA = (sizeof(InputAT) > 1) && (computeInputA != dtypeEnumA);
-    bool quantizesB = (sizeof(InputBT) > 1) && (computeInputB != dtypeEnumB);
-    initOperand(a, quantizesA);
-    initOperand(b, quantizesB);
+        for(size_t i = 0; i < storageA; i++)
+        {
+            float v0 = randomFp4();
+            float v1 = (i == storageA - 1 && numA % 2 != 0) ? 0.0f : randomFp4();
+            a[i]     = Float4x2(v0, v1);
+        }
+        for(size_t i = 0; i < storageB; i++)
+        {
+            float v0 = randomFp4();
+            float v1 = (i == storageB - 1 && numB % 2 != 0) ? 0.0f : randomFp4();
+            b[i]     = Float4x2(v0, v1);
+        }
+    }
+    else
+#endif
+    {
+        auto initOperand = [&](auto& vec, bool quantizes) {
+            using T = typename std::decay_t<decltype(vec)>::value_type;
+#ifndef _WIN32
+            if constexpr(std::is_same_v<T, Float4x2>)
+            {
+                // FP4 mixed-input init unsupported in this branch; the FP4-only
+                // path above handles the pure FP4 case. Mixed FP4/non-FP4
+                // dispatch is rejected at the dispatcher level.
+                throw std::runtime_error(
+                    "Mixed FP4 / non-FP4 input is not supported.");
+            }
+            else
+#endif
+            if(quantizes)
+            {
+                // Values representable in storage but not on the compute-input grid -
+                // for storage=Half/compute=F8N, values like 0.7 that Half holds
+                // exactly but F8N rounds to 0.625 or 0.75.
+                std::generate(vec.begin(), vec.end(),
+                              [&]() { return static_cast<T>(realDist(gen)); });
+            }
+            else
+            {
+                std::generate(vec.begin(), vec.end(),
+                              [&]() { return static_cast<T>(randomGen()); });
+            }
+        };
+
+        bool quantizesA = (sizeof(InputAT) > 1) && (computeInputA != dtypeEnumA);
+        bool quantizesB = (sizeof(InputBT) > 1) && (computeInputB != dtypeEnumB);
+        initOperand(a, quantizesA);
+        initOperand(b, quantizesB);
+    }
     std::generate(c.begin(), c.end(), [&]() { return static_cast<float>(randomGen()); });
 
     // Optional feature buffers
@@ -403,11 +612,58 @@ int runGemm(size_t         m,
         contraction.setParams().setActivationEnum(activation);
     }
 
+#ifndef _WIN32
+    // MX scale setup (FP4 with mxBlockA/B > 0 only)
+    [[maybe_unused]] std::vector<E8> mxsa, mxsb;
+
+    if constexpr(isFP4)
+    {
+        if(mxBlockA > 0 || mxBlockB > 0)
+        {
+            // Use unpadded MX scale tensors so the columnMajorGemm reference
+            // indexing matches: mxsa = {m, k/mxBlockA} with m as leading
+            // stride (and analogous for B). Default padScaleTensor=true would
+            // round M up to next 32 and K/mxBlock up to next 8, breaking the
+            // index math below.
+            contraction.setMXScaleA(rocisa::DataType::E8, mxBlockA, /*saStride=*/{}, /*padScaleTensor=*/false);
+            contraction.setMXScaleB(rocisa::DataType::E8, mxBlockB, /*sbStride=*/{}, /*padScaleTensor=*/false);
+
+            size_t nmxsa = contraction.mxsa().totalLogicalElements();
+            size_t nmxsb = contraction.mxsb().totalLogicalElements();
+
+            if(nmxsa == 0 || nmxsb == 0)
+            {
+                std::cerr << "Error: MX scale tensor has zero elements (nmxsa=" << nmxsa
+                          << ", nmxsb=" << nmxsb << ")" << std::endl;
+                return 1;
+            }
+
+            mxsa.resize(nmxsa);
+            mxsb.resize(nmxsb);
+
+            // Distinct exponents in [0..7] so wrong indexing breaks validation
+            std::uniform_int_distribution<> expDist(0, 7);
+            for(size_t i = 0; i < nmxsa; i++)
+                mxsa[i] = E8(std::ldexp(1.0f, expDist(gen)));
+            for(size_t i = 0; i < nmxsb; i++)
+                mxsb[i] = E8(std::ldexp(1.0f, expDist(gen)));
+        }
+    }
+#endif
+
     ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), alpha, beta);
     inputs.bias          = useBias ? biasVec.data() : nullptr;
     inputs.scaleAlphaVec = useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr;
     inputs.scaleA        = (useScaleAB != "none") ? scaleABuf.data() : nullptr;
     inputs.scaleB        = (useScaleAB != "none") ? scaleBBuf.data() : nullptr;
+
+#ifndef _WIN32
+    if constexpr(isFP4)
+    {
+        inputs.mxsa = (mxBlockA > 0) ? mxsa.data() : nullptr;
+        inputs.mxsb = (mxBlockB > 0) ? mxsb.data() : nullptr;
+    }
+#endif
 
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -432,9 +688,40 @@ int runGemm(size_t         m,
     {
         std::cout << "Validating..." << std::endl;
 
-        // Convert inputs to f32 for the golden reference comparison
-        std::vector<float> aF32(a.begin(), a.end());
-        std::vector<float> bF32(b.begin(), b.end());
+        // Convert inputs to f32 for the golden reference comparison.
+        // For batched problems, A/B/C are batchCount slices of size numA/numB/numC
+        // (column-major packed; batch stride = numA / numB / numC).
+        size_t totalA = numA * batchCount;
+        size_t totalB = numB * batchCount;
+        size_t totalC = numC * batchCount;
+
+        std::vector<float> aF32, bF32;
+
+#ifndef _WIN32
+        if constexpr(isFP4)
+        {
+            aF32.resize(totalA);
+            for(size_t i = 0; i < totalA; i++)
+                aF32[i] = a[i / 2].getElement(i % 2);
+            bF32.resize(totalB);
+            for(size_t i = 0; i < totalB; i++)
+                bF32[i] = b[i / 2].getElement(i % 2);
+        }
+        else if constexpr(std::is_same_v<InputAT, Float4x2> || std::is_same_v<InputBT, Float4x2>)
+        {
+            throw std::runtime_error("Mixed FP4 / non-FP4 input is not supported.");
+        }
+        else
+#endif
+        {
+            aF32.resize(totalA);
+            for(size_t i = 0; i < totalA; i++)
+                aF32[i] = static_cast<float>(a[i]);
+            bF32.resize(totalB);
+            for(size_t i = 0; i < totalB; i++)
+                bF32[i] = static_cast<float>(b[i]);
+        }
+
         std::vector<float> cF32(c.begin(), c.end());
         std::vector<float> dRef(d.size());
 
@@ -444,38 +731,71 @@ int runGemm(size_t         m,
         QuantizeFn quantA = (computeInputA != dtypeEnumA) ? quantizerFor(computeInputA) : nullptr;
         QuantizeFn quantB = (computeInputB != dtypeEnumB) ? quantizerFor(computeInputB) : nullptr;
 
-        // Run the golden reference
-        columnMajorGemm(aF32.data(),
-                        bF32.data(),
-                        cF32.data(),
-                        dRef.data(),
-                        m,
-                        n,
-                        k,
-                        transA,
-                        transB,
-                        (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha,
-                        beta,
-                        useBias ? biasVec.data() : nullptr,
-                        useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
-                        activation,
-                        (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
-                        (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
-                        factorDim,
-                        quantA,
-                        quantB);
+#ifndef _WIN32
+        // Per-batch MX scale stride matches what setMXScaleA/B produces with
+        // unpadded sizes: each batch is a tight {m, k/mxBlockA} (or transposed)
+        // slice. Compute the per-batch element count by dividing the total
+        // logical size by batchCount.
+        size_t mxsaBatchStride = 0, mxsbBatchStride = 0;
+        if constexpr(isFP4)
+        {
+            if(mxBlockA > 0)
+                mxsaBatchStride = mxsa.size() / batchCount;
+            if(mxBlockB > 0)
+                mxsbBatchStride = mxsb.size() / batchCount;
+        }
+#endif
 
-        // Compare results
+        // Run the golden reference per-batch.
+        for(size_t batch = 0; batch < batchCount; ++batch)
+        {
+            const float* aPtr = aF32.data() + batch * numA;
+            const float* bPtr = bF32.data() + batch * numB;
+            const float* cPtr = cF32.data() + batch * numC;
+            float*       dPtr = dRef.data() + batch * numC;
+
+            columnMajorGemm(aPtr,
+                            bPtr,
+                            cPtr,
+                            dPtr,
+                            m,
+                            n,
+                            k,
+                            transA,
+                            transB,
+                            (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha,
+                            beta,
+                            useBias ? biasVec.data() : nullptr,
+                            useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
+                            activation,
+                            (useScaleAB == "Vector") ? scaleABuf.data() : nullptr,
+                            (useScaleAB == "Vector") ? scaleBBuf.data() : nullptr,
+                            factorDim,
+                            quantA,
+                            quantB
+#ifndef _WIN32
+                            ,
+                            (isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride : nullptr,
+                            (isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride : nullptr,
+                            mxBlockA,
+                            mxBlockB
+#endif
+                            );
+        }
+
+        // Compare results — FP4 with MX scales needs wider tolerance
+        float tolerance = isFP4 ? 0.5f : 0.05f;
+
         bool  allClose = true;
         float maxDiff  = 0.0f;
 
-        for(size_t i = 0; i < m * n; i++)
+        for(size_t i = 0; i < totalC; i++)
         {
             float valDut = static_cast<float>(d[i]);
             float valRef = dRef[i];
             float diff   = std::abs(valDut - valRef);
 
-            if(diff > 0.05f)
+            if(diff > tolerance)
             {
                 allClose = false;
                 maxDiff  = std::max(maxDiff, diff);
@@ -513,7 +833,7 @@ int main(int argc, char* argv[])
         "transB", po::value<bool>()->default_value(false), "Transpose B")(
         "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
         "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
-        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz)")(
+        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4)")(
         "typeA", po::value<std::string>()->default_value(""), "Override A storage type (defaults to --type)")(
         "typeB", po::value<std::string>()->default_value(""), "Override B storage type (defaults to --type)")(
         "computeInputA", po::value<std::string>()->default_value(""), "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to mimic kernels that quantize A.")(
@@ -524,7 +844,11 @@ int main(int argc, char* argv[])
         "activation", po::value<std::string>()->default_value("none"), "Activation (none, relu)")(
         "scaleAlphaVec", po::value<bool>()->default_value(false), "Enable per-row alpha scaling")(
         "factorDim", po::value<int>()->default_value(0), "ScaleAlphaVec dimension: 0=row(M), 1=col(N)")(
-        "useScaleAB", po::value<std::string>()->default_value("none"), "ScaleAB mode (none, Scalar, Vector)");
+        "useScaleAB", po::value<std::string>()->default_value("none"), "ScaleAB mode (none, Scalar, Vector)")(
+        "mxBlock", po::value<int>()->default_value(0), "MX block size for FP4 (0=no MX, must be power of 2). Shortcut: sets both A and B sides.")(
+        "mxBlockA", po::value<int>()->default_value(0), "MX block size for the A side (overrides --mxBlock for A)")(
+        "mxBlockB", po::value<int>()->default_value(0), "MX block size for the B side (overrides --mxBlock for B)")(
+        "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)");
 
     po::variables_map vm;
     try
@@ -563,6 +887,8 @@ int main(int argc, char* argv[])
 
     auto strToDataType = [](const std::string& s, rocisa::DataType& out) -> bool {
         if(s == "f32")            { out = rocisa::DataType::Float;        return true; }
+        if(s == "f64")            { out = rocisa::DataType::Double;       return true; }
+        if(s == "tf32")           { out = rocisa::DataType::Float;        return true; }
         if(s == "f16")            { out = rocisa::DataType::Half;         return true; }
         if(s == "bf16")           { out = rocisa::DataType::BFloat16;     return true; }
 #ifdef TENSILE_USE_FP8_BF8
@@ -570,6 +896,9 @@ int main(int argc, char* argv[])
         if(s == "bf8")            { out = rocisa::DataType::BFloat8;      return true; }
         if(s == "f8fnuz")         { out = rocisa::DataType::Float8_fnuz;  return true; }
         if(s == "bf8fnuz")        { out = rocisa::DataType::BFloat8_fnuz; return true; }
+#endif
+#ifndef _WIN32
+        if(s == "f4")             { out = rocisa::DataType::Float4;       return true; }
 #endif
         return false;
     };
@@ -590,6 +919,52 @@ int main(int argc, char* argv[])
     bool        useScaleAlphaVec = vm["scaleAlphaVec"].as<bool>();
     int         factorDim        = vm["factorDim"].as<int>();
     std::string useScaleAB       = vm["useScaleAB"].as<std::string>();
+    int         mxBlock          = vm["mxBlock"].as<int>();
+    int         mxBlockA         = vm["mxBlockA"].as<int>();
+    int         mxBlockB         = vm["mxBlockB"].as<int>();
+    size_t      batchCount       = vm["batchCount"].as<size_t>();
+
+    // --mxBlock is a "set both sides" shortcut; --mxBlockA/--mxBlockB are
+    // per-side overrides. It's an error to mix the shortcut with either
+    // per-side flag.
+    if(mxBlock > 0 && (mxBlockA > 0 || mxBlockB > 0))
+    {
+        std::cerr << "Error: --mxBlock cannot be combined with --mxBlockA or --mxBlockB"
+                  << std::endl;
+        return 1;
+    }
+    if(mxBlock > 0)
+    {
+        mxBlockA = mxBlock;
+        mxBlockB = mxBlock;
+    }
+    if(mxBlockA < 0 || mxBlockB < 0)
+    {
+        std::cerr << "Error: mxBlockA/mxBlockB must be non-negative" << std::endl;
+        return 1;
+    }
+    // One-sided MX is rejected (see review #1). When either per-side flag is
+    // given, require both > 0.
+    if((mxBlockA > 0) != (mxBlockB > 0))
+    {
+        std::cerr << "Error: --mxBlockA and --mxBlockB must both be > 0 "
+                  << "(mxBlockA=" << mxBlockA << ", mxBlockB=" << mxBlockB << ")"
+                  << std::endl;
+        return 1;
+    }
+
+    if(mxBlock < 0)
+    {
+        std::cerr << "Error: mxBlock (" << mxBlock << ") must be non-negative" << std::endl;
+        return 1;
+    }
+
+    if((mxBlockA > 0 || mxBlockB > 0) && typeStr != "f4")
+    {
+        std::cerr << "Error: mxBlock/mxBlockA/mxBlockB is only supported for type f4, not "
+                  << typeStr << std::endl;
+        return 1;
+    }
 
     if(useScaleAB != "none" && useScaleAB != "Scalar" && useScaleAB != "Vector")
     {
@@ -627,7 +1002,7 @@ int main(int argc, char* argv[])
             return runGemm<AT, BT>(
                 m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
                 useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
-                computeInputA, computeInputB);
+                computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount);
         };
         if(typeBStr == "f32")        return callB(float{});
         if(typeBStr == "f16")        return callB(Half{});
@@ -637,6 +1012,9 @@ int main(int argc, char* argv[])
         if(typeBStr == "bf8")        return callB(BFloat8{});
         if(typeBStr == "f8fnuz")     return callB(Float8_fnuz{});
         if(typeBStr == "bf8fnuz")    return callB(BFloat8_fnuz{});
+#endif
+#ifndef _WIN32
+        if(typeBStr == "f4")         return callB(Float4x2{});
 #endif
         std::cerr << "Unknown typeB: " << typeBStr << std::endl;
         return 1;
@@ -652,6 +1030,9 @@ int main(int argc, char* argv[])
         if(typeAStr == "bf8")        return dispatchB(BFloat8{});
         if(typeAStr == "f8fnuz")     return dispatchB(Float8_fnuz{});
         if(typeAStr == "bf8fnuz")    return dispatchB(BFloat8_fnuz{});
+#endif
+#ifndef _WIN32
+        if(typeAStr == "f4")         return dispatchB(Float4x2{});
 #endif
         std::cerr << "Unknown typeA: " << typeAStr << std::endl;
         return 1;
