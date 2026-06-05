@@ -23,6 +23,8 @@ This tool loads serialized hipDNN graphs, executes them via the MIOpen plugin, a
 
 Run the provided setup script from the `dnn-benchmarking` directory:
 
+Requires Python 3.12 or newer.
+
 ```bash
 bash setup.sh
 source .workspace/.venv/bin/activate

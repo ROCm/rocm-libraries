@@ -29,6 +29,8 @@ RESOLVED_TORCH_INDEX_URL=""
 usage() {
     echo "Usage: $0 [options]"
     echo ""
+    echo "  Requires Python 3.12 or newer."
+    echo ""
     echo "  --torch-mode <rocm|cpu|existing|none>"
     echo "                       Select how torch is provided. Default: $TORCH_MODE"
     echo "                         rocm: install ROCm torch nightly, use ROCm"
@@ -70,6 +72,20 @@ require_arg() {
         usage
         exit 1
     fi
+}
+
+require_python_version() {
+    python3 - <<'PY'
+import sys
+
+required = (3, 12)
+if sys.version_info < required:
+    version = ".".join(str(part) for part in sys.version_info[:3])
+    raise SystemExit(
+        f"ERROR: setup.sh requires Python >= 3.12, but python3 is {version}. "
+        "Run setup with a Python 3.12+ environment."
+    )
+PY
 }
 
 while [[ $# -gt 0 ]]; do
@@ -121,6 +137,8 @@ esac
 if [ "$TORCH_MODE" = "existing" ]; then
     REUSE_VENV=1
 fi
+
+require_python_version
 mkdir -p "$DNN_BENCH_WORKSPACE"
 export DNN_BENCH_WORKSPACE
 
