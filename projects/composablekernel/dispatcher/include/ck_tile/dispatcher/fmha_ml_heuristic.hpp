@@ -257,9 +257,10 @@ class FmhaMLHeuristic
         auto features   = extract_fmha_features(prob, key, hw_);
         int64_t out_len = 0;
         double pred     = 0.0;
+        // data_type=1 (C_API_DTYPE_FLOAT64): features is std::array<double>.
         if(LGBM_BoosterPredictForMat(booster_,
                                      features.data(),
-                                     0,
+                                     1,
                                      1,
                                      FMHA_NUM_FEATURES,
                                      1,
