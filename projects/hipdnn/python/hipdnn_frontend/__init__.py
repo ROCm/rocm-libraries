@@ -30,14 +30,32 @@ if is_windows:
 # the extension resolves them at import time.
 try:
     import rocm_sdk
+
     core_shortnames = ["hipdnn"]
     if is_windows:
-        core_shortnames = ["amd_comgr", "amdhip64", "hiprtc", "hipdnn", "hipblaslt", "miopen"]
+        core_shortnames = [
+            "amd_comgr",
+            "amdhip64",
+            "hiprtc",
+            "hipdnn",
+            "hipblaslt",
+            "miopen",
+        ]
 
     rocm_sdk.initialize_process(preload_shortnames=core_shortnames)
 except ImportError:
+    # rocm_sdk is not installed. Non-wheel installs (source builds, system
+    # ROCm) resolve the runtime via RPATH/LD_LIBRARY_PATH/PATH on Linux, or via
+    # the HIPDNN_DLL_DIRECTORIES os.add_dll_directory registration above on
+    # Windows, and do not need preloading, so there is nothing to do.
     pass
 except Exception:
+    # Preload is best-effort. initialize_process can raise when a requested
+    # library is unavailable (ModuleNotFoundError if the providing wheel is not
+    # installed, FileNotFoundError if the wheel is present but the DLL is
+    # missing). The library may still be resolvable by other means; a genuine
+    # miss surfaces as a clear dlopen/ImportError from the extension import
+    # below.
     pass
 
 # Import everything from the compiled extension module
