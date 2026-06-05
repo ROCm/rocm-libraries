@@ -93,9 +93,22 @@ _MMA_C_FRAG_LEN: Dict[str, int] = {
     "mfma_scale_f32_16x16x128_f8f6f4": 4,
     "wmma_f32_16x16x16_f16": 8,
     "wmma_f32_16x16x16_bf16": 8,
+    "wmma_i32_16x16x16_iu8": 8,
+    "wmma_i32_16x16x16_iu4": 8,
     "wmma_gfx12_f32_16x16x16_f16": 8,
     "wmma_gfx12_f32_16x16x16_bf16": 8,
 }
+
+# op_id -> accumulator/result *element* type. Float atoms accumulate in f32;
+# integer WMMA atoms (iu8/iu4) accumulate in i32. Used by ``IRBuilder.mma`` to
+# size the result vector element type when ``op`` is a bare op_id string; an
+# ``MmaOp`` object supplies its ``c_dtype`` directly and bypasses this table.
+_MMA_C_INT_OP_IDS = frozenset(
+    {
+        "wmma_i32_16x16x16_iu8",
+        "wmma_i32_16x16x16_iu4",
+    }
+)
 
 # op_id -> the ``result_name_hint`` the legacy ISA-named method used. Most atoms
 # used "acc"; a handful used distinct hints that must be preserved verbatim so
@@ -549,11 +562,20 @@ class IRBuilder:
         """Bitwise-NOT. For an i1 input this is the logical negation."""
         return self._op("arith.not", [a], [a.type], result_name_hint="not").result
 
+    def smax(self, a: Value, b: Value) -> Value:
+        return self._op("arith.smax", [a, b], [a.type], result_name_hint="smax").result
+
+    def smin(self, a: Value, b: Value) -> Value:
+        return self._op("arith.smin", [a, b], [a.type], result_name_hint="smin").result
+
     def zext(self, v: Value, target: Type) -> Value:
         return self._op("arith.zext", [v], [target], result_name_hint="zx").result
 
     def sext(self, v: Value, target: Type) -> Value:
         return self._op("arith.sext", [v], [target], result_name_hint="sx").result
+
+    def trunc(self, v: Value, target: Type) -> Value:
+        return self._op("arith.trunc", [v], [target], result_name_hint="tr").result
 
     def select(self, cond: Value, lhs: Value, rhs: Value) -> Value:
         return self._op(
@@ -567,6 +589,19 @@ class IRBuilder:
         return self._op(
             "arith.trunc_f32_to_f16", [v], [F16], result_name_hint="t"
         ).result
+
+    def rint_f32(self, v: Value) -> Value:
+        """Round an f32 to the nearest integer (still f32), round-to-nearest-even.
+
+        Lowers to ``llvm.rint.f32`` (``rintf`` in HIP), which honours the
+        current rounding mode (RNE). Unlike :meth:`cvt_f32_to_i8_sat` this does
+        not narrow to i8, so it works for the full f32 integer range -- the
+        primitive an integer GEMM emulated via f16 WMMA needs to snap its
+        sub-ULP-noisy accumulator back to the exact integer before requant.
+        """
+        if v.type.name != "f32":
+            raise ValueError(f"rint_f32 expects f32 input, got {v.type.name}")
+        return self._op("arith.rint_f32", [v], [F32], result_name_hint="rint").result
 
     def cast_to_f32(self, v: Value) -> Value:
         if v.type.name == "f32":
@@ -1233,6 +1268,24 @@ class IRBuilder:
     def vector_mul(self, a: Value, b: Value) -> Value:
         return self.vector_binary("mul", a, b)
 
+    def vector_and(self, a: Value, b: Value) -> Value:
+        return self.vector_binary("and", a, b)
+
+    def vector_or(self, a: Value, b: Value) -> Value:
+        return self.vector_binary("or", a, b)
+
+    def vector_shl(self, a: Value, b: Value) -> Value:
+        return self.vector_binary("shl", a, b)
+
+    def vector_lshr(self, a: Value, b: Value) -> Value:
+        return self.vector_binary("lshr", a, b)
+
+    def vector_smax(self, a: Value, b: Value) -> Value:
+        return self.vector_binary("smax", a, b)
+
+    def vector_smin(self, a: Value, b: Value) -> Value:
+        return self.vector_binary("smin", a, b)
+
     def vector_max(self, a: Value, b: Value) -> Value:
         return self.vector_binary("max", a, b)
 
@@ -1283,6 +1336,28 @@ class IRBuilder:
             "vector.select", [mask, lhs, rhs], [lhs.type], result_name_hint="vsel"
         ).result
 
+    def vector_cmp(self, pred: str, a: Value, b: Value) -> Value:
+        if not isinstance(a.type, VectorType) or a.type != b.type:
+            raise ValueError("vector_cmp expects matching vector operands")
+        return self._op(
+            "vector.cmp",
+            [a, b],
+            [VectorType(I1, a.type.count)],
+            attrs={"pred": pred},
+            result_name_hint=f"vcmp_{pred}",
+        ).result
+
+    def vector_trunc(self, v: Value, target: Type) -> Value:
+        if not isinstance(v.type, VectorType):
+            raise ValueError("vector_trunc expects vector input")
+        return self._op(
+            "vector.trunc",
+            [v],
+            [VectorType(target, v.type.count)],
+            attrs={"target": target.name},
+            result_name_hint=f"vtr{v.type.count}",
+        ).result
+
     def smem_store_f16(
         self, smem: Value, indices: Sequence[Value], value: Value
     ) -> None:
@@ -1305,9 +1380,11 @@ class IRBuilder:
     def smem_store_vN(
         self, smem: Value, indices: Sequence[Value], value: Value, n: int
     ) -> None:
-        """Vectorised LDS store of N consecutive 16-bit values.
+        """Vectorised LDS store of N consecutive values.
 
-        Supports scalar 16-bit stores (`n=1`) and vector stores for f16/bf16.
+        Supports scalar stores (`n=1`) plus vector stores for the element types
+        accepted by :meth:`smem_load_vN`. For 8-bit element types, ``n=16`` maps
+        to a 16-byte LDS transaction, which is the native-int WMMA staging shape.
         """
         if n == 1:
             # Single-element store; route through the scalar `tile.smem_store`.
@@ -1317,14 +1394,33 @@ class IRBuilder:
                 attrs={"rank": len(indices), "elem_type": value.type.name},
             )
             return
-        if n not in (2, 4, 8):
-            raise ValueError(f"unsupported vector width for smem_store_vN: {n}")
         if not isinstance(value.type, VectorType):
             raise ValueError("smem_store_vN expects vector value for n > 1")
+        elem_name = value.type.elem.name
+        allowed_n = (
+            (2, 4, 8, 16) if elem_name in ("i8", "fp8e4m3", "bf8e5m2") else (2, 4, 8)
+        )
+        if n not in allowed_n:
+            raise ValueError(
+                f"unsupported vector width for smem_store_vN of {elem_name}: {n} "
+                f"(allowed: {allowed_n})"
+            )
+        elem_bytes = (
+            1
+            if elem_name in ("i8", "fp8e4m3", "bf8e5m2")
+            else 4
+            if elem_name in ("f32", "i32")
+            else 2
+        )
         self._op(
             "tile.smem_store_vN",
             [smem, *indices, value],
-            attrs={"rank": len(indices), "elem_type": value.type.elem.name, "vec": n},
+            attrs={
+                "rank": len(indices),
+                "elem_type": elem_name,
+                "vec": n,
+                "align": n * elem_bytes,
+            },
         )
 
     def smem_load_v4_f16(self, smem: Value, row: Value, col: Value) -> Value:
@@ -1416,11 +1512,19 @@ class IRBuilder:
             if hasattr(op, "c_frag_len") and op.c_frag_len
             else _mma_c_frag_len(op_id)
         )
+        # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
+        # i32; everything else in f32. Prefer the atom's own c_dtype when ``op``
+        # is an MmaOp, else fall back to the op_id table.
+        c_dtype = getattr(op, "c_dtype", None)
+        is_int_acc = (
+            c_dtype == "i32" if c_dtype is not None else op_id in _MMA_C_INT_OP_IDS
+        )
+        c_elem = I32 if is_int_acc else F32
         hint = _MMA_RESULT_HINT.get(op_id, "acc")
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
-            [VectorType(F32, c_frag_len)],
+            [VectorType(c_elem, c_frag_len)],
             attrs={"op_id": op_id},
             result_name_hint=hint,
         ).result
@@ -2960,8 +3064,11 @@ PURE_OP_NAMES = {
     "arith.and",
     "arith.or",
     "arith.not",
+    "arith.smax",
+    "arith.smin",
     "arith.zext",
     "arith.sext",
+    "arith.trunc",
     "arith.trunc_f32_to_f16",
     "arith.cast_to_f32",
     "arith.cast_f32_to",
@@ -2979,7 +3086,15 @@ PURE_OP_NAMES = {
     "vector.bitcast",
     "vector.add",
     "vector.mul",
+    "vector.and",
+    "vector.or",
+    "vector.shl",
+    "vector.lshr",
+    "vector.smax",
+    "vector.smin",
     "vector.max",
+    "vector.cmp",
+    "vector.trunc",
     "vector.sum",
     "vector.reduce_max",
     "vector.splat",
@@ -3009,6 +3124,7 @@ PURE_OP_NAMES = {
     "arith.cvt_f32_to_fp8",
     "arith.cvt_f32_to_bf8",
     "arith.cvt_f32_to_i8_sat",
+    "arith.rint_f32",
     "arith.cvt_pk_f32_fp8x4",
     "arith.cvt_pk_f32_bf8x4",
     "arith.cvt_pk_fp8_f32x4",

@@ -115,6 +115,7 @@ _CKDSL_VEC(int, i32x, 1); _CKDSL_VEC(int, i32x, 2); _CKDSL_VEC(int, i32x, 3);
 _CKDSL_VEC(int, i32x, 4); _CKDSL_VEC(int, i32x, 8);
 _CKDSL_VEC(int16_t, i16x, 1); _CKDSL_VEC(int16_t, i16x, 2);
 _CKDSL_VEC(int16_t, i16x, 4); _CKDSL_VEC(int16_t, i16x, 8);
+_CKDSL_VEC(int8_t, i8x, 1); _CKDSL_VEC(int8_t, i8x, 2);
 _CKDSL_VEC(int8_t, i8x, 4); _CKDSL_VEC(int8_t, i8x, 8); _CKDSL_VEC(int8_t, i8x, 16);
 _CKDSL_VEC(bool, boolx, 2); _CKDSL_VEC(bool, boolx, 4); _CKDSL_VEC(bool, boolx, 8);
 _CKDSL_VEC(bool, boolx, 16);
@@ -349,6 +350,20 @@ class _Lowerer:
             f"{_type_to_hip(op.result.type)} {_name(op.result)} = {_name(a)} | {_name(b)};"
         )
 
+    def _op_arith_smax(self, op: Op) -> None:
+        a, b = op.operands
+        self._emit(
+            f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
+            f"({_name(a)} > {_name(b)} ? {_name(a)} : {_name(b)});"
+        )
+
+    def _op_arith_smin(self, op: Op) -> None:
+        a, b = op.operands
+        self._emit(
+            f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
+            f"({_name(a)} < {_name(b)} ? {_name(a)} : {_name(b)});"
+        )
+
     def _op_arith_zext(self, op: Op) -> None:
         (v,) = op.operands
         self._emit(
@@ -356,6 +371,12 @@ class _Lowerer:
         )
 
     def _op_arith_sext(self, op: Op) -> None:
+        (v,) = op.operands
+        self._emit(
+            f"{_type_to_hip(op.result.type)} {_name(op.result)} = ({_type_to_hip(op.result.type)}){_name(v)};"
+        )
+
+    def _op_arith_trunc(self, op: Op) -> None:
         (v,) = op.operands
         self._emit(
             f"{_type_to_hip(op.result.type)} {_name(op.result)} = ({_type_to_hip(op.result.type)}){_name(v)};"
@@ -418,7 +439,16 @@ class _Lowerer:
             raise RuntimeError("smem store_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
+        prefix = {
+            "f16": "f16x",
+            "bf16": "bf16x",
+            "f32": "f32x",
+            "i32": "i32x",
+            "i16": "i16x",
+            "i8": "i8x",
+            "fp8e4m3": "i8x",
+            "bf8e5m2": "i8x",
+        }.get(elem_name, "f16x")
         self._emit(
             f"*reinterpret_cast<{prefix}{vec}*>(&{storage}[{idx_str}]) = {_name(value)};"
         )
@@ -1228,6 +1258,10 @@ class _Lowerer:
             f"({as_i32} > 127 ? 127 : {as_i32}));"
         )
 
+    def _op_arith_rint_f32(self, op: Op) -> None:
+        (v,) = op.operands
+        self._emit(f"float {_name(op.result)} = rintf({_name(v)});")
+
     def _op_arith_bitcast(self, op: Op) -> None:
         (v,) = op.operands
         tgt = _type_to_hip(op.result.type)
@@ -1710,11 +1744,10 @@ class _Lowerer:
         n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
         nice = _name(op.result)
         self._emit(f"{res_t} {nice};")
+        scalar_mask = not isinstance(mask.type, VectorType)
         for i in range(n):
-            self._emit(
-                f"{nice}[{i}] = {_name(mask)}[{i}] ? "
-                f"{_name(lhs)}[{i}] : {_name(rhs)}[{i}];"
-            )
+            cond = _name(mask) if scalar_mask else f"{_name(mask)}[{i}]"
+            self._emit(f"{nice}[{i}] = {cond} ? {_name(lhs)}[{i}] : {_name(rhs)}[{i}];")
 
     def _op_vector_sum(self, op: Op) -> None:
         (v,) = op.operands
@@ -1752,6 +1785,89 @@ class _Lowerer:
         self._emit(f"{res_t} {nice};")
         for i in range(n):
             self._emit(f"{nice}[{i}] = {_name(a)}[{i}] - {_name(bb)}[{i}];")
+
+    def _op_vector_and(self, op: Op) -> None:
+        a, bb = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(f"{nice}[{i}] = {_name(a)}[{i}] & {_name(bb)}[{i}];")
+
+    def _op_vector_or(self, op: Op) -> None:
+        a, bb = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(f"{nice}[{i}] = {_name(a)}[{i}] | {_name(bb)}[{i}];")
+
+    def _op_vector_shl(self, op: Op) -> None:
+        a, bb = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(f"{nice}[{i}] = {_name(a)}[{i}] << {_name(bb)}[{i}];")
+
+    def _op_vector_lshr(self, op: Op) -> None:
+        a, bb = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(
+                f"{nice}[{i}] = ((uint32_t){_name(a)}[{i}]) >> {_name(bb)}[{i}];"
+            )
+
+    def _op_vector_smax(self, op: Op) -> None:
+        a, bb = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(
+                f"{nice}[{i}] = ({_name(a)}[{i}] > {_name(bb)}[{i}]) ? "
+                f"{_name(a)}[{i}] : {_name(bb)}[{i}];"
+            )
+
+    def _op_vector_smin(self, op: Op) -> None:
+        a, bb = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(
+                f"{nice}[{i}] = ({_name(a)}[{i}] < {_name(bb)}[{i}]) ? "
+                f"{_name(a)}[{i}] : {_name(bb)}[{i}];"
+            )
+
+    def _op_vector_cmp(self, op: Op) -> None:
+        a, bb = op.operands
+        pred = op.attrs.get("pred", "lt")
+        cmap = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "==", "ne": "!="}
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(f"{nice}[{i}] = {_name(a)}[{i}] {cmap[pred]} {_name(bb)}[{i}];")
+
+    def _op_vector_trunc(self, op: Op) -> None:
+        (v,) = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        elem_cpp = _type_to_hip(op.result.type.elem)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(f"{nice}[{i}] = ({elem_cpp}){_name(v)}[{i}];")
 
     def _op_vector_fma(self, op: Op) -> None:
         a, bb, cc = op.operands

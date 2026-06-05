@@ -245,6 +245,21 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16("
         "<16 x i16>, <16 x i16>, <8 x float>)"
     ),
+    # RDNA3/3.5 (gfx11) integer WMMA — wave32 16x16x16 iu8. Operands are
+    # <4 x i32> (16 int8 packed 4-per-i32), accumulator/result <8 x i32>. The
+    # signature carries i1 signedness flags (unsignedA/unsignedB) before each
+    # matrix operand and a trailing i1 clamp. Emission goes through
+    # Gfx11RdnaBackend.emit_wmma. LLVM-lowered to v_wmma_i32_16x16x16_iu8.
+    "wmma.i32.16x16x16.iu8": (
+        "declare <8 x i32> @llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32("
+        "i1, <4 x i32>, i1, <4 x i32>, <8 x i32>, i1)"
+    ),
+    # RDNA3/3.5 (gfx11) integer WMMA — wave32 16x16x16 iu4. Operands are
+    # <2 x i32> (16 int4 packed 8-per-i32), accumulator/result <8 x i32>.
+    "wmma.i32.16x16x16.iu4": (
+        "declare <8 x i32> @llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.v2i32("
+        "i1, <2 x i32>, i1, <2 x i32>, <8 x i32>, i1)"
+    ),
     # RDNA4 (gfx12) WMMA — wave32 16x16x16. No cross-half operand duplication:
     # A/B are <8 x half> / <8 x i16> per lane (vs <16 x ...> on gfx11). Emission
     # goes through Gfx12RdnaBackend.emit_wmma.
@@ -1038,6 +1053,22 @@ class _Lowerer:
             f"  {op.result.name} = xor {ty} {self._operand(a)}, {mask}"
         )
 
+    def _op_arith_smax(self, op: Op) -> None:
+        a, b = op.operands
+        self._need("smax.i32")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.smax.i32(i32 {self._operand(a)}, "
+            f"i32 {self._operand(b)})"
+        )
+
+    def _op_arith_smin(self, op: Op) -> None:
+        a, b = op.operands
+        self._need("smin.i32")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.smin.i32(i32 {self._operand(a)}, "
+            f"i32 {self._operand(b)})"
+        )
+
     def _op_arith_zext(self, op: Op) -> None:
         (v,) = op.operands
         self._current().emit(
@@ -1049,6 +1080,13 @@ class _Lowerer:
         (v,) = op.operands
         self._current().emit(
             f"  {op.result.name} = sext {_llvm_type(v.type)} {self._operand(v)} "
+            f"to {_llvm_type(op.result.type)}"
+        )
+
+    def _op_arith_trunc(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = trunc {_llvm_type(v.type)} {self._operand(v)} "
             f"to {_llvm_type(op.result.type)}"
         )
 
@@ -1416,6 +1454,14 @@ class _Lowerer:
         )
         self._current().emit(f"  {op.result.name} = trunc i32 {smin_v} to i8")
 
+    def _op_arith_rint_f32(self, op: Op) -> None:
+        """Round an f32 to nearest integer (still f32), round-to-nearest-even."""
+        (v,) = op.operands
+        self._need("rint.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.rint.f32(float {self._operand(v)})"
+        )
+
     def _op_math_exp2(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
@@ -1692,10 +1738,11 @@ class _Lowerer:
         )
 
     def _op_tile_smem_store_vN(self, op: Op) -> None:
-        """Vectorised LDS store: stores <vec x half> at the given index.
+        """Vectorised LDS store at the given index.
 
-        Lowers to `store <vec x half>, ptr addrspace(3) %p, align (vec*2)`
-        which the AMDGPU backend turns into ds_write_b{32,64,128}.
+        Lowers to `store <vec x elem>, ptr addrspace(3) %p, align ...`.
+        The AMDGPU backend turns naturally-aligned payloads into
+        ds_write_b{16,32,64,128} based on total byte width.
         """
         smem = op.operands[0]
         indices = op.operands[1:-1]
@@ -1709,8 +1756,18 @@ class _Lowerer:
             f"  {gep} = getelementptr inbounds {agg_ty}, ptr addrspace(3) {gname}, "
             f"{', '.join(gidx)}"
         )
-        align = int(op.attrs.get("align", vec * 2))
         elem_ty = _llvm_type(value.type.elem)  # type: ignore[attr-defined]
+        elem_bytes = {
+            "i8": 1,
+            "fp8e4m3": 1,
+            "bf8e5m2": 1,
+            "f16": 2,
+            "bf16": 2,
+            "i32": 4,
+            "f32": 4,
+            "i64": 8,
+        }.get(value.type.elem.name, 2)  # type: ignore[attr-defined]
+        align = int(op.attrs.get("align", vec * elem_bytes))
         self._current().emit(
             f"  store <{vec} x {elem_ty}> {self._operand(value)}, ptr addrspace(3) {gep}, "
             f"align {align}"
@@ -3232,6 +3289,63 @@ class _Lowerer:
     def _op_vector_sub(self, op: Op) -> None:
         elem = op.result.type.elem.name  # type: ignore[attr-defined]
         self._vector_binop(op, "fsub" if elem in ("f16", "bf16", "f32") else "sub")
+
+    def _op_vector_and(self, op: Op) -> None:
+        self._vector_binop(op, "and")
+
+    def _op_vector_or(self, op: Op) -> None:
+        self._vector_binop(op, "or")
+
+    def _op_vector_shl(self, op: Op) -> None:
+        self._vector_binop(op, "shl")
+
+    def _op_vector_lshr(self, op: Op) -> None:
+        self._vector_binop(op, "lshr")
+
+    def _op_vector_cmp(self, op: Op) -> None:
+        pred = op.attrs.get("pred", "lt")
+        pmap = {
+            "lt": "slt",
+            "le": "sle",
+            "gt": "sgt",
+            "ge": "sge",
+            "eq": "eq",
+            "ne": "ne",
+        }
+        a, b = op.operands
+        self._current().emit(
+            f"  {op.result.name} = icmp {pmap[pred]} {_llvm_type(a.type)} "
+            f"{self._operand(a)}, {self._operand(b)}"
+        )
+
+    def _op_vector_smax(self, op: Op) -> None:
+        a, b = op.operands
+        cmp = self._fresh("vsmax.cmp")
+        self._current().emit(
+            f"  {cmp} = icmp sgt {_llvm_type(a.type)} {self._operand(a)}, {self._operand(b)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = select <{op.result.type.count} x i1> {cmp}, "
+            f"{_llvm_type(a.type)} {self._operand(a)}, {_llvm_type(b.type)} {self._operand(b)}"
+        )
+
+    def _op_vector_smin(self, op: Op) -> None:
+        a, b = op.operands
+        cmp = self._fresh("vsmin.cmp")
+        self._current().emit(
+            f"  {cmp} = icmp slt {_llvm_type(a.type)} {self._operand(a)}, {self._operand(b)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = select <{op.result.type.count} x i1> {cmp}, "
+            f"{_llvm_type(a.type)} {self._operand(a)}, {_llvm_type(b.type)} {self._operand(b)}"
+        )
+
+    def _op_vector_trunc(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = trunc {_llvm_type(v.type)} {self._operand(v)} "
+            f"to {_llvm_type(op.result.type)}"
+        )
 
     def _op_vector_fma(self, op: Op) -> None:
         """Packed FMA via the ``llvm.fmuladd.v<N>x<elem>`` intrinsic.

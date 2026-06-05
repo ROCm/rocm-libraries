@@ -40,6 +40,17 @@ _DTYPE_ALIASES = {
     "fp8e4m3": "fp8e4m3",
     "bf8": "bf8e5m2",
     "bf8e5m2": "bf8e5m2",
+    # Integer WMMA: "iu8"/"iu4" are the RDNA WMMA integer operand families
+    # (signedness is an instruction operand, not the dtype); "i32" is the
+    # integer accumulator. Scalar int spellings pass through for completeness.
+    "iu8": "iu8",
+    "iu4": "iu4",
+    "i8": "i8",
+    "int8": "i8",
+    "i4": "i4",
+    "int4": "i4",
+    "i32": "i32",
+    "int32": "i32",
 }
 
 
@@ -314,6 +325,49 @@ def _wmma_b_16x16(builder, lane, slot):
     return builder.const_i32(slot), col
 
 
+# --- RDNA3/3.5 integer WMMA (iu8) 16x16x16 lane maps --------------------------
+# Same lane geometry as f16 WMMA (lane l holds row/col l%16, cross-half
+# duplication), but the K=16 dimension is *packed* into the <4 x i32> A/B
+# fragment: slot j (0..3) is one i32 holding the four int8 K-values
+# [4j, 4j+1, 4j+2, 4j+3]. The lane map therefore returns the K *base* of the
+# slot (4*j); the kernel/staging code packs the four consecutive K bytes from
+# there. The accumulator is identical to f16 WMMA (_wmma_acc_16x16), only the
+# element type is i32 instead of f32.
+def _wmma_a_16x16_iu8(builder, lane, slot):
+    """iu8 WMMA A operand (wave32): lane ``l`` holds row ``l % 16``; A fragment
+    slot ``j`` is the i32 packing K=[4j..4j+3]. Returns ``(row, k_base=4j)``."""
+    c16 = builder.const_i32(16)
+    row = builder.mod(lane, c16)
+    return row, builder.const_i32(4 * slot)
+
+
+def _wmma_b_16x16_iu8(builder, lane, slot):
+    """iu8 WMMA B operand (wave32): lane ``l`` holds col ``l % 16``; B fragment
+    slot ``j`` is the i32 packing K=[4j..4j+3]. Returns ``(k_base=4j, col)``."""
+    c16 = builder.const_i32(16)
+    col = builder.mod(lane, c16)
+    return builder.const_i32(4 * slot), col
+
+
+# --- RDNA3/3.5 integer WMMA (iu4) 16x16x16 lane maps --------------------------
+# Same lane geometry as iu8, but the K=16 dimension is packed into <2 x i32>:
+# slot j (0..1) holds eight signed int4 values K=[8j..8j+7].
+def _wmma_a_16x16_iu4(builder, lane, slot):
+    """iu4 WMMA A operand (wave32): lane ``l`` holds row ``l % 16``; A fragment
+    slot ``j`` is the i32 packing K=[8j..8j+7]. Returns ``(row, k_base=8j)``."""
+    c16 = builder.const_i32(16)
+    row = builder.mod(lane, c16)
+    return row, builder.const_i32(8 * slot)
+
+
+def _wmma_b_16x16_iu4(builder, lane, slot):
+    """iu4 WMMA B operand (wave32): lane ``l`` holds col ``l % 16``; B fragment
+    slot ``j`` is the i32 packing K=[8j..8j+7]. Returns ``(k_base=8j, col)``."""
+    c16 = builder.const_i32(16)
+    col = builder.mod(lane, c16)
+    return builder.const_i32(8 * slot), col
+
+
 # --- RDNA4 (gfx12) WMMA 16x16x16 lane maps ------------------------------------
 # RDNA4 dropped the RDNA3/3.5 cross-half duplication: A/B fragments are
 # ``<8 x half>`` per lane (not <16 x half>), and the K dimension is split across
@@ -406,6 +460,18 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # element type / intrinsic mangling differ — operands lower as <16 x i16>).
     "wmma_f32_16x16x16_bf16": _FragInfo(
         16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_acc_16x16
+    ),
+    # --- WMMA iu8 (wave32, RDNA3/3.5) ------------------------------------------
+    # A/B fragments are <4 x i32> (16 int8 packed 4-per-i32); accumulator is
+    # <8 x i32> with the same lane math as the f16 WMMA accumulator.
+    "wmma_i32_16x16x16_iu8": _FragInfo(
+        4, 4, 8, 32, _wmma_a_16x16_iu8, _wmma_b_16x16_iu8, _wmma_acc_16x16
+    ),
+    # --- WMMA iu4 (wave32, RDNA3/3.5) ------------------------------------------
+    # A/B fragments are <2 x i32> (16 int4 packed 8-per-i32); accumulator is
+    # <8 x i32> with the same lane math as the f16 WMMA accumulator.
+    "wmma_i32_16x16x16_iu4": _FragInfo(
+        2, 2, 8, 32, _wmma_a_16x16_iu4, _wmma_b_16x16_iu4, _wmma_acc_16x16
     ),
     # --- WMMA f16 / bf16 (wave32, RDNA4 / gfx12) -------------------------------
     # No cross-half duplication: A/B are <8 x half> per lane; column-distributed

@@ -57,6 +57,10 @@ class WmmaGemmSpec:
 
     name: str = "ck_dsl_wmma_gemm"
     dtype: str = "fp16"
+    # Dispatch-order toggle (perf-only; correctness-neutral). True maps
+    # ``block_id.x -> M-tile`` (grid_order "MN"); False maps
+    # ``block_id.x -> N-tile`` (grid_order "NM", the universal-GEMM order).
+    block_x_is_m: bool = True
 
     def __post_init__(self) -> None:
         if self.dtype != "fp16":
@@ -71,7 +75,8 @@ class WmmaGemmSpec:
     def kernel_name(self) -> str:
         from ...helpers.spec import kernel_name_join
 
-        return kernel_name_join(self.name, "wmma16x16x16", self.dtype, "rcr")
+        order = "xm" if self.block_x_is_m else "xn"
+        return kernel_name_join(self.name, "wmma16x16x16", self.dtype, "rcr", order)
 
 
 def is_valid_spec(spec: WmmaGemmSpec, arch: str = "gfx1151"):
@@ -127,8 +132,12 @@ def build_wmma_gemm(spec: WmmaGemmSpec, arch: str = "gfx1151") -> KernelDef:
     frag = b.mod(lane, c16)  # lane%16: A-frag row, B-frag row, output col
     half = b.div(lane, c16)  # lane/16: 0 or 1, selects even/odd output rows
 
-    m0 = b.mul(b.block_id_x(), c16)  # output-tile row base
-    n0 = b.mul(b.block_id_y(), c16)  # output-tile col base
+    if spec.block_x_is_m:
+        m0 = b.mul(b.block_id_x(), c16)  # output-tile row base (grid_order "MN")
+        n0 = b.mul(b.block_id_y(), c16)  # output-tile col base
+    else:
+        m0 = b.mul(b.block_id_y(), c16)  # output-tile row base (grid_order "NM")
+        n0 = b.mul(b.block_id_x(), c16)  # output-tile col base
 
     # Per-lane global row bases (element offsets, row-major):
     #   A[m0+frag][k] = (m0+frag)*K + k ;  B[n0+frag][k] = (n0+frag)*K + k
