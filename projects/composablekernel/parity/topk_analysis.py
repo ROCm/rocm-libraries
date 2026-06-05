@@ -18,7 +18,7 @@ from collections import defaultdict
 def load(path):
     # returns {(M,N,K): [(kernel, tflops, non_zero), ...]}
     by_prob = defaultdict(list)
-    with open(path) as f:
+    with open(path, newline="") as f:
         for row in csv.DictReader(f):
             key = (int(row["M"]), int(row["N"]), int(row["K"]))
             tf = float(row["tflops"])
