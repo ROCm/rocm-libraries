@@ -44,85 +44,26 @@ except ImportError:
 
 # Import tile configurations and shared validation rules from grouped_config_rules
 # (single source of truth)
-try:
-    from grouped_config_rules import (
-        COMMON_TILES,
-        VARIANT_PIPELINES,
-        BWD_WEIGHT_TILES,
-        COMPV4_COMPATIBLE_TILES,
-        DTYPE_TO_DTYPE_KEY,
-        FWD_TILES,
-        BWD_DATA_TILES,
-        get_tiles_for_variant,
-        get_wave_warp_pairs,
-        get_all_valid_vector_sizes,
-        VecStrategy,
-        compute_vector_size,
-        get_vec_strategies,
-        get_extra_vec_triples,
-        get_pipelines_for_tile,
-        get_specs_for_tile,
-        VARIANT_FEATURES,
-        FeatureSpec,
-        StreamKSpec,
-        get_depthwise_configs,
-        # Shared validation functions
-        check_vectors,
-        is_valid_pipeline_for_variant,
-        is_streamk_valid_for_variant,
-    )
-    HAS_TILE_CONFIGS = True
-except ImportError:
-    HAS_TILE_CONFIGS = False
-    COMMON_TILES = []
-    VARIANT_PIPELINES = {}
-    BWD_WEIGHT_TILES = []
-    COMPV4_COMPATIBLE_TILES = []
-    DTYPE_TO_DTYPE_KEY = {}
-    FWD_TILES = []
-    BWD_DATA_TILES = []
-    VARIANT_FEATURES = {}
-    FeatureSpec = None
-    StreamKSpec = None
-
-    def get_tiles_for_variant(variant):
-        return COMMON_TILES
-
-    from enum import Enum
-
-    class VecStrategy(Enum):
-        GENERIC = "generic"
-        UNIFORM = "uniform"
-        KEEP_AB_HALF_C = "keep_ab_half_c"
-        MAX_A_MIN_BC = "max_a_min_bc"
-        MIN_A_MAX_BC = "min_a_max_bc"
-        HALF_UNIFORM = "half_uniform"
-        REDUCED_AB_MAX_C = "reduced_ab_max_c"
-
-    def get_wave_warp_pairs(tile_m, tile_n, tile_k, variant, dtype_key, arch="gfx942"):
-        return []
-
-    def get_all_valid_vector_sizes(tile_m, tile_n, tile_k, wave_m, wave_n, wave_k,
-                                 wt_m, wt_n, wt_k, dtype_key):
-        return set()
-
-    def compute_vector_size(strategy, dtype_class):
-        return (1, 1, 1)
-
-    def get_pipelines_for_tile(tile_m, tile_n, tile_k, variant):
-        return [("compv1", "intrawave")]
-
-    def get_specs_for_tile(tile_m, tile_n, tile_k, variant):
-        return ["default"]
-
-    def get_vec_strategies(tile_m, tile_n, tile_k, variant, dtype_class=None):
-        return [VecStrategy.GENERIC]
-
-    def get_extra_vec_triples(tile_m, tile_n, tile_k, variant, dtype_class=None):
-        return []
-
-    def get_depthwise_configs():
-        return []
+from grouped_config_rules import (
+    COMMON_TILES,
+    DTYPE_TO_DTYPE_KEY,
+    get_tiles_for_variant,
+    get_wave_warp_pairs,
+    get_all_valid_vector_sizes,
+    VecStrategy,
+    compute_vector_size,
+    get_vec_strategies,
+    get_extra_vec_triples,
+    get_pipelines_for_tile,
+    get_specs_for_tile,
+    VARIANT_FEATURES,
+    FeatureSpec,
+    StreamKSpec,
+    get_depthwise_configs,
+    check_vectors,
+    is_valid_pipeline_for_variant,
+    is_streamk_valid_for_variant,
+)
 
 
 # ============================================================================
@@ -419,7 +360,7 @@ class GroupedConvKernelConfig:
             supported = WARP_SUPPORTED_COMBINATIONS.get(target_arch)
             if supported is None:
                 return False  # Unknown architecture
-            warp_cfg = [t.warp_m, t.warp_n, t.warp_k]
+            warp_cfg = [self.tile.warp_m, self.tile.warp_n, self.tile.warp_k]
             if warp_cfg not in supported:
                 return False
         except ImportError:
@@ -2102,10 +2043,6 @@ def get_default_configs(
         ndims = [2]
     if datatypes is None:
         datatypes = ["fp16"]
-
-    if not HAS_TILE_CONFIGS:
-        log.warning("grouped_config_rules not available, returning empty config list")
-        return []
 
     seen: set = set()
     configs: List[Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig]] = []
