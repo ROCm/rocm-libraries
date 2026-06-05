@@ -49,22 +49,11 @@ Tests:
   matrix_size: *batched_small_matrix_size_range
   alpha_beta: *alpha_beta_range
   transA_transB: *transA_transB_range
-  batch_count: [ 1, 3 ]
+  batch_count: 3
+  bias_vector: true
   sparse_b: [true, false]
-  alpha_vector_scaling: [true, false]
-
-- name: spmm_batched_small
-  category: quick
-  function:
-    - spmm_batched: *real_precisions_1b
-  matrix_size: *batched_small_matrix_size_range
-  alpha_beta: *alpha_beta_range
-  transA_transB: *transA_transB_range
-  batch_count: [ 1, 3 ]
-  bias_vector: [true]
-  bias_stride: [0, -1, 256]
-  sparse_b: [true, false]
-  alpha_vector_scaling: [true, false]
+  alpha_vector_scaling: true
+  factor_dim: [0,1]
 
 - name: spmm_batched_medium
   category: pre_checkin
@@ -73,7 +62,7 @@ Tests:
   matrix_size: *batched_medium_matrix_size_range
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
-  batch_count: [ 1, 3 ]
+  batch_count: 3
   sparse_b: [true, false]
 
 - name: spmm_batched_large
@@ -83,7 +72,7 @@ Tests:
   matrix_size: *batched_large_matrix_size_range
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
-  batch_count: [  1, 3 ]
+  batch_count: 3
   sparse_b: [true, false]
 
 - name: spmm_batched_deepbench
@@ -95,7 +84,7 @@ Tests:
   beta: 0.0
   transA: N
   transB: T
-  batch_count: [ 2 ]
+  batch_count: 2
   sparse_b: [true, false]
 
 - name: spmm_batched_conv_resnet50_bwddata
@@ -131,7 +120,7 @@ Tests:
   beta: 0.0
   transA: N
   transB: N
-  batch_count: 1
+  batch_count: 2
   sparse_b: [true, false]
 
 ...

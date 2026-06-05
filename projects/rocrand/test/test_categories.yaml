@@ -103,6 +103,54 @@ test_categories:
       - "comprehensive"
       - "full"
 
+  ffm-quick:
+    description: "Fast FFM tests (target: < 120 min)"
+    test_patterns:
+      - "*basic_tests*"
+      - "*kernel_lfsr113*"
+      - "*kernel_lfsr113_poisson/*"
+      - "*kernel_mrg/*"
+      - "*kernel_mtgp32*"
+      - "*kernel_mtgp32_poisson/*"
+      - "*kernel_philox4x32_10*"
+      - "*kernel_philox4x32_10_poisson/*"
+      - "*kernel_sobol32*"
+      - "*kernel_sobol32_poisson/*"
+      - "*kernel_sobol64*"
+      - "*kernel_sobol64_poisson/*"
+      - "*kernel_threefry2x32_20*"
+      - "*kernel_threefry2x32_20_poisson/*"
+      - "*kernel_threefry2x64_20*"
+      - "*kernel_threefry2x64_20_poisson/*"
+      - "*kernel_threefry4x32_20*"
+      - "*kernel_threefry4x32_20_poisson/*"
+      - "*kernel_threefry4x64_20*"
+      - "*kernel_threefry4x64_20_poisson/*"
+      - "*kernel_xorwow*"
+      - "*kernel_xorwow_poisson/*"
+      - "*linkage_tests.*"
+      - "*cpp_utils_tests.*"
+      - "*log_normal_distribution_tests.*"
+      - "*normal_distribution_tests.*"
+      - "*poisson_distribution_tests/*"
+      - "*config_dispatch_tests.*"
+      - "*generator_type_tests.*"
+      - "*log_normal_tests.*"
+      - "*mrg31k3pTest.*"
+      - "*mrg32k3aTest.*"
+      - "*Mt19937OctoEngineTest.*"
+      - "*Mt19937OctoEngineAccessorTest.*"
+      - "*mtgp32_generator/*"
+      - "*philox4x32_10_generator/*"
+      - "*sobol_qrng_tests/*"
+    exclude:
+    # ffm-full is an alias of ffm-quick: tests labeled here are picked up
+    # by both `ctest -L ffm-quick` and `ctest -L ffm-full`. There is no
+    # separate ffm-full category entry at the moment.
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
 # GPU-architecture-specific exclusions.
 #
 # Any keys under `exclude_gpu` follow the schema
@@ -123,3 +171,4 @@ execution_settings:
   category_timeouts:
     quick: 300            # 5 minutes (matches TheRock CI quick budget)
     standard: 14400       # 4 hours (longest tier the standard entry serves)
+    ffm-quick: 7200       # 2 hours (also applies to the ffm-full alias label)
