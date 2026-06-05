@@ -81,7 +81,8 @@ inline hipblasHalf float_to_half(float val)
     uint16_t a = _cvtss_sh(val, 0);
     return a;
 #else
-#error "No float-to-half implementation available. Define HIPBLAS_USE_HIP_HALF or add a platform-specific fallback."
+#error \
+    "No float-to-half implementation available. Define HIPBLAS_USE_HIP_HALF or add a platform-specific fallback."
 #endif
 }
 
@@ -122,7 +123,8 @@ inline float half_to_float(hipblasHalf val)
 #elif defined(__x86_64__)
     return _cvtsh_ss(val);
 #else
-#error "No half-to-float implementation available. Define HIPBLAS_USE_HIP_HALF or add a platform-specific fallback."
+#error \
+    "No half-to-float implementation available. Define HIPBLAS_USE_HIP_HALF or add a platform-specific fallback."
 #endif
 }
 
