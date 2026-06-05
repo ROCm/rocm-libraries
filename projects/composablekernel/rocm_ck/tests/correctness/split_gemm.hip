@@ -105,6 +105,13 @@ __global__ void tile_gemm_naive_kernel(const float* __restrict__ A,
 // Tile kernel dispatch
 // =========================================================================
 
+static bool is_k4_policy(AccumKLoopPolicy p)
+{
+    return p == AccumKLoopPolicy::NaiveK4 ||
+           p == AccumKLoopPolicy::TwoSumK4 ||
+           p == AccumKLoopPolicy::KahanK4;
+}
+
 static void launch_tile_gemm(const float* A,
                               const float* B,
                               float* partial,
@@ -118,8 +125,21 @@ static void launch_tile_gemm(const float* A,
 {
     if(can_use_mfma(M, N, k_tile_len))
     {
-        launch_mfma_tile_gemm(
-            A, B, partial, M, N, K, k_offset, k_tile_len, stream, accum_policy);
+        if(accum_policy == AccumKLoopPolicy::VeltkampK4)
+        {
+            launch_mfma_tile_gemm_veltkamp_k4(
+                A, B, partial, M, N, K, k_offset, k_tile_len, stream);
+        }
+        else if(is_k4_policy(accum_policy))
+        {
+            launch_mfma_tile_gemm_k4(
+                A, B, partial, M, N, K, k_offset, k_tile_len, stream, accum_policy);
+        }
+        else
+        {
+            launch_mfma_tile_gemm(
+                A, B, partial, M, N, K, k_offset, k_tile_len, stream, accum_policy);
+        }
     }
     else
     {
@@ -283,7 +303,8 @@ void split_gemm_hp(const float* A,
                    int kTile,
                    ReduceStrategy /*unused*/,
                    hipStream_t stream,
-                   SplitGemmWorkspace* ws)
+                   SplitGemmWorkspace* ws,
+                   AccumKLoopPolicy accum_policy)
 {
     if(M <= 0 || N <= 0 || K <= 0)
         return;
@@ -335,10 +356,10 @@ void split_gemm_hp(const float* A,
     {
         int k_len = std::min(kTile, K - k);
 
-        launch_tile_gemm(l_a_hi, l_b_hi, l_p0, M, N, K, k, k_len, stream);
-        launch_tile_gemm(l_a_hi, l_b_lo, l_p1, M, N, K, k, k_len, stream);
-        launch_tile_gemm(l_a_lo, l_b_hi, l_p2, M, N, K, k, k_len, stream);
-        launch_tile_gemm(l_a_lo, l_b_lo, l_p3, M, N, K, k, k_len, stream);
+        launch_tile_gemm(l_a_hi, l_b_hi, l_p0, M, N, K, k, k_len, stream, accum_policy);
+        launch_tile_gemm(l_a_hi, l_b_lo, l_p1, M, N, K, k, k_len, stream, accum_policy);
+        launch_tile_gemm(l_a_lo, l_b_hi, l_p2, M, N, K, k, k_len, stream, accum_policy);
+        launch_tile_gemm(l_a_lo, l_b_lo, l_p3, M, N, K, k, k_len, stream, accum_policy);
 
         accumulate_tile_ozaki_kernel<<<grid, kBlock, 0, stream>>>(
             l_sum_buf, l_err_buf, l_p0, l_p1, l_p2, l_p3, MN_int);

@@ -127,7 +127,8 @@ void split_gemm_hp(const float* A,
                    int kTile,
                    ReduceStrategy tile_reduce_strategy,
                    hipStream_t stream = nullptr,
-                   SplitGemmWorkspace* ws = nullptr);
+                   SplitGemmWorkspace* ws = nullptr,
+                   AccumKLoopPolicy accum_policy = AccumKLoopPolicy::Naive);
 
 // Internal: launch reduce kernel (defined in reduce_kernels.hip)
 void launch_reduce(ReduceStrategy strategy,

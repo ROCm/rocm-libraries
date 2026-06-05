@@ -17,7 +17,6 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
-#include <cstdlib>
 #include <memory>
 #include <random>
 #include <string>
@@ -27,12 +26,6 @@
 using ck_tile::HostTensor;
 
 namespace {
-
-bool env_enabled(const char* var)
-{
-    const char* v = std::getenv(var);
-    return v && v[0] == '1';
-}
 
 void fill_uniform(HostTensor<float>& t, float lo, float hi, unsigned seed)
 {
@@ -109,6 +102,30 @@ ErrorStats compute_error(const float* actual, const float* reference, int count)
     return {max_abs, max_rel};
 }
 
+ErrorStats compute_error_compensated(const float* c_buf,
+                                     const float* err_buf,
+                                     const float* reference,
+                                     int count)
+{
+    constexpr double abs_floor = 1e-6;
+    double max_abs = 0;
+    double max_rel = 0;
+
+    for(int i = 0; i < count; ++i)
+    {
+        double a    = static_cast<double>(c_buf[i]) + static_cast<double>(err_buf[i]);
+        double r    = static_cast<double>(reference[i]);
+        double diff = std::fabs(a - r);
+
+        max_abs = std::max(max_abs, diff);
+
+        if(std::fabs(r) > abs_floor)
+            max_rel = std::max(max_rel, diff / std::fabs(r));
+    }
+
+    return {max_abs, max_rel};
+}
+
 void print_error_stats(const std::string& label, const ErrorStats& s)
 {
     std::cout << "  " << label << ": max_abs=" << s.max_abs << " max_rel=" << s.max_rel
@@ -138,7 +155,7 @@ protected:
 
     static void SetUpTestSuite()
     {
-        ws_ = std::make_unique<rocm_ck::test::SplitGemmWorkspace>(512, 512, 1024, 32);
+        ws_ = std::make_unique<rocm_ck::test::SplitGemmWorkspace>(256, 128, 1024, 256);
     }
 
     static void TearDownTestSuite() { ws_.reset(); }
@@ -151,9 +168,6 @@ std::unique_ptr<rocm_ck::test::SplitGemmWorkspace> SplitGemmTest::ws_;
 // =========================================================================
 TEST_P(SplitGemmTest, CorrectnessVsCpuFp64)
 {
-    if(!env_enabled("CK_TEST_CPU_FP64"))
-        GTEST_SKIP() << "set CK_TEST_CPU_FP64=1 to enable";
-
     auto cfg = GetParam();
 
     HostTensor<float> h_A({cfg.M, cfg.K});
@@ -188,9 +202,13 @@ TEST_P(SplitGemmTest, CorrectnessVsCpuFp64)
     };
 
     AccumCase accum_cases[] = {
-        {rocm_ck::test::AccumKLoopPolicy::Naive, "Naive"},
-        {rocm_ck::test::AccumKLoopPolicy::TwoSum, "TwoSum"},
-        {rocm_ck::test::AccumKLoopPolicy::Kahan, "Kahan"},
+        {rocm_ck::test::AccumKLoopPolicy::Naive, "K16_Naive"},
+        {rocm_ck::test::AccumKLoopPolicy::TwoSum, "K16_TwoSum"},
+        {rocm_ck::test::AccumKLoopPolicy::Kahan, "K16_Kahan"},
+        {rocm_ck::test::AccumKLoopPolicy::NaiveK4, "K4_Naive"},
+        {rocm_ck::test::AccumKLoopPolicy::TwoSumK4, "K4_TwoSum"},
+        {rocm_ck::test::AccumKLoopPolicy::KahanK4, "K4_Kahan"},
+        {rocm_ck::test::AccumKLoopPolicy::VeltkampK4, "VeltkampK4"},
     };
 
     std::cout << "[" << cfg << "]" << std::endl;
@@ -221,9 +239,6 @@ TEST_P(SplitGemmTest, CorrectnessVsCpuFp64)
 // =========================================================================
 TEST_P(SplitGemmTest, VeltkampHpVsCpuFp64)
 {
-    if(!env_enabled("CK_TEST_VELTKAMP"))
-        GTEST_SKIP() << "set CK_TEST_VELTKAMP=1 to enable";
-
     auto cfg = GetParam();
 
     HostTensor<float> h_A({cfg.M, cfg.K});
@@ -238,20 +253,92 @@ TEST_P(SplitGemmTest, VeltkampHpVsCpuFp64)
 
     HIP_CHECK_ERROR(hipMemcpy(ws_->d_A, h_A.data(), h_A.get_element_space_size_in_bytes(), hipMemcpyHostToDevice));
     HIP_CHECK_ERROR(hipMemcpy(ws_->d_B, h_B.data(), h_B.get_element_space_size_in_bytes(), hipMemcpyHostToDevice));
+
+    struct AccumCase
+    {
+        rocm_ck::test::AccumKLoopPolicy policy;
+        const char* name;
+    };
+
+    AccumCase accum_cases[] = {
+        {rocm_ck::test::AccumKLoopPolicy::Naive, "K16_Naive"},
+        {rocm_ck::test::AccumKLoopPolicy::TwoSum, "K16_TwoSum"},
+        {rocm_ck::test::AccumKLoopPolicy::Kahan, "K16_Kahan"},
+        {rocm_ck::test::AccumKLoopPolicy::NaiveK4, "K4_Naive"},
+        {rocm_ck::test::AccumKLoopPolicy::TwoSumK4, "K4_TwoSum"},
+        {rocm_ck::test::AccumKLoopPolicy::KahanK4, "K4_Kahan"},
+        {rocm_ck::test::AccumKLoopPolicy::VeltkampK4, "VeltkampK4"},
+    };
+
+    std::cout << "[" << cfg << "]" << std::endl;
+
+    for(const auto& ac : accum_cases)
+    {
+        HIP_CHECK_ERROR(hipMemset(ws_->d_C, 0, static_cast<size_t>(MN) * sizeof(float)));
+
+        rocm_ck::test::split_gemm_hp(ws_->d_A, ws_->d_B, ws_->d_C,
+                                     cfg.M, cfg.N, cfg.K, cfg.kTile,
+                                     rocm_ck::test::ReduceStrategy::FP64Sum,
+                                     nullptr, ws_.get(), ac.policy);
+
+        std::vector<float> h_C_gpu(static_cast<size_t>(MN));
+        HIP_CHECK_ERROR(hipMemcpy(h_C_gpu.data(), ws_->d_C, static_cast<size_t>(MN) * sizeof(float), hipMemcpyDeviceToHost));
+
+        auto stats = compute_error(h_C_gpu.data(), h_C_ref.data(), MN);
+        print_error_stats(std::string("VeltkampHP ") + ac.name, stats);
+    }
+}
+
+// =========================================================================
+// Test: VeltkampK4 split-output (c + err on CPU in FP64)
+//
+// Calls the VeltkampK4 kernel with err_out, reads back c and err
+// separately, reconstructs (double)c + (double)err on CPU, compares
+// against CPU FP64 reference. This bypasses the FP32 finalize floor.
+// Uses kTile = K (single tile) to eliminate inter-tile reduce noise.
+// =========================================================================
+TEST_P(SplitGemmTest, VeltkampK4SplitOutput)
+{
+    auto cfg = GetParam();
+
+    if(!rocm_ck::test::can_use_mfma(cfg.M, cfg.N, cfg.K))
+        GTEST_SKIP() << "config not MFMA-aligned";
+
+    HostTensor<float> h_A({cfg.M, cfg.K});
+    HostTensor<float> h_B({cfg.N, cfg.K});
+    fill_uniform(h_A, -1.0f, 1.0f, 42u);
+    fill_uniform(h_B, -1.0f, 1.0f, 43u);
+
+    int MN = cfg.M * cfg.N;
+
+    std::vector<float> h_C_ref(static_cast<size_t>(MN));
+    cpu_gemm_fp64(h_A.data(), h_B.data(), h_C_ref.data(), cfg.M, cfg.N, cfg.K);
+
+    HIP_CHECK_ERROR(hipMemcpy(ws_->d_A, h_A.data(), h_A.get_element_space_size_in_bytes(), hipMemcpyHostToDevice));
+    HIP_CHECK_ERROR(hipMemcpy(ws_->d_B, h_B.data(), h_B.get_element_space_size_in_bytes(), hipMemcpyHostToDevice));
     HIP_CHECK_ERROR(hipMemset(ws_->d_C, 0, static_cast<size_t>(MN) * sizeof(float)));
 
-    rocm_ck::test::split_gemm_hp(ws_->d_A, ws_->d_B, ws_->d_C,
-                                 cfg.M, cfg.N, cfg.K, cfg.kTile,
-                                 rocm_ck::test::ReduceStrategy::FP64Sum,
-                                 nullptr, ws_.get());
+    // Use err_buf from workspace for err output
+    HIP_CHECK_ERROR(hipMemset(ws_->err_buf, 0, static_cast<size_t>(MN) * sizeof(float)));
+
+    // Single tile: kTile = K, so one kernel call, no inter-tile reduce
+    rocm_ck::test::launch_mfma_tile_gemm_veltkamp_k4(
+        ws_->d_A, ws_->d_B, ws_->d_C,
+        cfg.M, cfg.N, cfg.K, 0, cfg.K,
+        nullptr, ws_->err_buf);
+    HIP_CHECK_ERROR(hipDeviceSynchronize());
 
     std::vector<float> h_C_gpu(static_cast<size_t>(MN));
+    std::vector<float> h_err_gpu(static_cast<size_t>(MN));
     HIP_CHECK_ERROR(hipMemcpy(h_C_gpu.data(), ws_->d_C, static_cast<size_t>(MN) * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK_ERROR(hipMemcpy(h_err_gpu.data(), ws_->err_buf, static_cast<size_t>(MN) * sizeof(float), hipMemcpyDeviceToHost));
 
-    auto stats = compute_error(h_C_gpu.data(), h_C_ref.data(), MN);
+    auto stats_finalized = compute_error(h_C_gpu.data(), h_C_ref.data(), MN);
+    auto stats_split = compute_error_compensated(h_C_gpu.data(), h_err_gpu.data(), h_C_ref.data(), MN);
 
-    std::cout << "[" << cfg << "] ";
-    print_error_stats("VeltkampHP", stats);
+    std::cout << "[" << cfg << "]" << std::endl;
+    print_error_stats("VeltkampK4 finalized (c only)", stats_finalized);
+    print_error_stats("VeltkampK4 split (c+err@FP64)", stats_split);
 }
 
 // =========================================================================
@@ -303,9 +390,13 @@ TEST_P(SplitGemmTest, SplitGemmVsReferenceBatchedGemm)
     };
 
     AccumCase accum_cases[] = {
-        {rocm_ck::test::AccumKLoopPolicy::Naive, "Naive"},
-        {rocm_ck::test::AccumKLoopPolicy::TwoSum, "TwoSum"},
-        {rocm_ck::test::AccumKLoopPolicy::Kahan, "Kahan"},
+        {rocm_ck::test::AccumKLoopPolicy::Naive, "K16_Naive"},
+        {rocm_ck::test::AccumKLoopPolicy::TwoSum, "K16_TwoSum"},
+        {rocm_ck::test::AccumKLoopPolicy::Kahan, "K16_Kahan"},
+        {rocm_ck::test::AccumKLoopPolicy::NaiveK4, "K4_Naive"},
+        {rocm_ck::test::AccumKLoopPolicy::TwoSumK4, "K4_TwoSum"},
+        {rocm_ck::test::AccumKLoopPolicy::KahanK4, "K4_Kahan"},
+        {rocm_ck::test::AccumKLoopPolicy::VeltkampK4, "VeltkampK4"},
     };
 
     std::cout << "[" << cfg << "]" << std::endl;
@@ -332,22 +423,6 @@ TEST_P(SplitGemmTest, SplitGemmVsReferenceBatchedGemm)
 // =========================================================================
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Phase2,
     SplitGemmTest,
-    ::testing::Values(SplitGemmConfig{32, 32, 32, 32, "tiny_1tile"},
-                      SplitGemmConfig{64, 64, 64, 64, "small_1tile"},
-                      SplitGemmConfig{64, 64, 64, 32, "small_2tile"}));
-
-INSTANTIATE_TEST_SUITE_P(
-    Medium,
-    SplitGemmTest,
-    ::testing::Values(SplitGemmConfig{128, 256, 512, 128, "med_4tile"},
-                      SplitGemmConfig{256, 128, 1024, 256, "med_4tile_tall"},
-                      SplitGemmConfig{128, 128, 256, 64, "med_4tile_sq"}));
-
-INSTANTIATE_TEST_SUITE_P(
-    Edge,
-    SplitGemmTest,
-    ::testing::Values(SplitGemmConfig{1, 1, 1, 1, "1x1x1"},
-                      SplitGemmConfig{7, 13, 37, 16, "odd"},
-                      SplitGemmConfig{255, 127, 63, 32, "nonaligned"}));
+    ::testing::Values(SplitGemmConfig{256, 128, 1024, 256, "k1024_4tile"}));

@@ -60,6 +60,13 @@ template <typename AccumPolicy>
 using MfmaBlockGemmAccum =
     BlockGemmASmemBSmemCRegV1Accum<MfmaBlockGemmProblem, MfmaBlockGemmPolicy, AccumPolicy>;
 
+template <typename AccumPolicy>
+using MfmaBlockGemmAccumK4 =
+    BlockGemmASmemBSmemCRegV1AccumK4<MfmaBlockGemmProblem, MfmaBlockGemmPolicy, AccumPolicy>;
+
+using MfmaBlockGemmVeltkampK4 =
+    BlockGemmASmemBSmemCRegV1VeltkampK4<MfmaBlockGemmProblem, MfmaBlockGemmPolicy>;
+
 // LDS descriptors — PADDING_K_FIRST for A, plain for B
 CK_TILE_HOST_DEVICE static constexpr auto MakeALdsDesc()
 {
