@@ -640,7 +640,7 @@ auto GenericSearch(const Solver s,
 
                     try
                     {
-                        for(uint64_t i = 1ULL; i < env::value(MIOPEN_TUNING_ITERATIONS); ++i)
+                        for(uint64_t i = 1U; i < env::value(MIOPEN_TUNING_ITERATIONS); ++i)
                         {
                             invoker(profile_h, invoke_ctx);
                             samples.push_back(profile_h.GetKernelTime());

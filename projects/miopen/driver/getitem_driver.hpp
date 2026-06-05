@@ -68,7 +68,7 @@ int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
     auto element_index = std::vector<int32_t>(indexCount * index_numel + indexCount);
 
     std::vector<size_t> output_dims;
-    for(size_t i = 0ULL; i < dimCount; i++)
+    for(size_t i = 0U; i < dimCount; i++)
     {
         output_dims.push_back(dx_dims[dims[i]]);
     }
@@ -352,12 +352,12 @@ int GetitemDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     dxhost    = std::vector<Tref>(dx_sz, static_cast<Tref>(0));
     errorhost = std::vector<int32_t>(error_sz, static_cast<int32_t>(0));
 
-    for(size_t i = 0ULL; i < dy_sz; i++)
+    for(size_t i = 0U; i < dy_sz; i++)
     {
         dy[i] = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(-1), static_cast<Tgpu>(1));
     }
 
-    for(size_t i = 0ULL; i < indexDescs.size(); i++)
+    for(size_t i = 0U; i < indexDescs.size(); i++)
     {
         size_t index_sz = GetTensorSize(indexDescs[i]);
         index_devs.push_back(std::unique_ptr<GPUMem>(new GPUMem(ctx, index_sz, sizeof(int32_t))));
@@ -365,7 +365,7 @@ int GetitemDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         auto& index    = indexs.back();
         auto index_dev = index_devs.back().get();
 
-        for(size_t j = 0ULL; j < index_sz; j++)
+        for(size_t j = 0U; j < index_sz; j++)
         {
             index[j] = prng::gen_A_to_B<int32_t>(static_cast<int32_t>(0),
                                                  static_cast<int32_t>(output_dims[i]));
