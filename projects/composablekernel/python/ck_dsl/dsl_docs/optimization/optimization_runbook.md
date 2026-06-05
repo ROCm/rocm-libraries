@@ -75,14 +75,15 @@ Stream-K, quantization, attention-2D micro-levers, chiplet swizzle,
 compiler flags, runtime / launch, dispatcher policy, benchmark
 hygiene, static probes).
 
-If you came here looking for **what is available on gfx950 / CDNA4
-specifically** (the DSL's default target — MI350X / MI355X), jump to
-**§21 Target Architecture Reference**: the full MFMA atom catalog,
-LDS specs and bank-conflict rules, CDNA4-only intrinsics
-(`v_permlane32_swap_b32`, `ds_read_tr16_b{64,128}`, `ds_read_tr_b8`,
-scaled / MX MFMA), VGPR / AGPR / occupancy caps, chiplet swizzle
-parameters, buffer-descriptor flags, fp8 / quantization support, and
-gfx950 compiler caveats.
+If you came here looking for **what is available on a specific
+architecture** (MFMA atom catalog, LDS size / banks / conflict rules,
+transpose-read and cross-lane intrinsics, VGPR / AGPR / occupancy caps,
+chiplet swizzle parameters, buffer-descriptor flags, fp8 / quantization
+support, and compiler caveats), pick your target architecture
+reference: [arch/README.md](arch/README.md) — currently
+[gfx950](arch/gfx950.md) (CDNA4 / MI350X / MI355X, the DSL's default
+target). The base runbook itself stays arch-neutral; the arch reference
+holds the concrete facts.
 - `utilities/skills/` — focused skill docs (`gemm-optimization`,
   `lds-optimization`, `kernel-trace-analysis`,
   `prefetch-data-load`, `capture-kernel-trace`, `empirical-case-studies`,
@@ -851,6 +852,11 @@ bucket reveals scalar-store kernels immediately.
 
 ### 6.3 LDS / Shared Memory
 
+> Arch-specific (LDS size / banks / conflict strategy, transpose-read
+> availability): see your target's arch reference
+> ([arch/README.md](arch/README.md); gfx950 →
+> [arch/gfx950.md §21.2](arch/gfx950.md)).
+
 - Use LDS to share input or weights across waves / threads.
 - Avoid LDS if data is not reused enough.
 - Use double buffering when global load latency matters
@@ -905,6 +911,11 @@ register-PV + transposed-PV reads.
 
 ### 6.4 LDS Bank Conflicts
 
+> Arch-specific (per-opcode bank-conflict periods, read/write
+> asymmetry, transpose-read availability): see your target's arch
+> reference ([arch/README.md](arch/README.md); gfx950 →
+> [arch/gfx950.md §21.2](arch/gfx950.md)).
+
 - Inspect LDS access patterns, not just total LDS bytes. Use the
   `analyze_lds_conflicts.py` tool under
   `utilities/tools/stage4_analyze/` to combine rocprof counters and
@@ -938,11 +949,11 @@ Notation:
   `probe_occupancy.py` or `analyze_hsaco`.
 - **LDS_avail**: Available LDS per CU on the target architecture.
 
-| Architecture | GPU | LDS per CU | Preferred swizzle |
-|---|---|---|---|
-| gfx90a | MI210 / MI250X | 64 KB | XOR (capacity precious) |
-| gfx942 | MI300 | 64 KB | XOR (capacity precious) |
-| gfx950 | MI350X / MI355X | 160 KB | padding (capacity abundant) |
+> Arch-specific (LDS per CU, bank count, and the resulting preferred
+> swizzle): see your target's arch reference §21.2
+> ([arch/README.md](arch/README.md); gfx950 →
+> [arch/gfx950.md §21.2](arch/gfx950.md)). The selection *method*
+> below is arch-neutral; plug in your arch's LDS capacity.
 
 Two primary approaches exist for eliminating LDS bank conflicts, with
 dramatically different performance characteristics depending on GPU
@@ -981,17 +992,20 @@ else:
     benchmark_both()       # 96 KB <= LDS_b < 128 KB
 ```
 
-**gfx950 caveat**: Explicit scheduling barriers (`s_sched_barrier`,
-`s_sched_group_barrier`) are silently removed by the LLVM backend on
-gfx950. Verify with `probe_isa_inspect.py` (the `sched_barrier`
-sub-bucket should be 0). Cannot rely on scheduling barriers to
-mitigate XOR overhead on gfx950.
+> Arch-specific caveat: on some arches the LLVM backend silently
+> removes explicit scheduling barriers (`s_sched_barrier`,
+> `s_sched_group_barrier`), so you cannot rely on them to mitigate XOR
+> address overhead. Check your target's arch reference §21.3/§21.8
+> (gfx950 → [arch/gfx950.md](arch/gfx950.md): they are dropped there;
+> verify with `probe_isa_inspect.py` that the `sched_barrier`
+> sub-bucket is 0).
 
-Critical asymmetry: `ds_write_b128` has 32-dword conflict period
-while `ds_read_b128` has 64-dword period. Read and write conflict
-behavior can differ — may need separate swizzle strategies. See
-`utilities/skills/empirical-case-studies.md` (Case Study 2) and
-**§21.2** for the full per-arch LDS table.
+Critical asymmetry: conflict periods can differ between `ds_read_b128`
+and `ds_write_b128` (and across arches), so reads and writes may need
+separate swizzle strategies. See
+`utilities/skills/empirical-case-studies.md` (Case Study 2) and your
+target's arch reference §21.2 for the per-opcode conflict-period table
+(gfx950 → [arch/gfx950.md §21.2](arch/gfx950.md)).
 
 ### 6.5 Registers
 
@@ -1024,21 +1038,23 @@ behavior can differ — may need separate swizzle strategies. See
 
 ### 7.1 MFMA/WMMA Selection
 
-The DSL's `MfmaAtom` catalog (`helpers/atoms.py`) ships:
+The DSL's `MfmaAtom` catalog lives in `helpers/atoms.py::MFMA_*_ATOMS`.
+**Which atoms (and which K widths) are legal depends on the target
+architecture** — the wide-K and fp8 / bf8 / scaled / MX variants in
+particular are not universal. Always select against your target's
+MFMA-atom catalog: see your arch reference §21.1
+([arch/README.md](arch/README.md); gfx950 →
+[arch/gfx950.md §21.1](arch/gfx950.md), which also documents the
+lane-layout-match property of the 32×32 atoms).
 
-```text
-f16: 16x16x16, 16x16x32, 32x32x8, 32x32x16, 4x4x4
-bf16: 16x16x16, 16x16x32, 32x32x16
-fp8 / bf8: native CDNA4 fp8 / bf8 MFMA + scaled / MX variants
-```
+General selection guidance (then confirm against the arch catalog):
 
-See **§21.1** for the full per-arch atom catalog, including CDNA4-
-only atoms (fp8 / bf8 / scaled / MX) and the lane-layout-match
-property of the 32×32 atoms.
-
-- `16x16x16` for fp16/bf16 standard tiles.
-- `16x16x32` for fp16 on newer AMD architectures when K packing is
-  valid.
+- Prefer the **widest-K atom that is legal on your target** — a wider
+  K folds more contraction per MFMA (see §7.4). Do not assume a
+  particular wide-K atom exists; check the arch §21.1 table first.
+- `16x16x16` for standard fp16/bf16 tiles (broadly available).
+- `16x16x32` for fp16/bf16 **where the arch supports it** and K
+  packing is valid.
 - `4x4x4` for many independent small-channel computations
   (used by `DirectConv4cSpec`).
 - Scaled MFMA for fp8 / fp6 / fp4 where available.
@@ -1092,8 +1108,11 @@ layout match, independent of the atom's compute throughput.
 ### 7.4 Reducing MFMA Count
 
 - Fold small dimensions into K if operand layout supports it.
-- Use larger K MFMA variants when valid (`16x16x32` over `16x16x16`,
-  `32x32x16` over `32x32x8`).
+- Prefer the widest-K atom **that is legal on your target** (e.g.
+  `16x16x32` over `16x16x16`, `32x32x16` over `32x32x8`) — but confirm
+  the wide-K variant exists for your arch in the arch MFMA-atom catalog
+  §21.1 ([arch/README.md](arch/README.md); gfx950 →
+  [arch/gfx950.md §21.1](arch/gfx950.md)); do not assume it is present.
 - Fuse filter positions into K for convolution when contiguous.
 - Use Toeplitz-like packing for convolution only when correct and
   worth the complexity.
@@ -1147,6 +1166,13 @@ layout match, independent of the atom's compute throughput.
   value as the constant `20336`; cross-check in the lowered IR.
 
 ### 8.4 Scheduling Hints
+
+> Arch-specific (which scheduling intrinsics survive the backend vs are
+> silently dropped or ICE the compiler — `sched_barrier`,
+> `sched_group_barrier`, `iglp_opt`, named/split barriers): see your
+> target's arch reference §21.3/§21.8 ([arch/README.md](arch/README.md);
+> gfx950 → [arch/gfx950.md](arch/gfx950.md)). The gfx950 facts below
+> are illustrative of one such arch.
 
 - Try compiler scheduling flags only after correctness is stable.
 - On AMD, experiment with `sched_group_barrier(mask, count, sync_id)`,
@@ -1240,7 +1266,8 @@ reference back-to-back in one process.
 ### 8.7 What a good hot-loop schedule looks like
 
 ck_dsl declares ops + dependencies and hands instruction scheduling to the
-backend; on gfx950 the scheduling *hints* are dropped (§8.4, §21.8), so you
+backend; on some arches (e.g. gfx950 — see [arch/gfx950.md §21.8](arch/gfx950.md))
+the scheduling *hints* are dropped (§8.4), so you
 cannot place instructions directly. You can still shape the schedule indirectly:
 the **order, spacing, and dependency structure of the ops you emit** is the
 backend's starting point, and inside a fenced region (see the "hard scheduling
@@ -1313,7 +1340,8 @@ in the lowered ISA.
 `v_fma` vs `v_mul`+`v_add`). Treat those as the *acceptance test* for the schedule
 you intended, exactly as §8.4 says for `iglp_opt`: a no-op and an
 applied-but-useless change both read as "no perf delta", so check the histogram,
-not the clock. See §10.5 (limits vs hand assembly) and §21.8 (gfx950 caveats).
+not the clock. See §10.5 (limits vs hand assembly) and your arch
+reference's §21.8 (gfx950 → [arch/gfx950.md §21.8](arch/gfx950.md)).
 
 ---
 
@@ -1428,6 +1456,12 @@ bottleneck class, and the kernel structure (§3, §11).
 
 ### 10.3 DSL-Specific Compiler Hazards
 
+> Arch-specific backend hazards (which intrinsics the LLVM backend
+> silently drops or ICEs on, which `-mllvm` flags are risky on a given
+> arch): see your target's arch reference §21.8
+> ([arch/README.md](arch/README.md); gfx950 →
+> [arch/gfx950.md §21.8](arch/gfx950.md)).
+
 - The DSL ships a conservative pass pipeline:
   `core/passes.py::optimize_kernel` runs canonicalize → conservative
   integer constant fold (add/sub/mul/div/mod/and/or/zext/sext/cmp/
@@ -1506,6 +1540,12 @@ near-assembly results (cf. Triton); the work is always in the backend/scheduler.
 ---
 
 ## 11. ISA And Resource Inspection
+
+> Arch-specific (the `--mcpu` / ISA target to disassemble against, the
+> resource caps the occupancy math uses, which opcodes to expect):
+> see your target's arch reference §21.4/§21.9
+> ([arch/README.md](arch/README.md); gfx950 →
+> [arch/gfx950.md](arch/gfx950.md)).
 
 The DSL's static analysis layer lives at `ck_dsl.analysis`:
 
@@ -1593,6 +1633,13 @@ faster on this shape?" — is for `probe_targeted_bench.py`.
 ---
 
 ## 12. Autotuning Strategy
+
+> Arch-specific: the legal range of several knobs below (MFMA atom and
+> K-pack §12.1.C, LDS layout / swizzle §12.1.F, compiler flags
+> §12.1.M, chiplet swizzle §12.1.L) depends on the target — prune the
+> sweep to what your arch actually supports. See your target's arch
+> reference ([arch/README.md](arch/README.md); gfx950 →
+> [arch/gfx950.md](arch/gfx950.md)).
 
 ### 12.1 Knob Catalog (Master List)
 
@@ -3073,184 +3120,25 @@ python ck_dsl/dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocpr
 - **Profiling-counter tools**: `utilities/tools/stage4_analyze/`,
   `utilities/tools/stage5_compare/`, `utilities/tools/utils/`.
 - **Benchmark harnesses**: `utilities/tools/stage1_benchmark/`.
-- **Target architecture reference**: **§21** for gfx950 / CDNA4
-  MFMA atoms, LDS specs, cross-lane primitives, register / occupancy
-  caps, chiplet / XCD, buffer descriptors, fp8 / MX support, and
-  gfx950-specific compiler caveats.
+- **Target architecture references**: [`optimization/arch/`](arch/README.md)
+  for per-arch MFMA atoms, LDS specs, cross-lane primitives, register /
+  occupancy caps, chiplet / XCD, buffer descriptors, fp8 / MX support,
+  and compiler caveats (gfx950 → [arch/gfx950.md](arch/gfx950.md)).
 
 ---
 
-## 21. Target Architecture Reference (gfx950 / CDNA4 / MI350X / MI355X)
+## 21. Target Architecture Reference
 
 The runbook itself is architecture-agnostic — every principle and
-lever applies to any AMDGPU CDNA target. This section collects the
-**gfx950 / CDNA4** specifics that the DSL targets by default. When
-porting to gfx942 (MI300X), gfx940 (MI250X-class CDNA3), or gfx90a,
-the corresponding caps and intrinsics differ — always verify against
-the vendor spec sheet.
-
-### 21.1 MFMA Atom Catalog (gfx950)
-
-The full DSL atom catalog lives in `helpers/atoms.py::MFMA_*_ATOMS`.
-On gfx950 the following are available:
-
-| Atom factory | A / B / C dtype | M × N × K | Notes |
-|---|---|---|---|
-| `MfmaAtom.f16_4x4x4` | fp16 / fp16 / fp32 | 4×4×4 | Many independent small problems per wave (used by `DirectConv4cSpec`) |
-| `MfmaAtom.f16_16x16x16` | fp16 / fp16 / fp32 | 16×16×16 | Standard small tile |
-| `MfmaAtom.f16_16x16x32` | fp16 / fp16 / fp32 | 16×16×32 | K-packed (recommended over `16x16x16`) |
-| `MfmaAtom.f16_32x32x8` | fp16 / fp16 / fp32 | 32×32×8 | Larger output tile |
-| `MfmaAtom.f16_32x32x16` | fp16 / fp16 / fp32 | 32×32×16 | K-packed + larger output tile. **C-output lane layout matches A-input layout** — chained MFMA without re-pack (§7.2) |
-| `MfmaAtom.bf16_16x16x16` | bf16 / bf16 / fp32 | 16×16×16 | |
-| `MfmaAtom.bf16_16x16x32` | bf16 / bf16 / fp32 | 16×16×32 | K-packed |
-| `MfmaAtom.bf16_32x32x16` | bf16 / bf16 / fp32 | 32×32×16 | K-packed; chained-MFMA layout match |
-| `MfmaAtom.fp8_*_f8` | fp8e4m3 / fp8e4m3 / fp32 | varies | CDNA4 native fp8 MFMA |
-| `MfmaAtom.bf8_*_bf8` | bf8e5m2 / bf8e5m2 / fp32 | varies | CDNA4 native bf8 MFMA |
-| Mixed-precision MFMA | mixed | varies | bf16 / fp8, fp16 / fp8, etc. |
-| Scaled MFMA (block-scale) | fp8 + per-block scale | varies | `BlockScaleGemmSpec`; `helpers/atoms.py::MFMA_FP8_ATOMS` |
-| MX (microscaling) MFMA | fp8 + E8M0 shared exponent | varies | `MxGemmSpec`; `helpers/mx_scale.py` |
-| i8 / i4 atoms | int8 / int4 packed | varies | `helpers/codebook.py` for i4 unpack |
-
-Lane-layout matching across chained atoms (§7.2): the 16×16 atoms'
-C-output doesn't natively match their A-input, so a QK→PV-style
-chain needs an LDS round-trip or a cross-lane permute. The 32×32
-atoms natively match — prefer them when the chain pattern allows
-(`use_mfma_32x32`, `use_transposed_qk_32x32` on the attention 2D path).
-
-### 21.2 LDS specifics
-
-| Spec | gfx950 | gfx942 (MI300X) | gfx90a (MI250X) |
-|---|---|---|---|
-| LDS per CU | 160 KB | 64 KB | 64 KB |
-| LDS banks | 64 | 32 | 32 |
-| Preferred swizzle (§6.4a) | padding | XOR | XOR |
-| `ds_read_b64_tr_b16` / `ds_read_b128_tr_b16` | CDNA4 only | — | — |
-| `ds_read_tr_b8` (i8 / fp8 / bf8 transposed) | CDNA4 only | — | — |
-| `ds_read_b128` conflict period | 64 dwords | 32 dwords | 32 dwords |
-| `ds_write_b128` conflict period | 32 dwords | 32 dwords | 32 dwords |
-| Other `ds_read_b{32,64}` / `ds_write_*` conflict period | 32 dwords | 32 dwords | 32 dwords |
-| Intra-dword sub-dword accesses | conflict-free | conflict-free | conflict-free |
-| Unaligned `ds_read_u16` charged to | `SQ_LDS_IDX_ACTIVE` (not `SQ_LDS_BANK_CONFLICT`) | same | same |
-
-Important asymmetry: `ds_write_b128` (32-dword period) and
-`ds_read_b128` (64-dword period) on gfx950 can require **different
-swizzle strategies** for reads vs writes. See `LDS_a.md` / `LDS_b.md`
-in the empirical studies for the full opcode × phase table.
-
-### 21.3 Cross-lane primitives
-
-| Primitive | Available on | DSL surface | Notes |
-|---|---|---|---|
-| `v_permlane32_swap_b32` | gfx950 (CDNA4) | `permlane32.swap` intrinsic | Cheap VOP1 32-lane swap — the canonical primitive for FA-style softmax row reduction on CDNA4 |
-| `ds_bpermute_b32` | gfx9* and gfx95* | `b.ds_bpermute` | LDS-bus cross-lane shuffle (costs `lgkmcnt`) |
-| `ds_bpermute_b64` | synthesised from two b32 | `b.ds_bpermute_b64` | Cross-lane 64-bit shuffle |
-| `ds_swizzle_b32` | gfx9* and gfx95* | `b.ds_swizzle_xor` | LDS-bus cross-lane shuffle |
-| `ds_read_tr16_b64` | gfx950 | `b.ds_read_tr16_b64` | Transposed bf16/fp16 tile reader (4 rows per lane) |
-| `ds_read_tr16_b128` | gfx950 | `b.ds_read_tr16_b128` | Transposed bf16/fp16 tile reader (8 rows per lane) |
-| `ds_read_tr_b8` | gfx950 | `b.ds_read_tr_b8` | Transposed i8/fp8/bf8 tile reader |
-| `s_setprio` | gfx9* and gfx95* | `b.s_setprio` | Wave priority hint |
-| `s_sched_barrier`, `s_sched_group_barrier` | available in ISA | `b.sched_barrier`, `b.sched_group_barrier` | **Silently dropped by LLVM backend on gfx950** — verify with `probe_isa_inspect.py` that the `sched_barrier` sub-bucket is 0 |
-| `s_barrier` (bare, no implicit waitcnt) | gfx9* and gfx95* | `b.s_barrier_bare` | Pure WG rendezvous; caller issues the explicit `s_waitcnt`. Use for single-barrier ping-pong loops (§8.6). Named/split barriers (`s.barrier.signal/wait`) **ICE the gfx950 backend** — do not emit. |
-| `iglp_opt` | gfx9* and gfx95* | `b.iglp_opt(n)` | Canned backend GEMM MFMA/memory interleave (`llvm.amdgcn.iglp.opt`). *Survives* on gfx950 (unlike `sched_barrier`). Helps schedule-bound loops with `ds_write` traffic; neutral on direct-to-LDS / barrier-bound loops (§8.4, §8.6). |
-
-### 21.4 Register / occupancy
-
-| Quantity | Value |
-|---|---|
-| SIMDs / CU | 4 |
-| Waves / SIMD (hardware max) | 8 |
-| Waves / CU (hardware max) | 32 |
-| VGPRs / SIMD | 512 |
-| AGPRs / SIMD | 256 (separate file from VGPRs) |
-| SGPRs / CU | 800 |
-| VGPR allocation granularity | 16 VGPRs |
-| Threads / CTA (max) | 1024 |
-| Wave size | 64 (wave64) — the only path the DSL helpers support today |
-
-`probe_occupancy.py` uses these caps when reporting waves/CU and
-the apparent limiter (`VGPR`, `AGPR`, `LDS`, `WAVES_PER_EU_HINT`,
-`MAX_WAVES_PER_CU`).
-
-### 21.5 Chiplet / XCD (MI300X / MI325X / MI350X)
-
-| Quantity | Value |
-|---|---|
-| XCDs per package | 8 |
-| `helpers/grid.py::NUM_XCDS_MI300X / MI325X / MI350X` | 8 / 8 / 8 |
-| Grid swizzle helper | `chiplet_transform_chunked` (cross-XCD WGID reorder for L2 reuse) |
-| Default `chiplet_wgm` | 8 (super-tile WGM grouping) |
-| Default `chiplet_num_xcds` | 8 |
-| Default `chiplet_chunk_size` | 64 |
-
-### 21.6 Buffer descriptor (AMDGPU)
-
-| Spec | Value | Notes |
-|---|---|---|
-| DW3 flag for OOB-safe buffer-resource | `0x00027000` (= 159744) | TYPE=2 (BUFFER_RESOURCE), DATA_FORMAT=4 (32-bit dword), NUM_FORMAT=4 (UINT) |
-| DSL IR builder | `b.buffer_rsrc(ptr, num_bytes)` | Emits the correct DW3 — OOB lanes silently return zero |
-| `raw_ptr_buffer_load_lds` dwords accepted | `{4, 3, 1}` only — **not 2** | `AsyncTileLoader.choose_dwords` enforces this |
-| Async DRAM→LDS write contract | lane-contiguous addresses only | Arbitrary per-lane swizzled destinations corrupt output (§6.3) |
-| `s_waitcnt(vmcnt=16, lgkmcnt=16)` encoded value | `20336` | Cross-check against the lowered IR |
-
-### 21.7 FP8 / quantization (gfx950)
-
-| dtype | Range | Mantissa bits | Native MFMA on gfx950 | DSL surface |
-|---|---|---|---|---|
-| `FP8E4M3` | ±240 (no Inf) | 3 | Yes | `Type("fp8e4m3")`, `QDType="fp8e4m3"` |
-| `BF8E5M2` | ±57344 (with Inf) | 2 | Yes | `Type("bf8e5m2")`, `QDType="bf8e5m2"` |
-| `I8` saturating | ±127 | int8 | Yes (i8 MFMA) | `QDType="i8"` |
-| MX scale | E8M0 shared exponent | block-scaled | Yes (scaled MFMA) | `MxGemmSpec`, `helpers/mx_scale.py` |
-| Block-scale mantissa | FP8 or BF8 | block-scaled | Yes | `BlockScaleGemmSpec`, `MantissaDType`, `QuantMode` |
-| Codebook (i4) | packed nibble pairs | int4 | unpack-then-MFMA | `helpers/codebook.py::codebook_lookup_i4_pair_to_{bf8,fp8}` |
-
-`use_fp8_mfma_qk` and `use_fp8_mfma_pv` on `UnifiedAttention2DTiledSpec`
-enable the native fp8 MFMA path; the working dtype (bf16) is preserved
-for QK softmax math even when the MFMA itself is fp8 (§17.4).
-
-### 21.8 Compiler caveats specific to gfx950
-
-- **LLVM backend silently removes** `s_sched_barrier` and
-  `s_sched_group_barrier` instructions on gfx950. Verify with
-  `probe_isa_inspect.py` (the `sched_barrier` sub-bucket should be
-  0). This is not a kernel bug; the hardware scheduler is doing
-  the work the intrinsics meant to control.
-- **`-mllvm -enable-post-misched=0`** is safe in CK's CMake-generated
-  code but has been observed miscompiling MLIR-generated kernels on
-  this arch — treat as risky.
-- The remaining recommended CK-style flag stack
-  (`-mllvm -amdgpu-function-calls=false`,
-  `-mllvm -amdgpu-early-inline-all=true`,
-  `-mllvm --lsr-drop-solution=1`, `-fno-offload-uniform-block`,
-  `-O3`, fast / unsafe math) has been measured safe but rarely
-  moves the needle by more than 1 % on gfx950 — large gaps come
-  from kernel structure, not flags (§10.2).
-
-### 21.9 Default ISA target
-
-| Spec | Value |
-|---|---|
-| `compile_kernel(...)` default ISA | `amdgcn-amd-amdhsa--gfx950` |
-| `_DATALAYOUT` in `core/lower_llvm.py` | gfx950 datalayout string baked in |
-| Other supported targets | `gfx942` (MI300X), `gfx90a` (MI250X) — verify MFMA atom shapes are valid for the target |
-
-To target a different arch from the default, pass
-`isa="amdgcn-amd-amdhsa--gfx942"` (or similar) to `compile_kernel`,
-and verify the atoms picked by the spec are in that arch's
-`_F16_WARP_TILE_SHAPES_*` / `_BF16_WARP_TILE_SHAPES_*` set.
-
-### 21.10 Pointers to deeper material
-
-- `LDS_a.md` — "Four Things to Know About LDS Bank Conflicts on
-  MI350X" (opcode-specific conflict periods, phase decomposition,
-  asymmetry between read and write).
-- `LDS_b.md` — "Empirically Characterizing LDS Bank Conflicts on
-  AMD MI350X" (active-pair probe methodology, cross-half isolation,
-  composition linearity).
-- `utilities/skills/empirical-case-studies.md` — measured deltas,
-  bug-signature tolerances, stability caveats, "Closing the Last
-  5 %" patterns on this arch.
-
----
+lever applies to any AMDGPU CDNA target. The concrete per-architecture
+facts (MFMA atom catalog, LDS size / banks / conflict periods,
+cross-lane primitives, register / occupancy caps, chiplet / XCD,
+buffer descriptors, fp8 / quantization support, compiler caveats,
+default ISA) now live in per-arch references under
+[`optimization/arch/`](arch/README.md). Pick your target:
+**[arch/gfx950.md](arch/gfx950.md)** (CDNA4 / MI350X / MI355X — the
+DSL's default target). See [arch/README.md](arch/README.md) for the
+index, the 10-subsection template, and how to add a new architecture.
 
 ## Appendix: One-Page Diagnostic Decision Tree
 
@@ -3320,7 +3208,7 @@ Action:  inspect LLVM / ISA (§11, §18); check atom selection (§7.1)
 Symptom: fast but incorrect only on padded / tail shapes
 Likely:  invalid pointer load, bad descriptor valid, vector crosses tail
 Action:  test tiny adversarial shapes (§1.5); inspect buffer-rsrc
-         sentinel path (§6.1, §21.6)
+         sentinel path (§6.1, arch ref §21.6 — arch/gfx950.md)
 
 Symptom: intermittent wrong answers in async path
 Likely:  missing `s_waitcnt` / barrier, workspace lifetime
