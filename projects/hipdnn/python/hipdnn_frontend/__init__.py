@@ -12,46 +12,68 @@ high-level Python interface.
 import os
 import platform
 
-is_windows = platform.system() == "Windows"
+_IS_WINDOWS = platform.system() == "Windows"
 
-# Windows extension modules cannot resolve dependent DLLs from PATH: CPython
-# loads them with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which excludes PATH and has
-# no RPATH equivalent. HIPDNN_DLL_DIRECTORIES lets a caller register absolute
-# directories (e.g. a raw ROCm artifact tree's bin/) via os.add_dll_directory
-# before the extension imports, without requiring rocm_sdk to be installed.
-if is_windows:
-    for _dll_dir in os.environ.get("HIPDNN_DLL_DIRECTORIES", "").split(os.pathsep):
-        if _dll_dir and os.path.isdir(_dll_dir):
-            os.add_dll_directory(_dll_dir)
+# ROCm runtime libraries the compiled extension and hipdnn_backend link against.
+# On Windows every dependent DLL (runtime, runtime compiler, and engine-provider
+# deps) resolves by base name under a restricted loader search, so all must be
+# in the process beforehand. On Linux, RPATH/ldconfig pull the transitive deps
+# once libhipdnn itself is loadable, so only hipdnn needs to be located.
+_ROCM_CORE_SHORTNAMES = (
+    ["amd_comgr", "amdhip64", "hiprtc", "hipdnn"] if _IS_WINDOWS else ["hipdnn"]
+)
+# Engine provider plugins are loaded by absolute path at handle-create time, but
+# their transitive ROCm deps resolve by base name under the same restricted
+# Windows search, so preload them too. Optional: a distribution may ship only one.
+_ROCM_PROVIDER_SHORTNAMES = ["hipblaslt", "miopen"] if _IS_WINDOWS else []
 
-# Preload ROCm libraries when installed via ROCm wheels. The compiled extension
-# (hipdnn_frontend_python) and hipdnn_backend live in separate wheel package
-# directories, not on LD_LIBRARY_PATH. rocm_sdk loads them by absolute path so
-# the extension resolves them at import time.
-try:
+
+def _preload_via_rocm_sdk():
+    """Wheel install: ROCm libs ship as sibling rocm_sdk packages, off the
+    loader path. rocm_sdk resolves them by absolute path and preloads them so
+    the extension's by-name imports resolve at import time. Raises ImportError
+    when rocm_sdk is not installed (i.e. this is not a ROCm-wheel environment).
+    """
     import rocm_sdk
 
-    core_shortnames = (
-        ["amd_comgr", "amdhip64", "hiprtc", "hipdnn", "hipblaslt", "miopen"]
-        if is_windows
-        else ["hipdnn"]
-    )
+    # Core first so a missing optional provider can never block it. Each group is
+    # best-effort: initialize_process raises if a requested wheel/DLL is absent,
+    # but the library may still be resolvable by other means, and a genuine miss
+    # surfaces as a clear ImportError from the extension import below.
+    for shortnames in (_ROCM_CORE_SHORTNAMES, _ROCM_PROVIDER_SHORTNAMES):
+        if not shortnames:
+            continue
+        try:
+            rocm_sdk.initialize_process(preload_shortnames=shortnames)
+        except Exception:
+            pass
 
-    rocm_sdk.initialize_process(preload_shortnames=core_shortnames)
+
+def _register_rocm_lib_dir():
+    """Non-wheel installs (system /opt/rocm or a .deb, and build/artifact trees):
+    locate the ROCm library directory from the standard ROCM_PATH/ROCM_HOME env
+    vars.
+
+    On Windows the directory must be registered via os.add_dll_directory:
+    extension modules load with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which excludes
+    PATH and has no RPATH equivalent. On Linux the dynamic loader already
+    searches RPATH/ldconfig/LD_LIBRARY_PATH, so there is nothing to do.
+    """
+    if not _IS_WINDOWS:
+        return
+    for var in ("ROCM_PATH", "ROCM_HOME"):
+        root = os.environ.get(var)
+        if root and os.path.isdir(root):
+            lib_dir = os.path.join(root, "bin")
+            if os.path.isdir(lib_dir):
+                os.add_dll_directory(lib_dir)
+            return
+
+
+try:
+    _preload_via_rocm_sdk()
 except ImportError:
-    # rocm_sdk is not installed. Non-wheel installs (source builds, system
-    # ROCm) resolve the runtime via RPATH/LD_LIBRARY_PATH/PATH on Linux, or via
-    # the HIPDNN_DLL_DIRECTORIES os.add_dll_directory registration above on
-    # Windows, and do not need preloading, so there is nothing to do.
-    pass
-except Exception:
-    # Preload is best-effort. initialize_process can raise when a requested
-    # library is unavailable (ModuleNotFoundError if the providing wheel is not
-    # installed, FileNotFoundError if the wheel is present but the DLL is
-    # missing). The library may still be resolvable by other means; a genuine
-    # miss surfaces as a clear dlopen/ImportError from the extension import
-    # below.
-    pass
+    _register_rocm_lib_dir()
 
 # Import everything from the compiled extension module
 try:
