@@ -196,6 +196,34 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
+hipblasStatus_t hipblasLtSetSmCountTarget(hipblasLtHandle_t handle, int32_t smCountTarget)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtSetSmCountTarget");
+    auto status = RocBlasLtStatusToHIPStatus(
+        rocblaslt_set_sm_count_target((rocblaslt_handle)handle, smCountTarget));
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtGetSmCountTarget(hipblasLtHandle_t handle, int32_t* smCountTarget)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtGetSmCountTarget");
+    auto status = RocBlasLtStatusToHIPStatus(
+        rocblaslt_get_sm_count_target((rocblaslt_handle)handle, smCountTarget));
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
 hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle, uint32_t* first_nan_call_id)
 try
 {
