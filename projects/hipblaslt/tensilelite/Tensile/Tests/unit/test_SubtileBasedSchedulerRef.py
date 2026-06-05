@@ -615,7 +615,8 @@ def test_256x256_fp8_partition_1x1_pgr1():
     """
     cfg = make_256x256_fp8(pgr=1)
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    schedule = sched.build(stop_after='remove_unnecessary_wait_lr_sync')
+    sched.emit(schedule)
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP8_PGR1, (
         f"Emit dependency order mismatch.\n"
@@ -634,7 +635,8 @@ def test_256x256_fp8_partition_1x1_pgr2():
     """
     cfg = make_256x256_fp8(pgr=2)
     sched = LogicalScheduler(cfg)
-    sched.emit()
+    schedule = sched.build(stop_after='remove_unnecessary_wait_lr_sync')
+    sched.emit(schedule)
     actual = sched.print_emit_dep_order()
     assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_FP8_PGR2, (
         f"Emit dependency order mismatch.\n"

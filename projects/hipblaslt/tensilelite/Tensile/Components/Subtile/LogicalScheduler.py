@@ -482,6 +482,8 @@ class LogicalScheduler:
     def __init__(self, config: SchedulerConfig):
         self.config = config
         self.tensors: List[str] = ['A', 'B'] + (['SA', 'SB'] if config.hasScale else [])
+        self._annotated_schedule: Optional[AnnotatedSchedule] = None
+        self._augmented: Optional[AugmentedSchedule] = None
         self._emitted: Optional[EmittedSchedule] = None
         self._preloop_emitted: Optional[EmittedSchedule] = None
         self._ngll_emitted: Optional[EmittedSchedule] = None
@@ -607,8 +609,8 @@ class LogicalScheduler:
                 )
                 slots[slot_k].lrs.append(lr)
 
-        self._partitions = [slots]
-        return self._partitions
+        partitions = [slots]
+        return partitions
 
     def _place_LRs_for_partition(self, cur: tuple, nxt: tuple,
                                   is_last: bool,
@@ -1097,6 +1099,7 @@ class LogicalScheduler:
         for pi, slots in enumerate(schedule):
             self._annotate_deps_partition(pi, slots, cfg, lr_by_data,
                                           gr_by_tensor, lr_by_tensor)
+        self._annotated_schedule = schedule
         return schedule
 
     def _annotate_deps_partition(self, pi: int, slots: List[SubIterKSlot],
@@ -1291,6 +1294,7 @@ class LogicalScheduler:
                     lr.deps.clear()
                 else:
                     max_guaranteed = eo
+        self._annotated_schedule = schedule
         return schedule
 
     # ── Remove unnecessary LR deps ────────────────────────
@@ -1381,6 +1385,7 @@ class LogicalScheduler:
 
                 if prev_eo is not None and prev_eo >= cur_eo:
                     gr.deps.clear()
+        self._annotated_schedule = schedule
         return schedule
 
     # ── Remove cross-subIterK deps ─────────────────────────
@@ -1423,7 +1428,7 @@ class LogicalScheduler:
 
         # Locate dep_flat: the flat position of the dependency GR in the schedule.
         dep_flat = None
-        for p_idx, pslots in enumerate(self._partitions):
+        for p_idx, pslots in enumerate(schedule):
             for k_idx, slot in enumerate(pslots):
                 if any(gr is dep_ref.ref for gr in slot.grs):
                     dep_flat = p_idx * numK + k_idx
@@ -1521,6 +1526,7 @@ class LogicalScheduler:
                         isinstance(d.ref, LRPlacement)
                         for d in same + cross)
                     gr.preOps = [WaitLROp(has_sync=True)] if has_lr_dep else []
+        self._annotated_schedule = schedule
         return schedule
 
     def insert_gr_lr_inc(self, schedule: AnnotatedSchedule) -> AugmentedSchedule:
@@ -1578,6 +1584,7 @@ class LogicalScheduler:
             for tensor, lr in first_lr.items():
                 if tensor not in lr_inc_tensors:
                     lr.preOps.append(LRIncOp(tensor=tensor))
+        self._augmented = schedule
         return schedule
 
     # ── Group LR/GR chains ─────────────────────────────────────
@@ -1747,6 +1754,7 @@ class LogicalScheduler:
                                       if id(d.ref) not in slot_lr_set]
                         slot.mfma.deps = other_deps + [
                             Dep(ref=last_lr, mt_offset=lr_deps[0].mt_offset)]
+        self._augmented = schedule
         return schedule
 
     def remove_unnecessary_wait_lr_sync(self, schedule: AugmentedSchedule) -> AugmentedSchedule:
@@ -1814,6 +1822,7 @@ class LogicalScheduler:
                     gr.preOps = [
                         SyncOp() if (isinstance(op, WaitLROp) and op.has_sync) else op
                         for op in gr.preOps]
+        self._augmented = schedule
         return schedule
 
     def _split_deps(self, deps: List[Dep], consumer_pi: int,
@@ -2499,7 +2508,7 @@ class LogicalScheduler:
         closeLoop(emitEndLabelOnly=True) after, mirroring the legacy
         KernelWriter pattern.
         """
-        assert Pass.POPULATE in self._completed, \
+        assert hasattr(self, '_emitter'), \
             "populate_instructions() must be called before emitTailLoop()"
 
         module = Module("TailLoop")
@@ -2638,15 +2647,18 @@ class LogicalScheduler:
         """Single source of truth for tail-loop tile usage.
 
         Returns (tile_maps, unused) where
-          - tile_maps[pi] = self._partitions[pi][0].mfma.vgpr_tile_maps,
+                    - tile_maps[pi] = self._augmented[pi][0].mfma.vgpr_tile_maps,
             reused by build_tailloop_pgr0 to wire LR/MFMA/MaskK ops.
           - unused[tensor] = {tid} for tile slots the tail loop never
             references (the PGR>=1 prefetch half). Consumed by
             _release_unused_tail_tiles to reclaim their vgprs.
 
         """
-        tile_maps = [self._partitions[pi][0].mfma.vgpr_tile_maps
-                     for pi in range(self.config.numPartitions)]
+        assert self._augmented is not None, \
+            "build() must be called before _compute_tail_tile_state()"
+
+        tile_maps = [self._augmented[pi][0].mfma.vgpr_tile_maps
+                 for pi in range(self.config.numPartitions)]
         used = {t: set() for t in ('A', 'B', 'SA', 'SB')}
         for pi_map in tile_maps:
             for tensor in used:

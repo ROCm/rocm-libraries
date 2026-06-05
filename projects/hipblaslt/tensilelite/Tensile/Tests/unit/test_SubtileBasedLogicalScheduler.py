@@ -876,7 +876,7 @@ class TestAssignVgprTiles:
         """BF16 256x256 with default miWaveGroup=[2,2]."""
         cfg = make_cfg_bf16(depthU=depthU)
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 16, 'B': 16}
         assert not sched.needs_unrolling
@@ -889,7 +889,7 @@ class TestAssignVgprTiles:
         """BF16 256x256 miWaveGroup=[1,4]: 16 M-tiles, 4 N-tiles."""
         cfg = make_cfg_bf16(depthU=depthU, miWaveGroup=[1, 4])
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 32, 'B': 8}
         assert not sched.needs_unrolling
@@ -900,7 +900,7 @@ class TestAssignVgprTiles:
         """BF16 256x256 miWaveGroup=[4,1]: 4 M-tiles, 16 N-tiles."""
         cfg = make_cfg_bf16(depthU=depthU, miWaveGroup=[4, 1])
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 8, 'B': 32}
         assert not sched.needs_unrolling
@@ -917,12 +917,12 @@ class TestAssignVgprTiles:
         """BF16 256x256 (tilesN=8) with partitions along N."""
         cfg = make_cfg_bf16(depthU=64, partSizeN=partSizeN)
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks['A'] == 16
         assert sched.tile_peaks['B'] == expected_peak_B
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     # ── Group 3b: BF16 multi-partition on asymmetric macro tiles ──
 
@@ -937,12 +937,12 @@ class TestAssignVgprTiles:
         cfg = make_cfg_bf16(MT1=384, depthU=64, partSizeN=partSizeN)
         assert cfg.partitionSizesN == expected_partN
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks['A'] == 16
         assert sched.tile_peaks['B'] == expected_peak_B
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
         (4, 8,  [4, 3, 4]),
@@ -954,12 +954,12 @@ class TestAssignVgprTiles:
         cfg = make_cfg_bf16(MT1=352, depthU=64, partSizeN=partSizeN)
         assert cfg.partitionSizesN == expected_partN
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks['A'] == 16
         assert sched.tile_peaks['B'] == expected_peak_B
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
         (4, 8,  [4, 4, 3, 4, 4, 4]),
@@ -972,12 +972,12 @@ class TestAssignVgprTiles:
                             partSizeN=partSizeN)
         assert cfg.partitionSizesN == expected_partN
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks['A'] == 8
         assert sched.tile_peaks['B'] == expected_peak_B
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     # ── Group 4: FP4 2x2 ──
 
@@ -986,18 +986,18 @@ class TestAssignVgprTiles:
         """FP4 256x256 with default miWaveGroup=[2,2]."""
         cfg = make_cfg_256x256_fp4(depthU=depthU)
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 16, 'B': 16, 'SA': 8, 'SB': 8}
         assert sched.needs_unrolling == expect_unrolling
 
         for pi in range(cfg.numPartitions):
-            for slot in sched._partitions[pi]:
+            for slot in schedule[pi]:
                 if slot.mfma:
                     assert len(slot.mfma.vgpr_tile_maps['SA']) > 0
                     assert len(slot.mfma.vgpr_tile_maps['SB']) > 0
 
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     # ── Group 5: FP4 1x4 / 4x1 ──
 
@@ -1006,22 +1006,22 @@ class TestAssignVgprTiles:
         """FP4 256x256 miWaveGroup=[1,4]: 16 M-tiles, 4 N-tiles."""
         cfg = make_cfg_256x256_fp4(depthU=depthU, miWaveGroup=[1, 4])
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 32, 'B': 8, 'SA': 16, 'SB': 4}
         assert sched.needs_unrolling == expect_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     @pytest.mark.parametrize("depthU,expect_unrolling", [(256, True), (512, False)])
     def test_fp4_4x1(self, depthU, expect_unrolling):
         """FP4 256x256 miWaveGroup=[4,1]: 4 M-tiles, 16 N-tiles."""
         cfg = make_cfg_256x256_fp4(depthU=depthU, miWaveGroup=[4, 1])
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 8, 'B': 32, 'SA': 4, 'SB': 16}
         assert sched.needs_unrolling == expect_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     # ── Group 6: BF16 with lrA/lrB k=2 granularity ──
 
@@ -1034,11 +1034,11 @@ class TestAssignVgprTiles:
             lrB=ReadGranularity(mn=1, k=2),
         )
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 16, 'B': 16}
         assert sched.needs_unrolling == expect_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     # ── Group 1: BF16 2x2 ──
 
@@ -1047,11 +1047,11 @@ class TestAssignVgprTiles:
         """BF16 256x256 with default miWaveGroup=[2,2]."""
         cfg = make_cfg_bf16(depthU=depthU)
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 16, 'B': 16}
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     # ── Group 2: BF16 1x4 / 4x1 ──
 
@@ -1060,22 +1060,22 @@ class TestAssignVgprTiles:
         """BF16 256x256 miWaveGroup=[1,4]: 16 M-tiles, 4 N-tiles."""
         cfg = make_cfg_bf16(depthU=depthU, miWaveGroup=[1, 4])
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 32, 'B': 8}
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     @pytest.mark.parametrize("depthU", [64, 128])
     def test_bf16_4x1(self, depthU):
         """BF16 256x256 miWaveGroup=[4,1]: 4 M-tiles, 16 N-tiles."""
         cfg = make_cfg_bf16(depthU=depthU, miWaveGroup=[4, 1])
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 8, 'B': 32}
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     # ── Group 3: BF16 multi-partition along N ──
 
@@ -1088,12 +1088,12 @@ class TestAssignVgprTiles:
         """BF16 256x256 (tilesN=8) with partitions along N."""
         cfg = make_cfg_bf16(depthU=64, partSizeN=partSizeN)
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks['A'] == 16
         assert sched.tile_peaks['B'] == expected_peak_B
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     # ── Group 3b: BF16 multi-partition on asymmetric macro tiles ──
 
@@ -1108,12 +1108,12 @@ class TestAssignVgprTiles:
         cfg = make_cfg_bf16(MT1=384, depthU=64, partSizeN=partSizeN)
         assert cfg.partitionSizesN == expected_partN
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks['A'] == 16
         assert sched.tile_peaks['B'] == expected_peak_B
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
         (4, 8,  [4, 3, 4]),
@@ -1125,12 +1125,12 @@ class TestAssignVgprTiles:
         cfg = make_cfg_bf16(MT1=352, depthU=64, partSizeN=partSizeN)
         assert cfg.partitionSizesN == expected_partN
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks['A'] == 16
         assert sched.tile_peaks['B'] == expected_peak_B
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
         (4, 8,  [4, 4, 3, 4, 4, 4]),
@@ -1143,12 +1143,12 @@ class TestAssignVgprTiles:
                             partSizeN=partSizeN)
         assert cfg.partitionSizesN == expected_partN
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks['A'] == 8
         assert sched.tile_peaks['B'] == expected_peak_B
         assert not sched.needs_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     # ── Group 4: FP4 2x2 ──
 
@@ -1157,18 +1157,18 @@ class TestAssignVgprTiles:
         """FP4 256x256 with default miWaveGroup=[2,2]."""
         cfg = make_cfg_256x256_fp4(depthU=depthU)
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 16, 'B': 16, 'SA': 8, 'SB': 8}
         assert sched.needs_unrolling == expect_unrolling
 
         for pi in range(cfg.numPartitions):
-            for slot in sched._partitions[pi]:
+            for slot in schedule[pi]:
                 if slot.mfma:
                     assert len(slot.mfma.vgpr_tile_maps['SA']) > 0
                     assert len(slot.mfma.vgpr_tile_maps['SB']) > 0
 
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     # ── Group 5: FP4 1x4 / 4x1 ──
 
@@ -1177,22 +1177,22 @@ class TestAssignVgprTiles:
         """FP4 256x256 miWaveGroup=[1,4]: 16 M-tiles, 4 N-tiles."""
         cfg = make_cfg_256x256_fp4(depthU=depthU, miWaveGroup=[1, 4])
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 32, 'B': 8, 'SA': 16, 'SB': 4}
         assert sched.needs_unrolling == expect_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     @pytest.mark.parametrize("depthU,expect_unrolling", [(256, True), (512, False)])
     def test_fp4_4x1(self, depthU, expect_unrolling):
         """FP4 256x256 miWaveGroup=[4,1]: 4 M-tiles, 16 N-tiles."""
         cfg = make_cfg_256x256_fp4(depthU=depthU, miWaveGroup=[4, 1])
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 8, 'B': 32, 'SA': 4, 'SB': 16}
         assert sched.needs_unrolling == expect_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
     # ── Group 6: BF16 with lrA/lrB k=2 granularity ──
 
@@ -1205,11 +1205,11 @@ class TestAssignVgprTiles:
             lrB=ReadGranularity(mn=1, k=2),
         )
         sched = LogicalScheduler(cfg)
-        sched.assign_vgpr_tiles()
+        schedule = sched.build(stop_after='assign_vgpr_tiles')
 
         assert sched.tile_peaks == {'A': 16, 'B': 16}
         assert sched.needs_unrolling == expect_unrolling
-        self._assert_no_conflict_and_unrolling(sched)
+        self._assert_no_conflict_and_unrolling(sched, schedule)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1348,8 +1348,7 @@ class TestPlaceGRs:
         cfg = make_cfg_bf16(320, 304, partSizeN=1,
                             miWaveGroup=[4, 1], sourceSwap=True)
         sched = LogicalScheduler(cfg)
-        sched.place_GRs()
-        parts = sched._partitions
+        parts = sched.build(stop_after='place_GRs')
 
         # Collect (partition, subIterK) for each tensor/mt.
         b_n1 = []
@@ -1699,9 +1698,9 @@ class TestComputeInflightLoads:
         cfg = make_cfg_fp8(128, 192, waveGroup=(2, 2))
         assert cfg.numSubIterK == 1, "FP8 DU=128 / matrixInstK=128 → single subIterK"
         sched = LogicalScheduler(cfg)
-        sched.remove_cross_deps()
+        schedule = sched.build(stop_after="remove_cross_deps")
 
-        s0 = sched._partitions[0][0]
+        s0 = schedule[0][0]
 
         # LR A: dep is GR A (emitted first → last in reverse order).
         # All B GRs (emitted after A, encountered first in backward walk) are inflight.
@@ -1726,9 +1725,9 @@ class TestComputeInflightLoads:
         cfg = make_cfg_fp8(448, 64, waveGroup=(4, 1))
         assert cfg.numSubIterK == 1
         sched = LogicalScheduler(cfg)
-        sched.remove_cross_deps()
+        schedule = sched.build(stop_after="remove_cross_deps")
 
-        s0 = sched._partitions[0][0]
+        s0 = schedule[0][0]
 
         lr_a = _get_lr(s0, 'A')
         assert lr_a.preOps[0].wait_gr_counts.A == 0
