@@ -1,6 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+include(HipBLASLtCodegen)
+
 set(TENSILELITE_BUILD_PARALLEL_LEVEL "" CACHE STRING "Number of CPU cores to use for building device libraries (will use nproc if unset).")
 set(TENSILELITE_KEEP_BUILD_TMP OFF CACHE STRING "Keep temporary build directory for device libraries (turning this ON  bloat the build size).")
 set(TENSILELITE_ASM_DEBUG "" CACHE STRING "Keep debug information for built code objects.")
@@ -12,104 +14,64 @@ set(TENSILELITE_OFFLOADBUNDLER "" CACHE STRING "Path to clang-offload-bundler.")
 
 set(HIPBLASLT_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")
 set(HIPBLASLT_TENSILE_LIBPATH "${hipblaslt_BINARY_DIR}/Tensile" CACHE STRING "Path to output the device gemm libraries.")
-file(MAKE_DIRECTORY "${HIPBLASLT_TENSILE_LIBPATH}/library")
-
-list(JOIN GPU_TARGETS "$<SEMICOLON>" TENSILELITE_GPU_TARGETS_SEMI_ESCAPED)
-
-set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--architecture=${TENSILELITE_GPU_TARGETS_SEMI_ESCAPED}")
-set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--cxx-compiler=${CMAKE_CXX_COMPILER}")
-if(TENSILELITE_OFFLOADBUNDLER)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--offload-bundler=${TENSILELITE_OFFLOADBUNDLER}")
-endif()
-if(HIPBLASLT_ENABLE_ASAN)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--address-sanitizer")
-endif()
-if(TENSILELITE_BUILD_PARALLEL_LEVEL)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--jobs=${TENSILELITE_BUILD_PARALLEL_LEVEL}")
-endif()
-if(TENSILELITE_KEEP_BUILD_TMP)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--keep-build-tmp")
-endif()
-if(TENSILELITE_ASM_DEBUG)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--asm-debug")
-endif()
-if(HIPBLASLT_ENABLE_YAML)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--library-format=yaml")
-endif()
-if(TENSILELITE_LOGIC_FILTER)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--logic-filter=${TENSILELITE_LOGIC_FILTER}")
-endif()
-if(TENSILELITE_NO_COMPRESS)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--no-compress")
-endif()
-if(TENSILELITE_EXPERIMENTAL)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--experimental")
-endif()
-if(NOT HIPBLASLT_ENABLE_LAZY_LOAD)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--no-lazy-library-loading")
-endif()
-if(NOT TENSILELITE_ENABLE_ASM_COMMENTS)
-    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--disable-asm-comments")
-endif()
 
 if(NOT HIPBLASLT_LIBLOGIC_PATH)
     set(HIPBLASLT_LIBLOGIC_PATH "${hipblaslt_SOURCE_DIR}/library")
 endif()
 
-# Pre-build gate: validate all library logic YAMLs (WorkGroup, MatrixInstruction,
-# WorkGroupMappingXCC vs CU count, etc.) before generating .dat files. Fails build
-# if any solution fails validation so bad logic is never compiled.
-set(HIPBLASLT_TENSILELOGIC_KNOWN_BUGS
-    "${hipblaslt_SOURCE_DIR}/tensilelite/Tensile/TensileLogic/known_bugs.yaml"
-)
-# Stamp DEPENDS include known_bugs.yaml but not every library logic YAML (thousands
-# of files; CONFIGURE_DEPENDS globs are costly). After editing logic only, run
-# scripts/run_tensile_logic_check.py or touch the stamp input to force re-validation.
-set(TENSILELOGIC_STAMP "${CMAKE_CURRENT_BINARY_DIR}/TensileLogic.stamp")
-add_custom_command(
-    OUTPUT "${TENSILELOGIC_STAMP}"
-    COMMENT "Validating library logic (TensileLogic --check-all) ..."
-    COMMAND ${HIPBLASLT_PYTHON_COMMAND}
-        "${hipblaslt_SOURCE_DIR}/tensilelite/Tensile/bin/TensileLogic"
-        "${HIPBLASLT_LIBLOGIC_PATH}"
-        --known-bugs
-        "${HIPBLASLT_TENSILELOGIC_KNOWN_BUGS}"
-        --check-all
-    COMMAND ${CMAKE_COMMAND} -E touch "${TENSILELOGIC_STAMP}"
-    DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${HIPBLASLT_TENSILELOGIC_KNOWN_BUGS}"
-    VERBATIM
-    USES_TERMINAL
-)
+# hipBLASLt's own device-library build runs the codegen against the source tree:
+# locate the Tensile package (TensileLogic gate, known_bugs.yaml) there.
+set(HIPBLASLT_CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite")
 
-set(output_stamp "${CMAKE_CURRENT_BINARY_DIR}/Tensile.stamp")
-set(TENSILE_CREATE_LIBRARY_COMMAND
-    ${HIPBLASLT_PYTHON_COMMAND} -m Tensile.TensileCreateLibrary
-    ${TENSILELITE_BUILD_OPTS}
-    ${HIPBLASLT_LIBLOGIC_PATH}
-    "${HIPBLASLT_TENSILE_LIBPATH}"
-    HIP
-)
+# Map hipBLASLt's cache knobs / feature flags onto the codegen function's
+# optional arguments. The function itself is the single source of truth for the
+# codegen invocation; downstream consumers (hipSPARSELt) call it the same way via
+# the exported HipBLASLtCodegen.cmake (see hipblaslt-config.cmake).
+set(_codegen_flags "")
+if(HIPBLASLT_ENABLE_ASAN)
+    list(APPEND _codegen_flags ASAN)
+endif()
+if(HIPBLASLT_ENABLE_YAML)
+    list(APPEND _codegen_flags YAML_FORMAT)
+endif()
+if(TENSILELITE_NO_COMPRESS)
+    list(APPEND _codegen_flags NO_COMPRESS)
+endif()
+if(TENSILELITE_EXPERIMENTAL)
+    list(APPEND _codegen_flags EXPERIMENTAL)
+endif()
+if(NOT HIPBLASLT_ENABLE_LAZY_LOAD)
+    list(APPEND _codegen_flags NO_LAZY_LOAD)
+endif()
+if(TENSILELITE_ENABLE_ASM_COMMENTS)
+    list(APPEND _codegen_flags ASM_COMMENTS)
+endif()
+if(TENSILELITE_KEEP_BUILD_TMP)
+    list(APPEND _codegen_flags KEEP_BUILD_TMP)
+endif()
+if(TENSILELITE_ASM_DEBUG)
+    list(APPEND _codegen_flags ASM_DEBUG)
+endif()
 
-add_custom_command(
-    OUTPUT "${output_stamp}"
-    COMMENT "Building device libraries to ${HIPBLASLT_TENSILE_LIBPATH} ..."
-    COMMAND ${TENSILE_CREATE_LIBRARY_COMMAND}
-    COMMAND ${CMAKE_COMMAND} -E touch "${output_stamp}"
-    DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${TENSILELOGIC_STAMP}"
-    # Because the command can contain special characters
-    VERBATIM
-    # Because this can be very long running and difficult to debug deadlocks
-    # without streaming.
-    USES_TERMINAL
-)
+set(_codegen_opts "")
+if(TENSILELITE_OFFLOADBUNDLER)
+    list(APPEND _codegen_opts OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}")
+endif()
+if(TENSILELITE_BUILD_PARALLEL_LEVEL)
+    list(APPEND _codegen_opts JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}")
+endif()
+if(TENSILELITE_LOGIC_FILTER)
+    list(APPEND _codegen_opts LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}")
+endif()
 
-block(SCOPE_FOR VARIABLES)
-    list(JOIN TENSILE_CREATE_LIBRARY_COMMAND " " FORMATTED_TCL)
-    message(STATUS "Device lib build command: ${FORMATTED_TCL}")
-endblock()
-
-add_custom_target(tensilelite-device-libraries ALL
-    DEPENDS "${output_stamp}"
+hipblaslt_create_device_library(
+    TARGET tensilelite-device-libraries
+    LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
+    OUTPUT_DIR "${HIPBLASLT_TENSILE_LIBPATH}"
+    ARCHES ${GPU_TARGETS}
+    CXX_COMPILER "${CMAKE_CXX_COMPILER}"
+    ${_codegen_opts}
+    ${_codegen_flags}
 )
 
 if(HIPBLASLT_ENABLE_EXTOPS)
