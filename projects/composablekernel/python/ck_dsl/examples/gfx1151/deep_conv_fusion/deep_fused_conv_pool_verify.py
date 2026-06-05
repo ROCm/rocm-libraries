@@ -466,6 +466,22 @@ def main() -> int:
         "LDS -> exact i32 acc) instead of the fp16-emulation path; conv1 uses "
         "native packed-int4 WMMA when available",
     )
+    parser.add_argument(
+        "--batch-loads",
+        dest="batch_loads",
+        action="store_true",
+        default=True,
+        help="Lever 1 (DEFAULT ON): register-level multi-buffered footprint "
+        "staging -- issue all conv0 input global loads to distinct VGPRs before "
+        "any ds_store so they coalesce under a single vmcnt(0) and overlap "
+        "(~5%% on the full shape, bit-exact)",
+    )
+    parser.add_argument(
+        "--no-batch-loads",
+        dest="batch_loads",
+        action="store_false",
+        help="disable Lever 1 footprint load batching (A/B baseline)",
+    )
     args = parser.parse_args()
 
     if args.arch not in ("gfx1151", "gfx11-generic"):
@@ -504,6 +520,7 @@ def main() -> int:
         repack_c0=args.repack_c0,
         butterfly_conv01=args.butterfly,
         native_int=args.native_int,
+        batch_loads=args.batch_loads,
     )
     ok, why = is_valid_spec(spec, arch=args.arch)
     if not ok:

@@ -37,6 +37,12 @@ It reads a `ui_output_agent_*_dispatch_*` directory and reports top-K stall hots
 
 ⚠️ **PREREQUISITE CHECK**: ATT analysis requires `rocprof-trace-decoder` library. If not installed, use **Mode C: PMC Analysis** instead.
 
+Before collecting ATT for an optimization experiment, run the
+`/isa-inspection-ckdsl` checklist when the change is expected to alter matrix
+opcodes, packed dtype handling, LDS handoffs, wait/barrier placement, or
+occupancy. ISA inspection catches wrong-codegen and hidden conversion/packing
+taxes before you spend time interpreting stall traces.
+
 ### Mode A: Analyze existing dispatch directory
 
 If the user provides `--dir <path>` or already has a `ui_output_agent_*_dispatch_*` directory:
