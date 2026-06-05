@@ -14,15 +14,18 @@ test_pipeline_v18
 test_pipeline_v17
 test_lds
 test_ws
+test_pp8
 test_reference
 probe_glds
 exp_sgb
-exp_interleave
+exp_interleave*
 tp_builtin
+tl_sf
 profile_v17
 profile_lds
 profile_v17.0.host-*
 profile_v17.*.hipv4-*
+*-host-x86_64-unknown-linux-gnu.s
 # profiler / tooling output
 prof_out*/
 .rocprofv3/
