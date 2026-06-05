@@ -14,110 +14,6 @@ auto calculate_rtol_atol(const ck_tile::index_t K, const float max_accumulated_v
     return ck_tile::make_tuple(rtol, atol);
 }
 
-template <ck_tile::index_t MNPack      = 2,
-          ck_tile::index_t KPack       = 2,
-          ck_tile::index_t XdlMNThread = 16,
-          ck_tile::index_t XdlKThread  = 4,
-          typename ScaleType>
-void preShuffleScaleBuffer_gfx950(const ScaleType* src,
-                                  ScaleType* packed,
-                                  ck_tile::index_t MN,
-                                  ck_tile::index_t K_scale,
-                                  bool kLast)
-{
-    const ck_tile::index_t MN_packed             = MN / MNPack;
-    const ck_tile::index_t K_packed              = K_scale / KPack;
-    constexpr ck_tile::index_t NumScalesPerDword = 4 / sizeof(ScaleType);
-
-    for(ck_tile::index_t packed_mn = 0; packed_mn < MN_packed; packed_mn++)
-    {
-        for(ck_tile::index_t packed_k = 0; packed_k < K_packed; packed_k++)
-        {
-            ck_tile::index_t mn_lane  = packed_mn % XdlMNThread;
-            ck_tile::index_t mn_group = packed_mn / XdlMNThread;
-            ck_tile::index_t k_lane   = packed_k % XdlKThread;
-            ck_tile::index_t k_group  = packed_k / XdlKThread;
-            for(ck_tile::index_t ik = 0; ik < KPack; ik++)
-            {
-                for(ck_tile::index_t imn = 0; imn < MNPack; imn++)
-                {
-                    ck_tile::index_t byteIdx = ik * MNPack + imn;
-                    ck_tile::index_t orig_mn =
-                        mn_group * XdlMNThread * MNPack + imn * XdlMNThread + mn_lane;
-                    ck_tile::index_t orig_k =
-                        k_group * XdlKThread * KPack + ik * XdlKThread + k_lane;
-
-                    ck_tile::index_t inputIndex =
-                        kLast ? orig_k + orig_mn * K_scale : orig_mn + orig_k * MN;
-                    ScaleType v = src[inputIndex];
-                    ck_tile::index_t outputIndex =
-                        byteIdx + (packed_mn % XdlMNThread) * NumScalesPerDword +
-                        packed_k * XdlMNThread * NumScalesPerDword +
-                        (packed_mn / XdlMNThread) * XdlMNThread * NumScalesPerDword * K_packed;
-                    packed[outputIndex] = v;
-                }
-            }
-        }
-    }
-}
-
-template <ck_tile::index_t NWarp,
-          ck_tile::index_t NPerBlock,
-          ck_tile::index_t XdlMNThread,
-          typename ScaleType>
-auto preShuffleScaleBufferPermuteN_gfx950(
-    const ScaleType* src, ScaleType* shuffled, ck_tile::index_t MN, ck_tile::index_t K, bool kLast)
-{
-    constexpr ck_tile::index_t MNXdlPack  = 2;
-    constexpr ck_tile::index_t KXdlPack   = 2;
-    constexpr ck_tile::index_t NRepeat    = NPerBlock / NWarp / XdlMNThread;
-    constexpr ck_tile::index_t XdlKThread = ck_tile::get_warp_size() / XdlMNThread; // 4
-
-    assert(K % (KXdlPack * XdlKThread) == 0);
-    const ck_tile::index_t K0 = K / KXdlPack / XdlKThread;
-
-    for(ck_tile::index_t n = 0; n < MN; ++n)
-    {
-        for(ck_tile::index_t k = 0; k < K; ++k)
-        {
-            const ck_tile::index_t n0     = n / NPerBlock;
-            const ck_tile::index_t tempn0 = n % NPerBlock;
-            const ck_tile::index_t n1     = tempn0 / (XdlMNThread * NRepeat);
-            const ck_tile::index_t tempn1 = tempn0 % (XdlMNThread * NRepeat);
-            const ck_tile::index_t n2     = tempn1 / (NRepeat);
-            const ck_tile::index_t tempn2 = tempn1 % (NRepeat);
-            const ck_tile::index_t n3     = tempn2 % MNXdlPack;
-            const ck_tile::index_t n4     = tempn2 / MNXdlPack;
-
-            const ck_tile::index_t k0    = k / (XdlKThread * KXdlPack);
-            const ck_tile::index_t tempk = k % (XdlKThread * KXdlPack);
-            const ck_tile::index_t k1    = tempk % XdlKThread;
-            const ck_tile::index_t k2    = tempk / XdlKThread;
-
-            const ck_tile::index_t outputIndex =
-                n0 * MNXdlPack * KXdlPack * XdlMNThread * XdlKThread * K0 * NWarp *
-                    (NRepeat / MNXdlPack) +
-                n1 * MNXdlPack * KXdlPack * XdlMNThread * XdlKThread * K0 +
-                n2 * MNXdlPack * KXdlPack + k0 * MNXdlPack * KXdlPack * XdlMNThread * XdlKThread +
-                k1 * MNXdlPack * KXdlPack * XdlMNThread + k2 * MNXdlPack +
-                n4 * MNXdlPack * KXdlPack * XdlMNThread * XdlKThread * K0 * NWarp + n3;
-
-            ck_tile::index_t inputIndex = kLast ? k + n * K : n + k * MN;
-
-            if(n < MN)
-            {
-                shuffled[outputIndex] = src[inputIndex];
-            }
-            else
-            {
-                shuffled[outputIndex] = ScaleType{};
-            }
-        }
-    }
-
-    return shuffled;
-}
-
 template <typename ADataType,
           typename BDataType,
           typename AScaleDataType,
@@ -239,17 +135,19 @@ int run_mx_gemm_with_layouts(int argc, char* argv[], ALayout, BLayout, CLayout)
          static_cast<std::size_t>(scale_k_size / KXdlPackEff * 2)},
         {static_cast<std::size_t>(scale_k_size / KXdlPackEff * 2), static_cast<std::size_t>(1)});
 
-    preShuffleScaleBuffer_gfx950<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
+    ck_tile::preShuffleScaleBuffer_gfx950<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
         scale_a_host.mData.data(), scale_a_shuffled.mData.data(), M, scale_k_size, true);
 
     if constexpr(GemmConfig::Preshuffle && GemmConfig::TiledMMAPermuteN)
     {
-        preShuffleScaleBufferPermuteN_gfx950<GemmConfig::N_Warp, GemmConfig::N_Tile, XdlMNThread>(
+        ck_tile::preShuffleScaleBufferPermuteN_gfx950<GemmConfig::N_Warp,
+                                                      GemmConfig::N_Tile,
+                                                      XdlMNThread>(
             scale_b_host.mData.data(), scale_b_shuffled.mData.data(), N, scale_k_size, true);
     }
     else
     {
-        preShuffleScaleBuffer_gfx950<NXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
+        ck_tile::preShuffleScaleBuffer_gfx950<NXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
             scale_b_host.mData.data(), scale_b_shuffled.mData.data(), N, scale_k_size, true);
     }
 
