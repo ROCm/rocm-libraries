@@ -97,7 +97,7 @@ def get_configs(
     Trims down the profiler config set using the rules defined in ``_select_test_configs``.
     """
 
-    from grouped_config_rules import get_configs as get_profiler_configs
+    from grouped_config_rules_profiler import get_configs as get_profiler_configs
 
     all_configs = get_profiler_configs(arch, variants, ndims, datatypes)
     test_configs = _select_test_configs(all_configs)
