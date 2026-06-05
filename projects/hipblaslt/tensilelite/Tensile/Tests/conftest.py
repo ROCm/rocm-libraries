@@ -26,6 +26,8 @@ import pytest
 import os
 import sys
 
+NO_TESTS_PASSED_EXIT_CODE = 6
+
 try:
     import xdist  # noqa
 except ImportError:
@@ -45,6 +47,27 @@ def pytest_addoption(parser):
     parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
+    parser.addoption("--fail-if-no-tests", action="store_true")
+
+def pytest_sessionfinish(session, exitstatus):
+    if not session.config.getoption("--fail-if-no-tests"):
+        return
+
+    # Pytest returns OK for sessions where tests were collected but all skipped.
+    # Convert that no-pass success case to a distinct failure while preserving
+    # pytest's existing non-zero exit code logic for empty or fully deselected
+    # runs.
+    if exitstatus != pytest.ExitCode.OK:
+        return
+
+    terminal = session.config.pluginmanager.get_plugin("terminalreporter")
+    if terminal is None:
+        return
+
+    passed = len(terminal.stats.get("passed", []))
+    if passed == 0:
+        terminal.write_sep("=", "no tests passed")
+        session.exitstatus = NO_TESTS_PASSED_EXIT_CODE
 
 @pytest.fixture(scope="session")
 def timing_path(pytestconfig, tmpdir_factory):
@@ -217,4 +240,3 @@ def useGlobalParameters(tensile_args):
             Common.restoreDefaultGlobalParameters()
 
     return gpUpdater
-
