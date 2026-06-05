@@ -165,8 +165,10 @@ double2 dd_div(double2 a, double2 b)
 /* =========================================================================
  * GPU random-number helpers
  * ========================================================================= */
-static constexpr uint64_t SEED_A = 12345ULL;
-static constexpr uint64_t SEED_B = 54321ULL;
+/* GEMMul8 uses the same seed for A and B so that A == B (for square
+ * k=m=n).  This avoids catastrophic cancellation in A*B that would make
+ * per-element relative errors meaningless for near-zero output entries. */
+static constexpr uint64_t SEED = 12345ULL;
 
 __device__ __forceinline__
 uint64_t xorshift64(uint64_t s)
@@ -679,8 +681,8 @@ int main(int argc, char** argv)
     for(double phi : cfg.phi_list) {
 
         /* Fill A, B on GPU */
-        launch_randmat(N, N, d_A, phi, SEED_A, stream);
-        launch_randmat(N, N, d_B, phi, SEED_B, stream);
+        launch_randmat(N, N, d_A, phi, SEED, stream);
+        launch_randmat(N, N, d_B, phi, SEED, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
 
         /* Double-double reference (skipped when --no-check) */
