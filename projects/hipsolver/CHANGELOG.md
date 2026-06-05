@@ -9,8 +9,8 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 
 * Added functions:
   * getrsBatched
-    * hipsolverXgetrsBatched_bufferSize
-    * hipsolverXgetrsBatched
+    * hipsolverSgetrsBatched_bufferSize, hipsolverDgetrsBatched_bufferSize, hipsolverCgetrsBatched_bufferSize, hipsolverZgetrsBatched_bufferSize
+    * hipsolverSgetrsBatched, hipsolverDgetrsBatched, hipsolverCgetrsBatched, hipsolverZgetrsBatched
 
 ### Changed
 ### Removed
