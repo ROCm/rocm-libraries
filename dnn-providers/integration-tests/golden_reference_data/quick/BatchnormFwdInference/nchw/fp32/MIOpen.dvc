@@ -1,6 +1,0 @@
-outs:
-- md5: 2945b255de2f2b8724e89bc7ff3b0750.dir
-  size: 1264
-  nfiles: 7
-  hash: md5
-  path: MIOpen

@@ -1,0 +1,5 @@
+outs:
+- md5: de16dfad5fa564ed1cbcf74f4c3dcf0a
+  size: 8
+  hash: md5
+  path: MIOpen.tensor4.bin

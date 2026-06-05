@@ -6,7 +6,7 @@ in S3 via [DVC](https://dvc.org) — git only tracks small `.dvc` pointer files.
 | Key            | Value                                |
 |----------------|--------------------------------------|
 | Remote         | `s3://therock-dvc/rocm-libraries`    |
-| Tracking       | Per-bundle (one `.dvc` file per bundle) |
+| Tracking       | Per-file `.bin` tracking (`.json` stays in git for PR review) |
 | Auto-stage     | Enabled (`dvc add` auto-stages `.dvc` and `.gitignore` for git) |
 | Naming spec    | [RFC 0011 Section 4.1](../../../projects/hipdnn/docs/rfcs/0011_GoldenReferenceValidation.md) |
 
@@ -14,8 +14,8 @@ in S3 via [DVC](https://dvc.org) — git only tracks small `.dvc` pointer files.
 
 ```
 golden_reference_data/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
-    {Name}.json              # graph description
-    {Name}.tensor0.bin       # binary tensor data
+    {Name}.json              # graph description (committed to git)
+    {Name}.tensor0.bin       # binary tensor data (DVC-tracked)
     {Name}.tensor1.bin
     ...
 ```
@@ -54,10 +54,13 @@ mkdir -p dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhw
 cp resnet50_layer3.json        dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
 cp resnet50_layer3.tensor*.bin dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
 
-# 3. DVC-track the bundle (auto-stages .dvc and .gitignore for git)
-dvc add dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
+# 3. DVC-track only the .bin files (auto-stages .dvc pointers for git)
+dvc add --glob dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/*.bin
 
-# 4. Commit and push
+# 4. Git-add the .json so reviewers can see it in the PR
+git add dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.json
+
+# 5. Commit and push
 git commit -m "Add ConvFwd resnet50_layer3 bundle"
 dvc push
 git push
@@ -69,10 +72,13 @@ git push
 # 1. Overwrite the files in the bundle directory
 cp new_tensors/*.bin dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
 
-# 2. Re-track (updates the hash in the .dvc file)
-dvc add dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
+# 2. Re-track the .bin files (updates hashes in .dvc pointers)
+dvc add --glob dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/*.bin
 
-# 3. Commit and push
+# 3. If the .json also changed, stage it for git
+git add dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/resnet50_layer3.json
+
+# 4. Commit and push
 git commit -m "Update ConvFwd resnet50_layer3 tensors"
 dvc push
 git push
@@ -84,10 +90,10 @@ old `.dvc` pointer, and `dvc pull` fetches the previous version.
 ## Remove a Bundle
 
 ```bash
-# 1. Remove DVC tracking
-dvc remove dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3
+# 1. Remove DVC tracking for the .bin files
+dvc remove dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/*.bin.dvc
 
-# 2. Delete the data
+# 2. Delete the bundle directory
 rm -rf dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
 
 # 3. Commit
@@ -103,9 +109,9 @@ If DVC tracking needs to be rolled back:
 
 ```bash
 # Pull the data if not on disk, then remove DVC tracking and re-add to git
-dvc pull dnn-providers/integration-tests/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small.dvc
-dvc remove dnn-providers/integration-tests/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small.dvc
-git add -f dnn-providers/integration-tests/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/
+dvc pull dnn-providers/integration-tests/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/
+dvc remove dnn-providers/integration-tests/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/*.bin.dvc
+git add -f dnn-providers/integration-tests/golden_reference_data/quick/BatchnormFwdInference/nchw/fp32/Small/*.bin
 git commit -m "Revert Small bundle from DVC to git tracking"
 ```
 
@@ -119,18 +125,19 @@ git revert <migration-commit-hash>
 
 ## How It Works
 
-Each bundle is tracked independently. `dvc add` hashes every file by MD5 and
-stores it in S3 by that hash. Git only sees the `.dvc` pointer file.
+Each `.bin` file is tracked individually by DVC. `.json` files stay in git.
 
 ```
-On disk (your checkout)         In git              In S3
-------------------------------  ------------------  -------------------------
-resnet50_layer3/                resnet50_layer3.dvc  ab/cd1234...  (json)
-  resnet50_layer3.json            outs:              ef/gh5678...  (tensor0)
-  resnet50_layer3.tensor0.bin       - md5: ab12..    ij/kl9012...  (tensor1)
-  resnet50_layer3.tensor1.bin         path: ...
+On disk (your checkout)           In git                     In S3
+---------------------------------  -------------------------  -------------------------
+resnet50_layer3/                                             
+  resnet50_layer3.json             resnet50_layer3.json       (not in S3)
+  resnet50_layer3.tensor0.bin      .tensor0.bin.dvc           ab/cd1234...  (tensor0)
+  resnet50_layer3.tensor1.bin      .tensor1.bin.dvc           ef/gh5678...  (tensor1)
 ```
 
+- `.json` graph descriptions are committed to git — visible in PR diffs
+- `.bin` tensor data is stored in S3 by content hash via DVC
 - Identical files are stored once regardless of path
 - Old versions persist — revert a `.dvc` pointer to restore previous data
 - `dvc push` uploads only new/changed files

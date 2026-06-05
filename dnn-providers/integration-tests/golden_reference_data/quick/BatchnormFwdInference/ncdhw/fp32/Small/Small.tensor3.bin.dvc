@@ -1,0 +1,5 @@
+outs:
+- md5: 38a66b1c54fc2a5c21e8cce7602bf88e
+  size: 12
+  hash: md5
+  path: Small.tensor3.bin

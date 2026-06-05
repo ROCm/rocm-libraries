@@ -1,0 +1,5 @@
+outs:
+- md5: bfc2738584da16f8b247c0f82de63bfe
+  size: 16
+  hash: md5
+  path: Large.tensor3.bin
