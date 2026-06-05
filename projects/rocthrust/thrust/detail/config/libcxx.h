@@ -40,7 +40,8 @@
 #define _THRUST_REQUIRED_LIBCXX_VERSION_MINOR 8
 
 // If the '::cuda::std' namespace from 'libcudacxx' or 'libhipcxx' is available. 
-#if THRUST_HAS_INCLUDE(<cuda/std/version>)
+#if THRUST_HAS_INCLUDE(<cuda/std/version>) \
+	 && (defined(USE_LIBCUDACXX) || defined(USE_LIBHIPCXX))
 #  include <cuda/std/version>
 // If version matches and '_CUDA_VSTD' is available.
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MAJOR \
@@ -63,6 +64,7 @@
 #  if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _THRUST_REQUIRED_LIBCXX_VERSION_MINOR \
     && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _THRUST_REQUIRED_LIBCXX_VERSION_MINOR \
     && defined(_CUDA_VSTD)
+	#pragma message("Setting libhipcxx")
 #    define _THRUST_LIBCXX_INCLUDE(LIB)   <hip/LIB>
 #    define _THRUST_STD_INCLUDE(LIB)      <hip/std/LIB>
 // In 'libhipcxx' the '::hip' namespace is synonymous with '::cuda'. 
