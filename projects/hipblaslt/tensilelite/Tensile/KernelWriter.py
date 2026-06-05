@@ -7096,6 +7096,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # and re-run compare_graphs / validate_edge_wait_coverage
             # explicitly with category-specific filtering on the residual.
             # See test_prologue_capture.py for the canonical pattern.
+            assert kernel["PrefetchGlobalRead"] == 2, (
+              "CMS validator has only been empirically verified for "
+              "PrefetchGlobalRead=2. A kernel with a different prefetch depth "
+              "reached the validator before the unrolled walk has been "
+              "re-investigated for this depth. "
+              "See UNROLLED_VALIDATION_PLAN.md §9 Q1."
+            )
             kernel_label = (
               f"{kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']}"
             )

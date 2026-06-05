@@ -879,6 +879,13 @@ _MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = (
 )
 
 
+# Number of main-loop iter copies materialized in the unrolled timeline.
+# Consumed by UnrolledCapture (C3a). Hardcoded for PrefetchGlobalRead=2;
+# the validator has only been empirically verified for this prefetch depth.
+# See UNROLLED_VALIDATION_PLAN.md §9 Q1.
+ML_MAT_COUNT = 2
+
+
 # =============================================================================
 # Dataflow graph — GraphNode / DataflowEdge / DataflowGraph
 # =============================================================================
@@ -3828,19 +3835,6 @@ def diagnose_missing_edge(
         default_p_before_c = ref_p.position < ref_c.position
         subj_p_before_c = p_node.position < c_node.position
         if default_p_before_c and not subj_p_before_c:
-            # Cross-subiter ALU-producer edges are a known false-positive
-            # source: a PackA3 (subiter 3) writes a symbolic vgpr that an
-            # earlier-subiter MFMA reads under the same symbolic name. The
-            # default schedule emits all Packs before all MFMAs (linear
-            # within-body); CMS pipelines so subiter-N+1's Pack issues after
-            # subiter-N's MFMA — the order inversion across subiters is
-            # legitimate pipelining, not a real reorder of a same-subiter
-            # dependency. Mirrors the same-subiter gate
-            # _classify_edge_coverage uses in within-graph mode.
-            nmps = subj_graph.num_mfma_per_subiter
-            if (_is_alu_producer(p_node)
-                    and p_node.subiter(nmps) != c_node.subiter(nmps)):
-                return []  # cross-subiter pipelined dependency — legitimate
             return [OrderInvertedFailure(
                 producer=cms_node_label(p_node, subj_graph.body_for(p_node)),
                 consumer=cms_node_label(c_node, subj_graph.body_for(c_node)),
