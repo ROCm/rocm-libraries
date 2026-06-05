@@ -158,7 +158,8 @@ if needs_install "$HIPDNN_CONFIG"; then
     cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-        -DHIPDNN_SKIP_TESTS=ON
+        -DHIPDNN_SKIP_TESTS=ON \
+        -DHIPDNN_ENABLE_SDPA=ON
     cmake --build "$BUILD_DIR"
     cmake --install "$BUILD_DIR"
     BUILT_HIPDNN=1
