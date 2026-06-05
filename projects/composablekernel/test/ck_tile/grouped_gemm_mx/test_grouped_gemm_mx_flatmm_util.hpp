@@ -336,7 +336,7 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
             h_scale_as.data(),
             h_scale_bs.data()};
 
-        // Instantiate and launch the GroupedMXFlatmmKernel
+        // --- Shape, partitioner, and traits common to all kernel permutations ---
         using FlatmmShape = ck_tile::TileGemmShape<
             ck_tile::sequence<FlatmmConfig::M_Tile, FlatmmConfig::N_Tile, FlatmmConfig::K_Tile>,
             ck_tile::sequence<FlatmmConfig::M_Warp, FlatmmConfig::N_Warp, FlatmmConfig::K_Warp>,
@@ -363,57 +363,123 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
                                              FlatmmConfig::NumWaveGroups,
                                              /*UseAsyncCopy=*/true>;
 
-        using MXPipelineProblem =
-            ck_tile::MXFlatmmPipelineProblem<ADataType,
-                                             BDataType,
-                                             AccDataType,
-                                             FlatmmShape,
-                                             GemmTraits,
-                                             ck_tile::GemmPipelineScheduler::Default,
-                                             true,
-                                             ck_tile::TailNumber::Even>;
+        // Used only for its static helpers BlockHasHotloop / GetBlockLoopTailNum / TailHandler.
+        using GemmPipelineProblem = ck_tile::
+            GemmPipelineProblem<ADataType, BDataType, AccDataType, FlatmmShape, GemmTraits>;
+        using BaseFlatmmPipeline = ck_tile::BaseFlatmmPipelineAGmemBGmemCRegV1<GemmPipelineProblem>;
 
-        using MXFlatmmPipeline =
-            typename MXFlatmmArchTraits::template MXFlatmmPipeline<MXPipelineProblem>;
+        // --- Per-group num_loop class (HasHotLoop, TailNum) and same-class invariant ---
+        //
+        // The MX FLATMM non-TDM pipeline (MXFlatmmPipelineAGmemBGmemCRegV1) bakes
+        // HasHotLoop and TailNum into the compiled kernel; choosing the wrong pair
+        // makes the kernel do the wrong number of K-steps. The grouped kernel must
+        // therefore launch a single (HasHotLoop, TailNum) instantiation per call,
+        // which forces every group in the call to share the same num_loop class.
+        // This is enforced here, not asserted inside the kernel, because mixing
+        // classes is a *test design* error: callers must group their problems by
+        // class and issue separate calls if they need to cover multiple classes.
+        const auto compute_class = [](ck_tile::index_t K) {
+            const ck_tile::index_t k_grain  = FlatmmConfig::K_Tile;
+            const ck_tile::index_t k_split  = (K + k_grain - 1) / k_grain * k_grain;
+            const ck_tile::index_t num_loop = TilePartitioner::GetLoopNum(k_split);
+            const bool hot   = BaseFlatmmPipeline::BlockHasHotloop(num_loop);
+            const auto  tail = BaseFlatmmPipeline::GetBlockLoopTailNum(num_loop);
+            return std::make_tuple(num_loop, hot, tail);
+        };
 
-        using GemmEpilogue = ck_tile::CShuffleEpilogue<
-            ck_tile::CShuffleEpilogueProblem<ADataType,
-                                             BDataType,
-                                             DsDataType,
-                                             AccDataType,
-                                             CDataType,
-                                             DsLayout,
-                                             CLayout,
-                                             ck_tile::element_wise::PassThrough,
-                                             TilePartitioner::MPerBlock,
-                                             TilePartitioner::NPerBlock,
-                                             FlatmmConfig::M_Warp,
-                                             FlatmmConfig::N_Warp,
-                                             FlatmmConfig::M_Warp_Tile,
-                                             FlatmmConfig::N_Warp_Tile,
-                                             FlatmmConfig::K_Warp_Tile,
-                                             FlatmmConfig::TransposeC,
-                                             FlatmmConfig::NumWaveGroups,
-                                             false,
-                                             1,
-                                             MXFlatmmArchTraits::BlockedXDLN_PerWarp,
-                                             FlatmmConfig::DoubleSmemBuffer>>;
+        const auto [g0_num_loop, has_hot_loop, tail_num] = compute_class(Ks[0]);
+        for(int i = 1; i < group_count; ++i)
+        {
+            const auto [gi_num_loop, gi_hot, gi_tail] = compute_class(Ks[i]);
+            ASSERT_EQ(gi_hot, has_hot_loop)
+                << "All groups in one Run() call must share the same num_loop class. "
+                << "Group 0 K=" << Ks[0] << " gives HasHotLoop=" << has_hot_loop
+                << "; Group " << i << " K=" << Ks[i] << " gives HasHotLoop=" << gi_hot
+                << ". Split the call into per-class invocations.";
+            ASSERT_EQ(gi_tail, tail_num)
+                << "All groups in one Run() call must share the same num_loop class. "
+                << "Group 0 K=" << Ks[0] << " gives TailNum=" << static_cast<int>(tail_num)
+                << "; Group " << i << " K=" << Ks[i]
+                << " gives TailNum=" << static_cast<int>(gi_tail)
+                << ". Split the call into per-class invocations.";
+        }
 
-        using Kernel =
-            ck_tile::GroupedMXFlatmmKernel<TilePartitioner, MXFlatmmPipeline, GemmEpilogue>;
+        // --- Build kernel and launch via TailHandler runtime dispatch ---
+        //
+        // BaseFlatmmPipeline::TailHandler<true>(...) compiles all 4 permutations
+        // of (HasHotLoop, TailNum) and dispatches at runtime to the one matching
+        // the values computed above. This is the same pattern used by the
+        // single-problem MX FLATMM fixture in test_mx_flatmm_base.hpp.
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wundefined-func-template"
+#endif
+        BaseFlatmmPipeline::template TailHandler<true>(
+            [&](auto has_hot_loop_, auto tail_num_) {
+                constexpr auto has_hot_loop_v = has_hot_loop_.value;
+                constexpr auto tail_num_v     = tail_num_.value;
 
-        auto kernel_args  = Kernel::MakeKernelArgs(host_args);
-        const dim3 grids  = Kernel::GridSize(host_args);
-        const dim3 blocks = Kernel::BlockSize();
+                using MXPipelineProblem =
+                    ck_tile::MXFlatmmPipelineProblem<ADataType,
+                                                     BDataType,
+                                                     AccDataType,
+                                                     FlatmmShape,
+                                                     GemmTraits,
+                                                     ck_tile::GemmPipelineScheduler::Default,
+                                                     has_hot_loop_v,
+                                                     tail_num_v>;
 
-        std::cout << "Launching kernel: " << Kernel::GetName() << " grid: {" << grids.x << ", "
-                  << grids.y << ", " << grids.z << "}, blocks: {" << blocks.x << "}"
-                  << ", group_count: " << group_count << std::endl;
+                using MXFlatmmPipeline =
+                    typename MXFlatmmArchTraits::template MXFlatmmPipeline<MXPipelineProblem>;
 
-        auto s          = ck_tile::stream_config{nullptr, false, 0, 0, 1};
-        ck_tile::ignore = ck_tile::launch_kernel(s,
-                                                 ck_tile::make_kernel<FlatmmConfig::kBlockPerCu>(
-                                                     Kernel{}, grids, blocks, 0, kernel_args));
+                using GemmEpilogue = ck_tile::CShuffleEpilogue<
+                    ck_tile::CShuffleEpilogueProblem<ADataType,
+                                                     BDataType,
+                                                     DsDataType,
+                                                     AccDataType,
+                                                     CDataType,
+                                                     DsLayout,
+                                                     CLayout,
+                                                     ck_tile::element_wise::PassThrough,
+                                                     TilePartitioner::MPerBlock,
+                                                     TilePartitioner::NPerBlock,
+                                                     FlatmmConfig::M_Warp,
+                                                     FlatmmConfig::N_Warp,
+                                                     FlatmmConfig::M_Warp_Tile,
+                                                     FlatmmConfig::N_Warp_Tile,
+                                                     FlatmmConfig::K_Warp_Tile,
+                                                     FlatmmConfig::TransposeC,
+                                                     FlatmmConfig::NumWaveGroups,
+                                                     false,
+                                                     1,
+                                                     MXFlatmmArchTraits::BlockedXDLN_PerWarp,
+                                                     FlatmmConfig::DoubleSmemBuffer>>;
+
+                using Kernel = ck_tile::
+                    GroupedMXFlatmmKernel<TilePartitioner, MXFlatmmPipeline, GemmEpilogue>;
+
+                auto kernel_args  = Kernel::MakeKernelArgs(host_args);
+                const dim3 grids  = Kernel::GridSize(host_args);
+                const dim3 blocks = Kernel::BlockSize();
+
+                std::cout << "Launching kernel: " << Kernel::GetName() << " grid: {"
+                          << grids.x << ", " << grids.y << ", " << grids.z << "}, blocks: {"
+                          << blocks.x << "}, group_count: " << group_count
+                          << ", num_loop=" << g0_num_loop
+                          << ", HasHotLoop=" << has_hot_loop_v
+                          << ", TailNum=" << static_cast<int>(tail_num_v) << std::endl;
+
+                auto s          = ck_tile::stream_config{nullptr, false, 0, 0, 1};
+                ck_tile::ignore = ck_tile::launch_kernel(
+                    s,
+                    ck_tile::make_kernel<FlatmmConfig::kBlockPerCu>(
+                        Kernel{}, grids, blocks, 0, kernel_args));
+            },
+            has_hot_loop,
+            tail_num);
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
         // Copy results back and validate per group
         bool pass = true;
