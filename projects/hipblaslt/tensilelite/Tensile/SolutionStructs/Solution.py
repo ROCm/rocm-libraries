@@ -162,6 +162,24 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   return True
 
 
+def _disableRuntimeStaggerU(state):
+  state["StaggerU"] = 0
+  state["StaggerUMapping"] = 0
+  state["StaggerUStride"] = 0
+  state["InternalSupportParams"]["SupportCustomStaggerU"] = False
+
+
+def _disableUnsupportedRuntimeStaggerU(state):
+  hasMxForStagger = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
+  usesTdmForStagger = state["enableTDMA"] or state["enableTDMB"]
+  usesDtlForStagger = state["DirectToLdsA"] or state["DirectToLdsB"]
+
+  if state["PrefetchAcrossPersistent"] and state["TDMInst"] == 3:
+    _disableRuntimeStaggerU(state)
+  if state["PrefetchAcrossPersistent"] and hasMxForStagger and not (usesTdmForStagger or usesDtlForStagger):
+    _disableRuntimeStaggerU(state)
+
+
 def _getExpectedTypes(validParams):
   """Build a map from parameter name to the set of allowed Python types.
 
@@ -2333,6 +2351,9 @@ class Solution(collections.abc.Mapping):
       if state["StreamK"] != 3:
         reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent requires StreamK == 3")
         return
+      if state["TDMInst"] == 3 and state["StaggerU"] != 0:
+        reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent with StaggerU is not implemented")
+        return
       if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) \
           and (state["ProblemType"]["TransposeA"], state["ProblemType"]["TransposeB"]) != (True, False):
         reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent with MX supports TN only")
@@ -3996,20 +4017,9 @@ class Solution(collections.abc.Mapping):
       # - MX + StreamK (not enough sgpr)
       if state["TailloopInNll"] or \
          (state["StreamK"] and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])):
-        # need to disable StaggerU
-        state["StaggerU"] = 0
-        state["StaggerUMapping"] = 0
-        state["StaggerUStride"] = 0
-        state["InternalSupportParams"]["SupportCustomStaggerU"] = False # Disable CustomStaggerU for no StagggerU code
+        _disableRuntimeStaggerU(state)
 
-    hasMxForStagger = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
-    usesTdmForStagger = state["enableTDMA"] or state["enableTDMB"]
-    usesDtlForStagger = state["DirectToLdsA"] or state["DirectToLdsB"]
-    if state["PrefetchAcrossPersistent"] and hasMxForStagger and not (usesTdmForStagger or usesDtlForStagger):
-      state["StaggerU"] = 0
-      state["StaggerUMapping"] = 0
-      state["StaggerUStride"] = 0
-      state["InternalSupportParams"]["SupportCustomStaggerU"] = False
+    _disableUnsupportedRuntimeStaggerU(state)
 
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved

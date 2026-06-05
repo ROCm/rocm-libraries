@@ -20,7 +20,7 @@ from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Common.RequiredParameters import getRequiredParametersMin
 from Tensile.Common.ValidParameters import validParameters
 from Tensile.Contractions import SizeMapping
-from Tensile.SolutionStructs.Solution import validateParameterTypes
+from Tensile.SolutionStructs.Solution import _disableUnsupportedRuntimeStaggerU, validateParameterTypes
 
 
 def _module_with_comment(name, comment):
@@ -215,6 +215,24 @@ def _tensor_parameters(with_mx=False):
     return tpa, tpb
 
 
+def _stagger_runtime_state(**overrides):
+    state = {
+        "PrefetchAcrossPersistent": 0,
+        "TDMInst": 0,
+        "StaggerU": 32,
+        "StaggerUMapping": 2,
+        "StaggerUStride": 256,
+        "InternalSupportParams": {"SupportCustomStaggerU": True},
+        "ProblemType": {"MXBlockA": 0, "MXBlockB": 0},
+        "enableTDMA": False,
+        "enableTDMB": False,
+        "DirectToLdsA": False,
+        "DirectToLdsB": False,
+    }
+    state.update(overrides)
+    return state
+
+
 def _module_items(module):
     return [module.getItem(i) for i in range(module.itemsSize())]
 
@@ -254,6 +272,38 @@ def test_pap_is_valid_solution_parameter():
     assert "PrefetchAcrossPersistent" in getRequiredParametersMin()
     assert "prefetchAcrossPersistent" in SizeMapping.StateKeys
     validateParameterTypes({"PrefetchAcrossPersistent": 1})
+
+
+def test_pap_tdm_disables_runtime_staggeru_controls():
+    state = _stagger_runtime_state(
+        PrefetchAcrossPersistent=1,
+        TDMInst=3,
+        StaggerU=0,
+        enableTDMA=True,
+        enableTDMB=True,
+    )
+
+    _disableUnsupportedRuntimeStaggerU(state)
+
+    assert state["StaggerU"] == 0
+    assert state["StaggerUMapping"] == 0
+    assert state["StaggerUStride"] == 0
+    assert state["InternalSupportParams"]["SupportCustomStaggerU"] is False
+
+
+def test_non_pap_tdm_keeps_runtime_staggeru_controls():
+    state = _stagger_runtime_state(
+        TDMInst=3,
+        enableTDMA=True,
+        enableTDMB=True,
+    )
+
+    _disableUnsupportedRuntimeStaggerU(state)
+
+    assert state["StaggerU"] == 32
+    assert state["StaggerUMapping"] == 2
+    assert state["StaggerUStride"] == 256
+    assert state["InternalSupportParams"]["SupportCustomStaggerU"] is True
 
 
 def test_classic_pap_primes_mx_first_pgr_group_before_marking_primed():

@@ -2941,7 +2941,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, i))
         module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
-      if not forceNoTileCode and self.states.staggerUCode and self.hasStaggerableGlobalRead(kernel):
+      if not forceNoTileCode and self.states.staggerUCode:
         module.add(self.declareStaggerParms(kernel))
         # Calculate stagger A(MXSA)
         module.add(self.calculateStagger(kernel, tensorParametersA))
@@ -5721,8 +5721,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, NLLindex=NLLindex, NLLnum=NLLnum))
             self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
 
-    if (self.states.actualSummationLoops>1 and self.states.staggerUCode
-        and self.hasStaggerableGlobalRead(kernel)):
+    if self.states.actualSummationLoops>1 and self.states.staggerUCode:
       module.addComment1("remove stagger offsets")
       module.add(self.removeStaggerAB(kernel, tensorParametersA, tensorParametersB))
 
@@ -5826,8 +5825,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       is_wmma_v3 = self.states.asmCaps.get("HasWMMA_V3", False)
       if not is_wmma_v3:
         module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, -1))
-      if (self.states.actualSummationLoops==1 and self.states.staggerUCode
-          and self.hasStaggerableGlobalRead(kernel)):
+      if self.states.actualSummationLoops==1 and self.states.staggerUCode:
         module.addComment1("remove stagger offsets for tail loop")
         if is_wmma_v3:
           skipRemoveStaggerLabel = Label("SkipRemoveStagger", "")
@@ -9974,12 +9972,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
             and not kernel.get("SuppressNoLoadLoop", False)
             and kernel["PrefetchGlobalRead"] >= 1
             and not kernel.get("UseCustomMainLoopSchedule", 0))
-
-  def hasStaggerableGlobalRead(self, kernel):
-    """Return True if any emitted global-read path can consume StaggerU state."""
-    return (not kernel["enableTDMA"]
-            or not kernel["enableTDMB"]
-            or (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]))
 
   ##############################################################################
   # Function End
