@@ -7,6 +7,7 @@
 #   - patches arch/target.py off __file__/open/json onto the embedded dict
 import json
 import os
+import pathlib  # noqa: F401  see SHIMS note below
 import shutil
 import sys
 
@@ -23,6 +24,13 @@ FROZEN = os.environ["FROZEN_DIR"]
 #    etc.) and run a lower() to pull lazy core/arch imports. We do NOT run comgr here
 #    (just need the import set), so build_frozen needs no libamd_comgr.
 sys.path.insert(0, BUNDLE)
+# SHIMS holds POSIX-only MicroPython stand-ins (pathlib/os/...) meant for the
+# embed runtime, not for this CPython capture. Putting it on sys.path lets it
+# shadow the real stdlib, and the pathlib shim splits paths on "/" only -- so on
+# Windows `Path(__file__).parent` (a backslash path) collapses to ".", breaking
+# arch_specs.json loading. Pre-importing the real os/pathlib above caches them in
+# sys.modules so the shims never shadow them here; the shims are still copied into
+# the frozen set (step 2) for the runtime.
 sys.path.insert(0, SHIMS)
 import ck_dsl_provider.compile_service  # noqa: E402,F401
 from ck_dsl.helpers.compile import compile_kernel  # noqa: E402,F401
@@ -64,11 +72,17 @@ _ = lower_kernel_to_llvm(build_elementwise(_smoke_spec), arch="gfx950")
 # hip_module is the launch-side ctypes layer; the native-backed comgr.py we write
 # below does not import it, so exclude it from the frozen set.
 EXCLUDE = {"ck_dsl/runtime/hip_module.py"}
+# Match modules under BUNDLE robustly: on Windows __file__ uses "\" separators
+# (and case is insensitive), so a literal `startswith(BUNDLE + "/")` misses every
+# file. Compare normcase'd prefixes and emit rel paths with forward slashes so
+# the EXCLUDE set and copy logic below stay platform-independent.
+_bundle_prefix = os.path.normcase(os.path.join(BUNDLE, ""))
 ck_files = sorted(
     rel
     for m in sys.modules.values()
-    if getattr(m, "__file__", None) and m.__file__.startswith(BUNDLE + "/")
-    for rel in [m.__file__[len(BUNDLE) + 1 :]]
+    if getattr(m, "__file__", None)
+    and os.path.normcase(m.__file__).startswith(_bundle_prefix)
+    for rel in [os.path.relpath(m.__file__, BUNDLE).replace(os.sep, "/")]
     if rel not in EXCLUDE
 )
 

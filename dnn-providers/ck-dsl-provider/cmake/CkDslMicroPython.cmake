@@ -52,9 +52,15 @@ function(ck_dsl_provider_configure_micropython)
     if(NOT Python3_EXECUTABLE)
         find_package(Python3 COMPONENTS Interpreter REQUIRED)
     endif()
-    find_library(CKDSL_AMD_COMGR_LIBRARY amd_comgr REQUIRED
-                 HINTS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64)
-    message(STATUS "CK DSL provider amd_comgr: ${CKDSL_AMD_COMGR_LIBRARY}")
+    # Windows links nothing for comgr (see below): comgr_compile.c resolves the
+    # DLL at runtime via LoadLibraryEx + GetProcAddress to dodge a System32
+    # hijack. We still locate the import lib on other platforms, where it is
+    # linked normally and resolved through RPATH/ld.so.
+    if(NOT WIN32)
+        find_library(CKDSL_AMD_COMGR_LIBRARY amd_comgr REQUIRED
+                     HINTS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64)
+        message(STATUS "CK DSL provider amd_comgr: ${CKDSL_AMD_COMGR_LIBRARY}")
+    endif()
 
     set(_root "${CMAKE_CURRENT_SOURCE_DIR}")
     set(_out "${CMAKE_CURRENT_BINARY_DIR}/micropython-embed")

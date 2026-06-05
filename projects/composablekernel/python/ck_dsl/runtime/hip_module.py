@@ -122,6 +122,44 @@ def _rocm_sdk_dll(stem: str) -> Optional[str]:
     return None
 
 
+def _path_env_dlls(stem: str) -> List[str]:
+    """Resolve ``<stem>*.dll`` by scanning the directories on ``%PATH%``.
+
+    Windows' default DLL search order consults the system directories
+    (``C:\\Windows\\System32``) *before* the directories on ``PATH``. A
+    driver- or HIP-SDK-installed ``amd_comgr.dll`` in System32 therefore
+    hijacks a bare-name load even when a matching ROCm-SDK wheel sits
+    earlier on ``PATH`` -- its ``bin`` is added by the environment but
+    loses the search-order race. The two are not interchangeable: the
+    System32 build can ship a different ``amd_comgr_action_kind_t``
+    numbering (``ADD_DEVICE_LIBRARIES`` shifts ``CODEGEN_BC_TO_RELOCATABLE``
+    and ``LINK_RELOCATABLE_TO_EXECUTABLE``), so the BC/reloc/exe chain in
+    :mod:`ck_dsl.runtime.comgr` silently produces the wrong data kinds.
+
+    Returning the *full* path of each PATH match lets the loader bypass
+    the System32 preference and keeps HIP and comgr drawn from the same
+    ROCm install. PATH order is preserved, so a wheel ``bin`` added ahead
+    of System32 wins. The ROCm-SDK wheels are commonly unpacked to a
+    directory that is on ``PATH`` but not on ``sys.path`` (so
+    :func:`_rocm_sdk_dll` cannot import them); this scan finds them there.
+    """
+    if not _IS_WINDOWS:
+        return []
+    found: List[str] = []
+    seen_dirs = set()
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        if not d or d in seen_dirs:
+            continue
+        seen_dirs.add(d)
+        direct = os.path.join(d, f"{stem}.dll")
+        if os.path.exists(direct) and direct not in found:
+            found.append(direct)
+        for m in sorted(glob.glob(os.path.join(d, f"{stem}*.dll"))):
+            if m not in found:
+                found.append(m)
+    return found
+
+
 def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[str]:
     """Resolution order for the HIP runtime / COMGR shared libraries.
 
@@ -130,6 +168,10 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
       2. ``<torch>/lib/lib<stem>.so`` if torch is already imported.
       3. ``/opt/rocm/lib/lib<stem>.so`` and the requested SONAME variants.
       4. Bare ``lib<stem>.so`` for the dynamic linker's search path.
+
+    On Windows, full-path matches found on ``%PATH%`` (see
+    :func:`_path_env_dlls`) are tried before the bare DLL name so a
+    ROCm-SDK wheel on ``PATH`` is not lost to a System32 hijack.
     """
     paths: List[str] = []
     override = os.getenv(env_var)
@@ -152,6 +194,9 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
             bindir = os.path.join(root, "bin")
             paths.append(os.path.join(bindir, f"{stem}.dll"))
             paths.extend(sorted(glob.glob(os.path.join(bindir, f"{stem}*.dll"))))
+        # Full-path matches on %PATH% (e.g. an unpacked ROCm-SDK wheel's
+        # ``bin``) before the bare name, which System32 would otherwise win.
+        paths.extend(_path_env_dlls(stem))
         paths.append(f"{stem}.dll")
         return paths
     paths.append(f"/opt/rocm/lib/lib{stem}.so")

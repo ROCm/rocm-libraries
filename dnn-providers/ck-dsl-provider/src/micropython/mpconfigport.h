@@ -5,6 +5,19 @@
  */
 #include <port/mpconfigport_common.h>
 
+// On the MSVC ABI (clang's default Windows target defines _MSC_VER) there is no
+// POSIX <unistd.h>/<sys/types.h>, so ssize_t -- which several py/*.c sources use
+// (e.g. emitbc.c's jump offsets) -- is undefined. MicroPython's own MSVC configs
+// (mpy-cross, ports/windows) typedef it in their mpconfigport.h; mirror that for
+// the embed build. intptr_t is the correct width on both 32- and 64-bit.
+#ifdef _MSC_VER
+#include <stdint.h>
+typedef intptr_t ssize_t;
+#ifndef SSIZE_MAX
+#define SSIZE_MAX INTPTR_MAX
+#endif
+#endif
+
 // Minimal base (disables optional extmod modules the bare embed port doesn't
 // compile); we raise features incrementally as the bundle needs them.
 #define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_CORE_FEATURES)

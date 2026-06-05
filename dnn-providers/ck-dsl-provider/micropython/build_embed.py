@@ -76,6 +76,40 @@ OBJ_DIR = OUT_DIR / "obj"
 LIB = OUT_DIR / "libckdsl_micropython.a"
 MPYX_BUILD = OUT_DIR / "mpy-cross-build"
 
+# On Windows our clang targets the MSVC ABI (Target: *-windows-msvc, _MSC_VER
+# defined), so the POSIX headers MicroPython's sources reach for -- <unistd.h>,
+# <sys/time.h>, <dirent.h> -- are absent. MicroPython ships shims for exactly
+# these under ports/windows/msvc and its own MSVC build (paths.props) adds that
+# directory to the include path along with a couple of CRT-quieting defines.
+# Mirror that here so the make-free build resolves them the same way.
+#
+# MICROPY_GCREGS_SETJMP: gchelper_generic.c captures callee-save registers via
+# GCC-style named-register asm (`register long rbx asm("rbx")`) on the
+# __x86_64__ path -- which clang defines even for the windows-msvc target, and
+# then ICEs on. mpy-cross/mpconfigport.h only enables the portable setjmp-based
+# capture when the arch is NOT x86_64/etc, so it misses this case. ports/windows/
+# mpconfigport.h forces setjmp unconditionally; do the same here for both the
+# mpy-cross and embed compiles.
+#
+# MICROPY_FLOAT_USE_NATIVE_FLT16: mpconfig.h auto-enables native _Float16 when
+# __FLT16_MAX__ is defined (clang defines it for this target), and binary.c's
+# half-float conversions then emit __extendhfsf2/__truncsfhf2 -- compiler-rt
+# builtins that aren't linked on the msvc target, breaking both the mpy-cross
+# and final-plugin links. Disable it so MicroPython's bundled software
+# half-float path is used instead (matching what ports/unix variants do); the
+# conversions are bit-identical IEEE-754, only without native instructions.
+WIN_MSVC_CFLAGS = (
+    [
+        f"-I{MPY_DIR / 'ports' / 'windows' / 'msvc'}",
+        "-D_CRT_SECURE_NO_WARNINGS",
+        "-D_CRT_NONSTDC_NO_WARNINGS",
+        "-DMICROPY_GCREGS_SETJMP=1",
+        "-DMICROPY_FLOAT_USE_NATIVE_FLT16=0",
+    ]
+    if IS_WINDOWS
+    else []
+)
+
 
 def run(cmd, **kw):
     subprocess.run([str(c) for c in cmd], check=True, **kw)
@@ -236,6 +270,7 @@ def build_mpy_cross():
         "-Og",
         "-fno-common",
         "-Wall",
+        *WIN_MSVC_CFLAGS,
     ]
     py_c = sorted(str(p) for p in py_src.glob("*.c"))
     src_c = [
@@ -283,6 +318,7 @@ def embed_cflags(on_disk):
         f"-I{BUILD_DIR}",
         f"-I{MPY_DIR / 'ports' / 'embed'}",
         "-std=c99",
+        *WIN_MSVC_CFLAGS,
     ]
     if not on_disk:
         # Frozen build: make adds these to global CFLAGS so the qstr scan sees the
@@ -376,6 +412,7 @@ def compile_lib(on_disk, frozen):
         "-Og",
         "-fno-common",
         "-Wall",
+        *WIN_MSVC_CFLAGS,
     ]
     if not IS_WINDOWS:
         cflags.append("-fPIC")

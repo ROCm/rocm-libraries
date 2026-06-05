@@ -56,10 +56,14 @@ add_dependencies(ck_dsl_provider_private ${CKDSL_MPY_BUILD_TARGET})
 # Whole-archive so executables linking this static lib (the unit + integration
 # tests) also force-include the frozen-module table + native comgr module, just
 # like the plugin .so does.
+# comgr is import-linked only off Windows. On Windows comgr_compile.c resolves
+# amd_comgr.dll at runtime (LoadLibraryEx + GetProcAddress) to avoid a System32
+# hijack, so no import lib is linked there -- see comgr_compile.c.
 target_link_libraries(
     ck_dsl_provider_private
     PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk hipdnn_flatbuffers_sdk ck_dsl_provider_impl
-           "$<LINK_LIBRARY:WHOLE_ARCHIVE,${CKDSL_MPY_STATIC_LIB}>" ${CKDSL_MPY_COMGR_LIB}
+           "$<LINK_LIBRARY:WHOLE_ARCHIVE,${CKDSL_MPY_STATIC_LIB}>"
+           $<$<NOT:$<PLATFORM_ID:Windows>>:${CKDSL_MPY_COMGR_LIB}>
            $<$<NOT:$<PLATFORM_ID:Windows>>:m> ${CMAKE_DL_LIBS}
 )
 
@@ -82,7 +86,8 @@ target_link_libraries(
 target_link_libraries(
     ck_dsl_provider_plugin
     PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${CKDSL_MPY_STATIC_LIB}>"
-            ${CKDSL_MPY_COMGR_LIB} $<$<NOT:$<PLATFORM_ID:Windows>>:m> ${CMAKE_DL_LIBS}
+            $<$<NOT:$<PLATFORM_ID:Windows>>:${CKDSL_MPY_COMGR_LIB}>
+            $<$<NOT:$<PLATFORM_ID:Windows>>:m> ${CMAKE_DL_LIBS}
 )
 
 if(NOT WIN32)
