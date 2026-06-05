@@ -30,6 +30,7 @@ import copy
 import io
 import math
 
+from rocisa.code import Module
 from .ScheduleTypes import (
     AnnotatedSchedule,
     AugmentedSchedule,
