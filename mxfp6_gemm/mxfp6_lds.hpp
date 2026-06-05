@@ -202,7 +202,6 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     constexpr int SA_PAD = ((M_PW + 3) / 4) * 4, SB_PAD = ((N_PW + 3) / 4) * 4;
     constexpr int NDA = SA_PAD / 4, NDB = SB_PAD / 4;
     static_assert(NDA == 1 && NDB == 1, "tiled-scale path assumes <=4 blocks/wave");
-    constexpr int LPT_TOT = LOADS_PER_TILE + 2;  // glds + 1 wide A-scale + 1 wide B-scale load
     int sa_grp = wg_m * WAVES_M + wm, sb_grp = wg_n * WAVES_N + wn;
     int k_tiles = k_iters / K64_PER_TILE;
 
@@ -261,14 +260,22 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         }
     };
 
-    // NOTE: wait_vmcnt(LPT_TOT) below is a no-op for LPT_TOT>4 (the helper only emits
-    // 0-4). The real load/compute overlap comes from the COMPILER's own vmcnt(0) drain
-    // before each ds_read + prefetching one tile ahead (drain is cheap because deep K
-    // amortizes it). PROBED (Step 26): swapping in a true relative vmcnt(LPT_TOT) via an
-    // arbitrary-count s_waitcnt changed nothing (8192^3 1633->1627, noise) — the compiler
-    // STILL inserts its own vmcnt(0) before every ds_read (asm: 10x vmcnt(0) vs 2x
-    // vmcnt(20)), so the explicit relative wait is a redundant extra. Suppressing the
-    // compiler drain needs full-asm ds_read, disproven 6 ways in Step 21.
+    // ⚠️ RAW DRAIN IS IMPLICIT (Step 31, verified). The async load-to-LDS completes on
+    // VM_CNT, but __syncthreads() lowers to a BARE s_barrier (confirmed by isolated test):
+    // s_barrier only rendezvouses waves, it does NOT wait for memory. So nothing HERE in the
+    // source drains the buffer's loads before the next compute reads them. What actually
+    // provides the RAW vmcnt(0) is the COMPILER: the prefetch's (vmcnt) scale loads are
+    // consumed right after, forcing an s_waitcnt vmcnt(0); since vmcnt is one in-order
+    // counter, that drain also covers the buffer_load_lds. The compiler hoists it to just
+    // before the s_barrier -> in asm each hot-loop barrier is `vmcnt(0); lgkmcnt(0);
+    // s_barrier`. This is correct TODAY (validated bit-exact incl. race-prone 3072^2 etc.,
+    // Step 28) but is an INCIDENTAL guarantee: a NOSCALE build or any refactor that removes
+    // the post-prefetch scale consumption would drop the vmcnt(0) -> silent RAW race. If you
+    // touch the scale path, re-add an explicit wait_vmcnt(0) before these barriers (measured
+    // ~-0.3% then, because it drains a hair earlier than the compiler's placement). The old
+    // wait_vmcnt(LPT_TOT) here was pure no-op (helper emits only vmcnt(0..4), LPT_TOT=20) so
+    // it was deleted -- it never guarded anything. (Step-26 relative-vmcnt idea is also dead:
+    // needs full-asm ds_read, disproven 6 ways in Step 21.)
     // SYNC: the deep-K double buffer needs both RAW (fill-before-read) and WAR
     // (read-before-refill) ordering across the block's 4 waves. The naive form uses 4
     // __syncthreads/2 tiles (2 RAW + 2 WAR). The 2 WAR barriers cost ~6% @8192^3, BUT
@@ -291,19 +298,20 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     int sa0[K64_PER_TILE][NDA], sa1[K64_PER_TILE][NDA], sb0[K64_PER_TILE][NDB], sb1[K64_PER_TILE][NDB];
     if constexpr (DB) {
         // 2x-unrolled ping-pong: buf0 for even tiles, buf1 for odd. Compile-time
-        // buffer/scale-array selection (no dynamic index). Prefetch next tile
-        // (glds+scales) while computing current; wait_vmcnt(LPT_TOT) drains current's
-        // loads in issue order while next's stay in flight -> real load/compute overlap.
+        // buffer/scale-array selection (no dynamic index). Prefetch next tile (loads+scales)
+        // while computing current; the next tile's loads stay in flight across the compute
+        // and are drained at the NEXT barrier (RAW vmcnt(0) supplied by the compiler via the
+        // scale consumption -- see the IMPLICIT RAW DRAIN note above) -> load/compute overlap.
         prefetch(0, 0, sa0, sb0);  // prologue: tile 0 -> buf0
         int kt = 0;
         for (; kt + 1 < k_tiles; kt += 2) {
-            wait_vmcnt(LPT_TOT); __syncthreads();      // RAW(buf0) + WAR-guards buf1 recycle
+            __syncthreads();                           // RAW(buf0)+sync; vmcnt(0) implicit (note above)
             prefetch(kt + 1, BUF, sa1, sb1);           // tile kt+1 -> buf1 (issued AFTER barrier)
-            compute(0, sa0, sb0);                      // compute buf0
+            compute(0, sa0, sb0);                      // compute buf0 (buf1 loads in flight)
             bool pf = (kt + 2 < k_tiles);
-            wait_vmcnt(LPT_TOT); __syncthreads();      // RAW(buf1) + WAR-guards buf0 recycle
+            __syncthreads();                           // RAW(buf1)+sync; vmcnt(0) implicit (note above)
             if (pf) prefetch(kt + 2, 0, sa0, sb0);     // tile kt+2 -> buf0 (issued AFTER barrier)
-            compute(BUF, sa1, sb1);                    // compute buf1
+            compute(BUF, sa1, sb1);                    // compute buf1 (buf0 loads in flight)
         }
         if (kt < k_tiles) {                            // odd tail (buf0 already loaded)
             wait_vmcnt(0); __syncthreads();
