@@ -32,6 +32,7 @@
 #include "efficiency_monitor.hpp"
 #include "flops.hpp"
 #include "hipBuffer.hpp"
+#include "hipblaslt_bench_options.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_math.hpp"
@@ -2294,6 +2295,28 @@ void testing_matmul_with_bias(const Arguments& arg,
         CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
             matmul[0][i], HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(int32_t)));
 
+        // Forward CLI knobs from hipblaslt-bench into the matmul descriptor.
+        {
+            int32_t sm = hipblaslt_bench_options::sm_count_target();
+            if(sm != 0)
+            {
+                CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                    matmul[0][i],
+                    HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                    &sm,
+                    sizeof(sm)));
+            }
+            int32_t dyn = hipblaslt_bench_options::dyn_persistent_tile_enabled() ? 1 : 0;
+            if(dyn != 0)
+            {
+                CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                    matmul[0][i],
+                    HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                    &dyn,
+                    sizeof(dyn)));
+            }
+        }
+
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
             if(arg.bias_vector)
@@ -3732,6 +3755,29 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                 &TciB,
                                                 sizeof(void*)),
                 HIPBLAS_STATUS_SUCCESS);
+
+            // Forward CLI knobs from hipblaslt-bench into the matmul descriptor.
+            {
+                int32_t sm = hipblaslt_bench_options::sm_count_target();
+                if(sm != 0)
+                {
+                    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                        matmul[b][i],
+                        HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                        &sm,
+                        sizeof(sm)));
+                }
+                int32_t dyn = hipblaslt_bench_options::dyn_persistent_tile_enabled() ? 1 : 0;
+                if(dyn != 0)
+                {
+                    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                        matmul[b][i],
+                        HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                        &dyn,
+                        sizeof(dyn)));
+                }
+            }
+
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 // Update bias, E

@@ -34,7 +34,7 @@ import itertools
 from copy import deepcopy
 from joblib import Parallel, delayed
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional, TypedDict
 
 from Tensile import CUSTOM_KERNEL_PATH, SolutionLibrary, LibraryIO
 from Tensile.KernelWriter import DebugConfig
@@ -89,8 +89,18 @@ def _computeCacheKey(benchmarkStep):
     return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
 
 
-def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage):
-    """Return CodeObjectFiles from cachePath iff its params match benchmarkStep, else None."""
+class CacheEntry(TypedDict):
+    CodeObjectFiles: List[str]
+    LibraryFile: str
+
+
+def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage) -> Optional[CacheEntry]:
+    """Return the cache entry from cachePath iff its params match benchmarkStep, else None.
+
+    Returning None triggers a recompile, which is the right thing for any
+    cache.yaml that doesn't contain everything --use-cache needs (including
+    legacy caches written before LibraryFile was persisted).
+    """
     if not os.path.isfile(cachePath):
         return None
     try:
@@ -100,7 +110,7 @@ def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage):
         return None
     try:
         if _cacheDataMatches(c, benchmarkStep):
-            return c["CodeObjectFiles"]
+            return {"CodeObjectFiles": c["CodeObjectFiles"], "LibraryFile": c["LibraryFile"]}
     except KeyError as e:
         printWarning(f"Ignoring incompatible cache entry {cachePath} (missing field {e})")
         return None
@@ -108,8 +118,8 @@ def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage):
     return None
 
 
-def _loadCacheIfMatches(cacheDir, benchmarkStep):
-    """Return CodeObjectFiles from the hash-keyed cacheDir/cache.yaml iff matching, else None."""
+def _loadCacheIfMatches(cacheDir, benchmarkStep) -> Optional[CacheEntry]:
+    """Return the cache entry from the hash-keyed cacheDir/cache.yaml iff matching, else None."""
     cachePath = os.path.join(cacheDir, "cache.yaml")
     # Hash matched but content didn't: collision. Loser will be overwritten on the next write.
     return _readCacheIfValid(
@@ -122,8 +132,10 @@ def _loadCacheIfMatches(cacheDir, benchmarkStep):
 # period of ~3 months (i.e. on/after 2026-08-04). It exists only so users with
 # pre-multi-cache output dirs from develop don't pay one extra recompile after
 # upgrading. See PR #6583.
-def _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep):
-    """Return CodeObjectFiles from the pre-multi-cache stepBaseDir/cache.yaml iff matching."""
+def _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep) -> Optional[CacheEntry]:
+    """Return the cache entry from the pre-multi-cache stepBaseDir/cache.yaml
+    iff matching. Legacy caches written before LibraryFile was persisted are
+    treated as invalid (KeyError → None → recompile)."""
     cachePath = os.path.join(stepBaseDir, "cache.yaml")
     return _readCacheIfValid(
         cachePath, benchmarkStep,
@@ -386,6 +398,7 @@ def writeBenchmarkFiles(
 
         codeObjectFiles = [os.path.relpath(f, sourcePath) \
                 for f in codeObjectFiles]
+        libraryFileRel = os.path.relpath(newLibraryFileFull, sourcePath)
 
         with timing_context("python_benchpost_client_config"):
             if "TileAwareSelection" in problemType and problemType["TileAwareSelection"]:
@@ -425,7 +438,7 @@ def writeBenchmarkFiles(
     if len(solutions) == 0:
         printExit("write solutions and kernels results 0 valid soultion.")
 
-    return codeObjectFiles
+    return codeObjectFiles, libraryFileRel
 
 
 def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSizeGroupIdx, useCache,
@@ -500,17 +513,19 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
 
         with timing_context("python_cache_check"):
             cacheValid = False
+            cachedLibraryFile = None
             if useCache:
-                matchCO = _loadCacheIfMatches(cacheDir, benchmarkStep)
-                if matchCO is None:
+                cacheEntry = _loadCacheIfMatches(cacheDir, benchmarkStep)
+                if cacheEntry is None:
                     # TODO(2026-05-04): Drop legacy fallback after ~2026-08-04 (see _loadLegacyCacheIfMatches).
-                    matchCO = _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep)
-                    if matchCO is not None:
+                    cacheEntry = _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep)
+                    if cacheEntry is not None:
                         cacheDir = stepBaseDir
                         sourcePath = shortNamePath / "source"
-                if matchCO is not None:
+                if cacheEntry is not None:
                     cacheValid = True
-                    codeObjectFiles = matchCO
+                    codeObjectFiles = cacheEntry["CodeObjectFiles"]
+                    cachedLibraryFile = cacheEntry["LibraryFile"]
                 elif os.path.isdir(os.path.join(stepBaseDir, "caches")) \
                         or os.path.isfile(os.path.join(stepBaseDir, "cache.yaml")):
                     printWarning("Cache data does not match config: redoing solution generation")
@@ -561,7 +576,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             # write benchmarkFiles (kernel generation and compilation)
             prevCount = len(solutions)
             with timing_context("python_kernel_compilation"):
-                codeObjectFiles = writeBenchmarkFiles(stepBaseDir, solutions, \
+                codeObjectFiles, libraryFileRel = writeBenchmarkFiles(stepBaseDir, solutions, \
                         benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
                         benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
                         benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
@@ -573,6 +588,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                 cachePath = os.path.join(cacheDir, "cache.yaml")
                 cacheData = {
                     "CodeObjectFiles": codeObjectFiles,
+                    "LibraryFile": libraryFileRel,
                     "ConstantParams": benchmarkStep.constantParams,
                     "ForkParams": benchmarkStep.forkParams,
                     "ParamGroups": benchmarkStep.paramGroups,
@@ -600,11 +616,20 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             conProblemType = ContractionsProblemType.FromOriginalState(ssProblemType)
             outFile = os.path.join(sourcePath, "ClientParameters.ini")
 
+            libraryFile = os.path.join(str(sourcePath), cachedLibraryFile)
+            if not os.path.isfile(libraryFile):
+                printExit(
+                    f"cache.yaml refers to a library file that no longer "
+                    f"exists on disk: {libraryFile}. The cache directory may "
+                    f"have been partially deleted; remove the parent caches/ "
+                    f"directory and re-run without --use-cache.")
+
             writeClientConfigIni(True, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
                                  benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                  benchmarkStep.icacheFlushArgs, conProblemType,
                                  sourcePath, codeObjectFiles, resultsFileName,
-                                 outFile, deviceId, gfxName, probSolMap=probSolMap)
+                                 outFile, deviceId, gfxName,
+                                 libraryFile=libraryFile, probSolMap=probSolMap)
 
         # I think the size portion of this yaml could be removed,
         # but for now it's needed, so we update it even in the cache case

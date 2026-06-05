@@ -66,7 +66,7 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
     const int64_t batch = 2;
     const int64_t numHeads = 4;
     const int64_t seqQ = 256;
-    const int64_t seqKv = 256;
+    const int64_t seqKv = 128;
 
     // Determine data type
     const DataType dataType = toDataType(config.dtype);

@@ -586,6 +586,48 @@ rocblaslt_status rocblaslt_destroy(const rocblaslt_handle handle)
 }
 
 /********************************************************************************
+ * \brief Set the handle-level SM-count-target override.
+ *******************************************************************************/
+rocblaslt_status rocblaslt_set_sm_count_target(rocblaslt_handle handle,
+                                               int32_t          sm_count_target)
+{
+    if(handle == nullptr)
+    {
+        log_error(__func__, "handle", handle);
+        return rocblaslt_status_invalid_handle;
+    }
+    if(sm_count_target < 0)
+    {
+        log_error(__func__, "negative sm_count_target", sm_count_target);
+        return rocblaslt_status_invalid_value;
+    }
+    log_api(__func__, "handle", handle, "sm_count_target", sm_count_target);
+    handle->sm_count_target = sm_count_target;
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
+ * \brief Get the handle-level SM-count-target override.
+ *******************************************************************************/
+rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
+                                               int32_t*         sm_count_target)
+{
+    if(handle == nullptr)
+    {
+        log_error(__func__, "handle", handle);
+        return rocblaslt_status_invalid_handle;
+    }
+    if(sm_count_target == nullptr)
+    {
+        log_error(__func__, "sm_count_target", sm_count_target);
+        return rocblaslt_status_invalid_value;
+    }
+    *sm_count_target = handle->sm_count_target;
+    log_api(__func__, "handle", handle, "sm_count_target", *sm_count_target);
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
  * \brief rocblaslt_matrix_layout is a structure holding the rocblaslt matrix
  * content. It must be initialized using rocblaslt_matrix_layout_create()
  * and the retured handle must be passed
@@ -1360,6 +1402,41 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+            case ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET:
+                if(sizeof(int32_t) <= sizeInBytes)
+                {
+                    int32_t requested = 0;
+                    memcpy(&requested, buf, sizeof(int32_t));
+                    // 0 means "all CUs"; negative values are rejected.
+                    if(requested < 0)
+                    {
+                        log_error(__func__, "negative sm_count_target", requested);
+                        return rocblaslt_status_invalid_value;
+                    }
+                    matmulDesc->sm_count_target = requested;
+                }
+                else
+                {
+                    log_error(__func__, "invalid sm_count_target buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+            case ROCBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT:
+                if(sizeof(int32_t) <= sizeInBytes)
+                {
+                    int32_t requested = 0;
+                    memcpy(&requested, buf, sizeof(int32_t));
+                    // Treat any nonzero as "enable"; clamp to 0/1 for forward-compat.
+                    matmulDesc->dyn_persistent_tile_ext = (requested != 0) ? 1 : 0;
+                }
+                else
+                {
+                    log_error(__func__,
+                              "invalid dyn_persistent_tile_ext buf size",
+                              sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;
@@ -1675,6 +1752,28 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 }
                 memcpy(buf, &matmulDesc->compute_input_typeB, sizeof(int32_t));
                 break;
+            case ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__, "invalid sm_count_target buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->sm_count_target, sizeof(int32_t));
+                break;
+            case ROCBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__,
+                              "invalid dyn_persistent_tile_ext buf size",
+                              sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->dyn_persistent_tile_ext, sizeof(int32_t));
+                break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;
@@ -1800,6 +1899,35 @@ rocblaslt_status
                     "data",
                     pref->max_workspace_bytes);
             break;
+        case ROCBLASLT_MATMUL_PREF_SM_COUNT_TARGET:
+        {
+            if(dataSize < sizeof(int32_t))
+            {
+                log_error(__func__, "invalid sm_count_target buf size", dataSize);
+                return rocblaslt_status_invalid_value;
+            }
+            int32_t requested = 0;
+            memcpy(&requested, data, sizeof(int32_t));
+            // 0 means "all CUs"; negative values are rejected.
+            if(requested < 0)
+            {
+                log_error(__func__, "negative sm_count_target", requested);
+                return rocblaslt_status_invalid_value;
+            }
+            pref->sm_count_target = requested;
+            log_api(__func__,
+                    "matmulPref",
+                    pref,
+                    "attr",
+                    attribute,
+                    "buf",
+                    data,
+                    "sizeInBytes",
+                    dataSize,
+                    "data",
+                    pref->sm_count_target);
+            break;
+        }
         default:
             log_error(__func__, "invalid attribute", attribute);
             return rocblaslt_status_invalid_value;
@@ -1863,6 +1991,26 @@ rocblaslt_status
                     sizeInBytes,
                     "data[out]",
                     pref->max_workspace_bytes);
+            break;
+        case ROCBLASLT_MATMUL_PREF_SM_COUNT_TARGET:
+            if(sizeInBytes < sizeof(int32_t))
+            {
+                log_error(__func__, "invalid sm_count_target buf size", sizeInBytes);
+                return rocblaslt_status_invalid_value;
+            }
+            *sizeWritten    = sizeof(int32_t);
+            *(int32_t*)data = pref->sm_count_target;
+            log_api(__func__,
+                    "matmulPref",
+                    pref,
+                    "attr",
+                    attribute,
+                    "buf",
+                    data,
+                    "sizeInBytes",
+                    sizeInBytes,
+                    "data[out]",
+                    pref->sm_count_target);
             break;
         default:
             return rocblaslt_status_invalid_value;
