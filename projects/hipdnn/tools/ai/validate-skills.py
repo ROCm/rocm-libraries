@@ -134,7 +134,7 @@ def validate_skill(skill: Path) -> list[str]:
         "hipdnn-superbuild-test",
         "pr-summary",
         "rfc-review",
-        "rfc-review-compat",
+        "rfc-review-compatibility",
         "rfc-review-ops",
         "rfc-review-security",
     }

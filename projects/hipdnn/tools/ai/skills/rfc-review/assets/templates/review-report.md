@@ -59,7 +59,7 @@ Grouped by lens. Skip any lens with nothing to say.
 
 <List any lenses that warrant a deeper, specialized pass. Omit if none.>
 
-- [ ] Compatibility / migration deep-dive (`/rfc-review-compat`)
+- [ ] Compatibility / migration deep-dive (`/rfc-review-compatibility`)
 - [ ] Operational / build / observability deep-dive (`/rfc-review-ops`)
 - [ ] Security threat model (`/rfc-review-security`)
 - [ ] Other: ...

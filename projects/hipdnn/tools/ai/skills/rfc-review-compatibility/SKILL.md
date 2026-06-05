@@ -1,5 +1,5 @@
 ---
-name: rfc-review-compat
+name: rfc-review-compatibility
 description: Deep-dive review of a technical RFC focused on change-management concerns — API/ABI/wire/on-disk compatibility, version skew, migration tooling, rollout mechanics, reversibility, and consumer impact. Produces a written review report. Use when an RFC touches a stable surface (public API, plugin ABI, on-disk or wire format), or as a follow-up pass after `/rfc-review` flags compatibility as a deeper concern.
 argument-hint: "[<path-or-pr>]"
 allowed-tools: Read, Grep, Glob, Bash, WebFetch
@@ -16,8 +16,8 @@ Focused lens on a single RFC. Where the umbrella `/rfc-review` gives change mana
 ## Usage
 
 ```
-/rfc-review-compat                              # Find the RFC on the current branch and review it
-/rfc-review-compat docs/rfcs/my-rfc.md          # Review a specific RFC file
+/rfc-review-compatibility                       # Find the RFC on the current branch and review it
+/rfc-review-compatibility docs/rfcs/my-rfc.md   # Review a specific RFC file
 ```
 
 Can be invoked standalone, or as a follow-up when `/rfc-review` recommends a deeper compat pass.
@@ -93,9 +93,9 @@ If the compat review surfaces concerns that need a different specialist (e.g. op
 ## Examples
 
 ```
-/rfc-review-compat
+/rfc-review-compatibility
 # → finds the RFC on the current branch, runs the compat deep dive
 
-/rfc-review-compat docs/rfcs/0042-plugin-v2.md
+/rfc-review-compatibility docs/rfcs/0042-plugin-v2.md
 # → reviews a specific RFC with the compat lens
 ```

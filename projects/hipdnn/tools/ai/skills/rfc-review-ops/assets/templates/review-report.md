@@ -79,5 +79,5 @@ Grouped by operational sub-area. Skip any sub-area with nothing to say (one line
 - [ ] Build-system / packaging deep-dive with the release engineering owner
 - [ ] CI capacity / cost review with the infra owner
 - [ ] Security threat model (`/rfc-review-security`) — if the new dep / new surface raises trust questions
-- [ ] Compatibility / ABI deep-dive (`/rfc-review-compat`) — if SONAME or public-header changes are non-trivial
+- [ ] Compatibility / ABI deep-dive (`/rfc-review-compatibility`) — if SONAME or public-header changes are non-trivial
 - [ ] Other: ...

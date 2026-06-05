@@ -74,7 +74,7 @@ If writing to disk, use the git user name (`git config user.name`) as `<reviewer
 
 If any lens warrants deeper specialized review, name it explicitly at the end of the report:
 
-- Cross-version / ABI concerns → `/rfc-review-compat` (focused skill)
+- Cross-version / ABI concerns → `/rfc-review-compatibility` (focused skill)
 - Build, CI, packaging, observability → `/rfc-review-ops` (focused skill)
 - Threat model, attack surface → `/rfc-review-security` (focused skill)
 
