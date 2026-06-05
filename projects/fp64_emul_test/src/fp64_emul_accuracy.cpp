@@ -24,7 +24,7 @@
  *
  *   Comparisons:
  *     1. hipBLASLt native DGEMM  (HIPBLAS_COMPUTE_64F, emulation disabled)
- *     2. FP64 emulation with num_moduli = min_s .. max_s  (default 2..14)
+ *     2. FP64 emulation with num_moduli = min_s .. max_s  (default 2..20)
  *     3. FP64 emulation adaptive-s (library default settings)
  *
  * This file must be compiled as HIP (it contains __global__ kernels).
@@ -342,6 +342,17 @@ struct DgemmRunner {
     hipblasLtMatmulHeuristicResult_t heur{};
     bool hasAlgo = false;
 
+    size_t workspaceSize() const { return heur.workspaceSize; }
+
+    void requery()
+    {
+        int cnt = 0;
+        hipblasLtMatmulAlgoGetHeuristic(
+            handle, desc, layoutA, layoutB, layoutD, layoutD,
+            pref, 1, &heur, &cnt);
+        hasAlgo = (cnt > 0);
+    }
+
     void init(int64_t N, bool emulation_enabled, size_t workspace_bytes)
     {
         HLT_CHECK(hipblasLtCreate(&handle));
@@ -481,9 +492,7 @@ static constexpr double CRT_BITS[21] = {
  * The library picks the minimum s' such that CRT_BITS[s'] >= maxBits.
  * To select exactly s, we need:
  *   CRT_BITS[s-1] < maxBits <= CRT_BITS[s]
- * Using maxBits = (int)CRT_BITS[s-1] + 1 satisfies this:
- *   CRT_BITS[s-1] is ~N.xxx, so (int)CRT_BITS[s-1] = floor = N < N.xxx
- *   and N+1 > CRT_BITS[s-1] but <= CRT_BITS[s] (verified for s=2..14).
+ * Using maxBits = (int)CRT_BITS[s-1] + 1 satisfies this for s=2..20.
  */
 static int bits_for_moduli(unsigned s)
 {
@@ -518,7 +527,7 @@ static void print_usage(const char* prog)
         "\n"
         "Output: CSV with columns  phi,N,algo,crt_bits,err_max,err_med,ms_per_run\n"
         "  algo = 'DGEMM'              native FP64 (emulation disabled)\n"
-        "  algo = 'OS2-accu-adaptive'  adaptive s (library default, s<=14)\n"
+        "  algo = 'OS2-accu-adaptive'  adaptive s (library default, s<=16)\n"
         "  algo = 'OS2-accu-sN'        fixed N moduli\n",
         prog);
 }
@@ -621,14 +630,24 @@ int main(int argc, char** argv)
     std::vector<double> h_err(N2);
 
     /*
-     * Workspace for hipblasLtMatmul.
-     * The emulation code allocates internally if the provided workspace is
-     * too small, but pre-allocating avoids that latency during timed runs.
-     * 512 MiB is sufficient for N up to ~4096 with 14 moduli.
+     * Workspace budget offered to hipblasLtMatmulAlgoGetHeuristic.
+     * Setting this large lets the heuristic choose the optimal algorithm;
+     * the actual memory allocated per-run equals heur.workspaceSize, which
+     * the emulation library computes exactly from the problem size and s.
      */
-    constexpr size_t WS_BYTES = 512ull << 20;  /* 512 MiB */
-    void* d_ws = nullptr;
-    HIP_CHECK(hipMalloc(&d_ws, WS_BYTES));
+    constexpr size_t WS_BUDGET = size_t(-1);    /* no limit — heuristic picks best algo;
+                                                 * actual memory allocated = heur.workspaceSize */
+    size_t ws_bytes = 0;                          /* actual bytes currently allocated */
+    void*  d_ws     = nullptr;
+
+    /* Grow the workspace buffer lazily to match what the heuristic requires. */
+    auto ensure_ws = [&](size_t needed) {
+        if(needed > ws_bytes) {
+            HIP_CHECK(hipFree(d_ws));
+            ws_bytes = needed;
+            HIP_CHECK(hipMalloc(&d_ws, ws_bytes));
+        }
+    };
 
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
@@ -636,14 +655,20 @@ int main(int argc, char** argv)
     /* ── hipBLASLt runner setup ───────────────────────────────────────── */
     /* Native DGEMM: emulation explicitly disabled */
     DgemmRunner native;
-    native.init(static_cast<int64_t>(N), /*emulation_enabled=*/false, WS_BYTES);
+    native.init(static_cast<int64_t>(N), /*emulation_enabled=*/false, WS_BUDGET);
+    ensure_ws(native.workspaceSize());   /* native DGEMM workspace (typically 0) */
 
     /* Emulated DGEMM: emulation enabled, EAGER strategy, no Inf/NaN check */
     DgemmRunner emulated;
-    emulated.init(static_cast<int64_t>(N), /*emulation_enabled=*/true, WS_BYTES);
+    emulated.init(static_cast<int64_t>(N), /*emulation_enabled=*/true, WS_BUDGET);
+    /* Pre-allocate workspace for the largest possible emulation configuration
+     * (max_s moduli), so no per-call allocation is needed during timed runs. */
+    ensure_ws(hipblasLtFp64EmulationWorkspaceSize(
+        static_cast<int64_t>(N), static_cast<int64_t>(N), static_cast<int64_t>(N),
+        cfg.max_s));
 
     /* ── CSV header ───────────────────────────────────────────────────── */
-    std::printf("phi,N,algo,crt_bits,err_max,err_med,ms_per_run\n");
+    std::printf("phi,N,algo,crt_bits,err_max,err_med,ms_per_run,workspace_MiB\n");
     std::fflush(stdout);
 
     /* ── Main sweep ───────────────────────────────────────────────────── */
@@ -660,33 +685,42 @@ int main(int argc, char** argv)
 
         /* ── Native DGEMM ─────────────────────────────────────────────── */
         {
-            auto fn = [&]{ native.run(d_A, d_B, d_D, d_ws, WS_BYTES, stream); };
+            ensure_ws(native.workspaceSize());  /* typically 0 for native FP64 */
+            auto fn = [&]{ native.run(d_A, d_B, d_D, d_ws, ws_bytes, stream); };
             double ms = run_and_time(fn, num_runs, num_runs, stream);
 
             auto [err_max, err_med] = compute_errors(
                 N, d_D, d_C_dd, d_err, h_err, stream);
 
-            std::printf("%.4g,%zu,DGEMM,%.1f,%.4e,%.4e,%.3f\n",
+            /* Native DGEMM uses no emulation workspace. */
+            std::printf("%.4g,%zu,DGEMM,%.1f,%.4e,%.4e,%.3f,0.000\n",
                         phi, N, 53.0, err_max, err_med, ms);
             std::fflush(stdout);
         }
 
         /* ── Adaptive-s emulation run ─────────────────────────────────── */
         if(cfg.run_adaptive) {
-            /* DYNAMIC: library selects num_moduli automatically.
-             * Default mantissa control is DYNAMIC, so just reset it. */
+            /* DYNAMIC: library selects num_moduli automatically (≤ 16 by default). */
             HLT_CHECK(hipblasLtSetFixedPointEmulationMantissaControl(
                 emulated.handle, HIPBLAS_EMULATION_MANTISSA_CONTROL_DYNAMIC));
+            /* Workspace for adaptive mode: use the library default (16 moduli) as
+             * an upper bound. The actual workspace is computed from the problem size. */
+            constexpr unsigned ADAPTIVE_DEFAULT_MODULI = 16u;
+            const size_t emu_ws = hipblasLtFp64EmulationWorkspaceSize(
+                static_cast<int64_t>(N), static_cast<int64_t>(N), static_cast<int64_t>(N),
+                ADAPTIVE_DEFAULT_MODULI);
+            ensure_ws(emu_ws);
 
-            auto fn = [&]{ emulated.run(d_A, d_B, d_D, d_ws, WS_BYTES, stream); };
+            auto fn = [&]{ emulated.run(d_A, d_B, d_D, d_ws, ws_bytes, stream); };
             double ms = run_and_time(fn, num_runs, num_runs, stream);
 
             auto [err_max, err_med] = compute_errors(
                 N, d_D, d_C_dd, d_err, h_err, stream);
 
             /* Report crt_bits as the library default upper-bound (16 moduli → 125.4 bits) */
-            std::printf("%.4g,%zu,OS2-accu-adaptive,%.1f,%.4e,%.4e,%.3f\n",
-                        phi, N, CRT_BITS[16], err_max, err_med, ms);
+            std::printf("%.4g,%zu,OS2-accu-adaptive,%.1f,%.4e,%.4e,%.3f,%.3f\n",
+                        phi, N, CRT_BITS[16], err_max, err_med, ms,
+                        emu_ws / (1024.0 * 1024.0));
             std::fflush(stdout);
         }
 
@@ -697,8 +731,12 @@ int main(int argc, char** argv)
                 emulated.handle, HIPBLAS_EMULATION_MANTISSA_CONTROL_FIXED));
             HLT_CHECK(hipblasLtSetFixedPointEmulationMaxMantissaBitCount(
                 emulated.handle, bits_for_moduli(s)));
+            /* Workspace depends on s (A8i+B8i+C32i+Zhi+Zlo arrays). */
+            const size_t emu_ws = hipblasLtFp64EmulationWorkspaceSize(
+                static_cast<int64_t>(N), static_cast<int64_t>(N), static_cast<int64_t>(N), s);
+            ensure_ws(emu_ws);
 
-            auto fn = [&]{ emulated.run(d_A, d_B, d_D, d_ws, WS_BYTES, stream); };
+            auto fn = [&]{ emulated.run(d_A, d_B, d_D, d_ws, ws_bytes, stream); };
             double ms = run_and_time(fn, num_runs, num_runs, stream);
 
             auto [err_max, err_med] = compute_errors(
@@ -707,9 +745,10 @@ int main(int argc, char** argv)
             char algo_name[32];
             std::snprintf(algo_name, sizeof(algo_name), "OS2-accu-s%u", s);
 
-            std::printf("%.4g,%zu,%s,%.1f,%.4e,%.4e,%.3f\n",
+            std::printf("%.4g,%zu,%s,%.1f,%.4e,%.4e,%.3f,%.3f\n",
                         phi, N, algo_name, CRT_BITS[s],
-                        err_max, err_med, ms);
+                        err_max, err_med, ms,
+                        emu_ws / (1024.0 * 1024.0));
             std::fflush(stdout);
         }
     }

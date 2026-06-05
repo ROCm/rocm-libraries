@@ -40,7 +40,7 @@ echo "Output   : $OUTPUT" >&2
 echo "" >&2
 
 # Write CSV header once
-echo "phi,N,algo,crt_bits,err_max,err_med,ms_per_run" > "$OUTPUT"
+echo "phi,N,algo,crt_bits,err_max,err_med,ms_per_run,workspace_MiB" > "$OUTPUT"
 
 # Use fewer timing iterations for larger N:
 #   N ≤ 2048 → NUM_RUNS        (user-specified, default 30)
