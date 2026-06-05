@@ -26,7 +26,8 @@ The rocFFT public repository is located at `<https://github.com/ROCm/rocm-librar
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./install/building-installing-rocfft>`
+    * :doc:`Install rocFFT <./install/install>`
+    * :doc:`Build from source <./install/building-installing-rocfft>`
 
 .. grid:: 2
   :gutter: 3

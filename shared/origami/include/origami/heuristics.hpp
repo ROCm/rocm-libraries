@@ -32,35 +32,10 @@
 #include <unordered_map>
 
 #include "origami/hardware.hpp"
+#include "origami/math.hpp"
 #include "origami/types.hpp"
 
 namespace origami {
-
-/**
- * @brief Structure to hold modular epilogue penalty blocks.
- *
- * Each component is calculated independently and can be combined in different ways.
- */
-struct epilogue_components_t {
-  double initial_memory_write   = 0.0;  // Base memory write latency for output
-  double compute_iteration      = 0.0;  // One compute iteration in epilogue
-  double k_split_reduction      = 0.0;  // K-split reduction overhead (L_reduce + partial_adds)
-  double k_split_overhead_const = 0.0;  // K-split constant overhead
-  double k_padding              = 0.0;  // K-dimension padding penalty
-};
-
-/**
- * @brief Epilogue composition strategy selector.
- *
- * Determines how epilogue penalty blocks are combined.
- */
-enum class epilogue_composition_strategy_t {
-  DEFAULT                = 0,  // Original formula (before modularization)
-  GLOBAL_OCCUPANCY_DECAY = 1,  // Apply occupancy decay to all components
-  MEMORY_GROUPED         = 2,  // Group memory operations together
-  COMPUTE_PRIORITIZED    = 3,  // Apply occupancy decay primarily to compute
-};
-
 /**
  * @brief Default values for heuristic parameters.
  * Centralized location for all default constants.
@@ -79,11 +54,34 @@ struct heuristic_defaults_t {
   static constexpr double WEIGHT_TILE_TOTAL    = 1.0;
 
   // Empirical Constants
-  static constexpr double L2_MIN_HIT_RATE            = 0.5;
-  static constexpr double MAIN_MEMORY_LOAD_LATENCY   = 200.0;
-  static constexpr double OCCUPANCY_DECAY_BASE       = 0.95;
-  static constexpr double K_SPLIT_REDUCTION_OVERHEAD = 10000.0;
-  static constexpr double K_PADDING_PENALTY          = 50000.0;
+  static constexpr double MAIN_MEMORY_LOAD_LATENCY         = 200.0;
+  static constexpr double OCCUPANCY_DECAY_BASE             = 0.95;
+  static constexpr double MALL_DEPTH_SQ                    = 2.0;
+  static constexpr double MALL_COLD_FLOOR                  = 0.85;
+  static constexpr double L2_DEPTH_SQ                      = 4.0;
+  static constexpr double L2_COLD_FLOOR                    = 0.75;
+  static constexpr double L2_POLLUTION_PENALTY             = 0.7;
+  static constexpr double L2_AMP_CEILING_BATCHED           = 0.9;
+  static constexpr double L2_AMP_CEILING_K_SPLIT           = 0.4;
+  static constexpr double L2_AMP_CEILING_SKINNY            = 0.6;
+  static constexpr double L2_DEPTH_PENALTY                 = 0.9;
+  static constexpr double L1_HIT_RATE_CEILING_SKINNY       = 0.7;
+  static constexpr double EPILOGUE_CYCLES_PER_ACC_READ     = 8.0;
+  static constexpr double EPILOGUE_ACC_READ_PARALLELISM    = 0.9;
+  static constexpr double EPILOGUE_CYCLES_PER_BOUNDS_CHECK = 6.0;
+  static constexpr double EPILOGUE_SCALAR_STORE_PENALTY    = 1.1;
+  static constexpr size_t EPILOGUE_THREADS_PER_WAVE        = 64;
+  static constexpr size_t EPILOGUE_BYTES_PER_VECTORIZED_STORE = 16;  // buffer_store_dwordx4
+  static constexpr size_t EPILOGUE_CACHE_LINE_BYTES         = 128;
+  static constexpr size_t EPILOGUE_WORKSPACE_BYTES_PER_ELEM = 4;
+  static constexpr double EPILOGUE_SALU_OVERHEAD            = 35.0;
+  static constexpr double EPILOGUE_L_BARRIER                = 100.0;
+  static constexpr double EPILOGUE_L_SMEM = 900.0;  // s_load_dword(glc) cross-XCD flag poll
+  static constexpr double EPILOGUE_K_PADDING_PENALTY     = 50000.0;
+  static constexpr size_t POSTGSU_COMPUTE_BYTES          = 4;  // workspace partials stored as f32
+  static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 12000.0;
+  static constexpr size_t POSTGSU_THREADS_PER_WG         = 256;
+  static constexpr size_t POSTGSU_WAVEFRONT_SIZE         = 64;
 
   // Main Loop Efficiency
   static constexpr double MAIN_LOOP_EFFICIENCY = 1.0;
@@ -112,18 +110,39 @@ struct heuristic_params_t {
   double weight_tile_total    = heuristic_defaults_t::WEIGHT_TILE_TOTAL;
 
   // === Empirical Constants ===
-  double l2_min_hit_rate_default    = heuristic_defaults_t::L2_MIN_HIT_RATE;
-  double main_memory_load_latency   = heuristic_defaults_t::MAIN_MEMORY_LOAD_LATENCY;
-  double occupancy_decay_base       = heuristic_defaults_t::OCCUPANCY_DECAY_BASE;
-  double k_split_reduction_overhead = heuristic_defaults_t::K_SPLIT_REDUCTION_OVERHEAD;
-  double k_padding_penalty          = heuristic_defaults_t::K_PADDING_PENALTY;
+  double main_memory_load_latency         = heuristic_defaults_t::MAIN_MEMORY_LOAD_LATENCY;
+  double occupancy_decay_base             = heuristic_defaults_t::OCCUPANCY_DECAY_BASE;
+  double mall_depth_sq                    = heuristic_defaults_t::MALL_DEPTH_SQ;
+  double mall_cold_floor                  = heuristic_defaults_t::MALL_COLD_FLOOR;
+  double l2_depth_sq                      = heuristic_defaults_t::L2_DEPTH_SQ;
+  double l2_cold_floor                    = heuristic_defaults_t::L2_COLD_FLOOR;
+  double l2_pollution_penalty             = heuristic_defaults_t::L2_POLLUTION_PENALTY;
+  double l2_amp_ceiling_batched           = heuristic_defaults_t::L2_AMP_CEILING_BATCHED;
+  double l2_amp_ceiling_k_split           = heuristic_defaults_t::L2_AMP_CEILING_K_SPLIT;
+  double l2_amp_ceiling_skinny            = heuristic_defaults_t::L2_AMP_CEILING_SKINNY;
+  double l2_depth_penalty                 = heuristic_defaults_t::L2_DEPTH_PENALTY;
+  double l1_hit_rate_ceiling_skinny       = heuristic_defaults_t::L1_HIT_RATE_CEILING_SKINNY;
+  double epilogue_cycles_per_acc_read     = heuristic_defaults_t::EPILOGUE_CYCLES_PER_ACC_READ;
+  double epilogue_acc_read_parallelism    = heuristic_defaults_t::EPILOGUE_ACC_READ_PARALLELISM;
+  double epilogue_cycles_per_bounds_check = heuristic_defaults_t::EPILOGUE_CYCLES_PER_BOUNDS_CHECK;
+  double epilogue_scalar_store_penalty    = heuristic_defaults_t::EPILOGUE_SCALAR_STORE_PENALTY;
+  size_t epilogue_threads_per_wave        = heuristic_defaults_t::EPILOGUE_THREADS_PER_WAVE;
+  size_t epilogue_bytes_per_vectorized_store =
+      heuristic_defaults_t::EPILOGUE_BYTES_PER_VECTORIZED_STORE;
+  size_t epilogue_cache_line_bytes = heuristic_defaults_t::EPILOGUE_CACHE_LINE_BYTES;
+  size_t epilogue_workspace_bytes_per_elem =
+      heuristic_defaults_t::EPILOGUE_WORKSPACE_BYTES_PER_ELEM;
+  double epilogue_salu_overhead         = heuristic_defaults_t::EPILOGUE_SALU_OVERHEAD;
+  double epilogue_l_barrier             = heuristic_defaults_t::EPILOGUE_L_BARRIER;
+  double epilogue_l_smem                = heuristic_defaults_t::EPILOGUE_L_SMEM;
+  double epilogue_k_padding_penalty     = heuristic_defaults_t::EPILOGUE_K_PADDING_PENALTY;
+  size_t postgsu_compute_bytes          = heuristic_defaults_t::POSTGSU_COMPUTE_BYTES;
+  double postgsu_kernel_launch_overhead = heuristic_defaults_t::POSTGSU_KERNEL_LAUNCH_OVERHEAD;
+  size_t postgsu_threads_per_wg         = heuristic_defaults_t::POSTGSU_THREADS_PER_WG;
+  size_t postgsu_wavefront_size         = heuristic_defaults_t::POSTGSU_WAVEFRONT_SIZE;
 
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
-
-  // === Epilogue Composition Strategy ===
-  epilogue_composition_strategy_t epilogue_composition_strategy =
-      epilogue_composition_strategy_t::DEFAULT;
 
   /**
    * @brief Merge this parameter set with another (for hierarchical lookup).
@@ -201,21 +220,13 @@ struct hand_optimized_kernel_key_t {
   }
 
   std::size_t hash() const {
-    std::size_t seed                   = 0;
-    constexpr std::size_t golden_ratio = 0x9e3779b9;
-    auto hash_combine                  = [](std::size_t& seed, std::size_t value) {
-      seed ^= value + golden_ratio + (seed << 6) + (seed >> 2);
-    };
-
-    hash_combine(seed, std::hash<int>()(static_cast<int>(arch)));
-    hash_combine(seed, std::hash<int>()(static_cast<int>(mi_dtype)));
-    hash_combine(seed, std::hash<int>()(static_cast<int>(a_transpose)));
-    hash_combine(seed, std::hash<int>()(static_cast<int>(b_transpose)));
-    hash_combine(seed, std::hash<size_t>()(mt_m));
-    hash_combine(seed, std::hash<size_t>()(mt_n));
-    hash_combine(seed, std::hash<size_t>()(mt_k));
-
-    return seed;
+    return math::hash_combine(static_cast<int>(arch),
+                              static_cast<int>(mi_dtype),
+                              static_cast<int>(a_transpose),
+                              static_cast<int>(b_transpose),
+                              mt_m,
+                              mt_n,
+                              mt_k);
   }
 };
 
@@ -260,6 +271,18 @@ class heuristics_database_t {
    * @brief Add or update a heuristic entry.
    */
   void add_entry(const heuristic_key_t& key, const heuristic_params_t& params);
+
+  /**
+   * @brief Return true if the database has a hand-optimized entry for the given (arch, dtype,
+   * layout, MT).
+   */
+  bool has_hand_optimized_entry(hardware_t::architecture_t arch,
+                                data_type_t mi_dtype,
+                                transpose_t transA,
+                                transpose_t transB,
+                                size_t mt_m,
+                                size_t mt_n,
+                                size_t mt_k) const;
 
   /**
    * @brief Get the global heuristics database instance.
@@ -318,77 +341,5 @@ heuristic_key_t make_tile_key(size_t MT_M,
  * @brief Helper to create a key for architecture/datatype combination.
  */
 heuristic_key_t make_arch_dtype_key(hardware_t::architecture_t arch, data_type_t mi_dtype);
-
-/**
- * @brief Epilogue composition strategy functions.
- *
- * These functions define how epilogue components are combined.
- * Select via heuristic_params_t::epilogue_composition_strategy.
- */
-// Default composition strategy
-inline double compose_epilogue_default(const epilogue_components_t& comp,
-                                       const heuristic_params_t& heuristic,
-                                       double occupancy_factor) {
-  // Original formula (before modularization):
-  // ((initial + compute) * occupancy_decay) + (k_split + overhead) + k_padding
-  return ((comp.initial_memory_write + comp.compute_iteration) * occupancy_factor) +
-         (comp.k_split_reduction + comp.k_split_overhead_const) + comp.k_padding;
-}
-
-// Global occupancy decay composition strategy (simple sum of all components)
-inline double compose_epilogue_global_occupancy_decay(const epilogue_components_t& comp,
-                                                      const heuristic_params_t& heuristic,
-                                                      double occupancy_factor) {
-  return (comp.initial_memory_write + comp.compute_iteration + comp.k_split_reduction +
-          comp.k_split_overhead_const + comp.k_padding) *
-         occupancy_factor;
-}
-
-// Memory grouped composition strategy: group memory operations together
-inline double compose_epilogue_memory_grouped(const epilogue_components_t& comp,
-                                              const heuristic_params_t& heuristic,
-                                              double occupancy_factor) {
-  double memory_ops = comp.initial_memory_write + comp.k_split_reduction;
-  double overheads  = comp.k_split_overhead_const + comp.k_padding;
-  return (memory_ops * occupancy_factor) + comp.compute_iteration + overheads;
-}
-
-// Compute prioritized composition strategy: prioritize compute impact
-inline double compose_epilogue_compute_prioritized(const epilogue_components_t& comp,
-                                                   const heuristic_params_t& heuristic,
-                                                   double occupancy_factor) {
-  double compute_ops = comp.compute_iteration * occupancy_factor;
-  double memory_ops  = comp.initial_memory_write + comp.k_split_reduction;
-  double overheads   = comp.k_split_overhead_const + comp.k_padding;
-  return compute_ops + memory_ops + overheads;
-}
-
-/**
- * @brief Main dispatcher for epilogue composition.
- *
- * Selects the appropriate composition strategy based on heuristic parameters.
- * This is the main entry point used by gemm.cpp.
- * Marked inline for performance in hot path.
- *
- * @param comp Epilogue components calculated in gemm.cpp
- * @param heuristic Heuristic parameters (includes strategy selector)
- * @param occupancy_factor Occupancy decay factor (pow(decay_base, real_occupancy))
- * @return Composed epilogue latency
- */
-inline double compose_epilogue(const epilogue_components_t& comp,
-                               const heuristic_params_t& heuristic,
-                               double occupancy_factor) {
-  switch (heuristic.epilogue_composition_strategy) {
-    case epilogue_composition_strategy_t::DEFAULT:
-      return compose_epilogue_default(comp, heuristic, occupancy_factor);
-    case epilogue_composition_strategy_t::GLOBAL_OCCUPANCY_DECAY:
-      return compose_epilogue_global_occupancy_decay(comp, heuristic, occupancy_factor);
-    case epilogue_composition_strategy_t::MEMORY_GROUPED:
-      return compose_epilogue_memory_grouped(comp, heuristic, occupancy_factor);
-    case epilogue_composition_strategy_t::COMPUTE_PRIORITIZED:
-      return compose_epilogue_compute_prioritized(comp, heuristic, occupancy_factor);
-    default: return compose_epilogue_default(comp, heuristic, occupancy_factor);
-  }
-}
 
 }  // namespace origami

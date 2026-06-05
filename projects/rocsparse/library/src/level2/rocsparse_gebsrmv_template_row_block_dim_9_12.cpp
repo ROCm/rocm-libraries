@@ -297,11 +297,11 @@ namespace rocsparse
             }
             else if(col_block_dim == 3)
             {
-                LAUNCH_GEBSRMV_MXN_16_KERNEL(48, 12, 3);
+                LAUNCH_GEBSRMV_MXN_16_KERNEL(36, 12, 3);
             }
             else if(col_block_dim == 4)
             {
-                LAUNCH_GEBSRMV_MXN_16_KERNEL(60, 12, 4);
+                LAUNCH_GEBSRMV_MXN_16_KERNEL(48, 12, 4);
             }
             else if(col_block_dim == 5)
             {

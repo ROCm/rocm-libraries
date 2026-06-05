@@ -133,7 +133,7 @@ struct Tensor
 #if MIOPEN_BACKEND_OPENCL
         clReleaseMemObject(data);
 #elif MIOPEN_BACKEND_HIP
-        hipFree(data);
+        (void)hipFree(data);
 #endif
     }
 };
@@ -158,8 +158,16 @@ struct Conv
 
 struct CreateCBAFusionPlan
 {
-    miopenFusionPlanDescriptor_t fusePlanDesc;
+    miopenFusionPlanDescriptor_t fusePlanDesc = nullptr;
     miopen::OperatorArgs op_args;
+
+    ~CreateCBAFusionPlan()
+    {
+        if(fusePlanDesc != nullptr)
+        {
+            miopenDestroyFusionPlan(fusePlanDesc);
+        }
+    }
 
     void CBAPlan()
     {
@@ -181,8 +189,16 @@ struct CreateCBAFusionPlan
 template <typename T>
 struct CreateBNormFusionPlan
 {
-    miopenFusionPlanDescriptor_t fusePlanDesc;
+    miopenFusionPlanDescriptor_t fusePlanDesc = nullptr;
     miopen::OperatorArgs op_args;
+
+    ~CreateBNormFusionPlan()
+    {
+        if(fusePlanDesc != nullptr)
+        {
+            miopenDestroyFusionPlan(fusePlanDesc);
+        }
+    }
 
     miopen::TensorDescriptor bn_desc;
     miopen::ActivationDescriptor activ_desc;
@@ -347,7 +363,7 @@ void TestLogCmdBNormFusion(std::function<void(const miopenFusionPlanDescriptor_t
         ASSERT_FALSE(isSubStr(str, sub_str)) << "str     : " << str << "str_sub : " << sub_str;
 }
 
-void TestLogBufferOn()
+void TestLogBufferEnvEnabled()
 {
     auto filename =
         fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
@@ -358,8 +374,10 @@ void TestLogBufferOn()
 
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
                                                  "5"); // miopen::LoggingLevel::Info
+    ScopedEnvironment<std::string> log_buffer_on_env(MIOPEN_LOG_BUFFER_SIZE,
+                                                     "128"); // enable logging
     // test log dump after error
-    miopen::ClearBufferLog();
+    miopen::ClearLogBuffer();
     MIOPEN_LOG_W("warn");
     MIOPEN_LOG_I("info");
     MIOPEN_LOG_I2("info2");
@@ -376,23 +394,19 @@ void TestLogBufferOn()
             case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
             case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
             case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
-            case 3:
-                ASSERT_FALSE(isSubStr(line, "trace"));
-                ASSERT_TRUE(isSubStr(line, "error"));
-                break;
+            case 3: ASSERT_TRUE(isSubStr(line, "error")); break;
+            case 4: ASSERT_TRUE(isSubStr(line, "")); break;
             }
             line_i++;
         }
     }
-    fs::remove(filename);
 
-    // test log dump after throw
-    miopen::ClearBufferLog();
-    MIOPEN_LOG_W("warn");
-    MIOPEN_LOG_I("info");
-    MIOPEN_LOG_I2("info2");
-    MIOPEN_LOG_T("trace");
-    EXPECT_ANY_THROW({ MIOPEN_THROW("throw"); });
+    // test log dump after 2nd error
+    MIOPEN_LOG_W("warn 2nd");
+    MIOPEN_LOG_I("info 2nd");
+    MIOPEN_LOG_I2("info2 2nd");
+    MIOPEN_LOG_T("trace 2nd");
+    MIOPEN_LOG_E("error 2nd");
 
     EXPECT_TRUE(fs::exists(filename));
     {
@@ -405,12 +419,22 @@ void TestLogBufferOn()
             case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
             case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
             case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
-            case 3: ASSERT_TRUE(isSubStr(line, "throw")); break;
+            case 3: ASSERT_TRUE(isSubStr(line, "error")); break;
+            case 4: ASSERT_TRUE(isSubStr(line, "")); break;
+            case 5: ASSERT_TRUE(isSubStr(line, "warn 2nd")); break;
+            case 6: ASSERT_TRUE(isSubStr(line, "info 2nd")); break;
+            case 7: ASSERT_TRUE(isSubStr(line, "info2 2nd")); break;
+            case 8: ASSERT_TRUE(isSubStr(line, "error 2nd")); break;
+            case 9: ASSERT_TRUE(isSubStr(line, "")); break;
             }
             line_i++;
         }
+        ASSERT_TRUE(line_i == 10);
     }
     fs::remove(filename);
+
+    EXPECT_ANY_THROW({ MIOPEN_THROW("throw"); });
+    ASSERT_FALSE(fs::exists(filename));
 }
 
 void TestLogBufferOff()
@@ -421,9 +445,32 @@ void TestLogBufferOff()
     fs::remove(filename);
 
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
-                                                 "6"); // miopen::LoggingLevel::Info2
+                                                 "5"); // miopen::LoggingLevel::Info
 
-    miopen::ClearBufferLog();
+    miopen::ClearLogBuffer();
+    // log messages
+    MIOPEN_LOG_W("warn");
+    MIOPEN_LOG_I("info");
+    MIOPEN_LOG_I2("info2");
+    MIOPEN_LOG_T("trace");
+    // test log dump after error
+    MIOPEN_LOG_E("error");
+    ASSERT_FALSE(fs::exists(filename));
+}
+
+void TestLogBufferOffAtHighLevel()
+{
+    auto filename =
+        fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
+
+    fs::remove(filename);
+
+    ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
+                                                 "6"); // miopen::LoggingLevel::Info2
+    ScopedEnvironment<std::string> log_buffer_on_env(MIOPEN_LOG_BUFFER_SIZE,
+                                                     "128"); // enable logging
+
+    miopen::ClearLogBuffer();
     // log messages
     MIOPEN_LOG_W("warn");
     MIOPEN_LOG_I("info");

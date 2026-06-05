@@ -49,11 +49,13 @@ protected:
         return strides;
     }
 
+    // NOLINTBEGIN(portability-template-virtual-member-function)
     virtual std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
         initGraph(const TestParamsType& testParams, hipdnn_frontend::graph::Graph& graphObj) const
         = 0;
     virtual std::string getGraphName() const = 0;
     virtual unsigned int getSeed(const TestParamsType& testParams) const = 0;
+    // NOLINTEND(portability-template-virtual-member-function)
 };
 
 } // namespace hipblaslt_plugin::test_utilities

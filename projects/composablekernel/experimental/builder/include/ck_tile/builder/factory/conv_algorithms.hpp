@@ -63,6 +63,10 @@ concept TileAlgorithm = ConvAlgorithmDescriptor<T> && SpecifiesTileThreadBlock<T
                         SpecifiesTileTransfer<T> && SpecifiesTileConvSpecialization<T> &&
                         SpecifiesTileBlockGemm<T> && SpecifiesTileOptimizations<T>;
 
+// Depthwise tile-based algorithm concept (no GEMM - direct spatial pipeline)
+template <typename T>
+concept DepthwiseAlgorithm = ConvAlgorithmDescriptor<T> && SpecifiesDepthwiseConvParams<T>;
+
 // FWD XDL algorithm concepts
 template <typename T>
 concept FwdXdlAlgorithm = FwdXdlAlgorithmBase<T> && SpecifiesGenericInstance<T>;
@@ -74,6 +78,13 @@ template <typename T>
 concept FwdXdlV3Algorithm =
     ConvAlgorithmDescriptor<T> && SpecifiesThreadBlock<T> && SpecifiesTileTransferParameters3D<T> &&
     SpecifiesGridwiseFwdXdlGemm<T> && SpecifiesFwdConvSpecialization<T> &&
+    SpecifiesGemmSpecialization<T> && SpecifiesBlockGemm<T> && SpecifiesNumGroupsToMerge<T>;
+
+// FWD WMMA V3 algorithm concept
+template <typename T>
+concept FwdWmmaV3Algorithm =
+    ConvAlgorithmDescriptor<T> && SpecifiesThreadBlock<T> && SpecifiesTileTransferParameters3D<T> &&
+    SpecifiesGridwiseWmmaGemm<T> && SpecifiesFwdConvSpecialization<T> &&
     SpecifiesGemmSpecialization<T> && SpecifiesBlockGemm<T> && SpecifiesNumGroupsToMerge<T>;
 
 // FWD WMMA algorithm concepts

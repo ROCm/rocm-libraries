@@ -136,6 +136,16 @@ public:
         return hipsparselt_fp8_e5m2(random_nan_data<float, uint32_t, 7, 8>());
     }
 #endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+    explicit operator hipsparselt_fp8_e4m3_fnuz()
+    {
+        return hipsparselt_fp8_e4m3_fnuz(random_nan_data<float, uint32_t, 7, 8>());
+    }
+    explicit operator hipsparselt_fp8_e5m2_fnuz()
+    {
+        return hipsparselt_fp8_e5m2_fnuz(random_nan_data<float, uint32_t, 7, 8>());
+    }
+#endif
 };
 
 /* ============================================================================================ */
@@ -303,6 +313,19 @@ template <>
 inline hipsparselt_fp8_e5m2 random_hpl_generator()
 {
     return hipsparselt_fp8_e5m2(std::uniform_real_distribution<float>(-0.5, 0.5)(t_hipsparselt_rng));
+}
+#endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+template <>
+inline hipsparselt_fp8_e4m3_fnuz random_hpl_generator()
+{
+    return hipsparselt_fp8_e4m3_fnuz(std::uniform_real_distribution<float>(-0.5, 0.5)(t_hipsparselt_rng));
+}
+
+template <>
+inline hipsparselt_fp8_e5m2_fnuz random_hpl_generator()
+{
+    return hipsparselt_fp8_e5m2_fnuz(std::uniform_real_distribution<float>(-0.5, 0.5)(t_hipsparselt_rng));
 }
 #endif
 /*! \brief  generate a random number in [-1.0,1.0] doubles  */

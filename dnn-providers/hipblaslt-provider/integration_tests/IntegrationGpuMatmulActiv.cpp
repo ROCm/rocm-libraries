@@ -21,7 +21,7 @@ template <typename DataType>
 class IntegrationGpuMatmulActiv : public IntegrationGpuMatmulBase<DataType, TestParamsType>
 {
 protected:
-    virtual std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
+    std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
         initGraph(const TestParamsType& testParams,
                   hipdnn_frontend::graph::Graph& graphObj) const override
     {
@@ -39,7 +39,7 @@ protected:
             this->generateInputStrideOrder(matmulParams.bDims, matmulParams.transB));
         auto bTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
 
-        graph::MatmulAttributes matmulAttrs;
+        graph::MatmulAttributes const matmulAttrs;
         auto cAttr = graphObj.matmul(aTensorAttr, bTensorAttr, matmulAttrs);
 
         graph::PointwiseAttributes activAttrs;
@@ -60,12 +60,12 @@ protected:
         return graphObj.pointwise(cAttr, activAttrs);
     }
 
-    virtual std::string getGraphName() const override
+    std::string getGraphName() const override
     {
         return "MatmulActivTest";
     }
 
-    virtual unsigned int getSeed(const TestParamsType& testParams) const override
+    unsigned int getSeed(const TestParamsType& testParams) const override
     {
         return std::get<0>(testParams).seed;
     }

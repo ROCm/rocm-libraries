@@ -1,0 +1,5 @@
+// Add to frontend/include/hipdnn_frontend/node/NodeType.hpp
+// Insert before the closing brace of the NodeType enum:
+{% if op.frontend.node_type_enum %}
+    {{ op.frontend.node_type_enum | replace('NodeType::', '') }} = <NEXT_VALUE>,
+{% endif %}

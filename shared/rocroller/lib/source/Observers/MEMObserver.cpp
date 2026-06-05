@@ -93,13 +93,20 @@ namespace rocRoller
                     auto ctx = m_context.lock();
                     AssertFatal(ctx != nullptr);
 
-                    AssertFatal(inst.getModelledAddresses().has_value());
-                    std::vector<size_t> addresses = inst.getModelledAddresses().value();
-                    auto [stallCycles, additionalCycles]
-                        = m_scheduler.value().predictCycles({{direction}, dwords, addresses});
+                    if(inst.getModelledAddresses().has_value())
+                    {
+                        std::vector<size_t> addresses = inst.getModelledAddresses().value();
+                        auto [stallCycles, additionalCycles]
+                            = m_scheduler.value().predictCycles({{direction}, dwords, addresses});
 
-                    status.stallCycles      = stallCycles / 4;
-                    status.additionalCycles = additionalCycles / 4;
+                        status.stallCycles      = stallCycles / 4;
+                        status.additionalCycles = additionalCycles / 4;
+                    }
+                    else
+                    {
+                        Log::warn("Missing modelled addresses for {}",
+                                  inst.toString(LogLevel::Terse));
+                    }
                 }
             }
 
@@ -135,7 +142,7 @@ namespace rocRoller
             if(GPUInstructionInfo::isLDS(inst.getOpCode()))
             {
                 auto ldsInfo = LDSModel::getLdsInfoFromOpcodeIfSupported(inst.getOpCode());
-                if(ldsInfo.has_value())
+                if(ldsInfo.has_value() && inst.getModelledAddresses().has_value())
                 {
                     auto [direction, dwords] = *ldsInfo;
 

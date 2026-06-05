@@ -494,6 +494,58 @@ namespace GEMMTests
                         gemm.workgroupSizeX * gemm.workgroupSizeY);
     }
 
+    TEST_P(GEMMTestSuite, GPU_GEMM_FP4_MT256x256x128_LDSSwizzle)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm           = GEMMProblemF8F6F4{32, 32, 64};
+        gemm.m              = 512;
+        gemm.n              = 256;
+        gemm.k              = 512;
+        gemm.macM           = 256;
+        gemm.macN           = 256;
+        gemm.macK           = 128;
+        gemm.loadPathA      = SolutionParams::LoadPath::BufferToLDS;
+        gemm.loadPathB      = SolutionParams::LoadPath::BufferToLDS;
+        gemm.storePath      = SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer;
+        gemm.transA         = "T";
+        gemm.transB         = "N";
+        gemm.ldsSwizzleMode = LDSBankSwizzleMode::Swizzle;
+
+        basicGEMM<FP4, FP4, float>(gemm);
+
+        // LDS swizzle uses XOR-based permutation; expect exactly 12 v_xor_b32.
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
+        EXPECT_EQ(countSubstring(generatedCode, "v_xor_b32"), 12);
+    }
+
+    TEST_P(GEMMTestSuite, GPU_GEMM_FP4_MI16x16x128_MT64x64x256_LDSSwizzle)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm           = GEMMProblemF8F6F4{16, 16, 128};
+        gemm.loadPathA      = SolutionParams::LoadPath::BufferToLDS;
+        gemm.loadPathB      = SolutionParams::LoadPath::BufferToLDS;
+        gemm.ldsSwizzleMode = LDSBankSwizzleMode::Swizzle;
+
+        basicGEMM<FP4, FP4, float>(gemm);
+
+        // LDS swizzle uses XOR-based permutation; expect exactly 12 v_xor_b32.
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
+        EXPECT_EQ(countSubstring(generatedCode, "v_xor_b32"), 12);
+    }
+
+    TEST_P(GEMMTestSuite, GPU_GEMM_FP4_MI16x16x128_MT64x64x256_LDSSwizzle_ViaVGPR)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm           = GEMMProblemF8F6F4{16, 16, 128};
+        gemm.loadPathA      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.ldsSwizzleMode = LDSBankSwizzleMode::Swizzle;
+
+        basicGEMM<FP4, FP4, float>(gemm);
+    }
+
     TEST_P(GEMMTestSuite, GPU_GEMM_DataType_FP16_AllLDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);

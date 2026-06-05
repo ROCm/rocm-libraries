@@ -1,0 +1,60 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+#
+# Five token-0 ds_load_tr16_b128 reads are followed by four token-1 reads
+# (these belong to a different LDS region and must NOT block the writer),
+# then by two consecutive tensor_load_to_lds writes targeting LDS region 0.
+#
+# At the first tensor_load_to_lds (token 0):
+#   pendingDSOps = [r0..r4 (token 0), r5..r8 (token 1)]   (9 ops)
+#   WAR set      = {r0..r4}
+#   DS counter   : requiredWait = min(count(r_i) - 1) = count(r4) - 1 = 5 - 1 = 4
+#   -> emit s_wait_dscnt 4
+#
+# At the second tensor_load_to_lds (token 0): the queue is unchanged in-loop
+# (trim happens at end of block), so the calculation produces requiredWait = 4
+# again. With dsState.lastEmittedWait = 4 and opsSinceLastWait = 0,
+# needsNewWait(4) returns false -> no second wait is emitted.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_war_tensor_load_2token
+# Five token-0 reads, then four token-1 reads (all without intervening waits).
+# CHECK: ds_load_tr16_b128
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: ds_load_tr16_b128
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: ds_load_tr16_b128
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: ds_load_tr16_b128
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: ds_load_tr16_b128
+# CHECK-SAME: tokens = [0]
+# CHECK-NEXT: ds_load_tr16_b128
+# CHECK-SAME: tokens = [1]
+# CHECK-NEXT: ds_load_tr16_b128
+# CHECK-SAME: tokens = [1]
+# CHECK-NEXT: ds_load_tr16_b128
+# CHECK-SAME: tokens = [1]
+# CHECK-NEXT: ds_load_tr16_b128
+# CHECK-SAME: tokens = [1]
+# Pass inserts a single s_wait_dscnt 4 before the first tensor_load_to_lds.
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 4
+# CHECK-NEXT: tensor_load_to_lds
+# Second tensor_load_to_lds gets no new wait (redundant).
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_lds_war_tensor_load_2token() {
+^entry:
+  v[66:69] = "st.ds_load_tr16_b128"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 2560, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[36:39] = "st.ds_load_tr16_b128"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 3072, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[40:43] = "st.ds_load_tr16_b128"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 3584, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[70:73] = "st.ds_load_tr16_b128"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 3072, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[74:77] = "st.ds_load_tr16_b128"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 3584, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[12:15] = "st.ds_load_tr16_b128"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[16:19] = "st.ds_load_tr16_b128"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 512, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[46:49] = "st.ds_load_tr16_b128"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[50:53] = "st.ds_load_tr16_b128"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 512, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[48:51], s[52:59]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[60:63], s[64:71]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+}

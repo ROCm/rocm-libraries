@@ -26,7 +26,7 @@ struct TopologicalSortResult
 
 inline std::vector<int> computeInDegrees(const GraphStructure& structure)
 {
-    size_t nodeCount = structure.adjacencyList.size();
+    const size_t nodeCount = structure.adjacencyList.size();
     std::vector<int> inDegrees(nodeCount, 0);
     for(size_t i = 0; i < nodeCount; ++i)
     {
@@ -40,7 +40,7 @@ inline std::vector<int> computeInDegrees(const GraphStructure& structure)
 
 inline std::vector<size_t> performTopologicalSort(const GraphStructure& structure)
 {
-    size_t nodeCount = structure.adjacencyList.size();
+    const size_t nodeCount = structure.adjacencyList.size();
     std::queue<size_t> zeroInDegree;
     std::vector<size_t> topologicalOrder;
     std::vector<int> inDegrees = computeInDegrees(structure);
@@ -57,7 +57,7 @@ inline std::vector<size_t> performTopologicalSort(const GraphStructure& structur
     // Process nodes in topological order
     while(!zeroInDegree.empty())
     {
-        size_t current = zeroInDegree.front();
+        const size_t current = zeroInDegree.front();
         zeroInDegree.pop();
         topologicalOrder.push_back(current);
 
@@ -76,7 +76,7 @@ inline std::vector<size_t> performTopologicalSort(const GraphStructure& structur
 
 inline int countConnectedComponents(const GraphStructure& structure)
 {
-    size_t nodeCount = structure.adjacencyList.size();
+    const size_t nodeCount = structure.adjacencyList.size();
 
     if(nodeCount == 0)
     {
@@ -111,7 +111,7 @@ inline int countConnectedComponents(const GraphStructure& structure)
 
         while(!stack.empty())
         {
-            size_t current = stack.top();
+            const size_t current = stack.top();
             stack.pop();
 
             if(visited.find(current) != visited.end())
@@ -137,7 +137,7 @@ inline int countConnectedComponents(const GraphStructure& structure)
 inline bool detectCycle(const std::vector<size_t>& topologicalOrder,
                         const GraphStructure& structure)
 {
-    size_t nodeCount = structure.adjacencyList.size();
+    const size_t nodeCount = structure.adjacencyList.size();
 
     if(topologicalOrder.size() == nodeCount)
     {
@@ -191,8 +191,8 @@ inline TopologicalSortResult
     performTopologicalSortWithComponentDetection(const GraphStructure& structure)
 {
     auto topologicalOrder = performTopologicalSort(structure);
-    int componentCount = countConnectedComponents(structure);
-    bool hasCycle = detectCycle(topologicalOrder, structure);
+    const int componentCount = countConnectedComponents(structure);
+    const bool hasCycle = detectCycle(topologicalOrder, structure);
 
     return {topologicalOrder, componentCount, hasCycle};
 }

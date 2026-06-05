@@ -44,12 +44,22 @@ namespace rocisa
         {
         }
 
-        std::vector<InstructionInput> getParams() const
+        std::vector<InstructionInput> getParams() const override
         {
             return {labelName};
         }
 
-        std::string toString() const
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {labelName};
+        }
+
+        virtual std::string toString() const override
         {
             return formatWithComment(instStr + " " + labelName);
         }
@@ -112,6 +122,25 @@ namespace rocisa
         }
     };
 
+    struct SAddPCI64_SIMM : public BranchInstruction
+    {
+        SAddPCI64_SIMM(const std::string& src, const std::string& comment = "")
+            : BranchInstruction(src, comment)
+        {
+            setInst("s_add_pc_i64");
+        }
+
+        SAddPCI64_SIMM(const SAddPCI64_SIMM& other)
+            : BranchInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAddPCI64_SIMM>(*this);
+        }
+    };
+
     struct SCBranchVCCNZ : public BranchInstruction
     {
         SCBranchVCCNZ(const std::string& labelName, const std::string& comment = "")
@@ -170,6 +199,21 @@ namespace rocisa
             return std::make_shared<SSetPCB64>(*this);
         }
 
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {srcs};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {srcs};
+        }
+
         std::string toString() const override
         {
             return formatWithComment(instStr + " " + srcs->toString());
@@ -201,6 +245,21 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SSwapPCB64>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {dst, srcs};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {srcs};
         }
 
         std::string toString() const override

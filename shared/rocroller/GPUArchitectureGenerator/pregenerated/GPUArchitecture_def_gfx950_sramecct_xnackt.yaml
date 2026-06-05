@@ -48,6 +48,7 @@ Architectures:
       MaxLdsSize: 163840
       MaxLgkmcnt: 15
       MaxVmcnt: 63
+      MaxPreloadedKernargs: 16
       PackedWorkitemIDs: 0
       SupportedISA: 0
       SupportedSource: 0

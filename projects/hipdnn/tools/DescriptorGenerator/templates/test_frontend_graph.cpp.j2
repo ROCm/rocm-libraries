@@ -1,0 +1,80 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+#include <gtest/gtest.h>
+#include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/attributes/{{ op.frontend.effective_attributes_include }}.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+
+#include <memory>
+#include <vector>
+
+using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
+
+TEST(TestGraph{{ op.name }}, BuildGraph)
+{
+    Graph graph;
+    graph.set_compute_data_type(DataType::FLOAT)
+         .set_io_data_type(DataType::FLOAT)
+         .set_intermediate_data_type(DataType::FLOAT);
+
+    // Create input tensors
+{% for param in op.frontend.graph_method_params %}
+{% set tc = op.test_data.tensor_configs.get(param.tensor_name) %}
+    auto {{ param.name }} = std::make_shared<TensorAttributes>();
+{% if tc %}
+    {{ param.name }}->set_dim({{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }})
+        .set_stride({{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }})
+        .set_data_type(DataType::FLOAT);
+{% else %}
+    {{ param.name }}->set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1})
+        .set_data_type(DataType::FLOAT);
+{% endif %}
+
+{% endfor %}
+    // Create attributes
+    {{ op.frontend.attributes_class }} attributes;
+    attributes.set_name("{{ op.frontend.node_class }}");
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+    attributes.{{ df.frontend_setter_name }}({{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }});
+{% elif df.is_mode or df.is_enum %}
+{% if df.effective_frontend_type and df.test_enum_value %}
+    attributes.{{ df.frontend_setter_name }}({{ df.effective_frontend_type }}::{{ df.test_enum_value }});
+{% else %}
+    // TODO: Set {{ df.name }} — provide frontend_type and test_enum_value in YAML config
+{% endif %}
+{% endif %}
+{% endfor %}
+
+    // Call graph method
+{% if op.frontend.graph_return_type == "single" %}
+{% set return_output = op.frontend.graph_return_outputs[0] if op.frontend.graph_return_outputs else "result" %}
+    auto {{ return_output }} = graph.{{ op.effective_graph_method_name }}({% for param in op.frontend.graph_method_params %}{{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}, attributes);
+
+    // Verify returned tensor is non-null
+    ASSERT_NE({{ return_output }}, nullptr);
+    EXPECT_EQ({{ return_output }}->get_name(), "{{ op.frontend.node_class }}::{{ (op.frontend.graph_return_outputs[0] if op.frontend.graph_return_outputs else "result") | upper }}");
+    EXPECT_TRUE({{ return_output }}->get_is_virtual());
+{% elif op.frontend.graph_return_type == "tuple" %}
+    auto [{% for out_name in op.frontend.graph_return_outputs %}{{ out_name }}{% if not loop.last %}, {% endif %}{% endfor %}] = graph.{{ op.effective_graph_method_name }}({% for param in op.frontend.graph_method_params %}{{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}, attributes);
+
+    // Verify returned tensors (required outputs should be non-null)
+{% for output in op.frontend.required_outputs %}
+    ASSERT_NE({{ output.name }}, nullptr);
+    EXPECT_EQ({{ output.name }}->get_name(), "{{ op.frontend.node_class }}::{{ output.effective_enum_name }}");
+    EXPECT_TRUE({{ output.name }}->get_is_virtual());
+{% endfor %}
+{% for output in op.frontend.optional_outputs %}
+    // {{ output.name }} is optional — may be null depending on configuration
+{% endfor %}
+{% else %}
+    // TODO: Handle graph_return_type '{{ op.frontend.graph_return_type }}'
+    graph.{{ op.effective_graph_method_name }}({% for param in op.frontend.graph_method_params %}{{ param.name }}{% if not loop.last %}, {% endif %}{% endfor %}, attributes);
+{% endif %}
+
+    // Verify graph validates successfully
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}

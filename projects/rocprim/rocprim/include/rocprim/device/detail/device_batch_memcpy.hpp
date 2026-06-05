@@ -118,7 +118,8 @@ template<bool IsMemCpy,
          typename std::enable_if<IsMemCpy, int>::type = 0>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static Alias read_item(InputIt buffer_src, Offset offset)
 {
-    return *(reinterpret_cast<Alias*>(buffer_src) + offset);
+    // Note: we must reinterpret_cast to const Alias because InputIt may be a const type.
+    return *(reinterpret_cast<const Alias*>(buffer_src) + offset);
 }
 
 template<bool IsMemCpy,
@@ -396,10 +397,13 @@ private:
                                                    batch_memcpy_config_params params)
     {
         auto size_class = batch_memcpy::size_class::tlev;
-        size_class
-            = size > params.wlev_size_threshold ? batch_memcpy::size_class::wlev : size_class;
-        size_class
-            = size > params.blev_size_threshold ? batch_memcpy::size_class::blev : size_class;
+        // We presume the size to be no larger than maximum of unsigned int
+        size_class = static_cast<unsigned int>(size) > params.wlev_size_threshold
+                         ? batch_memcpy::size_class::wlev
+                         : size_class;
+        size_class = static_cast<unsigned int>(size) > params.blev_size_threshold
+                         ? batch_memcpy::size_class::blev
+                         : size_class;
         return size_class;
     }
 
@@ -1062,8 +1066,10 @@ public:
                 = (tile_id - blev_buffers.offsets[buffer_id]) * blev_tile_size;
 
             // If the tile has already reached beyond the work of the end of the last buffer
+            // We presume the size to be no larger than maximum of unsigned int
             if(buffer_id >= num_blev_buffers - 1
-               && tile_offset_within_buffer > blev_buffers.sizes[buffer_id])
+               && tile_offset_within_buffer
+                      > static_cast<unsigned int>(blev_buffers.sizes[buffer_id]))
             {
                 return;
             }

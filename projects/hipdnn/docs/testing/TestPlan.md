@@ -129,8 +129,8 @@ Test project /workspace/therock-build/bin/hipdnn
   Test #3: hipdnn_frontend_tests
   Test #4: hipdnn_test_sdk_tests
   Test #5: hipdnn_plugin_sdk_tests
-  Test #6: public_hipdnn_backend_tests
-  Test #7: public_hipdnn_frontend_tests
+  Test #6: hipdnn_public_backend_tests
+  Test #7: hipdnn_public_frontend_tests
 
 Total Tests: 7
 ```
@@ -145,16 +145,16 @@ Internal ctest changing into directory: /workspace/therock-build/bin/hipdnn
 Test project /workspace/therock-build/bin/hipdnn
     Start 1: hipdnn_data_sdk_tests
     Start 2: hipdnn_backend_tests
-    Start 6: public_hipdnn_backend_tests
-    Start 7: public_hipdnn_frontend_tests
+    Start 6: hipdnn_public_backend_tests
+    Start 7: hipdnn_public_frontend_tests
     Start 3: hipdnn_frontend_tests
     Start 4: hipdnn_test_sdk_tests
     Start 5: hipdnn_plugin_sdk_tests
 1/7 Test #4: hipdnn_test_sdk_tests ............   Passed    0.02 sec
 2/7 Test #5: hipdnn_plugin_sdk_tests ..........   Passed    0.02 sec
 3/7 Test #3: hipdnn_frontend_tests ............   Passed    0.02 sec
-4/7 Test #7: public_hipdnn_frontend_tests .....   Passed    0.27 sec
-5/7 Test #6: public_hipdnn_backend_tests ......   Passed    0.84 sec
+4/7 Test #7: hipdnn_public_frontend_tests .....   Passed    0.27 sec
+5/7 Test #6: hipdnn_public_backend_tests ......   Passed    0.84 sec
 6/7 Test #2: hipdnn_backend_tests .............   Passed    1.33 sec
 7/7 Test #1: hipdnn_data_sdk_tests ............   Passed    2.64 sec
 

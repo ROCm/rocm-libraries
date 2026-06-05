@@ -27,11 +27,10 @@ import itertools
 import math
 import multiprocessing
 import os
-import pathlib
 import random
 import subprocess
 from dataclasses import asdict, dataclass, field, fields
-from typing import List, Tuple
+from pathlib import Path
 
 import numpy as np
 import rrperf
@@ -43,7 +42,7 @@ gpus = {}
 mp_pool = None
 
 
-def instantiate_gpus(idxs: List[int]):
+def instantiate_gpus(idxs: list[int]):
     global gpus, mp_pool  # noqa: disable=F824
     for idx in idxs:
         gpus[idx] = multiprocessing.Lock()
@@ -52,7 +51,7 @@ def instantiate_gpus(idxs: List[int]):
         mp_pool = None
 
 
-def acquire_lock() -> Tuple[int, multiprocessing.Lock]:
+def acquire_lock() -> tuple[int, multiprocessing.Lock]:
     global gpus  # noqa: disable=unused-variable
     for i in range(100):
         for id, lock in gpus.items():
@@ -118,8 +117,61 @@ def fixed_value(value):
     return factory
 
 
-@dataclass(frozen=True, order=True, unsafe_hash=True)
 class Weights:
+    @classmethod
+    def Combine(cls, inputs: list, mutation: float = 0.1):
+        vals = {}
+        for fld in fields(cls):
+            if random.uniform(0, 1) < mutation:
+                vals[fld.name] = fld.default_factory()
+            else:
+                vals[fld.name] = getattr(random.choice(inputs), fld.name)
+        return cls(**vals)
+
+    @property
+    def short_hash(self):
+        d = hashlib.shake_128()
+
+        the_hash = hash(self)
+        num_bits = the_hash.bit_length()
+        num_bytes = (num_bits + 7) // 8
+        the_bytes = the_hash.to_bytes(num_bytes + 1, byteorder="big", signed=True)
+
+        d.update(the_bytes)
+
+        return d.hexdigest(4)
+
+    @classmethod
+    def from_dict(cls, d):
+        assert "type" in d
+
+        if d["type"] == "FullWeights":
+            return FullWeights(**d)
+        else:
+            return SimplifiedWeights(**d)
+
+    @classmethod
+    def subclass_map(cls):
+        # TODO: This could be automatically populated using introspection.
+        return {
+            "Full": FullWeights,
+            "FullWeights": FullWeights,
+            "Simplified": SimplifiedWeights,
+            "SimplifiedWeights": SimplifiedWeights,
+        }
+
+    @classmethod
+    def subclass(cls, name):
+        lookup = cls.subclass_map()
+
+        assert name in lookup
+        return lookup[name]
+
+
+@dataclass(frozen=True, order=True, unsafe_hash=True)
+class FullWeights(Weights):
+    type: str = field(default_factory=fixed_value("FullWeights"))
+
     nops: float = field(default_factory=random_inv_exp())
 
     vmcnt: float = field(default_factory=random_inv_exp())
@@ -183,28 +235,41 @@ class Weights:
         default_factory=random_bool(), metadata={"isCoefficient": False}
     )
 
-    @classmethod
-    def Combine(cls, inputs: list, mutation: float = 0.1):
-        vals = {}
-        for fld in fields(cls):
-            if random.uniform(0, 1) < mutation:
-                vals[fld.name] = fld.default_factory()
-            else:
-                vals[fld.name] = getattr(random.choice(inputs), fld.name)
-        return cls(**vals)
 
-    @property
-    def short_hash(self):
-        d = hashlib.shake_128()
+@dataclass(frozen=True, order=True, unsafe_hash=True)
+class SimplifiedWeights(Weights):
+    type: str = field(default_factory=fixed_value("SimplifiedWeights"))
 
-        the_hash = hash(self)
-        num_bits = the_hash.bit_length()
-        num_bytes = (num_bits + 7) // 8
-        the_bytes = the_hash.to_bytes(num_bytes + 1, byteorder="big", signed=True)
+    nops: float = field(default_factory=random_inv_exp())
 
-        d.update(the_bytes)
+    vmemCycles: int = field(
+        default_factory=random_int(max=500), metadata={"isCoefficient": False}
+    )
+    vmemQueueSize: int = field(
+        default_factory=random_int(min=1, max=6), metadata={"isCoefficient": False}
+    )
+    dsmemCycles: int = field(
+        default_factory=random_int(max=100), metadata={"isCoefficient": False}
+    )
+    dsmemQueueSize: int = field(
+        default_factory=random_int(min=1, max=6), metadata={"isCoefficient": False}
+    )
 
-        return d.hexdigest(4)
+    # Fix the cost of a stall cycle to provide a common reference point
+    # so that different randomly generated weights are of comparable magnitudes.
+    stallCycles: float = field(default_factory=fixed_value(1000.0))
+
+    isSALU: float = field(default_factory=random_inv_exp())
+    isVALU: float = field(default_factory=random_inv_exp())
+
+    # It doesn't make a lot of sense to allow the optimizer to choose
+    # whether to run out of registers should the opportunity arise.
+    # Therefore, fix this parameter at a high value.
+    outOfRegisters: float = field(default_factory=fixed_value(1e9))
+
+    zeroFreeBarriers: bool = field(
+        default_factory=random_bool(), metadata={"isCoefficient": False}
+    )
 
 
 @dataclass(order=True, unsafe_hash=True)
@@ -212,14 +277,14 @@ class Result:
     # The time field must be first so that results are sorted by speed.
     time: float = field(default=math.inf)
 
-    weights: Weights = field(default_factory=Weights)
-
     command: str = field(default="", compare=False)
     output: str = field(default="", compare=False)
 
     output_file: str = field(default="", compare=False)
 
     rnorm: float = field(default=math.inf)
+
+    weights: Weights = field(default=None)
 
     @property
     def passed(self):
@@ -250,7 +315,7 @@ class Result:
     def from_dict(cls, d):
         args = {k: v for k, v in d.items() if k != "hash"}
         if "weights" in args:
-            args["weights"] = Weights(**args["weights"])
+            args["weights"] = Weights.from_dict(args["weights"])
         return cls(**args)
 
 
@@ -259,7 +324,10 @@ def bench_star(arg):
 
 
 def bench(
-    thedir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: Weights
+    thedir: Path,
+    problem: rrperf.problems.GEMMRun,
+    weights: Weights,
+    single_threaded: bool = True,
 ) -> Result:
     device, lock = acquire_lock()
 
@@ -275,7 +343,8 @@ def bench(
 
         env = dict(os.environ)
         env["ROCROLLER_SCHEDULER_WEIGHTS"] = str(weights_path.absolute())
-        env["OMP_NUM_THREADS"] = str(1)
+        if single_threaded:
+            env["OMP_NUM_THREADS"] = str(1)
 
         cmd = problem.command(device=device, yaml=result_path.absolute())
 
@@ -318,7 +387,7 @@ def bench(
         lock.release()
 
 
-def sanity_check(results: List[Result]):
+def sanity_check(results: list[Result]):
     rnorms = {r.rnorm for r in results if r.passed}
     print(f"RNorms: {rnorms}")
     if len(rnorms) != 1:
@@ -329,7 +398,7 @@ def sanity_check(results: List[Result]):
 prev_results = {}
 
 
-def split_old_new_results(weights) -> Tuple[List[Weights], List[Weights]]:
+def split_old_new_results(weights) -> tuple[list[Weights], list[Weights]]:
     global prev_results  # noqa: disable=F824
 
     already_ran = []
@@ -344,8 +413,11 @@ def split_old_new_results(weights) -> Tuple[List[Weights], List[Weights]]:
 
 
 def generation(
-    output_dir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: List[Weights]
-) -> List[Result]:
+    output_dir: Path,
+    problem: rrperf.problems.GEMMRun,
+    weights: list[Weights],
+    single_threaded: bool = True,
+) -> list[Result]:
     global prev_results  # noqa: disable=F824
 
     already_ran, to_run = split_old_new_results(weights)
@@ -359,7 +431,12 @@ def generation(
         old_results_msg = ", ".join(w.weights.short_hash for w in old_results)
         print(f"Using previous results for {old_results_msg}")
 
-    to_run_args = zip(itertools.repeat(output_dir), itertools.repeat(problem), to_run)
+    to_run_args = zip(
+        itertools.repeat(output_dir),
+        itertools.repeat(problem),
+        to_run,
+        itertools.repeat(single_threaded),
+    )
 
     async_results = pool().imap_unordered(bench_star, to_run_args)
     new_results = []
@@ -371,7 +448,7 @@ def generation(
 
 
 def read_gen_results(resfile: str):
-    resfile = pathlib.Path(resfile)
+    resfile = Path(resfile)
     with resfile.open() as f:
         data = yaml.safe_load(f)
 
@@ -381,7 +458,7 @@ def read_gen_results(resfile: str):
         return list(map(res, data))
 
 
-def write_generation(thedir: pathlib.Path, name, results: List[Result]):
+def write_generation(thedir: Path, name, results: list[Result]):
     data = list([val.dict for val in results])
     datafile = thedir / f"results_{name}.yaml"
     with datafile.open("w") as f:
@@ -390,12 +467,17 @@ def write_generation(thedir: pathlib.Path, name, results: List[Result]):
 
 
 def new_inputs(
-    all_results: List[Result], population, num_parents, num_random, mutation
+    all_results: list[Result],
+    population,
+    num_parents,
+    num_random,
+    mutation,
+    weight_type,
 ):
     if len(all_results) == 0:
         rv = set()
         while len(rv) < population:
-            rv.add(Weights())
+            rv.add(weight_type())
         return list(rv)
 
     num_children = population - num_random
@@ -412,24 +494,24 @@ def new_inputs(
         i += 1
     # use new random values if there aren't enough.
     while len(parents) < num_parents:
-        parents.add(Weights())
+        parents.add(weight_type())
     parents = list(parents)
 
     # create children: Half from sets of 2 parents
     rv = set(parents)
     while len(rv) < len(parents) + (num_children // 2):
         these_parents = random.choices(parents, k=2)
-        new_child = Weights.Combine(these_parents, mutation)
+        new_child = weight_type.Combine(these_parents, mutation)
         rv.add(new_child)
 
     # create children: Half from all parents together.
     while len(rv) < len(parents) + num_children:
-        new_child = Weights.Combine(parents, mutation)
+        new_child = weight_type.Combine(parents, mutation)
         rv.add(new_child)
 
     # Add num_random new random weights.
     while len(rv) < rv_len:
-        new_weights = Weights()
+        new_weights = weight_type()
         rv.add(new_weights)
 
     return list(rv)
@@ -438,6 +520,8 @@ def new_inputs(
 def genetic(args):
     num_children = args.population - args.num_random
     assert num_children > 0
+
+    single_threaded = not args.multi_threaded
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -449,11 +533,13 @@ def genetic(args):
                 num_parents=args.num_parents,
                 num_random=args.num_random,
                 mutation=args.mutation,
+                weight_type=args.weight_type,
             )
 
             gen_dir = args.output_dir / f"gen_{i}"
-            results = generation(gen_dir, args.problem, inputs)
-            sanity_check(results)
+            results = generation(gen_dir, args.problem, inputs, single_threaded)
+            if single_threaded:
+                sanity_check(results)
 
             write_generation(args.output_dir, i, results)
 
@@ -474,7 +560,7 @@ def genetic(args):
         close_pool()
 
 
-def find_most_different_outputs(results: List[Result], n: int = 5):
+def find_most_different_outputs(results: list[Result], n: int = 5):
     n = min(n, len(results))
     if n <= 0:
         return
@@ -548,7 +634,7 @@ def get_args(parser: argparse.ArgumentParser):
         "--output",
         "-o",
         dest="output_dir",
-        type=pathlib.Path,
+        type=Path,
         required=True,
         help="Directory to store results.",
     )
@@ -559,6 +645,14 @@ def get_args(parser: argparse.ArgumentParser):
         type=read_gen_results,
         dest="all_results",
         help="Start from results_*.yaml from previous run",
+    )
+
+    parser.add_argument(
+        "--weight-type",
+        default="Simplified",
+        type=Weights.subclass,
+        help="Which subset of weights to optimize. Options: "
+        + ", ".join(Weights.subclass_map().keys()),
     )
 
     parser.add_argument(
@@ -586,7 +680,7 @@ def get_args(parser: argparse.ArgumentParser):
         dest="num_random",
         default=4,
         type=int,
-        help="Number of new random configurations to try every " "generation.",
+        help="Number of new random configurations to try every generation.",
     )
 
     parser.add_argument(
@@ -601,7 +695,7 @@ def get_args(parser: argparse.ArgumentParser):
         "--mutation-decay",
         default=0.98,
         type=float,
-        help="Mutation rate is multiplied by this number every" " generation.",
+        help="Mutation rate is multiplied by this number every generation.",
     )
 
     parser.add_argument(
@@ -610,6 +704,15 @@ def get_args(parser: argparse.ArgumentParser):
         type=rrperf.utils.first_problem_from_suite,
         help="Benchmark suite to run. NOTE: Only the first problem from the "
         "suite will be used.",
+    )
+
+    parser.add_argument(
+        "--multi-threaded",
+        action="store_true",
+        default=False,
+        help="Allow multi-threaded host execution (do not set OMP_NUM_THREADS=1) "
+        "and skip the rnorm sanity check. Use for large-K problems where "
+        "single-threaded accumulation causes rnorm differences.",
     )
 
 

@@ -30,4 +30,6 @@ void init_macro(nb::module_ m)
     auto m_macro = m.def_submodule("macro", "Macro module");
     m_macro.def("MacroVMagicDiv", &rocisa::MacroVMagicDiv);
     m_macro.def("PseudoRandomGenerator", &rocisa::PseudoRandomGenerator);
+    m_macro.def("VMagicDiv", &rocisa::VMagicDiv);
+    m_macro.def("PseudoRandomGeneratorModule", &rocisa::PseudoRandomGeneratorModule);
 }

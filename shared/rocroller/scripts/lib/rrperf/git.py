@@ -5,7 +5,6 @@
 
 import subprocess
 from pathlib import Path
-from typing import List, Union
 
 
 def top(loc: str = None) -> Path:
@@ -20,7 +19,7 @@ def top(loc: str = None) -> Path:
     return Path(p.stdout.strip()).resolve()
 
 
-def clone(remote: Union[str, Path], repo: Path) -> None:
+def clone(remote: str | Path, repo: Path) -> None:
     subprocess.run(
         [
             "git",
@@ -85,7 +84,7 @@ def full_hash(repo: Path) -> str:
     return p.stdout.strip()
 
 
-def rev_list(repo: Path, old_commit: str, new_commit: str) -> List[str]:
+def rev_list(repo: Path, old_commit: str, new_commit: str) -> list[str]:
     """
     Gets a list of commits, starting with the newest commit and ending
     with the oldest commit, with every commit in between.

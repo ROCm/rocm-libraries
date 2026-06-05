@@ -70,6 +70,35 @@ enum class MyEnum
 };
 ```
 
+## Graph Operation Methods
+
+`Graph.hpp` is the primary entry point for users. Operation methods (e.g., `conv_fprop`, `matmul`, `pointwise`, `batchnorm`) should include:
+
+1. A `@brief` one-liner
+2. A short formula showing the mathematical operation (use `@code` blocks)
+3. `@param` tags documenting each input tensor with its expected shape
+4. `@return` documenting each output tensor with its shape
+5. A `@see` reference to the corresponding attributes class
+
+```cpp
+/** @brief Convolution forward pass
+ *
+ * For 2D with NCHW layout:
+ * @code
+ * y[n,k,oh,ow] = sum_c,r,s  x[n, c, oh*stride+r*dilation-pad, ...]  *  w[k,c,r,s]
+ * @endcode
+ *
+ * @param x Input activation tensor [N, C, H, W]
+ * @param w Filter/weight tensor [K, C, R, S]
+ * @param attributes Convolution parameters: padding, stride, dilation
+ * @return y: Output activation tensor [N, K, OH, OW]
+ *
+ * @see ConvFpropAttributes
+ */
+```
+
+When adding a new operation to `Graph.hpp`, add a Doxygen comment following this pattern before the method declaration.
+
 ## Doxygen Comment Style
 
 - Use `/** ... */` for multi-line Doxygen comments

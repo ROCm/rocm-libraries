@@ -26,7 +26,9 @@
 #include "hiptensor_options.hpp"
 #include "utils.hpp"
 
+#include <cstdio>
 #include <gtest/gtest.h>
+#include <hip/hip_runtime_api.h>
 
 #include "llvm/command_line_parser.hpp"
 
@@ -35,11 +37,26 @@ int main(int argc, char** argv)
     // Parse hiptensor test options
     hiptensor::parseOptions(argc, argv);
 
+    // Force HIP runtime initialization before any test fixture runs.
+    // If HIP fails here we get a clean error rather than an SEH crash inside a
+    // fixture, which would leave the C++ static-initialization guard locked and
+    // cause all subsequent tests to deadlock ("resource deadlock would occur").
+    int        deviceCount = 0;
+    hipError_t hipErr      = hipGetDeviceCount(&deviceCount);
+    if((hipErr != hipSuccess) || (deviceCount <= 0))
+    {
+        fprintf(
+            stderr,
+            "hipGetDeviceCount failed (%d: %s) — Device count: %d — aborting before tests run.\n",
+            static_cast<int>(hipErr),
+            hipGetErrorString(hipErr),
+            deviceCount);
+        return 1;
+    }
+
     // Initialize Google Tests
     testing::InitGoogleTest(&argc, argv);
 
     // Run the tests
-    int status = RUN_ALL_TESTS();
-
-    return status;
+    return RUN_ALL_TESTS();
 }

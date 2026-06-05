@@ -7,12 +7,12 @@ import argparse
 import datetime
 import io
 import os
-import pathlib
 import re
 import statistics
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
-from typing import Any, List
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -30,24 +30,24 @@ def priority_problems():
 
 @dataclass
 class ComparisonResult:
-    mean: List[float]
-    median: List[float]
+    mean: list[float]
+    median: list[float]
     moods_pval: float
 
-    results: List[Any] = field(repr=False)
+    results: list[Any] = field(repr=False)
 
     problem: str
 
 
 @dataclass
 class PlotData:
-    timestamp: List[float] = field(default_factory=list)
-    commit: List[str] = field(default_factory=list)
-    median: List[float] = field(default_factory=list)
-    min: List[float] = field(default_factory=list)
-    name: List[str] = field(default_factory=list)
-    kernel: List[float] = field(default_factory=list)
-    machine: List[int] = field(default_factory=list)
+    timestamp: list[float] = field(default_factory=list)
+    commit: list[str] = field(default_factory=list)
+    median: list[float] = field(default_factory=list)
+    min: list[float] = field(default_factory=list)
+    name: list[str] = field(default_factory=list)
+    kernel: list[float] = field(default_factory=list)
+    machine: list[int] = field(default_factory=list)
     box_data: pd.DataFrame = field(
         default_factory=lambda: pd.DataFrame(columns=["timestamp", "commit", "runs"])
     )
@@ -133,7 +133,7 @@ class PerformanceRun:
     def load_perf_runs(directories):
         perf_runs = list()
         for directory in directories:
-            wrkdir = pathlib.Path(directory)
+            wrkdir = Path(directory)
             results = OrderedDict()
             for path in wrkdir.glob("*.yaml"):
                 try:

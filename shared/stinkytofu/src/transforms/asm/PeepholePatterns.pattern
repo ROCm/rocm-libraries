@@ -1,0 +1,318 @@
+//===- PeepholePatterns.pattern - Peephole optimization patterns -----------===//
+//
+// StinkyTofu GPU Compiler Library
+//
+// Declarative pattern definitions for peephole optimizations.
+// Parsed at compile time by TableGen, generates C++ matcher code.
+//
+// Original Python implementations: projects/hipblaslt/tensilelite/Tensile/Activation.py
+//
+//===----------------------------------------------------------------------===//
+
+//===----------------------------------------------------------------------===//
+// Pattern 1: Add+FMA Fusion (F32)
+//
+// Fuses a v_add_f32 into a preceding v_fma_f32 by folding constants.
+// Handles both in-place and non-in-place additions.
+//
+// Example (in-place):
+//   v_fma_f32 v0, a, b, 1.0
+//   v_add_f32 v0, 1.0, v0
+//   => v_fma_f32 v0, a, b, 2.0
+//
+// Example (non-in-place):
+//   v_fma_f32 v0, a, b, 1.0
+//   v_add_f32 v2, 1.0, v0
+//   => v_fma_f32 v2, a, b, 2.0  (v0 eliminated!)
+//
+// Requirements:
+//   - FMA result has only ONE use (the ADD)
+//   - Both FMA and ADD have constant addends
+//
+// Benefit: 2 instructions → 1, constant folding, may free register
+//
+// Original: Activation.py lines 1016-1050
+//===----------------------------------------------------------------------===//
+
+peephole pattern AddFMAFusion_F32 {
+  match {
+    // First: FMA produces $fma_result
+    $fma_inst = v_fma_f32 $fma_result, $a, $b, $fma_const
+
+    // Second: ADD uses $fma_result
+    $add_inst = v_add_f32 $add_dst, $add_const, $fma_result
+  }
+
+  constraints {
+    HasOneUse($fma_result)    // FMA result only used by this ADD
+    IsConstant($fma_const)    // FMA has constant addend
+    IsConstant($add_const)    // ADD has constant addend
+  }
+
+  rewrite {
+    // Fold constants: $fma_const + $add_const
+    $new_const = AddConstants($fma_const, $add_const)
+
+    // Create new FMA with ADD's destination and folded constant
+    $new_fma = v_fma_f32 $add_dst, $a, $b, $new_const
+
+    // Replace old FMA, remove ADD
+    replace $fma_inst with $new_fma
+    remove $add_inst
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// Pattern 2: Add+FMA Fusion (F16)
+//
+// Same as F32 variant, but for half-precision floats.
+//===----------------------------------------------------------------------===//
+
+peephole pattern AddFMAFusion_F16 {
+  match {
+    $fma_inst = v_fma_f16 $fma_result, $a, $b, $fma_const
+    $add_inst = v_add_f16 $add_dst, $add_const, $fma_result
+  }
+
+  constraints {
+    HasOneUse($fma_result)
+    IsConstant($fma_const)
+    IsConstant($add_const)
+  }
+
+  rewrite {
+    $new_const = AddConstants($fma_const, $add_const)
+    $new_fma = v_fma_f16 $add_dst, $a, $b, $new_const
+    replace $fma_inst with $new_fma
+    remove $add_inst
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// Pattern 3: Add+FMA Fusion (PK_F16 - Packed Half)
+//
+// Same as F16 variant, but for packed half-precision (two f16 values).
+// TODO: Re-enable once v_fma_pk_f16 and v_add_pk_f16 opcodes are added to GFX ISA
+//===----------------------------------------------------------------------===//
+
+// peephole pattern AddFMAFusion_PKF16 {
+//   match {
+//     $fma_inst = v_fma_pk_f16 $fma_result, $a, $b, $fma_const
+//     $add_inst = v_add_pk_f16 $add_dst, $add_const, $fma_result
+//   }
+//
+//   constraints {
+//     HasOneUse($fma_result)
+//     IsConstant($fma_const)
+//     IsConstant($add_const)
+//   }
+//
+//   rewrite {
+//     $new_const = AddConstants($fma_const, $add_const)
+//     $new_fma = v_fma_pk_f16 $add_dst, $a, $b, $new_const
+//     replace $fma_inst with $new_fma
+//     remove $add_inst
+//   }
+// }
+
+//===----------------------------------------------------------------------===//
+// Pattern: MUL+MUL Fusion
+//===----------------------------------------------------------------------===//
+
+peephole pattern MULMULFusion_F32 {
+  match {
+    $mul_inst1 = v_mul_f32 $mul_result1, $mul_const1, $a
+    $mul_inst2 = v_mul_f32 $mul_result2, $mul_const2, $mul_result1
+  }
+
+  constraints {
+    HasOneUse($mul_result1)    // First MUL result only used by this MUL
+    IsConstant($mul_const1)    // MUL1 has constant mul
+    IsConstant($mul_const2)    // MUL2 has constant mul
+  }
+
+  rewrite {
+    $new_const = MulConstants($mul_const1, $mul_const2)
+    $new_mul = v_mul_f32 $mul_result2, $new_const, $a
+
+    // Replace first MUL, remove second MUL
+    replace $mul_inst1 with $new_mul
+    remove $mul_inst2
+  }
+}
+
+peephole pattern MULMULFusion_F16 {
+  match {
+    $mul_inst1 = v_mul_f16 $mul_result1, $mul_const1, $a
+    $mul_inst2 = v_mul_f16 $mul_result2, $mul_const2, $mul_result1
+  }
+
+  constraints {
+    HasOneUse($mul_result1)    // First MUL result only used by this MUL
+    IsConstant($mul_const1)    // MUL1 has constant mul
+    IsConstant($mul_const2)    // MUL2 has constant mul
+  }
+
+  rewrite {
+    $new_const = MulConstants($mul_const1, $mul_const2)
+    $new_mul = v_mul_f16 $mul_result2, $new_const, $a
+
+    // Replace first MUL, remove second MUL
+    replace $mul_inst1 with $new_mul
+    remove $mul_inst2
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// Pattern: Mul+FMA Fusion
+//===----------------------------------------------------------------------===//
+
+peephole pattern MULFMAFusion_F32 {
+  match {
+    $mul_inst = v_mul_f32 $mul_result, $mul_const, $a
+    $fma_inst = v_fma_f32 $fma_result, $fma_const, $mul_result, $b
+  }
+
+  constraints {
+    HasOneUse($mul_result)    // MUL result only used by this FMA
+    IsConstant($mul_const)    // MUL has constant multiplier
+    IsConstant($fma_const)    // FMA has constant multiplier
+  }
+
+  rewrite {
+    $new_const = MulConstants($mul_const, $fma_const)
+    $new_fma = v_fma_f32 $fma_result, $new_const, $a, $b
+
+    // Modify FMA (root), remove MUL (producer)
+    replace $fma_inst with $new_fma
+    remove $mul_inst
+  }
+}
+
+peephole pattern MULFMAFusion_F16 {
+  match {
+    $mul_inst = v_mul_f16 $mul_result, $mul_const, $a
+    $fma_inst = v_fma_f16 $fma_result, $fma_const, $mul_result, $b
+  }
+
+  constraints {
+    HasOneUse($mul_result)    // MUL result only used by this FMA
+    IsConstant($mul_const)    // MUL has constant multiplier
+    IsConstant($fma_const)    // FMA has constant multiplier
+  }
+
+  rewrite {
+    $new_const = MulConstants($mul_const, $fma_const)
+    $new_fma = v_fma_f16 $fma_result, $new_const, $a, $b
+
+    // Modify FMA (root), remove MUL (producer)
+    replace $fma_inst with $new_fma
+    remove $mul_inst
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// ADD+MUL Fusion: v_add + v_mul => v_fma with constant folding
+// Pattern: (const1 + a) * const2 => const2 * a + (const2 * const1)
+//===----------------------------------------------------------------------===//
+
+peephole pattern ADDMULFusion_F32 {
+  match {
+    $add_inst = v_add_f32 $add_result, $add_const, $a
+    $mul_inst = v_mul_f32 $mul_result, $mul_const, $add_result
+  }
+  constraints {
+    HasOneUse($add_result)
+    IsConstant($add_const)
+    IsConstant($mul_const)
+  }
+  rewrite {
+    $new_const = MulConstants($mul_const, $add_const)
+    $new_fma = v_fma_f32 $mul_result, $mul_const, $a, $new_const
+    replace $add_inst with $new_fma
+    remove $mul_inst
+  }
+}
+
+peephole pattern ADDMULFusion_F16 {
+  match {
+    $add_inst = v_add_f16 $add_result, $add_const, $a
+    $mul_inst = v_mul_f16 $mul_result, $mul_const, $add_result
+  }
+  constraints {
+    HasOneUse($add_result)
+    IsConstant($add_const)
+    IsConstant($mul_const)
+  }
+  rewrite {
+    $new_const = MulConstants($mul_const, $add_const)
+    $new_fma = v_fma_f16 $mul_result, $mul_const, $a, $new_const
+    replace $add_inst with $new_fma
+    remove $mul_inst
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// Move Propagation: Eliminate redundant moves by propagating source register
+// v_mov_b32 + ALU => ALU (with mov source)
+//===----------------------------------------------------------------------===//
+
+peephole pattern MovPropagation_F32_Add {
+  match {
+    $mov_inst = v_mov_b32 $mov_result, $src
+    $alu_inst = v_add_f32 $alu_result, $op1, $mov_result
+  }
+  constraints {
+    HasOneUse($mov_result)
+  }
+  rewrite {
+    $new_alu = v_add_f32 $alu_result, $op1, $src
+    replace $alu_inst with $new_alu
+    remove $mov_inst
+  }
+}
+
+peephole pattern MovPropagation_F16_Add {
+  match {
+    $mov_inst = v_mov_b32 $mov_result, $src
+    $alu_inst = v_add_f16 $alu_result, $op1, $mov_result
+  }
+  constraints {
+    HasOneUse($mov_result)
+  }
+  rewrite {
+    $new_alu = v_add_f16 $alu_result, $op1, $src
+    replace $alu_inst with $new_alu
+    remove $mov_inst
+  }
+}
+
+peephole pattern MovPropagation_F32_Mul {
+  match {
+    $mov_inst = v_mov_b32 $mov_result, $src
+    $alu_inst = v_mul_f32 $alu_result, $op1, $mov_result
+  }
+  constraints {
+    HasOneUse($mov_result)
+  }
+  rewrite {
+    $new_alu = v_mul_f32 $alu_result, $op1, $src
+    replace $alu_inst with $new_alu
+    remove $mov_inst
+  }
+}
+
+peephole pattern MovPropagation_F16_Mul {
+  match {
+    $mov_inst = v_mov_b32 $mov_result, $src
+    $alu_inst = v_mul_f16 $alu_result, $op1, $mov_result
+  }
+  constraints {
+    HasOneUse($mov_result)
+  }
+  rewrite {
+    $new_alu = v_mul_f16 $alu_result, $op1, $src
+    replace $alu_inst with $new_alu
+    remove $mov_inst
+  }
+}

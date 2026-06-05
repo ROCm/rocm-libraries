@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,11 +58,14 @@ struct threefry_device_engine : public BaseType
     static inline constexpr unsigned int vector_dim
         = static_cast<unsigned int>(cpp_utils::vector_size_v<vector_type>);
 
-    __forceinline__ __device__ __host__ threefry_device_engine() {}
+    __forceinline__ __device__ __host__
+    threefry_device_engine()
+    {}
 
-    __forceinline__ __device__ __host__ threefry_device_engine(const unsigned long long seed,
-                                                             const unsigned long long subsequence,
-                                                             const unsigned long long offset)
+    __forceinline__ __device__ __host__
+    threefry_device_engine(const unsigned long long seed,
+                           const unsigned long long subsequence,
+                           const unsigned long long offset)
         : base_type(seed, subsequence, offset)
     {}
 
@@ -287,6 +290,8 @@ public:
         {
             return ROCRAND_STATUS_OUT_OF_RANGE;
         }
+        // Set order type. Only executed for valid order types.
+        m_order = order;
         reset();
         return ROCRAND_STATUS_SUCCESS;
     }

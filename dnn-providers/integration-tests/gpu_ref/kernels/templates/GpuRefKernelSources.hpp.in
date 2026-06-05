@@ -1,0 +1,22 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+// Auto-generated GPU reference kernel sources - DO NOT EDIT
+#pragma once
+
+#include <string_view>
+#include <vector>
+
+@KERNEL_DECLARATIONS@
+
+@HEADER_DECLARATIONS@
+
+namespace hipdnn_gpu_ref
+{
+
+std::string_view getGpuRefKernelSrc(const char* name);
+
+void getGpuRefKernelIncList(std::vector<std::string_view>& includeTexts,
+                            std::vector<const char*>& includeNames);
+
+} // namespace hipdnn_gpu_ref

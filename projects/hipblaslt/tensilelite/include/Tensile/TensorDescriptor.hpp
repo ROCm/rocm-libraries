@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@
 #include <Tensile/Macros.hpp>
 #include <Tensile/Utils.hpp>
 
+TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     template <typename SizeIter>
@@ -345,11 +346,23 @@ namespace TensileLite
         }
         size_t totalAllocatedBytes() const
         {
-            return totalAllocatedElements() * elementBytes();
+            // info.elementSize is the per-element segment size in bytes
+            // (post-PR #6499: ElementSize = sizeof(T) / Packing). The
+            // total byte count is integral as long as the element count
+            // is a whole number of packed containers.
+            auto const info = DataTypeInfo::Get(m_dataType);
+            assert(totalAllocatedElements() % info.packing == 0);
+            return multiplyElementSize(totalAllocatedElements(), info.elementSize);
         }
 
-        size_t elementBytes() const
+        float elementBytes() const
         {
+            // info.elementSize is already the per-element segment size in
+            // bytes (post-PR #6499: BaseTypeInfo::ElementSize = sizeof(T) /
+            // Packing), so this returns 0.5 for Float4 and 0.75 for
+            // Float6/BFloat6. Callers should pair this with
+            // multiplyElementSize() from Utils.hpp when converting element
+            // counts to byte counts.
             return DataTypeInfo::Get(m_dataType).elementSize;
         }
 
@@ -446,11 +459,13 @@ namespace TensileLite
         if(decorated)
             stream << "[";
 
+        constexpr size_t packing = TypeInfo<std::remove_cv_t<T>>::Packing;
+
         if(desc.sizes()[0] > 0)
             stream << data[0];
 
-        for(size_t i = 1; i < desc.sizes()[0]; i++)
-            stream << " " << data[i];
+        for(size_t i = packing; i < desc.sizes()[0]; i += packing)
+            stream << " " << data[i / packing];
 
         if(decorated)
             stream << "]" << std::endl;
@@ -509,14 +524,14 @@ namespace TensileLite
             {
                 coord[0] = 0;
 
-                auto const* localPtr = data + desc.index(coord);
+                auto const* localPtr = data + (desc.index(coord) / TypeInfo<T>::Packing);
 
                 if(sizes[0] > 0)
                     stream << localPtr[0];
 
-                for(coord[0] = 1; coord[0] < sizes[0]; coord[0]++)
+                for(coord[0] = TypeInfo<T>::Packing; coord[0] < sizes[0]; coord[0]+=TypeInfo<T>::Packing)
                 {
-                    stream << " " << localPtr[coord[0] * stride0];
+                    stream << " " << localPtr[coord[0] * stride0 / TypeInfo<T>::Packing];
                 }
 
                 stream << std::endl;
@@ -524,9 +539,10 @@ namespace TensileLite
 
             if(decorated)
             {
-                stream << std::endl << "]" << std::endl;
+                stream << "]" << std::endl;
             }
         }
     }
 
 } // namespace TensileLite
+TENSILE_HIDDEN_END

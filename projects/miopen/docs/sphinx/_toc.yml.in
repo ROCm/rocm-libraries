@@ -6,14 +6,12 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/prerequisites.rst
-    title: MIOpen prerequisites
   - file: install/install.rst
     title: Install MIOpen
   - file: install/build-source.rst
-    title: Build MIOpen from source
+    title: Build from source
   - file: install/embed.rst
-    title: Build MIOpen for embedded systems
+    title: Build for embedded systems
   - file: install/docker-build.rst
     title: Build MIOpen using Docker
 

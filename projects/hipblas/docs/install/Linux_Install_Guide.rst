@@ -5,22 +5,36 @@
 .. _linux-install:
 
 ***********************************
-Installing and building for Linux
+Install and build hipBLAS for Linux
 ***********************************
+
+To build hipBLAS as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build hipBLAS standalone using the following
+instructions.
 
 This topic discusses how to install hipBLAS on Linux from a package and how to build and install it from the source code.
 For a list of installation prerequisites, see :doc:`hipBLAS prerequisites <prerequisites>`.
 
-Installing prebuilt packages
-=============================
+Prerequisites for Linux
+=========================
 
-You can manually download the prebuilt hipBLAS packages from the :doc:`ROCm native package manager <rocm-install-on-linux:install/quick-start>`.
+The hipBLAS prerequisites are different than the :doc:`rocBLAS <rocblas:index>` and NVIDIA CUDA cuBLAS backend prerequisites. See the cuBLAS documentation for NVIDIA installation procedures.
 
-To download the prebuilt package, use this command:
+*  The prerequisites required to use the rocBLAS backend with AMD components are as follows:
 
-.. code-block:: shell
+   * A ROCm-enabled platform. For more information, see :ref:`ROCm Core SDK components <rocm:release-components>`.
+   * A compatible version of `hipblas-common <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas-common>`_.
+   * A compatible version of rocBLAS.
+   * For full functionality, optionally install a compatible version of :doc:`rocSOLVER <rocsolver:index>` and its dependencies.
 
-   sudo apt update && sudo apt install hipblas
+*  The prerequisites required to use the cuBLAS backend with NVIDIA components are as follows:
+
+   * A HIP-enabled platform. For more information, see :doc:`HIP installation <hip:install/install>`.
+   * A working CUDA toolkit, including cuBLAS. For more information, see `CUDA toolkit <https://developer.nvidia.com/accelerated-computing-toolkit/>`_.
 
 Building hipBLAS from source
 ============================
@@ -40,7 +54,6 @@ To download hipBLAS, including all projects in the rocm-libraries repository, us
 
    git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
    cd  rocm-libraries/projects/hipblas
-
 
 To limit your local checkout to only the hipBLAS project, configure ``sparse-checkout`` before cloning.
 This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.

@@ -1,14 +1,14 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-import pathlib
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, List, Optional
+from pathlib import Path
+from typing import Any
 
 import yaml
 from rrperf.utils import get_dataclass_id
 
-repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+repo_dir = Path(__file__).resolve().parent.parent.parent.parent
 
 
 def field_dict(cls, obj):
@@ -66,11 +66,11 @@ class RRPerfResult:
     """
 
     resultType: str = field(repr=False)
-    path: pathlib.Path = field(repr=False, hash=False)
+    path: Path = field(repr=False, hash=False)
 
     kernelGenerate: int = field(repr=False, hash=False)
     kernelAssemble: int = field(repr=False, hash=False)
-    kernelExecute: List[int] = field(repr=False, hash=False)
+    kernelExecute: list[int] = field(repr=False, hash=False)
 
     device: int = field(repr=False, hash=False, compare=False, default=0)
 
@@ -107,7 +107,7 @@ class TypeParameters:
     scaleBlockSize: int = -1
     scaleSkipPermlane: str = "None"  # None, PreSwizzleScale, PreSwizzleScaleGFX950
 
-    def __init__(self, typeParams: Optional[Any] = None, **kwargs):
+    def __init__(self, typeParams: Any | None = None, **kwargs):
         if isinstance(typeParams, TypeParameters):
             for f in fields(self):
                 setattr(self, f.name, getattr(typeParams, f.name))
@@ -122,8 +122,8 @@ class TypeParameters:
             else:
                 raise AttributeError(f"Unknown field: {key}")
 
-    def asArgs(self) -> List[str]:
-        rv: List[str] = []
+    def asArgs(self) -> list[str]:
+        rv: list[str] = []
         for f in fields(self):
             rv.append(f"--{f.name}={self.__getattribute__(f.name)}")
         return rv
@@ -137,7 +137,7 @@ class GPUArchitectureTarget:
     Xnack: bool = False
     Sramecc: bool = False
 
-    def asArgs(self) -> List[str]:
+    def asArgs(self) -> list[str]:
         if len(self.ArchString) == 0:
             return []
         arch = self.ArchString
@@ -217,6 +217,8 @@ class GEMMSolution:
     swizzleTileSize: MKNLTuple = MKNLTuple(0, 0, 0, 0)
     prefetchScale: bool = False
     pretileScale: bool = False
+
+    ldsBankSwizzle: str = "None"
 
     streamK: str = "None"
     numWGs: int = 0
@@ -305,18 +307,18 @@ class GEMM(GEMMProblem, GEMMSolution):
 class GEMMRun(GEMM):
     """GEMM run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
+    output: Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
         return "gemm"
 
-    def set_output(self, path: pathlib.Path):
+    def set_output(self, path: Path):
         self.output = path
 
     def command(
         self, generate_only=False, architecture=None, **extra_args
-    ) -> List[str]:
+    ) -> list[str]:
 
         specialNames = {
             "output": "yaml",
@@ -472,16 +474,16 @@ class CodeGen:
 class CodeGenRun(CodeGen):
     """CodeGen run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
+    output: Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
         return "codegen"
 
-    def set_output(self, path: pathlib.Path):
+    def set_output(self, path: Path):
         self.output = path
 
-    def command(self) -> List[str]:
+    def command(self) -> list[str]:
         retval = [
             "client/rocroller-codegen-stress",
             "--inst_count=" + str(self.instCount),
@@ -505,18 +507,18 @@ class CodeGenResult(CodeGen, RRPerfResult):
 class TensileRun(GEMM):
     """Tensile run interface."""
 
-    config: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
-    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
+    config: Path = field(repr=False, default=None, hash=False, compare=False)
+    output: Path = field(repr=False, default=None, hash=False, compare=False)
     tensile_commit: str = "rocm-6.0.0"
 
     @property
     def group(self):
         return "gemm"
 
-    def set_output(self, path: pathlib.Path):
+    def set_output(self, path: Path):
         self.output = path
 
-    def command(self, **extra_args) -> List[str]:
+    def command(self, **extra_args) -> list[str]:
         command = str(repo_dir / "scripts" / "benchmark_tensile")
 
         arg_dict = asdict(self)
@@ -634,7 +636,7 @@ def cast_missing_parameters(result):
         del result["matchMemoryAccess"]
 
 
-def load_results(path: pathlib.Path):
+def load_results(path: Path):
     """
     Load results from a YAML file `path` and return an array of RESULT objects.
     """

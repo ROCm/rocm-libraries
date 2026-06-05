@@ -53,7 +53,6 @@ doxygen_project = {
 
 external_projects = []
 external_projects_current_project = "rocprim"
-external_projects_remote_repository=""
 
 cpp_id_attributes = ["__global__", "__device__", "__host__", "__forceinline__", "__restrict__", "static"]
 cpp_paren_attributes = ["__declspec"]

@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,12 +20,17 @@
 
 #include "rocfft/rocfft.h"
 
+extern "C" {
+#include "rocfft_c.h"
+}
+
 #include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
 #include "../../shared/environment.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/params_gen.h"
 #include "../../shared/precision_type.h"
+#include "../../shared/reference_fft_data.h"
 #include "../../shared/rocfft_complex.h"
 #include "hip/hip_runtime_api.h"
 #include <condition_variable>
@@ -55,7 +60,7 @@ namespace std
 
 namespace fs = std::filesystem;
 
-#ifndef WIN32
+#ifndef _WIN32
 // get program_invocation_name
 #include <errno.h>
 #endif
@@ -112,22 +117,7 @@ TEST(rocfft_UnitTest, plan_description)
         ASSERT_TRUE(rocfft_status_success == rocfft_plan_description_destroy(desc));
         ASSERT_TRUE(rocfft_status_success == rocfft_plan_destroy(plan));
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 TEST(rocfft_UnitTest, plan_description_reuse)
@@ -227,22 +217,56 @@ TEST(rocfft_UnitTest, plan_description_reuse)
 
         ASSERT_EQ(rocfft_plan_description_destroy(desc), rocfft_status_success);
     }
-    catch(const std::bad_alloc&)
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+}
+
+TEST(rocfft_UnitTest, nonzero_offsets)
+{
+    // check that plan creation does not proceed with non-zero offsets.
+
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
     {
-        GTEST_SKIP() << "host memory allocation failure";
+        GTEST_SKIP();
     }
-    catch(const ROCFFT_SKIP& e)
+
+    try
     {
-        GTEST_SKIP() << e.what();
+        size_t                  length    = 96;
+        size_t                  in_offset = 2, out_offset = 1;
+        rocfft_plan_description desc = nullptr;
+        ASSERT_EQ(rocfft_plan_description_create(&desc), rocfft_status_success);
+        // use default strides and distances
+        auto rocfft_ret
+            = rocfft_plan_description_set_data_layout(desc,
+                                                      rocfft_array_type_real,
+                                                      rocfft_array_type_hermitian_interleaved,
+                                                      &in_offset,
+                                                      &out_offset,
+                                                      0,
+                                                      nullptr,
+                                                      0,
+                                                      0,
+                                                      nullptr,
+                                                      0);
+        if(rocfft_ret != rocfft_status_success)
+            rocfft_plan_description_destroy(desc);
+        ASSERT_EQ(rocfft_ret, rocfft_status_success);
+        // Try to create the plan
+        rocfft_plan plan                 = nullptr;
+        const auto  plan_creation_status = rocfft_plan_create(&plan,
+                                                             rocfft_placement_inplace,
+                                                             rocfft_transform_type_real_forward,
+                                                             rocfft_precision_single,
+                                                             1,
+                                                             &length,
+                                                             1,
+                                                             desc);
+        rocfft_plan_destroy(plan);
+        rocfft_plan_description_destroy(desc);
+        ASSERT_EQ(plan_creation_status, rocfft_status_invalid_offset);
     }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 struct LocalCleanup
@@ -280,7 +304,7 @@ TEST(rocfft_UnitTest, log_levels)
 
         // enumerate all known log levels and direct all of the logs to nowhere
         EnvironmentSetTemp layer("ROCFFT_LAYER", std::to_string(0xffffffff).c_str());
-#ifdef WIN32
+#ifdef _WIN32
         static const char* log_output = "NUL";
 #else
         static const char* log_output   = "/dev/null";
@@ -341,22 +365,7 @@ TEST(rocfft_UnitTest, log_levels)
             }
         }
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 // Check whether logs can be emitted from multiple threads properly
@@ -423,22 +432,7 @@ TEST(rocfft_UnitTest, log_multithreading)
             ASSERT_TRUE(res) << "line contains invalid content: " << line;
         }
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 // a function that accepts a plan's requested size on input, and
@@ -523,22 +517,7 @@ TEST(rocfft_UnitTest, workmem_missing)
     {
         workmem_test([](size_t) { return 0; }, rocfft_status_success);
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 // check what happens if work memory is required but not enough is provided
@@ -555,22 +534,7 @@ TEST(rocfft_UnitTest, workmem_small)
         workmem_test([](size_t requested) { return requested / 2; },
                      rocfft_status_invalid_work_buffer);
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 // hard to imagine this being a problem, but try giving too much as well
@@ -586,22 +550,7 @@ TEST(rocfft_UnitTest, workmem_big)
     {
         workmem_test([](size_t requested) { return requested * 2; }, rocfft_status_success);
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 // check if a user explicitly gives a null pointer - set work buffer
@@ -619,22 +568,7 @@ TEST(rocfft_UnitTest, workmem_null)
     {
         workmem_test([](size_t requested) { return requested; }, rocfft_status_success, true);
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 static const size_t RTC_PROBLEM_SIZE = 2304;
@@ -800,22 +734,7 @@ TEST(rocfft_UnitTest, rtc_cache_iter_1)
     {
         rtc_cache_main();
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 TEST(rocfft_UnitTest, rtc_cache_iter_2)
@@ -824,22 +743,7 @@ TEST(rocfft_UnitTest, rtc_cache_iter_2)
     {
         rtc_cache_main();
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 // make sure cache API functions tolerate null pointers without crashing
@@ -861,22 +765,7 @@ TEST(rocfft_UnitTest, rtc_cache_null)
         ASSERT_EQ(rocfft_cache_deserialize(nullptr, 12345), rocfft_status_invalid_arg_value);
         ASSERT_EQ(rocfft_cache_deserialize(&buf_len, 0), rocfft_status_invalid_arg_value);
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 // make sure RTC gracefully handles a helper process that crashes
@@ -890,7 +779,7 @@ TEST(rocfft_UnitTest, rtc_helper_crash)
 
     try
     {
-#ifdef WIN32
+#ifdef _WIN32
         char filename[MAX_PATH];
         GetModuleFileNameA(NULL, filename, MAX_PATH);
         fs::path test_exe    = filename;
@@ -952,22 +841,7 @@ TEST(rocfft_UnitTest, rtc_helper_crash)
         rocfft_plan_destroy(plan);
         plan = nullptr;
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 TEST(rocfft_UnitTest, rtc_test_harness)
@@ -984,7 +858,7 @@ TEST(rocfft_UnitTest, rtc_test_harness)
         //
         // NOTE: using system() for launching subprocesses for simplicity
         // and portability
-#ifdef WIN32
+#ifdef _WIN32
         static const char* test_command = "amdclang++ --version > NUL";
 #else
         static const char* test_command = "amdclang++ --version > /dev/null";
@@ -1100,7 +974,7 @@ TEST(rocfft_UnitTest, rtc_test_harness)
 #endif
             for(i = 0; i < files.size(); ++i)
             {
-#ifdef WIN32
+#ifdef _WIN32
                 const std::string command
                     = "amdclang++ -x hip -c -std=c++20 -o NUL " + files[i].first;
 #else
@@ -1128,20 +1002,11 @@ TEST(rocfft_UnitTest, rtc_test_harness)
             }
         }
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+}
+
+// Verify that rocfft/rocfft.h can be compiled as plain C (not C++).
+TEST(rocfft, cApi)
+{
+    EXPECT_EQ(rocfft_c(), 0);
 }

@@ -240,6 +240,8 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 /// \parblock
 /// In this example a device-level adjacent_difference operation is performed on integer values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_adjacent_difference.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp> //or <rocprim/device/device_adjacent_difference.hpp>
 ///
@@ -252,7 +254,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
 /// std::size_t size; // e.g., 8
-/// int* input1; // e.g., [8, 7, 6, 5, 4, 3, 2, 1]
+/// int* input1; // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
 /// int* output; // empty array of 8 elements
 ///
 /// std::size_t temporary_storage_size_bytes;
@@ -271,7 +273,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, size, binary_op
 /// );
-/// // output: [8, 1, 1, 1, 1, 1, 1, 1]
+/// // output: [1, 1, 1, 1, 1, 1, 1, 1]
 /// \endcode
 /// \endparblock
 template<typename Config = default_config,

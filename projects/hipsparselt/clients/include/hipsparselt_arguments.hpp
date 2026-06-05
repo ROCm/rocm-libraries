@@ -301,11 +301,6 @@ enum hipsparselt_argument : int
 };
 #undef CREATE_ENUM
 
-#if __clang__
-#define HIPSPARSELT_CLANG_STATIC static
-#else
-#define HIPSPARSELT_CLANG_STATIC
-#endif
 
 // ArgumentsHelper contains a templated lambda apply<> where there is a template
 // specialization for each line in the CPP macro FOR_EACH_ARGUMENT. For example,
@@ -332,9 +327,9 @@ namespace ArgumentsHelper
     // Macro defining specializations for specific arguments
     // e_alpha and e_beta get turned into negative sentinel value specializations
     // clang-format off
-#define APPLY(NAME)                                                                         \
-    template <>                                                                             \
-    HIPSPARSELT_CLANG_STATIC constexpr auto                                                     \
+#define APPLY(NAME)                                                                             \
+    template <>                                                                                 \
+    constexpr auto                                                                              \
         apply<e_##NAME == e_alpha ? hipsparselt_argument(-1)                                    \
                                   : e_##NAME == e_beta ? hipsparselt_argument(-2) : e_##NAME> = \
             [](auto&& func, const Arguments& arg, auto) { func(#NAME, arg.NAME); }
@@ -344,14 +339,14 @@ namespace ArgumentsHelper
 
     // Specialization for e_alpha
     template <>
-    HIPSPARSELT_CLANG_STATIC constexpr auto apply<e_alpha> =
+    constexpr auto apply<e_alpha> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("alpha", arg.get_alpha<decltype(T)>());
         };
 
     // Specialization for e_beta
     template <>
-    HIPSPARSELT_CLANG_STATIC constexpr auto apply<e_beta> =
+    constexpr auto apply<e_beta> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("beta", arg.get_beta<decltype(T)>());
         };

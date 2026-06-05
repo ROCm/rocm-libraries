@@ -35,6 +35,10 @@
 #include <algorithm>
 #include <map>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     // Which placeholder libraries should be initialized at start
@@ -69,6 +73,7 @@ namespace TensileLite
         gfx1153,
         gfx1200,
         gfx1201,
+        gfx1250,
         All
     };
 
@@ -133,6 +138,8 @@ namespace TensileLite
             return "TensileLibrary_*_gfx1200";
         case LazyLoadingInit::gfx1201:
             return "TensileLibrary_*_gfx1201";
+        case LazyLoadingInit::gfx1250:
+            return "TensileLibrary_*_gfx1250";
         case LazyLoadingInit::None:
             return "";
         }
@@ -358,3 +365,5 @@ namespace TensileLite
     };
 
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

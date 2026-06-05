@@ -1,47 +1,40 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2022 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
-#include <gtest/gtest.h>
-#include <miopen/miopen.h>
-#include <miopen/solver_id.hpp>
-#include <serialize.hpp>
-#include <fusionHost.hpp>
-#include <miopen/fusion.hpp>
-#include <miopen/fusion/solvers.hpp>
-#include <miopen/fusion/fusion_invoke_params.hpp>
-#include <miopen/conv_algo_name.hpp>
-#include <half/half.hpp>
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
-#include "tensor_util.hpp"
+#include <algorithm>
+#include <cctype>
+#include <string>
+
+#include <gtest/gtest.h>
+#include <half/half.hpp>
+#include <miopen/fusion.hpp>
+#include <miopen/fusion/fusion_invoke_params.hpp>
+#include <miopen/fusion/solvers.hpp>
+#include <miopen/miopen.h>
+
+#include "cba.hpp"
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "cba.hpp"
+#include "tensor_util.hpp"
 
 namespace {
 
 using float16 = half_float::half;
+
+struct CbaParamNameGenerator
+{
+    template <typename ParamType>
+    std::string operator()(const testing::TestParamInfo<ParamType>& info) const
+    {
+        std::string name = testing::PrintToString(info.param);
+        std::transform(name.begin(), name.end(), name.begin(), [](const char c) {
+            return std::isalnum(static_cast<unsigned char>(c)) ? c : '_';
+        });
+        if(name.empty())
+            name = "param";
+        return "case_" + std::to_string(info.index) + "_" + name;
+    }
+};
 
 template <typename T, typename TestCaseType = ConvTestCaseBase>
 struct CBAInferBase : ConvBiasActivInferTest<T, TestCaseType>
@@ -244,7 +237,8 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::Values(miopenTensorNCHW),
                      testing::Values(0.25f),
                      testing::Values(0.75f),
-                     testing::Values(0.5f)));
+                     testing::Values(0.5f)),
+    CbaParamNameGenerator{});
 
 #endif
 
@@ -255,7 +249,8 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(miopenTensorNCHW),
                                           testing::Values(0.25f),
                                           testing::Values(0.75f),
-                                          testing::Values(0.5f)));
+                                          testing::Values(0.5f)),
+                         CbaParamNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_ConvBiasActivInfer_FP16,
@@ -264,73 +259,86 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(miopenTensorNCHW, miopenTensorNHWC),
                                           testing::Values(0.25f),
                                           testing::Values(0.75f),
-                                          testing::Values(0.5f)));
+                                          testing::Values(0.5f)),
+                         CbaParamNameGenerator{});
 
 // BFP16 tests
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_ConvGrpBiasActivInfer_BFP16,
     gcbaInferParamGenSmoke(GroupConvTestConfig<2u>::GetSmokeConfigs<Direction::Forward>(),
-                           testing::Values(miopenTensorNHWC, miopenTensorNCHW)));
+                           testing::Values(miopenTensorNHWC, miopenTensorNCHW)),
+    CbaParamNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_ConvGrpBiasActivInfer3D_BFP16,
     gcbaInferParamGenSmoke(GroupConvTestConfig<3u>::GetSmokeConfigs<Direction::Forward>(),
-                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)));
+                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)),
+    CbaParamNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     GPU_ConvGrpBiasActivInfer_BFP16,
     gcbaInferParamGenFull(GroupConvTestConfig<2u>::GetConfigs<Direction::Forward>(),
-                          testing::Values(miopenTensorNHWC, miopenTensorNCHW)));
+                          testing::Values(miopenTensorNHWC, miopenTensorNCHW)),
+    CbaParamNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(
     Full,
     GPU_ConvGrpBiasActivInfer3D_BFP16,
     gcbaInferParamGenFull(GroupConvTestConfig<3u>::GetConfigs<Direction::Forward>(),
-                          testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)));
+                          testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)),
+    CbaParamNameGenerator{});
 
 // FP16 tests
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_ConvGrpBiasActivInfer_FP16,
     gcbaInferParamGenSmoke(GroupConvTestConfig<2u>::GetSmokeConfigs<Direction::Forward>(),
-                           testing::Values(miopenTensorNHWC, miopenTensorNCHW)));
+                           testing::Values(miopenTensorNHWC, miopenTensorNCHW)),
+    CbaParamNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_ConvGrpBiasActivInfer3D_FP16,
     gcbaInferParamGenSmoke(GroupConvTestConfig<3u>::GetSmokeConfigs<Direction::Forward>(),
-                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)));
+                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)),
+    CbaParamNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     GPU_ConvGrpBiasActivInfer_FP16,
     gcbaInferParamGenFull(GroupConvTestConfig<2u>::GetConfigs<Direction::Forward>(),
-                          testing::Values(miopenTensorNHWC, miopenTensorNCHW)));
+                          testing::Values(miopenTensorNHWC, miopenTensorNCHW)),
+    CbaParamNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(
     Full,
     GPU_ConvGrpBiasActivInfer3D_FP16,
     gcbaInferParamGenFull(GroupConvTestConfig<3u>::GetConfigs<Direction::Forward>(),
-                          testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)));
+                          testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)),
+    CbaParamNameGenerator{});
 
 // FP32 tests
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_ConvGrpBiasActivInfer_FP32,
     gcbaInferParamGenSmoke(GroupConvTestConfig<2u>::GetSmokeConfigs<Direction::Forward>(),
-                           testing::Values(miopenTensorNHWC, miopenTensorNCHW)));
+                           testing::Values(miopenTensorNHWC, miopenTensorNCHW)),
+    CbaParamNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_ConvGrpBiasActivInfer3D_FP32,
     gcbaInferParamGenSmoke(GroupConvTestConfig<3u>::GetSmokeConfigs<Direction::Forward>(),
-                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)));
+                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)),
+    CbaParamNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     GPU_ConvGrpBiasActivInfer_FP32,
     gcbaInferParamGenFull(GroupConvTestConfig<2u>::GetConfigs<Direction::Forward>(),
-                          testing::Values(miopenTensorNHWC, miopenTensorNCHW)));
+                          testing::Values(miopenTensorNHWC, miopenTensorNCHW)),
+    CbaParamNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(
     Full,
     GPU_ConvGrpBiasActivInfer3D_FP32,
     gcbaInferParamGenFull(GroupConvTestConfig<3u>::GetConfigs<Direction::Forward>(),
-                          testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)));
+                          testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)),
+    CbaParamNameGenerator{});

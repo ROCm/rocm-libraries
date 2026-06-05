@@ -53,6 +53,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
     generator.blockDim = {LAUNCH_BOUNDS_R2C_C2R_KERNEL, 1, 1};
 
     RealComplexSpecs specs{node.scheme,
+                           node.dimension,
                            node.length.size(),
                            node.precision,
                            node.inArrayType,
@@ -82,13 +83,13 @@ RTCKernelArgs RTCKernelRealComplex::get_launch_args(DeviceCallIn& data)
     std::array<size_t, 3> kern_lengths{1, 1, 1};
     std::array<size_t, 4> kern_stride_in{1, 1, 1, 1};
     std::array<size_t, 4> kern_stride_out{1, 1, 1, 1};
-    auto                  dim = data.node->length.size();
+    auto                  lensz = data.node->length.size();
 
     std::copy(data.node->length.begin(), data.node->length.end(), kern_lengths.begin());
     std::copy(data.node->inStride.begin(), data.node->inStride.end(), kern_stride_in.begin());
-    kern_stride_in[dim] = data.node->iDist;
+    kern_stride_in[lensz] = data.node->iDist;
     std::copy(data.node->outStride.begin(), data.node->outStride.end(), kern_stride_out.begin());
-    kern_stride_out[dim] = data.node->oDist;
+    kern_stride_out[lensz] = data.node->oDist;
 
     RTCKernelArgs kargs;
     if(data.node->scheme == CS_KERNEL_COPY_HERM_TO_CMPLX)
@@ -165,6 +166,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
     generator.blockDim = {LAUNCH_BOUNDS_R2C_C2R_KERNEL, 1, 1};
 
     RealComplexEvenSpecs specs{{node.scheme,
+                                node.dimension,
                                 node.length.size(),
                                 node.precision,
                                 node.inArrayType,
@@ -288,6 +290,7 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
     generator.blockDim = {tileX, tileY, 1};
 
     RealComplexEvenTransposeSpecs specs{{node.scheme,
+                                         node.dimension,
                                          node.length.size(),
                                          node.precision,
                                          node.inArrayType,

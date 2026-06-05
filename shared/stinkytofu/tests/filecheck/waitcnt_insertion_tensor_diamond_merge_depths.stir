@@ -1,0 +1,67 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+#
+# CFG (tensor ops shown; cbranch is s_cbranch_scc1 to ^p_shallow when SCC0 set):
+#
+#                         ^entry
+#                    tensor_load [11]
+#                        /     \
+#           (taken)     /       \     (fall-through)
+#                     v           v
+#               ^p_shallow     ^p_deep
+#              (no extra ops)  tensor_load [12]
+#                     \         tensor_load [12]
+#                      \       /
+#                       v     v
+#                      ^merge
+#                   s_barrier [11]
+#
+# Per-path tensor FIFO at the merge anchor (drain token [11]):
+#   via ^p_shallow: [t11]                     -> tlcnt=0
+#   via ^p_deep:    [t11], [t12], [t12]       -> tlcnt=2
+#
+# Diamond merge with different per-predecessor tensor FIFO depths before a
+# shared barrier (token [11]):
+#   - via p_shallow (taken cbranch): [t11] issued in ^entry only     -> tlcnt=0
+#   - via p_deep (fall-through):     [t11] + [t12] + [t12] in ^p_deep -> tlcnt=2
+#
+# The shared t11 must be issued in ^entry (before the split), not only in ^p_shallow:
+# with the load only in ^p_shallow the planner collapses paths and emits tlcnt=0
+# at the merge. An explicit cbranch is required (entry "Successors: ^a, ^b"
+# without a branch does not split per-path FIFO state).
+#
+# CHECK-LABEL patterns must include the trailing ':' so they match block headers
+# (^p_shallow:) and not Successors lines (Successors: ^p_shallow, ...).
+#
+# CHECK-LABEL: @waitcnt_insertion_tensor_diamond_merge_depths
+#
+# CHECK-LABEL: ^p_deep:
+# CHECK-NOT: s_wait_tensorcnt
+#
+# Shallow path: compensating full drain at the (empty) predecessor tail.
+# CHECK-LABEL: ^p_shallow:
+# CHECK: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+#
+# Merge: deepest-path wait at the anchor barrier.
+# CHECK-LABEL: ^merge:
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 2
+# CHECK-NEXT: s_barrier
+# CHECK-SAME: tokens = [11]
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_tensor_diamond_merge_depths() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [11] } }
+  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_cbranch_scc1"("p_shallow", SCC0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^p_shallow, ^p_deep
+^p_deep:
+  "st.tensor_load_to_lds"(s[4:7], s[18:25]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [12] } }
+  "st.tensor_load_to_lds"(s[8:11], s[26:33]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [12] } }
+  Successors: ^merge
+^p_shallow:
+  Successors: ^merge
+^merge:
+  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [11] } }
+}

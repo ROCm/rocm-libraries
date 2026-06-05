@@ -30,7 +30,7 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup level3_module
-*  \brief Sparse matrix dense matrix multiplication using CSR storage format
+*  \brief Sparse matrix dense matrix multiplication using the CSR storage format.
 *
 *  \details
 *  \p hipsparseXcsrmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
@@ -67,15 +67,15 @@ extern "C" {
 *  \endcode
 *
  *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \deprecated
 *  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
 *  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
-*  handle              handle to the hipsparse library context queue.
+*  handle              handle to the hipSPARSE library context queue.
 *  @param[in]
 *  transA              matrix \f$A\f$ operation type.
 *  @param[in]
@@ -115,9 +115,9 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha or \p beta is nullptr,
-*          \p m, \p n, \p k or \p nnz is negative, \p ldb or \p ldc is invalid, or
-*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B or \p C is nullptr.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
+*          \p m, \p n, \p k, or \p nnz is negative, \p ldb or \p ldc is invalid, or
+*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B, or \p C is nullptr.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
 *          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
@@ -200,7 +200,7 @@ hipsparseStatus_t hipsparseZcsrmm(hipsparseHandle_t         handle,
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup level3_module
-*  \brief Sparse matrix dense matrix multiplication using CSR storage format
+*  \brief Sparse matrix dense matrix multiplication using the CSR storage format.
 *
 *  \details
 *  \p hipsparseXcsrmm2 multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
@@ -247,11 +247,11 @@ hipsparseStatus_t hipsparseZcsrmm(hipsparseHandle_t         handle,
 *  \endcode
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  transA      matrix \f$A\f$ operation type.
 *  @param[in]
@@ -281,20 +281,20 @@ hipsparseStatus_t hipsparseZcsrmm(hipsparseHandle_t         handle,
 *  B           array of dimension \p ldb*n (\f$op(B) == B\f$),
 *              \p ldb*k otherwise.
 *  @param[in]
-*  ldb         leading dimension of \f$B\f$, must be at least \f$\max{(1, k)}\f$
+*  ldb         leading dimension of \f$B\f$. Must be at least \f$\max{(1, k)}\f$
 *              (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
 *  @param[in]
 *  beta        scalar \f$\beta\f$.
 *  @param[inout]
 *  C           array of dimension \p ldc*n.
 *  @param[in]
-*  ldc         leading dimension of \f$C\f$, must be at least \f$\max{(1, m)}\f$
+*  ldc         leading dimension of \f$C\f$. Must be at least \f$\max{(1, m)}\f$
 *              (\f$op(A) == A\f$), \f$\max{(1, k)}\f$ otherwise.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, \p ldb, \p ldc
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, \p ldb, \p ldc,
 *              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
-*              \p B, \p beta or \p C is invalid.
+*              \p B, \p beta, or \p C is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.

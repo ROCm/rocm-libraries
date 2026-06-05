@@ -28,7 +28,12 @@
 #include "ck_tile/builder/reflect/description.hpp"
 #include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_fwd_multiple_d_wmma_cshuffle.hpp"
 #endif
+#include "ck/tensor_operation/gpu/device/tensor_size_check.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace device {
@@ -126,7 +131,6 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
 
     static constexpr auto MWaves = MPerBlock / (MRepeat * MPerWmma);
     static constexpr auto NWaves = NPerBlock / (NRepeat * NPerWmma);
-    static constexpr auto WmmaK  = 16;
 
     static constexpr auto AEnableLds_auto = NWaves == 1 ? false : true;
     static constexpr auto BEnableLds_auto = MWaves == 1 ? false : true;
@@ -171,17 +175,18 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
         }
         else
         {
-            constexpr auto A_KRow      = 2;
-            constexpr auto A_K0PerWmma = WmmaK / A_KRow / K1Number;
-            const auto A_KWmma         = K / WmmaK;
+            const index_t WmmaK    = get_wmma_k<ADataType>();
+            constexpr auto A_KRow  = 2;
+            const auto A_K0PerWmma = WmmaK / A_KRow / K1Number;
+            const auto A_KWmma     = K / WmmaK;
 
             const auto M0 = M / MPerBlock;
             // 0   1     0         1                2        3             4        5          6
             // M - K <-> A_KWmma - MBlock*MRepeat - MWaves - A_K0PerWmma - A_KRow - MPerWmma - A_K1
             return transform_tensor_descriptor(
                 in_gemmm_gemmk_desc,
-                make_tuple(make_unmerge_transform(make_tuple(
-                               A_KWmma, Number<A_K0PerWmma>{}, Number<A_KRow>{}, K1Number)),
+                make_tuple(make_unmerge_transform(
+                               make_tuple(A_KWmma, A_K0PerWmma, Number<A_KRow>{}, K1Number)),
                            make_unmerge_transform(
                                make_tuple(M0 * MRepeat, Number<MWaves>{}, Number<MPerWmma>{}))),
                 make_tuple(Sequence<1>{}, Sequence<0>{}),
@@ -215,17 +220,18 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
         }
         else
         {
-            constexpr auto B_KRow      = 2;
-            constexpr auto B_K0PerWmma = WmmaK / B_KRow / K1Number;
-            const auto B_KWmma         = K / WmmaK;
+            constexpr auto B_KRow  = 2;
+            const index_t WmmaK    = get_wmma_k<BDataType, K1>();
+            const auto B_K0PerWmma = WmmaK / B_KRow / K1Number;
+            const auto B_KWmma     = K / WmmaK;
 
             const auto N0 = N / NPerBlock;
             // 0   1     0         1                2        3             4        5          6
             // M - K <-> A_KWmma - MBlock*MRepeat - MWaves - A_K0PerWmma - A_KRow - MPerWmma - A_K1
             return transform_tensor_descriptor(
                 wei_gemmn_gemmk_desc,
-                make_tuple(make_unmerge_transform(make_tuple(
-                               B_KWmma, Number<B_K0PerWmma>{}, Number<B_KRow>{}, K1Number)),
+                make_tuple(make_unmerge_transform(
+                               make_tuple(B_KWmma, B_K0PerWmma, Number<B_KRow>{}, K1Number)),
                            make_unmerge_transform(
                                make_tuple(N0 * NRepeat, Number<NWaves>{}, Number<NPerWmma>{}))),
                 make_tuple(Sequence<1>{}, Sequence<0>{}),
@@ -348,7 +354,8 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
                  index_t N01,
                  const AElementwiseOperation& a_element_op,
                  const BElementwiseOperation& b_element_op,
-                 const CDEElementwiseOperation& cde_element_op)
+                 const CDEElementwiseOperation& cde_element_op,
+                 bool stride_overflow_in = false)
             : p_a_grid_{static_cast<const ADataType*>(p_a)},
               p_b_grid_{static_cast<const BDataType*>(p_b)},
               p_ds_grid_{},
@@ -376,6 +383,7 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
               a_element_op_{a_element_op},
               b_element_op_{b_element_op},
               cde_element_op_{cde_element_op},
+              stride_overflow_{stride_overflow_in},
               a_g_n_c_wis_lengths_{a_g_n_c_wis_lengths},
               a_g_n_c_wis_strides_{a_g_n_c_wis_strides},
               b_g_k_c_xs_lengths_{b_g_k_c_xs_lengths},
@@ -476,6 +484,7 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
         AElementwiseOperation a_element_op_;
         BElementwiseOperation b_element_op_;
         CDEElementwiseOperation cde_element_op_;
+        bool stride_overflow_;
 
         // for checking IsSupportedArgument()
         std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_lengths_;
@@ -579,6 +588,9 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(arg.stride_overflow_)
+            return false;
+
         namespace ctc = tensor_layout::convolution;
 
         // check device
@@ -593,7 +605,10 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
         {
             return false;
         }
-
+        if(!is_xdl_wmma_k_supported<ADataType, KPerBlock>())
+        {
+            return false;
+        }
         // check ConvolutionForwardSpecialization
         if constexpr(ConvForwardSpecialization ==
                      ConvolutionForwardSpecialization::Filter1x1Stride1Pad0)
@@ -829,6 +844,12 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
         array_convert(input_left_pads_i32, input_left_pads);
         array_convert(input_right_pads_i32, input_right_pads);
 
+        bool ds_ovf = false;
+        for(index_t d = 0; d < NumDTensor; d++)
+            ds_ovf |= tensor_exceeds_2gb(ds_g_n_k_wos_lengths[d]);
+        const bool stride_ovf = tensor_exceeds_2gb(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb(e_g_n_k_wos_lengths) || ds_ovf;
         return Argument{p_a,
                         p_b,
                         p_ds,
@@ -849,7 +870,8 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
                         1,
                         a_element_op,
                         b_element_op,
-                        cde_element_op};
+                        cde_element_op,
+                        stride_ovf};
     }
 
     static auto MakeInvoker() { return Invoker{}; }
@@ -950,6 +972,12 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
         array_convert(input_left_pads_i32, input_left_pads);
         array_convert(input_right_pads_i32, input_right_pads);
 
+        bool ds_ovf = false;
+        for(index_t d = 0; d < NumDTensor; d++)
+            ds_ovf |= tensor_exceeds_2gb(ds_g_n_k_wos_lengths[d]);
+        const bool stride_ovf = tensor_exceeds_2gb(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb(e_g_n_k_wos_lengths) || ds_ovf;
         return std::make_unique<Argument>(p_a,
                                           p_b,
                                           p_ds,
@@ -970,7 +998,8 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
                                           1,
                                           a_element_op,
                                           b_element_op,
-                                          cde_element_op);
+                                          cde_element_op,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseInvoker> MakeInvokerPointer() override
@@ -1031,3 +1060,6 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

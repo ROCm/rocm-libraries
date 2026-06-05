@@ -5,7 +5,12 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <iostream>
 #include <vector>
+
+#include <gtest/gtest.h>
+
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -44,31 +49,48 @@ public:
     }
 };
 
-inline std::vector<std::filesystem::path> filesInDirectoryWithExt(const std::filesystem::path& path,
-                                                                  const std::string& ext)
+/// Recursively scan a directory for bundle JSON files.
+/// Returns sorted paths. Excludes meta.json. Returns empty vector on error or
+/// if no bundles are found.
+inline std::vector<std::filesystem::path>
+    scanBundleJsonFiles(const std::filesystem::path& directory)
 {
     std::vector<std::filesystem::path> paths;
-    std::copy_if(std::filesystem::directory_iterator(path),
-                 std::filesystem::directory_iterator(),
-                 std::back_inserter(paths),
-                 [ext](const std::filesystem::path& p) { return p.extension() == ext; });
+    try
+    {
+        for(const auto& entry : std::filesystem::recursive_directory_iterator(directory))
+        {
+            if(entry.path().extension() == ".json" && entry.path().filename() != "meta.json")
+            {
+                paths.push_back(entry.path());
+            }
+        }
+    }
+    catch(const std::exception& e)
+    {
+        std::cerr << "Warning: failed to scan golden reference data in " << directory << ": "
+                  << e.what() << '\n';
+        return {};
+    }
 
+    std::sort(paths.begin(), paths.end());
     return paths;
 }
 
-// Temporary helper function
-inline std::vector<std::filesystem::path>
-    filesInDirectoryWithExtReturnEmptyPathOnThrow(const std::filesystem::path& path,
-                                                  const std::string& ext)
+/// Scan golden reference data directory for bundle JSON files.
+/// Returns a gtest parameter generator. On failure or empty directory, returns
+/// a sentinel empty-path so SetUp() can GTEST_SKIP() gracefully.
+inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
-    try
+    auto dir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+               / "../lib/golden_reference_data" / subDirectory;
+
+    auto paths = scanBundleJsonFiles(dir);
+    if(paths.empty())
     {
-        return filesInDirectoryWithExt(path, ext);
+        return testing::ValuesIn(std::vector<std::filesystem::path>{""});
     }
-    catch(...)
-    {
-        return {""};
-    }
+    return testing::ValuesIn(paths);
 }
 
 }

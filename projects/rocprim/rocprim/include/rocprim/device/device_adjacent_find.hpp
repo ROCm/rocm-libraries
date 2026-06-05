@@ -139,10 +139,11 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
 
         const auto params = get_config<Selector>(Config{}, current_target);
 
-        const unsigned int                block_size       = params.kernel_config.block_size;
-        const unsigned int                items_per_thread = params.kernel_config.items_per_thread;
-        const unsigned int                items_per_block  = block_size * items_per_thread;
-        const unsigned int grid_size        = (size + items_per_block - 1) / items_per_block;
+        const unsigned int block_size       = params.kernel_config.block_size;
+        const unsigned int items_per_thread = params.kernel_config.items_per_thread;
+        const unsigned int items_per_block  = block_size * items_per_thread;
+        const unsigned int grid_size
+            = ::rocprim::detail::ceiling_div(size + items_per_block - 1, items_per_block);
         const unsigned int shared_mem_bytes = 0; /*no dynamic shared mem*/
 
         auto kernel = [=](auto target_config)
@@ -160,14 +161,13 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
 
         // Get grid size for maximum occupancy, as we may not be able to schedule all the blocks
         // at the same time
-        int min_grid_size      = 0;
-        int optimal_block_size = 0;
-        ROCPRIM_RETURN_ON_ERROR(
-            hipOccupancyMaxPotentialBlockSize(&min_grid_size,
-                                              &optimal_block_size,
-                                              adjacent_find_block_reduce_kernel.kernel,
-                                              shared_mem_bytes,
-                                              int(block_size)));
+        int min_grid_size = 0;
+        ROCPRIM_RETURN_ON_ERROR(rocprim::detail::grid_dim_for_max_active_blocks(
+            min_grid_size,
+            block_size,
+            adjacent_find_block_reduce_kernel.kernel,
+            stream));
+
         min_grid_size = std::min(static_cast<unsigned int>(min_grid_size), grid_size);
 
         if(debug_synchronous)
@@ -259,31 +259,32 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
 /// \parblock
 /// In this example a device-level adjacent_find operation is performed on integer values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_adjacent_find.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp> //or <rocprim/device/device_adjacent_find.hpp>
 ///
 /// // Custom boolean binary function
-/// auto equal_op = [](int a, int b) -> bool { return (a - b == 2); };
+/// auto diff_is_two = [](int a, int b) -> bool { return (a - b == 2); };
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
 /// std::size_t  size;   // e.g., 8
 /// int*         input;  // e.g., [8, 7, 5, 4, 3, 2, 1, 0]
 /// std::size_t* output; // output index
-/// auto         custom_op = equal_op{};
 ///
 /// std::size_t  temporary_storage_size_bytes;
 /// void*        temporary_storage_ptr = nullptr;
 ///
 /// // Get required size of the temporary storage
 /// rocprim::adjacent_find(
-///     temporary_storage_ptr, temporary_storage_size_bytes, input, output, size, custom_op);
+///     temporary_storage_ptr, temporary_storage_size_bytes, input, output, size, diff_is_two);
 ///
 /// // Allocate temporary storage
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // Perform adjacent find
 /// rocprim::adjacent_find(
-///     temporary_storage_ptr, temporary_storage_size_bytes, input, output, size, custom_op);
+///     temporary_storage_ptr, temporary_storage_size_bytes, input, output, size, diff_is_two);
 /// // output: 1
 /// \endcode
 /// \endparblock

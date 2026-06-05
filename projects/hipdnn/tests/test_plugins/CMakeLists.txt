@@ -5,18 +5,10 @@ cmake_minimum_required(VERSION 3.25.2)
 
 find_package(hip REQUIRED)
 
-# Define plugin names as variables
-set(TEST_GOOD_PLUGIN_NAME "test_good_plugin")
-set(TEST_EXECUTE_FAILS_PLUGIN_NAME "test_execute_fails_plugin")
-set(TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME "test_no_applicable_engines_a_plugin")
-set(TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME "test_no_applicable_engines_b_plugin")
-set(TEST_DUPLICATE_ID_A_PLUGIN_NAME "test_duplicate_id_a_plugin")
-set(TEST_DUPLICATE_ID_B_PLUGIN_NAME "test_duplicate_id_b_plugin")
-set(TEST_INCOMPLETE_API_PLUGIN_NAME "test_incomplete_api_plugin")
-set(TEST_GOOD_DEFAULT_PLUGIN_NAME "test_good_default_plugin")
-set(TEST_KNOBS_PLUGIN_NAME "test_knobs_plugin")
-set(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME "test_knob_constraint_validation_plugin")
-set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "test_incompatible_version_plugin")
+# Plugin target names are defined in cmake/TestPluginNames.cmake (included by
+# the root CMakeLists.txt) so they are available to both this directory and
+# the test executables that depend on these targets, regardless of the order
+# subdirectories are added.
 
 # Function to create a test plugin with common configuration
 function(add_test_plugin target_name)
@@ -25,12 +17,13 @@ function(add_test_plugin target_name)
     add_library(${target_name} SHARED ${source_files})
 
     target_compile_definitions(
-        ${target_name} PRIVATE HIPDNN_COMPONENT_NAME="${target_name}" __HIP_PLATFORM_AMD__
+        ${target_name} PRIVATE HIPDNN_COMPONENT_NAME="${target_name}" HIPDNN_TEST_PLUGIN_BUILD
+                               __HIP_PLATFORM_AMD__
     )
 
     target_include_directories(${target_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-    target_link_libraries(${target_name} PUBLIC hipdnn_data_sdk hipdnn_plugin_sdk hip::host)
+    target_link_libraries(${target_name} PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)
 
     target_compile_options(${target_name} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
@@ -86,24 +79,49 @@ add_test_plugin(${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME} TestKnobConstrain
 # test_incompatible_version_plugin is a plugin that returns an incompatible plugin API version
 add_test_plugin(${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME} TestIncompatibleVersionPlugin.cpp)
 
+# Override-implementing fake: reports `K_OVERRIDE_EXECUTE_MIN_API_VERSION`
+# and exports the optional override-execute symbol.
+add_test_plugin(${HIPDNN_TEST_OVERRIDE_IMPLEMENTING_PLUGIN_TARGET} TestOverrideImplementingPlugin.cpp)
+
+# Override-omitting fake: reports the baseline API and omits the override symbol.
+add_test_plugin(${HIPDNN_TEST_OVERRIDE_OMITTING_PLUGIN_TARGET} TestOverrideOmittingPlugin.cpp)
+
+# Version-liar fake: reports the override API version but omits the override symbol.
+add_test_plugin(${HIPDNN_TEST_VERSION_LIAR_PLUGIN_TARGET} TestVersionLiarPlugin.cpp)
+
+# Second override-implementing fake with a distinct engine id.
+add_test_plugin(${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET} TestSecondOverridePlugin.cpp)
+
+# Malformed-version fake exercises load-time API-version parse rejection.
+add_test_plugin(${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET} TestMalformedVersionPlugin.cpp)
+
+# Version-zero fake reports a parseable but too-low API version.
+add_test_plugin(${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET} TestVersionZeroPlugin.cpp)
+
 # Create the default plugin in test_plugins/default
 set(test_good_default_plugin_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/default")
 set(test_good_default_plugin_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/default")
 add_test_plugin(${TEST_GOOD_DEFAULT_PLUGIN_NAME} TestGoodDefaultPlugin.cpp)
 
-# Export plugin names to parent scope for use in test compilation
-set(TEST_GOOD_PLUGIN_NAME "${TEST_GOOD_PLUGIN_NAME}" PARENT_SCOPE)
-set(TEST_EXECUTE_FAILS_PLUGIN_NAME "${TEST_EXECUTE_FAILS_PLUGIN_NAME}" PARENT_SCOPE)
-set(TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME "${TEST_NO_APPLICABLE_ENGINES_A_PLUGIN_NAME}"
-    PARENT_SCOPE
-)
-set(TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME "${TEST_NO_APPLICABLE_ENGINES_B_PLUGIN_NAME}"
-    PARENT_SCOPE
-)
-set(TEST_DUPLICATE_ID_A_PLUGIN_NAME "${TEST_DUPLICATE_ID_A_PLUGIN_NAME}" PARENT_SCOPE)
-set(TEST_DUPLICATE_ID_B_PLUGIN_NAME "${TEST_DUPLICATE_ID_B_PLUGIN_NAME}" PARENT_SCOPE)
-set(TEST_INCOMPLETE_API_PLUGIN_NAME "${TEST_INCOMPLETE_API_PLUGIN_NAME}" PARENT_SCOPE)
-set(TEST_GOOD_DEFAULT_PLUGIN_NAME "${TEST_GOOD_DEFAULT_PLUGIN_NAME}" PARENT_SCOPE)
-set(TEST_KNOBS_PLUGIN_NAME "${TEST_KNOBS_PLUGIN_NAME}" PARENT_SCOPE)
-set(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME "${TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME}" PARENT_SCOPE)
-set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "${TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME}" PARENT_SCOPE)
+# Heuristic test plugins
+# test_good_heuristic_plugin implements the full heuristic plugin API
+add_test_plugin(${TEST_GOOD_HEURISTIC_PLUGIN_NAME} TestGoodHeuristicPlugin.cpp)
+
+# test_incomplete_heuristic_api_plugin is missing required symbols (for error testing)
+add_test_plugin(${TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME} TestIncompleteHeuristicApiPlugin.cpp)
+
+# test_no_optional_heuristic_plugin omits optional symbols (GetPolicyName, SetLogLevel)
+add_test_plugin(${TEST_NO_OPTIONAL_HEURISTIC_PLUGIN_NAME} TestNoOptionalHeuristicPlugin.cpp)
+
+# test_bad_api_version_heuristic_plugin returns incompatible API version
+add_test_plugin(${TEST_BAD_API_VERSION_HEURISTIC_PLUGIN_NAME} TestBadApiVersionHeuristicPlugin.cpp)
+
+# test_empty_name_heuristic_plugin returns empty policy name
+add_test_plugin(${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME} TestEmptyNameHeuristicPlugin.cpp)
+
+# test_duplicate_policy_id_a/b_plugin return same policy name (same ID)
+add_test_plugin(${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME} TestDuplicatePolicyIdAPlugin.cpp)
+add_test_plugin(${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME} TestDuplicatePolicyIdBPlugin.cpp)
+
+# Plugin names are exported via cmake/TestPluginNames.cmake; no PARENT_SCOPE
+# re-export needed.

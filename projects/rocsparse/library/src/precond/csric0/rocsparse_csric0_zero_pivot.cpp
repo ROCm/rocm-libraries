@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,15 +42,26 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, info);
     ROCSPARSE_CHECKARG_POINTER(2, position);
 
-    auto       csric0_info = info->get_csric0_info();
-    const auto status      = csric0_info->copy_zero_pivot_async(
-        handle->pointer_mode, rocsparse::get_indextype<rocsparse_int>(), position, handle->stream);
+    auto csric0_info = info->get_csric0_info();
 
-    if(status == rocsparse_status_zero_pivot)
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(
+        handle,
+        1,
+        csric0_info,
+        (csric0_info != nullptr) ? csric0_info->get_singularity_numeric_exact() : nullptr,
+        nullptr,
+        handle->pointer_mode,
+        rocsparse::get_indextype<rocsparse_int>(),
+        position));
+
+    rocsparse_int pos;
+    RETURN_IF_HIP_ERROR(
+        hipMemcpyAsync(&pos, position, sizeof(rocsparse_int), hipMemcpyDefault, handle->stream));
+    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    if(pos != -1)
     {
-        return status;
+        return rocsparse_status_zero_pivot;
     }
-    RETURN_IF_ROCSPARSE_ERROR(status);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

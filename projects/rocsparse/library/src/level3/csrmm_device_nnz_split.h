@@ -61,6 +61,12 @@ namespace rocsparse
                                                             rocsparse_order      order_C,
                                                             rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int tid = hipThreadIdx_x;
         const int bid = hipBlockIdx_x;
         const int lid = tid & (WF_SIZE - 1);
@@ -198,6 +204,12 @@ namespace rocsparse
                                                                  rocsparse_order      order_C,
                                                                  rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int tid = hipThreadIdx_x;
         const int bid = hipBlockIdx_x;
         const int lid = tid & (WF_SIZE - 1);
@@ -314,6 +326,9 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void segmented_blockreduce(const I* __restrict__ rows,
                                                     T* __restrict__ vals)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+
         const int tid = hipThreadIdx_x;
 
         for(unsigned int j = 1; j < BLOCKSIZE; j <<= 1)
@@ -356,11 +371,14 @@ namespace rocsparse
 
         const I col = hipBlockIdx_x;
 
-        for(I i = tid; i < nblocks; i += BLOCKSIZE)
+        for(I i = 0; i < nblocks; i += BLOCKSIZE)
         {
+            const I idx = i + tid;
+
             // Copy data to reduction buffers
-            shared_row[tid] = row_block_red[i];
-            shared_val[tid] = val_block_red[i + nblocks * col];
+            shared_row[tid] = (idx < nblocks) ? row_block_red[idx] : -1;
+            shared_val[tid]
+                = (idx < nblocks) ? val_block_red[idx + nblocks * col] : static_cast<T>(0);
 
             __syncthreads();
 
@@ -459,6 +477,11 @@ namespace rocsparse
                                                             rocsparse_order      order_C,
                                                             rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const int tid = hipThreadIdx_x;
         const int bid = hipBlockIdx_x;
         const int lid = tid & (WF_SIZE - 1);
@@ -583,6 +606,14 @@ namespace rocsparse
                                                                  rocsparse_order      order_C,
                                                                  rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+        static_assert((BLOCKSIZE / WF_SIZE) > 0
+                          && ((BLOCKSIZE / WF_SIZE) & ((BLOCKSIZE / WF_SIZE) - 1)) == 0,
+                      "BLOCKSIZE / WF_SIZE must be a power of two.");
+
         const int tid = hipThreadIdx_x;
         const int bid = hipBlockIdx_x;
         const int lid = tid & (WF_SIZE - 1);

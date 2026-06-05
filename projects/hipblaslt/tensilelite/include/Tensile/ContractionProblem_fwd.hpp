@@ -26,12 +26,16 @@
 
 #pragma once
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
-    class ContractionProblemParameters;
-    class ContractionProblem;
-    class ContractionProblemGemm;
-    class ContractionProblemGroupedGemm;
-    struct ContractionInputs;
-    struct ContractionGroupedInputs;
+    class TENSILE_API ContractionProblemParameters;
+    class TENSILE_API ContractionProblem;
+    class TENSILE_API ContractionProblemGemm;
+    class TENSILE_API ContractionProblemGroupedGemm;
+    struct TENSILE_API ContractionInputs;
+    struct TENSILE_API ContractionGroupedInputs;
 } // namespace TensileLite
+TENSILE_HIDDEN_END

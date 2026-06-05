@@ -90,7 +90,10 @@ using Params = ::testing::Types<
     params<int8_t, int8_t, rocprim::plus<int8_t>, -100, 0, 10000>,
     params<custom_double2, custom_double2, rocprim::minimum<custom_double2>, 1000, 0, 10000>,
     params<custom_int2, custom_short2, rocprim::maximum<custom_int2>, 10, 1000, 10000>,
+#if !USES_ASAN
+    // Workaround: This test case is **very** slow under ASAN. Skipping for now.
     params<double, double, rocprim::maximum<double>, 50, 2, 10>,
+#endif
     params<float, float, rocprim::plus<float>, 123, 100, 200, true>,
     params<bfloat16, float, rocprim::plus<bfloat16>, 0, 3, 50, true>,
     params<bfloat16, bfloat16, rocprim::minimum<bfloat16>, 0, 1000, 30000>,

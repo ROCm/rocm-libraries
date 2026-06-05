@@ -82,7 +82,6 @@ namespace rocRoller
             std::vector<CommandArgumentPtr> const& strides() const;
             std::vector<CommandArgumentPtr> const& sizes() const;
 
-            CommandArgumentPtr limit() const;
             CommandArgumentPtr data() const;
 
             VariableType variableType() const;
@@ -100,7 +99,6 @@ namespace rocRoller
             int          m_numDims = -1;
 
             CommandArgumentPtr m_pointer;
-            CommandArgumentPtr m_extent;
 
             std::vector<CommandArgumentPtr> m_sizes;
             std::vector<CommandArgumentPtr> m_strides;

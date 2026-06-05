@@ -1,0 +1,1029 @@
+{% from "macros.j2" import vector_const_name %}
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include "DescriptorTestUtils.hpp"
+#include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
+#include "TensorDescriptorTestUtils.hpp"
+#include "TestMacros.hpp"
+#include "descriptors/{{ op.class_name }}.hpp"
+#include "descriptors/IGraphOperation.hpp"
+#include "descriptors/TensorDescriptor.hpp"
+#include "hipdnn_backend.h"
+
+#include <gtest/gtest.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/{{ op.fbs_generated_header }}>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/{{ op.effective_constants_include }}.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
+
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+
+#include <memory>
+#include <vector>
+
+using namespace hipdnn_backend;
+using namespace hipdnn_backend::test_utilities;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
+
+class Test{{ op.class_name }} : public ::testing::Test
+{
+public:
+    std::shared_ptr<{{ op.class_name }}> getDescriptor() const
+    {
+        return _wrapper->asDescriptor<{{ op.class_name }}>();
+    }
+
+    void setTensors() const
+    {
+        auto desc = getDescriptor();
+{% for tf in op.tensor_fields %}
+        desc->setAttribute({{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
+                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                           1,
+                           &{{ tf.member_name }});
+{% endfor %}
+    }
+
+    void {{ op.effective_test_params_method_name }}() const
+    {
+        auto desc = getDescriptor();
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+{% set const_name = vector_const_name(df, op) %}
+        auto {{ df.camel_name }} = toVec({{ const_name }});
+{% endif %}
+{% endfor %}
+
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+        desc->setAttribute(
+            {{ df.attr_name }}, {{ df.backend_type }}, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
+{% endif %}
+{% endfor %}
+    }
+
+    void setRequiredAttributes() const
+    {
+        setTensors();
+        {{ op.effective_test_params_method_name }}();
+{% if op.has_compute_data_type %}
+        auto computeType = HIPDNN_DATA_FLOAT;
+        getDescriptor()->setAttribute(
+            {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+{% endif %}
+{% for ef in op.enum_fields %}
+        auto {{ ef.camel_name }} = static_cast<int64_t>({{ ef.enum_short_type }}::{{ ef.test_enum_value }});
+        getDescriptor()->setAttribute(
+            {{ ef.attr_name }}, HIPDNN_TYPE_INT64, 1, &{{ ef.camel_name }});
+{% endfor %}
+{% for cf in op.mode_fields %}
+        auto {{ cf.camel_name }} = {{ cf.test_backend_value }};
+        getDescriptor()->setAttribute(
+            {{ cf.attr_name }}, {{ cf.backend_type }}, 1, &{{ cf.camel_name }});
+{% endfor %}
+    }
+
+    void makeFinalized() const
+    {
+        setRequiredAttributes();
+        getDescriptor()->finalize();
+    }
+
+protected:
+    std::unique_ptr<HipdnnBackendDescriptor> _wrapper = nullptr;
+{% for tf in op.tensor_fields %}
+    std::unique_ptr<HipdnnBackendDescriptor> {{ tf.member_name }} = nullptr;
+{% endfor %}
+{% for taf in op.tensor_array_fields %}
+{% for uid in taf.test_uids %}
+    std::unique_ptr<HipdnnBackendDescriptor> _{{ taf.camel_name }}Desc{{ loop.index0 }} = nullptr;
+{% endfor %}
+{% endfor %}
+    std::unique_ptr<HipdnnBackendDescriptor> _unfinalizedTensor = nullptr;
+
+    void SetUp() override
+    {
+        _wrapper = createDescriptor<{{ op.class_name }}>();
+{% for tf in op.tensor_fields %}
+{% set tc = op.test_data.tensor_configs.get(tf.name) %}
+{% if tc %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+        {{ tf.member_name }} = createFinalizedTensor(
+            {{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
+{% else %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+        {{ tf.member_name }} = createFinalizedTensor({{ uid_const }});
+{% endif %}
+{% endfor %}
+{% for taf in op.tensor_array_fields %}
+{% for uid in taf.test_uids %}
+        _{{ taf.camel_name }}Desc{{ loop.index0 }} = createFinalizedTensor({{ uid }});
+{% endfor %}
+{% endfor %}
+        _unfinalizedTensor = createDescriptor<TensorDescriptor>();
+    }
+
+    void TearDown() override
+    {
+        _wrapper.reset();
+{% for tf in op.tensor_fields %}
+        {{ tf.member_name }}.reset();
+{% endfor %}
+{% for taf in op.tensor_array_fields %}
+{% for uid in taf.test_uids %}
+        _{{ taf.camel_name }}Desc{{ loop.index0 }}.reset();
+{% endfor %}
+{% endfor %}
+        _unfinalizedTensor.reset();
+    }
+};
+
+// =============================================================================
+// Lifecycle Tests
+// =============================================================================
+
+TEST_F(Test{{ op.class_name }}, CreateDescriptor)
+{
+    auto desc = getDescriptor();
+    ASSERT_NE(desc, nullptr);
+    ASSERT_FALSE(desc->isFinalized());
+    ASSERT_EQ(desc->getType(), {{ op.descriptor_type_enum }});
+}
+
+TEST_F(Test{{ op.class_name }}, FinalizeWithRequiredAttributes)
+{
+    setRequiredAttributes();
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+    ASSERT_TRUE(getDescriptor()->isFinalized());
+}
+{% for tf in op.required_tensor_fields %}
+
+TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ tf.pascal_name }}Tensor)
+{
+    auto desc = getDescriptor();
+{% for tf2 in op.tensor_fields %}
+{% if tf2.name != tf.name %}
+    desc->setAttribute(
+        {{ op.operation_attr_prefix }}_{{ tf2.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &{{ tf2.member_name }});
+{% endif %}
+{% endfor %}
+    {{ op.effective_test_params_method_name }}();
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+{% endfor %}
+{% for df in op.required_data_fields %}
+{% if df.is_vector %}
+
+TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ df.name | replace('_', ' ') | title | replace(' ', '') }})
+{
+    auto desc = getDescriptor();
+    setTensors();
+{% for df2 in op.required_data_fields %}
+{% if df2.name != df.name and df2.is_vector %}
+{% set const_name = vector_const_name(df2, op) %}
+    auto {{ df2.camel_name }} = toVec({{ const_name }});
+{% endif %}
+{% endfor %}
+
+{% for df2 in op.required_data_fields %}
+{% if df2.name != df.name and df2.is_vector %}
+    desc->setAttribute({{ df2.attr_name }}, {{ df2.backend_type }}, {{ op.test_data.field_values.get(df2.name, [1, 1]) | length }}, {{ df2.camel_name }}.data());
+{% endif %}
+{% endfor %}
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+{% endif %}
+{% endfor %}
+{% if op.has_compute_data_type %}
+
+TEST_F(Test{{ op.class_name }}, FinalizeFailsWithoutComputeType)
+{
+    setTensors();
+    {{ op.effective_test_params_method_name }}();
+{% for ef in op.enum_fields %}
+    auto {{ ef.camel_name }} = static_cast<int64_t>({{ ef.enum_short_type }}::{{ ef.test_enum_value }});
+    getDescriptor()->setAttribute(
+        {{ ef.attr_name }}, HIPDNN_TYPE_INT64, 1, &{{ ef.camel_name }});
+{% endfor %}
+{% for cf in op.mode_fields %}
+    auto {{ cf.camel_name }} = {{ cf.test_backend_value }};
+    getDescriptor()->setAttribute(
+        {{ cf.attr_name }}, {{ cf.backend_type }}, 1, &{{ cf.camel_name }});
+{% endfor %}
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+{% endif %}
+{% for ef in op.enum_fields %}
+
+TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ ef.enum_short_type }})
+{
+    setTensors();
+    {{ op.effective_test_params_method_name }}();
+    auto computeType = HIPDNN_DATA_FLOAT;
+    getDescriptor()->setAttribute(
+        {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+{% endfor %}
+{% for cf in op.mode_fields %}
+
+TEST_F(Test{{ op.class_name }}, FinalizeFailsWithout{{ cf.enum_short_type }})
+{
+    setTensors();
+    {{ op.effective_test_params_method_name }}();
+    auto computeType = HIPDNN_DATA_FLOAT;
+    getDescriptor()->setAttribute(
+        {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+{% endfor %}
+
+// =============================================================================
+// SetAttribute Tests - Tensor Descriptors
+// =============================================================================
+{% for tf in op.tensor_fields %}
+
+TEST_F(Test{{ op.class_name }}, SetTensorDescriptor{{ tf.pascal_name }})
+{
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(desc->setAttribute(
+        {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &{{ tf.member_name }}));
+
+{% if loop.first %}
+    // Verify UID extracted via getData()
+{% endif %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    ASSERT_EQ(desc->getData().{{ tf.uid_field }}, {{ uid_const }});
+    ASSERT_NE(desc->{{ tf.getter_name }}(), nullptr);
+}
+{% endfor %}
+
+TEST_F(Test{{ op.class_name }}, SetTensorFailsNotFinalized)
+{
+    auto desc = getDescriptor();
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute({{ op.operation_attr_prefix }}_{{ op.tensor_fields[0].attr_suffix }},
+                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                  1,
+                                                  &_unfinalizedTensor),
+                               HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
+}
+
+TEST_F(Test{{ op.class_name }}, SetTensorFailsWrongType)
+{
+    auto desc = getDescriptor();
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(
+            {{ op.operation_attr_prefix }}_{{ op.tensor_fields[0].attr_suffix }}, HIPDNN_TYPE_INT64, 1, &{{ op.tensor_fields[0].member_name }}),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(Test{{ op.class_name }}, SetTensorFailsWrongElementCount)
+{
+    auto desc = getDescriptor();
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute({{ op.operation_attr_prefix }}_{{ op.tensor_fields[0].attr_suffix }},
+                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                  2,
+                                                  &{{ op.tensor_fields[0].member_name }}),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(Test{{ op.class_name }}, SetTensorFailsNullPointer)
+{
+    auto desc = getDescriptor();
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute({{ op.operation_attr_prefix }}_{{ op.tensor_fields[0].attr_suffix }},
+                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                  1,
+                                                  nullptr),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+// =============================================================================
+// SetAttribute Tests - {{ op.effective_data_fields_section_label }}
+// =============================================================================
+{% for df in op.vector_fields %}
+
+TEST_F(Test{{ op.class_name }}, Set{{ df.test_label }}{{ df.name | replace('_', ' ') | title | replace(' ', '') }})
+{
+    auto desc = getDescriptor();
+{% set tv = df.test_value if df.test_value else op.test_data.field_values.get(df.name, [2, 3]) %}
+    std::vector<int64_t> {{ df.camel_name }} = {{ '{' }}{{ tv | join(', ') }}{{ '}' }};
+
+    ASSERT_NO_THROW(desc->setAttribute(
+        {{ df.attr_name }}, {{ df.backend_type }}, {{ tv | length }}, {{ df.camel_name }}.data()));
+
+    auto& data = desc->getData();
+    ASSERT_EQ(data.{{ df.fbs_field }}.size(), {{ tv | length }});
+{% for val in tv %}
+    ASSERT_EQ(data.{{ df.fbs_field }}[{{ loop.index0 }}], {{ val }});
+{% endfor %}
+}
+{% endfor %}
+{% for ef in op.enum_fields %}
+
+TEST_F(Test{{ op.class_name }}, Set{{ ef.enum_short_type }})
+{
+    auto desc = getDescriptor();
+    auto {{ ef.camel_name }} = static_cast<int64_t>({{ ef.enum_short_type }}::{{ ef.test_enum_value }});
+
+    ASSERT_NO_THROW(
+        desc->setAttribute({{ ef.attr_name }}, HIPDNN_TYPE_INT64, 1, &{{ ef.camel_name }}));
+
+    ASSERT_EQ(desc->getData().{{ ef.fbs_field }}, {{ ef.enum_short_type }}::{{ ef.test_enum_value }});
+}
+
+TEST_F(Test{{ op.class_name }}, Set{{ ef.enum_short_type }}WrongElementCount)
+{
+    auto desc = getDescriptor();
+    int64_t {{ ef.camel_name }} = 0;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute({{ ef.attr_name }}, HIPDNN_TYPE_INT64, 2, &{{ ef.camel_name }}),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+{% endfor %}
+{% for cf in op.mode_fields %}
+
+TEST_F(Test{{ op.class_name }}, Set{{ cf.enum_short_type }})
+{
+    auto desc = getDescriptor();
+    auto {{ cf.camel_name }} = {{ cf.test_backend_value }};
+
+    ASSERT_NO_THROW(
+        desc->setAttribute({{ cf.attr_name }}, {{ cf.backend_type }}, 1, &{{ cf.camel_name }}));
+
+    ASSERT_EQ(desc->getData().{{ cf.fbs_field }}, {{ cf.enum_short_type }}::{{ cf.test_enum_value }});
+}
+
+TEST_F(Test{{ op.class_name }}, Set{{ cf.enum_short_type }}WrongElementCount)
+{
+    auto desc = getDescriptor();
+    auto {{ cf.camel_name }} = {{ cf.test_backend_value }};
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute({{ cf.attr_name }}, {{ cf.backend_type }}, 2, &{{ cf.camel_name }}),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+{% endfor %}
+{% if op.has_compute_data_type %}
+
+TEST_F(Test{{ op.class_name }}, SetComputeDataType)
+{
+    auto desc = getDescriptor();
+    auto computeType = HIPDNN_DATA_FLOAT;
+
+    ASSERT_NO_THROW(desc->setAttribute(
+        {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
+
+    ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
+}
+
+TEST_F(Test{{ op.class_name }}, SetComputeDataTypeWrongElementCount)
+{
+    auto desc = getDescriptor();
+    auto computeType = HIPDNN_DATA_FLOAT;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(
+            {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+{% endif %}
+{% if op.vector_fields %}
+
+TEST_F(Test{{ op.class_name }}, Set{{ op.effective_error_label | capitalize }}ParamsWrongType)
+{
+    auto desc = getDescriptor();
+{% set first_vf = op.vector_fields[0] %}
+{% set const_name = vector_const_name(first_vf, op) %}
+    auto padding = toVec({{ const_name }});
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(
+            {{ op.vector_fields[0].attr_name }}, HIPDNN_TYPE_CHAR, 2, padding.data()),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+{% endif %}
+
+// =============================================================================
+// SetAttribute Error Cases
+// =============================================================================
+
+TEST_F(Test{{ op.class_name }}, SetAttributeFailsAfterFinalize)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute({{ op.operation_attr_prefix }}_{{ op.tensor_fields[0].attr_suffix }},
+                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                  1,
+                                                  &{{ op.tensor_fields[0].member_name }}),
+                               HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST_F(Test{{ op.class_name }}, SetAttributeUnsupported)
+{
+    auto desc = getDescriptor();
+    int64_t dummy = 0;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_INT64, 1, &dummy),
+        HIPDNN_STATUS_NOT_SUPPORTED);
+}
+
+// =============================================================================
+// GetAttribute Tests - Tensor Descriptors
+// =============================================================================
+
+TEST_F(Test{{ op.class_name }}, GetAttributeTensorDescriptor)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    HipdnnBackendDescriptor* retrieved{{ op.tensor_fields[0].pascal_name }} = nullptr;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute({{ op.operation_attr_prefix }}_{{ op.tensor_fields[0].attr_suffix }},
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       &elementCount,
+                                       static_cast<void*>(&retrieved{{ op.tensor_fields[0].pascal_name }})));
+
+    ASSERT_EQ(elementCount, 1);
+    ASSERT_NE(retrieved{{ op.tensor_fields[0].pascal_name }}, nullptr);
+    const std::unique_ptr<HipdnnBackendDescriptor> guard{{ op.tensor_fields[0].pascal_name }}(retrieved{{ op.tensor_fields[0].pascal_name }});
+}
+
+// =============================================================================
+// GetAttribute Tests - {{ op.effective_data_fields_section_label }}
+// =============================================================================
+{% if op.vector_fields or op.enum_fields or op.mode_fields %}
+
+TEST_F(Test{{ op.class_name }}, GetAttribute{{ op.effective_error_label | capitalize }}Params)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+{% for vf in op.vector_fields %}
+
+{% if loop.first %}
+    // {{ vf.name }}
+{% else %}
+
+    // {{ vf.name }}
+{% endif %}
+{% set tv = op.test_data.field_values.get(vf.name, [1, 1]) %}
+    std::vector<int64_t> {{ vf.camel_name }}({{ tv | length }});
+    int64_t {{ vf.camel_name }}Count = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        {{ vf.attr_name }}, {{ vf.backend_type }}, {{ tv | length }}, &{{ vf.camel_name }}Count, {{ vf.camel_name }}.data()));
+{% if loop.first %}
+
+    ASSERT_EQ({{ vf.camel_name }}Count, {{ tv | length }});
+{% else %}
+    ASSERT_EQ({{ vf.camel_name }}Count, {{ tv | length }});
+{% endif %}
+{% set const_name = vector_const_name(vf, op) %}
+    EXPECT_EQ({{ vf.camel_name }}, toVec({{ const_name }}));
+{% endfor %}
+{% for ef in op.enum_fields %}
+
+    // {{ ef.name | replace('_', ' ') }}
+    int64_t {{ ef.camel_name }} = -1;
+    int64_t {{ ef.camel_name }}Count = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        {{ ef.attr_name }}, HIPDNN_TYPE_INT64, 1, &{{ ef.camel_name }}Count, &{{ ef.camel_name }}));
+    ASSERT_EQ({{ ef.camel_name }}Count, 1);
+    EXPECT_EQ({{ ef.camel_name }}, static_cast<int64_t>({{ ef.enum_short_type }}::{{ ef.test_enum_value }}));
+{% endfor %}
+{% for cf in op.mode_fields %}
+
+    // {{ cf.name | replace('_', ' ') }}
+    {{ cf.test_c_type }} {{ cf.camel_name }} = {{ cf.test_default_value }};
+    int64_t {{ cf.camel_name }}Count = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        {{ cf.attr_name }}, {{ cf.backend_type }}, 1, &{{ cf.camel_name }}Count, &{{ cf.camel_name }}));
+    ASSERT_EQ({{ cf.camel_name }}Count, 1);
+    EXPECT_EQ({{ cf.camel_name }}, {{ cf.test_backend_value }});
+{% endfor %}
+}
+{% endif %}
+{% if op.has_compute_data_type %}
+
+TEST_F(Test{{ op.class_name }}, GetAttributeComputeType)
+{
+    auto desc = getDescriptor();
+    setRequiredAttributes();
+    auto computeType = HIPDNN_DATA_HALF;
+    desc->setAttribute({{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->finalize();
+
+    hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
+
+    ASSERT_EQ(retrieved, HIPDNN_DATA_HALF);
+    ASSERT_EQ(elementCount, 1);
+}
+{% endif %}
+
+// =============================================================================
+// GetAttribute Error Cases
+// =============================================================================
+
+TEST_F(Test{{ op.class_name }}, GetAttributeFailsBeforeFinalize)
+{
+    auto desc = getDescriptor();
+    setRequiredAttributes();
+
+    HipdnnBackendDescriptor* dummy = nullptr;
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute({{ op.operation_attr_prefix }}_{{ op.tensor_fields[0].attr_suffix }},
+                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                  1,
+                                                  nullptr,
+                                                  &dummy),
+                               HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST_F(Test{{ op.class_name }}, GetAttributeFailsNullPointer)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute({{ op.operation_attr_prefix }}_{{ op.tensor_fields[0].attr_suffix }},
+                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                  1,
+                                                  nullptr,
+                                                  nullptr),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST_F(Test{{ op.class_name }}, GetAttributeUnsupported)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+    int64_t dummy = 0;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->getAttribute(HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_INT64, 1, nullptr, &dummy),
+        HIPDNN_STATUS_NOT_SUPPORTED);
+}
+
+// =============================================================================
+// GetAttribute Query Mode Tests
+// =============================================================================
+{% for tf in op.tensor_fields %}
+
+TEST_F(Test{{ op.class_name }}, GetAttributeTensor{{ tf.pascal_name }}QueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute({{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+{% endfor %}
+{% for ef in op.enum_fields %}
+
+TEST_F(Test{{ op.class_name }}, GetAttribute{{ ef.enum_short_type }}QueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        {{ ef.attr_name }}, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+{% endfor %}
+{% for cf in op.mode_fields %}
+
+TEST_F(Test{{ op.class_name }}, GetAttribute{{ cf.enum_short_type }}QueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        {{ cf.attr_name }}, {{ cf.backend_type }}, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+{% endfor %}
+{% if op.vector_fields %}
+
+TEST_F(Test{{ op.class_name }}, GetAttribute{{ op.vector_fields[0].name | replace('_', ' ') | title | replace(' ', '') }}QueryReturnsSize)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        {{ op.vector_fields[0].attr_name }}, {{ op.vector_fields[0].backend_type }}, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, {{ op.test_data.field_values.get(op.vector_fields[0].name, [1, 1]) | length }});
+}
+{% endif %}
+{% if op.has_compute_data_type %}
+
+TEST_F(Test{{ op.class_name }}, GetAttributeComputeTypeQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        {{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+{% endif %}
+{% if op.vector_fields %}
+
+TEST_F(Test{{ op.class_name }}, GetAttribute{{ op.vector_fields[0].name | replace('_', ' ') | title | replace(' ', '') }}QueryThenRetrieve)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    // Query: get the element count
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        {{ op.vector_fields[0].attr_name }}, {{ op.vector_fields[0].backend_type }}, 0, &elementCount, nullptr));
+{% set fv_len = op.test_data.field_values.get(op.vector_fields[0].name, [1, 1]) | length %}
+    ASSERT_EQ(elementCount, {{ fv_len }});
+
+    // Retrieve: use the queried count to allocate and fetch
+    std::vector<int64_t> {{ op.vector_fields[0].camel_name }}(static_cast<size_t>(elementCount));
+    int64_t retrievedCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute({{ op.vector_fields[0].attr_name }},
+                                       {{ op.vector_fields[0].backend_type }},
+                                       elementCount,
+                                       &retrievedCount,
+                                       {{ op.vector_fields[0].camel_name }}.data()));
+    ASSERT_EQ(retrievedCount, {{ fv_len }});
+{% set const_name = vector_const_name(op.vector_fields[0], op) %}
+    EXPECT_EQ({{ op.vector_fields[0].camel_name }}, toVec({{ const_name }}));
+}
+{% endif %}
+
+TEST_F(Test{{ op.class_name }}, GetAttributeTensorQueryFailsNullElementCount)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute({{ op.operation_attr_prefix }}_{{ op.tensor_fields[0].attr_suffix }},
+                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                  0,
+                                                  nullptr,
+                                                  nullptr),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+{% for ef in op.enum_fields %}
+
+TEST_F(Test{{ op.class_name }}, GetAttribute{{ ef.enum_short_type }}QueryFailsNullElementCount)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->getAttribute(
+            {{ ef.attr_name }}, HIPDNN_TYPE_INT64, 0, nullptr, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+{% endfor %}
+{% for cf in op.mode_fields %}
+
+TEST_F(Test{{ op.class_name }}, GetAttribute{{ cf.enum_short_type }}QueryFailsNullElementCount)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->getAttribute(
+            {{ cf.attr_name }}, {{ cf.backend_type }}, 0, nullptr, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+{% endfor %}
+
+// =============================================================================
+// Accessor Tests
+// =============================================================================
+
+TEST_F(Test{{ op.class_name }}, FinalizePreservesTensorReferences)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    // Verify the tensor descriptors are preserved
+{% for tf in op.tensor_fields %}
+    ASSERT_NE(desc->{{ tf.getter_name }}(), nullptr);
+{% endfor %}
+
+    // Verify UIDs match
+{% for tf in op.tensor_fields %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    ASSERT_EQ(desc->{{ tf.getter_name }}()->getData().uid, {{ uid_const }});
+{% endfor %}
+}
+
+// =============================================================================
+// ToString Test
+// =============================================================================
+
+TEST_F(Test{{ op.class_name }}, ToStringContainsExpectedInfo)
+{
+    setRequiredAttributes();
+    auto desc = getDescriptor();
+
+    const std::string str = desc->toString();
+    ASSERT_NE(str.find("{{ op.class_name }}"), std::string::npos);
+{% for tf in op.tensor_fields %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    ASSERT_NE(str.find("{{ tf.name }}_uid=" + std::to_string({{ uid_const }})), std::string::npos);
+{% endfor %}
+{% if op.has_compute_data_type %}
+    ASSERT_NE(str.find("compute_data_type="), std::string::npos);
+{% endif %}
+}
+
+// =============================================================================
+// IGraphOperation Interface Tests
+// =============================================================================
+
+TEST_F(Test{{ op.class_name }}, GetTensorDescriptorsReturnsAllTensors)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    auto tensors = desc->getTensorDescriptors();
+    ASSERT_EQ(tensors.size(), {{ op.tensor_fields | length }});
+{% for tf in op.tensor_fields %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    ASSERT_EQ(tensors[{{ loop.index0 }}]->getData().uid, {{ uid_const }});
+{% endfor %}
+}
+
+TEST_F(Test{{ op.class_name }}, BuildNodeProducesCorrectNodeT)
+{
+    setRequiredAttributes();
+
+    auto desc = getDescriptor();
+{% if op.has_compute_data_type %}
+    auto computeType = HIPDNN_DATA_FLOAT;
+    desc->setAttribute({{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+{% endif %}
+    desc->finalize();
+
+    auto node = desc->buildNode();
+    ASSERT_NE(node, nullptr);
+{% if op.has_compute_data_type %}
+    ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
+{% endif %}
+    ASSERT_EQ(node->attributes.type, NodeAttributes::{{ op.node_attributes_union_member }});
+
+    auto* {{ op.effective_build_node_attrs_var }} = node->attributes.As{{ op.fbs_table }}();
+    ASSERT_NE({{ op.effective_build_node_attrs_var }}, nullptr);
+{% for tf in op.tensor_fields %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+    ASSERT_EQ({{ op.effective_build_node_attrs_var }}->{{ tf.uid_field }}, {{ uid_const }});
+{% endfor %}
+{% for df in op.vector_fields %}
+{% if df.build_node_check %}
+{% set const_name = vector_const_name(df, op) %}
+    EXPECT_EQ({{ op.effective_build_node_attrs_var }}->{{ df.fbs_field }}, toVec({{ const_name }}));
+{% endif %}
+{% endfor %}
+{% for ef in op.enum_fields %}
+    EXPECT_EQ({{ op.effective_build_node_attrs_var }}->{{ ef.fbs_field }}, {{ ef.enum_short_type }}::{{ ef.test_enum_value }});
+{% endfor %}
+{% for cf in op.mode_fields %}
+    EXPECT_EQ({{ op.effective_build_node_attrs_var }}->{{ cf.fbs_field }}, {{ cf.enum_short_type }}::{{ cf.test_enum_value }});
+{% endfor %}
+}
+{% if op.has_compute_data_type %}
+
+TEST_F(Test{{ op.class_name }}, BuildNodeWithHalfComputeType)
+{
+    setRequiredAttributes();
+
+    auto desc = getDescriptor();
+    auto computeType = HIPDNN_DATA_HALF;
+    desc->setAttribute({{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->finalize();
+
+    auto node = desc->buildNode();
+    ASSERT_NE(node, nullptr);
+    ASSERT_EQ(node->compute_data_type, DataType::HALF);
+}
+{% endif %}
+
+TEST_F(Test{{ op.class_name }}, GetTensorDescriptorsOrderIs{{ op.tensor_fields | map(attribute='pascal_name') | join('') }})
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    auto tensors = desc->getTensorDescriptors();
+    ASSERT_EQ(tensors.size(), {{ op.tensor_fields | length }});
+    // Verify ordering: [{{ op.tensor_fields | map(attribute='attr_suffix') | join(', ') }}] matches UIDs [{{ op.tensor_uid_list | join(', ') }}]
+{% for tf in op.tensor_fields %}
+    EXPECT_EQ(tensors[{{ loop.index0 }}], desc->{{ tf.getter_name }}());
+{% endfor %}
+}
+
+TEST_F(Test{{ op.class_name }}, TryAsInterfaceReturnsValidGraphOp)
+{
+    makeFinalized();
+
+    auto graphOp = _wrapper->tryAsGraphOperation();
+    ASSERT_NE(graphOp, nullptr);
+
+    // Verify the returned interface is the same underlying object
+    auto tensors = graphOp->getTensorDescriptors();
+    ASSERT_EQ(tensors.size(), {{ op.tensor_fields | length }});
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (op.tensor_fields[0].name | upper) ~ "_UID" %}
+    ASSERT_EQ(tensors[0]->getData().uid, {{ uid_const }});
+}
+
+TEST_F(Test{{ op.class_name }}, TryAsInterfaceReturnsNullForWrongType)
+{
+    // TensorDescriptor does not implement IGraphOperation
+    auto graphOp = {{ op.tensor_fields[0].member_name }}->tryAsGraphOperation();
+    EXPECT_EQ(graphOp, nullptr);
+}
+{% for taf in op.tensor_array_fields %}
+{% if taf.test_uids %}
+
+// =============================================================================
+// Tensor Array Tests - {{ taf.test_label or taf.name }}
+// =============================================================================
+
+TEST_F(Test{{ op.class_name }}, Set{{ taf.test_label or taf.name | replace('_', ' ') | title | replace(' ', '') }}TensorArray)
+{
+    auto desc = getDescriptor();
+    std::array<HipdnnBackendDescriptor*, {{ taf.test_uids | length }}> descs = {{ '{' }}{% for uid in taf.test_uids %}_{{ taf.camel_name }}Desc{{ loop.index0 }}.get(){% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
+
+    ASSERT_NO_THROW(desc->setAttribute(
+        {{ taf.attr_name }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, {{ taf.test_uids | length }}, descs.data()));
+
+    auto& data = desc->getData();
+    ASSERT_EQ(data.{{ taf.fbs_field }}.size(), {{ taf.test_uids | length }});
+{% for uid in taf.test_uids %}
+    EXPECT_EQ(data.{{ taf.fbs_field }}[{{ loop.index0 }}], {{ uid }});
+{% endfor %}
+}
+
+TEST_F(Test{{ op.class_name }}, Set{{ taf.test_label or taf.name | replace('_', ' ') | title | replace(' ', '') }}TensorArrayFailsNotFinalized)
+{
+    auto desc = getDescriptor();
+    std::array<HipdnnBackendDescriptor*, 1> descs = {_unfinalizedTensor.get()};
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute({{ taf.attr_name }},
+                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                  1,
+                                                  descs.data()),
+                               HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
+}
+
+TEST_F(Test{{ op.class_name }}, Set{{ taf.test_label or taf.name | replace('_', ' ') | title | replace(' ', '') }}TensorArrayFailsNullPointer)
+{
+    auto desc = getDescriptor();
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute({{ taf.attr_name }},
+                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                  1,
+                                                  nullptr),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST_F(Test{{ op.class_name }}, Get{{ taf.test_label or taf.name | replace('_', ' ') | title | replace(' ', '') }}TensorArray)
+{
+    auto desc = getDescriptor();
+    std::array<HipdnnBackendDescriptor*, {{ taf.test_uids | length }}> descs = {{ '{' }}{% for uid in taf.test_uids %}_{{ taf.camel_name }}Desc{{ loop.index0 }}.get(){% if not loop.last %}, {% endif %}{% endfor %}{{ '}' }};
+    desc->setAttribute(
+        {{ taf.attr_name }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR, {{ taf.test_uids | length }}, descs.data());
+    setRequiredAttributes();
+    desc->finalize();
+
+    std::array<HipdnnBackendDescriptor*, {{ taf.test_uids | length }}> retrieved = {};
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute({{ taf.attr_name }},
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       {{ taf.test_uids | length }},
+                                       &elementCount,
+                                       retrieved.data()));
+
+    ASSERT_EQ(elementCount, {{ taf.test_uids | length }});
+{% for uid in taf.test_uids %}
+    ASSERT_NE(retrieved[{{ loop.index0 }}], nullptr);
+{% endfor %}
+{% for uid in taf.test_uids %}
+    const std::unique_ptr<HipdnnBackendDescriptor> guard{{ loop.index0 }}(retrieved[{{ loop.index0 }}]);
+{% endfor %}
+}
+{% endif %}
+{% endfor %}
+
+// =============================================================================
+// Operation Name Tests
+// =============================================================================
+
+TEST_F(Test{{ op.class_name }}, SetAttributeNameSuccess)
+{
+    auto desc = getDescriptor();
+    const std::string name = "test_{{ op.name | lower }}_op";
+
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                                       HIPDNN_TYPE_CHAR,
+                                       static_cast<int64_t>(name.size()),
+                                       name.c_str()));
+
+    // Finalize and verify name round-trips
+    setRequiredAttributes();
+    desc->finalize();
+
+    int64_t count = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
+    ASSERT_EQ(count, static_cast<int64_t>(name.size() + 1));
+
+    std::vector<char> buffer(static_cast<size_t>(count));
+    int64_t actualCount = 0;
+    desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, count, &actualCount, buffer.data());
+    EXPECT_STREQ(buffer.data(), "test_{{ op.name | lower }}_op");
+}
+
+TEST_F(Test{{ op.class_name }}, GetAttributeNameQueryReturnsSizeInclNull)
+{
+    auto desc = getDescriptor();
+    const std::string name = "my_op";
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                       HIPDNN_TYPE_CHAR,
+                       static_cast<int64_t>(name.size()),
+                       name.c_str());
+    setRequiredAttributes();
+    desc->finalize();
+
+    int64_t count = 0;
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &count, nullptr);
+    EXPECT_EQ(count, static_cast<int64_t>(name.size() + 1));
+}
+{% if op.operation_type_enum %}
+
+// =============================================================================
+// Operation Type Tests
+// =============================================================================
+
+TEST_F(Test{{ op.class_name }}, GetAttributeOperationTypeReturnsCorrectType)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    hipdnnOperationType_ext_t opType = HIPDNN_OPERATION_TYPE_NOT_SET_EXT;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &elementCount, &opType));
+
+    ASSERT_EQ(elementCount, 1);
+    EXPECT_EQ(opType, {{ op.operation_type_enum }});
+}
+
+TEST_F(Test{{ op.class_name }}, GetAttributeOperationTypeQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+{% endif %}
+
+TEST_F(Test{{ op.class_name }}, BuildNodePreservesName)
+{
+    setRequiredAttributes();
+    auto desc = getDescriptor();
+
+    const std::string opName = "test_{{ op.name | lower }}";
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_NAME_EXT,
+                       HIPDNN_TYPE_CHAR,
+                       static_cast<int64_t>(opName.size()),
+                       opName.c_str());
+{% if op.has_compute_data_type %}
+    auto computeType = HIPDNN_DATA_FLOAT;
+    desc->setAttribute({{ op.compute_data_type_attr }}, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+{% endif %}
+    desc->finalize();
+
+    auto node = desc->buildNode();
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->name, "test_{{ op.name | lower }}");
+}

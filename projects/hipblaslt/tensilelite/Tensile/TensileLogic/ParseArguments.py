@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 ################################################################################
 
 from argparse import ArgumentParser
+from pathlib import Path
 
 from Tensile.Toolchain.Validators import ToolchainDefaults
 
@@ -73,6 +74,15 @@ def parseArguments():
         dest="CheckOnlyCustomKernels",
         action="store_true",
         help="run logic file checks only on custom kernels",
+    )
+    argParser.add_argument(
+        "--known-bugs",
+        dest="KnownBugs",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="YAML file listing (path, solution_index) pairs to skip validation for "
+        "(documented exceptions; paths relative to LogicPath)",
     )
     args = argParser.parse_args()
 

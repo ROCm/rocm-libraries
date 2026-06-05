@@ -111,6 +111,17 @@ void print_reference_lib_warning()
 #endif
 }
 
+void print_asan_kernel_warning(const char* program_name)
+{
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    rocblas_cout << program_name
+                 << " WARNING: AddressSanitizer build active; some kernel launch "
+                    "configurations are reduced for stability and may not match production "
+                    "performance."
+                 << std::endl;
+#endif
+}
+
 // Print rocBLAS and Tensile commit hashes
 void print_rocblas_client_commit_hashes()
 {

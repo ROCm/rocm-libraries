@@ -175,6 +175,9 @@ int main()
     HIP_CHECK(hipFree(d_bsr_row_ptr_B));
     HIP_CHECK(hipFree(d_bsr_col_ind_B));
     HIP_CHECK(hipFree(d_bsr_val_B));
+    HIP_CHECK(hipFree(d_bsr_row_ptr_C));
+    HIP_CHECK(hipFree(d_bsr_col_ind_C));
+    HIP_CHECK(hipFree(d_bsr_val_C));
 
     return 0;
 }

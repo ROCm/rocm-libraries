@@ -107,28 +107,9 @@ except ImportError:
     BytesIO = None
 
 # Install dependent modules
-smi = None
-smi_imported = False
 def import_rocm_smi(install_path):
-    global smi
-    global smi_imported
-    if not smi_imported:
-        smi_imported = True
-        host_rocm_ver = Decimal('.'.join(getspecs.getrocmversion().split('.')[0:2])) # get host's rocm major.minor version
-        rocm_5_2_ver = Decimal('5.2')
-        try:
-            if rocm_5_2_ver.compare(host_rocm_ver) == 1:
-                sys.path.append(os.path.join(install_path, 'bin')) # For versions below ROCm 5.2
-            else:
-                sys.path.append(os.path.join(install_path, 'libexec/rocm_smi')) # For versions equal or above ROCm 5.2
-            import rocm_smi
-            smi = rocm_smi
-
-            # The following is needed to call rsmi_init() before other calls as documented in /opt/rocm/rocm_smi/docs/README.md
-            smi.initializeRsmi()
-        except ImportError:
-            print('WARNING - rocm_smi.py not found!')
-    return smi
+    """Deprecated: hipBLAS performance scripts now use amd-smi via getspecs."""
+    return None
 
 class SystemMonitor(object):
     supported_metrics = [
@@ -141,8 +122,6 @@ class SystemMonitor(object):
             'fan_speed_percent',
             ]
     def __init__(self, metrics = supported_metrics, cuda = False):
-        if not smi_imported and not cuda:
-            raise RuntimeError('import_rocm_smi(install_path) must be called before consturcting a SystemMonitor')
         if len(metrics) == 0:
             raise ValueError('SystemMonitor must record at least one metric')
         self.metrics = metrics
@@ -155,19 +134,18 @@ class SystemMonitor(object):
 
     def measure(self, metric, cuda, device=None):
         if device is None:
-            device = getspecs.listdevices(cuda, smi)[0]
-        if smi is None:
-            return 0.0
-        elif metric == 'fan_speed_percent':
+            device = getspecs.listdevices(cuda)[0]
+        if metric == 'fan_speed_percent':
             # Not querying fan speed on 908 or 90a
             gfx = getspecs.getgfx(device, cuda)
             if gfx == 'gfx908' or gfx == 'gfx90a' or gfx == 'N/A':
                 return 'N/A'
-            return getspecs.getfanspeedpercent(device, cuda, smi)[1]
-        elif metric.find('clk') >=0 and metric.split('_')[0] in getspecs.validclocknames(cuda, smi):
-            return int(getspecs.getcurrentclockfreq(device, metric.split('_')[0], cuda, smi).strip('Mhz'))
+            return getspecs.getfanspeedpercent(device, cuda)
+        elif metric.find('clk') >=0 and metric.split('_')[0] in getspecs.validclocknames(cuda):
+            freq = getspecs.getcurrentclockfreq(device, metric.split('_')[0], cuda)
+            return int(''.join(ch for ch in str(freq) if ch.isdigit()) or 0)
         elif 'used_memory_percent':
-            used_bytes, total_bytes = getspecs.getmeminfo(device, 'vram', cuda, smi)
+            used_bytes, total_bytes = getspecs.getmeminfo(device, 'vram', cuda)
             used_bytes_int = used_bytes.split()[0] if cuda else used_bytes
             total_bytes_int = total_bytes.split()[0] if cuda else total_bytes
             return int(used_bytes_int)*100.0/int(total_bytes_int)
@@ -644,8 +622,6 @@ class MachineSpecs(dict):
             device_info['memory clock'] = getspecs.getmclk(device_num, cuda)
             rv['Device {0:2d}'.format(device_num)] = device_info
         smi = None
-        if not cuda:
-            smi = import_rocm_smi(install_path)
         devices = getspecs.listdevices(cuda, smi)
         for device in devices:
             smi_info = {}
@@ -667,10 +643,7 @@ class MachineSpecs(dict):
                 total_bytes_int = total_bytes.split()[0] if cuda else total_bytes
                 smi_info[key] = '{} / {}'.format(to_mem_units(used_bytes_int), to_mem_units(total_bytes_int))
             for component in getspecs.validversioncomponents(cuda, smi):
-                if cuda:
-                    smi_info[component.capitalize() + ' Version'] = getspecs.getversion(device, component, cuda, smi)
-                else:
-                    smi_info[smi.component_str(component).capitalize() + ' Version'] = getspecs.getversion(device, component, cuda, smi)
+                smi_info[component.capitalize() + ' Version'] = getspecs.getversion(device, component, cuda, smi)
             rv['Card' + str(device)] = smi_info
 
         return rv

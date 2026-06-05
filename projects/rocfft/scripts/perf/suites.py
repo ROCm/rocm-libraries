@@ -943,6 +943,20 @@ def tuning_2D_example():
                                      reals=[False],
                                      max_wgs=1024)
 
+def real_2D_single_kernel():
+    """Some 2D real single-precision transforms computed via a single kernel"""
+
+    lengths = [(32,32), (64,32), (32,64), (64,64), (96,96), (100,100)] 
+    # batch size set to make 32x32 data size 1 GiB 
+    batch_sz = 1024*1024*1024//(32*32*4)
+
+    yield from default_length_params("2D_SINGLE",
+                                     lengths,
+                                     batch_sz,
+                                     precisions=['single'],
+                                     inplaces=[False],
+                                     reals=[True])
+
 
 def tuning_suite():
     """tuning"""
@@ -1050,23 +1064,25 @@ def partial_pass():
                    (32, 32, 128), (32, 32, 64), (64, 32, 128), (160, 72, 72),
                    (72, 72, 72), (160, 80, 72), (160, 80, 80), (96, 96, 96),
                    (108, 108, 80), (72, 72, 52), (80, 80, 80), (84, 84, 72)]:
-        for direction in [-1, 1]:
-            for precision in ['single', 'double']:
-                for place in all_inplaces:
-                    for batch in [
-                            1, 5, 20, 50, 100, 200, 500, 1000, 1500, 3000,
-                            5000, 7500, 10000
-                    ]:
+        for real in [True, False]:
+            for direction in [-1, 1]:
+                for precision in ['single', 'double']:
+                    for place in all_inplaces:
+                        for batch in [
+                                1, 5, 20, 50, 100, 200, 500, 1000, 1500, 3000,
+                                5000, 7500, 10000
+                        ]:
 
-                        yield Problem(length,
-                                      tag=mktag("partial_pass", 3, precision,
-                                                direction, place, False),
-                                      nbatch=batch,
-                                      direction=direction,
-                                      inplace=place,
-                                      real=False,
-                                      meta={'ivariable': 'batch'},
-                                      precision=precision)
+                            yield Problem(length,
+                                          tag=mktag("partial_pass", 3,
+                                                    precision, direction,
+                                                    place, real),
+                                          nbatch=batch,
+                                          direction=direction,
+                                          inplace=place,
+                                          real=real,
+                                          meta={'ivariable': 'batch'},
+                                          precision=precision)
 
 
 def large_1d_extended():

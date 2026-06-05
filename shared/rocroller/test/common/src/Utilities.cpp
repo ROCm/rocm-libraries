@@ -22,6 +22,23 @@ int countSubstring(const std::string& str, const std::string& sub)
     return count;
 }
 
+std::shared_ptr<void> make_shared_device(rocRoller::CommandArgumentValue const& arg)
+{
+    auto visitor = [](auto const& arg) -> std::shared_ptr<void> {
+        using T = std::decay_t<decltype(arg)>;
+
+        auto rv = make_shared_device<int8_t>(sizeof(T));
+
+        auto result = hipMemcpy(rv.get(), &arg, sizeof(T), hipMemcpyHostToDevice);
+        if(result != hipSuccess)
+        {
+            throw std::runtime_error(hipGetErrorString(result));
+        }
+        return rv;
+    };
+    return std::visit(visitor, arg);
+}
+
 namespace rocRoller
 {
     void CPUMM(std::vector<float>&       D,

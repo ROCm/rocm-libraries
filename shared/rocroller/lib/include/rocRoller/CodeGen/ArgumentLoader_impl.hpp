@@ -25,8 +25,10 @@ namespace rocRoller
         {
             auto widthBytes = width * 4;
 
+            auto alignment = std::min(width, 4);
+
             if((offset % widthBytes == 0) && (offset + widthBytes) <= endOffset
-               && (*beginReg % width == 0) && IsContiguousRange(beginReg, beginReg + width))
+               && (*beginReg % alignment == 0) && IsContiguousRange(beginReg, beginReg + width))
             {
                 return widthBytes;
             }

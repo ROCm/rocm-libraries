@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -101,6 +101,8 @@ __device__ void sytf2_device_upper(const rocblas_int tid,
                 iamax<MAX_THDS>(tid, k - imax, A + imax + (imax + 1) * lda, lda, sval, sidx);
                 if(tid == 0)
                     rowmax = sval[0];
+
+                __syncthreads();
 
                 if(imax > 0)
                 {
@@ -272,6 +274,8 @@ __device__ void sytf2_device_lower(const rocblas_int tid,
                 iamax<MAX_THDS>(tid, imax - k, A + imax + k * lda, lda, sval, sidx);
                 if(tid == 0)
                     rowmax = sval[0];
+
+                __syncthreads();
 
                 if(imax < n - 1)
                 {

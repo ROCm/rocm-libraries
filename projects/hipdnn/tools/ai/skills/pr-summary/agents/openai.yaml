@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR Summary"
+  short_description: "Draft structured PR descriptions"
+  default_prompt: "Use $pr-summary to draft or revise a concise PR body with risk assessment, testing summary, testing checklist, and technical changes."

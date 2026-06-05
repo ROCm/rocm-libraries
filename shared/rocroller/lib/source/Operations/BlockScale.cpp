@@ -108,17 +108,13 @@ namespace rocRoller
             return stream << toString(mode);
         }
 
-        SubTileTranspose::SubTileTranspose(OperationTag input, std::vector<size_t> tileDimensions)
+        SubTileTranspose::SubTileTranspose(OperationTag        input,
+                                           std::vector<size_t> tileDimensions,
+                                           bool                transpose)
             : m_input(input)
             , m_tileDimensions(std::move(tileDimensions))
+            , m_transpose(transpose)
         {
-            if(!m_tileDimensions.empty())
-            {
-                AssertFatal(m_tileDimensions.size() == 3, ShowValue(m_tileDimensions));
-                AssertFatal(m_tileDimensions[0] * m_tileDimensions[1] == 256
-                                && (m_tileDimensions[2] == 2 || m_tileDimensions[2] == 4),
-                            ShowValue(m_tileDimensions));
-            }
         }
 
         std::unordered_set<OperationTag> SubTileTranspose::getInputs() const
@@ -130,9 +126,15 @@ namespace rocRoller
             return fmt::format(
                 "SubTileTranspose({}: input {})", concatenate(m_tileDimensions), m_input.value);
         }
+
         const std::vector<size_t>& SubTileTranspose::tileDimensions() const
         {
             return m_tileDimensions;
+        }
+
+        bool SubTileTranspose::isTranspose() const
+        {
+            return m_transpose;
         }
 
         bool SubTileTranspose::operator==(SubTileTranspose const& other) const

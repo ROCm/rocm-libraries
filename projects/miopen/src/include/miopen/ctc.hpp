@@ -31,6 +31,7 @@
 #include <miopen/handle.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/common.hpp>
+#include <miopen/config.hpp>
 #include <miopen/perf_field.hpp>
 #include <miopen/tensor_ops.hpp>
 #include <miopen/mlo_internal.hpp>

@@ -1,7 +1,8 @@
 - {MinimumRequiredVersion: 5.0.0}
 - aldebaran
 - gfx90a
-- fallback
+- [Device 0050, Device 0051, Device 0052, Device 0054, Device 0062, Device 7400, Device
+    740c]
 - Activation: false
   ActivationComputeDataType: 0
   ActivationNoGuard: false
@@ -100,7 +101,7 @@
     CustomKernelName: ''
     DebugStreamK: 0
     DepthU: 4
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
     DirectToVgprA: false
@@ -112,7 +113,7 @@
     ExpandPointerSwap: true
     ExpertSchedulingMode: 0
     ForceDisableShadowInit: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 1
     GlobalSplitU: 1
@@ -260,7 +261,7 @@
     ThreadTileA: 32
     ThreadTileB: 2
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false

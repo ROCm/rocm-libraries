@@ -33,6 +33,10 @@
 
 #include <mutex>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     namespace hip
@@ -104,6 +108,9 @@ namespace TensileLite
             std::vector<std::string>        m_loadedModuleNames;
             std::unordered_set<std::string> m_loadedCOFiles;
 
+            // Record for module reload
+            std::string m_lazyLoadArchitecture;
+
             friend std::ostream& operator<<(std::ostream& stream, SolutionAdapter const& adapter);
         };
 
@@ -111,3 +118,5 @@ namespace TensileLite
         std::ostream& operator<<(std::ostream& stream, std::shared_ptr<SolutionAdapter> const& ptr);
     } // namespace hip
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

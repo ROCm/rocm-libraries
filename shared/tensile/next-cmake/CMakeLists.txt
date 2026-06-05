@@ -131,11 +131,10 @@ if(TENSILE_ENABLE_ROCM_SMI)
 endif()
 
 if(TENSILE_ENABLE_CLIENT)
-  find_package(Boost REQUIRED COMPONENTS program_options)
   add_library(tensile-client-lib OBJECT)
   add_library(tensile::tensile-client-lib ALIAS tensile-client-lib)
   target_link_libraries(
-    tensile-client-lib PRIVATE Boost::boost Boost::program_options tensile-host OpenMP::OpenMP_CXX)
+    tensile-client-lib PRIVATE tensile-host OpenMP::OpenMP_CXX)
     target_compile_features(tensile-client-lib PUBLIC cxx_std_${TENSILE_CXX_STANDARD})
 
   if(rocm_smi_FOUND)
@@ -149,21 +148,14 @@ if(TENSILE_ENABLE_CLIENT)
   target_link_libraries(
     tensile-client PRIVATE roc::tensile-host tensile::tensile-client-lib)
   target_compile_features(tensile-client PUBLIC cxx_std_${TENSILE_CXX_STANDARD})
-  target_compile_definitions(
-    tensile-client
-    PRIVATE BOOST_ALL_NO_LIB BOOST_PROGRAM_OPTIONS_DYN_LINK)
   add_subdirectory(client)
 endif()
 
 if(TENSILE_BUILD_TESTING)
-  find_package(Boost REQUIRED COMPONENTS filesystem)
   find_package(GTest REQUIRED)
 
   add_library(tensile-test-lib OBJECT)
   add_library(tensile::tensile-test-lib ALIAS tensile-test-lib)
-  target_compile_definitions(
-    tensile-test-lib
-    PRIVATE BOOST_ALL_NO_LIB BOOST_ERROR_CODE_HEADER_ONLY BOOST_FILESYSTEM_DYN_LINK)
   target_compile_features(tensile-test-lib PRIVATE cxx_std_${TENSILE_CXX_STANDARD})
   target_link_libraries(tensile-test-lib PRIVATE roc::tensile-host)
 
@@ -175,7 +167,7 @@ if(TENSILE_BUILD_TESTING)
   add_executable(tensile-tests)
   target_link_libraries(
     tensile-tests PRIVATE GTest::gtest roc::tensile-host tensile::tensile-test-lib
-                          Boost::filesystem hip::host test-device-kernels
+                          hip::host test-device-kernels
                           tensile-client-lib OpenMP::OpenMP_CXX)
   if(TENSILE_ENABLE_LLVM)
       target_link_libraries(tensile-tests PRIVATE LLVMObjectYAML)

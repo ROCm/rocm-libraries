@@ -1214,7 +1214,7 @@ namespace rocisa
         }
         else {
             // not supported
-            return 0;
+	        return 0;
         }
         // Calculate local read bytes
         auto localReadBytes = _calculateLocalReadBytes(module, numWaves);

@@ -5,7 +5,9 @@ subtrees:
   - caption: Install
     entries:
     - file: install/installing
-      title: Installation guide
+      title: Install rocRAND
+    - file: install/build
+      title: Build from source
 
   - caption: Conceptual
     entries:

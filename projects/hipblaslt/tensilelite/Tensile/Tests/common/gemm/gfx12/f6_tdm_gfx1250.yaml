@@ -1,0 +1,94 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  NewClient: 2
+  BoundsCheck: False
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  PruneSparseMode: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeD: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: False
+  MinKForGSU: 1
+  Architecture: gfx1250
+  PrintLevel: 2
+
+BenchmarkProblems:
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F6
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  1, 1,  1, 1]
+          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
+          - [16, 16, 128, 1,  1,  2, 2,  1, 1]
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+        - DepthU: [128, 256]
+        - LocalReadVectorWidth: [32]
+        - ScheduleIterAlg: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - VectorWidthA: [-1, 1]
+        - VectorWidthB: [-1, 1]
+        - GlobalReadVectorWidthA: [32]
+        - GlobalReadVectorWidthB: [32]
+        - InnerUnroll: [1]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - TransposeLDS: [1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - WaveSeparateGlobalReadA: [0]
+        - WaveSeparateGlobalReadB: [0]
+        - 1LDSBuffer: [0]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - WavefrontSize: [32]
+        - TDMInst: [3]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 512]
+          - Exact: [126, 128, 1, 256]
+          - Exact: [128, 126, 1, 256]
+          - Exact: [128, 128, 1, 272] # tail
+          - Exact: [126, 128, 1, 272] # M-edge + tail
+          - Exact: [128, 126, 1, 272] # N-edge + tail
+          - Exact: [126, 126, 1, 256] # M+N edge
+          - Exact: [126, 126, 1, 272] # M+N edge + tail
+          - Exact: [128, 128, 4, 256] # batch=4
+          - Exact: [126, 128, 2, 272] # batch=2 + M-edge + tail

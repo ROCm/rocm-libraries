@@ -9,6 +9,9 @@
 
 using namespace hipdnn_data_sdk::utilities;
 
+namespace
+{
+
 // Helper to process ITensor polymorphically
 template <typename T>
 void processITensorErased(ITensor& tensor, const std::function<void(T&)>& func)
@@ -19,6 +22,8 @@ void processITensorErased(ITensor& tensor, const std::function<void(T&)>& func)
         func(*value);
     }
 }
+
+} // namespace
 
 // ============================================================================
 // Basic Type-Erased Iterator Tests
@@ -209,7 +214,7 @@ TEST(TestTypeErasedIterator, MoveConstructor)
 
 TEST(TestTypeErasedIterator, EmptyTensor)
 {
-    std::vector<int64_t> dims;
+    const std::vector<int64_t> dims;
     Tensor<float> tensor(dims);
     ITensor* iTensor = &tensor;
 
@@ -318,8 +323,8 @@ TEST(TestTypeErasedIteratorInt, BasicIteration)
 
 TEST(TestTypeErasedIterator, StridedTensor)
 {
-    std::vector<int64_t> dims = {2, 2};
-    std::vector<int64_t> strides = {3, 1}; // Non-standard strides
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {3, 1}; // Non-standard strides
 
     Tensor<float> tensor(dims, strides);
 

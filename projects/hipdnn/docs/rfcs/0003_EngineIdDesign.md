@@ -124,16 +124,16 @@ struct EngineRegistrar {
 };
 
 // Macro that defines engine and automatically registers it
-#define HIPDNN_REGISTER_ENGINE(name, value) \
-    inline constexpr const char* name = value; \
-    inline constexpr const int64_t name##_id = hipdnn_data_sdk::engineNameToId(value); \
-    inline const EngineRegistrar name##_registrar{value};
+#define HIPDNN_REGISTER_ENGINE(name) \
+    inline constexpr const char* name##_NAME = value; \
+    inline const int64_t name##_ID = hipdnn_data_sdk::utilities::engineNameToId(#name); \
+    inline const hipdnn_data_sdk::utilities::EngineRegistrar name##_registrar{#name};
 
 // Define all engines using the macro, name and value should match.
-HIPDNN_REGISTER_ENGINE(MIOPEN_PLUGIN, "MIOPEN_PLUGIN")
-HIPDNN_REGISTER_ENGINE(VENDOR_FAST_CONV, "VENDOR_FAST_CONV")
-HIPDNN_REGISTER_ENGINE(CPU_REFERENCE_ENGINE, "CPU_REFERENCE_ENGINE")
-HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_RENAME_THIS, "EXAMPLE_PLUGIN_RENAME_THIS")
+HIPDNN_REGISTER_ENGINE(MIOPEN_PLUGIN)
+HIPDNN_REGISTER_ENGINE(VENDOR_FAST_CONV)
+HIPDNN_REGISTER_ENGINE(CPU_REFERENCE_ENGINE)
+HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_RENAME_THIS)
 
 } // namespace hipdnn_plugin_sdk::engine_names
 

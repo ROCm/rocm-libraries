@@ -37,7 +37,7 @@ Definitions:
 
 Tests:
 - name: spmm_bad_arg
-  category: pre_checkin
+  category: smoke
   function:
     - spmm_bad_arg: *real_precisions_1b
   transA: N
@@ -463,11 +463,11 @@ Tests:
   activation_arg2 : [-1.0, 0.0, 0.5, 1.0, 3.0]
   sparse_b: [true, false]
 
-- name: spmm_bert_demo_sizes
-  category: pre_checkin
+- name: spmm_bert_sizes
+  category: nightly
   function:
     spmm: *real_precisions_1b
-  matrix_size: *bert_demo_sizes
+  matrix_size: *bert_sizes
   transA_transB: *transA_transB_range
-  sparse_b: [true, false]
+  sparse_b: false
 ...

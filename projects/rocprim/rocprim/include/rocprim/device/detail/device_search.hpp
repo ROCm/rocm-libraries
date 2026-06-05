@@ -136,13 +136,25 @@ void search_kernel_shared_impl(InputIterator1 input,
     bool find_pattern = false;
 
     ROCPRIM_SHARED_MEMORY uninitialized_array<key_type, max_shared_key> local_keys_;
-    ROCPRIM_SHARED_MEMORY uninitialized_array<value_type, items_per_block> local_input_;
+    // Hide extra bool shared memory usage with union
+    ROCPRIM_SHARED_MEMORY union
+    {
+        bool                                             check_prev;
+        uninitialized_array<value_type, items_per_block> local_input_;
+    } storage;
 
-    // Check if a key was already found in a place before this block
-    if(block_offset > atomic_load(output))
+    // Check if it can have fit a key and a previous block already found an earlier solution.
+    // This early exit needs to be for the whole block.
+    if(flat_id == 0)
+    {
+        storage.check_prev = block_offset + keys_size > size || block_offset > atomic_load(output);
+    }
+    syncthreads();
+    if(storage.check_prev)
     {
         return;
     }
+    syncthreads();
 
     // Load in key in shared memory
     const size_t batch_size = ceiling_div(keys_size, block_size);
@@ -174,7 +186,7 @@ void search_kernel_shared_impl(InputIterator1 input,
         for(size_t i = 0; i < items_per_thread; i++)
         {
             const size_t index = flat_id * items_per_thread + i;
-            local_input_.emplace(index, elements[i]);
+            storage.local_input_.emplace(index, elements[i]);
         }
     }
     else
@@ -186,18 +198,18 @@ void search_kernel_shared_impl(InputIterator1 input,
             const size_t index_value = block_offset + index;
             if(index_value < size)
             {
-                local_input_.emplace(index, elements[i]);
+                storage.local_input_.emplace(index, elements[i]);
             }
         }
     }
 
     const key_type*   local_keys  = local_keys_.get_unsafe_array();
-    const value_type* local_input = local_input_.get_unsafe_array();
+    const value_type* local_input = storage.local_input_.get_unsafe_array();
 
     syncthreads();
 
-    // Check if it can have fit a key and a key has not yet be found with a lower index.
-    if(offset + block_offset + keys_size > size || offset > atomic_load(output))
+    // Check if a solution is found in this block or in another block during loading.
+    if(block_offset + offset + keys_size > size || block_offset + offset > atomic_load(output))
     {
         return;
     }

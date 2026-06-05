@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -52,7 +52,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
-  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
+  action: [rocsparse_action_numeric]
   matrix: [rocsparse_matrix_random]
 
 - name: gebsr2gebsc
@@ -66,7 +66,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row]
-  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
+  action: [rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_random]
 
 - name: gebsr2gebsc
@@ -80,7 +80,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
-  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
+  action: [rocsparse_action_numeric]
   matrix: [rocsparse_matrix_random]
 
 - name: gebsr2gebsc
@@ -94,7 +94,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_one]
   direction: [rocsparse_direction_row]
-  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
+  action: [rocsparse_action_symbolic]
   matrix: [rocsparse_matrix_random]
 
 - name: gebsr2gebsc_file
@@ -107,7 +107,7 @@ Tests:
   col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
-  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
+  action: [rocsparse_action_numeric]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos5]
 

@@ -60,7 +60,7 @@ if(TENSILE_STATIC_ONLY)
 endif()
 
 if(NOT Tensile_FOUND)
-    find_package(Tensile 4.46.0 EXACT REQUIRED ${TENSILE_COMPONENTS} PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../Tensile")
+    find_package(Tensile 4.47.0 EXACT REQUIRED ${TENSILE_COMPONENTS} PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../Tensile")
 endif()
 
 if(NOT TENSILE_DISABLE_CTEST)
@@ -79,8 +79,6 @@ add_subdirectory(googletest)
 if(NOT gtest_SOURCE_DIR)
     message(FATAL_ERROR "googletest not found.  Run git submodule update --init")
 endif()
-
-find_package(Boost COMPONENTS filesystem)
 
 #if(TENSILE_USE_HIP AND NOT HIP_DIR)
 if(TENSILE_USE_HIP)
@@ -181,7 +179,7 @@ if(NOT TENSILE_DISABLE_CTEST)
     endif()
 endif()
 
-target_link_libraries(TensileTests PUBLIC gtest TensileHost TensileTestLib ${Boost_LIBRARIES})
+target_link_libraries(TensileTests PUBLIC gtest TensileHost TensileTestLib)
 
 if(TENSILE_USE_LLVM)
     find_library(LLVMObjectYAML_LIBRARY

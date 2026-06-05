@@ -23,6 +23,7 @@ Architectures:
       MaxLdsSize: 65536
       MaxLgkmcnt: 15
       MaxVmcnt: 63
+      MaxPreloadedKernargs: 0
       SupportedISA: 0
       SupportedSource: 0
       UnalignedVGPRs: 0

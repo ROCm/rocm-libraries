@@ -196,7 +196,7 @@ public:
         }
 
         void* ptr = nullptr;
-        hipError_t err = hipHostMalloc(&ptr, n * sizeof(T));
+        const hipError_t err = hipHostMalloc(&ptr, n * sizeof(T));
         if(err != hipSuccess)
         {
             throw std::bad_alloc();
@@ -261,7 +261,7 @@ public:
         }
 
         void* ptr = nullptr;
-        hipError_t err = hipMalloc(&ptr, n * sizeof(T));
+        const hipError_t err = hipMalloc(&ptr, n * sizeof(T));
         if(err != hipSuccess)
         {
             throw std::bad_alloc();

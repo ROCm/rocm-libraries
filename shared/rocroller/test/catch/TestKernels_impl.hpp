@@ -29,13 +29,10 @@ template <typename... Args>
 void AssemblyTestKernel::operator()(rocRoller::KernelInvocation const& invocation,
                                     Args const&... args)
 {
-    REQUIRE_TEST_TAG("gpu");
-    auto kernel = getExecutableKernel();
-
     bool log = rocRoller::Log::getLogger()->should_log(rocRoller::LogLevel::Debug);
 
     rocRoller::KernelArguments kargs(log);
     appendArgs(kargs, std::forward_as_tuple(args...));
 
-    kernel->executeKernel(kargs, invocation);
+    operator()(invocation, kargs);
 }

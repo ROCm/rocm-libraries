@@ -21,6 +21,7 @@
  * ************************************************************************ */
 
 #include "../blas1/rocblas_copy.hpp"
+#include "asan_helpers.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
 #include "rocblas_hpmv.hpp"
@@ -147,20 +148,15 @@ rocblas_hpmv_kernel(bool           is_upper,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto AP = cond_load_ptr_batch(alpha, APa, batch, shifta, strideA);
         auto x  = cond_load_ptr_batch(alpha, xa, batch, shiftx, stridex);
 
         auto y = load_ptr_batch(ya, batch, shifty, stridey);
 
         rocblas_hpmv_kernel_calc<DIM_X, DIM_Y>(is_upper, n, alpha, AP, x, incx, beta, y, incy);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /**
@@ -198,7 +194,7 @@ rocblas_status rocblas_hpmv_launcher(rocblas_handle handle,
     int batches = handle->getBatchGridDim((int)batch_count);
 
     static constexpr int HPMV_DIM_X = 64;
-    static constexpr int HPMV_DIM_Y = 16;
+    static constexpr int HPMV_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
 
     rocblas_int blocks = (n - 1) / (HPMV_DIM_X) + 1;
     dim3        hpmv_grid(blocks, 1, batches);

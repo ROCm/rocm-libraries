@@ -5741,17 +5741,19 @@ void host_bsric0(rocsparse_direction               direction,
                         {
                             if(direction == rocsparse_direction_row)
                             {
-                                local_sum = std::fma(bsr_val[block_dim * block_dim * l
-                                                             + block_dim * local_row_j + m],
-                                                     rocsparse_conj(bsr_val[idx]),
-                                                     local_sum);
+                                local_sum = std::fma(
+                                    bsr_val[idx],
+                                    rocsparse_conj(bsr_val[block_dim * block_dim * l
+                                                           + block_dim * local_row_j + m]),
+                                    local_sum);
                             }
                             else
                             {
-                                local_sum = std::fma(bsr_val[block_dim * block_dim * l
-                                                             + block_dim * m + local_row_j],
-                                                     rocsparse_conj(bsr_val[idx]),
-                                                     local_sum);
+                                local_sum = std::fma(
+                                    bsr_val[idx],
+                                    rocsparse_conj(bsr_val[block_dim * block_dim * l + block_dim * m
+                                                           + local_row_j]),
+                                    local_sum);
                             }
                         }
                     }
@@ -6771,7 +6773,7 @@ void host_gtsv_interleaved_batch_lu(rocsparse_int m,
 #endif
         for(rocsparse_int j = 0; j < batch_count; j++)
         {
-            if(p[batch_count * i + j] <= i) // no pivoting occured, sum up result
+            if(p[batch_count * i + j] <= i) // no pivoting occurred, sum up result
             {
                 T temp = static_cast<T>(0);
                 for(rocsparse_int s = start[j]; s < i; s++)

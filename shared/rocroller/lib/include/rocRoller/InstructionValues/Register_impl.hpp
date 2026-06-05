@@ -68,6 +68,7 @@ namespace rocRoller
             case Type::VCC:
             case Type::VCC_LO:
             case Type::VCC_HI:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
@@ -104,6 +105,7 @@ namespace rocRoller
             case Type::VCC:
             case Type::VCC_LO:
             case Type::VCC_HI:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
@@ -125,6 +127,7 @@ namespace rocRoller
             case Type::VCC:
             case Type::VCC_LO:
             case Type::VCC_HI:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
@@ -195,6 +198,7 @@ namespace rocRoller
             {
             case Type::M0:
             case Type::SCC:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
@@ -241,6 +245,8 @@ namespace rocRoller
                 return "VCC_LO";
             case Type::VCC_HI:
                 return "VCC_HI";
+            case Type::EXECZ:
+                return "EXECZ";
             case Type::EXEC:
                 return "EXEC";
             case Type::EXEC_LO:
@@ -540,9 +546,9 @@ namespace rocRoller
             return m_regType == Type::SCC;
         }
 
-        inline constexpr bool Value::isExec() const
+        inline constexpr bool Value::isEXECZ() const
         {
-            return m_regType == Type::EXEC;
+            return m_regType == Type::EXECZ;
         }
 
         inline ValuePtr Value::placeholder() const
@@ -615,7 +621,8 @@ namespace rocRoller
         {
             AssertFatal(canUseAsOperand(),
                         "Tried to use unallocated register value!",
-                        ShowValue(this->toString()));
+                        ShowValue(this->toString()),
+                        ShowValue(this->valueCount()));
         }
 
         inline void Value::specialString(std::ostream& os) const
@@ -636,6 +643,9 @@ namespace rocRoller
                 return;
             case Type::VCC_HI:
                 os << "vcc_hi";
+                return;
+            case Type::EXECZ:
+                os << "execz";
                 return;
             case Type::EXEC:
                 os << "exec";
@@ -742,6 +752,7 @@ namespace rocRoller
             case Type::VCC:
             case Type::VCC_LO:
             case Type::VCC_HI:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
@@ -1050,28 +1061,38 @@ namespace rocRoller
             : m_context(context)
             , m_regType(regType)
             , m_variableType(variableType)
-            , m_options(options)
             , m_valueCount(count)
         {
             AssertFatal(context != nullptr);
 
             setRegisterCount();
-            if(options.contiguousChunkWidth == Register::FULLY_CONTIGUOUS)
+
+            setOptions(options);
+        }
+
+        inline void Allocation::setOptions(AllocationOptions opts)
+        {
+            m_options = opts;
+
+            if(m_options.contiguousChunkWidth == Register::FULLY_CONTIGUOUS)
             {
                 m_options.contiguousChunkWidth = m_registerCount;
             }
-            else if(options.contiguousChunkWidth == Register::VALUE_CONTIGUOUS)
+            else if(m_options.contiguousChunkWidth == Register::VALUE_CONTIGUOUS)
             {
-                m_options.contiguousChunkWidth = CeilDivide<int>(variableType.getElementSize(), 4);
+                m_options.contiguousChunkWidth
+                    = CeilDivide<int>(m_variableType.getElementSize(), 4);
             }
 
-            if(options.alignment <= 0)
+            if(m_options.alignment <= 0)
             {
-                m_options.alignment = m_variableType.registerAlignment(
-                    m_regType, m_options.contiguousChunkWidth, context->targetArchitecture());
+                m_options.alignment
+                    = m_variableType.registerAlignment(m_regType,
+                                                       m_options.contiguousChunkWidth,
+                                                       m_context.lock()->targetArchitecture());
             }
 
-            if(options.contiguousChunkWidth != Register::MANUAL)
+            if(m_options.contiguousChunkWidth != Register::MANUAL)
             {
                 AssertFatal(m_options.alignment <= m_options.contiguousChunkWidth,
                             ShowValue(m_options),

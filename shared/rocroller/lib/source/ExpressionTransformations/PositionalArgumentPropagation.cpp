@@ -75,7 +75,7 @@ namespace rocRoller
 
                 auto replacement = m_arguments[expr.slot];
 
-                auto [regType, varType] = resultType(replacement);
+                auto [regType, varType, valueCount] = resultType(replacement);
 
                 if(regType != expr.regType || varType != expr.varType)
                     Log::debug("Type mismatch for PositionalArgument({}):\n"

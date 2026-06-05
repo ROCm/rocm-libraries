@@ -41,7 +41,7 @@ extern "C" {
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  dir          matrix storage of GEBSC blocks.
 *  @param[in]
@@ -66,7 +66,7 @@ extern "C" {
 *  idx_base    \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
 *  @param[in]
 *  matrix_type \ref rocsparse_matrix_type_general, \ref rocsparse_matrix_type_symmetric,
-*              \ref rocsparse_matrix_type_hermitian or \ref rocsparse_matrix_type_triangular.
+*              \ref rocsparse_matrix_type_hermitian, or \ref rocsparse_matrix_type_triangular.
 *  @param[in]
 *  uplo        \ref rocsparse_fill_mode_lower or \ref rocsparse_fill_mode_upper.
 *  @param[in]
@@ -74,13 +74,13 @@ extern "C" {
 *  @param[out]
 *  buffer_size number of bytes of the temporary storage buffer required by
 *              rocsparse_scheck_matrix_gebsc(), rocsparse_dcheck_matrix_gebsc(),
-*              rocsparse_ccheck_matrix_gebsc() and rocsparse_zcheck_matrix_gebsc().
+*              rocsparse_ccheck_matrix_gebsc(), and rocsparse_zcheck_matrix_gebsc().
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_value \p dir or \p idx_base or \p matrix_type or \p uplo or \p storage is invalid.
-*  \retval rocsparse_status_invalid_size \p mb \p nb \p nnzb \p row_block_dim or \p col_block_dim is invalid.
-*  \retval rocsparse_status_invalid_pointer \p bsc_val, \p bsc_col_ptr, \p bsc_row_ind or \p buffer_size pointer
+*  \retval rocsparse_status_invalid_value \p dir, \p idx_base, \p matrix_type, \p uplo, or \p storage is invalid.
+*  \retval rocsparse_status_invalid_size \p mb, \p nb, \p nnzb, \p row_block_dim, or \p col_block_dim is invalid.
+*  \retval rocsparse_status_invalid_pointer \p bsc_val, \p bsc_col_ptr, \p bsc_row_ind, or \p buffer_size pointer
 *          is invalid.
 */
 /**@{*/
@@ -157,21 +157,21 @@ rocsparse_status rocsparse_zcheck_matrix_gebsc_buffer_size(rocsparse_handle    h
 *  \brief Check matrix to see if it is valid.
 *
 *  \details
-*  \p rocsparse_check_matrix_gebsc checks if the input GEBSC matrix is valid. It performs basic sanity checks on the input
+*  \p rocsparse_check_matrix_gebsc checks whether the input GEBSC matrix is valid. It performs basic sanity checks on the input
 *  matrix and tries to detect issues in the data. This includes looking for 'nan' or 'inf' values in the data arrays,
 *  invalid row indices or column offsets, whether the matrix is triangular or not, whether there are duplicate
-*  indices or whether the row indices are not sorted when they should be. If an issue is found, it is written to the
+*  indices, or whether the row indices are not sorted when they should be. If an issue is found, it is written to the
 *  \p data_status parameter.
 *
-*  Performing the above checks involves two steps. First the user calls \p rocsparse_Xcheck_matrix_gebsr_buffer_size in order
-*  to determine the required buffer size. The user then allocates this buffer and passes it to \p rocsparse_Xcheck_matrix_gebsr.
-*  Any issues detected will be written to the \p data_status parameter which is always a host variable regardless of pointer mode.
+*  Performing the above checks involves two steps. First, call \p rocsparse_Xcheck_matrix_gebsc_buffer_size
+*  to determine the required buffer size. Then allocate this buffer and pass it to \p rocsparse_Xcheck_matrix_gebsc.
+*  Any issues detected will be written to the \p data_status parameter, which is always a host variable regardless of the pointer mode.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  dir          matrix storage of GEBSC blocks.
 *  @param[in]
@@ -196,21 +196,21 @@ rocsparse_status rocsparse_zcheck_matrix_gebsc_buffer_size(rocsparse_handle    h
 *  idx_base    \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
 *  @param[in]
 *  matrix_type \ref rocsparse_matrix_type_general, \ref rocsparse_matrix_type_symmetric,
-*              \ref rocsparse_matrix_type_hermitian or \ref rocsparse_matrix_type_triangular.
+*              \ref rocsparse_matrix_type_hermitian, or \ref rocsparse_matrix_type_triangular.
 *  @param[in]
 *  uplo        \ref rocsparse_fill_mode_lower or \ref rocsparse_fill_mode_upper.
 *  @param[in]
 *  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_sorted.
 *  @param[out]
-*  data_status modified to indicate the status of the data
+*  data_status modified to indicate the status of the data.
 *  @param[in]
 *  temp_buffer temporary storage buffer allocated by the user.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_value \p dir or \p idx_base or \p matrix_type or \p uplo or \p storage is invalid.
-*  \retval rocsparse_status_invalid_size \p mb \p nb \p nnzb \p row_block_dim or \p col_block_dim is invalid.
-*  \retval rocsparse_status_invalid_pointer \p bsc_val, \p bsc_col_ptr, \p bsc_row_ind, \p temp_buffer or \p data_status pointer
+*  \retval rocsparse_status_invalid_value \p dir, \p idx_base, \p matrix_type, \p uplo, or \p storage is invalid.
+*  \retval rocsparse_status_invalid_size \p mb, \p nb, \p nnzb, \p row_block_dim, or \p col_block_dim is invalid.
+*  \retval rocsparse_status_invalid_pointer \p bsc_val, \p bsc_col_ptr, \p bsc_row_ind, \p temp_buffer, or \p data_status pointer
 *          is invalid.
 */
 /**@{*/

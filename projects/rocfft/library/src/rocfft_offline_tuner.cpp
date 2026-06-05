@@ -129,24 +129,23 @@ int offline_tune_problems(rocfft_params& params, int verbose, int ntrial)
     // first time call create_plan is actually generating a bunch of combination of configs
     offline_tuner->SetInitStep(0);
 
-    // Check free and total available memory:
-    size_t free  = 0;
-    size_t total = 0;
-    HIP_V_THROW(hipMemGetInfo(&free, &total), "hipMemGetInfo failed");
-    const auto raw_vram_footprint
-        = params.fft_params_vram_footprint() + twiddle_table_vram_footprint(params);
-    if(!vram_fits_problem(raw_vram_footprint, free))
+    // Check available memory:
+    const auto vram_avail = device_memory_accountant::singleton().get_usable_bytes_all_devices();
+    const auto io_vram_footprint = params.io_vram_footprint();
+    if(!vram_fits_problem(io_vram_footprint, vram_avail))
     {
-        std::cout << "SKIPPED: Problem size (" << raw_vram_footprint
-                  << ") raw data too large for device.\n";
+        std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(io_vram_footprint)
+                  << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail)
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 
     const auto vram_footprint = params.vram_footprint();
-    if(!vram_fits_problem(vram_footprint, free))
+    if(!vram_fits_problem(vram_footprint, vram_avail))
     {
-        std::cout << "SKIPPED: Problem size (" << vram_footprint
-                  << ") raw data too large for device.\n";
+        std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(vram_footprint)
+                  << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail)
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 

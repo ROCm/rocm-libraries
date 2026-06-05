@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "check_numerics_matrix.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
@@ -95,29 +96,20 @@ rocblas_her_kernel(bool           is_upper,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, 0); //stride_alpha is always 0
         if(!alpha)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         auto*       A = load_ptr_batch(Aa, batch, shift_A, stride_A);
         const auto* x = load_ptr_batch(xa, batch, shift_x, stride_x);
 
         rocblas_her_kernel_calc<DIM_X>(is_upper, n, alpha, x, incx, A, lda);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /**
@@ -157,7 +149,7 @@ rocblas_status rocblas_her_launcher(rocblas_handle handle,
     her_grid, her_threads, 0, rocblas_stream, uplo == rocblas_fill_upper, n, alpha_, x, shift_x, \
         incx, stride_x, A, lda, offset_A, stride_A, batch_count
 
-    static constexpr int HER_DIM_X = 1024;
+    static constexpr int HER_DIM_X = rocblas::conditional_v<rocblas_enable_asan, 256, 1024>;
 
     dim3 her_grid(n, 1, batches);
     dim3 her_threads(HER_DIM_X);

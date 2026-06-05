@@ -279,7 +279,7 @@ namespace rocRoller
 
                 int nMac0, nMac1;
                 std::tie(nMac0, iMac0, nMac1, iMac1)
-                    = addLoadMacroTileCT(graph, connections, macTileTag, sDims);
+                    = addLoadMacroTileCT(graph, connections, macTileTag, sDims, false);
 
                 auto existingMacTileNum0 = graph.mapper.get<MacroTileNumber>(tag, 0);
                 AssertFatal(existingMacTileNum0 != -1,
@@ -519,8 +519,8 @@ namespace rocRoller
             auto waveSwizzleN = macTile.swizzleTileSizes.at(1);
             auto waveSwizzleK = macTile.swizzleTileSizes.at(2);
 
-            AssertFatal(waveSwizzleM == waveSwizzleN,
-                        "waveSwizzleM is not equal to waveSwizzleN",
+            AssertFatal(waveSwizzleM == waveSwizzleN && waveSwizzleM > 0,
+                        "waveSwizzleM is not equal to waveSwizzleN or is zero",
                         ShowValue(waveSwizzleM),
                         ShowValue(waveSwizzleN));
 
@@ -540,7 +540,7 @@ namespace rocRoller
 
             auto const waveSwizzleM = macTile.swizzleTileSizes.at(0);
             auto const waveSwizzleN = macTile.swizzleTileSizes.at(1);
-            AssertFatal(waveSwizzleM == waveSwizzleN,
+            AssertFatal(waveSwizzleM == waveSwizzleN && waveSwizzleM > 0,
                         "waveSwizzleM is not equal to waveSwizzleN",
                         ShowValue(waveSwizzleM),
                         ShowValue(waveSwizzleN));

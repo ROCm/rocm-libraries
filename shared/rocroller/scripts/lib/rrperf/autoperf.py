@@ -14,7 +14,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List
 
 import rrperf.args as args
 from rrperf import compare, git
@@ -78,7 +77,7 @@ def build_rocroller(
     return build_dir
 
 
-def ancestral_targets(targets: List[str]):
+def ancestral_targets(targets: list[str]):
     orig_project_dir = git.top()
     targets = git.rev_list(orig_project_dir, targets[0], targets[-1])
     targets.reverse()
@@ -142,10 +141,10 @@ def run(args):
 
 
 def autoperf(
-    commits: List[str],
+    commits: list[str],
     clonedir: str,
     rundir: str,
-    no_fail: List[str] = None,
+    no_fail: list[str] = None,
     current: bool = False,
     ancestral: bool = False,
     suite: str = None,

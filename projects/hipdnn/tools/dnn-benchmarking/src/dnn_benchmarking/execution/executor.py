@@ -6,7 +6,7 @@
 import json
 from typing import Any, Dict, List, Literal, Optional
 
-from ..common.exceptions import ExecutionError
+from ..common.exceptions import ExecutionError, UnsupportedGraphError
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from .timing import GpuTimerInterface, Timer, create_gpu_timer
@@ -27,19 +27,22 @@ _DATA_TYPE_STR_MAP = {
 }
 
 
-def _resolve_data_type(hipdnn: Any, type_str: str, fallback: str = "FLOAT") -> Any:
+def _resolve_data_type(hipdnn: Any, type_str: str) -> Optional[Any]:
     """Resolve a data type string to a hipdnn.DataType enum value.
 
     Args:
         hipdnn: The hipdnn_frontend module.
         type_str: Data type string from graph JSON (e.g. "FLOAT", "HALF").
-        fallback: Fallback enum name if type_str is not recognized.
 
     Returns:
-        hipdnn.DataType enum value.
+        Matching hipdnn.DataType enum value, or None if the string is not
+        a recognised data type. Callers should skip configuring the graph
+        attribute when None is returned and let hipDNN inference resolve it.
     """
-    enum_name = _DATA_TYPE_STR_MAP.get(type_str.upper(), fallback)
-    return getattr(hipdnn.DataType, enum_name, hipdnn.DataType.FLOAT)
+    enum_name = _DATA_TYPE_STR_MAP.get(type_str.upper())
+    if enum_name is None:
+        return None
+    return getattr(hipdnn.DataType, enum_name, None)
 
 
 class Executor:
@@ -75,7 +78,117 @@ class Executor:
         self._graph: Any = None
         self._workspace: Any = None
         self._workspace_ptr: int = 0
+        self._workspace_size: int = 0
         self._init_time_ms: float = 0.0
+
+    def _build_through_operation_graph(
+        self, handle: Any, engine_id: Optional[int] = None
+    ) -> Any:
+        """Create the hipdnn graph and run it up to ``build_operation_graph``.
+
+        Shared by ``discover_engines`` and ``prepare``. Configures only the
+        data-type attributes that are explicitly present in the graph JSON
+        (other types are left for hipDNN inference). When ``engine_id`` is
+        provided, sets the preferred engine immediately after deserialisation
+        so the rest of the pipeline (validate, build_operation_graph, plan
+        creation) sees it.
+
+        Args:
+            handle: hipdnn.Handle instance.
+            engine_id: Optional preferred engine to set on the graph. Pass
+                None for discovery, where engine selection has not happened.
+
+        Returns:
+            The hipdnn module (so callers can keep using its enums/types
+            without re-importing).
+
+        Raises:
+            ExecutionError: If hipdnn_frontend is unavailable or any of the
+                graph-build steps fail.
+        """
+        try:
+            import hipdnn_frontend as hipdnn
+        except ImportError as e:
+            raise ExecutionError(
+                "hipdnn_frontend not available. Install hipDNN Python bindings."
+            ) from e
+
+        self._graph = hipdnn.Graph()
+
+        try:
+            graph_dict = json.loads(self._graph_json_str)
+        except (json.JSONDecodeError, TypeError):
+            graph_dict = {}
+
+        if "io_data_type" in graph_dict:
+            io_dt = _resolve_data_type(hipdnn, graph_dict["io_data_type"])
+            if io_dt is not None:
+                self._graph.set_io_data_type(io_dt)
+        if "intermediate_data_type" in graph_dict:
+            intermediate_dt = _resolve_data_type(
+                hipdnn, graph_dict["intermediate_data_type"]
+            )
+            if intermediate_dt is not None:
+                self._graph.set_intermediate_data_type(intermediate_dt)
+        if "compute_data_type" in graph_dict:
+            compute_dt = _resolve_data_type(hipdnn, graph_dict["compute_data_type"])
+            if compute_dt is not None:
+                self._graph.set_compute_data_type(compute_dt)
+
+        # Normalise node compute_data_type: from_json rejects "unset", which
+        # hipDNN emits when the caller leaves the field unset. Promote to the
+        # graph-level compute type so the serialised form round-trips cleanly.
+        if graph_dict.get("nodes"):
+            graph_cdt = graph_dict.get("compute_data_type", "float")
+            changed = False
+            for node in graph_dict["nodes"]:
+                if node.get("compute_data_type", "").lower() == "unset":
+                    node["compute_data_type"] = graph_cdt
+                    changed = True
+            if changed:
+                self._graph_json_str = json.dumps(graph_dict)
+
+        result = self._graph.from_json(self._graph_json_str)
+        if result.is_bad():
+            raise ExecutionError(f"Failed to deserialize graph: {result.get_message()}")
+
+        if engine_id is not None:
+            self._graph.set_preferred_engine_id_ext(engine_id)
+
+        result = self._graph.validate()
+        if result.is_bad():
+            raise ExecutionError(f"Graph validation failed: {result.get_message()}")
+
+        result = self._graph.build_operation_graph(handle)
+        if result.is_bad():
+            raise ExecutionError(
+                f"Failed to build operation graph: {result.get_message()}"
+            )
+
+        return hipdnn
+
+    def discover_engines(self, handle: Any) -> List[int]:
+        """Build the operation graph and return ranked engine IDs.
+
+        Runs the same setup as ``prepare`` up to ``build_operation_graph``,
+        then queries ``get_ranked_engine_ids``. Does not allocate a workspace
+        or set a preferred engine; callers iterate the returned IDs and create
+        a fresh Executor per engine for execution.
+
+        Args:
+            handle: hipdnn.Handle instance.
+
+        Returns:
+            List of int engine IDs ranked by the backend's heuristics.
+
+        Raises:
+            ExecutionError: If any graph-build step fails.
+        """
+        self._build_through_operation_graph(handle)
+        try:
+            return [int(eid) for eid in self._graph.get_ranked_engine_ids()]
+        except RuntimeError as e:
+            raise UnsupportedGraphError(str(e)) from e
 
     def prepare(self, handle: Any, engine_id: Optional[int] = None) -> None:
         """Build the operation graph and prepare for execution.
@@ -88,79 +201,27 @@ class Executor:
         Raises:
             ExecutionError: If graph building fails.
         """
-        try:
-            import hipdnn_frontend as hipdnn
-        except ImportError as e:
-            raise ExecutionError(
-                "hipdnn_frontend not available. Install hipDNN Python bindings."
-            ) from e
-
         with Timer() as t:
-            # Create and configure graph
-            self._graph = hipdnn.Graph()
+            hipdnn = self._build_through_operation_graph(handle, engine_id=engine_id)
 
-            # Parse data types from the graph JSON; fall back to FLOAT
-            try:
-                graph_dict = json.loads(self._graph_json_str)
-            except (json.JSONDecodeError, TypeError):
-                graph_dict = {}
-
-            io_dt = _resolve_data_type(hipdnn, graph_dict.get("io_data_type", "FLOAT"))
-            intermediate_dt = _resolve_data_type(
-                hipdnn, graph_dict.get("intermediate_data_type", "FLOAT")
-            )
-            compute_dt = _resolve_data_type(
-                hipdnn, graph_dict.get("compute_data_type", "FLOAT")
-            )
-
-            self._graph.set_io_data_type(io_dt)
-            self._graph.set_intermediate_data_type(intermediate_dt)
-            self._graph.set_compute_data_type(compute_dt)
-
-            # Deserialize from JSON
-            result = self._graph.from_json(self._graph_json_str)
-            if result.is_bad():
-                raise ExecutionError(
-                    f"Failed to deserialize graph: {result.get_message()}"
-                )
-
-            # Set engine preference if specified
-            if engine_id is not None:
-                self._graph.set_preferred_engine_id_ext(engine_id)
-
-            # Validate
-            result = self._graph.validate()
-            if result.is_bad():
-                raise ExecutionError(f"Graph validation failed: {result.get_message()}")
-
-            # Build operation graph
-            result = self._graph.build_operation_graph(handle)
-            if result.is_bad():
-                raise ExecutionError(
-                    f"Failed to build operation graph: {result.get_message()}"
-                )
-
-            # Create execution plans
             result = self._graph.create_execution_plans()
             if result.is_bad():
                 raise ExecutionError(
                     f"Failed to create execution plans: {result.get_message()}"
                 )
 
-            # Check support
             result = self._graph.check_support()
             if result.is_bad():
-                raise ExecutionError(
+                raise UnsupportedGraphError(
                     f"Backend support check failed: {result.get_message()}"
                 )
 
-            # Build plans
             result = self._graph.build_plans()
             if result.is_bad():
                 raise ExecutionError(f"Failed to build plans: {result.get_message()}")
 
-            # Allocate workspace
             workspace_size = self._graph.get_workspace_size()
+            self._workspace_size = int(workspace_size)
             if workspace_size > 0:
                 self._workspace = hipdnn.DeviceBuffer(workspace_size)
                 self._workspace_ptr = self._workspace.ptr()
@@ -232,8 +293,9 @@ class Executor:
                 )
             except RuntimeError as e:
                 raise ExecutionError(str(e)) from e
-            kernel_timings = []
-            backend_name = gpu_timer.backend_name
+            if gpu_timer is not None:
+                kernel_timings = []
+                backend_name = gpu_timer.backend_name
 
         for _ in range(self._config.benchmark_iters):
             with Timer() as t:
@@ -274,6 +336,16 @@ class Executor:
     def init_time_ms(self) -> float:
         """Get graph initialization time in milliseconds."""
         return self._init_time_ms
+
+    @property
+    def workspace_size(self) -> int:
+        """Bytes hipDNN reserved for the operation graph workspace.
+
+        Zero before :meth:`prepare` runs. Surfaced so the suite runner
+        can record it as an always-on metric without re-querying the
+        graph object.
+        """
+        return self._workspace_size
 
     @property
     def graph(self) -> Any:

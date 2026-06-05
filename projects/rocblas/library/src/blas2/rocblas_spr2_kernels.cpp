@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
@@ -79,19 +80,14 @@ rocblas_spr2_kernel(bool           host_ptr_mode,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto*       AP = load_ptr_batch(APa, batch, shift_AP, stride_AP);
         const auto* x  = load_ptr_batch(xa, batch, shift_x, stride_x);
         const auto* y  = load_ptr_batch(ya, batch, shift_y, stride_y);
 
         rocblas_spr2_kernel_calc<DIM_X, DIM_Y, N_TX>(is_upper, n, alpha, x, incx, y, incy, AP);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /**
@@ -132,7 +128,7 @@ rocblas_status rocblas_internal_spr2_launcher(rocblas_handle handle,
     static constexpr bool is_float = std::is_same_v<TScal, float>;
 
     static constexpr int SPR2_DIM_X = 128;
-    static constexpr int SPR2_DIM_Y = 8;
+    static constexpr int SPR2_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
     static constexpr int N_TX       = is_float ? 2 : 1; // x items per x thread
 
     rocblas_int blocksX = (n - 1) / (SPR2_DIM_X * N_TX) + 1;

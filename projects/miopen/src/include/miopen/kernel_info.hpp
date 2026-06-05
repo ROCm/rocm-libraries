@@ -30,6 +30,7 @@
 #include <ostream>
 #include <string>
 #include <vector>
+#include <miopen/config.hpp>
 #include <miopen/kernel.hpp>
 
 namespace miopen {
@@ -50,9 +51,8 @@ struct KernelInfo
     friend std::ostream& operator<<(std::ostream& os, const KernelInfo& k);
 };
 
-std::vector<Program> PrecompileKernels(const Handle& h,
-                                       const std::vector<KernelInfo>& kernels,
-                                       bool force_attach_binary = false);
+MIOPEN_INTERNALS_EXPORT std::vector<Program> PrecompileKernels(
+    const Handle& h, const std::vector<KernelInfo>& kernels, bool force_attach_binary = false);
 
 } // namespace solver
 } // namespace miopen

@@ -85,6 +85,8 @@ The ``gemv`` functions support the ``_64`` interface. See the :ref:`ILP64 API` s
 
 ``gemv_batched`` functions have an implementation which uses atomic operations. See the :ref:`Atomic Operations` section for more information.
 The ``gemv_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+The ``gemv_batched`` functions support ``rocblas_set_batch_alpha_stride`` and ``rocblas_set_batch_beta_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 
 .. doxygenfunction:: rocblas_sgemv_strided_batched
    :outline:
@@ -104,6 +106,8 @@ The ``gemv_batched`` functions support the ``_64`` interface. See the :ref:`ILP6
 
 ``gemv_strided_batched`` functions have an implementation which uses atomic operations. See the :ref:`Atomic Operations` section for more information.
 The ``gemv_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+The ``gemv_strided_batched`` functions support ``rocblas_set_batch_alpha_stride`` and ``rocblas_set_batch_beta_stride`` when the ``rocblas_handle`` is
+in mode ``rocblas_pointer_mode_device``.
 
 .. _rocblas_ger:
 

@@ -61,11 +61,14 @@ namespace rocRoller
         public:
             SubTileTranspose() = delete;
 
-            explicit SubTileTranspose(OperationTag input, std::vector<size_t> tileDimensions);
+            explicit SubTileTranspose(OperationTag        input,
+                                      std::vector<size_t> tileDimensions,
+                                      bool                transpose = false);
 
             std::unordered_set<OperationTag> getInputs() const;
             std::string                      toString() const;
             std::vector<size_t> const&       tileDimensions() const;
+            bool                             isTranspose() const;
 
             auto operator<=>(SubTileTranspose const&) const = default;
             bool operator==(SubTileTranspose const& other) const;
@@ -75,6 +78,7 @@ namespace rocRoller
         private:
             OperationTag        m_input;
             std::vector<size_t> m_tileDimensions;
+            bool                m_transpose;
 
             template <typename T1, typename T2, typename T3>
             friend struct rocRoller::Serialization::MappingTraits;

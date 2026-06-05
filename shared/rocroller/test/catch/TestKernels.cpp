@@ -44,3 +44,12 @@ rocRoller::ContextPtr AssemblyTestKernel::getContext() const
 {
     return m_context;
 }
+
+void AssemblyTestKernel::operator()(rocRoller::KernelInvocation const& invocation,
+                                    rocRoller::KernelArguments const&  args)
+{
+    REQUIRE_TEST_TAG("gpu");
+
+    auto kernel = getExecutableKernel();
+    kernel->executeKernel(args, invocation);
+}

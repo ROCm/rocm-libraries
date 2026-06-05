@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -156,6 +156,42 @@ inline void auto_testing_bad_arg_set_invalid(rocsparse_sptrsv_alg& p)
 }
 
 template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spic0_alg& p)
+{
+    p = (rocsparse_spic0_alg)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spic0_output& p)
+{
+    p = (rocsparse_spic0_output)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spilu0_output& p)
+{
+    p = (rocsparse_spilu0_output)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spic0_input& p)
+{
+    p = (rocsparse_spic0_input)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spilu0_input& p)
+{
+    p = (rocsparse_spilu0_input)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spilu0_alg& p)
+{
+    p = (rocsparse_spilu0_alg)-1;
+}
+
+template <>
 inline void auto_testing_bad_arg_set_invalid(rocsparse_spitsv_alg& p)
 {
     p = (rocsparse_spitsv_alg)-1;
@@ -303,6 +339,18 @@ template <>
 inline void auto_testing_bad_arg_set_invalid(rocsparse_sptrsv_stage& p)
 {
     p = (rocsparse_sptrsv_stage)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spic0_stage& p)
+{
+    p = (rocsparse_spic0_stage)-1;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_spilu0_stage& p)
+{
+    p = (rocsparse_spilu0_stage)-1;
 }
 
 template <>

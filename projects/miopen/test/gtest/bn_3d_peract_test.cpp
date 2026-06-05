@@ -1009,54 +1009,41 @@ struct Bn3DPeractTest : public testing::TestWithParam<TestCase>
                    tolerance);
 
         // inference recalc
-        Verify(verify_forward_infer_3d_bn_per_activation_recalc<T, PREC_TYPE>{input, scale, shift},
-               tolerance,
-               false);
+        (void)Verify(
+            verify_forward_infer_3d_bn_per_activation_recalc<T, PREC_TYPE>{input, scale, shift},
+            tolerance);
 
         // inference use estimated running values
         if(input.desc.GetType() == miopenFloat)
         {
             const auto& estMean = std::get<1>(outpair_train.second);
             const auto& estVar  = std::get<2>(outpair_train.second);
-            Verify(
+            (void)Verify(
                 verify_forward_infer_3d_bn_per_activation_use_est<T, PREC_TYPE>{
                     input, scale, shift, estMean, estVar},
-                tolerance,
-                false);
+                tolerance);
         }
 
         // backprop recalc
-        Verify(verify_backward_3d_bn_per_activation_recalc<T, PREC_TYPE>{input, dy_input, scale},
-               8000 * input.desc.GetElementSize(),
-               false);
+        (void)Verify(
+            verify_backward_3d_bn_per_activation_recalc<T, PREC_TYPE>{input, dy_input, scale},
+            8000 * input.desc.GetElementSize());
 
         // backprop use saved values
         const auto& savedMean   = std::get<3>(outpair_train.second);
         const auto& savedInvVar = std::get<4>(outpair_train.second);
-        Verify(
+        (void)Verify(
             verify_backward_3d_bn_per_activation_use_saved<T, PREC_TYPE>{
                 input, dy_input, scale, savedMean, savedInvVar},
-            8000 * input.desc.GetElementSize(),
-            false);
+            8000 * input.desc.GetElementSize());
     }
 
-    auto Verify(auto&& v, double tolerance, bool return_results = true)
+    auto Verify(auto&& v, double tolerance)
     {
-        std::pair<decltype(v.cpu()), decltype(v.gpu())> res;
-        {
-            res.first = v.cpu();
-        }
-        {
-            res.second = v.gpu();
-        }
-        {
-            Compare(v, res.first, res.second, tolerance);
-        }
+        auto res = std::make_pair(v.cpu(), v.gpu());
+        Compare(v, res.first, res.second, tolerance);
 
-        if(return_results)
-            return res;
-        else
-            return std::make_pair(res.first, res.first);
+        return std::move(res);
     }
 
     template <typename... CpuRanges, typename... GpuRanges>

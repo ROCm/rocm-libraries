@@ -53,6 +53,9 @@
 #elif defined(__gfx1200__) || defined(__gfx1201__)
 #define USE_GFX_BUFFER_INTRINSIC
 #define BUFFER_RESOURCE_3RD_DWORD 0x30020000
+#elif defined(__gfx1250__)
+#define USE_GFX_BUFFER_INTRINSIC
+#define BUFFER_RESOURCE_3RD_DWORD 0x00000000
 #else // not support
 #define BUFFER_RESOURCE_3RD_DWORD -1
 #endif
@@ -100,21 +103,32 @@ struct alignas(16) BufferResource
     };
 
     INLINEDEVICE
-    BufferResource(void const* base_addr, uint32_t num_records = (0xFFFFFFFF - 1))
+    BufferResource(void const* base_addr, uint64_t num_records = (0xFFFFFFFF - 1))
     {
-        // Reference:
-        //   For CDNA: see section 9.1.8 in the AMD resources
-        //   https://developer.amd.com/wp-content/resources/CDNA1_Shader_ISA_14December2020.pdf
-        //   For RDNA: see section 8.1.8 in the AMD resources
-        //   https://developer.amd.com/wp-content/resources/RDNA2_Shader_ISA_November2020.pdf
-        //   The d32[3] field represents the 0x[127] ~ [96]
+        //   GFX1250:
+        //      base address bits [56:0] (57 bits)
+        //      num_records bits [101:57] (45 bits)
+        //   Other archs:
+        //      base address bits [47:0] (47 bits)
+        //      num_records bits [95:64] (32 bits)
 
-        // 64-bit base address
+#if defined(__gfx1250__)
+        uint64_t addr = reinterpret_cast<uint64_t>(const_cast<void*>(base_addr));
+
+        // bits [56:0] - base address (57 bits)
+        desc_.d32[0] = static_cast<uint32_t>(addr);
+        desc_.d32[1] = static_cast<uint32_t>(addr >> 32) & 0x01FFFFFFu;  // bits 32-56
+
+        // bits [101:57] - num_records (45 bits)
+        desc_.d32[1] |= static_cast<uint32_t>((num_records & 0x7Fu) << 25);   // bits 57-63
+        desc_.d32[2] = static_cast<uint32_t>((num_records >> 7) & 0xFFFFFFFFu); // bits 64-95
+        desc_.d32[3] = (BUFFER_RESOURCE_3RD_DWORD & 0xFFFFFFC0u) |
+                       static_cast<uint32_t>((num_records >> 39) & 0x3Fu);     // bits 96-101
+#else
         desc_.d64[0] = const_cast<void*>(base_addr);
-        // 32-bit number of records in bytes which is used to guard against out-of-range access
-        desc_.d32[2] = num_records;
-        // 32-bit buffer resource descriptor
+        desc_.d32[2] = static_cast<uint32_t>(num_records);
         desc_.d32[3] = BUFFER_RESOURCE_3RD_DWORD;
+#endif
     }
 
     INLINEDEVICE
@@ -147,35 +161,35 @@ __device__ char
     llvm_amdgcn_raw_buffer_load_i8(int32x4_t buffer_resource,
                                    uint32_t  voffset,
                                    uint32_t  soffset,
-                                   int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.load.i8");
+                                   int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.load.i8.v4i32");
 
 // 2 bytes
 __device__ float16_t
     llvm_amdgcn_raw_buffer_load_f16(int32x4_t buffer_resource,
                                     uint32_t  voffset,
                                     uint32_t  soffset,
-                                    int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.load.f16");
+                                    int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.load.f16.v4i32");
 
 // 4 bytes
 __device__ float32_t
     llvm_amdgcn_raw_buffer_load_f32(int32x4_t buffer_resource,
                                     uint32_t  voffset,
                                     uint32_t  soffset,
-                                    int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.load.f32");
+                                    int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.load.f32.v4i32");
 
 // 8 bytes
 __device__ float32x2_t
     llvm_amdgcn_raw_buffer_load_f32x2(int32x4_t buffer_resource,
                                       uint32_t  voffset,
                                       uint32_t  soffset,
-                                      int32_t cache_op) __asm("llvm.amdgcn.raw.buffer.load.v2f32");
+                                      int32_t cache_op) __asm("llvm.amdgcn.raw.buffer.load.v2f32.v4i32");
 
 // 16 bytes
 __device__ float32x4_t
     llvm_amdgcn_raw_buffer_load_f32x4(int32x4_t buffer_resource,
                                       uint32_t  voffset,
                                       uint32_t  soffset,
-                                      int32_t cache_op) __asm("llvm.amdgcn.raw.buffer.load.v4f32");
+                                      int32_t cache_op) __asm("llvm.amdgcn.raw.buffer.load.v4f32.v4i32");
 
 // 4 bytes
 __device__ int32_t
@@ -205,7 +219,7 @@ __device__ void
                                     int32x4_t buffer_resource,
                                     uint32_t  voffset,
                                     uint32_t  soffset,
-                                    int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.store.i8");
+                                    int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.store.i8.v4i32");
 
 // 2 bytes
 __device__ void
@@ -213,7 +227,7 @@ __device__ void
                                      int32x4_t buffer_resource,
                                      uint32_t  voffset,
                                      uint32_t  soffset,
-                                     int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.store.f16");
+                                     int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.store.f16.v4i32");
 
 // 4 bytes
 __device__ void
@@ -221,7 +235,7 @@ __device__ void
                                      int32x4_t buffer_resource,
                                      uint32_t  voffset,
                                      uint32_t  soffset,
-                                     int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.store.f32");
+                                     int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.store.f32.v4i32");
 
 // 8 bytes
 __device__ void llvm_amdgcn_raw_buffer_store_f32x2(
@@ -229,7 +243,7 @@ __device__ void llvm_amdgcn_raw_buffer_store_f32x2(
     int32x4_t   buffer_resource,
     uint32_t    voffset,
     uint32_t    soffset,
-    int32_t     cache_op) __asm("llvm.amdgcn.raw.buffer.store.v2f32");
+    int32_t     cache_op) __asm("llvm.amdgcn.raw.buffer.store.v2f32.v4i32");
 
 // 16 bytes
 __device__ void llvm_amdgcn_raw_buffer_store_f32x4(
@@ -237,7 +251,7 @@ __device__ void llvm_amdgcn_raw_buffer_store_f32x4(
     int32x4_t   buffer_resource,
     uint32_t    voffset,
     uint32_t    soffset,
-    int32_t     cache_op) __asm("llvm.amdgcn.raw.buffer.store.v4f32");
+    int32_t     cache_op) __asm("llvm.amdgcn.raw.buffer.store.v4f32.v4i32");
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 

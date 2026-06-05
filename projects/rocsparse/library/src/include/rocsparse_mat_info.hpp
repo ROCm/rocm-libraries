@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 #include "rocsparse_csrgemm_info.hpp"
 #include "rocsparse_csritsv_info.hpp"
 #include "rocsparse_csrmv_info.hpp"
+#include "rocsparse_numeric_boost.hpp"
 #include "rocsparse_sorted_coo2csr_info.hpp"
 #include "rocsparse_trm_info.hpp"
 #include "rocsparse_trm_t.hpp"
@@ -39,6 +40,7 @@
  * to all subsequent function calls that require additional information. It
  * should be destroyed at the end using rocsparse_destroy_mat_info().
  *******************************************************************************/
+
 struct _rocsparse_mat_info
 {
 protected:
@@ -48,9 +50,12 @@ protected:
     rocsparse::sorted_coo2csr_info_t* m_sorted_coo2csr_info{};
     rocsparse::trm_t                  m_trm;
 
+    rocsparse::numeric_boost m_boost{};
+
 public:
     void duplicate_trdata(const rocsparse_mat_info src, hipStream_t stream);
-
+    const rocsparse::numeric_boost*          get_boost() const;
+    rocsparse::numeric_boost*                get_boost();
     std::shared_ptr<_rocsparse_csrsv_info>   get_shared_csrsv_info();
     std::shared_ptr<_rocsparse_csrsm_info>   get_shared_csrsm_info();
     std::shared_ptr<_rocsparse_csrilu0_info> get_shared_csrilu0_info();
@@ -126,12 +131,6 @@ public:
 
     rocsparse_csrgemm_info csrgemm_info{};
     rocsparse_csritsv_info csritsv_info{};
-
-    // numeric boost for ilu0
-    int         boost_enable{};
-    size_t      boost_tol_size{};
-    const void* boost_tol{};
-    const void* boost_val{};
 
     ~_rocsparse_mat_info();
 

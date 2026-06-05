@@ -4,12 +4,13 @@
 #pragma once
 
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
+#include <hipdnn_frontend/detail/ConvolutionPackerHelpers.hpp>
 #include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
 
 namespace hipdnn_frontend::detail
 {
 
-// Builds a convolution forward operation descriptor from ConvFpropAttributes.
+// Builds a conv fprop operation descriptor from ConvFpropAttributes.
 // Tensor descriptors are created/deduplicated via createOrFindTensorDesc.
 inline Error createConvFpropOperation(
     const graph::ConvFpropAttributes& attributes,
@@ -21,7 +22,7 @@ inline Error createConvFpropOperation(
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                "Failed to create convolution forward operation descriptor"};
+                "Failed to create conv fprop operation descriptor"};
     }
 
     // Create tensor descriptors (if needed) and set them on the operation
@@ -29,59 +30,31 @@ inline Error createConvFpropOperation(
                                              HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
                                              attributes.get_x(),
                                              tensorDescs,
-                                             "conv X"));
+                                             "conv fprop X"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
                                              HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
                                              attributes.get_w(),
                                              tensorDescs,
-                                             "conv W"));
+                                             "conv fprop W"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
                                              HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
                                              attributes.get_y(),
                                              tensorDescs,
-                                             "conv Y"));
+                                             "conv fprop Y"));
 
-    // Set convolution parameters
-    HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
-                                            HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
-                                            HIPDNN_TYPE_INT64,
-                                            attributes.get_pre_padding(),
-                                            "conv pre_padding"));
-    HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
-                                            HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS,
-                                            HIPDNN_TYPE_INT64,
-                                            attributes.get_post_padding(),
-                                            "conv post_padding"));
-    HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
-                                            HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES,
-                                            HIPDNN_TYPE_INT64,
-                                            attributes.get_stride(),
-                                            "conv stride"));
-    HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
-                                            HIPDNN_ATTR_CONVOLUTION_DILATIONS,
-                                            HIPDNN_TYPE_INT64,
-                                            attributes.get_dilation(),
-                                            "conv dilation"));
+    // Pack shared convolution parameters
+    HIPDNN_CHECK_ERROR(packConvolutionParams(opDesc.get(), attributes, "conv fprop"));
 
-    // Set conv mode and compute data type
-    auto convMode = hipdnn_frontend::toBackendConvMode(attributes.get_convolution_mode());
-    if(!convMode.has_value())
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
     {
-        return {ErrorCode::INVALID_VALUE, "Unsupported convolution mode"};
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(
+            opDesc.get(), HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "operation name"));
     }
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
-                                               HIPDNN_TYPE_CONVOLUTION_MODE,
-                                               *convMode,
-                                               "conv mode"));
-
-    HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,
-                                                 attributes.compute_data_type,
-                                                 "conv compute data type"));
 
     // Finalize operation descriptor
-    HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "convolution operation descriptor"));
+    HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "conv fprop operation descriptor"));
 
     operations.push_back(std::move(opDesc));
     return {};

@@ -1,0 +1,40 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// Auto-generated from kernel_sources.hpp.in by EmbedKernelSources.cmake - DO NOT EDIT
+//
+// Kernel source embedding overview
+// ---------------------------------
+// HIPRTC compiles GPU kernels at runtime from source text. Since HIPRTC has no
+// filesystem access, all source text must be provided programmatically. At CMake
+// build time, EmbedKernelSources.cmake reads kernel .cpp and .h/.hpp files
+// from disk and embeds them as C++ raw string literals in generated code.
+//
+// hiprtcCreateProgram() takes two separate sets of embedded text:
+//   - A single kernel source string (the .cpp being compiled)
+//   - An array of header strings (files the kernel may #include)
+//
+// These map to two independent registries, each split into a .hpp/.cpp pair:
+//   kernel_sources.hpp/cpp  - kernel .cpp files, looked up individually by name
+//   kernel_includes.hpp/cpp - kernel .h/.hpp headers, provided in bulk to HIPRTC
+//
+// The .hpp/.cpp split keeps the large embedded string literals compiled once in
+// the .cpp; the .hpp exposes only extern declarations and lookup signatures.
+//
+// This file: declares extern variables for each embedded kernel source and the
+// getKernelSrc() lookup function. See kernel_includes.hpp.in for the header
+// embedding counterpart.
+
+#pragma once
+
+#include <string_view>
+
+// Kernel declarations generation begin
+@KERNEL_DECLARATIONS@
+// Kernel declarations generation end
+
+namespace example_provider {
+
+std::string_view getKernelSrc(const char* name);
+
+} // namespace example_provider

@@ -21,6 +21,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "check_numerics_matrix.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
@@ -69,19 +70,13 @@ rocblas_ger_kernel(rocblas_int    m,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         if(!alpha)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const T* __restrict__ x = load_ptr_batch(xa, batch, shiftx, stridex);
@@ -114,9 +109,7 @@ rocblas_ger_kernel(rocblas_int    m,
                         += x_value * (CONJ ? conj(ydata[tyi + i]) : ydata[tyi + i]);
             }
         }
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //optimized kernel for SGER for gfx942
@@ -140,7 +133,7 @@ rocblas_sger_gfx942_kernel(rocblas_int    m,
                            rocblas_stride strideA)
 {
 // gfx942 kernels
-#if defined(__gfx942__)
+#if defined(__SPIRV__) || defined(__gfx942__)
 
     rocblas_int tx  = (blockIdx.x * DIM_X + threadIdx.x) * 2;
     rocblas_int col = blockIdx.y;
@@ -210,20 +203,14 @@ rocblas_sger_kernel(rocblas_int    m,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
 
         if(!alpha)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const T* __restrict__ x = load_ptr_batch(xa, batch, shiftx, stridex);
@@ -246,9 +233,7 @@ rocblas_sger_kernel(rocblas_int    m,
         {
             A[i] += res_y * x[(tx + i) * int64_t(incx)];
         }
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //optimized double buffered load kernel for GER
@@ -291,10 +276,8 @@ rocblas_ger_double_buffered_kernel(bool           host_ptr_mode,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha              = host_ptr_mode ? alpha_device_host.value
                                                 : load_scalar(alpha_device_host.ptr, batch, stride_alpha);
@@ -305,11 +288,7 @@ rocblas_ger_double_buffered_kernel(bool           host_ptr_mode,
 
         if(!alpha)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         T x_reg_upper                     = 0.0;
@@ -365,10 +344,7 @@ rocblas_ger_double_buffered_kernel(bool           host_ptr_mode,
 #pragma unroll
         for(int k = 0; k < elements_per_thread; k++)
             A[(DIM_X / 2) + j + k * size_t(lda)] = areg_lower[k];
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <bool CONJ, typename T, typename U, typename V, typename W>
@@ -424,8 +400,9 @@ rocblas_status rocblas_internal_ger_launcher(rocblas_handle handle,
        && ((m % 64 == 0 && (is_double || is_complex_float)) || ((m % 128 == 0) && is_float)))
     {
         //The following rocblas_ger_double_buffered_kernel is only valid for the multiples of DIM_X
-        static constexpr int DIM_X               = is_float ? 128 : 64;
-        static constexpr int DIM_Y               = is_float ? 8 : 16;
+        static constexpr int DIM_X = is_float ? 128 : 64;
+        static constexpr int DIM_Y = rocblas::conditional_v < rocblas_enable_asan, is_float ? 2 : 4,
+                             is_float ? 8 : 16 > ;
         static constexpr int elements_per_thread = DIM_X / (2 * DIM_Y);
 
         const int block_x = m / DIM_X;
@@ -483,7 +460,7 @@ rocblas_status rocblas_internal_ger_launcher(rocblas_handle handle,
         }
         else
         {
-            static constexpr int DIM_X = 1024;
+            static constexpr int DIM_X = rocblas::conditional_v<rocblas_enable_asan, 256, 1024>;
             dim3                 ger_grid(n, 1, batches);
             dim3                 ger_threads(DIM_X);
 
@@ -500,7 +477,7 @@ rocblas_status rocblas_internal_ger_launcher(rocblas_handle handle,
     else
     {
         static constexpr int DIM_X   = 32;
-        static constexpr int DIM_Y   = 32;
+        static constexpr int DIM_Y   = rocblas::conditional_v<rocblas_enable_asan, 8, 32>;
         static constexpr int WIN     = 2; // work item number of elements to process
         rocblas_int          blocksX = (m - 1) / DIM_X + 1;
         rocblas_int          blocksY = (n - 1) / (DIM_Y * WIN) + 1; // WIN columns/work item

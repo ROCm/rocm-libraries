@@ -273,10 +273,11 @@ namespace rocRoller
                 }
             }
         }
-        // Scalar -> VCC
-        else if((dest->isVCC()) && src->regType() == Register::Type::Scalar
-                && ((src->registerCount() == 2 && context->kernel()->wavefront_size() == 64)
-                    || (src->registerCount() == 1 && context->kernel()->wavefront_size() == 32)))
+        // Scalar <-> VCC, or Scalar -> EXEC
+        else if((src->regType() == Register::Type::Scalar && (dest->isVCC() || dest->isEXEC())
+                 && src->registerCount() == context->kernel()->wavefront_size() / 32)
+                || (src->isVCC() && dest->regType() == Register::Type::Scalar
+                    && dest->registerCount() == context->kernel()->wavefront_size() / 32))
         {
             if(context->kernel()->wavefront_size() == 64)
             {
@@ -291,7 +292,6 @@ namespace rocRoller
         else if(dest->regType() == Register::Type::Scalar
                 && src->regType() == Register::Type::Vector)
         {
-
             co_yield_(Instruction("v_readfirstlane_b32", {dest}, {src}, {}, comment));
         }
         // Catch unhandled copy cases

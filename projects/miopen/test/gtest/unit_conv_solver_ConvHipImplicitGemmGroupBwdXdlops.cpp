@@ -10,25 +10,23 @@ using TestDataType = miopen::unit_tests::TestDataType;
 
 // Non-deterministic test cases (for GPU smoke tests)
 template <TestDataType type>
-auto GetConvSmokeTestCases()
+std::vector<TestCase> GetConvSmokeTestCases()
 {
     const bool tf32_compute = type == TestDataType::TF32;
 
-    static std::vector<TestCase> test_cases = {
+    return {
         // clang-format off
         TestCase{{1, 32, 8, 8}, {32, 32, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1, false, tf32_compute}
         // clang-format on
     };
-
-    return test_cases;
 }
 
 template <TestDataType type>
-auto GetConvFullTestCases()
+std::vector<TestCase> GetConvFullTestCases()
 {
     const bool tf32_compute = type == TestDataType::TF32;
 
-    static std::vector<TestCase> test_cases = {
+    return {
         // clang-format off
         TestCase{{1, 32, 8, 8}, {32, 32, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 1, false, tf32_compute}, // non-zero padding
         TestCase{{1, 64, 24, 48}, {96, 64, 1, 1}, {0, 0}, {2, 2}, {1, 1}, 1, false, tf32_compute}, // stride > 1
@@ -39,8 +37,6 @@ auto GetConvFullTestCases()
         TestCase{{1, 64, 24, 48}, {96, 16, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 4, false, tf32_compute},
         // clang-format on
     };
-
-    return test_cases;
 }
 
 auto GetDevApplicabilityConvCase()
@@ -63,43 +59,32 @@ auto GetDeterministicConvCase()
 }
 
 template <TestDataType type>
-const auto& GetTestParams()
+miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
-    static const auto params = [] {
-// If MIOpen is built without CK these tests will fail, skip them to avoid failing
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-        Gpu supportedDevices;
-        if constexpr(type == TestDataType::FP32)
-        {
-            supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
-        }
-        else if constexpr(type == TestDataType::TF32)
-        {
-            supportedDevices = Gpu::gfx94X | Gpu::gfx950;
-        }
-        else
-        {
-            supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 |
-                               Gpu::gfx110X | Gpu::gfx115X | Gpu::gfx120X;
-        }
+// CK dynamic-library tests are HIP-only; runtime plugin availability is checked by the harness.
+#if MIOPEN_BACKEND_HIP
+    Gpu supportedDevices;
+    if constexpr(type == TestDataType::FP32)
+    {
+        supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
+    }
+    else if constexpr(type == TestDataType::TF32)
+    {
+        supportedDevices = Gpu::gfx94X | Gpu::gfx950;
+    }
+    else
+    {
+        supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X |
+                           Gpu::gfx115X | Gpu::gfx120X;
+    }
 #else
-        Gpu supportedDevices = Gpu::None;
+    Gpu supportedDevices = Gpu::None;
 #endif
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(supportedDevices);
-        p.Tunable(5);
-        return p;
-    }();
-    return params;
-}
-
-Gpu GetDeterministicSupportedDevices()
-{
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    return Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X | Gpu::gfx115X |
-           Gpu::gfx120X;
-#else
-    return Gpu::None;
-#endif
+    miopen::unit_tests::UnitTestConvSolverParams p(supportedDevices);
+    p.ExcludeDevice("gfx1103");
+    p.Tunable(5);
+    p.UsesCKDynamicLib();
+    return p;
 }
 
 } // namespace
@@ -220,5 +205,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     CPU_UnitTestConvSolverImplicitGemmGroupBwdXdlopsDeterministicApplicability_NONE,
-    testing::Combine(testing::Values(GetDeterministicSupportedDevices()),
+    testing::Combine(testing::Values(GetTestParams<TestDataType::FP16>()),
                      testing::Values(GetDeterministicConvCase())));

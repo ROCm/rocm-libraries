@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2022 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2019 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -93,15 +93,13 @@ int main()
     std::cout << std::endl;
 
     hipfftHandle hipPlan;
-    hipfftResult hipfft_rt;
-    hipfft_rt = hipfftPlanMany(
+    hipfftResult hipfft_rt = hipfftPlanMany(
         &hipPlan, rank, n, inembed, istride, idist, onembed, ostride, odist, HIPFFT_Z2Z, howmany);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
 
-    hipError_t           hip_rt;
     hipfftDoubleComplex* d_in_out;
-    hip_rt = hipMalloc((void**)&d_in_out, total_bytes);
+    hipError_t           hip_rt = hipMalloc((void**)&d_in_out, total_bytes);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
     hip_rt = hipMemcpy(d_in_out, (void*)data.data(), total_bytes, hipMemcpyHostToDevice);
@@ -132,6 +130,9 @@ int main()
         std::cout << "\n";
     }
     std::cout << std::endl;
+
+    if(hipfftDestroy(hipPlan) != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftDestroy failed");
 
     hip_rt = hipFree(d_in_out);
     if(hip_rt != hipSuccess)

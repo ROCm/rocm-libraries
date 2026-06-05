@@ -26,10 +26,7 @@ namespace rocRoller
 
             void observe(Instruction const& inst);
 
-            constexpr static bool required(GPUArchitectureTarget const& target)
-            {
-                return true;
-            }
+            static bool runtimeRequired(ContextPtr const& ctx);
 
             static bool isTargetedInstruction(Instruction const& inst);
 
@@ -54,10 +51,7 @@ namespace rocRoller
 
             void observe(Instruction const& inst);
 
-            constexpr static bool required(GPUArchitectureTarget const& target)
-            {
-                return true;
-            }
+            static bool runtimeRequired(ContextPtr const& ctx);
 
             DisallowedCycles getDisallowedCycles(Instruction const& inst) const;
 
@@ -76,7 +70,8 @@ namespace rocRoller
             std::weak_ptr<Context> m_context;
         };
 
-        static_assert(CObserverConst<MFMAObserver>);
+        static_assert(CObserverRuntimeWithContext<MFMAObserver>);
+        static_assert(CObserverRuntimeWithContext<MFMACoexecObserver>);
 
     }
 }

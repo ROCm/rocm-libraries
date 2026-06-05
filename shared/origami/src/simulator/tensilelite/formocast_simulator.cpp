@@ -36,7 +36,7 @@ namespace origami
         //issue 2nd prefetch
         double grCycles2 = numGRA * 4 / waveNum;
         grCycles2 += numGRB * 4 / waveNum;
-        return (grCycles2 + others + 1024*depthU/64) / math_frequency;                       
+        return (grCycles2 + others + 1024*depthU/64) / math_frequency;
     }
 
 
@@ -154,7 +154,7 @@ namespace origami
             MT0, MT1, bpeA, bpeB, NTA, NTB, GRVWA, GRVWB, DTVA, DTVB,
             isSwizzleA, isSwizzleB, VWA, VWB, transA, transB, lda, ldb,
             NLCA, NLCB, threadnum, NumWave0, NumWave1, hw.architecture == hardware_t::architecture_t::gfx942);
-        
+
         L1CacheHitRate result;
         result.tile0HitRate = hr.tile0HitRate;
         result.tile1HitRate = hr.tile1HitRate;
@@ -169,7 +169,7 @@ namespace origami
         auto hr = simulator::computeL3CacheHitRate(
             M, N, K, hw.L3CacheCapacity, hw.NumCUs, bpeA, bpeB, NTA, NTB,
             N_WGs_total, M_WGs_total, N_WGs_per_tile, M_WGs_per_tile);
-        
+
         L3CacheHitRate result;
         result.totalHitRate = hr.totalHitRate;
         result.tile0HitRate = hr.tile0HitRate;
@@ -186,7 +186,7 @@ namespace origami
                                                         double storeGSU) const
     {
         double gsu_overall = 0.0;
-        
+
         if(gsuMethod == 2 && GlobalSplitU > 1) //MB
         {
             gsu_overall = simulator::getMultipleBufferOverhead(
@@ -216,7 +216,7 @@ namespace origami
                                                      ProblemInfo problem,
                                                      const HardwareConstants& hw_consts) const
     {
-        return simulator::getLocalSplitKOverhead(MT0, MT1, lsu, svw, numThreads, 
+        return simulator::getLocalSplitKOverhead(MT0, MT1, lsu, svw, numThreads,
                                          problem.bpeCompute, hw_consts.math_frequency);
     }
 
@@ -298,7 +298,7 @@ namespace origami
     bool Formocast::isBetter(ProblemInfo problem, TieBreakerInfo previousSolution) const
     {
         auto currSol = getTieBreakerInfo();
-        
+
         // Call standalone tie-breaker function
         return compareConfigTieBreaker(
             problem.M, problem.N, problem.K, problem.NumBatches,
@@ -557,8 +557,8 @@ namespace origami
         // Calculate load requests and memory access costs before calling calculateMemoryAccessCosts
         double tcc_ea0_coalscedA;
         double tcc_ea0_coalscedB;
-        double A_L1_req = simulator::getLoadRequest(std::min(MT0, M), depthU, hw_consts.L1CacheLineSize, 
-                                         GRVWA, bpeA, DTVA, 
+        double A_L1_req = simulator::getLoadRequest(std::min(MT0, M), depthU, hw_consts.L1CacheLineSize,
+                                         GRVWA, bpeA, DTVA,
                                          transA,           // isTransposed
                                          isSwizzleA,    // isSwizzled (for transposed case)
                                          VWA,           // VW (for transposed case)
@@ -567,8 +567,8 @@ namespace origami
                                          NumWave1,      // numWaveX (for non-transposed case)
                                          tcc_ea0_coalscedA);
 
-        double B_L1_req = simulator::getLoadRequest(std::min(MT1, N), depthU, hw_consts.L1CacheLineSize, 
-                                         GRVWB, bpeB, DTVB, 
+        double B_L1_req = simulator::getLoadRequest(std::min(MT1, N), depthU, hw_consts.L1CacheLineSize,
+                                         GRVWB, bpeB, DTVB,
                                          !transB,          // isTransposed (B is transposed when trB=false)
                                          isSwizzleB,    // isSwizzled (for transposed case)
                                          VWB,           // VW (for transposed case)
@@ -685,10 +685,14 @@ namespace origami
         uint32_t MT1 = sizeMapping.macroTile[1];
         uint32_t depthU = sizeMapping.depthU;
 
+        // can't make these two unsigned, they could be -1 in special cases
+        int XCC = sizeMapping.workGroupMappingXCC;
+        int XCCG = (sizeMapping.workGroupMappingXCCGroup < 0)? hw.NumCUs : sizeMapping.workGroupMappingXCCGroup;
+
         auto hr = simulator::computeL2CacheHitRate(
             M, N, K, MT0, MT1, depthU, hw.L2CacheCapacity, hw.NumCUs, hw.NumXCDs,
-            gsu, wgm, batches, bpeA, bpeB, NTA, NTB, isGSUWGMRR);
-        
+            XCC, XCCG, gsu, wgm, batches, bpeA, bpeB, NTA, NTB, isGSUWGMRR);
+
         L2CacheHitRate hitRate;
         hitRate.totalHitRate = hr.totalHitRate;
         hitRate.tile0HitRate = hr.tile0HitRate;
@@ -827,7 +831,7 @@ namespace origami
         // No preference - configurations are considered equal
         return false;
     }
-    
+
     // Helper function to analyze bank conflicts from VGPR states
     Formocast::BankConflictResult Formocast::analyzeBankConflictsFromVGPR(
         const std::vector<std::unordered_map<std::string, int64_t>>& vgprState,

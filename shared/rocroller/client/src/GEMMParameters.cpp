@@ -163,6 +163,17 @@ namespace rocRoller
                 return s;
             }
 
+            std::string toString(XYTuple x)
+            {
+                return fmt::format("{}x{}", x.x, x.y);
+            }
+
+            std::ostream& operator<<(std::ostream& s, XYTuple const& x)
+            {
+                s << toString(x);
+                return s;
+            }
+
             std::string toString(MNKTuple x)
             {
                 return fmt::format("{}x{}x{}", x.m, x.n, x.k);
@@ -287,6 +298,29 @@ namespace rocRoller
 
 namespace rocRoller::Client::GEMMClient::CLI
 {
+    bool ParseXY(const std::string& arg, XYTuple& x)
+    {
+        if(arg.empty())
+            return PARSE_FAILURE;
+
+        std::regex  pattern(R"((\d+)x(\d+))");
+        std::smatch match;
+
+        bool matched = std::regex_match(arg, match, pattern);
+        if(matched)
+        {
+            x.x = std::stoi(match[1]);
+            x.y = std::stoi(match[2]);
+        }
+        else
+        {
+            std::cerr << "Invalid format for XxY pair.\n" << std::endl;
+            return PARSE_FAILURE;
+        }
+
+        return PARSE_SUCCESS;
+    }
+
     bool ParseIntPair(const std::string& arg, std::pair<int, int>& x)
     {
         if(arg.empty())

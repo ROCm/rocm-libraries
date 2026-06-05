@@ -15,6 +15,7 @@
  * All functions simply forward to the corresponding std:: function.
  */
 
+#include <algorithm>
 #include <cmath>
 
 namespace hipdnn_data_sdk::types
@@ -60,9 +61,17 @@ inline double copysign(double x, double y)
 // Min/max functions
 inline double max(double a, double b)
 {
-    return std::fmax(a, b);
+    return std::max(a, b);
 }
 inline double min(double a, double b)
+{
+    return std::min(a, b);
+}
+inline double fmax(double a, double b)
+{
+    return std::fmax(a, b);
+}
+inline double fmin(double a, double b)
 {
     return std::fmin(a, b);
 }

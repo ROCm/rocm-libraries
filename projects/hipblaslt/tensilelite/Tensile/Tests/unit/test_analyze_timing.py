@@ -23,8 +23,14 @@ from analyze_timing import (
     parse_timing_line,
     parse_context_line,
     analyze_timing_file,
+    build_hierarchy,
     TimingRecord,
     ProblemTiming,
+    ALL_KNOWN_CATEGORIES,
+    SOLUTION_GENERATION_PHASES,
+    SOLUTION_GENERATION_PARENT,
+    BENCH_POSTPROCESS_PHASES,
+    BENCH_POSTPROCESS_PARENT,
 )
 
 
@@ -81,6 +87,18 @@ class TestParseTimingLine:
 
     def test_invalid_line_empty(self):
         assert parse_timing_line("") is None
+
+    def test_valid_timing_line_scientific_notation_positive(self):
+        record = parse_timing_line("TIMING:cpu_reference_gemm:1.5e+03")
+        assert record is not None
+        assert record.category == "cpu_reference_gemm"
+        assert record.duration_ms == 1500.0
+
+    def test_valid_timing_line_scientific_notation_negative(self):
+        record = parse_timing_line("TIMING:gpu_kernel_execution:3.2e-04")
+        assert record is not None
+        assert record.category == "gpu_kernel_execution"
+        assert record.duration_ms == pytest.approx(0.00032)
 
     def test_timing_line_with_surrounding_text(self):
         # Should not match if TIMING is not at start
@@ -235,3 +253,90 @@ TIMING:python_benchmark_problems:5000.0
             + timings["gpu_kernel_execution"][0]
         )
         assert cpp_sum <= timings["python_client_execution"][0]
+
+
+class TestAllKnownCategories:
+    """Tests that ALL_KNOWN_CATEGORIES includes the new sub-timing phases."""
+
+    def test_solution_generation_phases_in_known(self):
+        for phase in SOLUTION_GENERATION_PHASES:
+            assert phase in ALL_KNOWN_CATEGORIES, f"{phase} not in ALL_KNOWN_CATEGORIES"
+
+    def test_bench_postprocess_phases_in_known(self):
+        for phase in BENCH_POSTPROCESS_PHASES:
+            assert phase in ALL_KNOWN_CATEGORIES, f"{phase} not in ALL_KNOWN_CATEGORIES"
+
+
+class TestSolutionGenerationHierarchy:
+    """Tests for solution generation sub-phase hierarchy."""
+
+    @pytest.fixture
+    def solgen_timing_log(self, tmp_path):
+        log_content = """\
+TIMING:python_solgen_fork_permutations:50.0
+TIMING:python_solgen_forked_solutions:400.0
+TIMING:python_solgen_custom_kernels:30.0
+TIMING:python_solution_generation:500.0
+TIMING:python_kernel_compilation:2000.0
+TIMING:python_client_execution:1000.0
+TIMING:python_benchmark_problems:5000.0
+"""
+        log_file = tmp_path / "solgen.log"
+        log_file.write_text(log_content)
+        return log_file
+
+    def test_solgen_subphases_sum_within_parent(self, solgen_timing_log):
+        timings, _ = analyze_timing_file(str(solgen_timing_log))
+        parent = timings[SOLUTION_GENERATION_PARENT][0]
+        child_sum = sum(timings[p][0] for p in SOLUTION_GENERATION_PHASES if p in timings)
+        assert child_sum <= parent
+
+    def test_solgen_hierarchy_built(self, solgen_timing_log):
+        timings, _ = analyze_timing_file(str(solgen_timing_log))
+        nodes = build_hierarchy(timings)
+        # Find the python_benchmark_problems node
+        pbp = next(n for n in nodes if n.name == "python_benchmark_problems")
+        # Find python_solution_generation child
+        solgen = next(c for c in pbp.children if c.name == SOLUTION_GENERATION_PARENT)
+        # It should have children (the sub-phases)
+        child_names = {c.name for c in solgen.children}
+        for phase in SOLUTION_GENERATION_PHASES:
+            assert phase in child_names, f"{phase} not in solgen children"
+
+
+class TestBenchPostprocessHierarchy:
+    """Tests for bench postprocess sub-phase hierarchy."""
+
+    @pytest.fixture
+    def benchpost_timing_log(self, tmp_path):
+        log_content = """\
+TIMING:python_benchpost_naming:10.0
+TIMING:python_benchpost_lib_construction:50.0
+TIMING:python_benchpost_library_write:30.0
+TIMING:python_benchpost_client_config:15.0
+TIMING:python_kernel_bench_postprocess:120.0
+TIMING:python_kernel_compilation:2000.0
+TIMING:python_solution_generation:500.0
+TIMING:python_client_execution:1000.0
+TIMING:python_benchmark_problems:5000.0
+"""
+        log_file = tmp_path / "benchpost.log"
+        log_file.write_text(log_content)
+        return log_file
+
+    def test_benchpost_subphases_sum_within_parent(self, benchpost_timing_log):
+        timings, _ = analyze_timing_file(str(benchpost_timing_log))
+        parent = timings[BENCH_POSTPROCESS_PARENT][0]
+        child_sum = sum(timings[p][0] for p in BENCH_POSTPROCESS_PHASES if p in timings)
+        assert child_sum <= parent
+
+    def test_benchpost_hierarchy_built(self, benchpost_timing_log):
+        timings, _ = analyze_timing_file(str(benchpost_timing_log))
+        nodes = build_hierarchy(timings)
+        # Find python_benchmark_problems -> python_kernel_compilation -> python_kernel_bench_postprocess
+        pbp = next(n for n in nodes if n.name == "python_benchmark_problems")
+        kc = next(c for c in pbp.children if c.name == "python_kernel_compilation")
+        bp = next(c for c in kc.children if c.name == BENCH_POSTPROCESS_PARENT)
+        child_names = {c.name for c in bp.children}
+        for phase in BENCH_POSTPROCESS_PHASES:
+            assert phase in child_names, f"{phase} not in benchpost children"

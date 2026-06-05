@@ -186,9 +186,9 @@ rocblas_status rocsolver_gels_outofplace_template(rocblas_handle handle,
     if(m == 0 || n == 0)
     {
         rocblas_int rowsX = (trans == rocblas_operation_none ? n : m);
-        rocblas_int blocksx = (rowsX - 1) / 32 + 1;
-        rocblas_int blocksy = (nrhs - 1) / 32 + 1;
-        ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(blocksx, blocksy, batch_count), dim3(32, 32), 0,
+        rocblas_int blocksx = (rowsX - 1) / BS2 + 1;
+        rocblas_int blocksy = (nrhs - 1) / BS2 + 1;
+        ROCSOLVER_LAUNCH_KERNEL(set_zero<T>, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0,
                                 stream, rowsX, nrhs, X, shiftX, ldx, strideX);
 
         return rocblas_status_success;
@@ -202,9 +202,9 @@ rocblas_status rocsolver_gels_outofplace_template(rocblas_handle handle,
     // constants in host memory
     const rocblas_stride strideP = std::min(m, n);
     const rocblas_int check_threads = std::min(((std::min(m, n) - 1) / 64 + 1) * 64, BS1);
-    const rocblas_int copyblocksmin = (std::min(m, n) - 1) / 32 + 1;
-    const rocblas_int copyblocksmax = (std::max(m, n) - 1) / 32 + 1;
-    const rocblas_int copyblocksy = (nrhs - 1) / 32 + 1;
+    const rocblas_int copyblocksmin = (std::min(m, n) - 1) / BS2 + 1;
+    const rocblas_int copyblocksmax = (std::max(m, n) - 1) / BS2 + 1;
+    const rocblas_int copyblocksy = (nrhs - 1) / BS2 + 1;
 
     // TODO: apply scaling to improve accuracy over a larger range of values
 
@@ -222,8 +222,8 @@ rocblas_status rocsolver_gels_outofplace_template(rocblas_handle handle,
         {
             // save B in savedB
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmax, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, copymat_to_buffer, m, nrhs, B, shiftB,
-                                    ldb, strideB, savedB);
+                                    dim3(BS2, BS2), 0, stream, copymat_to_buffer, m, nrhs, B,
+                                    shiftB, ldb, strideB, savedB);
 
             rocsolver_ormqr_unmqr_template<BATCHED, STRIDED>(
                 handle, rocblas_side_left, rocblas_operation_conjugate_transpose, m, nrhs, n, A,
@@ -242,12 +242,12 @@ rocblas_status rocsolver_gels_outofplace_template(rocblas_handle handle,
 
             // copy result to X
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmin, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, n, nrhs, B, shiftB, ldb, strideB, X,
+                                    dim3(BS2, BS2), 0, stream, n, nrhs, B, shiftB, ldb, strideB, X,
                                     shiftX, ldx, strideX);
 
             // restore B from savedB
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmax, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, copymat_from_buffer, m, nrhs, B,
+                                    dim3(BS2, BS2), 0, stream, copymat_from_buffer, m, nrhs, B,
                                     shiftB, ldb, strideB, savedB);
         }
         else
@@ -258,7 +258,7 @@ rocblas_status rocsolver_gels_outofplace_template(rocblas_handle handle,
 
             // copy B to X
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmin, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, n, nrhs, B, shiftB, ldb, strideB, X,
+                                    dim3(BS2, BS2), 0, stream, n, nrhs, B, shiftB, ldb, strideB, X,
                                     shiftX, ldx, strideX);
 
             // solve R'Y = B (here Y = Q'X)
@@ -269,9 +269,9 @@ rocblas_status rocsolver_gels_outofplace_template(rocblas_handle handle,
                 trfact_workTrmm_invA_arr);
 
             // zero row n to m-1 of X in cases where info is zero
-            const rocblas_int zeroblocksx = (m - n - 1) / 32 + 1;
+            const rocblas_int zeroblocksx = (m - n - 1) / BS2 + 1;
             ROCSOLVER_LAUNCH_KERNEL((gels_set_zero<T, U>),
-                                    dim3(zeroblocksx, copyblocksy, batch_count), dim3(32, 32), 0,
+                                    dim3(zeroblocksx, copyblocksy, batch_count), dim3(BS2, BS2), 0,
                                     stream, n, m, nrhs, X, shiftX, ldx, strideX, info);
 
             rocsolver_ormqr_unmqr_template<BATCHED, STRIDED>(
@@ -295,7 +295,7 @@ rocblas_status rocsolver_gels_outofplace_template(rocblas_handle handle,
 
             // copy B to X
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmin, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, m, nrhs, B, shiftB, ldb, strideB, X,
+                                    dim3(BS2, BS2), 0, stream, m, nrhs, B, shiftB, ldb, strideB, X,
                                     shiftX, ldx, strideX);
 
             // solve LY = B (here Y = QX)
@@ -305,9 +305,9 @@ rocblas_status rocsolver_gels_outofplace_template(rocblas_handle handle,
                 work_x_temp, workArr_temp_arr, diag_trfac_invA, trfact_workTrmm_invA_arr);
 
             // zero row m to n-1 of X in cases where info is zero
-            const rocblas_int zeroblocksx = (n - m - 1) / 32 + 1;
+            const rocblas_int zeroblocksx = (n - m - 1) / BS2 + 1;
             ROCSOLVER_LAUNCH_KERNEL((gels_set_zero<T, U>),
-                                    dim3(zeroblocksx, copyblocksy, batch_count), dim3(32, 32), 0,
+                                    dim3(zeroblocksx, copyblocksy, batch_count), dim3(BS2, BS2), 0,
                                     stream, m, n, nrhs, X, shiftX, ldx, strideX, info);
 
             rocsolver_ormlq_unmlq_template<BATCHED, STRIDED>(
@@ -319,8 +319,8 @@ rocblas_status rocsolver_gels_outofplace_template(rocblas_handle handle,
         {
             // save B in savedB
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmax, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, copymat_to_buffer, n, nrhs, B, shiftB,
-                                    ldb, strideB, savedB);
+                                    dim3(BS2, BS2), 0, stream, copymat_to_buffer, n, nrhs, B,
+                                    shiftB, ldb, strideB, savedB);
 
             rocsolver_ormlq_unmlq_template<BATCHED, STRIDED>(
                 handle, rocblas_side_left, rocblas_operation_none, n, nrhs, m, A, shiftA, lda,
@@ -340,12 +340,12 @@ rocblas_status rocsolver_gels_outofplace_template(rocblas_handle handle,
 
             // copy result to X
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmin, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, m, nrhs, B, shiftB, ldb, strideB, X,
+                                    dim3(BS2, BS2), 0, stream, m, nrhs, B, shiftB, ldb, strideB, X,
                                     shiftX, ldx, strideX);
 
             // restore B from savedB
             ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U>), dim3(copyblocksmax, copyblocksy, batch_count),
-                                    dim3(32, 32), 0, stream, copymat_from_buffer, n, nrhs, B,
+                                    dim3(BS2, BS2), 0, stream, copymat_from_buffer, n, nrhs, B,
                                     shiftB, ldb, strideB, savedB);
         }
     }

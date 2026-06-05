@@ -459,6 +459,10 @@ hipblasClientProcessor getArch()
     {
         return hipblasClientProcessor::gfx90a;
     }
+    else if(deviceString.find("gfx90c") != std::string::npos)
+    {
+        return hipblasClientProcessor::gfx90c;
+    }
     else if(deviceString.find("gfx942") != std::string::npos)
     {
         return hipblasClientProcessor::gfx942;
@@ -522,6 +526,10 @@ hipblasClientProcessor getArch()
     else if(deviceString.find("gfx1201") != std::string::npos)
     {
         return hipblasClientProcessor::gfx1201;
+    }
+    else if(deviceString.find("gfx1250") != std::string::npos)
+    {
+        return hipblasClientProcessor::gfx1250;
     }
     return static_cast<hipblasClientProcessor>(0);
 }

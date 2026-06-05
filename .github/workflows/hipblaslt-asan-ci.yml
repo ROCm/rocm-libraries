@@ -1,0 +1,291 @@
+name: hipblaslt ASAN CI
+
+# Standalone hipblaslt ASAN smoke build. Opt-in via `ci:asan` label so we
+# do not burn the limited gfx90a runner pool on every PR. Scope:
+#
+#   - gfx90a only
+#   - hipblaslt only
+#   - smoke hipblaslt-test
+#   - Does not gate
+
+on:
+  pull_request:
+    types:
+      - labeled
+      - synchronize
+      - reopened
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  check_label:
+    name: "Check ci:asan label"
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        env:
+          IS_DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:asan') }}
+        run: |
+          if [[ "$IS_DISPATCH" == "true" || "$HAS_LABEL" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  setup:
+    name: "Setup"
+    needs: check_label
+    if: needs.check_label.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
+      docker_image: ${{ steps.ci-env.outputs.docker-image }}
+      build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+          fetch-depth: 1
+
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
+  build:
+    name: "Build (hipblaslt | gfx90a | ASAN)"
+    needs: setup
+    runs-on: ${{ needs.setup.outputs.build_runs_on }}
+    permissions:
+      id-token: write
+    container:
+      image: ${{ needs.setup.outputs.docker_image }}
+      options: -v /runner/config:/home/awsconfig/
+    env:
+      CACHE_DIR: ${{ github.workspace }}/.container-cache
+      CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
+      AMDGPU_FAMILIES: gfx90a
+      TEATIME_FORCE_INTERACTIVE: 0
+      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
+      ARTIFACT_GROUP: gfx90a-asan
+    steps:
+      - name: "Check out rocm-libraries"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          path: TheRock
+          ref: ${{ needs.setup.outputs.therock_ref }}
+
+      - name: Install python deps
+        run: |
+          pip install -r TheRock/requirements.txt
+
+      - name: Adjust git config
+        run: |
+          git config --global --add safe.directory $PWD
+          git config fetch.parallel 10
+
+      - name: Setup ccache
+        run: |
+          ./TheRock/build_tools/setup_ccache.py \
+            --config-preset "github-oss-dev" \
+            --dir "$(dirname $CCACHE_CONFIGPATH)" \
+            --local-path "$CACHE_DIR/ccache"
+
+      - name: Runner health status
+        run: |
+          ./TheRock/build_tools/health_status.py
+
+      - name: Pull DVC files for rocm-libraries
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
+      - name: Fetch sources
+        timeout-minutes: 30
+        run: |
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
+
+      - name: Configure Projects
+        env:
+          amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
+          package_version: ADHOCBUILD
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DhipBLASLt_SANITIZER=ASAN -Drocprofiler-sdk_CMAKE_ARGS=-DROCPROFILER_BUILD_TESTS=OFF"
+          BUILD_DIR: build
+        run: |
+          python3 TheRock/build_tools/github_actions/build_configure.py
+
+      - name: Build hipBLASLt
+        run: cmake --build TheRock/build --target hipBLASLt -- -k 0
+
+      - name: Report
+        if: ${{ !cancelled() }}
+        run: |
+          echo "hipBLASLt subproject dirs:"
+          echo "--------------------------"
+          find TheRock/build -maxdepth 5 -type d -path '*hipBLASLt*' \
+            \( -name stage -o -name dist -o -name build \) -print 2>/dev/null || true
+          echo "hipblaslt-test binary:"
+          echo "----------------------"
+          find TheRock/build -type f -name 'hipblaslt-test' 2>/dev/null || true
+          echo "hipBLASLt stage tree (top levels):"
+          echo "----------------------------------"
+          for d in $(find TheRock/build -maxdepth 5 -type d -path '*hipBLASLt*' -name stage 2>/dev/null); do
+            echo "## $d"
+            find "$d" -maxdepth 3 -name 'hipblaslt-test' -o -maxdepth 3 -type d -name library 2>/dev/null || true
+            du -h -d 2 "$d" 2>/dev/null | tail -20 || true
+          done
+          echo "CCache Stats:"
+          echo "-------------"
+          ccache -s -v || true
+
+      - name: Package hipBLASLt trees
+        if: ${{ !cancelled() }}
+        run: |
+          set -uo pipefail
+          mkdir -p upload
+          found=0
+          for kind in stage dist; do
+            for d in $(find TheRock/build -maxdepth 6 -type d -path '*hipBLASLt*' -name "$kind" 2>/dev/null); do
+              echo "Packaging $kind tree: $d"
+              if tar -C "$d" -czf "upload/hipblaslt-${kind}.tar.gz" . ; then found=1; fi
+              break
+            done
+          done
+          ls -lh upload || true
+          [ "$found" = 1 ] || echo "::warning::no hipBLASLt stage/dist tree found to package"
+
+      - name: Upload hipBLASLt trees
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: hipblaslt-asan-trees
+          path: upload/*.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
+
+  test:
+    name: "Test hipblaslt ASAN (smoke)"
+    needs: [setup, build]
+    runs-on: linux-gfx90a-gpu-rocm
+    timeout-minutes: 210
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1]
+    defaults:
+      run:
+        shell: bash
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      OUTPUT_ARTIFACTS_DIR: "./build"
+      THEROCK_BIN_DIR: "./build/bin"
+      THEROCK_DIR: ${{ github.workspace }}
+      AMDGPU_FAMILIES: gfx90a
+      ARTIFACT_GROUP: gfx90a-asan
+      TEST_COMPONENT: hipblaslt
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ needs.setup.outputs.therock_ref }}
+
+      - name: Checkout rocm-libraries repository for scripts
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-libraries
+
+      - name: Download hipBLASLt ASAN trees
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: hipblaslt-asan-trees
+          path: hipblaslt-asan-trees
+
+      - name: Assemble runnable tree from dist
+        run: |
+          set -euo pipefail
+          mkdir -p "${OUTPUT_ARTIFACTS_DIR}"
+          tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf hipblaslt-asan-trees/hipblaslt-dist.tar.gz
+          test -x "${THEROCK_BIN_DIR}/hipblaslt-test"
+          echo "Extracted dist tree:"; ls -1 "${OUTPUT_ARTIFACTS_DIR}"
+
+      - name: Driver / GPU sanity check
+        timeout-minutes: 3
+        run: |
+          export PATH="${GITHUB_WORKSPACE}/build/bin:${PATH}"
+          export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/build/lib:${LD_LIBRARY_PATH:-}"
+          timeout -k 10 120 python3 ./build_tools/print_driver_gpu_info.py || true
+
+      - name: ASAN runtime environment
+        run: |
+          set -euo pipefail
+          OUT="${GITHUB_WORKSPACE}/build"
+          ASAN_RT_DIR="$(dirname "$(find "$OUT/lib/llvm/lib/clang" -name 'libclang_rt.asan-x86_64.so' | head -1)")"
+          {
+            echo "ASAN_OPTIONS=detect_odr_violation=0:quarantine_size_mb=600:detect_leaks=0:new_delete_type_mismatch=0"
+            echo "LSAN_OPTIONS=print_suppressions=0"
+            echo "HSA_XNACK=1"
+            echo "ASAN_SYMBOLIZER_PATH=${OUT}/lib/llvm/bin/llvm-symbolizer"
+            echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
+          } >> "$GITHUB_ENV"
+
+      - name: Test hipblaslt
+        timeout-minutes: 180
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+          TOTAL_SHARDS: 1
+          TEST_TYPE: quick
+        run: |
+          mkdir -p ./test_logs
+          python3 rocm-libraries/test/therock/test_hipblaslt.py 2>&1 | tee ./test_logs/test_output.log
+
+  summary:
+    name: "hipblaslt ASAN CI Summary"
+    if: always()
+    needs:
+      - check_label
+      - build
+      - test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report
+        env:
+          GATE: ${{ needs.check_label.outputs.run }}
+          BUILD: ${{ needs.build.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          if [[ "$GATE" != "true" ]]; then
+            echo "Skipped (ci:asan label not set)."
+            exit 0
+          fi
+          echo "Build:  ${BUILD}"
+          echo "Test:   ${TEST}"

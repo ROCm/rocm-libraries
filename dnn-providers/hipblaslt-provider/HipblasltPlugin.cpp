@@ -3,9 +3,9 @@
 
 #include <iostream>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
@@ -19,17 +19,19 @@
 #include "HipblasltPlugin.hpp"
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "version.h"
 
 static const char* pluginName = "hipblaslt_plugin";
-static const char* pluginVersion = "1.0.0";
+static const char* pluginVersion = HIPBLASLT_PROVIDER_VERSION_STRING;
 
 using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipblaslt_plugin;
 
 // NOLINTNEXTLINE
 thread_local char PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH] = "";
 
-std::weak_ptr<HipblasltContainer> hipblasltContainerLifecyclePtr;
+static std::weak_ptr<HipblasltContainer> hipblasltContainerLifecyclePtr;
 
 extern "C" {
 
@@ -92,6 +94,14 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallbackImpl(hipdnnCallback_t callbac
         throwIfNull(callback);
         hipdnn_plugin_sdk::logging::initializeCallbackLogging(pluginName, callback);
         LOG_API_SUCCESS(apiName, "");
+    });
+}
+
+hipdnnPluginStatus_t hipdnnPluginSetLogLevelImpl(hipdnnSeverity_t level)
+{
+    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        hipdnn_plugin_sdk::logging::setLogLevel(level);
+        LOG_API_SUCCESS(apiName, "level=" << level);
     });
 }
 
@@ -161,7 +171,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreateImpl(hipdnnEnginePluginHandle_t* ha
         else
         {
             static std::mutex s_hipblasltContainerMutex;
-            std::lock_guard<std::mutex> lock(s_hipblasltContainerMutex);
+            std::lock_guard<std::mutex> const lock(s_hipblasltContainerMutex);
 
             // if we do have a race condition that results in threads getting locked, we want to
             // ensure that we only create one instance.  Therefore, the second thread to get
@@ -234,7 +244,7 @@ hipdnnPluginStatus_t
         throwIfNull(numEngines);
 
         auto& engineManager = handle->getEngineManager();
-        GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
+        GraphWrapper const opGraphWrapper(opGraph->ptr, opGraph->size);
 
         auto applicableEngines = engineManager.getApplicableEngineIds(*handle, opGraphWrapper);
 
@@ -274,7 +284,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineDetailsImpl(hipdnnEnginePluginHa
         throwIfNull(engineDetails);
 
         auto& engineManager = handle->getEngineManager();
-        GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
+        GraphWrapper const opGraphWrapper(opGraph->ptr, opGraph->size);
 
         engineManager.getEngineDetails(*handle, opGraphWrapper, engineId, *engineDetails);
 
@@ -319,8 +329,8 @@ hipdnnPluginStatus_t
 
         auto& engineManager = handle->getEngineManager();
 
-        EngineConfigWrapper engineConfigWrapper(engineConfig->ptr, engineConfig->size);
-        GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
+        EngineConfigWrapper const engineConfigWrapper(engineConfig->ptr, engineConfig->size);
+        GraphWrapper const opGraphWrapper(opGraph->ptr, opGraph->size);
         *workspaceSize = engineManager.getWorkspaceSize(
             *handle, engineConfigWrapper.engineId(), opGraphWrapper);
 
@@ -345,8 +355,8 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextImpl(
         throwIfNull(opGraph);
         throwIfNull(executionContext);
 
-        GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
-        EngineConfigWrapper engineConfigWrapper(engineConfig->ptr, engineConfig->size);
+        GraphWrapper const opGraphWrapper(opGraph->ptr, opGraph->size);
+        EngineConfigWrapper const engineConfigWrapper(engineConfig->ptr, engineConfig->size);
 
         auto& engineManager = handle->getEngineManager();
 

@@ -1,0 +1,14 @@
+# Single source of truth for the flatc command-line flags hipDNN passes when
+# generating C++ headers from .fbs schemas. Consumed by both
+#   * cmake/FlatBuffersGenerate.cmake   (build-time, via file(STRINGS))
+#   * scripts/run_flatc.py              (manual dev workflow, via plain read)
+#
+# Format: one flag per line. Lines starting with '#' and blank lines are
+# comments and ignored by both consumers. The C++ output mode (--cpp) is
+# implied by the consumer (build_flatbuffers adds it; run_flatc.py adds it
+# explicitly) and must NOT be listed here.
+--gen-object-api
+--gen-mutable
+--gen-compare
+--defaults-json
+--scoped-enums

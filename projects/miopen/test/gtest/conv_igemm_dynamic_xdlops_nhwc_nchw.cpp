@@ -126,7 +126,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     const std::string out_nhwc      = " --out_layout NHWC";
     const std::string args_nhwc_wrw = dis_fwd + dis_bk_data + in_nhwc + fil_nhwc + out_nhwc;
 
-    const std::vector<std::string> test_cases = {
+    return {
         // clang-format off
     //nhwc_fwd
     {flags + "  --input  64 256  7  7 --weights 128 256 1 1 --pads_strides_dilations 0 0 1 1 1 1" + dis_bk_data + dis_bk_wei + in_nhwc + fil_nhwc + out_nhwc},
@@ -265,7 +265,6 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     {flags + "  --input  2 64 19 19 --weights 510 64 3 3 --pads_strides_dilations 1 1 1 1 1 1" + dis_fwd + dis_bk_data}
         // clang-format on
     };
-    return test_cases;
 }
 
 } // namespace conv_igemm_dynamic_xdlops_nhwc_nchw

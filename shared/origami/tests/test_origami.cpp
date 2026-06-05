@@ -90,6 +90,13 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
                                             1.8,
                                             1,
                                             std::make_tuple(0, 0.008, 0));
+      } else if (gpu_arch == 1250) {
+        hardware_slow                    = make_hardware(950);
+        hardware_slow.arch               = origami::hardware_t::architecture_t::gfx1250;
+        hardware_slow.compute_clock_ghz  = 1.4;
+        hardware_fast                    = make_hardware(950);
+        hardware_fast.arch               = origami::hardware_t::architecture_t::gfx1250;
+        hardware_fast.compute_clock_ghz  = 1.8;
       }
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
@@ -118,6 +125,8 @@ TEST_CASE("Origami: hardware_arch_enum", "[origami]") {
         REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx942);
       } else if (gpu_arch == 950) {
         REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx950);
+      } else if (gpu_arch == 1250) {
+        REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx1250);
       }
     }
   }
@@ -178,6 +187,7 @@ TEST_CASE("Origami: best_macro_tile_size", "[origami]") {
 
 TEST_CASE("Origami: best_macro_tile_size mxfp4", "[origami]") {
   for (int gpu_arch : test_architectures) {
+    if (gpu_arch != 950) continue;  // mxfp4 only supported on gfx950 for now
     DYNAMIC_SECTION("gfx" << gpu_arch << " - rank configs by latency") {
       auto hardware = make_hardware(gpu_arch);
       hardware.lds_capacity = 400000;
@@ -201,7 +211,6 @@ TEST_CASE("Origami: best_macro_tile_size mxfp4", "[origami]") {
       auto results = origami::rank_configs(problem, hardware, configs);
 
       REQUIRE(results.size() == configs.size());
-      // Results should be ranked, so latencies should be in ascending order (best first)
       REQUIRE(results[0].config.mt.m == 256);
       REQUIRE(results[1].config.mt.m == 128);
       REQUIRE(results[2].config.mt.m == 64);
@@ -402,7 +411,7 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
         invalid_configs.push_back(make_config(256, 256, 128, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(128, 128, 256, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(64, 64, 512, 32, 32, 8, false, 1, 6, 0, 0));
-      } else if (gpu_arch == 950) {
+      } else if (gpu_arch == 950 || gpu_arch == 1250) {
         invalid_configs.push_back(make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(128, 128, 512, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(256, 256, 512, 32, 32, 8, false, 1, 6, 0, 0));
@@ -444,8 +453,7 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
       portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.0", 1);
       // Read back and parse
       double env_val = origami::runtime_options::read_heuristics_variance_from_env();
-      REQUIRE(env_val == 0.01);  // Return default value 0.01 when
-                                 // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 0.0
+      REQUIRE(env_val == 0.0);  // Return ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 0.0
 
       portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "-1.0", 1);
       // Read back and parse
@@ -543,6 +551,171 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
       REQUIRE(result_select_config_mnk.config.mt.k == result_select_config.config.mt.k);
     }
   }
+}
+
+// Formocast Simulation Mode Tests
+
+TEST_CASE("Origami: simulation mode basic", "[origami][formocast]") {
+  for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast returns positive latency") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem = make_problem(2048, 2048, 2048);
+      
+      // Create config with simulation mode
+      auto config = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
+      config.prediction_mode = origami::prediction_modes_t::simulation;
+      
+      // Set Formocast-specific parameters (via tensile nested struct)
+      config.tensile().depth_u = 32;
+      config.tensile().global_split_u = 1;
+      config.grvw_a = 4;
+      config.grvw_b = 4;
+      config.gwvw_d = 4;
+      config.tensile().wave_num = 4;
+      config.tensile().wave_group_m = 2;
+      config.tensile().wave_group_n = 2;
+      config.tensile().prefetch_global_read = 2;
+      
+      double latency = origami::compute_total_latency(problem, hardware, config, hardware.N_CU);
+      
+      REQUIRE(latency > 0);
+    }
+  }
+}
+
+TEST_CASE("Origami: simulation mode via compute_total_latency", "[origami][formocast]") {
+  for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - compute_total_latency uses Formocast in simulation mode") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem = make_problem(2048, 2048, 2048);
+      
+      // Create config with estimation mode
+      auto config_estimation = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
+      config_estimation.prediction_mode = origami::prediction_modes_t::estimation;
+      
+      // Create config with simulation mode
+      auto config_simulation = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
+      config_simulation.prediction_mode = origami::prediction_modes_t::simulation;
+      config_simulation.tensile().depth_u = 32;
+      config_simulation.tensile().global_split_u = 1;
+      config_simulation.grvw_a = 4;
+      config_simulation.grvw_b = 4;
+      config_simulation.gwvw_d = 4;
+      config_simulation.tensile().wave_num = 4;
+      config_simulation.tensile().wave_group_m = 2;
+      config_simulation.tensile().wave_group_n = 2;
+      config_simulation.tensile().prefetch_global_read = 2;
+      
+      double latency_estimation = origami::compute_total_latency(
+          problem, hardware, config_estimation, hardware.N_CU);
+      double latency_simulation = origami::compute_total_latency(
+          problem, hardware, config_simulation, hardware.N_CU);
+      
+      // Both should be positive
+      REQUIRE(latency_estimation > 0);
+      REQUIRE(latency_simulation > 0);
+      
+      // They should produce different results (different models, different units)
+      REQUIRE(latency_estimation != latency_simulation);
+    }
+  }
+}
+
+TEST_CASE("Origami: Formocast with various problem sizes", "[origami][formocast]") {
+  for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast handles various problem sizes") {
+      auto hardware = make_hardware(gpu_arch);
+      
+      std::vector<std::tuple<size_t, size_t, size_t>> problem_sizes = {
+          {1024, 1024, 1024},
+          {2048, 2048, 2048},
+          {4096, 4096, 512},
+          {512, 4096, 4096},
+          {8192, 8192, 1024},
+      };
+      
+      for (const auto& [m, n, k] : problem_sizes) {
+        auto problem = make_problem(m, n, k);
+        
+        auto config = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
+        config.prediction_mode = origami::prediction_modes_t::simulation;
+        config.tensile().depth_u = 32;
+        config.tensile().global_split_u = 1;
+        config.grvw_a = 4;
+        config.grvw_b = 4;
+        config.gwvw_d = 4;
+        config.tensile().wave_num = 4;
+        config.tensile().wave_group_m = 2;
+        config.tensile().wave_group_n = 2;
+        
+        double latency = origami::compute_total_latency(problem, hardware, config, hardware.N_CU);
+        
+        INFO("Problem size: " << m << "x" << n << "x" << k);
+        REQUIRE(latency > 0);
+      }
+    }
+  }
+}
+
+TEST_CASE("Origami: Formocast with different tile sizes", "[origami][formocast]") {
+  for (int gpu_arch : test_architectures) {
+    if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - Formocast handles different tile sizes") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem = make_problem(4096, 4096, 4096);
+      
+      std::vector<std::tuple<size_t, size_t, size_t>> tile_sizes = {
+          {64, 64, 32},
+          {128, 128, 32},
+          {256, 256, 32},
+          {128, 256, 64},
+          {256, 128, 64},
+      };
+      
+      for (const auto& [mt_m, mt_n, mt_k] : tile_sizes) {
+        auto config = make_config(mt_m, mt_n, mt_k, 16, 16, 16, false, 8, 2);
+        config.prediction_mode = origami::prediction_modes_t::simulation;
+        config.tensile().depth_u = mt_k;
+        config.tensile().global_split_u = 1;
+        config.grvw_a = 4;
+        config.grvw_b = 4;
+        config.gwvw_d = 4;
+        config.tensile().wave_num = 4;
+        config.tensile().wave_group_m = 2;
+        config.tensile().wave_group_n = 2;
+        
+        double latency = origami::compute_total_latency(problem, hardware, config, hardware.N_CU);
+        
+        INFO("Tile size: " << mt_m << "x" << mt_n << "x" << mt_k);
+        REQUIRE(latency > 0);
+      }
+    }
+  }
+}
+
+TEST_CASE("Origami: Formocast config fields have correct defaults", "[origami][formocast]") {
+  origami::config_t config;
+  
+  // Check default values for Tensile-specific fields (via nested struct)
+  REQUIRE(config.tensile().depth_u == 0);
+  REQUIRE(config.tensile().global_split_u == 1);
+  REQUIRE(config.tensile().global_accumulation == 0);
+  REQUIRE(config.tensile().local_split_u == 1);
+  REQUIRE(config.grvw_a == 1);
+  REQUIRE(config.grvw_b == 1);
+  REQUIRE(config.gwvw_d == 1);
+  REQUIRE(config.tensile().direct_to_vgpr_a == false);
+  REQUIRE(config.tensile().direct_to_vgpr_b == false);
+  REQUIRE(config.tensile().direct_to_lds_a == false);
+  REQUIRE(config.tensile().direct_to_lds_b == false);
+  REQUIRE(config.tensile().wave_num == 4);
+  REQUIRE(config.tensile().wave_group_m == 2);
+  REQUIRE(config.tensile().wave_group_n == 2);
+  REQUIRE(config.tensile().prefetch_global_read == 2);
+  REQUIRE(config.prediction_mode == origami::prediction_modes_t::estimation);
 }
 
 TEST_CASE("Origami: select_staggerU unit test", "[origami]") {
@@ -746,5 +919,146 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       else if (gpu_arch == 950)
         REQUIRE(out_wgm.wgm == 4);
     }
+  }
+}
+
+TEST_CASE("Origami: config_t hash function", "[origami]") {
+  SECTION("hash works with no backend (monostate)") {
+    origami::config_t config1;
+    config1.mt        = {256, 256, 32};
+    config1.mi        = {16, 16, 16};
+    config1.occupancy = 4;
+
+    origami::config_t config2;
+    config2.mt        = {256, 256, 32};
+    config2.mi        = {16, 16, 16};
+    config2.occupancy = 4;
+
+    // Identical configs should have the same hash
+    REQUIRE(config1.hash() == config2.hash());
+
+    // Hash should be non-zero for a valid config
+    REQUIRE(config1.hash() != 0);
+  }
+
+  SECTION("hash works with tensile backend") {
+    origami::config_t config1;
+    config1.mt                    = {256, 256, 32};
+    config1.mi                    = {16, 16, 16};
+    config1.occupancy             = 4;
+    config1.tensile().depth_u        = 16;
+    config1.tensile().global_split_u = 2;
+    config1.tensile().wave_num       = 4;
+
+    origami::config_t config2;
+    config2.mt                    = {256, 256, 32};
+    config2.mi                    = {16, 16, 16};
+    config2.occupancy             = 4;
+    config2.tensile().depth_u        = 16;
+    config2.tensile().global_split_u = 2;
+    config2.tensile().wave_num       = 4;
+
+    // Identical configs with tensile params should have the same hash
+    REQUIRE(config1.hash() == config2.hash());
+  }
+
+  SECTION("different configs produce different hashes") {
+    origami::config_t config1;
+    config1.mt        = {256, 256, 32};
+    config1.mi        = {16, 16, 16};
+    config1.occupancy = 4;
+
+    origami::config_t config2;
+    config2.mt        = {128, 128, 32};  // Different tile size
+    config2.mi        = {16, 16, 16};
+    config2.occupancy = 4;
+
+    REQUIRE(config1.hash() != config2.hash());
+  }
+
+  SECTION("config with vs without tensile params produces different hashes") {
+    origami::config_t config_no_backend;
+    config_no_backend.mt        = {256, 256, 32};
+    config_no_backend.mi        = {16, 16, 16};
+    config_no_backend.occupancy = 4;
+
+    origami::config_t config_with_backend;
+    config_with_backend.mt               = {256, 256, 32};
+    config_with_backend.mi               = {16, 16, 16};
+    config_with_backend.occupancy        = 4;
+    config_with_backend.tensile().depth_u = 16;
+
+    REQUIRE(config_no_backend.hash() != config_with_backend.hash());
+  }
+
+  SECTION("different tensile params produce different hashes") {
+    origami::config_t config1;
+    config1.mt                = {256, 256, 32};
+    config1.mi                = {16, 16, 16};
+    config1.occupancy         = 4;
+    config1.tensile().depth_u = 16;
+
+    origami::config_t config2;
+    config2.mt                = {256, 256, 32};
+    config2.mi                = {16, 16, 16};
+    config2.occupancy         = 4;
+    config2.tensile().depth_u = 32;  // Different depth_u
+
+    REQUIRE(config1.hash() != config2.hash());
+  }
+}
+
+TEST_CASE("Origami: tensile_params_t hash function", "[origami]") {
+  SECTION("identical params produce same hash") {
+    origami::tensile_params_t params1;
+    params1.depth_u        = 16;
+    params1.global_split_u = 2;
+    params1.wave_num       = 4;
+
+    origami::tensile_params_t params2;
+    params2.depth_u        = 16;
+    params2.global_split_u = 2;
+    params2.wave_num       = 4;
+
+    REQUIRE(params1.hash() == params2.hash());
+  }
+
+  SECTION("different params produce different hashes") {
+    origami::tensile_params_t params1;
+    params1.depth_u = 16;
+
+    origami::tensile_params_t params2;
+    params2.depth_u = 32;
+
+    REQUIRE(params1.hash() != params2.hash());
+  }
+
+  SECTION("all fields contribute to hash") {
+    origami::tensile_params_t base_params;
+
+    // Changing each field should produce a different hash
+    origami::tensile_params_t params_depth_u = base_params;
+    params_depth_u.depth_u                   = 32;
+    REQUIRE(base_params.hash() != params_depth_u.hash());
+
+    origami::tensile_params_t params_gsu = base_params;
+    params_gsu.global_split_u            = 4;
+    REQUIRE(base_params.hash() != params_gsu.hash());
+
+    origami::tensile_params_t params_wave = base_params;
+    params_wave.wave_num                  = 8;
+    REQUIRE(base_params.hash() != params_wave.hash());
+
+    origami::tensile_params_t params_dtvgpr = base_params;
+    params_dtvgpr.direct_to_vgpr_a          = true;
+    REQUIRE(base_params.hash() != params_dtvgpr.hash());
+
+    origami::tensile_params_t params_swizzle = base_params;
+    params_swizzle.swizzle_a                 = true;
+    REQUIRE(base_params.hash() != params_swizzle.hash());
+
+    origami::tensile_params_t params_wgm_xcc = base_params;
+    params_wgm_xcc.workgroup_mapping_xcc     = 8;
+    REQUIRE(base_params.hash() != params_wgm_xcc.hash());
   }
 }

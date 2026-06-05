@@ -9,10 +9,10 @@ Render a matrix stored in a msgpack file as an image.
 
 import argparse
 import os
-import pathlib
 import sys
+from pathlib import Path
 
-repo_dir = pathlib.Path(__file__).resolve().parent.parent
+repo_dir = Path(__file__).resolve().parent.parent
 sys.path.append(str(repo_dir / "scripts" / "lib"))
 
 import matrix_utils  # noqa: E402

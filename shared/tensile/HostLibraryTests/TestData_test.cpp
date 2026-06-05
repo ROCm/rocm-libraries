@@ -26,6 +26,7 @@
 
 #include <TestData.hpp>
 
+#include <filesystem>
 #include <gtest/gtest.h>
 
 TEST(TestData, Simple)
@@ -36,7 +37,7 @@ TEST(TestData, Simple)
 
 #if defined(TENSILE_MSGPACK) || defined(TENSILE_LLVM)
     auto is_regular_file
-        = static_cast<bool (*)(boost::filesystem::path const&)>(boost::filesystem::is_regular_file);
+        = static_cast<bool (*)(std::filesystem::path const&)>(std::filesystem::is_regular_file);
 
     EXPECT_PRED1(is_regular_file, data.file("KernelsLite"));
     EXPECT_FALSE(is_regular_file(data.file("fjdlksljfjldskj")));

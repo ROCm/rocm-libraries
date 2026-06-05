@@ -14,9 +14,9 @@ using namespace hipdnn_test_sdk::utilities;
 TEST(TestShallowTensor, ConstructionAndShape)
 {
     std::array<float, 12> backing{};
-    std::vector<int64_t> dims = {1, 3, 2, 2}; // N C H W
-    std::vector<int64_t> strides = {12, 4, 2, 1}; // custom (not contiguous standard)
-    ShallowTensor<float> tensor(backing.data(), dims, strides);
+    const std::vector<int64_t> dims = {1, 3, 2, 2}; // N C H W
+    const std::vector<int64_t> strides = {12, 4, 2, 1}; // custom (not contiguous standard)
+    const ShallowTensor<float> tensor(backing.data(), dims, strides);
 
     EXPECT_EQ(tensor.dims(), dims);
     EXPECT_EQ(tensor.strides(), strides);
@@ -25,8 +25,8 @@ TEST(TestShallowTensor, ConstructionAndShape)
 TEST(TestShallowTensor, MemoryAccessHostOnly)
 {
     std::array<int, 6> backing = {1, 2, 3, 4, 5, 6};
-    std::vector<int64_t> dims = {1, 1, 2, 3};
-    std::vector<int64_t> strides = {6, 6, 3, 1};
+    const std::vector<int64_t> dims = {1, 1, 2, 3};
+    const std::vector<int64_t> strides = {6, 6, 3, 1};
     ShallowTensor<int> tensor(backing.data(), dims, strides);
 
     auto& mem = tensor.memory();
@@ -35,12 +35,16 @@ TEST(TestShallowTensor, MemoryAccessHostOnly)
     EXPECT_EQ(mem.location(), MemoryLocation::HOST);
 }
 
-TEST(TestShallowTensor, FillWithValueThrows)
+TEST(TestShallowTensor, FillWithValueFillsMemory)
 {
     std::array<int, 4> backing = {7, 8, 9, 10};
     ShallowTensor<int> tensor(backing.data(), {1, 1, 2, 2}, {4, 4, 2, 1});
 
-    EXPECT_THROW(tensor.fillWithValue(123), std::runtime_error);
+    tensor.fillWithValue(123);
+    for(const auto& val : backing)
+    {
+        EXPECT_EQ(val, 123);
+    }
 }
 
 TEST(TestShallowTensor, FillWithRandomValuesThrows)
@@ -75,8 +79,8 @@ TEST(TestShallowTensor, SparseTensorCreationAndUsage)
 {
     // Create a sparse tensor with dims {2,2,2,2} and strides {2,4,8,16}
     // This represents a non-packed layout with gaps in memory
-    std::vector<int64_t> dims = {2, 2, 2, 2};
-    std::vector<int64_t> strides = {2, 4, 8, 16};
+    const std::vector<int64_t> dims = {2, 2, 2, 2};
+    const std::vector<int64_t> strides = {2, 4, 8, 16};
 
     Tensor<float> tensor(dims, strides);
 
@@ -108,6 +112,6 @@ TEST(TestShallowTensor, SparseTensorCreationAndUsage)
 
     //checking the shallow tensor of tensor matches should validate the setup of shallow
     //tensor for sparse data.
-    CpuFpReferenceValidation<float> refValidation;
+    const CpuFpReferenceValidation<float> refValidation;
     EXPECT_TRUE(refValidation.allClose(tensor, shallow));
 }

@@ -62,6 +62,12 @@ namespace rocRoller
             ControlToCoordinateMapper        mapper;
 
             /**
+            * Modelled addresses for ops with memory access.
+            * Set by @ref rocRoller::KernelGraph::ModelAddresses transform.
+            */
+            std::unordered_map<int, std::vector<size_t>> modelledAddresses;
+
+            /**
             * Set up the coordinate graph and transducer for existing transformers.
             */
             void initializeTransformersForCodeGen(rocRoller::Expression::ExpressionTransducer);

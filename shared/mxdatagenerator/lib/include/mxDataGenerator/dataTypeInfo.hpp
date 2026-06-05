@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <limits.h>
 #include <memory>
 #include <random>
@@ -75,18 +76,124 @@ namespace DGen
         constexpr double NegInf = -std::numeric_limits<double>::infinity();
     }
 
-    struct E8M0_SCALE_INFO
+    enum class ScaleType
     {
-        static constexpr uint signBits     = 0;
-        static constexpr uint exponentBits = 8;
-        static constexpr uint mantissaBits = 0;
-        static constexpr uint bias         = 127;
-
-        static constexpr int unBiasedEMin = -127;
-        static constexpr int unBiasedEMax = 127;
-        static constexpr int biasedEMin   = 0;
-        static constexpr int biasedEMax   = 254;
+        None,
+        E8M0,
+        E5M3,
+        E4M3,
     };
+
+    template <uint SignBits, uint ExponentBits, uint MantissaBits, bool HasZero, bool HasInf, bool HasNaN>
+    struct ScaleFmt
+    {
+        static constexpr uint signBits     = SignBits;
+        static constexpr uint exponentBits = ExponentBits;
+        static constexpr uint mantissaBits = MantissaBits;
+        static constexpr int  bias         = (1 << (ExponentBits - 1)) - 1;
+        static constexpr int  biasedEMin   = HasZero ? 1 : 0;
+        static constexpr int  biasedEMax   = (1 << ExponentBits) - (HasInf ? 2 : 1);
+        static constexpr int  unBiasedEMin = biasedEMin - bias;
+        static constexpr int  unBiasedEMax = biasedEMax - bias;
+        static constexpr bool hasZero = HasZero;
+        static constexpr bool hasInf = HasInf;
+        static constexpr bool hasNan = HasNaN;
+    };
+
+    template <ScaleType T>
+    struct ScaleInfoFor;
+
+    template <>
+    struct ScaleInfoFor<ScaleType::E8M0>
+    {
+        using info = ScaleFmt<0, 8, 0, false, true, true>;
+    };
+
+    template <>
+    struct ScaleInfoFor<ScaleType::E5M3>
+    {
+        using info = ScaleFmt<0, 5, 3, true, false, true>;
+    };
+
+    template <>
+    struct ScaleInfoFor<ScaleType::E4M3>
+    {
+        // The scale doesn't have a sign bit, but it is needed
+        // here for size computations.
+        using info = ScaleFmt<1, 4, 3, true, false, true>;
+    };
+
+    template <ScaleType T>
+    using ScaleInfo = typename ScaleInfoFor<T>::info;
+
+    template <ScaleType T>
+    inline constexpr bool isConcreteScaleType()
+    {
+        return T != ScaleType::None;
+    };
+
+    template<ScaleType T>
+    inline constexpr uint getScaleNan();
+
+    template<>
+    inline constexpr uint getScaleNan<ScaleType::E8M0>()
+    {
+        return Constants::E8M0_NAN;
+    }
+
+    template<>
+    inline constexpr uint getScaleNan<ScaleType::E5M3>()
+    {
+        return 0b11111111;
+    }
+
+    template<>
+    inline constexpr uint getScaleNan<ScaleType::E4M3>()
+    {
+        return 0b01111111;
+    }
+
+    template<ScaleType T>
+    inline constexpr uint getScaleOne();
+
+    template<>
+    inline constexpr uint getScaleOne<ScaleType::E8M0>()
+    {
+        return Constants::E8M0_1;
+    }
+
+    template<>
+    inline constexpr uint getScaleOne<ScaleType::E5M3>()
+    {
+        return 0b01111000;
+    }
+
+    template<>
+    inline constexpr uint getScaleOne<ScaleType::E4M3>()
+    {
+        return 0b00111000;
+    }
+
+    template<ScaleType T>
+    inline constexpr uint getScaleTwo();
+
+    template<>
+    inline constexpr uint getScaleTwo<ScaleType::E8M0>()
+    {
+        return Constants::E8M0_2;
+    }
+
+    template<>
+    inline constexpr uint getScaleTwo<ScaleType::E5M3>()
+    {
+        return 0b10000000;
+    }
+
+    template<>
+    inline constexpr uint getScaleTwo<ScaleType::E4M3>()
+    {
+        return 0b01000000;
+    }
 
     union cvt
     {
@@ -156,6 +263,136 @@ namespace DGen
         }
 
         return mantissa;
+    }
+
+    template <typename scaleInfo>
+    inline constexpr uint8_t getScalePayloadMask()
+    {
+        constexpr uint scaleBits = scaleInfo::exponentBits + scaleInfo::mantissaBits;
+        if constexpr(scaleBits >= 8)
+            return 0xff;
+        else
+            return (1 << scaleBits) - 1;
+    }
+
+    template <typename scaleInfo>
+    inline uint8_t getScalePayload(uint8_t scale)
+    {
+        return scale & getScalePayloadMask<scaleInfo>();
+    }
+
+    template <typename scaleInfo>
+    inline bool isScaleNaN(uint8_t scale)
+    {
+        if constexpr(!scaleInfo::hasNan)
+            return false;
+        else
+            return getScalePayload<scaleInfo>(scale) == getScalePayloadMask<scaleInfo>();
+    }
+
+    template <typename scaleInfo>
+    inline double getScaleValue(uint8_t scale)
+    {
+        if(isScaleNaN<scaleInfo>(scale))
+            return std::numeric_limits<double>::quiet_NaN();
+
+        const uint8_t payload = getScalePayload<scaleInfo>(scale);
+        if constexpr(scaleInfo::mantissaBits == 0)
+        {
+            const int exponent = getExponentValue<uint8_t>(
+                payload, scaleInfo::mantissaBits, scaleInfo::exponentBits);
+            return std::pow(2.0,
+                            static_cast<double>(exponent - static_cast<int>(scaleInfo::bias)));
+        }
+
+        if constexpr(scaleInfo::hasZero)
+        {
+            if(payload == 0)
+                return 0.0;
+        }
+
+        const int exponent
+            = getExponentValue<uint8_t>(payload, scaleInfo::mantissaBits, scaleInfo::exponentBits);
+        const int unbiasedExponent
+            = exponent == 0 ? 1 - static_cast<int>(scaleInfo::bias)
+                            : exponent - static_cast<int>(scaleInfo::bias);
+        const double mantissa
+            = getMantissaValue<uint8_t>(payload, scaleInfo::mantissaBits, scaleInfo::exponentBits);
+
+        return mantissa * std::pow(2.0, static_cast<double>(unbiasedExponent));
+    }
+
+    template <typename scaleInfo>
+    inline float getScaleValueFloat(uint8_t scale)
+    {
+        return static_cast<float>(getScaleValue<scaleInfo>(scale));
+    }
+
+    template <typename scaleInfo>
+    inline bool isCanonicalScaleByte(uint8_t scale)
+    {
+        return scale == getScalePayload<scaleInfo>(scale);
+    }
+
+    template <typename scaleInfo>
+    inline bool isFiniteScaleByte(uint8_t scale)
+    {
+        return isCanonicalScaleByte<scaleInfo>(scale) && std::isfinite(getScaleValue<scaleInfo>(scale));
+    }
+
+    template <typename scaleInfo>
+    inline bool isFiniteNonzeroScaleByte(uint8_t scale)
+    {
+        const auto value = getScaleValue<scaleInfo>(scale);
+        return isCanonicalScaleByte<scaleInfo>(scale) && std::isfinite(value) && value != 0.0;
+    }
+
+    template <typename scaleInfo>
+    inline std::vector<uint8_t> enumerateFiniteScaleBytes(
+        double minValue = 0.0, double maxValue = std::numeric_limits<double>::infinity())
+    {
+        std::vector<uint8_t> candidates;
+        for(uint32_t raw = 0; raw <= getScalePayloadMask<scaleInfo>(); raw++)
+        {
+            const auto scale = static_cast<uint8_t>(raw);
+            const auto value = getScaleValue<scaleInfo>(scale);
+            if(std::isfinite(value) && value >= minValue && value <= maxValue)
+                candidates.push_back(scale);
+        }
+        return candidates;
+    }
+
+    template <typename scaleInfo>
+    inline std::vector<uint8_t> enumerateFiniteNonzeroScaleBytes(
+        double minValue = 0.0, double maxValue = std::numeric_limits<double>::infinity())
+    {
+        std::vector<uint8_t> candidates;
+        for(const auto scale : enumerateFiniteScaleBytes<scaleInfo>(minValue, maxValue))
+        {
+            if(getScaleValue<scaleInfo>(scale) != 0.0)
+                candidates.push_back(scale);
+        }
+        return candidates;
+    }
+
+    template <typename scaleInfo>
+    inline uint8_t nearestFiniteScaleByte(double target, const std::vector<uint8_t>& candidates)
+    {
+        assert(!candidates.empty());
+
+        auto best     = candidates.front();
+        auto bestDiff = std::abs(getScaleValue<scaleInfo>(best) - target);
+        for(const auto candidate : candidates)
+        {
+            const auto diff = std::abs(getScaleValue<scaleInfo>(candidate) - target);
+            if(diff < bestDiff)
+            {
+                best     = candidate;
+                bestDiff = diff;
+            }
+        }
+
+        return best;
     }
 
     /**
@@ -1001,8 +1238,8 @@ namespace DGen
     template <typename T, typename DTYPE>
     T convertToTypeSR(float value, uint seed);
 
-    template <typename T, typename dataInfo, typename scaleInfo>
-    double convertToDouble(T data, int scaleExp)
+    template <typename T, typename dataInfo>
+    double convertToDoubleWithScale(T data, double scaleValue)
     {
         double d_s = std::pow(
             -1, static_cast<double>(data >> (dataInfo::exponentBits + dataInfo::mantissaBits)));
@@ -1019,14 +1256,20 @@ namespace DGen
             = getMantissaValue<uint8_t>(data, dataInfo::mantissaBits, dataInfo::exponentBits);
 
         double dataValue = d_s * d_e * d_m;
-        double scaleValue
-            = std::pow(2, static_cast<double>((scaleExp - static_cast<int>(scaleInfo::bias))));
 
         return dataValue * scaleValue;
     }
 
     template <typename T, typename dataInfo, typename scaleInfo>
-    float convertToFloat(T data, int scaleExp)
+    double convertToDouble(T data, int scaleExp)
+    {
+        double scaleValue
+            = std::pow(2, static_cast<double>((scaleExp - static_cast<int>(scaleInfo::bias))));
+        return convertToDoubleWithScale<T, dataInfo>(data, scaleValue);
+    }
+
+    template <typename T, typename dataInfo>
+    float convertToFloatWithScale(T data, float scaleValue)
     {
         float d_s = std::pow(
             -1, static_cast<float>(data >> (dataInfo::exponentBits + dataInfo::mantissaBits)));
@@ -1042,10 +1285,16 @@ namespace DGen
         float d_m = getMantissaValue<uint8_t>(data, dataInfo::mantissaBits, dataInfo::exponentBits);
 
         float dataValue = d_s * d_e * d_m;
-        float scaleValue
-            = std::pow(2, static_cast<float>((scaleExp - static_cast<int>(scaleInfo::bias))));
 
         return dataValue * scaleValue;
+    }
+
+    template <typename T, typename dataInfo, typename scaleInfo>
+    float convertToFloat(T data, int scaleExp)
+    {
+        float scaleValue
+            = std::pow(2, static_cast<float>((scaleExp - static_cast<int>(scaleInfo::bias))));
+        return convertToFloatWithScale<T, dataInfo>(data, scaleValue);
     }
 }
 

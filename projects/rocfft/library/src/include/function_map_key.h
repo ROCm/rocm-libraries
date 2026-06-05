@@ -516,17 +516,19 @@ struct PPFMKey : public FMKeyBase
     PPFMKey(const PPFMKey&) = default;
 
     // with every data
-    PPFMKey(size_t           length0,
-            size_t           length1,
-            size_t           length2,
-            rocfft_precision precision,
-            ComputeScheme    scheme          = CS_3D_PP,
-            KernelConfig     kernel_config_1 = KernelConfig::EmptyConfig(),
-            KernelConfig     kernel_config_2 = KernelConfig::EmptyConfig(),
-            std::string      gcn_arch_name   = get_curr_gcn_arch_name())
+    PPFMKey(size_t                length0,
+            size_t                length1,
+            size_t                length2,
+            rocfft_precision      precision,
+            rocfft_transform_type transform_type,
+            ComputeScheme         scheme          = CS_3D_PP,
+            KernelConfig          kernel_config_1 = KernelConfig::EmptyConfig(),
+            KernelConfig          kernel_config_2 = KernelConfig::EmptyConfig(),
+            std::string           gcn_arch_name   = get_curr_gcn_arch_name())
         : FMKeyBase({length0, length1, length2}, precision, scheme, gcn_arch_name)
         , kernel_config_1(kernel_config_1)
         , kernel_config_2(kernel_config_2)
+        , transform_type(transform_type)
     {
     }
 
@@ -534,9 +536,16 @@ struct PPFMKey : public FMKeyBase
 
     bool operator==(const PPFMKey& rhs) const
     {
-        return std::tie(lengths, precision, scheme, kernel_config_1, kernel_config_2, gcn_arch_name)
+        return std::tie(lengths,
+                        precision,
+                        transform_type,
+                        scheme,
+                        kernel_config_1,
+                        kernel_config_2,
+                        gcn_arch_name)
                == std::tie(rhs.lengths,
                            rhs.precision,
+                           rhs.transform_type,
                            rhs.scheme,
                            rhs.kernel_config_1,
                            rhs.kernel_config_2,
@@ -550,9 +559,16 @@ struct PPFMKey : public FMKeyBase
 
     bool operator<(const PPFMKey& rhs) const
     {
-        return std::tie(lengths, precision, scheme, kernel_config_1, kernel_config_2, gcn_arch_name)
+        return std::tie(lengths,
+                        precision,
+                        transform_type,
+                        scheme,
+                        kernel_config_1,
+                        kernel_config_2,
+                        gcn_arch_name)
                < std::tie(rhs.lengths,
                           rhs.precision,
+                          rhs.transform_type,
                           rhs.scheme,
                           rhs.kernel_config_1,
                           rhs.kernel_config_2,
@@ -570,6 +586,8 @@ struct PPFMKey : public FMKeyBase
     {
         return true;
     }
+
+    rocfft_transform_type transform_type{};
 };
 
 // Hash function for PPFMKey.
@@ -581,6 +599,7 @@ struct SimpleHashPP
         for(auto& v : p.lengths)
             h ^= std::hash<int>{}(v);
         h ^= std::hash<rocfft_precision>{}(p.precision);
+        h ^= std::hash<rocfft_transform_type>{}(p.transform_type);
         h ^= std::hash<ComputeScheme>{}(p.scheme);
         h ^= std::hash<KernelConfig>{}(p.kernel_config_1);
         h ^= std::hash<KernelConfig>{}(p.kernel_config_2);

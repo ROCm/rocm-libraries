@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -163,7 +163,7 @@ namespace rocsparse
 
         const rocsparse_fill_mode fill_mode  = descr->fill_mode;
         const rocsparse_diag_type diag_type  = descr->diag_type;
-        J*                        zero_pivot = (J*)info->get_zero_pivot();
+        J*                        zero_pivot = (J*)info->get_position();
         if(nnz == 0)
         {
             if(diag_type == rocsparse_diag_type_non_unit)

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,8 +54,8 @@ struct host_test_params
 
     friend std::ostream& operator<<(std::ostream& os, const host_test_params& params)
     {
-        os << "{ "
-           << "rng_type: " << params.rng_type << ", blocking: " << params.blocking_host_generator
+        os << "{ " << "rng_type: " << params.rng_type
+           << ", blocking: " << params.blocking_host_generator
            << ", default_stream: " << params.use_default_stream << " }";
         return os;
     }
@@ -210,7 +210,7 @@ void test_int_parity(rocrand_generator                      host_generator,
                             hipMemcpyDeviceToHost));
         HIP_CHECK(hipDeviceSynchronize());
 
-        assert_eq(host_results, device_results);
+        ASSERT_VEC_EQ(host_results, device_results);
     }
 
     ROCRAND_CHECK(rocrand_destroy_generator(host_generator));
@@ -263,7 +263,7 @@ void test_uniform_parity(rocrand_generator                      host_generator,
                             hipMemcpyDeviceToHost));
         HIP_CHECK(hipDeviceSynchronize());
 
-        assert_eq(host_results, device_results);
+        ASSERT_VEC_EQ(host_results, device_results);
     }
 
     ROCRAND_CHECK(rocrand_destroy_generator(host_generator));
@@ -330,7 +330,7 @@ void test_normal_parity(rocrand_generator                      host_generator,
 
         // This rounding is required because the sine and cosine used in box-muller used in the normal
         // distribution is slightly different from the one used on the host.
-        assert_near(host_results, device_results, eps);
+        ASSERT_VEC_NEAR(host_results, device_results, eps);
     }
 
     ROCRAND_CHECK(rocrand_destroy_generator(host_generator));
@@ -418,7 +418,7 @@ TEST_P(rocrand_generate_host_test, poisson_parity_test)
                             hipMemcpyDeviceToHost));
         HIP_CHECK(hipDeviceSynchronize());
 
-        assert_eq(host_results, device_results);
+        ASSERT_VEC_EQ(host_results, device_results);
     }
 
     ROCRAND_CHECK(rocrand_destroy_generator(host_generator));

@@ -39,7 +39,7 @@ CK_TILE_HOST_DEVICE constexpr auto
 container_reorder_given_new2old(const array<TData, NSize>& old_array, sequence<IRs...> /*new2old*/)
 {
     static_assert(NSize == sizeof...(IRs), "wrong! size not consistent");
-    static_assert(is_valid_sequence_map<sequence<IRs...>>{}, "wrong! invalid reorder map");
+    static_assert(is_valid_sequence_map<sequence<IRs...>>::value, "wrong! invalid reorder map");
     return make_array<remove_cvref_t<TData>>(old_array[IRs]...);
 }
 
@@ -89,7 +89,7 @@ CK_TILE_HOST_DEVICE constexpr auto container_reorder_given_new2old(const tuple<T
 {
     static_assert(sizeof...(Ts) == sizeof...(IRs), "wrong! size not consistent");
 
-    static_assert(is_valid_sequence_map<sequence<IRs...>>{}, "wrong! invalid reorder map");
+    static_assert(is_valid_sequence_map<sequence<IRs...>>::value, "wrong! invalid reorder map");
 
     return make_tuple(old_tuple[number<IRs>{}]...);
 }
@@ -109,7 +109,7 @@ CK_TILE_HOST_DEVICE constexpr auto container_reorder_given_new2old(sequence<Is..
 {
     static_assert(sizeof...(Is) == sizeof...(IRs), "wrong! size not consistent");
 
-    static_assert(is_valid_sequence_map<sequence<IRs...>>{}, "wrong! invalid reorder map");
+    static_assert(is_valid_sequence_map<sequence<IRs...>>::value, "wrong! invalid reorder map");
 
     return sequence<sequence<Is...>::at(number<IRs>{})...>{};
 }
@@ -120,7 +120,7 @@ CK_TILE_HOST_DEVICE constexpr auto container_reorder_given_old2new(sequence<Is..
 {
     static_assert(sizeof...(Is) == sizeof...(IRs), "wrong! size not consistent");
 
-    static_assert(is_valid_sequence_map<sequence<IRs...>>{}, "wrong! invalid reorder map");
+    static_assert(is_valid_sequence_map<sequence<IRs...>>::value, "wrong! invalid reorder map");
 
     constexpr auto new2old = typename sequence_map_inverse<sequence<IRs...>>::type{};
 
@@ -239,7 +239,6 @@ template <typename TData, index_t NSize, typename Reduce, typename Init>
 CK_TILE_HOST_DEVICE constexpr auto
 container_reverse_exclusive_scan(const array<TData, NSize>& x, Reduce f, Init init)
 {
-#if 0
     array<TData, NSize> y;
 
     TData r = init;
@@ -252,21 +251,6 @@ container_reverse_exclusive_scan(const array<TData, NSize>& x, Reduce f, Init in
     y(number<0>{}) = r;
 
     return y;
-#else
-    array<TData, NSize> y;
-
-    TData r = init;
-
-    for(index_t i = NSize - 1; i > 0; --i)
-    {
-        y(i) = r;
-        r    = f(r, x[i]);
-    }
-
-    y(0) = r;
-
-    return y;
-#endif
 }
 
 template <index_t... Is, typename Reduce, index_t Init>

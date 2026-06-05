@@ -77,7 +77,7 @@ MIOPEN_EXPORT extern bool
 
 } // namespace debug
 
-struct MIOPEN_INTERNALS_EXPORT ExecutionContext
+struct ExecutionContext
 {
     // Solution-specific
     std::string general_compile_options;
@@ -297,7 +297,7 @@ struct MIOPEN_INTERNALS_EXPORT ExecutionContext
 private:
     const Handle* stream = nullptr;
 
-    void DetectRocm();
+    MIOPEN_INTERNALS_EXPORT void DetectRocm();
 };
 
 struct [[deprecated]] ConvolutionContext : ExecutionContext

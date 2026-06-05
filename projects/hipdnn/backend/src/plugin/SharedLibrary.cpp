@@ -24,9 +24,11 @@ SharedLibrary::SharedLibrary(const std::filesystem::path& libraryPath)
 }
 
 SharedLibrary::SharedLibrary(SharedLibrary&& other) noexcept
-    : _libraryHandle(other._libraryHandle)
+    : _libraryPath(std::move(other._libraryPath))
+    , _libraryHandle(other._libraryHandle)
 {
     other._libraryHandle = nullptr;
+    other._libraryPath.clear();
 }
 
 SharedLibrary::~SharedLibrary()
@@ -43,7 +45,9 @@ SharedLibrary& SharedLibrary::operator=(SharedLibrary&& other) noexcept
 
         // Transfer ownership
         _libraryHandle = other._libraryHandle;
+        _libraryPath = std::move(other._libraryPath);
         other._libraryHandle = nullptr;
+        other._libraryPath.clear();
     }
     return *this;
 }
@@ -119,7 +123,7 @@ void* SharedLibrary::getSymbol(std::string_view symbolName) const
                                   + std::string(symbolName));
     }
 
-    return platform_utilities::getSymbol(_libraryHandle, symbolName.data());
+    return platform_utilities::getSymbol(_libraryHandle, std::string(symbolName).c_str());
 }
 
 const std::filesystem::path& SharedLibrary::libraryPath() const

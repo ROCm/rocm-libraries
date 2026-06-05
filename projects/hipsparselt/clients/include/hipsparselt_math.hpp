@@ -91,3 +91,19 @@ inline hipsparselt_fp8_e5m2 negate(hipsparselt_fp8_e5m2 x)
     return x;
 }
 #endif
+
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+template <>
+inline hipsparselt_fp8_e4m3_fnuz negate(hipsparselt_fp8_e4m3_fnuz x)
+{
+    x.__x ^= 0x80;
+    return x;
+}
+
+template <>
+inline hipsparselt_fp8_e5m2_fnuz negate(hipsparselt_fp8_e5m2_fnuz x)
+{
+    x.__x ^= 0x80;
+    return x;
+}
+#endif

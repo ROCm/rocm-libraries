@@ -32,6 +32,7 @@
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/tensors.hpp>
+#include <miopen/tensor.hpp>
 
 /// Global switch
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_RXS)
@@ -183,7 +184,14 @@ static inline bool IsShaderContraintsMet(const miopen::ExecutionContext& ctx,
             return false;
     }
     const auto grid_workgroup_count_x = ctx.GetStream().GetMaxComputeUnits();
-    if(!problem.IsLayoutDefault())
+
+    // Use IsPossibleLayout4D5D to check actual tensor strides rather than cached layout string
+    // This allows transposed solvers to work correctly when they modify tensor strides
+    static const auto strict =
+        miopen::TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+    if(!(problem.GetIn().IsPossibleLayout4D5D("NCHW", strict) &&
+         problem.GetWeights().IsPossibleLayout4D5D("NCHW", strict) &&
+         problem.GetOut().IsPossibleLayout4D5D("NCHW", strict)))
         return false;
 
     // clang-format off
@@ -272,6 +280,10 @@ bool ConvBinWinogradRxS::IsApplicable(const ExecutionContext& ctx,
         }
     }
 
+    // Use IsPossibleLayout4D5D to check actual tensor strides rather than cached layout string
+    // This allows transposed solvers to work correctly when they modify tensor strides
+    static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+
     // clang-format off
     if (! (problem.GetKernelStrideW() <= 2 // -u inp_u 1 or 2
         && problem.GetKernelStrideW() == problem.GetKernelStrideH()
@@ -279,7 +291,7 @@ bool ConvBinWinogradRxS::IsApplicable(const ExecutionContext& ctx,
         && problem.GetDilationH() == 1
         && problem.GetBias() == 0
         && problem.GetGroupCount() == 1
-        && problem.GetInLayout() == "NCHW"))
+        && problem.GetIn().IsPossibleLayout4D5D("NCHW", strict)))
         return false;
     // clang-format on
 

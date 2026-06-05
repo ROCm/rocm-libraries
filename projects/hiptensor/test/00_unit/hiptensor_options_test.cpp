@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <cstdio>
 #include <gtest/gtest.h>
 #include <iostream>
 
@@ -32,8 +33,9 @@
 
 TEST(HiptensorOptionsTest, UtilTest)
 {
-    auto& options = hiptensor::HiptensorOptions::instance();
-    options->setOstream("path");
+    auto&             options     = hiptensor::HiptensorOptions::instance();
+    const char* const ostreamFile = "path";
+    options->setOstream(ostreamFile);
     options->setOmits(0xF);
     EXPECT_EQ(options->omitSkipped(), true);
     EXPECT_EQ(options->omitFailed(), true);
@@ -43,4 +45,6 @@ TEST(HiptensorOptionsTest, UtilTest)
     EXPECT_EQ(options->performValidation(), true);
     options->setValidation("OFF");
     EXPECT_EQ(options->performValidation(), false);
+    options->ostream().fstream().close();
+    std::remove(ostreamFile);
 }

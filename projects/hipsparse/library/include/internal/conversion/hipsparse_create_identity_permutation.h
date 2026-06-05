@@ -30,7 +30,7 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup conv_module
-*  \brief Create the identity map
+*  \brief Create the identity map.
 *
 *  \details
 *  \p hipsparseCreateIdentityPermutation stores the identity map in \p p, such that
@@ -44,18 +44,18 @@ extern "C" {
 *  \endcode
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPASRE library context queue.
 *  @param[in]
 *  n           size of the map \p p.
 *  @param[out]
 *  p           array of \p n integers containing the map.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p n or \p p pointer is invalid.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p n, or \p p pointer is invalid.
 */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT

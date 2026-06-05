@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -365,8 +365,14 @@ auto assert_near(const common::custom_type<T, T, true>& result,
 {
     auto diff1 = std::abs(percent * expected.x);
     auto diff2 = std::abs(percent * expected.y);
-    if(!bit_equal(result.x, expected.x)) ASSERT_NEAR(result.x, expected.x, diff1);
-    if(!bit_equal(result.x, expected.x)) ASSERT_NEAR(result.y, expected.y, diff2);
+    if(!bit_equal(result.x, expected.x))
+    {
+        ASSERT_NEAR(result.x, expected.x, diff1);
+    }
+    if(!bit_equal(result.y, expected.y))
+    {
+        ASSERT_NEAR(result.y, expected.y, diff2);
+    }
 }
 
 template<class T>

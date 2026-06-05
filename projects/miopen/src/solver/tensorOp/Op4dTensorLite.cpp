@@ -126,25 +126,25 @@ ConvSolution Op4dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
 
     result.invoker_factory = [data_type, total_work](const std::vector<Kernel> kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
-            decltype(auto) params = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
+            decltype(auto) kernel_ = handle_.Run(kernels.front());
+            decltype(auto) params  = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
 
             visit_float(data_type, [&](auto as_float) {
                 auto miopen_alpha0 = as_float(*(static_cast<const float*>(params.alpha0)));
                 auto miopen_alpha1 = as_float(*(static_cast<const float*>(params.alpha1)));
                 auto miopen_beta   = as_float(*(static_cast<const float*>(params.beta)));
 
-                kernel(params.ATensor,
-                       params.BTensor,
-                       params.CTensor,
-                       miopen_alpha0,
-                       miopen_alpha1,
-                       miopen_beta,
-                       static_cast<int64_t>(params.Aoffset),
-                       static_cast<int64_t>(params.Boffset),
-                       static_cast<int64_t>(params.Coffset),
-                       static_cast<int64_t>(total_work),
-                       static_cast<int>(!float_equal(miopen_beta, 0.0)));
+                kernel_(params.ATensor,
+                        params.BTensor,
+                        params.CTensor,
+                        miopen_alpha0,
+                        miopen_alpha1,
+                        miopen_beta,
+                        static_cast<int64_t>(params.Aoffset),
+                        static_cast<int64_t>(params.Boffset),
+                        static_cast<int64_t>(params.Coffset),
+                        static_cast<int64_t>(total_work),
+                        static_cast<int>(!float_equal(miopen_beta, 0.0)));
             });
         };
     };

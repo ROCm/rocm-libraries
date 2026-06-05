@@ -26,7 +26,7 @@
 #include "rocfft_hip.h"
 
 // RAII wrapper around HIP objects
-template <typename T, auto TCreate, auto TDestroy>
+template <typename T, auto TCreate, auto TDestroy, auto TSuccess = hipSuccess>
 struct hip_object_wrapper_t
 {
     hip_object_wrapper_t()
@@ -38,8 +38,15 @@ struct hip_object_wrapper_t
     void alloc(Args&&... arg)
     {
         free();
-        if(TCreate(&obj, std::forward<Args>(arg)...) != hipSuccess)
-            throw std::runtime_error("hip create failure");
+        if(TCreate(&obj, std::forward<Args>(arg)...) != TSuccess)
+            throw std::runtime_error("object allocation failure");
+    }
+
+    template <typename... Args>
+    auto alloc_with_err(Args&&... arg)
+    {
+        free();
+        return TCreate(&obj, std::forward<Args>(arg)...);
     }
 
     void free()

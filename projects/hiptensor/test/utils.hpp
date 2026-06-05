@@ -65,11 +65,11 @@ inline double getEpsilon(hiptensorComputeDescriptor_t id)
 
     if(id == HIPTENSOR_COMPUTE_DESC_16F)
     {
-        return toDouble(std::numeric_limits<_Float16>::epsilon());
+        return std::pow(2, -10); // F16 machine epsilon (std::numeric_limits<_Float16> isn't valid on Windows MSVC)
     }
     else if(id == HIPTENSOR_COMPUTE_DESC_16BF)
     {
-        return toDouble(std::numeric_limits<hip_bfloat16>::epsilon());
+        return std::pow(2, -7); // BF16 machine epsilon (std::numeric_limits<hip_bfloat16> isn't valid on Windows MSVC)
     }
     else if(id == HIPTENSOR_COMPUTE_DESC_32F)
     {
@@ -135,7 +135,8 @@ inline bool isF16Supported()
            || (deviceName.find("gfx1152") != std::string::npos)
            || (deviceName.find("gfx1153") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
-           || (deviceName.find("gfx1201") != std::string::npos);
+           || (deviceName.find("gfx1201") != std::string::npos)
+           || (deviceName.find("gfx1250") != std::string::npos);
 }
 
 inline bool isF32Supported()
@@ -161,7 +162,8 @@ inline bool isF32Supported()
            || (deviceName.find("gfx1152") != std::string::npos)
            || (deviceName.find("gfx1153") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
-           || (deviceName.find("gfx1201") != std::string::npos);
+           || (deviceName.find("gfx1201") != std::string::npos)
+           || (deviceName.find("gfx1250") != std::string::npos);
 }
 
 inline bool isF64Supported()
@@ -176,7 +178,8 @@ inline bool isF64Supported()
 
     return (deviceName.find("gfx90a") != std::string::npos)
            || (deviceName.find("gfx942") != std::string::npos)
-           || (deviceName.find("gfx950") != std::string::npos);
+           || (deviceName.find("gfx950") != std::string::npos)
+           || (deviceName.find("gfx1250") != std::string::npos);
 }
 
 inline bool isF16F16MatrixCoreSupported()
@@ -198,7 +201,8 @@ inline bool isF16F16MatrixCoreSupported()
            || (deviceName.find("gfx1152") != std::string::npos)
            || (deviceName.find("gfx1153") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
-           || (deviceName.find("gfx1201") != std::string::npos);
+           || (deviceName.find("gfx1201") != std::string::npos)
+           || (deviceName.find("gfx1250") != std::string::npos);
 }
 
 inline bool isF32F16MatrixCoreSupported()
@@ -224,7 +228,8 @@ inline bool isF32F16MatrixCoreSupported()
            || (deviceName.find("gfx1152") != std::string::npos)
            || (deviceName.find("gfx1153") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
-           || (deviceName.find("gfx1201") != std::string::npos);
+           || (deviceName.find("gfx1201") != std::string::npos)
+           || (deviceName.find("gfx1250") != std::string::npos);
 }
 
 inline bool isF32F32MatrixCoreSupported()
@@ -240,7 +245,8 @@ inline bool isF32F32MatrixCoreSupported()
     return (deviceName.find("gfx908") != std::string::npos)
            || (deviceName.find("gfx90a") != std::string::npos)
            || (deviceName.find("gfx942") != std::string::npos)
-           || (deviceName.find("gfx950") != std::string::npos);
+           || (deviceName.find("gfx950") != std::string::npos)
+           || (deviceName.find("gfx1250") != std::string::npos);
 }
 
 inline bool isF16F32MatrixCoreSupported()
@@ -275,7 +281,8 @@ inline bool isF64F32MatrixCoreSupported()
 
     return (deviceName.find("gfx90a") != std::string::npos)
            || (deviceName.find("gfx942") != std::string::npos)
-           || (deviceName.find("gfx950") != std::string::npos);
+           || (deviceName.find("gfx950") != std::string::npos)
+           || (deviceName.find("gfx1250") != std::string::npos);
 }
 
 inline bool isDataType16Bits(hiptensorDataType_t dataType)

@@ -45,7 +45,7 @@
 
 #### Third-Party Libraries
 The following libraries are automatically managed by CMake (see [Dependencies.cmake](../cmake/Dependencies.cmake)):
-- [FlatBuffers](https://github.com/google/flatbuffers) - Serialization library
+- [FlatBuffers](https://github.com/google/flatbuffers) - Serialization library (used by backend and data_sdk)
 - [Google Test](https://github.com/google/googletest) - Unit testing framework
 - [spdlog](https://github.com/gabime/spdlog) - Logging library
 - [nlohmann_json](https://github.com/nlohmann/json) - JSON serialization (optional, see [Disabling JSON Support](#disabling-json-support))
@@ -116,10 +116,48 @@ ninja coverage
 ```
 
 ### Address Sanitizer Build
+
+#### Linux
 ```bash
 cmake -GNinja -DBUILD_ADDRESS_SANITIZER=ON ..
 ninja check
 # Note: Some HIP-related tests may be skipped due to AddressSanitizer incompatibility
+```
+
+#### Windows (Clang)
+
+Before configuring, ensure the following are on your `PATH` (in addition to the
+[standard Windows setup](#8-setup-environment-variables)):
+
+- **TheRock `bin`** (for `hipconfig`): `C:\dist\therock\bin`
+- **Windows SDK `bin`** (for `rc.exe`, the Windows Resource Compiler — required by CMake when
+  targeting Clang on Windows, including sub-builds such as `flatc`):
+  `C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64`
+  (adjust the SDK version number to match your installed Windows Kit)
+
+Also set `HIP_PLATFORM=amd` if not already in your environment.
+
+```bash
+# Example using bash (Git Bash / MSYS2):
+export PATH="/c/dist/therock/bin:/c/Program Files (x86)/Windows Kits/10/bin/10.0.22621.0/x64:$PATH"
+export HIP_PLATFORM=amd
+
+cmake -GNinja -DBUILD_ADDRESS_SANITIZER=ON -DGPU_TARGETS=<target> \
+    -DENABLE_CLANG_TIDY=OFF -DENABLE_CLANG_FORMAT=OFF ..
+ninja
+```
+
+The Clang ASAN runtime DLL (`clang_rt.asan_dynamic-x86_64.dll`) must be on your `PATH` when
+running test executables. With a TheRock installation, add its `lib/windows` directory to `PATH`:
+```bash
+# TheRock installs the ASAN DLL here (adjust the clang version number as needed):
+export PATH="C:/dist/therock/lib/llvm/lib/clang/22/lib/windows:$PATH"
+ninja check
+```
+
+To find the exact resource directory path for your installation:
+```
+C:\dist\therock\lib\llvm\bin\clang++.exe -print-resource-dir
 ```
 
 ### Disabling JSON Support
@@ -127,7 +165,7 @@ By default, hipDNN includes JSON serialization support via [nlohmann_json](https
 ```bash
 cmake -GNinja -DHIPDNN_FRONTEND_SKIP_JSON_LIB=ON ..
 ```
-This disables JSON-based graph serialization and deserialization. FlatBuffer-based serialization remains available.
+This disables JSON-based graph serialization and deserialization. Binary serialization remains available.
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 
@@ -155,6 +193,12 @@ cmake -GNinja -DCMAKE_INSTALL_PREFIX=/custom/install/path ..
 # Both custom
 cmake -GNinja -DROCM_CMAKE_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/another/path ..
 ```
+
+### rocm-libraries Superbuild
+
+The superbuild allows you to build hipdnn + dnn-providers in the same build making it easier to do cross project changes.
+
+See [Superbuild](./Superbuild.md) documentation for usage.
 
 ### Clang Tools
 
@@ -193,7 +237,7 @@ All targets support parallel builds with ninja.
 | `current-coverage` | Generate test coverage reports using coverage data already on disk (does not automatically run `check`; requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
 | `clean` | Clean build artifacts |
 | `validate_test_names` | Validates test names conform to naming rules |
-| `generate_hipdnn_data_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
+| `generate_hipdnn_flatbuffers_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
 
 The following example build commands are equivalent (depending on which generator was used) and will build the `check` target, to build and run all tests.
 

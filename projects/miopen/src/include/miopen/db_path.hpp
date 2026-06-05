@@ -35,7 +35,7 @@ namespace miopen {
 MIOPEN_INTERNALS_EXPORT fs::path GetSystemDbPath();
 MIOPEN_INTERNALS_EXPORT const fs::path& GetUserDbPath();
 MIOPEN_INTERNALS_EXPORT std::string GetUserDbSuffix();
-MIOPEN_INTERNALS_EXPORT std::string GetSystemFindDbSuffix();
+std::string GetSystemFindDbSuffix();
 
 #ifdef MIOPEN_BUILD_TESTING
 namespace testing {

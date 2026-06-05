@@ -1,0 +1,37 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyIRVerifierPass --print-output 2>&1
+#
+# Verify that MUBUF buffer_store_b32 and buffer_load_b32 instructions that use
+# the "off" keyword as their vaddr operand pass the AsmVerifierPass without
+# errors, and that "off" is preserved in the IR output.
+
+#--- buffer_store_b32 with off vaddr: verifier must accept it and preserve "off"
+# CHECK-LABEL: @buffer_store_b32_off_vaddr
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: buffer_store_b32
+# CHECK-SAME: off
+
+st.func @buffer_store_b32_off_vaddr() {
+^entry:
+  "st.buffer_store_b32"(v12, off, s[60:63], s46) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- buffer_load_b32 with off vaddr: verifier must accept it and preserve "off"
+# CHECK-LABEL: @buffer_load_b32_off_vaddr
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: buffer_load_b32
+# CHECK-SAME: off
+
+st.func @buffer_load_b32_off_vaddr() {
+^entry:
+  v0 = "st.buffer_load_b32"(off, s[4:7], s3) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- MUBUF scope modifier: IR round-trip must preserve scope for asm emission
+# CHECK-LABEL: @buffer_store_b32_scope
+# CHECK: mod.mubuf
+# CHECK-SAME: scope = "SCOPE_DEV"
+
+st.func @buffer_store_b32_scope() {
+^entry:
+  "st.buffer_store_b32"(v12, v32, s[60:63], s46) { issueCycles = 1, latencyCycles = 1, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false, scope = "SCOPE_DEV" } }
+}

@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse CSR matrix into a sparse HYB matrix
+*  \brief Convert a sparse CSR matrix into a sparse HYB matrix.
 *
 *  \details
 *  \p rocsparse_csr2hyb converts a CSR matrix into a HYB matrix. It is assumed
@@ -50,7 +50,7 @@ extern "C" {
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
 *  m               number of rows of the sparse CSR matrix.
 *  @param[in]
@@ -72,15 +72,15 @@ extern "C" {
 *                  \p partition_type == \ref rocsparse_hyb_partition_user).
 *  @param[in]
 *  partition_type  \ref rocsparse_hyb_partition_auto (recommended),
-*                  \ref rocsparse_hyb_partition_user or
+*                  \ref rocsparse_hyb_partition_user, or
 *                  \ref rocsparse_hyb_partition_max.
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p m, \p n or \p user_ell_width is invalid.
+*  \retval     rocsparse_status_invalid_size \p m, \p n, or \p user_ell_width is invalid.
 *  \retval     rocsparse_status_invalid_value \p partition_type is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p hyb, \p csr_val,
-*              \p csr_row_ptr or \p csr_col_ind pointer is invalid.
+*              \p csr_row_ptr, or \p csr_col_ind pointer is invalid.
 *  \retval     rocsparse_status_memory_error the buffer for the HYB matrix could not be
 *              allocated.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
@@ -88,7 +88,7 @@ extern "C" {
 *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
 *
 *  \par Example
-*  This example converts a CSR matrix into a HYB matrix using user defined partitioning.
+*  This example converts a CSR matrix into a HYB matrix using user-defined partitioning.
 *  \snippet example_rocsparse_csr2hyb.cpp doc example
 */
 /**@{*/

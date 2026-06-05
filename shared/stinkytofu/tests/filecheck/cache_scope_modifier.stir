@@ -1,0 +1,62 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyIRVerifierPass --print-output 2>&1
+#
+# Verify that the dedicated CacheScopeModifiers used by SOPP-format memory
+# fences (global_wb / global_inv) is preserved across an IR roundtrip. The
+# fence carries no register operands; its only encoded modifier is the cache
+# scope. A regression that drops `mod.cache_scope` from the modifier
+# serializer would silently demote the fence scope on roundtrip, which is
+# the worst-case correctness failure for a cross-CU/XCD ordering primitive.
+
+#--- global_wb scope:SCOPE_DEV: roundtrip must preserve mod.cache_scope
+#    and must NOT re-attach mod.mubuf (structural decoupling invariant).
+# CHECK-LABEL: @global_wb_scope_dev
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: global_wb
+# CHECK-SAME: mod.cache_scope
+# CHECK-SAME: scope = "SCOPE_DEV"
+# CHECK-NOT: mod.mubuf
+
+st.func @global_wb_scope_dev() {
+^entry:
+  "st.global_wb"() { issueCycles = 1, latencyCycles = 1, mod.cache_scope = { scope = "SCOPE_DEV" } }
+}
+
+#--- global_inv scope:SCOPE_DEV: roundtrip must preserve mod.cache_scope
+#    and must NOT re-attach mod.mubuf (structural decoupling invariant).
+# CHECK-LABEL: @global_inv_scope_dev
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: global_inv
+# CHECK-SAME: mod.cache_scope
+# CHECK-SAME: scope = "SCOPE_DEV"
+# CHECK-NOT: mod.mubuf
+
+st.func @global_inv_scope_dev() {
+^entry:
+  "st.global_inv"() { issueCycles = 1, latencyCycles = 1, mod.cache_scope = { scope = "SCOPE_DEV" } }
+}
+
+#--- global_wb scope:SCOPE_SE: non-DEV scope must roundtrip too.
+# CHECK-LABEL: @global_wb_scope_se
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: global_wb
+# CHECK-SAME: mod.cache_scope
+# CHECK-SAME: scope = "SCOPE_SE"
+# CHECK-NOT: mod.mubuf
+
+st.func @global_wb_scope_se() {
+^entry:
+  "st.global_wb"() { issueCycles = 1, latencyCycles = 1, mod.cache_scope = { scope = "SCOPE_SE" } }
+}
+
+#--- global_inv scope:SCOPE_SYS: symmetric non-DEV coverage on the inv opcode.
+# CHECK-LABEL: @global_inv_scope_sys
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK: global_inv
+# CHECK-SAME: mod.cache_scope
+# CHECK-SAME: scope = "SCOPE_SYS"
+# CHECK-NOT: mod.mubuf
+
+st.func @global_inv_scope_sys() {
+^entry:
+  "st.global_inv"() { issueCycles = 1, latencyCycles = 1, mod.cache_scope = { scope = "SCOPE_SYS" } }
+}

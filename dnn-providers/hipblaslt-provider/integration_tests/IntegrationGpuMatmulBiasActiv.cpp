@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "IntegrationGpuMatmulBase.hpp"
+#include "TestWorkarounds.hpp"
 #include "utils/ActivationUtils.hpp"
 #include "utils/MatmulUtils.hpp"
 
@@ -21,7 +22,7 @@ template <typename DataType>
 class IntegrationGpuMatmulBiasActiv : public IntegrationGpuMatmulBase<DataType, TestParamsType>
 {
 protected:
-    virtual std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
+    std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
         initGraph(const TestParamsType& testParams,
                   hipdnn_frontend::graph::Graph& graphObj) const override
     {
@@ -39,7 +40,7 @@ protected:
             this->generateInputStrideOrder(matmulParams.bDims, matmulParams.transB));
         auto bTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
 
-        graph::MatmulAttributes matmulAttrs;
+        graph::MatmulAttributes const matmulAttrs;
         auto cAttr = graphObj.matmul(aTensorAttr, bTensorAttr, matmulAttrs);
 
         std::vector<int64_t> biasDims(matmulParams.cDims.size(), 1);
@@ -72,22 +73,38 @@ protected:
         return graphObj.pointwise(cBiasAttr, activAttrs);
     }
 
-    virtual std::string getGraphName() const override
+    std::string getGraphName() const override
     {
         return "MatmulBiasActivTest";
     }
 
-    virtual unsigned int getSeed(const TestParamsType& testParams) const override
+    unsigned int getSeed(const TestParamsType& testParams) const override
     {
         return std::get<0>(testParams).seed;
     }
 };
 
 using IntegrationGpuMatmulBiasActivFp32 = IntegrationGpuMatmulBiasActiv<float>;
-using IntegrationGpuMatmulBiasActivFp16
-    = IntegrationGpuMatmulBiasActiv<hipdnn_data_sdk::types::half>;
 using IntegrationGpuMatmulBiasActivBf16
     = IntegrationGpuMatmulBiasActiv<hipdnn_data_sdk::types::bfloat16>;
+
+// Fp16 derives from the template so we can override the skip hook for the
+// known hipBLASLt gfx12 FP16 T-T + bias gap. Fp32 / Bf16 stay as plain
+// typedefs so they still fail loudly on regression.
+class IntegrationGpuMatmulBiasActivFp16
+    : public IntegrationGpuMatmulBiasActiv<hipdnn_data_sdk::types::half>
+{
+protected:
+    std::optional<std::string>
+        shouldSkipOnEngineConfigResult(const hipdnn_frontend::Error& result) override
+    {
+        if(IS_HIPBLASLT_GFX12_FP16_TT_BIAS(result))
+        {
+            return HIPBLASLT_GFX12_FP16_TT_BIAS_SKIP_MSG;
+        }
+        return std::nullopt;
+    }
+};
 
 } // namespace
 

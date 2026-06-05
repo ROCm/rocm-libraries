@@ -29,7 +29,7 @@
 #include "CSVStackFile.hpp"
 #include "ResultReporter.hpp"
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <cstddef>
 
@@ -37,8 +37,6 @@ namespace Tensile
 {
     namespace Client
     {
-        namespace po = boost::program_options;
-
         class ResultFileReporter : public ResultReporter
         {
         public:

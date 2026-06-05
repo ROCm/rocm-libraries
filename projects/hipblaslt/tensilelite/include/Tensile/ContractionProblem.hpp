@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,7 @@
 #include <Tensile/TensorOps.hpp>
 #include <Tensile/Utils.hpp>
 
+TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     /**
@@ -180,7 +181,7 @@ namespace TensileLite
         rocisa::DataType dataType;
     };
 
-    class ContractionProblem : public Problem
+    class TENSILE_API ContractionProblem : public Problem
     {
     public:
         ContractionProblem(size_t size, size_t workspaceSize = 0);
@@ -246,14 +247,24 @@ namespace TensileLite
             return m_f32XdlMathOp;
         }
 
-        void setComputeInputType(rocisa::DataType value)
+        void setComputeInputTypeA(rocisa::DataType value)
         {
-            m_computeInputType = value;
+            m_computeInputTypeA = value;
         }
 
-        rocisa::DataType computeInputType() const
+        rocisa::DataType computeInputTypeA() const
         {
-            return m_computeInputType;
+            return m_computeInputTypeA;
+        }
+
+        void setComputeInputTypeB(rocisa::DataType value)
+        {
+            m_computeInputTypeB = value;
+        }
+
+        rocisa::DataType computeInputTypeB() const
+        {
+            return m_computeInputTypeB;
         }
 
         void setUseDeviceUserArguments(bool use)
@@ -275,7 +286,8 @@ namespace TensileLite
         size_t m_workspaceSizeGroupedGemm = std::numeric_limits<size_t>::max();
 
         rocisa::DataType m_f32XdlMathOp;
-        rocisa::DataType m_computeInputType;
+        rocisa::DataType m_computeInputTypeA;
+        rocisa::DataType m_computeInputTypeB;
 
         bool m_useDeviceUserArguments = false;
     };
@@ -286,7 +298,7 @@ namespace TensileLite
      * summations, etc. This is decoupled from any particular pointers, which
      * are provided in ContractionInputs objects.
      */
-    class ContractionProblemGemm : public ContractionProblem
+    class TENSILE_API ContractionProblemGemm : public ContractionProblem
     {
     public:
         enum TENSOR : int
@@ -306,6 +318,8 @@ namespace TensileLite
             Synchronizer  = 12,
             AMAXD         = 13,
             COMPRESSED    = 14,
+            MXSA          = 15,
+            MXSB          = 16,
             TENSOR_COUNT
         };
 
@@ -318,11 +332,17 @@ namespace TensileLite
             CONST_COUNT
         };
 
+        enum BATCHMODE : int
+        {
+            STRIDED = 0,
+            POINTER_ARRAY = 1,
+            BATCHMODE_COUNT
+        };
         using Solution = ContractionSolution;
         using Inputs   = ContractionInputs;
 
         ContractionProblemGemm()
-            : ContractionProblem(ContractionProblemGemm::TENSOR::TENSOR_COUNT){};
+            : ContractionProblem(ContractionProblemGemm::TENSOR::TENSOR_COUNT) {};
 
         /**
          * Represents a pair of free indices in a tensor contraction.
@@ -354,7 +374,7 @@ namespace TensileLite
                 : a(xa)
                 , b(xb)
                 , aMirror(aMirror)
-                , bMirror(bMirror){};
+                , bMirror(bMirror) {};
             size_t a, b; //! positions in a or b tensor
             bool   aMirror, bMirror;
         };
@@ -401,6 +421,30 @@ namespace TensileLite
                                            double beta,
                                            bool   unused,
                                            size_t batchCount);
+
+        static ContractionProblemGemm GEMM_Strides(bool             transA,
+                                                   bool             transB,
+                                                   rocisa::DataType aType,
+                                                   rocisa::DataType bType,
+                                                   rocisa::DataType cType,
+                                                   rocisa::DataType dType,
+                                                   size_t           m,
+                                                   size_t           n,
+                                                   size_t           k,
+                                                   size_t           batchSize,
+                                                   size_t           lda,
+                                                   size_t           aStride,
+                                                   size_t           ldb,
+                                                   size_t           bStride,
+                                                   size_t           ldc,
+                                                   size_t           cStride,
+                                                   size_t           ldd,
+                                                   size_t           dStride,
+                                                   double           beta,
+                                                   TensorOps const& aOps,
+                                                   TensorOps const& bOps,
+                                                   TensorOps const& cOps,
+                                                   TensorOps const& dOps);
 
         /**
          * Create a ContractionProblemGemm representing a batched SGEMM, with
@@ -580,8 +624,9 @@ namespace TensileLite
                                TensorOps const&        dOps,
                                size_t                  workspaceSize = 0
                                );
-
-        //! Returns size given original index assignment (in range
+        
+        
+         //! Returns size given original index assignment (in range
         //! 0..NumIndicesC+boundSizes)
         size_t size(size_t idx) const;
 
@@ -670,7 +715,7 @@ namespace TensileLite
             return m_betaType;
         }
 
-        size_t computeTypeElementSize() const
+        float computeTypeElementSize() const
         {
             return DataTypeInfo::Get(m_betaType).elementSize;
         }
@@ -886,6 +931,16 @@ namespace TensileLite
             return m_stridedBatched;
         }
 
+        void setBatchMode(ContractionProblemGemm::BATCHMODE value)
+        {
+            batch_Mode = value;
+        }
+
+        ContractionProblemGemm::BATCHMODE batchMode() const
+        {
+            return batch_Mode;
+        }
+
         void setGroupedGemm(bool value)
         {
             m_groupedGemm = value;
@@ -916,15 +971,21 @@ namespace TensileLite
             return m_highPrecisionAccumulate;
         }
 
-        void setSparse(int value)
+        void setSparse(int value, int layout)
         {
             m_sparse = value;
+            m_metadataLayout = layout;
             normalizeSparse();
         }
 
         int sparse() const
         {
             return m_sparse;
+        }
+
+        int metadataLayout() const
+        {
+            return m_metadataLayout;
         }
 
         void setKernelLanguage(KernelLanguage value)
@@ -1012,6 +1073,26 @@ namespace TensileLite
             return m_activationNoGuard;
         }
 
+        void setAOps(TensorOps const& newAOps)
+        {
+            m_aOps = newAOps; 
+        }
+
+        void setBOps(TensorOps const& newBOps)
+        {
+            m_bOps = newBOps; 
+        }
+
+        void setCOps(TensorOps const& newCOps)
+        {
+            m_cOps = newCOps; 
+        }
+
+        void setDOps(TensorOps const& newDOps)
+        {
+            m_dOps = newDOps; 
+        }
+
         // Get/set ContractionProblem parameters
         ContractionProblemParameters& setParams()
         {
@@ -1027,6 +1108,20 @@ namespace TensileLite
         size_t maxProblemSize() const
         {
             return m_maxProblemSize;
+        }
+
+        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensor = true);
+
+        rocisa::DataType mxTypeA() const
+        {
+            return m_mxTypeA;
+        }
+
+        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensor = true);
+
+        rocisa::DataType mxTypeB() const
+        {
+            return m_mxTypeB;
         }
 
         bool swizzleTensorA() const
@@ -1047,6 +1142,16 @@ namespace TensileLite
         void setSwizzleTensorB(bool swizzle)
         {
             m_swizzleTensorB = swizzle;
+        }
+
+        size_t mxBlockA() const
+        {
+            return m_mxBlockA;
+        }
+
+        size_t mxBlockB() const
+        {
+            return m_mxBlockB;
         }
 
         /// Allocated elements excluding batch dimensions
@@ -1124,6 +1229,14 @@ namespace TensileLite
         {
             return m_dOps;
         }
+        TensorDescriptor const& mxsa() const
+        {
+            return m_tensors[ContractionProblemGemm::TENSOR::MXSA];
+        }
+        TensorDescriptor const& mxsb() const
+        {
+            return m_tensors[ContractionProblemGemm::TENSOR::MXSB];
+        }
         FreeIndices const& freeIndicesA() const
         {
             return m_freeIndicesA;
@@ -1197,6 +1310,7 @@ namespace TensileLite
 
         size_t getNumTiles(SizeMapping const& sizeMapping, size_t gsu) const;
         size_t getItersPerTile(SizeMapping const& sizeMapping) const;
+        size_t getAccumulation(Hardware const& hardware, SizeMapping const& sizeMapping, size_t gsu) const;
 
         void checkPersistentKernelEligibility(ContractionSolution const& solution,
                                               Hardware const&            hardware);
@@ -1251,7 +1365,8 @@ namespace TensileLite
                                  rocisa::DataType               typeD,
                                  rocisa::DataType               typeAlpha,
                                  rocisa::DataType               typeBeta,
-                                 rocisa::DataType               typeComputeInput,
+                                 rocisa::DataType               typeComputeInputA,
+                                 rocisa::DataType               typeComputeInputB,
                                  rocisa::DataType               typeCompute,
                                  double                         alpha,
                                  double                         beta,
@@ -1260,13 +1375,17 @@ namespace TensileLite
                                  std::vector<rocisa::DataType>& biasDataTypeWhiteList,
                                  std::vector<int>&              biasSrcWhiteList,
                                  bool                           isGroupedGemm,
-                                 size_t                         maxWorkspaceBytes);
+                                 size_t                         maxWorkspaceBytes,
+                                 TensorOps const&               aOps,
+                                 TensorOps const&               bOps,
+                                 TensorOps const&               cOps,
+                                 TensorOps const&               dOps);
 
     private:
-        TensorOps        m_aOps;
-        TensorOps        m_bOps;
-        TensorOps        m_cOps;
-        TensorOps        m_dOps;
+        TensorOps m_aOps;
+        TensorOps m_bOps;
+        TensorOps m_cOps;
+        TensorOps m_dOps;
 
         std::string m_sumNames;
         std::string m_operationIdentifier;
@@ -1293,6 +1412,11 @@ namespace TensileLite
         ActivationType   m_activationType          = ActivationType::None;
         bool             m_activationNoGuard       = false;
         int              m_sparse                  = 0;
+        int              m_metadataLayout          = 0;
+        int              m_mxBlockA                = 0;
+        int              m_mxBlockB                = 0;
+        rocisa::DataType m_mxTypeA                 = rocisa::DataType::None;
+        rocisa::DataType m_mxTypeB                 = rocisa::DataType::None;
 
         KernelLanguage    m_kernelLanguage    = KernelLanguage::Any;
         PerformanceMetric m_performanceMetric = PerformanceMetric::DeviceEfficiency;
@@ -1354,13 +1478,14 @@ namespace TensileLite
 
         std::string getOperationIdentifier() const;
         std::string getOperationDescription() const;
+        ContractionProblemGemm::BATCHMODE batch_Mode = ContractionProblemGemm::BATCHMODE::STRIDED;        
     };
 
     class ContractionProblemGroupedGemm : public ContractionProblem
     {
     public:
         ContractionProblemGroupedGemm()
-            : ContractionProblem(0){};
+            : ContractionProblem(0) {};
         std::vector<ContractionProblemGemm> gemms;
         virtual std::string                 description() const
         {
@@ -1396,7 +1521,9 @@ namespace TensileLite
                           void*                _ws,
                           void*                _Synchronizer,
                           unsigned char const* _metadata,
-                          void const*          _compressed);
+                          void const*          _compressed,
+                          void const*          _mxsa,
+                          void const*          _mxsb);
 
         ContractionInputs(void const*     _a,
                           void const*     _b,
@@ -1425,9 +1552,11 @@ namespace TensileLite
         void const* scaleC        = nullptr;
         void const* scaleD        = nullptr;
         void const* scaleAlphaVec = nullptr;
+        void const* mxsa          = nullptr;
+        void const* mxsb          = nullptr;
 
-        unsigned char const* metadata = nullptr;
-        void const* compressed        = nullptr;
+        unsigned char const* metadata   = nullptr;
+        void const*          compressed = nullptr;
 
         // Constants
         ConstantVariant              alpha = static_cast<float>(0);
@@ -1435,8 +1564,8 @@ namespace TensileLite
         std::vector<ConstantVariant> activationArgs;
 
         // Workspace
-        void*                ws           = nullptr;
-        void*                Synchronizer = nullptr;
+        void* ws           = nullptr;
+        void* Synchronizer = nullptr;
 
         std::vector<size_t> maxElements;
         size_t              workspaceSize;
@@ -1481,3 +1610,4 @@ namespace TensileLite
      * @}
      */
 } // namespace TensileLite
+TENSILE_HIDDEN_END

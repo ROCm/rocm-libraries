@@ -5,13 +5,15 @@
 
 #include <hipdnn_frontend/detail/IncompatibleBackend.hpp>
 
+#include <array>
+
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::detail;
 using namespace ::testing;
 
 TEST(TestIncompatibleBackendWrapper, AllFunctionsReturnFailed)
 {
-    IncompatibleBackendWrapper backendWrapper;
+    const IncompatibleBackendWrapper backendWrapper;
 }
 
 TEST(TestIncompatibleBackendWrapper, Create)
@@ -120,11 +122,37 @@ TEST(TestIncompatibleBackendWrapper, BackendCreateAndDeserializeGraphExt)
               hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
-TEST(TestIncompatibleBackendWrapper, VersionExt)
+TEST(TestIncompatibleBackendWrapper, BackendGetSerializedExecutionPlanExt)
 {
     IncompatibleBackendWrapper backendWrapper;
-    const char* version = nullptr;
-    EXPECT_EQ(backendWrapper.versionExt(&version), hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    size_t planByteSize = 0;
+    EXPECT_EQ(
+        backendWrapper.backendGetSerializedExecutionPlanExt(descriptor, 0, &planByteSize, nullptr),
+        hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, BackendCreateAndDeserializeExecutionPlanExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    hipdnnHandle_t handle = nullptr;
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    const std::array<uint8_t, 1> serializedPlan{0};
+    EXPECT_EQ(backendWrapper.backendCreateAndDeserializeExecutionPlanExt(
+                  handle, &descriptor, serializedPlan.data(), serializedPlan.size()),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST(TestIncompatibleBackendWrapper, VersionString)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    EXPECT_STREQ(backendWrapper.versionString(), "");
+}
+
+TEST(TestIncompatibleBackendWrapper, Version)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    EXPECT_EQ(backendWrapper.version(), hipdnn_data_sdk::utilities::Version(-1, 0, 0));
 }
 
 TEST(TestIncompatibleBackendWrapper, SetEnginePluginPathsExt)

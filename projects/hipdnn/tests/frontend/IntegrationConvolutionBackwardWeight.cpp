@@ -251,14 +251,14 @@ protected:
 
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
 
-        std::vector<int64_t> inputDims = {2, 3, 14, 14}; // X dimensions
-        std::vector<int64_t> filterDims = {3, 3, 3, 3}; // DW dimensions (K, C, R, S)
-        std::vector<int64_t> outputDims = {2, 3, 12, 12}; // DY dimensions
+        const std::vector<int64_t> inputDims = {2, 3, 14, 14}; // X dimensions
+        const std::vector<int64_t> filterDims = {3, 3, 3, 3}; // DW dimensions (K, C, R, S)
+        const std::vector<int64_t> outputDims = {2, 3, 12, 12}; // DY dimensions
 
-        std::vector<int64_t> prePadding = {0, 0};
-        std::vector<int64_t> postPadding = {0, 0};
-        std::vector<int64_t> stride = {1, 1};
-        std::vector<int64_t> dilation = {1, 1};
+        const std::vector<int64_t> prePadding = {0, 0};
+        const std::vector<int64_t> postPadding = {0, 0};
+        const std::vector<int64_t> stride = {1, 1};
+        const std::vector<int64_t> dilation = {1, 1};
 
         SimpleConvolution2DTensorBundle<float> tensorBundle(inputDims, filterDims, outputDims);
 

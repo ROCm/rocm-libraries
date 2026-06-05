@@ -328,7 +328,7 @@ rocblas_status rocsolver_trtri_template(rocblas_handle handle,
     T one = 1;
     T minone = -1;
 
-    blocks = (n - 1) / 32 + 1;
+    blocks = (n - 1) / BS2 + 1;
     rocblas_int ldw = n;
     rocblas_stride strideW = n * n;
 
@@ -346,7 +346,7 @@ rocblas_status rocsolver_trtri_template(rocblas_handle handle,
     if(diag == rocblas_diagonal_non_unit && blk > 0)
     {
         // save copy of A to restore it in cases where info is nonzero
-        ROCSOLVER_LAUNCH_KERNEL((copy_mat<T>), dim3(blocks, blocks, batch_count), dim3(32, 32), 0,
+        ROCSOLVER_LAUNCH_KERNEL((copy_mat<T>), dim3(blocks, blocks, batch_count), dim3(BS2, BS2), 0,
                                 stream, copymat_to_buffer, n, n, A, shiftA, lda, strideA, tmpcopy,
                                 info_mask(info));
     }
@@ -358,7 +358,7 @@ rocblas_status rocsolver_trtri_template(rocblas_handle handle,
                           batch_count, (T*)work1, (T**)work2, workArr);
 
         // copy result to A if info is zero
-        ROCSOLVER_LAUNCH_KERNEL((copy_mat<T>), dim3(blocks, blocks, batch_count), dim3(32, 32), 0,
+        ROCSOLVER_LAUNCH_KERNEL((copy_mat<T>), dim3(blocks, blocks, batch_count), dim3(BS2, BS2), 0,
                                 stream, copymat_from_buffer, n, n, A, shiftA, lda, strideA, tmpcopy,
                                 info_mask(info, info_mask::negate), uplo, diag);
     }
@@ -420,7 +420,7 @@ rocblas_status rocsolver_trtri_template(rocblas_handle handle,
     if(diag == rocblas_diagonal_non_unit && blk > 0)
     {
         // restore A in cases where info is nonzero
-        ROCSOLVER_LAUNCH_KERNEL((copy_mat<T>), dim3(blocks, blocks, batch_count), dim3(32, 32), 0,
+        ROCSOLVER_LAUNCH_KERNEL((copy_mat<T>), dim3(blocks, blocks, batch_count), dim3(BS2, BS2), 0,
                                 stream, copymat_from_buffer, n, n, A, shiftA, lda, strideA, tmpcopy,
                                 info_mask(info));
     }

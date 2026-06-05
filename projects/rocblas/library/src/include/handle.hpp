@@ -79,6 +79,7 @@ enum class Processor : int
     // only including supported types
     gfx803  = 803,
     gfx900  = 900,
+    gfx90c  = 912,
     gfx906  = 906,
     gfx908  = 908,
     gfx90a  = 910,
@@ -103,7 +104,8 @@ enum class Processor : int
     gfx1152 = 1152,
     gfx1153 = 1153,
     gfx1200 = 1200,
-    gfx1201 = 1201
+    gfx1201 = 1201,
+    gfx1250 = 1250
 };
 
 // helper function in handle.cpp
@@ -274,7 +276,18 @@ public:
 
     bool isYZGridDim16bit()
     {
-        return archMajor == 12;
+        static bool expectedYZGrid = [&] {
+            if(device_properties.maxGridSize[1] < c_YZ_grid_launch_limit
+               || device_properties.maxGridSize[2] < c_YZ_grid_launch_limit)
+            {
+                rocblas_cerr << "rocBLAS error: maxGridSize Y or Z smaller than known hardware. "
+                                "If larger problems return error code try ILP64 APIs."
+                             << std::endl;
+                return false;
+            }
+            return true;
+        }();
+        return true;
     }
 
     int getBatchGridDim(int batch_count)
@@ -292,7 +305,7 @@ public:
     bool isDefaultHipBLASLtArch()
     {
         int gfx_arch = getArch();
-        if(gfx_arch == 1200 || gfx_arch == 1201 || gfx_arch == 950)
+        if(gfx_arch == 1200 || gfx_arch == 1201 || gfx_arch == 1250 || gfx_arch == 950)
         {
             return true;
         }
@@ -410,6 +423,10 @@ public:
     // default atomics mode does not allows atomic operations
     rocblas_atomics_mode atomics_mode = rocblas_atomics_not_allowed;
 
+    // optional stride between successive alpha/beta values for advanced batched use; 0 is default
+    rocblas_stride stride_alpha = 0;
+    rocblas_stride stride_beta  = 0;
+
     // Selects the benchmark library to be used for solution selection
     rocblas_performance_metric performance_metric = rocblas_default_performance_metric;
 
@@ -436,6 +453,26 @@ public:
     void set_data_ptr(std::shared_ptr<void>& data_ptr)
     {
         this->data_ptr = data_ptr;
+    }
+
+    rocblas_stride get_stride_alpha() const
+    {
+        // only applicable to device mode alpha, load_scalar ignores for value
+        return stride_alpha;
+    }
+    void set_stride_alpha(rocblas_stride stride)
+    {
+        stride_alpha = stride;
+    }
+
+    rocblas_stride get_stride_beta() const
+    {
+        // only applicable to device mode beta, load_scalar ignores for value
+        return stride_beta;
+    }
+    void set_stride_beta(rocblas_stride stride)
+    {
+        stride_beta = stride;
     }
 
     // C interfaces for manipulating device memory

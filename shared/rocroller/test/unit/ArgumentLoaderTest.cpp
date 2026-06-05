@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <cstdio>
-#include <iterator>
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -98,7 +97,7 @@ namespace rocRollerTest
         EXPECT_EQ(NormalizedSource(""), NormalizedSource(output()));
     }
 
-    TEST_F(ArgumentLoaderTest, loadAllArguments)
+    TEST_F(ArgumentLoaderTest, eagerLoadArguments)
     {
         auto kernel = m_context->kernel();
         kernel->setKernelDimensions(2);
@@ -110,11 +109,11 @@ namespace rocRollerTest
 
         auto loader = m_context->argLoader();
         m_context->schedule(kernel->allocateInitialRegisters());
-        m_context->schedule(loader->loadAllArguments());
+        m_context->schedule(loader->eagerLoadArguments());
+        m_context->schedule(loader->splitOutArgumentRegisters());
 
         std::string expected = R"(
-            s_load_dwordx2 s[4:5], s[0:1], 0
-            s_load_dwordx2 s[6:7], s[0:1], 8
+            s_load_dwordx4 s[4:7], s[0:1], 0
             s_load_dwordx2 s[8:9], s[0:1], 16
         )";
 
@@ -154,7 +153,8 @@ namespace rocRollerTest
 
         auto loader = m_context->argLoader();
         m_context->schedule(kernel->allocateInitialRegisters());
-        m_context->schedule(loader->loadAllArguments());
+        m_context->schedule(loader->eagerLoadArguments());
+        m_context->schedule(loader->splitOutArgumentRegisters());
 
         Register::ValuePtr a, b, c;
         m_context->schedule(loader->getValue("a", a));

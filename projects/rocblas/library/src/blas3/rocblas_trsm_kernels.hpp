@@ -23,6 +23,7 @@
 #pragma once
 
 #include "../blas2/rocblas_trsv.hpp"
+#include "asan_helpers.hpp"
 #include "definitions.hpp"
 #include "device_macros.hpp"
 #ifdef BUILD_WITH_TENSILE
@@ -160,10 +161,8 @@ rocblas_copy_matrix_trsm(rocblas_int    rows,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         const T* xa = load_ptr_batch(a, batch, offset_a, stride_a);
         T*       xb = load_ptr_batch(b, batch, offset_b, stride_b);
@@ -172,10 +171,7 @@ rocblas_copy_matrix_trsm(rocblas_int    rows,
         for(size_t ty = blockIdx.y * DIM_Y + threadIdx.y; ty < cols && tx < rows;
             ty += DIM_Y * gridDim.y)
             xb[tx + size_t(ldb) * ty] = xa[tx + size_t(lda) * ty];
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /* ===============copy helper============================================= */
@@ -194,7 +190,7 @@ rocblas_status rocblas_copy_block_unit(rocblas_handle handle,
                                        rocblas_stride offset_dst = 0)
 {
     static constexpr int COPY_DIM_X = 128;
-    static constexpr int COPY_DIM_Y = 8;
+    static constexpr int COPY_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
@@ -243,19 +239,14 @@ rocblas_set_matrix_trsm(int64_t        rows,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         T* xa = load_ptr_batch(a, batch, offset_a, stride_a);
 
         if(tx < rows && ty < cols)
             xa[tx + lda * ty] = T(0.0);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /* ===============set helper============================================= */
@@ -271,7 +262,7 @@ rocblas_status set_block_unit(rocblas_handle handle,
                               rocblas_stride offset_src)
 {
     static constexpr int DIM_X = 128;
-    static constexpr int DIM_Y = 8;
+    static constexpr int DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
 
     int         batches = handle->getBatchGridDim((int)batch_count);
     rocblas_int blocksX = (m - 1) / DIM_X + 1; // parameters for device kernel
@@ -2013,15 +2004,13 @@ rocblas_trsm_small_right_device(rocblas_fill      uplo,
 {
     auto alpha = load_scalar(alpha_dev_host);
 
-    uint32_t batchid = blockIdx.z;
+    uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    for(; batchid < batch_count; batchid += c_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
-        auto A = load_ptr_batch(Aa, batchid, offset_A, stride_A);
-        auto B = load_ptr_batch(Ba, batchid, offset_B, stride_B);
+        auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
+        auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
 
         bool      LOWER = uplo == rocblas_fill_lower;
         bool      CONJ  = transA == rocblas_operation_conjugate_transpose;
@@ -2266,10 +2255,7 @@ rocblas_trsm_small_right_device(rocblas_fill      uplo,
             for(int i = 0; i < n; i++)
                 B[i * size_t(ldb) + tx] = sB[i * NB + tx];
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /*
@@ -2297,15 +2283,13 @@ rocblas_trsm_small_64_right_device(rocblas_fill      uplo,
 {
     auto alpha = load_scalar(alpha_dev_host);
 
-    uint32_t batchid = blockIdx.z;
+    uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    for(; batchid < batch_count; batchid += c_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
-        auto A = load_ptr_batch(Aa, batchid, offset_A, stride_A);
-        auto B = load_ptr_batch(Ba, batchid, offset_B, stride_B);
+        auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
+        auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
 
         bool      LOWER = uplo == rocblas_fill_lower;
         bool      CONJ  = transA == rocblas_operation_conjugate_transpose;
@@ -2401,10 +2385,7 @@ rocblas_trsm_small_64_right_device(rocblas_fill      uplo,
             for(int i = 0; i < n; i++)
                 B[i * size_t(ldb) + tx] = sB[i * NB + tx];
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /* T = float, double, etc.
@@ -2441,14 +2422,12 @@ rocblas_trsm_small_left_device(rocblas_fill      uplo,
     bool CONJ  = transA == rocblas_operation_conjugate_transpose;
     auto alpha = load_scalar(alpha_dev_host);
 
-    uint32_t batchid = blockIdx.z;
+    uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    for(; batchid < batch_count; batchid += c_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
-        auto A = load_ptr_batch(Aa, batchid, offset_A, stride_A);
-        auto B = load_ptr_batch(Ba, batchid, offset_B, stride_B);
+        auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
+        auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
 
         const int tx = threadIdx.x;
         const int bx = blockIdx.x;
@@ -2623,10 +2602,7 @@ rocblas_trsm_small_left_device(rocblas_fill      uplo,
                     break;
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <const int NB,
@@ -2656,14 +2632,12 @@ rocblas_trsm_small_left_device_sharedB(rocblas_fill      uplo,
     bool CONJ  = transA == rocblas_operation_conjugate_transpose;
     auto alpha = load_scalar(alpha_dev_host);
 
-    uint32_t batchid = blockIdx.z;
+    uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    for(; batchid < batch_count; batchid += c_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
-        auto A = load_ptr_batch(Aa, batchid, offset_A, stride_A);
-        auto B = load_ptr_batch(Ba, batchid, offset_B, stride_B);
+        auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
+        auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
 
         const int tx = threadIdx.x;
         const int bx = blockIdx.x;
@@ -2850,10 +2824,7 @@ rocblas_trsm_small_left_device_sharedB(rocblas_fill      uplo,
             for(int i = 0; i <= maxColA; i++)
                 B[i + tx * size_t(ldb)] = sB[i * NB + tx];
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /*
@@ -2881,15 +2852,13 @@ rocblas_trsm_small_64_left_device(rocblas_fill      uplo,
 {
     auto alpha = load_scalar(alpha_dev_host);
 
-    uint32_t batchid = blockIdx.z;
+    uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    for(; batchid < batch_count; batchid += c_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
-        auto A = load_ptr_batch(Aa, batchid, offset_A, stride_A);
-        auto B = load_ptr_batch(Ba, batchid, offset_B, stride_B);
+        auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
+        auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
 
         bool      LOWER = uplo == rocblas_fill_lower;
         bool      CONJ  = transA == rocblas_operation_conjugate_transpose;
@@ -2986,10 +2955,7 @@ rocblas_trsm_small_64_left_device(rocblas_fill      uplo,
             for(int i = 0; i < maxColB; i++)
                 B[i * size_t(ldb) + tx] = sB[i * NB + tx];
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /* T = float, double, etc.
@@ -3180,14 +3146,12 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_backward_substitution(rocblas_operat
     const bool CONJ  = transA == rocblas_operation_conjugate_transpose;
     auto       alpha = load_scalar(alpha_dev_host);
 
-    uint32_t batchid = blockIdx.z;
+    uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    for(; batchid < batch_count; batchid += c_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
-        auto A = load_ptr_batch(Aa, batchid, offset_A, stride_A);
-        auto B = load_ptr_batch(Ba, batchid, offset_B, stride_B);
+        auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
+        auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
 
         int64_t       lda_norm  = TRANSA ? lda : 1;
         int64_t       lda_trans = TRANSA ? 1 : lda;
@@ -3265,10 +3229,7 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_backward_substitution(rocblas_operat
             // store back to mem
             B[offY * size_t(ldb_norm) + tx * size_t(ldb_trans)] = valB;
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename T,
@@ -3301,14 +3262,12 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_forward_substitution(rocblas_operati
     const int64_t ldb_norm  = TRANSB ? 1 : ldb;
     const int64_t ldb_trans = TRANSB ? ldb : 1;
 
-    uint32_t batchid = blockIdx.z;
+    uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    for(; batchid < batch_count; batchid += c_YZ_grid_launch_limit)
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
-        auto A = load_ptr_batch(Aa, batchid, offset_A, stride_A);
-        auto B = load_ptr_batch(Ba, batchid, offset_B, stride_B);
+        auto A = load_ptr_batch(Aa, batch, offset_A, stride_A);
+        auto B = load_ptr_batch(Ba, batch, offset_B, stride_B);
 
         const int     tx   = threadIdx.x;
         const int     ty   = threadIdx.y;
@@ -3376,10 +3335,7 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trsm_block_forward_substitution(rocblas_operati
             // store back to mem
             B[offY * size_t(ldb_norm) + tx * size_t(ldb_trans)] = valB;
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename T,

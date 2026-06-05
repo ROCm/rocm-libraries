@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -360,21 +360,16 @@ inline bool hipsolver_isnan(hipsolverDoubleComplex arg)
 /* Workaround for clang bug:
    https://bugs.llvm.org/show_bug.cgi?id=35863
 */
-#if __clang__
-#define HIPSOLVER_CLANG_STATIC static
-#else
-#define HIPSOLVER_CLANG_STATIC
-#endif
 
 template <typename T>
-static constexpr bool is_complex = false;
+inline constexpr bool is_complex = false;
 
 // cppcheck-suppress syntaxError
 template <>
-HIPSOLVER_CLANG_STATIC constexpr bool is_complex<hipsolverComplex> = true;
+inline constexpr bool is_complex<hipsolverComplex> = true;
 
 template <>
-HIPSOLVER_CLANG_STATIC constexpr bool is_complex<hipsolverDoubleComplex> = true;
+inline constexpr bool is_complex<hipsolverDoubleComplex> = true;
 
 // Get base types from complex types.
 template <typename T, typename = void>

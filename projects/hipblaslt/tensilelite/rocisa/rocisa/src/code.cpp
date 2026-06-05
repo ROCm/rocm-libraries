@@ -57,7 +57,10 @@ namespace rocisa
     {
         if(isa[0] == 12)
         {
-            return std::make_shared<SrdUpperValue12XX>(SrdUpperValue12XX::staticInit());
+            if(isa[1] == 5)
+                return std::make_shared<SrdUpperValue125X>(SrdUpperValue125X::staticInit());
+            else
+                return std::make_shared<SrdUpperValue12XX>(SrdUpperValue12XX::staticInit());
         }
         else if(isa[0] == 11)
         {
@@ -390,7 +393,7 @@ void init_code(nb::module_ m)
                       int,
                       int,
                       int,
-                      bool>(),
+                      int>(),
              nb::arg("kernelName"),
              nb::arg("kernArgsVersion"),
              nb::arg("codeObjectVersion"),
@@ -401,7 +404,7 @@ void init_code(nb::module_ m)
              nb::arg("totalVgprs")      = 0,
              nb::arg("totalAgprs")      = 0,
              nb::arg("totalSgprs")      = 0,
-             nb::arg("preloadKernArgs") = false)
+             nb::arg("numSgprPreload")  = 0)
         .def("setGprs", &rocisa::SignatureBase::setGprs)
         .def("addArg",
              &rocisa::SignatureBase::addArg,

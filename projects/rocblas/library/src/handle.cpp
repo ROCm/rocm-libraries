@@ -386,6 +386,10 @@ Processor _rocblas_handle::getActiveArch()
     {
         return Processor::gfx900;
     }
+    else if(deviceString.find("gfx90c") != std::string::npos)
+    {
+        return Processor::gfx90c;
+    }
     else if(deviceString.find("gfx906") != std::string::npos)
     {
         return Processor::gfx906;
@@ -485,6 +489,10 @@ Processor _rocblas_handle::getActiveArch()
     else if(deviceString.find("gfx1201") != std::string::npos)
     {
         return Processor::gfx1201;
+    }
+    else if(deviceString.find("gfx1250") != std::string::npos)
+    {
+        return Processor::gfx1250;
     }
     return static_cast<Processor>(0);
 }

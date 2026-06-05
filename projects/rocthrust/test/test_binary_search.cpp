@@ -123,6 +123,7 @@ void RunSingleValueTest(const ExpectedFunction& ef, const ThrustDeviceFunction& 
   }
 
   delete[] host_search;
+  delete[] host_input;
   delete[] host_expected;
   delete[] host_thrust_output;
   delete[] device_thrust_output;

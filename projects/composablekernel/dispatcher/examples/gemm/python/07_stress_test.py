@@ -18,7 +18,6 @@ This tests:
 - Multiple data types (fp16, bf16)
 - Different schedulers (intrawave, interwave)
 
-Complexity: ★★★★☆
 
 Usage:
     python3 07_stress_test.py
@@ -41,8 +40,8 @@ from ctypes_utils import (
     KernelConfig,
     setup_gemm_dispatcher,
     cleanup_gemm,
-    reset_for_example,
     Validator,
+    detect_gpu_arch,
 )
 
 
@@ -413,12 +412,10 @@ Examples:
     )
     parser.add_argument(
         "--arch",
-        default="gfx942",
-        help="Target architecture (default: gfx942)",
+        default=detect_gpu_arch(),
+        help="Target architecture (auto-detected from rocminfo, override with --arch gfxNNN)",
     )
     args = parser.parse_args()
-
-    reset_for_example()
 
     print("=" * 80)
     print("Example 07: GEMM Stress Test - Multiple Kernels")

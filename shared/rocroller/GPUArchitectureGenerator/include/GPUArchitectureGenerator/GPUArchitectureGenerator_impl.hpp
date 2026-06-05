@@ -311,6 +311,48 @@ namespace GPUArchitectureGenerator
                     isaVersion, rocRoller::GPUCapability::DSReadTransposeB6PaddingBytes, 4);
             }
 
+            {
+                /**
+                 * Try to assemble a kernel that requests the given number of preloaded kernel
+                 * arguments. Some architectures require the amdhsa_accum_offset directive and
+                 * some don't support it so we try both.
+                 */
+                auto tryPreloadedArgs = [hipcc, isaVersion](int n, bool accumOffset) -> bool {
+                    std::ostringstream kernel;
+                    kernel << ".amdhsa_kernel hello_world" << std::endl;
+                    kernel << ".amdhsa_next_free_vgpr .amdgcn.next_free_vgpr" << std::endl;
+                    kernel << ".amdhsa_next_free_sgpr .amdgcn.next_free_sgpr" << std::endl;
+                    if(accumOffset)
+                        kernel << ".amdhsa_accum_offset 4" << std::endl;
+                    kernel << ".amdhsa_user_sgpr_kernarg_preload_length " << n << std::endl;
+                    kernel << ".amdhsa_user_sgpr_kernarg_preload_offset 0" << std::endl;
+
+                    kernel << ".end_amdhsa_kernel" << std::endl;
+
+                    if(isaVersion.toString().starts_with("gfx94"))
+                        std::cout << kernel.str();
+
+                    return TryAssembler(hipcc, isaVersion, kernel.str(), "");
+                };
+
+                // Binary search for the max number of preloaded kernel arguments.
+                int minVal = 0, maxVal = 108;
+                while((minVal + 1) < maxVal)
+                {
+                    int n = (minVal + maxVal) / 2;
+                    if(tryPreloadedArgs(n, true) || tryPreloadedArgs(n, false))
+                    {
+                        minVal = n;
+                    }
+                    else
+                    {
+                        maxVal = n;
+                    }
+                }
+
+                AddCapability(isaVersion, rocRoller::GPUCapability::MaxPreloadedKernargs, minVal);
+            }
+
             for(auto const& info : InstructionInfos)
             {
                 if(std::find(std::get<0>(info).begin(), std::get<0>(info).end(), isaVersion)

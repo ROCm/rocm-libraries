@@ -41,7 +41,7 @@ namespace rocRoller
                                 ShowValue(rv.waitLengths.size()),
                                 ShowValue(pair.second.size()));
 
-                    rv.waitLengths.at(wqType) = pair.second.size();
+                    rv.waitLengths.at(idx) = pair.second.size();
                 }
             }
 

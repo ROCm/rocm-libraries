@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -63,6 +63,7 @@ typedef struct _rocsparse_csrmv_info
     {
         this->adaptive.clear();
         this->lrb.clear();
+        this->nnzsplit.clear();
         this->trans        = rocsparse_operation_none;
         this->m            = 0;
         this->n            = 0;

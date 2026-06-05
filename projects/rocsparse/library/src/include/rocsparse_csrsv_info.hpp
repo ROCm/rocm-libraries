@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,8 +24,35 @@
 
 #pragma once
 
+#include "rocsparse_singular_info_t.hpp"
 #include "rocsparse_trm_data_t.hpp"
 
-typedef rocsparse::trm_data_t _rocsparse_csrsv_info;
+struct _rocsparse_csrsv_info : rocsparse::trm_data_t
+{
+protected:
+    rocsparse::singular_info_t m_singularity_numeric_exact;
 
+public:
+    ~_rocsparse_csrsv_info() = default;
+    void copy(const _rocsparse_csrsv_info* that, hipStream_t stream)
+    {
+        this->rocsparse::trm_data_t::copy(that, stream);
+        this->m_singularity_numeric_exact.copy_singular_info_async(
+            &that->m_singularity_numeric_exact, stream);
+        THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    }
+
+    rocsparse::singular_info_t* get_singularity_numeric_exact()
+    {
+        return &this->m_singularity_numeric_exact;
+    }
+
+    void create_singularity_numeric_exact(int64_t             batch_count,
+                                          rocsparse_indextype indextype,
+                                          hipStream_t         stream)
+    {
+        THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact.create_singular_pivot_async(
+            batch_count, indextype, stream));
+    }
+};
 typedef _rocsparse_csrsv_info* rocsparse_csrsv_info;

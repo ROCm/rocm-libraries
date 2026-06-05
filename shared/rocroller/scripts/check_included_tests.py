@@ -14,17 +14,16 @@ scripts/check_included_tests.py -t test/
 import argparse
 import sys
 from pathlib import Path
-from typing import List
 
 
 def check_included_tests(
     tests_dir: str,
-    exclude_paths: List[str],
+    exclude_paths: list[str],
 ) -> int:
     tests_dir = Path(tests_dir)
     assert tests_dir.is_dir()
 
-    def should_exclude(test_path: Path, exclude_paths: List[str]):
+    def should_exclude(test_path: Path, exclude_paths: list[str]):
         for exclude_path in exclude_paths:
             if test_path.is_relative_to(Path(exclude_path)):
                 return True

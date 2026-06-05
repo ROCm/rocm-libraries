@@ -60,6 +60,5 @@ private:
     std::optional<PerformanceDb> db;
 };
 
-[[nodiscard]] MIOPEN_INTERNALS_EXPORT auto
-MakeConvDbGetter(const ExecutionContext& ctx) -> DbGetter;
+[[nodiscard]] auto MakeConvDbGetter(const ExecutionContext& ctx) -> DbGetter;
 } // namespace miopen

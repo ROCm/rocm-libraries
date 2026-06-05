@@ -13,7 +13,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -29,6 +28,13 @@ namespace hipdnn_frontend::graph
  * operation: C = A @ B. Supports batched operations when tensors have
  * leading batch dimensions.
  *
+ * **Tensor Shapes:**
+ * - **A** (left input): `(...batch, M, K)` — leading batch dims, rows, columns
+ * - **B** (right input): `(...batch, K, N)` — K must match A's last dim
+ * - **C** (output): `(...batch, M, N)` — batch dims are broadcast
+ *
+ * Batch dimensions support broadcasting (dims must be equal or divisible).
+ *
  * @code{.cpp}
  * // Matrix multiplication: C = A @ B
  * auto c = graph.matmul(a, b, MatmulAttributes());
@@ -39,6 +45,8 @@ namespace hipdnn_frontend::graph
 class MatmulAttributes : public Attributes<MatmulAttributes>
 {
 public:
+    MatmulAttributes() = default;
+
     /// Input tensor identifiers
     enum class InputNames
     {
@@ -104,26 +112,6 @@ public:
     MatmulAttributes& set_c(std::shared_ptr<TensorAttributes>&& value)
     {
         return setOutput(OutputNames::C, std::move(value));
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::MatmulAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        return hipdnn_data_sdk::data_objects::CreateMatmulAttributes(
-            builder, get_a()->get_uid(), get_b()->get_uid(), get_c()->get_uid());
-    }
-
-    static MatmulAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::MatmulAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        MatmulAttributes attr;
-
-        attr.set_a(tensorMap.at(fb->a_tensor_uid()));
-        attr.set_b(tensorMap.at(fb->b_tensor_uid()));
-        attr.set_c(tensorMap.at(fb->c_tensor_uid()));
-
-        return attr;
     }
 };
 

@@ -4,7 +4,7 @@
 #pragma once
 
 #include "TensorDescriptor.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <memory>
 #include <vector>
 
@@ -26,7 +26,7 @@ public:
     // Builds a NodeT representing this operation in the graph.
     // Sets the correct flatbuffer union type for the node's attributes.
     // Implementations must set node->compute_data_type from their stored compute type.
-    virtual std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT> buildNode() const = 0;
+    virtual std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT> buildNode() const = 0;
 };
 
 } // namespace hipdnn_backend

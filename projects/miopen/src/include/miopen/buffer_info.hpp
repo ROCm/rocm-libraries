@@ -26,6 +26,7 @@
 #ifndef GUARD_MIOPEN_BUFFER_INFO_HPP_
 #define GUARD_MIOPEN_BUFFER_INFO_HPP_
 
+#include <miopen/config.hpp>
 #include <string>
 #include <cassert>
 #include <vector>
@@ -310,9 +311,9 @@ struct WinogradBufferInfo
 
 struct MultiBufferWorkspaceTraits
 {
-    MultiBufferWorkspaceTraits(std::initializer_list<size_t> v_size_);
-    size_t GetSize() const;
-    size_t GetOffset(size_t index) const;
+    MIOPEN_INTERNALS_EXPORT MultiBufferWorkspaceTraits(std::initializer_list<size_t> v_size_);
+    MIOPEN_INTERNALS_EXPORT size_t GetSize() const;
+    MIOPEN_INTERNALS_EXPORT size_t GetOffset(size_t index) const;
 
     std::vector<size_t> v_offset;
     // aligning and padding to 256 byte boundary

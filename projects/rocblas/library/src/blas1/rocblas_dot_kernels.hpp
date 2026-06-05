@@ -73,10 +73,8 @@ rocblas_dot_kernel_inc1(rocblas_int n,
     int      i     = !ONE_BLOCK ? blockIdx.x * NB + threadIdx.x : threadIdx.x;
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         const auto* x = load_ptr_batch(xa, batch, shiftx, stridex);
         const auto* y = load_ptr_batch(ya, batch, shifty, stridey);
 
@@ -95,10 +93,7 @@ rocblas_dot_kernel_inc1(rocblas_int n,
             sum = rocblas_dot_block_reduce<WARP_64, NB>(sum);
 
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <bool ONE_BLOCK, int NB, int WIN, bool CONJ, typename T, typename U, typename V>
@@ -117,10 +112,8 @@ rocblas_dot_kernel_inc1by2(rocblas_int n,
     int      i     = !ONE_BLOCK ? blockIdx.x * NB + threadIdx.x : threadIdx.x;
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         const auto* x = load_ptr_batch(xa, batch, shiftx, stridex);
         const auto* y = load_ptr_batch(ya, batch, shifty, stridey);
@@ -165,10 +158,7 @@ rocblas_dot_kernel_inc1by2(rocblas_int n,
             sum = rocblas_dot_block_reduce<WARP_64, NB>(sum);
 
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename API_INT,
@@ -196,10 +186,8 @@ rocblas_dot_kernel(rocblas_int n,
     int      i     = !ONE_BLOCK ? blockIdx.x * NB + threadIdx.x : threadIdx.x;
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         const auto* x = load_ptr_batch(xa, batch, shiftx, stridex);
         const auto* y = load_ptr_batch(ya, batch, shifty, stridey);
@@ -219,10 +207,7 @@ rocblas_dot_kernel(rocblas_int n,
             sum = rocblas_dot_block_reduce<WARP_64, NB>(sum);
 
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename API_INT, int NB, typename T, typename U, typename V = T>
@@ -240,7 +225,7 @@ rocblas_dot_kernel_gfx942_float_double(rocblas_int n,
                                        T* __restrict__ out)
 {
 // gfx942 kernels
-#if defined(__gfx942__)
+#if defined(__SPIRV__) || defined(__gfx942__)
     int         i = blockIdx.x * NB + threadIdx.x;
     const auto* x = load_ptr_batch(xa, blockIdx.z, shiftx, stridex);
     const auto* y = load_ptr_batch(ya, blockIdx.z, shifty, stridey);
@@ -294,10 +279,8 @@ rocblas_dot_kernel_magsq(rocblas_int n,
     int      i     = !ONE_BLOCK ? blockIdx.x * NB + threadIdx.x : threadIdx.x;
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         const auto* x = load_ptr_batch(xa, batch, shiftx, stridex);
 
@@ -316,10 +299,7 @@ rocblas_dot_kernel_magsq(rocblas_int n,
             sum = rocblas_dot_block_reduce<WARP_64, NB>(sum);
 
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename API_INT, int WARP, int NB_Y, bool CONJ, typename V, typename T, typename U>

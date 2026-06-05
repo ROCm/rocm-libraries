@@ -1,0 +1,62 @@
+# clang-tidy configuration for stinkytofu
+#
+# Bug-finding + performance checks. No style-enforcement checks.
+# Follows LLVM's approach: misc-* with targeted exclusions, plus
+# performance-* for JIT-readiness.
+#
+# Explicit positive list with wildcard categories; upgrading clang-tidy
+# may auto-enable new checks within these categories (desired: new bug
+# finders are welcome). Noisy checks are excluded individually below.
+#
+# Excluded bugprone checks (false positives or too noisy for this codebase):
+#   -bugprone-easily-swappable-parameters (too noisy, low signal)
+#   -bugprone-unchecked-optional-access   (false positives on if-auto)
+#   -bugprone-narrowing-conversions       (too noisy, pervasive int/size_t mixing)
+#   -bugprone-branch-clone                (intentional patterns in switch/if chains)
+#   -bugprone-argument-comment            (test shorthand mismatches)
+#   -bugprone-exception-escape            (main() intentionally propagates)
+#   -bugprone-multi-level-implicit-pointer-conversion (ErrorHandling.hpp pattern)
+#   -bugprone-string-literal-with-embedded-nul (fuzz test data)
+#   -bugprone-macro-parentheses              (X-macro patterns can't be parenthesized)
+#
+# Excluded misc checks (LLVM-style exclusions):
+#   -misc-const-correctness              (too verbose, LLVM excludes)
+#   -misc-include-cleaner                (LLVM excludes)
+#   -misc-no-recursion                   (LLVM excludes)
+#   -misc-non-private-member-variables-in-classes (LLVM excludes)
+#   -misc-unused-parameters              (LLVM excludes)
+#   -misc-use-anonymous-namespace        (LLVM excludes)
+#
+# Excluded performance checks:
+#   -performance-enum-size               (too noisy, low value)
+#
+# Not included (style enforcement, not bug-finding):
+#   readability-*, modernize-*, google-*, fuchsia-*
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-unchecked-optional-access,
+  -bugprone-narrowing-conversions,
+  -bugprone-branch-clone,
+  -bugprone-argument-comment,
+  -bugprone-exception-escape,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-string-literal-with-embedded-nul,
+  -bugprone-macro-parentheses,
+  clang-analyzer-*,
+  -clang-analyzer-optin.performance.Padding,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
+  misc-*,
+  -misc-const-correctness,
+  -misc-include-cleaner,
+  -misc-no-recursion,
+  -misc-non-private-member-variables-in-classes,
+  -misc-unused-parameters,
+  -misc-use-anonymous-namespace,
+  performance-*,
+  -performance-enum-size
+
+WarningsAsErrors: '*'
+
+HeaderFilterRegex: 'include/stinkytofu/.*'

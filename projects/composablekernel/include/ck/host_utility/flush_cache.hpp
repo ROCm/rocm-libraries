@@ -10,6 +10,7 @@
 
 #include "ck/ck.hpp"
 #include "ck/utility/env.hpp"
+#include "ck/utility/tuple.hpp"
 #include "ck/stream_config.hpp"
 #include "ck/host_utility/hip_check_error.hpp"
 #include "ck/utility/flush_icache.hpp"
@@ -474,16 +475,6 @@ float launch_and_time_kernel_with_preprocess(const StreamConfig& stream_config,
             kernel<<<grid_dim, block_dim, lds_byte, stream_config.stream_id_>>>(gemm_args, args...);
             hip_check_error(hipGetLastError());
             // end real kernel
-
-            //             hip_check_error(hipEventRecord(stop, stream_config.stream_id_));
-            //             hip_check_error(hipEventSynchronize(stop));
-            //             float cur_time = 0;
-            //             hip_check_error(hipEventElapsedTime(&cur_time, start, stop));
-            // #if MEDIAN
-            //             times.insert(cur_time);
-            // #else
-            //             total_time += cur_time;
-            // #endif
 
 #if !defined(CK_USE_WMMA)
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))

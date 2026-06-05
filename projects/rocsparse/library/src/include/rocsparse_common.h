@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -63,16 +63,4 @@ namespace rocsparse
                                     const T*         scalar_device_host,
                                     A*               array,
                                     rocsparse_order  order);
-
-    template <typename I, typename J>
-    rocsparse_status copy(rocsparse_handle     handle,
-                          int64_t              length,
-                          const I*             in,
-                          J*                   out,
-                          rocsparse_index_base idx_base_in,
-                          rocsparse_index_base idx_base_out);
-
-    template <typename T>
-    rocsparse_status copy_and_scale(
-        rocsparse_handle handle, int64_t length, const T* in, T* out, const T* scalar_device_host);
 }

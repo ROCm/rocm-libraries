@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -275,9 +275,6 @@ static rocsparse_status rocsparse_trm_transpose(rocsparse_handle          handle
                                                        csrt_perm_indextype,
                                                        csrt_perm,
                                                        rocsparse_index_base_zero)));
-    //    std::cout << "csrt_perm " << rocsparse_array_hash(csrt_perm,
-    //						    sizeof(int32_t)*(nnz))
-    //	      << std::endl;
     return rocsparse_status_success;
 }
 
@@ -374,10 +371,9 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
     // Initialize zero pivot
     //
     // Allocate buffer to hold zero pivot
-    void* zero_pivot = pivot_info->get_zero_pivot();
-
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::assign_max_async(1, csr_col_ind_indextype, zero_pivot, stream));
+    void* zero_pivot = pivot_info->get_position();
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
+        pivot_info->get_batch_count(), csr_col_ind_indextype, zero_pivot, stream));
 
     //  rocsparse_indextype row_map_indextype = csr_col_ind_indextype;
     void*               row_map            = info->get_row_map();
@@ -396,10 +392,6 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
 
     const void* local_csr_col_ind
         = (trans == rocsparse_operation_none) ? csr_col_ind : info->get_transposed_col_ind();
-    //    	hipMemset(done_array,0,sizeof(int32_t)*m);
-    //      std::cout << "done_array before " << rocsparse_array_hash(done_array,
-    //						      sizeof(int32_t)*(m))
-    //	      << std::endl;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::launch_csrsv_analysis_kernel(handle,
                                                                       trans,
@@ -416,10 +408,6 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
                                                                       descr->base,
                                                                       descr->diag_type,
                                                                       descr->fill_mode));
-
-    //        std::cout << "done_array after " << rocsparse_array_hash(done_array,
-    //						      sizeof(int32_t)*(m))
-    //	      << std::endl;
 
     {
         // Post processing

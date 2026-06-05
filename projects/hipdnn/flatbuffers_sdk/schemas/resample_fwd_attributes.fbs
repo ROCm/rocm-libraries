@@ -1,0 +1,26 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+include "resample_common.fbs";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+table ResampleFwdAttributes {
+    // Input/Output tensor UIDs
+    x_tensor_uid: long;          // Input tensor
+    y_tensor_uid: long;          // Output tensor (resample result)
+    index_tensor_uid: long = null; // Optional index tensor (for max resample indices)
+
+    // Resample parameters (N-dimensional support)
+    pre_padding: [long];         // Padding before each spatial dimension
+    post_padding: [long];        // Padding after each spatial dimension
+    stride: [long];              // Stride for each spatial dimension
+    window: [long];              // Resample window for each spatial dimension
+
+    // Algorithm/mode selection
+    resample_mode: ResampleMode;
+    padding_mode: PaddingMode;
+
+    // Whether to generate index output (for max resample)
+    generate_index: bool = null;
+}

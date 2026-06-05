@@ -26,6 +26,7 @@ namespace rocRoller
             VCC,
             VCC_LO,
             VCC_HI,
+            EXECZ,
             EXEC,
             EXEC_LO,
             EXEC_HI,

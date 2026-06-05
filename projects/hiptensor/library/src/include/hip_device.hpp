@@ -51,6 +51,7 @@ namespace hiptensor
             GFX1153          = 0x1153,
             GFX1200          = 0x1200,
             GFX1201          = 0x1201,
+            GFX1250          = 0x1250,
             UNSUPPORTED_ARCH = 0x0,
         };
 

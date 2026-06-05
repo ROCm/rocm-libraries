@@ -56,6 +56,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// In the examples discontinuity operation is performed on block of 128 threads, using type
 /// \p int.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_discontinuity.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {

@@ -6,6 +6,7 @@
 #include <string>
 
 #include "client/GEMMParameters.hpp"
+#include <rocRoller/Parameters/Solution/LDSBankSwizzleMode.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/Parameters/Solution/StoreOption.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -33,10 +34,21 @@ namespace CLI
             return true;
         }
 
+        inline bool lexical_cast(const std::string& s, rocRoller::LDSBankSwizzleMode& v)
+        {
+            v = rocRoller::fromString<rocRoller::LDSBankSwizzleMode>(s);
+            return true;
+        }
+
         inline bool lexical_cast(const std::string& s, rocRoller::ScaleSkipPermlaneMode& v)
         {
             v = rocRoller::fromString<rocRoller::ScaleSkipPermlaneMode>(s);
             return true;
+        }
+
+        inline bool lexical_cast(const std::string& s, rocRoller::Client::GEMMClient::XYTuple& v)
+        {
+            return rocRoller::Client::GEMMClient::CLI::ParseXY(s, v);
         }
 
         inline bool lexical_cast(const std::string& s, rocRoller::Client::GEMMClient::MNKTuple& v)

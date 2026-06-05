@@ -528,7 +528,13 @@ GENERATE_DEFINITIONS(int8_t, int8_t, float)
 GENERATE_DEFINITIONS(int8_t, __half, float)
 GENERATE_DEFINITIONS(int8_t, hip_bfloat16, float)
 GENERATE_DEFINITIONS(int8_t, int32_t, float)
+#if HIP_FP8_TYPE_OCP
 GENERATE_DEFINITIONS(__hip_fp8_e4m3, float, float)
 GENERATE_DEFINITIONS(__hip_fp8_e5m2, float, float)
+#endif
+#if HIP_FP8_TYPE_FNUZ
+GENERATE_DEFINITIONS(__hip_fp8_e4m3_fnuz, float, float)
+GENERATE_DEFINITIONS(__hip_fp8_e5m2_fnuz, float, float)
+#endif
 
 #undef GENERATE_DEFINITIONS

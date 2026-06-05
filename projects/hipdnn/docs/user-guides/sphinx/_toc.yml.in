@@ -1,0 +1,109 @@
+defaults:
+  numbered: False
+  maxdepth: 6
+root: index
+subtrees:
+- entries:
+  - file: what-is-hipdnn.rst
+    title: What is hipDNN?
+
+- caption: Install
+  entries:
+  - file: install/installation.rst
+    title: hipDNN installation
+  - file: install/add-project.rst
+    title: Add hipDNN to your project
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/architecture.rst
+    title: High-level architecture
+  - file: conceptual/knobs.rst
+    title: Engine configuration knobs
+  - file: conceptual/backend-architecture.rst
+    title: Backend architecture
+
+- caption: How to
+  entries:
+  - file: how-to/how-to-users.rst
+    title: For users
+    subtrees:
+    - entries:
+      - file: how-to/build-execute-hipdnn.rst
+        title: Build and execute operation graphs
+      - file: how-to/get-set-engine-knob.rst
+        title: Get and set engine knob configurations
+      - file: how-to/migrate-cudnn.rst
+        title: Migrate a cuDNN project to hipDNN
+  - file: how-to/how-to-plugin.rst
+    title: For plugin developers
+    subtrees:
+    - entries:
+      - file: how-to/develop-plugins.rst
+        title: Develop plugins for hipDNN
+
+- caption: Reference
+  entries:
+  - file: reference/plugins.rst
+    title: Operation support
+    subtrees:
+    - entries:
+      - file: reference/miopen-plugin.rst
+        title: MIOpen provider
+      - file: reference/hipblaslt.rst
+        title: hipBLASLt provider
+  - file: reference/environment-variables.rst
+    title: Environment variables
+  - file: reference/glossary.rst
+    title: Glossary
+  - file: reference/api-reference.rst
+    title: API reference
+    subtrees:
+    - entries:
+      - file: reference/frontend-api/frontend-api.rst
+        title: Frontend C++
+        subtrees:
+        - entries:
+          - file: reference/frontend-api/frontend-graph.rst
+            title: Graph
+          - file: reference/frontend-api/frontend-utilities.rst
+            title: Utilities
+          - file: reference/frontend-api/frontend-types.rst
+            title: Types
+          - file: reference/frontend-api/frontend-handle.rst
+            title: Handle
+          - file: reference/frontend-api/frontend-logging.rst
+            title: Logging
+          - file: reference/frontend-api/frontend-error.rst
+            title: Error
+      - file: reference/backend-api/backend-api.rst
+        title: Backend C
+        subtrees:
+        - entries:
+          - file: reference/backend-api/backend-attribute.rst
+            title: Attribute
+          - file: reference/backend-api/backend-attribute-type.rst
+            title: Attribute type
+          - file: reference/backend-api/backend-callback-type.rst
+            title: Callback type
+          - file: reference/backend-api/backend-descriptor-type.rst
+            title: Descriptor type
+          - file: reference/backend-api/backend-heuristic-type.rst
+            title: Heuristic type
+          - file: reference/backend-api/backend-limits.rst
+            title: Limits
+          - file: reference/backend-api/backend-status.rst
+            title: Status
+          - file: reference/backend-api/backend-flatbuffer.rst
+            title: FlatBuffer data
+          - file: reference/backend-api/backend-plugin-loading.rst
+            title: Plugin loading mode
+          - file: reference/backend-api/backend-plugin-unloading.rst
+            title: Plugin unloading mode
+      - file: reference/knob-api.rst
+        title: Knobs
+
+- caption: About
+  entries:
+  - file: license.rst
+    title: License

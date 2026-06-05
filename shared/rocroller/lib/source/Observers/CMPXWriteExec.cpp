@@ -12,7 +12,7 @@ namespace rocRoller
         {
             if(trigger(inst))
             {
-                for(auto const& regId : m_context.lock()->getExec()->getRegisterIds())
+                for(auto const& regId : m_context.lock()->getEXEC()->getRegisterIds())
                 {
                     (*m_hazardMap)[regId].push_back(
                         WaitStateHazardCounter(getMaxNops(inst), writeTrigger()));
@@ -35,7 +35,7 @@ namespace rocRoller
             if(GPUInstructionInfo::isMFMA(inst.getOpCode())
                || (m_checkACCVGPR && GPUInstructionInfo::isACCVGPRWrite(inst.getOpCode())))
             {
-                return checkRegister(m_context.lock()->getExec()).value_or(0);
+                return checkRegister(m_context.lock()->getEXEC()).value_or(0);
             }
             return 0;
         }

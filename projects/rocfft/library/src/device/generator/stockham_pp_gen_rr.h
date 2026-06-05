@@ -235,8 +235,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                 stmts += Assign{lds_complex[offset_lds + idx],
                                 LoadGlobal{buf, offset_pp + idx * stride0}};
             }
-            stmts += LineBreak();
-            stmts += CommentLines{"append extra global loading for C2Real pre-process only"};
 
             StatementList stmts_c2real_pre;
             stmts_c2real_pre += CommentLines{
@@ -278,17 +276,19 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             }
 
             stmts += LineBreak{};
-            stmts += CommentLines{"append extra global write for Real2C post-process only"};
             StatementList stmts_real2c_post;
             stmts_real2c_post += CommentLines{
                 "use the last thread of each transform to write one more element per row"};
             stmts_real2c_post
                 += If{Equal{thread, threads_per_transform - 1},
                       {StoreGlobal{buf,
-                                   offset + (thread + (height - 1) * width + 1) * stride0,
+                                   offset_pp + (thread + (height - 1) * width + 1) * stride0,
                                    lds_complex[offset_lds + thread + (height - 1) * width + 1]}}};
             if(ebtype == EmbeddedType::Real2C_POST)
+            {
+                stmts += CommentLines{"append extra global write for Real2C post-process only"};
                 stmts += stmts_real2c_post;
+            }
         }
         else
             throw std::runtime_error(
@@ -640,9 +640,10 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         stmts += LineBreak{};
         stmts += CommentLines{"partial-pass offsets"};
-        stmts += Declaration{stride_lds_pp, length};
+        stmts += Declaration{stride_lds_pp, (length + get_lds_padding())};
         stmts += Declaration{offset_lds_pp,
-                             Parens(block_id * transforms_per_block + thread_id) % length};
+                             Parens(block_id * transforms_per_block + thread_id)
+                                 % (length + get_lds_padding())};
 
         auto pre_post_lds_tmpl = device_lds_reg_inout_pp_step_1_2_device_call_templates();
         auto pre_post_lds_args = device_lds_reg_inout_pp_device_call_arguments();
@@ -823,14 +824,17 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                           pre_post_lds_args};
         body += postStore;
 
+        // handle even-length real to complex post-process in lds after full pass
+        if(ebtype == EmbeddedType::Real2C_POST)
+        {
+            body += LineBreak{};
+            body += real_trans_pre_post();
+        }
+
         body += generate_partial_pass_steps_1_2();
 
         body += LineBreak{};
         StatementList storelds;
-        storelds += LineBreak{};
-        // handle even-length complex to real post-process in lds after transform
-        if(ebtype == EmbeddedType::Real2C_POST)
-            storelds += real_trans_pre_post();
         storelds += LineBreak{};
         storelds += CommentLines{"store global"};
         storelds += SyncThreads{};

@@ -16,11 +16,23 @@ namespace rocRoller
     {
         auto ctx = m_context.lock();
 
-        VariableType rawPointer{DataType::Raw32, PointerType::PointerGlobal};
-        m_argumentPointer
-            = std::make_shared<Register::Value>(ctx, Register::Type::Scalar, rawPointer, 1);
-        m_argumentPointer->setName("Kernel argument pointer");
-        co_yield m_argumentPointer->allocate();
+        auto argLoader = ctx->argLoader();
+
+        if(argLoader->anyManuallyLoadedArguments())
+        {
+            VariableType rawPointer{DataType::Raw32, PointerType::PointerGlobal};
+            m_argumentPointer
+                = std::make_shared<Register::Value>(ctx, Register::Type::Scalar, rawPointer, 1);
+            m_argumentPointer->setName("Kernel argument pointer");
+            co_yield m_argumentPointer->allocate();
+        }
+        else
+        {
+            co_yield Instruction::Comment("No kernel argument pointer needed");
+        }
+
+        co_yield ctx->argLoader()->allocatePreloadedRegisters(m_preloadedRegOffset,
+                                                              m_numPreloadedRegs);
 
         if(ctx->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
         {
@@ -89,6 +101,10 @@ namespace rocRoller
         m_startedCodeGeneration = true;
         auto archName           = m_context.lock()->targetArchitecture().target().toString();
 
+        co_yield Instruction::Comment("Kernel Arguments:");
+        for(auto const& arg : m_arguments)
+            co_yield Instruction::Comment(arg.toString());
+
         co_yield Instruction::Directive(".amdgcn_target \"amdgcn-amd-amdhsa--" + archName + "\"");
         co_yield Instruction::Directive(".set .amdgcn.next_free_vgpr, 0");
         co_yield Instruction::Directive(".set .amdgcn.next_free_sgpr, 0");
@@ -100,6 +116,19 @@ namespace rocRoller
         co_yield allocateInitialRegisters();
 
         co_yield Instruction::Label(m_kernelStartLabel);
+
+        if(m_numPreloadedRegs > 0)
+        {
+            co_yield Instruction::Comment("Pad to make room for arg loading preamble.");
+            for(int i = 0; i < 64; i++)
+                co_yield Instruction::Nop();
+
+            auto afterPaddingLabel = m_kernelStartLabel->getLabel() + "_exec_begin";
+            co_yield Instruction::Label(
+                afterPaddingLabel,
+                "Kernel execution starts here. Use this label instead of the "
+                "kernel name when setting a breakpoint.");
+        }
     }
 
     Generator<Instruction> AssemblyKernel::prolog()
@@ -108,8 +137,10 @@ namespace rocRoller
 
         co_yield Instruction::Comment(ctx->kernelOptions()->toString());
 
-        if(ctx->kernelOptions()->preloadKernelArguments)
-            co_yield ctx->argLoader()->loadAllArguments();
+        if(!ctx->kernelOptions()->lazyLoadKernelArguments)
+            co_yield ctx->argLoader()->eagerLoadArguments();
+
+        co_yield ctx->argLoader()->splitOutArgumentRegisters();
 
         if(ctx->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
         {
@@ -160,10 +191,22 @@ namespace rocRoller
 
             // No more need for packed value.
             m_packedWorkitemIndex.reset();
-            if(ctx->kernelOptions()->preloadKernelArguments)
-                m_argumentPointer.reset();
-            else
-                m_argumentPointer->setReadOnly();
+
+            for(auto& workitem : m_workitemIndex)
+            {
+                if(workitem)
+                    workitem->setReadOnly();
+            }
+        }
+
+        if(ctx->kernelOptions()->lazyLoadKernelArguments && m_argumentPointer)
+        {
+            m_argumentPointer->setReadOnly();
+        }
+        else
+        {
+            // We're done loading kernel arguments so we don't need the pointer anymore.
+            m_argumentPointer.reset();
         }
 
         for(auto& reg : m_workgroupIndex)
@@ -223,7 +266,17 @@ namespace rocRoller
             co_yield Instruction::Directive(".amdhsa_wavefront_size32 1");
 
         co_yield Instruction::Comment("Initial kernel state");
-        co_yield Instruction::Directive("  .amdhsa_user_sgpr_kernarg_segment_ptr 1");
+        if(m_context.lock()->argLoader()->anyManuallyLoadedArguments())
+            co_yield Instruction::Directive("  .amdhsa_user_sgpr_kernarg_segment_ptr 1");
+
+        if(m_numPreloadedRegs > 0)
+        {
+            co_yield Instruction::Directive(
+                concatenate("  .amdhsa_user_sgpr_kernarg_preload_length ", m_numPreloadedRegs));
+            co_yield Instruction::Directive(
+                concatenate("  .amdhsa_user_sgpr_kernarg_preload_offset ", m_preloadedRegOffset));
+        }
+
         co_yield Instruction::Directive(".amdhsa_system_sgpr_workgroup_id_x 1");
         co_yield Instruction::Directive(
             concatenate(".amdhsa_system_sgpr_workgroup_id_y ", m_kernelDimensions > 1));
@@ -344,16 +397,6 @@ namespace rocRoller
         m_arguments.push_back(std::move(arg));
 
         return Expression::fromKernelArgument(m_arguments.back());
-    }
-
-    void AssemblyKernel::setLaunchTimeOnlyArguments(std::set<std::string> args)
-    {
-        m_launchTimeOnlyArguments = std::move(args);
-    }
-
-    std::set<std::string> const& AssemblyKernel::launchTimeOnlyArguments() const
-    {
-        return m_launchTimeOnlyArguments;
     }
 
 }

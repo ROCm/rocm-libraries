@@ -20,7 +20,7 @@ protected:
 
 TEST_F(TestVectorLoggingUtils, FormatsEmptyVector)
 {
-    std::vector<int64_t> emptyVec;
+    const std::vector<int64_t> emptyVec;
     std::ostringstream oss;
     oss << StreamVec(emptyVec);
     EXPECT_EQ(oss.str(), "[]");
@@ -28,7 +28,7 @@ TEST_F(TestVectorLoggingUtils, FormatsEmptyVector)
 
 TEST_F(TestVectorLoggingUtils, FormatsSingleElement)
 {
-    std::vector<int64_t> singleVec = {42};
+    const std::vector<int64_t> singleVec = {42};
     std::ostringstream oss;
     oss << StreamVec(singleVec);
     EXPECT_EQ(oss.str(), "[42]");
@@ -36,7 +36,7 @@ TEST_F(TestVectorLoggingUtils, FormatsSingleElement)
 
 TEST_F(TestVectorLoggingUtils, FormatsMultipleElements)
 {
-    std::vector<int64_t> multiVec = {1, 2, 3, 4, 5};
+    const std::vector<int64_t> multiVec = {1, 2, 3, 4, 5};
     std::ostringstream oss;
     oss << StreamVec(multiVec);
     EXPECT_EQ(oss.str(), "[1, 2, 3, 4, 5]");
@@ -44,7 +44,7 @@ TEST_F(TestVectorLoggingUtils, FormatsMultipleElements)
 
 TEST_F(TestVectorLoggingUtils, FormatsNegativeNumbers)
 {
-    std::vector<int64_t> negativeVec = {-100, -50, 0, 50, 100};
+    const std::vector<int64_t> negativeVec = {-100, -50, 0, 50, 100};
     std::ostringstream oss;
     oss << StreamVec(negativeVec);
     EXPECT_EQ(oss.str(), "[-100, -50, 0, 50, 100]");
@@ -52,7 +52,7 @@ TEST_F(TestVectorLoggingUtils, FormatsNegativeNumbers)
 
 TEST_F(TestVectorLoggingUtils, FormatsLargeNumbers)
 {
-    std::vector<int64_t> largeVec = {1000000000000, 2000000000000, 3000000000000};
+    const std::vector<int64_t> largeVec = {1000000000000, 2000000000000, 3000000000000};
     std::ostringstream oss;
     oss << StreamVec(largeVec);
     EXPECT_EQ(oss.str(), "[1000000000000, 2000000000000, 3000000000000]");
@@ -60,7 +60,7 @@ TEST_F(TestVectorLoggingUtils, FormatsLargeNumbers)
 
 TEST_F(TestVectorLoggingUtils, FormatsMinMaxValues)
 {
-    std::vector<int64_t> extremeVec
+    const std::vector<int64_t> extremeVec
         = {std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max()};
     std::ostringstream oss;
     oss << StreamVec(extremeVec);
@@ -72,7 +72,7 @@ TEST_F(TestVectorLoggingUtils, FormatsMinMaxValues)
 
 TEST_F(TestVectorLoggingUtils, WorksWithFormatStrings)
 {
-    std::vector<int64_t> vec = {10, 20, 30};
+    const std::vector<int64_t> vec = {10, 20, 30};
     std::ostringstream oss;
     oss << "Vector contents: " << StreamVec(vec);
     EXPECT_EQ(oss.str(), "Vector contents: [10, 20, 30]");
@@ -80,8 +80,8 @@ TEST_F(TestVectorLoggingUtils, WorksWithFormatStrings)
 
 TEST_F(TestVectorLoggingUtils, FormatsMultipleVectorsInSameString)
 {
-    std::vector<int64_t> vec1 = {1, 2};
-    std::vector<int64_t> vec2 = {3, 4, 5};
+    const std::vector<int64_t> vec1 = {1, 2};
+    const std::vector<int64_t> vec2 = {3, 4, 5};
     std::ostringstream oss;
     oss << "First: " << StreamVec(vec1) << ", Second: " << StreamVec(vec2);
     EXPECT_EQ(oss.str(), "First: [1, 2], Second: [3, 4, 5]");
@@ -89,7 +89,7 @@ TEST_F(TestVectorLoggingUtils, FormatsMultipleVectorsInSameString)
 
 TEST_F(TestVectorLoggingUtils, FormatsZeroValues)
 {
-    std::vector<int64_t> zeroVec = {0, 0, 0};
+    const std::vector<int64_t> zeroVec = {0, 0, 0};
     std::ostringstream oss;
     oss << StreamVec(zeroVec);
     EXPECT_EQ(oss.str(), "[0, 0, 0]");
@@ -97,7 +97,7 @@ TEST_F(TestVectorLoggingUtils, FormatsZeroValues)
 
 TEST_F(TestVectorLoggingUtils, PreservesElementOrder)
 {
-    std::vector<int64_t> orderedVec = {5, 3, 8, 1, 9};
+    const std::vector<int64_t> orderedVec = {5, 3, 8, 1, 9};
     std::ostringstream oss;
     oss << StreamVec(orderedVec);
     EXPECT_EQ(oss.str(), "[5, 3, 8, 1, 9]");
@@ -105,7 +105,7 @@ TEST_F(TestVectorLoggingUtils, PreservesElementOrder)
 
 TEST_F(TestVectorLoggingUtils, HandlesAlternatingSignValues)
 {
-    std::vector<int64_t> altVec = {1, -1, 2, -2, 3, -3};
+    const std::vector<int64_t> altVec = {1, -1, 2, -2, 3, -3};
     std::ostringstream oss;
     oss << StreamVec(altVec);
     EXPECT_EQ(oss.str(), "[1, -1, 2, -2, 3, -3]");

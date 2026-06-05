@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1201,6 +1201,106 @@ void testing_csritsv(const Arguments& arg)
             {
                 hy_iterative.near_check(dy, tol_compare);
             }
+        }
+
+        //
+        // ============================================================================
+        // Regression test for rocsparse_copy_mat_info on a csritsv info.
+        //
+        // For a general matrix, csritsv analysis allocates device buffers (the ptr_end
+        // submatrix offsets and the zero-pivot position) that are owned by the
+        // rocsparse_csritsv_info and freed in its destructor. Copying a mat_info used to
+        // be broken in two ways that this test guards against:
+        //
+        //   1. ptr_end was copied shallowly, so a copied rocsparse_mat_info shared the
+        //      SAME device allocation as its source. Destroying the source freed that
+        //      buffer out from under the copy (use-after-free), and destroying both
+        //      objects double-freed it. The fix deep-copies the owned buffer so each
+        //      object owns its allocation. This test reproduces the exact scenario:
+        //      copy, destroy the source, keep using the copy, then destroy the copy.
+        //
+        //   2. The pivot/position metadata was copied using the destination's (invalid,
+        //      default) index type instead of the source's, corrupting the copied info
+        //      so that solving with it produced a wrong result. The solve-and-compare
+        //      below deterministically fails unless that metadata is copied correctly.
+        // ============================================================================
+        //
+        if(arg.matrix_type == rocsparse_matrix_type_general && *h_analysis_pivot == -1
+           && *h_solve_pivot == -1 && host_iterative_convergence)
+        {
+            rocsparse_pointer_mode pointer_mode_save;
+            CHECK_ROCSPARSE_ERROR(rocsparse_get_pointer_mode(handle, &pointer_mode_save));
+            CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+
+            rocsparse_mat_info src_info  = nullptr;
+            rocsparse_mat_info copy_info = nullptr;
+            CHECK_ROCSPARSE_ERROR(rocsparse_create_mat_info(&src_info));
+            CHECK_ROCSPARSE_ERROR(rocsparse_create_mat_info(&copy_info));
+
+            //
+            // Analyze the source info; this allocates the owned ptr_end device buffer.
+            //
+            CHECK_ROCSPARSE_ERROR(rocsparse_csritsv_analysis<T>(handle,
+                                                                trans,
+                                                                dA.m,
+                                                                dA.nnz,
+                                                                descr,
+                                                                dA.val,
+                                                                dA.ptr,
+                                                                dA.ind,
+                                                                src_info,
+                                                                apol,
+                                                                spol,
+                                                                dbuffer));
+
+            //
+            // Copy the analyzed source info into a freshly created destination info.
+            //
+            CHECK_ROCSPARSE_ERROR(rocsparse_copy_mat_info(copy_info, src_info));
+
+            //
+            // Destroy the source. With the shallow-copy bug this frees the device buffer
+            // still referenced by copy_info (use-after-free); with the deep copy copy_info
+            // keeps its own buffer. The copy must remain fully usable afterwards.
+            //
+            CHECK_ROCSPARSE_ERROR(rocsparse_destroy_mat_info(src_info));
+
+            //
+            // Solve with the (now sole) copy and compare against the reference iterative
+            // solution. This fails if the pivot/position metadata was not copied with the
+            // correct index type, and exercises the copy's ptr_end buffer after the source
+            // has been destroyed.
+            //
+            CHECK_HIP_ERROR(hipMemset(dy, 0, sizeof(T) * M));
+            host_nmaxiter[0] = arg.nmaxiter;
+            CHECK_ROCSPARSE_ERROR(rocsparse_csritsv_solve<T>(handle,
+                                                             host_nmaxiter,
+                                                             host_tol,
+                                                             host_history,
+                                                             trans,
+                                                             dA.m,
+                                                             dA.nnz,
+                                                             h_alpha,
+                                                             descr,
+                                                             dA.val,
+                                                             dA.ptr,
+                                                             dA.ind,
+                                                             copy_info,
+                                                             dx,
+                                                             dy,
+                                                             spol,
+                                                             dbuffer));
+            hy_iterative.near_check(dy, tol_compare);
+
+            //
+            // Destroying the copy frees its ptr_end buffer. With the deep copy this is the
+            // buffer's only owner and the free is clean; with the shallow-copy bug this is
+            // a second free of the already-freed source buffer (double-free).
+            //
+            CHECK_ROCSPARSE_ERROR(rocsparse_destroy_mat_info(copy_info));
+            CHECK_HIP_ERROR(hipDeviceSynchronize());
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, pointer_mode_save));
         }
 
         if(device_iterative_convergence != host_iterative_convergence)

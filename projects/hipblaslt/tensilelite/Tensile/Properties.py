@@ -65,6 +65,16 @@ class Property:
         return hash_objs(self.tag, self.value, self.index)
 
 
+_MATCHING_ORDER = {
+    'EqualityMatching': 0,
+    'RangeMatching': 1,
+    'PredictionMatching': 2,
+    'GridBasedMatching': 3,
+    'FreeSizeMatching': 4,
+    'TruePred': 5,
+}
+
+
 class Predicate(Property):
 
     @classmethod
@@ -86,36 +96,9 @@ class Predicate(Property):
         return cls('Or', value=predicates)
 
     def __lt__(self, other):
-        # Ensure TruePred appears last.
-        if other.tag == 'TruePred':
-            if self.tag == 'TruePred':
-                return False
-            return True
-        if self.tag == 'TruePred':
-            return False
-
-        # EqualityMatching < RangeMatching < FreeSizeMatching
-        if self.tag == 'EqualityMatching':
-            if other.tag == 'EqualityMatching':
-                return False
-            if other.tag == 'RangeMatching':
-                return True
-            if other.tag == 'FreeSizeMatching':
-                return True
-        if self.tag == 'RangeMatching':
-            if other.tag == 'EqualityMatching':
-                return False
-            if other.tag == 'RangeMatching':
-                return False
-            if other.tag == 'FreeSizeMatching':
-                return True
-        if self.tag == 'FreeSizeMatching':
-            if other.tag == 'EqualityMatching':
-                return False
-            if other.tag == 'RangeMatching':
-                return False
-            if other.tag == 'FreeSizeMatching':
-                return False
+        # EqualityMatching < RangeMatching < PredictionMatching < GridBasedMatching < FreeSizeMatching < TruePred
+        if self.tag in _MATCHING_ORDER and other.tag in _MATCHING_ORDER:
+            return _MATCHING_ORDER[self.tag] < _MATCHING_ORDER[other.tag]
 
         selfValue = self.value
         otherValue = other.value

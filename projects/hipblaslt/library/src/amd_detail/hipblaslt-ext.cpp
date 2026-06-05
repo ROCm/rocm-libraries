@@ -36,10 +36,15 @@
 
 namespace hipblaslt_ext
 {
+    static_assert(sizeof(hipblasLtMatmulHeuristicResult_t) == sizeof(rocblaslt_matmul_heuristic_result),
+                  "hipblasLtMatmulHeuristicResult_t must match rocblaslt_matmul_heuristic_result for "
+                  "reinterpret_cast in hipblaslt_ext");
+
     class GemmPreference::GemmPreferenceImpl
     {
     public:
-        size_t workspace_bytes;
+        size_t workspace_bytes         = 0;
+        bool   dyn_persistent_tile_ext = false;
     };
 
     GemmPreference::GemmPreference()
@@ -71,6 +76,16 @@ namespace hipblaslt_ext
     const size_t GemmPreference::getMaxWorkspaceBytes() const
     {
         return pimpl->workspace_bytes;
+    }
+
+    void GemmPreference::setDynPersistentTileEnabled(bool enabled)
+    {
+        pimpl->dyn_persistent_tile_ext = enabled;
+    }
+
+    bool GemmPreference::getDynPersistentTileEnabled() const
+    {
+        return pimpl->dyn_persistent_tile_ext;
     }
 
     class GemmProblemType::GemmProblemTypeImpl
@@ -1419,22 +1434,12 @@ namespace hipblaslt_ext
 
     std::string getSolutionNameFromAlgo(hipblasLtHandle_t handle, hipblasLtMatmulAlgo_t& algo)
     {
-        int* algo_ptr = (int*)algo.data;
-        if(*algo_ptr < 0)
-        {
-            return "";
-        }
         auto rocalgo = reinterpret_cast<const rocblaslt_matmul_algo*>(&algo);
         return rocblaslt_get_solution_name_from_algo((rocblaslt_handle)handle, *rocalgo);
     }
 
     std::string getKernelNameFromAlgo(hipblasLtHandle_t handle, hipblasLtMatmulAlgo_t& algo)
     {
-        int* algo_ptr = (int*)algo.data;
-        if(*algo_ptr < 0)
-        {
-            return "";
-        }
         auto rocalgo = reinterpret_cast<const rocblaslt_matmul_algo*>(&algo);
         return rocblaslt_get_kernel_name_from_algo((rocblaslt_handle)handle, *rocalgo);
     }
@@ -1443,6 +1448,7 @@ namespace hipblaslt_ext
         getAlgosFromIndex(hipblasLtHandle_t                              handle,
                           std::vector<int>&                              algoIndex,
                           std::vector<hipblasLtMatmulHeuristicResult_t>& heuristicResults)
+    try
     {
         rocblaslt::Debug::Instance().markerStart("hipblasLtGetAlgosFromIndexCpp");
         auto results
@@ -1452,6 +1458,10 @@ namespace hipblaslt_ext
             (rocblaslt_handle)handle, algoIndex, *results));
         rocblaslt::Debug::Instance().markerStop();
         return status;
+    }
+    catch(...)
+    {
+        return exception_to_hipblas_status();
     }
 
     hipblasStatus_t copyMatmul(hipblasLtMatmulDesc_t src, hipblasLtMatmulDesc_t dst)

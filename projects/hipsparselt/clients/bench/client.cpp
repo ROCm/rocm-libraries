@@ -114,6 +114,12 @@ struct perf_sparse<
             && std::is_same<Tc, float>{})
 #endif
 #endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+        || (std::is_same<Ti, hipsparselt_fp8_e4m3_fnuz>{} && (std::is_same<To, float>{})
+            && std::is_same<Tc, float>{})
+        || (std::is_same<Ti, hipsparselt_fp8_e5m2_fnuz>{} && (std::is_same<To, float>{})
+            && std::is_same<Tc, float>{})
+#endif
 	>> : hipsparselt_test_valid
 {
     void operator()(const Arguments& arg)
@@ -584,6 +590,9 @@ try
     bool is_f16      = arg.a_type == HIP_R_16F || arg.a_type == HIP_R_16BF;
     bool is_f32      = arg.a_type == HIP_R_32F;
     bool is_f8       = arg.a_type == HIP_R_8F_E4M3 || arg.a_type == HIP_R_8F_E5M2;
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+    is_f8 = is_f8 || arg.a_type == HIP_R_8F_E4M3_FNUZ || arg.a_type == HIP_R_8F_E5M2_FNUZ;
+#endif
     arg.compute_type = compute_type == ""
 #ifdef __HIP_PLATFORM_AMD__
                            ? (is_f16 || is_f8 ? HIPSPARSELT_COMPUTE_32F : HIPSPARSELT_COMPUTE_32I)

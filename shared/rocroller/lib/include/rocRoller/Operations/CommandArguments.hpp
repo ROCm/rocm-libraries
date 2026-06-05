@@ -29,6 +29,14 @@ namespace rocRoller
         template <CCommandArgumentValue T>
         void setArgument(Operations::OperationTag op, ArgumentType argType, T value);
 
+        void setArgument(Operations::OperationTag    op,
+                         ArgumentType                argType,
+                         int                         dimension,
+                         CommandArgumentValue const& value);
+        void setArgument(Operations::OperationTag    op,
+                         ArgumentType                argType,
+                         CommandArgumentValue const& value);
+
         RuntimeArguments runtimeArguments() const;
 
     private:

@@ -301,12 +301,5 @@ int main(int argc, char** argv)
         rocsparse_reproducibility_write_report(reproducibility);
     }
 
-    // Reset HIP device
-    if(hipDeviceReset() != hipSuccess)
-    {
-        std::cerr << "Error: cannot reset HIP device" << std::endl;
-        return rocsparse_status_internal_error;
-    }
-
     return ret;
 }

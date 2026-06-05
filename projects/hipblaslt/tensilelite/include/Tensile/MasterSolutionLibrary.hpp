@@ -37,6 +37,10 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorOps.hpp>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace fs = std::filesystem;
 
 namespace TensileLite
@@ -113,13 +117,27 @@ namespace TensileLite
             fs::path path(tensileLibPath);
             libraryDirectory = path.parent_path().string();
             suffix           = path.extension().string();
-            path             = fs::path(libraryDirectory) / "TensileLiteLibrary_lazy_Mapping.dat";
 
-            // libraryMapping
+            // Derive the arch from the master library filename, e.g.
+            // "TensileLibrary_lazy_gfx1100.dat" -> "gfx1100", and load the
+            // matching per-arch mapping file. Per-arch mapping files are
+            // required so single-arch shard installs don't collide on a
+            // shared "TensileLiteLibrary_lazy_Mapping.dat".
+            std::string       stem   = path.stem().string();
+            const std::string prefix = "TensileLibrary_lazy_";
+            if(stem.compare(0, prefix.size(), prefix) != 0)
+            {
+                std::cout << "Cannot derive arch from " << tensileLibPath << std::endl;
+                return false;
+            }
+            const std::string arch = stem.substr(prefix.size());
+            path                   = fs::path(libraryDirectory)
+                   / ("TensileLiteLibrary_lazy_" + arch + "_Mapping.dat");
+
             libraryMapping = LoadLibraryMapping(path.string());
             if(libraryMapping.empty())
             {
-                std::cout << "No library mapping found in " << libraryDirectory << std::endl;
+                std::cout << "No library mapping found at " << path.string() << std::endl;
                 return false;
             }
             return true;
@@ -127,53 +145,65 @@ namespace TensileLite
 
         void loadLibrary(const int index) const
         {
+            // TODO(#7080): point-key + upper_bound misses on above-largest and
+            // gap-between-keys; switch to range-encoded mapping.
             auto it = libraryMapping.upper_bound(index);
-            if(it != libraryMapping.begin())
+            if(it == libraryMapping.begin())
             {
-                --it;
-                std::string filePrefix = it->second;
-                // load the file here directly and push the library for later use.
-                {
-                    std::lock_guard<std::mutex> lock(solutionsGuard);
-                    if(loadedFiles.find(filePrefix) != loadedFiles.end())
-                        return;
-                }
                 if(Debug::Instance().printDataInit())
-                    std::cout << "Loading library for index " << index
-                              << " from file: " << filePrefix << std::endl;
-
-                fs::path path(libraryDirectory);
-                path = path / (filePrefix + suffix);
-
-                auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(path.string());
-                auto mLibrary
-                    = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
-
-                using std::begin;
-                using std::end;
-
+                {
+                    std::cout << "Index " << index << " not in this arch's mapping range"
+                              << std::endl;
+                }
+                return;
+            }
+            --it;
+            std::string filePrefix = it->second;
+            // load the file here directly and push the library for later use.
+            {
                 std::lock_guard<std::mutex> lock(solutionsGuard);
                 if(loadedFiles.find(filePrefix) != loadedFiles.end())
+                {
                     return;
-                // Push to cache
-                indexLoadedLibraries[filePrefix] = mLibrary->library;
-
-                std::transform(begin(mLibrary->solutions),
-                               end(mLibrary->solutions),
-                               std::inserter(solutions, end(solutions)),
-                               [this, filePrefix](auto& i) {
-                                   i.second->codeObjectFilename = filePrefix + ".co";
-                                   return i;
-                               });
-                loadedFiles.insert(filePrefix);
-
-                if(Debug::Instance().printCodeObjectInfo())
-                    std::cout << "load placeholder library " << path << std::endl
-                              << mLibrary->solutions.size() << " solutions loaded" << std::endl;
+                }
             }
-            else
+            if(Debug::Instance().printDataInit())
             {
-                std::cerr << "No library found for index " << index << std::endl;
+                std::cout << "Loading library for index " << index
+                          << " from file: " << filePrefix << std::endl;
+            }
+
+            fs::path path(libraryDirectory);
+            path = path / (filePrefix + suffix);
+
+            auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(path.string());
+            auto mLibrary
+                = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+
+            using std::begin;
+            using std::end;
+
+            std::lock_guard<std::mutex> lock(solutionsGuard);
+            if(loadedFiles.find(filePrefix) != loadedFiles.end())
+            {
+                return;
+            }
+            // Push to cache
+            indexLoadedLibraries[filePrefix] = mLibrary->library;
+
+            std::transform(begin(mLibrary->solutions),
+                           end(mLibrary->solutions),
+                           std::inserter(solutions, end(solutions)),
+                           [this, filePrefix](auto& i) {
+                               i.second->codeObjectFilename = filePrefix + ".co";
+                               return i;
+                           });
+            loadedFiles.insert(filePrefix);
+
+            if(Debug::Instance().printCodeObjectInfo())
+            {
+                std::cout << "load placeholder library " << path << std::endl
+                          << mLibrary->solutions.size() << " solutions loaded" << std::endl;
             }
         }
 
@@ -204,9 +234,19 @@ namespace TensileLite
             {
                 return std::shared_ptr<MySolution>();
             }
-            auto solution = solutions.at(index);
+            auto                   solution = solutions.at(index);
+            
+            TensileLite::TensorOps nop;
+
             if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
             {
+                const auto& pt = solution->problemType;
+
+                bool isComplexInput
+                    = (pt.aType == rocisa::DataType::ComplexFloat || pt.aType == rocisa::DataType::ComplexDouble);
+                    
+                rocisa::DataType alphaBetaType = isComplexInput ? pt.aType : pt.computeType;
+
                 auto problem
                     = MyProblem::createDefaultProblem(solution->problemType.transA,
                                                       solution->problemType.transB,
@@ -214,9 +254,10 @@ namespace TensileLite
                                                       solution->problemType.bType,
                                                       solution->problemType.cType,
                                                       solution->problemType.dType,
-                                                      solution->problemType.computeType,
-                                                      solution->problemType.computeType,
-                                                      solution->problemType.computeInputType,
+                                                      alphaBetaType,
+                                                      alphaBetaType,
+                                                      solution->problemType.computeInputTypeA,
+                                                      solution->problemType.computeInputTypeB,
                                                       solution->problemType.computeType,
                                                       1.0,
                                                       1.0,
@@ -225,7 +266,11 @@ namespace TensileLite
                                                       solution->problemType.biasDataTypeWhiteList,
                                                       solution->problemType.biasSrcWhiteList,
                                                       solution->problemType.groupedGemm,
-                                                      std::numeric_limits<size_t>::max());
+                                                      std::numeric_limits<size_t>::max(),
+                                                      nop,
+                                                      nop,
+                                                      nop,
+                                                      nop);
                 solution->requiredHostWorkspaceSizePerProblem
                     = solution->requiredHostSizeGroupedGemmSingle(problem, hardware);
             }
@@ -352,3 +397,5 @@ namespace TensileLite
     };
 
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

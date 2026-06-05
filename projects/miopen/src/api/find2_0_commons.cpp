@@ -1,34 +1,12 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2022 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/miopen.h>
 
 #include <miopen/common.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
+#include <miopen/hof_match.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/problem.hpp>
 #include <miopen/search_options.hpp>
@@ -36,7 +14,6 @@
 #include <miopen/solver_id.hpp>
 
 #include <nlohmann/json.hpp>
-#include <boost/hof/match.hpp>
 
 template <class OperationDescriptor>
 static miopenStatus_t MakeProblem(miopenProblem_t* problem,
@@ -134,7 +111,7 @@ miopenStatus_t miopenFuseProblems(miopenProblem_t problem1, miopenProblem_t prob
         auto& problem1_deref = miopen::deref(problem1);
 
         auto emplace_problem2 = [problem2](auto& problems) {
-            const auto impl2 = boost::hof::match(
+            const auto impl2 = miopen::hof_match(
                 [&](miopen::Problem& problem2_inner) { problems.emplace_back(problem2_inner); },
                 [&](const miopen::FusedProblem& problem2_inner) {
                     problems.reserve(problems.size() + problem2_inner.problems.size());
@@ -146,7 +123,7 @@ miopenStatus_t miopenFuseProblems(miopenProblem_t problem1, miopenProblem_t prob
             std::visit(impl2, miopen::deref(problem2).item);
         };
 
-        std::visit(boost::hof::match(
+        std::visit(miopen::hof_match(
                        [&](miopen::Problem& problem1_inner) {
                            auto tmp = miopen::FusedProblem{};
                            tmp.problems.reserve(2);
@@ -176,9 +153,9 @@ miopenStatus_t miopenSetProblemTensorDescriptor(miopenProblem_t problem,
     MIOPEN_LOG_FUNCTION(problem, id, descriptor);
 
     return miopen::try_([&] {
-        const auto impl = boost::hof::match(
-            [&](miopen::Problem& problem) {
-                if(!problem.RegisterTensorDescriptor(id, miopen::deref(descriptor)))
+        const auto impl = miopen::hof_match(
+            [&](miopen::Problem& problem_) {
+                if(!problem_.RegisterTensorDescriptor(id, miopen::deref(descriptor)))
                     MIOPEN_THROW(miopenStatusBadParm,
                                  "Attempt to set tensor descriptor with the same name twice in the "
                                  "same problem");
@@ -284,14 +261,14 @@ miopenStatus_t miopenFindSolutions(miopenHandle_t handle,
         auto& handle_deref        = miopen::deref(handle);
         const auto& problem_deref = miopen::deref(problem).item;
 
-        std::visit([](auto&& problem) { problem.LogDriverCommand(); }, problem_deref);
+        std::visit([](auto&& problem_) { problem_.LogDriverCommand(); }, problem_deref);
 
         const auto& options_deref =
             options == nullptr ? miopen::FindOptions{} : miopen::deref(options);
 
         auto solutions_deref = std::visit(
-            [&](auto&& problem) {
-                return problem.FindSolutions(handle_deref, options_deref, maxSolutions);
+            [&](auto&& problem_) {
+                return problem_.FindSolutions(handle_deref, options_deref, maxSolutions);
             },
             problem_deref);
 

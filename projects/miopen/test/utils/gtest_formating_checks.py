@@ -52,7 +52,7 @@ TESTSUITE_REGEX = re.compile(
     r"^(CPU|GPU)_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*_(" + "|".join(VALID_DATATYPES) + r")$"
 )
 # Test type for instantiations must be one of these words, optionally with extra alphanum characters.
-TEST_TYPE_REGEX = re.compile(r"^(Smoke|Full|Perf|Unit)([A-Za-z0-9]*)?$")
+TEST_TYPE_REGEX = re.compile(r"^(Smoke|Standard|Full|Perf|Unit)([A-Za-z0-9]*)?$")
 
 # Updated regexes that do not allow newlines in the macro arguments
 TEST_P_REGEX = re.compile(

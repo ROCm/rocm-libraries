@@ -551,7 +551,7 @@ static void LogCmdRNN(const miopenTensorDescriptor_t* xDesc,
             for(int i = 0; i < seqLength; i++)
             {
                 batch_sz += std::to_string(miopen::deref(xDesc[i]).GetLengths()[0]);
-                batch_sz += ",";
+                batch_sz += ',';
             }
             batch_sz.pop_back();
         }

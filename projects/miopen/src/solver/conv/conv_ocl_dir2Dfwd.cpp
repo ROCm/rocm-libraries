@@ -319,7 +319,8 @@ ConvSolution ConvOclDirectFwd::BaseGetSolution(const ExecutionContext& ctx,
     if(result.out_pix_tile1 == 0 || result.out_pix_tile0 == 0 /* DIV/0 */)
     {
         MIOPEN_LOG_E("result.out_pix_tile1 == 0 || result.out_pix_tile0 == 0");
-        return {miopenStatusInternalError};
+        result = ConvSolution{miopenStatusInternalError};
+        return result;
     }
     result.grp_tile0 = std::max(8, (result.in_tile0 / result.out_pix_tile0));
     result.grp_tile1 = std::max(8, (result.in_tile1 / result.out_pix_tile1));
@@ -332,7 +333,8 @@ ConvSolution ConvOclDirectFwd::BaseGetSolution(const ExecutionContext& ctx,
     if(alu_tiles_sz > 256 || alu_tiles_sz == 0 /* DIV/0 */)
     {
         MIOPEN_LOG_E("need out pix size ajustments (alu_tiles_sz > 256 || alu_tiles_sz == 0)");
-        return {miopenStatusInternalError};
+        result = ConvSolution{miopenStatusInternalError};
+        return result;
     }
 
     int n_alus_total = (result.grp_tile0 * result.grp_tile1);
@@ -343,7 +345,8 @@ ConvSolution ConvOclDirectFwd::BaseGetSolution(const ExecutionContext& ctx,
     if(result.n_stacks == 0 /* DIV/0 */)
     {
         MIOPEN_LOG_E("result.n_stacks == 0");
-        return {miopenStatusInternalError};
+        result = ConvSolution{miopenStatusInternalError};
+        return result;
     }
     int n_alus_perstack = (n_alus_total + result.n_stacks - 1) / result.n_stacks;
 
@@ -464,7 +467,8 @@ ConvSolution ConvOclDirectFwd::BaseGetSolution(const ExecutionContext& ctx,
     if(n_out_tiles_perstack == 0 /* DIV/0 */)
     {
         MIOPEN_LOG_E("n_out_tiles_perstack == 0");
-        return {miopenStatusInternalError};
+        result = ConvSolution{miopenStatusInternalError};
+        return result;
     }
     size_t gbl_wk1 =
         group_counts >= 2

@@ -305,31 +305,26 @@ struct PoolingFwdNCHWTransposingSolver
     using Problem      = miopen::pooling::ProblemDescription;
     using InvokeParams = miopen::pooling::FwdInvokeParams;
 
-    inline static auto GetTransposes()
+    inline static auto GetTransposes(const Problem& /*problem*/)
     {
-        auto ret = std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 2>{{
+        return std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 2>{{
             {
                 &Problem::GetXDesc,
-                &Problem::GetXDesc,
                 &InvokeParams::xDesc,
-                {&InvokeParams::x},
+                &InvokeParams::x, // x is input
+                nullptr,
                 "NCDHW",
                 true,
             },
             {
                 &Problem::GetYDesc,
-                &Problem::GetYDesc,
                 &InvokeParams::yDesc,
-                {},
+                nullptr,
+                &InvokeParams::y, // y is output
                 "NCDHW",
                 false,
             },
         }};
-
-        // Before C++20 you can't aggregate initialize non-first union element
-        ret[1].as_output = &InvokeParams::y;
-
-        return ret;
     }
 };
 
@@ -462,31 +457,26 @@ struct PoolingBwdNCHWTransposingSolver
     using Problem      = miopen::pooling::ProblemDescription;
     using InvokeParams = miopen::pooling::BwdInvokeParams;
 
-    inline static auto GetTransposes()
+    inline static auto GetTransposes(const Problem& /*problem*/)
     {
-        auto ret = std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 2>{{
+        return std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 2>{{
             {
                 &Problem::GetXDesc,
-                &Problem::GetXDesc,
                 &InvokeParams::dxDesc,
-                {},
+                nullptr,
+                &InvokeParams::dx, // dx is output
                 "NCDHW",
                 false,
             },
             {
                 &Problem::GetYDesc,
-                &Problem::GetYDesc,
                 &InvokeParams::dyDesc,
-                {&InvokeParams::dy},
+                &InvokeParams::dy, // dy is input
+                nullptr,
                 "NCDHW",
                 true,
             },
         }};
-
-        // Before C++20 you can't aggregate initialize non-first union element
-        ret[0].as_output = &InvokeParams::dx;
-
-        return ret;
     }
 };
 

@@ -1,0 +1,135 @@
+name: StinkyTofu CI
+
+on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
+    paths:
+      - 'shared/stinkytofu/**'
+      - '.github/workflows/stinkytofu-ci.yml'
+  pull_request:
+    paths:
+      - 'shared/stinkytofu/**'
+      - '.github/workflows/stinkytofu-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    name: "Setup"
+    runs-on: ubuntu-24.04
+    outputs:
+      docker-image: ${{ steps.env.outputs.docker-image }}
+      linux-runner: ${{ steps.env.outputs.linux-runner }}
+      windows-runner: ${{ steps.env.outputs.windows-runner }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/ci-env
+      - uses: ./.github/actions/ci-env
+        id: env
+
+  Linux:
+    needs: setup
+    runs-on: ${{ needs.setup.outputs.linux-runner }}
+    container:
+      image: ${{ needs.setup.outputs.docker-image }}
+    env:
+      ROCM_PATH: /opt/rocm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r shared/stinkytofu/requirements.txt
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-linux
+        with:
+          amdgpu_family: gfx94X-dcgpu
+
+      - name: Build (GCC)
+        working-directory: shared/stinkytofu
+        run: invoke build --gcc --build-dir build_gcc --clean
+
+      - name: Build
+        working-directory: shared/stinkytofu
+        run: invoke build
+
+      - name: Debug stinkytofu-opt
+        working-directory: shared/stinkytofu/build
+        run: |
+          ldd tools/stinkytofu-opt/stinkytofu-opt
+          ./tools/stinkytofu-opt/stinkytofu-opt --list-passes
+
+      - name: Test
+        working-directory: shared/stinkytofu/build
+        run: ctest --output-on-failure
+
+      - name: Test pip install
+        uses: ./.github/actions/pip-install-test
+        with:
+          package_path: shared/stinkytofu
+          test_path: python_module/tests
+
+  Windows:
+    needs: setup
+    runs-on: ${{ needs.setup.outputs.windows-runner }}
+    env:
+      BUILD_DIR: B:\build
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Configure git long paths
+        run: git config --global core.longpaths true
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r shared/stinkytofu/requirements.txt
+
+      - name: Install GTest
+        run: vcpkg install gtest
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-windows
+        with:
+          amdgpu_family: gfx1151
+
+      - name: Build
+        working-directory: shared/stinkytofu
+        run: invoke build --build-dir "${{ env.BUILD_DIR }}/stinkytofu"
+
+      - name: Test
+        working-directory: ${{ env.BUILD_DIR }}/stinkytofu
+        run: ctest --output-on-failure
+
+      - name: Build (static)
+        working-directory: shared/stinkytofu
+        run: invoke build --static --build-dir "${{ env.BUILD_DIR }}/stinkytofu-static" --clean
+
+      - name: Test (static)
+        working-directory: ${{ env.BUILD_DIR }}/stinkytofu-static
+        run: ctest --output-on-failure
+
+      - name: Test pip install
+        uses: ./.github/actions/pip-install-test
+        with:
+          package_path: shared/stinkytofu
+          test_path: python_module/tests

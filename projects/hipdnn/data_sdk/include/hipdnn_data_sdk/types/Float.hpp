@@ -15,6 +15,7 @@
  * All functions simply forward to the corresponding std:: function.
  */
 
+#include <algorithm>
 #include <cmath>
 
 namespace hipdnn_data_sdk::types
@@ -60,9 +61,17 @@ inline float copysign(float x, float y)
 // Min/max functions
 inline float max(float a, float b)
 {
-    return std::fmax(a, b);
+    return std::max(a, b);
 }
 inline float min(float a, float b)
+{
+    return std::min(a, b);
+}
+inline float fmax(float a, float b)
+{
+    return std::fmax(a, b);
+}
+inline float fmin(float a, float b)
 {
     return std::fmin(a, b);
 }

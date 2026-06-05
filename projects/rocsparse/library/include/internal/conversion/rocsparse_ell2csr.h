@@ -34,7 +34,7 @@ extern "C" {
 /*! \ingroup conv_module
 *  \details
 *  This function takes a sparse ELL matrix as input and computes the row offset array, \p csr_row_ptr,
-*  and the total number of nonzeros, \p csr_nnz, that will result from converting the ELL format input
+*  and the total number of non-zeros, \p csr_nnz, that will result from converting the ELL format input
 *  matrix to a CSR format output matrix. This function is the first step in the conversion and is used in
 *  conjunction with \ref rocsparse_sell2csr "rocsparse_Xell2csr()". It is assumed that \p csr_row_ptr has
 *  been allocated with size \p m+1.
@@ -46,7 +46,7 @@ extern "C" {
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  m           number of rows of the sparse ELL matrix.
 *  @param[in]
@@ -71,9 +71,9 @@ extern "C" {
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p m, \p n or \p ell_width is invalid.
+*  \retval     rocsparse_status_invalid_size \p m, \p n, or \p ell_width is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p ell_descr, \p ell_col_ind,
-*              \p csr_descr, \p csr_row_ptr or \p csr_nnz pointer is invalid.
+*              \p csr_descr, \p csr_row_ptr, or \p csr_nnz pointer is invalid.
 *  \retval     rocsparse_status_not_implemented
 *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
 */
@@ -89,24 +89,24 @@ rocsparse_status rocsparse_ell2csr_nnz(rocsparse_handle          handle,
                                        rocsparse_int*            csr_nnz);
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse ELL matrix into a sparse CSR matrix
+*  \brief Convert a sparse ELL matrix into a sparse CSR matrix.
 *
 *  \details
 *  \p rocsparse_ell2csr converts a ELL matrix into a CSR matrix. It is assumed
 *  that \p csr_row_ptr has already been filled and that \p csr_val and \p csr_col_ind
-*  are allocated by the user. Allocation size for \p csr_row_ptr is computed as
-*  \p m+1. Allocation size for \p csr_val and \p csr_col_ind is computed using
+*  are allocated by the user. The allocation size for \p csr_row_ptr is computed as
+*  \p m+1. The allocation size for \p csr_val and \p csr_col_ind is computed using
 *  \ref rocsparse_ell2csr_nnz() which also fills in \p csr_row_ptr.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  m           number of rows of the sparse ELL matrix.
 *  @param[in]
@@ -134,9 +134,9 @@ rocsparse_status rocsparse_ell2csr_nnz(rocsparse_handle          handle,
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p m, \p n or \p ell_width is invalid.
+*  \retval     rocsparse_status_invalid_size \p m, \p n, or \p ell_width is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p csr_descr, \p csr_val,
-*              \p csr_row_ptr, \p csr_col_ind, \p ell_descr, \p ell_val or
+*              \p csr_row_ptr, \p csr_col_ind, \p ell_descr, \p ell_val, or
 *              \p ell_col_ind pointer is invalid.
 *  \retval     rocsparse_status_not_implemented
 *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.

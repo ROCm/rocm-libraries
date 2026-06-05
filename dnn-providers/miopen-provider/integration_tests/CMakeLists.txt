@@ -3,24 +3,22 @@
 
 find_package(Threads REQUIRED)
 
-find_package(hipdnn_test_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+# hipdnn SDK dependencies - use targets directly if available (superbuild),
+# otherwise find installed packages (true standalone)
+if(NOT TARGET hipdnn_test_sdk)
+    find_package(hipdnn_test_sdk CONFIG REQUIRED)
+endif()
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+endif()
 
 add_executable(
     miopen_plugin_integration_tests
     main.cpp
-    IntegrationGpuBatchnormBackward.cpp
-    IntegrationGpuBatchnormBackwardActivation.cpp
-    IntegrationGpuBatchnormForwardInference.cpp
-    IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
-    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
-    IntegrationGpuBatchnormFwdPlusActive.cpp
-    IntegrationGpuBatchnormForwardTraining.cpp
-    IntegrationGpuBatchnormFwdTrainingActiv.cpp
-    IntegrationGpuConvForward.cpp
-    IntegrationGpuConvFwdBiasActiv.cpp
-    IntegrationGpuConvBackwardData.cpp
-    IntegrationGpuConvBackwardWeights.cpp
+    IntegrationGpuBatchnormUnsupportedDataTypes.cpp
+    IntegrationGpuBatchnormTrainingUnhappySpatial.cpp
+    IntegrationGpuBatchnormUnhappyActivation.cpp
+    IntegrationGpuBatchnormUnhappyLayouts.cpp
     IntegrationGpuBenchmarkingKnob.cpp
     IntegrationGpuDeterministic.cpp
 )
@@ -44,4 +42,4 @@ add_dependencies(miopen_plugin_integration_tests miopen_plugin)
 
 clang_tidy_check(miopen_plugin_integration_tests)
 
-add_integration_test_target(miopen_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_integration_test_target(miopen_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR} LABELS slow)

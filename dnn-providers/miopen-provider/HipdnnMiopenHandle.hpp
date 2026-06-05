@@ -32,6 +32,11 @@ class MiopenContainer;
 struct HipdnnMiopenHandle : HipdnnEnginePluginHandle
 {
 public:
+    HipdnnMiopenHandle(const HipdnnMiopenHandle&) = delete;
+    HipdnnMiopenHandle& operator=(const HipdnnMiopenHandle&) = delete;
+    HipdnnMiopenHandle(HipdnnMiopenHandle&&) = delete;
+    HipdnnMiopenHandle& operator=(HipdnnMiopenHandle&&) = delete;
+
     HipdnnMiopenHandle()
     {
         miopenStatus_t status = miopenCreate(&miopenHandle);

@@ -3,10 +3,10 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-import pathlib
 import sys
+from pathlib import Path
 
-repo_dir = pathlib.Path(__file__).resolve().parent.parent
+repo_dir = Path(__file__).resolve().parent.parent
 sys.path.append(str(repo_dir / "scripts" / "lib"))
 
 import rrperf.cli  # noqa: E402

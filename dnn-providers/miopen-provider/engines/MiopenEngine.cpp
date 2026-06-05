@@ -4,9 +4,9 @@
 #include "MiopenEngine.hpp"
 #include "plans/MiopenBatchnormPlanBuilder.hpp"
 
-#include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -24,8 +24,9 @@ auto createBenchmarkingKnob(flatbuffers::FlatBufferBuilder& builder)
         builder, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {});
 }
 
-void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
-                                   HipdnnMiopenSettings& executionSettings)
+void handleBenchmarkingKnobSetting(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    HipdnnMiopenSettings& executionSettings)
 {
     if(!engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
     {
@@ -35,21 +36,21 @@ void handleBenchmarkingKnobSetting(const hipdnn_plugin_sdk::IEngineConfig& engin
     const auto& knobSetting
         = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
 
-    if(knobSetting.valueType() != hipdnn_data_sdk::data_objects::KnobValue::IntValue)
+    if(knobSetting.valueType() != hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Benchmarking knob setting value is not an integer. Type: "
-                + std::string(
-                    hipdnn_data_sdk::data_objects::EnumNameKnobValue(knobSetting.valueType())));
+                + std::string(hipdnn_flatbuffers_sdk::data_objects::EnumNameKnobValue(
+                    knobSetting.valueType())));
     }
 
-    auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
+    auto value = knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>().value();
     executionSettings.setBenchmarkingEnabled(value != 0);
 }
 
 void initializeMiopenSettings(
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnMiopenSettings& executionSettings)
 {
     if(engineConfig.isValid())
@@ -74,8 +75,9 @@ int64_t MiopenEngine::id() const
     return _id;
 }
 
-bool MiopenEngine::isApplicable(HipdnnMiopenHandle& handle,
-                                const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+bool MiopenEngine::isApplicable(
+    HipdnnMiopenHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     // This is wrong if we ever have more than 1 plan builder thats applicable.
     // If this is the case, we should split plan builders accross multiple engines.
@@ -90,14 +92,14 @@ bool MiopenEngine::isApplicable(HipdnnMiopenHandle& handle,
 }
 
 void MiopenEngine::getDetails(HipdnnMiopenHandle& handle,
-                              const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                              const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                               hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
 
     auto benchmarkingKnob = createBenchmarkingKnob(builder);
 
-    std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
+    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobsVector;
     knobsVector.push_back(benchmarkingKnob);
 
     // Collect custom knobs from plan builders
@@ -112,7 +114,7 @@ void MiopenEngine::getDetails(HipdnnMiopenHandle& handle,
 
         for(const auto& knobT : customKnobs)
         {
-            auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(builder, &knobT);
+            auto knobOffset = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobT);
             knobsVector.push_back(knobOffset);
         }
 
@@ -123,7 +125,8 @@ void MiopenEngine::getDetails(HipdnnMiopenHandle& handle,
 
     auto knobs = builder.CreateVector(knobsVector);
 
-    auto engineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
+    auto engineDetails
+        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();
@@ -134,8 +137,8 @@ void MiopenEngine::getDetails(HipdnnMiopenHandle& handle,
 
 size_t MiopenEngine::getMaxWorkspaceSize(
     const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
     HipdnnMiopenSettings baseExecutionSettings;
     initializeMiopenSettings(engineConfig, baseExecutionSettings);
@@ -160,8 +163,8 @@ size_t MiopenEngine::getMaxWorkspaceSize(
 
 void MiopenEngine::initializeExecutionContext(
     const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     HipdnnMiopenContext& executionContext) const
 {
     HipdnnMiopenSettings executionSettings;

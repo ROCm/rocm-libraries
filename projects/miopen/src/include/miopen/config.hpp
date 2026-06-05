@@ -28,11 +28,6 @@
 
 #include <miopen/config.h>
 #include <miopen/export.h>
-
-#ifdef MIOPEN_BUILD_TESTING
 #include <miopen/export_internals.h>
-#else
-#define MIOPEN_INTERNALS_EXPORT
-#endif
 
 #endif // GUARD_MIOPEN_CONFIG_HPP

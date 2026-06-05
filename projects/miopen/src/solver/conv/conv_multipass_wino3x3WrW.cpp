@@ -474,8 +474,16 @@ bool ConvWinograd3x3MultipassWrW<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>
         return false;
     if(problem.IsTensorsCasted())
         return false;
-    if(!problem.IsLayoutDefault())
-        return false;
+
+    // Use IsPossibleLayout4D5D to check actual tensor strides rather than cached layout string
+    // This allows transposed solvers to work correctly when they modify tensor strides
+    {
+        static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+        if(!(problem.GetIn().IsPossibleLayout4D5D("NCHW", strict) &&
+             problem.GetWeights().IsPossibleLayout4D5D("NCHW", strict) &&
+             problem.GetOut().IsPossibleLayout4D5D("NCHW", strict)))
+            return false;
+    }
 
     const auto& target = ctx.GetStream().GetTargetProperties();
     if(target.isXnackEnabled())
@@ -524,8 +532,15 @@ bool ConvWinograd3x3MultipassWrW<WinoDataH, WinoFilterH, WinoDataW, WinoFilterW>
     {
         return false;
     }
-    if(!problem.IsLayoutDefault())
-        return false;
+    // Use IsPossibleLayout4D5D to check actual tensor strides rather than cached layout string
+    // This allows transposed solvers to work correctly when they modify tensor strides
+    {
+        static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
+        if(!(problem.GetIn().IsPossibleLayout4D5D("NCHW", strict) &&
+             problem.GetWeights().IsPossibleLayout4D5D("NCHW", strict) &&
+             problem.GetOut().IsPossibleLayout4D5D("NCHW", strict)))
+            return false;
+    }
 
     // clang-format off
     {
@@ -811,6 +826,20 @@ template struct MIOPEN_INTERNALS_EXPORT ConvWinograd3x3MultipassWrW<7, 2, 1, 1>;
 template struct MIOPEN_INTERNALS_EXPORT ConvWinograd3x3MultipassWrW<7, 3, 1, 1>;
 template struct MIOPEN_INTERNALS_EXPORT ConvWinograd3x3MultipassWrW<5, 3>;
 template struct MIOPEN_INTERNALS_EXPORT ConvWinograd3x3MultipassWrW<5, 4>;
+
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<3, 2>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<3, 3>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<3, 4>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<3, 5>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<3, 6>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<7, 2>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<7, 3>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 2>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 3>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<7, 2, 1, 1>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<7, 3, 1, 1>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<5, 3>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinograd3x3MultipassWrW<5, 4>;
 
 } // namespace conv
 } // namespace solver

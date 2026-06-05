@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -37,7 +37,8 @@ class MAC_F32_Plain(MAC):
     def asmCaps(caps):
         return caps["v_mac_f32"] or caps["v_fma_f32"]
 
-    kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Float)}}
+    kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.Float),
+                              "MacDataTypeB": DataType(DataTypeEnum.Float),}}
 
     def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel

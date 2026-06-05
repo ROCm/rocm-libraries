@@ -1,0 +1,200 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --BuildUseDefChainPass --PeepholeOptimizationPass --print-output
+#
+# Add+FMA Fusion: v_fma + v_add with constants → single v_fma with summed constant.
+# Converted from PeepholeOptimizationPassTest.*AddFMA* and related tests.
+
+#--- F32 in-place: v_fma v0,v1,v2,1.0 + v_add v0,1.0,v0 → v_fma v0,v1,v2,2.0
+# CHECK-LABEL: @add_fma_f32_inplace
+# CHECK: v_fma_f32
+# CHECK-SAME: v0
+# CHECK-SAME: v1
+# CHECK-SAME: v2
+# CHECK-SAME: 2
+# CHECK-NOT: v_add_f32
+
+st.func @add_fma_f32_inplace() {
+^entry:
+  v0 = "st.v_fma_f32"(v1, v2, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_add_f32"(1.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- F32 non-in-place: v_fma v0,v1,v2,1.5 + v_add v3,0.5,v0 → v_fma v3,v1,v2,2.0
+# CHECK-LABEL: @add_fma_f32_non_inplace
+# CHECK: v_fma_f32
+# CHECK-SAME: v3
+# CHECK-SAME: v1
+# CHECK-SAME: v2
+# CHECK-SAME: 2
+# CHECK-NOT: v_add_f32
+
+st.func @add_fma_f32_non_inplace() {
+^entry:
+  v0 = "st.v_fma_f32"(v1, v2, 1.5) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(0.5, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- F16 in-place: 0.5 + 0.5 = 1.0
+# CHECK-LABEL: @add_fma_f16_inplace
+# CHECK: v_fma_f16
+# CHECK-SAME: v10
+# CHECK-SAME: v11
+# CHECK-SAME: v12
+# CHECK-SAME: 1
+# CHECK-NOT: v_add_f16
+
+st.func @add_fma_f16_inplace() {
+^entry:
+  v10 = "st.v_fma_f16"(v11, v12, 0.5) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.v_add_f16"(0.5, v10) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- F16 non-in-place: 2.0 + 3.0 = 5.0
+# CHECK-LABEL: @add_fma_f16_non_inplace
+# CHECK: v_fma_f16
+# CHECK-SAME: v8
+# CHECK-SAME: v6
+# CHECK-SAME: v7
+# CHECK-SAME: 5
+# CHECK-NOT: v_add_f16
+
+st.func @add_fma_f16_non_inplace() {
+^entry:
+  v5 = "st.v_fma_f16"(v6, v7, 2.0) { issueCycles = 1, latencyCycles = 5 }
+  v8 = "st.v_add_f16"(3.0, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative: FMA result has multiple uses → no fusion
+# CHECK-LABEL: @no_fusion_multiple_uses
+# CHECK: v_fma_f32
+# CHECK: v_add_f32
+# CHECK: v_mul_f32
+
+st.func @no_fusion_multiple_uses() {
+^entry:
+  v0 = "st.v_fma_f32"(v1, v2, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(1.0, v0) { issueCycles = 1, latencyCycles = 5 }
+  v4 = "st.v_mul_f32"(v0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative: FMA has register addend, not constant → no fusion
+# CHECK-LABEL: @no_fusion_fma_const_missing
+# CHECK: v_fma_f32
+# CHECK: v_add_f32
+
+st.func @no_fusion_fma_const_missing() {
+^entry:
+  v0 = "st.v_fma_f32"(v1, v2, v3) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_add_f32"(1.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative: ADD has register operand, not constant → no fusion
+# CHECK-LABEL: @no_fusion_add_const_missing
+# CHECK: v_fma_f32
+# CHECK: v_add_f32
+
+st.func @no_fusion_add_const_missing() {
+^entry:
+  v0 = "st.v_fma_f32"(v1, v2, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_add_f32"(v3, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Non-consecutive: intervening instruction doesn't touch v0 → SHOULD fuse
+# CHECK-LABEL: @fusion_non_consecutive
+# CHECK: v_fma_f32
+# CHECK-SAME: v0
+# CHECK-SAME: v1
+# CHECK-SAME: v2
+# CHECK-SAME: 2
+# CHECK: v_mul_f32
+# CHECK-NOT: v_add_f32
+
+st.func @fusion_non_consecutive() {
+^entry:
+  v0 = "st.v_fma_f32"(v1, v2, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mul_f32"(v6, v7) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_add_f32"(1.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative: intervening def overwrites FMA result → no fusion
+# CHECK-LABEL: @no_fusion_intervening_def
+# CHECK: v_fma_f32
+# CHECK: v_mul_f32
+# CHECK: v_add_f32
+
+st.func @no_fusion_intervening_def() {
+^entry:
+  v0 = "st.v_fma_f32"(v1, v2, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_mul_f32"(v6, v7) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(1.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative constants: -1.0 + -2.0 = -3.0
+# CHECK-LABEL: @negative_constants
+# CHECK: v_fma_f32
+# CHECK-SAME: -3
+# CHECK-NOT: v_add_f32
+
+st.func @negative_constants() {
+^entry:
+  v0 = "st.v_fma_f32"(v1, v2, -1.0) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_add_f32"(-2.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Zero constants: 0.0 + 0.0 = 0.0
+# CHECK-LABEL: @zero_constants
+# CHECK: v_fma_f32
+# CHECK-SAME: 0
+# CHECK-NOT: v_add_f32
+
+st.func @zero_constants() {
+^entry:
+  v0 = "st.v_fma_f32"(v1, v2, 0.0) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_add_f32"(0.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Commutative: v_add with swapped operands (reg, const) → should fuse
+# CHECK-LABEL: @fusion_commutative
+# CHECK: v_fma_f32
+# CHECK-SAME: v11
+# CHECK-SAME: v1
+# CHECK-SAME: v2
+# CHECK-SAME: 2
+# CHECK-NOT: v_add_f32
+
+st.func @fusion_commutative() {
+^entry:
+  v10 = "st.v_fma_f32"(v1, v2, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v11 = "st.v_add_f32"(v10, 1.0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Commutative in-place
+# CHECK-LABEL: @fusion_commutative_inplace
+# CHECK: v_fma_f32
+# CHECK-SAME: v10
+# CHECK-SAME: v1
+# CHECK-SAME: v2
+# CHECK-SAME: 2
+# CHECK-NOT: v_add_f32
+
+st.func @fusion_commutative_inplace() {
+^entry:
+  v10 = "st.v_fma_f32"(v1, v2, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.v_add_f32"(v10, 1.0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Register reuse: same reg redefined multiple times, def#1 has only one use → should fuse
+# CHECK-LABEL: @fusion_register_reuse
+# CHECK: v_fma_f32
+# CHECK-SAME: v10
+# CHECK-SAME: 2
+# CHECK: v_mul_f32
+# CHECK: v_mul_f32
+# CHECK-NOT: v_add_f32
+
+st.func @fusion_register_reuse() {
+^entry:
+  v10 = "st.v_fma_f32"(v1, v2, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.v_add_f32"(1.0, v10) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.v_mul_f32"(v3, v10) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mul_f32"(v4, v10) { issueCycles = 1, latencyCycles = 5 }
+}

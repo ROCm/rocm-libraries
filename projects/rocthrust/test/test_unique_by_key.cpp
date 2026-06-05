@@ -538,6 +538,10 @@ TEST(UniqueIntegralTests, TestUniqueDevice)
 
 TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKeyLargeInput)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping large size test for address sanitizer build.";
+#endif
+
   using K          = typename TestFixture::input_type;
   using type       = K;
   using index_type = std::int64_t;
@@ -569,6 +573,10 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKeyLargeInput)
 
 TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKeyLargeOutCount)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping large size test for address sanitizer build.";
+#endif
+
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   constexpr std::size_t num_items = 4400000000ULL;

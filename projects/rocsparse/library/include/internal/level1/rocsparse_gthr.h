@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /*! \ingroup level1_module
-*  \brief Gather elements from a dense vector and store them into a sparse vector.
+*  \brief Gather elements from a dense vector and store them in a sparse vector.
 *
 *  \details
 *  \p rocsparse_gthr gathers the elements that are listed in \p x_ind from the dense
@@ -47,14 +47,14 @@ extern "C" {
 *  \endcode
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  nnz         number of non-zero entries of \f$x\f$.
 *  @param[in]
@@ -71,7 +71,7 @@ extern "C" {
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_value \p idx_base is invalid.
 *  \retval     rocsparse_status_invalid_size \p nnz is invalid.
-*  \retval     rocsparse_status_invalid_pointer \p y, \p x_val or \p x_ind pointer is
+*  \retval     rocsparse_status_invalid_pointer \p y, \p x_val, or \p x_ind pointer is
 *              invalid.
 *
 *  \par Example

@@ -21,7 +21,7 @@ public:
     MOCK_METHOD(bool,
                 isApplicable,
                 (HipdnnEnginePluginHandle & handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
+                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph),
                 (const, override));
     MOCK_METHOD(void,
                 getDetails,
@@ -30,13 +30,13 @@ public:
     MOCK_METHOD(size_t,
                 getWorkspaceSize,
                 (const HipdnnEnginePluginHandle& handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
+                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph),
                 (const, override));
 
     MOCK_METHOD(void,
                 initializeExecutionContext,
                 (const HipdnnEnginePluginHandle& handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                  HipdnnEnginePluginExecutionContext& executionContext),
                 (const, override));
 };

@@ -66,8 +66,6 @@ struct ProblemDescription : ProblemDescriptionBase,
     const PoolingDescriptor& GetPooling() const { return pooling; }
     const TensorDescriptor& GetXDesc() const { return xDesc; }
     const TensorDescriptor& GetYDesc() const { return yDesc; }
-    TensorDescriptor& GetXDesc() { return xDesc; }
-    TensorDescriptor& GetYDesc() { return yDesc; }
 
     const TensorDescriptor& GetDXDesc() const
     {
@@ -183,16 +181,12 @@ private:
     }
     std::string GetDirectionStr() const
     {
-        std::string s;
-
         switch(direction)
         {
         case Direction::Forward: return "Fwd";
         case Direction::Backward: return "Bwd";
         default: MIOPEN_THROW(miopenStatusInvalidValue, "Wrong pooling direction provided");
         }
-
-        return s;
     }
     std::string GetModeStr() const
     {

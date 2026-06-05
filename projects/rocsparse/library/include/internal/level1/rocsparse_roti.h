@@ -54,14 +54,14 @@ extern "C" {
 *  \endcode
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  nnz         number of non-zero entries of \f$x\f$.
 *  @param[inout]
@@ -72,9 +72,9 @@ extern "C" {
 *  @param[inout]
 *  y           array of values in dense format.
 *  @param[in]
-*  c           pointer to the cosine element of \f$G\f$, can be on host or device.
+*  c           pointer to the cosine element of \f$G\f$, can be on the host or device.
 *  @param[in]
-*  s           pointer to the sine element of \f$G\f$, can be on host or device.
+*  s           pointer to the sine element of \f$G\f$, can be on the host or device.
 *  @param[in]
 *  idx_base    \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
 *
@@ -82,7 +82,7 @@ extern "C" {
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_value \p idx_base is invalid.
 *  \retval     rocsparse_status_invalid_size \p nnz is invalid.
-*  \retval     rocsparse_status_invalid_pointer \p c, \p s, \p x_val, \p x_ind or \p y
+*  \retval     rocsparse_status_invalid_pointer \p c, \p s, \p x_val, \p x_ind, or \p y
 *              pointer is invalid.
 *
 *  \par Example

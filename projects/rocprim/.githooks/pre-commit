@@ -6,7 +6,7 @@ exec 1>&2
 check_failed=false
 
 # Do the code format check
-if ! "$(git rev-parse --show-toplevel)/scripts/code-format/check-format.sh" HEAD --cached 1>&2; then
+if ! "$(git rev-parse --show-toplevel)/projects/rocprim/scripts/code-format/check-format.sh" HEAD --cached 1>&2; then
     printf "\n\033[31mFailed\033[0m: code format check.\n"
     check_failed=true
 fi
@@ -18,7 +18,7 @@ if [ "$(git config --get --type bool --default false hooks.updateCopyright)" = "
     opts="-qca"
 fi
 
-if ! "$(git rev-parse --show-toplevel)/scripts/copyright-date/check-copyright.sh" "$opts" 1>&2; then
+if ! "$(git rev-parse --show-toplevel)/projects/rocprim/scripts/copyright-date/check-copyright.sh" "$opts" 1>&2; then
     printf "\n\033[31mFailed\033[0m: copyright date check.\n"
     check_failed=true
 fi

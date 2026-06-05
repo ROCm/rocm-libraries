@@ -1,0 +1,96 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --RedundantMovEliminationPass --print-output
+#
+# Redundant MOV Elimination: remove duplicate v_mov_b32 instructions
+# that write the same value to the same destination.
+# Converted from RedundantMovEliminationPassTest.
+
+#--- Simple duplicate: two identical movs, second is eliminated
+# CHECK-LABEL: @eliminate_simple_duplicate
+# CHECK: v_mov_b32
+# CHECK-SAME: v0
+# CHECK-SAME: v1
+# CHECK: v_add_f32
+# CHECK: v_sub_f32
+# CHECK-NOT: v_mov_b32
+
+st.func @eliminate_simple_duplicate() {
+^entry:
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  v7 = "st.v_sub_f32"(v0, v3) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Multiple duplicates: three identical movs, only first kept
+# CHECK-LABEL: @multiple_duplicates
+# CHECK: v_mov_b32
+# CHECK-SAME: v0
+# CHECK-SAME: v1
+# CHECK: v_add_f32
+# CHECK: v_sub_f32
+# CHECK: v_fma_f32
+# CHECK-NOT: v_mov_b32
+
+st.func @multiple_duplicates() {
+^entry:
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  v6 = "st.v_sub_f32"(v7, v8) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  v9 = "st.v_fma_f32"(v0, v3, v6) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Don't eliminate when source is modified between movs
+# CHECK-LABEL: @dont_eliminate_modified_operand
+# CHECK: v_mov_b32
+# CHECK-SAME: v0
+# CHECK-SAME: v1
+# CHECK: v_add_f32
+# CHECK: v_sub_f32
+# CHECK-SAME: v1
+# CHECK: v_mov_b32
+# CHECK-SAME: v8
+# CHECK-SAME: v1
+
+st.func @dont_eliminate_modified_operand() {
+^entry:
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v1 = "st.v_sub_f32"(v6, v7) { issueCycles = 1, latencyCycles = 5 }
+  v8 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- Different operands: all movs have different src/dst, none eliminated
+# CHECK-LABEL: @different_operands
+# CHECK: v_mov_b32
+# CHECK-SAME: v0
+# CHECK-SAME: v1
+# CHECK: v_mov_b32
+# CHECK-SAME: v3
+# CHECK-SAME: v4
+# CHECK: v_mov_b32
+# CHECK-SAME: v6
+# CHECK-SAME: v5
+
+st.func @different_operands() {
+^entry:
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 1 }
+  v6 = "st.v_mov_b32"(v5) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- No duplicates: all movs to different destinations with different sources
+# CHECK-LABEL: @no_duplicates
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+
+st.func @no_duplicates() {
+^entry:
+  v0 = "st.v_mov_b32"(v1) { issueCycles = 1, latencyCycles = 1 }
+  v3 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 1 }
+  v6 = "st.v_mov_b32"(v7) { issueCycles = 1, latencyCycles = 1 }
+  v9 = "st.v_mov_b32"(v10) { issueCycles = 1, latencyCycles = 1 }
+}

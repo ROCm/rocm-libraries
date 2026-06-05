@@ -6,8 +6,8 @@
 #include <memory>
 #include <mutex>
 
-#include <hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_wrw_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <miopen/miopen.h>
 
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
@@ -24,8 +24,9 @@ class ConvWrwParams
 {
 public:
     ConvWrwParams(
-        const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap,
         bool deterministicEnabled = false);
 

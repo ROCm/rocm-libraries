@@ -30,13 +30,13 @@ Tests:
   category: pre_checkin
   function: scatter_bad_arg
   indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
+  precision: *scatter_precisions
 
 - name: scatter
   category: quick
   function: scatter
   indextype: *i32
-  precision: *single_double_precisions
+  precision: *scatter_precisions
   N: [5000]
   nnz: [0, 10, 500, 2500, 5000]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
@@ -45,7 +45,7 @@ Tests:
   category: pre_checkin
   function: scatter
   indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
+  precision: *scatter_precisions
   N: [12000, 15332, 22031]
   nnz: [0, 5, 10, 500, 1000, 7111, 10000, 12000]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
@@ -54,7 +54,7 @@ Tests:
   category: nightly
   function: scatter
   indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
+  precision: *scatter_precisions
   N: [100000, 500000]
   nnz: [0, 1000, 10000, 50000, 100000]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
@@ -63,7 +63,7 @@ Tests:
   category: pre_checkin
   function: scatter
   indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
+  precision: *scatter_precisions
   N: [26870]
   nnz: [18756]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]

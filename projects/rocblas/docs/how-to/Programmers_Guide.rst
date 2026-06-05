@@ -1464,6 +1464,12 @@ For example, the performance of SGEMM using rocblas-bench on an AMD vega20 machi
    transA,transB,M,N,K,alpha,lda,ldb,beta,ldc,rocblas-Gflops,us
    N,N,4096,4096,4096,1,4096,4096,0,4096,11941.5,11509.4
 
+Logging affects performance, so only use it to log the command under evaluation,
+then run the command without logging to measure performance.
+
+Use of logging to advise on rocblas-bench arguments
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 A useful way of finding the parameters that can be used with ``./rocblas-bench -f gemm`` is to turn on logging
 by setting the environment variable ``ROCBLAS_LAYER=2``. For example, if the user runs:
 
@@ -1483,15 +1489,18 @@ The user can copy and change the above command. For example, to change the datat
 
    ./rocblas-bench -f gemm -r f64_r --transposeA N --transposeB N -m 2048 -n 2048 -k 2048 --alpha 1 --lda 2048 --ldb 2048 --beta 0 --ldc 2048
 
+
+Benchmarking ILP64 APIs
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 To measure performance on the ILP64 API functions, when they exist, add the argument ``--api 1`` rather
 than changing the function name set in ``-f``.
-Logging affects performance, so only use it to log the command under evaluation,
-then run the command without logging to measure performance.
 
 
 .. note::
 
-   rocblas-bench also has the flag ``-v 1`` for correctness checks.
+   rocblas-bench has the flag ``-v 1`` for norm based correctness checks against CPU reference.
+   rocblas-bench has the flag ``-t 1`` for equality and tolerance based correctness checks against CPU reference.
 
 Benchmarking special case gemv_batched and gemv_strided_batched functions using rocblas-bench
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1626,6 +1635,10 @@ The following test situations require additional consideration:
    .. code-block:: bash
 
       ROCBLAS_CLIENT_RAM_GB_LIMIT=32 ./rocblas-test --gtest_filter=*stress*
+
+   If the ``rocblas-test`` process is being killed due to an out of memory (OOM) condition, then reduce the client limit by half
+   and try again.  It is not advisable to run any stress tests if you have less than 8 GB VRAM available to your graphics device.
+   Use the test subtraction syntax if combining with other filters, for example, ``-*stress*``.
 
 *  Long-running tests
 

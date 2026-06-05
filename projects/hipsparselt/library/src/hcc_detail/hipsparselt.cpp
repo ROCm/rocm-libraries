@@ -945,8 +945,8 @@ try
 {
     *archName = nullptr;
     auto arch = rocsparselt_internal_get_arch_name();
-    *archName = (char*)malloc(arch.size() * sizeof(char));
-    strncpy(*archName, arch.c_str(), arch.size());
+    *archName = (char*)malloc((arch.size() + 1) * sizeof(char));
+    strcpy(*archName, arch.c_str());
     return HIPSPARSE_STATUS_SUCCESS;
 }
 catch(...)

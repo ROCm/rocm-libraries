@@ -28,7 +28,7 @@
 
 #include "RunListener.hpp"
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <ConvolutionProblem.hpp>
 #include <Tensile/ContractionProblem.hpp>
@@ -42,8 +42,6 @@ namespace Tensile
 {
     namespace Client
     {
-        namespace po = boost::program_options;
-
         class ReferenceValidator : public RunListener
         {
         public:

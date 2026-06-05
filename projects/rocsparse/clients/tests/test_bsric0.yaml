@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -54,6 +54,21 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   direction: [rocsparse_direction_row, rocsparse_direction_column]
   matrix: [rocsparse_matrix_zero]
+
+- name : bsric0_math
+  category: quick
+  function : bsric0
+  precision: *double_only_precisions_complex_real
+  M: [1]
+  N: [1]
+  block_dim: [3, 4, 5, 8, 9, 16, 17, 32, 33]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+  formatA: [rocsparse_format_bsr]
 
 - name: bsric0
   category: quick

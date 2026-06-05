@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-set(SUPPORTED_GPUS gfx908 gfx90a gfx942 gfx950)
+set(SUPPORTED_GPUS gfx908 gfx90a gfx942 gfx950 gfx1201 gfx1250)
 
 set(has_supported_gpu FALSE)
 foreach(gpu IN LISTS GPU_TARGETS)
@@ -30,14 +30,14 @@ if(has_supported_gpu)
     add_executable(tile_example_grouped_flatmm grouped_flatmm.cpp)
     target_compile_options(tile_example_grouped_flatmm PRIVATE ${EXAMPLE_FLATMM_COMPILE_OPTIONS})
 
-    if(GPU_TARGETS MATCHES "gfx95" OR GPU_TARGETS MATCHES "gfx94")
+    if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
         add_executable(tile_example_mixed_prec_flatmm mixed_prec/mixed_prec_flatmm.cpp)
         target_compile_options(tile_example_mixed_prec_flatmm PRIVATE ${EXAMPLE_FLATMM_COMPILE_OPTIONS})
 
         add_executable(tile_example_a16w4_moe_flatmm mixed_prec/a16w4_moe_flatmm.cpp)
         target_compile_options(tile_example_a16w4_moe_flatmm PRIVATE ${EXAMPLE_FLATMM_COMPILE_OPTIONS})
     endif()
-    if (GPU_TARGETS MATCHES "gfx95")
+    if (GPU_TARGETS MATCHES "gfx95" OR GPU_TARGETS MATCHES "gfx125")
         include(mxgemm/mx_flatmm_instance.cmake)
         mx_flatmm_instance_generate(EXAMPLE_MX_FLATMM_FILES)
         message(STATUS "Generated MX FlatMM kernel files: ${EXAMPLE_MX_FLATMM_FILES}")

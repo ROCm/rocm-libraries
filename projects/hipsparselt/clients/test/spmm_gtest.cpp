@@ -58,10 +58,14 @@ namespace
         std::enable_if_t<std::is_same<Ti, __half>{} || std::is_same<Ti, hip_bfloat16>{}
                          || std::is_same<Ti, int8_t>{}
 #ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
-			 || std::is_same<Ti, hipsparselt_fp8_e4m3>{}
+                         || std::is_same<Ti, hipsparselt_fp8_e4m3>{}
                          || std::is_same<Ti, hipsparselt_fp8_e5m2>{}
 #endif
-			 >> : hipsparselt_test_valid
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+                         || std::is_same<Ti, hipsparselt_fp8_e4m3_fnuz>{}
+                         || std::is_same<Ti, hipsparselt_fp8_e5m2_fnuz>{}
+#endif
+                         >> : hipsparselt_test_valid
     {
         void operator()(const Arguments& arg)
         {

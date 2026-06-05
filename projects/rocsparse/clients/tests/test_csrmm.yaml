@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -68,7 +68,7 @@ Tests:
   function: csrmm
   precision: *single_double_precisions_complex_real
   M: [2]
-  N: [8]
+  N: [8, 16, 32]
   K: [32]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -83,7 +83,7 @@ Tests:
   function: csrmm
   precision: *double_only_precisions_complex_real
   M: [64]
-  N: [64]
+  N: [64, 55, 91]
   K: [512]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -97,7 +97,7 @@ Tests:
   function: csrmm
   precision: *double_only_precisions
   M: [32]
-  N: [64]
+  N: [64, 78, 87, 90]
   K: [64]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_conjugate_transpose]
@@ -111,7 +111,7 @@ Tests:
   function: csrmm
   precision: *single_double_precisions
   M: 1
-  N: [33]
+  N: [33, 41, 63]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -119,6 +119,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
+             nos3,
              nos5]
 
 - name: csrmm_file
@@ -126,42 +127,45 @@ Tests:
   function: csrmm
   precision: *single_double_precisions
   M: 1
-  N: [62]
+  N: [62, 71, 84]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_transpose]
   transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos7]
+  filename: [nos2,
+             nos6,
+             nos7]
 
 - name: csrmm_file
   category: pre_checkin
   function: csrmm
   precision: *single_double_precisions_complex
   M: 1
-  N: [16]
+  N: [16, 37, 51]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate]
+  filename: [qc2534, 
+             mplate]
 
 - name: csrmm_file
   category: pre_checkin
   function: csrmm
   precision: *double_only_precisions
   M: 1
-  N: [5]
+  N: [5, 12, 17]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_transpose]
   transB: [rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate]
+  filename: [Chevron2]
 
 - name: csrmm_graph_test
   category: pre_checkin
@@ -248,8 +252,7 @@ Tests:
   transB: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2,
-             qc2534]
+  filename: [qc2534]
 
 # ##############################
 # NIGHTLY

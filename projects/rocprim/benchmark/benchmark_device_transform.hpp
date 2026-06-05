@@ -40,7 +40,7 @@
 #include <string>
 #include <vector>
 
-inline const char* get_thread_load_method_name(rocprim::cache_load_modifier method)
+constexpr inline const char* get_thread_load_method_name(rocprim::cache_load_modifier method)
 {
     switch(method)
     {
@@ -57,7 +57,7 @@ inline const char* get_thread_load_method_name(rocprim::cache_load_modifier meth
 }
 
 template<typename Config>
-auto config_name()
+constexpr auto config_name()
 {
     if constexpr(std::is_same_v<Config, rocprim::default_config>)
     {

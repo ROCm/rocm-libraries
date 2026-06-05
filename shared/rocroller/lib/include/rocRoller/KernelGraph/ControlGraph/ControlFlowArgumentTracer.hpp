@@ -30,17 +30,9 @@ namespace rocRoller::KernelGraph
          */
         std::set<std::string> const& neverReferencedArguments() const;
 
-        /**
-         * Arguments that are only needed at kernel launch time (for other arguments' expression evaluation)
-         * and don't need to be loaded into SGPRs during kernel execution.
-         */
-        std::set<std::string> const& launchTimeOnlyArguments() const;
-
     private:
         std::unordered_map<int, std::unordered_set<std::string>> m_referencedArguments;
 
         std::set<std::string> m_neverReferencedArguments;
-
-        std::set<std::string> m_launchTimeOnlyArguments;
     };
 }

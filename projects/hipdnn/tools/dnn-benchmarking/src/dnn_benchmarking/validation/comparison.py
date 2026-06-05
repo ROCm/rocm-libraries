@@ -3,7 +3,7 @@
 
 """Unified comparison logic for array validation.
 
-Extracts comparison logic used by both A/B testing and reference validation.
+Shared by reference validation and any direct array comparisons.
 """
 
 from dataclasses import dataclass
@@ -33,7 +33,7 @@ class ArrayComparator:
     """Compares numpy arrays with tolerance-based matching.
 
     Handles NaN/Inf detection, shape validation, and difference calculation.
-    Used by both A/B testing and reference validation.
+    Used by reference validation and direct output comparisons.
     """
 
     def __init__(self, rtol: float = 1e-5, atol: float = 1e-8) -> None:

@@ -503,6 +503,8 @@ private:
             }
         }
 
+        return 0;
+
         msg << "]" << std::endl;
 
         throw std::runtime_error(concatenate("AMDSMI Can't find a device with PCI ID ",

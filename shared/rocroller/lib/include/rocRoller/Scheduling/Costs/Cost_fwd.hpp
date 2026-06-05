@@ -16,6 +16,7 @@ namespace rocRoller
             WaitCntNop,
             LinearWeighted,
             LinearWeightedSimple,
+            LinearWeightedSimpleStreamK,
             Count
         };
 

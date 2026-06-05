@@ -1,0 +1,58 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// Auto-generated from kernel_includes.cpp.in by EmbedKernelSources.cmake - DO NOT EDIT
+//
+// Defines the embedded kernel header string literals, the filename-to-header
+// lookup map, and getKernelIncList() which provides all headers to HIPRTC in
+// bulk. If the kernel source files do not #include any header files then the
+// s_data{} structure will be empty. See kernel_sources.hpp.in for the full
+// embedding overview.
+
+#include "kernel_includes.hpp"
+#include <cstddef>
+#include <unordered_map>
+#include <stdexcept>
+
+// Header definitions generation begin
+@HEADER_DEFINITIONS@
+// Header definitions generation end
+
+namespace example_provider {
+
+static const std::unordered_map<std::string_view, std::string_view>& getKernelIncludes()
+{
+    static const std::unordered_map<std::string_view, std::string_view> s_data{
+        // s_data content generation begin
+@HEADER_MAP_ENTRIES@
+        // s_data content generation end
+    };
+    return s_data;
+}
+
+std::string_view getKernelInc(const char* name)
+{
+    const auto& map = getKernelIncludes();
+    auto it = map.find(name);
+    if(it == map.end())
+    {
+        throw std::runtime_error(std::string("Failed to load kernel include: ") + name);
+    }
+    return it->second;
+}
+
+void getKernelIncList(std::vector<std::string_view>& includeTexts,
+                      std::vector<const char*>& includeNames)
+{
+    static const std::vector<const char*> s_allIncludes = {
+@HEADER_FILENAMES@
+    };
+
+    for(const char* filename : s_allIncludes)
+    {
+        includeTexts.push_back(getKernelInc(filename));
+        includeNames.push_back(filename);
+    }
+}
+
+} // namespace example_provider

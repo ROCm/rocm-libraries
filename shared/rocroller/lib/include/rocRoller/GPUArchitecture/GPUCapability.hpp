@@ -152,6 +152,16 @@ namespace rocRoller
             HasXCC,
             DefaultRemapXCCValue,
 
+            /**
+             * The maximum number of SGPRs that can be preloaded with kernel
+             * arguments at the beginning of the kernel.
+             *
+             * Note that this is the absolute maximum for the architecture, and that the actual
+             * maximum for a given kernel will be reduced if other user SPGRs (such as the
+             * kernel argument pointer) are also needed.
+             */
+            MaxPreloadedKernargs,
+
             Count,
         };
 

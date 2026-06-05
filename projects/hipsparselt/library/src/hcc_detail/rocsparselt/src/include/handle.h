@@ -61,7 +61,8 @@ struct _rocsparselt_handle
     // asic revision
     int asic_rev;
 
-    bool has_fp8_ocp = false;
+    bool has_fp8_ocp  = false;
+    bool has_fp8_fnuz = false;
 
     // pointer mode ; default mode is host
     rocsparselt_pointer_mode pointer_mode = rocsparselt_pointer_mode_host;
@@ -394,6 +395,8 @@ enum _rocsparselt_matmul_datatype
     MATMUL_DATATYPE_I8_I_S,
     MATMUL_DATATYPE_E4M3_S_S,
     MATMUL_DATATYPE_E5M2_S_S,
+    MATMUL_DATATYPE_E4M3_FNUZ_S_S,
+    MATMUL_DATATYPE_E5M2_FNUZ_S_S,
     MATMUL_DATATYPE_UNKNOWN,
 };
 
@@ -418,6 +421,10 @@ constexpr _rocsparselt_matmul_type valid_matmul_datatypes[] =
 #if HIP_FP8_TYPE_OCP
     {MATMUL_DATATYPE_E4M3_S_S, HIP_R_8F_E4M3, HIP_R_8F_E4M3, HIP_R_32F, HIP_R_32F, rocsparselt_compute_f32},
     {MATMUL_DATATYPE_E5M2_S_S, HIP_R_8F_E5M2, HIP_R_8F_E5M2, HIP_R_32F, HIP_R_32F, rocsparselt_compute_f32},
+#endif
+#if HIP_FP8_TYPE_FNUZ
+    {MATMUL_DATATYPE_E4M3_FNUZ_S_S, HIP_R_8F_E4M3_FNUZ, HIP_R_8F_E4M3_FNUZ, HIP_R_32F, HIP_R_32F, rocsparselt_compute_f32},
+    {MATMUL_DATATYPE_E5M2_FNUZ_S_S, HIP_R_8F_E5M2_FNUZ, HIP_R_8F_E5M2_FNUZ, HIP_R_32F, HIP_R_32F, rocsparselt_compute_f32},
 #endif
 };
 

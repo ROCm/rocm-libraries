@@ -74,8 +74,10 @@ template <
     typename T,
     std::enable_if_t<!(std::is_same<T, hipblaslt_f8_fnuz>{} || std::is_same<T, hipblaslt_bf8_fnuz>{}
                        || std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}
-                       ),
-                     int> = 0>
+                       || std::is_same<T, std::complex<float>>{}
+                       || std::is_same<T, std::complex<double>>{}),
+                     int>
+    = 0>
 bool allclose_check_general(char    allclose_type,
                             int64_t M,
                             int64_t N,
@@ -131,7 +133,8 @@ bool allclose_check_general(char    allclose_type,
 template <typename T,
           std::enable_if_t<(std::is_same<T, hipblaslt_f8_fnuz>{}
                             || std::is_same<T, hipblaslt_bf8_fnuz>{}),
-                           int> = 0>
+                           int>
+          = 0>
 bool allclose_check_general(char    allclose_type,
                             int64_t M,
                             int64_t N,
@@ -184,9 +187,10 @@ bool allclose_check_general(char    allclose_type,
     return true;
 }
 
-template <typename T,
-          std::enable_if_t<(std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}),
-                           int> = 0>
+template <
+    typename T,
+    std::enable_if_t<(std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}), int>
+    = 0>
 bool allclose_check_general(char    allclose_type,
                             int64_t M,
                             int64_t N,
@@ -239,10 +243,10 @@ bool allclose_check_general(char    allclose_type,
     return true;
 }
 // For BF16 and half, we convert the results to double first
-template <
-    typename T,
-    typename VEC,
-    std::enable_if_t<std::is_same<T, hipblasLtHalf>{} || std::is_same<T, hip_bfloat16>{}, int> = 0>
+template <typename T,
+          typename VEC,
+          std::enable_if_t<std::is_same<T, hipblasLtHalf>{} || std::is_same<T, hip_bfloat16>{}, int>
+          = 0>
 bool allclose_check_general(char    allclose_type,
                             int64_t M,
                             int64_t N,
@@ -301,6 +305,76 @@ bool allclose_check_general(char    allclose_type,
 
     return allclose_check_general<int>(
         allclose_type, M, N, lda, hCPU_int, hGPU_int, hipblaslt_atol, hipblaslt_rtol);
+}
+
+//For complex datatypes
+template <typename T,
+          // Enable this function if T is std::complex<float> OR std::complex<double>
+          std::enable_if_t<std::is_same_v<T, std::complex<float>>
+                               || std::is_same_v<T, std::complex<double>>,
+                           int>
+          = 0>
+bool allclose_check_general(char    allclose_type,
+                            int64_t M,
+                            int64_t N,
+                            int64_t lda,
+                            T*      hCPU,
+                            T*      hGPU,
+                            double& hipblaslt_atol,
+                            double& hipblaslt_rtol)
+{
+    if(M * N == 0)
+        return true;
+
+    size_t size           = N * (size_t)lda;
+    size_t total_elements = 2 * size;
+
+    host_vector<double> hCPU_real_and_imag(total_elements);
+    host_vector<double> hGPU_real_and_imag(total_elements);
+
+    for(int64_t i = 0; i < N; i++)
+    {
+        for(int64_t j = 0; j < M; j++)
+        {
+            size_t complex_idx = j + i * (size_t)lda;
+            size_t real_idx    = complex_idx;
+
+            size_t imag_idx = complex_idx + size;
+
+            hCPU_real_and_imag[real_idx] = static_cast<double>(hCPU[complex_idx].real());
+            hGPU_real_and_imag[real_idx] = static_cast<double>(hGPU[complex_idx].real());
+
+            hCPU_real_and_imag[imag_idx] = static_cast<double>(hCPU[complex_idx].imag());
+            hGPU_real_and_imag[imag_idx] = static_cast<double>(hGPU[complex_idx].imag());
+        }
+    }
+
+    std::vector<double> atols{1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
+    std::vector<double> rtols{1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
+    hipblaslt_atol = 1.0;
+    hipblaslt_rtol = 1.0;
+
+    for(auto& atol : atols)
+    {
+        for(auto& rtol : rtols)
+        {
+            if(allclose(&total_elements,
+                        hCPU_real_and_imag.data(),
+                        hGPU_real_and_imag.data(),
+                        atol,
+                        rtol,
+                        false))
+            {
+                hipblaslt_atol = atol;
+                hipblaslt_rtol = rtol;
+                break;
+            }
+        }
+        if(hipblaslt_atol != 1.0)
+            break;
+    }
+
+    return hipblaslt_atol != 1.0;
 }
 
 /* ============== allclose check for strided_batched case ============= */
@@ -394,6 +468,29 @@ bool allclose_check_general(char        allclose_type,
                                               batch_count,
                                               hipblaslt_atol,
                                               hipblaslt_rtol);
+    case HIP_C_32F:
+        return allclose_check_general<std::complex<float>>(allclose_type,
+                                                           M,
+                                                           N,
+                                                           lda,
+                                                           stride_a,
+                                                           static_cast<std::complex<float>*>(hCPU),
+                                                           static_cast<std::complex<float>*>(hGPU),
+                                                           batch_count,
+                                                           hipblaslt_atol,
+                                                           hipblaslt_rtol);
+    case HIP_C_64F:
+        return allclose_check_general<std::complex<double>>(
+            allclose_type,
+            M,
+            N,
+            lda,
+            stride_a,
+            static_cast<std::complex<double>*>(hCPU),
+            static_cast<std::complex<double>*>(hGPU),
+            batch_count,
+            hipblaslt_atol,
+            hipblaslt_rtol);
     case HIP_R_16F:
         return allclose_check_general<hipblasLtHalf>(allclose_type,
                                                      M,

@@ -3,16 +3,46 @@
 
 include(CMakePackageConfigHelpers)
 
+# Version handling
+hipdnn_setup_version(hipdnn_frontend)
+
+# Set project with version
+project(hipdnn_frontend VERSION ${HIPDNN_FRONTEND_VERSION} LANGUAGES CXX)
+
 # Read data_sdk version for minimum requirement
 hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION)
 
-set(HIP_DNN_FRONTEND_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
+# Read backend version for minimum requirement
+hipdnn_get_component_version(hipdnn_backend HIPDNN_FRONTEND_BACKEND_MIN_VERSION)
 
-add_subdirectory(tests)
+set(HIP_DNN_FRONTEND_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 add_library(hipdnn_frontend INTERFACE)
 
+# Generate version header
+hipdnn_generate_version_header(hipdnn_frontend)
+
 target_link_libraries(hipdnn_frontend INTERFACE hipdnn_data_sdk hipdnn_backend)
+
+# Per-library JSON gate. Defaults from the umbrella HIPDNN_SKIP_JSON_LIB when
+# building as part of the top-level project; can be set independently when
+# frontend is built standalone. Same name as the C++ macro defined on the target.
+if(DEFINED HIPDNN_SKIP_JSON_LIB)
+    set(_hipdnn_frontend_skip_default ${HIPDNN_SKIP_JSON_LIB})
+else()
+    set(_hipdnn_frontend_skip_default OFF)
+endif()
+option(HIPDNN_FRONTEND_SKIP_JSON_LIB
+    "Skip nlohmann/json.hpp from frontend public headers."
+    ${_hipdnn_frontend_skip_default})
+unset(_hipdnn_frontend_skip_default)
+
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    if(NOT TARGET nlohmann_json::nlohmann_json)
+        hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+    endif()
+    hipdnn_add_dependency_includes(hipdnn_frontend nlohmann_json::nlohmann_json)
+endif()
 
 set(HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/frontend")
 
@@ -21,9 +51,20 @@ target_include_directories(
                               $<INSTALL_INTERFACE:${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}>
 )
 
+# Export installed hipdnn_frontend include paths as system include paths.
+set_target_properties(hipdnn_frontend PROPERTIES
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+        "$<INSTALL_INTERFACE:${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}>"
+)
+
+# Scope the SKIP_JSON_LIB macro to installed (downstream) consumers only.
+# In-tree consumers (frontend tests, etc.) keep access to the json serialize/
+# deserialize methods so the build always succeeds; only external consumers of
+# the installed package see the gated-out public API.
 target_compile_definitions(
     hipdnn_frontend INTERFACE
     $<$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>:HIPDNN_FRONTEND_SKIP_JSON_LIB>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:HIPDNN_ENABLE_SDPA>
 )
 
 # Generate the config file from template
@@ -48,15 +89,33 @@ install(
     FILES_MATCHING
     PATTERN "*.h"
     PATTERN "*.hpp"
+    PATTERN "*.h.in" EXCLUDE
+)
+
+# Install generated version header
+install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_frontend/version.h"
+    DESTINATION ${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}/hipdnn_frontend
+    COMPONENT Development
 )
 
 install(EXPORT hipdnn_frontend_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend
         FILE hipdnn_frontendTargets.cmake COMPONENT Development
 )
 
+# Generate package version file for find_package version checking
+write_basic_package_version_file(
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend/hipdnn_frontendConfigVersion.cmake"
+    VERSION ${HIPDNN_FRONTEND_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
 install(
     FILES
         "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend/hipdnn_frontendConfigVersion.cmake"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_frontend
     COMPONENT Development
 )
+
+add_subdirectory(tests)

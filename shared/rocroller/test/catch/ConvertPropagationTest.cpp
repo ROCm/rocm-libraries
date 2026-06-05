@@ -342,9 +342,10 @@ namespace ExpressionTest
 
             auto [tagResult, argResult]
                 = allocateTagAndArg(typeResult, PointerType::PointerGlobal, ArgumentType::Value);
-            auto [tagA, argA] = allocateTagAndArg(typeA, PointerType::Value, ArgumentType::Value);
-            auto [tagB, argB] = allocateTagAndArg(typeB, PointerType::Value, ArgumentType::Value);
-            auto [tagC, argC] = allocateTagAndArg(typeC, PointerType::Value, ArgumentType::Value);
+            auto& argResultRef = argResult;
+            auto [tagA, argA]  = allocateTagAndArg(typeA, PointerType::Value, ArgumentType::Value);
+            auto [tagB, argB]  = allocateTagAndArg(typeB, PointerType::Value, ArgumentType::Value);
+            auto [tagC, argC]  = allocateTagAndArg(typeC, PointerType::Value, ArgumentType::Value);
 
             auto kernel = context->kernel();
             kernel->addArgument({argResult->name(),
@@ -372,7 +373,7 @@ namespace ExpressionTest
 
             auto kb = [&]() -> Generator<Instruction> {
                 Register::ValuePtr s_result;
-                co_yield context->argLoader()->getValue(argResult->name(), s_result);
+                co_yield context->argLoader()->getValue(argResultRef->name(), s_result);
 
                 auto v_result
                     = Register::Value::Placeholder(context.get(),

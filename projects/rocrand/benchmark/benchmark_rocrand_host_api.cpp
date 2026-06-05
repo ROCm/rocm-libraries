@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@
 #include <vector>
 
 #ifndef DEFAULT_RAND_N
-const size_t DEFAULT_RAND_N = 1024 * 1024 * 512;
+const size_t DEFAULT_RAND_N = 1024 * 1024 * 128;
 #endif
 
 typedef rocrand_rng_type rng_type_t;

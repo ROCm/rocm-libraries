@@ -29,7 +29,8 @@ The rocRAND public repository is located at `<https://github.com/ROCm/rocm-libra
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./install/installing>`
+    * :doc:`Install rocRAND <./install/installing>`
+    * :doc:`Build from source <./install/build>`
 
   .. grid-item-card:: Conceptual
 

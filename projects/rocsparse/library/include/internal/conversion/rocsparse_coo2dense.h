@@ -36,14 +36,14 @@ extern "C" {
 *  This function converts the sparse matrix in COO format into a column-oriented dense matrix.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  m           number of rows of the column-oriented dense matrix \p A.
 *  @param[in]
@@ -51,24 +51,24 @@ extern "C" {
 *  @param[in]
 *  nnz         number of non-zero entries of the sparse COO matrix.
 *  @param[in]
-*  descr       the descriptor of the column-oriented dense matrix \p A, the supported matrix type is
+*  descr       the descriptor of the column-oriented dense matrix \p A. The supported matrix type is
 *              \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
-*  coo_val     array of nnz nonzero elements of matrix \p A.
+*  coo_val     array of \p nnz non-zero elements of matrix \p A.
 *  @param[in]
-*  coo_row_ind integer array of nnz row indices of the non-zero elements of matrix \p A.
+*  coo_row_ind integer array of \p nnz row indices of the non-zero elements of matrix \p A.
 *  @param[in]
-*  coo_col_ind integer array of nnz column indices of the non-zero elements of matrix \p A.
+*  coo_col_ind integer array of \p nnz column indices of the non-zero elements of matrix \p A.
 *  @param[out]
-*  A           array of dimensions (\p ld, \p n)
+*  A           array of dimensions (\p ld, \p n).
 *
 *  @param[out]
 *  ld          leading dimension of column-oriented dense matrix \p A.
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p m or \p n or \p nnz or \p ld is invalid.
-*  \retval     rocsparse_status_invalid_pointer \p A or \p coo_val \p coo_col_ind or \p coo_row_ind
+*  \retval     rocsparse_status_invalid_size \p m, \p n, \p nnz, or \p ld is invalid.
+*  \retval     rocsparse_status_invalid_pointer \p A, \p coo_val, \p coo_col_ind, or \p coo_row_ind
 *              pointer is invalid.
 *
 *  \par Example

@@ -8,7 +8,6 @@ Sorts a list of paths by directory and then by filename. Useful for sorting the
 file paths in CMake files.
 """
 
-# import pathlib
 import collections
 import os.path
 import sys

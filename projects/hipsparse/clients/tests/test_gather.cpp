@@ -25,4 +25,4 @@
 #include "testing_gather.hpp"
 
 TEST_ROUTINE_WITH_CONFIG(
-    gather, generic, hipsparse_test_config_it, arg.N, arg.nnz, arg.baseA, arg.graph_test);
+    gather, generic, hipsparse_test_config_gather, arg.N, arg.nnz, arg.baseA, arg.graph_test);

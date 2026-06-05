@@ -11,18 +11,19 @@ namespace hipdnn_backend
 namespace flatbuffer_utilities
 {
 
-void convertSerializedGraphToGraph(const uint8_t* buffer,
-                                   size_t size,
-                                   std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT>& graphOut)
+void convertSerializedGraphToGraph(
+    const uint8_t* buffer,
+    size_t size,
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>& graphOut)
 {
     flatbuffers::Verifier verifier(buffer, size);
-    if(!verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>())
+    if(!verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Graph>())
     {
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                               "Invalid buffer: unable to verify the flatbuffer schema.");
     }
 
-    auto graph = hipdnn_data_sdk::data_objects::UnPackGraph(buffer);
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(buffer);
     if(graph == nullptr)
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,

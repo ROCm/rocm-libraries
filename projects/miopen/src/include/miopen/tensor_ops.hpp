@@ -1,54 +1,23 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #ifndef GUARD_MIOPEN_TENSOR_OPPS_HPP_
 #define GUARD_MIOPEN_TENSOR_OPPS_HPP_
 
 #include <miopen/common.hpp>
 #include <miopen/miopen.h>
-#include <miopen/object.hpp>
 #include <miopen/tensor.hpp>
-#include <miopen/functional.hpp>
+
+#include <array>
+#include <ranges>
+#include <tuple>
 #include <vector>
-#include <boost/range/combine.hpp>
-#include <boost/range/adaptor/filtered.hpp>
 
 namespace miopen {
 
 struct Handle;
 
-struct f_length_is_not_1_t
-{
-    template <typename T>
-    bool operator()(T&& v)
-    {
-        return boost::get<0>(v) > 1;
-    }
-};
-
-MIOPEN_INTERNALS_EXPORT TensorDescriptor GetFlattenedTensorDescriptor(const TensorDescriptor& desc);
+TensorDescriptor GetFlattenedTensorDescriptor(const TensorDescriptor& desc);
 
 template <typename... TDescriptors>
 std::tuple<TDescriptors...>
@@ -86,9 +55,20 @@ GetConsistentFlattenedTensorDescriptors(const TDescriptors&... real_descriptor_p
         }
     }
 
-    auto non1_length_strides =
-        boost::combine(real_descriptors[0]->GetLengths(), real_descriptor_pack.GetStrides()...) |
-        boost::adaptors::filtered(f_length_is_not_1_t());
+    const auto& length_   = real_descriptors[0]->GetLengths();
+    const size_t num_dims = length_.size();
+
+    const auto combine_length_and_strides = [&](std::size_t dim) {
+        return std::apply(
+            [&](const auto*... descs) {
+                return std::make_tuple(length_[dim], descs->GetStrides()[dim]...);
+            },
+            real_descriptors);
+    };
+
+    auto indices = std::views::iota(std::size_t(0), num_dims) |
+                   std::views::filter([&](const size_t i) { return length_[i] > 1; });
+    auto non1_length_strides = indices | std::views::transform(combine_length_and_strides);
 
     if((is_all_packed && is_all_same_strided) || non1_length_strides.empty())
     {
@@ -104,19 +84,19 @@ GetConsistentFlattenedTensorDescriptors(const TDescriptors&... real_descriptor_p
     std::array<std::vector<std::size_t>, NTensor> array_of_flat_strides;
 
     auto i               = non1_length_strides.begin();
-    std::size_t flat_len = boost::get<0>(*i);
+    std::size_t flat_len = std::get<0>(*i);
     auto i_previous      = i++;
 
     // the 0-th dimension full-length doesn't matter
     for(; i != non1_length_strides.end(); ++i)
     {
-        std::size_t len = boost::get<0>(*i);
+        std::size_t len = std::get<0>(*i);
 
         bool is_all_full_length = true;
         repeat_n(
             [&](auto itensor) {
-                const std::size_t stride          = boost::get<itensor + 1>(*i);
-                const std::size_t previous_stride = boost::get<itensor + 1>(*i_previous);
+                const std::size_t stride          = std::get<itensor + 1>(*i);
+                const std::size_t previous_stride = std::get<itensor + 1>(*i_previous);
                 const std::size_t full_len        = previous_stride / stride;
                 is_all_full_length &= (len == full_len);
             },
@@ -132,7 +112,7 @@ GetConsistentFlattenedTensorDescriptors(const TDescriptors&... real_descriptor_p
 
             repeat_n(
                 [&](auto itensor) {
-                    std::size_t previous_stride = boost::get<itensor + 1>(*i_previous);
+                    std::size_t previous_stride = std::get<itensor + 1>(*i_previous);
                     array_of_flat_strides[itensor].push_back(previous_stride);
                 },
                 NTensorConstant);
@@ -146,7 +126,7 @@ GetConsistentFlattenedTensorDescriptors(const TDescriptors&... real_descriptor_p
     // strides of all flattend tensors are different
     repeat_n(
         [&](auto itensor) {
-            std::size_t previous_stride = boost::get<itensor + 1>(*i_previous);
+            std::size_t previous_stride = std::get<itensor + 1>(*i_previous);
             array_of_flat_strides[itensor].push_back(previous_stride);
         },
         NTensorConstant);

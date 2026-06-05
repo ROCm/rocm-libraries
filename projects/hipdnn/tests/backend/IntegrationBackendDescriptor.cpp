@@ -35,7 +35,7 @@ TEST_F(IntegrationBackendDescriptor, CreateAndDestroy)
 
 TEST_F(IntegrationBackendDescriptor, CreateWithNullptr)
 {
-    hipdnnStatus_t status
+    const hipdnnStatus_t status
         = hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, nullptr);
 
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
@@ -45,7 +45,8 @@ TEST_F(IntegrationBackendDescriptor, WillNotCreateDescriptorIfTypeNotSupported)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
 
-    hipdnnStatus_t status = hipdnnBackendCreateDescriptor(HIPDNN_INVALID_TYPE, &descriptor);
+    const hipdnnStatus_t status
+        = hipdnnBackendCreateDescriptor(HIPDNN_INVALID_TYPE_EXT, &descriptor);
 
     EXPECT_EQ(status, HIPDNN_STATUS_NOT_SUPPORTED);
 }
@@ -54,7 +55,7 @@ TEST_F(IntegrationBackendDescriptor, WontDestroyDescriptorIfNull)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
 
-    hipdnnStatus_t status = hipdnnBackendDestroyDescriptor(descriptor);
+    const hipdnnStatus_t status = hipdnnBackendDestroyDescriptor(descriptor);
 
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
@@ -63,7 +64,7 @@ TEST_F(IntegrationBackendDescriptor, Finalize)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
 
-    hipdnnStatus_t status = hipdnnBackendFinalize(descriptor);
+    const hipdnnStatus_t status = hipdnnBackendFinalize(descriptor);
 
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
@@ -71,18 +72,18 @@ TEST_F(IntegrationBackendDescriptor, Finalize)
 TEST_F(IntegrationBackendDescriptor, GetAttributeWithNullDescriptor)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
-    hipdnnBackendAttributeName_t attributeName = HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH;
-    hipdnnBackendAttributeType_t attributeType = HIPDNN_TYPE_NUMERICAL_NOTE;
-    int64_t requestedElementCount = 0;
+    const hipdnnBackendAttributeName_t attributeName = HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH;
+    const hipdnnBackendAttributeType_t attributeType = HIPDNN_TYPE_NUMERICAL_NOTE;
+    const int64_t requestedElementCount = 0;
     int64_t elementCount = 0;
     void* arrayOfElements = nullptr;
 
-    hipdnnStatus_t status = hipdnnBackendGetAttribute(descriptor,
-                                                      attributeName,
-                                                      attributeType,
-                                                      requestedElementCount,
-                                                      &elementCount,
-                                                      arrayOfElements);
+    const hipdnnStatus_t status = hipdnnBackendGetAttribute(descriptor,
+                                                            attributeName,
+                                                            attributeType,
+                                                            requestedElementCount,
+                                                            &elementCount,
+                                                            arrayOfElements);
 
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
@@ -90,12 +91,12 @@ TEST_F(IntegrationBackendDescriptor, GetAttributeWithNullDescriptor)
 TEST_F(IntegrationBackendDescriptor, SetAttributeWithNullDescriptor)
 {
     hipdnnBackendDescriptor_t descriptor = nullptr;
-    hipdnnBackendAttributeName_t attributeName = HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH;
-    hipdnnBackendAttributeType_t attributeType = HIPDNN_TYPE_NUMERICAL_NOTE;
-    int64_t elementCount = 0;
+    const hipdnnBackendAttributeName_t attributeName = HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH;
+    const hipdnnBackendAttributeType_t attributeType = HIPDNN_TYPE_NUMERICAL_NOTE;
+    const int64_t elementCount = 0;
     void* arrayOfElements = nullptr;
 
-    hipdnnStatus_t status = hipdnnBackendSetAttribute(
+    const hipdnnStatus_t status = hipdnnBackendSetAttribute(
         descriptor, attributeName, attributeType, elementCount, arrayOfElements);
 
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);

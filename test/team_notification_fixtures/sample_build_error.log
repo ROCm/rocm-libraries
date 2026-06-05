@@ -1,0 +1,17 @@
+[  5%] Building CXX object CMakeFiles/miopen.dir/src/convolution.cpp.o
+[ 10%] Building CXX object CMakeFiles/miopen.dir/src/pooling.cpp.o
+[ 15%] Building CXX object CMakeFiles/miopen.dir/src/batch_norm.cpp.o
+/workspace/rocm-libraries/projects/miopen/src/solver/conv_asm_impl_gemm.cpp:245:37: error: no matching function for call to 'GetKernelFile'
+     const auto kernel_file = GetKernelFile(ctx, "conv_asm_impl_gemm.s");
+                              ~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/workspace/rocm-libraries/projects/miopen/include/miopen/kernel_cache.hpp:89:13: note: candidate function not viable: no known conversion from 'const Handle &' to 'const std::string &' for 1st argument
+std::string GetKernelFile(const std::string& base_name, const std::string& kernel_name);
+            ^
+/workspace/rocm-libraries/projects/miopen/src/solver/conv_asm_impl_gemm.cpp:248:18: error: undefined reference to symbol 'rocblas_gemm_ex'
+     auto status = rocblas_gemm_ex(handle, transA, transB, m, n, k, &alpha,
+                   ^~~~~~~~~~~~~~~~
+/opt/rocm/lib/librocblas.so.0: note: rocblas_gemm_ex is defined in DSO /opt/rocm/lib/librocblas.so.0
+compilation terminated due to errors
+make[2]: *** [CMakeFiles/miopen.dir/build.make:76: CMakeFiles/miopen.dir/src/solver/conv_asm_impl_gemm.cpp.o] Error 1
+make[1]: *** [CMakeFiles/Makefile2:83: CMakeFiles/miopen.dir/all] Error 2
+make: *** [Makefile:136: all] Error 2

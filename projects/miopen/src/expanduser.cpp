@@ -31,7 +31,6 @@
 #include <string>
 #ifdef _WIN32
 #include <optional>
-#include <boost/algorithm/string/replace.hpp>
 #endif
 
 #ifdef __linux__
@@ -53,7 +52,7 @@ namespace miopen {
 namespace {
 std::string GetHomeDir()
 {
-    const auto p = env::value(HOME);
+    auto p = env::value(HOME);
     if(!(p.empty() || p == std::string("/")))
     {
         return p;
@@ -62,7 +61,8 @@ std::string GetHomeDir()
     // need to figure out what is the correct thing to do here
     // in tensoflow unit tests run via bazel, $HOME is not set, so this can happen
     // setting home_dir to the /tmp for now
-    return fs::temp_directory_path().string();
+    p = fs::temp_directory_path().string();
+    return p;
 }
 } // namespace
 

@@ -178,31 +178,31 @@ inline bool enabled(const detail::EnvVar<bool>& t) { return t.template value<boo
 template <typename T, typename U = typename T::value_type>
 inline U value(T t)
 {
-    return std::forward<T>(t).ref().template value<U>();
+    return t.ref().template value<U>();
 }
 
 template <typename T, typename U = typename T::value_type>
 inline U value_or(T t, U k)
 {
-    return std::forward<T>(t).ref().template value<U>(std::forward<U>(k));
+    return t.ref().template value<U>(k);
 }
 
 template <typename T>
 inline std::string name(T t)
 {
-    return std::string{std::forward<T>(t).ref().name()};
+    return std::string{t.ref().name()};
 }
 
 template <typename T>
 void clear(T t)
 {
-    std::forward<T>(t).ref().clear();
+    t.ref().clear();
 }
 
 template <typename T, typename U = typename T::value_type>
 inline void update(T t, U k)
 {
-    std::forward<T>(t).ref().template update<U>(std::forward<U>(k));
+    t.ref().template update<U>(k);
 }
 
 } // namespace miopen::env
