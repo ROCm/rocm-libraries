@@ -84,17 +84,49 @@ from Tensile.Utilities.Decorators.Timing import timing
 from .ParseArguments import parseArguments
 
 
-def libraryDir(outputPath: Union[str, Path], archs: Collection[str]) -> Path:
-    """Return the library output/input directory for the given target archs.
+def libraryRoot(outputPath: Union[str, Path]) -> Path:
+    """The library/ root directory under outputPath.
 
-    Single arch  → <outputPath>/library/<arch>/   (TheRock shard overlay safe)
-    Zero or multiple archs → <outputPath>/library/ (flat)
+    Used as the dispatch root by builders that fan kernels out into per-base
+    subdirectories at write time.
     """
-    path = Path(outputPath)
-    archs = list(archs)
-    if len(archs) == 1:
-        return path / "library" / archs[0]
-    return path / "library"
+    return Path(outputPath) / "library"
+
+
+def libraryDir(outputPath: Union[str, Path], arch: str) -> Path:
+    """The per-base-arch library subdirectory: <outputPath>/library/<base>/.
+
+    Target features (xnack+/xnack-, sramecc, etc.) are stripped from the path —
+    variants of one base co-locate in one directory, disambiguated by kernel
+    filename suffix. Layout matches the runtime probe in tensile_host.cpp which
+    strips at the first colon before looking up the subdirectory.
+    """
+    return libraryRoot(outputPath) / arch.split(":")[0]
+
+
+def _baseArchs(archs: Collection[str]) -> List[str]:
+    """Unique base archs (xnack/sramecc stripped), sorted for determinism."""
+    return sorted({a.split(":")[0] for a in archs})
+
+
+def tensileLibraryFile(outputPath: Union[str, Path], arch: str, library_format: str = "msgpack") -> Path:
+    """The canonical TensileLibrary path for one base arch under outputPath.
+
+    Composes ``<outputPath>/library/<base>/TensileLibrary.<ext>`` where ``ext``
+    is ``.yaml`` for the YAML format and ``.dat`` for msgpack. The base arch
+    is derived from ``arch`` via the same colon-strip rule as ``libraryDir``,
+    so cooked variants like ``gfx942:sramecc+:xnack+`` resolve to the same
+    file as the bare ``gfx942`` arch.
+
+    This is the file that ``writeClientConfigIni``'s ``libraryFile`` argument
+    must point to under the per-base layout. Callers (BenchmarkProblems'
+    cache-hit branch, ClientWriter's benchmark-parameters helper) reach for
+    it from different parts of the pipeline; the helper keeps the
+    "library/<base>/TensileLibrary.<ext>" naming convention in one place so
+    future format/extension changes touch a single call site.
+    """
+    ext = ".yaml" if library_format == "yaml" else ".dat"
+    return libraryDir(outputPath, arch) / f"TensileLibrary{ext}"
 
 
 class KernelCodeGenResult(NamedTuple):
@@ -401,9 +433,11 @@ def writeSolutionsAndKernels(
 
     with timing_context("python_kernel_setup"):
         outputPath = Path(outputPath)
-        destLibPath = ensurePath(
-            libraryDir(outputPath, cmdlineArchs)
-        )  # Destination for code object library files (.co)
+        # Builders fan out into <destRoot>/<base-arch>/ at the moment of write.
+        # Pre-create the per-base subdirs so concurrent emit doesn't race mkdir.
+        destRoot = ensurePath(libraryRoot(outputPath))
+        for base in _baseArchs(cmdlineArchs):
+            ensurePath(libraryDir(outputPath, base))
         buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())  #
         assemblyTmpPath = ensurePath(
             buildTmpPath / "assembly"
@@ -489,7 +523,7 @@ def writeSolutionsAndKernels(
                 asmToolchain.linker,
                 asmToolchain.bundler,
                 asmKernels,
-                destLibPath,
+                destRoot,
                 assemblyTmpPath,
                 compress,
             )
@@ -498,7 +532,7 @@ def writeSolutionsAndKernels(
             buildSourceCodeObjectFiles(
                 srcToolchain.compiler,
                 srcToolchain.bundler,
-                destLibPath,
+                destRoot,
                 objectTmpPath,
                 outputPath,
                 srcKernelFile,
@@ -527,7 +561,11 @@ def writeSolutionsAndKernelsTCL(
     removeTemporaries: bool=True
 ):
     outputPath = Path(outputPath)
-    destLibPath = ensurePath(libraryDir(outputPath, cmdlineArchs))
+    # Builders fan out into <destRoot>/<base-arch>/ at the moment of write.
+    # Pre-create the per-base subdirs so concurrent emit doesn't race mkdir.
+    destRoot = ensurePath(libraryRoot(outputPath))
+    for base in _baseArchs(cmdlineArchs):
+        ensurePath(libraryDir(outputPath, base))
     buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())
     assemblyTmpPath = ensurePath(
         buildTmpPath / "assembly"
@@ -598,7 +636,7 @@ def writeSolutionsAndKernelsTCL(
         asmToolchain.linker,
         asmToolchain.bundler,
         asmKernels,
-        destLibPath,
+        destRoot,
         assemblyTmpPath,
         compress,
     )
@@ -609,7 +647,7 @@ def writeSolutionsAndKernelsTCL(
     buildSourceCodeObjectFiles(
         srcToolchain.compiler,
         srcToolchain.bundler,
-        destLibPath,
+        destRoot,
         objectTmpPath,
         outputPath,
         srcKernelFile,
@@ -1008,7 +1046,11 @@ def run():
         for arch in targetIsas
         if isaInfoMap[arch].asmCaps["SupportedISA"]
     ]
-    newLibraryDir = ensurePath(libraryDir(outputPath, archs))
+    # Per-base subdirs are created here (idempotent if writeSolutionsAndKernels*
+    # already created them above). Each per-arch write below routes to its own
+    # libraryDir(outputPath, archName).
+    for base in _baseArchs(archs):
+        ensurePath(libraryDir(outputPath, base))
     splitGSU = False
 
     start_pki = timer()
@@ -1024,17 +1066,12 @@ def run():
             if kName not in solDict:
                 solDict["%s"%kName] = kernel
 
-    def writeMsl(name, lib):
-        filename = os.path.join(newLibraryDir, name)
-        lib.applyNaming(splitGSU)
-        LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
-
-    # Split libraryMapping per arch and write one mapping file per arch.
-    # Every value ends in "_<arch>" because tuned entries carry the arch
-    # natively and renameFallbacksPerArch arch-suffixed every fallback entry
-    # before this point. Filtering on that suffix keeps each arch's Mapping
-    # complete while letting single-arch builds produce non-colliding mapping
-    # artifacts that survive overlay-style installs (kpack shards).
+    # Split libraryMapping per arch and write one mapping file per arch into
+    # that arch's per-base subdirectory. Every value ends in "_<arch>" because
+    # tuned entries carry the arch natively and renameFallbacksPerArch
+    # arch-suffixed every fallback entry before this point. Filtering on that
+    # suffix keeps each arch's Mapping complete while letting builds produce
+    # non-colliding mapping artifacts that survive overlay-style installs.
     for archName in archs:
         archMapping = {
             idx: name
@@ -1042,18 +1079,25 @@ def run():
             if name.endswith("_" + archName)
         }
         if archMapping:
+            archDir = libraryDir(outputPath, archName)
             archMappingFile = os.path.join(
-                newLibraryDir, "TensileLiteLibrary_lazy_" + archName + "_Mapping"
+                archDir, "TensileLiteLibrary_lazy_" + archName + "_Mapping"
             )
             LibraryIO.write(archMappingFile, archMapping, "msgpack")
 
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
         if archName in archs:
+            archDir = libraryDir(outputPath, archName)
+            def writeMsl(name, lib, archDir=archDir):
+                filename = os.path.join(archDir, name)
+                lib.applyNaming(splitGSU)
+                LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
+
             if arguments["LazyLibraryLoading"]:
-                masterFile = os.path.join(newLibraryDir, "TensileLibrary_lazy_" + archName)
+                masterFile = os.path.join(archDir, "TensileLibrary_lazy_" + archName)
             else:
-                masterFile = os.path.join(newLibraryDir, "TensileLibrary_" + archName)
+                masterFile = os.path.join(archDir, "TensileLibrary_" + archName)
             newMasterLibrary.applyNaming(splitGSU)
             LibraryIO.write(masterFile, state(newMasterLibrary), arguments["LibraryFormat"])
 

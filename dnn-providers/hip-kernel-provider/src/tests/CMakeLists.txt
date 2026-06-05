@@ -17,13 +17,13 @@ endif()
 add_executable(
     hip_kernel_provider_tests
     main.cpp
-    TestHipKernelContainer.cpp
-    TestHipKernelHandle.cpp
-    TestHipKernelContext.cpp
-    TestHipKernelUtils.cpp
-    TestHipKernelPluginPublic.cpp
-    hip/TestHipProgramAndKernel.cpp
-    hip/TestHipKernelCompileOptions.cpp
+    core/TestContainer.cpp
+    core/TestHandle.cpp
+    core/TestContext.cpp
+    core/TestUtils.cpp
+    core/TestPluginPublic.cpp
+    compilation/TestProgramAndKernel.cpp
+    compilation/TestKernelCompileOptions.cpp
 )
 
 # Add the dummy kernel for running the tests
