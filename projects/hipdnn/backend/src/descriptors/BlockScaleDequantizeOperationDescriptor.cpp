@@ -245,7 +245,7 @@ std::string BlockScaleDequantizeOperationDescriptor::toString() const
     str += ", is_negative_scale=" + std::to_string(static_cast<int>(_data.is_negative_scale));
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 
