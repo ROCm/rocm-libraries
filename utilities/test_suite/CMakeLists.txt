@@ -144,7 +144,7 @@ endif()
 
 # Add HOST/HIP subdirectories to build executables (OpenMP required, Python3 optional)
 add_subdirectory(HOST)
-if(rpp_BACKEND_TYPE STREQUAL "HIP" AND HIP_FOUND)
+if(rpp_BACKEND_TYPE STREQUAL "HIP")
     add_subdirectory(HIP)
 endif()
 
