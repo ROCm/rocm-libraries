@@ -924,6 +924,13 @@ def buildAndTest(Map conf=[:]){
         return retimage
 }
 
+// Deprecated alias for the build-only entry point unified into buildAndTest.
+// Kept so develop's Jenkinsfile (and PRs branched from it) still resolve against
+// this ck.groovy once it lands on develop. Remove when no open branch calls it.
+def buildHipClangJobAndReboot(Map conf=[:]){
+    return buildAndTest(conf)
+}
+
 def process_results(Map conf=[:]){
     checkoutComposableKernel()
     //use older image that has user jenkins
