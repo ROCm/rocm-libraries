@@ -202,9 +202,13 @@ def get_valid_vec_sizes(
         pixels_a   = tile_m * tile_k / block_size   (elements per thread, A tile)
         pixels_b   = tile_n * tile_k / block_size   (elements per thread, B tile)
 
-    Valid vec_a/vec_b must divide their respective pixel budget and satisfy
-    VMEM/LDS hardware constraints.  vec_c is constrained by the XDL output
-    shuffle: tile_n must be divisible by (wave_n * warp_tile_n * vec_c).
+    Valid vec_a/vec_b must be compatible with their respective pixel budget and
+    satisfy VMEM/LDS hardware constraints.  Compatibility means either the
+    vector divides the per-thread pixel budget (v divides pixels) OR the vector
+    is an exact multiple of it (pixels divides v) — in the latter case a single
+    wide load simply decomposes into v/pixels sub-loads, which is valid on
+    hardware (observed for asymmetric small-pixel tiles).  vec_c is constrained
+    by the XDL output shuffle: tile_n must be divisible by vec_c.
 
     Args:
         tile_m, tile_n, tile_k: block tile dimensions
@@ -236,20 +240,26 @@ def get_valid_vec_sizes(
     # The LDS validity check below enforces the finer-grained hardware constraint.
     max_vec_ab = max(1, int(32 // sizeof_a))   # 2× standard VMEM width
 
-    # Output vec_c uses the same dtype on the C tile; standard 16-byte limit applies
-    max_vec_c = max(1, int(16 // sizeof_a))
+    # Output vec_c: relaxed to the same 32-byte (2× VMEM) ceiling as vec_a/vec_b.
+    # The finer-grained _lds_valid check below still enforces the <=256-bit
+    # hardware ceiling, so e.g. bf16 vec_c stays <= 16.  This admits fp32 vec_c=8
+    # observed in the profiler configs.
+    max_vec_c = max(1, int(32 // sizeof_a))
 
+    # A vector width is compatible with the per-thread pixel budget if it either
+    # divides the budget or is an exact multiple of it (the wide load decomposes
+    # into v/pixels sub-loads).
     valid_a = [
         v for v in [1, 2, 4, 8, 16]
         if v <= max_vec_ab
-        and pixels_a % v == 0
+        and (pixels_a % v == 0 or v % pixels_a == 0)
         and _lds_valid(v, sizeof_a)
     ]
 
     valid_b = [
         v for v in [1, 2, 4, 8, 16]
         if v <= max_vec_ab
-        and pixels_b % v == 0
+        and (pixels_b % v == 0 or v % pixels_b == 0)
         and _lds_valid(v, sizeof_a)
     ]
 

@@ -366,7 +366,11 @@ class TestGetValidVecSizes(unittest.TestCase):
     # --- Structural validity ---
 
     def test_pixel_budget_respected(self):
-        """vec_a must divide pixels_a; vec_b must divide pixels_b."""
+        """vec_a/vec_b must be compatible with their pixel budget.
+
+        Compatible means the vector divides the per-thread pixel budget OR is an
+        exact multiple of it (the wide load decomposes into v/pixels sub-loads).
+        """
         configs = [
             (128, 64, 32, 2, 2, 1, 32, 32, 8, "bf16_bf16_fp32"),
             (64, 64, 32, 1, 1, 1, 32, 32, 8, "bf16_bf16_fp32"),
@@ -378,10 +382,28 @@ class TestGetValidVecSizes(unittest.TestCase):
             pixels_a = tm * tk // block_size
             pixels_b = tn * tk // block_size
             for va, vb, vc in get_valid_vec_sizes(*cfg):
-                self.assertEqual(pixels_a % va, 0,
-                    f"cfg={cfg}: pixels_a={pixels_a} not divisible by vec_a={va}")
-                self.assertEqual(pixels_b % vb, 0,
-                    f"cfg={cfg}: pixels_b={pixels_b} not divisible by vec_b={vb}")
+                self.assertTrue(pixels_a % va == 0 or va % pixels_a == 0,
+                    f"cfg={cfg}: pixels_a={pixels_a} incompatible with vec_a={va}")
+                self.assertTrue(pixels_b % vb == 0 or vb % pixels_b == 0,
+                    f"cfg={cfg}: pixels_b={pixels_b} incompatible with vec_b={vb}")
+
+    def test_fp32_vec_c_8_admitted(self):
+        """fp32 tiles admit vec_c=8 (relaxed 32-byte ceiling). Category (A)."""
+        vecs = get_valid_vec_sizes(128, 128, 32, 2, 2, 1, 32, 32, 8, "fp32_fp32_fp32")
+        self.assertIn((4, 4, 8), set(vecs),
+            "fp32 (128,128,32) should admit vec triple (4,4,8)")
+
+    def test_bf16_asymmetric_small_pixel_vec8(self):
+        """Asymmetric small-pixel tile admits a vec=8 triple. Category (B)."""
+        # (16,256,64) wave=(1,4,1): pixels_a = 16*64/256 = 4 < 8, but 8 % 4 == 0.
+        vecs = get_valid_vec_sizes(16, 256, 64, 1, 4, 1, 16, 16, 16, "bf16_bf16_fp32")
+        self.assertTrue(any(8 in (va, vb) for va, vb, vc in vecs),
+            "bf16 (16,256,64) wave=(1,4,1) should admit a vec=8 triple")
+
+    def test_bf16_vec_c_capped_at_16(self):
+        """bf16 vec_c never exceeds 16 (LDS 256-bit ceiling still enforced)."""
+        for va, vb, vc in get_valid_vec_sizes(128, 128, 32, 2, 2, 1, 32, 32, 8, "bf16_bf16_fp32"):
+            self.assertLessEqual(vc, 16, f"bf16: vec_c={vc} > 16")
 
     def test_lds_validity_bf16(self):
         """All returned vecs must satisfy the power-of-2 bit-width constraint for bf16.

@@ -55,6 +55,7 @@ try:
         BWD_DATA_TILES,
         get_tiles_for_variant,
         get_wave_warp_pairs,
+        get_all_valid_vector_sizes,
         VecStrategy,
         compute_vector_size,
         get_vec_strategies,
@@ -67,8 +68,6 @@ try:
         get_depthwise_configs,
         # Shared validation functions
         check_vectors,
-        check_warp_coverage,
-        check_bwd_data_vec_coverage,
         is_valid_pipeline_for_variant,
         is_streamk_valid_for_variant,
     )
@@ -102,6 +101,10 @@ except ImportError:
 
     def get_wave_warp_pairs(tile_m, tile_n, tile_k, variant, dtype_key, arch="gfx942"):
         return []
+
+    def get_all_valid_vector_sizes(tile_m, tile_n, tile_k, wave_m, wave_n, wave_k,
+                                 wt_m, wt_n, wt_k, dtype_key):
+        return set()
 
     def compute_vector_size(strategy, dtype_class):
         return (1, 1, 1)
@@ -408,34 +411,6 @@ class GroupedConvKernelConfig:
                 f"vec_c={self.vector_size_c})"
             )
             return False
-
-        # Reject tile dims that exceed single-warp vector load coverage
-        t = self.tile
-        if not check_warp_coverage(
-            t.tile_m, t.tile_n, t.tile_k,
-            self.vector_size_a, self.vector_size_b,
-            variant=variant_str,
-        ):
-            log.warning(
-                f"Rejecting config: tile exceeds warp coverage "
-                f"(tile={t.tile_m}x{t.tile_n}x{t.tile_k}, "
-                f"vec_a={self.vector_size_a}, vec_b={self.vector_size_b})"
-            )
-            return False
-
-        # Bwd_data only: vector width must not exceed elements per thread
-        if self.variant == GroupedConvVariant.BACKWARD_DATA:
-            if not check_bwd_data_vec_coverage(
-                t.tile_m, t.tile_n, t.tile_k,
-                t.warp_m, t.warp_n, t.warp_k,
-                self.vector_size_a, self.vector_size_b,
-            ):
-                log.warning(
-                    f"Rejecting bwd_data config: vec exceeds tile coverage "
-                    f"(tile={t.tile_m}x{t.tile_n}x{t.tile_k}, "
-                    f"vec_a={self.vector_size_a}, vec_b={self.vector_size_b})"
-                )
-                return False
 
         # Check warp configuration (from arch_specs)
         try:
@@ -2217,11 +2192,35 @@ def get_default_configs(
         if not pairs:
             return
 
-        # Vec sizes are wave/warp independent — compute once per tile
+        # Candidate vec triples (wave/warp-independent strategy/extra selection).
+        # These are gated per (wave, warp) below against tile_math, the authority.
         vec_list = _get_union_vecs(tile_m, tile_n, tile_k, var_str)
 
-        for vec_a, vec_b, vec_c in vec_list:
-            for (wave_m, wave_n, wave_k), (warp_tile_m, warp_tile_n, warp_tile_k) in pairs:
+        for (wave_m, wave_n, wave_k), (warp_tile_m, warp_tile_n, warp_tile_k) in pairs:
+            # tile_math gate: a candidate vec triple survives only if it is valid
+            # for this (tile, wave, warp) under at least one profiler dtype_key.
+            tm_valid: set = set()
+            for dk in profiler_dtype_keys:
+                tm_valid |= get_all_valid_vector_sizes(
+                    tile_m, tile_n, tile_k,
+                    wave_m, wave_n, wave_k,
+                    warp_tile_m, warp_tile_n, warp_tile_k,
+                    dk,
+                )
+            gated_vecs = []
+            for triple in vec_list:
+                if triple in tm_valid:
+                    gated_vecs.append(triple)
+                else:
+                    log.debug(
+                        "tile_math rejects vec %s for tile=(%d,%d,%d) "
+                        "wave=(%d,%d,%d) warp=(%d,%d,%d)",
+                        triple, tile_m, tile_n, tile_k,
+                        wave_m, wave_n, wave_k,
+                        warp_tile_m, warp_tile_n, warp_tile_k,
+                    )
+
+            for vec_a, vec_b, vec_c in gated_vecs:
                 for pipeline, scheduler in pipelines:
                     # compv4 forces double_smem_buffer
                     dsb = (pipeline == "compv4") or (feat.double_smem_buffer if feat else False)
