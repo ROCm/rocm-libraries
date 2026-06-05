@@ -22,9 +22,13 @@
 #
 ################################################################################
 
+import argparse
 import pytest
 import os
 import sys
+
+NO_TESTS_PASSED_EXIT_CODE = 6
+passed_test_count = 0
 
 try:
     import xdist  # noqa
@@ -59,6 +63,35 @@ def pytest_addoption(parser):
              "With --build-only: compressed build outputs are written here. "
              "With --use-cache: previously built artifacts are read from here. "
              "Required when either --build-only or --use-cache is set.")
+    parser.addoption("--fail-if-no-tests", action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Fail with exit code 6 when tests are collected but none pass. "
+             "Use --no-fail-if-no-tests to allow all-skipped sessions.")
+
+def pytest_runtest_logreport(report):
+    # Setup and teardown reports also pass, so count only the test call. An
+    # unexpected pass of an xfail test is an xpass, not a pass. Under xdist the
+    # controller receives every worker's reports through this hook.
+    global passed_test_count
+    if report.when == "call" and report.passed and not hasattr(report, "wasxfail"):
+        passed_test_count += 1
+
+def pytest_sessionfinish(session, exitstatus):
+    if not session.config.getoption("--fail-if-no-tests"):
+        return
+
+    # Pytest returns OK for sessions where tests were collected but all skipped.
+    # Convert that no-pass success case to a distinct failure while preserving
+    # pytest's existing non-zero exit code logic for empty or fully deselected
+    # runs. --collect-only runs no tests, so it is exempt.
+    if exitstatus != pytest.ExitCode.OK or session.config.option.collectonly:
+        return
+
+    if passed_test_count == 0:
+        terminal = session.config.pluginmanager.get_plugin("terminalreporter")
+        if terminal is not None:
+            terminal.write_sep("=", "no tests passed")
+        session.exitstatus = NO_TESTS_PASSED_EXIT_CODE
 
 @pytest.fixture(scope="session")
 def timing_path(pytestconfig, tmpdir_factory):
