@@ -396,6 +396,8 @@ class CKTileKernelGenerator:
             includes += """
 #include <vector>
 #include <hip/hip_runtime.h>
+#include "ck_tile/host/device_memory.hpp"
+#include "ck_tile/host/hip_check_error.hpp"
 #include "ck_tile/ops/gemm/kernel/grouped_gemm_kernel.hpp"
 """
 
@@ -530,6 +532,9 @@ using ADataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using BDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using CDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.tm.get_output_dtype(self.datatype)]};
 using AccDataType = float;
+using ALayout = {ns_name}::ALayout;
+using BLayout = {ns_name}::BLayout;
+using CLayout = {ns_name}::CLayout;
 #endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 """
 
@@ -610,18 +615,24 @@ using AccDataType = float;
     }}"""
 
     def _launch_function_grouped(self, config: KernelConfig) -> str:
-        """Generate launch function for grouped GEMM"""
+        """Generate launch function for grouped GEMM.
+
+        Follows the dispatcher's workspace idiom (see grouped_conv stream-K launch in
+        unified_grouped_conv_codegen.py): signature is (args, stream); the device
+        workspace is allocated internally via DeviceMem rather than passed in. The
+        grouped kernel's per-group arg vector is built with MakeKargs, copied to the
+        workspace, and the device pointer + group count are passed to the kernel.
+        """
+        persistent = config.trait.persistent
+        grid_expr = (
+            "GemmKernel::MaxOccupancyGridSize(stream)"
+            if persistent
+            else "dim3(kargs.empty() ? 0 : kargs.back().block_end, 1, 1)"
+        )
         return f"""
     static float launch(const std::vector<ck_tile::GroupedGemmHostArgs<>>& gemm_descs,
                         const stream_config& stream) {{
-        const index_t num_groups = gemm_descs.size();
-        if(num_groups == 0) return 0.0f;
-
-        const index_t k_grain = TileK;
-        const index_t K_split = (gemm_descs[0].K + k_grain - 1) / k_grain * TileK;
-        const index_t num_loop = TilePartitioner::GetLoopNum(K_split);
-        const bool has_hot_loop = BaseGemmPipeline::BlockHasHotloop(num_loop);
-        const TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
+        if(gemm_descs.empty()) return 0.0f;
 
         float ave_time{{0}};
 
@@ -640,24 +651,29 @@ using AccDataType = float;
 
         using GemmKernel = ck_tile::GroupedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 
-        const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
-            auto kargs = GemmKernel::MakeKernelArgs(gemm_descs);
+        auto kargs = GemmKernel::MakeKargs(gemm_descs);
+        if(!GemmKernel::IsSupportedArgument(kargs)) {{
+            throw std::runtime_error("Arguments not supported for grouped gemm kernel");
+        }}
 
-            if (!GemmKernel::IsSupportedArgument(kargs)) {{
-                throw std::runtime_error("Arguments not supported!");
-            }}
+        // Workspace allocated internally (dispatcher idiom, mirrors grouped_conv stream-K).
+        const std::size_t ws_size = kargs.size() * sizeof(ck_tile::GemmTransKernelArg<>);
+        DeviceMem workspace_dev(ws_size);
+        HIP_CHECK_ERROR(hipMemcpyWithStream(workspace_dev.GetDeviceBuffer(),
+                                            kargs.data(),
+                                            ws_size,
+                                            hipMemcpyHostToDevice,
+                                            stream.stream_id_));
 
-            const dim3 grids  = GemmKernel::GridSize(gemm_descs);
-            const dim3 blocks = GemmKernel::BlockSize();
+        const dim3 grids  = {grid_expr};
+        const dim3 blocks = GemmKernel::BlockSize();
 
-            constexpr int kBlockPerCu = {config.k_block_per_cu};
-            ave_time = launch_kernel(stream,
-                make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
+        constexpr int kBlockPerCu = {config.k_block_per_cu};
+        ave_time = launch_kernel(stream,
+            make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0,
+                cast_pointer_to_constant_address_space(workspace_dev.GetDeviceBuffer()),
+                kargs.size()));
 
-            return ave_time;
-        }};
-
-        BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
         return ave_time;
     }}"""
 
@@ -1473,7 +1489,7 @@ def main():
     parser.add_argument(
         "--variants",
         nargs="+",
-        choices=["standard", "preshuffle", "multi_d"],
+        choices=["standard", "preshuffle", "multi_d", "grouped"],
         default=["standard"],
         help="Variants to generate",
     )
