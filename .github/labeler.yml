@@ -14,7 +14,6 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
   - any-glob-to-any-file: 'shared/origami/**/*'
-  - any-glob-to-any-file: 'shared/rocroller/**/*'
   - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
 "project: hipblaslt-provider":
