@@ -785,13 +785,12 @@ namespace TensileLite
             }
             else if(sizeMapping.streamK == 5)
             {
-                // SK5 hybrid: per Alex's review on PR 7953 (this file, original
-                // line 868) we push only the 6 args matching the runtime mode
+                // SK5 hybrid: push only the 6 args matching the runtime mode
                 // the host has selected for this launch. The kernel's SK3 and
                 // SK4 code paths read via different symbolic names that are
-                // RegSet-aliased onto the same 6 SGPRs (see
-                // Tensile/KernelWriterAssembly.py SK5 alias block and
-                // Tensile/Components/Signature.py SK5 branch).
+                // RegSet-aliased onto the same 6 SGPRs (see the SK5 alias
+                // block in Tensile/KernelWriterAssembly.py and the SK5 branch
+                // in Tensile/Components/Signature.py).
                 //
                 // The mode bit lives in bit 31 of slot 2:
                 //   SK3 mode -> slot 2 = magicShiftItersPerTile (5 bits, MSB=0)

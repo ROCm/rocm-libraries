@@ -147,10 +147,9 @@ class TestStreamK5PersistentLoop:
 
 
 class TestStreamK5SixArgCollapse:
-    """Per Alex's review on hipBLASLt PR 7953: SK5 must push only the 6
-    args matching the active runtime mode (not the union of SK3+SK4 = 11
-    args), with SK4 reader names resolved via RegSet aliases onto the
-    SK3 primary SGPRs.
+    """SK5 must push only the 6 args matching the active runtime mode
+    (not the union of SK3+SK4 = 11 args), with SK4 reader names resolved
+    via RegSet aliases onto the SK3 primary SGPRs.
     """
 
     # ---- Signature.py: exactly 6 SK args + 24-byte size ----
