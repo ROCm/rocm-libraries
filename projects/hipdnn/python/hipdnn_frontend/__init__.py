@@ -9,34 +9,36 @@ enabling GPU-accelerated deep neural network operations through a
 high-level Python interface.
 """
 
+import os
+import platform
+
+is_windows = platform.system() == "Windows"
+
+# Windows extension modules cannot resolve dependent DLLs from PATH: CPython
+# loads them with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which excludes PATH and has
+# no RPATH equivalent. HIPDNN_DLL_DIRECTORIES lets a caller register absolute
+# directories (e.g. a raw ROCm artifact tree's bin/) via os.add_dll_directory
+# before the extension imports, without requiring rocm_sdk to be installed.
+if is_windows:
+    for _dll_dir in os.environ.get("HIPDNN_DLL_DIRECTORIES", "").split(os.pathsep):
+        if _dll_dir and os.path.isdir(_dll_dir):
+            os.add_dll_directory(_dll_dir)
+
 # Preload ROCm libraries when installed via ROCm wheels. The compiled extension
 # (hipdnn_frontend_python) and hipdnn_backend live in separate wheel package
 # directories, not on LD_LIBRARY_PATH. rocm_sdk loads them by absolute path so
 # the extension resolves them at import time.
 try:
     import rocm_sdk
+    core_shortnames = ["hipdnn"]
+    if is_windows:
+        core_shortnames = ["amd_comgr", "amdhip64", "hiprtc", "hipdnn", "hipblaslt", "miopen"]
+
+    rocm_sdk.initialize_process(preload_shortnames=core_shortnames)
 except ImportError:
-    rocm_sdk = None
-
-if rocm_sdk is not None:
-    import platform
-
-    # On Windows, CPython >= 3.8 loads extension modules with
-    # LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which excludes PATH. The extension and
-    # hipdnn_backend.dll resolve their ROCm runtime imports (amdhip64, hiprtc,
-    # amd_comgr) by base name, so those DLLs must already be in the process. The
-    # runtime libs are listed before hipdnn so they load first.
-    preload_shortnames = ["hipdnn"]
-    if platform.system() == "Windows":
-        preload_shortnames = ["amd_comgr", "amdhip64", "hiprtc", "hipdnn"]
-
-    try:
-        rocm_sdk.initialize_process(preload_shortnames=preload_shortnames)
-    except Exception:
-        # Preload is best-effort: the libraries may already be resolvable
-        # (source builds, system installs, LD_LIBRARY_PATH). A genuine miss
-        # surfaces as a clear dlopen/ImportError below.
-        pass
+    pass
+except Exception:
+    pass
 
 # Import everything from the compiled extension module
 try:
