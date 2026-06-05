@@ -2003,10 +2003,10 @@ class GSUOn(GSU):
     def initializeSrd(self, writer, ArgTypeCheckLabel, GeneralBatchedGemmSrdInitiation_End, kernel, ch):
         module = Module("initializeSrd")
         # Special handling for "MultipleBuffer" and "MultipleBufferSingleKernel" for General Batched GEMM
-        # ArgType == 3 (General Batched GEMM) but GSU == 1, then SrdC/D will be initialized to right batch matrix address from pointer array (AddressC/D)
+        # ArgType == 3 (General Batched GEMM) but GSU == 1, then SrdC/D will be initialized to correct batch matrix address from pointer array (AddressC/D)
         # ArgType == 3 (General Batched GEMM) but GSU > 1, then SrdC/D will be initialized with workspace.
         # "MultipleBuffer" means both SrdC and SrdD are workspace pointers
-        # "MultipleBufferSingleKernel" means only SrdD will be workspace pointer while SrdC will be initialized to right batch matrix address from pointer array (AddressC)      
+        # "MultipleBufferSingleKernel" means only SrdD will be workspace pointer while SrdC will be initialized to correct batch matrix address from pointer array (AddressC)      
         if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')):
             with writer.allocTmpSgpr(1) as tmpSgprGSU:
                 module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
@@ -2019,7 +2019,7 @@ class GSUOn(GSU):
         return module
 
     # GSU = 1, then all C and D will have pointer to device memory holding pointer array to batch matrices. 
-    # So we need logic to get the right batch matrix address into Srd.
+    # So we need logic to get the correct batch matrix address into Srd.
     # GSU > 1, then AddressA/B will be pointer to device memory holding pointer array to batch matrices but AddressC/D will further depend on the following:
     # a) MultiBuffer case: AddressC/D will be pointer to workspace and will be handled similar to Strided Batched case.
     # b) MultiBufferSingleKernel case: AddressC will be pointer to device memory holding pointer array to batch matrices while AddressD will be pointer to workspace.
