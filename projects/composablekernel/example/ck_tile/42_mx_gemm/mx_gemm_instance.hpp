@@ -7,7 +7,6 @@
 #include "mx_gemm.hpp"
 #include "ck_tile/ops/gemm_mx/pipeline/gemm_pipeline_ag_bg_cr_comp_async.hpp"
 #include "ck_tile/ops/gemm_mx/pipeline/gemm_pipeline_ag_bg_cr_comp_async_eight_waves.hpp"
-#include "ck_tile/ops/gemm_mx/kernel/gemm_mx_kernel.hpp"
 #include "ck_tile/ops/gemm_mx/pipeline/wp_pipeline_agmem_bgmem_creg_v1.hpp"
 
 template <typename Layout>
