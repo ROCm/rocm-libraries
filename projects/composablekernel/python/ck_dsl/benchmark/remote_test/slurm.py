@@ -21,6 +21,11 @@ _PKG_EXCLUDES = (
     "--exclude=*.pyc",
     "--exclude=examples",
     "--exclude=dsl_docs",
+    # The remote runs its own /usr/bin/python3 (numpy present; run_manifest's
+    # torch launcher falls back to direct HIP timing), so the local virtualenv
+    # is never used on the node -- pushing it is pure waste (~15 GB of torch
+    # aotriton images) and trips remote path/quota limits during rsync.
+    "--exclude=.venv",
 )
 
 

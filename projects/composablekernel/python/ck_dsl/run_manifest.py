@@ -920,6 +920,104 @@ def _simple_op_problem(
     raise ValueError(f"_simple_op_problem: unknown kind {kind!r}")
 
 
+def _deep_fused_conv_pool_fp16_problem(
+    manifest: dict, _shape: Optional[Tuple[int, int, int]], verify: bool
+) -> tuple:
+    """gfx1201 fp16 fused conv0->conv1->pool runner.
+
+    This is intentionally separate from the gfx1151 i8/i4 runner: the ABI,
+    storage types, and reference path are different even though both manifests
+    describe a deep-fused conv/pool pipeline.
+    """
+    np = _require_numpy()
+    cv = [int(x) for x in manifest["conv"]]
+    if len(cv) < 13:
+        raise ValueError("conv manifest needs [N,H,W,C,K,R,S,sH,sW,pH,pW,dH,dW]")
+    N, Hi, Wi, C, K, R, S, sH, sW, pH, pW, dH, dW = cv[:13]
+    pool = [int(x) for x in manifest["pool"]]
+    pool_y, pool_x, pool_sh, pool_sw = pool[:4]
+    K1 = int(manifest["conv1"]["K1"])
+    _, pool_ho, pool_wo, _ = [int(x) for x in manifest["pool_output_shape"]]
+
+    Ho = (Hi + 2 * pH - dH * (R - 1) - 1) // sH + 1
+    Wo = (Wi + 2 * pW - dW * (S - 1) - 1) // sW + 1
+
+    seed = int(manifest.get("seed", 123))
+    rng = np.random.default_rng(seed)
+    A = (rng.standard_normal((N, Hi, Wi, C)).astype(np.float32) * 0.25).astype(
+        np.float16
+    )
+    B0 = (rng.standard_normal((K, R, S, C)).astype(np.float32) * 0.25).astype(
+        np.float16
+    )
+    W1 = (rng.standard_normal((K1, K)).astype(np.float32) * 0.25).astype(np.float16)
+    Y = np.zeros((N, pool_ho, pool_wo, K1), dtype=np.float16)
+
+    gx, gy, gz = [int(x) for x in manifest["grid_explicit"]]
+    grid = (gx, gy, gz)
+    block = (int(manifest["threads_per_block"]), 1, 1)
+    conv0_flop = N * Ho * Wo * K * R * S * C
+    conv1_flop = N * Ho * Wo * K1 * K
+    flop = 2.0 * (conv0_flop + conv1_flop)
+    bytes_xfer = 2.0 * (A.size + B0.size + W1.size + Y.size)
+
+    def make_args(rt: Runtime):
+        A_dev = rt.alloc(_nbytes(A))
+        B_dev = rt.alloc(_nbytes(B0))
+        Y_dev = rt.alloc(_nbytes(Y))
+        W1_dev = rt.alloc(_nbytes(W1))
+        rt.memcpy_h2d(A_dev, _as_u8_buffer(A), _nbytes(A))
+        rt.memcpy_h2d(B_dev, _as_u8_buffer(B0), _nbytes(B0))
+        rt.memcpy_h2d(W1_dev, _as_u8_buffer(W1), _nbytes(W1))
+        rt.memset(Y_dev, 0, _nbytes(Y))
+        args = struct.pack(
+            "<QQQQiiii",
+            A_dev,
+            B_dev,
+            Y_dev,
+            W1_dev,
+            _nbytes(W1),
+            _nbytes(A),
+            _nbytes(B0),
+            _nbytes(Y),
+        )
+        return args, (A_dev, B_dev, Y_dev, W1_dev)
+
+    def check(rt: Runtime, ptrs):
+        if not verify:
+            return 0.0, 0, Y.size
+        rt.memcpy_d2h(_as_u8_buffer(Y), ptrs[2], _nbytes(Y))
+        Ap = np.pad(A, ((0, 0), (pH, pH), (pW, pW), (0, 0)))
+        C0 = np.zeros((N, Ho, Wo, K), dtype=np.float32)
+        for r in range(R):
+            for s in range(S):
+                row_start = r * dH
+                col_start = s * dW
+                x = Ap[
+                    :,
+                    row_start : row_start + Ho * sH : sH,
+                    col_start : col_start + Wo * sW : sW,
+                    :,
+                ].astype(np.float32)
+                w = B0[:, r, s, :].astype(np.float32)
+                C0 += np.einsum("nhwc,kc->nhwk", x, w, optimize=True)
+        C0 = np.maximum(C0, 0.0).astype(np.float16).astype(np.float32)
+        C1 = np.einsum("nhwk,ok->nhwo", C0, W1.astype(np.float32), optimize=True)
+        C1 = np.maximum(C1, 0.0).astype(np.float16).astype(np.float32)
+        ref = np.empty((N, pool_ho, pool_wo, K1), dtype=np.float32)
+        for ho in range(pool_ho):
+            for wo in range(pool_wo):
+                h0 = ho * pool_sh
+                w0 = wo * pool_sw
+                patch = C1[:, h0 : h0 + pool_y, w0 : w0 + pool_x, :]
+                ref[:, ho, wo, :] = patch.max(axis=(1, 2))
+        ref_h = ref.astype(np.float16)
+        diff = np.abs(Y.astype(np.float32) - ref_h.astype(np.float32))
+        return float(diff.max()), int(np.count_nonzero(diff > 1e-2)), Y.size
+
+    return make_args, grid, block, flop, bytes_xfer, check
+
+
 def run_manifest(
     manifest_path: Path,
     hsaco_path: Optional[Path] = None,
@@ -955,6 +1053,10 @@ def run_manifest(
     elif kind == "deep_fused_conv_pool_i8i4":
         make_args, grid, block, flop, bytes_xfer, check = (
             _deep_fused_conv_pool_i8i4_problem(manifest, shape, verify)
+        )
+    elif kind == "deep_fused_conv_pool_fp16":
+        make_args, grid, block, flop, bytes_xfer, check = (
+            _deep_fused_conv_pool_fp16_problem(manifest, shape, verify)
         )
     elif kind in (
         "elementwise_fp16",
