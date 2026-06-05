@@ -66,6 +66,9 @@ option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
+option(HIPBLASLT_INSTALL_CODEGEN
+       "Install the device-library codegen subset (Tensile codegen import closure + vendored rocisa) so downstream consumers can call hipblaslt_create_device_library() against a binary hipBLASLt install."
+       ${HIPBLASLT_ENABLE_HOST})
 option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
 
 if(HIPBLASLT_ENABLE_CLIENT)
@@ -434,11 +437,23 @@ if(HIPBLASLT_ENABLE_HOST)
         NAMESPACE roc::
     )
 
+    # @ONLY: substitute @CMAKE_INSTALL_DATADIR@ (used by the Phase 3 codegen block)
+    # while leaving all ${CMAKE_CURRENT_LIST_DIR} references intact for consume-time.
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt-config.cmake.in"
         "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config.cmake"
-        COPYONLY
+        @ONLY
     )
+
+    # Ship the codegen function module next to the package config so the exported
+    # hipblaslt-config.cmake can include() it (Phase 3: hipblaslt_create_device_library).
+    if(HIPBLASLT_INSTALL_CODEGEN AND NOT WIN32)
+        install(
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipBLASLtCodegen.cmake"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt"
+            COMPONENT devel
+        )
+    endif()
 
     if( LEGACY_HIPBLAS_DIRECT )
         rocm_package_add_dependencies(DEPENDS "hipblas >= 0.50.0")
@@ -659,6 +674,16 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
 
     # TODO: Add C++ test tools (tensilelite-client, cpu-gemm-driver) when
     # common/generator tests are enabled in CI.
+endif()
+
+# Install the device-library codegen subset so a binary-only hipBLASLt package
+# can drive hipblaslt_create_device_library() in a downstream consumer
+# (hipSPARSELt) with no hipBLASLt source tree present. Gated on the host build so
+# the package has a single owner: the hipSPARSELt fork build (HOST OFF) consumes
+# this from the installed hipBLASLt package rather than re-installing it.
+if(HIPBLASLT_INSTALL_CODEGEN AND NOT WIN32)
+    include(HipBLASLtCodegenInstall)
+    hipblaslt_install_codegen_subset("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)

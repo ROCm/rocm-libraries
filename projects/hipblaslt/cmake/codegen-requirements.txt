@@ -1,0 +1,12 @@
+# Python packages required by the hipBLASLt device-library codegen
+# (python -m Tensile.TensileCreateLibrary + the TensileLogic --check-all gate).
+#
+# Declared as a safety net (Phase 3, D1): the interpreter that a downstream
+# consumer (e.g. hipSPARSELt) uses to drive hipblaslt_create_device_library()
+# must have these importable. They are part of the codegen import closure and are
+# NOT vendored (unlike rocisa, which ships alongside this file).
+PyYAML
+msgpack
+joblib>=1.4.0
+packaging
+tqdm
