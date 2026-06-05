@@ -9700,6 +9700,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           uniqueTokens = sorted(set(barrierTokens))
           syncComments = ", ".join([f"sync LDS{token}" for token in uniqueTokens])
           barrier = SBarrier(comment=f"auto token transition barrier, {syncComments}")
+          barrier.setMemToken(MemTokenData(uniqueTokens))
           rewrittenItems.append(barrier)
           insertedCount += 1
 
