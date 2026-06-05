@@ -367,7 +367,7 @@ namespace TensileLite
                 ("activation-no-guard",          po::value<bool>()->default_value(false), "Use activation guard to deall with nan outputs.")
                 ("activation-additional-args",vector_default_empty<std::string>(), "Activation additional floating-point number arguments.")
                 ("activation-enum-args",      po::value<std::vector<ActivationType>>()->default_value(std::vector<ActivationType>(1, ActivationType::None), "[]"), "Activation enum argument.")
-                ("streamk-hybrid-mode",       po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[0]"), "StreamK=5 hybrid-mode toggle values. Each element runs the problem once with setParams().setDynPersistentTileMode(value); accepts {0=OFF, 1=ON, 2=AUTO}. Use [0, 1] (or [0, 1, 2]) to exercise the SK5 paths in a single run.")
+                ("streamk-hybrid-mode",       po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[0]"), "StreamK=5 hybrid-mode toggle values. Each element runs the problem once with setParams().setDynPersistentTileMode(value); use [0, 1] to exercise the two deterministic SK5 sub-paths (0=static, 1=dynamic per-XCD work-queue) in a single run. AUTO (=2) is intentionally not a valid value for this test driver because the runtime heuristic would make per-launch sub-path coverage non-deterministic; the underlying setDynPersistentTileMode API still accepts {0, 1, 2} for production use.")
                 ("use-bias",                  po::value<int>()->default_value(0), "Use bias.")
                 ("bias-source",               po::value<int>()->default_value(3), "Bias source.")
                 ("use-scaleAB",               po::value<std::string>()->default_value(""), "Use scaleAB.")

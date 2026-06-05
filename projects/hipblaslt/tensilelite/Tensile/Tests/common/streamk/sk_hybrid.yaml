@@ -15,13 +15,17 @@ GlobalParameters:
   NumWarmups: 0
   EnqueuesPerSync: 1
   SleepPercent: 50
-  # Exercise all three SK5 hybrid-mode paths in one run:
+  # Exercise the two deterministic SK5 hybrid-mode paths in one run:
   #   0 -> static work assignment (OFF, default)
   #   1 -> dynamic per-XCD work-queue path (ON)
-  #   2 -> AUTO (origami heuristic picks between 0 and 1 per launch)
   # Each base problem is replayed once per value, so reference vs kernel
-  # validation runs for all three modes and confirms numerical equivalence.
-  StreamKHybridMode: [0, 1, 2]
+  # validation runs for both paths and confirms numerical equivalence.
+  # The AUTO (=2) mode is not exercised here because the heuristic may
+  # resolve to either 0 or 1 depending on hardware/geometry, which makes
+  # per-launch sub-path coverage non-deterministic at the YAML layer.
+  # AUTO is validated separately by the origami unit tests (heuristic
+  # logic) and the hipBLASLt client gtests (end-to-end dispatch).
+  StreamKHybridMode: [0, 1]
 
 BenchmarkProblems:
 
