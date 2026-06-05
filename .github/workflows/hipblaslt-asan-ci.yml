@@ -1,11 +1,14 @@
-name: hipblaslt ASAN CI
+name: BLAS-stack ASAN CI
 
-# Standalone hipblaslt ASAN smoke build. Opt-in via `ci:asan` label so we
-# do not burn the limited gfx90a runner pool on every PR. Scope:
+# Opt-in ASAN build + smoke test of hipBLASLt and its downstream BLAS/SOLVER
+# consumers. Opt-in via `ci:asan` label so we do not burn the limited gfx90a
+# runner pool on every PR. Scope:
 #
-#   - gfx90a only
-#   - hipblaslt only
-#   - smoke hipblaslt-test
+#   - gfx90a only (host-side ASAN; device xnack+ is gfx942/gfx950 only)
+#   - ASAN-instrumented subprojects (per-subproject `<target>_SANITIZER=ASAN`):
+#       hipBLASLt, rocBLAS, rocSOLVER, hipSOLVER, hipBLAS
+#     everything else compiles with normal flags (shared-cache ccache hits)
+#   - smoke <component>-test per component (quick test type)
 #   - Does not gate
 
 on:
@@ -63,7 +66,7 @@ jobs:
         uses: ./.github/actions/ci-env
 
   build:
-    name: "Build (hipblaslt | gfx90a | ASAN)"
+    name: "Build (BLAS stack | gfx90a | ASAN)"
     needs: setup
     runs-on: ${{ needs.setup.outputs.build_runs_on }}
     permissions:
@@ -127,62 +130,109 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DhipBLASLt_SANITIZER=ASAN -Drocprofiler-sdk_CMAKE_ARGS=-DROCPROFILER_BUILD_TESTS=OFF"
+          # Per-subproject `<target>_SANITIZER=ASAN` instruments only these five
+          # at the toolchain level (TheRock cmake/therock_sanitizers.cmake); all
+          # other subprojects keep normal flags. rocprofiler-sdk test build is
+          # disabled (its test kernel needs a HIP runtime not staged on this path).
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DhipBLASLt_SANITIZER=ASAN -DrocBLAS_SANITIZER=ASAN -DrocSOLVER_SANITIZER=ASAN -DhipSOLVER_SANITIZER=ASAN -DhipBLAS_SANITIZER=ASAN -Drocprofiler-sdk_CMAKE_ARGS=-DROCPROFILER_BUILD_TESTS=OFF"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build hipBLASLt
-        run: cmake --build TheRock/build --target hipBLASLt -- -k 0
+      - name: Build BLAS stack (ASAN)
+        run: |
+          cmake --build TheRock/build \
+            --target hipBLASLt rocBLAS rocSOLVER hipSOLVER hipBLAS \
+            -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
         run: |
-          echo "hipBLASLt subproject dirs:"
-          echo "--------------------------"
-          find TheRock/build -maxdepth 5 -type d -path '*hipBLASLt*' \
-            \( -name stage -o -name dist -o -name build \) -print 2>/dev/null || true
-          echo "hipblaslt-test binary:"
-          echo "----------------------"
-          find TheRock/build -type f -name 'hipblaslt-test' 2>/dev/null || true
-          echo "hipBLASLt stage tree (top levels):"
-          echo "----------------------------------"
-          for d in $(find TheRock/build -maxdepth 5 -type d -path '*hipBLASLt*' -name stage 2>/dev/null); do
-            echo "## $d"
-            find "$d" -maxdepth 3 -name 'hipblaslt-test' -o -maxdepth 3 -type d -name library 2>/dev/null || true
-            du -h -d 2 "$d" 2>/dev/null | tail -20 || true
+          for comp in hipBLASLt rocBLAS rocSOLVER hipSOLVER hipBLAS; do
+            echo "## ${comp}"
+            echo "------------------------------------"
+            for kind in stage dist; do
+              find TheRock/build -maxdepth 6 -type d -path "*/math-libs/BLAS/${comp}/${kind}" 2>/dev/null || true
+            done
+            lc=$(echo "$comp" | tr 'A-Z' 'a-z')
+            find TheRock/build -maxdepth 8 -type f -name "${lc}-test" 2>/dev/null || true
           done
           echo "CCache Stats:"
           echo "-------------"
           ccache -s -v || true
 
-      - name: Package hipBLASLt trees
+      - name: Package subproject trees
         if: ${{ !cancelled() }}
         run: |
           set -uo pipefail
           mkdir -p upload
-          found=0
-          for kind in stage dist; do
-            for d in $(find TheRock/build -maxdepth 6 -type d -path '*hipBLASLt*' -name "$kind" 2>/dev/null); do
-              echo "Packaging $kind tree: $d"
-              if tar -C "$d" -czf "upload/hipblaslt-${kind}.tar.gz" . ; then found=1; fi
-              break
+          # lowercase artifact name -> CamelCase build subdir
+          comps="hipblaslt:hipBLASLt rocblas:rocBLAS rocsolver:rocSOLVER hipsolver:hipSOLVER hipblas:hipBLAS"
+          for pair in $comps; do
+            name="${pair%%:*}"
+            cdir="${pair##*:}"
+            mkdir -p "upload/${name}"
+            found=0
+            for kind in stage dist; do
+              d=$(find TheRock/build -maxdepth 6 -type d -path "*/math-libs/BLAS/${cdir}/${kind}" 2>/dev/null | head -1)
+              if [ -n "$d" ] && [ -d "$d" ]; then
+                echo "Packaging ${cdir}/${kind}: $d"
+                if tar -C "$d" -czf "upload/${name}/${name}-${kind}.tar.gz" . ; then found=1; fi
+              else
+                echo "::warning::no ${cdir}/${kind} tree found"
+              fi
             done
+            [ "$found" = 1 ] || echo "::warning::no stage/dist tree packaged for ${cdir}"
+            ls -lh "upload/${name}" || true
           done
-          ls -lh upload || true
-          [ "$found" = 1 ] || echo "::warning::no hipBLASLt stage/dist tree found to package"
 
       - name: Upload hipBLASLt trees
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: hipblaslt-asan-trees
-          path: upload/*.tar.gz
+          name: asan-trees-hipblaslt
+          path: upload/hipblaslt/*.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload rocBLAS trees
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: asan-trees-rocblas
+          path: upload/rocblas/*.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload rocSOLVER trees
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: asan-trees-rocsolver
+          path: upload/rocsolver/*.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload hipSOLVER trees
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: asan-trees-hipsolver
+          path: upload/hipsolver/*.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload hipBLAS trees
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: asan-trees-hipblas
+          path: upload/hipblas/*.tar.gz
           if-no-files-found: warn
           retention-days: 7
 
   test:
-    name: "Test hipblaslt ASAN (smoke)"
+    name: "Test ${{ matrix.component.name }} ASAN (smoke)"
     needs: [setup, build]
     runs-on: linux-gfx90a-gpu-rocm
     timeout-minutes: 210
@@ -199,6 +249,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        component:
+          - { name: hipblaslt, bin: hipblaslt-test, script: test_hipblaslt.py }
+          - { name: rocblas,   bin: rocblas-test,   script: test_rocblas.py }
+          - { name: rocsolver, bin: rocsolver-test, script: test_rocsolver.py }
+          - { name: hipsolver, bin: hipsolver-test, script: test_hipsolver.py }
+          - { name: hipblas,   bin: hipblas-test,   script: test_hipblas.py }
         shard: [1]
     defaults:
       run:
@@ -211,7 +267,7 @@ jobs:
       THEROCK_DIR: ${{ github.workspace }}
       AMDGPU_FAMILIES: gfx90a
       ARTIFACT_GROUP: gfx90a-asan
-      TEST_COMPONENT: hipblaslt
+      TEST_COMPONENT: ${{ matrix.component.name }}
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -224,19 +280,22 @@ jobs:
         with:
           path: rocm-libraries
 
-      - name: Download hipBLASLt ASAN trees
+      - name: Download ${{ matrix.component.name }} ASAN trees
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: hipblaslt-asan-trees
-          path: hipblaslt-asan-trees
+          name: asan-trees-${{ matrix.component.name }}
+          path: asan-trees
 
-      - name: Assemble runnable tree from dist
+      - name: Assemble runnable tree from dist (+ stage overlay)
         run: |
           set -euo pipefail
           mkdir -p "${OUTPUT_ARTIFACTS_DIR}"
-          tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf hipblaslt-asan-trees/hipblaslt-dist.tar.gz
-          test -x "${THEROCK_BIN_DIR}/hipblaslt-test"
-          echo "Extracted dist tree:"; ls -1 "${OUTPUT_ARTIFACTS_DIR}"
+          tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf "asan-trees/${{ matrix.component.name }}-dist.tar.gz"
+          if [ -f "asan-trees/${{ matrix.component.name }}-stage.tar.gz" ]; then
+            tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf "asan-trees/${{ matrix.component.name }}-stage.tar.gz"
+          fi
+          test -x "${THEROCK_BIN_DIR}/${{ matrix.component.bin }}"
+          echo "Extracted tree:"; ls -1 "${OUTPUT_ARTIFACTS_DIR}"
 
       - name: Driver / GPU sanity check
         timeout-minutes: 3
@@ -258,7 +317,7 @@ jobs:
             echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
           } >> "$GITHUB_ENV"
 
-      - name: Test hipblaslt
+      - name: Test ${{ matrix.component.name }}
         timeout-minutes: 180
         env:
           SHARD_INDEX: ${{ matrix.shard }}
@@ -266,10 +325,10 @@ jobs:
           TEST_TYPE: quick
         run: |
           mkdir -p ./test_logs
-          python3 rocm-libraries/test/therock/test_hipblaslt.py 2>&1 | tee ./test_logs/test_output.log
+          python3 "rocm-libraries/test/therock/${{ matrix.component.script }}" 2>&1 | tee "./test_logs/${{ matrix.component.name }}-test_output.log"
 
   summary:
-    name: "hipblaslt ASAN CI Summary"
+    name: "BLAS-stack ASAN CI Summary"
     if: always()
     needs:
       - check_label
@@ -287,5 +346,5 @@ jobs:
             echo "Skipped (ci:asan label not set)."
             exit 0
           fi
-          echo "Build:  ${BUILD}"
-          echo "Test:   ${TEST}"
+          echo "Build (all 5 ASAN subprojects):  ${BUILD}"
+          echo "Test  (5-component smoke matrix): ${TEST}"
