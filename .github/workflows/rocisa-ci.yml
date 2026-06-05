@@ -32,7 +32,7 @@ jobs:
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           sparse-checkout: .github/actions/ci-env
       - uses: ./.github/actions/ci-env
@@ -45,7 +45,7 @@ jobs:
       image: ${{ needs.setup.outputs.docker-image }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm-linux
@@ -69,7 +69,7 @@ jobs:
         run: git config --global core.longpaths true
 
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0

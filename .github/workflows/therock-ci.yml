@@ -55,7 +55,7 @@ jobs:
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
@@ -68,7 +68,7 @@ jobs:
         uses: ./.github/actions/ci-env
 
       - name: Checkout TheRock repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: "ROCm/TheRock"
           path: TheRock

@@ -56,7 +56,7 @@ jobs:
       TEST_COMPONENT: ${{ fromJSON(inputs.component).job_name }}
     steps:
       - name: "Fetch 'build_tools' from repository"
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: "ROCm/TheRock"
           sparse-checkout: build_tools
@@ -74,7 +74,7 @@ jobs:
         run: bash ./prejob/build_tools/github_actions/cleanup_processes.sh
 
       - name: Checkout Repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: "ROCm/TheRock"
           ref: ${{ inputs.therock_ref }}
@@ -84,7 +84,7 @@ jobs:
         run: git config --global core.longpaths true
 
       - name: Checkout rocm-libraries repository for scripts
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           path: rocm-libraries
 
