@@ -49,31 +49,43 @@ def _preload_via_rocm_sdk():
             pass
 
 
-def _register_rocm_lib_dir():
-    """Non-wheel installs (system /opt/rocm or a .deb, and build/artifact trees):
+def _preload_via_rocm_path():
+    """Non-wheel installs (system .deb / /opt/rocm, and build/artifact trees):
     locate the ROCm library directory from the standard ROCM_PATH/ROCM_HOME env
-    vars.
+    vars and make its libraries resolvable for the extension import.
 
-    On Windows the directory must be registered via os.add_dll_directory:
-    extension modules load with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which excludes
-    PATH and has no RPATH equivalent. On Linux the dynamic loader already
-    searches RPATH/ldconfig/LD_LIBRARY_PATH, so there is nothing to do.
+    On Windows the directory is registered via os.add_dll_directory: extension
+    modules load with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which excludes PATH and
+    has no RPATH equivalent. On Linux libhipdnn is ctypes-preloaded with
+    RTLD_GLOBAL so its RPATH pulls the transitive ROCm deps and the soname is
+    already resolved when the extension imports; LD_LIBRARY_PATH cannot be set
+    from here because the dynamic loader reads it once at process start.
     """
-    if not _IS_WINDOWS:
-        return
     for var in ("ROCM_PATH", "ROCM_HOME"):
         root = os.environ.get(var)
-        if root and os.path.isdir(root):
-            lib_dir = os.path.join(root, "bin")
-            if os.path.isdir(lib_dir):
-                os.add_dll_directory(lib_dir)
+        if not (root and os.path.isdir(root)):
+            continue
+        lib_dir = os.path.join(root, "bin" if _IS_WINDOWS else "lib")
+        if not os.path.isdir(lib_dir):
             return
+        if _IS_WINDOWS:
+            os.add_dll_directory(lib_dir)
+        else:
+            import ctypes
+            from glob import glob
+
+            # Base symlink sorts before its versioned aliases; loading any of
+            # them registers the lib under its soname for the extension.
+            matches = sorted(glob(os.path.join(lib_dir, "libhipdnn.so*")))
+            if matches:
+                ctypes.CDLL(matches[0], mode=ctypes.RTLD_GLOBAL)
+        return
 
 
 try:
     _preload_via_rocm_sdk()
 except ImportError:
-    _register_rocm_lib_dir()
+    _preload_via_rocm_path()
 
 # Import everything from the compiled extension module
 try:
