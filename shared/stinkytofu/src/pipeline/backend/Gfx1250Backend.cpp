@@ -57,7 +57,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
-#include "stinkytofu/transforms/asm/SwPrefetchInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -198,7 +198,6 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // WARNING: temporary workaround; see FlattenCalleesPass. Remove once
     // SwPrefetchInsertionPass handles multiple functions directly.
     pm.addPass(createFlattenCalleesPass(module.getFunctions()));
-
     // gfx1250 hardware-entrypoint prologue:
     // `global_prefetch_b8 v0, [s0, s1] scope:SCOPE_SE th:TH_LOAD_RT` + `v_nop`.
     // global_prefetch_b8 makes the first VMEM instruction non-clause-bound (it
@@ -209,8 +208,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // CP-boundary coverage stays gap-free.
     pm.addPass(createInsertInitialUnclausedVmemPass());
 
-    if (moduleOptions.EnableSwPrefetchInsertion) {
-        pm.addPass(createSwPrefetchInsertionPass(module));
+    if (moduleOptions.EnableSwInstructionPrefetchRelStatic) {
+        pm.addPass(createSwInstructionPrefetchRelStaticPass(module));
     }
 
     // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction + summary) to

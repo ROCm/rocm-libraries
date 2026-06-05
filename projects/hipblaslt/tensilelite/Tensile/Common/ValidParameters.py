@@ -358,7 +358,7 @@ validParameters = { # we need to make sure this matches develop
     # don't create a whole copy of the Unroll loop with loads removed - instead
     # use buffer limits to suppress global loads and ignore unnecessary ds_reads
     "SuppressNoLoadLoop": [False, True],
-    # StinkyTofu: whether SwPrefetchInsertionPass may insert software instruction prefetch.
+    # StinkyTofu: whether SwInstructionPrefetchRelStaticPass may insert software instruction prefetch.
     # True: Turn on StinkyTofu instruction prefetch for this solution (extra SGPR on supported ISAs only).
     # False: no prefetch SGPR, prefetch pass disabled for this kernel.
     #
