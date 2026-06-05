@@ -183,14 +183,14 @@ class GlobalWriteBatchWriter:
     assert self._checkAtomicPreconditions()
     module = Module(self.moduleName)
     self._prolog(module)
-    self._emitAdd(module)
-    # UseSubtileImpl with bias/SAV: drain LDS reads and sync waves after alpha
-    # multiply to prevent cross-wave LDS corruption from ds_bpermute.
+    # UseSubtileImpl with bias/SAV: drain LDS reads and sync waves after prolog
+    # (alpha + epilogue LDS loads) and before _emitAdd subtile stores.
     if self.kernel.get("UseSubtileImpl") and \
        (self.parentWriter.states.useBias != DataDirection.NONE or \
         self.kernel["ProblemType"].get("UseScaleAlphaVec", 0)):
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
       module.add(SBarrier(comment="sync waves before subtile paired stores"))
+    self._emitAdd(module)
     self._epilog(module)
     return module
 
@@ -558,7 +558,8 @@ class GlobalWriteBatchWriter:
 
       if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
         modGwvwScaleAlpha = Module("GwvwScaleAlpha")
-        self.loadsScaleAlphaVecIssued += addEpilogueLoad(modGwvwScaleAlpha, "ScaleAlphaVec", addrScaleAlphaVecVgpr, self.addrScaleAlphaVec, dataScaleAlphaVec, loadedDataScaleAlphaVec, addrCalc.scaleAlphaVecOffset[self.factorDim], factor_gwvw, localReferenceVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load scaleAlpha")
+        savLdsRefVgpr = None if (self.kernel.get("UseSubtileImpl") and addrScaleAlphaVecVgpr is not None) else localReferenceVgpr
+        self.loadsScaleAlphaVecIssued += addEpilogueLoad(modGwvwScaleAlpha, "ScaleAlphaVec", addrScaleAlphaVecVgpr, self.addrScaleAlphaVec, dataScaleAlphaVec, loadedDataScaleAlphaVec, addrCalc.scaleAlphaVecOffset[self.factorDim], factor_gwvw, savLdsRefVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load scaleAlpha")
         if localReferenceVgpr == None:
           localReferenceVgpr = addrScaleAlphaVecVgpr
         modGwvwScale.append(modGwvwScaleAlpha)

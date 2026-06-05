@@ -16409,10 +16409,32 @@ class KernelWriterAssembly(KernelWriter):
       else kernel["ProblemType"]["ComputeDataType"].numRegisters()
     return gwvw * reg - numVgprs
 
+  def getSubtileVectorLdsSlotStrideBpe(self, kernel, dim):
+    """Byte stride between epilogue vector LDS slots (matches GW coordOffset spacing)."""
+    mi = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+    mn = kernel["MatrixInstN"]
+    bpe = kernel["ProblemType"]["ComputeDataType"].numBytes()
+    ws = kernel["WavefrontSize"]
+    ovw = kernel["MIOutputVectorWidth"]
+    if dim == 0:
+      lanesPerIdx = ws // (mn if kernel["SourceSwap"] else mi)
+    else:
+      lanesPerIdx = ws // (mi if kernel["SourceSwap"] else mn)
+    return lanesPerIdx * ovw * bpe
+
   def getTurn(self, kernel, gwvw, dim):
     divisor = kernel["SubGroup0"] * kernel["SubGroup1"]
+    if kernel.get("UseSubtileImpl"):
+      turn = kernel["MIWaveTile"][dim]
+      return turn, divisor
     turn    = ceil(kernel["MacroTile%d"%dim] / (divisor * gwvw))
     return turn, divisor
+
+  def getVectorLdsTurnStrideBpe(self, kernel, gwvw, dim):
+    if kernel.get("UseSubtileImpl"):
+      return self.getSubtileVectorLdsSlotStrideBpe(kernel, dim)
+    _, divisor = self.getTurn(kernel, gwvw, dim)
+    return (divisor * gwvw) * kernel["ProblemType"]["ComputeDataType"].numBytes()
 
   def addVectorGlobalLoad(self, kernel, srdName: str, offsetVgpr, shiftOffset, dataType, bpe, gwvw, tmpVgpr1Res: ContinuousRegister, dstOffset, dim):
     module        = Module("")
@@ -16420,7 +16442,7 @@ class KernelWriterAssembly(KernelWriter):
     turn, divisor = self.getTurn(kernel, gwvw, dim)
     addr0         = vgpr(offsetVgpr)
     addr1         = sgpr("Srd%s"%srdName, 4)
-    offset        = (divisor * gwvw) * bpe
+    offset        = self.getVectorLdsTurnStrideBpe(kernel, gwvw, dim)
 
     for i in range(turn):
       if i != 0:
@@ -16434,7 +16456,7 @@ class KernelWriterAssembly(KernelWriter):
     module        = Module("")
     tmpVgpr1      = tmpVgpr1Res.idx + srcOffset
     turn, divisor = self.getTurn(kernel, gwvw, dim)
-    offset        = (divisor * gwvw) * self.states.bpeCinternal
+    offset        = self.getVectorLdsTurnStrideBpe(kernel, gwvw, dim)
 
     if setToOne:
       module.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
@@ -16673,6 +16695,10 @@ class KernelWriterAssembly(KernelWriter):
         if isinstance(storeModule, DSStoreInstruction):
           storeModule.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
         module.add(storeModule)
+
+    if kernel.get("UseSubtileImpl"):
+      module.add(SWaitCnt(dscnt=0, comment="drain epilogue vector LDS writes"))
+      module.add(SBarrier(comment="sync waves after epilogue vector LDS writes"))
 
     return module
 

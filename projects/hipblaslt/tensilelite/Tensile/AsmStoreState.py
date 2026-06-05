@@ -253,7 +253,8 @@ class StoreState:
             else:
                 self.sharedColEVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
+                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ) or \
+                   (self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha"):
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColScaleAlphaVecVgprs for packed elements")
                 else:
                     self.sharedColScaleAlphaVecVgprs = None
@@ -296,7 +297,8 @@ class StoreState:
             else:
                 self.sharedColEVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
+                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ) or \
+                   (self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha"):
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColScaleAlphaVecVgprs for packed elements")
                 else:
                     self.sharedColScaleAlphaVecVgprs = None
