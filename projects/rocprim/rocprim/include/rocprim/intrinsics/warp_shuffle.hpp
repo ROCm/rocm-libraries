@@ -100,8 +100,8 @@ T warp_move_dpp(const T& input)
             }
             else
             {
-                assert(
-                    ROCPRIM_HAS_DPP()); // This function should not be used if dpp is not available.
+                // Calling DPP on an architecture that does not support it is UB. warp_move_dpp should not be called on these machines.
+                __builtin_trap();
                 return v;
             }
         });
