@@ -172,6 +172,21 @@ class Gfx1151DeepFusedConvPoolSpec:
     # Forces the im2col A path (direct/butterfly are not ported). The fp16 path
     # is left byte-identical so a flag A/B benchmark is clean. iu8-only (conv0).
     native_int: bool = False
+    # Lever 1: register-level multi-buffered staging. False (default) ->
+    # staging emits each global_load immediately followed by its dependent
+    # ds_store, so the LLVM backend must insert s_waitcnt vmcnt(0) between every
+    # load/store pair -> the four conv0-footprint global loads pay full memory
+    # latency back-to-back with zero overlap (confirmed in ISA). True -> the
+    # vectorized footprint staging issues ALL per-thread global loads into
+    # distinct VGPRs first, then a single vmcnt(0) gates the whole batch, then
+    # all ds_stores fire. This lets the four loads coalesce under one wait so
+    # their latencies overlap. Correctness-neutral. gfx1151 has no direct
+    # global->LDS DMA, so this VGPR-staged batching is the only prefetch vehicle.
+    # MEASURED LEVER (gfx1151 board, pt2x64 native-int direct, full shape,
+    # interleaved A/B): 14.74 ms -> 13.99 ms (~5.1% faster), bit-exact across 4
+    # pairs. Default ON. Only the footprint loads coalesce so far (the W1 b128
+    # load is still serialized in _stage_conv1_w1_packed -- a further lever).
+    batch_loads: bool = True
     # Per-node inverse requant multipliers (fold act/weight/out scales).
     m0: float = 0.0625  # conv0 int32 -> int8
     m0b: float = 0.5  # conv0 int8 -> int4
@@ -285,6 +300,7 @@ def make_deep_fused_conv_pool_spec(
     repack_c0: bool = False,
     butterfly_conv01: bool = False,
     native_int: bool = False,
+    batch_loads: bool = True,
     m0: float = 0.0625,
     m0b: float = 0.5,
     m1: float = 0.25,
@@ -333,6 +349,7 @@ def make_deep_fused_conv_pool_spec(
         repack_c0=repack_c0,
         butterfly_conv01=butterfly_conv01,
         native_int=native_int,
+        batch_loads=batch_loads,
         m0=m0,
         m0b=m0b,
         m1=m1,
@@ -816,6 +833,42 @@ def _stage_input_footprint_int(
         ept = (npix + bs - 1) // bs
 
         def emit_vec_body(skip_halo_predicates: bool) -> None:
+            if spec.batch_loads:
+                # Lever 1: decouple loads from stores. Issue every per-thread
+                # global load into its own VGPR first (no intervening store ->
+                # the backend coalesces them under a single vmcnt(0)), then run
+                # the validity selects, then fire all ds_stores.
+                loads = []
+                for e in range(ept):
+                    idx = b.add(b.const_i32(e * bs), grid.tid)
+                    in_range = b.cmp_lt(idx, c_npix)
+                    sidx = b.select(in_range, idx, c0)
+                    fr = b.div(sidx, c_fw)
+                    fw = b.mod(sidx, c_fw)
+                    ih = b.add(ih0, fr)
+                    iw = b.add(iw0, fw)
+                    off = b.mul(b.add(b.mul(ih, c_Wi), iw), b.const_i32(cc))
+                    if skip_halo_predicates:
+                        raw = b.global_load_vN(x_ptr, off, I8, cc)
+                        loads.append((idx, in_range, raw, None))
+                    else:
+                        valid = b.land(
+                            in_range,
+                            b.land(
+                                b.land(b.cmp_ge(ih, c0), b.cmp_lt(ih, c_Hi)),
+                                b.land(b.cmp_ge(iw, c0), b.cmp_lt(iw, c_Wi)),
+                            ),
+                        )
+                        safe_off = b.select(valid, off, c0)
+                        raw = b.global_load_vN(x_ptr, safe_off, I8, cc)
+                        loads.append((idx, in_range, raw, valid))
+                for idx, in_range, raw, valid in loads:
+                    code = (
+                        raw if valid is None else b.vector_select(valid, raw, zero_vec)
+                    )
+                    with b.scf_if(in_range):
+                        b.smem_store_vN(inp_smem, [idx, c0], code, n=cc)
+                return
             for e in range(ept):
                 idx = b.add(b.const_i32(e * bs), grid.tid)
                 in_range = b.cmp_lt(idx, c_npix)
