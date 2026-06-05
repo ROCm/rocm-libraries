@@ -51,47 +51,49 @@ DTYPE_TO_DTYPE_KEY: Dict[str, str] = {
 # =============================================================================
 # Tile Lists
 # =============================================================================
-# Four orthogonal lists covering all tiles from configs corresponding old CK 
-# grouped conv instances.
-# COMMON_TILES = tiles present in ALL three directions.
-# FWD_TILES / BWD_DATA_TILES / BWD_WEIGHT_TILES = direction-specific tiles.
-# Format: (tile_m, tile_n, tile_k)
 
-# Tiles present in all three directions.
-COMMON_TILES: List[Tuple[int, int, int]] = [
-    (32,  64,  32), (32,  128, 32), (64,  16,  64), (64,  32,  32),
-    (64,  64,  32), (64,  128, 32), (128, 32,  16), (128, 32,  32),
-    (128, 64,  32), (128, 128, 32), (128, 256, 32), (256, 128, 32),
-]
+# =============================================================================
+# ndim + concrete-dtype keyed tile tables
+# =============================================================================
+# Tiles diverge by both ndim (3D is a subset of 2D) and concrete dtype (bf16 and fp16 are not equal on some
+# forward tiles; half data types vs. fp32 are nearly disjoint). Keyed by (ndim, dtype) where
+# dtype is the concrete "fp16"/"bf16"/"fp32" string. Used by the per-dtype
+# generation path so we only emit each tile for the dtypes that actually use it.
+# Derived from configs/grouped_conv/{variant}/profiler/{nhwgc|ndhwgc}_{dtype}.json
+# (ngchw/depthwise skipped).
 
-# Forward-only tiles.
-FWD_TILES: List[Tuple[int, int, int]] = [
-    (16,  16,  64),  (16,  16,  128), (16,  32,  64),  (16,  64,  64),
-    (16,  128, 64),  (16,  256, 64),  (32,  16,  64),   (32,  64,  16),
-    (32,  64,  64),  (32,  128, 16),  (32,  128, 64),   (32,  256, 64),
-    (64,  16,  16),  (64,  32,  16),  (64,  32,  64),   (64,  64,  8),
-    (64,  64,  16),  (64,  64,  64),  (64,  128, 16),   (64,  128, 64),
-    (128, 16,  64),  (128, 32,  64),  (128, 64,  8),    (128, 64,  16),
-    (128, 64,  64),  (128, 128, 16),  (128, 128, 64),   (128, 192, 16),
-    (128, 256, 16),  (224, 256, 64),  (256, 16,  64),   (256, 32,  64),
-    (256, 64,  8),   (256, 128, 16),  (256, 224, 64),   (256, 256, 32),
-]
+_FWD_TILES: Dict[Tuple[int, str], List[Tuple[int, int, int]]] = {
+    (2, 'bf16'): [(16, 16, 64), (16, 16, 128), (16, 32, 64), (16, 64, 64), (16, 128, 64), (16, 256, 64), (32, 16, 64), (32, 64, 32), (32, 64, 64), (32, 128, 32), (32, 128, 64), (32, 256, 64), (64, 16, 16), (64, 16, 64), (64, 32, 32), (64, 32, 64), (64, 64, 8), (64, 64, 32), (64, 64, 64), (64, 128, 32), (64, 128, 64), (128, 16, 64), (128, 32, 32), (128, 32, 64), (128, 64, 8), (128, 64, 16), (128, 64, 32), (128, 64, 64), (128, 128, 32), (128, 128, 64), (128, 256, 32), (224, 256, 64), (256, 16, 64), (256, 32, 64), (256, 64, 8), (256, 128, 32), (256, 224, 64), (256, 256, 32)],
+    (2, 'fp16'): [(16, 16, 64), (16, 16, 128), (16, 32, 64), (16, 64, 64), (16, 128, 64), (16, 256, 64), (32, 16, 64), (32, 64, 32), (32, 64, 64), (32, 128, 32), (32, 128, 64), (32, 256, 64), (64, 16, 16), (64, 16, 64), (64, 32, 32), (64, 32, 64), (64, 64, 8), (64, 64, 32), (64, 64, 64), (64, 128, 32), (64, 128, 64), (128, 16, 64), (128, 32, 32), (128, 32, 64), (128, 64, 8), (128, 64, 16), (128, 64, 32), (128, 64, 64), (128, 128, 32), (128, 128, 64), (128, 256, 32), (224, 256, 64), (256, 16, 64), (256, 32, 64), (256, 64, 8), (256, 128, 32), (256, 224, 64), (256, 256, 32)],
+    (2, 'fp32'): [(16, 16, 64), (16, 16, 128), (16, 32, 64), (16, 64, 64), (16, 128, 64), (32, 16, 64), (32, 64, 16), (32, 64, 64), (32, 128, 16), (32, 128, 64), (64, 16, 16), (64, 16, 64), (64, 32, 16), (64, 32, 64), (64, 64, 16), (64, 64, 32), (64, 128, 16), (128, 16, 64), (128, 32, 16), (128, 32, 64), (128, 64, 16), (128, 128, 16), (128, 128, 32), (128, 128, 64), (128, 192, 16), (128, 256, 16), (256, 128, 16)],
+    (3, 'bf16'): [(16, 16, 64), (16, 16, 128), (16, 32, 64), (16, 64, 64), (16, 128, 64), (16, 256, 64), (32, 16, 64), (32, 64, 32), (32, 64, 64), (32, 128, 32), (32, 128, 64), (32, 256, 64), (64, 16, 16), (64, 16, 64), (64, 32, 32), (64, 32, 64), (64, 64, 32), (64, 64, 64), (64, 128, 32), (64, 128, 64), (128, 16, 64), (128, 32, 32), (128, 32, 64), (128, 64, 32), (128, 64, 64), (128, 128, 32), (128, 128, 64), (128, 256, 32), (224, 256, 64), (256, 16, 64), (256, 32, 64), (256, 128, 32), (256, 224, 64), (256, 256, 32)],
+    (3, 'fp16'): [(16, 16, 64), (16, 16, 128), (16, 32, 64), (16, 64, 64), (16, 128, 64), (16, 256, 64), (32, 16, 64), (32, 64, 32), (32, 64, 64), (32, 128, 32), (32, 128, 64), (32, 256, 64), (64, 16, 16), (64, 16, 64), (64, 32, 32), (64, 32, 64), (64, 64, 32), (64, 64, 64), (64, 128, 32), (64, 128, 64), (128, 16, 64), (128, 32, 32), (128, 32, 64), (128, 64, 32), (128, 64, 64), (128, 128, 32), (128, 128, 64), (128, 256, 32), (224, 256, 64), (256, 16, 64), (256, 32, 64), (256, 128, 32), (256, 224, 64), (256, 256, 32)],
+    (3, 'fp32'): [(16, 16, 64), (16, 16, 128), (16, 32, 64), (16, 64, 64), (16, 128, 64), (32, 16, 64), (32, 64, 16), (32, 64, 64), (32, 128, 16), (32, 128, 64), (64, 16, 16), (64, 16, 64), (64, 32, 16), (64, 32, 64), (64, 64, 16), (64, 64, 32), (64, 128, 16), (128, 16, 64), (128, 32, 16), (128, 32, 64), (128, 64, 16), (128, 128, 16), (128, 128, 32), (128, 128, 64), (128, 192, 16), (128, 256, 16), (256, 128, 16)],
+}
 
-# Backward-data-only tiles.
-BWD_DATA_TILES: List[Tuple[int, int, int]] = [
-    (16, 64, 32), (64, 16, 16), (64, 16, 32), (128, 32, 64),
-]
+_BWD_DATA_TILES: Dict[Tuple[int, str], List[Tuple[int, int, int]]] = {
+    (2, 'bf16'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 32, 64), (128, 64, 32), (128, 128, 32), (128, 256, 32), (256, 128, 32)],
+    (2, 'fp16'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 32, 64), (128, 64, 32), (128, 128, 32), (128, 256, 32), (256, 128, 32)],
+    (2, 'fp32'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 32, 32), (64, 64, 32), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 256, 32), (256, 128, 32)],
+    (3, 'bf16'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 32, 64), (128, 64, 32), (128, 128, 32), (128, 256, 32), (256, 128, 32)],
+    (3, 'fp16'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 32, 64), (128, 64, 32), (128, 128, 32), (128, 256, 32), (256, 128, 32)],
+    (3, 'fp32'): [(16, 64, 32), (32, 64, 32), (32, 128, 32), (64, 16, 16), (64, 16, 32), (64, 32, 32), (64, 64, 32), (64, 128, 32), (128, 32, 16), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 256, 32), (256, 128, 32)],
+}
 
-# Backward-weight-only tiles.
-BWD_WEIGHT_TILES: List[Tuple[int, int, int]] = [
-    (16,  16,  32),  (16,  16,  64),  (16,  32,  64),  (16,  64,  64),
-    (16,  128, 32),  (16,  128, 64),  (16,  256, 32),  (16,  256, 64),
-    (32,  16,  64),  (32,  32,  32),  (32,  64,  16),  (32,  128, 16),
-    (64,  32,  16),  (64,  64,  16),  (64,  64,  64),  (64,  128, 16),
-    (64,  128, 64),  (128, 16,  64),  (128, 64,  16),  (128, 128, 16),
-    (128, 128, 64),  (128, 256, 16),  (256, 16,  64),  (256, 32,  64),
-    (256, 128, 16),  (256, 256, 32),
-]
+_BWD_WEIGHT_TILES: Dict[Tuple[int, str], List[Tuple[int, int, int]]] = {
+    (2, 'bf16'): [(16, 16, 32), (16, 16, 64), (16, 32, 64), (16, 64, 64), (16, 128, 32), (16, 128, 64), (16, 256, 32), (16, 256, 64), (32, 16, 64), (32, 32, 32), (32, 64, 32), (32, 128, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 64, 64), (64, 128, 32), (64, 128, 64), (128, 16, 64), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 128, 64), (128, 256, 32), (256, 16, 64), (256, 32, 64), (256, 128, 32), (256, 256, 32)],
+    (2, 'fp16'): [(16, 16, 32), (16, 16, 64), (16, 32, 64), (16, 64, 64), (16, 128, 32), (16, 128, 64), (16, 256, 32), (16, 256, 64), (32, 16, 64), (32, 32, 32), (32, 64, 32), (32, 128, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 64, 64), (64, 128, 32), (64, 128, 64), (128, 16, 64), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 128, 64), (128, 256, 32), (256, 16, 64), (256, 32, 64), (256, 128, 32), (256, 256, 32)],
+    (2, 'fp32'): [(16, 16, 32), (16, 32, 64), (32, 16, 64), (32, 64, 16), (32, 128, 16), (64, 16, 64), (64, 32, 16), (64, 64, 16), (64, 64, 64), (64, 128, 16), (128, 32, 16), (128, 32, 32), (128, 64, 16), (128, 128, 16), (128, 256, 16), (256, 128, 16)],
+    (3, 'bf16'): [(16, 16, 32), (16, 16, 64), (16, 32, 64), (16, 64, 64), (16, 128, 32), (16, 128, 64), (16, 256, 32), (16, 256, 64), (32, 16, 64), (32, 32, 32), (32, 64, 32), (32, 128, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 64, 64), (64, 128, 32), (128, 16, 64), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 128, 64), (128, 256, 32), (256, 16, 64), (256, 128, 32), (256, 256, 32)],
+    (3, 'fp16'): [(16, 16, 32), (16, 16, 64), (16, 32, 64), (16, 64, 64), (16, 128, 32), (16, 128, 64), (16, 256, 32), (16, 256, 64), (32, 16, 64), (32, 32, 32), (32, 64, 32), (32, 128, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 64, 64), (64, 128, 32), (128, 16, 64), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 128, 64), (128, 256, 32), (256, 16, 64), (256, 128, 32), (256, 256, 32)],
+    (3, 'fp32'): [(16, 16, 32), (16, 32, 64), (32, 16, 64), (32, 64, 16), (32, 128, 16), (64, 16, 64), (64, 32, 16), (64, 64, 16), (64, 64, 64), (64, 128, 16), (128, 32, 16), (128, 32, 32), (128, 64, 16), (128, 128, 16), (128, 256, 16), (256, 128, 16)],
+}
+
+_TILES_PER_VARIANT: Dict[str, Dict[Tuple[int, str], List[Tuple[int, int, int]]]] = {
+    "forward": _FWD_TILES,
+    "bwd_data": _BWD_DATA_TILES,
+    "bwd_weight": _BWD_WEIGHT_TILES,
+}
 
 # Override the tile sizes for split-image feature.
 _SPLIT_IMAGE_TILES: List[Tuple[int, int, int]] = [
@@ -115,17 +117,20 @@ COMPV4_COMPATIBLE_TILES: List[Tuple[int, int, int]] = [
 def get_tiles_for_variant(variant: str) -> List[Tuple[int, int, int]]:
     """Return all tiles available for the given conv variant.
 
-    Returns COMMON_TILES ∪ <variant>_TILES, sorted.
+    Returns the union of tiles across all (ndim, dtype) keys, sorted.
     """
-    if variant == "forward":
-        extra = FWD_TILES
-    elif variant == "bwd_data":
-        extra = BWD_DATA_TILES
-    elif variant == "bwd_weight":
-        extra = BWD_WEIGHT_TILES
-    else:
-        extra = []
-    return sorted(set(COMMON_TILES) | set(extra))
+    all_tiles: set = set()
+    for tiles in _TILES_PER_VARIANT.get(variant, {}).values():
+        all_tiles.update(tiles)
+    return sorted(all_tiles)
+
+def get_tiles(variant: str, ndim: int, dtype: str) -> List[Tuple[int, int, int]]:
+    """Return tiles for a (variant, ndim, concrete-dtype).
+
+    ``dtype`` is the concrete "fp16"/"bf16"/"fp32" string. Returns the exact
+    tile list observed in the corresponding profiler JSON, or [] if none.
+    """
+    return list(_TILES_PER_VARIANT.get(variant, {}).get((ndim, dtype), []))
 
 
 # =============================================================================
@@ -993,16 +998,49 @@ _BWD_WEIGHT_TILE_PIPELINES: Dict[Tuple[int, int, int], List[Tuple[str, str]]] = 
 }
 
 
+# Dtype-class-keyed pipeline overrides for tiles whose (pipeline, scheduler)
+# set differs between half (bf16/fp16) and float (fp32). Consulted first when a
+# dtype_class is provided. Tiles used by only one dtype-class are handled by the
+# ndim+dtype tile tables, so only tiles present in BOTH classes appear here.
+# half = union(bf16, fp16) pipes; float = fp32 pipes (from profiler JSON).
+_BWD_WEIGHT_TILE_PIPELINES_DCLASS: Dict[Tuple[int, int, int], Dict[str, List[Tuple[str, str]]]] = {
+    (16, 16, 32): {'half': [('compv1', 'intrawave'), ('compv6', 'intrawave'), ('mem', 'intrawave')], 'float': [('compv6', 'intrawave'), ('mem', 'intrawave')]},
+    (16, 32, 64): {'half': [('basic_async_v1', 'intrawave'), ('compv1', 'interwave'), ('compv1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')], 'float': [('compv1', 'intrawave')]},
+    (32, 16, 64): {'half': [('compv1', 'interwave'), ('compv1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')], 'float': [('compv1', 'intrawave')]},
+    (64, 16, 64): {'half': [('mem', 'interwave'), ('mem', 'intrawave')], 'float': [('mem', 'intrawave')]},
+    (64, 64, 64): {'half': [('basic_async_v1', 'intrawave'), ('compv1', 'intrawave')], 'float': [('compv1', 'intrawave')]},
+    (128, 32, 32): {'half': [('compv1', 'intrawave'), ('compv6', 'intrawave'), ('mem', 'intrawave')], 'float': [('compv1', 'intrawave')]},
+}
+
+_FWD_TILE_PIPELINES_DCLASS: Dict[Tuple[int, int, int], Dict[str, List[Tuple[str, str]]]] = {
+    (128, 128, 32): {'half': [('compv1', 'intrawave'), ('compv4', 'intrawave')], 'float': [('compv4', 'intrawave')]},
+    (128, 128, 64): {'half': [('compv1', 'interwave'), ('compv3', 'intrawave'), ('compv4', 'intrawave'), ('compv6', 'intrawave')], 'float': [('compv1', 'interwave'), ('compv3', 'intrawave'), ('compv6', 'intrawave')]},
+}
+
+
 def get_pipelines_for_tile(
     tile_m: int, tile_n: int, tile_k: int, variant: str,
+    dtype_class: Optional[str] = None,
 ) -> List[Tuple[str, str]]:
     """Return list of (pipeline, scheduler) pairs for a tile shape and variant.
 
-    Prefers the curated per-tile map (from profiler JSON) when the tile is present;
-    otherwise falls back to the shape-based rules below. The curated map bounds
-    pipeline/scheduler over-generation; the rules cover tiles not seen in JSON.
+    When ``dtype_class`` ("half"/"float") is given and a dtype-class override
+    exists for this (variant, tile), that override is returned (trims half-only
+    pipelines from fp32 and vice versa). Otherwise prefers the curated per-tile
+    map (from profiler JSON) when the tile is present, falling back to the
+    shape-based rules below.
     """
     tile_key = (tile_m, tile_n, tile_k)
+
+    if dtype_class is not None:
+        dclass_table = {
+            "forward": _FWD_TILE_PIPELINES_DCLASS,
+            "bwd_weight": _BWD_WEIGHT_TILE_PIPELINES_DCLASS,
+        }.get(variant, {})
+        override = dclass_table.get(tile_key)
+        if override is not None and dtype_class in override:
+            return list(override[dtype_class])
+
     curated = {
         "forward": _FWD_TILE_PIPELINES,
         "bwd_data": _BWD_DATA_TILE_PIPELINES,
@@ -1153,6 +1191,11 @@ class FeatureSpec:
     tile_override: Optional[List[Tuple[int, int, int]]] = None
     pipeline_override: Optional[List[Tuple[str, str]]] = None
 
+    # Optional restrictions (None = applies to all). When set, the feature is
+    # only emitted for the listed dtype classes ("half"/"float") and/or ndims.
+    dtype_classes: Optional[List[str]] = None
+    ndims: Optional[List[int]] = None
+
 
 # Tiles used per feature (derived from JSON profiler analysis).
 # Restricting features to specific tiles prevents config explosion.
@@ -1200,21 +1243,24 @@ VARIANT_FEATURES: Dict[str, List[FeatureSpec]] = {
     ],
     "bwd_data": [],
     "bwd_weight": [
+        # explicit_gemm / two_stage / num_groups_to_merge are half-only:
+        # the fp32 bwd_weight profiler JSON contains none of these features.
         # explicit_gemm only: tiles with tile_k=64 (larger internal GEMM)
-        FeatureSpec(explicit_gemm=True, tile_override=_BWD_EG_TILES),
+        FeatureSpec(explicit_gemm=True, tile_override=_BWD_EG_TILES, dtype_classes=["half"]),
         # two_stage only
-        FeatureSpec(two_stage=True, tile_override=_BWD_2S_TILES),
+        FeatureSpec(two_stage=True, tile_override=_BWD_2S_TILES, dtype_classes=["half"]),
         # two_stage + explicit_gemm
-        FeatureSpec(two_stage=True, explicit_gemm=True, tile_override=_BWD_EG_2S_TILES),
+        FeatureSpec(two_stage=True, explicit_gemm=True, tile_override=_BWD_EG_2S_TILES, dtype_classes=["half"]),
         # num_groups_to_merge + two_stage combinations
-        FeatureSpec(num_groups_to_merge=2, two_stage=True, tile_override=_BWD_GM2_2S_TILES),
-        FeatureSpec(num_groups_to_merge=4, two_stage=True, tile_override=_BWD_GM4_2S_TILES),
-        FeatureSpec(num_groups_to_merge=8, two_stage=True, tile_override=_BWD_GM8_2S_TILES),
+        FeatureSpec(num_groups_to_merge=2, two_stage=True, tile_override=_BWD_GM2_2S_TILES, dtype_classes=["half"]),
+        FeatureSpec(num_groups_to_merge=4, two_stage=True, tile_override=_BWD_GM4_2S_TILES, dtype_classes=["half"]),
+        FeatureSpec(num_groups_to_merge=8, two_stage=True, tile_override=_BWD_GM8_2S_TILES, dtype_classes=["half"]),
         # basic_async_v1 + num_groups_to_merge=2
         FeatureSpec(
             num_groups_to_merge=2,
             tile_override=[(16, 32, 64), (16, 64, 64), (64, 128, 64)],
             pipeline_override=[("basic_async_v1", "intrawave")],
+            dtype_classes=["half"],
         ),
         # StreamK non-persistent
         FeatureSpec(
@@ -1465,7 +1511,11 @@ def get_depthwise_configs():
 
 
 if __name__ == "__main__":
-    all_tiles = sorted(set(COMMON_TILES) | set(FWD_TILES) | set(BWD_DATA_TILES) | set(BWD_WEIGHT_TILES))
+    all_tiles = sorted(
+        set(get_tiles_for_variant("forward"))
+        | set(get_tiles_for_variant("bwd_data"))
+        | set(get_tiles_for_variant("bwd_weight"))
+    )
     print(f"Total unique tiles: {len(all_tiles)}")
-    print(f"  COMMON: {len(COMMON_TILES)}, FWD: {len(FWD_TILES)}, "
-          f"BWD_DATA: {len(BWD_DATA_TILES)}, BWD_WEIGHT: {len(BWD_WEIGHT_TILES)}")
+    for variant in ("forward", "bwd_data", "bwd_weight"):
+        print(f"  {variant}: {len(get_tiles_for_variant(variant))}")

@@ -45,9 +45,8 @@ except ImportError:
 # Import tile configurations and shared validation rules from grouped_config_rules
 # (single source of truth)
 from grouped_config_rules import (
-    COMMON_TILES,
     DTYPE_TO_DTYPE_KEY,
-    get_tiles_for_variant,
+    get_tiles,
     get_wave_warp_pairs,
     get_all_valid_vector_sizes,
     VecStrategy,
@@ -1942,21 +1941,26 @@ def load_configs_from_json(
 
 
 def _classify_config(cfg) -> str:
-    """Classify a config into a feature category for stratified test selection."""
+    """Classify a config into a feature category for stratified test selection.
+
+    The datatype tag is folded into the category so that the stratified subset keeps
+    at least one config per datatype per feature category.
+    """
+    dt = getattr(cfg, "datatype", None) or "fp16"
     if isinstance(cfg, DepthwiseConvKernelConfig):
-        return "depthwise"
+        return f"depthwise:{dt}"
     tr = cfg.trait
     if getattr(tr.streamk_config, "streamk_enabled", False):
-        return "streamk"
+        return f"streamk:{dt}"
     if tr.split_image:
-        return "split_image"
+        return f"split_image:{dt}"
     if tr.num_groups_to_merge > 1:
-        return "merged_groups"
+        return f"merged_groups:{dt}"
     if tr.two_stage:
-        return "two_stage"
+        return f"two_stage:{dt}"
     if tr.explicit_gemm:
-        return "explicit_gemm"
-    return "regular"
+        return f"explicit_gemm:{dt}"
+    return f"regular:{dt}"
 
 
 def _select_test_configs(configs):
@@ -1989,21 +1993,24 @@ def _select_test_configs(configs):
         if not cat_selected:
             selected_ids.add(id(cat_configs[0]))
 
-    # Ensure pipeline/scheduler coverage per variant (GEMM configs only)
+    # Ensure pipeline/scheduler coverage per (variant, datatype) (GEMM only).
     gemm_configs = [c for c in configs if isinstance(c, GroupedConvKernelConfig)]
     variant_combos = defaultdict(set)
     variant_covered = defaultdict(set)
     for c in gemm_configs:
+        vkey = (c.variant, getattr(c, "datatype", None) or "fp16")
         combo = (c.trait.pipeline, c.trait.scheduler)
-        variant_combos[c.variant].add(combo)
+        variant_combos[vkey].add(combo)
         if id(c) in selected_ids:
-            variant_covered[c.variant].add(combo)
+            variant_covered[vkey].add(combo)
 
-    for variant, required in variant_combos.items():
-        missing = required - variant_covered[variant]
+    for vkey, required in variant_combos.items():
+        variant, dt = vkey
+        missing = required - variant_covered[vkey]
         for combo in missing:
             for c in gemm_configs:
                 if c.variant == variant and \
+                        (getattr(c, "datatype", None) or "fp16") == dt and \
                         (c.trait.pipeline, c.trait.scheduler) == combo:
                     selected_ids.add(id(c))
                     break
@@ -2064,6 +2071,7 @@ def get_default_configs(
             config.trait.num_groups_to_merge, config.trait.specialization,
             getattr(config.trait.streamk_config, "streamk_enabled", False),
             getattr(config.trait.streamk_config, "streamk_persistent", False),
+            config.datatype,
         )
         if key in seen:
             return
@@ -2079,71 +2087,48 @@ def get_default_configs(
             streamk_persistent=spec_sk.persistent,
         )
 
-    # Compute dtype_keys for union across all profiler dtypes
-    profiler_dtype_keys = [
-        DTYPE_TO_DTYPE_KEY[dt] for dt in datatypes if dt in DTYPE_TO_DTYPE_KEY
-    ]
-    if not profiler_dtype_keys:
-        profiler_dtype_keys = ["bf16_bf16_fp32"]
-
-    def _get_union_pairs(tile_m, tile_n, tile_k, variant_str):
-        """Get union of wave/warp pairs across all profiler dtypes."""
-        pair_set: set = set()
-        for dk in profiler_dtype_keys:
-            for pair in get_wave_warp_pairs(tile_m, tile_n, tile_k, variant_str, dk, arch):
-                pair_set.add(pair)
-        return sorted(pair_set)
-
-    def _get_union_vecs(tile_m, tile_n, tile_k, variant_str):
-        """Get union of vec sizes for this tile across dtype classes.
-
-        Strategy tables are dtype-class-keyed (Step 7): a strategy's triple is
-        emitted only for the dtype class it was observed with, so we don't
-        generate e.g. half (8,8,8) for a tile that only used fp32 (4,4,4).
-        """
-        vec_set: set = set()
-        for dtype_class in ["half", "float"]:
-            for strategy in get_vec_strategies(tile_m, tile_n, tile_k, variant_str, dtype_class):
-                vec_set.add(compute_vector_size(strategy, dtype_class))
-            # Long-tail triples not produced by any strategy formula
-            for triple in get_extra_vec_triples(tile_m, tile_n, tile_k, variant_str, dtype_class):
-                vec_set.add(triple)
-        return sorted(vec_set)
-
     def _emit_configs_for_tile(
         tile_m: int, tile_n: int, tile_k: int,
         pipelines: List[Tuple[str, str]],
         specializations: List[str],
         variant: "GroupedConvVariant",
         ndim: int,
+        datatype: str,
+        dtype_class: str,
+        dtype_key: str,
         feat: Optional["FeatureSpec"] = None,
     ) -> None:
-        """Emit all valid configs for a single tile shape + pipeline list."""
+        """Emit all valid configs for a single tile shape + pipeline list, for
+        one concrete datatype. Wave/warp pairs and vec triples are selected for
+        this dtype only; each emitted config is tagged with ``datatype``."""
         var_str = {
             GroupedConvVariant.FORWARD: "forward",
             GroupedConvVariant.BACKWARD_DATA: "bwd_data",
             GroupedConvVariant.BACKWARD_WEIGHT: "bwd_weight",
         }.get(variant, "forward")
 
-        pairs = _get_union_pairs(tile_m, tile_n, tile_k, var_str)
+        pairs = get_wave_warp_pairs(tile_m, tile_n, tile_k, var_str, dtype_key, arch)
         if not pairs:
             return
 
-        # Candidate vec triples (wave/warp-independent strategy/extra selection).
-        # These are gated per (wave, warp) below against tile_math, the authority.
-        vec_list = _get_union_vecs(tile_m, tile_n, tile_k, var_str)
+        # Candidate vec triples for this dtype class (strategies + long-tail
+        # extras). Gated per (wave, warp) below against tile_math, the authority.
+        vec_set: set = set()
+        for strategy in get_vec_strategies(tile_m, tile_n, tile_k, var_str, dtype_class):
+            vec_set.add(compute_vector_size(strategy, dtype_class))
+        for triple in get_extra_vec_triples(tile_m, tile_n, tile_k, var_str, dtype_class):
+            vec_set.add(triple)
+        vec_list = sorted(vec_set)
 
         for (wave_m, wave_n, wave_k), (warp_tile_m, warp_tile_n, warp_tile_k) in pairs:
             # tile_math gate: a candidate vec triple survives only if it is valid
-            # for this (tile, wave, warp) under at least one profiler dtype_key.
-            tm_valid: set = set()
-            for dk in profiler_dtype_keys:
-                tm_valid |= get_all_valid_vector_sizes(
-                    tile_m, tile_n, tile_k,
-                    wave_m, wave_n, wave_k,
-                    warp_tile_m, warp_tile_n, warp_tile_k,
-                    dk,
-                )
+            # for this (tile, wave, warp) under this dtype_key.
+            tm_valid = get_all_valid_vector_sizes(
+                tile_m, tile_n, tile_k,
+                wave_m, wave_n, wave_k,
+                warp_tile_m, warp_tile_n, warp_tile_k,
+                dtype_key,
+            )
             gated_vecs = []
             for triple in vec_list:
                 if triple in tm_valid:
@@ -2212,6 +2197,7 @@ def get_default_configs(
                             vector_size_a=vec_a,
                             vector_size_b=vec_b,
                             vector_size_c=vec_c,
+                            datatype=datatype,
                         )
                         _add_config(config)
 
@@ -2222,36 +2208,54 @@ def get_default_configs(
             GroupedConvVariant.BACKWARD_WEIGHT: "bwd_weight",
         }[variant]
 
-        base_tiles = get_tiles_for_variant(variant_str)
         features = VARIANT_FEATURES.get(variant_str, [])
 
         for ndim in ndims:
-            # --- Base configs (no feature flags, dtype-agnostic) ---
-            for tile_m, tile_n, tile_k in base_tiles:
-                tile_pipelines = get_pipelines_for_tile(tile_m, tile_n, tile_k, variant_str)
-                tile_specs = get_specs_for_tile(tile_m, tile_n, tile_k, variant_str)
-                _emit_configs_for_tile(
-                    tile_m, tile_n, tile_k,
-                    tile_pipelines, tile_specs,
-                    variant, ndim,
-                    feat=None,
-                )
+            for datatype in datatypes:
+                dtype_key = DTYPE_TO_DTYPE_KEY.get(datatype)
+                if dtype_key is None:
+                    continue
+                dclass = "float" if datatype == "fp32" else "half"
 
-            # --- Feature-flag configs ---
-            for feat in features:
-                feat_tiles = feat.tile_override if feat.tile_override is not None else base_tiles
-                for tile_m, tile_n, tile_k in feat_tiles:
-                    if feat.pipeline_override is not None:
-                        feat_pipes = feat.pipeline_override
-                    else:
-                        feat_pipes = get_pipelines_for_tile(tile_m, tile_n, tile_k, variant_str)
+                # Tiles for this exact (variant, ndim, dtype).
+                base_tiles = get_tiles(variant_str, ndim, datatype)
+
+                # --- Base configs (no feature flags) ---
+                for tile_m, tile_n, tile_k in base_tiles:
+                    tile_pipelines = get_pipelines_for_tile(
+                        tile_m, tile_n, tile_k, variant_str, dclass
+                    )
                     tile_specs = get_specs_for_tile(tile_m, tile_n, tile_k, variant_str)
                     _emit_configs_for_tile(
                         tile_m, tile_n, tile_k,
-                        feat_pipes, tile_specs,
+                        tile_pipelines, tile_specs,
                         variant, ndim,
-                        feat=feat,
+                        datatype, dclass, dtype_key,
+                        feat=None,
                     )
+
+                # --- Feature-flag configs ---
+                for feat in features:
+                    if feat.dtype_classes is not None and dclass not in feat.dtype_classes:
+                        continue
+                    if feat.ndims is not None and ndim not in feat.ndims:
+                        continue
+                    feat_tiles = feat.tile_override if feat.tile_override is not None else base_tiles
+                    for tile_m, tile_n, tile_k in feat_tiles:
+                        if feat.pipeline_override is not None:
+                            feat_pipes = feat.pipeline_override
+                        else:
+                            feat_pipes = get_pipelines_for_tile(
+                                tile_m, tile_n, tile_k, variant_str, dclass
+                            )
+                        tile_specs = get_specs_for_tile(tile_m, tile_n, tile_k, variant_str)
+                        _emit_configs_for_tile(
+                            tile_m, tile_n, tile_k,
+                            feat_pipes, tile_specs,
+                            variant, ndim,
+                            datatype, dclass, dtype_key,
+                            feat=feat,
+                        )
 
         # --- Depthwise configs (forward only, 2D only) ---
         if variant == GroupedConvVariant.FORWARD and 2 in ndims:
@@ -2354,7 +2358,7 @@ class UnifiedGroupedConvCodegen:
             except ValueError as e:
                 log.warning(f"Could not create arch filter: {e}")
 
-    def _get_configs(self) -> List[GroupedConvKernelConfig]:
+    def _get_configs(self) -> List[GroupedConvKernelConfig | DepthwiseConvKernelConfig]:
         """Get configurations for this codegen's datatype and ndim_spatial."""
         return get_default_configs(
             arch=self.gpu_target,
@@ -2364,6 +2368,7 @@ class UnifiedGroupedConvCodegen:
                 GroupedConvVariant.BACKWARD_WEIGHT,
             ],
             ndims=[self.ndim_spatial],
+            datatypes=[self.datatype],
         )
 
     def _get_operator_type(
@@ -2745,8 +2750,8 @@ def main():
         "-v",
         type=str,
         nargs="+",
-        default=["forward"],
-        choices=["forward", "bwd_data", "bwd_weight"],
+        default=["all"],
+        choices=["forward", "bwd_data", "bwd_weight", "all"],
         help="Grouped convolution variants",
     )
     parser.add_argument(
@@ -2881,11 +2886,14 @@ def main():
 
     # Map variant strings to enums
     variant_map = {
-        "forward": GroupedConvVariant.FORWARD,
-        "bwd_data": GroupedConvVariant.BACKWARD_DATA,
-        "bwd_weight": GroupedConvVariant.BACKWARD_WEIGHT,
+        "forward": [GroupedConvVariant.FORWARD],
+        "bwd_data": [GroupedConvVariant.BACKWARD_DATA],
+        "bwd_weight": [GroupedConvVariant.BACKWARD_WEIGHT],
+        "all": [GroupedConvVariant.FORWARD, GroupedConvVariant.BACKWARD_DATA, GroupedConvVariant.BACKWARD_WEIGHT],
     }
-    requested_variants = [variant_map[v] for v in args.variant]
+    requested_variants = []
+    for v in args.variant:
+        requested_variants.extend(variant_map[v])
 
     # Validate --instance-id requires --config-file
     if args.instance_id is not None and args.config_file is None:
@@ -2944,24 +2952,25 @@ def main():
                 streamk_persistent=args.streamk_persistent,
             ) if args.streamk_enabled else StreamKConfig()
         )
-        config = GroupedConvKernelConfig(
-            tile=tile,
-            trait=trait,
-            variant=requested_variants[0]
-            if requested_variants
-            else GroupedConvVariant.FORWARD,
-            ndim_spatial=args.ndim[0] if args.ndim else 2,
-            arch=args.arch,
-            vector_size_a=args.vector_a,
-            vector_size_b=args.vector_b,
-            vector_size_c=args.vector_c,
-            num_wave_groups=args.num_wave_groups,
-        )
-        filtered_configs = [config]
+
+        filtered_configs = []
+        for var in requested_variants:
+            config = GroupedConvKernelConfig(
+                tile=tile,
+                trait=trait,
+                variant=var,
+                ndim_spatial=args.ndim[0] if args.ndim else 2,
+                arch=args.arch,
+                vector_size_a=args.vector_a,
+                vector_size_b=args.vector_b,
+                vector_size_c=args.vector_c,
+                num_wave_groups=args.num_wave_groups,
+            )
+            filtered_configs.append(config)
     else:
         # Get predefined configurations for target arch with requested variants and ndims
         filtered_configs = get_default_configs(
-            arch=args.arch, variants=requested_variants, ndims=args.ndim
+            arch=args.arch, variants=requested_variants, ndims=args.ndim, datatypes=args.datatype
         )
 
     if args.list_configs:
