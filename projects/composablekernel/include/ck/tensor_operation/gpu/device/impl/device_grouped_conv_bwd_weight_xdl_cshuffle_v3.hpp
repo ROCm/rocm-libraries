@@ -1616,7 +1616,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
                     ck::LogInfo("Filter1x1Stride1Pad0: dim ",
                                 i,
                                 " does not match (filter=",
-                                arg.filter_spatial_lengths_[i],
+                                arg.e_g_k_c_xs_lengths_[i + 3],
                                 ", stride=",
                                 arg.conv_filter_strides_[i],
                                 ", pad=",
