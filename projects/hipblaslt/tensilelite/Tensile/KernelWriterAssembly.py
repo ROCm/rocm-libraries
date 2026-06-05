@@ -2549,6 +2549,22 @@ class KernelWriterAssembly(KernelWriter):
             moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskB"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
                                               comment="Setting maskB"))
 
+          # Metadata multicast mask is independent of the A/B descriptors and always
+          # uses the non-wave-separated scheme (its TDM descriptor is non-wave-separated).
+          # Compute it before the A/B masks while wg_y (sgprWgY) still holds its raw
+          # value, and use a scratch reg for the Sparse==2 (wg_y * nwg_x) shift so the
+          # A/B computation below is unaffected.
+          #   Sparse==1 -> sparse A -> broadcast across wg_y (same as maskA)
+          #   Sparse==2 -> sparse B -> broadcast across wg_x (same as maskB)
+          if kernel["enableTDMMetadata"]:
+            if kernel["ProblemType"]["Sparse"] == 1:
+              moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskMetadata"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
+                                                comment="Setting metadata mask (follows sparse A)"))
+            else: #TODO: check sparse B
+              moduleRegInit.add(SMulI32(dst=sgpr(sTmp+4), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                        comment="Shift factor: wg_y * nwg_x (metadata)"))
+              moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskMetadata"), shiftHex=sgpr(sTmp+4), src=hex(maskB),\
+                                                comment="Setting metadata mask (follows sparse B)"))
       # SrdD can be used as temp sgprs for a bit
       if self.states.doShadowInit and kernel["BufferStore"]:
         self.addSgprVarToPool("SrdD")
