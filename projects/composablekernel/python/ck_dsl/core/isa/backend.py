@@ -165,11 +165,18 @@ _RDNA_WMMA = {
 # emitted as (unsignedA=0, unsignedB=0, clamp=0). Verified on gfx1151/gfx11-generic
 # (ROCm 7.2.0): lowers to v_wmma_i32_16x16x16_iu8.
 #   iu8:  A/B = <4 x i32> (16 int8 packed 4-per-i32), C/D = <8 x i32>
+#   iu4:  A/B = <2 x i32> (16 int4 packed 8-per-i32), C/D = <8 x i32>
 _RDNA_WMMA_INT = {
     "tile.wmma_i32_16x16x16_iu8": (
         "wmma.i32.16x16x16.iu8",
         "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32",
         4,
+        8,
+    ),
+    "tile.wmma_i32_16x16x16_iu4": (
+        "wmma.i32.16x16x16.iu4",
+        "llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.v2i32",
+        2,
         8,
     ),
 }

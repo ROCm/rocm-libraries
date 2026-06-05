@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import json
+import subprocess
 import struct
 import sys
 from pathlib import Path
@@ -36,7 +38,7 @@ from pathlib import Path
 import numpy as np
 
 from ck_dsl.core.arch import ArchTarget
-from ck_dsl.helpers import compile_kernel
+from ck_dsl.helpers import compile_kernel, make_conv_manifest, write_artifact
 from ck_dsl.instances.gfx1151.deep_fused_conv_pool import (
     Gfx1151DeepFusedConvPoolSpec,
     build_deep_fused_conv_pool,
@@ -164,6 +166,94 @@ def _useful_flops(spec: Gfx1151DeepFusedConvPoolSpec) -> int:
     return 2 * (conv0 + conv1)
 
 
+def _deep_fused_args_signature():
+    return [
+        {"name": "X", "type": "ptr<i8, global>", "size_bytes": 8},
+        {"name": "W0", "type": "ptr<i8, global>", "size_bytes": 8},
+        {"name": "Y", "type": "ptr<i32, global>", "size_bytes": 8},
+        {"name": "W1", "type": "ptr<i8, global>", "size_bytes": 8},
+    ]
+
+
+def _make_manifest(artifact, spec, *, seed: int, tol: int, warmup: int, iters: int):
+    conv = spec.problem.conv
+    problem = spec.problem
+    grid = deep_fused_conv_pool_grid(spec)
+    atoms = ["wmma_i32_16x16x16_iu8"] if spec.native_int else []
+    atoms.append("wmma_f32_16x16x16_f16")
+    return make_conv_manifest(
+        artifact=artifact,
+        block_m=spec.tile_m,
+        block_n=spec.tile_n,
+        block_k=spec.kpad,
+        threads_per_block=spec.block_size,
+        conv=[
+            conv.N,
+            conv.Hi,
+            conv.Wi,
+            conv.C,
+            conv.K,
+            conv.R,
+            conv.S,
+            conv.sH,
+            conv.sW,
+            conv.pH,
+            conv.pW,
+            conv.dH,
+            conv.dW,
+        ],
+        groups=1,
+        cpg=conv.C,
+        kpg=conv.K,
+        grid_explicit=grid,
+        conv_layout="deep_fused_conv_pool_i8i4",
+        warmup_iters=warmup,
+        timed_iters=iters,
+        atoms=atoms,
+        notes=(
+            "gfx1151 deep-fused int8/int4 conv0 -> conv1 -> 2x2/s2 maxpool. "
+            "The kernel ABI is four pointers (X, W0, Y, W1); W1 and Y use "
+            "packed signed int4 storage."
+        ),
+        extra={
+            "kind": "deep_fused_conv_pool_i8i4",
+            "args_signature": _deep_fused_args_signature(),
+            "sig_has_bytes": 0,
+            "pool": [
+                problem.pool_y,
+                problem.pool_x,
+                problem.pool_stride_h,
+                problem.pool_stride_w,
+            ],
+            "pool_tile": [spec.pool_tile_h, spec.pool_tile_w],
+            "conv1": {"kernel": "1x1", "K1": problem.conv1_channels},
+            "pool_output_shape": [
+                conv.N,
+                problem.pool_ho,
+                problem.pool_wo,
+                problem.conv1_channels,
+            ],
+            "default_shape": [
+                conv.N,
+                conv.Hi,
+                conv.Wi,
+                conv.C,
+                conv.K,
+                problem.conv1_channels,
+            ],
+            "quant": {
+                "m0": spec.m0,
+                "m0b": spec.m0b,
+                "m1": spec.m1,
+                "mf": spec.mf,
+            },
+            "seed": int(seed),
+            "verify_tol": int(tol),
+            "experimental": True,
+        },
+    )
+
+
 def _launch(rt, fn, spec, X, W0, W1, Y, *, blocking: bool):
     X_dev = rt.alloc(X.nbytes)
     W0_dev = rt.alloc(W0.nbytes)
@@ -276,10 +366,15 @@ def main() -> int:
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--bench", action="store_true")
     parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="directory for the emitted hsaco and manifest.json",
+    )
+    parser.add_argument(
         "--emit-hsaco",
         default=None,
-        help="build+compile only, write the hsaco to this path, then exit "
-        "(local half of a build-here / run-on-board cross-build)",
+        help="build+compile only, write the hsaco to this path plus a sibling "
+        "manifest.json, then exit (local half of a cross-build)",
     )
     parser.add_argument(
         "--prebuilt",
@@ -299,8 +394,11 @@ def main() -> int:
     parser.add_argument("--c", type=int, default=8)
     parser.add_argument("--k0", type=int, default=32)
     parser.add_argument("--k1", type=int, default=24)
-    parser.add_argument("--pool-tile-h", type=int, default=4)
-    parser.add_argument("--pool-tile-w", type=int, default=8)
+    # Best measured tile for the native-int direct path on gfx1151: a
+    # wide-short 2x32 pool tile (tile_m=256) is memory/latency-bound-optimal,
+    # ~16.1 ms full-shape vs ~18.5 ms for 8x8 (both bit-exact).
+    parser.add_argument("--pool-tile-h", type=int, default=2)
+    parser.add_argument("--pool-tile-w", type=int, default=32)
     parser.add_argument(
         "--direct",
         action="store_true",
@@ -315,14 +413,46 @@ def main() -> int:
     )
     parser.add_argument(
         "--sched",
-        default="mem",
+        default="compv4",
         choices=["mem", "compv3", "compv4", "intrawave"],
-        help="L2: instruction-schedule policy for the WMMA loops",
+        help="L2: instruction-schedule policy for the WMMA loops "
+        "(compv4 is the best measured policy for the native-int path)",
     )
     parser.add_argument(
         "--mask-maxpool",
         action="store_true",
         help="L3: predicated (branch-free) maxpool tail",
+    )
+    parser.add_argument(
+        "--scalar-rne",
+        action="store_true",
+        help="compatibility no-op: scalar per-slot RNE is the default after measurement",
+    )
+    parser.add_argument(
+        "--vector-rne",
+        action="store_true",
+        help="Q1: use vectorized fixed-scale RNE/clamp over WMMA accumulator vectors",
+    )
+    parser.add_argument(
+        "--interior-fastpath",
+        action="store_true",
+        help="Q2: use no-halo-predicate direct input staging for interior CTAs",
+    )
+    parser.add_argument(
+        "--static-direct-kmap",
+        action="store_true",
+        help="Q3: specialize direct-conv A fragment Kg->(r,s,ci) mapping",
+    )
+    parser.add_argument(
+        "--packed-c0",
+        action="store_true",
+        help="Q4: pack conv0 C0 int4 handoff two codes per byte using even-lane stores",
+    )
+    parser.add_argument(
+        "--repack-c0",
+        action="store_true",
+        help="Lever 2: lane-local LDS->LDS repack of C0 (no bpermute) so conv1 "
+        "loads A as a bitcast instead of packing nibbles on every fragment load",
     )
     parser.add_argument(
         "--butterfly",
@@ -333,8 +463,8 @@ def main() -> int:
         "--native-int",
         action="store_true",
         help="conv0 uses the native wmma_i32_16x16x16_iu8 atom (raw int8 -> i8 "
-        "LDS -> exact i32 acc) instead of the fp16-emulation path; forces "
-        "im2col (conv1 stays fp16 in this phase)",
+        "LDS -> exact i32 acc) instead of the fp16-emulation path; conv1 uses "
+        "native packed-int4 WMMA when available",
     )
     args = parser.parse_args()
 
@@ -353,8 +483,7 @@ def main() -> int:
         return 2
 
     # butterfly is built on the direct-conv0 path, so force it on when requested.
-    # native_int currently only ports the im2col A path, so force direct off.
-    direct = (args.direct or args.butterfly) and not args.native_int
+    direct = args.direct or args.butterfly
     spec = make_deep_fused_conv_pool_spec(
         n=args.n,
         h=args.h,
@@ -368,6 +497,11 @@ def main() -> int:
         waves_per_eu=args.waves_per_eu,
         sched_policy=args.sched,
         mask_maxpool=args.mask_maxpool,
+        specialized_rne=args.vector_rne and not args.scalar_rne,
+        interior_fastpath=args.interior_fastpath,
+        static_direct_kmap=args.static_direct_kmap,
+        packed_c0_handoff=args.packed_c0,
+        repack_c0=args.repack_c0,
         butterfly_conv01=args.butterfly,
         native_int=args.native_int,
     )
@@ -386,24 +520,52 @@ def main() -> int:
             hsaco=hsaco,
             kernel_name=spec.kernel_name(),
             hsaco_bytes=len(hsaco),
+            timings={},
         )
     else:
         kernel = build_deep_fused_conv_pool(spec, arch=args.arch)
         artifact = compile_kernel(kernel, arch=args.arch)
 
+    manifest = _make_manifest(
+        artifact,
+        spec,
+        seed=args.seed,
+        tol=args.tol,
+        warmup=args.warmup,
+        iters=args.iters,
+    )
+
     if args.emit_hsaco:
-        Path(args.emit_hsaco).write_bytes(artifact.hsaco)
+        hsaco_path = Path(args.emit_hsaco)
+        hsaco_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest = dict(manifest)
+        manifest["hsaco"] = hsaco_path.name
+        hsaco_path.write_bytes(artifact.hsaco)
+        manifest_path = hsaco_path.with_name("manifest.json")
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+        )
         print(
-            f"emitted {artifact.kernel_name} -> {args.emit_hsaco} "
+            f"emitted {artifact.kernel_name} -> {hsaco_path} and {manifest_path} "
             f"({artifact.hsaco_bytes} bytes) for arch {args.arch}"
         )
         return 0
+
+    out = Path(args.output_dir or f"/tmp/deep_fused_conv_pool_verify_{args.arch}")
+    paths = write_artifact(
+        artifact,
+        out,
+        manifest,
+        write_ir_text=hasattr(artifact, "ir_text"),
+        write_llvm_text=hasattr(artifact, "llvm_text"),
+    )
 
     conv = spec.problem.conv
     p = spec.problem
     grid = deep_fused_conv_pool_grid(spec)
     print(
-        f"emitted {artifact.kernel_name} ({artifact.hsaco_bytes} bytes); "
+        f"emitted {paths['hsaco']} and {paths['manifest']} "
+        f"({artifact.hsaco_bytes} bytes); "
         f"grid={grid} block=({spec.block_size},1,1)"
     )
     print(
@@ -417,13 +579,23 @@ def main() -> int:
         f"warps={spec.warp_m}x{spec.warp_n}"
     )
 
-    if args.verify:
-        if not _verify_artifact(artifact, spec, seed=args.seed, tol=args.tol):
-            return 1
-    if args.bench:
-        _benchmark_artifact(
-            artifact, spec, seed=args.seed, warmup=args.warmup, iters=args.iters
-        )
+    if args.verify or args.bench:
+        cmd = [
+            sys.executable,
+            "-m",
+            "ck_dsl.run_manifest",
+            str(paths["hsaco"]),
+            str(paths["manifest"]),
+        ]
+        if args.verify:
+            cmd.append("--verify")
+        r = subprocess.run(cmd, text=True, timeout=300)
+        return r.returncode
+    print(
+        "run with: "
+        f"{sys.executable} -m ck_dsl.run_manifest {paths['hsaco']} "
+        f"{paths['manifest']} --verify"
+    )
     return 0
 
 
