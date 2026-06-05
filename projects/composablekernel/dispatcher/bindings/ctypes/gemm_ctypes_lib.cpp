@@ -310,9 +310,39 @@ int dispatcher_run_gemm(
 }
 
 /**
- * Get kernel information
+ * Get kernel information (legacy single-kernel ABI).
+ *
+ * Returns the compile-time KERNEL_NAME of the force-included kernel header.
+ * Kept for backward compatibility with one-kernel-per-.so callers.
  */
 const char* dispatcher_get_kernel_name() { return KERNEL_NAME; }
+
+/**
+ * Get the name of the kernel at a given registry index (multi-kernel ABI).
+ *
+ * Mirrors the conv/fmha ctypes libs: copies the index-th registered kernel's
+ * name into the caller-provided buffer so one .so can report a whole batch and
+ * be selected by name at runtime. Returns 0 on success, -1 on bad args or
+ * out-of-range index.
+ */
+int dispatcher_get_kernel_name_at(int index, char* buffer, int buffer_size)
+{
+    if(!buffer || buffer_size <= 0)
+    {
+        return -1;
+    }
+
+    auto kernels = Registry::instance().get_all();
+    if(index < 0 || index >= static_cast<int>(kernels.size()))
+    {
+        return -1;
+    }
+
+    std::string name = kernels[index]->get_name();
+    std::strncpy(buffer, name.c_str(), static_cast<size_t>(buffer_size) - 1);
+    buffer[buffer_size - 1] = '\0';
+    return 0;
+}
 
 /**
  * Initialize dispatcher (alias)

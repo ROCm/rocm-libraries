@@ -1,0 +1,738 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""
+GEMM Tile Engine <-> Dispatcher bridge.
+
+This is the GEMM counterpart of ``grouped_conv_utils.py`` / ``fmha_utils.py``:
+a single shared config dataclass (``GemmKernelConfig``) that Tile Engine imports
+and hands back to the dispatcher. There is no translator between two
+vocabularies -- both sides share the one object whose ``.name`` mirrors the
+kernel identifier baked into the generated kernel header.
+
+Public surface (mirrors the grouped_conv bridge):
+
+    GemmKernelConfig                 -- the shared contract dataclass
+        .name                        -- registry/runtime lookup key (byte-exact)
+        .to_codegen_json()           -- feeds unified_gemm_codegen.py
+    GemmProblem                      -- a single (M, N, K) problem
+    setup_multiple_gemm_dispatchers  -- codegen + hipcc -> .so paths (NO GPU)
+    GemmDispatcherLib                -- thin ctypes ABI wrapper
+    GpuGemmRunner                    -- GPU memory + run + time (from a .so path)
+    expand_sweep                     -- TE JSON sweep config -> [GemmKernelConfig]
+
+The heavy lifting for codegen and compilation is reused from ``ctypes_utils``
+so there is a single source of truth for how a kernel header is produced and
+how it is compiled into a ``.so``.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import itertools
+import json
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+# Reuse the proven codegen/compile leaf helpers from the dispatcher's own
+# python layer. gemm_utils is a thin bridge on top of these.
+import ctypes_utils as _cu
+
+
+# ============================================================================
+# Layout / dtype helpers
+# ============================================================================
+
+_LAYOUT_CHAR = {"row": "r", "col": "c", "r": "r", "c": "c"}
+_LAYOUT_WORD = {"r": "row", "c": "col"}
+
+
+def _cap(flag: bool) -> str:
+    """Reproduce Python ``str(bool).capitalize()`` -> 'True' / 'False'."""
+    return "True" if flag else "False"
+
+
+# ============================================================================
+# The shared contract: GemmKernelConfig
+# ============================================================================
+
+
+@dataclass
+class GemmKernelConfig:
+    """The common config struct shared by Tile Engine and the Dispatcher.
+
+    Naming convention (the "warp/wave trap" lives here, in ONE place):
+      * ``wave_m/n/k``      -- warps per block (C++ ``wave_shape``; TE "warp").
+      * ``warp_tile_m/n/k`` -- MFMA instruction shape (C++ ``warp_tile_shape``;
+                               TE "warp_tile").
+    """
+
+    # --- Signature: what operation is computed -----------------------------
+    dtype_a: str = "fp16"
+    dtype_b: str = "fp16"
+    dtype_c: str = "fp16"
+    dtype_acc: str = "fp32"
+    layout_a: str = "row"
+    layout_b: str = "col"
+    layout_c: str = "row"
+
+    # --- Algorithm: how it is implemented ----------------------------------
+    tile_m: int = 128
+    tile_n: int = 128
+    tile_k: int = 32
+    wave_m: int = 2
+    wave_n: int = 2
+    wave_k: int = 1
+    warp_tile_m: int = 32
+    warp_tile_n: int = 32
+    warp_tile_k: int = 16
+
+    pipeline: str = "compv4"
+    scheduler: str = "intrawave"
+    epilogue: str = "cshuffle"
+
+    pad_m: bool = True
+    pad_n: bool = True
+    pad_k: bool = True
+    persistent: bool = False
+
+    gfx_arch: str = "gfx942"
+    variant: str = "standard"
+
+    # ------------------------------------------------------------------ #
+    # Derived string fragments
+    # ------------------------------------------------------------------ #
+    @property
+    def layout(self) -> str:
+        """3-char layout string, e.g. 'rcr'."""
+        return (
+            _LAYOUT_CHAR[self.layout_a]
+            + _LAYOUT_CHAR[self.layout_b]
+            + _LAYOUT_CHAR[self.layout_c]
+        )
+
+    @property
+    def tile_str(self) -> str:
+        return f"{self.tile_m}x{self.tile_n}x{self.tile_k}"
+
+    @property
+    def wave_str(self) -> str:
+        return f"{self.wave_m}x{self.wave_n}x{self.wave_k}"
+
+    @property
+    def warp_tile_str(self) -> str:
+        return f"{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}"
+
+    @property
+    def name(self) -> str:
+        """Registry / runtime lookup key.
+
+        Reproduces, byte-for-byte, the ``KERNEL_NAME`` that
+        ``unified_gemm_codegen.py::KernelNaming.generate`` bakes into the
+        generated kernel header (and that the .so reports via
+        ``dispatcher_get_kernel_name``). This is the single thread tying
+        config -> codegen -> runtime together.
+        """
+        name = (
+            f"gemm_{self.dtype_a}_{self.layout}"
+            f"_{self.pipeline}_{self.epilogue}_{self.scheduler}"
+            f"_{_cap(self.pad_m)}_{_cap(self.pad_n)}_{_cap(self.pad_k)}"
+            f"_{_cap(self.persistent)}"
+            f"_{self.tile_str}_{self.wave_str}_{self.warp_tile_str}"
+        )
+        if self.variant == "preshuffle":
+            name += "_preshuffle"
+        elif self.variant == "streamk":
+            name += "_streamk"
+        return name
+
+    # ------------------------------------------------------------------ #
+    # Serialization
+    # ------------------------------------------------------------------ #
+    def to_codegen_json(self) -> Dict[str, Any]:
+        """Single-config JSON consumed by unified_gemm_codegen.py.
+
+        Note the warp/wave mapping: the codegen calls the warps-per-block
+        triple ``warp_*`` and the MFMA triple ``warp_tile_*``. We translate
+        from dispatcher semantics here so the mapping cannot drift.
+        """
+        return {
+            "tile_config": {
+                "tile_m": [self.tile_m],
+                "tile_n": [self.tile_n],
+                "tile_k": [self.tile_k],
+                # dispatcher wave_* -> codegen warp_* (warps per block)
+                "warp_m": [self.wave_m],
+                "warp_n": [self.wave_n],
+                "warp_k": [self.wave_k],
+                # dispatcher warp_tile_* -> codegen warp_tile_* (MFMA shape)
+                "warp_tile_m": [self.warp_tile_m],
+                "warp_tile_n": [self.warp_tile_n],
+                "warp_tile_k": [self.warp_tile_k],
+            },
+            "trait_config": {
+                "pipeline": [self.pipeline],
+                "epilogue": [self.epilogue],
+                "scheduler": [self.scheduler],
+                "pad_m": [self.pad_m],
+                "pad_n": [self.pad_n],
+                "pad_k": [self.pad_k],
+                "persistent": [self.persistent],
+            },
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "dtype_a": self.dtype_a,
+            "dtype_b": self.dtype_b,
+            "dtype_c": self.dtype_c,
+            "dtype_acc": self.dtype_acc,
+            "layout": self.layout,
+            "tile": [self.tile_m, self.tile_n, self.tile_k],
+            "wave": [self.wave_m, self.wave_n, self.wave_k],
+            "warp_tile": [self.warp_tile_m, self.warp_tile_n, self.warp_tile_k],
+            "pipeline": self.pipeline,
+            "scheduler": self.scheduler,
+            "epilogue": self.epilogue,
+            "pad": [self.pad_m, self.pad_n, self.pad_k],
+            "persistent": self.persistent,
+            "gfx_arch": self.gfx_arch,
+            "variant": self.variant,
+            "name": self.name,
+        }
+
+    def to_ctypes_config(self) -> "_cu.KernelConfig":
+        """Convert to the ctypes_utils.KernelConfig used by the codegen/validate
+        helpers. ctypes_utils renames the MFMA triple ``warp_*`` (no _tile)."""
+        return _cu.KernelConfig(
+            dtype_a=self.dtype_a,
+            dtype_b=self.dtype_b,
+            dtype_c=self.dtype_c,
+            dtype_acc=self.dtype_acc,
+            layout_a=_LAYOUT_WORD[_LAYOUT_CHAR[self.layout_a]],
+            layout_b=_LAYOUT_WORD[_LAYOUT_CHAR[self.layout_b]],
+            layout_c=_LAYOUT_WORD[_LAYOUT_CHAR[self.layout_c]],
+            tile_m=self.tile_m,
+            tile_n=self.tile_n,
+            tile_k=self.tile_k,
+            wave_m=self.wave_m,
+            wave_n=self.wave_n,
+            wave_k=self.wave_k,
+            warp_m=self.warp_tile_m,
+            warp_n=self.warp_tile_n,
+            warp_k=self.warp_tile_k,
+            pipeline=self.pipeline,
+            scheduler=self.scheduler,
+            epilogue=self.epilogue,
+            pad_m=self.pad_m,
+            pad_n=self.pad_n,
+            pad_k=self.pad_k,
+            gfx_arch=self.gfx_arch,
+            variant=self.variant,
+        )
+
+
+# ============================================================================
+# Problem
+# ============================================================================
+
+
+@dataclass
+class GemmProblem:
+    """A single GEMM problem: C[MxN] = A[MxK] @ B[KxN]."""
+
+    M: int
+    N: int
+    K: int
+
+    @property
+    def flops(self) -> float:
+        return 2.0 * self.M * self.N * self.K
+
+    def to_dict(self) -> Dict[str, int]:
+        return {"M": self.M, "N": self.N, "K": self.K}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, int]) -> "GemmProblem":
+        return cls(M=int(d["M"]), N=int(d["N"]), K=int(d["K"]))
+
+
+@dataclass
+class GemmResult:
+    output: np.ndarray
+    time_ms: float
+    status: int
+    tflops: float
+    kernel_name: str
+
+    @property
+    def success(self) -> bool:
+        return self.status == 0
+
+
+# ============================================================================
+# ctypes ABI wrapper
+# ============================================================================
+
+
+class GemmDispatcherLib:
+    """Thin ctypes wrapper around a compiled GEMM dispatcher .so.
+
+    Supports both the legacy single-kernel ABI (``dispatcher_get_kernel_name``)
+    and the multi-kernel ABI (``dispatcher_get_kernel_name_at(index, buf, n)``)
+    so one .so can report a whole batch and be selected by name.
+    """
+
+    def __init__(self, so_path: Path):
+        self._path = Path(so_path)
+        self._lib = ctypes.CDLL(str(self._path))
+        self._has_indexed = hasattr(self._lib, "dispatcher_get_kernel_name_at")
+        self._setup_functions()
+
+    def _setup_functions(self) -> None:
+        lib = self._lib
+
+        lib.dispatcher_initialize.argtypes = []
+        lib.dispatcher_initialize.restype = ctypes.c_int
+
+        lib.dispatcher_get_kernel_count.argtypes = []
+        lib.dispatcher_get_kernel_count.restype = ctypes.c_int
+
+        lib.dispatcher_get_kernel_name.argtypes = []
+        lib.dispatcher_get_kernel_name.restype = ctypes.c_char_p
+
+        if self._has_indexed:
+            lib.dispatcher_get_kernel_name_at.argtypes = [
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_int,
+            ]
+            lib.dispatcher_get_kernel_name_at.restype = ctypes.c_int
+
+        lib.dispatcher_run_gemm.argtypes = [
+            ctypes.c_void_p,  # A (host)
+            ctypes.c_void_p,  # B (host)
+            ctypes.c_void_p,  # C (host)
+            ctypes.c_int64,  # M
+            ctypes.c_int64,  # N
+            ctypes.c_int64,  # K
+            ctypes.POINTER(ctypes.c_float),  # time_ms
+        ]
+        lib.dispatcher_run_gemm.restype = ctypes.c_int
+
+        lib.dispatcher_cleanup.argtypes = []
+        lib.dispatcher_cleanup.restype = None
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def initialize(self) -> bool:
+        return self._lib.dispatcher_initialize() == 0
+
+    def get_kernel_count(self) -> int:
+        return int(self._lib.dispatcher_get_kernel_count())
+
+    @property
+    def kernel_names(self) -> List[str]:
+        """List every kernel the .so exposes, by index when available."""
+        if self._has_indexed:
+            names: List[str] = []
+            count = self.get_kernel_count()
+            buf = ctypes.create_string_buffer(256)
+            for i in range(count):
+                if self._lib.dispatcher_get_kernel_name_at(i, buf, 256) == 0:
+                    names.append(buf.value.decode("utf-8"))
+            if names:
+                return names
+        # Legacy single-kernel fallback.
+        raw = self._lib.dispatcher_get_kernel_name()
+        return [raw.decode("utf-8")] if raw else []
+
+    def run(
+        self, A: np.ndarray, B: np.ndarray, C: np.ndarray, M: int, N: int, K: int
+    ) -> Tuple[int, float]:
+        time_ms = ctypes.c_float(0.0)
+        status = self._lib.dispatcher_run_gemm(
+            A.ctypes.data_as(ctypes.c_void_p),
+            B.ctypes.data_as(ctypes.c_void_p),
+            C.ctypes.data_as(ctypes.c_void_p),
+            M,
+            N,
+            K,
+            ctypes.byref(time_ms),
+        )
+        return status, time_ms.value
+
+    def cleanup(self) -> None:
+        self._lib.dispatcher_cleanup()
+
+
+# ============================================================================
+# GPU runner (constructed from a .so path; loaded only inside a worker)
+# ============================================================================
+
+
+class GpuGemmRunner:
+    """High-level runner: construct from a .so path, call run(A, B, problem).
+
+    The GEMM ctypes ABI takes HOST pointers and manages GPU memory internally
+    (hipMalloc/hipMemcpy/hipFree), so this runner stays simple -- it hands
+    numpy arrays straight to the .so.
+    """
+
+    def __init__(self, lib_path: Path):
+        self.lib = GemmDispatcherLib(lib_path)
+        if not self.lib.initialize():
+            raise RuntimeError(f"Failed to initialize dispatcher .so: {lib_path}")
+        names = self.lib.kernel_names
+        self._kernel_name = names[0] if names else "unknown"
+
+    @property
+    def kernel_name(self) -> str:
+        return self._kernel_name
+
+    def run(
+        self, A: np.ndarray, B: np.ndarray, problem: GemmProblem
+    ) -> GemmResult:
+        M, N, K = problem.M, problem.N, problem.K
+
+        # A is row-major MxK; B is supplied KxN and stored column-major (the
+        # 'c' in rcr), matching how the kernel expects its operands.
+        A_h = np.ascontiguousarray(A, dtype=np.float16)
+        B_h = np.ascontiguousarray(B.T, dtype=np.float16)
+        C_h = np.zeros((M, N), dtype=np.float16)
+
+        status, time_ms = self.lib.run(A_h, B_h, C_h, M, N, K)
+
+        tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0
+        return GemmResult(
+            output=C_h,
+            time_ms=time_ms,
+            status=status,
+            tflops=tflops,
+            kernel_name=self._kernel_name,
+        )
+
+
+# ============================================================================
+# Build API: codegen + hipcc -> .so paths (no GPU)
+# ============================================================================
+
+
+def _build_compile_jobs(
+    config: GemmKernelConfig, header: Path
+) -> Tuple[Dict[str, Any], Path]:
+    """Replicate the (validated) compile+link commands from ctypes_utils."""
+    root = _cu.get_dispatcher_root()
+    ck_root = root.parent
+    build_dir = _cu.get_build_dir()
+    output_dir = _cu.get_generated_kernels_dir()
+    ctypes_source = root / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
+    static_lib = build_dir / "libck_tile_dispatcher.a"
+
+    lib_path = build_dir / "examples" / f"lib{config.name}.so"
+    obj_file = lib_path.with_suffix(".o")
+
+    compile_cmd = [
+        "/opt/rocm/bin/hipcc",
+        "-c",
+        "-fPIC",
+        "-O3",
+        f"-I{root / 'include'}",
+        f"-I{ck_root / 'include'}",
+        f"-I{ck_root}",
+        f"-I{str(output_dir)}",
+        "-DCK_TILE_SINGLE_KERNEL_INCLUDE",
+        f"-include{header}",
+        "-D__HIP_PLATFORM_AMD__",
+        f"--offload-arch={config.gfx_arch}",
+        f'-DGFX_ARCH="{config.gfx_arch}"',
+        "-mllvm",
+        "-enable-noalias-to-md-conversion=0",
+        "-Wno-undefined-func-template",
+        "-Wno-float-equal",
+        str(ctypes_source),
+        "-o",
+        str(obj_file),
+    ]
+    link_cmd = [
+        "/opt/rocm/bin/hipcc",
+        "-shared",
+        "-fPIC",
+        f"--offload-arch={config.gfx_arch}",
+        "--hip-link",
+        str(obj_file),
+        str(static_lib),
+        "-o",
+        str(lib_path),
+    ]
+    job = {"compile_cmd": compile_cmd, "link_cmd": link_cmd, "lib_path": str(lib_path)}
+    return job, lib_path
+
+
+def setup_multiple_gemm_dispatchers(
+    configs: List[GemmKernelConfig],
+    verbose: bool = True,
+    max_workers: Optional[int] = None,
+) -> List[Optional[Path]]:
+    """Codegen + compile each config into its own .so. Returns .so paths.
+
+    This is the build half of the bridge. It touches NO GPU -- pure CPU
+    codegen + hipcc, run massively in parallel -- and returns only ``Path``
+    objects (``None`` for configs that failed to generate/compile), aligned to
+    the input order. Benchmarking happens later, in an isolated worker.
+    """
+    import sys
+
+    n = len(configs)
+    results: List[Optional[Path]] = [None] * n
+    if n == 0:
+        return results
+
+    max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
+
+    # Dedupe identical configs by name; compile once, share the path.
+    first_index: Dict[str, int] = {}
+    unique: List[int] = []
+    for i, c in enumerate(configs):
+        key = c.name
+        if key not in first_index:
+            first_index[key] = i
+            unique.append(i)
+
+    codegen_script = _cu.get_codegen_path()
+    output_dir = _cu.get_generated_kernels_dir()
+    static_lib = _cu.get_build_dir() / "libck_tile_dispatcher.a"
+    ctypes_source = (
+        _cu.get_dispatcher_root() / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
+    )
+    if not static_lib.exists() or not ctypes_source.exists():
+        raise FileNotFoundError(
+            "Missing static lib or ctypes source required for compilation:\n"
+            f"  {static_lib}\n  {ctypes_source}\n"
+            "Build the dispatcher first (cmake + make)."
+        )
+
+    # -- Step 1: parallel codegen (one header per unique config) -----------
+    codegen_args = []
+    for i in unique:
+        c = configs[i]
+        codegen_args.append(
+            {
+                "index": i,
+                "python": sys.executable,
+                "codegen_script": str(codegen_script),
+                "output_dir": str(output_dir),
+                "dtype": c.dtype_a,
+                "layout": c.layout,
+                "gpu_target": c.gfx_arch,
+                "tile_config_json": c.to_codegen_json(),
+                "hpp_glob_pattern": f"{c.name}.hpp",
+            }
+        )
+
+    if verbose:
+        print(
+            f"[gemm-bridge] codegen: {len(codegen_args)} headers "
+            f"(workers={max_workers})..."
+        )
+
+    headers: Dict[int, Path] = {}
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        futs = {
+            ex.submit(_cu._generate_single_kernel_subprocess, a): a["index"]
+            for a in codegen_args
+        }
+        for fut in as_completed(futs):
+            i = futs[fut]
+            ok, hdr, err = fut.result()
+            if ok and hdr:
+                headers[i] = Path(hdr)
+                if verbose:
+                    print(f"  OK  codegen [{i}] {configs[i].name}")
+            elif verbose:
+                print(f"  FAIL codegen [{i}] {configs[i].name}: {err}")
+
+    # -- Step 2: parallel compile + link -----------------------------------
+    compile_jobs = []
+    job_index: List[int] = []
+    for i in unique:
+        hdr = headers.get(i)
+        if hdr is None:
+            continue
+        job, _ = _build_compile_jobs(configs[i], hdr)
+        compile_jobs.append(job)
+        job_index.append(i)
+
+    if verbose and compile_jobs:
+        print(
+            f"[gemm-bridge] compile: {len(compile_jobs)} .so "
+            f"(workers={max_workers})..."
+        )
+
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        futs = {
+            ex.submit(_cu._run_hipcc_subprocess, job): job_index[j]
+            for j, job in enumerate(compile_jobs)
+        }
+        for fut in as_completed(futs):
+            i = futs[fut]
+            ok, lp, err = fut.result()
+            if ok and lp:
+                results[i] = Path(lp)
+                if verbose:
+                    print(f"  OK  compile [{i}] {Path(lp).name}")
+            elif verbose:
+                print(f"  FAIL compile [{i}] {configs[i].name}: {err}")
+
+    # -- Fan the deduped result back out to every input index --------------
+    for i, c in enumerate(configs):
+        if results[i] is None:
+            results[i] = results[first_index[c.name]]
+
+    if verbose:
+        ok_count = sum(1 for r in results if r is not None)
+        print(f"[gemm-bridge] setup complete: {ok_count}/{n} configs -> .so")
+
+    return results
+
+
+# ============================================================================
+# TE sweep config expansion
+# ============================================================================
+
+
+def _expand_range(entry: Dict[str, Any]) -> List[int]:
+    """Expand a tile_config entry: either {min,max,step} or {values:[...]}."""
+    if "values" in entry:
+        return list(entry["values"])
+    lo = int(entry["min"])
+    hi = int(entry["max"])
+    step = int(entry.get("step", 1))
+    return list(range(lo, hi + 1, step))
+
+
+def _expand_values(entry: Optional[Dict[str, Any]], default: List[Any]) -> List[Any]:
+    if entry is None:
+        return list(default)
+    return list(entry.get("values", default))
+
+
+def expand_sweep(
+    config_path: str,
+    arch: str,
+    dtype: str = "fp16",
+    layout: str = "rcr",
+) -> List[GemmKernelConfig]:
+    """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
+
+    The TE config uses ``tile_config`` (ranges/value-lists for tile, warp and
+    warp_tile triples) and ``trait_config`` (value-lists for pipeline,
+    scheduler, epilogue, pad_*, persistent). Every valid combination becomes
+    one GemmKernelConfig. Invalid combinations are dropped via the dispatcher's
+    own validator, and duplicates (by .name) are collapsed.
+
+    For Phase 1 the signature is fixed to fp16 / rcr.
+    """
+    with open(config_path) as f:
+        cfg = json.load(f)
+
+    tc = cfg.get("tile_config", {})
+    tr = cfg.get("trait_config", {})
+
+    tile_ms = _expand_range(tc["tile_m"])
+    tile_ns = _expand_range(tc["tile_n"])
+    tile_ks = _expand_range(tc["tile_k"])
+    wave_ms = _expand_range(tc["warp_m"])  # TE "warp" == wave count
+    wave_ns = _expand_range(tc["warp_n"])
+    wave_ks = _expand_range(tc["warp_k"])
+    wt_ms = _expand_range(tc["warp_tile_m"])
+    wt_ns = _expand_range(tc["warp_tile_n"])
+    wt_ks = _expand_range(tc["warp_tile_k"])
+
+    pipelines = _expand_values(tr.get("pipeline"), ["compv3"])
+    schedulers = _expand_values(tr.get("scheduler"), ["intrawave"])
+    epilogues = _expand_values(tr.get("epilogue"), ["cshuffle"])
+    pad_ms = _expand_values(tr.get("pad_m"), [False])
+    pad_ns = _expand_values(tr.get("pad_n"), [False])
+    pad_ks = _expand_values(tr.get("pad_k"), [False])
+    persistents = _expand_values(tr.get("persistent"), [False])
+
+    la, lb, lc = layout[0], layout[1], layout[2]
+
+    configs: List[GemmKernelConfig] = []
+    seen: set = set()
+    for (
+        tm,
+        tn,
+        tk,
+        wm,
+        wn,
+        wk,
+        wtm,
+        wtn,
+        wtk,
+        pipe,
+        sched,
+        epi,
+        pm,
+        pn,
+        pk,
+        persist,
+    ) in itertools.product(
+        tile_ms,
+        tile_ns,
+        tile_ks,
+        wave_ms,
+        wave_ns,
+        wave_ks,
+        wt_ms,
+        wt_ns,
+        wt_ks,
+        pipelines,
+        schedulers,
+        epilogues,
+        pad_ms,
+        pad_ns,
+        pad_ks,
+        persistents,
+    ):
+        c = GemmKernelConfig(
+            dtype_a=dtype,
+            dtype_b=dtype,
+            dtype_c=dtype,
+            layout_a=_LAYOUT_WORD[la],
+            layout_b=_LAYOUT_WORD[lb],
+            layout_c=_LAYOUT_WORD[lc],
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            wave_m=wm,
+            wave_n=wn,
+            wave_k=wk,
+            warp_tile_m=wtm,
+            warp_tile_n=wtn,
+            warp_tile_k=wtk,
+            pipeline=pipe,
+            scheduler=sched,
+            epilogue=epi,
+            pad_m=bool(pm),
+            pad_n=bool(pn),
+            pad_k=bool(pk),
+            persistent=bool(persist),
+            gfx_arch=arch,
+        )
+        if c.name in seen:
+            continue
+        val = _cu.validate_kernel_config(c.to_ctypes_config())
+        if not val.is_valid:
+            continue
+        seen.add(c.name)
+        configs.append(c)
+
+    return configs
