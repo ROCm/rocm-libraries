@@ -238,13 +238,14 @@ function(_fetch_nlohmann_json VERSION HASH)
         json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
     )
 
+    set(JSON_Install ON CACHE BOOL "Install nlohmann_json CMake package files" FORCE)
+
     fetchcontent_makeavailable(json)
 
     set(HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR ${json_SOURCE_DIR}/include
         CACHE PATH "Path to nlohmann::json include"
     )
 
-    _exclude_from_all(${json_SOURCE_DIR})
     _mark_targets_as_system(${json_SOURCE_DIR})
 
 endfunction()
