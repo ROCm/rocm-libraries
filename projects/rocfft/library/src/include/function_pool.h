@@ -218,6 +218,8 @@ class function_pool
         return best;
     }
 
+    // NOTE: This function relies on the batch configurations for a given (length, precision, transform_type,
+    // scheme, gcn_arch_name) prefix being non-overlapping. This is guaranteed by the kernel-generator.py.
     PPFPKeyMap::const_iterator
         find_pp_key_in_map(const PPFPKeyMap& fmap, const PPFMKey& key, const size_t& batch) const
     {
