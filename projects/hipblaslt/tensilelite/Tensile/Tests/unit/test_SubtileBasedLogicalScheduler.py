@@ -295,6 +295,7 @@ def make_writer_and_tileinfos(kernel, fp4=False):
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
         unrollIdx=0,
         laneSGPRCount=2,
+        subtileLdsSwizzle=True,
     )
     writer.allocTmpSgpr = lambda num, alignment=None, tag=None: allocTmpGpr(
         writer.sgprPool, num, writer.states.regCaps["MaxSgpr"], alignment, tag, None)
