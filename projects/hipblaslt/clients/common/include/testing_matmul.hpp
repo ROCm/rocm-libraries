@@ -4020,18 +4020,36 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 if(b == 0)
                 {
-                    hipblasLtMatmulMatrixScale_t sscale = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
-                    hipblasLtMatmulMatrixScale_t svector
-                        = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+                    auto toMatrixScale = [](hipblaslt_scaling_format f) {
+                        switch(f)
+                        {
+                        case hipblaslt_scaling_format::Vector:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+                        case hipblaslt_scaling_format::Block_32_UE8M0:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+                        case hipblaslt_scaling_format::Block_16_UE8M0:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT;
+                        case hipblaslt_scaling_format::Block_32_UE4M3:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT;
+                        case hipblaslt_scaling_format::Block_16_UE4M3:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+                        case hipblaslt_scaling_format::Block_32_UE5M3:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT;
+                        case hipblaslt_scaling_format::Block_16_UE5M3:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT;
+                        case hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+                        default:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+                        }
+                    };
                     extepilogue[gemmIdx].setMode(epilogue[gemmIdx]);
                     extepilogue[gemmIdx].setBiasDataType(bias_type);
                     extepilogue[gemmIdx].setAuxDataType(aux_type);
                     extepilogue[gemmIdx].setAuxLeadingDimension(lde[gemmIdx]);
                     extepilogue[gemmIdx].setAuxBatchStride(stride_e[gemmIdx]);
-                    extepilogue[gemmIdx].setScalingAType(
-                        arg.scaleA == hipblaslt_scaling_format::Vector ? svector : sscale);
-                    extepilogue[gemmIdx].setScalingBType(
-                        arg.scaleB == hipblaslt_scaling_format::Vector ? svector : sscale);
+                    extepilogue[gemmIdx].setScalingAType(toMatrixScale(arg.scaleA));
+                    extepilogue[gemmIdx].setScalingBType(toMatrixScale(arg.scaleB));
                 }
                 extinputs[b][gemmIdx].setA((void*)((dA[gemmIdx].as<char>())
                                                    + b * size_dA[gemmIdx] * realDataTypeSize(TiA)));
@@ -4045,13 +4063,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 extinputs[b][gemmIdx].setBeta(&h_beta[gemmIdx]);
                 extinputs[b][gemmIdx].setBias(bias_addr);
                 extinputs[b][gemmIdx].setScaleA(
-                    (arg.scaleA == hipblaslt_scaling_format::Scalar
-                     || arg.scaleA == hipblaslt_scaling_format::Vector)
+                    arg.scaleA != hipblaslt_scaling_format::none
                         ? (void*)((dScaleA[gemmIdx].as<char>()) + b * size_scaleAVec[gemmIdx])
                         : nullptr);
                 extinputs[b][gemmIdx].setScaleB(
-                    (arg.scaleB == hipblaslt_scaling_format::Scalar
-                     || arg.scaleB == hipblaslt_scaling_format::Vector)
+                    arg.scaleB != hipblaslt_scaling_format::none
                         ? (void*)((dScaleB[gemmIdx].as<char>()) + b * size_scaleBVec[gemmIdx])
                         : nullptr);
                 extinputs[b][gemmIdx].setScaleC(arg.scaleC ? dScaleC[gemmIdx].as<char>() : nullptr);
