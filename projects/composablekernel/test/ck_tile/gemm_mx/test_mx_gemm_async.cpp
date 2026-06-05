@@ -29,14 +29,16 @@ TYPED_TEST_SUITE(TestCkTileMxGemmPipelineCompAsync, KernelTypesMxGemmCompAsync);
 // using F6  = ck_tile::pk_fp6x16_t;
 
 // // clang-format off
-// using MxTypes = ::testing::Types<std::tuple<F4, F4, MX_GemmConfig16,               Row, Col, Row>,
-//                                  std::tuple<F4, F4, MX_GemmConfigEightWaves,       Row, Col, Row>,
-//                                  std::tuple<F4, F4, MXfp4_GemmConfig16_Preshuffle, Row, Col, Row>,
-//                                  std::tuple<F4, F4, MXfp4_GemmConfig16_PermuteN,   Row, Col, Row>,
-//                                  std::tuple<F8, F8, MX_GemmConfig16,               Row, Col, Row>,
-//                                  std::tuple<F8, F8, MX_GemmConfigEightWaves,       Row, Col, Row>,
-//                                  std::tuple<F8, F8, MXfp8_GemmConfig16_Preshuffle, Row, Col, Row>,
-//                                  std::tuple<F8, F8, MXfp8_GemmConfig16_PermuteN,   Row, Col, Row>>;
+// using MxTypes = ::testing::Types<std::tuple<F4, F4, MX_GemmConfig16,               Row, Col,
+// Row>,
+//                                  std::tuple<F4, F4, MX_GemmConfigEightWaves,       Row, Col,
+//                                  Row>, std::tuple<F4, F4, MXfp4_GemmConfig16_Preshuffle, Row,
+//                                  Col, Row>, std::tuple<F4, F4, MXfp4_GemmConfig16_PermuteN, Row,
+//                                  Col, Row>, std::tuple<F8, F8, MX_GemmConfig16, Row, Col, Row>,
+//                                  std::tuple<F8, F8, MX_GemmConfigEightWaves,       Row, Col,
+//                                  Row>, std::tuple<F8, F8, MXfp8_GemmConfig16_Preshuffle, Row,
+//                                  Col, Row>, std::tuple<F8, F8, MXfp8_GemmConfig16_PermuteN, Row,
+//                                  Col, Row>>;
 
 // // Preshuffle configs
 // using MxTypesPreshuffle = ::testing::Types<
