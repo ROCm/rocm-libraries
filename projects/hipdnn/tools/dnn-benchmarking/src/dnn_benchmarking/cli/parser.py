@@ -95,7 +95,7 @@ def _parse_plugin_path_list(s: str) -> List[Path]:
 
 
 _BACKEND_CHOICES = frozenset({"hipdnn", "pytorch"})
-_VALIDATE_CHOICES = frozenset({"pytorch", "cpu_plugin", "none"})
+_VALIDATE_CHOICES = frozenset({"pytorch", "none"})
 _METRICS_TIER_CHOICES = frozenset({"basic", "off"})
 _EMIT_TRACE_CHOICES = frozenset({"pftrace", "kineto"})
 _PMC_CHOICES = frozenset({"basic", "memory", "flops", "all"})
@@ -228,8 +228,7 @@ CLI_OPTIONS: tuple[CliOption, ...] = (
         default="none",
         metavar="PROVIDER",
         group="Reference Validation",
-        help="Reference provider for validation (default: none). "
-        "Options: pytorch, cpu_plugin, none",
+        help="Reference provider for validation (default: none). Options: pytorch, none",
         config_key="validate",
         config_kind=ConfigKind.CHOICE,
         config_type=str,

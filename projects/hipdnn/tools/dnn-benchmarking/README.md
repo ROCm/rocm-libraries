@@ -25,11 +25,20 @@ Run the provided setup script from the `dnn-benchmarking` directory:
 
 ```bash
 bash setup.sh
-source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activate
+source /workspace/.venv/bin/activate
+```
+
+Use `--workspace <path>` to place the virtual environment, Python bytecode
+cache, and runtime benchmark caches somewhere other than `/workspace`:
+
+```bash
+bash setup.sh --workspace /tmp/dnn-bench
+source /tmp/dnn-bench/.venv/bin/activate
 ```
 
 The default `--torch-mode rocm` flow assumes no system ROCm installation:
-1. Creates a virtual environment under `$DNN_BENCH_WORKSPACE` (defaults to `/workspace`)
+1. Creates a virtual environment under the selected workspace (`--workspace`,
+   `$DNN_BENCH_WORKSPACE`, or `/workspace`)
 2. Detects the GPU architecture and installs the matching ROCm PyTorch nightly wheel
 3. Discovers hipDNN from the torch wheel's bundled ROCm SDK libraries
 4. Builds the local MIOpen provider if the selected ROCm prefix does not already contain it
@@ -177,7 +186,7 @@ python -m dnn_benchmarking --config sample_configs/config.toml.example --iters 5
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--validate` | Reference provider for correctness validation: `pytorch`, `cpu_plugin`, or `none` | `none` |
+| `--validate` | Reference provider for correctness validation: `pytorch` or `none` | `none` |
 
 #### Suite Options
 
@@ -341,5 +350,4 @@ LD_LIBRARY_PATH=$HIPDNN_PREFIX/lib:$LD_LIBRARY_PATH pytest --profiling-strict -m
 
 ## Limitations
 
-- The `cpu_plugin` reference provider is not yet implemented in Python bindings; use `--validate pytorch` for CPU torch reference validation.
 - Engine comparison reports engines side by side only; use `--validate` for reference-output correctness checks.

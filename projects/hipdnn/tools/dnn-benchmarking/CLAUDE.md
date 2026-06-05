@@ -119,7 +119,7 @@ src/dnn_benchmarking/
 ├── graph/            # loader.py (JSON loading), validator.py, tensor_info.py
 ├── reporting/        # reporter.py (console output), statistics.py, suite_results.py
 └── validation/       # validator.py, comparison.py, reference_provider.py
-    └── providers/    # cpu_plugin_provider.py, pytorch_provider.py
+    └── providers/    # pytorch_provider.py
 ```
 
 **Data flow (single graph):** CLI → Config → GraphLoader → Executor → BufferManager → Timing → BenchmarkStats → Reporter

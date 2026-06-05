@@ -419,7 +419,7 @@ class TestSuiteConfigValidation:
         assert config.reference_provider == "none"
         for backend in ("torch", "auto", "none"):
             SuiteConfig(gpu_backend=backend)
-        for provider in ("none", "pytorch", "cpu_plugin"):
+        for provider in ("none", "pytorch"):
             SuiteConfig(reference_provider=provider)
 
 

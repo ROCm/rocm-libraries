@@ -46,7 +46,7 @@ class ValidationConfig:
     """Configuration for reference validation.
 
     Attributes:
-        provider: Reference provider name ("pytorch", "cpu_plugin", or "none").
+        provider: Reference provider name ("pytorch" or "none").
         rtol: Relative tolerance for comparison.
         atol: Absolute tolerance for comparison.
     """
@@ -57,7 +57,7 @@ class ValidationConfig:
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
-        valid_providers = {"none", "pytorch", "cpu_plugin"}
+        valid_providers = {"none", "pytorch"}
         if self.provider not in valid_providers:
             raise ValueError(
                 f"Invalid provider: '{self.provider}'. "
@@ -300,7 +300,7 @@ class SuiteConfig:
                 f"Invalid gpu_backend: '{self.gpu_backend}'. "
                 f"Valid options: {valid_gpu_backends}"
             )
-        valid_reference_providers = {"none", "pytorch", "cpu_plugin"}
+        valid_reference_providers = {"none", "pytorch"}
         if self.reference_provider not in valid_reference_providers:
             raise ValueError(
                 f"Invalid reference_provider: '{self.reference_provider}'. "

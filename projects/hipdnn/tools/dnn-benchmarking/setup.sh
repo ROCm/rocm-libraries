@@ -8,8 +8,6 @@ WORKSPACE_ROOT="$(cd "$HIPDNN_ROOT/../.." && pwd)"
 BUILD_DIR="$HIPDNN_ROOT/build"
 DEFAULT_ROCM_PREFIX="/opt/rocm"
 DNN_BENCH_WORKSPACE="${DNN_BENCH_WORKSPACE:-/workspace}"
-mkdir -p "$DNN_BENCH_WORKSPACE"
-export DNN_BENCH_WORKSPACE
 VENV_DIR="$DNN_BENCH_WORKSPACE/.venv"
 MIOPEN_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/miopen-provider"
 MIOPEN_BUILD_DIR="$MIOPEN_PROVIDER_DIR/build"
@@ -40,10 +38,13 @@ usage() {
     echo "                         none: leave torch uninstalled and build bindings"
     echo "                               against installed ROCm/hipDNN."
     echo "  --reuse-venv         Reuse an existing $VENV_DIR instead of deleting it."
+    echo "  --workspace <path>  Workspace root for the venv, Python bytecode cache,"
+    echo "                       and runtime benchmark caches. Default: $DNN_BENCH_WORKSPACE"
+    echo "                       The virtual environment is <path>/.venv."
     echo "  --torch-index-url <url>"
     echo "                       Override the pip index URL used for torch."
     echo "  --gpu-arch <gfx*>    Override GPU architecture detection for ROCm torch"
-    echo "                       nightly selection."
+    echo "                       nightly selection. Supported: gfx90a, gfx942, gfx950."
     echo "  --rocm-prefix <path> Explicit ROCm/hipDNN prefix for binding/provider"
     echo "                       builds. Takes precedence over venv discovery."
     echo "  --force-build        Build hipDNN and the MIOpen provider from source,"
@@ -79,6 +80,12 @@ while [[ $# -gt 0 ]]; do
             TORCH_MODE="$1"
             ;;
         --reuse-venv) REUSE_VENV=1 ;;
+        --workspace)
+            require_arg "$1" "${2:-}"
+            shift
+            DNN_BENCH_WORKSPACE="$1"
+            VENV_DIR="$DNN_BENCH_WORKSPACE/.venv"
+            ;;
         --torch-index-url)
             require_arg "$1" "${2:-}"
             shift
@@ -108,6 +115,9 @@ esac
 if [ "$TORCH_MODE" = "existing" ]; then
     REUSE_VENV=1
 fi
+mkdir -p "$DNN_BENCH_WORKSPACE"
+export DNN_BENCH_WORKSPACE
+
 
 hipdnn_config_path() {
     local prefix="$1"
@@ -168,9 +178,8 @@ detect_gpu_arch_from_kfd() {
             [ "$key" = "gfx_target_version" ] || continue
             case "${value:-0}" in
                 90010) echo "gfx90a"; return 0 ;;
-                90400) echo "gfx940"; return 0 ;;
-                90401) echo "gfx941"; return 0 ;;
                 90402) echo "gfx942"; return 0 ;;
+                90500) echo "gfx950"; return 0 ;;
             esac
         done < "$props"
     done
@@ -259,11 +268,12 @@ install_torch() {
                 local gpu_arch index_arch
                 gpu_arch=$(detect_gpu_arch)
                 case "$gpu_arch" in
-                    gfx90*) index_arch="gfx90X" ;;
-                    gfx94*) index_arch="gfx94X" ;;
+                    gfx90a) index_arch="gfx90X" ;;
+                    gfx942) index_arch="gfx94X" ;;
+                    gfx950) index_arch="gfx950" ;;
                     *)
                         echo "ERROR: Unsupported GPU architecture '${gpu_arch:-none}'." >&2
-                        echo "Supported: gfx90a (MI200/MI210/MI250), gfx942 (MI300X/MI300A)" >&2
+                        echo "Supported: gfx90a (MI200/MI210/MI250), gfx942 (MI300X/MI300A), gfx950 (MI350)" >&2
                         echo "Pass --gpu-arch or --torch-index-url to override detection." >&2
                         exit 1
                         ;;
