@@ -33,8 +33,9 @@ def _require_hipdnn(plugin_paths: List[str]):
     try:
         import hipdnn_frontend
 
-        hipdnn_frontend.set_engine_plugin_paths(plugin_paths)
-
+        hipdnn_frontend.set_engine_plugin_paths(
+            plugin_paths, hipdnn_frontend.PluginLoadingMode.ABSOLUTE
+        )
         hipdnn_frontend.Handle()
         return hipdnn_frontend
     except ImportError:

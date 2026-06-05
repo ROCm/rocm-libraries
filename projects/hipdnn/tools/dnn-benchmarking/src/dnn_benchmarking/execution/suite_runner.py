@@ -142,9 +142,8 @@ def set_plugin_path(
         return
     paths = [str(plugin_path)]
     if loading_mode is None:
-        hipdnn.set_engine_plugin_paths(paths)
-    else:
-        hipdnn.set_engine_plugin_paths(paths, loading_mode)
+        loading_mode = hipdnn.PluginLoadingMode.ABSOLUTE
+    hipdnn.set_engine_plugin_paths(paths, loading_mode)
 
 
 def _engine_setup_error_result(

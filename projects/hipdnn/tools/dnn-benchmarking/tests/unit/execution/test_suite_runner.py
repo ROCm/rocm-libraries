@@ -14,6 +14,7 @@ from dnn_benchmarking.execution.suite_runner import (
     _resolve_engine_name,
     _get_reference_provider,
     _check_correctness,
+    set_plugin_path,
 )
 from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
 from dnn_benchmarking.common.exceptions import ExecutionError, UnsupportedGraphError
@@ -108,6 +109,20 @@ def _make_exec_factory(
         return m
 
     return make_instance
+
+
+class TestPluginPathLoading:
+    """Explicit benchmark plugin paths should replace default plugin search paths."""
+
+    def test_set_plugin_path_defaults_to_absolute_loading(self) -> None:
+        hipdnn = MagicMock()
+        hipdnn.PluginLoadingMode.ABSOLUTE = "absolute"
+
+        set_plugin_path(hipdnn, Path("/plugins/engines"))
+
+        hipdnn.set_engine_plugin_paths.assert_called_once_with(
+            ["/plugins/engines"], "absolute"
+        )
 
 
 class TestRunGraphAllProviders:

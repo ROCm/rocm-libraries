@@ -87,7 +87,9 @@ class TestCLIIntegration:
         try:
             import hipdnn_frontend
 
-            hipdnn_frontend.set_engine_plugin_paths(plugin_paths)
+            hipdnn_frontend.set_engine_plugin_paths(
+                plugin_paths, hipdnn_frontend.PluginLoadingMode.ABSOLUTE
+            )
             hipdnn_frontend.Handle()
         except Exception as e:
             pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")
@@ -173,7 +175,9 @@ class TestCLIIntegration:
         try:
             import hipdnn_frontend
 
-            hipdnn_frontend.set_engine_plugin_paths(plugin_paths)
+            hipdnn_frontend.set_engine_plugin_paths(
+                plugin_paths, hipdnn_frontend.PluginLoadingMode.ABSOLUTE
+            )
             hipdnn_frontend.Handle()
         except Exception as e:
             pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")

@@ -94,6 +94,7 @@ class TestRunInternalProfilingSuccessPath:
 
         fake_hipdnn = MagicMock()
         fake_hipdnn.Handle.return_value = MagicMock()
+        fake_hipdnn.PluginLoadingMode.ABSOLUTE = "absolute"
         monkeypatch.setitem(_sys.modules, "hipdnn_frontend", fake_hipdnn)
         captured["hipdnn"] = fake_hipdnn
 
@@ -144,9 +145,10 @@ class TestRunInternalProfilingSuccessPath:
         assert rc == 0
         # Two forwarding paths must both fire: set_engine_plugin_paths
         # for the active hipdnn registry, and SuiteConfig.plugin_path
-        # for any inner code that reads from config.
+        # for any inner code that reads from config. An explicit CLI
+        # plugin path must replace default plugin loading, not add to it.
         captured["hipdnn"].set_engine_plugin_paths.assert_called_once_with(
-            [str(plugin)]
+            [str(plugin)], "absolute"
         )
         cfg: SuiteConfig = captured["run_kwargs"]["config"]
         assert cfg.plugin_path == plugin

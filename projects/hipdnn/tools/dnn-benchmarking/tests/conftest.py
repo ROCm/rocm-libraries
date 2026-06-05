@@ -192,7 +192,7 @@ def skip_if_no_gpu(plugin_paths):
     try:
         import hipdnn_frontend as hipdnn
 
-        hipdnn.set_engine_plugin_paths(plugin_paths)
+        hipdnn.set_engine_plugin_paths(plugin_paths, hipdnn.PluginLoadingMode.ABSOLUTE)
 
         hipdnn.Handle()
     except Exception:

@@ -32,7 +32,7 @@ def _skip_if_no_rocm(plugin_paths: List[str]) -> None:
     try:
         import hipdnn_frontend as hipdnn
 
-        hipdnn.set_engine_plugin_paths(plugin_paths)
+        hipdnn.set_engine_plugin_paths(plugin_paths, hipdnn.PluginLoadingMode.ABSOLUTE)
         hipdnn.Handle()
     except Exception as e:
         pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")
