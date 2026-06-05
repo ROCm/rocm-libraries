@@ -149,7 +149,7 @@ This pass uses `MemTokenData` in three ways, all driven from inside `computeRequ
 
 ### Conservative Fallback for Missing `MemTokenData`
 
-`StinkyBuildImplicitDependencyPass` does not always attach `MemTokenData`. When `passCtx.getPassFeatureConfig().barrierConfig.unrollMovableBarrier == false` the upstream pass skips all LDS-token annotation, so the three sites above receive instructions with no tokens at all. To stay correctness-safe in that mode (and in any other situation where a single op fails to be annotated), the pass applies a hybrid conservative policy whenever a required token is missing.
+`StinkyBuildImplicitDependencyPass` annotates every LDS/tensor op and barrier it recognizes with `MemTokenData`, but an op can still reach this pass untagged (e.g. raw-assembly input that was never annotated, or an op shape the upstream pass does not handle). To stay correctness-safe whenever a required token is missing, the pass applies a hybrid conservative policy.
 
 | Site | Anchor missing tokens (writer / barrier) | Candidate missing tokens (reader / pending op / pending tensor load) |
 |------|------------------------------------------|----------------------------------------------------------------------|
@@ -157,7 +157,7 @@ This pass uses `MemTokenData` in three ways, all driven from inside `computeRequ
 | WAR-on-LDS | Writer without `MemTokenData` triggers `s_wait_dscnt 0` if any non-same-pipeline DS read/atomic is pending (current block or any predecessor exit state). Same-pipeline filter still applies. | A reader/atomic without `MemTokenData` is widened into the WAR dep set; the normal `min(count - 1)` algorithm then picks the wait value. |
 | Tensor-wait anchor | Anchor without `MemTokenData` (`collectTensorLoadDependencies` returns `forceTensorDrain == true`) emits `s_wait_tensorcnt 0` and clears `pendingTensorLoadOps`. | A pending tensor load without `MemTokenData` (`hasUntaggedTensorLoadOp()`) is conservatively treated as conflicting and added to `deps`; `min(count - 1)` over that widened set picks the wait value. |
 
-The "anchor missing" branch always reduces to a wait-0 on the appropriate counter, subject to the standard `CounterWaitState::needsNewWait` redundancy elision (so back-to-back drains do not double-emit). The "candidate missing" branch never inflates the value beyond what the normal `min(count - 1)` path would compute for an overlapping op at the same position. Every conservative branch logs a `PASS_DEBUG` line so investigations into perf regressions in `unrollMovableBarrier=false` mode can identify which sites fired.
+The "anchor missing" branch always reduces to a wait-0 on the appropriate counter, subject to the standard `CounterWaitState::needsNewWait` redundancy elision (so back-to-back drains do not double-emit). The "candidate missing" branch never inflates the value beyond what the normal `min(count - 1)` path would compute for an overlapping op at the same position. Every conservative branch logs a `PASS_DEBUG` line so investigations into perf regressions from missing tokens can identify which sites fired.
 
 ```mermaid
 flowchart TD

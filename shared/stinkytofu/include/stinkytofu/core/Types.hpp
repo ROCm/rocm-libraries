@@ -53,12 +53,6 @@ struct GemmTileConfig {
 /// Pass-specific feature configuration
 /// Categorizes optimization behaviors into semantics, properties, and features
 struct PassFeatureConfig {
-    /// Barrier semantics and unrolling behavior
-    /// These are code structure PROPERTIES (not optional features)
-    struct BarrierConfig {
-        bool unrollMovableBarrier = false;  ///< Whether GEMM barriers can be moved during unroll
-    };
-
     /// Loop structure and unrolling properties
     /// These are code structure PROPERTIES (not optional features)
     struct LoopConfig {
@@ -96,7 +90,6 @@ struct PassFeatureConfig {
         std::vector<std::string> dumpAfterPasses;
     };
 
-    BarrierConfig barrierConfig;
     LoopConfig loopConfig;
     DagFeatures dagFeatures;
     PassOrderSnapshotConfig passOrderSnapshot;

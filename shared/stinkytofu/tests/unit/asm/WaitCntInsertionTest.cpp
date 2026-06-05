@@ -1216,10 +1216,8 @@ st.func @test_ds_store_raw_ds_load() {
 // Test Suite 6: Conservative Fallback for Missing MemTokenData
 //
 // The pass uses MemTokenData for three LDS-related decisions: barrier-vs-DS
-// conflict, WAR-on-LDS synthesis, and tensor-load/barrier matching. When the
-// upstream StinkyBuildImplicitDependencyPass is configured to skip token
-// annotation (e.g. unrollMovableBarrier=false) or any specific op is missing
-// MemTokenData, a hybrid conservative policy fires:
+// conflict, WAR-on-LDS synthesis, and tensor-load/barrier matching. When any
+// specific op is missing MemTokenData, a hybrid conservative policy fires:
 //
 //   * Anchor missing tokens (writer / barrier) -> full drain on the relevant
 //     counter (s_wait_dscnt 0 or s_wait_tensorcnt 0).

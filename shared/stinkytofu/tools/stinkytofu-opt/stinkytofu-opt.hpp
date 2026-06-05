@@ -145,7 +145,6 @@ std::shared_ptr<stinkytofu::PassInstrumentation> createDebugPrintInstrumentation
  */
 stinkytofu::PassFeatureConfig getPassFeatureConfig() {
     stinkytofu::PassFeatureConfig config;
-    config.barrierConfig.unrollMovableBarrier = true;
     config.loopConfig.unrollGemm = true;
     config.dagFeatures.distributeGlobalRead = true;
     return config;
