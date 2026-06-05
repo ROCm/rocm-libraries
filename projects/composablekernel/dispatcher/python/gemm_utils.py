@@ -146,7 +146,7 @@ class GemmKernelConfig:
         )
         if self.variant == "preshuffle":
             name += "_preshuffle"
-        elif self.variant == "streamk":
+        elif self.variant == "stream_k":
             name += "_streamk"
         return name
 
@@ -424,6 +424,20 @@ class GpuGemmRunner:
 # ============================================================================
 
 
+def _ctypes_source_name(variant: str) -> str:
+    """Select the ctypes bridge .cpp for a variant.
+
+    Variants whose launch ABI differs from the single-problem
+    ``dispatcher_run_gemm`` path need their own lib. Stream-K keeps the same
+    C ABI (single A/B/C, M/N/K) but its lib builds a ``StreamKHostArgs`` and
+    calls ``SelectedKernel::launch(args, stream)`` directly instead of routing
+    through the registry, so it gets a dedicated source.
+    """
+    if variant == "stream_k":
+        return "streamk_gemm_ctypes_lib.cpp"
+    return "gemm_ctypes_lib.cpp"
+
+
 def _build_compile_jobs(
     config: GemmKernelConfig, header: Path
 ) -> Tuple[Dict[str, Any], Path]:
@@ -432,7 +446,9 @@ def _build_compile_jobs(
     ck_root = root.parent
     build_dir = _cu.get_build_dir()
     output_dir = _cu.get_generated_kernels_dir()
-    ctypes_source = root / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
+    ctypes_source = (
+        root / "bindings" / "ctypes" / _ctypes_source_name(config.variant)
+    )
     static_lib = build_dir / "libck_tile_dispatcher.a"
 
     lib_path = build_dir / "examples" / f"lib{config.name}.so"
@@ -508,8 +524,12 @@ def setup_multiple_gemm_dispatchers(
     codegen_script = _cu.get_codegen_path()
     output_dir = _cu.get_generated_kernels_dir()
     static_lib = _cu.get_build_dir() / "libck_tile_dispatcher.a"
+    # All configs in a sweep share one variant; route to the matching bridge lib.
     ctypes_source = (
-        _cu.get_dispatcher_root() / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
+        _cu.get_dispatcher_root()
+        / "bindings"
+        / "ctypes"
+        / _ctypes_source_name(configs[0].variant)
     )
     if not static_lib.exists() or not ctypes_source.exists():
         raise FileNotFoundError(
@@ -533,6 +553,7 @@ def setup_multiple_gemm_dispatchers(
                 "gpu_target": c.gfx_arch,
                 "tile_config_json": c.to_codegen_json(),
                 "hpp_glob_pattern": f"{c.name}.hpp",
+                "variant": c.variant,
             }
         )
 
@@ -628,6 +649,7 @@ def expand_sweep(
     arch: str,
     dtype: str = "fp16",
     layout: str = "rcr",
+    variant: str = "standard",
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -726,6 +748,7 @@ def expand_sweep(
             pad_k=bool(pk),
             persistent=bool(persist),
             gfx_arch=arch,
+            variant=variant,
         )
         if c.name in seen:
             continue
