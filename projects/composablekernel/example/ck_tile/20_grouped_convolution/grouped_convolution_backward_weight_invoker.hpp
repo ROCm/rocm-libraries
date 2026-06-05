@@ -82,6 +82,7 @@ struct GroupedConvolutionBackwardWeightInvoker
             GroupedConvTraitsType::FixedGemmParams::LDSVectorSize,
             ck_tile::DataCachePrefetchKind::None,
             ck_tile::DataCachePrefetchKind::None,
+            false, /*Async*/
             LargeTensors>;
         constexpr auto scheduler = ConvConfig::Scheduler;
 
