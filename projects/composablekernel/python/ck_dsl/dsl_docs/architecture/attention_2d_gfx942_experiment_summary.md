@@ -597,3 +597,46 @@ today.
 2. If conflict-free V lands, the next structural gap is **accumulator residency**: flash carries
    384 AGPR (deeper SW pipeline / larger acc tiles) vs our 152 — independent of the V fix.
 3. bf16 D128 has no wide flash atom yet — a separate enablement, not a tuning lever.
+
+---
+
+## Appendix — measured arch facts (re-homed from the gfx942 arch reference)
+
+The lean `optimization/arch/gfx942.md` keeps only AMD-doc-grounded ISA constraints; these
+**measured / project-specific** numbers from this push live here so nothing is lost.
+
+### Compile-time budget (cold JIT, gfx942)
+
+- **≈ 250–290 s per shape-signature** for this attention path (e.g. bf16 narrow D64 ≈ 245 s;
+  cfv GqaD128 ≈ 293 s). The cold-compile is **per-shape-signature** — there is no cross-shape
+  cache, so every new shape pays the full cost. Treat 250–290 s as the budget to respect when
+  enumerating shapes.
+- **Fully-unrolled transposes explode compile time** — a fully-unrolled per-element register
+  transpose hit a **45-minute comgr/JIT timeout** (also seen as the cfv-store / read-path JIT
+  IR-explosion in 5a/5c). The DSL never re-rolls loops, so a Python-time `static_for` / `unroll`
+  over a whole tile emits O(tile) straight-line IR. **Fix: ALWAYS loop-roll** — wrap whole-tile
+  reshapes in a runtime `scf_for` over micro-tiles, keep only the tiny inner block unrolled (the
+  `perm_b32` transpose in 5c is loop-rolled to emit exactly 2 `perm_b32`); the IR collapses and
+  the build drops back to seconds with bit-identical numerics.
+- **Prefer native vector ops** (`v_perm` / `perm_b32`, vector loads/stores) over scalar
+  `vec_extract` / `vec_pack` chains — the scalar chains balloon IR for the same numerics.
+
+### Per-opcode LDS bank-conflict period (gfx942, measured)
+
+AMD documents LDS conflicts only qualitatively; these per-opcode periods were measured on this
+push (the underlying ISA fact — 64 KB LDS / 32 banks, 2/bank floor — is in the arch reference).
+
+| Access | Conflict period |
+|---|---|
+| `ds_read_b128` | 32 dwords |
+| `ds_write_b128` | 32 dwords |
+| Other `ds_read_b{32,64}` / `ds_write_*` | 32 dwords |
+| Intra-dword sub-dword accesses | conflict-free |
+
+### In-register reshape vehicle (gfx942)
+
+The gfx942 in-register transpose vehicle in the DSL is **`perm_b32` (`v_perm_b32`,
+`__builtin_amdgcn_perm`)** driven by CK `transpose_vectors` **mask values** (2×2 f16 transpose via
+masks `0x01000504` / `0x03020706`) — not a cross-lane `ds_swizzle` / `ds_bpermute` (those are
+LDS-port ops that cost `lgkmcnt`; see 5a/L2) and not `permlane32_swap` (gfx950-only). `perm_b32` has
+no LDS port and no `lgkmcnt`, so it is the preferred in-register reshape on this arch.
