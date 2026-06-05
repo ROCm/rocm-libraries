@@ -23,6 +23,8 @@
 * ************************************************************************ */
 #pragma once
 
+#include "hipsparse-bfloat16.h"
+#include "hipsparse-float16.h"
 #include "hipsparse_test_traits.hpp"
 
 template <hipsparse_test_enum::value_type ROUTINE>
@@ -47,6 +49,15 @@ public:
         {
             return std::is_same<T, hipComplex>{} || std::is_same<T, hipDoubleComplex>{};
         }
+        case hipsparse_test_numeric_types_enum::spvv:
+        case hipsparse_test_numeric_types_enum::gather:
+        case hipsparse_test_numeric_types_enum::scatter:
+        {
+            return std::is_same<T, int8_t>{} || std::is_same<T, hipsparseFloat16>{}
+                   || std::is_same<T, hipsparseBfloat16>{} || std::is_same<T, float>{}
+                   || std::is_same<T, double>{} || std::is_same<T, hipComplex>{}
+                   || std::is_same<T, hipDoubleComplex>{};
+        }
         case hipsparse_test_numeric_types_enum::spmv:
         {
             return std::is_same<T, int8_t>{} || std::is_same<T, int32_t>{}
@@ -68,6 +79,13 @@ public:
     static constexpr bool is_valid_type()
     {
         return std::is_integral<I>::value && std::is_integral<J>::value && is_valid_type<T>();
+    };
+
+    template <typename I, typename X, typename Y, typename T>
+    static constexpr bool is_valid_type()
+    {
+        return std::is_integral<I>::value && is_valid_type<X>() && is_valid_type<Y>()
+               && is_valid_type<T>();
     };
 
     template <typename I, typename A, typename X, typename Y, typename T>

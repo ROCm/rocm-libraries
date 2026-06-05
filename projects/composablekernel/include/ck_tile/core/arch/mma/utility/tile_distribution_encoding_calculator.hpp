@@ -3,15 +3,24 @@
 
 #pragma once
 
-#include <algorithm>
-#include "ck_tile/core/tensor/tile_distribution.hpp"
 #include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_register_mapper.hpp"
+#include "ck_tile/core/container/sequence.hpp"
+#include "ck_tile/core/container/tuple.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/vector_type.hpp"
+#include "ck_tile/core/tensor/tile_distribution_encoding.hpp"
+
+#include <algorithm>
+#include <type_traits>
 
 namespace ck_tile::core::arch::mma {
 /**
  * @class TileDistrEncCalc
  * @brief Given an MmaOp and modifiers, provides warp-level tile distribution encodings for mapping
- * ABC matrix fragment coordinates to register coordinates (lane, vector item) and vice versa.
+ * ABC matrix fragment coordinates to register coordinates (lane, vector item) and vice versa. Note
+ * that in case of compression or packed data types, the matrix minor dimension is effectively
+ * shrunk by that factor. This is because tile distribution encodings always describe compressed /
+ * packed *Datatype* elements, not logical / mathematical uncompressed *value* elements.
  * @tparam MmaOp          Intrinsic (amdgcn_mma).
  * @tparam CTranspose     Whether we are using CTranspose.
  * @tparam SFactor        Swizzle factor. Not implemented.
@@ -37,19 +46,25 @@ struct TileDistrEncCalc
     static_assert(AttrNumAccessB % MmaOp::kBKNumAccess == 0,
                   "Requesting NumAccessB incompatible with builtin.");
 
-    static_assert(MmaOp::kABKPerLane % NumAccessA == 0);
-    static_assert(MmaOp::kABKPerLane % NumAccessB == 0);
+    static_assert(MmaOp::kABKPerLane %
+                      (NumAccessA * MmaOp::kCompressionRatio * MmaOp::APackedSize) ==
+                  0);
+    static_assert(MmaOp::kABKPerLane % (NumAccessB * MmaOp::BPackedSize) == 0);
     static_assert(SFactor == 1, "Swizzle not implemented yet."); // TODO: Implement Swizzle.
 
-    template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
+    template <index_t MajorDimSize,
+              index_t Repeat,
+              index_t NumAccess,
+              index_t PackedSize       = 1,
+              index_t CompressionRatio = 1>
     using ABWarpDstrEnc = tile_distribution_encoding<
         sequence<Repeat>,
         tuple<sequence<MajorDimSize>,
               sequence<NumAccess,
                        MmaOp::kK / MmaOp::kABKPerLane,
-                       MmaOp::kABKPerLane / NumAccess / CompressionRatio>>,
-        tuple<sequence<0, 2, 1>>,
-        tuple<sequence<0, 1, 0>>,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio / PackedSize>>,
+        tuple<sequence<2, 0, 1>>,
+        tuple<sequence<1, 0, 0>>,
         sequence<2, 2>,
         sequence<0, 2>>;
 
@@ -83,15 +98,19 @@ struct TileDistrEncCalc
         {
             return tile_distribution_encoding<sequence<1>,
                                               MatDims,
-                                              tuple<sequence<MInx, NInx, MInx, NInx>>,
-                                              tuple<sequence<0, 0, 2, 1>>,
+                                              tuple<sequence<MInx, MInx, NInx, NInx>>,
+                                              tuple<sequence<2, 0, 0, 1>>,
                                               sequence<MInx, MInx>,
                                               sequence<1, 3>>{};
         }
     }
 
-    using AEnc_ = ABWarpDstrEnc<MmaOp::kM, MmaOp::kARepeat, NumAccessA, MmaOp::kCompressionRatio>;
-    using BEnc_ = ABWarpDstrEnc<MmaOp::kN, MmaOp::kBRepeat, NumAccessB>;
+    using AEnc_ = ABWarpDstrEnc<MmaOp::kM,
+                                MmaOp::kARepeat,
+                                NumAccessA,
+                                MmaOp::APackedSize,
+                                MmaOp::kCompressionRatio>;
+    using BEnc_ = ABWarpDstrEnc<MmaOp::kN, MmaOp::kBRepeat, NumAccessB, MmaOp::BPackedSize>;
 
     public:
     // When using CTranspose, the A and B matrices are swapped.

@@ -113,6 +113,14 @@ namespace
                       << hipsparse_datatype2string(arg.compute_type);
                     break;
                 }
+                case hipsparse_test_dispatch_enum::spvv:
+                case hipsparse_test_dispatch_enum::gather:
+                case hipsparse_test_dispatch_enum::scatter:
+                {
+                    s << hipsparse_indextype2string(arg.index_type_I) << '_'
+                      << hipsparse_datatype2string(arg.compute_type);
+                    break;
+                }
                 case hipsparse_test_dispatch_enum::axpby:
                 {
                     s << hipsparse_indextype2string(arg.index_type_I) << '_'
@@ -234,6 +242,52 @@ namespace
     };
 
     template <hipsparse_test_enum::value_type ROUTINE>
+    struct hipsparse_test_scatter_template
+    {
+        using check_t = hipsparse_test_check<ROUTINE>;
+
+        template <typename T, typename I = int32_t, typename = void>
+        struct test_call : hipsparse_test_invalid
+        {
+        };
+
+        template <typename I, typename T>
+        struct test_call<I,
+                         T,
+                         typename std::enable_if<check_t::template is_valid_type<I, T>()>::type>
+            : hipsparse_test_template<ROUTINE>::template test_call_proxy<I, T>
+        {
+        };
+
+        struct test : hipsparse_test_template<ROUTINE>::template test_proxy<test, test_call>
+        {
+        };
+    };
+
+    template <hipsparse_test_enum::value_type ROUTINE>
+    struct hipsparse_test_gather_template
+    {
+        using check_t = hipsparse_test_check<ROUTINE>;
+
+        template <typename T, typename I = int32_t, typename = void>
+        struct test_call : hipsparse_test_invalid
+        {
+        };
+
+        template <typename I, typename T>
+        struct test_call<I,
+                         T,
+                         typename std::enable_if<check_t::template is_valid_type<I, T>()>::type>
+            : hipsparse_test_template<ROUTINE>::template test_call_proxy<I, T>
+        {
+        };
+
+        struct test : hipsparse_test_template<ROUTINE>::template test_proxy<test, test_call>
+        {
+        };
+    };
+
+    template <hipsparse_test_enum::value_type ROUTINE>
     struct hipsparse_test_axpby_template
     {
         template <typename I = int32_t,
@@ -247,6 +301,36 @@ namespace
 
         template <typename I, typename X, typename Y, typename T>
         struct test_call<I, X, Y, T, typename std::enable_if<std::is_integral<I>::value>::type>
+            : hipsparse_test_template<ROUTINE>::template test_call_proxy<I, X, Y, T>
+        {
+        };
+
+        struct test : hipsparse_test_template<ROUTINE>::template test_proxy<test, test_call>
+        {
+        };
+    };
+
+    template <hipsparse_test_enum::value_type ROUTINE>
+    struct hipsparse_test_spvv_template
+    {
+        using check_t = hipsparse_test_check<ROUTINE>;
+
+        template <typename I      = int32_t,
+                  typename X      = float,
+                  typename Y      = float,
+                  typename T      = float,
+                  typename ENABLE = void>
+        struct test_call : hipsparse_test_invalid
+        {
+        };
+
+        template <typename I, typename X, typename Y, typename T>
+        struct test_call<
+            I,
+            X,
+            Y,
+            T,
+            typename std::enable_if<check_t::template is_valid_type<I, X, Y, T>()>::type>
             : hipsparse_test_template<ROUTINE>::template test_call_proxy<I, X, Y, T>
         {
         };

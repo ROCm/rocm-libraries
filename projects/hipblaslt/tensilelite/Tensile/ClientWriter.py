@@ -359,7 +359,7 @@ fi
   else:
     mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {} --best-solution 1{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
+      runScriptFile.write("{} --config-file {} --best-solution{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
 
   if os.name != "nt":
     runScriptFile.write("exit $ERR\n")
@@ -558,7 +558,7 @@ def pruneModeName(mode):
     if mode == 5: return 'Prune0X0X'
     if mode == 6: return 'Prune00XX'
 
-def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile=None, probSolMap={}):
+def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, probSolMap={}):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
 
@@ -566,9 +566,6 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         def param(key, value):
             f.write("{}={}\n".format(key, value))
 
-        if libraryFile is None:
-          libraryFilename = "TensileLibrary.yaml" if globalParameters["LibraryFormat"] == "yaml" else "TensileLibrary.dat"
-          libraryFile = os.path.join(sourceDir, "library", libraryFilename)
         param("library-file", libraryFile)
 
         for coFile in codeObjectFiles:
@@ -735,7 +732,8 @@ def writeClientConfig(
       deviceId: int,
       gfxName: str,
       configBase = "ClientParameters",
-      libraryFile = None,
+      *,
+      libraryFile,
       probSolMap = {},
       sourceDir = None
     ):
@@ -779,7 +777,9 @@ def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataF
       problemTypeDict = metaData["ProblemType"]
       problemType = ContractionsProblemType.FromOriginalState(problemTypeDict)
 
-    writeClientConfigIni(True, problemSizes, "", "", "", "", problemType, libraryRootPath, codeObjectFiles, dataFilePath, configFile, deviceId, gfxName)
+    libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
+    libraryFile = str(libraryPath / ("TensileLibrary" + libraryExt))
+    writeClientConfigIni(True, problemSizes, "", "", "", "", problemType, libraryRootPath, codeObjectFiles, dataFilePath, configFile, deviceId, gfxName, libraryFile=libraryFile)
 
 def getClientExecutablePath():
   clientExe = globalParameters.get("PrebuiltClient")
