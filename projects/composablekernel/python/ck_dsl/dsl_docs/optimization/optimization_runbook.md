@@ -3136,6 +3136,7 @@ Pick your target:
 
 - **[arch/gfx950.md](arch/gfx950.md)** — CDNA4 / MI350X / MI355X (the
   DSL's default target).
+- **[arch/gfx942.md](arch/gfx942.md)** — CDNA3 / MI300X / MI325X.
 
 See [arch/README.md](arch/README.md) for the index and how to add a new
 architecture. Every arch reference uses the same `21.x` layout, so a
