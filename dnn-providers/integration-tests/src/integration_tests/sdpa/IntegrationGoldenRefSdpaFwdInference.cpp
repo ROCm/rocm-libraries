@@ -36,6 +36,6 @@ TEST_P(TestCpuSdpaFwdGoldenReferenceBf16Hd128NomaskBatchBfp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestCpuSdpaFwdGoldenReferenceBf16Hd128NomaskBatchBfp16,
-                         getGoldenReferenceParams("SdpaFwd/bf16/hd128_nomask_batch"));
+                         getGoldenReferenceParams("quick/SdpaFwd/bhsd/bf16/hd128_nomask_batch"));
 
 #endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
