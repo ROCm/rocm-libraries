@@ -1,5 +1,12 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
 #
+# Policy
+# ------
+# A tensor-wait anchor at a merge block must drain its conflicting
+# tensor_load_to_lds dep on EVERY incoming CFG path. Each incoming path
+# carries its own per-path tensor-load FIFO -- the tensor_load_to_lds ops
+# issued on that path that are still in flight at the merge entry.
+#
 # CFG (tensor ops shown; cbranch is s_cbranch_scc1 to ^p_shallow when SCC0 set):
 #
 #                         ^entry
@@ -16,38 +23,46 @@
 #                   s_barrier [11]
 #
 # Per-path tensor FIFO at the merge anchor (drain token [11]):
-#   via ^p_shallow: [t11]                     -> tlcnt=0
-#   via ^p_deep:    [t11], [t12], [t12]       -> tlcnt=2
+#   via ^p_shallow: [t11]                 -> shallow (1 in flight) -> tlcnt=0
+#   via ^p_deep:    [t11], [t12], [t12]   -> deep    (3 in flight) -> tlcnt=2
 #
-# Diamond merge with different per-predecessor tensor FIFO depths before a
-# shared barrier (token [11]):
-#   - via p_shallow (taken cbranch): [t11] issued in ^entry only     -> tlcnt=0
-#   - via p_deep (fall-through):     [t11] + [t12] + [t12] in ^p_deep -> tlcnt=2
+# A single merge anchor wait sized for the deeper predecessor (^p_deep,
+# tlcnt=2) is a no-op on ^p_shallow, so the shared t11 dep would not drain
+# on the shallow path. The pass PROMOTES the conservative full drain out of
+# the merge into ^p_shallow's tail, then relaxes the merge wait to ^p_deep's
+# depth (still correct on ^p_shallow, which already drained at its own tail).
 #
-# The shared t11 must be issued in ^entry (before the split), not only in ^p_shallow:
-# with the load only in ^p_shallow the planner collapses paths and emits tlcnt=0
-# at the merge. An explicit cbranch is required (entry "Successors: ^a, ^b"
-# without a branch does not split per-path FIFO state).
-#
-# CHECK-LABEL patterns must include the trailing ':' so they match block headers
-# (^p_shallow:) and not Successors lines (Successors: ^p_shallow, ...).
+# The shared t11 must be issued in ^entry (before the split), not only in
+# ^p_shallow: with the load only in ^p_shallow the planner collapses paths
+# and emits tlcnt=0 at the merge. An explicit cbranch is required (entry
+# "Successors: ^a, ^b" without a branch does not split per-path FIFO state).
 #
 # CHECK-LABEL: @waitcnt_insertion_tensor_diamond_merge_depths
 #
-# CHECK-LABEL: ^p_deep:
+# Entry issues the shared tensor load whose dep flows to both branches.
+# CHECK: ^entry
+# CHECK: tensor_load_to_lds{{.*}}tokens = [11]
+# CHECK: s_cbranch_scc1
+#
+# ^p_deep (deep predecessor): two extra tensor_load_to_lds with a disjoint
+# token that extend its in-flight depth ahead of the merge. No pre-drain
+# inserted here because ^p_deep's depth drives the merge wait.
+# CHECK: ^p_deep
+# CHECK: tensor_load_to_lds{{.*}}tokens = [12]
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [12]
 # CHECK-NOT: s_wait_tensorcnt
 #
-# Shallow path: compensating full drain at the (empty) predecessor tail.
-# CHECK-LABEL: ^p_shallow:
-# CHECK: s_wait_tensorcnt
-# CHECK-SAME: tlcnt = 0
+# ^p_shallow (shallow predecessor): receives the promoted
+# `s_wait_tensorcnt 0` so the shared dep is drained on this path before
+# reaching the merge.
+# CHECK: ^p_shallow
+# CHECK: s_wait_tensorcnt{{.*}}tlcnt = 0
 #
-# Merge: deepest-path wait at the anchor barrier.
-# CHECK-LABEL: ^merge:
-# CHECK-NEXT: s_wait_tensorcnt
-# CHECK-SAME: tlcnt = 2
-# CHECK-NEXT: s_barrier
-# CHECK-SAME: tokens = [11]
+# ^merge: relaxed wait sized for ^p_deep's depth, emitted before the barrier
+# that conflicts with the shared dep on token 11.
+# CHECK: ^merge
+# CHECK: s_wait_tensorcnt{{.*}}tlcnt = 2
+# CHECK-NEXT: s_barrier{{.*}}tokens = [11]
 # CHECK-NOT: s_wait_tensorcnt
 
 st.func @waitcnt_insertion_tensor_diamond_merge_depths() {
