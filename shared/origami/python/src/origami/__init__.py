@@ -20,6 +20,7 @@ try:
         # Data structures
         dim3_t,
         dim4_t,
+        cluster_dim_t,
         tensile_params_t,
         config_t,
         prediction_result_t,
@@ -90,6 +91,7 @@ __all__ = [
     # Data structures
     "dim3_t",
     "dim4_t",
+    "cluster_dim_t",
     "tensile_params_t",
     "config_t",
     "prediction_result_t",

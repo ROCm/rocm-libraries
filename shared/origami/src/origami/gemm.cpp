@@ -105,6 +105,10 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("ElementSizeB (bits): " << int(b_bits));
     OLOG_DEBUG("CacheHintsA: " << int(config.cache_hints_a));
     OLOG_DEBUG("CacheHintsB: " << int(config.cache_hints_b));
+    if (config.cluster_dim.enable_cluster) {
+      OLOG_DEBUG("ClusterDim: " << int(config.cluster_dim.x) << "x" << int(config.cluster_dim.y)
+                                  << "x" << int(config.cluster_dim.z));
+    }
 
     OLOG_DEBUG("Grid: " << int(grid_m) << "x" << int(grid_n));
     OLOG_DEBUG("NumOutputTiles: " << int(num_output_tiles));

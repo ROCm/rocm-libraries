@@ -262,6 +262,38 @@ struct dim3_t {
 };
 
 /**
+ * @brief Workgroup cluster dimensions (x, y, z).
+ *
+ * Matches HIP/Tensile cluster launch semantics. When enable_cluster is false,
+ * cluster dimensions are ignored. Defaults to {0, 0, 0} so that {1, 1, 1} can
+ * be set explicitly as a valid cluster size when enable_cluster is true.
+ */
+struct cluster_dim_t {
+  /// Whether cluster launch is enabled.
+  bool enable_cluster = false;
+
+  /// Cluster dimension along X.
+  std::size_t x = 0;
+
+  /// Cluster dimension along Y.
+  std::size_t y = 0;
+
+  /// Cluster dimension along Z.
+  std::size_t z = 0;
+
+  constexpr bool operator==(const cluster_dim_t& o) const noexcept {
+    return enable_cluster == o.enable_cluster && x == o.x && y == o.y && z == o.z;
+  }
+
+  constexpr bool operator!=(const cluster_dim_t& o) const noexcept { return !(*this == o); }
+
+  /// @return true when cluster launch is enabled and at least one dimension exceeds 1.
+  constexpr bool is_active() const noexcept {
+    return enable_cluster && (x > 1 || y > 1 || z > 1);
+  }
+};
+
+/**
  * @brief 4-dimensional size/coordinate: (k, m, n, b).
  *
  * Used for tile coordinates and unique tile counts across the GEMM grid.
@@ -518,6 +550,9 @@ struct config_t {
   /// LDS load vector width for matrix B (elements per LDS read)
   int vector_width_b = 1;
 
+  /// Workgroup cluster launch configuration.
+  cluster_dim_t cluster_dim{};
+
   /// Backend-specific parameters (type should match target).
   /// Use tensile() accessor to get/set Tensile-specific params.
   backend_params_t backend{};
@@ -542,7 +577,7 @@ struct config_t {
            workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
            prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
            grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
-           vector_width_b == o.vector_width_b && backend == o.backend;
+           vector_width_b == o.vector_width_b && cluster_dim == o.cluster_dim && backend == o.backend;
   }
 
   std::size_t hash() const {
@@ -563,7 +598,11 @@ struct config_t {
                                           grvw_b,
                                           gwvw_d,
                                           vector_width_a,
-                                          vector_width_b);
+                                          vector_width_b,
+                                          cluster_dim.enable_cluster,
+                                          cluster_dim.x,
+                                          cluster_dim.y,
+                                          cluster_dim.z);
     // Hash backend-specific parameters if present. The visitor pattern allows
     // automatic handling of any backend type that provides a hash() method,
     // while std::monostate (no backend params) is a no-op.
@@ -582,7 +621,11 @@ struct config_t {
   }
 
   bool is_valid() const {
-    return mt.m > 0 && mt.n > 0 && mt.k > 0 && mi.m > 0 && mi.n > 0 && mi.k > 0 && occupancy > 0;
+    if (!(mt.m > 0 && mt.n > 0 && mt.k > 0 && mi.m > 0 && mi.n > 0 && mi.k > 0 && occupancy > 0)) {
+      return false;
+    }
+    if (cluster_dim.enable_cluster && (cluster_dim.x == 0 || cluster_dim.y == 0)) { return false; }
+    return true;
   }
 };
 

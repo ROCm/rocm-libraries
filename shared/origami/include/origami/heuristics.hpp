@@ -82,6 +82,7 @@ struct heuristic_defaults_t {
   static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 12000.0;
   static constexpr size_t POSTGSU_THREADS_PER_WG         = 256;
   static constexpr size_t POSTGSU_WAVEFRONT_SIZE         = 64;
+  static constexpr double WG_CLUSTER_OVERHEAD            = 0.0;
 
   // Main Loop Efficiency
   static constexpr double MAIN_LOOP_EFFICIENCY = 1.0;

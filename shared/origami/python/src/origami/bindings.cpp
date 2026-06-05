@@ -111,6 +111,14 @@ NB_MODULE(origami, m) {
       .def("mnk", &origami::dim4_t::mnk)
       .def("total", &origami::dim4_t::total);
 
+  nanobind::class_<origami::cluster_dim_t>(m, "cluster_dim_t")
+      .def(nanobind::init<>())
+      .def_rw("enable_cluster", &origami::cluster_dim_t::enable_cluster)
+      .def_rw("x", &origami::cluster_dim_t::x)
+      .def_rw("y", &origami::cluster_dim_t::y)
+      .def_rw("z", &origami::cluster_dim_t::z)
+      .def("is_active", &origami::cluster_dim_t::is_active);
+
   // Tensile-specific parameters (used when prediction_mode == simulation)
   nanobind::class_<origami::tensile_params_t>(m, "tensile_params_t")
       .def(nanobind::init<>())
@@ -157,6 +165,7 @@ NB_MODULE(origami, m) {
       .def_rw("gwvw_d", &origami::config_t::gwvw_d)
       .def_rw("vector_width_a", &origami::config_t::vector_width_a)
       .def_rw("vector_width_b", &origami::config_t::vector_width_b)
+      .def_rw("cluster_dim", &origami::config_t::cluster_dim)
       // Tensile-specific parameters accessed via variant backend
       .def("tensile",
            static_cast<origami::tensile_params_t& (origami::config_t::*)()>(
