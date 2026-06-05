@@ -422,6 +422,7 @@ rocblaslt_status
                                      rocblaslt::RocGemmType gemmType,
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
+                                     const int32_t          dynPersistentTileMode,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results);
 

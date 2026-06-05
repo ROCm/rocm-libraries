@@ -85,18 +85,25 @@ namespace hipblaslt_ext
          *  \details
          *  Exposed via the ``hipblaslt_ext`` namespace because it controls a
          *  hipBLASLt-internal scheduler with no equivalent in the base
-         *  ``hipblasLt`` C API. When ``enabled`` is ``true`` and the chosen
-         *  kernel supports the feature, hipBLASLt launches a persistent grid
-         *  that uses the dynamic work-stealing StreamK scheduler; otherwise
-         *  the library default scheduler is used.
+         *  ``hipblasLt`` C API. The ``mode`` argument is one of
+         *  ``hipblasLtDynPersistentTileMode_t``:
+         *
+         *    - ``HIPBLASLT_DYN_PERSISTENT_TILE_OFF`` (default) — library default scheduler.
+         *    - ``HIPBLASLT_DYN_PERSISTENT_TILE_ON``  — always request the dynamic persistent tile path when the chosen kernel supports it.
+         *    - ``HIPBLASLT_DYN_PERSISTENT_TILE_AUTO`` — delegate to the library heuristic per launch.
+         *
+         *  This replaces the previous bool ``setDynPersistentTileEnabled`` /
+         *  ``getDynPersistentTileEnabled`` API (the bool surface could not
+         *  express AUTO). The previous API has no known in-tree callers and
+         *  was renamed in the same release that introduced it.
          *
          *  See ``hipblasLtSetSmCountTarget`` (non-ext) for the analogous
          *  cuBLAS-compatible hint on the number of compute units to target.
          *
          *  @param[in]
-         *  enabled  ``true`` to request the dynamic persistent tile path.
+         *  mode  Tri-state mode selector.
          */
-        HIPBLASLT_EXPORT void setDynPersistentTileEnabled(bool enabled);
+        HIPBLASLT_EXPORT void setDynPersistentTileMode(hipblasLtDynPersistentTileMode_t mode);
 
         /*! \ingroup library_module
          *  \brief This function returns the maximum workspace size that was set.
@@ -106,10 +113,11 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT const size_t getMaxWorkspaceBytes() const;
 
         /*! \ingroup library_module
-         *  \brief Return whether the dynamic persistent tile scheduler has
-         *  been requested via ``setDynPersistentTileEnabled``.
+         *  \brief Return the dynamic-persistent-tile mode set via
+         *  ``setDynPersistentTileMode``. Defaults to
+         *  ``HIPBLASLT_DYN_PERSISTENT_TILE_OFF``.
          */
-        HIPBLASLT_EXPORT bool getDynPersistentTileEnabled() const;
+        HIPBLASLT_EXPORT hipblasLtDynPersistentTileMode_t getDynPersistentTileMode() const;
 
     private:
         friend GemmInstance;
@@ -584,7 +592,8 @@ namespace hipblaslt_ext
         hipblasLtHandle_t     m_handle;
         std::shared_ptr<void> m_data;
 
-        size_t m_workspace_bytes = 0;
+        size_t  m_workspace_bytes        = 0;
+        int32_t m_dyn_persistent_tile_mode = 0;
     };
 
     /*! \ingroup types_module

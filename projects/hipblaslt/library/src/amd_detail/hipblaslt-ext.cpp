@@ -43,8 +43,8 @@ namespace hipblaslt_ext
     class GemmPreference::GemmPreferenceImpl
     {
     public:
-        size_t workspace_bytes         = 0;
-        bool   dyn_persistent_tile_ext = false;
+        size_t                           workspace_bytes          = 0;
+        hipblasLtDynPersistentTileMode_t dyn_persistent_tile_mode = HIPBLASLT_DYN_PERSISTENT_TILE_OFF;
     };
 
     GemmPreference::GemmPreference()
@@ -78,14 +78,24 @@ namespace hipblaslt_ext
         return pimpl->workspace_bytes;
     }
 
-    void GemmPreference::setDynPersistentTileEnabled(bool enabled)
+    void GemmPreference::setDynPersistentTileMode(hipblasLtDynPersistentTileMode_t mode)
     {
-        pimpl->dyn_persistent_tile_ext = enabled;
+        switch(mode)
+        {
+        case HIPBLASLT_DYN_PERSISTENT_TILE_OFF:
+        case HIPBLASLT_DYN_PERSISTENT_TILE_ON:
+        case HIPBLASLT_DYN_PERSISTENT_TILE_AUTO:
+            pimpl->dyn_persistent_tile_mode = mode;
+            break;
+        default:
+            pimpl->dyn_persistent_tile_mode = HIPBLASLT_DYN_PERSISTENT_TILE_OFF;
+            break;
+        }
     }
 
-    bool GemmPreference::getDynPersistentTileEnabled() const
+    hipblasLtDynPersistentTileMode_t GemmPreference::getDynPersistentTileMode() const
     {
-        return pimpl->dyn_persistent_tile_ext;
+        return pimpl->dyn_persistent_tile_mode;
     }
 
     class GemmProblemType::GemmProblemTypeImpl
@@ -756,6 +766,8 @@ namespace hipblaslt_ext
             rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
+        m_dyn_persistent_tile_mode
+            = static_cast<int32_t>(pref.pimpl->dyn_persistent_tile_mode);
         auto gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         auto results
             = reinterpret_cast<std::vector<rocblaslt_matmul_heuristic_result>*>(&heuristicResults);
@@ -765,6 +777,7 @@ namespace hipblaslt_ext
                                              gemmType,
                                              m_data,
                                              pref.pimpl->workspace_bytes,
+                                             m_dyn_persistent_tile_mode,
                                              requestedAlgoCount,
                                              *results));
         rocblaslt::Debug::Instance().markerStop();

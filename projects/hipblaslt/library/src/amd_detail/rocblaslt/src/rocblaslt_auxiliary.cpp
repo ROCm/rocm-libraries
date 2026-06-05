@@ -1426,8 +1426,14 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                 {
                     int32_t requested = 0;
                     memcpy(&requested, buf, sizeof(int32_t));
-                    // Treat any nonzero as "enable"; clamp to 0/1 for forward-compat.
-                    matmulDesc->dyn_persistent_tile_ext = (requested != 0) ? 1 : 0;
+                    if(requested < 0 || requested > 2)
+                    {
+                        log_error(__func__,
+                                  "invalid dyn_persistent_tile_ext mode value",
+                                  requested);
+                        return rocblaslt_status_invalid_value;
+                    }
+                    matmulDesc->dyn_persistent_tile_ext = requested;
                 }
                 else
                 {
@@ -2392,6 +2398,7 @@ rocblaslt_status
                                      rocblaslt::RocGemmType gemmType,
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
+                                     const int32_t          dynPersistentTileMode,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results)
 {
@@ -2406,6 +2413,12 @@ rocblaslt_status
             __func__,
             "will be deprecated for groupedgemm in the future, please use get_all_algos instead");
     }
+    // The GemmPreference-supplied dyn-persistent-tile mode is threaded
+    // into the contraction problem in tensile_host.cpp's
+    // applyDynPersistentTileMode (added alongside the host-plumbing
+    // changes); consume the parameter here so this commit builds
+    // without unused-parameter warnings.
+    (void)dynPersistentTileMode;
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
