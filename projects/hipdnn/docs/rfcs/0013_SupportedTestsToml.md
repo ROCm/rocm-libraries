@@ -26,7 +26,7 @@
 
 This RFC adds **structured engine-support claims** to each per-engine integration-test config. Within this per-engine config, claims are scoped per-asic and live in a machine-managed sidecar (`<EngineName>.supported.toml`) paired with the hand-edited main TOML. Each claim asserts a cross-product of `(op_chain, dtype_combo, layout)` tuples the engine must support on the named arch. The verifier runs after `RUN_ALL_TESTS()` and fails the build when a claimed test loses engine support.
 
-Claims are exact-string lists, not globs — no wildcards. Per-matcher, `op_chains` strings come from the existing `describeGraph()` (extended with per-node `:variant` tags for mode-bearing nodes and `[flag,…]` tags for shape-bearing nodes — see §5.4); `dtype_combos` are TOML inline tables mirroring the support-matrix display (`{io, output?, compute, intermediate?}`); `layouts` are exact-match strings (one per op family, derived from the tensor stride ordering — see §5.3). This eliminates an entire class of test-name glob hazards (platform-divergent matchers, char-class collisions, fixture-naming fragility, `TEST_F`/`TYPED_TEST` format misclassification, `DISABLED_` prefix).
+Claims are exact-string lists, not globs — no wildcards. Per-matcher, `op_chains` strings come from the existing `describeGraph()` (extended with per-node `:variant` tags for mode-bearing nodes and `[flag,…]` tags for shape-bearing nodes — see §5.4); `dtype_combos` are composite `{ graph={...}, tensors={...} }` inline tables — the graph-declared dtypes (tracked-only) plus the authoritative per-tensor dtype map the engine actually dispatches on (see §5.4); `layouts` are exact-match strings (one per op family, derived from the tensor stride ordering — see §5.3). This eliminates an entire class of test-name glob hazards (platform-divergent matchers, char-class collisions, fixture-naming fragility, `TEST_F`/`TYPED_TEST` format misclassification, `DISABLED_` prefix).
 
 The auto-generation tool (`--write-support-claims`, embedded in `hipdnn_integration_tests`, C++-only) observes runtime support and rewrites the sidecar for the current asic. Engineer reviews via `git diff`.
 
@@ -130,58 +130,30 @@ engine  = "MIOPEN_ENGINE"
 arch     = "gfx1151"
 platform = "windows"
 
-# Conv across all directions × all observed shape variants. When support is
-# uniform across variants — the common case — the condenser folds every
-# variant into one matcher with a long op_chains list, so sidecar size barely
-# grows. (Shape variants serialize as bracket-only tags: see §5.4.)
+# Conv across observed dtypes. Each dtype_combos entry is composite:
+# graph = the tracked-only graph-declared dtypes; tensors = the
+# authoritative per-tensor map (node-qualified keys, quoted). Because the
+# tensor keys embed the node label, distinct op_chains rarely share a
+# combo, so matchers are typically scoped to one op_chain.
 [[supported.matchers]]
-op_chains = [
-    "ConvFprop", "ConvFprop[1x1]", "ConvFprop[1x1,multi_batch]",
-    "ConvFprop[grouped,padding]", "ConvFprop[padding,stride]",
-    "ConvFprop[padding,dilation]", "ConvFprop[non_square,padding]",
-    "ConvDgrad", "ConvDgrad[1x1]", "ConvWgrad", "ConvWgrad[1x1]",
-]
+op_chains = ["ConvFprop"]
 dtype_combos = [
-    {io="bf16", compute="fp32", intermediate="bf16"},
-    {io="fp16", compute="fp32", intermediate="fp16"},
-    {io="fp32", compute="fp32", intermediate="fp32"},
-]
-layouts = ["NCDHW", "NCHW", "NDHWC", "NHWC"]
-
-# Conv + Bias + Activation (CBA), including a mixed-precision asymmetric combo.
-# Mode-bearing Pointwise variants keep the leading colon (Pointwise:MODE).
-[[supported.matchers]]
-op_chains = [
-    "ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD",
-    "ConvFprop + Pointwise:ADD + Pointwise:SIGMOID",
-]
-dtype_combos = [
-    {io="fp16", compute="fp32"},
-    {io="fp32", compute="fp32"},
-    {io="bf16", compute="fp32"},
-    {io="fp16", output="fp32", compute="fp32"},   # asymmetric (mixed precision)
+    { graph={io="bf16", compute="fp32", intermediate="bf16"},
+      tensors={"ConvFprop.x"="bf16", "ConvFprop.w"="bf16", "ConvFprop.y"="bf16"} },
+    { graph={io="fp16", compute="fp32", intermediate="fp16"},
+      tensors={"ConvFprop.x"="fp16", "ConvFprop.w"="fp16", "ConvFprop.y"="fp16"} },
 ]
 layouts = ["NCHW", "NHWC"]
 
-# Batchnorm with the multi_batch shape tag (N>1 hits a different solver path).
+# Batchnorm mixed precision — the case graph-level io would hide: the
+# data tensors (x/y) are fp16/bf16 while the stats (scale/bias/mean/
+# inv_variance) are fp32. The per-tensor map captures each independently.
 [[supported.matchers]]
-op_chains = [
-    "Batchnorm", "Batchnorm[multi_batch]",
-    "Batchnorm[multi_batch] + Pointwise:RELU_FWD[upper_clip]",
-]
-dtype_combos = [{io="fp32", compute="fp32", intermediate="fp32"}]
-layouts = ["NCHW", "NHWC"]
-
-# ─── gfx10 (no CK fusion kernels — list only plain Conv here) ─────────────
-[[supported]]
-arch = "gfx10"
-
-[[supported.matchers]]
-op_chains = ["ConvFprop", "ConvDgrad", "ConvWgrad"]
+op_chains = ["Batchnorm"]
 dtype_combos = [
-    {io="fp16", compute="fp32", intermediate="fp16"},
-    {io="fp32", compute="fp32", intermediate="fp32"},
-    {io="bf16", compute="fp32", intermediate="bf16"},
+    { graph={io="fp16", compute="fp32", intermediate="fp32"},
+      tensors={"Batchnorm.x"="fp16", "Batchnorm.scale"="fp32", "Batchnorm.bias"="fp32",
+               "Batchnorm.mean"="fp32", "Batchnorm.inv_variance"="fp32", "Batchnorm.y"="fp16"} },
 ]
 layouts = ["NCHW", "NHWC"]
 ```
@@ -193,10 +165,10 @@ layouts = ["NCHW", "NHWC"]
 | `arch`         | yes      | Exact match against `archTokenOf(gcnArchName)` — the prefix before the first `:` of the raw `gcnArchName` (e.g. `gfx942:sramecc+:xnack-` → `gfx942`). Substring matching is rejected — it would collide families (`"gfx10"` would match `gfx1030`, `gfx1100`). One block per asic. |
 | `platform`     | no       | Exact match against `"windows"` or `"linux"`. Default = any. |
 | `op_chains`    | yes      | Exact match against `describeGraphStructured(graph).opChain`. See §5.4 for variant-tag rules. |
-| `dtype_combos` | yes      | Non-empty array of inline tables with named fields. See §5.4. |
+| `dtype_combos` | yes      | Non-empty array of composite `{ graph={...}, tensors={...} }` inline tables. See §5.4. |
 | `layouts`      | yes      | Exact match against the test's `setTestCaseLayout(...)` value. |
 
-A test **matches** a matcher if and only if its observed `(op_chain, io, output, compute, intermediate, layout)` 6-tuple matches some combo's `(io, effectiveOutput, compute, intermediate)` AND its `op_chain ∈ op_chains` AND its `layout ∈ layouts`. Output dtype is normalized to `io` for symmetric records on both sides (`effectiveOutput = output ?? io`). A test is **claimed** if and only if it matches ≥1 matcher in the asic's block. No wildcards anywhere — the schema rejects `*` and `?`.
+A test **matches** a matcher if and only if its observed per-tensor dtype map equals some combo's `tensors` map AND its `op_chain ∈ op_chains` AND its `layout ∈ layouts`. The combo's `graph` sub-table is tracked-only and never participates in matching. A test is **claimed** if and only if it matches ≥1 matcher in the asic's block. No wildcards anywhere — the schema rejects `*` and `?`.
 
 **Layouts are strings, not a fixed enum.** A `layout` is the test's `setTestCaseLayout(...)` value, matched as an opaque exact string. Conv/Batchnorm today emit `NCHW`, `NHWC`, `NCDHW`, `NDHWC`, `NCL`, `NLC`, etc. The set is deliberately not an enumeration the schema knows about: op families that land later contribute their own layout strings derived from the same tensor stride ordering (matmul: `BMK` / `BKM`; SDPA: `BHSD` / `BSHD`) with no schema or loader change. The string is chosen per op family for readability in both the sidecar and the support matrix.
 
@@ -206,7 +178,7 @@ A test **matches** a matcher if and only if its observed `(op_chain, io, output,
 
 - All required fields (`arch`, `op_chains`, `dtype_combos`, `layouts`) must be present and non-empty.
 - All string values are matched exact-string. No `*`, no `?`, no fnmatch.
-- `dtype_combos` entries must be inline tables.
+- `dtype_combos` entries must be composite inline tables with `graph` (io+compute required, intermediate optional) and a non-empty `tensors` map.
 - Unknown keys inside a combo are rejected (catches typos / silent schema drift). Unknown *top-level* keys are logged-and-ignored for forward compatibility.
 - Duplicate combos (compared by all four fields, with `output` normalized to `io`) are rejected.
 
@@ -239,20 +211,21 @@ A colon means "this node has a mode/op"; bare brackets mean "this node has shape
 
 **Variants are demand-driven.** A variant tag (or combo field) earns its place only when an observed partition or a support conflict (§7) demonstrates the bare node type is too coarse. Adding speculative variants creates matcher-set noise — extra entries that look like dispatch-relevant distinctions but aren't, because the engine treats them identically. The support-conflict refusal in §7 is the canonical signal that a new variant is needed; absent that signal, leave the node type alone.
 
-**`dtype_combos` fields.**
+**`dtype_combos` entries — composite `graph` + `tensors`.** Each entry pairs the graph-declared dtypes with the resolved per-tensor dtypes:
 
-| Field          | Required | Meaning |
-|----------------|----------|---------|
-| `io`           | yes      | Input dtype. Also the output dtype when `output` is omitted (symmetric — the common case). |
-| `output`       | no       | Output dtype. Set only when it differs from `io` (mixed-precision graphs). |
-| `compute`      | yes      | Compute / accumulation dtype. |
-| `intermediate` | no       | Intermediate dtype. Set only when the graph specifies it via `graph.set_intermediate_data_type(...)`. |
+| Part      | Required | Meaning |
+|-----------|----------|---------|
+| `graph`   | yes      | Inline table of the graph-declared dtypes: `io` + `compute` (required), `intermediate` (optional). **Tracked-only** — recorded for the support matrix and other generators, never used for matching. `compute` is the one genuinely op-level value (no tensor carries it). |
+| `tensors` | yes      | Non-empty inline table of node-qualified tensor role → resolved dtype, e.g. `"Batchnorm.scale"="fp32"`. **Authoritative for matching.** |
 
-The named-field (inline-table) shape is deliberate:
+A test matches on its `tensors` map only; `graph` never widens the claim. Example: `{ graph={io="fp16", compute="fp32"}, tensors={"ConvFprop.x"="fp16", "ConvFprop.w"="fp16", "ConvFprop.y"="fp16"} }`.
 
-- **Mirrors the support-matrix display.** The existing markdown shows `[io=bf16, compute=fp32, intermediate=fp32]` per entry. The schema uses the same shape, so the support matrix can be rendered directly from the sidecar — single source of truth (§14).
-- **Captures what the engine actually dispatches on.** A simpler dtype dimension that collapsed `compute` and `intermediate` to record-side only would hide them from the matcher key. Combos make them first-class matcher-key fields: if the engine dispatches differently per compute dtype, a support conflict surfaces it instead of silently mixing.
-- **Extensible by adding keys, not by inventing syntax.** A future dispatch dimension (weight dtype, accumulator, layout-variant, etc.) is just a new optional key. No new parsing convention; existing combos still load.
+The per-tensor `tensors` map is deliberate:
+
+- **Matches dispatch truth.** The frontend resolves each tensor's dtype individually; the graph-level `io`/`intermediate` are merely the *fill source* for tensors that weren't set explicitly (`TensorAttributes::fill_from_context`). A matcher keyed on graph-level defaults mis-claims mixed-precision graphs — e.g. a batchnorm with fp16 data and fp32 stats (`scale`/`bias`/`mean`/`inv_variance`), or an intermediate tensor whose dtype differs from the graph default. The per-tensor map records exactly what the engine sees.
+- **Full picture for generators.** `graph` rides along with each combo so the support matrix and other tools have the graph-declared dtypes too — they just don't affect matching.
+- **Self-limiting size.** A uniform graph collapses to identical combos the condenser folds into one matcher; per-tensor detail only multiplies entries when dtypes genuinely diverge — which is exactly when it carries information (§7.2).
+- **Node-qualified keys.** `<NodeLabel>.<role>` (`ConvFprop.x`, `Pointwise:ADD.in1`); a `#k` suffix disambiguates a repeated node label. Named roles come from the typed node accessors; nodes without named tensor accessors (Pointwise) use positional `in0`/`in1`/`out`. Keys contain `.`/`:` and so serialize as quoted TOML keys.
 
 ### 5.5 Variant data sources
 
@@ -263,6 +236,8 @@ The shape tags are computed from graph node attributes, not from test-case metad
 - **Batchnorm family:** `attributes.get_x()` → N > 1 ⇒ `multi_batch`.
 
 This replaces the per-test-case `generateNote()` tag derivation in `*Common.hpp` as the authority for what a graph *is*.
+
+**Per-tensor dtypes** (the authoritative `tensors` map) are read from each node's operand tensors' resolved `get_data_type()` (after `fill_from_context`), keyed by node-qualified role: Conv `get_x/get_w/get_y` (and `get_dx/get_dw/get_dy` for bwd), Batchnorm `get_x/get_scale/get_bias/get_mean/get_inv_variance/get_y`, etc. Nodes without named tensor accessors (Pointwise) fall back to the generic input/output tensor lists with positional roles (`in0`/`in1`/`out`). `compute` comes from the op/graph compute attribute — it is not a tensor. The graph-declared `io`/`intermediate` are still read (into the tracked-only `graph` sub-table) but are not used for matching.
 
 ## 6. Failure Detection
 
@@ -288,7 +263,7 @@ Findings carry the full dispatch signature in the `dtype_combo` field (the label
   CLAIM BROKEN (Rule A):
     Smoke/IntegrationGpuConvFwdBiasActiv.Correctness/0
       observed: op_chain="ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD"
-                dtype_combo="{io=fp32, compute=fp32, intermediate=fp32}" layout="NCHW"
+                tensors={ConvFprop.x=fp32, ConvFprop.w=fp32, ConvFprop.y=fp32, ...} graph={io=fp32, compute=fp32, intermediate=fp32} layout="NCHW"
       claim source: [[supported]]#0/[[supported.matchers]]#3 in MIOPEN_ENGINE.supported.toml
       engine returned no support for this graph
       Action: narrow op_chains/dtype_combos to exclude this tuple, add a
@@ -302,7 +277,7 @@ Findings carry the full dispatch signature in the `dtype_combo` field (the label
 
   SUPPORT STATUS UNKNOWN (Rule C, note):
     Smoke/IntegrationGpuConvFprop.Correctness/fp16_NHWC_64x64
-      observed: op_chain="ConvFprop" dtype_combo="{io=fp16, compute=fp32}" layout="NHWC"
+      observed: op_chain="ConvFprop" tensors={ConvFprop.x=fp16, ConvFprop.w=fp16, ConvFprop.y=fp16} graph={io=fp16, compute=fp32} layout="NHWC"
       the engine's support query (get_ranked_engine_ids) returned an error status;
       support is UNKNOWN, not "unsupported" — excluded from claim evaluation.
       Action: fix the support-query failure first.
@@ -316,13 +291,13 @@ Findings carry the full dispatch signature in the `dtype_combo` field (the label
 
   UNCLAIMED GAIN (Rule E, warning):
     Smoke/IntegrationGpuLayernormForward.Correctness/fp16_NCHW_32x512x768
-      observed: op_chain="LayerNorm" dtype_combo="{io=fp16, compute=fp32}" layout="NCHW"
+      observed: op_chain="LayerNorm" tensors={LayerNorm.in0=fp16, LayerNorm.out=fp16} graph={io=fp16, compute=fp32} layout="NCHW"
                 engine returned support: [MIOPEN_ENGINE].
       Action: if intentional, add to MIOPEN_ENGINE.supported.toml under
               [[supported]] arch="gfx942".
 ```
 
-Asymmetric records show the output dtype, e.g. `{io=fp16, output=fp32, compute=fp32}`. Failures are grouped by `(matcher, op_chain)` when many tests share the same cross-product. Full lists are written to `support_claim_failures.txt` for CI artifact capture.
+Mixed-precision graphs show each tensor's dtype in the `tensors={...}` map (e.g. a batchnorm with `Batchnorm.x=fp16` but `Batchnorm.scale=fp32`). Failures are grouped by `(matcher, op_chain)` when many tests share the same cross-product. Full lists are written to `support_claim_failures.txt` for CI artifact capture.
 
 ### 6.4 Verifier preconditions (refuse-to-run)
 
@@ -505,6 +480,6 @@ Docs land in the same PR as the implementation. PRs that change schema or verifi
 - **Variant tag.** A per-node label returned by `describeNodeVariant()` and appended to the node's serialization in op_chain strings. Partitions graphs the engine dispatches differently despite sharing a node type. Examples: `Pointwise:RELU_FWD[upper_clip]`, `Reduction:ADD`.
 - **Shape variant.** A bracket-only `describeNodeVariant()` tag derived from a Conv or Batchnorm node's tensor shapes / conv params (`1x1`, `grouped`, `multi_batch`, `non_square`, `padding`, `stride`, `dilation`). Attaches to the node name without a leading colon: `ConvFprop[1x1,grouped]`.
 - **Bracket-only vs mode-bearing tag.** A serialization distinction in op_chain: mode-bearing tags (Pointwise, Reduction) use `Node:MODE[flags]`; bracket-only tags (Conv, Batchnorm shape) use `Node[flags]`. The presence of the colon signals whether the node has a mode/op.
-- **Dtype combo.** One entry in a matcher's `dtype_combos` list, an inline TOML table with named fields: `io` (required input dtype), `output` (optional, defaults to `io` for symmetric), `compute` (required), `intermediate` (optional). One entry per distinct dispatch signature.
+- **Dtype combo.** One entry in a matcher's `dtype_combos` list: a composite `{ graph={io, compute, intermediate?}, tensors={role -> dtype} }`. `graph` is the graph-declared dtypes (tracked-only); `tensors` is the resolved per-tensor map keyed by node-qualified role and is authoritative for matching. One entry per distinct dispatch signature.
 - **Support conflict.** A tuple `(op_chain, dtype_combo, layout)` observed as both supported (by at least one test case) and unsupported (by at least one other) in the same run. Violates §7.1's safety invariant; the condenser refuses to write the sidecar and surfaces the offending test cases for engineer review. (In §7's set notation: a tuple in both the supported set `S` and the unsupported set `U`.)
 - **Rectangle cover.** The output of §7's condensation algorithm for one op_chain: a set of `(dtype_combo_subset, layout_subset)` rectangles whose union covers every supported cell while avoiding every unsupported cell. Each rectangle becomes one emitted matcher.
