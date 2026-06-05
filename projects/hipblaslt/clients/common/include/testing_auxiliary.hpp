@@ -1247,12 +1247,12 @@ void testing_aux_matmul_dyn_persistent_tile_ext(const Arguments& arg)
                           HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(value_r == 1);
 
-    // Any nonzero value gets clamped to 1.
-    int32_t three = 3;
+    // AUTO (2) is also accepted and round-trips.
+    int32_t auto_mode = 2;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
                                                           HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
-                                                          &three,
-                                                          sizeof(three)),
+                                                          &auto_mode,
+                                                          sizeof(auto_mode)),
                           HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
                                                           HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
@@ -1260,7 +1260,22 @@ void testing_aux_matmul_dyn_persistent_tile_ext(const Arguments& arg)
                                                           sizeof(value_r),
                                                           &sizeWritten),
                           HIPBLAS_STATUS_SUCCESS);
-    ASSERT_TRUE(value_r == 1);
+    ASSERT_TRUE(value_r == 2);
+
+    // Values outside {0,1,2} are rejected with INVALID_VALUE (previously
+    // any nonzero value was silently clamped to 1).
+    int32_t three = 3;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          &three,
+                                                          sizeof(three)),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+    int32_t negative = -1;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          &negative,
+                                                          sizeof(negative)),
+                          HIPBLAS_STATUS_INVALID_VALUE);
 
     int32_t disable = 0;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,

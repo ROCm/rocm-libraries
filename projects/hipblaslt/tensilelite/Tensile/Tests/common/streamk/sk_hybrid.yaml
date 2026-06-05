@@ -15,12 +15,13 @@ GlobalParameters:
   NumWarmups: 0
   EnqueuesPerSync: 1
   SleepPercent: 50
-  # Exercise both SK5 hybrid paths in one run:
-  #   0 -> static work assignment (default)
-  #   1 -> dynamic per-XCD work-queue path
+  # Exercise all three SK5 hybrid-mode paths in one run:
+  #   0 -> static work assignment (OFF, default)
+  #   1 -> dynamic per-XCD work-queue path (ON)
+  #   2 -> AUTO (origami heuristic picks between 0 and 1 per launch)
   # Each base problem is replayed once per value, so reference vs kernel
-  # validation runs for both paths and confirms numerical equivalence.
-  StreamKHybridMode: [0, 1]
+  # validation runs for all three modes and confirms numerical equivalence.
+  StreamKHybridMode: [0, 1, 2]
 
 BenchmarkProblems:
 
