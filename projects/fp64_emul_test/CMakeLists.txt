@@ -78,3 +78,29 @@ target_compile_features(fp64_emul_accuracy PRIVATE cxx_std_17)
 set_target_properties(fp64_emul_accuracy PROPERTIES
     BUILD_RPATH  "${HIPBLASLT_BUILD_DIR}/library"
     INSTALL_RPATH "${HIPBLASLT_BUILD_DIR}/library")
+
+# ── Correctness test ─────────────────────────────────────────────────────────
+# Tests all 4 transpose combinations and alpha/beta ∈ {-2,-1,0,1,2}.
+# Compares emulated DGEMM against native DGEMM element-wise.
+# Usage:  ./build/fp64_emul_correctness [N]   (default N=128)
+add_executable(fp64_emul_correctness
+    src/fp64_emul_correctness.cpp)
+
+set_source_files_properties(
+    src/fp64_emul_correctness.cpp
+    PROPERTIES LANGUAGE HIP)
+
+target_link_libraries(fp64_emul_correctness
+    PRIVATE
+        hipblaslt_bt
+        hip::device)
+
+target_include_directories(fp64_emul_correctness
+    PRIVATE
+        "/opt/rocm/include")
+
+target_compile_features(fp64_emul_correctness PRIVATE cxx_std_17)
+
+set_target_properties(fp64_emul_correctness PROPERTIES
+    BUILD_RPATH  "${HIPBLASLT_BUILD_DIR}/library"
+    INSTALL_RPATH "${HIPBLASLT_BUILD_DIR}/library")
