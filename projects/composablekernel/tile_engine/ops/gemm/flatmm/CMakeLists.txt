@@ -4,6 +4,7 @@
 set(FLATMM_DATATYPE "fp16;fp8;bf16;bf8" CACHE STRING "List of datatypes for FLATMM (semicolon-separated)")
 set(FLATMM_LAYOUT "rcr" CACHE STRING "List of layouts for FLATMM (semicolon-separated)")
 set(FLATMM_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
+set(FLATMM_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 option(ENABLE_CCACHE_FLATMM "Enable ccache for FLATMM ops compilation" OFF)
 
 set(FLATMM_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
@@ -41,7 +42,7 @@ function(create_individual_flatmm_target datatype layout trait tile_config confi
         ${instance_header}
     )
 
-    set_property(TARGET ${target_name} PROPERTY HIP_ARCHITECTURES ${target_archs})
+    set_property(TARGET ${target_name} PROPERTY HIP_ARCHITECTURES ${FLATMM_GPU_TARGETS_INDIVIDUAL})
 
     target_compile_definitions(${target_name} PRIVATE
         FLATMM_SINGLE_INSTANCE_HPP="${instance_header}"
@@ -95,7 +96,27 @@ function(build_individual_flatmm_targets datatype layout)
 
     file(MAKE_DIRECTORY ${working_path})
 
+    set(extra_list_args "")
+    if(NOT "${FLATMM_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${FLATMM_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     message(VERBOSE "Generating FLATMM kernels for ${datatype} ${layout}")
+    message(VERBOSE "COMMAND: ${Python3_EXECUTABLE} -u ${CMAKE_CURRENT_LIST_DIR}/flatmm_instance_builder.py
+                --working_path ${working_path}
+                --datatype ${datatype}
+                --layout ${layout}
+                --config_json ${json_blob}
+                --gpu_target ${FLATMM_GPU_TARGETS_CSV}
+                --list_kernels
+                ${extra_list_args}")
     execute_process(
         COMMAND ${Python3_EXECUTABLE} -u ${CMAKE_CURRENT_LIST_DIR}/flatmm_instance_builder.py
                 --working_path ${working_path}
@@ -104,6 +125,7 @@ function(build_individual_flatmm_targets datatype layout)
                 --config_json ${json_blob}
                 --gpu_target "${FLATMM_GPU_TARGETS_CSV}"
                 --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -211,6 +233,20 @@ else()
     foreach(scheduler IN LISTS FLATMM_SCHEDULERS)
         add_custom_target(benchmark_flatmm_${scheduler}_scheduler)
     endforeach()
+
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap larger than any combo's
+    # feasible set.
+    if(NOT "${FLATMM_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH FLATMM_DATATYPE _flatmm_n_dt)
+        list(LENGTH FLATMM_LAYOUT _flatmm_n_lay)
+        math(EXPR _flatmm_n_combos "${_flatmm_n_dt} * ${_flatmm_n_lay}")
+        if(_flatmm_n_combos GREATER 0)
+            math(EXPR FLATMM_MAX_INSTANCES
+                "${FLATMM_MAX_INSTANCES} / ${_flatmm_n_combos}")
+            message(STATUS "  flatmm: per-combo budget = ${FLATMM_MAX_INSTANCES} (${_flatmm_n_combos} combos)")
+        endif()
+    endif()
 
     foreach(dt IN LISTS FLATMM_DATATYPE)
         foreach(l IN LISTS FLATMM_LAYOUT)

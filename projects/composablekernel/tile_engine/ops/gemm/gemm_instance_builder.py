@@ -676,7 +676,7 @@ struct SelectedKernel {{
             if self.kernel_name_prefix == "flatmm":
                 instance_code += f"""
     static constexpr int N_Repeat          = TileN / WarpTileN / WarpPerBlock_N;
-    static constexpr bool PermuteN = N_Repeat % 4 == 0;"""
+    static constexpr bool TiledMMAPermuteN = N_Repeat % 4 == 0;"""
 
         return instance_code
 
@@ -1069,7 +1069,7 @@ struct SelectedKernel {{
                                              NumWaveGroups,
                                              false,
                                              1,
-                                             PermuteN>>;
+                                             TiledMMAPermuteN>>;
 
         using Kernel = ck_tile::FlatmmKernel<TilePartitioner, CodegenFlatmmPipeline, GemmEpilogue>;
 

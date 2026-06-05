@@ -47,7 +47,18 @@ class FlatmmKernelBuilder(GemmKernelBuilder):
     DEFAULT_SMEM_CAPACITY_BYTES = 65536
     GFX950_SMEM_CAPACITY_BYTES = 163840
 
-    def __init__(self, working_path, gpu_target, datatype, layout, config_json):
+    def __init__(
+        self,
+        working_path,
+        gpu_target,
+        datatype,
+        layout,
+        config_json,
+        max_instances=None,
+        seed=None,
+        tier=None,
+        manifest_path=None,
+    ):
         self.gpu_targets = normalize_gpu_targets(gpu_target)
         super().__init__(
             "flatmm",
@@ -56,6 +67,10 @@ class FlatmmKernelBuilder(GemmKernelBuilder):
             datatype,
             layout,
             config_json,
+            max_instances=max_instances,
+            seed=seed,
+            tier=tier,
+            manifest_path=manifest_path,
         )
 
     @staticmethod
@@ -253,6 +268,28 @@ def main():
     parser.add_argument("--kernel_name", help="Kernel name for single generation")
     parser.add_argument("--tile_config", help="Tile configuration string for single generation")
     parser.add_argument("--trait_combo", help="Trait combination string for single generation")
+    parser.add_argument(
+        "--max-instances",
+        type=int,
+        default=None,
+        help="Cap on number of kernel instances per (dtype, layout) combo",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="RNG seed for deterministic sampling; if omitted, derived from today's date",
+    )
+    parser.add_argument(
+        "--tier",
+        default=None,
+        help="Sampling tier (daily/weekly)",
+    )
+    parser.add_argument(
+        "--manifest-path",
+        default=None,
+        help="Directory for chosen_instances.json",
+    )
 
     args = parser.parse_args()
 
@@ -262,6 +299,10 @@ def main():
         args.datatype,
         args.layout,
         args.config_json,
+        max_instances=args.max_instances,
+        seed=args.seed,
+        tier=args.tier,
+        manifest_path=args.manifest_path,
     )
 
     if args.list_kernels:

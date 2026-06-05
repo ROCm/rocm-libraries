@@ -2,21 +2,21 @@
 
 | Op | CK Tile Kernel | fp16 | fp8 | bf16 | bf8 | int8 | fp4 | fp6 | rcr | rrr | ccr | crr | 90a | 942 | 950 | 1201 | Op Weight |
 |:--:|----------------|:----:|:---:|:----:|:---:|:----:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:----:|:---------:|
-| GEMM | gemm_universal [1][2]<br>engine: gemm_universal/<br>example: 03_gemm/ | ✅ | ✅ | ✅ | ✅ | ❌ | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 0.0910 |
-| GEMM | gemm_multi_d [3]<br>engine: gemm_multi_d/<br>example: 19_gemm_multi_d/ | ✅ | | | | | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | 0.0909 |
-| GEMM | gemm_preshuffle [4]<br>engine: gemm_preshuffle/ | ✅ | ✅ | ✅ | ✅ | | | | ✅ | | | | ✅ | ✅ | ✅ | ❌ | 0.0909 |
+| GEMM | gemm_universal [1][2]<br>engine: gemm_universal/<br>example: 03_gemm/ | ✅ | ✅ | ✅ | ✅ | ❌ | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 0.0833 |
+| GEMM | gemm_multi_d [3]<br>engine: gemm_multi_d/<br>example: 19_gemm_multi_d/ | ✅ | | | | | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | 0.0833 |
+| GEMM | gemm_preshuffle [4]<br>engine: gemm_preshuffle/ | ✅ | ✅ | ✅ | ✅ | | | | ✅ | | | | ✅ | ✅ | ✅ | ❌ | 0.0833 |
 | GEMM | streamk_gemm [5][6][7]<br>engine: gemm_streamk/<br>example: 40_streamk_gemm/ | ✅ | ✅ | ❌ | ❌ | | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | |
 | GEMM | batched_gemm<br>example: 16_batched_gemm/ | ❌ | | | | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ | |
-| GEMM | batched_contraction<br>example: 41_batched_contraction/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ❌ | 0.0909 |
-| GEMM | block_scale_gemm/gemm_rowcolquant [9]<br>engine: block_scale_gemm/gemm_rowcolquant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | | | | ❌ | ✅ | ✅ | ✅ | 0.0909 |
-| GEMM | block_scale_gemm/gemm_tensor_quant [9]<br>engine: block_scale_gemm/gemm_tensor_quant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | 0.0909 |
-| GEMM | flatmm<br>example: 18_flatmm/ | ❌ | ❌ | ❌ | ❌ | | ❌ | ❌ | ❌ | | | | ❌ | ❌ | ❌ | ❌ | |
-| GEMM | gemm_multi_abd<br>example: 22_gemm_multi_abd/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ✅ | 0.0909 |
+| GEMM | batched_contraction<br>example: 41_batched_contraction/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ❌ | 0.0833 |
+| GEMM | block_scale_gemm/gemm_rowcolquant [9]<br>engine: block_scale_gemm/gemm_rowcolquant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | | | | ❌ | ✅ | ✅ | ✅ | 0.0833 |
+| GEMM | block_scale_gemm/gemm_tensor_quant [9]<br>engine: block_scale_gemm/gemm_tensor_quant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | 0.0833 |
+| GEMM | flatmm<br>engine: gemm/flatmm/<br>example: 18_flatmm/ | ✅ | ✅ | ✅ | ✅ | | | | ✅ | | | | ✅ | ✅ | ✅ | ❌ | 0.0833 |
+| GEMM | gemm_multi_abd<br>example: 22_gemm_multi_abd/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ✅ | 0.0833 |
 | GEMM | gemm_quant | | ❌ | | ❌ | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ | |
-| GEMM | grouped_gemm [10]<br>engine: grouped_gemm/<br>example: 17_grouped_gemm/ | ✅ | ✅ | | | | | | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | 0.0909 |
-| GEMM | grouped_gemm_quant/grouped_gemm_rowcolquant<br>engine: grouped_gemm_quant/grouped_gemm_rowcolquant/ | | ✅ | | ✅ | | | | ✅ | | | | | ✅ | ✅ | ✅ | 0.0909 |
-| GEMM | grouped_gemm_quant/grouped_gemm_tensorquant<br>engine: grouped_gemm_quant/grouped_gemm_tensorquant/ | | ✅ | | ✅ | | | | ✅ | | | | | ✅ | ✅ | ✅ | 0.0909 |
-| GEMM | mx_gemm<br>engine: gemm/mx_gemm/ | | ✅ | | | | ✅ | | ✅ | | | | | ✅ | ✅ | ❌ | 0.0909 |
+| GEMM | grouped_gemm [10]<br>engine: grouped_gemm/<br>example: 17_grouped_gemm/ | ✅ | ✅ | | | | | | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | 0.0833 |
+| GEMM | grouped_gemm_quant/grouped_gemm_rowcolquant<br>engine: grouped_gemm_quant/grouped_gemm_rowcolquant/ | | ✅ | | ✅ | | | | ✅ | | | | | ✅ | ✅ | ✅ | 0.0833 |
+| GEMM | grouped_gemm_quant/grouped_gemm_tensorquant<br>engine: grouped_gemm_quant/grouped_gemm_tensorquant/ | | ✅ | | ✅ | | | | ✅ | | | | | ✅ | ✅ | ✅ | 0.0833 |
+| GEMM | mx_gemm<br>engine: gemm/mx_gemm/ | | ✅ | | | | ✅ | | ✅ | | | | | ✅ | ✅ | ❌ | 0.0833 |
 | Reduce | multi_reduce2d [8]<br>engine: reduce/<br>example: 05_reduce/ | ✅ | | ❌ | | | | | | | | | ❌ | ✅ | ✅ | ❌ |
 | Reduce | reduce2d<br>example: 05_reduce/ | ❌ | | ❌ | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
 | Attention | fmha<br>engine: fmha/<br>example: 01_fmha/ | ✅ | ✅ | ✅ | ❌ | | | | | | | | ✅ | ✅ | ✅ | ❌ |
@@ -41,7 +41,7 @@
 - **Green cell** (✅): CK Tile implementation exists **and** the tile engine supports it.
 - **Red cell** (❌): CK Tile implementation exists **but** the tile engine does **not** support it.
 - **Grey cell** (blank): No CK Tile implementation exists for this combination.
-- **Op Weight column:** Sampling budget weight assigned to each op in `sampling/op_weights.json`. Ops without a weight are not part of the daily sampling tier. All weighted ops share an equal weight of ~0.0909 (sum = 1.0).
+- **Op Weight column:** Sampling budget weight assigned to each op in `sampling/op_weights.json`. Ops without a weight are not part of the daily sampling tier. All weighted ops share an equal weight of ~0.0833 (sum = 1.0).
 
 **Notes:**
 - All CK Tile GEMM and reduce kernels are architecturally generic (no compile-time GPU guards). The gfx filtering in the tile engine is a validation/testing scope decision, not a code limitation.
