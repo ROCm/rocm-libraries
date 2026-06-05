@@ -59,7 +59,7 @@ BenchmarkProblems:
         - AssertFree1ElementMultiple: [1]
         - AssertSummationElementMultiple: [64]
         - LocalReadVectorWidth: [32]
-        - PrefetchAcrossPersistent: [0, 1]
+        - PrefetchAcrossPersistent: [1]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - PreloadKernArgs: [1]

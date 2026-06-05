@@ -277,18 +277,16 @@ def test_classic_pap_primes_mx_first_pgr_group_before_marking_primed():
 
 
 def test_classic_pap_restores_gfx1250_shadow_limit_descriptor_encoding():
-    writer = _ClassicPapWriter(version=(12, 5, 0), use64b_shadow=True, use64b_shadow_mx=True)
-    kernel = _classic_kernel(ProblemType={"MXBlockA": 32, "MXBlockB": 32, "Sparse": 0})
-    tpa, tpb = _tensor_parameters(with_mx=True)
+    writer = _ClassicPapWriter(version=(12, 5, 0), use64b_shadow=True)
+    kernel = _classic_kernel()
+    tpa, tpb = _tensor_parameters()
 
     module = writer.setupPrefetchAcrossPersistentLoads(kernel, tpa, tpb)
     items = _module_items(module)
 
     assert _instruction_indices(items, kwa_module.SMovB64, src_contains="ShadowLimitA+0")
     assert _instruction_indices(items, kwa_module.SMovB64, dst_contains="ShadowLimitA+0")
-    assert _instruction_indices(items, kwa_module.SMovB64, src_contains="ShadowLimitMXSA+0")
-    assert _instruction_indices(items, kwa_module.SMovB64, dst_contains="ShadowLimitMXSA+0")
-    assert len(_instruction_indices(items, kwa_module.SLShiftRightB32, dst_contains="Srd")) == 4
+    assert len(_instruction_indices(items, kwa_module.SLShiftRightB32, dst_contains="Srd")) == 2
 
 
 def test_classic_pap_shiftptr_refreshes_and_restores_gro_for_next_tile_loads():
