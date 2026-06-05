@@ -12,6 +12,7 @@
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
 
+#include "../TestPlanCommon.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
@@ -114,15 +115,6 @@ std::pair<flatbuffers::FlatBufferBuilder, RMSnormFwdPlan>
     return {std::move(builder), RMSnormFwdPlan{std::move(params)}};
 }
 
-hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
-{
-    hipDeviceProp_t deviceProps = {};
-    deviceProps.multiProcessorCount = 60;
-    deviceProps.warpSize = 64;
-    std::snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", archName);
-    return deviceProps;
-}
-
 } // namespace
 
 // ============================================================================
@@ -132,14 +124,14 @@ hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
 TEST(TestRMSnormFwdPlan, ExecuteWithoutCompileThrows)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestRMSnormFwdPlan, GetWorkspaceSizeReturnsZero)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
@@ -148,7 +140,7 @@ TEST(TestRMSnormFwdPlan, IsMoveConstructible)
     auto [fbb, plan] = createPlanFromGraph();
 
     const RMSnormFwdPlan moved(std::move(plan));
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 

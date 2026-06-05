@@ -3,9 +3,6 @@
 
 #pragma once
 
-#include "DefaultConfiguration.hpp"
-
-#include "Bfloat16Dev.hpp"
 #include "VectorTypes.hpp"
 #include <type_traits>
 
@@ -72,14 +69,14 @@ struct proto_config
 } // namespace detail
 
 using config = detail::proto_config<HIP_PLUGIN_LAYOUT_NHWC,
-                                    HIP_PLUGIN_SAVE_MEAN_VARIANCE,
-                                    HIP_PLUGIN_RUNNING_RESULT,
+                                    HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE,
+                                    HIP_PLUGIN_BN_RUNNING_RESULT,
                                     HIP_PLUGIN_USE_FP16,
                                     HIP_PLUGIN_USE_FP32,
                                     HIP_PLUGIN_USE_FPMIX,
                                     HIP_PLUGIN_USE_BFPMIX,
                                     HIP_PLUGIN_USE_AMDGCN,
-                                    HIP_PLUGIN_NRN_OP_ID>;
+                                    HIP_PLUGIN_BN_NRN_OP_ID>;
 
 } // namespace hip_kernel_provider
 
@@ -102,16 +99,16 @@ enum class architecture : int
 namespace detail
 {
 
-// TODO: why this is here, becasue before c++ 20, double is not supported to be template parameter
+// TODO: why this is here, because before c++ 20, double is not supported to be template parameter
 struct half_max
 {
-    static constexpr double value = HALF_MAX;
+    static constexpr double value = 65504;
 };
 
-// TODO: why this is here, becasue before c++ 20, double is not supported to be template parameter
+// TODO: why this is here, because before c++ 20, double is not supported to be template parameter
 struct flt_max
 {
-    static constexpr double value = FLT_MAX;
+    static constexpr double value = 3.402823466e+38;
 };
 
 template <int Grp0, int Grp1, int Grp2>
@@ -264,10 +261,10 @@ using config = hip_kernel_provider::batchnorm::detail::proto_config<
     hip_kernel_provider::batchnorm::detail::flt_max,
     hip_kernel_provider::batchnorm::detail::
         launch_dimension<HIP_PLUGIN_BN_GRP0, HIP_PLUGIN_BN_GRP1, HIP_PLUGIN_BN_GRP2>,
-    hip_kernel_provider::batchnorm::detail::architecture_switch<HIP_PLUGIN_BN_GFX103X,
-                                                                HIP_PLUGIN_BN_GFX110X,
-                                                                HIP_PLUGIN_BN_GFX120X,
-                                                                HIP_PLUGIN_BN_GFX115X>,
+    hip_kernel_provider::batchnorm::detail::architecture_switch<HIP_PLUGIN_GFX103X,
+                                                                HIP_PLUGIN_GFX110X,
+                                                                HIP_PLUGIN_GFX120X,
+                                                                HIP_PLUGIN_GFX115X>,
     HIP_PLUGIN_BN_VARIANT,
     HIP_PLUGIN_BN_NCHW,
     HIP_PLUGIN_BN_MAXN,

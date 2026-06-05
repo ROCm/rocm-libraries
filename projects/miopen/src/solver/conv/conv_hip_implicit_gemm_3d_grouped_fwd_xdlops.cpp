@@ -60,7 +60,7 @@ namespace {
 // ============================================================================
 
 // clang-format off
-constexpr SolverHeuristicConfig k3DFwdSolverConfig = {
+[[maybe_unused]] constexpr SolverHeuristicConfig k3DFwdSolverConfig = {
     /* solver_name                 */ "ConvHipImplicitGemm3DGroupFwdXdlops",
     /* solver_name_ktn             */ "ConvHipImplicitGemm3DGroupFwdXdlops", // No KTN for 3D
     /* spatial_dims                */ 3,
