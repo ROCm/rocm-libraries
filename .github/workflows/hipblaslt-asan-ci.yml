@@ -309,9 +309,13 @@ jobs:
           set -euo pipefail
           OUT="${GITHUB_WORKSPACE}/build"
           ASAN_RT_DIR="$(dirname "$(find "$OUT/lib/llvm/lib/clang" -name 'libclang_rt.asan-x86_64.so' | head -1)")"
+          LSAN_SUPP="${GITHUB_WORKSPACE}/rocm-libraries/test/therock/lsan.supp"
           {
-            echo "ASAN_OPTIONS=detect_odr_violation=0:quarantine_size_mb=600:detect_leaks=0:new_delete_type_mismatch=0"
-            echo "LSAN_OPTIONS=print_suppressions=0"
+            # Full checks ON (ODR, leaks, new/delete). Only the ROCm HSA-runtime
+            # teardown leaks are suppressed via lsan.supp; real BLAS leaks/errors
+            # still fail the leg.
+            echo "ASAN_OPTIONS=quarantine_size_mb=600"
+            echo "LSAN_OPTIONS=suppressions=${LSAN_SUPP}:print_suppressions=0"
             echo "HSA_XNACK=1"
             echo "ASAN_SYMBOLIZER_PATH=${OUT}/lib/llvm/bin/llvm-symbolizer"
             echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"

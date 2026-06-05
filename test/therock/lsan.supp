@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+# LeakSanitizer suppressions for the ASAN CI (.github/workflows/hipblaslt-asan-ci.yml).
+#
+# These suppress *only* the ROCm HSA runtime's process-teardown leaks — signal,
+# queue, and KFD event objects that libhsa-runtime64.so allocates once and never
+# frees at exit. They are runtime internals, not defects in any BLAS library, and
+# every BLAS/SOLVER test binary reports the identical set (~5784 bytes / 101 allocs
+# rooted in rocr::AMD::hsa_amd_signal_create / AqlQueue / hsaKmtCreateEventCtx).
+#
+# Scope is deliberately narrow: a leak whose stack does NOT pass through one of
+# these frames (e.g. an actual leak in rocBLAS/rocSOLVER/hipSOLVER/hipBLAS/hipBLASLt)
+# is NOT suppressed and still fails the job. This keeps leak detection ON without
+# red-flagging the unactionable runtime teardown noise.
+leak:rocr::AMD::
+leak:hsaKmt
+leak:libhsa-runtime64.so
