@@ -13,6 +13,8 @@
 
 #pragma once
 
+#include "mfma_tile_gemm.hpp"
+
 #include <hip/hip_runtime.h>
 
 #include <cstddef>
@@ -91,7 +93,8 @@ void split_gemm(const float* A,
                 int kTile,
                 ReduceStrategy strategy,
                 hipStream_t stream = nullptr,
-                SplitGemmWorkspace* ws = nullptr);
+                SplitGemmWorkspace* ws = nullptr,
+                AccumKLoopPolicy accum_policy = AccumKLoopPolicy::Naive);
 
 /// Batched variant: A, B, C are contiguous batches separated by the
 /// given strides. Calls split_gemm per batch on the same stream.

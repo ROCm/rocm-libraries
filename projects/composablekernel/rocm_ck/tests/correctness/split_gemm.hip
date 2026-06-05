@@ -3,9 +3,11 @@
 //
 // Split-accumulation GPU reference GEMM implementation.
 //
-// The tile kernel is a simple one-thread-per-output-element GEMM over
-// a K-slice. For FP32 the tile kernel is trivially correct: each thread
-// accumulates min(kTile, K_remaining) FP32 products sequentially.
+// Tile engine dispatch:
+//   - MFMA kernel for aligned sizes (M%128==0, N%128==0, K_tile%16==0)
+//   - Naive fallback for non-aligned sizes
+//
+// CK convention: C[M,N] = sum_k A[M,K] * B[N,K]  (B is [N,K])
 
 #include "split_gemm.hpp"
 
@@ -19,7 +21,7 @@
 namespace rocm_ck::test {
 
 // =========================================================================
-// Workspace: pre-allocate all device buffers once
+// Workspace
 // =========================================================================
 
 SplitGemmWorkspace::SplitGemmWorkspace(int max_M, int max_N, int max_K, int min_kTile)
@@ -32,7 +34,6 @@ SplitGemmWorkspace::SplitGemmWorkspace(int max_M, int max_N, int max_K, int min_
     partials_bytes = static_cast<size_t>(num_tiles) * MN * sizeof(float);
     HIP_CHECK_ERROR(hipMalloc(&partials, partials_bytes));
 
-    // HP buffers
     HIP_CHECK_ERROR(hipMalloc(&a_hi, MK * sizeof(float)));
     HIP_CHECK_ERROR(hipMalloc(&a_lo, MK * sizeof(float)));
     HIP_CHECK_ERROR(hipMalloc(&b_hi, KN * sizeof(float)));
@@ -44,9 +45,8 @@ SplitGemmWorkspace::SplitGemmWorkspace(int max_M, int max_N, int max_K, int min_
     HIP_CHECK_ERROR(hipMalloc(&sum_buf, MN * sizeof(float)));
     HIP_CHECK_ERROR(hipMalloc(&err_buf, MN * sizeof(float)));
 
-    // Test I/O buffers
     d_A_bytes = MK * sizeof(float);
-    d_B_bytes = static_cast<size_t>(std::max(MK, KN)) * sizeof(float); // max(M*K, N*K)
+    d_B_bytes = static_cast<size_t>(std::max(MK, KN)) * sizeof(float);
     d_C_bytes = MN * sizeof(float);
     HIP_CHECK_ERROR(hipMalloc(&d_A, d_A_bytes));
     HIP_CHECK_ERROR(hipMalloc(&d_B, d_B_bytes));
@@ -72,21 +72,18 @@ SplitGemmWorkspace::~SplitGemmWorkspace()
 }
 
 // =========================================================================
-// Tile GEMM kernel
+// Naive tile kernel (fallback for non-aligned sizes)
 // =========================================================================
 
-// CK convention: C[i,j] = sum_{k in tile} A[i,k] * B[j,k]
-//   A is [M, K_full] row-major (stride = K_full)
-//   B is [N, K_full] row-major (stride = K_full)  ← CK convention: B is [N,K]
-//   partial is [M, N] row-major (stride = N)
-__global__ void tile_gemm_kernel(const float* __restrict__ A,
-                                 const float* __restrict__ B,
-                                 float* __restrict__ partial,
-                                 int M,
-                                 int N,
-                                 int K_full,
-                                 int k_offset,
-                                 int K_tile)
+// C[i,j] = sum_{k in tile} A[i,k] * B[j,k]   (B is [N,K])
+__global__ void tile_gemm_naive_kernel(const float* __restrict__ A,
+                                       const float* __restrict__ B,
+                                       float* __restrict__ partial,
+                                       int M,
+                                       int N,
+                                       int K_full,
+                                       int k_offset,
+                                       int K_tile)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int row = idx / N;
@@ -105,6 +102,38 @@ __global__ void tile_gemm_kernel(const float* __restrict__ A,
 }
 
 // =========================================================================
+// Tile kernel dispatch
+// =========================================================================
+
+static void launch_tile_gemm(const float* A,
+                              const float* B,
+                              float* partial,
+                              int M,
+                              int N,
+                              int K,
+                              int k_offset,
+                              int k_tile_len,
+                              hipStream_t stream,
+                              AccumKLoopPolicy accum_policy = AccumKLoopPolicy::Naive)
+{
+    if(can_use_mfma(M, N, k_tile_len))
+    {
+        launch_mfma_tile_gemm(
+            A, B, partial, M, N, K, k_offset, k_tile_len, stream, accum_policy);
+    }
+    else
+    {
+        long MN          = static_cast<long>(M) * N;
+        constexpr int kB = 256;
+        int grid         = static_cast<int>((MN + kB - 1) / kB);
+
+        tile_gemm_naive_kernel<<<grid, kB, 0, stream>>>(
+            A, B, partial, M, N, K, k_offset, k_tile_len);
+        HIP_CHECK_ERROR(hipGetLastError());
+    }
+}
+
+// =========================================================================
 // split_gemm
 // =========================================================================
 
@@ -117,7 +146,8 @@ void split_gemm(const float* A,
                 int kTile,
                 ReduceStrategy strategy,
                 hipStream_t stream,
-                SplitGemmWorkspace* ws)
+                SplitGemmWorkspace* ws,
+                AccumKLoopPolicy accum_policy)
 {
     if(M <= 0 || N <= 0 || K <= 0)
         return;
@@ -125,8 +155,7 @@ void split_gemm(const float* A,
     int num_tiles = (K + kTile - 1) / kTile;
     long MN       = static_cast<long>(M) * N;
 
-    // Use workspace or allocate
-    float* partials   = nullptr;
+    float* partials    = nullptr;
     bool owns_partials = false;
     if(ws)
     {
@@ -138,17 +167,13 @@ void split_gemm(const float* A,
         owns_partials = true;
     }
 
-    constexpr int kBlock = 256;
-    int grid             = static_cast<int>((MN + kBlock - 1) / kBlock);
-
     for(int t = 0; t < num_tiles; ++t)
     {
         int k_offset   = t * kTile;
         int k_tile_len = std::min(kTile, K - k_offset);
 
-        tile_gemm_kernel<<<grid, kBlock, 0, stream>>>(
-            A, B, partials + t * MN, M, N, K, k_offset, k_tile_len);
-        HIP_CHECK_ERROR(hipGetLastError());
+        launch_tile_gemm(
+            A, B, partials + t * MN, M, N, K, k_offset, k_tile_len, stream, accum_policy);
     }
 
     if(num_tiles == 1)
@@ -180,7 +205,7 @@ __global__ void veltkamp_split_kernel(const float* __restrict__ in,
     if(i >= count)
         return;
 
-    constexpr float kFactor = 4097.0f; // 2^12 + 1
+    constexpr float kFactor = 4097.0f;
 
     float a    = in[i];
     float c    = a * kFactor;
@@ -267,7 +292,6 @@ void split_gemm_hp(const float* A,
     long KN = static_cast<long>(K) * N;
     long MN = static_cast<long>(M) * N;
 
-    // Use workspace or allocate
     float *l_a_hi, *l_a_lo, *l_b_hi, *l_b_lo;
     float *l_p0, *l_p1, *l_p2, *l_p3;
     float *l_sum_buf, *l_err_buf;
@@ -311,14 +335,10 @@ void split_gemm_hp(const float* A,
     {
         int k_len = std::min(kTile, K - k);
 
-        tile_gemm_kernel<<<grid, kBlock, 0, stream>>>(l_a_hi, l_b_hi, l_p0, M, N, K, k, k_len);
-        HIP_CHECK_ERROR(hipGetLastError());
-        tile_gemm_kernel<<<grid, kBlock, 0, stream>>>(l_a_hi, l_b_lo, l_p1, M, N, K, k, k_len);
-        HIP_CHECK_ERROR(hipGetLastError());
-        tile_gemm_kernel<<<grid, kBlock, 0, stream>>>(l_a_lo, l_b_hi, l_p2, M, N, K, k, k_len);
-        HIP_CHECK_ERROR(hipGetLastError());
-        tile_gemm_kernel<<<grid, kBlock, 0, stream>>>(l_a_lo, l_b_lo, l_p3, M, N, K, k, k_len);
-        HIP_CHECK_ERROR(hipGetLastError());
+        launch_tile_gemm(l_a_hi, l_b_hi, l_p0, M, N, K, k, k_len, stream);
+        launch_tile_gemm(l_a_hi, l_b_lo, l_p1, M, N, K, k, k_len, stream);
+        launch_tile_gemm(l_a_lo, l_b_hi, l_p2, M, N, K, k, k_len, stream);
+        launch_tile_gemm(l_a_lo, l_b_lo, l_p3, M, N, K, k, k_len, stream);
 
         accumulate_tile_ozaki_kernel<<<grid, kBlock, 0, stream>>>(
             l_sum_buf, l_err_buf, l_p0, l_p1, l_p2, l_p3, MN_int);

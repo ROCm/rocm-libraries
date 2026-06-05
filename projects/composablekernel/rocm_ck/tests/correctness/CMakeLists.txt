@@ -31,6 +31,7 @@ set_tests_properties(rocm_ck_cpu_ref_validation PROPERTIES
 # ---------------------------------------------------------------------------
 add_executable(rocm_ck_split_gemm_test
     split_gemm.hip
+    mfma_tile_gemm.hip
     reduce_kernels.hip
     test_split_gemm.hip
 )
