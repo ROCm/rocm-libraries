@@ -551,15 +551,16 @@ size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_
     const size_t ldb8i      = lda8i;
     const size_t ldc32i     = cola8i;
     const size_t padn       = oz2_pad(static_cast<size_t>(n));
+    const size_t szC32i     = ldc32i * static_cast<size_t>(n);
     const unsigned chunk_sz = oz2_compute_chunk_size(m, n, num_moduli);
 
-    return   chunk_sz * lda8i * cola8i * sizeof(int8_t)                    /* A8i batch  */
-           + chunk_sz * ldb8i * static_cast<size_t>(n) * sizeof(int8_t)    /* B8i batch  */
-           + chunk_sz * ldc32i * static_cast<size_t>(n) * sizeof(int32_t)  /* C32i batch */
-           + ldc32i * static_cast<size_t>(n) * sizeof(double) * 2          /* Zhi + Zlo */
-           + cola8i * sizeof(int16_t)                                       /* sftA */
-           + padn   * sizeof(int16_t)                                       /* sftB */
-           + sizeof(uint32_t);                                               /* nan_flag */
+    return   chunk_sz * lda8i * cola8i * sizeof(int8_t)                   /* A8i batch  */
+           + chunk_sz * ldb8i * static_cast<size_t>(n) * sizeof(int8_t)   /* B8i batch  */
+           + chunk_sz * szC32i * sizeof(int32_t)                           /* C32i batch */
+           + szC32i * sizeof(double) * 2                                   /* Zhi + Zlo  */
+           + cola8i * sizeof(int16_t)                                      /* sftA       */
+           + padn   * sizeof(int16_t)                                      /* sftB       */
+           + sizeof(uint32_t);                                              /* nan_flag   */
 }
 
 /**
@@ -1112,6 +1113,17 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     const unsigned chunk_size = oz2_compute_chunk_size(m, n, num_moduli);
 
     /* ------------------------------------------------------------------
+     * Padding / stride constants — needed both for the INT8 workspace
+     * query below and for the workspace layout that follows.
+     * ------------------------------------------------------------------ */
+    const size_t lda8i  = oz2_pad(static_cast<size_t>(k));
+    const size_t cola8i = oz2_pad(static_cast<size_t>(m));
+    const size_t ldb8i  = lda8i;
+    const size_t ldc32i = cola8i;
+    const size_t padn   = oz2_pad(static_cast<size_t>(n));
+    const size_t szC32i = ldc32i * static_cast<size_t>(n);  /* one INT32 slice */
+
+    /* ------------------------------------------------------------------
      * Workspace layout
      *
      *   lda8i      = padding(k)           — INT8 leading dim for A slices
@@ -1130,15 +1142,9 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
      *   sftB       [padn]                          INT16 per-col shifts for B
      *   nan_flag   [1]                             UINT32 Inf/NaN detection
      * ------------------------------------------------------------------ */
-    const size_t lda8i  = oz2_pad(static_cast<size_t>(k));
-    const size_t cola8i = oz2_pad(static_cast<size_t>(m));
-    const size_t ldb8i  = lda8i;
-    const size_t ldc32i = cola8i;
-    const size_t padn   = oz2_pad(static_cast<size_t>(n));
-
     const size_t szA8i    = chunk_size * lda8i * cola8i;
     const size_t szB8i    = chunk_size * ldb8i * static_cast<size_t>(n);
-    const size_t szC32i   = ldc32i * static_cast<size_t>(n);  /* one slice */
+    // szC32i already computed above
     const size_t szZhi    = szC32i;
     const size_t szZlo    = szC32i;
     const size_t szSftA   = cola8i;
@@ -1146,14 +1152,14 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     const size_t szNanFlag = 1;
 
     const size_t wsBytes =
-          szA8i           * sizeof(int8_t)
-        + szB8i           * sizeof(int8_t)
+          szA8i             * sizeof(int8_t)
+        + szB8i             * sizeof(int8_t)
         + chunk_size * szC32i * sizeof(int32_t)   /* C32i batch */
-        + szZhi           * sizeof(double)
-        + szZlo           * sizeof(double)
-        + szSftA          * sizeof(int16_t)
-        + szSftB          * sizeof(int16_t)
-        + szNanFlag       * sizeof(uint32_t);
+        + szZhi             * sizeof(double)
+        + szZlo             * sizeof(double)
+        + szSftA            * sizeof(int16_t)
+        + szSftB            * sizeof(int16_t)
+        + szNanFlag         * sizeof(uint32_t);
 
     /* Use caller-provided workspace if large enough; otherwise allocate. */
     bool   ws_owned = false;
@@ -1187,15 +1193,6 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
 
     const bool tA = (opA != HIPBLAS_OP_N);
     const bool tB = (opB != HIPBLAS_OP_N);
-
-    /* Thread-local hipBLASLt handle */
-    static thread_local hipblasLtHandle_t t_ltHandle = nullptr;
-    if(t_ltHandle == nullptr) {
-        if(hipblasLtCreate(&t_ltHandle) != HIPBLAS_STATUS_SUCCESS) {
-            (void)hipFreeAsync(ws, stream);
-            return rocblaslt_status_memory_error;
-        }
-    }
 
     /* hipBLASLt matmul descriptors */
     hipblasLtMatrixLayout_t layoutA  = nullptr;
@@ -1257,7 +1254,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     }
 
     /* Part 1c: preliminary INT8 GEMM */
-    hipblasLtMatmul(t_ltHandle, matmulDesc,
+    hipblasLtMatmul(settings.handle, matmulDesc,
                     &one_i, A8i_high, layoutA, B8i_high, layoutB,
                     &zero_i, C32i, layoutCD, C32i, layoutCD,
                     nullptr, nullptr, 0, stream);
@@ -1373,7 +1370,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         /* Part 2c: batched INT8 GEMM over 'actual' slices.
          * A8i and B8i always start at slice 0 of their buffers (no offset
          * needed since the scale kernels above wrote to positions 0..actual-1). */
-        hipblasLtMatmul(t_ltHandle, matmulDesc,
+        hipblasLtMatmul(settings.handle, matmulDesc,
                         &one_i,
                         A8i, layoutA_b,
                         B8i, layoutB_b,

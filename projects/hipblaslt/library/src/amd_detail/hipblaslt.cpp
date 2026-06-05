@@ -28,6 +28,7 @@
 #include "UserDrivenTuningParser.hpp"
 #include "check_numerics_matrix.hpp"
 #include "exceptions.hpp"
+#include "fp64_emulation.hpp"
 #include "handle.h"
 #include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
@@ -892,6 +893,22 @@ try
 catch(...)
 {
     return exception_to_hipblas_status();
+}
+
+size_t hipblasLtFp64EmulationWorkspaceSize(int64_t  m,
+                                           int64_t  n,
+                                           int64_t  k,
+                                           unsigned num_moduli)
+try
+{
+    /* Clamp num_moduli to the valid range [2, 20] used by the emulation. */
+    if(num_moduli < 2u)  num_moduli = 2u;
+    if(num_moduli > 20u) num_moduli = 20u;
+    return fp64EmulationWorkspaceSize(m, n, k, num_moduli);
+}
+catch(...)
+{
+    return 0;
 }
 
 #ifdef __cplusplus

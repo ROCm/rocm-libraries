@@ -1238,6 +1238,32 @@ HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtSetEmulationSpecialValuesSupport(hipblasLtHandle_t handle,
                                                           unsigned int      mask);
 
+/*! \ingroup library_module
+ *  \brief Compute the GPU workspace required by the FP64 emulation for a given problem.
+ *
+ *  \details
+ *  Returns the number of bytes needed in the workspace buffer that must be
+ *  passed to \ref hipblasLtMatmul when FP64 emulation is active.  The size
+ *  depends on the matrix dimensions and the number of CRT moduli used.
+ *
+ *  Pass the return value to \ref hipblasLtMatmulPreferenceSetAttribute as
+ *  \c HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES to guarantee that the
+ *  heuristic selects a compatible algorithm, and allocate at least this many
+ *  bytes for the workspace pointer supplied to \ref hipblasLtMatmul.
+ *
+ *  @param[in]  m           Number of rows of op(A) and D.
+ *  @param[in]  n           Number of columns of op(B) and D.
+ *  @param[in]  k           Shared dimension of op(A) and op(B).
+ *  @param[in]  num_moduli  Number of CRT moduli (2..20); clamped to that range.
+ *
+ *  \retval  Workspace size in bytes, or 0 on error.
+ */
+HIPBLASLT_EXPORT
+size_t hipblasLtFp64EmulationWorkspaceSize(int64_t  m,
+                                           int64_t  n,
+                                           int64_t  k,
+                                           unsigned num_moduli);
+
 #ifdef __cplusplus
 }
 #endif

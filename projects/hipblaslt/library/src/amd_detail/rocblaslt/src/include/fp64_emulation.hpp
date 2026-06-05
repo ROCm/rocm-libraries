@@ -56,10 +56,11 @@ size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_
  * Fields with sentinel values (0 for num_moduli, ~0u for sv_mask) cause the
  * function to fall back to the process-wide env var defaults.              */
 struct Fp64EmulationSettings {
-    unsigned int num_moduli;      /* 2..20; 0 = derive from env var          */
-    unsigned int sv_mask;         /* special-values mask; ~0u = env var      */
-    void*        workspace;       /* caller workspace; nullptr = allocate     */
-    size_t       workspace_bytes; /* size of caller workspace                */
+    unsigned int      num_moduli;      /* 2..20; 0 = derive from env var          */
+    unsigned int      sv_mask;         /* special-values mask; ~0u = env var      */
+    void*             workspace;       /* caller workspace; nullptr = allocate     */
+    size_t            workspace_bytes; /* size of caller workspace                */
+    hipblasLtHandle_t handle;          /* caller handle for INT8 GEMMs             */
 };
 
 /* Run an emulated FP64 GEMM using Ozaki Scheme II (accurate mode).
