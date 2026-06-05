@@ -1,0 +1,135 @@
+{
+    "name": "aotriton_test_gqa_Fp32_B1_QH10_KVH2_SQ143_SKV579_D203_CausalOff",
+    "_comment": "Extracted from ROCm/aotriton@59441e8a559425ddfe51fbc8e0acfd1d9beebbac test/test_forward.py::test_gqa; source params: BATCH=1, N_HEADS=(10, 2), D_HEAD=203, seqlen_q=143, seqlen_k=579, causal=False, dropout_p=0.0, dtype=torch.float32, sm_scale=0.125, storage_flip=False.",
+    "compute_data_type": "float",
+    "io_data_type": "float",
+    "intermediate_data_type": "float",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "query",
+            "dims": [
+                1,
+                10,
+                143,
+                203
+            ],
+            "strides": [
+                290290,
+                29029,
+                203,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "key",
+            "dims": [
+                1,
+                2,
+                579,
+                203
+            ],
+            "strides": [
+                235074,
+                117537,
+                203,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "value",
+            "dims": [
+                1,
+                2,
+                579,
+                203
+            ],
+            "strides": [
+                235074,
+                117537,
+                203,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "output",
+            "dims": [
+                1,
+                10,
+                143,
+                203
+            ],
+            "strides": [
+                290290,
+                29029,
+                203,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "sdpa_node",
+            "type": "SdpaAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "q_tensor_uid": 1,
+                "k_tensor_uid": 2,
+                "v_tensor_uid": 3,
+                "attn_mask_tensor_uid": null,
+                "scale_tensor_uid": null,
+                "seq_len_q_tensor_uid": null,
+                "seq_len_kv_tensor_uid": null,
+                "seed_tensor_uid": null,
+                "offset_tensor_uid": null,
+                "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null,
+                "page_table_k_tensor_uid": null,
+                "page_table_v_tensor_uid": null,
+                "block_mask_tensor_uid": null,
+                "sink_token_tensor_uid": null,
+                "descale_q_tensor_uid": null,
+                "descale_k_tensor_uid": null,
+                "descale_v_tensor_uid": null,
+                "descale_s_tensor_uid": null,
+                "scale_s_tensor_uid": null,
+                "scale_o_tensor_uid": null
+            },
+            "outputs": {
+                "o_tensor_uid": 4,
+                "stats_tensor_uid": null,
+                "max_tensor_uid": null,
+                "sum_exp_tensor_uid": null,
+                "rng_dump_tensor_uid": null,
+                "amax_s_tensor_uid": null,
+                "amax_o_tensor_uid": null
+            },
+            "attributes": {
+                "generate_stats": null,
+                "alibi_mask": false,
+                "padding_mask": false,
+                "causal_mask": false,
+                "causal_mask_bottom_right": false,
+                "dropout_probability": null,
+                "attn_scale_value": 0.125,
+                "left_bound": null,
+                "right_bound": null,
+                "max_seq_len_kv": null,
+                "diagonal_alignment": "TOP_LEFT",
+                "mma_core_mode": "UNSET",
+                "implementation": "AUTO"
+            }
+        }
+    ]
+}

@@ -1,0 +1,135 @@
+{
+    "name": "aotriton_test_irregular_Bf16_B3_H7_SQ1033_SKV1063_D149_CausalOn_Contiguous",
+    "_comment": "Extracted from ROCm/aotriton@59441e8a559425ddfe51fbc8e0acfd1d9beebbac test/test_forward.py::test_irregulars; source params: BATCH=3, N_HEADS=7, D_HEAD=149, seqlen_q=1033, seqlen_k=1063, causal=True, dropout_p=0.0, dtype=torch.bfloat16, sm_scale=1.2, storage_flip=None, bias_type=None.",
+    "compute_data_type": "float",
+    "io_data_type": "bfloat16",
+    "intermediate_data_type": "bfloat16",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "query",
+            "dims": [
+                3,
+                7,
+                1033,
+                149
+            ],
+            "strides": [
+                1077419,
+                153917,
+                149,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "key",
+            "dims": [
+                3,
+                7,
+                1063,
+                149
+            ],
+            "strides": [
+                1108709,
+                158387,
+                149,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "value",
+            "dims": [
+                3,
+                7,
+                1063,
+                149
+            ],
+            "strides": [
+                1108709,
+                158387,
+                149,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "output",
+            "dims": [
+                3,
+                7,
+                1033,
+                149
+            ],
+            "strides": [
+                1077419,
+                153917,
+                149,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "sdpa_node",
+            "type": "SdpaAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "q_tensor_uid": 1,
+                "k_tensor_uid": 2,
+                "v_tensor_uid": 3,
+                "attn_mask_tensor_uid": null,
+                "scale_tensor_uid": null,
+                "seq_len_q_tensor_uid": null,
+                "seq_len_kv_tensor_uid": null,
+                "seed_tensor_uid": null,
+                "offset_tensor_uid": null,
+                "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null,
+                "page_table_k_tensor_uid": null,
+                "page_table_v_tensor_uid": null,
+                "block_mask_tensor_uid": null,
+                "sink_token_tensor_uid": null,
+                "descale_q_tensor_uid": null,
+                "descale_k_tensor_uid": null,
+                "descale_v_tensor_uid": null,
+                "descale_s_tensor_uid": null,
+                "scale_s_tensor_uid": null,
+                "scale_o_tensor_uid": null
+            },
+            "outputs": {
+                "o_tensor_uid": 4,
+                "stats_tensor_uid": null,
+                "max_tensor_uid": null,
+                "sum_exp_tensor_uid": null,
+                "rng_dump_tensor_uid": null,
+                "amax_s_tensor_uid": null,
+                "amax_o_tensor_uid": null
+            },
+            "attributes": {
+                "generate_stats": null,
+                "alibi_mask": false,
+                "padding_mask": false,
+                "causal_mask": true,
+                "causal_mask_bottom_right": false,
+                "dropout_probability": null,
+                "attn_scale_value": 1.2,
+                "left_bound": null,
+                "right_bound": null,
+                "max_seq_len_kv": null,
+                "diagonal_alignment": "TOP_LEFT",
+                "mma_core_mode": "UNSET",
+                "implementation": "AUTO"
+            }
+        }
+    ]
+}
