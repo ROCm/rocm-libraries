@@ -2704,9 +2704,39 @@ double compute_total_latency(const problem_t& problem,
   double L_parallel_reduce = compute_parallel_reduction_latency(problem, hardware, config, context);
   total_latency += L_parallel_reduce;
 
+  //  6) Oversized single-tile penalty.  When one macro-tile covers the entire
+  //  per-batch problem in BOTH dims (MT_M >= M and MT_N >= N), each batch is a
+  //  single (partial) tile.  The model otherwise over-rewards this for
+  //  minimizing tile/timestep count, but the masked lanes waste compute and --
+  //  for latency-bound tiny-K batched GEMMs -- the oversized tile's low
+  //  occupancy cannot hide load latency, so it is much slower on HW (e.g.
+  //  257x160x32 B1792: MT320x192 covers the tile, model-fastest but 2.6x
+  //  slower than MT160x192).  Charge by the tile's wasted fraction.  This can
+  //  never fire for huge-N shapes (MT_N < N), so it cannot disturb the
+  //  cat-A/cat-B fixes.
+  double oversize_tile_penalty = 0.0;
+  const size_t M_prob_ot = problem.size.m;
+  const size_t N_prob_ot = problem.size.n;
+  // Gate to shallow-K (latency-bound) tiles only: when K is deep the mainloop
+  // amortizes the load latency, occupancy stops mattering, and an oversized
+  // tile is fine (deep-K tiny-N shapes are compute-bound).  k_iters <= 4
+  // separates the shallow-K batched/small cases (the regressions) from deep-K.
+  const size_t k_iters_ot = config.mt.k > 0 ? problem.size.k / config.mt.k : 0;
+  constexpr size_t OVERSIZE_K_ITERS_MAX = 4;
+  if (M_prob_ot > 0 && N_prob_ot > 0 && k_iters_ot <= OVERSIZE_K_ITERS_MAX &&
+      config.mt.m >= M_prob_ot && config.mt.n >= N_prob_ot) {
+    const double tile_area = static_cast<double>(config.mt.m) * static_cast<double>(config.mt.n);
+    const double useful    = static_cast<double>(M_prob_ot) * static_cast<double>(N_prob_ot);
+    const double util      = (tile_area > 0.0) ? std::min(useful / tile_area, 1.0) : 1.0;
+    constexpr double OVERSIZE_TILE_PENALTY = 0.5;
+    oversize_tile_penalty = OVERSIZE_TILE_PENALTY * (1.0 - util) * total_latency;
+    total_latency += oversize_tile_penalty;
+  }
+
   if (context.debug) {
     OLOG_DEBUG("L_kernel_launch: " << L_kernel_launch);
     OLOG_DEBUG("L_parallel_reduce: " << L_parallel_reduce);
+    OLOG_DEBUG("oversize_tile_penalty: " << oversize_tile_penalty);
     OLOG_DEBUG("total_latency: " << total_latency);
     OLOG_DEBUG("=================================");
   }
