@@ -109,16 +109,19 @@ def _select_tiny_configs(configs, min_count: int = 10) -> List:
 
     Uses the same category mechanism as ``_select_test_configs``
     (``_classify_config`` folds the feature category and datatype together, so a
-    represented category also represents its variant), but maximally trimmed
-    down: pick a single config per category, then round-robin fill up to
-    ``min_count`` so the set is at least ``min_count`` configs (or all available,
-    if fewer). Every feature category present in ``configs`` is represented.
+    represented category also represents its variant), additionally split by
+    spatial dimensionality so both 2D and 3D kernels are represented, but
+    maximally trimmed down: pick a single config per (category, ndim), then
+    round-robin fill up to ``min_count`` so the set is at least ``min_count``
+    configs (or all available, if fewer). Every (feature category, ndim) present
+    in ``configs`` is represented.
     """
     from collections import OrderedDict
 
-    by_category: "OrderedDict[str, list]" = OrderedDict()
+    by_category: "OrderedDict[tuple, list]" = OrderedDict()
     for cfg in configs:
-        by_category.setdefault(_classify_config(cfg), []).append(cfg)
+        key = (_classify_config(cfg), getattr(cfg, "ndim_spatial", None))
+        by_category.setdefault(key, []).append(cfg)
 
     selected: List = []
     # One per category first so every category (and thus variant) is represented.
