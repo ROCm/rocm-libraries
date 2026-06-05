@@ -8,22 +8,39 @@ reference ``C = A @ dequant(B, scales)^T``). Must run on a gfx1151 device (e.g.
 alola ``ctr-halo-*``) for the verify step; ``--no-verify`` only builds and writes
 the artifact so a remote node can run the numeric gate.
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1151.matmul_nbits_verify \
-      --m 128 --n 4096 --k 4096
+  python scripts/02_int4_matmul_nbits_verify.py --m 128 --n 4096 --k 4096
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-from ck_dsl.helpers import compile_kernel, make_gemm_manifest, write_artifact
-from ck_dsl.instances import TileSpec
-from ck_dsl.instances.common.matmul_nbits import MatMulNBitsSpec, build_matmul_nbits
-from ck_dsl.instances.common._matmul_nbits_common import _scale_wire_dtype
+ROOT = Path(__file__).resolve().parents[1]  # examples/gfx1151/gemm
+_PYROOT = Path(__file__).resolve().parents[5]  # python root
+sys.path.insert(0, str(_PYROOT))
+
+from ck_dsl.helpers import compile_kernel, make_gemm_manifest, write_artifact  # noqa: E402
+from ck_dsl.instances import TileSpec  # noqa: E402
+from ck_dsl.instances.common.matmul_nbits import MatMulNBitsSpec, build_matmul_nbits  # noqa: E402
+from ck_dsl.instances.common._matmul_nbits_common import _scale_wire_dtype  # noqa: E402
+
+
+def _write_data(name: str, payload: dict) -> None:
+    (ROOT / "data").mkdir(exist_ok=True)
+    (ROOT / "data" / f"{name}.json").write_text(json.dumps(payload, indent=2))
+
+
+def _subprocess_env() -> dict:
+    """Ensure the run_manifest child can import ck_dsl under file-run."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(_PYROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    return env
 
 
 def _large_n_spec(name: str, n: int, k: int, group: int, scale_dtype: str) -> MatMulNBitsSpec:
@@ -148,7 +165,7 @@ def main() -> int:
         f"{args.m},{args.n},{args.k}",
         "--verify",
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=_subprocess_env())
     sys.stdout.write(r.stdout)
     if r.returncode != 0 and "max_abs_diff" not in r.stdout:
         sys.stderr.write(r.stderr[-2000:])
@@ -163,6 +180,15 @@ def main() -> int:
     print(
         f"[{args.arch}] MatMulNBits {args.m}x{args.n}x{args.k} g{args.group_size}: "
         f"max_abs_diff={max_abs:.3e} tol={args.tol:.0e} -> {'PASS' if ok else 'FAIL'}"
+    )
+    _write_data(
+        "02_int4_matmul_nbits_verify",
+        {
+            "kernel": "matmul_nbits large_n (int4 weight-only, W4A16)",
+            "shape": {"M": args.m, "N": args.n, "K": args.k},
+            "group_size": args.group_size, "scale_dtype": args.scale_dtype,
+            "tol": args.tol, "max_abs_diff": max_abs, "pass": ok,
+        },
     )
     return 0 if ok else 1
 

@@ -559,6 +559,25 @@ class _Lowerer:
             f"{_name(a)}, {_name(b)}, {_name(c)});"
         )
 
+    # ---- WMMA iu8 (RDNA3/3.5, gfx11, wave32) — integer matrix engine ----
+    #
+    # The integer twin of the f16 WMMA handler. Per-lane A/B operands are
+    # ``i32x4`` (16 int8 packed 4-per-i32) and the accumulator / result are
+    # ``i32x8``. The builtin's two leading bool flags select each operand's
+    # *signedness* (``true`` => signed; verified on gfx11 — passing ``false``
+    # makes the unit compute the *unsigned* dot product), and the trailing bool
+    # is the clamp flag (``false`` => exact i32 wrap). This mirrors the verified
+    # LLVM-IR emission in ``core/isa/backend.py`` (``_emit_wmma_int``):
+    # ``llvm.amdgcn.wmma.i32.16x16x16.iu8(i1 1, A, i1 1, B, C, i1 0)``.
+
+    def _op_tile_wmma_i32_16x16x16_iu8(self, op: Op) -> None:
+        self._require_wmma_arch("wmma_i32_16x16x16_iu8")
+        a, b, c = op.operands
+        self._emit(
+            f"i32x8 {_name(op.result)} = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32("
+            f"true, {_name(a)}, true, {_name(b)}, {_name(c)}, false);"
+        )
+
     def _require_wmma_arch(self, op_id: str) -> None:
         """Reject a WMMA op on a target whose ISA has no WMMA instruction.
 

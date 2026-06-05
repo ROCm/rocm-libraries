@@ -6,19 +6,38 @@ Builds the RDNA3.5 WMMA GEMM, writes a gemm manifest, and runs
 ``ck_dsl.run_manifest --verify`` (numpy reference ``C = A @ B.T``, RCR f16).
 Must run on a gfx1151 device (e.g. alola ``ctr-halo-*``).
 
-  PYTHONPATH=python python3 -m ck_dsl.examples.gfx1151.wmma_gemm_verify --m 128 --n 128 --k 128
+  python scripts/01_f16_verify.py --m 128 --n 128 --k 128
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-from ck_dsl.helpers import compile_kernel, make_gemm_manifest, write_artifact
-from ck_dsl.instances.gfx1151.wmma_gemm import WmmaGemmSpec, build_wmma_gemm
+ROOT = Path(__file__).resolve().parents[1]  # examples/gfx1151/gemm
+_PYROOT = Path(__file__).resolve().parents[5]  # python root
+sys.path.insert(0, str(_PYROOT))
+
+from ck_dsl.helpers import compile_kernel, make_gemm_manifest, write_artifact  # noqa: E402
+from ck_dsl.instances.gfx1151.wmma_gemm import WmmaGemmSpec, build_wmma_gemm  # noqa: E402
+
+
+def _write_data(name: str, payload: dict) -> None:
+    (ROOT / "data").mkdir(exist_ok=True)
+    (ROOT / "data" / f"{name}.json").write_text(json.dumps(payload, indent=2))
+
+
+def _subprocess_env() -> dict:
+    """Ensure the run_manifest child process can import ck_dsl when this script
+    is run as a file (not via ``-m`` with PYTHONPATH set)."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(_PYROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    return env
 
 
 def main() -> int:
@@ -81,7 +100,7 @@ def main() -> int:
         f"{args.m},{args.n},{args.k}",
         "--verify",
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=_subprocess_env())
     sys.stdout.write(r.stdout)
     if r.returncode != 0 and "max_abs_diff" not in r.stdout:
         # A real launch/runtime failure (not just a zero-tol mismatch).
@@ -97,6 +116,14 @@ def main() -> int:
     print(
         f"[{args.arch}] WMMA GEMM {args.m}x{args.n}x{args.k}: "
         f"max_abs_diff={max_abs:.3e} tol={args.tol:.0e} -> {'PASS' if ok else 'FAIL'}"
+    )
+    _write_data(
+        "01_f16_verify",
+        {
+            "kernel": "wmma_gemm (f16 baseline)",
+            "shape": {"M": args.m, "N": args.n, "K": args.k},
+            "tol": args.tol, "max_abs_diff": max_abs, "pass": ok,
+        },
     )
     return 0 if ok else 1
 

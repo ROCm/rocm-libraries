@@ -1,0 +1,126 @@
+{
+  "arch": "gfx1151",
+  "path_a": "wmma_gemm_iu8_dequant (true int8 i32-acc -> f16)",
+  "path_b": "wmma_gemm_int8 (int8 storage / f16 compute)",
+  "peak_f16_tf": 59.0,
+  "peak_i8_tops": 118.0,
+  "min_ms": 8.0,
+  "reps": 7,
+  "correctness_gate_pass": true,
+  "results": [
+    {
+      "M": 1024,
+      "N": 1024,
+      "K": 1024,
+      "tag": "balanced",
+      "ai": 512.0,
+      "path_b": {
+        "us": 696.97,
+        "tops": 3.08,
+        "spread_pct": 65.0
+      },
+      "path_a": {
+        "us": 431.46,
+        "tops": 4.98,
+        "spread_pct": 18.3
+      },
+      "a_over_b": 1.615,
+      "reliable": true
+    },
+    {
+      "M": 2048,
+      "N": 2048,
+      "K": 2048,
+      "tag": "balanced-large",
+      "ai": 1024.0,
+      "path_b": {
+        "us": 4226.8,
+        "tops": 4.06,
+        "spread_pct": 8.9
+      },
+      "path_a": {
+        "us": 3607.02,
+        "tops": 4.76,
+        "spread_pct": 6.9
+      },
+      "a_over_b": 1.172,
+      "reliable": true
+    },
+    {
+      "M": 512,
+      "N": 512,
+      "K": 8192,
+      "tag": "K-heavy (overhead-amortized)",
+      "ai": 481.9,
+      "path_b": {
+        "us": 1118.65,
+        "tops": 3.84,
+        "spread_pct": 6.7
+      },
+      "path_a": {
+        "us": 445.65,
+        "tops": 9.64,
+        "spread_pct": 20.8
+      },
+      "a_over_b": 2.51,
+      "reliable": true
+    },
+    {
+      "M": 256,
+      "N": 256,
+      "K": 16384,
+      "tag": "K-heavy-narrow",
+      "ai": 252.1,
+      "path_b": {
+        "us": 355.93,
+        "tops": 6.03,
+        "spread_pct": 47.2
+      },
+      "path_a": {
+        "us": 162.37,
+        "tops": 13.23,
+        "spread_pct": 26.0
+      },
+      "a_over_b": 2.192,
+      "reliable": true
+    },
+    {
+      "M": 4096,
+      "N": 4096,
+      "K": 512,
+      "tag": "wide-MN (load/epilogue-bound)",
+      "ai": 455.1,
+      "path_b": {
+        "us": 2948.77,
+        "tops": 5.83,
+        "spread_pct": 6.3
+      },
+      "path_a": {
+        "us": 2599.77,
+        "tops": 6.61,
+        "spread_pct": 4.7
+      },
+      "a_over_b": 1.134,
+      "reliable": true
+    },
+    {
+      "M": 8192,
+      "N": 512,
+      "K": 512,
+      "tag": "tall-skinny (LLM-ish proj)",
+      "ai": 334.4,
+      "path_b": {
+        "us": 1010.65,
+        "tops": 4.25,
+        "spread_pct": 16.6
+      },
+      "path_a": {
+        "us": 801.75,
+        "tops": 5.36,
+        "spread_pct": 26.8
+      },
+      "a_over_b": 1.261,
+      "reliable": true
+    }
+  ]
+}

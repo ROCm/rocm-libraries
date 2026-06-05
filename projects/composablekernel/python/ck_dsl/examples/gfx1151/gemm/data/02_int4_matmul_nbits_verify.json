@@ -1,0 +1,13 @@
+{
+  "kernel": "matmul_nbits large_n (int4 weight-only, W4A16)",
+  "shape": {
+    "M": 128,
+    "N": 4096,
+    "K": 4096
+  },
+  "group_size": 32,
+  "scale_dtype": "fp16",
+  "tol": 0.01,
+  "max_abs_diff": 0.125,
+  "pass": false
+}
