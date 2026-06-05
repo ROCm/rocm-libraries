@@ -62,18 +62,18 @@ void mloKthvalueFwdRunHost(TIO* input,
 
     std::vector<float> elements;
     std::vector<size_t> ids(dimSize);
-    for(size_t i = 0ULL; i < dimSize; ++i)
+    for(size_t i = 0U; i < dimSize; ++i)
     {
         ids[i] = i;
     }
 
-    for(size_t slideID = 0ULL; slideID < numSlice; ++slideID)
+    for(size_t slideID = 0U; slideID < numSlice; ++slideID)
     {
         elements.clear();
         tensor_layout_t<4> layout(inputTvWithoutDim, slideID);
         auto idx = inputTvWithoutDim.get_tensor_view_idx(layout);
 
-        for(size_t j = 0ULL; j < dimSize; ++j)
+        for(size_t j = 0U; j < dimSize; ++j)
         {
             elements.push_back(static_cast<float>(input[idx + j * dimStride]));
         }
@@ -257,7 +257,7 @@ int KthvalueDriver<TIO>::AllocateBuffersAndCopy()
     output      = std::vector<TIO>(out_sz, static_cast<TIO>(0));
     outputHost  = std::vector<TIO>(out_sz, static_cast<TIO>(0));
 
-    for(auto i = 0ULL; i < in_sz; i++)
+    for(auto i = 0U; i < in_sz; i++)
     {
         input[i] = prng::gen_A_to_B<TIO>(static_cast<TIO>(-10), static_cast<TIO>(10));
     }
