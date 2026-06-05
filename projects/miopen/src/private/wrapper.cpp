@@ -2060,11 +2060,44 @@ extern "C" miopenStatus_t miopenCreate(miopenHandle_t* handle)
 }
 // clang-format on
 
+// clang-format off
+// ALMIOPEN-1965: MIOpenDriver (and most HIP-backend consumers) create handles
+// via miopenCreateWithStream, not miopenCreate. Mirror the pairing logic so
+// MIOPEN_HIPDNN_FORWARDING=enabled takes effect on this path too.
 extern "C" miopenStatus_t miopenCreateWithStream(miopenHandle_t* handle,
                                                  miopenAcceleratorQueue_t stream)
 {
-    return miopenCreateWithStream_impl(handle, stream);
+    const miopenStatus_t s = miopenCreateWithStream_impl(handle, stream);
+    if(s == miopenStatusSuccess && handle != nullptr && *handle != nullptr &&
+       hipdnn_forwarding_enabled())
+    {
+        hipdnnHandle_t h = nullptr;
+        const auto t0    = std::chrono::steady_clock::now();
+        const hipdnnStatus_t hs = hipdnnCreate(&h);
+        const auto t1    = std::chrono::steady_clock::now();
+        if(hs == HIPDNN_STATUS_SUCCESS && h != nullptr)
+        {
+            std::lock_guard<std::mutex> g{hipdnn_handle_map_mutex()};
+            hipdnn_handle_map().emplace(*handle, h);
+            if(hipdnn_timing_enabled())
+            {
+                const auto ns =
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+                const unsigned seq = hipdnn_create_seq().fetch_add(1) + 1;
+                log_timing(seq == 1 ? "hipdnnCreate cold" : "hipdnnCreate warm", ns);
+            }
+        }
+        else
+        {
+            std::fprintf(stderr,
+                         "[MIOpen->hipDNN] hipdnnCreate failed (status=%d); "
+                         "continuing with MIOpen-only handle\n",
+                         static_cast<int>(hs));
+        }
+    }
+    return s;
 }
+// clang-format on
 
 // clang-format off
 // ALMIOPEN-1965: tear down the paired hipDNN handle (if any) before forwarding
