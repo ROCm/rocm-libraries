@@ -283,4 +283,21 @@ struct _rocblaslt_matmul_preference
     int64_t search_iterations = 0;
 };
 
+// Resolve the effective sm_count_target hint for a matmul launch using
+// the documented precedence (per-matmul preference > per-matmul desc >
+// handle). Returns 0 when nothing has been set, meaning "use all CUs
+// the device exposes".
+inline int32_t effective_sm_count_target(const _rocblaslt_handle*            handle,
+                                         const _rocblaslt_matmul_desc*       desc,
+                                         const _rocblaslt_matmul_preference* pref)
+{
+    if(pref && pref->sm_count_target > 0)
+        return pref->sm_count_target;
+    if(desc && desc->sm_count_target > 0)
+        return desc->sm_count_target;
+    if(handle)
+        return handle->sm_count_target;
+    return 0;
+}
+
 #endif // HANDLE_H
