@@ -722,6 +722,11 @@ BODY_LABEL_TO_LOOP_INDEX = {
     BODY_LABEL_NLL: 3,
 }
 
+# Number of main-loop iter copies materialized in the unrolled timeline.
+# Hardcoded for PrefetchGlobalRead=2; the validator has only been empirically
+# verified for this prefetch depth. See UNROLLED_VALIDATION_PLAN.md §9 Q1.
+ML_MAT_COUNT: int = 2
+
 
 @functools.total_ordering
 @dataclass(frozen=True)
@@ -831,6 +836,140 @@ def make_position(body_label: str, stream_index: int) -> SchedulePosition:
         loop_index=BODY_LABEL_TO_LOOP_INDEX[body_label],
         stream_index=stream_index,
     )
+
+
+# =============================================================================
+# Unrolled timeline — UnrolledIterRecord / UnrolledCapture
+# =============================================================================
+
+
+@dataclass
+class UnrolledIterRecord:
+    """One body-slice in the unrolled timeline.
+
+    For ML bodies, one record exists per iter copy (iter_index 0..ML_MAT_COUNT-1).
+    For PRO / NGL / NLL, exactly one record exists (iter_index = 0).
+
+    `instructions` holds the ordered TaggedInstruction list for this slice.
+    For ML iter copies, the list is a SHARED REFERENCE to the captured ML
+    body's instructions — the TaggedInstruction objects are not copied.
+    Shared identity across copies is preserved by construction: the same
+    Python object has the same `emission_ordinal` and `canonical_render`,
+    so `identity_for(body_label)` returns the same 3-tuple regardless of
+    which iter copy references it.
+
+    `unrolled_start` is the unrolled_position of the first instruction in
+    this record. Per-instruction unrolled positions are derived downstream
+    as `unrolled_start + local_stream_index` (the index of the instruction
+    within this record's ordered list, following slot lex sort order).
+    """
+    body_label: str                        # BODY_LABEL_* constant
+    iter_index: int                        # 0 for non-ML; 0..ML_MAT_COUNT-1 for ML
+    instructions: List['TaggedInstruction']  # ordered per slot lex sort
+    unrolled_start: int                    # global position of first instruction
+
+
+@dataclass
+class UnrolledCapture:
+    """The unrolled instruction timeline for one FourPartCapture.
+
+    Materializes the unrolled sequence:
+        PRO -> ML_iter[0] -> ML_iter[1] -> ... -> ML_iter[ML_MAT_COUNT-1] -> NGL -> NLL
+
+    PRO, NGL, and NLL each appear at most once (absent when the corresponding
+    FourPartCapture body is None / empty dict). ML appears exactly ML_MAT_COUNT
+    times (currently 2). Each ML iter record shares the underlying
+    TaggedInstruction objects with the captured ML body.
+
+    `records` is the ordered sequence of UnrolledIterRecord in unrolled timeline
+    order. The total instruction count across all records equals the total
+    unrolled_position span.
+
+    `total_instructions` is the sum of len(r.instructions) across all records.
+    Equivalent to: unrolled_start + len(instructions) of the last record.
+    """
+    records: List[UnrolledIterRecord]
+    total_instructions: int
+
+    @classmethod
+    def from_four_part_capture(cls, fpc: 'FourPartCapture') -> 'UnrolledCapture':
+        """Materialize the unrolled timeline from a FourPartCapture.
+
+        Sequence (in order):
+          1. PRO — fpc.prologue (skipped if None)
+          2. ML_iter[0..ML_MAT_COUNT-1] — fpc.main_loop[0].instructions, shared
+             reference, ML_MAT_COUNT copies, distinct unrolled_start per copy
+          3. NGL — fpc.n_gl[0] (skipped if empty)
+          4. NLL — fpc.n_ll[0] (skipped if empty)
+
+        Each body's instructions are ordered by slot lex sort
+        (slot.mfma_index, slot.sequence) before materializing so the
+        unrolled_position sequence is consistent with the stream-emission
+        order the graph builder expects.
+
+        Raises ValueError if fpc.main_loop has no codepath 0 entry (ML body
+        is mandatory for a meaningful unrolled timeline).
+        """
+        if 0 not in fpc.main_loop:
+            raise ValueError(
+                "UnrolledCapture.from_four_part_capture: fpc.main_loop has no "
+                "codepath 0 entry. ML body is required for the unrolled timeline."
+            )
+
+        records: List[UnrolledIterRecord] = []
+        cursor = 0
+
+        def _sorted_instructions(body):
+            return sorted(
+                body.instructions,
+                key=lambda ti: (ti.slot.mfma_index, ti.slot.sequence),
+            )
+
+        # PRO
+        if fpc.prologue is not None:
+            pro_insts = _sorted_instructions(fpc.prologue)
+            records.append(UnrolledIterRecord(
+                body_label=BODY_LABEL_PROLOGUE,
+                iter_index=0,
+                instructions=pro_insts,
+                unrolled_start=cursor,
+            ))
+            cursor += len(pro_insts)
+
+        # ML iter copies — same sorted list object shared across all copies
+        ml_insts = _sorted_instructions(fpc.main_loop[0])
+        for k in range(ML_MAT_COUNT):
+            records.append(UnrolledIterRecord(
+                body_label=BODY_LABEL_ML,
+                iter_index=k,
+                instructions=ml_insts,
+                unrolled_start=cursor,
+            ))
+            cursor += len(ml_insts)
+
+        # NGL
+        if 0 in fpc.n_gl:
+            ngl_insts = _sorted_instructions(fpc.n_gl[0])
+            records.append(UnrolledIterRecord(
+                body_label=BODY_LABEL_NGL,
+                iter_index=0,
+                instructions=ngl_insts,
+                unrolled_start=cursor,
+            ))
+            cursor += len(ngl_insts)
+
+        # NLL
+        if 0 in fpc.n_ll:
+            nll_insts = _sorted_instructions(fpc.n_ll[0])
+            records.append(UnrolledIterRecord(
+                body_label=BODY_LABEL_NLL,
+                iter_index=0,
+                instructions=nll_insts,
+                unrolled_start=cursor,
+            ))
+            cursor += len(nll_insts)
+
+        return cls(records=records, total_instructions=cursor)
 
 
 # Failure hierarchy + FailureNodeLabel + CMS-side label/iter-delta helpers

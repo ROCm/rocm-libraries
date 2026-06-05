@@ -49,6 +49,7 @@ from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_PROLOGUE,
     BODY_LABEL_ML_PREV, BODY_LABEL_ML, BODY_LABEL_NGL, BODY_LABEL_NLL,
     BODY_LABEL_TO_LOOP_INDEX,
+    ML_MAT_COUNT,
     CaptureConsistencyError,
     CaptureEmptyBodyError,
     CaptureUnknownInstructionError,
@@ -877,13 +878,6 @@ _MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = (
 _MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = (
     _DEFAULT_CDNA4_ARCH_PROFILE.mfma_type_switch_threshold_from_4x4
 )
-
-
-# Number of main-loop iter copies materialized in the unrolled timeline.
-# Consumed by UnrolledCapture (C3a). Hardcoded for PrefetchGlobalRead=2;
-# the validator has only been empirically verified for this prefetch depth.
-# See UNROLLED_VALIDATION_PLAN.md §9 Q1.
-ML_MAT_COUNT = 2
 
 
 # =============================================================================
