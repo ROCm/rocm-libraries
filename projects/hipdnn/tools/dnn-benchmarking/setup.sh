@@ -26,16 +26,21 @@ TORCH_INDEX_URL="${DNN_BENCH_TORCH_INDEX_URL:-}"
 usage() {
     echo "Usage: $0 [options]"
     echo ""
-    echo "  --torch-mode <rocm|cpu|none>"
-    echo "                       Select the PyTorch install and hipDNN binding prefix"
-    echo "                       discovery flow. Default: $TORCH_MODE"
+    echo "  --torch-mode <rocm|cpu|existing|none>"
+    echo "                       Select how torch is provided. Default: $TORCH_MODE"
     echo "                         rocm: install ROCm torch nightly and build bindings"
-    echo "                               against hipDNN from the venv ROCm SDK wheels."
+    echo "                               against hipDNN from the torch wheel's bundled"
+    echo "                               ROCm SDK libraries. Does not require a system"
+    echo "                               ROCm install."
     echo "                         cpu:  install CPU-only torch and build bindings"
-    echo "                               against --rocm-prefix or /opt/rocm."
-    echo "                         none: leave torch untouched and only install this"
-    echo "                               package plus hipDNN bindings."
-    echo "  --skip-torch-install Do not install torch; use the venv's existing torch."
+    echo "                               against installed ROCm/hipDNN."
+    echo "                         existing:"
+    echo "                               reuse torch already present in $VENV_DIR."
+    echo "                               ROCm torch uses its bundled SDK libraries;"
+    echo "                               CPU/non-ROCm torch uses installed ROCm/hipDNN."
+    echo "                         none: leave torch uninstalled and build bindings"
+    echo "                               against installed ROCm/hipDNN."
+    echo "  --skip-torch-install Legacy alias for --torch-mode existing."
     echo "  --reuse-venv         Reuse an existing $VENV_DIR instead of deleting it."
     echo "  --torch-index-url <url>"
     echo "                       Override the pip index URL used for torch."
@@ -43,8 +48,7 @@ usage() {
     echo "                       nightly selection."
     echo "  --rocm-prefix <path> Explicit ROCm/hipDNN prefix for binding/provider"
     echo "                       builds. Takes precedence over venv discovery."
-    echo "  --install-dir <path> Legacy alias for --rocm-prefix; also the install"
-    echo "                       prefix used by --force-build. Default: $INSTALL_DIR"
+    echo "  --install-dir <path> Legacy alias for --rocm-prefix. Default: $INSTALL_DIR"
     echo "  --force-build        Build hipDNN and the MIOpen provider from source,"
     echo "                       overwriting artifacts under --install-dir."
     echo "  -y                   Skip confirmation prompts."
@@ -54,29 +58,45 @@ usage() {
     echo "  Pass that path to --plugin-path when benchmarking."
 }
 
+require_arg() {
+    local option="$1"
+    local value="${2:-}"
+    if [ -z "$value" ] || [[ "$value" == -* ]]; then
+        echo "ERROR: $option requires a value." >&2
+        usage
+        exit 1
+    fi
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force-build) FORCE_BUILD=1 ;;
         --install-dir)
+            require_arg "$1" "${2:-}"
             shift
             INSTALL_DIR="$1"
             ROCM_PREFIX="$1"
             ;;
         --rocm-prefix)
+            require_arg "$1" "${2:-}"
             shift
             ROCM_PREFIX="$1"
+            INSTALL_DIR="$1"
             ;;
         --torch-mode)
+            require_arg "$1" "${2:-}"
             shift
             TORCH_MODE="$1"
             ;;
         --skip-torch-install) SKIP_TORCH_INSTALL=1 ;;
         --reuse-venv) REUSE_VENV=1 ;;
         --torch-index-url)
+            require_arg "$1" "${2:-}"
             shift
             TORCH_INDEX_URL="$1"
             ;;
         --gpu-arch)
+            require_arg "$1" "${2:-}"
             shift
             GPU_ARCH_OVERRIDE="$1"
             ;;
@@ -87,13 +107,21 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+if [ "$SKIP_TORCH_INSTALL" -eq 1 ]; then
+    TORCH_MODE="existing"
+fi
+
 case "$TORCH_MODE" in
-    rocm|cpu|none) ;;
+    rocm|cpu|existing|none) ;;
     *)
-        echo "ERROR: --torch-mode must be one of: rocm, cpu, none" >&2
+        echo "ERROR: --torch-mode must be one of: rocm, cpu, existing, none" >&2
         exit 1
         ;;
 esac
+
+if [ "$TORCH_MODE" = "existing" ]; then
+    REUSE_VENV=1
+fi
 
 hipdnn_config_path() {
     local prefix="$1"
@@ -146,6 +174,23 @@ sys.exit(1)
 PY
 }
 
+detect_gpu_arch_from_kfd() {
+    local props key value
+    for props in /sys/class/kfd/kfd/topology/nodes/*/properties; do
+        [ -r "$props" ] || continue
+        while read -r key value _; do
+            [ "$key" = "gfx_target_version" ] || continue
+            case "${value:-0}" in
+                90010) echo "gfx90a"; return 0 ;;
+                90400) echo "gfx940"; return 0 ;;
+                90401) echo "gfx941"; return 0 ;;
+                90402) echo "gfx942"; return 0 ;;
+            esac
+        done < "$props"
+    done
+    return 1
+}
+
 detect_gpu_arch() {
     local arch
     if [ -n "$GPU_ARCH_OVERRIDE" ]; then
@@ -154,19 +199,69 @@ detect_gpu_arch() {
     fi
     if command -v rocm_agent_enumerator &>/dev/null; then
         arch=$(rocm_agent_enumerator | grep -m1 'gfx9' || true)
-    elif command -v rocminfo &>/dev/null; then
-        arch=$(rocminfo | grep -oP 'gfx\d+' | head -1 || true)
+        if [ -n "$arch" ]; then
+            echo "$arch"
+            return
+        fi
     fi
-    echo "${arch:-}"
+    if command -v rocminfo &>/dev/null; then
+        arch=$(rocminfo | grep -oP 'gfx\d+[a-z0-9]*' | head -1 || true)
+        if [ -n "$arch" ]; then
+            echo "$arch"
+            return
+        fi
+    fi
+    if arch=$(detect_gpu_arch_from_kfd); then
+        echo "$arch"
+        return
+    fi
+    echo ""
+}
+
+torch_is_importable() {
+    python - <<'PY' >/dev/null 2>&1
+import torch  # noqa: F401
+PY
+}
+
+torch_is_rocm_wheel() {
+    python - <<'PY' >/dev/null 2>&1
+import sys
+try:
+    import torch
+except Exception:
+    sys.exit(1)
+sys.exit(0 if getattr(torch.version, "hip", None) else 1)
+PY
+}
+
+resolve_installed_rocm_prefix() {
+    if [ -n "$ROCM_PREFIX" ]; then
+        echo "$ROCM_PREFIX"
+        return
+    fi
+    if [ -n "${ROCM_PATH:-}" ]; then
+        echo "$ROCM_PATH"
+        return
+    fi
+    echo "$INSTALL_DIR"
 }
 
 install_torch() {
-    if [ "$SKIP_TORCH_INSTALL" -eq 1 ] || [ "$TORCH_MODE" = "none" ]; then
-        echo "Skipping torch install."
-        return
-    fi
-
     case "$TORCH_MODE" in
+        none)
+            echo "Leaving torch uninstalled."
+            return
+            ;;
+        existing)
+            if ! torch_is_importable; then
+                echo "ERROR: --torch-mode existing requires torch to already be installed in $VENV_DIR." >&2
+                echo "Use --torch-mode rocm or --torch-mode cpu to install torch automatically." >&2
+                exit 1
+            fi
+            echo "Using existing PyTorch in $VENV_DIR."
+            return
+            ;;
         cpu)
             local index_url="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
             echo "Installing CPU-only PyTorch from $index_url"
@@ -197,27 +292,39 @@ install_torch() {
 }
 
 select_binding_prefix() {
+    if [ "$FORCE_BUILD" -eq 1 ]; then
+        echo "$INSTALL_DIR"
+        return
+    fi
+
     if [ -n "$ROCM_PREFIX" ]; then
         echo "$ROCM_PREFIX"
         return
     fi
 
-    if [ "$TORCH_MODE" = "rocm" ]; then
-        local wheel_prefix
-        if wheel_prefix=$(discover_rocm_wheel_prefix); then
-            echo "$wheel_prefix"
-            return
-        fi
-        if [ "$FORCE_BUILD" -eq 1 ]; then
-            echo "$INSTALL_DIR"
-            return
-        fi
-        echo "ERROR: no hipDNN CMake configs found in venv ROCm SDK wheels." >&2
-        echo "Use a ROCm torch wheel that includes hipDNN, pass --rocm-prefix explicitly, or pass --force-build." >&2
-        exit 1
-    fi
-
-    echo "$INSTALL_DIR"
+    case "$TORCH_MODE" in
+        rocm)
+            local wheel_prefix
+            if wheel_prefix=$(discover_rocm_wheel_prefix); then
+                echo "$wheel_prefix"
+                return
+            fi
+            echo "ERROR: no hipDNN CMake configs found in venv ROCm SDK wheels." >&2
+            echo "Use a ROCm torch wheel that includes hipDNN, pass --rocm-prefix explicitly, or pass --force-build." >&2
+            exit 1
+            ;;
+        existing)
+            local wheel_prefix
+            if torch_is_rocm_wheel && wheel_prefix=$(discover_rocm_wheel_prefix); then
+                echo "$wheel_prefix"
+                return
+            fi
+            resolve_installed_rocm_prefix
+            ;;
+        cpu|none)
+            resolve_installed_rocm_prefix
+            ;;
+    esac
 }
 
 maybe_install_amdsmi() {
@@ -257,6 +364,7 @@ build_miopen_provider() {
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$prefix" \
         -DCMAKE_PREFIX_PATH="$prefix" \
+        -DROCM_PATH="$prefix" \
         -DMIOPENPROVIDER_SKIP_TESTS=ON
     cmake --build "$MIOPEN_BUILD_DIR"
     cmake --install "$MIOPEN_BUILD_DIR"
@@ -272,6 +380,11 @@ if [ "$FORCE_BUILD" -eq 1 ] && [ "$AUTO_YES" -eq 0 ]; then
 fi
 
 # 1. Create or activate venv
+if [ "$TORCH_MODE" = "existing" ] && [ ! -d "$VENV_DIR" ]; then
+    echo "ERROR: --torch-mode existing requires an existing virtual environment at $VENV_DIR." >&2
+    echo "Use --torch-mode rocm or --torch-mode cpu to create one and install torch automatically." >&2
+    exit 1
+fi
 if [ -d "$VENV_DIR" ]; then
     if [ "$REUSE_VENV" -eq 1 ]; then
         echo "Reusing existing virtual environment at $VENV_DIR..."
@@ -305,6 +418,8 @@ if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
         >> "$VENV_DIR/bin/activate"
 fi
 export PYTHONPYCACHEPREFIX="$DNN_BENCH_WORKSPACE/pycache"
+
+echo "Torch mode: $TORCH_MODE"
 
 # 2. Install torch, then editable-install the benchmark package. pyproject.toml
 # intentionally omits torch so pip never replaces the selected torch wheel.

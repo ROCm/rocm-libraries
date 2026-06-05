@@ -28,15 +28,17 @@ bash setup.sh
 source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activate
 ```
 
-The default `--torch-mode rocm` flow:
+The default `--torch-mode rocm` flow assumes no system ROCm installation:
 1. Creates a virtual environment under `$DNN_BENCH_WORKSPACE` (defaults to `/workspace`)
 2. Detects the GPU architecture and installs the matching ROCm PyTorch nightly wheel
-3. Discovers hipDNN from the venv-installed ROCm SDK libraries wheel
+3. Discovers hipDNN from the torch wheel's bundled ROCm SDK libraries
 4. Builds the local MIOpen provider if the selected ROCm prefix does not already contain it
 5. Installs the hipDNN Python bindings against the selected ROCm prefix
 
 The selected prefix is printed as `Using hipDNN/ROCm prefix: ...`; pass its
 `lib/hipdnn_plugins/engines` directory to `--plugin-path` when benchmarking.
+If GPU architecture detection is unavailable on the setup host, pass
+`--gpu-arch gfx90a` or `--gpu-arch gfx942`.
 
 ### Testing/CI Setup with CPU-Only PyTorch
 
@@ -49,10 +51,14 @@ bash setup.sh --torch-mode cpu --rocm-prefix /opt/rocm
 source /workspace/.venv/bin/activate
 ```
 
-Use `--skip-torch-install --reuse-venv` when the target virtual environment
-already contains the desired torch package. CPU-only torch never enables
-PyTorch GPU kernel timing or the PyTorch GPU backend; those paths still require
-a ROCm/CUDA-enabled torch build and a visible GPU.
+CPU-only torch never enables PyTorch GPU kernel timing or the PyTorch GPU
+backend; those paths still require a ROCm/CUDA-enabled torch build and a
+visible GPU.
+
+Use `--torch-mode existing` to reuse torch already installed in the target
+virtual environment. Existing ROCm torch uses its bundled ROCm SDK libraries;
+existing CPU/non-ROCm torch builds the hipDNN bindings against `--rocm-prefix`,
+`$ROCM_PATH`, or `/opt/rocm`.
 
 ### CUDA Setup
 
