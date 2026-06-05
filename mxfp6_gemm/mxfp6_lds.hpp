@@ -41,9 +41,20 @@ static TiledScale tile_scale(const PreprocessedScale& ps, int group, int subs) {
 // DEFAULT = MUBUF buffer_load_lds: the 64-bit base lives in the buffer descriptor (V#), so
 // each load only computes a 32-bit voffset -> ~half the per-load address VALU vs FLAT
 // global_load_lds (which recomputes a 64-bit addr/load). Measured +0.8% @8192^3, identical
-// correctness/VGPR/occ. Costs 1 manual s_nop/load for the "SALU writes M0 -> load LDS=1"
-// hazard (FLAT auto-handles it; MUBUF needs it explicit). Define USE_GLOBAL_LDS for the
-// FLAT fallback. See HANDOFF Step 29 / memory mxfp6_buffer_vs_global_lds.
+// correctness/VGPR/occ. The "SALU writes M0 -> load LDS=1" hazard guard (s_nop) is gated by
+// MXFP6_M0_NOP (default OFF for KT192, see below). Define USE_GLOBAL_LDS for the FLAT
+// fallback. See HANDOFF Step 29-30 / memory mxfp6_buffer_vs_global_lds.
+//
+// MXFP6_M0_NOP (default 0 = OFF): emit an explicit s_nop guard for the "SALU writes M0 ->
+// buffer_load(LDS=1)" 1-wait-state hazard. Reviewed (Step 30): for the production KT192 tile
+// the compiler already schedules ~20 instrs between set_m0 and the load, so the nop is
+// redundant; dropping it is 11/11 correct and perf-flat (1799<->1796, latency-bound -> the
+// nop sat in a stall shadow anyway). Default OFF. ⚠️ Set -DMXFP6_M0_NOP=1 for configs that
+// pack many back-to-back loads with no separating instrs (e.g. KT256 single-buffer raced
+// without it -> illegal LDS address); FLAT global_load_lds never needs it (auto-handled).
+#ifndef MXFP6_M0_NOP
+#define MXFP6_M0_NOP 0
+#endif
 template <int ROWS, int KT_BYTES, int CPR>
 __device__ __forceinline__ void load_tile_lds(char* smem, uint32_t lds_base,
                                               const char* gbase, int row_stride,
@@ -61,8 +72,13 @@ __device__ __forceinline__ void load_tile_lds(char* smem, uint32_t lds_base,
         int m = chunk / CPR, ck = chunk % CPR;
         uint32_t voff = (uint32_t)(m * row_stride + kt_byte + ck * 16);
         set_m0(__builtin_amdgcn_readfirstlane(lds_base + (uint32_t)((i * 256 + wave_id * 64) * 16)));
+#if MXFP6_M0_NOP
         asm volatile("s_nop 0\n buffer_load_dwordx4 %0, %1, 0 offen lds"
                      : : "v"(voff), "s"(rsrc) : "memory");
+#else
+        asm volatile("buffer_load_dwordx4 %0, %1, 0 offen lds"
+                     : : "v"(voff), "s"(rsrc) : "memory");
+#endif
     }
 #else
     // FLAT fallback (global_load_lds): 64-bit address per load, no manual M0 s_nop needed.
