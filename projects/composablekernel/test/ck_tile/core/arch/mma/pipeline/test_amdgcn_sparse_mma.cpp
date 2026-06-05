@@ -529,7 +529,7 @@ struct SparsePipelineKernel
                                                  false, // CTranspose
                                                  1,     // SwizzleFactor
                                                  1,     // AttrNumAccessAV
-                                                 1,     // AttrNumAccessAV
+                                                 1,     // AttrNumAccessBV
                                                  CompilerTarget>;
 
         using ATensor = typename Pipeline::AWarpTensor;
@@ -588,7 +588,7 @@ struct SparsePipelineFactory
                                        false, // CTranspose
                                        1,     // SwizzleFactor
                                        1,     // AttrNumAccessAV
-                                       1,     // AttrNumAccessAV
+                                       1,     // AttrNumAccessBV
                                        Target>;
     };
 };

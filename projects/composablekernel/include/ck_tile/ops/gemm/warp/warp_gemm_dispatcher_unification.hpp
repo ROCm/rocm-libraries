@@ -15,7 +15,9 @@
 // the regular Dispatcher. Furthermore, named WarpGemms like WarpGemmMfmaF32F32F32M16N16K4 will also
 // get rerouted to the UnificationDispatcher. The latter is necessary because some pipelines bypass
 // the WarpGemmDispatcher in favor of directly using named WarpGemms.
+#ifndef USE_NEW_UNIFIED_FRAMEWORK
 #define USE_NEW_UNIFIED_FRAMEWORK 0
+#endif
 
 #if USE_NEW_UNIFIED_FRAMEWORK
 namespace ck_tile {

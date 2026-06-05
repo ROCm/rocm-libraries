@@ -94,7 +94,7 @@ template <typename ADataType,
 struct MmaKSearchSelector
 {
     private:
-    static_assert(!(WaveTileKTest & (WaveTileKTest - 1))); // WaveTileKTest must be power of 2.
+    static_assert(!(WaveTileKTest & (WaveTileKTest - 1)), "WaveTileKTest must be power of 2.");
 
     using CandidateOp = amdgcn_mma<ADataType,
                                    BDataType,

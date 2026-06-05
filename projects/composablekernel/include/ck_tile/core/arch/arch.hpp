@@ -442,11 +442,12 @@ static constexpr auto getCMakeCompilerTarget()
     }
     else
     {
-        static_assert(always_false_v<decltype(id)>, "CK_CMAKE_TARGET_IDS[0] is HOST or UNKNOWN!\n");
+        static_assert(always_false_v<decltype(id)>,
+                      "CK_CMAKE_GPU_TARGET_IDS[0] is HOST or UNKNOWN!\n");
         return amdgcn_target<>{};
     }
 #else
-    static_assert(0, "The CK_CMAKE_TARGET_IDS macro was not made available!\n");
+    static_assert(0, "The CK_CMAKE_GPU_TARGET_IDS macro was not made available!\n");
     return amdgcn_target<>{};
 #endif
 }
