@@ -130,13 +130,17 @@ find_library(libsnd_LIBS
 find_package(OpenMP COMPONENTS CXX QUIET)
 find_package(OpenCV QUIET)
 
-# find required python3-pip imports
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} -m pip show pandas
-    RESULT_VARIABLE PANDAS_FOUND
-    OUTPUT_QUIET
-    ERROR_QUIET
-)
+# find required python3-pip imports (only if Python3 is found)
+if(Python3_FOUND)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -m pip show pandas
+        RESULT_VARIABLE PANDAS_FOUND
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+else()
+    set(PANDAS_FOUND 1)  # Set to not-found value when Python3 is missing
+endif()
 
 # Add HOST/HIP subdirectories to build executables (OpenMP required, Python3 optional)
 add_subdirectory(HOST)
@@ -146,7 +150,10 @@ endif()
 
 # Minimal sanity CTests: Always run these basic tests to verify HOST and HIP backends
 # These tests use the executables built by the subdirectories above
-if(OpenMP_CXX_FOUND)
+if(OpenMP_CXX_FOUND AND TARGET Tensor_image_host)
+    # Create output directory for HOST test
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HOST/output")
+
     # Minimal sanity test for HOST: brightness f32 test
     add_test(
         NAME rpp_sanity_test_brightness_host_f32
@@ -158,20 +165,23 @@ if(OpenMP_CXX_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}"
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HOST"
     )
+endif()
 
-    # Minimal sanity test for HIP: brightness f32 test (only if HIP backend)
-    if(rpp_BACKEND_TYPE STREQUAL "HIP" AND TARGET Tensor_image_hip)
-        add_test(
-            NAME rpp_sanity_test_brightness_hip_f32
-            COMMAND $<TARGET_FILE:Tensor_image_hip>
-                "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
-                "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
-                "${CMAKE_CURRENT_BINARY_DIR}/HIP/output"
-                2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
-                "${CMAKE_CURRENT_SOURCE_DIR}"
-            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HIP"
-        )
-    endif()
+if(OpenMP_CXX_FOUND AND rpp_BACKEND_TYPE STREQUAL "HIP" AND TARGET Tensor_image_hip)
+    # Create output directory for HIP test
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HIP/output")
+
+    # Minimal sanity test for HIP: brightness f32 test
+    add_test(
+        NAME rpp_sanity_test_brightness_hip_f32
+        COMMAND $<TARGET_FILE:Tensor_image_hip>
+            "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+            "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+            "${CMAKE_CURRENT_BINARY_DIR}/HIP/output"
+            2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HIP"
+    )
 endif()
 
 # Top-level guards: Python3 and OpenMP are required to register Python-based CTests. Pandas is optional (see warning below).

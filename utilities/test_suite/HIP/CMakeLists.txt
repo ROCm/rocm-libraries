@@ -124,18 +124,22 @@ else()
         find_package(OpenCV QUIET)
         find_package(StdFilesystem QUIET)
 
-        # find required python3 imports
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE} -c "import pandas"
-            RESULT_VARIABLE PANDAS_RESULT
-            OUTPUT_QUIET
-            ERROR_QUIET
-        )
-        # execute_process returns 0 on success (pandas found), non-zero on failure (pandas not found)
-        if(PANDAS_RESULT EQUAL 0)
-            set(PANDAS_FOUND 1)
+        # find required python3 imports (only if Python3 is found)
+        if(Python3_FOUND)
+            execute_process(
+                COMMAND ${Python3_EXECUTABLE} -c "import pandas"
+                RESULT_VARIABLE PANDAS_RESULT
+                OUTPUT_QUIET
+                ERROR_QUIET
+            )
+            # execute_process returns 0 on success (pandas found), non-zero on failure (pandas not found)
+            if(PANDAS_RESULT EQUAL 0)
+                set(PANDAS_FOUND 1)
+            else()
+                set(PANDAS_FOUND 0)
+            endif()
         else()
-            set(PANDAS_FOUND 0)
+            set(PANDAS_FOUND 0)  # Set to not-found value when Python3 is missing
         endif()
 
         if(HIP_FOUND)

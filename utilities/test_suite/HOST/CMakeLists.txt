@@ -119,27 +119,28 @@ else()
         find_package(OpenCV QUIET)
         find_package(StdFilesystem QUIET)
 
-        # find required python3 imports
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE} -c "import pandas"
-            RESULT_VARIABLE PANDAS_RESULT
-            OUTPUT_QUIET
-            ERROR_QUIET
-        )
-        # execute_process returns 0 on success (pandas found), non-zero on failure (pandas not found)
-        if(PANDAS_RESULT EQUAL 0)
-            set(PANDAS_FOUND 1)
-        else()
-            set(PANDAS_FOUND 0)
-        endif()
-
-        # Python3 status message (only needed for running Python scripts, not for building executables)
+        # find required python3 imports (only if Python3 is found)
         if(Python3_FOUND)
+            execute_process(
+                COMMAND ${Python3_EXECUTABLE} -c "import pandas"
+                RESULT_VARIABLE PANDAS_RESULT
+                OUTPUT_QUIET
+                ERROR_QUIET
+            )
+            # execute_process returns 0 on success (pandas found), non-zero on failure (pandas not found)
+            if(PANDAS_RESULT EQUAL 0)
+                set(PANDAS_FOUND 1)
+            else()
+                set(PANDAS_FOUND 0)
+            endif()
+
+            # Python3 status message (only needed for running Python scripts, not for building executables)
             message("-- ${Green}Python3 found at ${Python3_EXECUTABLE}${ColourReset}")
             if(NOT PANDAS_FOUND)
                 message("-- ${Yellow}Warning: Pandas not found (optional — needed only to print consolidated rocprof CSV tables from Python).${ColourReset}")
             endif()
         else()
+            set(PANDAS_FOUND 0)  # Set to not-found value when Python3 is missing
             message("-- ${Yellow}${PROJECT_NAME} Warning: Python3 not found — executables will be built but Python test scripts cannot run${ColourReset}")
         endif()
 
