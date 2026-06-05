@@ -214,41 +214,9 @@ _BF16_256X256X64_TN = dict(
 # numerically — its assertion passes today.
 #
 # DO NOT mark the failing fixtures as ``skip`` or remove them from this
-# list to make the green run cleaner — per the standing rule, test
-# exclusions / setdefault / defensive classifications are red flags.
-# The xfail marker below is conditional on the parametrize id and
-# cites rocm-libraries-udqg explicitly so a future fix that resolves
-# the byte-key sentinel pattern flips the xfail to a green (strict=True
-# makes a passing xfailed test fail loud — XPASS — so we are notified).
 _FIXTURES = [
-    pytest.param(_BPG_11_TF32_4X4_TN, id="bpg11-tf32-4x4-tn",
-                 marks=pytest.mark.xfail(
-                     strict=True,
-                     reason=(
-                         "rocm-libraries-udqg: SHADOW capture has "
-                         "unresolved name_to_idx for rotating T/X "
-                         "pack-buffer registers under "
-                         "UsePLRPack+UseMFMAF32XEmulation, so byte_keys "
-                         "collapse to (('v',-1),) and edge_keys "
-                         "diverge from CMS by 208 entries. Tracked "
-                         "as a P0 blocker on rocm-libraries-r62g. When "
-                         "udqg is closed, this xfail flips to XPASS "
-                         "(strict=True surfaces it as a failure) — "
-                         "remove the marks=... at that point."
-                     ),
-                 )),
-    pytest.param(_OPLB_TF32_6X8_TN, id="oplb-tf32-6x8-tn",
-                 marks=pytest.mark.xfail(
-                     strict=True,
-                     reason=(
-                         "rocm-libraries-udqg: same root cause as the "
-                         "BPG#11 entry above; reproduces with 624 "
-                         "edge_keys mismatches on the oplb anchor "
-                         "fixture. Larger tile -> proportionally more "
-                         "extra pack->MFMA edges in SHADOW (576 "
-                         "expected, but 1152 emitted)."
-                     ),
-                 )),
+    pytest.param(_BPG_11_TF32_4X4_TN, id="bpg11-tf32-4x4-tn"),
+    pytest.param(_OPLB_TF32_6X8_TN, id="oplb-tf32-6x8-tn"),
     pytest.param(_BF16_256X256X64_TN, id="bf16-256x256x64-tn"),
 ]
 

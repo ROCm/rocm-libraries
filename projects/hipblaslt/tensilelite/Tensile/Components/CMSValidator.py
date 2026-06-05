@@ -1248,75 +1248,68 @@ class DataflowGraph:
     def edge_keys(self):
         """Edge-equality keys for cross-graph diff.
 
-        Per rocm-libraries-hdem (`ORAM1_PRINCIPLED_APPROACH_INVESTIGATION.md`
-        §4 / §5.2 / §7), the edge identity tuple is:
+        C3d (rocm-libraries-xxj4) migrated the keying basis from the
+        identity-tuple `(producer.identity, consumer.identity, ...)` to
+        the byte-key tuple `(producer_write_byte_key, consumer_read_byte_key,
+        ...)`. The full key shape is:
 
-            (producer.identity, consumer.identity,
+            (producer_write_byte_key, consumer_read_byte_key,
              edge_kind, intra_operand_byte_offset,
              src_operand_slot, sink_operand_slot)
 
-        Body falls out of the edge-key tuple by construction — the
-        producer/consumer SchedulePositions (which carried `loop_index`
-        and therefore body) are no longer present, and the
-        producer/consumer identities are themselves body-blind under
-        Approach A (identity is `(canonical_render, emission_ordinal)`).
-        The matching becomes "the same producer-identity emitted the
-        same dataflow to the same consumer-identity" — independent of
-        which body each endpoint sits in. This is the body-blindness
-        that closes the cross-body pipelining false positive (the
-        motivating UsePLRPack case where Pack code lands in PRO body
-        under CMS but ML-1 body under default — same identity, same
-        consumer, different bodies).
+        **Allocation-invariance**: `producer_write_byte_key` and
+        `consumer_read_byte_key` are resolved at edge-formation time by
+        `_byte_keys_for_resource(overlap, name_to_idx=...)`. The
+        `name_to_idx` resolver collapses symbolic-vs-numeric naming
+        (C3c/rocm-libraries-1rsy threads this), so `vgprValuA_T0_I0+0`
+        and `vgprValuA_X0_I0+12` both resolve to `('v', 12)` when
+        `name_to_idx` is populated. CMS and SHADOW captures of the same
+        physical kernel produce identical byte-keys for the same edge →
+        set-diff cancels.
 
-        Why `producer.identity` instead of the memo's literal byte-key
-        proposal: the canonical render-text inside identity already
-        encodes operand register references (numeric or symbolic), so
-        two captures emitting the same instruction (same kernelBody,
-        same allocator snapshot — the operative motivating case) get
-        identical identities. Byte-keys would be additionally needed
-        only if symbolic-vs-numeric naming asymmetry surfaced at the
-        edge-key layer; in practice both real captures emit the same
-        form. The simpler identity-based key preserves
-        producer-discrimination for the LR_first/LR_second cross-iter
-        case (each LR has a distinct ordinal → distinct identity →
-        distinct edge key), which the memo's pure byte-key proposal
-        loses (both LRs share producer_write_byte_key=LR.dst and
-        collapse). The principled extension: identity carries
-        rocisa-derived render + per-body ordinal; both are
-        rocisa-derivable signal, xqj3-clean.
+        **Iter-blindness**: byte-key tuples are derived from physical
+        register indices, not from which iter copy the instruction belongs
+        to. ML iter 0 and ML iter 1 of the same PackB3 instruction produce
+        the same `producer_write_byte_key` → same edge_key → cancels in
+        set-diff. This is the property that closes the cross-body
+        pipelining false positive (the motivating UsePLRPack case where
+        Pack code lands in PRO body under CMS but ML-1 body under default).
 
-        Per-edge byte-keys remain on `DataflowEdge` (populated at
-        edge-formation time) as informational metadata that documents
-        which physical bytes the edge represents — they are NOT used
-        in the matching tuple but are available for diagnostic logging
-        and for any future consumer that needs them.
+        **No identity references remain in the keying tuple**: the
+        `producer.identity` / `consumer.identity` fields on nodes remain
+        available as diagnostic annotations (for `diagnose_missing_edge`
+        Phase 0 lookup — C3f scope) but are NOT used in the matching tuple.
 
-        * `producer.identity` / `consumer.identity` — body-blind
-          rocisa-derived `(canonical_render, emission_ordinal)` from
-          `TaggedInstruction.identity_for` (rocm-libraries-hdem A).
-        * `edge_kind` is unchanged from the prior tuple
-          (`raw_intrawave` / `lds_raw_intrawave` / `lr_to_gr_lds_reuse`
-          / `gr_to_lr_lds_reuse`).
-        * `intra_operand_byte_offset` is the tuple of byte positions WITHIN
-          the connected operand (0..N-1) — allocation-invariant. NOT the
+        **Hashability**: `producer_write_byte_key` and
+        `consumer_read_byte_key` are `tuple` objects from
+        `_byte_keys_for_resource` (always returns `tuple`). Each element
+        is `(str, int)`, `(str, str, int)`, or `("mem", str, id, int)` —
+        all hashable. The full 6-tuple is natively set-usable.
+
+        * `producer_write_byte_key` — tuple of byte-key pairs, e.g.
+          `(('v', 12), ('v', 13))`. Populated on `DataflowEdge` at
+          edge-formation time by `_byte_keys_for_resource(overlap,
+          name_to_idx=p_n2i)`. Allocation-invariant.
+        * `consumer_read_byte_key` — same shape. Populated on `DataflowEdge`
+          at edge-formation time by `_byte_keys_for_resource(overlap,
+          name_to_idx=n2i)`. Allocation-invariant.
+        * `edge_kind` — string: `'raw_intrawave'` / `'lds_raw_intrawave'`
+          / `'lr_to_gr_lds_reuse'` / `'gr_to_lr_lds_reuse'`. Unchanged.
+        * `intra_operand_byte_offset` — tuple of byte positions WITHIN the
+          connected operand (0..N-1). Allocation-invariant. NOT the
           absolute physical-register byte-key.
-        * `src_operand_slot` / `sink_operand_slot` are positional integer
+        * `src_operand_slot` / `sink_operand_slot` — positional integer
           indices (0, 1, 2, ...) describing WHICH positional operand of
           the producer was written and WHICH positional operand of the
           consumer was read for this edge. Allocation-invariant by
-          construction (small integer, not a register reference) AND
-          order-sensitive (it flips when two instructions sharing a
-          register are reordered, because the shared register lands in
-          different operand positions on each end). See
-          `DataflowEdge.src_operand_slot` for the convention and the
-          worked VSwap-pair example.
+          construction (small integer, not a register reference).
 
         The producer/consumer SchedulePositions stay on DataflowEdge for
         human-facing `Failure` rendering and for the same-body Phase 1
         order check in `diagnose_missing_edge` — they drop out of the
         matching path entirely.
         """
-        return {(e.producer.identity, e.consumer.identity,
+        return {(e.producer_write_byte_key, e.consumer_read_byte_key,
                  e.edge_kind, e.intra_operand_byte_offset,
                  e.src_operand_slot, e.sink_operand_slot)
                 for e in self.edges}
@@ -3640,8 +3633,22 @@ def compare_graphs(
     reference: DataflowGraph,
     subject: DataflowGraph,
 ) -> List["Failure"]:
-    """Compare two dataflow graphs as edge sets keyed on
-    (producer.identity, consumer.identity, register, edge_kind).
+    """Compare two dataflow graphs as edge sets keyed on byte-keys.
+
+    Each edge is keyed by (producer_write_byte_key, consumer_read_byte_key,
+    edge_kind) — a content-addressed basis introduced by C3d (xxj4) that
+    replaces the previous identity-tuple basis
+    (producer.identity, consumer.identity, register, edge_kind). Byte-key
+    matching is register-name-agnostic and body-position-agnostic, eliminating
+    false mismatches from T/X register-naming drift under UsePLRPack.
+
+    Known limitation (rocm-libraries-56e3): when two distinct producers write
+    identical byte sequences to the same resource, byte-key keying cannot
+    discriminate which producer fed the consumer. The validator will not
+    surface a missing edge in that case even if the wrong producer fed the
+    consumer. This is tracked as a producer-discrimination loss; it does not
+    affect correctness of the current corpus but bounds the precision of the
+    byte-key edge layer.
 
     Returns a list of Failure objects — one or more per missing edge,
     routed through diagnose_missing_edge.
@@ -3684,49 +3691,26 @@ def compare_graphs(
     # answers the pipeline-integrity question (both pipelines emitted N
     # LR / M MFMA / etc.) without conflating naming differences.
     #
-    # NOTE — NOT YET FIXED (originally tracked under rocm-libraries-n7og,
-    # superseded by rocm-libraries-udqg per the n7og investigation;
-    # udqg is the active P0 blocker on Phase 3 / r62g).
+    # C3d (xxj4) byte-key migration resolved the udqg-tagged TF32 mismatch.
     #
-    # The edge layer (`DataflowGraph.edge_keys`, below) still embeds
-    # `(producer.identity, consumer.identity, ...)` in its edge-key
-    # tuples. The n7og bead originally framed the residual as T/X
-    # register-naming drift surfacing through identity.canonical_render,
-    # with a candidate fix of switching to Approach-E byte-key matching.
+    # History: the n7og investigation found that the SHADOW capture's
+    # `LoopBodyCapture.name_to_idx` was missing rotating ValuA/B_T0/X0_I0
+    # pack-buffer bindings under UsePLRPack+UseMFMAF32XEmulation, causing
+    # `producer_write_byte_key` to collapse to the `(-1,)` sentinel for
+    # affected edges. The n7og analysis concluded that switching to byte-key
+    # matching would NOT resolve the divergence because the byte-keys
+    # themselves were wrong on the SHADOW side. The udqg bead fixed the
+    # SHADOW capture pipeline (harvest_name_to_idx), unblocking byte-key
+    # edge matching. After udqg landed, C3d (xxj4) completed the byte-key
+    # migration; the three n7og probe fixtures (bpg11-tf32-4x4-tn,
+    # oplb-tf32-6x8-tn, bf16-256x256x64-tn) all pass — xfail markers have
+    # been removed.
     #
-    # The n7og investigation built a multi-fixture probe
-    # (test_n7og_edge_keys_multifixture.py) comparing SHADOW
-    # (`_last_default_capture`) against CMS (`_last_cms_capture`)
-    # edge_keys across three CMS-enabled fixtures:
-    #
-    #   - bpg11-tf32-4x4-tn (UsePLRPack=True): 208 mismatches.
-    #   - oplb-tf32-6x8-tn (UsePLRPack=True): 624 mismatches.
-    #   - bf16-256x256x64-tn (UsePLRPack=False): 0 mismatches.
-    #
-    # Empirical correction to the n7og framing: the failing fixtures
-    # diverge by hundreds of edges with the per-category node-count gate
-    # (above) still PASSING — i.e. it is NOT just register-naming drift,
-    # it is structural edge-count divergence. Diagnostic at the
-    # byte-key level reveals the SHADOW capture's pack-MFMA edges have
-    # `producer_write_byte_key = (('v', -1),)` (the `-1` sentinel from
-    # `_byte_keys_for_resource` when `name_to_idx.get(bare)` returns
-    # None), while CMS edges have real keys like `(('v', 15),)`. The
-    # SHADOW pipeline's `LoopBodyCapture.name_to_idx` is missing the
-    # rotating ValuA/B_T0/X0_I0 pack-buffer bindings under
-    # UsePLRPack+UseMFMAF32XEmulation.
-    #
-    # As a result the Approach-E candidate fix in the n7og bead does
-    # NOT resolve this: switching `edge_keys` to byte-keys leaves the
-    # mismatch in place because the byte-keys themselves are wrong on
-    # the SHADOW side. The principled fix is in the SHADOW capture
-    # pipeline, not at the edge-layer matching basis. That work is
-    # tracked under rocm-libraries-udqg (P0, blocks r62g) — see the
-    # bead description for the scope estimate and the
-    # ScheduleCapture.py:2319 `harvest_name_to_idx` entry point.
-    #
-    # The n7og bead has been closed with this investigation's outcome
-    # (Outcome B per its acceptance criteria); udqg carries the actual
-    # fix.
+    # Residual limitation (rocm-libraries-56e3): when two distinct producers
+    # write the same byte sequence to the same resource, byte-key keying loses
+    # producer-discrimination — the validator cannot detect that the wrong
+    # producer fed the consumer. This does not affect the current corpus but
+    # bounds the precision of byte-key edge matching going forward.
     from collections import Counter
 
     def _data_flow_category_counts(graph):
@@ -3774,28 +3758,28 @@ def compare_graphs(
     missing_keys = ref_keys - subj_keys
 
     # Map missing keys back to reference edge objects for diagnosis.
-    # Same edge-key shape as DataflowGraph.edge_keys() (rocm-libraries-hdem
-    # Approach E, identity-based variant):
-    # (producer.identity, consumer.identity,
+    # Same edge-key shape as DataflowGraph.edge_keys() (C3d /
+    # rocm-libraries-xxj4, byte-key basis):
+    # (producer_write_byte_key, consumer_read_byte_key,
     #  edge_kind, intra_operand_byte_offset,
     #  src_operand_slot, sink_operand_slot).
     #
-    # Body falls out of the edge-key by construction; the producer and
-    # consumer identities are body-blind under hdem Approach A. See
-    # ORAM1 §4 / §5.2 / §7 (and the `DataflowGraph.edge_keys` docstring
-    # for the rationale on identity-based vs. byte-key-based matching).
+    # Body falls out of the edge-key by construction — byte-keys are
+    # derived from physical register indices, not from which iter or body
+    # the instruction belongs to (iter-blindness). See
+    # `DataflowGraph.edge_keys` docstring for the full rationale.
     #
     # Multiple ref-edges may share the same edge-key tuple (cross-body
-    # pipelining of the same identity collapses both endpoints to one
-    # identity each, and the edge falls out as a single key). For
-    # diagnosis we pick the FIRST such edge as representative — the
+    # pipelining of the same physical bytes collapses both endpoints to
+    # the same byte-key pair, and the edge falls out as a single key).
+    # For diagnosis we pick the FIRST such edge as representative — the
     # classifier's downstream reasoning consults the producer/consumer
     # nodes for ordering and the edge_kind / resource for failure
     # shape, both of which are uniform across edges sharing a key.
     failures = []
     ref_edges_by_key = {}
     for e in reference.edges:
-        key = (e.producer.identity, e.consumer.identity,
+        key = (e.producer_write_byte_key, e.consumer_read_byte_key,
                e.edge_kind, e.intra_operand_byte_offset,
                e.src_operand_slot, e.sink_operand_slot)
         ref_edges_by_key.setdefault(key, e)

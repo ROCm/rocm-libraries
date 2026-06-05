@@ -3141,8 +3141,8 @@ class TestVSwapPair:
         ])
         g_a = build_dataflow_graph(_wrap(cap_a))
         g_b = build_dataflow_graph(_wrap(cap_b))
-        # Different physical registers in canonical_render -> different
-        # producer/consumer identities -> different edge keys.
+        # Different physical registers -> different byte-keys -> different
+        # edge keys (C3d / rocm-libraries-xxj4 byte-key basis).
         assert g_a.edge_keys() != g_b.edge_keys()
 
 
