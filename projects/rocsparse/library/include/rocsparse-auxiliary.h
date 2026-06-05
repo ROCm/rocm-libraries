@@ -60,10 +60,16 @@ rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
  *  \details
  *  \p rocsparse_create_handle_with_stream behaves like \ref rocsparse_create_handle,
  *  but associates the handle with the user-provided \p stream before performing any
- *  setup work. All stream-ordered initialization is then enqueued on \p stream rather
- *  than the default (NULL) stream. Because the default stream implicitly synchronizes
- *  with all other streams on the device, using a dedicated stream prevents handle
- *  creation from blocking work the user has already enqueued on their own streams.
+ *  setup work. All device memory allocation and initialization is enqueued on \p stream
+ *  using stream-ordered operations, so handle creation returns to the caller without
+ *  blocking any GPU stream or the calling CPU thread.
+ *
+ *  \note
+ *  The handle is fully initialized for operations submitted on \p stream (stream
+ *  ordering guarantees correctness). If the handle must be used on a different stream
+ *  before \p stream has finished executing, the caller must first synchronize \p stream
+ *  (e.g. via \p hipStreamSynchronize or a HIP event dependency).
+ *
  *  The handle should be destroyed at the end using rocsparse_destroy_handle().
  *
  *  @param[out]

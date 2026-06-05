@@ -6,6 +6,7 @@ Documentation for rocSPARSE is available at
 ## rocSPARSE 4.6.0 for ROCm 7.13.0
 
 ### Added
+* Added `rocsparse_create_handle_with_stream` to create a handle associated with a user-provided stream. All internal device memory allocation and initialization is stream-ordered on that stream, so handle creation never blocks the calling thread or other GPU streams.
 * Added the `rocsparse_create_const_bsr_descr` routine for creating a const sparse BSR matrix descriptor.
 * Added the `rocsparse_spic0` and `rocsparse_spilu0` routines for incomplete factorizations, with strided batched computations enabled.
 * Added the `rocsparse_sptrsv_descr_create` and the `rocsparse_sptrsv_descr_destroy` routines.

@@ -88,17 +88,18 @@ _rocsparse_handle::_rocsparse_handle(hipStream_t user_stream)
 
         size_t coomv_size = (((sizeof(rocsparse_int) + 16) * nblocks - 1) / 256 + 1) * 256;
 
-        // Allocate device buffer
+        // Allocate device buffer — stream-ordered so handle creation never blocks
+        // streams other than the one passed by the caller.
         buffer_size = (coomv_size > 1024 * 1024) ? coomv_size : 1024 * 1024;
-        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&buffer, buffer_size, stream));
 
         // Device alpha and beta
-        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&alpha, sizeof(double) * 2));
-        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&beta, sizeof(double) * 2));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&alpha, sizeof(double) * 2, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&beta, sizeof(double) * 2, stream));
 
         // Device one
-        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&sone, sizeof(float) * 2));
-        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&done, sizeof(double) * 2));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&sone, sizeof(float) * 2, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&done, sizeof(double) * 2, stream));
 
         // Execute empty kernel for initialization
 
@@ -117,8 +118,12 @@ _rocsparse_handle::_rocsparse_handle(hipStream_t user_stream)
         THROW_IF_HIP_ERROR(
             hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
 
-        // Wait for device transfer to finish
-        THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        // No hipStreamSynchronize here: all initialization is enqueued on
+        // `stream`, so any operation the caller later submits on the same
+        // stream will automatically see the initialized values. If the handle
+        // must be used on a different stream before the creation stream has
+        // completed, the caller is responsible for synchronizing that stream
+        // (e.g. via hipStreamSynchronize or a HIP event) first.
 
 #if defined(ROCSPARSE_WITH_ASAN)
         const size_t required_stack_size = 64 * 1024;
