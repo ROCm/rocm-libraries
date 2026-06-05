@@ -22,25 +22,39 @@
 namespace test_helpers
 {
 
-/// Query total device VRAM in megabytes for the current HIP device.
+/// Query total device VRAM in megabytes for the device the test runs on.
 /// Returns 0 if the device cannot be queried (e.g. no GPU present).
+///
+/// Both guards query the current HIP device (the one the test executes on) so
+/// they always describe the same GPU as each other and as execution. Select a
+/// GPU with HIP_VISIBLE_DEVICES (e.g. `export HIP_VISIBLE_DEVICES=1`).
 inline std::size_t getDeviceTotalVramMb()
 {
-    std::size_t freeMem = 0;
-    std::size_t totalMem = 0;
-    if(hipMemGetInfo(&freeMem, &totalMem) == hipSuccess)
+    int device = 0;
+    if(hipGetDevice(&device) != hipSuccess)
     {
-        return totalMem / (1024 * 1024);
+        return 0;
+    }
+    hipDeviceProp_t props{};
+    if(hipGetDeviceProperties(&props, device) == hipSuccess)
+    {
+        return props.totalGlobalMem / (1024 * 1024);
     }
     return 0;
 }
 
-/// Query the raw gcnArchName string for device 0 (e.g. "gfx942:sramecc+:xnack-").
-/// Returns an empty string if the device cannot be queried.
+/// Query the raw gcnArchName string for the device the test runs on
+/// (e.g. "gfx942:sramecc+:xnack-"). Returns an empty string if the device
+/// cannot be queried. Uses the current HIP device — see getDeviceTotalVramMb.
 inline std::string getDeviceArchName()
 {
+    int device = 0;
+    if(hipGetDevice(&device) != hipSuccess)
+    {
+        return {};
+    }
     hipDeviceProp_t props{};
-    if(hipGetDeviceProperties(&props, 0) == hipSuccess)
+    if(hipGetDeviceProperties(&props, device) == hipSuccess)
     {
         return props.gcnArchName;
     }
