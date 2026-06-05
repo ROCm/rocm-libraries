@@ -24,68 +24,54 @@
 #
 ################################################################################
 
-set(__default_cxx_compile_options
+set(__cxx_compile_options
+    -Werror
     -Wall
     -Wextra
-    -Wcomment
-    -Wendif-labels
-    -Wformat
-    -Winit-self
-    -Wreturn-type
-    -Wsequence-point
-    -Wswitch
-    -Wtrigraphs
+    # Additional warnings not included in -Wall/-Wextra
     -Wundef
-    -Wuninitialized
     -Wunreachable-code
-    -Wno-ignored-qualifiers
-    -Wno-sign-compare
+    -Wmissing-noreturn
+    -Wshadow
+    -Wsuggest-override
+    -Wold-style-cast
+    -Wcast-align
+    -Wcast-qual
+    -Wformat-nonliteral
+    -Wunknown-attributes
+    -Wunknown-warning-option
+    -Wdeprecated
+    -Wdeprecated-builtins
+    -Wzero-as-null-pointer-constant
+    # TODO: Working to enable these warnings. Each requires code cleanup first.
+    # -Wconversion            # ~1000+ implicit narrowing/sign conversions to fix
+    # -Wdouble-promotion      # implicit float-to-double promotions
+    # Suppress specific warnings -- working to remove these by fixing the code
+    # ~40 instances: narrowing in brace init (batchnorm, ck_impl, addkernels)
+    -Wno-c++11-narrowing
+    -Wno-sign-compare           # ~1000+ instances: signed/unsigned comparisons throughout codebase
+    -Wno-deprecated-declarations # 2 deprecated MIOpen APIs still have callers
+    -Wno-deprecated-copy-with-dtor           # SolverBase needs Rule-of-5 refactoring
+    -Wno-deprecated-copy-with-user-provided-dtor  # TuningIterationScopedLimiter needs refactoring
 )
 
 set(__clang_cxx_compile_options
-    -Weverything
-    -Wno-c++98-compat
-    -Wno-c++98-compat-pedantic
-    -Wno-conversion
-    -Wno-double-promotion
-    -Wno-exit-time-destructors
-    -Wno-extra-semi
-    -Wno-extra-semi-stmt
-    -Wno-missing-prototypes
-    -Wno-padded
     -Wno-unused-command-line-argument
-    -Wno-weak-vtables
-    -Wno-covered-switch-default
-    -Wno-unsafe-buffer-usage
-    -Wno-global-constructors
-    -Wno-reserved-identifier
-    -Wno-old-style-cast
-    -Wno-c++11-narrowing
-    -Wno-switch-enum
-    -Wno-suggest-override
-    -Wno-nonportable-system-include-path
-    -Wno-documentation
-    -Wmissing-noreturn)
-
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
-    list(APPEND __clang_cxx_compile_options
-        -Wno-unique-object-duplication
-        -Wno-switch-default)
-endif()
-
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "23")
-    list(APPEND __clang_cxx_compile_options
-        -Wno-lifetime-safety
-        -Wno-lifetime-safety-suggestions
-        -Wno-lifetime-safety-intra-tu-suggestions
-        -Wno-lifetime-safety-cross-tu-suggestions)
-endif()
+    -Wthread-safety
+    -Wshift-sign-overflow
+    -Winconsistent-missing-destructor-override
+    -Wcomma
+    -Wmicrosoft-cpp-macro
+    -Wnested-anon-types
+    -Wlanguage-extension-token
+    -Wunused-template
+    -Wnrvo
+)
 
 if(WIN32)
     list(APPEND __clang_cxx_compile_options
         -fms-extensions
-        -fms-compatibility
-        )
+        -fms-compatibility)
     # AMD clang reports `__declspec(dllexport)` as "not supported" on the
     # x86_64-pc-windows-msvc target, even though the attribute is honored
     # (verified via llvm-readobj --coff-exports on MIOpen.dll). This produces
@@ -96,8 +82,9 @@ if(WIN32)
 endif()
 
 add_compile_options(
-    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:${__default_cxx_compile_options};${__clang_cxx_compile_options}>"
+    "$<$<COMPILE_LANGUAGE:CXX>:${__cxx_compile_options}>"
+    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:${__clang_cxx_compile_options}>"
 )
 
-unset(__default_cxx_compile_options)
+unset(__cxx_compile_options)
 unset(__clang_cxx_compile_options)

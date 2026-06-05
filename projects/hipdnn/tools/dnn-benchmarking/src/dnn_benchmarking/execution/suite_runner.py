@@ -3,9 +3,9 @@
 
 """Suite runner for per-graph engine iteration with granular timing.
 
-Iterates the engine IDs discovered for a graph via
-``Graph.get_ranked_engine_ids`` (real runtime discovery, no hardcoded engine
-lists). For each engine, captures separated CPU build time, GPU kernel time,
+Uses explicit ``--engine`` IDs in caller order when provided; otherwise
+discovers ranked engine IDs for the graph via ``Graph.get_ranked_engine_ids``.
+For each engine, captures separated CPU build time, GPU kernel time,
 and E2E wall-clock time. Performs correctness validation by comparing GPU
 output against a reference provider via ArrayComparator.
 """
@@ -76,6 +76,39 @@ def _resolve_engine_name(engine_id: int) -> str:
             "falling back to hex display string",
         )
     return f"engine_{engine_id:#x}"
+
+
+def set_plugin_path(
+    hipdnn: Any, plugin_path: Optional[Path], loading_mode: Optional[Any] = None
+) -> None:
+    """Set the process-wide hipDNN plugin search path for the next handle."""
+    if plugin_path is None:
+        return
+    paths = [str(plugin_path)]
+    if loading_mode is None:
+        hipdnn.set_engine_plugin_paths(paths)
+    else:
+        hipdnn.set_engine_plugin_paths(paths, loading_mode)
+
+
+def _engine_setup_error_result(
+    provider: str,
+    engine_id: int,
+    plugin_path: Optional[Path],
+    config: SuiteConfig,
+    error_message: str,
+) -> ProviderEngineResult:
+    """Build a per-engine error row for plugin-path/handle setup failures."""
+    return ProviderEngineResult(
+        provider=provider,
+        engine_id=engine_id,
+        status="error",
+        plugin_path=str(plugin_path) if plugin_path is not None else None,
+        error_message=error_message,
+        correctness=CorrectnessResult.failed(
+            rtol=config.rtol, atol=config.atol, error_message=error_message
+        ),
+    )
 
 
 def _get_reference_provider(
@@ -251,59 +284,64 @@ def run_graph_all_providers(
 
     validation_requested = config.reference_provider != "none"
 
-    # Discover engines via real backend heuristics. A discovery failure
-    # is a graph-level error (record it and stop iterating engines), but
-    # "no engine configurations available" / "not supported" messages are
-    # really an unsupported-graph signal -- record as skipped so the
-    # suite exit code stays 0 when nothing is wrong, just nothing to run.
-    discovery_config = BenchmarkConfig(
-        graph_path=graph_path,
-        warmup_iters=config.warmup_iters,
-        benchmark_iters=config.benchmark_iters,
-    )
-    try:
-        discovery_executor = Executor(
-            graph_json_str=graph_json_str,
-            config=discovery_config,
-            gpu_backend=config.gpu_backend,
-        )
-        engine_ids = discovery_executor.discover_engines(handle)
-    except UnsupportedGraphError as e:
-        return GraphResult(
-            graph_name=graph_name,
-            graph_path=str(graph_path),
-            results=[
-                ProviderEngineResult(
-                    provider="unknown",
-                    engine_id=0,
-                    status="skipped",
-                    skip_reason=str(e),
-                    correctness=CorrectnessResult.failed(
-                        rtol=config.rtol, atol=config.atol, error_message=str(e)
-                    ),
-                )
-            ],
-        )
-    except (ExecutionError, RuntimeError) as e:
-        msg = str(e)
-        return GraphResult(
-            graph_name=graph_name,
-            graph_path=str(graph_path),
-            results=[
-                ProviderEngineResult(
-                    provider="unknown",
-                    engine_id=0,
-                    status="error",
-                    error_message=f"Engine discovery failed: {msg}",
-                    correctness=CorrectnessResult.failed(
-                        rtol=config.rtol, atol=config.atol, error_message=msg
-                    ),
-                )
-            ],
-        )
-
     if config.engine_filter is not None:
-        engine_ids = [e for e in engine_ids if e in config.engine_filter]
+        # Explicit --engine is a selection, not a post-discovery filter. Keep the
+        # caller's order so per-engine plugin paths are deterministic.
+        engine_ids = list(config.engine_filter)
+    else:
+        # Discover engines via real backend heuristics. A discovery failure is a
+        # graph-level error (record it and stop iterating engines), but "no
+        # engine configurations available" / "not supported" messages are
+        # really an unsupported-graph signal.
+        discovery_config = BenchmarkConfig(
+            graph_path=graph_path,
+            warmup_iters=config.warmup_iters,
+            benchmark_iters=config.benchmark_iters,
+        )
+        try:
+            if handle is None:
+                import hipdnn_frontend as hipdnn
+
+                handle = hipdnn.Handle()
+            discovery_executor = Executor(
+                graph_json_str=graph_json_str,
+                config=discovery_config,
+                gpu_backend=config.gpu_backend,
+            )
+            engine_ids = discovery_executor.discover_engines(handle)
+        except UnsupportedGraphError as e:
+            return GraphResult(
+                graph_name=graph_name,
+                graph_path=str(graph_path),
+                results=[
+                    ProviderEngineResult(
+                        provider="unknown",
+                        engine_id=0,
+                        status="skipped",
+                        skip_reason=str(e),
+                        correctness=CorrectnessResult.failed(
+                            rtol=config.rtol, atol=config.atol, error_message=str(e)
+                        ),
+                    )
+                ],
+            )
+        except (ExecutionError, RuntimeError) as e:
+            msg = str(e)
+            return GraphResult(
+                graph_name=graph_name,
+                graph_path=str(graph_path),
+                results=[
+                    ProviderEngineResult(
+                        provider="unknown",
+                        engine_id=0,
+                        status="error",
+                        error_message=f"Engine discovery failed: {msg}",
+                        correctness=CorrectnessResult.failed(
+                            rtol=config.rtol, atol=config.atol, error_message=msg
+                        ),
+                    )
+                ],
+            )
 
     if not engine_ids:
         return GraphResult(
@@ -317,12 +355,12 @@ def run_graph_all_providers(
                     error_message=(
                         "No engines discovered for graph"
                         if config.engine_filter is None
-                        else "No discovered engines matched --engine filter"
+                        else "No engines selected for graph"
                     ),
                 )
             ],
         )
-
+    engine_selections = config.engine_selections_for(engine_ids)
     ref_provider = _get_reference_provider(config, graph_json)
 
     # Compute analytical metrics once per graph — they're a function of
@@ -343,20 +381,50 @@ def run_graph_all_providers(
             warn_once("analytical", f"compute_io_bytes failed for {graph_name}: {e}")
 
     pe_results: List[ProviderEngineResult] = []
-    for engine_id in engine_ids:
+    for selection in engine_selections:
+        engine_id = selection.engine_id
+        engine_plugin_path = selection.plugin_path
         engine_name = _resolve_engine_name(engine_id)
-        if reporter is not None:
-            reporter.print_engine_start(engine_name)
+        engine_handle = handle
         with Timer() as t:
-            pe_result = _run_single_provider_engine(
+            if engine_handle is None:
+                try:
+                    import hipdnn_frontend as hipdnn
+
+                    set_plugin_path(
+                        hipdnn,
+                        engine_plugin_path,
+                        hipdnn.PluginLoadingMode.ABSOLUTE,
+                    )
+                    engine_handle = hipdnn.Handle()
+                except (ImportError, RuntimeError, ValueError, OSError) as e:
+                    pe_result = _engine_setup_error_result(
+                        provider=engine_name,
+                        engine_id=engine_id,
+                        plugin_path=engine_plugin_path,
+                        config=config,
+                        error_message=str(e),
+                    )
+                    pe_result.elapsed_time_ms = t.elapsed_ms
+                    if reporter is not None:
+                        reporter.print_engine_start(engine_name)
+                        reporter.print_engine_result(pe_result)
+                    pe_results.append(pe_result)
+                    continue
+
+            if reporter is not None:
+                reporter.print_engine_start(engine_name)
+
+            pe_result = run_single_provider_engine(
                 graph_path=graph_path,
                 graph_json_str=graph_json_str,
                 graph_name=graph_name,
                 tensor_infos=tensor_infos,
                 config=config,
-                handle=handle,
+                handle=engine_handle,
                 provider=engine_name,
                 engine_id=engine_id,
+                plugin_path=engine_plugin_path,
                 ref_provider=ref_provider,
                 validation_requested=validation_requested,
                 graph_json=graph_json,
@@ -365,6 +433,8 @@ def run_graph_all_providers(
                 analytical_io_bytes=analytical_io_bytes,
             )
         pe_result.elapsed_time_ms = t.elapsed_ms
+        if engine_plugin_path is not None:
+            pe_result.plugin_path = str(engine_plugin_path)
         if reporter is not None:
             reporter.print_engine_result(pe_result)
         pe_results.append(pe_result)
@@ -388,7 +458,7 @@ def _collect_basic_metrics_post_loop(
     """Populate the basic always-on metric fields on ``result``.
 
     Called once after the timed loop when ``metrics.tier == "basic"``.
-    Pulled out of :func:`_run_single_provider_engine` to keep that
+    Pulled out of :func:`run_single_provider_engine` to keep that
     function focused on the timed loop itself; the basic-tier book
     keeping is otherwise just a long sequence of conditionals on
     intermediate results.
@@ -437,7 +507,7 @@ def _collect_basic_metrics_post_loop(
         warn_once("gpu_smi", f"vram snapshot failed: {e}")
 
 
-def _run_single_provider_engine(
+def run_single_provider_engine(
     graph_path: Path,
     graph_json_str: str,
     graph_name: str,
@@ -446,6 +516,7 @@ def _run_single_provider_engine(
     handle: Any,
     provider: str,
     engine_id: int,
+    plugin_path: Optional[Path],
     ref_provider: Optional[ReferenceProvider],
     validation_requested: bool,
     graph_json: Dict[str, Any],
@@ -586,7 +657,7 @@ def _run_single_provider_engine(
                     warmup_iters=config.warmup_iters,
                     benchmark_iters=config.benchmark_iters,
                     metrics_config=config.metrics,
-                    plugin_path=config.plugin_path,
+                    plugin_path=plugin_path,
                 )
                 if extra:
                     result.extra_metrics = extra

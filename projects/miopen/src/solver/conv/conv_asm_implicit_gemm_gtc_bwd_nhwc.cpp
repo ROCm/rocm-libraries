@@ -873,7 +873,7 @@ bool PerformanceConfigAsmImplicitGemmGTCBwdXdlopsNHWC::IsValid(
                     n = n | (n >> 16);
                     return n - (n >> 1);
                 }(padded_k_num);
-                int k_pow2 = (int)log2(prev_pow2);
+                int k_pow2 = static_cast<int>(log2(prev_pow2));
 
                 return std::min(k_pow2, BWD_MAX_GEMM_K_SPLITS);
             }

@@ -10,7 +10,7 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "HipKernelHandle.hpp"
+#include "core/Handle.hpp"
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 
@@ -23,7 +23,7 @@ class TestAsmSdpaEngine : public ::testing::Test
 {
 protected:
     AsmSdpaEngine _engine;
-    HipKernelHandle _handle;
+    Handle _handle;
 
     void SetUp() override
     {

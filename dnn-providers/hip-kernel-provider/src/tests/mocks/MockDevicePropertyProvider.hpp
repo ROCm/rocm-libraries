@@ -5,12 +5,12 @@
 
 #include <gmock/gmock.h>
 
-#include "IDevicePropertyProvider.hpp"
+#include "device/IDevicePropertyProvider.hpp"
 
 namespace hip_kernel_provider
 {
 
-class MockDevicePropertyProvider : public IDevicePropertyProvider
+class MockDevicePropertyProvider : public device::IDevicePropertyProvider
 {
 public:
     MOCK_METHOD(hipDeviceProp_t, getDeviceProperties, (), (const, override));
