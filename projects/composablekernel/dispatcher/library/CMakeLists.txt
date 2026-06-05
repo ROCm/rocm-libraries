@@ -112,6 +112,9 @@ function(ck_add_dispatcher_conv_instances VARIANT)
     -Wno-header-hygiene
     -Wno-unused-parameter
     -Wno-missing-variable-declarations
+    # New clang -Weverything suggestion firing on builder-pattern setters that
+    # return *this in the shared dispatcher headers; not a real defect.
+    -Wno-lifetime-safety-intra-tu-suggestions
   )
   if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
     target_compile_options(${TARGET_NAME} PRIVATE --offload-compress)

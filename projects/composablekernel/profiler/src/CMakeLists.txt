@@ -178,6 +178,9 @@ if(CK_TILE_DISPATCHER AND SUPPORTED_GPU_TARGETS MATCHES "gfx9")
     -Wno-float-equal
     -Wno-ctad-maybe-unsupported
     -Wno-old-style-cast
+    # New clang -Weverything suggestion firing on builder-pattern setters that
+    # return *this in the shared dispatcher headers; not a real defect.
+    -Wno-lifetime-safety-intra-tu-suggestions
   )
 
   # Link all available dispatcher instance libraries
