@@ -716,9 +716,11 @@ AnyInvokeParams Solution::MakeInvokeParams(const Problem& problem_,
                                      workspace_size,
                                      conv_desc.attribute.gfx90aFp16alt.GetWrW()};
 #ifdef MIOPEN_BETA_API
-    case miopenProblemDirectionInference: MIOPEN_THROW(miopenStatusNotImplemented);
+    case miopenProblemDirectionInference: break;
 #endif
     }
+
+    MIOPEN_THROW(miopenStatusNotImplemented);
 }
 
 Problem Solution::Transpose(const Problem& problem, RunInput* x, const RunInput& w, RunInput* y)

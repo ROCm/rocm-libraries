@@ -340,11 +340,11 @@ std::ostream& operator<<(std::ostream& os, miopenLRNMode_t mode)
 {
     switch(mode)
     {
-    case miopenLRNWithinChannel: os << "WithinChannel"; break;
-    case miopenLRNCrossChannel: os << "CrossChannel"; break;
+    case miopenLRNWithinChannel: return os << "WithinChannel";
+    case miopenLRNCrossChannel: return os << "CrossChannel";
     }
 
-    return os;
+    return os << "Invalid";
 }
 
 template <typename T>

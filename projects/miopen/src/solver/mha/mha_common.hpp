@@ -130,20 +130,19 @@ inline void gemm([[maybe_unused]] const Handle& handle,
     float beta = 0.0f;
 
     auto cvtMiopen2Rocblas = [](miopenDataType_t miopen) {
-        if(miopen == miopenFloat)
+        switch(miopen)
         {
-            return rocblas_datatype::rocblas_datatype_f32_r;
-        }
+        case miopenFloat: return rocblas_datatype::rocblas_datatype_f32_r;
 #if USE_ROCBLAS_EX3
-        else if(miopen == miopenFloat8_fnuz)
-        {
-            return rocblas_datatype::rocblas_datatype_f8_r;
-        }
-        else if(miopen == miopenBFloat8_fnuz)
-        {
-            return rocblas_datatype::rocblas_datatype_bf8_r;
-        }
+        case miopenFloat8_fnuz: return rocblas_datatype::rocblas_datatype_f8_r;
+        case miopenBFloat8_fnuz: return rocblas_datatype::rocblas_datatype_bf8_r;
 #endif
+        case miopenHalf:
+        case miopenInt32:
+        case miopenInt8:
+        case miopenDouble:
+        case miopenInt64: break;
+        }
 
         return rocblas_datatype::rocblas_datatype_invalid;
     };

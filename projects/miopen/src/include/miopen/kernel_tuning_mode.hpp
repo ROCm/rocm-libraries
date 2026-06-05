@@ -31,7 +31,7 @@ enum class KernelPhase
     Tuning
 };
 
-/// Convert KernelPhase enum to string for JSON output
+/// Convert KernelPhase enum to std::string for JSON output
 inline std::string KernelPhaseToString(KernelPhase phase)
 {
     switch(phase)

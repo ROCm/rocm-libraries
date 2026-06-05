@@ -243,20 +243,21 @@ bool CheckIsArgSupported(const ProblemDescription& problem, const std::string& k
 template <typename Fn>
 auto DispatchFusedByDataType(miopenDataType_t dtype, Fn&& fn)
 {
-    if(dtype == miopenHalf)
+    switch(dtype)
     {
-        return fn(ck::half_t{}, ck::half_t{});
-    }
-    else if(dtype == miopenBFloat16)
-    {
-        return fn(ck::bhalf_t{}, ck::bhalf_t{});
-    }
-    else if(dtype == miopenInt8)
-    {
-        return fn(int8_t{}, float{});
+    case miopenHalf: return fn(ck::half_t{}, ck::half_t{});
+    case miopenBFloat16: return fn(ck::bhalf_t{}, ck::bhalf_t{});
+    case miopenInt8: return fn(int8_t{}, float{});
+
+    case miopenFloat:
+    case miopenInt32:
+    case miopenInt64:
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz: return fn(float{}, float{});
     }
 
-    return fn(float{}, float{});
+    MIOPEN_THROW(miopenStatusInternalError, "Unhandled miopenDataType_t");
 }
 
 } // anonymous namespace

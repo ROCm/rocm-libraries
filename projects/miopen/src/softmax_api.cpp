@@ -40,21 +40,18 @@ static void LogCmdSoftmax(const miopenTensorDescriptor_t xDesc,
     {
         std::stringstream ss;
 
-        if(miopen::deref(xDesc).GetType() == miopenFloat)
+        switch(miopen::deref(xDesc).GetType())
         {
-            ss << "softmax";
-        }
-        else if(miopen::deref(xDesc).GetType() == miopenHalf)
-        {
-            ss << "softmaxfp16";
-        }
-        else if(miopen::deref(xDesc).GetType() == miopenBFloat16)
-        {
-            ss << "softmaxbfp16";
-        }
-        else
-        {
-            MIOPEN_THROW("Invalid type");
+        case miopenFloat: ss << "softmax"; break;
+        case miopenHalf: ss << "softmaxfp16"; break;
+        case miopenBFloat16: ss << "softmaxbfp16"; break;
+
+        case miopenInt32:
+        case miopenInt8:
+        case miopenDouble:
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
+        case miopenInt64: MIOPEN_THROW("Invalid type");
         }
 
         // clang-format off

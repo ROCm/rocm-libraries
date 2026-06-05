@@ -369,39 +369,48 @@ static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
                                               int BlkGroupSize,
                                               const tunable_generic_reduction* tunable)
 {
-    bool src_need_padding = false;
-    bool dst_need_padding = false;
-    int copySliceLen;
-    int reduceSizePerBlock;
+    auto res = [&]() {
+        bool src_need_padding = false;
+        bool dst_need_padding = false;
+        int copySliceLen;
+        int reduceSizePerBlock;
 
-    switch(reduceImpl)
-    {
-    case Reduce_DirectThreadWise:
-        copySliceLen     = tunable->GredThreadBufferLength;
-        src_need_padding = (invariantLen < static_cast<size_t>(GridSize) * BlockSize ||
-                            toReduceLen % copySliceLen > 0);
-        dst_need_padding = (invariantLen < static_cast<size_t>(GridSize) * BlockSize);
-        break;
-    case Reduce_DirectWarpWise:
-        copySliceLen = warpSize * tunable->GredAccessesPerThreadInWarp;
-        src_need_padding =
-            (invariantLen < GridSize * BlockSize / warpSize || toReduceLen % copySliceLen > 0);
-        dst_need_padding = (invariantLen < GridSize * BlockSize / warpSize);
-        break;
-    case Reduce_BlockWise:
-        copySliceLen     = BlockSize * tunable->GredAccessesPerThreadInBlock;
-        src_need_padding = (toReduceLen % copySliceLen > 0);
-        break;
-    case Reduce_MultiBlock:
-        copySliceLen = BlockSize * tunable->GredAccessesPerThreadInBlock;
-        reduceSizePerBlock =
-            (((toReduceLen + BlkGroupSize - 1) / BlkGroupSize + copySliceLen - 1) / copySliceLen) *
-            copySliceLen;
-        src_need_padding = (toReduceLen < static_cast<size_t>(reduceSizePerBlock) * BlkGroupSize);
-        break;
-    };
+        switch(reduceImpl)
+        {
+        case Reduce_DirectThreadWise:
+            copySliceLen     = tunable->GredThreadBufferLength;
+            src_need_padding = (invariantLen < static_cast<size_t>(GridSize) * BlockSize ||
+                                toReduceLen % copySliceLen > 0);
+            dst_need_padding = (invariantLen < static_cast<size_t>(GridSize) * BlockSize);
+            return std::make_pair(src_need_padding, dst_need_padding);
 
-    return (std::make_pair(src_need_padding, dst_need_padding));
+        case Reduce_DirectWarpWise:
+            copySliceLen = warpSize * tunable->GredAccessesPerThreadInWarp;
+            src_need_padding =
+                (invariantLen < GridSize * BlockSize / warpSize || toReduceLen % copySliceLen > 0);
+            dst_need_padding = (invariantLen < GridSize * BlockSize / warpSize);
+            return std::make_pair(src_need_padding, dst_need_padding);
+
+        case Reduce_BlockWise:
+            copySliceLen     = BlockSize * tunable->GredAccessesPerThreadInBlock;
+            src_need_padding = (toReduceLen % copySliceLen > 0);
+            return std::make_pair(src_need_padding, dst_need_padding);
+
+        case Reduce_MultiBlock:
+            copySliceLen = BlockSize * tunable->GredAccessesPerThreadInBlock;
+            reduceSizePerBlock =
+                (((toReduceLen + BlkGroupSize - 1) / BlkGroupSize + copySliceLen - 1) /
+                 copySliceLen) *
+                copySliceLen;
+            src_need_padding =
+                (toReduceLen < static_cast<size_t>(reduceSizePerBlock) * BlkGroupSize);
+            return std::make_pair(src_need_padding, dst_need_padding);
+        };
+
+        MIOPEN_THROW("Invalid reduction method ID!");
+    }();
+
+    return res;
 };
 
 static std::string get_kernel_file_name(const bool isFirstCall,
