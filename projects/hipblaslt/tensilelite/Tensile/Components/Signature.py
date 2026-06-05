@@ -222,17 +222,16 @@ class SignatureDefault(Signature):
             signature.addArg("SKItersPerWI",                       SVK.SIG_VALUE, "u32")
             signature.addArg("SKGrid",                             SVK.SIG_VALUE, "u32")
             userArgumentsInfo.gemmArgumentSize += 24
-        elif kernel["StreamK"]:
+        elif kernel["StreamK"] == 3:  # SK3 two-tile ABI
             # StreamK args
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
             signature.addArg("MagicNumberItersPerTile",            SVK.SIG_VALUE, "u32")
             signature.addArg("MagicShiftItersPerTile",             SVK.SIG_VALUE, "u32")
             signature.addArg("SKItersPerWG",                       SVK.SIG_VALUE, "u32")
             userArgumentsInfo.gemmArgumentSize += 16
-            if kernel["StreamK"] == 3: # SK3 two-tile ABI
-                signature.addArg("skGrid",                         SVK.SIG_VALUE, "u32")
-                signature.addArg("skTiles",                        SVK.SIG_VALUE, "u32")
-                userArgumentsInfo.gemmArgumentSize += 8
+            signature.addArg("skGrid",                             SVK.SIG_VALUE, "u32")
+            signature.addArg("skTiles",                            SVK.SIG_VALUE, "u32")
+            userArgumentsInfo.gemmArgumentSize += 8
 
         if kernel["ProblemType"]["UseScaleAB"]:
             signature.addArg("AddressScaleA", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")

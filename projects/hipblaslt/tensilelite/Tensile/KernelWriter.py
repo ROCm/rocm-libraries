@@ -8524,17 +8524,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("SKItersPerWI", 1)
       self.defineSgpr("skGrid", 1)
       self.states.numSgprStreamK += 6
-    elif kernel["StreamK"]:
+    elif kernel["StreamK"] == 3: # SK3 two-tile ABI
       # StreamK args
       self.defineSgpr("ItersPerTile", 1)
       self.defineSgpr("MagicNumberItersPerTile", 1)
       self.defineSgpr("MagicShiftItersPerTile", 1)
       self.defineSgpr("SKItersPerWG", 1)
-      self.states.numSgprStreamK += 4
-      if kernel["StreamK"] == 3: # SK3 two-tile ABI
-        self.defineSgpr("skGrid", 1)
-        self.defineSgpr("skTiles", 1)
-        self.states.numSgprStreamK += 2
+      self.defineSgpr("skGrid", 1)
+      self.defineSgpr("skTiles", 1)
+      self.states.numSgprStreamK += 6
 
     if not kernel["UseSubtileImpl"]:
       if kernel["LocalWriteUseSgprA"]:

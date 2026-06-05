@@ -182,7 +182,7 @@ BenchmarkProblems:
         - DirectToVgprA: [1]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        - StreamK: [0]
+        - StreamK: [0,3]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 1,  4,1 ]

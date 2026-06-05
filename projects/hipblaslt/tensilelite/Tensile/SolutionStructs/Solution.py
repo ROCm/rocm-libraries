@@ -1495,9 +1495,6 @@ class Solution(collections.abc.Mapping):
       return
 
     if state["StreamK"] != 0:
-      if state["StreamK"] in (1, 2):
-        reject(state, printRejectionReason, "Stream-K modes 1 and 2 are no longer supported; use StreamK=3 or StreamK=4")
-        return
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
