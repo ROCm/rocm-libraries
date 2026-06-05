@@ -1,20 +1,22 @@
 **CK Tile operation support by data type, layout, and GPU target:**
 
-| Op | CK Tile Kernel | fp16 | fp8 | bf16 | bf8 | int8 | fp4 | fp6 | rcr | rrr | ccr | crr | 90a | 942 | 950 | 1201 |
-|:--:|----------------|:----:|:---:|:----:|:---:|:----:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:----:|
-| GEMM | gemm_universal [1][2]<br>engine: gemm_universal/<br>example: 03_gemm/ | ✅ | ✅ | ✅ | ✅ | ❌ | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| GEMM | gemm_multi_d [3]<br>engine: gemm_multi_d/<br>example: 19_gemm_multi_d/ | ✅ | | | | | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| GEMM | gemm_preshuffle [4]<br>engine: gemm_preshuffle/ | ✅ | ✅ | ✅ | ✅ | | | | ✅ | | | | ✅ | ✅ | ✅ | ❌ |
-| GEMM | streamk_gemm [5][6][7]<br>engine: gemm_streamk/<br>example: 40_streamk_gemm/ | ✅ | ✅ | ❌ | ❌ | | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
-| GEMM | batched_gemm<br>example: 16_batched_gemm/ | ❌ | | | | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
-| GEMM | batched_contraction<br>example: 41_batched_contraction/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ❌ |
-| GEMM | block_scale_gemm/gemm_rowcolquant [9]<br>engine: block_scale_gemm/gemm_rowcolquant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | | | | ❌ | ✅ | ✅ | ✅ |
- | GEMM | block_scale_gemm/gemm_tensor_quant [9]<br>engine: block_scale_gemm/gemm_tensor_quant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
-| GEMM | flatmm<br>example: 18_flatmm/ | ❌ | ❌ | ❌ | ❌ | | ❌ | ❌ | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
-| GEMM | gemm_multi_abd<br>example: 22_gemm_multi_abd/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ✅ |
-| GEMM | gemm_quant | | ❌ | | ❌ | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
-| GEMM | grouped_gemm [10]<br>engine: grouped_gemm/<br>example: 17_grouped_gemm/ | ✅ | ✅ | | | | | | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
-| GEMM | grouped_gemm_quant | | ✅ | | ✅ | | | | ✅ | | | | | ✅ | ✅ | ✅ |
+| Op | CK Tile Kernel | fp16 | fp8 | bf16 | bf8 | int8 | fp4 | fp6 | rcr | rrr | ccr | crr | 90a | 942 | 950 | 1201 | Op Weight |
+|:--:|----------------|:----:|:---:|:----:|:---:|:----:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:----:|:---------:|
+| GEMM | gemm_universal [1][2]<br>engine: gemm_universal/<br>example: 03_gemm/ | ✅ | ✅ | ✅ | ✅ | ❌ | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 0.0910 |
+| GEMM | gemm_multi_d [3]<br>engine: gemm_multi_d/<br>example: 19_gemm_multi_d/ | ✅ | | | | | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | 0.0909 |
+| GEMM | gemm_preshuffle [4]<br>engine: gemm_preshuffle/ | ✅ | ✅ | ✅ | ✅ | | | | ✅ | | | | ✅ | ✅ | ✅ | ❌ | 0.0909 |
+| GEMM | streamk_gemm [5][6][7]<br>engine: gemm_streamk/<br>example: 40_streamk_gemm/ | ✅ | ✅ | ❌ | ❌ | | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | |
+| GEMM | batched_gemm<br>example: 16_batched_gemm/ | ❌ | | | | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ | |
+| GEMM | batched_contraction<br>example: 41_batched_contraction/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ❌ | 0.0909 |
+| GEMM | block_scale_gemm/gemm_rowcolquant [9]<br>engine: block_scale_gemm/gemm_rowcolquant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | | | | ❌ | ✅ | ✅ | ✅ | 0.0909 |
+| GEMM | block_scale_gemm/gemm_tensor_quant [9]<br>engine: block_scale_gemm/gemm_tensor_quant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | 0.0909 |
+| GEMM | flatmm<br>example: 18_flatmm/ | ❌ | ❌ | ❌ | ❌ | | ❌ | ❌ | ❌ | | | | ❌ | ❌ | ❌ | ❌ | |
+| GEMM | gemm_multi_abd<br>example: 22_gemm_multi_abd/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ✅ | 0.0909 |
+| GEMM | gemm_quant | | ❌ | | ❌ | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ | |
+| GEMM | grouped_gemm [10]<br>engine: grouped_gemm/<br>example: 17_grouped_gemm/ | ✅ | ✅ | | | | | | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | 0.0909 |
+| GEMM | grouped_gemm_quant/grouped_gemm_rowcolquant<br>engine: grouped_gemm_quant/grouped_gemm_rowcolquant/ | | ✅ | | ✅ | | | | ✅ | | | | | ✅ | ✅ | ✅ | 0.0909 |
+| GEMM | grouped_gemm_quant/grouped_gemm_tensorquant<br>engine: grouped_gemm_quant/grouped_gemm_tensorquant/ | | ✅ | | ✅ | | | | ✅ | | | | | ✅ | ✅ | ✅ | 0.0909 |
+| GEMM | mx_gemm<br>engine: gemm/mx_gemm/ | | ✅ | | | | ✅ | | ✅ | | | | | ✅ | ✅ | ❌ | 0.0909 |
 | Reduce | multi_reduce2d [8]<br>engine: reduce/<br>example: 05_reduce/ | ✅ | | ❌ | | | | | | | | | ❌ | ✅ | ✅ | ❌ |
 | Reduce | reduce2d<br>example: 05_reduce/ | ❌ | | ❌ | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
 | Attention | fmha<br>engine: fmha/<br>example: 01_fmha/ | ✅ | ✅ | ✅ | ❌ | | | | | | | | ✅ | ✅ | ✅ | ❌ |
@@ -39,6 +41,7 @@
 - **Green cell** (✅): CK Tile implementation exists **and** the tile engine supports it.
 - **Red cell** (❌): CK Tile implementation exists **but** the tile engine does **not** support it.
 - **Grey cell** (blank): No CK Tile implementation exists for this combination.
+- **Op Weight column:** Sampling budget weight assigned to each op in `sampling/op_weights.json`. Ops without a weight are not part of the daily sampling tier. All weighted ops share an equal weight of ~0.0909 (sum = 1.0).
 
 **Notes:**
 - All CK Tile GEMM and reduce kernels are architecturally generic (no compile-time GPU guards). The gfx filtering in the tile engine is a validation/testing scope decision, not a code limitation.
@@ -52,6 +55,7 @@
 - [8] **multi_reduce2d:** CK Tile's reduce example supports bf16 input but the tile engine only configures fp16. The reduce kernel adapts to wave32/wave64 at runtime via `is_wave32()`.
 - [9] **block_scale_gemm/gemm_rowcolquant:** Supports row-column quantized GEMM with fp8/bf8 inputs. Only rcr layout is supported. Not validated on gfx90a.
 - [10] **grouped_gemm:** Tile engine filters to gfx942, gfx950, and gfx12-generic (gfx1201) targets only. Supports fp16 and fp8 datatypes with all 4 layouts.
+- [11] **mx_gemm:** Microscaling GEMM supporting fp4 and fp8 MX datatypes with rcr layout. Validated on gfx942 and gfx950 only.
 - Reduce operations do not use matrix layouts.
 
 **Layout codes:** Each layout code specifies the memory layout of tensors A, B, and C as row-major (r) or column-major (c). For example, `rcr` means A is row-major, B is column-major, and C is row-major. For gemm_multi_d, the instance builder uses 4-character codes (e.g., `rcrr`) where the 4th character specifies the D tensor layout; in the table above, the 3-character A/B/C portion is shown since the D layout is always row-major (r) for all supported configurations.
