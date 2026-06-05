@@ -2407,8 +2407,8 @@ class StreamKBasic(StreamK):
             module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
             module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
             # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
-            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D needs to be dereferenced as workspace pointer
-            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be dereferenced as pointer array                   
+            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
+            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D is dereferenced as pointer array                   
             module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
             module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))        
         return module
@@ -2591,8 +2591,8 @@ class StreamKTwoTileOriginal(StreamK):
             module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
             module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
             # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
-            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D needs to be dereferenced as workspace pointer
-            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be dereferenced as pointer array                   
+            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
+            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D is dereferenced as pointer array                   
             module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
             module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))       
         return module
@@ -3010,8 +3010,8 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
             module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
             # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
-            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D needs to be dereferenced as workspace pointer
-            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be dereferenced as pointer array                   
+            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
+            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D is dereferenced as pointer array                   
             module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
             module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))        
         return module
@@ -3391,8 +3391,8 @@ class StreamKDynamic(StreamK):
             module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
             module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
             # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
-            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D needs to be dereferenced as workspace pointer
-            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be dereferenced as pointer array                   
+            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
+            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D is dereferenced as pointer array                   
             module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
             module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))        
         return module
