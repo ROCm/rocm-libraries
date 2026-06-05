@@ -93,6 +93,7 @@ public:
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
+        // Infer output shape and strides if not set
         if(attributes.get_dx()->get_dim().empty())
         {
             attributes.get_dx()->set_dim(attributes.get_x()->get_dim());
@@ -102,6 +103,7 @@ public:
             attributes.get_dx()->set_stride(attributes.get_x()->get_stride());
         }
 
+        // Infer dscale shape and strides if not set
         if(attributes.get_dscale()->get_dim().empty())
         {
             attributes.get_dscale()->set_dim(attributes.get_scale()->get_dim());
@@ -111,6 +113,7 @@ public:
             attributes.get_dscale()->set_stride(attributes.get_scale()->get_stride());
         }
 
+        // Infer dbias shape and strides if not set
         if(attributes.get_dbias()->get_dim().empty())
         {
             attributes.get_dbias()->set_dim(attributes.get_scale()->get_dim());
@@ -118,92 +121,6 @@ public:
         if(attributes.get_dbias()->get_stride().empty())
         {
             attributes.get_dbias()->set_stride(attributes.get_scale()->get_stride());
-        }
-
-        auto dxTensor = attributes.get_dx();
-        auto dscaleTensor = attributes.get_dscale();
-        auto dbiasTensor = attributes.get_dbias();
-        auto dyTensor = attributes.get_dy();
-        auto scaleTensor = attributes.get_scale();
-
-        // Infer output strides if not set
-        if(dxTensor->get_stride().empty())
-        {
-            auto& dyStrides = dyTensor->get_stride();
-            auto& dxDims = dxTensor->get_dim();
-
-            HIPDNN_RETURN_IF_TRUE(
-                dyStrides.empty(),
-                ErrorCode::ATTRIBUTE_NOT_SET,
-                "LayernormBackwardNode: Cannot infer output strides - missing input strides");
-
-            HIPDNN_RETURN_IF_TRUE(
-                dxDims.empty(),
-                ErrorCode::ATTRIBUTE_NOT_SET,
-                "LayernormBackwardNode: Cannot infer output strides - missing output dimensions");
-
-            HIPDNN_RETURN_IF_NE(dyStrides.size(),
-                                dxDims.size(),
-                                ErrorCode::ATTRIBUTE_NOT_SET,
-                                "LayernormBackwardNode: Stride dimension mismatch between input "
-                                "and output tensors");
-
-            auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(dyStrides);
-            auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(dxDims, strideOrder);
-            dxTensor->set_stride(dxStrides);
-        }
-
-        if(dscaleTensor->get_stride().empty())
-        {
-            auto& scaleStrides = scaleTensor->get_stride();
-            auto& dscaleDims = dscaleTensor->get_dim();
-
-            HIPDNN_RETURN_IF_TRUE(scaleStrides.empty(),
-                                  ErrorCode::ATTRIBUTE_NOT_SET,
-                                  "LayernormBackwardNode: Cannot infer gradient scale strides - "
-                                  "missing scale strides");
-
-            HIPDNN_RETURN_IF_TRUE(dscaleDims.empty(),
-                                  ErrorCode::ATTRIBUTE_NOT_SET,
-                                  "LayernormBackwardNode: Cannot infer gradient scale strides - "
-                                  "missing gradient scale dimensions");
-
-            HIPDNN_RETURN_IF_NE(scaleStrides.size(),
-                                dscaleDims.size(),
-                                ErrorCode::ATTRIBUTE_NOT_SET,
-                                "LayernormBackwardNode: Stride dimension mismatch between scale "
-                                "and gradient scale tensors");
-
-            auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(scaleStrides);
-            auto dscaleStrides
-                = hipdnn_data_sdk::utilities::generateStrides(dscaleDims, strideOrder);
-            dscaleTensor->set_stride(dscaleStrides);
-        }
-
-        if(dbiasTensor->get_stride().empty())
-        {
-            auto& scaleStrides = scaleTensor->get_stride();
-            auto& dbiasDims = dbiasTensor->get_dim();
-
-            HIPDNN_RETURN_IF_TRUE(scaleStrides.empty(),
-                                  ErrorCode::ATTRIBUTE_NOT_SET,
-                                  "LayernormBackwardNode: Cannot infer gradient bias strides - "
-                                  "missing scale strides");
-
-            HIPDNN_RETURN_IF_TRUE(dbiasDims.empty(),
-                                  ErrorCode::ATTRIBUTE_NOT_SET,
-                                  "LayernormBackwardNode: Cannot infer gradient bias strides - "
-                                  "missing gradient bias dimensions");
-
-            HIPDNN_RETURN_IF_NE(scaleStrides.size(),
-                                dbiasDims.size(),
-                                ErrorCode::ATTRIBUTE_NOT_SET,
-                                "LayernormBackwardNode: Stride dimension mismatch between scale "
-                                "and gradient bias tensors");
-
-            auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(scaleStrides);
-            auto dbiasStrides = hipdnn_data_sdk::utilities::generateStrides(dbiasDims, strideOrder);
-            dbiasTensor->set_stride(dbiasStrides);
         }
 
         // Infer normalized dimension count if not available

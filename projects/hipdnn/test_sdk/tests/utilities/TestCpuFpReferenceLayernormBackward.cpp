@@ -354,6 +354,89 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidationWithOptional3
     }
 }
 
+TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidationEntire3D)
+{
+    // Input shape: [1, 2, 3] — normalize over last 2 dims (2x3 = 6 features)
+    // dy = [[[-1, 2, -3], [4, -5, 6]]]
+    // x  = [[[1, 2, 3], [4, 5, 6]]]
+    //
+    // mean = (1+2+3+4+5+6)/6 = 3.5
+    // var = ((1-3.5)^2 + (2-3.5)^2 + (3-3.5)^2 + (4-3.5)^2 + (5-3.5)^2 + (6-3.5)^2) / 6
+    //     = (6.25 + 2.25 + 0.25 + 0.25 + 2.25 + 6.25) / 6 = 17.5 / 6 = 2.9166666666666665
+    // rstd = 1/sqrt(2.9166666666666665 + 1e-5) = 0.5855390399887689
+    //
+    // With scale=1, bias=0 (identity affine):
+    //   a      = rstd³ * (sum(dy * scale * x) - sum(dy * scale) * mean) / 6
+    //   b      = rstd * sum(dy * scale) / 6 - a * mean
+    //   dx     = rstd * dy * scale - a * x - b
+    //   dscale = sum(dy * (x - mean) * rstd)
+    //   dbias  = sum(dy)
+
+    Tensor<double> dy({1, 2, 3});
+    Tensor<double> x({1, 2, 3});
+    Tensor<double> scale({1, 2, 3});
+    Tensor<double> dx({1, 2, 3});
+    Tensor<double> dscale({1, 2, 3});
+    Tensor<double> dbias({1, 2, 3});
+
+    dy.setHostValue(-1.0, 0, 0, 0);
+    dy.setHostValue(2.0, 0, 0, 1);
+    dy.setHostValue(-3.0, 0, 0, 2);
+    dy.setHostValue(4.0, 0, 1, 0);
+    dy.setHostValue(-5.0, 0, 1, 1);
+    dy.setHostValue(6.0, 0, 1, 2);
+
+    x.setHostValue(1.0, 0, 0, 0);
+    x.setHostValue(2.0, 0, 0, 1);
+    x.setHostValue(3.0, 0, 0, 2);
+    x.setHostValue(4.0, 0, 1, 0);
+    x.setHostValue(5.0, 0, 1, 1);
+    x.setHostValue(6.0, 0, 1, 2);
+
+    scale.fillWithValue(1.0);
+
+    CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, nullptr, nullptr, 3);
+
+    Tensor<double> dxRef({1, 2, 3});
+    Tensor<double> dscaleRef({1, 2, 3});
+    Tensor<double> dbiasRef({1, 2, 3});
+
+    dxRef.setHostValue(-3.0113333097103734e-06, 0, 0, 0);
+    dxRef.setHostValue(1.4052918891730595, 0, 0, 1);
+    dxRef.setHostValue(-1.8737255302307223, 0, 0, 2);
+    dxRef.setHostValue(1.8737255302307223, 0, 1, 0);
+    dxRef.setHostValue(-3.7474480491281357, 0, 1, 1);
+    dxRef.setHostValue(2.342159171288385, 0, 1, 2);
+
+    dscaleRef.setHostValue(1.4638475999719223, 0, 0, 0);
+    dscaleRef.setHostValue(-1.7566171199663065, 0, 0, 1);
+    dscaleRef.setHostValue(0.8783085599831533, 0, 0, 2);
+    dscaleRef.setHostValue(1.1710780799775378, 0, 1, 0);
+    dscaleRef.setHostValue(-4.391542799915767, 0, 1, 1);
+    dscaleRef.setHostValue(8.783085599831534, 0, 1, 2);
+
+    dbiasRef.setHostValue(-1.0, 0, 0, 0);
+    dbiasRef.setHostValue(2.0, 0, 0, 1);
+    dbiasRef.setHostValue(-3.0, 0, 0, 2);
+    dbiasRef.setHostValue(4.0, 0, 1, 0);
+    dbiasRef.setHostValue(-5.0, 0, 1, 1);
+    dbiasRef.setHostValue(6.0, 0, 1, 2);
+
+    auto tolerance = layernorm::getTolerance<double>();
+
+    // Verify each output element: y = (x - mean) * rstd
+    for(int i = 0; i < 2; i++)
+    {
+        for(int j = 0; j < 3; j++)
+        {
+            EXPECT_NEAR(dx.getHostValue(0, i, j), dxRef.getHostValue(0, i, j), tolerance);
+            EXPECT_NEAR(dscale.getHostValue(0, i, j), dscaleRef.getHostValue(0, i, j), tolerance);
+            EXPECT_NEAR(dbias.getHostValue(0, i, j), dbiasRef.getHostValue(0, i, j), tolerance);
+        }
+    }
+}
+
 // ============================================================================
 // Corner case: all zeros input
 // ============================================================================
@@ -1074,6 +1157,50 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropPerFeatureScale)
 // Error handling: invalid dimensions
 // ============================================================================
 
+TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropThrowsOnInvalidDimensions)
+{
+    const Tensor<float> dy({2, 4});
+    const Tensor<float> x({2, 4});
+    const Tensor<float> scale({4});
+    const Tensor<float> mean({2});
+    const Tensor<float> rstd({2});
+    Tensor<float> dx({2, 4});
+    Tensor<float> dscale({4});
+    Tensor<float> dbias({4});
+    Tensor<float> invalidDscale({2});
+    Tensor<float> invalidDbias({2});
+    const Tensor<float> invalidMean({4});
+
+    // scale and dscale must have the same dimensions
+    EXPECT_THROW(
+        CpuFpReferenceLayernorm::bprop(
+            dy, x, scale, dx, invalidDscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1),
+        std::runtime_error);
+
+    // bias and dbias must have the same dimensions
+    EXPECT_THROW(
+        CpuFpReferenceLayernorm::bprop(
+            dy, x, scale, dx, dscale, invalidDbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1),
+        std::runtime_error);
+
+    // mean and rstd must have the same dimensions
+    EXPECT_THROW(CpuFpReferenceLayernorm::bprop(dy,
+                                                x,
+                                                scale,
+                                                dx,
+                                                dscale,
+                                                invalidDbias,
+                                                LAYERNORM_DEFAULT_EPSILON,
+                                                &invalidMean,
+                                                &rstd,
+                                                1),
+                 std::runtime_error);
+}
+
+// ============================================================================
+// Error handling: invalid normalized dimension count
+// ============================================================================
+
 TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropThrowsOnInvalidNormalizedDimCount)
 {
     const Tensor<float> dy({2, 4});
@@ -1094,6 +1221,33 @@ TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropThrowsOnInvalidNormalizedDimC
     EXPECT_THROW(CpuFpReferenceLayernorm::bprop(
                      dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 3),
                  std::runtime_error);
+}
+
+// ============================================================================
+// Error handling: invalid mean or rstd nullptr
+// ============================================================================
+
+TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropThrowsOnOnlyOneNullptrMeanOrRstd)
+{
+    const Tensor<float> dy({2, 4});
+    const Tensor<float> x({2, 4});
+    const Tensor<float> scale({4});
+    const Tensor<float> mean({2});
+    const Tensor<float> rstd({2});
+    Tensor<float> dx({2, 4});
+    Tensor<float> dscale({4});
+    Tensor<float> dbias({4});
+    const hipdnn_data_sdk::utilities::TensorBase<float>* nullTensor = nullptr;
+
+    // mean and rstd must both be specified or both be nullptr
+    EXPECT_THROW(
+        CpuFpReferenceLayernorm::bprop(
+            dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, nullTensor, &rstd, 1),
+        std::runtime_error);
+    EXPECT_THROW(
+        CpuFpReferenceLayernorm::bprop(
+            dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, nullTensor, 1),
+        std::runtime_error);
 }
 
 // ============================================================================

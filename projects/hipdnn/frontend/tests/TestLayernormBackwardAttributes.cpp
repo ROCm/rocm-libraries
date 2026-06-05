@@ -44,6 +44,7 @@ TEST(TestLayernormBackwardAttributes, CreateLayernormBackwardAttributes)
     attrs.set_dbias(dbiasTensor);
 
     // Set data fields
+    attrs.set_normalized_dim_count(2);
 
     // Verify tensor getters
     EXPECT_NE(attrs.get_dy(), nullptr);
@@ -66,6 +67,7 @@ TEST(TestLayernormBackwardAttributes, CreateLayernormBackwardAttributes)
     EXPECT_EQ(attrs.get_dbias()->get_uid(), 18);
 
     // Verify data field getters
+    EXPECT_EQ(attrs.get_normalized_dim_count(), 2);
 }
 
 TEST(TestLayernormBackwardAttributes, DefaultValues)
@@ -82,8 +84,6 @@ TEST(TestLayernormBackwardAttributes, DefaultValues)
     EXPECT_EQ(attrs.get_dx(), nullptr);
     EXPECT_EQ(attrs.get_dscale(), nullptr);
     EXPECT_EQ(attrs.get_dbias(), nullptr);
-
-    // Vector fields should be empty by default
 }
 
 TEST(TestLayernormBackwardAttributes, SetDyMove)
@@ -101,9 +101,10 @@ TEST(TestLayernormBackwardAttributes, SetDyMove)
     // After move, original should be nullptr
     EXPECT_EQ(dyTensor, nullptr);
 
-    // The moved tensor should be accessible through the getter
+    // The moved tensor should be accessible through the getter and should have the correct name
     auto retrievedTensor = attrs.get_dy();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
+    EXPECT_EQ(retrievedTensor->get_name(), "MovedDyTensor");
 }
 
 TEST(TestLayernormBackwardAttributes, SetXMove)
@@ -121,9 +122,10 @@ TEST(TestLayernormBackwardAttributes, SetXMove)
     // After move, original should be nullptr
     EXPECT_EQ(xTensor, nullptr);
 
-    // The moved tensor should be accessible through the getter
+    // The moved tensor should be accessible through the getter and should have the correct name
     auto retrievedTensor = attrs.get_x();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
+    EXPECT_EQ(retrievedTensor->get_name(), "MovedXTensor");
 }
 
 TEST(TestLayernormBackwardAttributes, SetScaleMove)
@@ -143,9 +145,10 @@ TEST(TestLayernormBackwardAttributes, SetScaleMove)
     // After move, original should be nullptr
     EXPECT_EQ(scaleTensor, nullptr);
 
-    // The moved tensor should be accessible through the getter
+    // The moved tensor should be accessible through the getter and should have the correct name
     auto retrievedTensor = attrs.get_scale();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
+    EXPECT_EQ(retrievedTensor->get_name(), "MovedScaleTensor");
 }
 
 TEST(TestLayernormBackwardAttributes, SetMeanMove)
@@ -165,9 +168,10 @@ TEST(TestLayernormBackwardAttributes, SetMeanMove)
     // After move, original should be nullptr
     EXPECT_EQ(meanTensor, nullptr);
 
-    // The moved tensor should be accessible through the getter
+    // The moved tensor should be accessible through the getter and should have the correct name
     auto retrievedTensor = attrs.get_mean();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
+    EXPECT_EQ(retrievedTensor->get_name(), "MovedMeanTensor");
 }
 
 TEST(TestLayernormBackwardAttributes, SetInvVarianceMove)
@@ -187,9 +191,74 @@ TEST(TestLayernormBackwardAttributes, SetInvVarianceMove)
     // After move, original should be nullptr
     EXPECT_EQ(invVarianceTensor, nullptr);
 
-    // The moved tensor should be accessible through the getter
+    // The moved tensor should be accessible through the getter and should have the correct name
     auto retrievedTensor = attrs.get_inv_variance();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
+    EXPECT_EQ(retrievedTensor->get_name(), "MovedInvVarianceTensor");
+}
+
+TEST(TestLayernormBackwardAttributes, SetMeanAndInvVarianceMove)
+{
+    LayernormBackwardAttributes attrs;
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_uid(13)
+        .set_name("MovedMeanTensor")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_uid(14)
+        .set_name("MovedInvVarianceTensor")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    // Store the raw pointer before moving
+    auto rawMeanPtr = meanTensor.get();
+    auto rawInvVariancePtr = invVarianceTensor.get();
+
+    attrs.set_saved_mean_and_inv_variance(std::move(meanTensor), std::move(invVarianceTensor));
+
+    // After move, original should be nullptr
+    EXPECT_EQ(meanTensor, nullptr);
+    EXPECT_EQ(invVarianceTensor, nullptr);
+
+    // The moved tensor should be accessible through the getter and should have the correct name
+    auto retrievedMeanTensor = attrs.get_mean();
+    EXPECT_EQ(retrievedMeanTensor.get(), rawMeanPtr);
+    EXPECT_EQ(retrievedMeanTensor->get_name(), "MovedMeanTensor");
+    auto retrievedInvVarianceTensor = attrs.get_inv_variance();
+    EXPECT_EQ(retrievedInvVarianceTensor.get(), rawInvVariancePtr);
+    EXPECT_EQ(retrievedInvVarianceTensor->get_name(), "MovedInvVarianceTensor");
+}
+
+TEST(TestLayernormBackwardAttributes, SetMeanAndInvVarianceCopy)
+{
+    LayernormBackwardAttributes attrs;
+
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_uid(13)
+        .set_name("CopiedMeanTensor")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_uid(14)
+        .set_name("CopiedInvVarianceTensor")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    // Store the raw pointer before moving
+    auto rawMeanPtr = meanTensor.get();
+    auto rawInvVariancePtr = invVarianceTensor.get();
+
+    attrs.set_saved_mean_and_inv_variance(meanTensor, invVarianceTensor);
+
+    // After copy, original should still exist
+    EXPECT_NE(meanTensor, nullptr);
+    EXPECT_NE(invVarianceTensor, nullptr);
+
+    // The copied tensor should be accessible through the getter and should have the correct name
+    auto retrievedMeanTensor = attrs.get_mean();
+    EXPECT_EQ(retrievedMeanTensor.get(), rawMeanPtr);
+    EXPECT_EQ(retrievedMeanTensor->get_name(), "CopiedMeanTensor");
+    auto retrievedInvVarianceTensor = attrs.get_inv_variance();
+    EXPECT_EQ(retrievedInvVarianceTensor.get(), rawInvVariancePtr);
+    EXPECT_EQ(retrievedInvVarianceTensor->get_name(), "CopiedInvVarianceTensor");
 }
 
 TEST(TestLayernormBackwardAttributes, SetEpsilonMove)
@@ -209,9 +278,10 @@ TEST(TestLayernormBackwardAttributes, SetEpsilonMove)
     // After move, original should be nullptr
     EXPECT_EQ(epsilonTensor, nullptr);
 
-    // The moved tensor should be accessible through the getter
+    // The moved tensor should be accessible through the getter and should have the correct name
     auto retrievedTensor = attrs.get_epsilon();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
+    EXPECT_EQ(retrievedTensor->get_name(), "MovedEpsilonTensor");
 }
 
 TEST(TestLayernormBackwardAttributes, SetDxMove)
@@ -229,9 +299,10 @@ TEST(TestLayernormBackwardAttributes, SetDxMove)
     // After move, original should be nullptr
     EXPECT_EQ(dxTensor, nullptr);
 
-    // The moved tensor should be accessible through the getter
+    // The moved tensor should be accessible through the getter and should have the correct name
     auto retrievedTensor = attrs.get_dx();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
+    EXPECT_EQ(retrievedTensor->get_name(), "MovedDxTensor");
 }
 
 TEST(TestLayernormBackwardAttributes, SetDscaleMove)
@@ -251,9 +322,10 @@ TEST(TestLayernormBackwardAttributes, SetDscaleMove)
     // After move, original should be nullptr
     EXPECT_EQ(dscaleTensor, nullptr);
 
-    // The moved tensor should be accessible through the getter
+    // The moved tensor should be accessible through the getter and should have the correct name
     auto retrievedTensor = attrs.get_dscale();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
+    EXPECT_EQ(retrievedTensor->get_name(), "MovedDscaleTensor");
 }
 
 TEST(TestLayernormBackwardAttributes, SetDbiasMove)
@@ -273,9 +345,10 @@ TEST(TestLayernormBackwardAttributes, SetDbiasMove)
     // After move, original should be nullptr
     EXPECT_EQ(dbiasTensor, nullptr);
 
-    // The moved tensor should be accessible through the getter
+    // The moved tensor should be accessible through the getter and should have the correct name
     auto retrievedTensor = attrs.get_dbias();
     EXPECT_EQ(retrievedTensor.get(), rawPtr);
+    EXPECT_EQ(retrievedTensor->get_name(), "MovedDbiasTensor");
 }
 
 TEST(TestLayernormBackwardAttributes, SetTensorsConstRef)

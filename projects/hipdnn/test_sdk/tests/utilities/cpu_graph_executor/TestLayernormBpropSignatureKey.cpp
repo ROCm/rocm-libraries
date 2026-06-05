@@ -119,3 +119,146 @@ TEST(TestLayernormBpropSignatureKey, CreateFromNodeAndTensorMap)
 
     EXPECT_TRUE(keyFromNode == expectedKey);
 }
+
+TEST(TestLayernormBpropSignatureKey, CreateFromNodeAndTensorMapWithOptionals)
+{
+    const LayernormBpropSignatureKey expectedKey{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const int64_t normalizedDimCount = 3;
+    auto graph = buildLayernormBpropGraph(DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          dims,
+                                          normalizedDimCount,
+                                          hipdnn_data_sdk::utilities::TensorLayout::NHWC,
+                                          true);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+
+    const LayernormBpropSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
+
+    EXPECT_TRUE(keyFromNode == expectedKey);
+}
+
+TEST(TestLayernormBpropSignatureKey, ThrowForInvalidNode)
+{
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const int64_t normalizedDimCount = 3;
+    // Fprop instead of Bprop to trigger an exception
+    auto graph = buildLayernormFpropGraph(DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          dims,
+                                          normalizedDimCount,
+                                          hipdnn_data_sdk::utilities::TensorLayout::NHWC);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_THROW(LayernormBpropSignatureKey(graphWrap.getNode(0), graphWrap.getTensorMap()),
+                 std::runtime_error);
+}
+
+TEST(TestLayernormBpropSignatureKey, ThrowForMissingDy)
+{
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const int64_t normalizedDimCount = 3;
+    auto graph = buildLayernormBpropGraph(DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          dims,
+                                          normalizedDimCount,
+                                          hipdnn_data_sdk::utilities::TensorLayout::NHWC);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+    auto* nodeAttributes
+        = const_cast<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes*>(
+            graphWrap.getNode(0).attributes_as_LayernormBackwardAttributes());
+    ASSERT_TRUE(nodeAttributes != nullptr);
+    auto& tensorMap = const_cast<
+        std::unordered_map<int64_t,
+                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&>(
+        graphWrap.getTensorMap());
+    tensorMap[nodeAttributes->dy_tensor_uid()] = nullptr;
+
+    ASSERT_THROW(LayernormBpropSignatureKey(graphWrap.getNode(0), graphWrap.getTensorMap()),
+                 std::runtime_error);
+}
+
+TEST(TestLayernormBpropSignatureKey, ThrowForMissingX)
+{
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const int64_t normalizedDimCount = 3;
+    auto graph = buildLayernormBpropGraph(DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          dims,
+                                          normalizedDimCount,
+                                          hipdnn_data_sdk::utilities::TensorLayout::NHWC);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+    auto* nodeAttributes
+        = const_cast<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes*>(
+            graphWrap.getNode(0).attributes_as_LayernormBackwardAttributes());
+    ASSERT_TRUE(nodeAttributes != nullptr);
+    auto& tensorMap = const_cast<
+        std::unordered_map<int64_t,
+                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&>(
+        graphWrap.getTensorMap());
+    tensorMap[nodeAttributes->x_tensor_uid()] = nullptr;
+
+    ASSERT_THROW(LayernormBpropSignatureKey(graphWrap.getNode(0), graphWrap.getTensorMap()),
+                 std::runtime_error);
+}
+
+TEST(TestLayernormBpropSignatureKey, ThrowForMissingDx)
+{
+    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const int64_t normalizedDimCount = 3;
+    auto graph = buildLayernormBpropGraph(DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          dims,
+                                          normalizedDimCount,
+                                          hipdnn_data_sdk::utilities::TensorLayout::NHWC);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
+    auto* nodeAttributes
+        = const_cast<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes*>(
+            graphWrap.getNode(0).attributes_as_LayernormBackwardAttributes());
+    ASSERT_TRUE(nodeAttributes != nullptr);
+    auto& tensorMap = const_cast<
+        std::unordered_map<int64_t,
+                           const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&>(
+        graphWrap.getTensorMap());
+    tensorMap[nodeAttributes->dx_tensor_uid()] = nullptr;
+
+    ASSERT_THROW(LayernormBpropSignatureKey(graphWrap.getNode(0), graphWrap.getTensorMap()),
+                 std::runtime_error);
+}
+
+TEST(TestLayernormBpropSignatureKey, StreamOperator)
+{
+    const LayernormBpropSignatureKey key{
+        DataType::FLOAT, DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE, DataType::INT32};
+    std::stringstream stream;
+    stream << key;
+    ASSERT_EQ(stream.str(),
+              "Layernorm(dyX=FLOAT, scale=HALF, meanInvVar=BFLOAT16, dxDscaleDbias=DOUBLE, "
+              "compute=INT32)");
+}

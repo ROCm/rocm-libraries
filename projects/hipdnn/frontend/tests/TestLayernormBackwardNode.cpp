@@ -49,6 +49,32 @@ LayernormBackwardAttributes createValidAttributes()
     return attrs;
 }
 
+LayernormBackwardAttributes createMinimalAttributes()
+{
+    LayernormBackwardAttributes attrs;
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    attrs.set_dbias(dbiasTensor);
+
+    return attrs;
+}
+
 } // namespace
 
 // --- GetNodeType ---
@@ -300,8 +326,28 @@ TEST(TestLayernormBackwardNode, InferPropertiesNode)
     LayernormBackwardNode node(std::move(attrs), graphAttributes);
 
     auto error = node.infer_properties_node();
-    // Stub implementation: verify the method can be called without error
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+    EXPECT_EQ(node.attributes.get_normalized_dim_count(), 3);
+}
+
+// --- InferMinimalPropertiesNode ---
+TEST(TestLayernormBackwardNode, InferMinimalPropertiesNode)
+{
+    auto attrs = createMinimalAttributes();
+
+    const GraphAttributes graphAttributes;
+    LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+    EXPECT_EQ(node.attributes.get_dx()->get_dim(), node.attributes.get_x()->get_dim());
+    EXPECT_EQ(node.attributes.get_dx()->get_stride(), node.attributes.get_x()->get_stride());
+    EXPECT_EQ(node.attributes.get_dscale()->get_dim(), node.attributes.get_scale()->get_dim());
+    EXPECT_EQ(node.attributes.get_dscale()->get_stride(),
+              node.attributes.get_scale()->get_stride());
+    EXPECT_EQ(node.attributes.get_dbias()->get_dim(), node.attributes.get_scale()->get_dim());
+    EXPECT_EQ(node.attributes.get_dbias()->get_stride(), node.attributes.get_scale()->get_stride());
+    EXPECT_EQ(node.attributes.get_normalized_dim_count(), 3);
 }
 
 // --- GatherHipdnnTensors ---

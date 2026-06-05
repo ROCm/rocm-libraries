@@ -244,10 +244,10 @@ public:
                 "normalizedDimCount must be between 1 and the number of tensor dimensions.");
         }
 
-        if(scale.dims().size() != dscale.dims().size()
-           || scale.dims().size() != dbias.dims().size())
+        if(scale.dims() != dscale.dims() || scale.dims() != dbias.dims())
         {
-            throw std::runtime_error("Scale, dscale and dbias tensors must have the same rank.");
+            throw std::runtime_error(
+                "Scale, dscale and dbias tensors must have the same dimensions.");
         }
 
         if((mean == nullptr) != (rstd == nullptr))
@@ -256,18 +256,9 @@ public:
                 "Layernorm backward requires both mean and rstd to be provided, or neither.");
         }
 
-        if(mean != nullptr && mean->dims().size() != rstd->dims().size())
+        if(mean != nullptr && mean->dims() != rstd->dims())
         {
-            throw std::runtime_error("Mean and rstd tensors must have the same rank.");
-        }
-
-        for(auto d : dims)
-        {
-            if(d <= 0)
-            {
-                throw std::runtime_error(
-                    "Dimensions must all be positive (no zero-size dimensions).");
-            }
+            throw std::runtime_error("Mean and rstd tensors must have the same dimensions.");
         }
 
         // Split dimensions into batch dims and normalized dims
