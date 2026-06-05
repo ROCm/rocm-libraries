@@ -186,7 +186,7 @@ endif()
 
 # Top-level guards: Python3 and OpenMP are required to register Python-based CTests. Pandas is optional (see warning below).
 if(NOT Python3_FOUND)
-    message("-- ${Yellow}Warning: Python3 not found — skipping Python-script based CTests - only sanity tests are registered)${ColourReset}")
+    message("-- ${Yellow}Warning: Python3 not found — skipping Python-script based CTests; only sanity tests are registered.${ColourReset}")
     return()
 endif()
 if(NOT PANDAS_FOUND EQUAL 0)
