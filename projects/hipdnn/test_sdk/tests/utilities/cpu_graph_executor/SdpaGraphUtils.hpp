@@ -3,12 +3,16 @@
 
 #pragma once
 
+#include <optional>
+
 #include "SdpaTensorBundles.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
 namespace hipdnn_sdk_test_utils
 {
@@ -17,13 +21,22 @@ template <typename InputType>
 static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   std::unordered_map<int64_t, void*>>
     buildSdpaFwdGraph(SdpaFwdTensorBundle<InputType>& tensorBundle,
-                      hipdnn_data_sdk::data_objects::DataType dataType,
-                      bool causalMask = false)
+                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                      bool causalMask = false,
+                      bool causalMaskBottomRight = false,
+                      std::optional<int64_t> leftBound = std::nullopt,
+                      std::optional<int64_t> rightBound = std::nullopt,
+                      hipdnn_frontend::DiagonalAlignment diagonalAlignment
+                      = hipdnn_frontend::DiagonalAlignment::TOP_LEFT,
+                      bool alibiMask = false)
 {
-    const auto frontendDataType = hipdnn_frontend::fromSdkType(dataType);
+    const auto frontendDataType = hipdnn_test_sdk::utilities::sdkToFrontendDataType(dataType);
 
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("SdpaFwdTest");
+    graph->set_io_data_type(frontendDataType)
+        .set_compute_data_type(frontendDataType)
+        .set_intermediate_data_type(frontendDataType);
 
     int64_t uid = 1;
     auto qAttr
@@ -44,6 +57,17 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     hipdnn_frontend::graph::SdpaAttributes sdpaAttrs;
     sdpaAttrs.set_name("SdpaFwd");
     sdpaAttrs.set_causal_mask(causalMask);
+    sdpaAttrs.set_causal_mask_bottom_right(causalMaskBottomRight);
+    sdpaAttrs.set_alibi_mask(alibiMask);
+    sdpaAttrs.set_diagonal_alignment(diagonalAlignment);
+    if(leftBound.has_value())
+    {
+        sdpaAttrs.set_diagonal_band_left_bound(leftBound.value());
+    }
+    if(rightBound.has_value())
+    {
+        sdpaAttrs.set_diagonal_band_right_bound(rightBound.value());
+    }
 
     auto [oTensorAttr, statsAttr] = graph->sdpa(qTensorAttr, kTensorAttr, vTensorAttr, sdpaAttrs);
 

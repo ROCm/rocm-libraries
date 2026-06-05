@@ -8,8 +8,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
@@ -23,8 +23,8 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::toVec;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
-using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using NodeAttrType = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 using hipdnn_tests::buildTensorMap;
 using hipdnn_tests::lowerAndDeserialize;
 using hipdnn_tests::TestableGraphLowering;

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,8 @@ namespace rocsparse
                           I* __restrict__ csr_row_ptr,
                           J* __restrict__ csr_col_ind)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
         const rocsparse_int wavefront_index = hipThreadIdx_x / WF_SIZE;
         const J             lane_index      = hipThreadIdx_x & (WF_SIZE - 1);
         const uint64_t      filter          = 0xffffffffffffffff >> (63 - lane_index);
@@ -57,11 +59,6 @@ namespace rocsparse
             //
             for(J column_index = lane_index; column_index < n; column_index += WF_SIZE)
             {
-                //
-                // Synchronize for cache considerations.
-                //
-                __syncthreads();
-
                 //
                 // Get value.
                 //
@@ -125,6 +122,8 @@ namespace rocsparse
                           I* __restrict__ csc_col_ptr,
                           J* __restrict__ csc_row_ind)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
         const rocsparse_int wavefront_index = hipThreadIdx_x / WF_SIZE;
         const J             lane_index      = hipThreadIdx_x & (WF_SIZE - 1);
         const uint64_t      filter          = 0xffffffffffffffff >> (63 - lane_index);
@@ -166,11 +165,6 @@ namespace rocsparse
 
                 // Get the number of non-zeros in the row.
                 const int count_total_nnzs = __popcll(wavefront_mask);
-
-                //
-                // Synchronize for cache considerations.
-                //
-                __syncthreads();
 
                 if(predicate)
                 {

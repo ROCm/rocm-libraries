@@ -73,7 +73,8 @@ if(WIN32)
 endif()
 add_dependencies(MIOpenDriver generate_kernels)
 target_include_directories(MIOpenDriver PRIVATE ../src/kernels)
-target_link_libraries(MIOpenDriver PRIVATE MIOpen Threads::Threads roc::rocrand nlohmann_json::nlohmann_json )
+# MIOpen_with_plugins ensures CK plugin .so's are built alongside MIOpenDriver
+target_link_libraries(MIOpenDriver PRIVATE MIOpen_with_plugins Threads::Threads roc::rocrand nlohmann_json::nlohmann_json )
 if(NOT MIOPEN_EMBED_DB STREQUAL "")
     target_link_libraries(MIOpenDriver PRIVATE $<BUILD_INTERFACE:miopen_data> )
 endif()
@@ -87,6 +88,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
 endif()
 
 if( NOT ENABLE_ASAN_PACKAGING )
+  set_target_properties(MIOpenDriver PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
   install(TARGETS MIOpenDriver
       PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
       DESTINATION ${CMAKE_INSTALL_BINDIR})

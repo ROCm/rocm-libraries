@@ -29,6 +29,7 @@
 #include <miopen/errors.hpp>
 #include <miopen/generic_search.hpp>
 #include <miopen/any_solver.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
 
 #include "unit_conv_solver.hpp"
 
@@ -85,6 +86,27 @@ bool IsDeviceSupported(Gpu supported_devs, Gpu dev)
     if((supported_devs & dev) != Gpu::None)
         return true;
     return false;
+}
+
+bool IsDeviceExcluded(const UnitTestConvSolverParams& params, std::string_view dev_name)
+{
+    // Runtime device names can include target properties such as xnack/sramecc.
+    // Test exclusions are written against the bare architecture name.
+    return params.excluded_devices.count(GetBaseDeviceName(dev_name)) != 0;
+}
+
+bool IsDeviceSupported(const UnitTestConvSolverParams& params,
+                       Gpu dev,
+                       std::string_view dev_name,
+                       bool xnack_enabled)
+{
+    return IsDeviceSupported(params.supported_devs, dev) && !IsDeviceExcluded(params, dev_name) &&
+           !(params.check_xnack_disabled && xnack_enabled);
+}
+
+bool IsCKDynamicLibLoaded(std::string_view dev_name)
+{
+    return miopen::solver::CkImplLibLoader::Get(std::string{dev_name}).IsLoaded();
 }
 
 } // namespace
@@ -272,7 +294,8 @@ UnitTestConvSolverParams::UnitTestConvSolverParams(Gpu supported_devs_)
       use_cpu_ref(false),
       use_gpu_ref(false),
       tunable(false),
-      check_xnack_disabled(false)
+      check_xnack_disabled(false),
+      uses_ck_dynamic_lib(false)
 {
 }
 
@@ -287,6 +310,8 @@ void UnitTestConvSolverParams::Tunable(std::size_t iterations_max_)
 }
 
 void UnitTestConvSolverParams::CheckXnackDisabled() { check_xnack_disabled = true; }
+
+void UnitTestConvSolverParams::UsesCKDynamicLib() { uses_ck_dynamic_lib = true; }
 
 void UnitTestConvSolverParams::SetConvAttrFp16Alt(uint64_t value) { conv_attr_fp16_alt = value; }
 
@@ -344,8 +369,8 @@ miopen::solver::ConvSolution FindSolution(const miopen::solver::conv::ConvSolver
 }
 
 template <typename T>
-double GetThreshold(miopenConvAlgorithm_t algo,
-                    miopen::conv::Direction direction,
+double GetThreshold(miopenConvAlgorithm_t /*algo*/,
+                    miopen::conv::Direction /*direction*/,
                     const Tolerances& tolerances,
                     const bool use_tf32_compute)
 {
@@ -859,13 +884,17 @@ void UnitTestConvSolverBase::SetUpImpl(const UnitTestConvSolverParams& params)
     {
         GTEST_SKIP();
     }
-    else if(params.excluded_devices.count(get_handle().GetDeviceName()) > 0)
+    else if(IsDeviceExcluded(params, get_handle().GetDeviceName()))
     {
         GTEST_SKIP();
     }
     else if(params.check_xnack_disabled && get_handle_xnack())
     {
         GTEST_SKIP();
+    }
+    else if(params.uses_ck_dynamic_lib && !IsCKDynamicLibLoaded(get_handle().GetDeviceName()))
+    {
+        GTEST_SKIP() << "CK dynamic library is not available for " << get_handle().GetDeviceName();
     }
 }
 
@@ -898,11 +927,22 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
 
     const auto problem = conv_config.GetProblemDescription(direction);
 
-    const auto all_known_devs = GetAllKnownDevices();
+    if(params.uses_ck_dynamic_lib)
+    {
+        const auto current_dev_name = get_handle().GetDeviceName();
+        if(!IsCKDynamicLibLoaded(current_dev_name))
+            GTEST_SKIP() << "CK dynamic library is not available for " << current_dev_name;
+    }
+
+    const auto current_dev_name      = get_handle().GetDeviceName();
+    const auto current_dev_base_name = GetBaseDeviceName(current_dev_name);
+    const auto all_known_devs        = GetAllKnownDevices();
     for(const auto& [dev, dev_descr] : all_known_devs)
     {
-        const auto supported = IsDeviceSupported(params.supported_devs, dev) &&
-                               params.excluded_devices.count(dev_descr.name) == 0;
+        if(params.uses_ck_dynamic_lib && current_dev_base_name != dev_descr.name)
+            continue;
+
+        const auto supported = IsDeviceSupported(params, dev, dev_descr.name, false);
         // std::cout << "Test " << dev_descr << " (supported: " << supported << ")" << std::endl;
 
         auto handle    = MockHandle{dev_descr, params.check_xnack_disabled};

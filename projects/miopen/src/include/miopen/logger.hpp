@@ -31,6 +31,8 @@
 #include <vector>
 #include <iostream>
 #include <sstream>
+#include <source_location>
+#include <string_view>
 #include <type_traits>
 #include <chrono>
 
@@ -163,13 +165,12 @@ std::array<T, sizeof...(Ts) + 1> make_array(T x, Ts... xs)
     return {{x, xs...}};
 }
 
-// MSVC's preprocessor and CPPCHECK seem unable
-// to properly handle some complex stuff. We have to disable
-// some debugging features to avoid build errors.
-#define WORKAROUND_ISSUE_PP_TRANSFORM_ARGS 0
-#if defined(_MSC_VER) || defined(CPPCHECK)
-#undef WORKAROUND_ISSUE_PP_TRANSFORM_ARGS
+// In case CPPCHECK we have to disable some
+// debugging features to avoid build errors.
+#if defined(CPPCHECK)
 #define WORKAROUND_ISSUE_PP_TRANSFORM_ARGS 1
+#else
+#define WORKAROUND_ISSUE_PP_TRANSFORM_ARGS 0
 #endif
 
 #define MIOPEN_LOG_ENUM_EACH(x) std::pair<std::string, decltype(x)>(#x, x)
@@ -323,7 +324,7 @@ LogParam(std::ostream& os, std::string name, const std::vector<T>& vec, bool ind
     if(miopen::IsLoggingToRoctx())                                       \
     {                                                                    \
         std::ostringstream miopen_log_func_ss;                           \
-        miopen_log_func_ss << "s_api = " << __FUNCTION__ << " | ";       \
+        miopen_log_func_ss << "s_api = " << __func__ << " | ";           \
         MIOPEN_PP_EACH_ARGS(MIOPEN_LOG_FUNCTION_EACH_ROCTX, __VA_ARGS__) \
         logtx.logRange(miopen_log_func_ss.str());                        \
     }
@@ -332,22 +333,23 @@ LogParam(std::ostream& os, std::string name, const std::vector<T>& vec, bool ind
 #define MIOPEN_LOG_ROCTX_DO_LOGGING(...)
 #endif
 
-#define MIOPEN_LOG_FUNCTION(...)                                                        \
-    MIOPEN_LOG_ROCTX_DEFINE_OBJECT                                                      \
-    do                                                                                  \
-    {                                                                                   \
-        if(miopen::IsLoggingFunctionCalls())                                            \
-        {                                                                               \
-            std::ostringstream miopen_log_func_ss;                                      \
-            miopen_log_func_ss << miopen::LoggingPrefix() << __PRETTY_FUNCTION__ << "{" \
-                               << std::endl;                                            \
-            std::cerr << miopen_log_func_ss.str();                                      \
-            MIOPEN_PP_EACH_ARGS(MIOPEN_LOG_FUNCTION_EACH, __VA_ARGS__)                  \
-            std::ostringstream().swap(miopen_log_func_ss);                              \
-            miopen_log_func_ss << miopen::LoggingPrefix() << "}" << std::endl;          \
-            std::cerr << miopen_log_func_ss.str();                                      \
-        }                                                                               \
-        MIOPEN_LOG_ROCTX_DO_LOGGING(__VA_ARGS__)                                        \
+#define MIOPEN_LOG_FUNCTION(...)                                                         \
+    MIOPEN_LOG_ROCTX_DEFINE_OBJECT                                                       \
+    do                                                                                   \
+    {                                                                                    \
+        if(miopen::IsLoggingFunctionCalls())                                             \
+        {                                                                                \
+            std::ostringstream miopen_log_func_ss;                                       \
+            miopen_log_func_ss << miopen::LoggingPrefix()                                \
+                               << std::source_location::current().function_name() << "{" \
+                               << std::endl;                                             \
+            std::cerr << miopen_log_func_ss.str();                                       \
+            MIOPEN_PP_EACH_ARGS(MIOPEN_LOG_FUNCTION_EACH, __VA_ARGS__)                   \
+            std::ostringstream().swap(miopen_log_func_ss);                               \
+            miopen_log_func_ss << miopen::LoggingPrefix() << "}" << std::endl;           \
+            std::cerr << miopen_log_func_ss.str();                                       \
+        }                                                                                \
+        MIOPEN_LOG_ROCTX_DO_LOGGING(__VA_ARGS__)                                         \
     } while(false)
 #else
 #define MIOPEN_LOG_FUNCTION(...)
@@ -363,11 +365,13 @@ constexpr std::string_view LoggingParseFunction(const std::string_view func,
     return pf_tail.substr(1 + pf_tail.find_last_of(':'));
 }
 
-#ifdef _MSC_VER
-#define MIOPEN_GET_FN_NAME miopen::LoggingParseFunction(__func__, __FUNCSIG__)
-#else
-#define MIOPEN_GET_FN_NAME miopen::LoggingParseFunction(__func__, __PRETTY_FUNCTION__)
-#endif
+inline std::string_view LoggingGetFnName(std::string_view func_name,
+                                         std::source_location loc = std::source_location::current())
+{
+    return LoggingParseFunction(func_name, loc.function_name());
+}
+
+#define MIOPEN_GET_FN_NAME ::miopen::LoggingGetFnName(__func__)
 
 MIOPEN_INTERNALS_EXPORT bool IsLogBufferOn();
 

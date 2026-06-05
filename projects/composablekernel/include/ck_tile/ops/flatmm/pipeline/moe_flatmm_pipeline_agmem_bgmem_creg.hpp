@@ -103,13 +103,8 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
     static constexpr index_t Aload_num_perK = dswrite_num_perK;
     static constexpr index_t Aload_rep      = dswrite_rep;
     static constexpr index_t Bload_num_perK = kNPerBlock * WG::kK / NWarp / BK1 / WaveSize;
-    // static constexpr index_t ScaleBload_K1  = ContinuousScaleNPerThread *
-    // ContinuousScaleKPerThread; static constexpr index_t ScaleBload_num =
-    //     kNPerBlock * kKPerBlock / NWarp / 32 / ScaleBload_K1 /
-    //     WaveSize; // BlockN * BlockK / NWarp / ScalePerK / ScaleB_K1 / wavesize
-    // static constexpr index_t KPerScaleLoad = KIterPerWarp / ScaleBload_num;
-    static constexpr index_t HalfMIter = (MIterPerWarp + 1) / 2;
-    static constexpr index_t Bload_rep = (Bload_num_perK + HalfMIter - 1) / HalfMIter;
+    static constexpr index_t HalfMIter      = (MIterPerWarp + 1) / 2;
+    static constexpr index_t Bload_rep      = (Bload_num_perK + HalfMIter - 1) / HalfMIter;
 
     static constexpr index_t mfma_perM_perK = NIterPerWarp * mfma_per_wg;
     static constexpr index_t dswrite_mIter  = (DsWritePreIssue - 1) % MIterPerWarp;
@@ -352,10 +347,6 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
                                     ? Aload_rep
                                     : 0;
                 }
-                // if((kIter % KPerScaleLoad == 0) && (mIter == 0))
-                // {
-                //     load_perM = load_perM + 1;
-                // }
                 SchedulerPerM(dsread_perM, dswrite_perM, load_perM);
             }
         }
@@ -451,8 +442,7 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
                                         const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
                                         number<IsGateUpMode>,
                                         index_t num_loop,
-                                        void* p_smem_ping,
-                                        void* p_smem_pong) const
+                                        void* p_smem) const
     {
         static_assert(
             std::is_same_v<ADataType, remove_cvref_t<typename ADramBlockWindowTmp::DataType>>,
@@ -476,8 +466,9 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
         __builtin_amdgcn_sched_barrier(0);
 
         // A tile in LDS
-        ADataType* p_a_lds_ping = static_cast<ADataType*>(p_smem_ping);
-        ADataType* p_a_lds_pong = static_cast<ADataType*>(p_smem_pong);
+        ADataType* p_a_lds_ping = static_cast<ADataType*>(p_smem);
+        ADataType* p_a_lds_pong = static_cast<ADataType*>(static_cast<void*>(
+            static_cast<char*>(p_smem) + PipelinePolicy::template GetSmemSize<Problem>()));
 
         constexpr auto a_lds_block_desc =
             PipelinePolicy::template MakeALdsBlockDescriptor<Problem>();
@@ -995,8 +986,7 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
                                    const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
                                    number<IsGateUpMode> is_gate_up_mode,
                                    index_t num_loop,
-                                   void* p_smem_ping,
-                                   void* p_smem_pong) const
+                                   void* p_smem) const
     {
         return operator()(
             a_dram_block_window_tmp,
@@ -1004,8 +994,7 @@ struct MoeFlatmmPipelineAGmemBGmemCRegV1
             b_flat_dram_block_window_tmp,
             is_gate_up_mode,
             num_loop,
-            p_smem_ping,
-            p_smem_pong);
+            p_smem);
     }
 };
 

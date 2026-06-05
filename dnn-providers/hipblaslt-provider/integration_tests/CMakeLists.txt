@@ -19,6 +19,7 @@ add_executable(
     IntegrationGpuMatmulActiv.cpp
     IntegrationGpuMatmulBias.cpp
     IntegrationGpuMatmulBiasActiv.cpp
+    TestTestWorkarounds.cpp
 )
 
 target_compile_options(hipblaslt_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -39,4 +40,6 @@ target_link_libraries(
 # integration tests depend on the hipBLASLt Provider Plugin
 add_dependencies(hipblaslt_plugin_integration_tests hipblaslt_plugin)
 
-add_integration_test_target(hipblaslt_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR})
+clang_tidy_check(hipblaslt_plugin_integration_tests)
+
+add_integration_test_target(hipblaslt_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR} LABELS slow)

@@ -480,32 +480,6 @@ struct sequence_split
     using right_type = decltype(Seq::extract(range1{}));
 };
 
-#if 0
-// reverse sequence
-template <typename Seq>
-struct sequence_reverse
-{
-    static constexpr index_t NSize = Seq{}.size();
-
-    using seq_split = sequence_split<Seq, NSize / 2>;
-    using type      = typename sequence_merge<
-        typename sequence_reverse<typename seq_split::right_type>::type,
-        typename sequence_reverse<typename seq_split::left_type>::type>::type;
-};
-
-template <index_t I>
-struct sequence_reverse<sequence<I>>
-{
-    using type = sequence<I>;
-};
-
-template <index_t I0, index_t I1>
-struct sequence_reverse<sequence<I0, I1>>
-{
-    using type = sequence<I1, I0>;
-};
-#endif
-
 namespace detail {
 template <typename Id, index_t... Ns>
 struct seq_reverse;
@@ -570,7 +544,7 @@ struct sequence_sort_helper<sequence<Vs...>, Compare, sequence<Idx...>>
     {
         constexpr index_t n = sizeof...(Vs);
         sort_result r{{{Vs...}}, {{Idx...}}};
-        // insertion sort — O(N^2) constexpr steps, O(1) template depth
+        // insertion sort - O(N^2) constexpr steps, O(1) template depth
         for(index_t i = 1; i < n; ++i)
         {
             for(index_t j = i; j > 0 && Compare{}(r.values[j], r.values[j - 1]); --j)

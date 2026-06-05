@@ -3,7 +3,6 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
@@ -37,15 +36,12 @@ public:
 
     Error pre_validate_node() const override
     {
-        // ====================================================================
-        // RMS NORMALIZATION FORWARD VALIDATION
-        // (Normalization across channels without mean subtraction)
-        // ====================================================================
         // Algorithm Overview:
-        // For each (batch, spatial) position, RMSNorm computes:
-        //   rms[n,h,w]  = sqrt((1/C) * sum_c x[n,c,h,w]^2 + epsilon)
-        //   y[n,c,h,w]  = scale[c] * (x[n,c,h,w] / rms[n,h,w]) + bias[c]
-        // ====================================================================
+        //   normalized_shape = trailing-suffix dims where scale[i] == input[i]; leading
+        //   dims (incl. batch) are preserved. For each leading position:
+        //     inv_rms = 1 / sqrt(mean(x^2 over normalized_shape) + epsilon)
+        //     y       = scale * x * inv_rms (+ bias)
+        //   inv_rms shape: leading dims preserved, normalized dims collapsed to 1.
 
         // SECTION 1: Validate Required Tensor Pointers
         HIPDNN_RETURN_IF_FALSE(attributes.get_x(),
@@ -82,16 +78,16 @@ public:
         HIPDNN_CHECK_ERROR(
             detail::validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
 
-        // SECTION 4: Validate Channel Dimensions and Scale Tensor Shape
-        // Scale is per-channel with shape [1, C, 1, 1, ...]
-        auto& xDims = x->get_dim();
-        const int64_t channels = xDims[1];
+        // SECTION 4: Validate Scale Tensor Shape (encodes normalized_shape)
+        HIPDNN_CHECK_ERROR(detail::validateScaleNormalizedShape(scale, x, "Scale tensor"));
 
-        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
-
-        // Validate optional bias tensor (per-channel with shape [1, C, 1, 1, ...])
-        HIPDNN_CHECK_ERROR(
-            detail::validateChannelOnlyShapeIfSet(attributes.get_bias(), channels, "Bias tensor"));
+        // Bias must have the same shape as scale (scale already validated above).
+        auto bias = attributes.get_bias();
+        if(bias)
+        {
+            HIPDNN_CHECK_ERROR(
+                detail::validateTensorShapesMatchIfSet(scale, bias, "Scale tensor", "Bias tensor"));
+        }
 
         // Validate forward_phase is set
         HIPDNN_RETURN_IF_EQ(attributes.get_forward_phase(),
@@ -114,6 +110,7 @@ public:
     {
         auto x = attributes.get_x();
         auto y = attributes.get_y();
+        auto scale = attributes.get_scale();
 
         if(!x)
         {
@@ -123,6 +120,12 @@ public:
         if(!y)
         {
             return {ErrorCode::ATTRIBUTE_NOT_SET, "RMSNormNode missing y for setting properties"};
+        }
+
+        if(!scale)
+        {
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "RMSNormNode missing scale for setting properties"};
         }
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
@@ -137,30 +140,20 @@ public:
             y->set_stride(x->get_stride());
         }
 
-        auto inferCTensor = [&](std::shared_ptr<TensorAttributes>& tensorToInfer) {
-            if(tensorToInfer->get_dim().empty())
+        // Scale strides inherit x's stride order.
+        if(scale->get_stride().empty() && !scale->get_dim().empty())
+        {
+            if(!x->get_stride().empty() && x->get_stride().size() == scale->get_dim().size())
             {
-                std::vector<int64_t> tensorDims(x->get_dim().size(), 1);
-                tensorDims[1] = x->get_dim()[1];
-                tensorToInfer->set_dim(tensorDims);
+                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                scale->set_stride(
+                    hipdnn_data_sdk::utilities::generateStrides(scale->get_dim(), strideOrder));
             }
-
-            if(tensorToInfer->get_stride().empty())
+            else
             {
-                if(!x->get_stride().empty())
-                {
-                    auto strideOrder
-                        = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
-                    tensorToInfer->set_stride(hipdnn_data_sdk::utilities::generateStrides(
-                        tensorToInfer->get_dim(), strideOrder));
-                }
-                else
-                {
-                    tensorToInfer->set_stride(
-                        hipdnn_data_sdk::utilities::generateStrides(tensorToInfer->get_dim()));
-                }
+                scale->set_stride(hipdnn_data_sdk::utilities::generateStrides(scale->get_dim()));
             }
-        };
+        }
 
         if(attributes.get_forward_phase() == NormFwdPhase::TRAINING)
         {
@@ -170,25 +163,13 @@ public:
                 // Derive inv_rms dims from input and scale:
                 // Where scale has a non-1 dim, inv_rms gets 1 (normalized dimension collapses).
                 // Where scale has dim 1, inv_rms keeps the input dim.
-                // Fallback (no scale dims): all dims except batch become 1 → [N, 1, 1, 1].
                 if(invRms->get_dim().empty())
                 {
                     auto invRmsDims = x->get_dim();
-                    auto scale = attributes.get_scale();
-                    if(scale && !scale->get_dim().empty())
+                    const auto& scaleDims = scale->get_dim();
+                    for(size_t i = 0; i < invRmsDims.size(); ++i)
                     {
-                        const auto& scaleDims = scale->get_dim();
-                        for(size_t i = 0; i < invRmsDims.size(); ++i)
-                        {
-                            if(scaleDims[i] != 1)
-                            {
-                                invRmsDims[i] = 1;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        for(size_t i = 1; i < invRmsDims.size(); ++i)
+                        if(scaleDims[i] != 1)
                         {
                             invRmsDims[i] = 1;
                         }
@@ -214,24 +195,21 @@ public:
             }
         }
 
+        // Bias inherits scale's shape and stride layout (validator enforces dim match).
         auto bias = attributes.get_bias();
         if(bias)
         {
-            inferCTensor(bias);
+            if(bias->get_dim().empty())
+            {
+                bias->set_dim(scale->get_dim());
+            }
+            if(bias->get_stride().empty())
+            {
+                bias->set_stride(scale->get_stride());
+            }
         }
 
         return {};
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
-    {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes,
-            attributes.pack_attributes(builder).Union());
     }
 
     Error create_operation(

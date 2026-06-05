@@ -22,7 +22,9 @@ struct fp4_e2m1;
 struct fp6_e2m3;
 struct fp6_e3m2;
 struct fp8_e4m3;
+struct fp8_e4m3_fnuz;
 struct fp8_e5m2;
+struct fp8_e5m2_fnuz;
 struct fp8_e8m0;
 // NOLINTEND(readability-identifier-naming)
 
@@ -270,7 +272,9 @@ struct half
     inline explicit half(fp6_e2m3 f) noexcept;
     inline explicit half(fp6_e3m2 f) noexcept;
     inline explicit half(fp8_e4m3 f) noexcept;
+    inline explicit half(fp8_e4m3_fnuz f) noexcept;
     inline explicit half(fp8_e5m2 f) noexcept;
+    inline explicit half(fp8_e5m2_fnuz f) noexcept;
     inline explicit half(fp8_e8m0 f) noexcept;
 
     // Factory for raw bits
@@ -450,8 +454,9 @@ inline half copysign(half x, half y)
     return half::from_bits(xBits | ySign);
 }
 
-// Min/max with NaN handling
-inline half max(half a, half b)
+// Equivalent to std::fmax/std::fmin
+// If one input is NaN and the other is not, returns the non-NaN value.
+inline half fmax(half a, half b)
 {
     if(isnan(a))
     {
@@ -464,7 +469,7 @@ inline half max(half a, half b)
     return a > b ? a : b;
 }
 
-inline half min(half a, half b)
+inline half fmin(half a, half b)
 {
     if(isnan(a))
     {
@@ -475,6 +480,18 @@ inline half min(half a, half b)
         return a;
     }
     return a < b ? a : b;
+}
+
+// Equivalent to std::max/std::min
+// No NaN handling
+inline half max(half a, half b)
+{
+    return a < b ? b : a;
+}
+
+inline half min(half a, half b)
+{
+    return b < a ? b : a;
 }
 
 // Rounding functions

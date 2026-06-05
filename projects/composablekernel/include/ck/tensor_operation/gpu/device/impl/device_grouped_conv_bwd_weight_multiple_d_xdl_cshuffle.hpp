@@ -70,7 +70,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
         const ComputePtrOffsetOfBatch compute_ptr_offset_of_batch)
 {
 #if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
-    if constexpr(GridwiseGemm::template IsValidCompilationParameter<>())
+    if constexpr(GridwiseGemm::IsValidCompilationParameter())
     {
         const index_t num_blocks_per_batch =
             __builtin_amdgcn_readfirstlane(get_grid_size() / batch_count);
@@ -177,14 +177,30 @@ struct DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle
                                                  ComputeTypeA,
                                                  ComputeTypeB>
 {
-    using DeviceOp = DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle;
-    GET_NXDL_PER_WAVE_IMPL
-    static constexpr auto NXdlPerWave64 = GetNXdlPerWave<true>();
-    static constexpr auto NXdlPerWave32 = GetNXdlPerWave<false>();
-
-    using ADataType = OutDataType;
-    using BDataType = InDataType;
-    using EDataType = WeiDataType;
+    using DeviceOp                         = DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle;
+    static constexpr auto WarpTileConfig64 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               true>();
+    static constexpr auto WarpTileConfig32 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               false>();
+    static constexpr auto NXdlPerWave64    = WarpTileConfig64.At(3);
+    static constexpr auto NXdlPerWave32    = WarpTileConfig32.At(3);
+    using ADataType                        = OutDataType;
+    using BDataType                        = InDataType;
+    using EDataType                        = WeiDataType;
 
     static constexpr index_t NumDTensor = DsLayout::Size();
 
@@ -313,7 +329,7 @@ struct DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle
     using BGridDesc_K0_N_K1 = remove_cvref_t<decltype(ABCGridDescs{}[I1])>;
     using CGridDesc_M_N     = remove_cvref_t<decltype(ABCGridDescs{}[I2])>;
 
-    template <index_t NXdlPerWave_>
+    template <typename WarpTileConfig>
     using GridwiseGemmBase = GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_bwd_weight<
         BlockSize,
         ADataType,
@@ -330,11 +346,11 @@ struct DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle
         MPerBlock,
         NPerBlock,
         K0PerBlock,
-        MPerXDL,
-        NPerXDL,
+        WarpTileConfig::At(0),
+        WarpTileConfig::At(1),
         K1,
-        MXdlPerWave,
-        NXdlPerWave_,
+        WarpTileConfig::At(2),
+        WarpTileConfig::At(3),
         ABlockTransferThreadClusterLengths_K0_M_K1,
         ABlockTransferThreadClusterArrangeOrder,
         ABlockTransferSrcAccessOrder,
@@ -357,8 +373,8 @@ struct DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle
         BBlockLdsN1PerBlock,
         BBlockLdsN0PerBlock,
         BBlockLdsN1Padding,
-        CShuffleMXdlPerWavePerShuffle,
-        CShuffleNXdlPerWavePerShuffle,
+        WarpTileConfig::At(4),
+        WarpTileConfig::At(5),
         WorkspaceInOutScalarPerVector,
         CBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
         true,
@@ -367,8 +383,8 @@ struct DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle
         PipelineVersion::v1,
         ComputeTypeA,
         ComputeTypeB>;
-    using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
-    using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
+    using GridwiseGemm64 = GridwiseGemmBase<decltype(WarpTileConfig64)>;
+    using GridwiseGemm32 = GridwiseGemmBase<decltype(WarpTileConfig32)>;
 
     static constexpr auto MakeElementwiseInputSequence()
     {
@@ -697,6 +713,7 @@ struct DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle
             {
                 k_batch_ = split_k;
             }
+            k_batch_ = clamp_gemm_k_batch(k_batch_);
 
             const auto descs =
                 conv_to_gemm_transformer
@@ -950,6 +967,38 @@ struct DeviceGroupedConvBwdWeightMultipleD_Xdl_CShuffle
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(!ck::is_xdl_wmma_supported<ComputeTypeA,
+                                      ComputeTypeB,
+                                      MPerXDL,
+                                      NPerXDL,
+                                      WarpTileConfig32.At(0),
+                                      WarpTileConfig32.At(1)>())
+        {
+            return false;
+        }
+
+        if(is_gfx11_supported())
+        {
+            if(!is_xdl_wmma_k_supported<ComputeTypeA, Number<K0PerBlock * K1>{}, K1>())
+            {
+                return false;
+            }
+            if(!is_xdl_wmma_k_supported<ComputeTypeB, Number<K0PerBlock * K1>{}, K1>())
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if(!is_xdl_wmma_k_supported<ComputeTypeA, Number<K0PerBlock * K1>{}>())
+            {
+                return false;
+            }
+            if(!is_xdl_wmma_k_supported<ComputeTypeB, Number<K0PerBlock * K1>{}>())
+            {
+                return false;
+            }
+        }
         if(!ck::is_xdl_wmma_supported<ComputeTypeA, ComputeTypeB, MPerXDL, NPerXDL>())
         {
             ck::LogInfo("Current device does not support xdl/wmma instructions!");
