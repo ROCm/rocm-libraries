@@ -73,12 +73,11 @@ endif()
 cmake_dependent_option(HIPSPARSELT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
 option(HIPSPARSELT_ENABLE_OPENMP "Enable OpenMP support." ON)
 option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
-option(HIPSPARSELT_ENABLE_FETCH "Fetch dependencies." OFF)
+# The dependency-fetch opt-in is defined where it is used now that hipBLASLt is
+# consumed as a binary package (find_package) rather than fetched / added as a
+# source subdirectory -- see cmake/fetch_lapack.cmake and cmake/fetch_google_test.cmake.
 option(HIPSPARSELT_ENABLE_THEROCK "Enable TheRock support." OFF)
 
-set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt"
-    CACHE PATH "Path to hipblaslt directory."
-)
 set(HIPSPARSELT_COVERAGE_GTEST_FILTER "" CACHE STRING "GTest filter for coverage tests.")
 
 if(NOT HIPSPARSELT_ENABLE_CUDA)
@@ -147,62 +146,51 @@ if(HIPSPARSELT_ENABLE_CUDA)
 endif()
 
 if(HIPSPARSELT_ENABLE_HIP)
-    set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
-    if(NOT EXISTS "${HIPBLASLT_PATH}")
-        message(FATAL_ERROR "hipBLASLt required but no not found at ${HIPBLASLT_PATH}.")
-    endif()
+    # hipBLASLt is consumed as a binary package (Phase 2 + Phase 3): no hipBLASLt
+    # source tree is added. find_package provides BOTH roc::tensilelite-host -- the
+    # shared libtensilelite-host.so this fork links (Phase 2) -- AND the exported
+    # hipblaslt_create_device_library() function (Phase 3). This replaces the old
+    # add_subdirectory of the hipBLASLt source tree that used to build both in-tree.
+    find_package(hipblaslt CONFIG REQUIRED)
 
-    block(SCOPE_FOR VARIABLES)
-    set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
-    # Builds tensilelite's device libraries (.co/.dat)
-    set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
-    # Builds tensilelite::tensilelite-host (the shared libtensilelite-host.so this
-    # fork links). Keep its install ON so libtensilelite-host.so ships in this
-    # package for runtime (DT_NEEDED) resolution -- with HIPBLASLT_ENABLE_HOST OFF,
-    # hipBLASLt's hipblaslt-targets export is not created, so tensilelite-host
-    # installs as a plain shared library (no EXPORT clause; see tensilelite/CMakeLists).
-    set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
-    set(TENSILELITE_ENABLE_INSTALL ON CACHE BOOL "" FORCE)
-    # Route tensilelite-host into this fork's package export (its exported library
-    # links the SHARED tensilelite-host, so that target must be in an export set).
-    set(TENSILELITE_HOST_EXPORT_SET hipsparselt-targets)
-    set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
-    set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
-    # hipSPARSELt does not use ExtOp or MatrixTransform artifacts
-    set(HIPBLASLT_ENABLE_EXTOPS OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_ENABLE_MATRIX_TRANSFORM OFF CACHE BOOL "" FORCE)
-    set(HIPBLASLT_LIBLOGIC_PATH
-        "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
-        CACHE STRING "" FORCE
-    )
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
         CACHE FILEPATH "License file for package" FORCE
     )
 
-    if(WIN32)
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin"
-            CACHE PATH "path to tensile library" FORCE
+    if(HIPSPARSELT_ENABLE_DEVICE)
+        # Build this fork's sparse-GEMM device libraries from its own library logic
+        # via the exported codegen function. Output to ${CMAKE_BINARY_DIR}/Tensile
+        # (build-tree code-object path) and install the resulting library/ tree to
+        # ${CMAKE_INSTALL_LIBDIR}/hipsparselt (install-tree path) -- both are what
+        # tensile_host.cpp probes at runtime to load the *.co modules.
+        set(_hipsparselt_logic
+            "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
         )
-    else()
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR
-            "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt"
-            CACHE PATH "path to tensile library" FORCE
+        set(_hipsparselt_tensile_out "${CMAKE_BINARY_DIR}/Tensile")
+        set(_hipsparselt_codegen_flags "")
+        if(HIPSPARSELT_ENABLE_ASAN)
+            list(APPEND _hipsparselt_codegen_flags ASAN)
+        endif()
+        hipblaslt_create_device_library(
+            TARGET tensilelite-device-libraries
+            LOGIC_PATH "${_hipsparselt_logic}"
+            OUTPUT_DIR "${_hipsparselt_tensile_out}"
+            ARCHES ${GPU_TARGETS}
+            CXX_COMPILER "${CMAKE_CXX_COMPILER}"
+            ${_hipsparselt_codegen_flags}
+        )
+
+        if(WIN32)
+            set(_hipsparselt_tensile_libdir "${CMAKE_INSTALL_BINDIR}/hipsparselt")
+        else()
+            set(_hipsparselt_tensile_libdir "${CMAKE_INSTALL_LIBDIR}/hipsparselt")
+        endif()
+        install(
+            DIRECTORY "${_hipsparselt_tensile_out}/library"
+            DESTINATION "${_hipsparselt_tensile_libdir}"
+            COMPONENT runtime
         )
     endif()
-
-    # Origami was previously built as a subproject via hipBLASLt's add_subdirectory
-    # fallback, with `set(ORIGAMI_ENABLE_INSTALL OFF)` suppressing its install rules.
-    # hipBLASLt now consumes origami via find_package(origami REQUIRED) in its own
-    # CMakeLists.txt, so the shim is gone and origami is no longer duplicated here.
-    add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
-    # NOTE (Phase 2): the previous
-    #   target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)
-    # symbol-hiding workaround is gone. tensilelite-host is now a single shared
-    # library that both hipBLASLt and hipSPARSELt link, so there is no second copy
-    # to interpose with -- the reach-in that hid TensileLite's symbols (the §3.4
-    # smoking gun) is no longer needed.
-    endblock()
 endif()
 
 add_subdirectory(library)

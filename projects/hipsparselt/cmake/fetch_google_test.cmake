@@ -1,6 +1,13 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+# Opt-in toggle for fetching client/test dependencies (lapack, gtest). Defined
+# here, at the point of use, rather than in the top-level CMakeLists -- hipBLASLt
+# is consumed as a binary package and is no longer fetched.
+if(NOT DEFINED HIPSPARSELT_ENABLE_FETCH)
+    option(HIPSPARSELT_ENABLE_FETCH "Fetch dependencies." OFF)
+endif()
+
 find_package(GTest QUIET CONFIG)
 
 if(NOT GTest_FOUND AND HIPSPARSELT_ENABLE_FETCH)
