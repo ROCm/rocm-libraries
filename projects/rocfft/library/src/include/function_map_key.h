@@ -158,6 +158,7 @@ struct KernelConfig
             ss << COMMA << factor;
             COMMA = ", ";
         }
+        ss << "]";
 
         ss << "}";
 
