@@ -4626,10 +4626,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersA))
       module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersB))
 
-    # Allocate A/B data tile VGPRs before D-tile so they get low VGPR indices.
-    # On HasVgprMSB archs this places A/B in bank 0.
-    scheduler = createSchedulerAndAllocABTiles(self, kernel)
-
     dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
 
     if dtileInfo.vgprTiles:
@@ -4644,7 +4640,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.do["executeToPrefetchEnd"]:
       module.add(self.functionEnd(kernel, addLabel=False))
 
-    module.add(mainLoop(self, kernel, scheduler=scheduler))
+    module.add(mainLoop(self, kernel))
 
     # Deallocate offset registers
     for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:

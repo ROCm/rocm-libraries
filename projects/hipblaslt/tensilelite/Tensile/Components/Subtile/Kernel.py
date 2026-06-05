@@ -1230,13 +1230,11 @@ def preLoop(writer, kernel):
 # Subroutine entry point for main loop
 #
 #
-def createSchedulerAndAllocABTiles(writer, kernel):
-  """Create the scheduler, run analysis, and allocate A/B data tile VGPRs.
+def mainLoop(writer, kernel):
+  module = Module()
+  tensorParametersA = writer.tPA
+  tensorParametersB = writer.tPB
 
-  Separated from mainLoop so A/B tiles can be allocated before the D-tile
-  (accumulator).  On HasVgprMSB architectures this places A/B in the lowest
-  VGPR bank.
-  """
   pgr = kernel["PrefetchGlobalRead"]
   assert pgr in (0, 1, 2), "SubtileBasedKernel only supports PGR=0, PGR=1, and PGR=2, got PGR=%d" % pgr
 
@@ -1297,21 +1295,6 @@ def createSchedulerAndAllocABTiles(writer, kernel):
           break
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
-  return scheduler
-
-
-def mainLoop(writer, kernel, scheduler=None):
-  module = Module()
-  tensorParametersA = writer.tPA
-  tensorParametersB = writer.tPB
-
-  if scheduler is None:
-    scheduler = createSchedulerAndAllocABTiles(writer, kernel)
-
-  tiA = writer.states.a.tileInfo
-  tiB = writer.states.b.tileInfo
-  scaleTiA = writer.states.mxsa.tileInfo if kernel["ProblemType"].get("MXBlockA", 0) else None
-  scaleTiB = writer.states.mxsb.tileInfo if kernel["ProblemType"].get("MXBlockB", 0) else None
 
   dtileInfo = writer.states.d.tileInfo
 
