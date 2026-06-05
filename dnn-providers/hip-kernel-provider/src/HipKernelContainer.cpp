@@ -3,13 +3,16 @@
 
 #include "HipKernelContainer.hpp"
 #include "CurrentDevicePropertyProvider.hpp"
-#include "engines/HipKernelEngine.hpp"
-#include "engines/plans/RMSnorm/RMSnormBwdPlanBuilder.hpp"
-#include "engines/plans/RMSnorm/RMSnormPlanBuilder.hpp"
-#include "engines/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
-#include "engines/plans/batchnorm/BatchnormPlanBuilder.hpp"
-#include "engines/plans/layernorm/LayernormPlanBuilder.hpp"
 #include "hip/HipKernelCompiler.hpp"
+
+#ifdef HIPDNN_ENGINE_HIP_MLOPS
+#include "engines/hip_mlops_engine/HipMlopsEngine.hpp"
+#include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormBwdPlanBuilder.hpp"
+#include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormPlanBuilder.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormPlanBuilder.hpp"
+#include "engines/hip_mlops_engine/plans/layernorm/LayernormPlanBuilder.hpp"
+#endif
 
 #ifdef HIPDNN_ENGINE_ASM_SDPA
 #include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
@@ -29,13 +32,14 @@ using namespace hipdnn_data_sdk::utilities;
 const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::getEngineDefinitions()
 {
     static const std::vector<EngineDefinition> s_engineDefinitions = {
-        // HIP_KERNEL_ENGINE
-        {HIP_KERNEL_ENGINE_ID,
+    // HIP_MLOPS_ENGINE
+#ifdef HIPDNN_ENGINE_HIP_MLOPS
+        {HIP_MLOPS_ENGINE_ID,
          [](const IKernelCompiler& kernelCompiler,
             const IDevicePropertyProvider& devicePropertyProvider)
              -> std::unique_ptr<
                  hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>> {
-             auto engine = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID);
+             auto engine = std::make_unique<HipMlopsEngine>(HIP_MLOPS_ENGINE_ID);
              engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormPlanBuilder>(
                  kernelCompiler, devicePropertyProvider));
              engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormFwdTrainingPlanBuilder>(
@@ -48,6 +52,7 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
                  kernelCompiler, devicePropertyProvider));
              return engine;
          }},
+#endif
 #ifdef HIPDNN_ENGINE_ASM_SDPA
         // ASM_SDPA_ENGINE
         {ASM_SDPA_ENGINE_ID,

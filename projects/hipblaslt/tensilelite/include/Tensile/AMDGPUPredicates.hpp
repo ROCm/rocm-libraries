@@ -79,6 +79,7 @@ namespace TensileLite
         {
             static const std::map<int, std::vector<int>> fallbacks = {
                 // mi355 chip IDs fall back to mi350
+                {0x75b0, {0x75a0}},  // mi350 -> mi350
                 {0x75a2, {0x75a0}},  // mi350 -> mi350
                 {0x75b2, {0x75a0}},  // mi350 -> mi350
                 {0x75a3, {0x75a0}},  // mi355x -> mi350
