@@ -103,24 +103,24 @@ void RunFind2ConvTest(const Find2ConvTestCase& test_case)
         if(test_case.preallocate)
         {
             std::size_t workspace_max = [&]() {
-                std::size_t workspace_max = 0;
+                std::size_t workspace_max_ = 0;
                 switch(test_case.direction)
                 {
                 case miopenProblemDirectionForward:
                     EXPECT_EQ(miopenConvolutionForwardGetWorkSpaceSize(
-                                  handle, &x.desc, &w.desc, &filter, &y.desc, &workspace_max),
+                                  handle, &x.desc, &w.desc, &filter, &y.desc, &workspace_max_),
                               miopenStatusSuccess);
-                    return workspace_max;
+                    return workspace_max_;
                 case miopenProblemDirectionBackward:
                     EXPECT_EQ(miopenConvolutionBackwardDataGetWorkSpaceSize(
-                                  handle, &y.desc, &w.desc, &filter, &x.desc, &workspace_max),
+                                  handle, &y.desc, &w.desc, &filter, &x.desc, &workspace_max_),
                               miopenStatusSuccess);
-                    return workspace_max;
+                    return workspace_max_;
                 case miopenProblemDirectionBackwardWeights:
                     EXPECT_EQ(miopenConvolutionBackwardWeightsGetWorkSpaceSize(
-                                  handle, &y.desc, &x.desc, &filter, &w.desc, &workspace_max),
+                                  handle, &y.desc, &x.desc, &filter, &w.desc, &workspace_max_),
                               miopenStatusSuccess);
-                    return workspace_max;
+                    return workspace_max_;
 
 #ifdef MIOPEN_BETA_API
                 case miopenProblemDirectionInference: break;

@@ -136,7 +136,11 @@ inline void gemm([[maybe_unused]] const Handle& handle,
 #if USE_ROCBLAS_EX3
         case miopenFloat8_fnuz: return rocblas_datatype::rocblas_datatype_f8_r;
         case miopenBFloat8_fnuz: return rocblas_datatype::rocblas_datatype_bf8_r;
+#else
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
 #endif
+        case miopenBFloat16:
         case miopenHalf:
         case miopenInt32:
         case miopenInt8:
