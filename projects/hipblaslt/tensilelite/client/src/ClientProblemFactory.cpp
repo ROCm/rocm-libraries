@@ -484,28 +484,21 @@ namespace TensileLite
                             {
                                 rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensor);
                             }
-                            // StreamK=5 hybrid-mode toggle. Restricted at this
-                            // layer to the two deterministic kernel sub-paths:
-                            //   0 -> static work assignment,
-                            //   1 -> dynamic per-XCD work-queue path.
-                            // AUTO (=2) is rejected here because the runtime
-                            // heuristic would make per-launch sub-path coverage
-                            // non-deterministic, which defeats the YAML-driven
-                            // reference-vs-kernel validation. The underlying
-                            // setDynPersistentTileMode API still accepts the
-                            // full {0, 1, 2} tri-state for production use.
+                            // StreamK=5 hybrid-mode toggle. Accepts the full
+                            // tri-state {0=OFF (static), 1=ON (dynamic per-XCD
+                            // work-queue), 2=AUTO (heuristic)}. The reference
+                            // path is unaffected by the choice, so all three
+                            // values validate cleanly against the CPU ref.
+                            // YAML sweep tests should prefer [0, 1] to
+                            // guarantee both deterministic sub-paths are
+                            // exercised; AUTO is most useful when overriding
+                            // from the command line (e.g.
+                            // `--streamk-hybrid-mode 2`) to exercise the
+                            // runtime heuristic end-to-end on a real problem.
                             if(m < (int)m_streamKHybridMode.size())
                             {
-                                const int mode = m_streamKHybridMode[m];
-                                if(mode != 0 && mode != 1)
-                                {
-                                    throw std::runtime_error(
-                                        "StreamKHybridMode test parameter must be 0 or 1; "
-                                        "AUTO (=2) is not supported by the tensilelite client "
-                                        "because the runtime heuristic makes per-launch sub-path "
-                                        "coverage non-deterministic.");
-                                }
-                                rv.back().setParams().setDynPersistentTileMode(mode);
+                                rv.back().setParams().setDynPersistentTileMode(
+                                    m_streamKHybridMode[m]);
                             }
                         }
                     }

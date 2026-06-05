@@ -20,11 +20,12 @@ GlobalParameters:
   #   1 -> dynamic per-XCD work-queue path (ON)
   # Each base problem is replayed once per value, so reference vs kernel
   # validation runs for both paths and confirms numerical equivalence.
-  # The AUTO (=2) mode is not exercised here because the heuristic may
-  # resolve to either 0 or 1 depending on hardware/geometry, which makes
-  # per-launch sub-path coverage non-deterministic at the YAML layer.
-  # AUTO is validated separately by the origami unit tests (heuristic
-  # logic) and the hipBLASLt client gtests (end-to-end dispatch).
+  # AUTO (=2) is also a valid value for this parameter but is not used
+  # in sweep YAMLs because the per-launch sub-path it picks depends on
+  # the runtime heuristic, which weakens per-path coverage guarantees.
+  # AUTO end-to-end coverage lives in the origami unit tests (heuristic
+  # logic) and the hipBLASLt client gtests (end-to-end dispatch); it is
+  # also reachable here ad-hoc via `--streamk-hybrid-mode 2`.
   StreamKHybridMode: [0, 1]
 
 BenchmarkProblems:

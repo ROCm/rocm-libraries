@@ -199,17 +199,17 @@ globalParameters["DataInitTypeMXSB"] = 1
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # StreamK=5 hybrid-mode toggle values driven by the benchmark client.
 # Each list entry causes ClientProblemFactory to replay every base
-# problem with setParams().setDynPersistentTileMode(value); the SK5
-# kernel then runs the static path (0=OFF) or the dynamic per-XCD
-# work-queue path (1=ON). Set to [0, 1] in YAML GlobalParameters to
-# exercise both deterministic code paths of an SK5 kernel in a single
-# run. The AUTO (=2) mode the host-side API exposes is intentionally
-# not a valid value here: it would delegate the sub-path pick to a
-# runtime heuristic, which makes per-launch coverage non-deterministic
-# at the YAML test layer. AUTO is exercised by the origami unit tests
-# and the hipBLASLt client gtests instead. Ignored at the host for
-# non-SK5 solutions. Default keeps behavior unchanged for existing
-# tests.
+# problem with setParams().setDynPersistentTileMode(value). Accepts
+# the full tri-state {0=OFF (static), 1=ON (dynamic per-XCD work-queue),
+# 2=AUTO (heuristic)}. Set to [0, 1] in YAML GlobalParameters to
+# deterministically exercise both SK5 sub-paths in a single sweep run;
+# AUTO is supported as well, but in a sweep it leaves the per-launch
+# sub-path up to the runtime heuristic, so [0, 1] is preferred when
+# the YAML's job is sub-path coverage. AUTO is most useful when
+# overriding from the command line (e.g. `--streamk-hybrid-mode 2`)
+# to run the heuristic end-to-end on a real problem. Ignored at the
+# host for non-SK5 solutions. Default keeps behavior unchanged for
+# existing tests.
 globalParameters["StreamKHybridMode"] = [0]
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
