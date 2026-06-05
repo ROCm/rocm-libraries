@@ -86,9 +86,17 @@ What it does (real):
       ``toString()`` resets ``setVgprMsb(-1)`` on a HasVgprMSB arch to
       reflect the basic-block boundary.
 
+    - ``StructuredModule`` — Module subclass with three auto-added
+      named sub-modules (``header / middle / footer``) aliased into
+      ``itemList``. Supports Tensile's SIA scheduling pass which
+      reorders the ``middle`` bucket while keeping ``header`` /
+      ``footer`` atomic. Raises ``RuntimeError("StructuredModule is
+      not picklable")`` (distinct from Module's own "Module is not
+      picklable" message).
+
 Not yet done (dummy):
     - Container nodes: ``KernelBody``, ``Macro``,
-      ``StructuredModule``, ``BitfieldUnion``, ``SignatureCodeMeta``,
+      ``BitfieldUnion``, ``SignatureCodeMeta``,
       ``SignatureBase``.
 
 Future:
@@ -1249,6 +1257,172 @@ class Module(Item):
 
 
 # ---------------------------------------------------------------------------
+# StructuredModule -- 3-bucket Module subclass for SIA scheduling.
+# ---------------------------------------------------------------------------
+#
+# Mirror of rocisa's ``StructuredModule``. A Module subclass that
+# carves its body into three named sub-modules -- ``header``,
+# ``middle``, ``footer`` -- and auto-adds them to its ``itemList``
+# at construction. The result is an Item tree where:
+#
+#     sm = StructuredModule("globalReadA")  # itemList = [header, middle, footer]
+#     sm.middle.add(SomeLoadInstruction(...))
+#     str(sm)  # emits header + middle + footer (in that order)
+#
+# Why this exists:
+#   The Tensile SIA (Scheduling Iterations Ahead) pass needs to
+#   distinguish "load issue" (header), "decomposable middle body"
+#   (the chunk it can reorder for latency hiding), and "guard /
+#   bookkeeping tail" (footer). By giving each chunk its own named
+#   sub-module, the scheduler can splice ``sm.middle.items()`` into
+#   the pipeline at any cycle without touching ``sm.header`` /
+#   ``sm.footer``. See KernelWriter.scheduleLatencyHiding callers.
+#
+#   The future logical-IR lowering (``to_stinky_asm``) flattens
+#   StructuredModule transparently -- the structural distinction is
+#   only needed on the Python side while SIA still runs there.
+#
+# Parity contract:
+#   * Public surface matches rocisa's nanobind binding (code.cpp:
+#     233-244): ctor ``(name="")``, read-write attrs ``header /
+#     middle / footer``, ``__deepcopy__``, AND a ``__reduce__`` that
+#     raises ``RuntimeError("StructuredModule is not picklable")``
+#     -- note the message differs from Module's "Module is not
+#     picklable" (the C++ binding has its own message).
+#   * The 3 sub-modules are aliased into ``itemList`` AT
+#     CONSTRUCTION: ``sm.header is sm.itemList[0]`` is True so
+#     mutations to ``sm.header.add(...)`` show up in ``str(sm)``.
+#   * Conscious divergence from rocisa C++ on deepcopy: rocisa's
+#     C++ copy ctor (code.hpp:781-790) accidentally BREAKS the
+#     aliasing post-clone (clones header/middle/footer a second
+#     time, leaving them out of itemList). We deliberately PRESERVE
+#     the aliasing using Python's deepcopy ``memo`` mechanism --
+#     see ``__deepcopy__``'s long comment for full rationale.
+#     Net effect: ``clone.header is clone.itemList[0]`` after
+#     deepcopy in this adapter (False in rocisa). Original / clone
+#     remain fully isolated either way.
+#   * Names of the sub-modules are the literals ``"header" /
+#     "middle" / "footer"``, matching the C++ ``make_shared<Module>
+#     ("header")`` calls. ``findNamedItem("header")`` works.
+
+
+class StructuredModule(Module):
+    """``Module`` subclass with auto-added ``header / middle / footer``
+    sub-modules. Mirror of ``rocisa::StructuredModule``.
+
+    See the section header above for the SIA-scheduling rationale,
+    the parity contract, and the deepcopy-aliasing quirk.
+    """
+
+    __slots__ = ("header", "middle", "footer")
+
+    def __init__(self, name: str = ""):
+        # ``Module.__init__`` populates ``itemList`` as empty plus
+        # all the Item-inherited slots. THEN we mint the three
+        # sub-modules and add them in order so itemList = [header,
+        # middle, footer].
+        super().__init__(name)
+        self.header: Module = Module("header")
+        self.middle: Module = Module("middle")
+        self.footer: Module = Module("footer")
+        # ``Module.add`` patches the child's ``.parent`` to ``self``,
+        # so the 3 sub-modules end up reparented here.
+        self.add(self.header)
+        self.add(self.middle)
+        self.add(self.footer)
+
+    def __deepcopy__(self, memo):
+        # ------------------------------------------------------------------
+        # Conscious divergence from rocisa C++ copy ctor (code.hpp:781-790).
+        # ------------------------------------------------------------------
+        # The C++ copy ctor breaks the construction-time aliasing
+        # between ``header / middle / footer`` attrs and
+        # ``itemList[0..2]``: it first calls ``Module(other)`` (which
+        # clones the entire itemList, including the 3 sub-modules),
+        # then independently calls ``other.header->clone()`` AGAIN
+        # in the field initializer -- producing a SECOND clone that
+        # is NOT in itemList. After the C++ copy ctor:
+        #
+        #     clone.header is not clone.itemList[0]   # True (!)
+        #
+        # That is almost certainly an unintentional bug. The
+        # construction-time aliasing is THE central invariant of
+        # this class -- it's what makes ``sm.middle.add(x)``
+        # propagate into ``str(sm)``. Breaking that invariant in the
+        # copy ctor means a freshly-constructed instance and a
+        # deepcopy'd instance behave DIFFERENTLY for the same API
+        # call -- a violation of the "principle of least surprise"
+        # that ``deepcopy`` typically obeys.
+        #
+        # We deliberately diverge from rocisa here for two reasons:
+        #
+        #   1. KernelWriter's PGR=2 path indirectly triggers this
+        #      via ``deepcopy(perIterGlobalRead[0])`` -- when
+        #      Components/SIA.py:564 has inserted a StructuredModule
+        #      as a transitive child, Python's recursive deepcopy
+        #      will reach ``__deepcopy__`` here. If we mirror the
+        #      C++ bug bit-for-bit, any subsequent code that touches
+        #      ``cloned_sm.middle.add(...)`` on those nested clones
+        #      silently produces nothing -- a sleeper bug nobody
+        #      would notice until output diffs appear.
+        #
+        #   2. Test suite isolation: ``copy.deepcopy(sm)`` should
+        #      produce a clone that behaves like a fresh ctor result.
+        #      Mirroring the C++ aliasing-break would force every
+        #      consumer to add "did this come from deepcopy?"
+        #      branches around any sub-module mutation -- not
+        #      feasible.
+        #
+        # Implementation: we let Python's standard ``memo`` mechanism
+        # preserve aliasing for free. Step 1 ``deepcopy(it, memo)``
+        # on each itemList entry populates ``memo[id(it)] ->
+        # cloned_it``. Step 2 then asks for ``deepcopy(self.header,
+        # memo)`` with the SAME memo -- which short-circuits to the
+        # already-cloned ``itemList[0]``. Result: the post-deepcopy
+        # invariant ``clone.header is clone.itemList[0]`` holds, AND
+        # original / clone remain fully isolated (mutating
+        # ``original.header`` after the copy does NOT bleed into
+        # ``clone.header`` -- ``memo`` only caches within a SINGLE
+        # deepcopy operation, not across them).
+        #
+        # If rocisa upstream eventually fixes this (the natural fix
+        # would be ``header = dynamic_pointer_cast<Module>(itemList[0])``
+        # in the C++ copy ctor body), the two sides will converge
+        # and this comment can be deleted.
+        # ------------------------------------------------------------------
+        clone = StructuredModule.__new__(StructuredModule)
+        memo[id(self)] = clone
+        # --- Step 1: Module(other) equivalent (clone itemList). ----------
+        Module.__init__(clone, self.name)
+        clone._isNoOpt = self._isNoOpt
+        if self.tempVgpr is not None:
+            try:
+                clone.tempVgpr = _copy.deepcopy(self.tempVgpr, memo)
+            except Exception:  # noqa: BLE001
+                clone.tempVgpr = self.tempVgpr
+        for it in self.itemList:
+            new_it = _copy.deepcopy(it, memo)
+            clone._reparent(new_it)
+            clone.itemList.append(new_it)
+        # --- Step 2: rebind attrs to the already-cloned itemList ---------
+        # entries via the SAME memo -- this is the aliasing-preserving
+        # step. See the long comment above for the rationale.
+        clone.header = _copy.deepcopy(self.header, memo)
+        clone.middle = _copy.deepcopy(self.middle, memo)
+        clone.footer = _copy.deepcopy(self.footer, memo)
+        return clone
+
+    def __reduce__(self):
+        # rocisa's StructuredModule binding (code.cpp:242-244) has its
+        # OWN ``__reduce__`` that raises with a class-specific
+        # message -- distinct from Module's "Module is not
+        # picklable". We mirror the message text exactly so any
+        # consumer that string-matches on the exception keeps
+        # working.
+        raise RuntimeError("StructuredModule is not picklable")
+
+
+# ---------------------------------------------------------------------------
 # Dummy code-composition components (pending real implementation).
 # ---------------------------------------------------------------------------
 #
@@ -1264,23 +1438,15 @@ class Module(Item):
 # Inheritance map (mirror of code.hpp):
 #   Macro / SignatureCodeMeta / SignatureBase / KernelBody
 #     -- ``: Item`` in C++ ⇒ ``base=Item`` here.
-#   StructuredModule -- ``: Module`` in C++ (code.hpp:469). Using
-#     ``base=Module`` here means KernelWriter's
-#     ``self.codes.globalReadA = StructuredModule()`` actually gets a
-#     working ``.add() / .items() / .appendModule(...)`` surface
-#     during bring-up instead of silent no-ops. The "structured"
-#     part (separate header/body/footer modules) is the only thing
-#     missing; a follow-up commit makes it real.
 #   BitfieldUnion -- standalone polymorphic root in C++
 #     (code.hpp:928, NOT a subclass of Item). Kept ``base=object``
 #     so ``isinstance(bf, Item)`` correctly stays False; the C++ class
 #     is the polymorphic root for the ``SrdUpperValue*`` family.
 #
 # Already real (above this block): TextBlock, Module, ValueIf,
-# ValueElseIf, ValueEndif, ValueSet, RegSet, Label.
+# ValueElseIf, ValueEndif, ValueSet, RegSet, Label, StructuredModule.
 
 Macro = make_dummy_class(f"{_P}.Macro", base=Item)
-StructuredModule = make_dummy_class(f"{_P}.StructuredModule", base=Module)
 BitfieldUnion = make_dummy_class(f"{_P}.BitfieldUnion")
 SignatureCodeMeta = make_dummy_class(f"{_P}.SignatureCodeMeta", base=Item)
 SignatureBase = make_dummy_class(f"{_P}.SignatureBase", base=Item)

@@ -1495,20 +1495,20 @@ class TestItemInheritanceShape(unittest.TestCase):
 
 class TestDummyClassesInheritItem(unittest.TestCase):
     """Every dummy code-composition node uses ``base=Item`` (with the
-    exception of ``StructuredModule`` which uses ``base=Module`` and
-    ``BitfieldUnion`` which is intentionally standalone). This is the
-    foundation that lets ``Module.findIndexByType(Item)`` /
-    ``isinstance``-based KernelWriter walks see dummies as
+    exception of ``BitfieldUnion`` which is intentionally standalone).
+    This is the foundation that lets ``Module.findIndexByType(Item)``
+    / ``isinstance``-based KernelWriter walks see dummies as
     composition nodes during the bring-up phase."""
 
     def test_macro_is_item(self):
         self.assertIsInstance(Macro(), Item)
 
     # NB: ValueIf / ValueElseIf / ValueEndif AND ValueSet / RegSet AND
-    # Label used to be dummies and were tested here. They became real
-    # classes (see TestValueConditionals / TestValueSet* / TestRegSet*
-    # / TestLabel* below); isinstance-Item coverage is preserved
-    # there alongside the rest of their behavioural tests.
+    # Label AND StructuredModule used to be dummies and were tested
+    # here. They became real classes (see TestValueConditionals /
+    # TestValueSet* / TestRegSet* / TestLabel* / TestStructuredModule*
+    # below); isinstance-Item coverage is preserved there alongside
+    # the rest of their behavioural tests.
 
     def test_signaturecodemeta_is_item(self):
         self.assertIsInstance(SignatureCodeMeta(), Item)
@@ -1518,15 +1518,6 @@ class TestDummyClassesInheritItem(unittest.TestCase):
 
     def test_kernelbody_is_item(self):
         self.assertIsInstance(KernelBody(), Item)
-
-    def test_structuredmodule_is_module_and_item(self):
-        # ``base=Module`` so KernelWriter's
-        # ``self.codes.globalReadA = StructuredModule()`` actually
-        # gets a working ``.add() / .items()`` surface during
-        # bring-up rather than silent ``__getattr__`` no-ops.
-        sm = StructuredModule()
-        self.assertIsInstance(sm, Module)
-        self.assertIsInstance(sm, Item)
 
     def test_bitfieldunion_is_not_item(self):
         # Intentionally NOT in the Item hierarchy -- mirror of
@@ -1626,34 +1617,315 @@ class TestModuleCountTypeRecursion(unittest.TestCase):
 
     def test_countExactType_subclass_does_not_match_module(self):
         # StructuredModule is a Module subclass; countExactType(Module)
-        # on a StructuredModule must return 0 (NOT 1). Mirror of C++
-        # ``typeid(*this) == targetType`` semantics where a derived
-        # type does not match its base.
-        sm = StructuredModule()  # base=Module dummy
-        self.assertEqual(sm.countExactType(Module), 0)
-        # ... but it DOES match its own type:
-        self.assertEqual(sm.countExactType(StructuredModule), 1)
-        # ... and isinstance-based countType matches Module:
-        self.assertEqual(sm.countType(Module), 1)
-
-
-class TestStructuredModuleDummyBehaviour(unittest.TestCase):
-    """``StructuredModule`` dummy uses ``base=Module`` so KernelWriter's
-    ``self.codes.globalReadA = StructuredModule(); ...add(...)`` flow
-    actually works during bring-up. The "structured" semantics
-    (separate header/body/footer modules) are NOT implemented yet --
-    Commit Z lands them."""
-
-    def test_structuredmodule_inherits_module_add(self):
+        # on a StructuredModule itself does NOT count it (the exact
+        # type check is ``typeid(*this) == targetType``, so the
+        # derived StructuredModule doesn't match Module). But the
+        # 3 auto-added sub-modules (header / middle / footer) ARE
+        # exact Modules, so countExactType recurses into itemList
+        # and counts them = 3.
         sm = StructuredModule()
-        sm.add(TextBlock("hello"))
-        self.assertEqual(sm.itemsSize(), 1)
-        self.assertEqual(str(sm), "hello")
+        self.assertEqual(sm.countExactType(Module), 3)
+        # ... StructuredModule itself matches its own exact type.
+        # The 3 sub-modules are Modules (not StructuredModules) so
+        # they DON'T count here -- just self.
+        self.assertEqual(sm.countExactType(StructuredModule), 1)
+        # ... and isinstance-based countType matches BOTH self
+        # (StructuredModule is-a Module) AND the 3 sub-modules,
+        # giving 1 + 3 = 4.
+        self.assertEqual(sm.countType(Module), 4)
 
-    def test_structuredmodule_inherits_module_findIndexByType(self):
+
+class TestStructuredModuleConstruction(unittest.TestCase):
+    """``StructuredModule`` is a real ``Module`` subclass that
+    auto-adds three named sub-modules ``(header, middle, footer)`` to
+    ``itemList`` at construction. Mirror of ``rocisa::StructuredModule``
+    (code.hpp:763-791)."""
+
+    def test_inherits_module_and_item(self):
+        sm = StructuredModule()
+        self.assertIsInstance(sm, Module)
+        self.assertIsInstance(sm, Item)
+
+    def test_default_name_empty(self):
+        # rocisa ctor default: ``StructuredModule(name="")``.
+        self.assertEqual(StructuredModule().name, "")
+
+    def test_custom_name_set(self):
+        # KernelWriter call sites pass things like
+        # ``StructuredModule("globalReadDoA_0")`` -- the name must
+        # propagate to ``Item.name``.
+        self.assertEqual(StructuredModule("globalReadA").name, "globalReadA")
+
+    def test_three_submodules_present(self):
+        sm = StructuredModule()
+        # All three are real Module instances (NOT None, NOT dummy).
+        self.assertIsInstance(sm.header, Module)
+        self.assertIsInstance(sm.middle, Module)
+        self.assertIsInstance(sm.footer, Module)
+
+    def test_submodule_names_match_rocisa(self):
+        # Names are the literal strings rocisa uses
+        # (``make_shared<Module>("header")`` / etc.) so that
+        # ``findIndexByName("middle")`` works against either side.
+        sm = StructuredModule()
+        self.assertEqual(sm.header.name, "header")
+        self.assertEqual(sm.middle.name, "middle")
+        self.assertEqual(sm.footer.name, "footer")
+
+    def test_itemList_has_three_entries(self):
+        # itemList starts at 3 (NOT 0) -- this is a behaviour change
+        # vs. the dummy version, where ``StructuredModule()`` was an
+        # empty Module. Any caller that previously asserted
+        # ``itemsSize() == 0`` post-construction must be updated.
+        self.assertEqual(StructuredModule().itemsSize(), 3)
+
+    def test_submodules_aliased_into_itemList(self):
+        # ``add(header)`` / ``add(middle)`` / ``add(footer)`` push the
+        # SAME shared_ptr (Python: same object) into itemList. This
+        # aliasing is what makes ``sm.middle.add(...)`` show up in
+        # ``str(sm)`` -- toString iterates itemList.
+        sm = StructuredModule()
+        self.assertIs(sm.itemList[0], sm.header)
+        self.assertIs(sm.itemList[1], sm.middle)
+        self.assertIs(sm.itemList[2], sm.footer)
+
+    def test_submodule_parent_set_to_owner(self):
+        # ``Module.add`` reparents the child; the 3 sub-modules must
+        # have their ``.parent`` set to the owning StructuredModule.
+        sm = StructuredModule()
+        self.assertIs(sm.header.parent, sm)
+        self.assertIs(sm.middle.parent, sm)
+        self.assertIs(sm.footer.parent, sm)
+
+
+class TestStructuredModuleEmission(unittest.TestCase):
+    """``StructuredModule.toString`` is inherited from ``Module`` and
+    just concatenates ``str(item)`` over itemList -- so the emission
+    is the concatenation of header + middle + footer (in order)."""
+
+    def test_empty_emits_empty_string(self):
+        # All three sub-modules are empty Modules; each emits "" so
+        # the StructuredModule emits "" overall.
+        self.assertEqual(str(StructuredModule()), "")
+
+    def test_middle_mutation_visible_in_str(self):
+        # The whole point of the aliasing -- mutating sm.middle.add
+        # MUST round-trip through ``str(sm)`` because itemList[1]
+        # IS sm.middle.
+        sm = StructuredModule("globalReadA")
+        sm.middle.add(TextBlock("load_a_0\n"))
+        sm.middle.add(TextBlock("load_a_1\n"))
+        self.assertEqual(str(sm), "load_a_0\nload_a_1\n")
+
+    def test_header_middle_footer_concatenated_in_order(self):
+        # Emission order is fixed: header content first, then
+        # middle, then footer. Any reordering would silently break
+        # SIA-scheduled kernels.
+        sm = StructuredModule()
+        sm.header.add(TextBlock("H\n"))
+        sm.middle.add(TextBlock("M\n"))
+        sm.footer.add(TextBlock("F\n"))
+        self.assertEqual(str(sm), "H\nM\nF\n")
+
+    def test_external_add_appends_after_footer(self):
+        # ``StructuredModule`` is still a Module -- raw ``.add(...)``
+        # appends to itemList AFTER the 3 sub-modules. The new
+        # entry's content shows up AFTER footer in the emission.
+        sm = StructuredModule()
+        sm.middle.add(TextBlock("M\n"))
+        sm.add(TextBlock("X\n"))  # itemList[3]
+        self.assertEqual(sm.itemsSize(), 4)
+        self.assertEqual(str(sm), "M\nX\n")
+
+
+class TestStructuredModuleAttributeSwap(unittest.TestCase):
+    """The ``header / middle / footer`` attributes are read-write
+    (``def_rw`` in rocisa). A caller may swap one out for a freshly
+    built Module -- emission must reflect the swap, but ONLY if the
+    caller also patches itemList (the aliasing is positional)."""
+
+    def test_assigning_new_module_does_not_auto_resync_itemList(self):
+        # ``sm.middle = Module("replacement")`` breaks the aliasing
+        # with itemList[1] -- a caller that wants the new middle to
+        # show up in ``str(sm)`` MUST also patch ``sm.itemList[1]``.
+        # We pin this behavior so anyone tempted to add magic
+        # syncing later thinks twice (rocisa doesn't do it either).
+        sm = StructuredModule()
+        replacement = Module("replacement")
+        sm.middle = replacement
+        # Aliasing broken: itemList[1] still points to the original.
+        self.assertIsNot(sm.itemList[1], replacement)
+        # Emission still reflects the OLD middle (empty).
+        replacement.add(TextBlock("X\n"))
+        self.assertEqual(str(sm), "")
+
+
+class TestStructuredModuleFind(unittest.TestCase):
+    """``findIndexByName`` / ``findIndexByType`` inherited from Module
+    must locate the 3 sub-modules at their fixed positions."""
+
+    def test_findNamedItem_locates_sub_modules(self):
+        sm = StructuredModule()
+        # ``findNamedItem`` returns the matching Item (the aliased
+        # sub-module), not an index. Mirror of rocisa code.hpp:216.
+        self.assertIs(sm.findNamedItem("header"), sm.header)
+        self.assertIs(sm.findNamedItem("middle"), sm.middle)
+        self.assertIs(sm.findNamedItem("footer"), sm.footer)
+
+    def test_findIndexByType_Module_returns_zero(self):
+        # ``findIndexByType(Module)`` returns the FIRST itemList
+        # entry that ``isinstance(..., Module)`` -- which is
+        # ``sm.header`` at position 0.
+        self.assertEqual(StructuredModule().findIndexByType(Module), 0)
+
+    def test_findIndexByType_TextBlock_skips_sub_modules(self):
+        # Sub-modules are Modules, not TextBlocks; the first
+        # TextBlock-typed child added afterwards lives at position 3.
         sm = StructuredModule()
         sm.add(TextBlock("x"))
-        self.assertEqual(sm.findIndexByType(TextBlock), 0)
+        self.assertEqual(sm.findIndexByType(TextBlock), 3)
+
+
+class TestStructuredModuleDeepCopy(unittest.TestCase):
+    """``copy.deepcopy(sm)`` returns an isolated clone that PRESERVES
+    the construction-time aliasing between ``header / middle /
+    footer`` and ``itemList[0..2]``.
+
+    This is a CONSCIOUS DIVERGENCE from rocisa's C++ copy ctor
+    (code.hpp:781-790), which accidentally re-clones the 3 sub-
+    modules a second time and ends up with attrs that point to
+    objects NOT in itemList. See ``StructuredModule.__deepcopy__``'s
+    long docstring for the full rationale -- in short, breaking the
+    aliasing on deepcopy makes ``cloned_sm.middle.add(...)``
+    silently no-op (the mutation lands on a Module nobody reaches
+    via toString), which is a sleeper bug. We use Python's standard
+    ``memo`` mechanism to keep attrs aliased to itemList entries
+    while still fully isolating clone from original."""
+
+    def test_deepcopy_returns_distinct_instance(self):
+        original = StructuredModule("foo")
+        clone = copy.deepcopy(original)
+        self.assertIsNot(clone, original)
+        self.assertIsInstance(clone, StructuredModule)
+        self.assertEqual(clone.name, "foo")
+
+    def test_deepcopy_clones_sub_modules(self):
+        original = StructuredModule()
+        clone = copy.deepcopy(original)
+        # Each sub-module attr on the clone is a different object
+        # from the original's same-named attr.
+        self.assertIsNot(clone.header, original.header)
+        self.assertIsNot(clone.middle, original.middle)
+        self.assertIsNot(clone.footer, original.footer)
+        # But their identity-content matches.
+        self.assertEqual(clone.header.name, "header")
+        self.assertEqual(clone.middle.name, "middle")
+        self.assertEqual(clone.footer.name, "footer")
+
+    def test_deepcopy_preserves_aliasing_with_itemList(self):
+        # The construction-time aliasing invariant (``sm.header is
+        # sm.itemList[0]``) MUST survive deepcopy -- this is the
+        # whole point of our divergence from rocisa C++ here.
+        # Achieved via Python's standard deepcopy ``memo`` cache:
+        # Step 1 deepcopies itemList entries (registering them in
+        # memo); Step 2 deepcopies ``self.header / middle / footer``
+        # with the SAME memo, hitting the cache and rebinding to
+        # the already-cloned itemList entries.
+        original = StructuredModule()
+        original.middle.add(TextBlock("M\n"))
+        clone = copy.deepcopy(original)
+        self.assertIs(clone.header, clone.itemList[0])
+        self.assertIs(clone.middle, clone.itemList[1])
+        self.assertIs(clone.footer, clone.itemList[2])
+
+    def test_deepcopy_emission_matches_original(self):
+        # toString iterates itemList. With aliasing preserved (see
+        # test_deepcopy_preserves_aliasing_with_itemList), the clone's
+        # ``itemList[0..2]`` ARE ``clone.header/middle/footer`` --
+        # so emission round-trips trivially.
+        original = StructuredModule()
+        original.header.add(TextBlock("H\n"))
+        original.middle.add(TextBlock("M\n"))
+        original.footer.add(TextBlock("F\n"))
+        clone = copy.deepcopy(original)
+        self.assertEqual(str(clone), str(original))
+        self.assertEqual(str(clone), "H\nM\nF\n")
+
+    def test_deepcopy_mutation_isolation_via_itemList(self):
+        # Mutating original.header propagates into original's
+        # itemList[0] (aliased), but the clone's itemList[0] is a
+        # fresh deepcopy and must be untouched.
+        original = StructuredModule()
+        clone = copy.deepcopy(original)
+        original.header.add(TextBlock("new_in_original\n"))
+        self.assertEqual(str(original), "new_in_original\n")
+        self.assertEqual(str(clone), "")
+
+    def test_deepcopy_mutation_via_clone_middle_does_show_up(self):
+        # Direct consequence of preserved aliasing: mutating
+        # ``clone.middle.add(...)`` MUST appear in ``str(clone)``
+        # because clone.middle IS clone.itemList[1] (toString
+        # iterates itemList). This is the "principle of least
+        # surprise" behavior that motivated diverging from rocisa
+        # C++ here -- a fresh-ctor instance and a deepcopy'd
+        # instance behave identically for the same API call.
+        clone = copy.deepcopy(StructuredModule())
+        clone.middle.add(TextBlock("yes\n"))
+        self.assertEqual(str(clone), "yes\n")
+
+
+class TestStructuredModulePickleRejected(unittest.TestCase):
+    """``StructuredModule`` is explicitly NOT picklable -- rocisa's
+    nanobind binding installs a ``__reduce__`` that raises with a
+    class-specific message (distinct from Module's own
+    ``"Module is not picklable"``)."""
+
+    def test_pickle_raises_runtime_error(self):
+        # ``pickle.dumps`` triggers ``__reduce__`` -- must raise.
+        with self.assertRaises(RuntimeError) as cm:
+            pickle.dumps(StructuredModule())
+        self.assertEqual(str(cm.exception), "StructuredModule is not picklable")
+
+    def test_pickle_message_distinct_from_module(self):
+        # Verify the message is the class-specific text, NOT the
+        # parent Module's ("Module is not picklable"). Any consumer
+        # that string-matches on the exception text relies on this
+        # distinction.
+        sm_msg = ""
+        try:
+            pickle.dumps(StructuredModule())
+        except RuntimeError as e:
+            sm_msg = str(e)
+        m_msg = ""
+        try:
+            pickle.dumps(Module())
+        except RuntimeError as e:
+            m_msg = str(e)
+        self.assertNotEqual(sm_msg, m_msg)
+        self.assertIn("StructuredModule", sm_msg)
+        self.assertIn("Module is not picklable", m_msg)
+
+
+class TestStructuredModuleCountType(unittest.TestCase):
+    """``countType`` inherited from Module recurses through itemList,
+    so a fresh StructuredModule counts as 4 Modules (self + 3 sub-
+    modules) and 4 Items."""
+
+    def test_countType_Module_recurses_through_sub_modules(self):
+        sm = StructuredModule()
+        # 1 (sm itself) + 3 (header/middle/footer) = 4.
+        self.assertEqual(sm.countType(Module), 4)
+
+    def test_countType_Item_includes_nested_content(self):
+        sm = StructuredModule()
+        sm.middle.add(TextBlock("x"))
+        # 1 (sm) + 3 (3 sub-modules) + 1 (TextBlock in middle) = 5.
+        self.assertEqual(sm.countType(Item), 5)
+
+
+# ===========================================================================
+# (end of StructuredModule tests)
+# ===========================================================================
 
 
 # ===========================================================================
