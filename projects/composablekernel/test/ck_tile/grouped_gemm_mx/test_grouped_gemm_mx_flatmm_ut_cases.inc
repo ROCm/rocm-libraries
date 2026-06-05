@@ -4,16 +4,16 @@
 #pragma once
 
 // =================================================================================
-// Test cases for GroupedMXFlatmmKernel: 4 num_loop classes x 2 cases each = 8 tests.
+// Test cases for GroupedMXFlatmmKernel: mixed-K coverage.
 //
-// The MX FLATMM non-TDM pipeline (MXFlatmmPipelineAGmemBGmemCRegV1) bakes
-// HasHotLoop and TailNum into the compiled kernel. The grouped wrapper can only
-// launch one kernel instantiation per call, so all groups in a single Run() must
-// share the same num_loop class (the fixture asserts this). Each class therefore
-// needs its own test cases with K values that satisfy that class.
+// The MX FLATMM pipelines (both MXFlatmmPipelineAGmemBGmemCRegV1 and
+// WeightPreshufflePipelineAGmemBGmemCRegTDM) dispatch (HasHotLoop, TailNum)
+// at runtime inside the pipeline body based on the per-tile num_loop. So
+// groups within a single Run() call may use any mix of K values -- there is
+// no same-class constraint at the test level.
 //
 //   PrefetchStages = 2
-//   BlockHasHotloop(num_loop)  = (num_loop > 2)
+//   BlockHasHotloop(num_loop)   = (num_loop > 2)
 //   GetBlockLoopTailNum(n_loop) = (n_loop % 2 == 0) ? Even : Odd
 //   K_Tile = 256, so num_loop = ceil(K / K_Tile)
 //
@@ -29,77 +29,50 @@
 //   N must be a multiple of 512 to satisfy MXfp4_FlatmmConfig16's N_Tile=512;
 //     this is a superset of MXFlatmmConfigBase16 / MXFlatmmConfigBase32TDM
 //     (N_Tile=256), so the same test cases cover both non-TDM and TDM binaries.
-//   K must satisfy the class table above.
+//   K must be a multiple of K_Tile = 256 and >= 256 (smallest non-trivial size).
 // =================================================================================
 
 constexpr int init_method = 1;
 
-// --- Class A: HasHotLoop=false, TailNum=Odd (num_loop=1, K=256) ---
-
-TYPED_TEST(TestGroupedGemmMXFlatmm, ClassA_NoHotLoop_OddTail_SingleGroup)
+TYPED_TEST(TestGroupedGemmMXFlatmm, Basic_4Groups)
 {
-    this->Run({128}, {512}, {256}, 1, init_method);
-}
-
-TYPED_TEST(TestGroupedGemmMXFlatmm, ClassA_NoHotLoop_OddTail_FourGroups)
-{
-    // All K=256 (only valid K for Class A); vary M and N.
+    // K values hit one class each: 256 (A), 512 (B), 768 (C), 1024 (D).
     this->Run({128, 256, 384, 512},
               {512, 1024, 512, 1024},
-              {256, 256, 256, 256},
+              {256, 512, 768, 1024},
               4,
               init_method);
 }
 
-// --- Class B: HasHotLoop=false, TailNum=Even (num_loop=2, K=512) ---
-
-TYPED_TEST(TestGroupedGemmMXFlatmm, ClassB_NoHotLoop_EvenTail_SingleGroup)
+TYPED_TEST(TestGroupedGemmMXFlatmm, Single_Group)
 {
+    // K=512 (Class B), smallest non-trivial size.
     this->Run({128}, {512}, {512}, 1, init_method);
 }
 
-TYPED_TEST(TestGroupedGemmMXFlatmm, ClassB_NoHotLoop_EvenTail_FourGroups)
+TYPED_TEST(TestGroupedGemmMXFlatmm, Two_Groups_Same_Size)
 {
-    // All K=512 (only valid K for Class B); vary M and N.
-    this->Run({128, 256, 384, 512},
-              {512, 1024, 512, 1024},
-              {512, 512, 512, 512},
-              4,
-              init_method);
+    // K=256 (Class A) -- this was Fix B's worst-case 4x overshoot before
+    // runtime dispatch was added to the pipeline. Passing confirms the
+    // runtime dispatch picks (HasHotLoop=false, TailNum=Odd) correctly.
+    this->Run({128, 128}, {512, 512}, {256, 256}, 2, init_method);
 }
 
-// --- Class C: HasHotLoop=true, TailNum=Odd (num_loop in {3,5,7,...}) ---
-
-TYPED_TEST(TestGroupedGemmMXFlatmm, ClassC_HotLoop_OddTail_SingleGroup)
+TYPED_TEST(TestGroupedGemmMXFlatmm, Eight_Groups)
 {
-    // K=768 -> num_loop=3 (smallest valid for Class C).
-    this->Run({128}, {512}, {768}, 1, init_method);
-}
-
-TYPED_TEST(TestGroupedGemmMXFlatmm, ClassC_HotLoop_OddTail_FourGroups)
-{
-    // num_loop values 3, 5, 7, 5 -- all odd and >= 3.
-    this->Run({128, 256, 384, 512},
-              {512, 1024, 512, 1024},
-              {768, 1280, 1792, 1280},
-              4,
-              init_method);
-}
-
-// --- Class D: HasHotLoop=true, TailNum=Even (num_loop in {4,6,8,...}) ---
-
-TYPED_TEST(TestGroupedGemmMXFlatmm, ClassD_HotLoop_EvenTail_SingleGroup)
-{
-    // K=1024 -> num_loop=4 (smallest valid for Class D).
-    this->Run({128}, {512}, {1024}, 1, init_method);
-}
-
-TYPED_TEST(TestGroupedGemmMXFlatmm, ClassD_HotLoop_EvenTail_FourGroups)
-{
-    // num_loop values 4, 6, 8, 6 -- all even and >= 4.
-    this->Run({128, 256, 384, 512},
-              {512, 1024, 512, 1024},
-              {1024, 1536, 2048, 1536},
-              4,
+    // K cycling through {256, 512, 768, 1024, 1280, 1536, 1792, 2048} -- every
+    // class hit, deeply mixed. Exercises per-tile runtime dispatch across all
+    // 4 (HasHotLoop, TailNum) variants within a single kernel launch.
+    //
+    // Per-group M/N kept modest so total tile count (~36 for non-TDM/non-FP4
+    // configs, ~18 for FP4xFP4, ~36 for TDM) stays at or below the persistent
+    // grid size (48 blocks); this avoids exercising the GroupedMXFlatmmKernel
+    // multi-tile-per-block dispatch path, which has a pre-existing bug that
+    // affects both MX-FLATMM pipelines (non-TDM and TDM) and is independent
+    // of this pipeline's HasHotLoop/TailNum dispatch. Filed as a follow-up.
+    this->Run({128, 128, 256, 256, 128, 128, 256, 256},
+              {512, 1024, 512, 1024, 512, 1024, 512, 1024},
+              {256, 512, 768, 1024, 1280, 1536, 1792, 2048},
+              8,
               init_method);
 }
