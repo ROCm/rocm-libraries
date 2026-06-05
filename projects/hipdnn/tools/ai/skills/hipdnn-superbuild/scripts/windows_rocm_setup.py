@@ -23,6 +23,26 @@ DEFAULT_ROCM_DEVEL = DEFAULT_VENV / "Lib/site-packages/_rocm_sdk_devel"
 DEFAULT_CLANG_BIN = Path("D:/develop/dist/clang/bin")
 DEFAULT_GPU_TARGET = "gfx1151"
 
+# Per-worktree wheel venv, provisioned by wheel_setup.py at <repo-root>/.rocm_wheels.
+WHEEL_DIR_NAME = ".rocm_wheels"
+ROCM_DEVEL_SUFFIX = Path("Lib/site-packages/_rocm_sdk_devel")
+
+
+def discover_rocm_path(repo_root):
+    """Find a usable ROCm devel dir without an explicit --rocm-path.
+
+    Prefers the per-worktree venv (<repo-root>/.rocm_wheels), then the global
+    fallback venv. Returns a Path with a valid hipcc.exe, or None.
+    """
+    candidates = [
+        Path(repo_root) / WHEEL_DIR_NAME / ROCM_DEVEL_SUFFIX,
+        DEFAULT_ROCM_DEVEL,
+    ]
+    for devel in candidates:
+        if (devel / "bin" / "hipcc.exe").exists():
+            return devel
+    return None
+
 
 def emit(rocm_path, clang_path, gpu_targets):
     if rocm_path:
@@ -48,13 +68,23 @@ def main():
         emit(args.rocm_path, None, args.gpu_targets)
         return 0
 
-    # Windows: require explicit rocm-path and clang-path
-    if not args.rocm_path:
-        p.error("--rocm-path is required on Windows")
+    # Windows: rocm-path may be auto-discovered from the per-worktree venv;
+    # clang-path is still required (clang lives outside the wheels).
+    if args.rocm_path:
+        rocm_path = Path(args.rocm_path)
+    else:
+        rocm_path = discover_rocm_path(args.repo_root)
+        if not rocm_path:
+            print(
+                "ERROR: no wheel-based ROCm found. Provision it with "
+                "wheel_setup.py --repo-root <repo-root>, or pass --rocm-path.",
+                file=sys.stderr,
+            )
+            return 1
+
     if not args.clang_path:
         p.error("--clang-path is required on Windows")
 
-    rocm_path = Path(args.rocm_path)
     clang_path = Path(args.clang_path)
     gpu_targets = args.gpu_targets or DEFAULT_GPU_TARGET
 

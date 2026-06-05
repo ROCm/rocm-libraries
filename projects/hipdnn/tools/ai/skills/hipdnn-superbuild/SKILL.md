@@ -1,7 +1,7 @@
 ---
 name: hipdnn-superbuild
 description: Build hipDNN with providers via the repository superbuild. Faster than standalone since providers build alongside hipDNN in a single CMake invocation. On Windows, auto-runs the wheel-based ROCm setup if not already prepared.
-argument-hint: "[preset] [clean] [ROCM_PATH=<path>] [CLANG_PATH=<path>] [GPU_TARGETS=<arch>] [SHA=<commit>]"
+argument-hint: "[preset] [clean] [ROCM_PATH=<path>] [CLANG_PATH=<path>] [GPU_TARGETS=<arch>] [SHA=<commit>] [VENV_PATH=<path>] [pull]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
@@ -19,6 +19,8 @@ Infer options from the user request:
 - **Clang path**: optional Windows `CLANG_PATH=<path>` override; default `D:/develop/dist/clang/bin`
 - **GPU targets**: optional `GPU_TARGETS=<arch>` override; Windows wheel setup defaults to `gfx1151`
 - **Wheel SHA**: optional Windows `SHA=<commit>` to pin the wheel setup
+- **Wheel venv**: optional `VENV_PATH=<path>` override; default is the per-worktree `<repo-root>/.rocm_wheels`
+- **Pull wheels**: pass through to `wheel_setup.py --pull` only when the user asks to refresh wheels; it reinstalls the current worktree's venv
 - **Jobs**: optional explicit parallelism only when the user requests it and active workspace instructions permit it; otherwise let Ninja auto-detect
 
 ## Presets
@@ -56,13 +58,15 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    ```bash
    python3 <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--rocm-path <path>] [--clang-path <path>] [--gpu-targets <arch>] [--sha <commit>]
    ```
-   On Linux this echoes only provided overrides. On Windows it detects or provisions the wheel-based ROCm install and prints `KEY=VALUE` lines for subsequent commands.
+   On Linux this echoes only provided overrides. On Windows it detects the wheel-based ROCm install and prints `KEY=VALUE` lines for subsequent commands. When `--rocm-path` is omitted it auto-discovers the per-worktree venv at `<repo-root>/.rocm_wheels` first, then the global fallback venv.
 
    To **provision or refresh** the wheel-based ROCm install (instead of only detecting an existing one), use the cross-platform `wheel_setup.py`. This is the Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`, so the same wheel-pull workflow runs on Windows or Linux:
    ```bash
-   python3 <scripts>/wheel_setup.py [--venv-path <path>] [--gpu-targets <arch>] [--sha <commit>] [--pull]
+   python3 <scripts>/wheel_setup.py --repo-root <repo-root> [--gpu-targets <arch>] [--sha <commit>] [--pull]
    ```
-   It creates or reuses a venv, installs ROCm wheels from nightlies (or S3 staging when `--sha` is given), runs `rocm-sdk init`, and prints `ROCM_PATH=`, `ROCM_BIN=`, `GPU_TARGETS=`, and (when applicable) `CLANG_PATH=`. An existing venv is reused untouched unless `--pull` is passed, which deletes and reinstalls it with fresh wheels. Feed the emitted `ROCM_PATH`/`CLANG_PATH`/`GPU_TARGETS` into the configure step and the emitted `ROCM_BIN` into the comgr staging step below.
+   With `--repo-root` it provisions a **per-worktree** venv at `<repo-root>/.rocm_wheels` (each git worktree is its own root, and the directory is gitignored). It creates or reuses the venv, installs ROCm wheels from nightlies (or S3 staging when `--sha` is given), runs `rocm-sdk init`, and prints `ROCM_PATH=`, `ROCM_BIN=`, `GPU_TARGETS=`, and (when applicable) `CLANG_PATH=`. An existing venv is reused untouched unless `--pull` is passed, which deletes and reinstalls it. Feed the emitted `ROCM_PATH`/`CLANG_PATH`/`GPU_TARGETS` into the configure step and the emitted `ROCM_BIN` into the comgr staging step below.
+
+   Per-worktree wheels keep each build self-consistent: a `--pull` (or a re-pull of a shared venv) changes DLL sonames such as `hiprtc<ver>.dll`, which silently invalidates builds linked against the old names (load-time `0xC0000135`). Isolating wheels per worktree means a pull in one worktree never breaks another's build; the cost is ~9 GB of disk per worktree. Use `--venv-path` to point at a shared venv instead when disk is tight, accepting that a re-pull then requires rebuilding every dependent build tree.
 
 5. If a clean rebuild was requested, remove the selected build directory using the active host's normal approval/safety flow.
 
@@ -100,6 +104,7 @@ Summarize:
 
 - `scripts/windows_rocm_setup.py`, `scripts/wheel_setup.py`, and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently.
 - `wheel_setup.py` is the cross-platform replacement for the external `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; prefer it so the wheel-pull workflow is the same on Windows and Linux.
+- Wheels are provisioned per-worktree at `<repo-root>/.rocm_wheels` (gitignored) so a `--pull` never invalidates another worktree's build. This trades disk (~9 GB per worktree) for isolation; pass `VENV_PATH=<path>` to share one venv when disk is constrained.
 - `comgr_stage.py` only does work on Windows. It also emits a diagnostic when `C:\Windows\System32\amd_comgr.dll` is present, explaining that it shadows PATH and is the reason for the app-local copy.
 - Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.
 - Product test execution is intentionally out of scope for this skill.

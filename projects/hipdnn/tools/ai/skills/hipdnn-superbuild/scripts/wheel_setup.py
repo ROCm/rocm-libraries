@@ -35,8 +35,14 @@ from pathlib import Path
 
 IS_WINDOWS = platform.system() == "Windows"
 
-# Defaults mirror wheel_build_setup.ps1 on Windows; Linux falls back to a venv
-# under the user's home so it works without write access to D:\.
+# Per-worktree venv directory name, created at the repository (worktree) root.
+# Each git worktree is its own root, so this isolates wheels per worktree: a
+# --pull in one worktree never invalidates a build in another. It is gitignored.
+WHEEL_DIR_NAME = ".rocm_wheels"
+
+# Fallback venv when no --repo-root/--venv-path is given. Mirrors
+# wheel_build_setup.ps1 on Windows; Linux uses the user's home so it works
+# without write access to D:\.
 DEFAULT_VENV = (
     Path("D:/develop/latest_wheels")
     if IS_WINDOWS
@@ -44,6 +50,14 @@ DEFAULT_VENV = (
 )
 DEFAULT_CLANG_BIN = Path("D:/develop/dist/clang/bin") if IS_WINDOWS else None
 DEFAULT_GPU_TARGET = "gfx1151"
+
+
+def default_venv_path(repo_root):
+    """Per-worktree venv at <repo-root>/.rocm_wheels, or the global fallback."""
+    if repo_root:
+        return Path(repo_root) / WHEEL_DIR_NAME
+    return DEFAULT_VENV
+
 
 # Per-architecture wheel family. Selects the nightlies index and S3 staging
 # bucket; pip picks the OS-correct wheel (win_amd64 vs linux) by platform tag.
@@ -146,7 +160,14 @@ def main():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--venv-path", default=str(DEFAULT_VENV), help="Venv location")
+    p.add_argument(
+        "--repo-root",
+        help="Worktree/repo root; default venv becomes <repo-root>/.rocm_wheels",
+    )
+    p.add_argument(
+        "--venv-path",
+        help="Explicit venv location (overrides the per-worktree default)",
+    )
     p.add_argument(
         "--pull",
         action="store_true",
@@ -181,7 +202,9 @@ def main():
     )
     args = p.parse_args()
 
-    venv_path = Path(args.venv_path)
+    venv_path = (
+        Path(args.venv_path) if args.venv_path else default_venv_path(args.repo_root)
+    )
     fresh = create_venv(venv_path, args.pull)
     py = venv_python(venv_path)
     if not py.exists():

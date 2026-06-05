@@ -4,6 +4,9 @@ __pycache__
 _build/
 build/
 
+# Per-worktree ROCm wheel venv (provisioned by hipdnn-superbuild wheel_setup.py)
+.rocm_wheels/
+
 # User-specific CMake presets
 CMakeUserPresets.json
 
