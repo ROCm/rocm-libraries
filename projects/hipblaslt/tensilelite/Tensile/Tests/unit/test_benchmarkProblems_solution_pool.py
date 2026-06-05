@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: MIT
 #
 ################################################################################
-""Unit tests for the solution-pool helpers in BenchmarkProblems.
+"""Unit tests for the solution-pool helpers in BenchmarkProblems.
 
 The solution-pool path lets a benchmark load pre-tuned solutions from a library
 logic file ("pool file") instead of generating them from ForkParameters. These
