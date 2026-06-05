@@ -138,41 +138,38 @@ execute_process(
     ERROR_QUIET
 )
 
+# Add HOST/HIP subdirectories to build executables (OpenMP required, Python3 optional)
+add_subdirectory(HOST)
+if(rpp_BACKEND_TYPE STREQUAL "HIP" AND HIP_FOUND)
+    add_subdirectory(HIP)
+endif()
+
 # Minimal sanity CTests: Always run these basic tests to verify HOST and HIP backends
+# These tests use the executables built by the subdirectories above
 if(OpenMP_CXX_FOUND)
     # Minimal sanity test for HOST: brightness f32 test
     add_test(
         NAME rpp_sanity_test_brightness_host_f32
-        COMMAND ${CMAKE_CTEST_COMMAND}
-            --build-and-test
-            "${CMAKE_CURRENT_SOURCE_DIR}/HOST"
-            "${CMAKE_CURRENT_BINARY_DIR}/HOST"
-            --build-generator "${CMAKE_GENERATOR}"
-            --build-target Tensor_image_host
-            --test-command Tensor_image_host
-                "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
-                "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
-                "${CMAKE_CURRENT_BINARY_DIR}/HOST/output"
-                2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
-                "${CMAKE_CURRENT_SOURCE_DIR}"
+        COMMAND $<TARGET_FILE:Tensor_image_host>
+            "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+            "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+            "${CMAKE_CURRENT_BINARY_DIR}/HOST/output"
+            2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HOST"
     )
 
     # Minimal sanity test for HIP: brightness f32 test (only if HIP backend)
-    if(rpp_BACKEND_TYPE STREQUAL "HIP")
+    if(rpp_BACKEND_TYPE STREQUAL "HIP" AND TARGET Tensor_image_hip)
         add_test(
             NAME rpp_sanity_test_brightness_hip_f32
-            COMMAND ${CMAKE_CTEST_COMMAND}
-                --build-and-test
-                "${CMAKE_CURRENT_SOURCE_DIR}/HIP"
-                "${CMAKE_CURRENT_BINARY_DIR}/HIP"
-                --build-generator "${CMAKE_GENERATOR}"
-                --build-target Tensor_image_hip
-                --test-command Tensor_image_hip
-                    "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
-                    "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
-                    "${CMAKE_CURRENT_BINARY_DIR}/HIP/output"
-                    2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
-                    "${CMAKE_CURRENT_SOURCE_DIR}"
+            COMMAND $<TARGET_FILE:Tensor_image_hip>
+                "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+                "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+                "${CMAKE_CURRENT_BINARY_DIR}/HIP/output"
+                2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
+                "${CMAKE_CURRENT_SOURCE_DIR}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HIP"
         )
     endif()
 endif()
