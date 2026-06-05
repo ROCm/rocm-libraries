@@ -12,7 +12,7 @@ rest of `dsl_docs/optimization/utilities/`.
 
 ## When to use these
 
-The optimization runbook (`../../optimization_runbook.md`) tells you
+The optimization runbook (`../../../optimization_runbook.md`) tells you
 to (1) verify correctness,
 (2) measure with hygiene, then (3) **inspect the generated artifact
 before chasing performance**. These probes are step (3).
