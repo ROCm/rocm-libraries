@@ -605,7 +605,7 @@ TEST_P(Dropout, DataTypeConfig)
     if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp16>)
     {
         if(hdim_q > 128 && mode == mode_enum::batch)
-            GTEST_SKIP() << "Skipped: fp16 dropout d256 batch — compiler bug (ROCm >= 7.12)";
+            GTEST_SKIP() << "Skipped: fp16 dropout d256 batch - compiler bug (ROCm >= 7.12)";
     }
 #endif
 
@@ -735,6 +735,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                  Values(3, 4),
                                  Values(std::tuple{4, 3, 1, 200, 1024, "0"},
                                         std::tuple{2, 2, -1, 512, 2000, "0"},
+                                        std::tuple{2, 8, 2, 1, 1024, "0"},
                                         std::tuple{3, 2, -1, 230, 899, "t:128,128"})));
 
 TEST_P(SplitKV, DataTypeConfig)

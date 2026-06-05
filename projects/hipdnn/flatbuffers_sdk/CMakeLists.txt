@@ -100,12 +100,6 @@ if(TARGET FlatBuffers)
     )
 endif()
 
-if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB)
-    _hipdnn_flatbuffers_sdk_process_dependency(
-        nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
-    )
-endif()
-
 # --- Create the library target ---
 add_library(hipdnn_flatbuffers_sdk INTERFACE)
 
@@ -166,6 +160,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/graph.fbs
             schemas/knob_value.fbs
             schemas/layernorm_attributes.fbs
+            schemas/layernorm_backward_attributes.fbs
             schemas/matmul_attributes.fbs
             schemas/norm_common.fbs
             schemas/pointwise_attributes.fbs

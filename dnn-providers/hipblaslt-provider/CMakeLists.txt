@@ -43,6 +43,11 @@ option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 if(NOT ENABLE_CLANG_FORMAT)
     message(WARNING "Clang-Format checks are disabled. CI requires passing clang-format checks.")
 endif()
+if(WIN32)
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
+else()
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+endif()
 
 list(
     PREPEND
@@ -87,6 +92,8 @@ endif()
 if(NOT TARGET hipdnn_plugin_sdk)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 endif()
+
+include(ClangTidy)
 
 # Sanitizer support (Address Sanitizer, etc.)
 include(Sanitizers)
@@ -148,9 +155,11 @@ dnn_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_private
 target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)
 
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+clang_tidy_check(hipblaslt_plugin_private)
 
 add_library(hipblaslt_plugin SHARED HipblasltPluginPublic.cpp)
 target_link_libraries(hipblaslt_plugin PRIVATE hipblaslt_plugin_private)
+clang_tidy_check(hipblaslt_plugin)
 
 if(NOT WIN32)
     target_link_libraries(

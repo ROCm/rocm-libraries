@@ -67,6 +67,18 @@ function(_create_test_name_validation_target_internal prefix_name)
             ${prefix_name}-validate_test_names DEPENDS ${CMAKE_BINARY_DIR}/${prefix_name}_test_names_validated
             COMMENT "Validating test names"
         )
+
+        # Also register as a ctest test so it runs with ctest and appears in test results
+        add_test(
+            NAME ${prefix_name}_test_name_validation
+            COMMAND ${Python3_EXECUTABLE}
+                ${_TEST_NAME_VALIDATOR_SCRIPT}
+                --test-executables ${TEST_EXECUTABLES_FILE}
+                --build-dir ${CMAKE_BINARY_DIR}
+                --strict
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        )
+        set_tests_properties(${prefix_name}_test_name_validation PROPERTIES LABELS "unit_test;integration_test;quick")
     else()
         add_custom_target(
             ${prefix_name}-validate_test_names COMMAND ${CMAKE_COMMAND} -E echo
@@ -377,6 +389,17 @@ function(install_provider_ctest_files INSTALL_SUBDIR)
     if(_tiered_staging)
         file(APPEND "${INSTALLED_CTEST_FILE}" "\n# Tiered test entries (smoke tier only for CI)\n")
         file(APPEND "${INSTALLED_CTEST_FILE}" "${_tiered_staging}")
+    endif()
+
+    # Append external integration test entries (cross-provider suite).
+    # These are accumulated by add_external_integration_test_target() calls
+    # that pass INSTALL_SUBDIR matching the value passed here.
+    get_property(_external_staging GLOBAL
+        PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${INSTALL_SUBDIR}"
+    )
+    if(_external_staging)
+        file(APPEND "${INSTALLED_CTEST_FILE}" "\n# External integration test entries (cross-provider suite)\n")
+        file(APPEND "${INSTALLED_CTEST_FILE}" "${_external_staging}")
     endif()
 
     install(FILES "${INSTALLED_CTEST_FILE}"

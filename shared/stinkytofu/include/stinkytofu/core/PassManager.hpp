@@ -112,6 +112,7 @@ class STINKYTOFU_EXPORT PassContext {
     GemmTileConfig gemmConfig;
     PassFeatureConfig passConfig;
     AsmCapsConfig asmCapsConfig;
+    bool enableRemarks_ = false;
     uint32_t wavefrontSize = 0;  ///< Computed from gemmConfig.arch
 
     // Global BasicBlock filter applied to all StinkyInstPass instances.
@@ -146,6 +147,14 @@ class STINKYTOFU_EXPORT PassContext {
 
     const AsmCapsConfig& getAsmCapsConfig() const {
         return asmCapsConfig;
+    }
+
+    void setRemarksEnabled(bool enable) {
+        enableRemarks_ = enable;
+    }
+
+    bool getRemarksEnabled() const {
+        return enableRemarks_;
     }
 
     /// Set global BasicBlock filter for all StinkyInstPass instances.

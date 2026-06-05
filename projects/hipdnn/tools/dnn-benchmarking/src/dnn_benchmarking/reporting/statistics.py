@@ -29,6 +29,7 @@ class BenchmarkStats:
 
     Attributes:
         mean_ms: Mean execution time in milliseconds.
+        median_ms: Median execution time in milliseconds.
         std_ms: Standard deviation of execution time in milliseconds.
         min_ms: Minimum execution time in milliseconds.
         max_ms: Maximum execution time in milliseconds.
@@ -44,6 +45,7 @@ class BenchmarkStats:
     p95_ms: float
     p99_ms: float
     total_ms: float = 0.0
+    median_ms: float = 0.0
 
     @classmethod
     def from_timings(cls, timings: List[float]) -> "BenchmarkStats":
@@ -65,6 +67,7 @@ class BenchmarkStats:
 
         return cls(
             mean_ms=float(np.mean(arr)),
+            median_ms=float(np.median(arr)),
             std_ms=float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0,
             min_ms=float(np.min(arr)),
             max_ms=float(np.max(arr)),
@@ -77,6 +80,7 @@ class BenchmarkStats:
         """Convert to dictionary for JSON serialization."""
         return {
             "mean_ms": self.mean_ms,
+            "median_ms": self.median_ms,
             "std_ms": self.std_ms,
             "min_ms": self.min_ms,
             "max_ms": self.max_ms,
