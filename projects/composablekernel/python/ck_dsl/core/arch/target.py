@@ -678,7 +678,9 @@ class ArchTarget:
 
 @lru_cache(maxsize=1)
 def _load_specs() -> Dict[str, dict]:
-    with open(_DATA_FILE) as fh:
+    # Pin UTF-8: the embedded interpreter defaults to the ASCII codec, and
+    # arch_specs.json contains non-ASCII bytes.
+    with open(_DATA_FILE, encoding="utf-8") as fh:
         doc = json.load(fh)
     return doc["arches"]
 
