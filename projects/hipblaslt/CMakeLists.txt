@@ -59,6 +59,7 @@ option(HIPBLASLT_ENABLE_FETCH "Fetch dependencies using fetch content" OFF)
 option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support." OFF)
 option(HIPBLASLT_ENABLE_THEROCK "Build hipBLASLt for TheRock." OFF)
+option(HIPBLASLT_VALIDATE_INSTALL "Run post-install per-base layout / .dat integrity checks on the install tree." OFF)
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
@@ -768,4 +769,24 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=lcov > "${coverage_dir}/coverage.info"
         COMMENT "Generating code coverage report"
       )
+endif()
+
+if(HIPBLASLT_VALIDATE_INSTALL)
+    set(_hipblaslt_validate_py "${Python_EXECUTABLE}")
+    if(NOT _hipblaslt_validate_py)
+        set(_hipblaslt_validate_py python3)
+    endif()
+    install(CODE "
+        set(_root \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}\")
+        message(STATUS \"hipBLASLt: validating install tree at \${_root}\")
+        execute_process(
+            COMMAND \"${_hipblaslt_validate_py}\" \"${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/validate_library_layout.py\" \"\${_root}\"
+            RESULT_VARIABLE _layout_rc)
+        execute_process(
+            COMMAND \"${_hipblaslt_validate_py}\" \"${CMAKE_CURRENT_SOURCE_DIR}/tools/scripts/check_dat_integrity.py\" \"\${_root}/lib/hipblaslt/library\"
+            RESULT_VARIABLE _dat_rc)
+        if(NOT _layout_rc EQUAL 0 OR NOT _dat_rc EQUAL 0)
+            message(FATAL_ERROR \"hipBLASLt post-install validation failed (layout=\${_layout_rc} dat=\${_dat_rc})\")
+        endif()
+    ")
 endif()
