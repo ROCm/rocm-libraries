@@ -31,12 +31,19 @@ static TiledScale tile_scale(const PreprocessedScale& ps, int group, int subs) {
     return ts;
 }
 
-// Cooperative async load of a (ROWS x K_TILE) FP6 tile into LDS via
-// global_load_lds_dwordx4. The tile's flattened layout in LDS is row-major:
+// Cooperative async load of a (ROWS x K_TILE) FP6 tile into LDS via buffer_load_dwordx4
+// (MUBUF, LDS dest). The tile's flattened layout in LDS is row-major:
 //   LDS[lds_base + (m*KT_BYTES + ck*16)] = global[gbase + m*row_stride + kt_byte + ck*16]
-// where KT_BYTES = K_TILE*6/8 and CPR = KT_BYTES/16 chunks per row. Each lane
-// fetches its own 16B; global_load_lds forces LDS dest = M0 + lane*16, so we walk
-// chunks in (m-major, ck-minor) order = exactly the row-major LDS layout above.
+// where KT_BYTES = K_TILE*6/8 and CPR = KT_BYTES/16 chunks per row. Each lane fetches its
+// own 16B; load-to-LDS forces LDS dest = M0 + lane*16, so we walk chunks in (m-major,
+// ck-minor) order = exactly the row-major LDS layout above.
+//
+// DEFAULT = MUBUF buffer_load_lds: the 64-bit base lives in the buffer descriptor (V#), so
+// each load only computes a 32-bit voffset -> ~half the per-load address VALU vs FLAT
+// global_load_lds (which recomputes a 64-bit addr/load). Measured +0.8% @8192^3, identical
+// correctness/VGPR/occ. Costs 1 manual s_nop/load for the "SALU writes M0 -> load LDS=1"
+// hazard (FLAT auto-handles it; MUBUF needs it explicit). Define USE_GLOBAL_LDS for the
+// FLAT fallback. See HANDOFF Step 29 / memory mxfp6_buffer_vs_global_lds.
 template <int ROWS, int KT_BYTES, int CPR>
 __device__ __forceinline__ void load_tile_lds(char* smem, uint32_t lds_base,
                                               const char* gbase, int row_stride,
@@ -44,17 +51,31 @@ __device__ __forceinline__ void load_tile_lds(char* smem, uint32_t lds_base,
     constexpr int TOTAL = ROWS * CPR;       // total 16B chunks in the tile
     static_assert(TOTAL % 256 == 0, "tile chunks must be a multiple of 256 (4 waves x 64)");
     constexpr int ISSUES = TOTAL / 256;
+#ifndef USE_GLOBAL_LDS
+    // descriptor: addr[47:32] in y (stride=0), num_records=2GB (no clamp), word3=gfx9 raw fmt.
+    uint64_t b = reinterpret_cast<uint64_t>(gbase);
+    v4i rsrc{(int)(uint32_t)b, (int)((uint32_t)(b >> 32) & 0xFFFF), (int)0x7FFFFFFF, (int)0x00020000};
+#pragma unroll
+    for (int i = 0; i < ISSUES; i++) {
+        int chunk = i * 256 + wave_id * 64 + lane;
+        int m = chunk / CPR, ck = chunk % CPR;
+        uint32_t voff = (uint32_t)(m * row_stride + kt_byte + ck * 16);
+        set_m0(__builtin_amdgcn_readfirstlane(lds_base + (uint32_t)((i * 256 + wave_id * 64) * 16)));
+        asm volatile("s_nop 0\n buffer_load_dwordx4 %0, %1, 0 offen lds"
+                     : : "v"(voff), "s"(rsrc) : "memory");
+    }
+#else
+    // FLAT fallback (global_load_lds): 64-bit address per load, no manual M0 s_nop needed.
 #pragma unroll
     for (int i = 0; i < ISSUES; i++) {
         int chunk = i * 256 + wave_id * 64 + lane;
         int m  = chunk / CPR;
         int ck = chunk % CPR;
         const void* g = gbase + (size_t)m * row_stride + kt_byte + ck * 16;
-        // M0 must be scalar (SGPR); wave_id is uniform per-wave but the compiler
-        // treats tid/64 as a VGPR -> readfirstlane forces it into an SGPR.
         set_m0(__builtin_amdgcn_readfirstlane(lds_base + (uint32_t)((i * 256 + wave_id * 64) * 16)));
         async_load_lds_b128(smem, g);  // -> LDS[lds_base + (i*256+wave*64+lane)*16]
     }
+#endif
 }
 
 // ds_read one 32x32 MFMA operand (32 FP6 / lane = 24B) from an LDS tile staged by
