@@ -463,5 +463,37 @@ size_t select_grid_size(const problem_t& problem,
     default: return hardware.N_CU;
   }
 }
+
+hybrid_mode_t select_hybrid_mode(const problem_t& problem,
+                                 const hardware_t& hardware,
+                                 const config_t& config,
+                                 size_t sm_count_target) {
+  size_t available_cus = (sm_count_target > 0)
+                             ? std::min<size_t>(sm_count_target, hardware.N_CU)
+                             : hardware.N_CU;
+  if (available_cus == 0) available_cus = hardware.N_CU;
+
+  const size_t MT_M = config.mt.m;
+  const size_t MT_N = config.mt.n;
+
+  if (MT_M == 16 && MT_N == 16) return hybrid_mode_t::static_;
+
+  const size_t batch = std::max<size_t>(problem.batch, 1);
+  const size_t tiles = compute_number_of_output_tiles(
+      MT_M, MT_N, problem.size.m, problem.size.n, batch);
+  const double tiles_per_cu =
+      static_cast<double>(tiles) / static_cast<double>(available_cus);
+
+  double threshold;
+  if      (MT_M ==  32 && MT_N ==  32) threshold = 256.4;
+  else if (MT_M ==  64 && MT_N ==  64) threshold =   7.22;
+  else if (MT_M == 128 && MT_N == 128) threshold =   2.08;
+  else if (MT_M == 128 && MT_N == 256) threshold =   2.58;
+  else if (MT_M == 256 && MT_N == 128) threshold =   0.87;
+  else                                 threshold =   2.0;
+
+  return (tiles_per_cu < threshold) ? hybrid_mode_t::static_
+                                    : hybrid_mode_t::dynamic;
+}
 }  // namespace streamk
 }  // namespace origami
