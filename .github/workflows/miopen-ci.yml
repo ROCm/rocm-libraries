@@ -1,6 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
+# TheRock CI builds and tests MIOpen in a single configuration (HIP backend,
+# optional CK, against TheRock's full ROCm stack). This workflow covers the
+# additional build configurations that MIOpen must support but TheRock CI does
+# not exercise: the HIPNOGPU backend (used for offline kernel tuning without
+# GPU hardware), the Tuna Fin subproject (offline tuning infrastructure), a
+# no-CK UBSan debug build, and gtest binary naming convention validation.
 
 name: MIOpen CI
 
