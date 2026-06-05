@@ -204,7 +204,7 @@ inline std::optional<std::string> checkArchCompatibility(const BundleMetadata& m
     // must not run on gfx940. e.g. metadata "gfx942" matches device
     // "gfx942:sramecc+:xnack-" but not "gfx940".
     const auto& metaArch = *meta.gpuArchitecture;
-    if(!archMatches(currentArch, metaArch, ArchMatchMode::Strict))
+    if(!archMatches(currentArch, metaArch, ArchMatchMode::STRICT))
     {
         return "Golden data generated on " + *meta.gpuArchitecture + " but current GPU is "
                + currentArch;

@@ -158,7 +158,7 @@ public:
                           return hipdnn_test_sdk::utilities::archMatches(
                               deviceArchStr,
                               candidate,
-                              hipdnn_test_sdk::utilities::ArchMatchMode::Loose);
+                              hipdnn_test_sdk::utilities::ArchMatchMode::LOOSE);
                       });
             if(!archMatched)
             {

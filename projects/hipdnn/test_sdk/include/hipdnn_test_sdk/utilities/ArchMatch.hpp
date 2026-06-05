@@ -15,11 +15,11 @@ enum class ArchMatchMode
     /// by ':' or end-of-string. "gfx942" matches "gfx942:sramecc+:xnack-" but
     /// "gfx94" does NOT match "gfx942". Use for arch-locking golden data, where
     /// data generated on gfx942 must not run on gfx940.
-    Strict,
+    STRICT,
     /// Candidate is any literal substring of the device string. "gfx10" matches
     /// "gfx1030". Use for human-written test-skip patterns where one entry
     /// (e.g. "gfx10") is meant to cover a whole architecture family.
-    Loose,
+    LOOSE,
 };
 
 /// Does `candidate` match `deviceArch` under the given mode?
@@ -27,10 +27,9 @@ enum class ArchMatchMode
 /// This is the single source of truth for arch matching across the test
 /// infrastructure (golden-data arch guard + test-skip system). See
 /// ArchMatchMode for the semantics of each mode.
-inline bool
-    archMatches(std::string_view deviceArch, std::string_view candidate, ArchMatchMode mode)
+inline bool archMatches(std::string_view deviceArch, std::string_view candidate, ArchMatchMode mode)
 {
-    if(mode == ArchMatchMode::Loose)
+    if(mode == ArchMatchMode::LOOSE)
     {
         return deviceArch.find(candidate) != std::string_view::npos;
     }

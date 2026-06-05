@@ -53,7 +53,7 @@ inline std::size_t currentDeviceTotalVramMb()
     hipDeviceProp_t props{};
     if(hipGetDeviceProperties(&props, device) == hipSuccess)
     {
-        return props.totalGlobalMem / (1024 * 1024);
+        return props.totalGlobalMem / (std::size_t{1024} * 1024);
     }
     return 0;
 }
