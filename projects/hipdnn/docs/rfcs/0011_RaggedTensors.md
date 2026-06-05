@@ -10,7 +10,7 @@ RFC should cover:
     - What is the expectation for what the reported size of the
 - Adding flatbuffer support
     - Add field for ragged offset
-- Create design for data_objects::ITensor subclass for ragged tensors (or a more general class) with the following qualities:
+- Create design for utilities::ITensor subclass for ragged tensors (or a more general class) with the following qualities:
     - Indexing either works, or is not available
     - Needs to support both ragged tensors, as well as an additional tensor that specifies sequence lengths
     - Size of memory is not derived from dimensions, but specified through other means
