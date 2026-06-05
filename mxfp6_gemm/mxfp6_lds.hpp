@@ -250,12 +250,16 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         }
     };
 
-    // ⚠️ RAW drain is IMPLICIT. __syncthreads() is a bare s_barrier (it does NOT wait on
-    // memory); the buffer's loads complete on vmcnt. The required s_waitcnt vmcnt(0) is
-    // supplied by the COMPILER: the prefetch's scale loads are consumed right after and force
-    // a vmcnt(0) which, being one in-order counter, also covers the buffer_load_lds. Correct
-    // today (validated incl. race-prone shapes) but fragile -- a NOSCALE / scale-path refactor
-    // would drop it -> silent RAW race; then re-add an explicit wait_vmcnt(0) before each barrier.
+    // ⚠️ Hot-loop RAW is NOT counter-synchronized -- it relies on the deep-K pipeline margin.
+    // buffer_load_lds completes on VM_CNT, but it is M0-implicit inline asm so the compiler
+    // cannot see the load->ds_read dependency and emits NO vmcnt in the steady state (barriers
+    // are lgkmcnt(0); s_barrier -- lgkmcnt is for the ds_reads/WAR, s_barrier is cross-wave
+    // only; neither waits on the load). RAW holds because each tile is prefetched a full
+    // compute window (the deep-K MFMA window, >> load latency) before it is read, so it has
+    // always landed; the kernel is validated bit-exact incl. race-prone shapes. If K_TILE ever
+    // shrinks toward the load latency, or you want a hard guarantee, add an explicit
+    // wait_vmcnt(0) before the barriers (~-0.3%). (The explicit wait_vmcnt(0) elsewhere lives
+    // only in the non-pipelined odd-tail / K-tail / single-buffer paths.)
     //
     // RDB (reordered double buffer): issue each tile's prefetch AFTER the barrier, so one
     // barrier/tile covers both RAW (fill-before-read of the buffer being read) and WAR
@@ -265,7 +269,7 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     if constexpr (DB) {
         // 2x-unrolled ping-pong: buf0 even tiles, buf1 odd (compile-time bufs, no dynamic
         // index/spill). Prefetch the next tile while computing the current; its loads stay in
-        // flight and are drained at the next barrier (vmcnt(0) implicit, see note above).
+        // flight and have landed by the time it is read a compute window later (see RAW note).
         prefetch(0, 0, sa0, sb0);  // prologue: tile 0 -> buf0
         int kt = 0;
         for (; kt + 1 < k_tiles; kt += 2) {
