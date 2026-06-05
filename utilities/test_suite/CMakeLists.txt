@@ -138,9 +138,37 @@ execute_process(
     ERROR_QUIET
 )
 
-# Top-level guards: Python3 and OpenMP are required to register CTests. Pandas is optional (see warning below).
+# Top-level guards: Python3 and OpenMP are required to register Python-based CTests. Pandas is optional (see warning below).
+# When Python3 is not found, we add a minimal sanity CTest that runs the C++ binary directly.
 if(NOT Python3_FOUND)
-    message("-- ${Yellow}Warning: Skipping all RPP-ctest test sets since Python3 is not found!${ColourReset}")
+    message("-- ${Yellow}Warning: Python3 not found — adding minimal sanity CTest for HOST and HIP backends${ColourReset}")
+    if(OpenMP_CXX_FOUND)
+        # Minimal sanity test for HOST: brightness f32 test
+        add_test(
+            NAME rpp_sanity_test_brightness_host_f32
+            COMMAND $<TARGET_FILE:Tensor_image_host>
+                ${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1
+                ${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1
+                ${CMAKE_CURRENT_BINARY_DIR}/HOST/output
+                2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
+                ${CMAKE_CURRENT_SOURCE_DIR}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/HOST
+        )
+
+        # Minimal sanity test for HIP: brightness f32 test (only if HIP backend)
+        if(rpp_BACKEND_TYPE STREQUAL "HIP" AND TARGET Tensor_image_hip)
+            add_test(
+                NAME rpp_sanity_test_brightness_hip_f32
+                COMMAND $<TARGET_FILE:Tensor_image_hip>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1
+                    ${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1
+                    ${CMAKE_CURRENT_BINARY_DIR}/HIP/output
+                    2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
+                    ${CMAKE_CURRENT_SOURCE_DIR}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/HIP
+            )
+        endif()
+    endif()
     return()
 endif()
 if(NOT PANDAS_FOUND EQUAL 0)
