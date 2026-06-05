@@ -64,13 +64,15 @@ TYPED_TEST(TestGroupedGemmMXFlatmm, Eight_Groups)
     // class hit, deeply mixed. Exercises per-tile runtime dispatch across all
     // 4 (HasHotLoop, TailNum) variants within a single kernel launch.
     //
-    // Per-group M/N kept modest so total tile count (~36 for non-TDM/non-FP4
-    // configs, ~18 for FP4xFP4, ~36 for TDM) stays at or below the persistent
-    // grid size (48 blocks); this avoids exercising the GroupedMXFlatmmKernel
-    // multi-tile-per-block dispatch path, which has a pre-existing bug that
-    // affects both MX-FLATMM pipelines (non-TDM and TDM) and is independent
-    // of this pipeline's HasHotLoop/TailNum dispatch. Filed as a follow-up.
-    this->Run({128, 128, 256, 256, 128, 128, 256, 256},
+    // Per-group M/N sized so total tile count (~64 for non-TDM/non-FP4,
+    // proportional for other configs) exceeds the persistent grid size
+    // (~48 blocks), forcing some CTAs to process multiple tiles across
+    // group boundaries. This validates the inter-tile LDS-sync fix in
+    // GroupedMXFlatmmKernel (grouped_mx_flatmm_kernel.hpp `block_sync_lds()`
+    // at the top of the persistence loop body): without that barrier, the
+    // CShuffleEpilogue's last `ds_read` races the next tile's pipeline
+    // `async_load_tile_` write to the shared per-CTA `smem_ptr` on gfx1250.
+    this->Run({128, 256, 384, 512, 128, 256, 384, 512},
               {512, 1024, 512, 1024, 512, 1024, 512, 1024},
               {256, 512, 768, 1024, 1280, 1536, 1792, 2048},
               8,

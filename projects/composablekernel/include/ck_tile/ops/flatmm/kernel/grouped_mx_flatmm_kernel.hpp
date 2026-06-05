@@ -97,6 +97,20 @@ struct GroupedMXFlatmmKernel
 
             while(block_linear_idx < group_block_cnt)
             {
+                // Drain the prior tile's in-flight LDS reads (notably the
+                // CShuffleEpilogue's final `ds_read` of the C-shuffle tile)
+                // before the next tile's MXFlatmmPipeline::Run_ issues
+                // `async_load_tile_` (buffer_load_lds) writes into the same
+                // per-CTA `__shared__ smem_ptr` region. On gfx1250 the async
+                // writes are tracked by `asynccnt` which is not ordered
+                // against in-flight `ds_read`s on `dscnt`, so without this
+                // barrier the leading wave's prefetch races and clobbers
+                // bytes that a lagging wave's last `iAccess` is still
+                // reading. The corruption manifests at the last SFC
+                // iteration's output position (e.g. row 120/col 32 in the
+                // grouped-flatmm MX tests). Mirrors the same fix at
+                // universal_gemm_kernel.hpp:1316 (commit b664f4b6).
+                block_sync_lds();
                 FlatmmKernelArgs<ScaleM, ScaleN, NumDTensor_> impl_kargs{
                     kargs.a_ptr[group_idx],
                     kargs.b_shuffle_ptr[group_idx],
