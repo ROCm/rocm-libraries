@@ -11,6 +11,9 @@ on:
       - hipblaslt_common_cms_phase2
       - "release**/therock*"
       - "release/rocm-rel-*"
+    paths:
+      - '**/*.py'
+      - '.github/**'    
   pull_request:
     branches:
       - develop
