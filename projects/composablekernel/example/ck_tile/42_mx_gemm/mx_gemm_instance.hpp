@@ -17,16 +17,16 @@ using is_row_major_t = ck_tile::bool_constant<
 template <typename GemmConfig,
           typename ADataType,
           typename BDataType,
+          typename AScaleDataType,
+          typename BScaleDataType,
           typename AccDataType,
           typename CDataType,
           typename ALayout,
           typename BLayout,
           typename CLayout,
-          typename ScaleM,
-          typename ScaleN,
           bool persistent,
           bool Splitk>
-float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::stream_config& s)
+float mx_gemm_calc(const ck_tile::MxGemmHostArgs<1, 1, 0>& args, const ck_tile::stream_config& s)
 {
     using GemmShape = ck_tile::TileGemmShape<
         ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
@@ -51,15 +51,22 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
     static_assert(sizeof(ComputeDataType) >= sizeof(BDataType),
                   "mixed_prec_gemm requires ADataType is a wider type than BDataType");
 
-    using MXPipelineProblem = ck_tile::UniversalGemmPipelineProblem<ADataType,
-                                                                    BDataType,
-                                                                    AccDataType,
-                                                                    GemmShape,
-                                                                    MXGemmTraits,
-                                                                    GemmConfig::Scheduler>;
+    using AComputeDataType = ADataType;
+    using BComputeDataType = BDataType;
 
-    // Use the MX GEMM Preshuffle pipeline or
-    // the new MX comp_async pipeline with MX scaling support
+    using MXPipelineProblem = ck_tile::MxGemmPipelineProblem<ADataType,
+                                                             BDataType,
+                                                             AccDataType,
+                                                             GemmShape,
+                                                             MXGemmTraits,
+                                                             GemmConfig::Scheduler,
+                                                             ck_tile::element_wise::PassThrough,
+                                                             ck_tile::element_wise::PassThrough,
+                                                             AComputeDataType,
+                                                             BComputeDataType,
+                                                             AScaleDataType,
+                                                             BScaleDataType>;
+
     constexpr bool IsEightWave =
         (GemmConfig::M_Warp * GemmConfig::N_Warp * GemmConfig::K_Warp) == 8;
     using MXGemmPipeline = std::conditional_t<
@@ -73,6 +80,8 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
         ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
                                                    GemmConfig::TileParitionerGroupNum,
                                                    GemmConfig::TileParitionerM01>;
+
+    constexpr ck_tile::index_t BlockedXDLNPerWarp = GemmConfig::Preshuffle ? 2 : 1;
 
     using GemmEpilogue =
         std::conditional_t<GemmConfig::TiledMMAPermuteN,
@@ -115,29 +124,16 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
                                GemmConfig::NumWaveGroups,
                                false, // FixedVectorSize_ (Default)
                                1,     // VectorSizeC_ (Default)
-                               ck_tile::MXEpilogueTraits<GemmConfig>::BlockedXDLNPerWarp,
+                               BlockedXDLNPerWarp,
                                false,                      // DoubleSmemBuffer_ (Default)
                                ComputeDataType,            // AComputeDataType
                                ComputeDataType,            // BComputeDataType
                                !GemmConfig::Preshuffle>>>; // TilesPacked_ (because of
                                                            // packed scales)
 
-    using Kernel = ck_tile::MXGemmKernel<TilePartitioner, MXGemmPipeline, GemmEpilogue>;
+    using Kernel = ck_tile::MxGemmKernel<TilePartitioner, MXGemmPipeline, GemmEpilogue>;
 
-    auto kargs = Kernel::MakeKernelArgs(std::array<const void*, 1>{args.as_ptr},
-                                        std::array<const void*, 1>{args.bs_ptr},
-                                        std::array<const void*, 0>{},
-                                        args.e_ptr,
-                                        args.k_batch,
-                                        args.M,
-                                        args.N,
-                                        args.K,
-                                        std::array<ck_tile::index_t, 1>{args.stride_As},
-                                        std::array<ck_tile::index_t, 1>{args.stride_Bs},
-                                        std::array<ck_tile::index_t, 0>{},
-                                        args.stride_E,
-                                        args.scale_m,
-                                        args.scale_n);
+    auto kargs = Kernel::MakeKernelArgs(args);
 
     if(!Kernel::IsSupportedArgument(kargs))
     {
@@ -145,8 +141,10 @@ float mx_gemm_calc(const MXGemmHostArgs<ScaleM, ScaleN>& args, const ck_tile::st
             "MX GEMM: unsupported shape/configuration (set CK_TILE_LOGGING=1 for details).");
     }
 
-    const auto kernel = ck_tile::make_kernel<Kernel::kBlockPerCu>(
-        Kernel{}, Kernel::GridSize(kargs), Kernel::BlockSize(), 0, kargs);
+    constexpr int kBlockPerCu = 1;
+
+    const auto kernel = ck_tile::make_kernel<kBlockPerCu>(
+        Kernel{}, Kernel::GridSize(args.M, args.N, args.k_batch), Kernel::BlockSize(), 0, kargs);
 
     // For split-K (k_batch > 1) the kernel's epilogue uses atomic_add into C, so C must be
     // zeroed before every kernel launch -- not just once before the first warmup iteration.
