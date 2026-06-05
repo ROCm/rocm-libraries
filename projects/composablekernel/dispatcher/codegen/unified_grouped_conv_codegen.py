@@ -1770,6 +1770,7 @@ _RULE_SET_MODULES = {
     "profiler": "grouped_config_rules_profiler",
     "tests": "grouped_config_rules_testing",
     "tiny": "grouped_config_rules_tiny",
+    "json": "grouped_config_rules_json",
 }
 
 
@@ -2305,7 +2306,7 @@ def main():
         "-r",
         type=str,
         default="default",
-        choices=["default", "profiler", "tests", "tiny"],
+        choices=["default", "profiler", "tests", "tiny", "json"],
         help="Rule-set used in the instance generation",
     )
 

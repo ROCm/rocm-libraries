@@ -322,7 +322,7 @@ def main():
     )
     parser.add_argument(
         "--rule-set",
-        choices=["profiler", "tests", "default", "tiny"],
+        choices=["profiler", "tests", "default", "tiny", "json"],
         default="profiler",
         help="Which rule set to generate configs from (default: profiler).",
     )
@@ -358,6 +358,8 @@ def main():
     json_config_set = "profiler" if args.rule_set == "default" else args.rule_set
     if json_config_set == "tiny":
         json_config_set = "tests"
+    if json_config_set == "json":
+        json_config_set = "profiler" 
 
     json_instances = load_json_instances(json_config_set)
     print(f"Loaded {len(json_instances)} JSON instances total.")

@@ -304,7 +304,7 @@ cmake                                                                           
 ```
 
 The Dispatcher codegen selects which kernel instances to generate via the rule set chosen with the CMake
-flag `-D DISPATCHER_RULE_SET=<rule-set>` at the configuration step. Four rule sets are available:
+flag `-D DISPATCHER_RULE_SET=<rule-set>` at the configuration step. The following rule sets are available:
 
 | Rule set | Description |
 |---|---|
@@ -312,6 +312,7 @@ flag `-D DISPATCHER_RULE_SET=<rule-set>` at the configuration step. Four rule se
 | `profiler` | The full rule set (all per-(variant, ndim, datatype) instances), derived from old CK configurations |
 | `tiny` | A minimal subset of the `tests` rule set (at least 10 configs, with every feature category represented for both 2D and 3D), for quick development/iteration builds. |
 | `default` | The original heuristic rules (datatype-agnostic). |
+| `json` | Configs loaded directly from the reference JSON files, useful for reproducing the exact reference instance set. |
 
 For example, to generate the full `profiler` set of kernels:
 ```bash
