@@ -139,95 +139,41 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     // On success the emulated result is returned directly; the native path
     // is used as fall-back when fp64EmulatedGemm returns non-success.
     // -----------------------------------------------------------------------
-    /* Resolve per-handle enabled override vs process-wide env var.
-     * handle->emulation.enabled: 1=force on, 0=force off, -1=defer to env var */
-    const bool emulEnabled = (handle->emulation.enabled == 1)
-                          || (handle->emulation.enabled != 0 && fp64EmulationIsEnabled());
-    if(type_a == HIP_R_64F
-       && num_batches_a == 1
-       && bias          == nullptr
+    if(bias          == nullptr
        && scaleAlphaVec == nullptr
        && E             == nullptr
        && !matmul_descr->pointermode
        && epilogue      == ROCBLASLT_EPILOGUE_DEFAULT
-       && emulEnabled)
+       && fp64EmulationWouldApply(handle, type_a, m, n, k, num_batches_a))
     {
-        /* Resolve emulation strategy: handle setting > env var.
-         * handle->emulation.strategy:  -1=use env var, 0=DEFAULT(=env var),
-         *                               1=PERFORMANT, 2=EAGER              */
-        const bool eager = (handle->emulation.strategy == 2)
-                         || (handle->emulation.strategy != 1
-                             && fp64EmulationIsEager());
-        const bool ai_ok = eager || fp64EmulationAICheck(m, n, k);
+        /* Build per-call settings from handle overrides + env var fallbacks. */
+        Fp64EmulationSettings emulSettings;
+        emulSettings.num_moduli = fp64EmulationEffectiveNumModuli(handle);
 
-        if(ai_ok)
-        {
-            /* Build per-call settings from handle overrides + env var fallbacks. */
-            Fp64EmulationSettings emulSettings;
+        /* special_values_mask: handle overrides env var when not sentinel */
+        emulSettings.sv_mask = (handle->emulation.special_values_mask != ~0u)
+                                   ? handle->emulation.special_values_mask
+                                   : ~0u;  /* ~0u → fp64EmulatedGemm uses env var */
 
-            /* num_moduli: derive from handle's max_mantissa_bits if set */
-            if(handle->emulation.max_mantissa_bits >= 0) {
-                /* CRT bit capacity for s=2..20 (19 entries, indexed by s-2). */
-                static constexpr double cum_bits[19] = {
-                     15.994,  /* s=2  */
-                     23.976,  /* s=3  */
-                     31.945,  /* s=4  */
-                     39.894,  /* s=5  */
-                     47.807,  /* s=6  */
-                     55.708,  /* s=7  */
-                     63.572,  /* s=8  */
-                     71.411,  /* s=9  */
-                     79.238,  /* s=10 */
-                     87.040,  /* s=11 */
-                     94.801,  /* s=12 */
-                    102.522,  /* s=13 */
-                    110.160,  /* s=14 */
-                    117.782,  /* s=15 */
-                    125.374,  /* s=16 */
-                    132.949,  /* s=17 */
-                    140.448,  /* s=18 */
-                    147.931,  /* s=19 */
-                    155.365,  /* s=20 */
-                };
-                static constexpr unsigned OZ2_S_MAX = 20u;
-                const unsigned target = static_cast<unsigned>(
-                    handle->emulation.max_mantissa_bits);
-                emulSettings.num_moduli = OZ2_S_MAX;
-                for(unsigned s = 2u; s <= OZ2_S_MAX; ++s) {
-                    if(cum_bits[s - 2u] >= static_cast<double>(target)) {
-                        emulSettings.num_moduli = s;
-                        break;
-                    }
-                }
-            } else {
-                emulSettings.num_moduli = 0u;  /* use env var */
-            }
+        /* caller workspace: pass through from the hipblasLtMatmul call */
+        emulSettings.workspace       = workspace;
+        emulSettings.workspace_bytes = workspaceSizeInBytes;
 
-            /* special_values_mask: handle overrides env var when not sentinel */
-            emulSettings.sv_mask = (handle->emulation.special_values_mask != ~0u)
-                                       ? handle->emulation.special_values_mask
-                                       : ~0u;  /* ~0u → fp64EmulatedGemm uses env var */
+        /* caller handle: reused for INT8 GEMMs inside the emulation */
+        emulSettings.handle = handle;
 
-            /* caller workspace: pass through from the hipblasLtMatmul call */
-            emulSettings.workspace       = workspace;
-            emulSettings.workspace_bytes = workspaceSizeInBytes;
-
-            /* caller handle: reused for INT8 GEMMs inside the emulation */
-            emulSettings.handle = handle;
-
-            const rocblaslt_status emulSt =
-                fp64EmulatedGemm(opA, opB, m, n, k,
-                                 static_cast<const double*>(alpha),
-                                 static_cast<const double*>(A), lda,
-                                 static_cast<const double*>(B), ldb,
-                                 static_cast<const double*>(beta),
-                                 static_cast<const double*>(C), ldc,
-                                 static_cast<double*>(D), ldd,
-                                 stream, emulSettings);
-            if(emulSt == rocblaslt_status_success)
-                return rocblaslt_status_success;
-            // Non-success (memory error, Inf/NaN detected, etc.): fall through to native.
-        }
+        const rocblaslt_status emulSt =
+            fp64EmulatedGemm(opA, opB, m, n, k,
+                             static_cast<const double*>(alpha),
+                             static_cast<const double*>(A), lda,
+                             static_cast<const double*>(B), ldb,
+                             static_cast<const double*>(beta),
+                             static_cast<const double*>(C), ldc,
+                             static_cast<double*>(D), ldd,
+                             stream, emulSettings);
+        if(emulSt == rocblaslt_status_success)
+            return rocblaslt_status_success;
+        // Non-success (memory error, Inf/NaN detected, etc.): fall through to native.
     }
 
     // Others

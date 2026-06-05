@@ -41,6 +41,7 @@
  */
 
 #include "fp64_emulation.hpp"
+#include "handle.h"   /* _rocblaslt_handle */
 
 #include "hipblaslt/hipblaslt.h"
 #include <hip/hip_runtime.h>
@@ -539,6 +540,60 @@ uint32_t fp64EmulationSpecialValuesMask()
         return static_cast<uint32_t>(std::strtoul(v, nullptr, 0));
     }();
     return mask;
+}
+
+/* =========================================================================
+ * fp64EmulationWouldApply / fp64EmulationEffectiveNumModuli
+ *
+ * These centralise the emulation-eligibility check and num_moduli resolution
+ * so that rocblaslt_matmul_impl and hipblasLtMatmulAlgoGetHeuristic share
+ * exactly the same logic without duplication.
+ * ========================================================================= */
+
+/* Cumulative log2 of the product of the first s moduli (s=2..20). */
+static constexpr double oz2_cum_bits[19] = {
+     15.994,  /* s=2  */  23.976,  /* s=3  */  31.945,  /* s=4  */
+     39.894,  /* s=5  */  47.807,  /* s=6  */  55.708,  /* s=7  */
+     63.572,  /* s=8  */  71.411,  /* s=9  */  79.238,  /* s=10 */
+     87.040,  /* s=11 */  94.801,  /* s=12 */ 102.522,  /* s=13 */
+    110.160,  /* s=14 */ 117.782,  /* s=15 */ 125.374,  /* s=16 */
+    132.949,  /* s=17 */ 140.448,  /* s=18 */ 147.931,  /* s=19 */
+    155.365,  /* s=20 */
+};
+
+bool fp64EmulationWouldApply(const _rocblaslt_handle* h,
+                              hipDataType              type_a,
+                              int64_t                  m,
+                              int64_t                  n,
+                              int64_t                  k,
+                              int                      batch_count)
+{
+    if(type_a != HIP_R_64F || batch_count != 1)
+        return false;
+
+    const bool emulEnabled = (h->emulation.enabled == 1)
+                           || (h->emulation.enabled != 0 && fp64EmulationIsEnabled());
+    if(!emulEnabled)
+        return false;
+
+    const bool eager = (h->emulation.strategy == 2)
+                     || (h->emulation.strategy != 1 && fp64EmulationIsEager());
+    return eager || fp64EmulationAICheck(m, n, k);
+}
+
+unsigned fp64EmulationEffectiveNumModuli(const _rocblaslt_handle* h)
+{
+    if(h->emulation.mantissa_control == 1 /* FIXED */
+       && h->emulation.max_mantissa_bits >= 0)
+    {
+        const unsigned target = static_cast<unsigned>(h->emulation.max_mantissa_bits);
+        for(unsigned s = 2u; s <= 20u; ++s) {
+            if(oz2_cum_bits[s - 2u] >= static_cast<double>(target))
+                return s;
+        }
+        return 20u;
+    }
+    return fp64EmulationNumModuli();
 }
 
 /* =========================================================================

@@ -52,6 +52,30 @@ unsigned fp64EmulationNumModuli();
  * Use this to check whether a caller-provided workspace is sufficient. */
 size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_moduli);
 
+/* Forward declaration — callers already include handle.h which provides the full
+ * definition.  Declared here so the two helpers below can use the type.     */
+struct _rocblaslt_handle;
+
+/* Returns true when FP64 emulation would intercept a GEMM with these parameters.
+ * Checks: emulation enabled for the handle, FP64 data type, non-batched, and the
+ * arithmetic-intensity heuristic (or EAGER strategy).  Does NOT check epilogue-
+ * specific conditions (bias, scaleAlpha, E, pointermode) — those remain the
+ * caller's responsibility.                                                   */
+bool fp64EmulationWouldApply(const _rocblaslt_handle* h,
+                              hipDataType              type_a,
+                              int64_t                  m,
+                              int64_t                  n,
+                              int64_t                  k,
+                              int                      batch_count);
+
+/* Returns the effective number of CRT moduli (2..20) given the handle's emulation
+ * settings.
+ *   FIXED mode (mantissa_control=1, max_mantissa_bits≥0): maps the bit count to
+ *     the minimum s whose CRT capacity ≥ max_mantissa_bits.
+ *   DYNAMIC mode or max_mantissa_bits<0: defers to fp64EmulationNumModuli()
+ *     (process-wide env var / default = 16).                                 */
+unsigned fp64EmulationEffectiveNumModuli(const _rocblaslt_handle* h);
+
 /* Per-call emulation settings.
  * Fields with sentinel values (0 for num_moduli, ~0u for sv_mask) cause the
  * function to fall back to the process-wide env var defaults.              */
