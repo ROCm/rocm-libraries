@@ -3021,8 +3021,11 @@ class StreamKDynamic(StreamK):
         module.add(SMulI32(dst=sgpr(sTotalTiles), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="Total tiles"))
 
         # Check if work item is a full tile
+        # Full-tile count must include batch (TotalItems spans all batches);
+        # sTotalTiles is per-batch (used for the WorkGroup2 division below).
         sFullTile = writer.sgprPool.checkOut(1, "fullTile")
-        module.add(SSubU32(dst=sgpr(sFullTile), src0=sgpr(sTotalTiles), src1=sgpr("skTiles"), comment="Get number of full-tile work items"))
+        module.add(self.computeTotalTiles(writer, kernel, sFullTile))
+        module.add(SSubU32(dst=sgpr(sFullTile), src0=sgpr(sFullTile), src1=sgpr("skTiles"), comment="Get number of full-tile work items (across all batches)"))
         module.add(SCmpLtU32(src0=sgpr(sWorkItemIdx), src1=sgpr(sFullTile), comment="Check if work item is a full tile"))
         module.add(SCBranchSCC0(labelName=skPartialTile.getLabelName(), comment="Work item is a partial tile"))
 
