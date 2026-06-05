@@ -510,6 +510,7 @@ struct Config {
     unsigned            max_s        = 20;
     std::vector<double> phi_list     = {0.5, 1.0, 2.0, 4.0};
     bool                run_adaptive = true;
+    bool                check_errors = true;
 };
 
 static void print_usage(const char* prog)
@@ -523,6 +524,9 @@ static void print_usage(const char* prog)
         "  --phi-list P   Comma-separated phi values\n"
         "                 (default: 0.5,1,2,4  — same as GEMMul8)\n"
         "  --no-adaptive  Skip the adaptive-s (library-default) run\n"
+        "  --no-check     Skip the double-double reference GEMM and error\n"
+        "                 computation.  err_max and err_med are printed as 'nan'.\n"
+        "                 Useful for fast timing-only sweeps at large N.\n"
         "  -h, --help     Print this help and exit\n"
         "\n"
         "Output: CSV with columns  phi,N,algo,crt_bits,err_max,err_med,ms_per_run\n"
@@ -568,6 +572,8 @@ static Config parse_args(int argc, char** argv)
             cfg.phi_list = parse_phi_list(argv[++i]);
         } else if(a == "--no-adaptive") {
             cfg.run_adaptive = false;
+        } else if(a == "--no-check") {
+            cfg.check_errors = false;
         } else {
             std::fprintf(stderr, "Unknown option: %s\n", a.c_str());
             print_usage(argv[0]);
@@ -624,10 +630,12 @@ int main(int argc, char** argv)
     HIP_CHECK(hipMalloc(&d_A,    N2 * sizeof(double)));
     HIP_CHECK(hipMalloc(&d_B,    N2 * sizeof(double)));
     HIP_CHECK(hipMalloc(&d_D,    N2 * sizeof(double)));
-    HIP_CHECK(hipMalloc(&d_err,  N2 * sizeof(double)));
-    HIP_CHECK(hipMalloc(&d_C_dd, N2 * sizeof(double2)));
+    if(cfg.check_errors) {
+        HIP_CHECK(hipMalloc(&d_err,  N2 * sizeof(double)));
+        HIP_CHECK(hipMalloc(&d_C_dd, N2 * sizeof(double2)));
+    }
 
-    std::vector<double> h_err(N2);
+    std::vector<double> h_err(cfg.check_errors ? N2 : 0u);
 
     /*
      * Workspace budget offered to hipblasLtMatmulAlgoGetHeuristic.
@@ -661,11 +669,7 @@ int main(int argc, char** argv)
     /* Emulated DGEMM: emulation enabled, EAGER strategy, no Inf/NaN check */
     DgemmRunner emulated;
     emulated.init(static_cast<int64_t>(N), /*emulation_enabled=*/true, WS_BUDGET);
-    /* Pre-allocate workspace for the largest possible emulation configuration
-     * (max_s moduli), so no per-call allocation is needed during timed runs. */
-    ensure_ws(hipblasLtFp64EmulationWorkspaceSize(
-        static_cast<int64_t>(N), static_cast<int64_t>(N), static_cast<int64_t>(N),
-        cfg.max_s));
+    ensure_ws(emulated.workspaceSize());   /* emulation workspace for default num_moduli */
 
     /* ── CSV header ───────────────────────────────────────────────────── */
     std::printf("phi,N,algo,crt_bits,err_max,err_med,ms_per_run,workspace_MiB\n");
@@ -679,9 +683,11 @@ int main(int argc, char** argv)
         launch_randmat(N, N, d_B, phi, SEED_B, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
 
-        /* Double-double reference */
-        launch_dd_gemm(N, d_A, d_B, d_C_dd, stream);
-        HIP_CHECK(hipStreamSynchronize(stream));
+        /* Double-double reference (skipped when --no-check) */
+        if(cfg.check_errors) {
+            launch_dd_gemm(N, d_A, d_B, d_C_dd, stream);
+            HIP_CHECK(hipStreamSynchronize(stream));
+        }
 
         /* ── Native DGEMM ─────────────────────────────────────────────── */
         {
@@ -689,8 +695,10 @@ int main(int argc, char** argv)
             auto fn = [&]{ native.run(d_A, d_B, d_D, d_ws, ws_bytes, stream); };
             double ms = run_and_time(fn, num_runs, num_runs, stream);
 
-            auto [err_max, err_med] = compute_errors(
-                N, d_D, d_C_dd, d_err, h_err, stream);
+            double err_max = std::nan(""), err_med = std::nan("");
+            if(cfg.check_errors)
+                std::tie(err_max, err_med) = compute_errors(
+                    N, d_D, d_C_dd, d_err, h_err, stream);
 
             /* Native DGEMM uses no emulation workspace. */
             std::printf("%.4g,%zu,DGEMM,%.1f,%.4e,%.4e,%.3f,0.000\n",
@@ -703,19 +711,18 @@ int main(int argc, char** argv)
             /* DYNAMIC: library selects num_moduli automatically (≤ 16 by default). */
             HLT_CHECK(hipblasLtSetFixedPointEmulationMantissaControl(
                 emulated.handle, HIPBLAS_EMULATION_MANTISSA_CONTROL_DYNAMIC));
-            /* Workspace for adaptive mode: use the library default (16 moduli) as
-             * an upper bound. The actual workspace is computed from the problem size. */
-            constexpr unsigned ADAPTIVE_DEFAULT_MODULI = 16u;
-            const size_t emu_ws = hipblasLtFp64EmulationWorkspaceSize(
-                static_cast<int64_t>(N), static_cast<int64_t>(N), static_cast<int64_t>(N),
-                ADAPTIVE_DEFAULT_MODULI);
+            /* Re-query so heur.workspaceSize reflects the adaptive configuration.    */
+            emulated.requery();
+            const size_t emu_ws = emulated.workspaceSize();
             ensure_ws(emu_ws);
 
             auto fn = [&]{ emulated.run(d_A, d_B, d_D, d_ws, ws_bytes, stream); };
             double ms = run_and_time(fn, num_runs, num_runs, stream);
 
-            auto [err_max, err_med] = compute_errors(
-                N, d_D, d_C_dd, d_err, h_err, stream);
+            double err_max = std::nan(""), err_med = std::nan("");
+            if(cfg.check_errors)
+                std::tie(err_max, err_med) = compute_errors(
+                    N, d_D, d_C_dd, d_err, h_err, stream);
 
             /* Report crt_bits as the library default upper-bound (16 moduli → 125.4 bits) */
             std::printf("%.4g,%zu,OS2-accu-adaptive,%.1f,%.4e,%.4e,%.3f,%.3f\n",
@@ -731,16 +738,18 @@ int main(int argc, char** argv)
                 emulated.handle, HIPBLAS_EMULATION_MANTISSA_CONTROL_FIXED));
             HLT_CHECK(hipblasLtSetFixedPointEmulationMaxMantissaBitCount(
                 emulated.handle, bits_for_moduli(s)));
-            /* Workspace depends on s (A8i+B8i+C32i+Zhi+Zlo arrays). */
-            const size_t emu_ws = hipblasLtFp64EmulationWorkspaceSize(
-                static_cast<int64_t>(N), static_cast<int64_t>(N), static_cast<int64_t>(N), s);
+            /* Re-query: workspace size changes with s. */
+            emulated.requery();
+            const size_t emu_ws = emulated.workspaceSize();
             ensure_ws(emu_ws);
 
             auto fn = [&]{ emulated.run(d_A, d_B, d_D, d_ws, ws_bytes, stream); };
             double ms = run_and_time(fn, num_runs, num_runs, stream);
 
-            auto [err_max, err_med] = compute_errors(
-                N, d_D, d_C_dd, d_err, h_err, stream);
+            double err_max = std::nan(""), err_med = std::nan("");
+            if(cfg.check_errors)
+                std::tie(err_max, err_med) = compute_errors(
+                    N, d_D, d_C_dd, d_err, h_err, stream);
 
             char algo_name[32];
             std::snprintf(algo_name, sizeof(algo_name), "OS2-accu-s%u", s);
@@ -757,8 +766,10 @@ int main(int argc, char** argv)
     emulated.destroy();
     native.destroy();
     HIP_CHECK(hipFree(d_ws));
-    HIP_CHECK(hipFree(d_C_dd));
-    HIP_CHECK(hipFree(d_err));
+    if(cfg.check_errors) {
+        HIP_CHECK(hipFree(d_C_dd));
+        HIP_CHECK(hipFree(d_err));
+    }
     HIP_CHECK(hipFree(d_D));
     HIP_CHECK(hipFree(d_B));
     HIP_CHECK(hipFree(d_A));

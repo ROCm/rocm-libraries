@@ -5,12 +5,16 @@
 # run_sweep.sh — Run fp64_emul_accuracy for N = 1024..16384 (powers of 2).
 #
 # Usage:
-#   ./run_sweep.sh [binary] [num_runs] [output_csv]
+#   ./run_sweep.sh [binary] [num_runs] [output_csv] [extra_flags]
 #
 # Defaults:
 #   binary      = ./build/fp64_emul_accuracy
 #   num_runs    = 30
 #   output_csv  = results_<timestamp>.csv
+#   extra_flags = (none — error check enabled by default)
+#
+# Example — timing-only sweep, no DD reference GEMM (fast for large N):
+#   ./run_sweep.sh ./build/fp64_emul_accuracy 30 timing.csv --no-check
 #
 # Progress and device info are written to stderr; only CSV goes to stdout
 # (and then to the output file).
@@ -20,11 +24,19 @@ set -euo pipefail
 BINARY="${1:-./build/fp64_emul_accuracy}"
 NUM_RUNS="${2:-30}"
 OUTPUT="${3:-results_$(date +%Y%m%d_%H%M%S).csv}"
+EXTRA_FLAGS="${4:-}"
 
 PHI_LIST="0.5,1,2,4"
 
 # Pin to device 0 (overridable: HIP_VISIBLE_DEVICES=2 ./run_sweep.sh)
 export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-0}"
+
+# Disable Inf/NaN detection for the emulation — the benchmark uses clean
+# synthetic data and the detection adds a per-call device→host sync that
+# inflates measured latency, especially for small N.
+# (The fp64_emul_accuracy driver also sets this via the handle API, but the
+#  env var serves as an explicit process-level safeguard.)
+export HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_MASK=0
 
 if [[ ! -x "$BINARY" ]]; then
     echo "ERROR: binary not found or not executable: $BINARY" >&2
@@ -33,10 +45,11 @@ if [[ ! -x "$BINARY" ]]; then
 fi
 
 echo "=== fp64 emulation sweep ===" >&2
-echo "Binary   : $BINARY" >&2
-echo "phi_list : $PHI_LIST" >&2
-echo "num_runs : $NUM_RUNS (warmup = same)" >&2
-echo "Output   : $OUTPUT" >&2
+echo "Binary     : $BINARY" >&2
+echo "phi_list   : $PHI_LIST" >&2
+echo "num_runs   : $NUM_RUNS (warmup = same)" >&2
+echo "Output     : $OUTPUT" >&2
+echo "Extra flags: ${EXTRA_FLAGS:-(none)}" >&2
 echo "" >&2
 
 # Write CSV header once
@@ -55,10 +68,12 @@ for N in 1024 2048 4096 8192 16384; do
     else                         RUNS=$(( NUM_RUNS / 16 < 2 ? 2 : NUM_RUNS / 16 ))
     fi
     echo "[$(date +%H:%M:%S)] Running N=$N (runs=$RUNS) ..." >&2
+    # shellcheck disable=SC2086
     "$BINARY" \
         -n         "$N"        \
         --num-runs "$RUNS"     \
         --phi-list "$PHI_LIST" \
+        $EXTRA_FLAGS           \
       | grep -v "^phi,"   \
       >> "$OUTPUT"
     echo "[$(date +%H:%M:%S)] N=$N done." >&2
