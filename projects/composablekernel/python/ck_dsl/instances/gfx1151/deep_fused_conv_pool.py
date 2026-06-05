@@ -69,12 +69,12 @@ class Gfx1151DeepFusedConvPoolSpec:
 
     problem: FusedConvPoolProblem
     name: str = "ck_dsl_gfx1151_deep_fused_conv_pool"
-    tile_m: int = 256
+    tile_m: int = 512
     tile_n: int = 32
-    pool_tile_h: int = 8
-    pool_tile_w: int = 8
-    warp_m: int = 4
-    warp_n: int = 2
+    pool_tile_h: int = 2
+    pool_tile_w: int = 64
+    warp_m: int = 16
+    warp_n: int = 1
     # Optimization toggles (correctness-neutral; for in-process A/B benching).
     vectorize_conv0_a: bool = True
     vectorize_maxpool: bool = True
@@ -265,11 +265,11 @@ def make_deep_fused_conv_pool_spec(
     k1: int,
     r: int = 3,
     s: int = 3,
-    pool_tile_h: int = 8,
-    pool_tile_w: int = 8,
+    pool_tile_h: int = 2,
+    pool_tile_w: int = 64,
     tile_n: int = 32,
-    warp_m: int = 4,
-    warp_n: int = 2,
+    warp_m: int = 16,
+    warp_n: int = 1,
     vectorize_conv0_a: bool = True,
     vectorize_maxpool: bool = True,
     early_w1: bool = True,

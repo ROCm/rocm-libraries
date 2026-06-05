@@ -390,15 +390,17 @@ def main() -> int:
     parser.add_argument("--tol", type=int, default=0)
     parser.add_argument("--n", type=int, default=1)
     parser.add_argument("--h", type=int, default=16)
-    parser.add_argument("--w", type=int, default=16)
+    parser.add_argument("--w", type=int, default=128)
     parser.add_argument("--c", type=int, default=8)
     parser.add_argument("--k0", type=int, default=32)
     parser.add_argument("--k1", type=int, default=24)
     # Best measured tile for the native-int direct path on gfx1151: a
-    # wide-short 2x32 pool tile (tile_m=256) is memory/latency-bound-optimal,
-    # ~16.1 ms full-shape vs ~18.5 ms for 8x8 (both bit-exact).
+    # wide-short 2x64 pool tile (tile_m=512) with 16x1 warps amortizes
+    # staging/barriers best, ~14.8 ms full-shape bit-exact.
     parser.add_argument("--pool-tile-h", type=int, default=2)
-    parser.add_argument("--pool-tile-w", type=int, default=32)
+    parser.add_argument("--pool-tile-w", type=int, default=64)
+    parser.add_argument("--warp-m", type=int, default=16)
+    parser.add_argument("--warp-n", type=int, default=1)
     parser.add_argument(
         "--direct",
         action="store_true",
@@ -493,6 +495,8 @@ def main() -> int:
         k1=args.k1,
         pool_tile_h=args.pool_tile_h,
         pool_tile_w=args.pool_tile_w,
+        warp_m=args.warp_m,
+        warp_n=args.warp_n,
         direct_conv0=direct,
         waves_per_eu=args.waves_per_eu,
         sched_policy=args.sched,
