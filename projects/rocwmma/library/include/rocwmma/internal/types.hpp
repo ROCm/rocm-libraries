@@ -44,6 +44,10 @@ namespace rocwmma
  * @{
  */
 
+    // INT4 type — 4-bit signed integer for SWMMAC.
+    // Full arithmetic definition in rocwmma_int4.hpp.
+    struct int4_t;  // Forward declaration — full definition in rocwmma_int4.hpp
+
     // Native types
     using float16_t = _Float16;
     using float32_t = float;

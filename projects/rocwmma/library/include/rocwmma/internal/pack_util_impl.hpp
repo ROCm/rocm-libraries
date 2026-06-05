@@ -45,6 +45,21 @@ namespace rocwmma
         using PackedT   = int32_t;
     };
 
+    // INT4: 4 values per i32 (each value occupies 1 byte, lower nibble used).
+    // Logical density is 8 values/i32 but sizeof(int4_t)=1 forces PackRatio=4.
+    // The SWMMAC hardware backend handles nibble-packing (8→1 i32) internally.
+    template <>
+    struct PackTraits<int4_t>
+    {
+        enum : uint32_t
+        {
+            PackRatio = 4  // 4 INT4 values per 32-bit register (byte-aligned)
+        };
+
+        using UnpackedT = int4_t;
+        using PackedT   = int32_t;
+    };
+
     template <>
     struct PackTraits<uint8_t>
     {
