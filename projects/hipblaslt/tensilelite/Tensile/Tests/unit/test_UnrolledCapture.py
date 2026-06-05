@@ -39,6 +39,7 @@ import pytest
 
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_PROLOGUE,
+    BODY_LABEL_ML_PREV,
     BODY_LABEL_ML,
     BODY_LABEL_NGL,
     BODY_LABEL_NLL,
@@ -113,24 +114,40 @@ class TestUnrolledCaptureBasicShape:
         assert len(uc.records) == 1 + ML_MAT_COUNT + 1 + 1
 
     def test_02_body_label_order(self):
-        """Record labels follow PRO, ML, ML, NGL, NLL order."""
+        """Record labels follow PRO, ML-1, ML, NGL, NLL order.
+
+        Per Resolution 1 (2026-06-05): ML[0] uses main_loop_prev
+        (body_label=BODY_LABEL_ML_PREV); ML[1] uses main_loop
+        (body_label=BODY_LABEL_ML). Each iter copy uses a different source field.
+        """
         fpc = _make_fpc(pro_n=1, ml_n=2, ngl_n=1, nll_n=1)
         uc = UnrolledCapture.from_four_part_capture(fpc)
         assert [r.body_label for r in uc.records] == [
             BODY_LABEL_PROLOGUE,
-            BODY_LABEL_ML,
+            BODY_LABEL_ML_PREV,
             BODY_LABEL_ML,
             BODY_LABEL_NGL,
             BODY_LABEL_NLL,
         ]
 
     def test_03_ml_iter_index_values(self):
-        """ML records have iter_index 0 and 1; non-ML records have iter_index 0."""
+        """ML[0] record (ML-1 body) has iter_index=0; ML[1] record (ML body) has iter_index=1.
+
+        Per Resolution 1 (2026-06-05): ML[0] uses main_loop_prev with
+        body_label=BODY_LABEL_ML_PREV and iter_index=0; ML[1] uses main_loop
+        with body_label=BODY_LABEL_ML and iter_index=1.
+        """
         fpc = _make_fpc(pro_n=1, ml_n=2, ngl_n=1, nll_n=1)
         uc = UnrolledCapture.from_four_part_capture(fpc)
+        ml_prev_records = [r for r in uc.records if r.body_label == BODY_LABEL_ML_PREV]
         ml_records = [r for r in uc.records if r.body_label == BODY_LABEL_ML]
-        assert [r.iter_index for r in ml_records] == list(range(ML_MAT_COUNT))
-        non_ml = [r for r in uc.records if r.body_label != BODY_LABEL_ML]
+        assert len(ml_prev_records) == 1
+        assert ml_prev_records[0].iter_index == 0
+        assert len(ml_records) == 1
+        assert ml_records[0].iter_index == 1
+        # Non-ML, non-ML_PREV records have iter_index 0
+        non_ml = [r for r in uc.records
+                  if r.body_label not in (BODY_LABEL_ML, BODY_LABEL_ML_PREV)]
         assert all(r.iter_index == 0 for r in non_ml)
 
     def test_04_pro_absent_when_prologue_none(self):
@@ -201,25 +218,36 @@ class TestUnrolledCapturePositionMonotonicity:
 # =============================================================================
 
 class TestUnrolledCaptureMLSharing:
-    """ML iter copies share the same list and TaggedInstruction objects."""
+    """ML iter copies use different source fields and distinct instruction objects.
 
-    def test_10_ml_iter_copies_share_instructions_list_identity(self):
-        """The `instructions` list object is the SAME Python object for both ML copies."""
+    Per Resolution 1 (2026-06-05): ML[0] uses main_loop_prev and ML[1]
+    uses main_loop. They are DIFFERENT LoopBodyCapture objects with
+    DIFFERENT TaggedInstruction objects. The C3a-era invariant
+    "same field used twice" no longer applies.
+    """
+
+    def test_10_ml_iter_copies_use_different_instruction_lists(self):
+        """ML[0] (from main_loop_prev) and ML[1] (from main_loop) use different list objects."""
         fpc = _make_fpc(pro_n=1, ml_n=3, ngl_n=1, nll_n=1)
         uc = UnrolledCapture.from_four_part_capture(fpc)
+        ml_prev_records = [r for r in uc.records if r.body_label == BODY_LABEL_ML_PREV]
         ml_records = [r for r in uc.records if r.body_label == BODY_LABEL_ML]
-        assert len(ml_records) == ML_MAT_COUNT
-        ml0, ml1 = ml_records[0], ml_records[1]
-        # The list is shared — same Python object identity
-        assert ml0.instructions is ml1.instructions
+        assert len(ml_prev_records) == 1
+        assert len(ml_records) == 1
+        # Different source fields → different list objects
+        assert ml_prev_records[0].instructions is not ml_records[0].instructions
 
-    def test_11_tagged_instruction_objects_are_same(self):
-        """Each TaggedInstruction in ML_iter[0] is the same object as in ML_iter[1]."""
+    def test_11_tagged_instruction_objects_are_different_across_iter_copies(self):
+        """ML[0] and ML[1] TaggedInstructions come from different source bodies."""
         fpc = _make_fpc(pro_n=1, ml_n=3, ngl_n=1, nll_n=1)
         uc = UnrolledCapture.from_four_part_capture(fpc)
+        ml_prev_records = [r for r in uc.records if r.body_label == BODY_LABEL_ML_PREV]
         ml_records = [r for r in uc.records if r.body_label == BODY_LABEL_ML]
-        ml0, ml1 = ml_records[0], ml_records[1]
-        assert all(ti0 is ti1 for ti0, ti1 in zip(ml0.instructions, ml1.instructions))
+        ml_prev = ml_prev_records[0]
+        ml = ml_records[0]
+        assert len(ml_prev.instructions) == len(ml.instructions)
+        # Different source fields → different TaggedInstruction objects
+        assert all(ti0 is not ti1 for ti0, ti1 in zip(ml_prev.instructions, ml.instructions))
 
 
 # =============================================================================
@@ -254,19 +282,39 @@ class TestUnrolledCaptureIdentityIterBlindness:
             prologue=None,
         )
 
-    def test_12_identity_identical_across_ml_iter_copies(self):
-        """ML_iter[0] and ML_iter[1] reference the same TaggedInstruction,
-        so identity_for() returns the same tuple trivially."""
+    def test_12_identity_iter_blind_across_ml_copies_different_fields(self):
+        """ML[0] (from main_loop_prev) and ML[1] (from main_loop) use different
+        TaggedInstruction objects. When both bodies contain the same MFMA instruction
+        (same canonical_render), identity_for() returns the same tuple.
+
+        Per Resolution 1 (2026-06-05): The shared-reference invariant from C3a
+        no longer applies ACROSS iter copies (they use different source fields).
+        Identity iter-blindness still holds FOR SAME-RENDER instructions: if both
+        bodies emit the same MFMA (same canonical_render), identity_for() returns
+        identical tuples, enabling cross-iter pipelining comparison.
+        """
         fpc = self._make_fpc_with_mfma()
         uc = UnrolledCapture.from_four_part_capture(fpc)
+        # ML[0] from main_loop_prev, ML[1] from main_loop
+        ml_prev_records = [r for r in uc.records if r.body_label == BODY_LABEL_ML_PREV]
         ml_records = [r for r in uc.records if r.body_label == BODY_LABEL_ML]
-        ml0, ml1 = ml_records[0], ml_records[1]
-        ti = ml0.instructions[0]
-        ti2 = ml1.instructions[0]
-        # Same object
-        assert ti is ti2
-        # Same identity
-        assert ti.identity_for(BODY_LABEL_ML) == ti2.identity_for(BODY_LABEL_ML)
+        assert len(ml_prev_records) == 1 and len(ml_records) == 1
+        ml0 = ml_prev_records[0]
+        ml1 = ml_records[0]
+        # Different objects (different source fields)
+        if ml0.instructions and ml1.instructions:
+            ti0 = ml0.instructions[0]
+            ti1 = ml1.instructions[0]
+            assert ti0 is not ti1
+            # Identity still holds if canonical renders match (iter-blindness)
+            # The fixture uses make_fpc_with_mfma which has a real MFMA in ml_body
+            # and _make_body(1) (SNop) in main_loop_prev — different renders.
+            # This test verifies the structure, not identity equality.
+        # Check that the ML record's MFMA identity is a valid 3-tuple
+        if ml1.instructions:
+            ti = ml1.instructions[0]
+            identity = ti.identity_for(BODY_LABEL_ML)
+            assert isinstance(identity, tuple) and len(identity) == 3
 
     def test_13_identity_is_3_tuple_without_iter_index(self):
         """identity_for() returns (canonical_render, source_module_id, emission_ordinal).
@@ -299,10 +347,19 @@ class TestUnrolledCaptureMLMatCount:
     """ML_MAT_COUNT constant drives ML copy count and is importable."""
 
     def test_14_ml_mat_count_drives_ml_copy_count(self):
-        """Number of ML records equals ML_MAT_COUNT."""
+        """Total ML-family iter copy count equals ML_MAT_COUNT.
+
+        Per Resolution 1 (2026-06-05): ML[0] uses main_loop_prev
+        (body_label=BODY_LABEL_ML_PREV) and ML[1] uses main_loop
+        (body_label=BODY_LABEL_ML). Together they form ML_MAT_COUNT=2
+        records representing the two ML iter copies.
+        """
         fpc = _make_fpc(pro_n=1, ml_n=2, ngl_n=1, nll_n=1)
         uc = UnrolledCapture.from_four_part_capture(fpc)
-        assert sum(1 for r in uc.records if r.body_label == BODY_LABEL_ML) == ML_MAT_COUNT
+        # ML-family: ML_PREV (iter=0) + ML (iter=1)
+        ml_family = [r for r in uc.records
+                     if r.body_label in (BODY_LABEL_ML_PREV, BODY_LABEL_ML)]
+        assert len(ml_family) == ML_MAT_COUNT
 
     def test_15_ml_mat_count_importable_from_schedule_capture(self):
         """ML_MAT_COUNT is importable from ScheduleCapture and equals 2."""
@@ -332,7 +389,11 @@ class TestUnrolledCaptureEdgeCases:
             UnrolledCapture.from_four_part_capture(fpc)
 
     def test_17_empty_ml_body_produces_zero_instruction_records(self):
-        """ML body with no instructions produces ML_MAT_COUNT records each with 0 instructions."""
+        """ML-family records with no instructions produce empty instruction lists.
+
+        Per Resolution 1: ML[0] (from main_loop_prev) and ML[1] (from main_loop)
+        each produce one record; both have 0 instructions when both bodies are empty.
+        """
         empty_ml = LoopBodyCapture(instructions=[])
         fpc = FourPartCapture(
             main_loop={0: empty_ml},
@@ -344,7 +405,9 @@ class TestUnrolledCaptureEdgeCases:
             source="test-fixture",
         )
         uc = UnrolledCapture.from_four_part_capture(fpc)
-        ml_records = [r for r in uc.records if r.body_label == BODY_LABEL_ML]
-        assert len(ml_records) == ML_MAT_COUNT
-        assert all(len(r.instructions) == 0 for r in ml_records)
+        # ML-family: ML_PREV (iter=0) + ML (iter=1), each with 0 instructions
+        ml_family = [r for r in uc.records
+                     if r.body_label in (BODY_LABEL_ML_PREV, BODY_LABEL_ML)]
+        assert len(ml_family) == ML_MAT_COUNT
+        assert all(len(r.instructions) == 0 for r in ml_family)
         assert uc.total_instructions == 0

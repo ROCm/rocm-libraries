@@ -62,6 +62,7 @@ from Tensile.Components.ScheduleCapture import (
     make_position,
     assign_stream_indices_for_body,
     _byte_keys_for_resource, _resolve_producers,
+    UnrolledCapture,
 )
 # rocm-libraries-009 (re-scoped): the 13 `_*_CLASS_NAMES` sets and 10
 # `_is_*` discriminator predicates that used to live in ScheduleCapture
@@ -922,6 +923,8 @@ class GraphNode:
     body_label: str                     # 'ML-1' | 'ML' | 'NGL' | 'NLL'
     name: str = ""                      # human-readable label (e.g. 'LRA0[2]')
     issue_cycles: int = 1               # per-instruction quad-cycle cost
+    unrolled_position: int = -1         # global position in the unrolled stream (0-based); -1 = not yet assigned
+    iter_index: int = 0                 # ML iter copy index (0 for PRO/ML-1/NGL/NLL; 1 for ML)
 
     @property
     def canonical_position(self) -> SchedulePosition:
@@ -1109,6 +1112,14 @@ class DataflowEdge:
     sink_operand_slot: int = 0          # positional operand-slot of the consumer's read
     producer_write_byte_key: tuple = ()    # rocisa-derived bytes the producer wrote (hdem Approach E)
     consumer_read_byte_key: tuple = ()     # rocisa-derived bytes the consumer read (hdem Approach E)
+    # C3c diagnostic annotation fields — NOT in edge_keys(); for failure formatters
+    # and Phase 1 order-check arithmetic (C3f). Set at edge-formation time.
+    producer_iter_index: int = 0
+    consumer_iter_index: int = 0
+    producer_body_label: str = ""
+    consumer_body_label: str = ""
+    producer_unrolled_position: int = -1
+    consumer_unrolled_position: int = -1
 
 
 @dataclass
@@ -1971,49 +1982,64 @@ def build_dataflow_graph(four_part_capture):
     nodes_per_body = {label: [] for label in _BODY_BUILD_ORDER}
 
     # ---------------------------------------------------------------------
-    # Phase 1 — node construction + sidecar.
+    # Phase 1 — node construction + sidecar via unrolled timeline.
+    # C3c: replace per-body _BODY_BUILD_ORDER iteration with a single walk
+    # over the unrolled stream. Each UnrolledIterRecord produces one set of
+    # GraphNodes. ML[0] uses main_loop_prev (body_label=BODY_LABEL_ML_PREV)
+    # and ML[1] uses main_loop (body_label=BODY_LABEL_ML); they use different
+    # source fields and different body_labels per Resolution 1 (2026-06-05).
     # ---------------------------------------------------------------------
-    for label in _BODY_BUILD_ORDER:
-        if label not in captures:
+    unrolled = UnrolledCapture.from_four_part_capture(four_part_capture)
+
+    # Cache per-body stream_index and dataflow_ti_ids to avoid recomputing
+    # across iter copies when the same body appears more than once. Keyed by
+    # body_label so each unique body is computed exactly once.
+    _body_stream_idx: dict = {}
+    _body_dataflow_ti_ids: dict = {}
+
+    for record in unrolled.records:
+        body_label = record.body_label
+        body = captures.get(body_label)
+        if body is None:
             continue
-        body = captures[label]
 
-        # Per-body stream_index assignment (the CMS bridge: collapses
-        # `(slot.mfma_index, slot.sequence)` lex order into a single
-        # monotonic int per body). See SchedulePosition / make_position
-        # docstrings.
-        stream_idx_by_id = assign_stream_indices_for_body(body.instructions)
+        # Per-body stream_index and dataflow set are computed once per unique
+        # body_label. For ML[0] (BODY_LABEL_ML_PREV) and ML[1] (BODY_LABEL_ML)
+        # they use different source fields, so each has its own entry.
+        if body_label not in _body_stream_idx:
+            _body_stream_idx[body_label] = assign_stream_indices_for_body(body.instructions)
+            _body_dataflow_ti_ids[body_label] = {id(ti) for ti in data_flow_instructions(body)}
+        stream_idx_by_id = _body_stream_idx[body_label]
+        dataflow_ti_ids = _body_dataflow_ti_ids[body_label]
 
-        # Pre-compute the dataflow-participating subset via the shared
-        # `data_flow_instructions` helper (the single source of truth for
-        # the scheduler-control exclusion shared with the d3zj tests in
-        # `test_dataflow_graph_emission_ordinal.py`). Membership is keyed
-        # by `id()` so the inner loop can dispatch in O(1) without
-        # re-deriving the predicate inline.
-        dataflow_ti_ids = {id(ti) for ti in data_flow_instructions(body)}
-
-        for tagged_inst in body.instructions:
+        for local_idx, tagged_inst in enumerate(record.instructions):
+            unrolled_pos = record.unrolled_start + local_idx
             inst = tagged_inst.wrapped.rocisa_inst
             try:
                 node = _make_node(
                     tagged_inst,
-                    label,
-                    stream_idx_by_id[id(tagged_inst)],
+                    body_label,
+                    stream_idx_by_id.get(id(tagged_inst), 0),
                     arch_profile,
                 )
             except CaptureUnknownInstructionError as e:
                 raise CaptureUnknownInstructionError(
                     f"build_dataflow_graph: cannot classify instruction "
                     f"{type(inst).__name__!r} (category={tagged_inst.category!r}) "
-                    f"in body {label!r}. The capture pipeline must assign a "
+                    f"in body {body_label!r}. The capture pipeline must assign a "
                     f"recognized category, or the instruction's class must be "
                     f"one of LR/LW/GR/MFMA/SWait/SBarrier. Inner: {e}"
                 ) from e
 
-            # Per-body sidecar: every node lives here, including SWait/
-            # SBarrier/SNop, so waits_in_window/barriers_in_window can
-            # find them.
-            nodes_per_body[label].append(node)
+            # Stamp the unrolled_position and iter_index on every node.
+            node.unrolled_position = unrolled_pos
+            node.iter_index = record.iter_index
+
+            # Per-body sidecar: populate unconditionally. Under Resolution 1,
+            # each ML iter copy has its own unique body_label (BODY_LABEL_ML_PREV
+            # for iter_index=0, BODY_LABEL_ML for iter_index=1), so appending
+            # every node keyed by body_label cannot produce duplicate entries.
+            nodes_per_body[body_label].append(node)
 
             # Cross-graph identity set: only "real" instructions
             # participate (excludes scheduler-choice SWait/SBarrier/SNop/
@@ -2030,8 +2056,13 @@ def build_dataflow_graph(four_part_capture):
             if id(tagged_inst) in dataflow_ti_ids:
                 nodes_list.append(node)
 
-        # Stash per-body GraphNodes on the LoopBodyCapture for the helpers.
-        body._graph_nodes = nodes_per_body[label]
+    # Stash per-body GraphNodes on each LoopBodyCapture for the helpers.
+    # Done after all records are processed (not per-record) so the sidecar
+    # reflects the full node set before any helper walks it.
+    for label in _BODY_BUILD_ORDER:
+        body_cap = captures.get(label)
+        if body_cap is not None:
+            body_cap._graph_nodes = nodes_per_body[label]
 
     # ---------------------------------------------------------------------
     # Phase 2 — edge formation by resource-name resolution.
@@ -2074,7 +2105,11 @@ def build_dataflow_graph(four_part_capture):
         # operand-slot of the producer published this byte
         # (rocm-libraries-wx9.3 phase 3, memo §6.1 step 1).
         latest_writer = {}  # byte_key -> (writer_node, write_resource, write_slot)
-        sorted_nodes = sorted(nodes_list, key=lambda n: n.position)
+        # C3c: sort by unrolled_position (int) instead of SchedulePosition.
+        # Two ML iter copies share identical SchedulePosition (same loop_index
+        # and stream_index) — sorting by unrolled_position is unambiguous and
+        # preserves the PRO→ML[0]→ML[1]→NGL→NLL execution order.
+        sorted_nodes = sorted(nodes_list, key=lambda n: n.unrolled_position)
 
         # Track the body_label of the previously processed node so we can
         # detect body-boundary transitions (ML-1 -> ML, ML -> NGL, NGL ->
@@ -2164,6 +2199,13 @@ def build_dataflow_graph(four_part_capture):
                         sink_operand_slot=sink_slot,
                         producer_write_byte_key=producer_byte_key,
                         consumer_read_byte_key=consumer_byte_key,
+                        # C3c diagnostic annotation fields (not in edge_keys()).
+                        producer_iter_index=producer.iter_index,
+                        consumer_iter_index=node.iter_index,
+                        producer_body_label=producer.body_label,
+                        consumer_body_label=node.body_label,
+                        producer_unrolled_position=producer.unrolled_position,
+                        consumer_unrolled_position=node.unrolled_position,
                     ))
 
             # Phase 2b — writes second: update latest_writer for every
@@ -2180,7 +2222,10 @@ def build_dataflow_graph(four_part_capture):
                           else write_idx)
                 for bk in _byte_keys_for_resource(write_resource, name_to_idx=n2i):
                     latest_writer[bk] = (node, write_resource, w_slot)
-                    byte_key_writers.setdefault(bk, []).append((node, node.position))
+                    # C3c: store unrolled_position (int) instead of SchedulePosition.
+                    # The DataflowGraph.byte_key_writers docstring already anticipates
+                    # this: "C3c will populate with (GraphNode, unrolled_position: int) pairs."
+                    byte_key_writers.setdefault(bk, []).append((node, node.unrolled_position))
 
     # =========================================================================
     # SBarrier-edge collectors (cross-wave LDS-reuse)

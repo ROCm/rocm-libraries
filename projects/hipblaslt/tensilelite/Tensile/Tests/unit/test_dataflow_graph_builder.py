@@ -873,3 +873,101 @@ class TestRegIntersection:
         assert r1 == r2
         assert hash(r1) == hash(r2)
         assert {r1, r2} == {r1}
+
+
+# =============================================================================
+# C3c unrolled-walk annotation tests
+# =============================================================================
+# These tests verify that the C3c unrolled-walk assigns correct diagnostic
+# annotation fields (unrolled_position, iter_index, body_label) on graph nodes
+# and DataflowEdge. They pin the observable shape produced by the new walk.
+
+
+class TestC3cUnrolledWalkAnnotations:
+    """Verify GraphNode.unrolled_position, iter_index, body_label assignment
+    and DataflowEdge diagnostic annotation fields from the C3c unrolled walk."""
+
+    def test_node_unrolled_position_monotonically_increasing(self):
+        """unrolled_position on nodes in sorted order is monotonically non-decreasing.
+
+        Per C3c design: sorted_nodes is sorted by unrolled_position (not
+        SchedulePosition). Two nodes in the same body may share the same
+        unrolled_position only if they share the same TaggedInstruction slot
+        (which cannot happen with well-formed captures).
+        """
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32, slot=2),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        positions = [n.unrolled_position for n in g.nodes]
+        assert positions == sorted(positions), (
+            f"unrolled_position must be non-decreasing in graph.nodes order; "
+            f"got {positions}"
+        )
+
+    def test_node_body_labels_and_iter_indices(self):
+        """Graph nodes carry correct body_label and iter_index from the unrolled walk.
+
+        Per Resolution 1 (2026-06-05): ML[0] from main_loop_prev has
+        body_label=BODY_LABEL_ML_PREV and iter_index=0. ML[1] from main_loop
+        has body_label=BODY_LABEL_ML and iter_index=1. Non-ML bodies have
+        iter_index=0.
+        """
+        cap = make_capture(BODY_LABEL_ML, [
+            make_lr(8, 4, 64, slot=0, category="LRA0"),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32, slot=1),
+        ])
+        g = build_dataflow_graph(_wrap(cap))
+        # ML-1 body (from main_loop_prev) nodes have body_label=BODY_LABEL_ML_PREV,
+        # iter_index=0
+        ml_prev_nodes = [n for n in g.nodes if n.body_label == BODY_LABEL_ML_PREV]
+        assert all(n.iter_index == 0 for n in ml_prev_nodes), (
+            f"ML-1 nodes must have iter_index=0; got "
+            f"{[n.iter_index for n in ml_prev_nodes]}"
+        )
+        # ML body (from main_loop) nodes have body_label=BODY_LABEL_ML,
+        # iter_index=1
+        ml_nodes = [n for n in g.nodes if n.body_label == BODY_LABEL_ML]
+        assert all(n.iter_index == 1 for n in ml_nodes), (
+            f"ML nodes must have iter_index=1; got "
+            f"{[n.iter_index for n in ml_nodes]}"
+        )
+
+    def test_cross_iter_edge_carries_diagnostic_annotations(self):
+        """A cross-iter edge (ML[0] producer → ML[1] consumer) carries correct
+        diagnostic annotation fields on the DataflowEdge.
+
+        This test pins the DataflowEdge.producer_iter_index,
+        consumer_iter_index, producer_body_label, consumer_body_label,
+        producer_unrolled_position, consumer_unrolled_position fields from §3.
+        """
+        prev_cap = make_capture(BODY_LABEL_ML_PREV, [
+            make_lr(8, 4, 64, slot=99, category="LRA0"),
+        ])
+        ml_cap = make_capture(BODY_LABEL_ML, [
+            make_swait(slot=0, dscnt=0),
+            make_mfma(c_dst_start=0, a_src_start=8, b_src_start=32,
+                      slot=1, a_src_count=4),
+        ])
+        g = build_dataflow_graph(_wrap(ml_cap, ml_prev=prev_cap))
+        cross_iter = [e for e in g.edges
+                      if e.edge_kind == "raw_intrawave"
+                      and e.producer.body_label == BODY_LABEL_ML_PREV
+                      and e.consumer.body_label == BODY_LABEL_ML]
+        assert len(cross_iter) == 1, (
+            f"Expected 1 cross-iter ML-1→ML edge; got {len(cross_iter)}"
+        )
+        e = cross_iter[0]
+        # Diagnostic annotation fields must match the node attributes
+        assert e.producer_iter_index == 0, (
+            f"ML[0] producer must have iter_index=0; got {e.producer_iter_index}"
+        )
+        assert e.consumer_iter_index == 1, (
+            f"ML[1] consumer must have iter_index=1; got {e.consumer_iter_index}"
+        )
+        assert e.producer_body_label == BODY_LABEL_ML_PREV
+        assert e.consumer_body_label == BODY_LABEL_ML
+        assert e.producer_unrolled_position >= 0
+        assert e.consumer_unrolled_position > e.producer_unrolled_position

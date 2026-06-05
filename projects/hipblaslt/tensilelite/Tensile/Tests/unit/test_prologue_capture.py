@@ -444,15 +444,32 @@ def test_build_dataflow_graph_handles_none_prologue():
     """A FourPartCapture with `prologue=None` (PGR=0 case) must build a
     graph cleanly — the prologue body is just absent from the graph's
     captures dict.
+
+    C3c: `build_dataflow_graph` now delegates to
+    `UnrolledCapture.from_four_part_capture`, which requires
+    `main_loop` to have a codepath-0 entry (ML body is mandatory for
+    the unrolled timeline). The fixture supplies a single-SNop ML body
+    so the mandatory-ML check passes; the test's intent (PRO=None is
+    handled cleanly) is unaffected.
     """
+    from rocisa.instruction import SNop
     from Tensile.Components.ScheduleCapture import (
-        FourPartCapture, LoopBodyCapture, BODY_LABEL_PROLOGUE,
+        FourPartCapture, LoopBodyCaptureBuilder, BODY_LABEL_PROLOGUE,
     )
+
+    def _one_snop_body():
+        b = LoopBodyCaptureBuilder()
+        b.append(inst=SNop(waitState=0), category="SNOP", subiter=0, mfma_index=0)
+        return b.finalize()
+
     # Synthetic minimal FourPartCapture; we only care that the
     # body-walk handles `prologue=None` without raising. Use the empty
     # n_gl/n_ll dicts to bypass the empty-body guard for tail bodies.
+    # ML body must be present (codepath 0) after C3c's mandatory-ML check.
     cap = FourPartCapture(
-        main_loop={}, main_loop_prev={}, n_gl={}, n_ll={},
+        main_loop={0: _one_snop_body()},
+        main_loop_prev={0: _one_snop_body()},
+        n_gl={}, n_ll={},
         num_mfma=0, num_codepaths=1, source="default-sia3",
         prologue=None,
     )

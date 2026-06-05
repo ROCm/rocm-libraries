@@ -874,12 +874,18 @@ class UnrolledCapture:
     """The unrolled instruction timeline for one FourPartCapture.
 
     Materializes the unrolled sequence:
-        PRO -> ML_iter[0] -> ML_iter[1] -> ... -> ML_iter[ML_MAT_COUNT-1] -> NGL -> NLL
+        PRO -> ML[0]=ML-1 -> ML[1]=ML -> NGL -> NLL
+
+    Per user resolution (2026-06-05): ML[0] uses main_loop_prev's instruction
+    stream (body_label=BODY_LABEL_ML_PREV, iter_index=0); ML[1] uses
+    main_loop's instruction stream (body_label=BODY_LABEL_ML, iter_index=1).
+    Each iter copy uses a DIFFERENT FourPartCapture field — NOT the same
+    field twice. The shared-reference invariant from C3a applies WITHIN an
+    iter copy (when a field is absent, the iter copy is omitted). ML_MAT_COUNT
+    remains 2.
 
     PRO, NGL, and NLL each appear at most once (absent when the corresponding
-    FourPartCapture body is None / empty dict). ML appears exactly ML_MAT_COUNT
-    times (currently 2). Each ML iter record shares the underlying
-    TaggedInstruction objects with the captured ML body.
+    FourPartCapture body is None / empty dict).
 
     `records` is the ordered sequence of UnrolledIterRecord in unrolled timeline
     order. The total instruction count across all records equals the total
@@ -897,15 +903,22 @@ class UnrolledCapture:
 
         Sequence (in order):
           1. PRO — fpc.prologue (skipped if None)
-          2. ML_iter[0..ML_MAT_COUNT-1] — fpc.main_loop[0].instructions, shared
-             reference, ML_MAT_COUNT copies, distinct unrolled_start per copy
-          3. NGL — fpc.n_gl[0] (skipped if empty)
-          4. NLL — fpc.n_ll[0] (skipped if empty)
+          2. ML[0] — fpc.main_loop_prev[0] instructions, body_label=BODY_LABEL_ML_PREV,
+             iter_index=0 (skipped if main_loop_prev has no codepath 0 entry)
+          3. ML[1] — fpc.main_loop[0] instructions, body_label=BODY_LABEL_ML,
+             iter_index=1 (skipped if main_loop has no codepath 0 entry)
+          4. NGL — fpc.n_gl[0] (skipped if empty)
+          5. NLL — fpc.n_ll[0] (skipped if empty)
 
         Each body's instructions are ordered by slot lex sort
         (slot.mfma_index, slot.sequence) before materializing so the
         unrolled_position sequence is consistent with the stream-emission
         order the graph builder expects.
+
+        The two ML iter copies use DIFFERENT source fields (main_loop_prev vs
+        main_loop) and DIFFERENT body_labels. Identity iter-blindness still
+        holds: instructions that appear in both with the same canonical_render
+        produce identical identities.
 
         Raises ValueError if fpc.main_loop has no codepath 0 entry (ML body
         is mandatory for a meaningful unrolled timeline).
@@ -936,16 +949,26 @@ class UnrolledCapture:
             ))
             cursor += len(pro_insts)
 
-        # ML iter copies — same sorted list object shared across all copies
-        ml_insts = _sorted_instructions(fpc.main_loop[0])
-        for k in range(ML_MAT_COUNT):
+        # ML[0] = ML-1's instructions (main_loop_prev, body_label=BODY_LABEL_ML_PREV)
+        if 0 in fpc.main_loop_prev:
+            ml_prev_insts = _sorted_instructions(fpc.main_loop_prev[0])
             records.append(UnrolledIterRecord(
-                body_label=BODY_LABEL_ML,
-                iter_index=k,
-                instructions=ml_insts,
+                body_label=BODY_LABEL_ML_PREV,
+                iter_index=0,
+                instructions=ml_prev_insts,
                 unrolled_start=cursor,
             ))
-            cursor += len(ml_insts)
+            cursor += len(ml_prev_insts)
+
+        # ML[1] = ML's instructions (main_loop, body_label=BODY_LABEL_ML)
+        ml_insts = _sorted_instructions(fpc.main_loop[0])
+        records.append(UnrolledIterRecord(
+            body_label=BODY_LABEL_ML,
+            iter_index=1,
+            instructions=ml_insts,
+            unrolled_start=cursor,
+        ))
+        cursor += len(ml_insts)
 
         # NGL
         if 0 in fpc.n_gl:
