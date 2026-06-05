@@ -47,6 +47,7 @@
 #include <hip/hip_runtime.h>
 
 #include <cstdlib>   // std::getenv
+#include <cstdio>    // std::fopen / std::fprintf / std::fclose / std::ftell
 #include <cstring>   // std::strcmp
 #include <cmath>     // std::log2, std::floor, etc.
 
@@ -1132,6 +1133,19 @@ oz2_finalize_kernel(const double* __restrict__ Zhi,
 }
 
 /* =========================================================================
+ * Optional per-call profiling — activated by setting
+ *   HIPBLASLT_EMULATION_PROFILE=/path/to/output.csv
+ * One CSV row is appended per fp64EmulatedGemm call.  When the env var is
+ * not set the only overhead is a single const-pointer check — effectively
+ * free for GPU-bound workloads.
+ * ========================================================================= */
+static const char* oz2_profile_file()
+{
+    static const char* const fn = std::getenv("HIPBLASLT_EMULATION_PROFILE");
+    return fn;
+}
+
+/* =========================================================================
  * fp64EmulatedGemm  (OS II accurate mode, variable number of moduli)
  * ========================================================================= */
 rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
@@ -1159,6 +1173,31 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
 
     if(oz2_init_constants(num_moduli) != hipSuccess)
         return rocblaslt_status_internal_error;
+
+    /* ------------------------------------------------------------------
+     * Optional profiling — zero overhead when HIPBLASLT_EMULATION_PROFILE
+     * is not set (a single nullptr check, perfectly predicted branch).
+     * ------------------------------------------------------------------ */
+    const char* const _pf   = oz2_profile_file();
+    const bool        _prof = (_pf != nullptr);
+    hipEvent_t _ev0{}, _ev1{}, _ev_tot{};
+    float _t_prelim = 0, _t_prelim_gemm = 0, _t_refine = 0,
+          _t_scale  = 0, _t_int8 = 0, _t_accum = 0, _t_finalize = 0, _t_total = 0;
+    if(_prof) {
+        (void)hipEventCreate(&_ev0);
+        (void)hipEventCreate(&_ev1);
+        (void)hipEventCreate(&_ev_tot);
+    }
+    auto _pstart = [&]() noexcept { if(_prof) (void)hipEventRecord(_ev0, stream); };
+    auto _pstop  = [&](float& t) noexcept {
+        if(_prof) {
+            (void)hipEventRecord(_ev1, stream);
+            (void)hipStreamSynchronize(stream);
+            float ms = 0.f;
+            (void)hipEventElapsedTime(&ms, _ev0, _ev1);
+            t += ms;
+        }
+    };
 
     /* ------------------------------------------------------------------
      * Chunk size: number of consecutive moduli batched into one
@@ -1238,6 +1277,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     /* First C32i slice (used by preliminary GEMM and shift refinement) */
     int32_t*  const C32i       = C32i_batch;
 
+    if(_prof) (void)hipEventRecord(_ev_tot, stream);
     if(hipMemsetAsync(nan_flag, 0, sizeof(uint32_t), stream) != hipSuccess) {
         (void)hipFreeAsync(ws, stream);
         return rocblaslt_status_internal_error;
@@ -1278,14 +1318,14 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     const int32_t one_i  = 1;
     const int32_t zero_i = 0;
 
-    /* Part 1a-b: per-row/col 6-bit preliminary extraction + Inf/NaN detection.
-     * 256 threads per block: 4 wavefronts on MI300 for better occupancy.    */
+    _pstart();
     hipLaunchKernelGGL(oz2_accu_prelim_A_kernel,
                        dim3(static_cast<unsigned>(m)), dim3(256), 0, stream,
                        A, m, k, lda, tA, A8i_high, lda8i, sftA, nan_flag);
     hipLaunchKernelGGL(oz2_accu_prelim_B_kernel,
                        dim3(static_cast<unsigned>(n)), dim3(256), 0, stream,
                        B, k, n, ldb, tB, B8i_high, ldb8i, sftB, nan_flag);
+    _pstop(_t_prelim);
 
     /* Inf/NaN check: use setting if not sentinel, else env var */
     const uint32_t svmask = (settings.sv_mask != ~0u)
@@ -1308,21 +1348,22 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         }
     }
 
-    /* Part 1c: preliminary INT8 GEMM */
+    _pstart();
     hipblasLtMatmul(settings.handle, matmulDesc,
                     &one_i, A8i_high, layoutA, B8i_high, layoutB,
                     &zero_i, C32i, layoutCD, C32i, layoutCD,
                     nullptr, nullptr, 0, stream);
+    _pstop(_t_prelim_gemm);
 
-    /* Parts 1d-e: refine shifts using the accu_log2P for the chosen num_moduli.
-     * 256 threads per block: 4 wavefronts on MI300 for better occupancy.    */
     const float accu_log2P = h_accu_log2P_all[num_moduli - 2];
+    _pstart();
     hipLaunchKernelGGL(oz2_accu_refine_sftA_kernel,
                        dim3(static_cast<unsigned>(m)), dim3(256), 0, stream,
                        C32i, m, n, ldc32i, sftA, accu_log2P);
     hipLaunchKernelGGL(oz2_accu_refine_sftB_kernel,
                        dim3(static_cast<unsigned>(n)), dim3(256), 0, stream,
                        C32i, m, n, ldc32i, sftB, accu_log2P);
+    _pstop(_t_refine);
 
     /* Parts 1f + 2a-d: per-chunk scaling + INT8 GEMMs + CRT accumulation.
      *
@@ -1404,12 +1445,14 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         /* Part 1f: extract INT8 slices for this chunk.
          * Writes to A8i[0..actual-1] and B8i[0..actual-1], reusing the
          * same buffer that held the previous chunk's slices.                */
+        _pstart();
         hipLaunchKernelGGL(oz2_scaleA_kernel, gA_scale, blk_scale, 0, stream,
                            A, m, k, lda, tA, A8i, lda8i, cola8i, sftA,
                            chunk_start, actual, do_pass3);
         hipLaunchKernelGGL(oz2_scaleB_kernel, gB_scale, blk_scale, 0, stream,
                            B, k, n, ldb, tB, B8i, ldb8i, sftB,
                            chunk_start, actual, do_pass3);
+        _pstop(_t_scale);
 
         /* Update batch count only if the last chunk is partial */
         if(static_cast<int32_t>(actual) != batch_cur) {
@@ -1425,6 +1468,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         /* Part 2c: batched INT8 GEMM over 'actual' slices.
          * A8i and B8i always start at slice 0 of their buffers (no offset
          * needed since the scale kernels above wrote to positions 0..actual-1). */
+        _pstart();
         hipblasLtMatmul(settings.handle, matmulDesc,
                         &one_i,
                         A8i, layoutA_b,
@@ -1432,22 +1476,25 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
                         &zero_i,
                         C32i_batch, layoutCD_b, C32i_batch, layoutCD_b,
                         nullptr, nullptr, 0, stream);
+        _pstop(_t_int8);
 
-        /* Accumulate all 'actual' slices into Zhi/Zlo in one kernel call */
         const bool is_first = (chunk_start == 0);
+        _pstart();
         hipLaunchKernelGGL(oz2_chunk_accum_kernel, grid_acc, blk_acc, 0, stream,
                            C32i_batch, Zhi, Zlo, m, n, ldc32i,
                            chunk_start, actual, is_first);
+        _pstop(_t_accum);
     }
 
     hipblasLtMatrixLayoutDestroy(layoutCD_b);
     hipblasLtMatrixLayoutDestroy(layoutB_b);
     hipblasLtMatrixLayoutDestroy(layoutA_b);
 
-    /* Parts 3+4: collapse, range-reduce, per-element inverse scale */
+    _pstart();
     hipLaunchKernelGGL(oz2_finalize_kernel, grid_acc, blk_acc, 0, stream,
                        Zhi, Zlo, C, D, m, n, ldc32i, ldc, ldd,
                        *alpha, *beta, sftA, sftB);
+    _pstop(_t_finalize);
 
     hipblasLtMatmulDescDestroy(matmulDesc);
     hipblasLtMatrixLayoutDestroy(layoutCD);
@@ -1457,6 +1504,32 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     if(ws_owned) {
         if(hipFreeAsync(ws, stream) != hipSuccess)
             return rocblaslt_status_internal_error;
+    }
+
+    if(_prof) {
+        (void)hipEventRecord(_ev1, stream);
+        (void)hipStreamSynchronize(stream);
+        (void)hipEventElapsedTime(&_t_total, _ev_tot, _ev1);
+        std::FILE* _f = std::fopen(_pf, "a");
+        if(_f) {
+            if(std::ftell(_f) == 0)
+                std::fprintf(_f,
+                    "m,n,k,num_moduli,chunk_size,"
+                    "t_prelim_ms,t_prelim_gemm_ms,t_refine_ms,"
+                    "t_scale_ms,t_int8_gemm_ms,t_accum_ms,"
+                    "t_finalize_ms,t_total_ms\n");
+            std::fprintf(_f,
+                "%lld,%lld,%lld,%u,%u,"
+                "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n",
+                (long long)m, (long long)n, (long long)k,
+                num_moduli, chunk_size,
+                _t_prelim, _t_prelim_gemm, _t_refine,
+                _t_scale, _t_int8, _t_accum, _t_finalize, _t_total);
+            std::fclose(_f);
+        }
+        (void)hipEventDestroy(_ev_tot);
+        (void)hipEventDestroy(_ev1);
+        (void)hipEventDestroy(_ev0);
     }
     return rocblaslt_status_success;
 }
