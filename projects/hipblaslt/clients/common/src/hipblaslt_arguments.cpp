@@ -123,13 +123,13 @@ void Arguments::init()
     gradient          = false;
     norm_check_assert = true;
 
-    use_ext                    = false;
-    use_ext_setproblem         = false;
-    algo_method                = 0;
-    use_user_args              = false;
-    rotating                   = 0;
-    use_gpu_timer              = false;
-    skip_slow_solution_ratio   = 0.0;
+    use_ext                  = false;
+    use_ext_setproblem       = false;
+    algo_method              = 0;
+    use_user_args            = false;
+    rotating                 = 0;
+    use_gpu_timer            = false;
+    skip_slow_solution_ratio = 0.0;
 
     // tuning
     gsu_vector[0] = 0;

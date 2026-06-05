@@ -58,7 +58,6 @@
 #include <omp.h>
 #include <optional>
 #include <set>
-#include <string>
 
 extern "C" __global__ void flush_icache()
 {
@@ -4765,7 +4764,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     heuristicResult.push_back(tmpAlgo[i]);
                 }
-                returnedAlgoCount = heuristicResult.size();
                 heuristicTuningIndex.resize(heuristicResult.size(), 0); // C API not supported yet
             }
 
