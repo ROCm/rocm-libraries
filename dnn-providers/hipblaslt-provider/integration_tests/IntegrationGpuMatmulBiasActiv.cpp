@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "IntegrationGpuMatmulBase.hpp"
+#include "TestWorkarounds.hpp"
 #include "utils/ActivationUtils.hpp"
 #include "utils/MatmulUtils.hpp"
 
@@ -84,10 +85,26 @@ protected:
 };
 
 using IntegrationGpuMatmulBiasActivFp32 = IntegrationGpuMatmulBiasActiv<float>;
-using IntegrationGpuMatmulBiasActivFp16
-    = IntegrationGpuMatmulBiasActiv<hipdnn_data_sdk::types::half>;
 using IntegrationGpuMatmulBiasActivBf16
     = IntegrationGpuMatmulBiasActiv<hipdnn_data_sdk::types::bfloat16>;
+
+// Fp16 derives from the template so we can override the skip hook for the
+// known hipBLASLt gfx12 FP16 T-T + bias gap. Fp32 / Bf16 stay as plain
+// typedefs so they still fail loudly on regression.
+class IntegrationGpuMatmulBiasActivFp16
+    : public IntegrationGpuMatmulBiasActiv<hipdnn_data_sdk::types::half>
+{
+protected:
+    std::optional<std::string>
+        shouldSkipOnEngineConfigResult(const hipdnn_frontend::Error& result) override
+    {
+        if(IS_HIPBLASLT_GFX12_FP16_TT_BIAS(result))
+        {
+            return HIPBLASLT_GFX12_FP16_TT_BIAS_SKIP_MSG;
+        }
+        return std::nullopt;
+    }
+};
 
 } // namespace
 
