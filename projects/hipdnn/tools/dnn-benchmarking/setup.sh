@@ -6,7 +6,7 @@ HIPDNN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "$HIPDNN_ROOT/../.." && pwd)"
 
 BUILD_DIR="$HIPDNN_ROOT/build"
-INSTALL_DIR="/opt/rocm"
+DEFAULT_ROCM_PREFIX="/opt/rocm"
 DNN_BENCH_WORKSPACE="${DNN_BENCH_WORKSPACE:-/workspace}"
 mkdir -p "$DNN_BENCH_WORKSPACE"
 export DNN_BENCH_WORKSPACE
@@ -16,7 +16,6 @@ MIOPEN_BUILD_DIR="$MIOPEN_PROVIDER_DIR/build"
 
 FORCE_BUILD=0
 AUTO_YES=0
-SKIP_TORCH_INSTALL=0
 REUSE_VENV=0
 TORCH_MODE="${DNN_BENCH_TORCH_MODE:-rocm}"
 ROCM_PREFIX="${DNN_BENCH_ROCM_PREFIX:-}"
@@ -40,7 +39,6 @@ usage() {
     echo "                               CPU/non-ROCm torch uses installed ROCm/hipDNN."
     echo "                         none: leave torch uninstalled and build bindings"
     echo "                               against installed ROCm/hipDNN."
-    echo "  --skip-torch-install Legacy alias for --torch-mode existing."
     echo "  --reuse-venv         Reuse an existing $VENV_DIR instead of deleting it."
     echo "  --torch-index-url <url>"
     echo "                       Override the pip index URL used for torch."
@@ -48,9 +46,8 @@ usage() {
     echo "                       nightly selection."
     echo "  --rocm-prefix <path> Explicit ROCm/hipDNN prefix for binding/provider"
     echo "                       builds. Takes precedence over venv discovery."
-    echo "  --install-dir <path> Legacy alias for --rocm-prefix. Default: $INSTALL_DIR"
     echo "  --force-build        Build hipDNN and the MIOpen provider from source,"
-    echo "                       overwriting artifacts under --install-dir."
+    echo "                       overwriting artifacts under the selected ROCm prefix."
     echo "  -y                   Skip confirmation prompts."
     echo ""
     echo "  The installed plugin will be at:"
@@ -71,24 +68,16 @@ require_arg() {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force-build) FORCE_BUILD=1 ;;
-        --install-dir)
-            require_arg "$1" "${2:-}"
-            shift
-            INSTALL_DIR="$1"
-            ROCM_PREFIX="$1"
-            ;;
         --rocm-prefix)
             require_arg "$1" "${2:-}"
             shift
             ROCM_PREFIX="$1"
-            INSTALL_DIR="$1"
             ;;
         --torch-mode)
             require_arg "$1" "${2:-}"
             shift
             TORCH_MODE="$1"
             ;;
-        --skip-torch-install) SKIP_TORCH_INSTALL=1 ;;
         --reuse-venv) REUSE_VENV=1 ;;
         --torch-index-url)
             require_arg "$1" "${2:-}"
@@ -107,9 +96,6 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-if [ "$SKIP_TORCH_INSTALL" -eq 1 ]; then
-    TORCH_MODE="existing"
-fi
 
 case "$TORCH_MODE" in
     rocm|cpu|existing|none) ;;
@@ -244,7 +230,7 @@ resolve_installed_rocm_prefix() {
         echo "$ROCM_PATH"
         return
     fi
-    echo "$INSTALL_DIR"
+    echo "$DEFAULT_ROCM_PREFIX"
 }
 
 install_torch() {
@@ -293,7 +279,7 @@ install_torch() {
 
 select_binding_prefix() {
     if [ "$FORCE_BUILD" -eq 1 ]; then
-        echo "$INSTALL_DIR"
+        resolve_installed_rocm_prefix
         return
     fi
 
@@ -343,10 +329,12 @@ maybe_install_amdsmi() {
 }
 
 build_hipdnn() {
-    echo "Building and installing hipDNN to $INSTALL_DIR..."
+    local prefix
+    prefix=$(resolve_installed_rocm_prefix)
+    echo "Building and installing hipDNN to $prefix..."
     cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+        -DCMAKE_INSTALL_PREFIX="$prefix" \
         -DHIPDNN_SKIP_TESTS=ON
     cmake --build "$BUILD_DIR"
     cmake --install "$BUILD_DIR"
@@ -372,8 +360,10 @@ build_miopen_provider() {
     echo "MIOpen plugin installed to: $prefix/lib/hipdnn_plugins/engines/"
 }
 
+FORCE_BUILD_PREFIX=$(resolve_installed_rocm_prefix)
+
 if [ "$FORCE_BUILD" -eq 1 ] && [ "$AUTO_YES" -eq 0 ]; then
-    read -r -p "This will build and install hipDNN to $INSTALL_DIR. Continue? [Y/n] " confirm
+    read -r -p "This will build and install hipDNN to $FORCE_BUILD_PREFIX. Continue? [Y/n] " confirm
     case "$confirm" in
         [nN]) echo "Aborted."; exit 0 ;;
     esac
@@ -432,7 +422,7 @@ echo "Using hipDNN/ROCm prefix: $BINDING_PREFIX"
 
 if [ "$FORCE_BUILD" -eq 1 ]; then
     build_hipdnn
-    BINDING_PREFIX="$INSTALL_DIR"
+    BINDING_PREFIX=$(resolve_installed_rocm_prefix)
 elif ! prefix_has_hipdnn "$BINDING_PREFIX"; then
     echo "ERROR: hipDNN CMake configs were not found under $BINDING_PREFIX." >&2
     echo "Expected:" >&2

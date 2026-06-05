@@ -43,12 +43,13 @@ def test_help_documents_rocm_cpu_and_existing_torch_modes(tmp_path: Path) -> Non
     assert "--torch-mode <rocm|cpu|existing|none>" in result.stdout
     assert "Does not require a system" in result.stdout
     assert "CPU/non-ROCm torch uses installed ROCm/hipDNN" in result.stdout
+    assert "--skip-torch-install" not in result.stdout
+    assert "--install-dir" not in result.stdout
 
 
 @pytest.mark.parametrize(
     "option",
     [
-        "--install-dir",
         "--rocm-prefix",
         "--torch-mode",
         "--torch-index-url",
@@ -80,9 +81,18 @@ def test_existing_torch_mode_requires_existing_venv(tmp_path: Path) -> None:
     assert not (tmp_path / "workspace" / ".venv").exists()
 
 
-def test_skip_torch_install_is_existing_mode_alias(tmp_path: Path) -> None:
-    result = run_setup(tmp_path, "--skip-torch-install")
+@pytest.mark.parametrize(
+    ("legacy_arg", "args"),
+    [
+        ("--skip-torch-install", ("--skip-torch-install",)),
+        ("--install-dir", ("--install-dir", "/tmp/rocm")),
+    ],
+)
+def test_removed_legacy_args_are_unknown(
+    tmp_path: Path, legacy_arg: str, args: tuple[str, ...]
+) -> None:
+    result = run_setup(tmp_path, *args)
 
     assert result.returncode == 1
-    assert "requires an existing virtual environment" in result.stderr
+    assert f"Unknown argument: {legacy_arg}" in result.stdout
     assert not (tmp_path / "workspace" / ".venv").exists()
