@@ -8,11 +8,11 @@ separate effort; its wide-K `16x16x32` / `32x32x16` atoms and transposed/combo l
 gfx942-illegal (rejected in `__post_init__`) — the gfx950 playbook does not transfer, so this
 document states gfx942 facts directly rather than by contrast.
 
-The distilled, arch-specific lessons from this log (ISA constraints,
-no-transpose-read operand feed, occupancy + compile-time budgets) are promoted
-to `optimization/gfx942_playbook.md`; the kept/reverted-lever ledger is in
-`optimization/runbook_compliance.md`. This file is the full per-experiment log and stands on
-its own for the experiment narrative.
+This file is the full, self-contained per-experiment log: the distilled
+arch-specific lessons (ISA constraints, no-transpose-read operand feed,
+occupancy + compile-time budgets) and the kept/reverted-lever ledger both live
+here. The doc-grounded ISA facts are summarized in the architecture reference
+[`optimization/arch/gfx942.md`](../optimization/arch/gfx942.md).
 
 **Final state (TL;DR).** The arc runs baselines → bound (LDS-latency-bound at WG=64) → a ladder
 of levers. **Shipped peak: `wide4` (WG=256 / num_warps=4 wide-tile), default-on for gfx942 D128

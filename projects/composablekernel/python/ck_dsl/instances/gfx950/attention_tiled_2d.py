@@ -596,10 +596,14 @@ def supports_tiled_2d(
     use_fp8: bool,
     q_dtype,
     num_warps: int = 1,
+    block_m_per_warp: int = 16,
     kv_storage_dtype: Optional[str] = None,
     tile_size: Optional[int] = None,
     arch: str = "gfx950",
 ) -> Tuple[bool, str]:
+    # ``block_m_per_warp`` is accepted for signature parity with the shared
+    # dispatch caller (``supports_native_unified_attention_tiled``) and the
+    # gfx942 gate; the gfx950 path does not key admission on it.
     # The tiled 2D kernel's QK/PV math uses gfx950's wide-K MFMA atoms and
     # LDS transpose reads; reject other targets up front with a structured
     # reason rather than letting comgr abort at lower time. See

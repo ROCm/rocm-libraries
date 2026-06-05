@@ -55,9 +55,8 @@ builds:
 double-buffered, LDS = 48 KB, 1 wg/CU); L4 stays at 1 wg/CU with the single
 K slot. See the case study
 [`dsl_docs/architecture/attention_2d_gfx942_experiment_summary.md`](../../../dsl_docs/architecture/attention_2d_gfx942_experiment_summary.md)
-(Batch 5, "wide4 SHIPPED") and the lever playbook
-[`dsl_docs/optimization/gfx942_playbook.md`](../../../dsl_docs/optimization/gfx942_playbook.md)
-for the full evidence trail (rocprof counters, LDS budgeting, why WG=256 wins).
+(Batch 5, "wide4 SHIPPED") for the full evidence trail (rocprof counters, LDS
+budgeting, why WG=256 wins).
 
 In the parity harness the `HIPDNN_GFX942_FLASH_WIDE` env var only **selects
 which explicit spec to build** (unset / `4` → wide4, `0` → L4); it does not

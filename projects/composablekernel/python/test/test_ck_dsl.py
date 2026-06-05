@@ -988,6 +988,43 @@ class TestHelpers(unittest.TestCase):
             self.assertFalse(ok, msg=f"expected reject for {override}, got: {reason}")
             self.assertTrue(reason)
 
+    def test_tiled_2d_dispatch_gate_accepts_block_m_per_warp_per_arch(self):
+        """Regression: the shared dispatch entry
+        ``supports_native_unified_attention_tiled`` forwards
+        ``block_m_per_warp`` to the per-arch ``supports_tiled_2d`` gate. Every
+        routed arch's gate must accept that kwarg. gfx950 previously raised
+        ``TypeError`` here (its gate signature lacked the parameter), which
+        broke the gfx950 SDPA dispatch path for ``backend in {tiled, auto}``.
+        """
+        from unittest import mock
+        from ck_dsl.instances import supports_native_unified_attention_tiled
+        import ck_dsl.instances.common.attention_unified as au
+
+        p = UnifiedAttentionProblem(
+            total_q=128,
+            num_seqs=3,
+            num_query_heads=8,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=129,
+            max_seqlen_k=2011,
+            dtype="fp16",
+        )
+        # Pin the routed arch so the test is deterministic on any host (the
+        # default fallback is gfx950, which is exactly the broken path).
+        for arch in ("gfx950", "gfx942"):
+            with mock.patch.object(
+                au, "_resolve_attention_arch", return_value=arch
+            ):
+                # Must not raise (the regression was a TypeError on the kwarg).
+                ok, reason = supports_native_unified_attention_tiled(p)
+                self.assertIsInstance(ok, bool)
+                self.assertIsInstance(reason, str)
+                self.assertTrue(
+                    ok, msg=f"{arch}: D128 fp16 GQA should be supported, got: {reason}"
+                )
+
 
 # ---------------------------------------------------------------------
 # Instances (end-to-end build smoke)
