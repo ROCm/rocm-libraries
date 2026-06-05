@@ -1,15 +1,15 @@
 # gfx1151 WMMA GEMM — the quantization/precision ladder
 
 A self-contained study of WMMA GEMM on **gfx1151 (RDNA3.5 / Strix Halo APU,
-wave32)** across the precision ladder the hardware supports, from the f16 baseline
-through int4 weight-only to **int8 storage / f16 compute** — each rung verified for
-correctness on silicon.
+wave32)** across the precision ladder the hardware supports — from the f16
+baseline through int4 weight-only to **int8**, with the two int8 compute paths
+compared head-to-head — each rung verified for correctness on silicon.
 
 The point is to show, end to end, (1) the **one-wave-per-16×16-tile WMMA GEMM**
-skeleton every rung shares, and (2) how int8 quantization is layered onto it
-*without* a DSL core change by dequantizing to f16 and reusing the verified f16
-WMMA atom. The **true int8 → int32 native path** (`wmma_i32_16x16x16_iu8`) is owned
-upstream — see "Relationship to the native-int path" below.
+skeleton every rung shares, (2) the two ways to do int8 — *int8 storage / f16
+compute* (dequant to f16, reuse the f16 atom) vs *true int8 compute* (int8×int8→
+int32 on the hardware `wmma_i32_16x16x16_iu8` atom, dequant to f16 in the
+epilogue), and (3) an honest A/B throughput read of the two.
 
 > RCR layout throughout (A row-major `M×K`, B row-major `N×K`, `C = A @ B.T`),
 > one wave (32 lanes) per 16×16 output tile, no LDS — the WMMA fragment ABI does
@@ -22,15 +22,18 @@ upstream — see "Relationship to the native-int path" below.
 |---|---|---|---|---|---|
 | 01 | f16 baseline | f16 × f16 | f32 | `wmma_f32_16x16x16_f16` | PASS |
 | 02 | int4 weight-only (W4A16) | f16 × int4 | f32 | `wmma_f32_16x16x16_f16` (+ int4 dequant) | PASS¹ |
-| 03 | int8 storage / f16 compute | int8→f16 × int8→f16 | f32 | `wmma_f32_16x16x16_f16` | PASS |
+| 03 | int8 storage / f16 compute ("Path B") | int8→f16 × int8→f16 | f32 | `wmma_f32_16x16x16_f16` | PASS |
+| 04 | true int8 / f16 dequant out ("Path A") | int8 × int8 | **int32** | `wmma_i32_16x16x16_iu8` (upstream atom) | PASS |
+| 05 | Path A vs Path B throughput | — | — | — | A wins 1.13–2.51× |
 
 ¹ See the int4 tolerance note under Step 02.
 
-This dir's int8 rung (03) is the **f16-compute** approach: convert int8→f16 in the
-K-loop and reuse the verified f16 WMMA. No DSL core change; the win is storage /
-memory bandwidth. The **true int8 compute** approach (int8×int8→int32 via the
-hardware `v_wmma_i32_16x16x16_iu8` instruction) lives in the upstream native-int
-path, not here.
+**Path A vs Path B** is the central comparison: same int8 quantization and the
+same f16 output, different *compute*. Path B converts int8→f16 in the K-loop and
+uses the verified f16 WMMA (no DSL core change; win is memory/bandwidth). Path A
+keeps int8 all the way into the tensor core via `v_wmma_i32_16x16x16_iu8` (int32
+accumulate), dequantizing to f16 only in the epilogue (~2× the tensor-core
+ceiling).
 
 ## Hardware / software pin
 
@@ -52,9 +55,12 @@ cd <ck_dsl>/examples/gfx1151/gemm          # this folder
 export CK_DSL_COMGR_LIB="C:\\Windows\\System32\\amd_comgr_3.dll"
 export CK_DSL_HIP_LIB="C:\\Windows\\System32\\amdhip64_7.dll"
 
-python scripts/01_f16_verify.py                # f16 baseline
-python scripts/02_int4_matmul_nbits_verify.py  # int4 weight-only (W4A16)
-python scripts/03_int8_pathb_verify.py         # int8 storage / f16 compute
+python scripts/01_f16_verify.py                       # f16 baseline
+python scripts/02_int4_matmul_nbits_verify.py         # int4 weight-only (W4A16)
+python scripts/03_int8_pathb_verify.py                # int8 storage / f16 compute
+python scripts/04_iu8_dequant_verify.py --m 16 --n 16 --k 16   # true int8 -> f16
+python scripts/04_iu8_dequant_verify.py --m 128 --n 128 --k 128
+python scripts/05_int8_perf_a_vs_b.py                 # A-vs-B throughput suite
 ```
 
 Each script writes its result to `data/0N_*.json`.
@@ -82,7 +88,7 @@ the same f16 WMMA. Verifies against `C = A @ dequant(B, scales)^T`.
 > upstream checkout reproduces the `0.125` identically. The fix is a relative
 > tolerance in the verify (as the int8 scripts use) — a harness change, deferred.
 
-## Step 03 — int8 storage / f16 compute (`03_int8_pathb_verify.py`)
+## Step 03 — int8 storage / f16 compute, "Path B" (`03_int8_pathb_verify.py`)
 
 `instances/gfx1151/wmma_gemm_int8.py`. Loads `<16 x i8>` A/B fragments, converts
 each element `i8 → sext → sitofp → f16` (lossless for |x|≤127), runs the verified
@@ -90,56 +96,64 @@ f16 WMMA, folds `scale_a*scale_b` into the epilogue. **No DSL core change** — 
 reuses the proven f16 path. Random asymmetric small int8 + `np.allclose`. Result:
 **PASS**.
 
-## Relationship to the native-int path (true int8 → int32)
+## Step 04 — true int8 / f16 dequant out, "Path A" (`04_iu8_dequant_verify.py`)
 
-True int8 *compute* on gfx1151 — `int8×int8→int32` via `v_wmma_i32_16x16x16_iu8`
-(and iu4) — is implemented **upstream** (#8091, "native int pipeline"):
+`instances/gfx1151/wmma_gemm_iu8_dequant.py`. Runs the hardware
+`wmma_i32_16x16x16_iu8` atom (int8×int8 → **int32** accumulate), then dequantizes
+the i32 accumulator to f16 in the epilogue (`f16 = trunc(sitofp(acc) *
+scale_a*scale_b)`). A/B are the *same int8 bytes* as Path B, read as i32-packed
+(4 int8/i32 — the iu8 fragment ABI); C is f16. Random asymmetric int8 +
+`np.allclose`. Result: **PASS** (max_abs `0.0` at 16³, ≤8e-7 at 64/128/256).
 
-- atom: `wmma_i32_16x16x16_iu8` / `wmma_i32_16x16x16_iu4` in the DSL core
-  (`core/arch`, `core/ir.py` generalized `mma()`, `core/isa/backend.py`,
-  `core/lower_llvm.py`);
-- instance: `instances/gfx1151/wmma_gemm_iu8.py` (int8 in, **int32 out**, i32-packed
-  operand pointers);
-- probe / example: `examples/gfx1151/wmma_iu8_probe.py`,
-  `examples/gfx1151/wmma_gemm_compare_orders.py`;
-- runner: `_gemm_iu8_problem` in `run_manifest.py`.
+> The `wmma_i32_16x16x16_iu8` atom (and iu4) is **upstream's** native-int landing
+> (#8091): the atom lives in the DSL core (`core/arch`, the generalized `mma()` in
+> `core/ir.py`, `core/isa/backend.py`, `core/lower_llvm.py`), and upstream ships an
+> i32-**output** GEMM at `instances/gfx1151/wmma_gemm_iu8.py` + a probe at
+> `examples/gfx1151/wmma_iu8_probe.py`. This step is the **f16-dequant-output**
+> sibling built on that atom — a usable quantized-GEMM result (matching the C++
+> `14_gemm_quantization` `Mul_Clamp` intent) and the f16-out counterpart that makes
+> the A/B comparison apples-to-apples.
 
-So this `gemm/` dir is the **f16-path quant ladder**; the native-int path is the
-upstream sibling. The two are complementary: native-int outputs raw i32; this dir's
-int8 rung outputs dequantized f16.
+## Step 05 — Path A vs Path B throughput (`05_int8_perf_a_vs_b.py`)
 
-### Deferred follow-on (preliminary results retained)
+Both kernels take the same int8 bytes and output f16 with an identical ABI, so
+they're built once and timed back-to-back over a roofline-tagged perf suite.
+**Methodology is differentiated from correctness**: one correctness gate up front
+(128³), then **adaptive timing** (auto-ramp the iteration count until the measured
+interval clears `--min-ms`, then median of `--reps` with min..max spread). Shapes
+too small to clear the floor are flagged `[!] launch-bound` rather than reported as
+a confident rate.
 
-A standalone exploration (on a pre-#8091 base) built an **f16-dequant-output**
-true-int8 GEMM and an A-vs-B throughput harness comparing it against the
-int8-storage/f16-compute kernel. That work is **deferred** for re-implementation on
-upstream's atom (its iu8 GEMM is i32-out; an f16-dequant-output variant + an
-adaptive-timing A/B bench are the planned additions). Preliminary A/B numbers from
-that exploration (hardened timing, median of 7), kept so the finding isn't lost —
-**K, not arithmetic intensity, drives the win**:
+Result (median of 7; Path A = true-int8→f16, Path B = int8→f16 compute):
 
-| Shape (M×N×K) | regime | A/B (true-int8 / int8→f16) |
-|---|---|---|
-| 256×256×16384 | K-heavy | ~1.96× |
-| 512×512×8192 | K-heavy | ~1.93× |
-| 1024×1024×1024 | balanced | ~1.49× |
-| 2048×2048×2048 | balanced-large | ~1.21× |
-| 8192×512×512 | tall-skinny | ~1.15× |
-| 4096×4096×512 | wide-MN | ~1.05× |
+| Shape (M×N×K) | regime | AI (op/B) | A TOP/s | B TOP/s | **A/B** |
+|---|---|---|---|---|---|
+| 512×512×8192 | K-heavy | 482 | 9.64 | 3.84 | **2.51×** |
+| 256×256×16384 | K-heavy-narrow | 252 | 13.23 | 6.03 | **2.19×** |
+| 1024×1024×1024 | balanced | 512 | 4.98 | 3.08 | 1.62× |
+| 8192×512×512 | tall-skinny | 334 | 5.36 | 4.25 | 1.26× |
+| 2048×2048×2048 | balanced-large | 1024 | 4.76 | 4.06 | 1.17× |
+| 4096×4096×512 | wide-MN | 455 | 6.61 | 5.83 | 1.13× |
 
-K-heavy shapes approach the ideal 2× (many WMMAs/wave amortize the shared per-wave
-overhead + true-int8 skips the per-element `sext→sitofp→cast`); wide/skinny shapes
-are load/epilogue-bound where both pay the same cost. (512×512×8192 and
-4096×4096×512 have near-equal AI ≈ 480 but 1.93× vs 1.05× — AI doesn't predict it.)
+**K, not arithmetic intensity, drives the win.** K-heavy shapes meet/exceed the
+ideal 2× — many WMMAs per wave amortize the fixed per-wave overhead (address setup
++ 8 epilogue stores, identical for both), and Path A additionally skips Path B's
+per-element `sext→sitofp→cast`. Wide-M·N / tall-skinny shapes barely move
+(1.13–1.26×): many tiles each do few WMMAs, so the shared load+epilogue cost swamps
+the compute difference. Note 512×512×8192 and 4096×4096×512 have near-equal AI
+(~470) but 2.51× vs 1.13× — AI doesn't predict it, K does. (Absolute rates carry
+GPU-clock/thermal jitter; the A/B ratio measured back-to-back is the stable signal.)
 
 ## What this doesn't do (and why)
 
-- **No per-row / asymmetric quantization (zero-point).** The int8 rung is
-  per-tensor symmetric — enough to exercise the path; per-channel is a follow-on.
-- **No int8-output requantization** (the C++ `14_gemm_quantization` `Mul_Clamp`).
-  The int8 rung outputs f16; the native-int upstream path outputs i32.
+- **No per-row / asymmetric quantization (zero-point).** Both int8 rungs are
+  per-tensor symmetric — enough to exercise the compute paths; per-channel is a
+  follow-on.
+- **No int8-output requantization.** Both int8 rungs output f16 (the useful
+  dequantized form); upstream's `wmma_gemm_iu8.py` is the raw-i32-output sibling.
 - **No LDS staging / multi-tile-per-wave tuning.** Correctness-first reference
-  kernels far from peak.
+  kernels far from peak; a compute-bound rewrite would widen the A/B gap on the
+  balanced shapes.
 
 ## File map
 
@@ -149,18 +163,22 @@ ck_dsl/examples/gfx1151/gemm/
 ├── scripts/
 │   ├── 01_f16_verify.py                   # f16 baseline (run_manifest verify)
 │   ├── 02_int4_matmul_nbits_verify.py     # int4 weight-only W4A16
-│   └── 03_int8_pathb_verify.py            # int8 storage / f16 compute
+│   ├── 03_int8_pathb_verify.py            # int8 storage / f16 compute
+│   ├── 04_iu8_dequant_verify.py           # true int8 -> f16 dequant (upstream iu8 atom)
+│   └── 05_int8_perf_a_vs_b.py             # A-vs-B throughput suite (hardened timing)
 └── data/
     └── 0N_*.json                          # per-script result captures
 ```
 
-Instances under test: `instances/gfx1151/{wmma_gemm, wmma_gemm_int8}.py` and
-`instances/common/matmul_nbits.py`. The true-int8 native path
-(`instances/gfx1151/wmma_gemm_iu8.py` + the iu8/iu4 core atom) is upstream's.
+Instances under test: `instances/gfx1151/{wmma_gemm, wmma_gemm_int8,
+wmma_gemm_iu8_dequant}.py` and `instances/common/matmul_nbits.py`. The
+`wmma_i32_16x16x16_iu8` core atom and the raw-i32-output `wmma_gemm_iu8.py` are
+upstream's (#8091); step 04 builds the f16-dequant variant on that atom.
 
 ## CK example that inspired the int8 work
 
 | CK path | what it gave us |
 |---|---|
-| `example/14_gemm_quantization/gemm_wmma_quantization_int8.cpp` | the true-int8 WMMA target (i8×i8→i32) — realized upstream as `wmma_i32_16x16x16_iu8` |
+| `example/14_gemm_quantization/gemm_wmma_quantization_int8.cpp` | the true-int8 WMMA target (i8×i8→i32) — the atom is upstream's `wmma_i32_16x16x16_iu8`; step 04 adds the `Mul_Clamp`-style dequant-to-f16 epilogue |
 | `include/ck_tile/core/arch/mma/wmma/wmma_gfx11.hpp` | the gfx11 iu8 builtin signature (signedness/clamp args, i32-packed operands) |
+```
