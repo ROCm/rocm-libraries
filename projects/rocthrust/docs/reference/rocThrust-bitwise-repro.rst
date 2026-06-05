@@ -8,58 +8,55 @@
 rocThrust bitwise reproducibility
 ************************************
 
-The default device execution policy, ``thrust::device`` (``thrust::hip::par``) does not guarantee run-to-run bitwise reproducibility: that is, given identical inputs and device, the function will return the exact same results in repeated invocations. In practise, all rocThrust API functions are bitwise reproducible, with exception of the following:
+Not all rocThrust functions are bitwise reproducible under the ``thrust::hip::par`` policy. The following functions are bitwise reproducible for associative operators but not for pseudo-associative floating point operators: 
 
-* scan (inclusive & exclusive)
-* scan_by_key (inclusive & exclusive)
-* reduce_by_key
-* transform_scan
+* ``inclusive_scan``
+* ``exclusive_scan``
+* ``inclusive_scan_by_key``
+* ``exclusive_scan_by_key``
+* ``transform_inclusive_scan``
+* ``transform_exclusive_scan``
+* ``reduce_by_key``
 
-In particular, the above operations are only bitwise reproducible for **associative scan and reduce operators**. Notably, this does not include the pseudo-associative floating point operators.
+.. note:: 
 
-An alternative version of the above operations that *is* bitwise reproducible with non-associative operators may be selected by using the *deterministic parallel* execution policy, ``thrust::hip::par_det``. Note that this implies a performance overhead, required to ensure that the results are run-to-run reproducible. There is no automatic detection for operator and input type pairs for which the default execution policy, that is ``thrust::hip::par``, is already bitwise reproducible. It is advised to only use ``thrust::hip::par_det`` for non-associative operators. ``thrust::hip::par_det`` may also be used with any of the other rocThrust API functions which are already bitwise reproducible. In this case the behavior is the same as ``thrust::hip::par``.
+    Under the :doc:`HIP backend <../how-to/rocThrust-build-for-backends>`, the default ``thrust::device`` policy is an alias for the ``thrust::hip::par`` policy.
 
-=====
-Tests
-=====
+Bitwise reproducible versions of these functions for pseudo-associative floating point operators are available under the ``thrust::hip::par_det`` deterministic parallel execution policy. 
 
-To run the bitwise reproducibility tests, you'll need to build the reproducibility.hip target.
-This target provides bitwise reproducibility test coverage in two forms:
+When using these functions with ``thrust::hip::par_det``, operations are forced to complete in a fixed order. This ensures that the result is bitwise-identical on every run. Because of this overhead, the ``thrust::hip::par_det`` policy should only be used with pseudo-associative floating point operators.  The ``thrust::hip::par`` policy should be used otherwise.
 
-1. The first form runs tests by issuing multiple calls to the bitwise-reproducible versions of the algorithms mentioned in the section above using the deterministic parallel execution policy.
-A special scan operator that inserts a random amount of delay into calculations is used to create variation in the internal timing of operations within the algorithm.
-We then check to make sure the results for each call are the same. In this approach, calls are all issued within a single run of the test program.
+.. note::
 
-2. The second form tests bitwise reproducibility across runs of the test program. On the initial run, information about the calls being made to the deterministic algorithms (all inputs and outputs)
-is stored in a database file. On subsequent runs, when a deterministic algorithm is called, we look for an corresponding entry in the database (a call to the same algorithm with the same inputs that
-produced the same output) and, if such an entry is found, the test succeeds. If no entry is found, the test fails.
+    The behavior of other bitwise reproducible functions under the ``thrust::hip::par_det`` policy will be identical to their behavior under the ``thrust::hip::par`` policy.
 
-Because the second form of the tests requires disk accesses, it can be very time consuming to run. For this reason, it is disabled by default. To enable it, define an environment variable called
-``ROCTHRUST_BWR_PATH`` and set it to the path to the database file (or the path where you'd like it created if it doesn't already exist).
+To run bitwise reproducibility tests, first build the ``reproducibility.hip`` target:
 
-It is also necessary to distinguish between the initial run (in which information about calls is inserted into the database), and subsequent runs (in which the output of calls is compared
-against existing entries in the database). You can use the ``ROCTHRUST_BWR_GENERATE`` environment variable to do this.
-A value of:
+.. code:: shell
 
-* ``1`` indicates that this is the inital test run, and information about calls should be inserted into the database. In this mode, bitwise reproducibility tests will not fail.
-* ``0`` (or if the variable is undefined) indicates that this is a subsequent run, and the results of calls should be compared to existing database entries. In this mode, no information is inserted into the database, and tests will fail if no matching database entry is found.
+       cmake --build build --target reproducibility.hip
 
-Note that bitwise reproduciblity is only guarenteed within a given combination of ROCm version, rocThrust version, and GPU architecture.
-This means that if any of these factors changes, additional database entries need to be generated. To do this, you can run the tests with ``ROCTHRUST_GENERATE=1`` a second time and the database will append additional entries for the new environment.
+.. note::
 
-For example, suppose we are running tests on gfx1030. On the first run, we use the environment variables like this to generate the database file:
+    rocThrust must have been built with ``-DBUILD_TEST=ON`` to build ``reproducibility.hip``.
 
-``ROCTHRUST_BWR_PATH=/path/to/repro.db ROCTHRUST_BWR_GENERATE=1 reproducibility.hip``
+This target tests bitwise reproducibility either by issuing multiple calls to the functions or by running multiple iterations of the same test.
 
-As long as the ROCm version, rocThrust version, and GPU architecture remain the same, we can now run the tests using the database file like this:
+In the first case, where multiple calls are made, a special scan operator inserts a random amount of delay into calculations to create variations in the internal timing of operations. The test then verifies that the results for each call are the same. All calls are issued within a single run of the test program.
 
-``ROCTHRUST_BWR_PATH=/path/to/repro.db reproducibility.hip``
+In the second case, several test runs are performed and compared. On the first run, the test stores input-output pairs for each function in a database file. In subsequent runs, the test compares the input-output pairs to those in the database. If identical pairs for a function are found, the test has succeeded. If no matching pair is found, the test has failed.
 
-If one or more of the three factors changes - suppose we now want to run on gfx1100 - using the same database file, we must do another inital run with ``ROCTHRUST_BWR_GENERATE=1`` to append new entries to the database for the new environment:
+On the first run, set ``ROCTHRUST_BWR_PATH`` to the database file path and ``ROCTHRUST_BWR_GENERATE`` to 1. This will create the database file and populate it with input-output pairs.
 
-``ROCTHRUST_BWR_PATH=/path/to/repro.db ROCTHRUST_BWR_GENERATE=1 reproducibility.hip``
+.. code:: shell
 
-After that we can test in the same manner as before:
+    ROCTHRUST_BWR_PATH=/path/to/repro.db ROCTHRUST_BWR_GENERATE=1 reproducibility.hip
 
-``ROCTHRUST_BWR_PATH=/path/to/repro.db reproducibility.hip``
+On subsequent iterations, point  ``ROCTHRUST_BWR_PATH`` to the database file, and set ``ROCTHRUST_BWR_GENERATE`` to 0 or leave it undefined. This will compare the results of the run with the values in the database.
+    
+.. code:: shell
+
+    ROCTHRUST_BWR_PATH=/path/to/repro.db ROCTHRUST_BWR_GENERATE=0 reproducibility.hip
+
+If the ROCm version, rocThrust version, or the GPU architecture changes, the test needs to be reset. Set ``ROCTHRUST_BWR_PATH`` to point to a new database file and set ``ROCTHRUST_BWR_GENERATE`` to 1 to run the initial test and and populate the database file with new data. After running the initial test, run the subsequent tests as usual.
 

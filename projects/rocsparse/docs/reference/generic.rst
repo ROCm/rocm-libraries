@@ -81,6 +81,27 @@ rocsparse_sptrsv()
 
 .. doxygenfunction:: rocsparse_sptrsv
 
+rocsparse_spilu0_buffer_size()
+------------------------------
+
+.. doxygenfunction:: rocsparse_spilu0_buffer_size
+
+rocsparse_spilu0()
+------------------
+
+.. doxygenfunction:: rocsparse_spilu0
+
+
+rocsparse_spic0_buffer_size()
+-----------------------------
+
+.. doxygenfunction:: rocsparse_spic0_buffer_size
+
+rocsparse_spic0()
+-----------------
+
+.. doxygenfunction:: rocsparse_spic0
+
 rocsparse_spsm()
 ----------------
 

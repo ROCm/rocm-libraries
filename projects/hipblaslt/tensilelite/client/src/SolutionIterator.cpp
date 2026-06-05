@@ -179,17 +179,23 @@ namespace TensileLite
             problemInfo.swizzleTensorA = problem.swizzleTensorA();
             problemInfo.swizzleTensorB = problem.swizzleTensorB();
 
-            problemInfo.dataType = datatypeToAnalyticalDatatype(problem.computeInputType());
+            problemInfo.dataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
             return problemInfo;
+        }
+
+        static bool isPredictionAvailable(Hardware const& hardware)
+        {
+            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            return hipAMDGPU && hipAMDGPU->analyticalHardware;
         }
 
         static origami::hardware_t::architecture_t getHardware(Hardware const& hardware)
         {
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-            auto origamiHardware = hipAMDGPU->analyticalHardware;
-
-            // Return origami architecture directly
-            return origamiHardware->arch;
+            if(!hipAMDGPU || !hipAMDGPU->analyticalHardware)
+                throw std::runtime_error(
+                    "[SolutionIterator] analyticalHardware is not available for this GPU");
+            return hipAMDGPU->analyticalHardware->arch;
         }
 
         static origami::Formocast::SizeMapping getSizeMapping(ContractionSolution&    solution,
@@ -298,7 +304,7 @@ namespace TensileLite
         void AllSolutionsIterator::preProblem(ContractionProblem* const problem)
         {
             SolutionIterator::preProblem(problem);
-            if (m_predictionThreshold > 1.0)
+            if (m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware))
             {
                 m_currentSolutionIdx = m_firstSolutionIdx;
             }
@@ -555,7 +561,7 @@ namespace TensileLite
                 m_solutions.push_back(m_library->solutions.find(0)->second);
             }
 
-            if(m_predictionThreshold > 1.0)
+            if(m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware))
             {
                 m_currentSolutionIdx = 0;
             }

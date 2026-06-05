@@ -1,0 +1,27 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): WAR-on-LDS across CFG edges.
+# The entry block issues two token-0 ds_load_b64 instructions and falls
+# through to ^body, which starts with a tensor_load_to_lds tagged token 0.
+# The WAR scan walks predecessors and finds both reads in
+# blockExitMemState[entry].pendingDSOps. computeWaitValueForCounter then
+# applies the predecessor-contribution path and emits s_wait_dscnt 0 at
+# the head of ^body, before the writer.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_war_cross_block
+# CHECK: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK: s_wait_dscnt
+# CHECK-SAME: dlcnt = 0
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_lds_war_cross_block() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  Successors: ^body
+^body:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+}

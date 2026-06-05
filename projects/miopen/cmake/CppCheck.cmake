@@ -90,9 +90,8 @@ macro(enable_cppcheck)
         file(GLOB_RECURSE GSRCS ${GLOBS})
         set(CPPCHECK_COMMAND
             ${CPPCHECK_EXE}
-            -q
-            # -v
-            # --report-progress
+            -v
+            --checkers-report=${CMAKE_BINARY_DIR}/cppcheck-checkers-report.txt
             ${CPPCHECK_FORCE}
             --cppcheck-build-dir=${CPPCHECK_BUILD_DIR}
             --platform=native
@@ -115,6 +114,11 @@ macro(enable_cppcheck)
             RESULT_VARIABLE RESULT
         )
         if(NOT RESULT EQUAL 0)
+            message(WARNING \"Cppcheck failed with exit code \${RESULT}\")
+            if(EXISTS \"${CMAKE_BINARY_DIR}/cppcheck-checkers-report.txt\")
+                file(READ \"${CMAKE_BINARY_DIR}/cppcheck-checkers-report.txt\" CHECKERS_REPORT)
+                message(WARNING \"\${CHECKERS_REPORT}\")
+            endif()
             message(FATAL_ERROR \"Cppcheck failed\")
         endif()
 ")

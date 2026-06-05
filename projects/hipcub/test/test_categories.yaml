@@ -1,0 +1,87 @@
+# hipCUB test categories
+#
+# This file is the single source of truth for the gtest filter that drives the
+# `quick` CTest tier in CI. The patterns below mirror the QUICK_TESTS list in
+# TheRock's `build_tools/github_actions/test_executable_scripts/test_hipcub.py`
+# so that running `ctest -L quick` from the build / install tree produces the
+# same selection that TheRock CI runs via the GTEST_FILTER environment
+# variable.
+#
+# Each entry under `quick.test_patterns` is a gtest filter pattern. The shared
+# parser (rocm-libraries/shared/ctest/parse_test_categories.py) joins them with
+# ':' and registers a `<binary>_quick_suite` CTest entry per hipCUB test
+# binary, invoking that binary with `--gtest_filter=<joined patterns>`.
+#
+test_categories:
+  quick:
+    description: "Fast sanity checks - mirrors TheRock test_hipcub.py QUICK_TESTS"
+    test_patterns:
+      - "*ShuffleTests/*.*"
+      - "*WarpStoreTest/*.*"
+      - "AdjacentDifference/*.*"
+      - "AdjacentDifferenceSubtract/*.*"
+      - "BatchCopyTests/*.*"
+      - "BatchMemcpyTests/*.*"
+      - "BlockScan*"
+      - "DeviceScanTests/*.*"
+      - "Discontinuity/*.*"
+      - "DivisionOperatorTests/*.*"
+      - "ExchangeTests"
+      - "GridTests/*.*"
+      - "HistogramEven/*.*"
+      - "HistogramInputArrayTests/*.*"
+      - "HistogramRange/*.*"
+      - "IteratorTests/*.*"
+      - "LoadStoreTestsDirect/*.*"
+      - "LoadStoreTestsStriped/*.*"
+      - "LoadStoreTestsTranspose/*.*"
+      - "LoadStoreTestsVectorize/*.*"
+      - "MergeSort/*.*"
+      - "NCThreadOperatorsTests/*"
+      - "RadixRank/*.*"
+      - "RadixSort/*.*"
+      - "ReduceArgMinMaxSpecialTests/*.*"
+      - "ReduceInputArrayTests/*.*"
+      - "ReduceLargeIndicesTests/*.*"
+      - "ReduceSingleValueTests/*.*"
+      - "ReduceTests/*.*"
+      - "RunLengthDecodeTest/*.*"
+      - "RunLengthEncode/*.*"
+      - "SegmentedReduce/*.*"
+      - "SegmentedReduceArgMinMaxSpecialTests/*.*"
+      - "SegmentedReduceOp/*.*"
+      - "SelectTests/*.*"
+      - "ThreadOperationTests/*.*"
+      - "ThreadOperatorsTests/*.*"
+      - "UtilPtxTests/*.*"
+      - "WarpExchangeTest/*.*"
+      - "WarpLoadTest/*.*"
+      - "WarpMergeSort/*.*"
+      - "WarpReduceTests/*.*"
+      - "WarpScanTests*"
+    exclude:
+    labels:
+      - "quick"
+
+  standard:
+    description: "Full gtest run (filter '*') - shared across PR / nightly / weekly tiers"
+    test_patterns:
+      - "*"
+    exclude:
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+
+# No GPU-specific exclusions are defined yet for hipCUB. Add entries here if a
+# specific gfx target needs to skip particular suites (see rocPRIM's
+# test_categories.yaml for a worked example). The empty mapping is required so
+# the shared parser does not treat the section as `None`.
+exclude_gpu: {}
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1 # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
+  category_timeouts:
+    quick: 300          # 5 minutes
+    standard: 14400     # 4 hours (longest tier the standard entry serves)

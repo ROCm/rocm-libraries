@@ -24,6 +24,26 @@ hipdnn_generate_version_header(hipdnn_frontend)
 
 target_link_libraries(hipdnn_frontend INTERFACE hipdnn_data_sdk hipdnn_backend)
 
+# Per-library JSON gate. Defaults from the umbrella HIPDNN_SKIP_JSON_LIB when
+# building as part of the top-level project; can be set independently when
+# frontend is built standalone. Same name as the C++ macro defined on the target.
+if(DEFINED HIPDNN_SKIP_JSON_LIB)
+    set(_hipdnn_frontend_skip_default ${HIPDNN_SKIP_JSON_LIB})
+else()
+    set(_hipdnn_frontend_skip_default OFF)
+endif()
+option(HIPDNN_FRONTEND_SKIP_JSON_LIB
+    "Skip nlohmann/json.hpp from frontend public headers."
+    ${_hipdnn_frontend_skip_default})
+unset(_hipdnn_frontend_skip_default)
+
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    if(NOT TARGET nlohmann_json::nlohmann_json)
+        hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+    endif()
+    hipdnn_add_dependency_includes(hipdnn_frontend nlohmann_json::nlohmann_json)
+endif()
+
 set(HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/frontend")
 
 target_include_directories(
@@ -31,9 +51,20 @@ target_include_directories(
                               $<INSTALL_INTERFACE:${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}>
 )
 
+# Export installed hipdnn_frontend include paths as system include paths.
+set_target_properties(hipdnn_frontend PROPERTIES
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+        "$<INSTALL_INTERFACE:${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}>"
+)
+
+# Scope the SKIP_JSON_LIB macro to installed (downstream) consumers only.
+# In-tree consumers (frontend tests, etc.) keep access to the json serialize/
+# deserialize methods so the build always succeeds; only external consumers of
+# the installed package see the gated-out public API.
 target_compile_definitions(
     hipdnn_frontend INTERFACE
     $<$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>:HIPDNN_FRONTEND_SKIP_JSON_LIB>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:HIPDNN_ENABLE_SDPA>
 )
 
 # Generate the config file from template

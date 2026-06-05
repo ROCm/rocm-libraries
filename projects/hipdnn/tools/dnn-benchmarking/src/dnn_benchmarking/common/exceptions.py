@@ -16,6 +16,12 @@ class ExecutionError(Exception):
     pass
 
 
+class UnsupportedGraphError(ExecutionError):
+    """Raised when a graph/engine combination is unsupported rather than broken."""
+
+    pass
+
+
 class ValidationError(Exception):
     """Raised when validation fails."""
 

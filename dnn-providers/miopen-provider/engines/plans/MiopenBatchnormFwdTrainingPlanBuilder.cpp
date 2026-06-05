@@ -18,9 +18,9 @@ namespace miopen_plugin
 namespace
 {
 
-bool isNodeActivFwd(const hipdnn_data_sdk::data_objects::PointwiseAttributes& attr)
+bool isNodeActivFwd(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attr)
 {
-    using PointwiseMode = hipdnn_data_sdk::data_objects::PointwiseMode;
+    using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
     // Check if operation is supported for batchnorm fusion
     switch(attr.operation())
@@ -39,31 +39,35 @@ bool isNodeActivFwd(const hipdnn_data_sdk::data_objects::PointwiseAttributes& at
     return !attr.relu_lower_clip_slope();
 }
 
-const hipdnn_data_sdk::data_objects::BatchnormAttributes&
-    checkBatchnormNode(const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& node)
+const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes&
+    checkBatchnormNode(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& node)
 {
-    if(node.attributesType() != hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes)
+    if(node.attributesType()
+       != hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "First node must be batchnorm");
     }
 
-    const auto& bnAttr = node.attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
+    const auto& bnAttr
+        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes>();
 
     return bnAttr;
 }
 
-const hipdnn_data_sdk::data_objects::PointwiseAttributes&
-    checkActivationNode(const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& node,
-                        const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr)
+const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes&
+    checkActivationNode(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& node,
+                        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr)
 {
-    if(node.attributesType() != hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes)
+    if(node.attributesType()
+       != hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                        "Second node must be pointwise");
     }
 
-    const auto& activAttr = node.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+    const auto& activAttr
+        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
 
     if(!isNodeActivFwd(activAttr))
     {
@@ -81,8 +85,9 @@ const hipdnn_data_sdk::data_objects::PointwiseAttributes&
 }
 
 void checkRunningStatisticsTensorVirtuality(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     // Optional running statistics tensors must be non-virtual if present
@@ -136,8 +141,9 @@ void checkRunningStatisticsTensorVirtuality(
 }
 
 void checkTensorVirtuality1Node(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     // Check for virtual tensors - 1-node case (solo batchnorm training)
@@ -184,9 +190,10 @@ void checkTensorVirtuality1Node(
 }
 
 void checkTensorVirtuality2Node(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
     // Check for virtual tensors - 2-node case (batchnorm training + activation)
@@ -248,7 +255,7 @@ void checkTensorVirtuality2Node(
 
 bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1 && opGraph.nodeCount() != 2)
     {
@@ -261,7 +268,7 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
         const auto& bnAttr = checkBatchnormNode(opGraph.getNodeWrapper(0));
 
         auto hasFloatComputeDataType = [](const auto& node) {
-            return node->computeDataType() == hipdnn_data_sdk::data_objects::DataType::FLOAT;
+            return node->computeDataType() == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
         };
 
         if(!std::all_of(opGraph.nodeWrappers().begin(),
@@ -309,7 +316,7 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
 
 size_t MiopenBatchnormFwdTrainingPlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const HipdnnMiopenSettings& executionSettings) const
 {
     // No workspace needed for batchnorm forward training
@@ -318,16 +325,18 @@ size_t MiopenBatchnormFwdTrainingPlanBuilder::getMaxWorkspaceSize(
 
 void MiopenBatchnormFwdTrainingPlanBuilder::initializeExecutionSettings(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+        engineConfig,
     [[maybe_unused]] HipdnnMiopenSettings& executionSettings) const
 {
 }
 
 void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+        engineConfig,
     HipdnnMiopenContext& executionContext) const
 {
     if(opGraph.nodeCount() == 1)
@@ -335,7 +344,7 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
         // Solo batchnorm training
         const auto& bnAttr
             = opGraph.getNodeWrapper(0)
-                  .attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
+                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes>();
 
         BatchnormFwdTrainingParams params(bnAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
@@ -347,10 +356,10 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
         // Batchnorm training + activation fusion
         const auto& bnAttr
             = opGraph.getNodeWrapper(0)
-                  .attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
+                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes>();
         const auto& activAttr
             = opGraph.getNodeWrapper(1)
-                  .attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
+                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
 
         BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
@@ -365,10 +374,10 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
     }
 }
 
-std::vector<hipdnn_data_sdk::data_objects::KnobT>
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
     MiopenBatchnormFwdTrainingPlanBuilder::getCustomKnobs(
         [[maybe_unused]] const HipdnnMiopenHandle& handle,
-        [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+        [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};
 }

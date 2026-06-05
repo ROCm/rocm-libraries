@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,8 +49,9 @@ try
         return rocsparse_status_invalid_pointer;
     }
 
-    auto csric0_info = info->get_csric0_info();
-    *tol             = csric0_info->get_singular_tol();
+    auto csric0_info  = info->get_csric0_info();
+    auto numeric_near = csric0_info->get_singularity_numeric_near();
+    *tol              = numeric_near->get_tolerance_legacy();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

@@ -98,7 +98,7 @@ inline Error
                                              HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES,
                                              HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                              static_cast<int64_t>(knobDescPtrs.size()),
-                                             knobDescPtrs.data()),
+                                             static_cast<const void*>(knobDescPtrs.data())),
         "Failed to set knob settings on engine config via descriptors.");
     return {};
 }

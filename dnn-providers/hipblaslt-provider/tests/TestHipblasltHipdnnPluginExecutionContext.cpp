@@ -18,7 +18,7 @@ TEST(TestHipblasltHipdnnEnginePluginExecutionContext, SetAndGetPlan)
     auto* planPtr = mockPlan.get();
     ctx.setPlan(std::move(mockPlan));
 
-    hipblaslt_plugin::IPlan& planRef = ctx.plan();
+    hipblaslt_plugin::IPlan const& planRef = ctx.plan();
 
     EXPECT_EQ(&planRef, planPtr);
 }
@@ -37,7 +37,7 @@ TEST(TestHipblasltHipdnnEnginePluginExecutionContext, HasValidPlan)
 
 TEST(TestHipblasltHipdnnEnginePluginExecutionContext, GetPlanThrowsIfNotSet)
 {
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnEnginePluginExecutionContext const ctx;
 
     EXPECT_THROW(ctx.plan(), hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -50,6 +50,6 @@ TEST(TestHipblasltHipdnnEnginePluginExecutionContext, GetWorkspaceSize)
     EXPECT_CALL(*mockPlan, getWorkspaceSize(::testing::_)).WillOnce(testing::Return(42));
     ctx.setPlan(std::move(mockPlan));
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnEnginePluginHandle const dummyHandle;
     EXPECT_EQ(ctx.plan().getWorkspaceSize(dummyHandle), 42);
 }

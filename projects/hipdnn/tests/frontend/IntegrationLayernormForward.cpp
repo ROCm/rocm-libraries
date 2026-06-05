@@ -194,12 +194,8 @@ protected:
         }
         tensors.bias = std::make_shared<TensorAttributes>(std::move(biasAttr));
 
-        tensors.epsilon = std::make_shared<TensorAttributes>();
-        tensors.epsilon->set_name("Epsilon")
-            .set_data_type(DataType::FLOAT)
-            .set_dim({1})
-            .set_stride({1})
-            .set_value(1e-5);
+        auto epsilonAttr = makeTensorAttributes("epsilon", 1e-5f);
+        tensors.epsilon = std::make_shared<TensorAttributes>(std::move(epsilonAttr));
         if(useManualUids)
         {
             tensors.epsilon->set_uid(uid++);
@@ -330,7 +326,7 @@ protected:
 
         _handle = setupEnvironmentWithPlugin(testCase.pluginPath);
 
-        std::vector<int64_t> dims = {2, 3, 14, 14};
+        const std::vector<int64_t> dims = {2, 3, 14, 14};
         SimpleLayernormTensorBundle<float, float> tensorBundle(dims);
 
         auto [graph, tensors] = createLayernormTestGraphWithUids(

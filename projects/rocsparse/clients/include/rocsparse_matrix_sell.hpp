@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -88,6 +88,19 @@ struct sell_matrix
         {
             this->transfer_from(that_);
         }
+    }
+
+    template <memory_mode::value_t THAT_MODE>
+    sell_matrix& operator()(const sell_matrix<THAT_MODE, T, I, J>& that_, bool transfer = true)
+    {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+        this->define(
+            that_.m, that_.n, that_.nnz, that_.sell_slice_size, that_.sell_colval_size, that_.base);
+        if(transfer)
+        {
+            this->transfer_from(that_);
+        }
+        return *this;
     }
 
     template <memory_mode::value_t THAT_MODE>

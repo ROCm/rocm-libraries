@@ -605,8 +605,7 @@ bool SeqNextImpl(rank<0>, const TSequence& seq, typename TSequence::value_type& 
 {
     auto it = GenericFind(seq, value);
 
-    assert(it != seq.end());
-    if(++it == seq.end())
+    if(it == seq.end() || ++it == seq.end())
     {
         value = *seq.begin();
         return true;

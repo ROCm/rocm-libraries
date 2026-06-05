@@ -24,14 +24,6 @@ namespace rocRoller
                 else
                     msg << "&" << m_pointer->offset();
             }
-            msg << ", lim=";
-            if(m_extent)
-            {
-                if(runtime_args)
-                    msg << *(reinterpret_cast<const size_t*>(runtime_args + m_extent->offset()));
-                else
-                    msg << "&" << m_extent->offset();
-            }
             msg << ", sizes={";
             for(auto i : m_sizes)
             {
@@ -89,11 +81,6 @@ namespace rocRoller
                                             DataDirection::ReadWrite,
                                             base + "_pointer");
 
-                m_extent  = ptr->allocateArgument(DataType::Int64,
-                                                 m_tag,
-                                                 ArgumentType::Limit,
-                                                 DataDirection::ReadOnly,
-                                                 base + "_extent");
                 m_sizes   = ptr->allocateArgumentVector(DataType::Int64,
                                                       m_numDims,
                                                       m_tag,

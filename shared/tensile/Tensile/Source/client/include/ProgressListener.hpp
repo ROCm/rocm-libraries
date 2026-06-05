@@ -32,14 +32,12 @@
 
 #include <cstddef>
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 namespace Tensile
 {
     namespace Client
     {
-        namespace po = boost::program_options;
-
         class ProgressListener : public RunListener
         {
         public:

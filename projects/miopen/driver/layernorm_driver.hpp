@@ -31,6 +31,7 @@
 #include <../test/cpu_layernorm.hpp>
 #include "InputFlags.hpp"
 #include "driver.hpp"
+#include "miopen/datatype.hpp"
 #include "miopen/miopen.h"
 #include "random.hpp"
 #include "tensor_driver.hpp"
@@ -425,6 +426,28 @@ int LayerNormDriver<T>::RunForwardGPU()
             iter > 1 ? (kernel_total_time - kernel_first_time) / (iter - 1) : kernel_first_time;
         std::cout << "GPU Kernel Time Forward LayerNorm Elapsed: " << kernel_average_time
                   << " ms\n";
+
+        auto dims         = miopen::deref(inputDesc).GetLengths();
+        size_t outer_size = 1, inner_size = 1;
+        for(size_t i = 0; i < dims.size(); ++i)
+        {
+            if(i < dim)
+            {
+                outer_size *= dims[i];
+            }
+            else
+            {
+                inner_size *= dims[i];
+            }
+        }
+        size_t size = (2 * outer_size * inner_size + // input, output
+                       2 * inner_size +              // weight, bias
+                       2 * outer_size                // mean, rstd
+                       ) *
+                      miopen::get_data_size(data_type);
+        std::cout << "Data size: " << size << std::endl;
+        std::cout << "Throughput: " << (size / kernel_average_time * 1000 / 1e9) << " GB/s"
+                  << std::endl;
     }
 
     if(out_dev->FromGPU(GetStream(), out.data.data()) != 0)
@@ -502,6 +525,28 @@ int LayerNormDriver<T>::RunBackwardGPU()
             iter > 1 ? (kernel_total_time - kernel_first_time) / (iter - 1) : kernel_first_time;
         std::cout << "GPU Kernel Time Backward LayerNorm Elapsed: " << kernel_average_time
                   << " ms\n";
+
+        auto dims         = miopen::deref(inputDesc).GetLengths();
+        size_t outer_size = 1, inner_size = 1;
+        for(size_t i = 0; i < dims.size(); ++i)
+        {
+            if(i < dim)
+            {
+                outer_size *= dims[i];
+            }
+            else
+            {
+                inner_size *= dims[i];
+            }
+        }
+        size_t size = (5 * outer_size * inner_size + // dy (x2), input (x2), dx
+                       3 * inner_size +              // weight, dw, db
+                       4 * outer_size                // mean (x2), rstd (x2)
+                       ) *
+                      miopen::get_data_size(data_type);
+        std::cout << "Data size: " << size << std::endl;
+        std::cout << "Throughput: " << (size / kernel_average_time * 1000 / 1e9) << " GB/s"
+                  << std::endl;
     }
 
     if(dx_dev->FromGPU(GetStream(), dx.data.data()) != 0)
@@ -547,12 +592,13 @@ int LayerNormDriver<T>::VerifyForward()
     const double tolerance  = GetTolerance();
     auto error              = miopen::rms_range(outhost, out);
     std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
+    int status              = miopenStatusSuccess;
 
     if(!std::isfinite(error) || error > tolerance)
     {
         std::cout << "Forward LayerNorm FAILED against " << solver_type
                   << " CPU reference: " << error << " > " << tolerance << std::endl;
-        return EC_VerifyFwd;
+        status = EC_VerifyFwd;
     }
     else
     {
@@ -565,7 +611,7 @@ int LayerNormDriver<T>::VerifyForward()
     {
         std::cout << "Forward LayerNorm mean FAILED against " << solver_type
                   << " CPU reference: " << meanerror << " > " << tolerance << std::endl;
-        return EC_VerifyFwd;
+        status = EC_VerifyFwd;
     }
     else
     {
@@ -578,7 +624,7 @@ int LayerNormDriver<T>::VerifyForward()
     {
         std::cout << "Forward LayerNorm rstd FAILED against " << solver_type
                   << " CPU reference: " << rstderror << " > " << tolerance << std::endl;
-        return EC_VerifyFwd;
+        status = EC_VerifyFwd;
     }
     else
     {
@@ -586,7 +632,7 @@ int LayerNormDriver<T>::VerifyForward()
                   << " CPU reference (" << rstderror << " < " << tolerance << ')' << std::endl;
     }
 
-    return miopenStatusSuccess;
+    return status;
 }
 
 template <typename T>
@@ -596,12 +642,13 @@ int LayerNormDriver<T>::VerifyBackward()
     const double tolerance  = GetTolerance();
     auto error              = miopen::rms_range(dxhost, dx);
     std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
+    int status              = miopenStatusSuccess;
 
     if(!std::isfinite(error) || error > tolerance)
     {
         std::cout << "Backward LayerNorm FAILED against " << solver_type
                   << " CPU reference: " << error << " > " << tolerance << std::endl;
-        return EC_VerifyBwd;
+        status = EC_VerifyBwd;
     }
     else
     {
@@ -614,7 +661,7 @@ int LayerNormDriver<T>::VerifyBackward()
     {
         std::cout << "Backward LayerNorm dw FAILED against " << solver_type
                   << " CPU reference: " << dwerror << " > " << tolerance << std::endl;
-        return EC_VerifyBwd;
+        status = EC_VerifyBwd;
     }
     else
     {
@@ -627,7 +674,7 @@ int LayerNormDriver<T>::VerifyBackward()
     {
         std::cout << "Backward LayerNorm db FAILED against " << solver_type
                   << " CPU reference: " << dberror << " > " << tolerance << std::endl;
-        return EC_VerifyBwd;
+        status = EC_VerifyBwd;
     }
     else
     {
@@ -635,7 +682,7 @@ int LayerNormDriver<T>::VerifyBackward()
                   << " CPU reference (" << dberror << " < " << tolerance << ')' << std::endl;
     }
 
-    return miopenStatusSuccess;
+    return status;
 }
 
 template <typename T>

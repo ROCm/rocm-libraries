@@ -41,9 +41,6 @@ class TestGRMustStartAfterGRInc(CMSValidationTestBase):
     """
     validator_passes = [add_gr_not_too_early_constraints]
 
-    def setUp(self):
-        super().setUp()
-
     def test_basic_grinc_before_gr(self):
         """
         GRIncA finishes well before GRA.

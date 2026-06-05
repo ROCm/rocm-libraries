@@ -744,13 +744,15 @@ struct hipsolverGesvdjInfo
     }
 
     // Free device memory
-    void free()
+    hipsolverStatus_t free()
     {
         if(capacity > 0)
         {
-            hipFree(n_sweeps);
             capacity = 0;
+            if(hipFree(n_sweeps) != hipSuccess)
+                return HIPSOLVER_STATUS_INTERNAL_ERROR;
         }
+        return HIPSOLVER_STATUS_SUCCESS;
     }
 };
 
@@ -776,10 +778,10 @@ try
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     hipsolverGesvdjInfo* params = (hipsolverGesvdjInfo*)info;
-    params->free();
+    hipsolverStatus_t    status = params->free();
     delete params;
 
-    return HIPSOLVER_STATUS_SUCCESS;
+    return status;
 }
 catch(...)
 {
@@ -956,13 +958,15 @@ struct hipsolverSyevjInfo
     }
 
     // Free device memory
-    void free()
+    hipsolverStatus_t free()
     {
         if(capacity > 0)
         {
-            hipFree(n_sweeps);
             capacity = 0;
+            if(hipFree(n_sweeps) != hipSuccess)
+                return HIPSOLVER_STATUS_INTERNAL_ERROR;
         }
+        return HIPSOLVER_STATUS_SUCCESS;
     }
 };
 
@@ -988,10 +992,10 @@ try
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     hipsolverSyevjInfo* params = (hipsolverSyevjInfo*)info;
-    params->free();
+    hipsolverStatus_t   status = params->free();
     delete params;
 
-    return HIPSOLVER_STATUS_SUCCESS;
+    return status;
 }
 catch(...)
 {

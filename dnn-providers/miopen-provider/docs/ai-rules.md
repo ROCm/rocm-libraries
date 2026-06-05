@@ -57,25 +57,26 @@ FlatBuffer Graph → Engine Selection → Plan Creation → GPU Execution
 
 ### Build Commands
 
-**Building as part of hipDNN**:
+**Via Superbuild (recommended)**:
 ```bash
-cd <workspace>/projects/hipdnn
-mkdir -p build && cd build
-cmake -GNinja ..
-ninja  # Plugin built by default
+cd <workspace>
+cmake --preset miopen-provider
+cmake --build build
 ```
 
-**Building standalone** (requires hipDNN and MIOpen installed):
+This uses the `miopen-provider` preset which builds both hipDNN and miopen-provider together. Other available presets: `hipdnn` (hipDNN only), `hipblaslt-provider` (hipDNN + hipblaslt-provider).
+
+In the superbuild, targets are prefixed (e.g., `miopen-provider-check`, `miopen-provider-unit-check`). See `projects/hipdnn/docs/Superbuild.md` for full details.
+
+**Standalone build** (requires hipDNN installed):
 ```bash
 cd <workspace>/dnn-providers/miopen-provider
 mkdir -p build && cd build
-cmake -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ ..
+cmake -GNinja -DCMAKE_PREFIX_PATH=<hipdnn-install-path> -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ ..
 ninja
 ```
 
 ### Test Binaries
-
-Plugin-specific test binaries (in `build/bin/` when building from hipDNN root):
 
 | Binary | Tests | Typical Use |
 |--------|-------|-------------|
@@ -128,17 +129,17 @@ Rules apply to the TestSuite name (first param of `TEST` / `TEST_F` / `TEST_P`).
 
 **Composition (left → right):**
 
-1. Optional `Integration` prefix (only for integration tests, always first)
-2. Optional `Gpu` (immediately after `Integration` if both apply, otherwise first)
+1. Required `Test` (unit tests) or `Integration` (integration tests) prefix, always first
+2. Optional `Gpu` immediately after `Test`/`Integration` if the test needs GPU support
 3. Core Feature / Subject under test (PascalCase, no underscores)
 4. Optional Datatype token: `Bfp16`, `Fp16`, `Fp32`
 
-Omit any position that does not apply.
+Omit any optional position that does not apply.
 
-**Unit tests**: Mirror the class under test — `TestMyClass` or `GpuTestMyClass` if GPU is required.
+**Unit tests**: Mirror the class under test — `TestMyClass` or `TestGpuMyClass` if GPU is required.
 
 **Valid examples:**
 ```
-IntegrationGpuConvolutionFwdFp32   GpuTestMiopenEngineFp32
+IntegrationGpuConvolutionFwdFp32   TestGpuMiopenEngineFp32
 TestMiopenEngineManager            TestConvolutionPlanBuilder
 ```

@@ -49,7 +49,7 @@ namespace hiptensor
         reset();
 
         // Handle our own outputs
-        hiptensorLoggerOpenFile("/dev/null");
+        hiptensor::test::silenceLogger();
         hiptensorLoggerSetCallback(logMessage);
     }
 

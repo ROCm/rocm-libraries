@@ -132,11 +132,10 @@ class TestFactoryFunction:
         with pytest.raises(RuntimeError, match="PyTorch GPU not available"):
             create_gpu_timer("torch")
 
-    def test_auto_no_backend_raises_error(self, monkeypatch) -> None:
-        """Test that auto with no backends raises RuntimeError."""
+    def test_auto_no_backend_returns_none(self, monkeypatch) -> None:
+        """Test that auto with no backends returns None (graceful fallback)."""
         monkeypatch.setattr(timing_module, "_is_torch_available", lambda: False)
-        with pytest.raises(RuntimeError, match="PyTorch GPU not available"):
-            create_gpu_timer("auto")
+        assert create_gpu_timer("auto") is None
 
     def test_auto_creates_timer_when_available(self, monkeypatch) -> None:
         """Test auto-detection creates a timer when available."""

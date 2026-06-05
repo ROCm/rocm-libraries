@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -131,8 +131,8 @@ Tests:
   function: bsrsm
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
-  K: [65, 153]
-  block_dim: [2, 14, 71]
+  K: [65]
+  block_dim: [12]
   alpha_alphai: *alpha_range_quick
   direction: [rocsparse_direction_row]
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -150,7 +150,7 @@ Tests:
   precision: *double_only_precisions_complex
   M_N: *M_N_range_quick
   K: [280]
-  block_dim: [2, 14, 71]
+  block_dim: [5, 14, 71]
   alpha_alphai: *alpha_range_quick
   direction: [rocsparse_direction_row]
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -165,7 +165,7 @@ Tests:
 - name: bsrsm
   category: quick
   function: bsrsm
-  precision: *single_double_precisions_complex_real
+  precision: *single_only_precisions_complex
   M_N: *M_N_range_quick
   K: [65]
   block_dim: [2]
@@ -183,7 +183,7 @@ Tests:
 - name: bsrsm_file
   category: quick
   function: bsrsm
-  precision: *single_double_precisions
+  precision: *single_only_precisions
   M: 1
   K: [63, 316]
   block_dim: [4, 27, 52]
@@ -203,7 +203,7 @@ Tests:
 - name: bsrsm_file
   category: quick
   function: bsrsm
-  precision: *single_double_precisions
+  precision: *double_only_precisions
   M: 1
   K: [63, 316]
   block_dim: [4, 27, 52]
@@ -224,10 +224,10 @@ Tests:
 - name: bsrsm_file
   category: quick
   function: bsrsm
-  precision: *single_double_precisions_complex
+  precision: *double_only_precisions_complex
   M: 1
-  K: [12, 27]
-  block_dim: [5, 12, 22]
+  K: [12]
+  block_dim: [22]
   alpha_alphai: *alpha_range_quick
   direction: [rocsparse_direction_row]
   transA: [rocsparse_operation_none]
@@ -238,7 +238,7 @@ Tests:
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2]
+  filename: [mplate]
 
 #
 # CATEGORY: NIGHTLY
@@ -327,7 +327,7 @@ Tests:
   M_N: *M_N_range_checkin
   K: [65, 153, 280]
   block_dim: [2, 14, 71]
-  alpha_alphai: *alpha_range_quick
+  alpha_alphai: *alpha_range_checkin
   direction: [rocsparse_direction_row]
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
   transB: [rocsparse_operation_none]

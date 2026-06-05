@@ -1,0 +1,110 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 23,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base-samples",
+      "hidden": true,
+      "displayName": "Base example plugin build settings",
+      "generator": "Ninja"
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug Example Plugin Configuration",
+      "inherits": ["base-samples"],
+      "binaryDir": "${sourceDir}/build/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release Example Plugin Configuration",
+      "inherits": ["base-samples"],
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "displayName": "Debug Example Plugin Build",
+      "configurePreset": "debug",
+      "targets": ["all"]
+    },
+    {
+      "name": "release",
+      "displayName": "Release Example Plugin Build",
+      "configurePreset": "release",
+      "targets": ["all"]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "base-test",
+      "displayName": "Run all tests",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug Example Plugin Tests",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "displayName": "Release Example Plugin Tests",
+      "configurePreset": "release"
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "debug",
+      "displayName": "Debug Configure, Build, and Test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "debug"
+        },
+        {
+          "type": "test",
+          "name": "debug"
+        }
+      ]
+    },
+    {
+      "name": "release",
+      "displayName": "Release Configure, Build, and Test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "release"
+        },
+        {
+          "type": "test",
+          "name": "release"
+        }
+      ]
+    }
+  ]
+}

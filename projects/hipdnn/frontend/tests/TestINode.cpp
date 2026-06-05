@@ -27,6 +27,13 @@ public:
     {
         _sub_nodes.push_back(child);
     }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& /*tensorDescs*/,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& /*operations*/) const override
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Not implemented in test"};
+    }
 };
 
 }
@@ -208,15 +215,21 @@ TEST(TestINode, VisitGraphModifyNodes)
     EXPECT_EQ(child2->value, 30);
 }
 
-TEST(TestINode, CreateOperationDefaultReturnsError)
+TEST(TestINode, CreateOperationReturnsError)
 {
-    FakeNode node(1);
+    const FakeNode node(1);
     std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
     std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
 
     auto err = node.create_operation(tensorDescs, operations);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
-    EXPECT_TRUE(err.err_msg.find("not implemented") != std::string::npos);
+    EXPECT_TRUE(err.err_msg.find("Not implemented") != std::string::npos);
     EXPECT_TRUE(operations.empty());
+}
+
+TEST(TestINode, GetNodeTypeDefaultReturnsUnknown)
+{
+    const FakeNode node(0);
+    EXPECT_EQ(node.getNodeType(), NodeType::UNKNOWN);
 }

@@ -122,7 +122,7 @@ struct GroupedConvolutionForwardInvoker
             }
             else if(!split_info.should_split)
             {
-                std::cout << "[INVOKER] Image is small (" << total_h << "×" << total_w
+                std::cout << "[INVOKER] Image is small (" << total_h << "x" << total_w
                           << "), split-image not necessary.\n";
                 std::cout << "[INVOKER] Using regular kernel (Kernel<false>).\n";
             }
@@ -157,8 +157,8 @@ struct GroupedConvolutionForwardInvoker
                 {
                     std::cout << "Total dimensions: D=" << total_d << " H=" << total_h
                               << " W=" << total_w << "\n";
-                    std::cout << "Split into pieces: D=" << num_d_pieces << " × H=" << num_h_pieces
-                              << " × W=" << num_w_pieces << " = " << total_pieces
+                    std::cout << "Split into pieces: D=" << num_d_pieces << " x H=" << num_h_pieces
+                              << " x W=" << num_w_pieces << " = " << total_pieces
                               << " total pieces\n";
                     std::cout << "Base piece size: D=" << (total_d / num_d_pieces)
                               << " H=" << (total_h / num_h_pieces)
@@ -167,7 +167,7 @@ struct GroupedConvolutionForwardInvoker
                 else if(NDimSpatial == 2)
                 {
                     std::cout << "Total dimensions: H=" << total_h << " W=" << total_w << "\n";
-                    std::cout << "Split into pieces: H=" << num_h_pieces << " × W=" << num_w_pieces
+                    std::cout << "Split into pieces: H=" << num_h_pieces << " x W=" << num_w_pieces
                               << " = " << total_pieces << " total pieces\n";
                     std::cout << "Base piece size: H=" << (total_h / num_h_pieces)
                               << " W=" << (total_w / num_w_pieces) << "\n";
@@ -230,6 +230,7 @@ struct GroupedConvolutionForwardInvoker
                 ck_tile::element_wise::PassThrough,
                 ck_tile::element_wise::PassThrough,
                 OutDataType,
+                OutDataType, // TODO: need to double check
                 GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
                 GroupedConvTraitsType::VectorSizeA,
                 GroupedConvTraitsType::VectorSizeB>;
@@ -237,7 +238,7 @@ struct GroupedConvolutionForwardInvoker
             using GemmPipeline = typename PipelineTypeTraits<
                 ConvConfig::Pipeline>::template GemmPipeline<UniversalGemmProblem>;
 
-            using ConvEpilogue = ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<
+            using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
                 InDataType,
                 WeiDataType,
                 DsDataType,
@@ -256,7 +257,14 @@ struct GroupedConvolutionForwardInvoker
                 GroupedConvTraitsType::FixedGemmParams::TransposeC,
                 ConvConfig::NumWaveGroups,
                 GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
-                GroupedConvTraitsType::VectorSizeC>>;
+                GroupedConvTraitsType::VectorSizeC>;
+
+            using ConvEpilogue =
+                std::conditional_t<ConvConfig::Pipeline == ck_tile::GemmPipeline::COMPUTE_TDM_V1 ||
+                                       ConvConfig::Pipeline ==
+                                           ck_tile::GemmPipeline::COMPUTE_TDM_V2,
+                                   ck_tile::TdmEpilogue<EpilogueProblem>,
+                                   ck_tile::CShuffleEpilogue<EpilogueProblem>>;
 
             // Use split-image kernel if layout supports it, otherwise use regular kernel
             using Kernel = ck_tile::GroupedConvolutionForwardKernel<GroupedConvTraitsType,

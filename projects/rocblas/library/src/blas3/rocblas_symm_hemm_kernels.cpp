@@ -74,15 +74,11 @@ rocblas_symm_scale_kernel(rocblas_int    m,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto C = load_ptr_batch(CP_array, batch, shift_c, stride_c);
         rocblas_symm_scale_device<DIM_X, DIM_Y>(m, n, beta, C, ldc);
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /**
@@ -255,10 +251,8 @@ rocblas_symm_hemm_kernel(bool           is_upper,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto A = load_ptr_batch(AP_array, batch, shift_a, stride_a);
         auto B = load_ptr_batch(BP_array, batch, shift_b, stride_b);
@@ -268,10 +262,7 @@ rocblas_symm_hemm_kernel(bool           is_upper,
         // when HERM does ^H in place of ^T for A fetches to symmetric empty side
         rocblas_symm_hemm_mult_add_device<HERM, RIGHT, DIM_XYT>(
             is_upper, m, n, alpha, A, lda, B, ldb, C, ldc);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /**

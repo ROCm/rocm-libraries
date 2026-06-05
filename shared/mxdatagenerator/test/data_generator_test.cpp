@@ -27,7 +27,9 @@ using DataGeneratorTypes = ::testing::Types<f32,
                                             ocp_e5m2_mxfp8,
                                             ocp_e2m3_mxfp6,
                                             ocp_e3m2_mxfp6,
-                                            ocp_e2m1_mxfp4>;
+                                            ocp_e2m1_mxfp4,
+                                            ocp_e2m1_mxfp4_e4m3,
+                                            ocp_e2m1_mxfp4_e5m3>;
 
 typedef std::tuple<bool, bool, bool, bool, vector<double>, DataScaling, vector<index_t>>
     BoundedTupleType;
@@ -91,6 +93,8 @@ const vector<vector<double>> min_max_denorm_params = {
     {-getDataMaxSubnorm<fp16>(), getDataMaxSubnorm<fp16>()},
     {-getDataMaxSubnorm<bf16>(), getDataMaxSubnorm<bf16>()},
     {-getDataMaxSubnorm<ocp_e2m1_mxfp4>(), getDataMaxSubnorm<ocp_e2m1_mxfp4>()},
+    {-getDataMaxSubnorm<ocp_e2m1_mxfp4_e4m3>(), getDataMaxSubnorm<ocp_e2m1_mxfp4_e4m3>()},
+    {-getDataMaxSubnorm<ocp_e2m1_mxfp4_e5m3>(), getDataMaxSubnorm<ocp_e2m1_mxfp4_e5m3>()},
     {-getDataMaxSubnorm<ocp_e2m3_mxfp6>(), getDataMaxSubnorm<ocp_e2m3_mxfp6>()},
     {-getDataMaxSubnorm<ocp_e3m2_mxfp6>(), getDataMaxSubnorm<ocp_e3m2_mxfp6>()},
     {-getDataMaxSubnorm<ocp_e4m3_mxfp8>(), getDataMaxSubnorm<ocp_e4m3_mxfp8>()},
@@ -105,6 +109,8 @@ const vector<double> max_denorm_params = {getDataMaxSubnorm<f32>(),
                                           getDataMaxSubnorm<fp16>(),
                                           getDataMaxSubnorm<bf16>(),
                                           getDataMaxSubnorm<ocp_e2m1_mxfp4>(),
+                                          getDataMaxSubnorm<ocp_e2m1_mxfp4_e4m3>(),
+                                          getDataMaxSubnorm<ocp_e2m1_mxfp4_e5m3>(),
                                           getDataMaxSubnorm<ocp_e2m3_mxfp6>(),
                                           getDataMaxSubnorm<ocp_e3m2_mxfp6>(),
                                           getDataMaxSubnorm<ocp_e4m3_mxfp8>(),

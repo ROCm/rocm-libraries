@@ -17,6 +17,8 @@
 
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 
+#include <unordered_set>
+
 namespace hipdnn_frontend
 {
 
@@ -86,7 +88,7 @@ public:
             return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain an integer value"};
         }
 
-        int64_t val = *value;
+        const int64_t val = *value;
 
         // If explicit valid values are specified, check against them
         if(!_validValues.empty())
@@ -195,7 +197,7 @@ public:
             return {ErrorCode::INVALID_VALUE, "KnobSetting does not contain a float value"};
         }
 
-        double val = *value;
+        const double val = *value;
 
         if(val < _minValue || val > _maxValue)
         {

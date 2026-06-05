@@ -274,10 +274,8 @@ rocblas_tbmvx_kernel(rocblas_operation transA,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         const auto* A        = load_ptr_batch(Aa, batch, shifta, strideA);
         const auto* w_x_copy = load_ptr_batch(w_xa_copy, batch, 0, n);
@@ -285,10 +283,7 @@ rocblas_tbmvx_kernel(rocblas_operation transA,
 
         rocblas_tbmvx_kernel_calc<DIM_X, DIM_Y>(
             transA, is_upper, is_unit_diag, n, k, A, lda, w_x_copy, x, incx);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /**

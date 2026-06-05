@@ -8,10 +8,14 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/constants/PointwiseConstants.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
@@ -19,112 +23,49 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::toVec;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
-using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
-using PointwiseModeSdk = hipdnn_data_sdk::data_objects::PointwiseMode;
+using namespace hipdnn_tests::constants;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using NodeAttrType = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+using PointwiseModeSdk = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+using hipdnn_tests::buildTensorMap;
+using hipdnn_tests::IntegrationTestFixture;
+using hipdnn_tests::lowerAndDeserialize;
+using hipdnn_tests::TestableGraphLowering;
 
 namespace
 {
 
-// Exposes protected Graph methods for testing
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph_via_descriptors;
-    using Graph::get_raw_graph_descriptor;
-};
-
-// -- Test constants --
-
-constexpr int64_t K_TENSOR_IN0_UID = 10;
-constexpr int64_t K_TENSOR_IN1_UID = 11;
-constexpr int64_t K_TENSOR_IN2_UID = 12;
-constexpr int64_t K_TENSOR_OUT0_UID = 20;
-
-constexpr std::array<int64_t, 4> K_TENSOR_DIMS = {2, 64, 32, 32};
-constexpr std::array<int64_t, 4> K_TENSOR_STRIDES = {65536, 1024, 32, 1};
-
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
-class IntegrationPointwiseDescriptorLowering : public ::testing::Test
+class IntegrationPointwiseDescriptorLowering : public IntegrationTestFixture
 {
-protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 // Binary pointwise (ADD) round-trip: lower and verify deserialized graph
 TEST_F(IntegrationPointwiseDescriptorLowering, PointwiseGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestPointwiseGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
     auto in0 = std::make_shared<TensorAttributes>();
-    in0->set_uid(K_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
-    in0->set_dim(toVec(K_TENSOR_DIMS)).set_stride(toVec(K_TENSOR_STRIDES));
+    in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
+    in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
     auto in1 = std::make_shared<TensorAttributes>();
-    in1->set_uid(K_TENSOR_IN1_UID).set_name("IN1").set_data_type(DataType::FLOAT);
-    in1->set_dim(toVec(K_TENSOR_DIMS)).set_stride(toVec(K_TENSOR_STRIDES));
+    in1->set_uid(K_PW_TENSOR_IN1_UID).set_name("IN1").set_data_type(DataType::FLOAT);
+    in1->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_name("add_op");
     pwAttrs.set_mode(PointwiseMode::ADD);
 
     auto out0 = graph->pointwise(in0, in1, pwAttrs);
-    out0->set_uid(K_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
+    out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    // -- Validate and lower --
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // -- Retrieve serialized graph --
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    // -- Deserialize into GraphT --
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
-    ASSERT_NE(graphFb, nullptr);
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    graphFb->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // -- Verify graph-level attributes --
     EXPECT_EQ(graphT.compute_data_type, DataTypeSdk::FLOAT);
@@ -134,26 +75,22 @@ TEST_F(IntegrationPointwiseDescriptorLowering, PointwiseGraphRoundTrip)
     // -- Verify tensors (in0, in1, out0) --
     ASSERT_EQ(graphT.tensors.size(), 3u);
 
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
-    for(const auto& t : graphT.tensors)
-    {
-        tensorMap[t->uid] = t.get();
-    }
+    auto tensorMap = buildTensorMap(graphT);
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_IN0_UID), 0u);
-    auto* in0T = tensorMap[K_TENSOR_IN0_UID];
+    ASSERT_NE(tensorMap.count(K_PW_TENSOR_IN0_UID), 0u);
+    auto* in0T = tensorMap[K_PW_TENSOR_IN0_UID];
     EXPECT_EQ(in0T->name, "IN0");
     EXPECT_EQ(in0T->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(in0T->dims, toVec(K_TENSOR_DIMS));
-    EXPECT_EQ(in0T->strides, toVec(K_TENSOR_STRIDES));
+    EXPECT_EQ(in0T->dims, toVec(K_PW_TENSOR_DIMS));
+    EXPECT_EQ(in0T->strides, toVec(K_PW_TENSOR_STRIDES));
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_IN1_UID), 0u);
-    auto* in1T = tensorMap[K_TENSOR_IN1_UID];
+    ASSERT_NE(tensorMap.count(K_PW_TENSOR_IN1_UID), 0u);
+    auto* in1T = tensorMap[K_PW_TENSOR_IN1_UID];
     EXPECT_EQ(in1T->name, "IN1");
     EXPECT_EQ(in1T->data_type, DataTypeSdk::FLOAT);
 
-    ASSERT_NE(tensorMap.count(K_TENSOR_OUT0_UID), 0u);
-    auto* out0T = tensorMap[K_TENSOR_OUT0_UID];
+    ASSERT_NE(tensorMap.count(K_PW_TENSOR_OUT0_UID), 0u);
+    auto* out0T = tensorMap[K_PW_TENSOR_OUT0_UID];
     EXPECT_EQ(out0T->name, "OUT0");
 
     // -- Verify pointwise operation node --
@@ -165,50 +102,34 @@ TEST_F(IntegrationPointwiseDescriptorLowering, PointwiseGraphRoundTrip)
     auto* pwNode = node->attributes.AsPointwiseAttributes();
     ASSERT_NE(pwNode, nullptr);
 
-    EXPECT_EQ(pwNode->in_0_tensor_uid, K_TENSOR_IN0_UID);
-    EXPECT_EQ(pwNode->out_0_tensor_uid, K_TENSOR_OUT0_UID);
-    EXPECT_EQ(pwNode->in_1_tensor_uid, K_TENSOR_IN1_UID);
+    EXPECT_EQ(pwNode->in_0_tensor_uid, K_PW_TENSOR_IN0_UID);
+    EXPECT_EQ(pwNode->out_0_tensor_uid, K_PW_TENSOR_OUT0_UID);
+    EXPECT_EQ(pwNode->in_1_tensor_uid, K_PW_TENSOR_IN1_UID);
     EXPECT_EQ(pwNode->operation, PointwiseModeSdk::ADD);
+    EXPECT_EQ(node->name, "add_op");
 }
 
 // Unary pointwise (RELU_FWD) round-trip with single input
 TEST_F(IntegrationPointwiseDescriptorLowering, UnaryPointwiseRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestUnaryPointwiseGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
     auto in0 = std::make_shared<TensorAttributes>();
-    in0->set_uid(K_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
-    in0->set_dim(toVec(K_TENSOR_DIMS)).set_stride(toVec(K_TENSOR_STRIDES));
+    in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
+    in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_name("relu_op");
     pwAttrs.set_mode(PointwiseMode::RELU_FWD);
 
     auto out0 = graph->pointwise(in0, pwAttrs);
-    out0->set_uid(K_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
+    out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // Unary: 2 tensors (in0, out0)
     ASSERT_EQ(graphT.tensors.size(), 2u);
@@ -217,23 +138,23 @@ TEST_F(IntegrationPointwiseDescriptorLowering, UnaryPointwiseRoundTrip)
     auto* pwNode = graphT.nodes[0]->attributes.AsPointwiseAttributes();
     ASSERT_NE(pwNode, nullptr);
 
-    EXPECT_EQ(pwNode->in_0_tensor_uid, K_TENSOR_IN0_UID);
-    EXPECT_EQ(pwNode->out_0_tensor_uid, K_TENSOR_OUT0_UID);
+    EXPECT_EQ(pwNode->in_0_tensor_uid, K_PW_TENSOR_IN0_UID);
+    EXPECT_EQ(pwNode->out_0_tensor_uid, K_PW_TENSOR_OUT0_UID);
     EXPECT_EQ(pwNode->operation, PointwiseModeSdk::RELU_FWD);
 }
 
 // RELU_FWD with activation scalar parameters round-trip
 TEST_F(IntegrationPointwiseDescriptorLowering, ScalarAttributesPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestScalarAttrsGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
     auto in0 = std::make_shared<TensorAttributes>();
-    in0->set_uid(K_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
-    in0->set_dim(toVec(K_TENSOR_DIMS)).set_stride(toVec(K_TENSOR_STRIDES));
+    in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
+    in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
     constexpr float K_LOWER_CLIP = -1.0F;
     constexpr float K_UPPER_CLIP = 6.0F;
@@ -247,26 +168,9 @@ TEST_F(IntegrationPointwiseDescriptorLowering, ScalarAttributesPreservedInRoundT
     pwAttrs.set_relu_lower_clip_slope(K_LOWER_CLIP_SLOPE);
 
     auto out0 = graph->pointwise(in0, pwAttrs);
-    out0->set_uid(K_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
+    out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto* pwNode = graphT.nodes[0]->attributes.AsPointwiseAttributes();
@@ -287,49 +191,32 @@ TEST_F(IntegrationPointwiseDescriptorLowering, ScalarAttributesPreservedInRoundT
 // Ternary pointwise (BINARY_SELECT) round-trip with 3 inputs
 TEST_F(IntegrationPointwiseDescriptorLowering, TernaryPointwiseRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestTernaryPointwiseGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
     auto in0 = std::make_shared<TensorAttributes>();
-    in0->set_uid(K_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
-    in0->set_dim(toVec(K_TENSOR_DIMS)).set_stride(toVec(K_TENSOR_STRIDES));
+    in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
+    in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
     auto in1 = std::make_shared<TensorAttributes>();
-    in1->set_uid(K_TENSOR_IN1_UID).set_name("IN1").set_data_type(DataType::FLOAT);
-    in1->set_dim(toVec(K_TENSOR_DIMS)).set_stride(toVec(K_TENSOR_STRIDES));
+    in1->set_uid(K_PW_TENSOR_IN1_UID).set_name("IN1").set_data_type(DataType::FLOAT);
+    in1->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
     auto in2 = std::make_shared<TensorAttributes>();
-    in2->set_uid(K_TENSOR_IN2_UID).set_name("IN2").set_data_type(DataType::FLOAT);
-    in2->set_dim(toVec(K_TENSOR_DIMS)).set_stride(toVec(K_TENSOR_STRIDES));
+    in2->set_uid(K_PW_TENSOR_IN2_UID).set_name("IN2").set_data_type(DataType::FLOAT);
+    in2->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_name("select_op");
     pwAttrs.set_mode(PointwiseMode::BINARY_SELECT);
 
     auto out0 = graph->pointwise(in0, in1, in2, pwAttrs);
-    out0->set_uid(K_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
+    out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // Ternary: 4 tensors (in0, in1, in2, out0)
     ASSERT_EQ(graphT.tensors.size(), 4u);
@@ -338,10 +225,10 @@ TEST_F(IntegrationPointwiseDescriptorLowering, TernaryPointwiseRoundTrip)
     auto* pwNode = graphT.nodes[0]->attributes.AsPointwiseAttributes();
     ASSERT_NE(pwNode, nullptr);
 
-    EXPECT_EQ(pwNode->in_0_tensor_uid, K_TENSOR_IN0_UID);
-    EXPECT_EQ(pwNode->out_0_tensor_uid, K_TENSOR_OUT0_UID);
-    EXPECT_EQ(pwNode->in_1_tensor_uid, K_TENSOR_IN1_UID);
-    EXPECT_EQ(pwNode->in_2_tensor_uid, K_TENSOR_IN2_UID);
+    EXPECT_EQ(pwNode->in_0_tensor_uid, K_PW_TENSOR_IN0_UID);
+    EXPECT_EQ(pwNode->out_0_tensor_uid, K_PW_TENSOR_OUT0_UID);
+    EXPECT_EQ(pwNode->in_1_tensor_uid, K_PW_TENSOR_IN1_UID);
+    EXPECT_EQ(pwNode->in_2_tensor_uid, K_PW_TENSOR_IN2_UID);
     EXPECT_EQ(pwNode->operation, PointwiseModeSdk::BINARY_SELECT);
 }
 
@@ -349,7 +236,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, TernaryPointwiseRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationPointwiseDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidPointwiseGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -357,11 +244,11 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 
     auto in0 = std::make_shared<TensorAttributes>();
     in0->set_name("IN0").set_data_type(DataType::FLOAT);
-    in0->set_dim(toVec(K_TENSOR_DIMS)).set_stride(toVec(K_TENSOR_STRIDES));
+    in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
     auto in1 = std::make_shared<TensorAttributes>();
     in1->set_name("IN1").set_data_type(DataType::FLOAT);
-    in1->set_dim(toVec(K_TENSOR_DIMS)).set_stride(toVec(K_TENSOR_STRIDES));
+    in1->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
     PointwiseAttributes pwAttrs;
     pwAttrs.set_mode(PointwiseMode::MUL);
@@ -369,25 +256,7 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     auto out0 = graph->pointwise(in0, in1, pwAttrs);
     out0->set_output(true);
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // All tensors should have been auto-assigned unique UIDs
     ASSERT_EQ(graphT.tensors.size(), 3u);
@@ -396,7 +265,8 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 3u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 3u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The pointwise operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -405,31 +275,36 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(pwNode->in_0_tensor_uid) > 0)
-        << "IN_0 tensor UID " << pwNode->in_0_tensor_uid << " not found in graph tensors";
-    ASSERT_TRUE(pwNode->in_1_tensor_uid.has_value()) << "IN_1 tensor UID should be set";
+        << "IN_0 tensor UID " << pwNode->in_0_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
+    ASSERT_TRUE(pwNode->in_1_tensor_uid.has_value())
+        << "IN_1 tensor UID should be set"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(pwNode->in_1_tensor_uid.value()) > 0)
-        << "IN_1 tensor UID " << pwNode->in_1_tensor_uid.value() << " not found in graph tensors";
+        << "IN_1 tensor UID " << pwNode->in_1_tensor_uid.value()
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(pwNode->out_0_tensor_uid) > 0)
-        << "OUT_0 tensor UID " << pwNode->out_0_tensor_uid << " not found in graph tensors";
+        << "OUT_0 tensor UID " << pwNode->out_0_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All three tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> nodeUids
+    const std::unordered_set<int64_t> nodeUids
         = {pwNode->in_0_tensor_uid, pwNode->in_1_tensor_uid.value(), pwNode->out_0_tensor_uid};
-    EXPECT_EQ(nodeUids.size(), 3u) << "Pointwise node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 3u)
+        << "Pointwise node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 // Additional activation scalars (swish_beta, elu_alpha, softplus_beta) round-trip
 TEST_F(IntegrationPointwiseDescriptorLowering, AdditionalScalarAttributesPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestAdditionalScalarAttrsGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
     auto in0 = std::make_shared<TensorAttributes>();
-    in0->set_uid(K_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
-    in0->set_dim(toVec(K_TENSOR_DIMS)).set_stride(toVec(K_TENSOR_STRIDES));
+    in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
+    in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
     constexpr float K_SWISH_BETA = 1.5F;
     constexpr float K_ELU_ALPHA = 0.25F;
@@ -443,26 +318,9 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AdditionalScalarAttributesPreserv
     pwAttrs.set_softplus_beta(K_SOFTPLUS_BETA);
 
     auto out0 = graph->pointwise(in0, pwAttrs);
-    out0->set_uid(K_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
+    out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto* pwNode = graphT.nodes[0]->attributes.AsPointwiseAttributes();
@@ -483,15 +341,15 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AdditionalScalarAttributesPreserv
 // GEN_INDEX mode with axis attribute round-trip
 TEST_F(IntegrationPointwiseDescriptorLowering, AxisAttributePreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestAxisAttrGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
     auto in0 = std::make_shared<TensorAttributes>();
-    in0->set_uid(K_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
-    in0->set_dim(toVec(K_TENSOR_DIMS)).set_stride(toVec(K_TENSOR_STRIDES));
+    in0->set_uid(K_PW_TENSOR_IN0_UID).set_name("IN0").set_data_type(DataType::FLOAT);
+    in0->set_dim(toVec(K_PW_TENSOR_DIMS)).set_stride(toVec(K_PW_TENSOR_STRIDES));
 
     constexpr int64_t K_AXIS = 2;
 
@@ -501,26 +359,9 @@ TEST_F(IntegrationPointwiseDescriptorLowering, AxisAttributePreservedInRoundTrip
     pwAttrs.set_axis(K_AXIS);
 
     auto out0 = graph->pointwise(in0, pwAttrs);
-    out0->set_uid(K_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
+    out0->set_uid(K_PW_TENSOR_OUT0_UID).set_output(true).set_name("OUT0");
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     ASSERT_EQ(graphT.nodes.size(), 1u);
     auto* pwNode = graphT.nodes[0]->attributes.AsPointwiseAttributes();

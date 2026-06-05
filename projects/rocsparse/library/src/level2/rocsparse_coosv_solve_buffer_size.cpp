@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,8 @@
 rocsparse_status rocsparse::coosv_solve_buffer_size(rocsparse_handle            handle,
                                                     rocsparse_operation         trans,
                                                     rocsparse_const_spmat_descr A,
+                                                    rocsparse_const_dnvec_descr x,
+                                                    rocsparse_const_dnvec_descr y,
                                                     size_t* buffer_size_in_bytes)
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -37,9 +39,10 @@ rocsparse_status rocsparse::coosv_solve_buffer_size(rocsparse_handle            
     ROCSPARSE_CHECKARG_ENUM(1, trans);
     ROCSPARSE_CHECKARG_POINTER(2, A);
     ROCSPARSE_CHECKARG_POINTER(3, buffer_size_in_bytes);
+    const int64_t batch_count = (y) ? y->batch_count : A->batch_count;
 
     // Quick return if possible
-    if(A->rows == 0 || A->batch_count == 0)
+    if(A->rows == 0 || batch_count == 0)
     {
         *buffer_size_in_bytes = 0;
         return rocsparse_status_success;
@@ -88,7 +91,7 @@ rocsparse_status rocsparse::coosv_solve_buffer_size(rocsparse_handle            
                                A->info);
 
     RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::csrsv_solve_buffer_size(handle, trans, &csr, buffer_size_in_bytes));
+        rocsparse::csrsv_solve_buffer_size(handle, trans, &csr, x, y, buffer_size_in_bytes));
 
     return rocsparse_status_success;
 }

@@ -1,0 +1,129 @@
+operation:
+  name: "BatchnormBackward"
+  class_name: "BatchnormBackwardOperationDescriptor"
+  fbs_table: "BatchnormBackwardAttributes"
+  fbs_generated_header: "batchnorm_backward_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD"
+
+  frontend:
+    packer_function: "createBatchnormBackwardOperation"
+    unpacker_function: "unpackBatchnormBackwardOperation"
+    node_class: "BatchnormBackwardNode"
+    attributes_class: "BatchnormBackwardAttributes"
+
+    inputs:
+      - name: "dy"
+        enum_name: "DY"
+        required: true
+        getter_name: "get_dy"
+        setter_name: "set_dy"
+      - name: "x"
+        enum_name: "X"
+        required: true
+        getter_name: "get_x"
+        setter_name: "set_x"
+      - name: "scale"
+        enum_name: "SCALE"
+        required: true
+        getter_name: "get_scale"
+        setter_name: "set_scale"
+    outputs:
+      - name: "dx"
+        enum_name: "DX"
+        required: true
+        getter_name: "get_dx"
+        setter_name: "set_dx"
+    graph_method_name: "batchnorm_backward"
+    graph_method_params:
+      - name: "dy"
+        tensor_name: "dy"
+      - name: "x"
+        tensor_name: "x"
+      - name: "scale"
+        tensor_name: "scale"
+    graph_return_type: "array"
+    graph_return_outputs:
+      - "dx"
+    node_type_enum: "NodeType::BATCHNORM_BACKWARD"
+
+  tensor_fields:
+    - name: "dy"
+      fbs_field: "dy_tensor_uid"
+      attr_suffix: "DY_EXT"
+      required: true
+      frontend_getter: "get_dy()"
+
+    - name: "x"
+      fbs_field: "x_tensor_uid"
+      attr_suffix: "X_EXT"
+      required: true
+      frontend_getter: "get_x()"
+
+    - name: "scale"
+      fbs_field: "scale_tensor_uid"
+      attr_suffix: "SCALE_EXT"
+      required: true
+      frontend_getter: "get_scale()"
+
+    - name: "dx"
+      fbs_field: "dx_tensor_uid"
+      attr_suffix: "DX_EXT"
+      required: true
+      frontend_getter: "get_dx()"
+
+    - name: "dscale"
+      fbs_field: "dscale_tensor_uid"
+      attr_suffix: "DSCALE_EXT"
+      required: true
+      frontend_getter: "get_dscale()"
+
+    - name: "dbias"
+      fbs_field: "dbias_tensor_uid"
+      attr_suffix: "DBIAS_EXT"
+      required: true
+      frontend_getter: "get_dbias()"
+
+    - name: "mean"
+      fbs_field: "mean_tensor_uid"
+      attr_suffix: "MEAN_EXT"
+      required: false
+      frontend_getter: "get_mean()"
+
+    - name: "inv_variance"
+      fbs_field: "inv_variance_tensor_uid"
+      attr_suffix: "INV_VARIANCE_EXT"
+      required: false
+      frontend_getter: "get_inv_variance()"
+
+  data_fields: []
+
+  tensor_array_fields:
+    - name: "peer_stats"
+      fbs_field: "peer_stats_tensor_uid"
+      attr_name: "HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT"
+      frontend_getter: "get_peer_stats()"
+      required: false
+      test_uids: [110, 111]
+      test_label: "PeerStats"
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT"
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_BACKWARD_EXT"
+
+  test_data:
+    tensor_uids: { dy: 60, x: 61, scale: 62, dx: 63, dscale: 64, dbias: 65, mean: 66, inv_variance: 67 }
+    tensor_configs:
+      dy: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      x: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      scale: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      dx: { dims: [1, 64, 32, 32], strides: [65536, 1024, 32, 1] }
+      dscale: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      dbias: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      mean: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+      inv_variance: { dims: [1, 64, 1, 1], strides: [64, 1, 1, 1] }
+    field_values: {}

@@ -49,6 +49,16 @@
             hipdnn_backend::logging::detail::K_BACKEND_LOGGER_COMPONENT_NAME,    \
             hipdnn_backend::logging::detail::formatBackendMessage(__VA_ARGS__)); \
     } while(0)
+
+// DEBUG logging - use INFO level since DEBUG doesn't exist in SDK
+#define HIPDNN_BACKEND_LOG_DEBUG(...)                                            \
+    do                                                                           \
+    {                                                                            \
+        hipdnn_backend::logging::initialize();                                   \
+        HIPDNN_SDK_LOG_INFO_WITH_COMPONENT(                                      \
+            hipdnn_backend::logging::detail::K_BACKEND_LOGGER_COMPONENT_NAME,    \
+            hipdnn_backend::logging::detail::formatBackendMessage(__VA_ARGS__)); \
+    } while(0)
 #endif // HIPDNN_BACKEND_COMPILATION
 
 namespace hipdnn_backend::logging

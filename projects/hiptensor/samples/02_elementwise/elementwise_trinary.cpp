@@ -34,7 +34,6 @@
 
 #include <hiptensor/hiptensor.h>
 #include <hiptensor/internal/hiptensor_utility.hpp>
-#include <hiptensor_options.hpp>
 
 #include "common.hpp"
 
@@ -218,11 +217,6 @@ int main()
     /**********************
      * Run
      **********************/
-    using hiptensor::HiptensorOptions;
-    auto& options = HiptensorOptions::instance();
-    options->setColdRuns(5);
-    options->setHotRuns(50);
-
     CHECK_HIPTENSOR_ERROR(hiptensorElementwiseTrinaryExecute(
         handle, plan, (void*)&alpha, A_d, (void*)&beta, B_d, (void*)&gamma, C_d, D_d, 0));
 

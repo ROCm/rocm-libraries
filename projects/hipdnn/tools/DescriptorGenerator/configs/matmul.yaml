@@ -1,0 +1,79 @@
+operation:
+  name: "Matmul"
+  class_name: "MatmulOperationDescriptor"
+  fbs_table: "MatmulAttributes"
+  fbs_generated_header: "matmul_attributes_generated.h"
+
+  descriptor_type:
+    enum_name: "HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR"
+
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_MATMUL"
+
+  frontend:
+    packer_function: "createMatmulOperation"
+    unpacker_function: "unpackMatmulOperation"
+    node_class: "MatmulNode"
+    attributes_class: "MatmulAttributes"
+
+    inputs:
+      - name: "a"
+        enum_name: "A"
+        required: true
+        getter_name: "get_a"
+        setter_name: "set_a"
+      - name: "b"
+        enum_name: "B"
+        required: true
+        getter_name: "get_b"
+        setter_name: "set_b"
+    outputs:
+      - name: "c"
+        enum_name: "C"
+        required: true
+        getter_name: "get_c"
+        setter_name: "set_c"
+    graph_method_name: "matmul"
+    graph_method_params:
+      - name: "a"
+        tensor_name: "a"
+      - name: "b"
+        tensor_name: "b"
+    graph_return_type: "single"
+    graph_return_outputs:
+      - "c"
+    node_type_enum: "NodeType::MATMUL"
+
+  tensor_fields:
+    - name: "a"
+      fbs_field: "a_tensor_uid"
+      attr_suffix: "ADESC"
+      required: true
+
+    - name: "b"
+      fbs_field: "b_tensor_uid"
+      attr_suffix: "BDESC"
+      required: true
+
+    - name: "c"
+      fbs_field: "c_tensor_uid"
+      attr_suffix: "CDESC"
+      required: true
+
+  data_fields: []
+
+  tensor_array_fields: []
+
+  has_compute_data_type: true
+  compute_data_type_attr: "HIPDNN_ATTR_MATMUL_COMP_TYPE"
+
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_MATMUL_EXT"
+
+  test_data:
+    constants_include: "MatmulConstants"
+    tensor_const_prefix: "K_MATMUL_"
+    tensor_uids: { a: 1500, b: 1501, c: 1502 }
+    tensor_configs:
+      a: { dims: [1, 1, 64, 128], strides: [8192, 8192, 128, 1] }
+      b: { dims: [1, 1, 128, 256], strides: [32768, 32768, 256, 1] }
+      c: { dims: [1, 1, 64, 256], strides: [16384, 16384, 256, 1] }
+    field_values: {}

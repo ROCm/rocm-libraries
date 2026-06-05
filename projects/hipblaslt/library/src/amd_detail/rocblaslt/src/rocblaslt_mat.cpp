@@ -24,6 +24,7 @@
  *
  * ************************************************************************ */
 
+#include "check_numerics_matrix.hpp"
 #include "definitions.h"
 #include "handle.h"
 #include "rocblaslt_mat_utils.hpp"
@@ -113,6 +114,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     hipblasOperation_t opA           = matmul_descr->op_A;
     hipblasOperation_t opB           = matmul_descr->op_B;
     int                num_batches_a = matA->batch_count;
+    hipblasLtBatchMode_t batch_mode  = matA->batch_mode;    
     rocblaslt_epilogue epilogue      = matmul_descr->epilogue;
     void*              scaleA        = matmul_descr->scaleA;
     void*              scaleB        = matmul_descr->scaleB;
@@ -218,9 +220,31 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         stream,
                                         handle->Synchronizer,
                                         swizzleA,
-                                        swizzleB};
+                                        swizzleB,
+                                        batch_mode,
+                                        matmul_descr->bias_stride};
 
-    return runContractionProblem(handle, algo, problem, gemmData);
+    rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
+
+    if(st == rocblaslt_status_success)
+    {
+        const uint32_t call_id = hipblaslt_check_numerics_begin_call(handle);
+        if(call_id != 0)
+        {
+            st = hipblaslt_check_numerics_scan_D(handle,
+                                                 stream,
+                                                 call_id,
+                                                 m, n,
+                                                 matD->batch_count,
+                                                 type_d,
+                                                 D,
+                                                 ldd,
+                                                 batch_stride_d,
+                                                 (matD->order == HIPBLASLT_ORDER_ROW));
+        }
+    }
+
+    return st;
 }
 
 rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle           handle,
@@ -294,6 +318,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
     hipblasOperation_t opA           = matmul_descr->op_A;
     hipblasOperation_t opB           = matmul_descr->op_B;
     int                num_batches_a = matA->batch_count;
+    hipblasLtBatchMode_t batch_mode  = matA->batch_mode;    
     rocblaslt_epilogue epilogue      = matmul_descr->epilogue;
     void*              scaleA        = matmul_descr->scaleA;
     void*              scaleB        = matmul_descr->scaleB;
@@ -377,7 +402,9 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         0,
                                         handle->Synchronizer,
                                         swizzleA,
-                                        swizzleB};
+                                        swizzleB,
+                                        batch_mode,
+                                        matmul_descr->bias_stride};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -667,7 +694,9 @@ rocblaslt_status
                                         0,
                                         (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
                                         swizzleA,
-                                        swizzleB});
+                                        swizzleB,
+                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
+                                        matmul_descr[i]->bias_stride});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
@@ -704,12 +733,6 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
     // Update for the valid case: ((alpha_in_host && alpha=0) && (A=NULL || B=NULL))
     bool alpha_A_B_violation
         = (!alpha || ((matmul_descr->pointermode || (*((float*)alpha))) && (!A || !B)));
-
-    hipDataType alpha_type = matA->type;
-    hipDataType beta_type  = matD->type;
-
-    auto alpha_scalar = get_alpha_beta_scalar(alpha_type, alpha);
-    auto beta_scalar  = get_alpha_beta_scalar(beta_type, beta);
 
     // Check if pointer is valid
     if(alpha == nullptr || beta == nullptr || C == nullptr || D == nullptr || alpha_A_B_violation)
@@ -762,6 +785,18 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
 
     if(get_logger_layer_mode() != rocblaslt_layer_mode_none)
     {
+        hipDataType alpha_type = matA->type;
+        hipDataType beta_type  = matD->type;
+        
+        // alpha is a device pointer when scaleAlpha_vector (pointermode != 0) is set;
+        // avoid CPU dereference which causes an access violation on Windows.
+        auto alpha_scalar = (!matmul_descr->pointermode && alpha)
+                            ? get_alpha_beta_scalar(alpha_type, alpha)
+                            : hipblaslt_complex_double{0.0, 0.0};
+        auto beta_scalar  = (!matmul_descr->pointermode && beta)
+                            ? get_alpha_beta_scalar(beta_type, beta)
+                            : hipblaslt_complex_double{0.0, 0.0};
+
         log_trace(
             __func__,
             "A",
@@ -1002,7 +1037,9 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         0,
         handle->Synchronizer,
         swizzleA,
-        swizzleB};
+        swizzleB,
+        HIPBLASLT_BATCH_MODE_STRIDED,
+        0};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1321,7 +1358,9 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         0,
                                         (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
                                         swizzleA,
-                                        swizzleB});
+                                        swizzleB,
+                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
+                                        0});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }

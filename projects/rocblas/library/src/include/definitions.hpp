@@ -30,6 +30,7 @@
  ******************************************************************************/
 const int c_rocblas_default_solution   = 0; // either backend -1 is equivalent
 const int c_rocblas_source_solution    = -2;
+const int c_rocblas_test_all_solutions = -3; // reserved for testing
 const int c_rocblas_solutions_reserved = 10;
 const int c_rocblas_bad_solution_index = 0x7fffffff; // maxint
 

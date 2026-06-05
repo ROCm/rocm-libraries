@@ -53,9 +53,12 @@ TIMING_HIERARCHY = {
             "python_kernel_build_co": {},
             "python_kernel_build_src_co": {
                 "python_kernel_build_src_co.setup": {},
+                "python_kernel_build_src_co.cache_check": {},
+                "python_kernel_build_src_co.cache_hit": {},
                 "python_kernel_build_src_co.compile": {},
                 "python_kernel_build_src_co.unbundle": {},
                 "python_kernel_build_src_co.move": {},
+                "python_kernel_build_src_co.cache_populate": {},
             },
             "python_kernel_bench_postprocess": {
                 "python_benchpost_naming": {},
@@ -71,6 +74,8 @@ TIMING_HIERARCHY = {
                 "python_wsol_prepare_cache": {},
                 "python_wsol_prepare_nocache": {},
             },
+            "python_wsol_header": {},
+            "python_wsol_dump": {},
         },
         "python_client_execution": {
             "hip_initialization": {},
@@ -81,13 +86,18 @@ TIMING_HIERARCHY = {
             "solution_iterator_setup": {},
             "listener_setup": {},
             "reporter_setup": {},
-            "pre_problem": {},
-            "cpu_data_init": {},
-            "cpu_reference_gemm": {},
+            "pre_problem": {
+                "cpu_data_init": {},
+                "cpu_reference_gemm": {
+                    "solve_cpu_fast": {},
+                    "solve_cpu_slow": {},
+                },
+            },
             "validate_warmups": {
                 "validate_gpu_sync": {},
                 "validate_gpu_readback": {},
                 "validate_element_comparison": {},
+                "validate_mismatch_printing": {},
             },
             "gpu_input_preparation": {},
             "gpu_input_reset": {},
@@ -136,13 +146,11 @@ CPP_PHASE_GROUPS = {
     ],
     "Data Preparation": [
         "pre_problem",
-        "cpu_data_init",
         "gpu_input_preparation",
         "gpu_input_reset",
         "rotating_buffer_preparation",
     ],
     "Reference Computation": [
-        "cpu_reference_gemm",
         "validate_warmups",
     ],
     "Kernel Execution": [

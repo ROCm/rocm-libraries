@@ -4,6 +4,7 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+find_dependency(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
 find_dependency(hipdnn_data_sdk @HIPDNN_PLUGIN_SDK_DATA_SDK_MIN_VERSION@ CONFIG REQUIRED)
 
 include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_plugin_sdkTargets.cmake")

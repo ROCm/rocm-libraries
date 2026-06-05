@@ -157,6 +157,8 @@ namespace rocRoller
         MATRIX_A,
         MATRIX_B,
         MATRIX_ACCUMULATOR,
+        ROW_MAJOR,
+        COLUMN_MAJOR,
         None,
         Count
     };

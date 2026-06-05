@@ -201,7 +201,7 @@ TEST(TestBlockScaleDequantizeAttributes, BlockSizeRawPointerZeroLengthIgnored)
 {
     hipdnn_frontend::graph::BlockScaleDequantizeAttributes attrs;
 
-    int32_t val = 32;
+    const int32_t val = 32;
     attrs.set_block_size(&val, 0);
     EXPECT_TRUE(attrs.get_block_size().empty());
 }

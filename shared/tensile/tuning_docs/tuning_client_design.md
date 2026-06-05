@@ -2,12 +2,7 @@
 
 The tuning client is written to exercise Tensile kernels by allocating and initializing input and output memory and calling the kernels while recording their run time and reporting the speed (in GFlops) back to the Python code.
 
-It is written in a modular, structured way which involves the cooperation of many different classes and class hierarchies. It uses the Tensile host runtime library (sometimes referred to as the 'new client') and several Boost libraries:
-
- - Algorithm
- - Any
- - Program options
- - Lexical Cast
+It is written in a modular, structured way which involves the cooperation of many different classes and class hierarchies. It uses the Tensile host runtime library (sometimes referred to as the 'new client') and standard library or custom replacements for program options and value reporting.
 
 This document assumes general familiarity with the Tensile host runtime library.
 
@@ -108,7 +103,7 @@ Right now, to get around the limitation in C++ against overloaded virtual functi
      - `reportValue_sizes()`
   - The `MetaResultReporter` implements these virtual functions, forwarding the calls to the child reporters.
 
-The overloading to renamed functions is awkward and may be replaced with `boost::any` or a CRTP implementation at some point.
+The overloading to renamed functions is awkward and may be replaced with `std::any` or a CRTP implementation at some point.
 
 The keys are generally declared as string constants in the `ResultKey` namespace, in order to prevent misspellings from causing uncaught bugs.
 

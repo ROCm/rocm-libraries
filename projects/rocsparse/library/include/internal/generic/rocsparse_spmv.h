@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief Sparse matrix vector multiplication
+*  \brief Sparse matrix vector multiplication.
 *
 *  \details
 *  \p rocsparse_spmv multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times n\f$ matrix \f$op(A)\f$, defined in CSR,
@@ -53,33 +53,33 @@ extern "C" {
 *    \right.
 *  \f]
 *
-*  Performing the above operation involves multiple steps. First the user calls \p rocsparse_spmv with the stage parameter set to
-*  \ref rocsparse_spmv_stage_buffer_size to determine the size of the required temporary storage buffer. The user then allocates this
-*  buffer and calls \p rocsparse_spmv with the stage parameter set to \ref rocsparse_spmv_stage_preprocess. Depending on the algorithm
-*  and sparse matrix format, this will perform analysis on the sparsity pattern of \f$op(A)\f$. Finally the user completes the operation
+*  Performing the above operation involves multiple steps. First, call \p rocsparse_spmv with the stage parameter set to
+*  \ref rocsparse_spmv_stage_buffer_size to determine the size of the required temporary storage buffer. Then allocate this
+*  buffer and call \p rocsparse_spmv with the stage parameter set to \ref rocsparse_spmv_stage_preprocess. Depending on the algorithm
+*  and sparse matrix format, this will perform analysis on the sparsity pattern of \f$op(A)\f$. Finally, complete the operation
 *  by calling \p rocsparse_spmv with the stage parmeter set to \ref rocsparse_spmv_stage_compute. The buffer size, buffer allocation, and
-*  preprecess stages only need to be called once for a given sparse matrix \f$op(A)\f$ while the computation stage can be repeatedly used
-*  with different \f$x\f$ and \f$y\f$ vectors. Once all calls to \p rocsparse_spmv are complete, the temporary buffer can be deallocated.
+*  preprocess stages only need to be called once for a given sparse matrix \f$op(A)\f$, while the computation stage can be repeatedly used
+*  with different \f$x\f$ and \f$y\f$ vectors. After all calls to \p rocsparse_spmv are complete, the temporary buffer can be deallocated.
 *
-*  \p rocsparse_spmv supports multiple different algorithms. These algorithms have different trade offs depending on the sparsity
+*  \p rocsparse_spmv supports multiple different algorithms. These algorithms have different trade-offs depending on the sparsity
 *  pattern of the matrix, whether or not the results need to be deterministic, and how many times the sparse-vector product will
 *  be performed.
 *
 *  <table>
 *  <caption id="spmv_csr_algorithms">CSR/CSC Algorithms</caption>
 *  <tr><th>Algorithm                            <th>Deterministic  <th>Preprocessing  <th>Notes
-*  <tr><td>rocsparse_spmv_alg_csr_rowsplit</td> <td>Yes</td>       <td>No</td>        <td>Is best suited for matrices with all rows having a similar number of non-zeros. Can out perform adaptive and LRB algorithms in certain sparsity patterns. Will perform very poorly if some rows have few non-zeros and some rows have many non-zeros.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_stream</td>   <td>Yes</td>       <td>No</td>        <td>[Deprecated] old name for rocsparse_spmv_alg_csr_rowsplit.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_adaptive</td> <td>No</td>        <td>Yes</td>       <td>Generally the fastest algorithm across all matrix sparsity patterns. This includes matrices that have some rows with many non-zeros and some rows with few non-zeros. Requires a lengthy preprocessing that needs to be amortized over many subsequent sparse vector products.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_lrb</td>      <td>No</td>        <td>Yes</td>       <td>Like adaptive algorithm, generally performs well across all matrix sparsity patterns. Generally not as fast as adaptive algorithm, however uses a much faster pre-processing step. Good for when only a few number of sparse vector products will be performed.</td>
-*  <tr><td>rocsparse_spmv_alg_csr_nnzsplit</td> <td>No</td>        <td>Yes</td>       <td>Like adaptive algorithm, generally performs well across all matrix sparsity patterns. Generally not as fast as adaptive algorithm but faster than LRB algorithm. It uses a much faster pre-processing step than LRB. Good for when the number of sparse vector products that will be performed is less than one hundred. If more products need to be computed, the adaptive algorithm is probably faster.</td>
+*  <tr><td>rocsparse_spmv_alg_csr_rowsplit</td> <td>Yes</td>       <td>No</td>        <td>Is best suited for matrices with all rows having a similar number of non-zeros. Can outperform adaptive and LRB algorithms in certain sparsity patterns. Will perform very poorly if some rows have few non-zeros and some rows have many non-zeros.</td>
+*  <tr><td>rocsparse_spmv_alg_csr_stream</td>   <td>Yes</td>       <td>No</td>        <td>[Deprecated] The old name for rocsparse_spmv_alg_csr_rowsplit.</td>
+*  <tr><td>rocsparse_spmv_alg_csr_adaptive</td> <td>No</td>        <td>Yes</td>       <td>Generally the fastest algorithm across all matrix sparsity patterns. This includes matrices that have some rows with many non-zeros and some rows with few non-zeros. Requires lengthy preprocessing that needs to be amortized over many subsequent sparse vector products.</td>
+*  <tr><td>rocsparse_spmv_alg_csr_lrb</td>      <td>No</td>        <td>Yes</td>       <td>Like the adaptive algorithm, it generally performs well across all matrix sparsity patterns. Generally not as fast as the adaptive algorithm, however, it uses a much faster pre-processing step. Good for when only a small number of sparse vector products will be performed.</td>
+*  <tr><td>rocsparse_spmv_alg_csr_nnzsplit</td> <td>No</td>        <td>Yes</td>       <td>Like the adaptive algorithm, it generally performs well across all matrix sparsity patterns. Generally not as fast as the adaptive algorithm but faster than the LRB algorithm. It uses a much faster preprocessing step than LRB. Good when the number of sparse vector products that will be performed is less than one hundred. If more products need to be computed, the adaptive algorithm is probably faster.</td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmv_coo_algorithms">COO Algorithms</caption>
 *  <tr><th>COO Algorithms                     <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmv_alg_coo</td>        <td>Yes</td>        <td>Yes</td>      <td>Generally not as fast as atomic algorithm but is deterministic</td>
-*  <tr><td>rocsparse_spmv_alg_coo_atomic</td> <td>No</td>         <td>No</td>       <td>Generally the fastest COO algorithm</td>
+*  <tr><td>rocsparse_spmv_alg_coo</td>        <td>Yes</td>        <td>Yes</td>      <td>Generally not as fast as the atomic algorithm but is deterministic.</td>
+*  <tr><td>rocsparse_spmv_alg_coo_atomic</td> <td>No</td>         <td>No</td>       <td>Generally the fastest COO algorithm.</td>
 *  </table>
 *
 *  <table>
@@ -95,9 +95,9 @@ extern "C" {
 *  </table>
 *
 *  \p rocsparse_spmv supports multiple combinations of data types and compute types. The tables below indicate the currently
-*  supported different data types that can be used for for the sparse matrix \f$op(A)\f$ and the dense vectors \f$x\f$ and
-*  \f$y\f$ and the compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different data types is to save on
-*  memory bandwidth and storage when a user application allows while performing the actual computation in a higher precision.
+*  supported different data types that can be used for the sparse matrix \f$op(A)\f$, the dense vectors \f$x\f$ and
+*  \f$y\f$, and the compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different data types is to save on
+*  memory bandwidth and storage when a user application allows, while performing the actual computation in a higher precision.
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -109,7 +109,7 @@ extern "C" {
 *  <tr><td>rocsparse_datatype_f64_c
 *  </table>
 *
-*  \par Mixed precisions:
+*  \par Mixed Precisions:
 *  <table>
 *  <caption id="spmv_mixed">Mixed Precisions</caption>
 *  <tr><th>A / X                     <th>Y                         <th>compute_type
@@ -121,17 +121,17 @@ extern "C" {
 *  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r
 *  </table>
 *
-*  \par Mixed-regular real precisions
+*  \par Mixed-regular Real Precisions
 *  <table>
-*  <caption id="spmv_mixed_regular_real">Mixed-regular real precisions</caption>
+*  <caption id="spmv_mixed_regular_real">Mixed-regular Real Precisions</caption>
 *  <tr><th>A                        <th>X / Y / compute_type
 *  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f64_r
 *  <tr><td>rocsparse_datatype_f32_c <td>rocsparse_datatype_f64_c
 *  </table>
 *
-*  \par Mixed-regular Complex precisions
+*  \par Mixed-regular Complex Precisions
 *  <table>
-*  <caption id="spmv_mixed_regular_complex">Mixed-regular Complex precisions</caption>
+*  <caption id="spmv_mixed_regular_complex">Mixed-regular Complex Precisions</caption>
 *  <tr><th>A                        <th>X / Y / compute_type
 *  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_c
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f64_c
@@ -145,11 +145,11 @@ extern "C" {
 *
 *  \note
 *  The sparse matrix formats currently supported are: \ref rocsparse_format_bsr, \ref rocsparse_format_coo,
-*  \ref rocsparse_format_coo_aos, \ref rocsparse_format_csr, \ref rocsparse_format_csc and \ref rocsparse_format_ell.
+*  \ref rocsparse_format_coo_aos, \ref rocsparse_format_csr, \ref rocsparse_format_csc, and \ref rocsparse_format_ell.
 *
 *  \note
-*  Only the \ref rocsparse_spmv_stage_buffer_size stage and the \ref rocsparse_spmv_stage_compute stage are non blocking
-*  and executed asynchronously with respect to the host. They may return before the actual computation has finished.
+*  Only the \ref rocsparse_spmv_stage_buffer_size stage and the \ref rocsparse_spmv_stage_compute stage are non-blocking
+*  and executed asynchronously with respect to the host. They can return before the actual computation has finished.
 *  The \ref rocsparse_spmv_stage_preprocess stage is blocking with respect to the host.
 *
 *  \note
@@ -157,7 +157,7 @@ extern "C" {
 *  support execution in a hipGraph context. The \ref rocsparse_spmv_stage_preprocess stage does not support hipGraph.
 *
 *  @param[in]
-*  handle       handle to the rocsparse library context queue.
+*  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
 *  trans        matrix operation type.
 *  @param[in]
@@ -187,7 +187,7 @@ extern "C" {
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context \p handle was not initialized.
-*  \retval      rocsparse_status_invalid_pointer \p alpha, \p mat, \p x, \p beta, \p y or
+*  \retval      rocsparse_status_invalid_pointer \p alpha, \p mat, \p x, \p beta, \p y, or
 *               \p buffer_size pointer is invalid.
 *  \retval      rocsparse_status_invalid_value the value of \p trans, \p compute_type, \p alg, or \p stage is incorrect.
 *  \retval      rocsparse_status_not_implemented \p compute_type or \p alg is

@@ -34,9 +34,9 @@ extern "C" {
 
 /*! \ingroup precond_module
  *  \details
- *  \p rocsparse_bsric0_zero_pivot returns \ref rocsparse_status_zero_pivot, if either a
- *  structural or numerical zero has been found during \ref rocsparse_sbsric0 "rocsparse_Xbsric0()",
- *  computation. The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, using same
+ *  \p rocsparse_bsric0_zero_pivot returns \ref rocsparse_status_zero_pivot if either a
+ *  structural or numerical zero has been found during \ref rocsparse_sbsric0 "rocsparse_Xbsric0()"
+ *  computation. The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, using the same
  *  index base as the BSR matrix.
  *
  *  \p position can be in host or device memory. If no zero pivot has been found,
@@ -47,18 +47,18 @@ extern "C" {
  *  is missing (structural zero) or the diagonal block \p A(j,j) is not positive definite
  *  (numerical zero).
  *
- *  \note \p rocsparse_bsric0_zero_pivot is a blocking function. It might influence
- *  performance negatively.
+ *  \note \p rocsparse_bsric0_zero_pivot is a blocking function. It might influence negatively
+ *  performance.
  *
  *  \note
  *  This routine does not support execution in a hipGraph context.
  *
  *  @param[in]
- *  handle      handle to the rocsparse library context queue.
+ *  handle      handle to the rocSPARSE library context queue.
  *  @param[in]
  *  info        structure that holds the information collected during the analysis step.
  *  @param[inout]
- *  position    pointer to zero pivot \f$j\f$, can be in host or device memory.
+ *  position    pointer to zero pivot \f$j\f$, which can be in host or device memory.
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
@@ -80,20 +80,20 @@ rocsparse_status rocsparse_bsric0_zero_pivot(rocsparse_handle   handle,
  *  allocated by the user. The size of the temporary storage buffer is identical to the size
  *  returned by \ref rocsparse_sbsrsv_buffer_size "rocsparse_Xbsrsv_buffer_size()" and
  *  \ref rocsparse_sbsrilu0_buffer_size "rocsparse_Xbsrilu0_buffer_size()" if the matrix sparsity
- *  pattern is identical. The user allocated buffer can thus be shared between subsequent calls
+ *  pattern is identical. The user-allocated buffer can therefore be shared between subsequent calls
  *  to those functions.
  *
  *  \note
- *  This function is non blocking and executed asynchronously with respect to the host.
- *  It may return before the actual computation has finished.
+ *  This function is non-blocking and executed asynchronously with respect to the host.
+ *  It can return before the actual computation has finished.
  *
  *  \note
  *  This routine supports execution in a hipGraph context.
  *
  *  @param[in]
- *  handle      handle to the rocsparse library context queue.
+ *  handle      handle to the rocSPARSE library context queue.
  *  @param[in]
- *  dir         direction that specifies whether to count nonzero elements by \ref rocsparse_direction_row or by
+ *  dir         direction that specifies whether to count non-zero elements by \ref rocsparse_direction_row or by
  *              \ref rocsparse_direction_column.
  *  @param[in]
  *  mb          number of block rows in the sparse BSR matrix.
@@ -109,7 +109,7 @@ rocsparse_status rocsparse_bsric0_zero_pivot(rocsparse_handle   handle,
  *  @param[in]
  *  bsr_col_ind array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
  *  @param[in]
- *  block_dim   the block dimension of the BSR matrix. Between 1 and m where \p m=mb*block_dim.
+ *  block_dim   the block dimension of the BSR matrix. Between 1 and m, where \p m=mb*block_dim.
  *  @param[out]
  *  info        structure that holds the information collected during the analysis step.
  *  @param[out]
@@ -121,7 +121,7 @@ rocsparse_status rocsparse_bsric0_zero_pivot(rocsparse_handle   handle,
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval     rocsparse_status_invalid_size \p mb, \p nnzb, or \p block_dim is invalid.
  *  \retval     rocsparse_status_invalid_pointer \p descr, \p bsr_val, \p bsr_row_ptr,
- *              \p bsr_col_ind, \p info or \p buffer_size pointer is invalid.
+ *              \p bsr_col_ind, \p info, or \p buffer_size pointer is invalid.
  *  \retval     rocsparse_status_internal_error an internal error occurred.
  *  \retval     rocsparse_status_not_implemented
  *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
@@ -185,16 +185,16 @@ rocsparse_status rocsparse_zbsric0_buffer_size(rocsparse_handle                h
  *  \p rocsparse_bsric0_analysis performs the analysis step for
  *  \ref rocsparse_sbsric0 "rocsparse_Xbsric0()". It is expected that this function will
  *  be executed only once for a given matrix and particular operation type. The analysis
- *  meta data can be cleared by \ref rocsparse_bsric0_clear().
+ *  metadata can be cleared by \ref rocsparse_bsric0_clear().
  *
  *  \p rocsparse_bsric0_analysis can share its meta data with
  *  \ref rocsparse_sbsrilu0_analysis "rocsparse_Xbsrilu0_analysis()",
  *  \ref rocsparse_sbsrsv_analysis "rocsparse_Xbsrsv_analysis()", and
  *  \ref rocsparse_sbsrsm_analysis "rocsparse_Xbsrsm_analysis()". Selecting
- *  \ref rocsparse_analysis_policy_reuse policy can greatly improve computation
- *  performance of meta data. However, the user needs to make sure that the sparsity
+ *  \ref rocsparse_analysis_policy_reuse policy can greatly improve the computation
+ *  performance of metadata. However, the user needs to ensure that the sparsity
  *  pattern remains unchanged. If this cannot be assured,
- *  \ref rocsparse_analysis_policy_force has to be used.
+ *  \ref rocsparse_analysis_policy_force must be used.
  *
  *  \note
  *  If the matrix sparsity pattern changes, the gathered information will become invalid.
@@ -206,9 +206,9 @@ rocsparse_status rocsparse_zbsric0_buffer_size(rocsparse_handle                h
  *  This routine does not support execution in a hipGraph context.
  *
  *  @param[in]
- *  handle      handle to the rocsparse library context queue.
+ *  handle      handle to the rocSPARSE library context queue.
  *  @param[in]
- *  dir         direction that specified whether to count nonzero elements by \ref rocsparse_direction_row or by
+ *  dir         direction that specified whether to count non-zero elements by \ref rocsparse_direction_row or by
  *              \ref rocsparse_direction_column.
  *  @param[in]
  *  mb          number of block rows in the sparse BSR matrix.
@@ -224,7 +224,7 @@ rocsparse_status rocsparse_zbsric0_buffer_size(rocsparse_handle                h
  *  @param[in]
  *  bsr_col_ind array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
  *  @param[in]
- *  block_dim   the block dimension of the BSR matrix. Between 1 and m where \p m=mb*block_dim.
+ *  block_dim   the block dimension of the BSR matrix. Between 1 and m, where \p m=mb*block_dim.
  *  @param[out]
  *  info        structure that holds the information collected during
  *              the analysis step.
@@ -240,7 +240,7 @@ rocsparse_status rocsparse_zbsric0_buffer_size(rocsparse_handle                h
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval     rocsparse_status_invalid_size \p mb, \p nnzb, or \p block_dim is invalid.
  *  \retval     rocsparse_status_invalid_pointer \p descr, \p bsr_val, \p bsr_row_ptr,
- *              \p bsr_col_ind, \p info or \p temp_buffer pointer is invalid.
+ *              \p bsr_col_ind, \p info, or \p temp_buffer pointer is invalid.
  *  \retval     rocsparse_status_internal_error an internal error occurred.
  *  \retval     rocsparse_status_not_implemented
  *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
@@ -310,19 +310,19 @@ rocsparse_status rocsparse_zbsric0_analysis(rocsparse_handle                hand
 /*! \ingroup precond_module
  *  \details
  *  \p rocsparse_bsric0_clear deallocates all memory that was allocated by
- *  \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()". This is especially useful,
+ *  \ref rocsparse_sbsric0_analysis "rocsparse_Xbsric0_analysis()". This is especially useful
  *  if memory is an issue and the analysis data is not required for further computation.
  *
  *  \note
  *  Calling \p rocsparse_bsric0_clear is optional. All allocated resources will be
- *  cleared, when the opaque \ref rocsparse_mat_info struct is destroyed using
+ *  cleared when the opaque \ref rocsparse_mat_info struct is destroyed using
  *  \ref rocsparse_destroy_mat_info().
  *
  *  \note
  *  This routine does not support execution in a hipGraph context.
  *
  *  @param[in]
- *  handle      handle to the rocsparse library context queue.
+ *  handle      handle to the rocSPARSE library context queue.
  *  @param[inout]
  *  info        structure that holds the information collected during the analysis step.
  *
@@ -337,8 +337,8 @@ ROCSPARSE_EXPORT
 rocsparse_status rocsparse_bsric0_clear(rocsparse_handle handle, rocsparse_mat_info info);
 
 /*! \ingroup precond_module
- *  \brief Incomplete Cholesky factorization with 0 fill-ins and no pivoting using BSR
- *  storage format
+ *  \brief Incomplete Cholesky factorization with 0 fill-ins and no pivoting using the BSR
+ *  storage format.
  *
  *  \details
  *  \p rocsparse_bsric0 computes the incomplete Cholesky factorization with 0 fill-ins
@@ -348,30 +348,30 @@ rocsparse_status rocsparse_bsric0_clear(rocsparse_handle handle, rocsparse_mat_i
  *  \f]
  *
  *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
- *  the user determines the size of the required temporary storage buffer by calling \ref rocsparse_sbsric0_buffer_size,
- *  \ref rocsparse_dbsric0_buffer_size, \ref rocsparse_cbsric0_buffer_size, or \ref rocsparse_zbsric0_buffer_size. Once
- *  this buffer size has been determined, the user allocates the buffer and passes it to \ref rocsparse_sbsric0_analysis,
+ *  determine the size of the required temporary storage buffer by calling \ref rocsparse_sbsric0_buffer_size,
+ *  \ref rocsparse_dbsric0_buffer_size, \ref rocsparse_cbsric0_buffer_size, or \ref rocsparse_zbsric0_buffer_size. After
+ *  this buffer size has been determined, allocate the buffer and pass it to \ref rocsparse_sbsric0_analysis,
  *  \ref rocsparse_dbsric0_analysis, \ref rocsparse_cbsric0_analysis, or \ref rocsparse_zbsric0_analysis. This will
- *  perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_sbsric0,
+ *  perform analysis on the sparsity pattern of the matrix. Finally, call \p rocsparse_sbsric0,
  *  \p rocsparse_dbsric0, \p rocsparse_cbsric0, or \p rocsparse_zbsric0 to perform the actual factorization. The calculation
- *  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern
- *  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls
+ *  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern,
+ *  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. After all calls
  *  to \ref rocsparse_sbsric0 "rocsparse_Xbsric0()" are complete, the temporary buffer can be deallocated.
  *
  *  \p rocsparse_bsric0 reports the first zero pivot (either numerical or structural zero).
  *  The zero pivot status can be obtained by calling \ref rocsparse_bsric0_zero_pivot().
  *
  *  \note
- *  This function is non blocking and executed asynchronously with respect to the host.
- *  It may return before the actual computation has finished.
+ *  This function is non-blocking and executed asynchronously with respect to the host.
+ *  It can return before the actual computation has finished.
  *
  *  \note
  *  This routine supports execution in a hipGraph context.
  *
  *  @param[in]
- *  handle      handle to the rocsparse library context queue.
+ *  handle      handle to the rocSPARSE library context queue.
  *  @param[in]
- *  dir         direction that specified whether to count nonzero elements by \ref rocsparse_direction_row or by
+ *  dir         direction that specified whether to count non-zero elements by \ref rocsparse_direction_row or by
  *              \ref rocsparse_direction_column.
  *  @param[in]
  *  mb          number of block rows in the sparse BSR matrix.
@@ -387,7 +387,7 @@ rocsparse_status rocsparse_bsric0_clear(rocsparse_handle handle, rocsparse_mat_i
  *  @param[in]
  *  bsr_col_ind array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
  *  @param[in]
- *  block_dim   the block dimension of the BSR matrix. Between 1 and m where \p m=mb*block_dim.
+ *  block_dim   the block dimension of the BSR matrix. Between 1 and m, where \p m=mb*block_dim.
  *  @param[in]
  *  info        structure that holds the information collected during the analysis step.
  *  @param[in]
@@ -398,7 +398,7 @@ rocsparse_status rocsparse_bsric0_clear(rocsparse_handle handle, rocsparse_mat_i
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval     rocsparse_status_invalid_size \p mb, \p nnzb, or \p block_dim is invalid.
- *  \retval     rocsparse_status_invalid_pointer \p descr, \p bsr_val, \p bsr_row_ptr
+ *  \retval     rocsparse_status_invalid_pointer \p descr, \p bsr_val, \p bsr_row_ptr,
  *              or \p bsr_col_ind pointer is invalid.
  *  \retval     rocsparse_status_arch_mismatch the device is not supported.
  *  \retval     rocsparse_status_internal_error an internal error occurred.

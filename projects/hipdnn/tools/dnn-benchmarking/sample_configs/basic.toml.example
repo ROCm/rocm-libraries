@@ -1,0 +1,16 @@
+# Basic dnn-benchmark config for values that usually stay fixed across runs.
+# Supply the workload per run with --graph/-g, for example:
+#   dnn-benchmark --config sample_configs/basic.toml.example --graph graphs/sample_conv_fwd.json
+#
+# CLI flags override config values, so this can be a baseline recipe:
+#   dnn-benchmark --config sample_configs/basic.toml.example --graph 'graphs/*.json' --iters 500
+
+version = 1
+
+warmup = 10
+iters = 100
+verbose = true
+
+# Generic ROCm hipDNN engine plugin directory. With no [[engines]] entries,
+# dnn-benchmark discovers and runs all engines available in this directory.
+plugin_path = "/opt/rocm/lib/hipdnn_plugins/engines"

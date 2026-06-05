@@ -31,8 +31,45 @@ namespace rocRoller
 
         void Transformer::fillExecutionCoordinates(ContextPtr context)
         {
-            auto const& kernelWorkgroupIndexes = context->kernel()->workgroupIndex();
-            auto const& kernelWorkitemIndexes  = context->kernel()->workitemIndex();
+            AssertFatal(context);
+
+            auto kernel = context->kernel();
+
+            auto const& kernelWorkgroupIndexes = kernel->workgroupIndex();
+            auto const& kernelWorkitemIndexes  = kernel->workitemIndex();
+
+            std::array<Expression::ExpressionPtr, 3> wgExprs, wiExprs;
+            for(size_t i = 0; i < 3; i++)
+            {
+                wgExprs[i]
+                    = kernelWorkgroupIndexes[i] ? kernelWorkgroupIndexes[i]->expression() : nullptr;
+                wiExprs[i]
+                    = kernelWorkitemIndexes[i] ? kernelWorkitemIndexes[i]->expression() : nullptr;
+            }
+
+            fillExecutionCoordinates(wgExprs, wiExprs);
+
+            // TODO Remove this when Workgroup removed from RegisterTagManager
+            for(auto const& tag : m_graph->getNodes())
+            {
+                auto dimension = m_graph->getNode(tag);
+                if(std::holds_alternative<Workgroup>(dimension))
+                {
+                    auto dim = std::get<Workgroup>(dimension).dim;
+                    context->registerTagManager()->addRegister(tag, kernelWorkgroupIndexes.at(dim));
+                }
+                if(std::holds_alternative<Workitem>(dimension))
+                {
+                    auto dim = std::get<Workitem>(dimension).dim;
+                    context->registerTagManager()->addRegister(tag, kernelWorkitemIndexes.at(dim));
+                }
+            }
+        }
+
+        void Transformer::fillExecutionCoordinates(
+            std::array<Expression::ExpressionPtr, 3> const& kernelWorkgroupIndexes,
+            std::array<Expression::ExpressionPtr, 3> const& kernelWorkitemIndexes)
+        {
             for(auto const& tag : m_graph->getNodes())
             {
                 auto dimension = m_graph->getNode(tag);
@@ -46,10 +83,8 @@ namespace rocRoller
                                 ShowValue(toString(dimension)),
                                 ShowValue(dimensionWorkgroup.dim),
                                 ShowValue(kernelWorkgroupIndexes.size()));
-                    auto expr = kernelWorkgroupIndexes.at(dimensionWorkgroup.dim)->expression();
-                    // TODO Remove this when Workgroup removed from RegisterTagManager
-                    context->registerTagManager()->addRegister(
-                        tag, kernelWorkgroupIndexes.at(dimensionWorkgroup.dim));
+
+                    auto expr = kernelWorkgroupIndexes.at(dimensionWorkgroup.dim);
                     setCoordinate(tag, expr);
                 }
                 if(std::holds_alternative<Workitem>(dimension))
@@ -61,9 +96,7 @@ namespace rocRoller
                                 ShowValue(toString(dimension)),
                                 ShowValue(dimensionWorkitem.dim),
                                 ShowValue(kernelWorkitemIndexes.size()));
-                    auto expr = kernelWorkitemIndexes.at(dimensionWorkitem.dim)->expression();
-                    context->registerTagManager()->addRegister(
-                        tag, kernelWorkitemIndexes.at(dimensionWorkitem.dim));
+                    auto expr = kernelWorkitemIndexes.at(dimensionWorkitem.dim);
                     setCoordinate(tag, expr);
                 }
             }

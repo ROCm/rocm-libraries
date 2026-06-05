@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@ set(rocsparse_source
   src/auxiliary/rocsparse_error.cpp
 
 # Common
+  src/common/rocsparse_singularity.cpp
   src/common/rocsparse_common.cpp
   src/common/rocsparse_valset.cpp
   src/common/rocsparse_conjugate.cpp
@@ -41,6 +42,8 @@ set(rocsparse_source
   src/common/rocsparse_pivot_info_t.cpp
   src/common/rocsparse_csric0_info.cpp
   src/common/rocsparse_csrilu0_info.cpp
+  src/common/rocsparse_bsric0_info.cpp
+  src/common/rocsparse_bsrilu0_info.cpp
   src/common/rocsparse_trm_info.cpp
   src/common/rocsparse_sorted_coo2csr_info.cpp
   src/common/rocsparse_indextype_utils.cpp
@@ -58,6 +61,7 @@ set(rocsparse_source
   src/common/rocsparse_trm_data_t.cpp
   src/common/rocsparse_message.cpp
   src/common/rocsparse_determine_indextype.cpp
+  src/common/rocsparse_numeric_boost.cpp
 
 # Primitives
   src/primitives/rocsparse_radix_sort_pairs.cpp
@@ -123,6 +127,7 @@ set(rocsparse_source
   src/level2/rocsparse_csrmv_info.cpp
   src/level2/rocsparse_csrmv_adaptive_info.cpp
   src/level2/rocsparse_csrmv_lrb_info.cpp
+  src/level2/rocsparse_csrmv_nnzsplit_info.cpp
   src/level2/rocsparse_csrmv_analysis.cpp
   #
   src/level2/rocsparse_cscmv_impl.cpp
@@ -136,7 +141,6 @@ set(rocsparse_source
   src/level2/rocsparse_sellmv.cpp
   #
   src/level2/rocsparse_csrsv.cpp
-  src/level2/rocsparse_csrsv_zero_pivot.cpp
   src/level2/rocsparse_csrsv_buffer_size.cpp
   src/level2/rocsparse_xcsrsv_buffer_size.cpp
   src/level2/rocsparse_csrsv_analysis_kernels.cpp
@@ -665,4 +669,17 @@ set(rocsparse_source
   src/util/rocsparse_check_matrix_ell_buffer_size.cpp
   src/util/rocsparse_check_matrix_hyb_buffer_size.cpp
   src/util/rocsparse_check_spmat.cpp
+
+# Generic
+  src/generic/spilu0/rocsparse_spilu0_descr.cpp
+  src/generic/spilu0/rocsparse_spilu0_set_input.cpp
+  src/generic/spilu0/rocsparse_spilu0_get_output.cpp
+  src/generic/spilu0/rocsparse_spilu0.cpp
+  src/generic/spilu0/rocsparse_spilu0_buffer_size.cpp
+  src/generic/spic0/rocsparse_spic0_descr.cpp
+  src/generic/spic0/rocsparse_spic0_set_input.cpp
+  src/generic/spic0/rocsparse_spic0_get_output.cpp
+  src/generic/spic0/rocsparse_spic0.cpp
+  src/generic/spic0/rocsparse_spic0_buffer_size.cpp
+
 )

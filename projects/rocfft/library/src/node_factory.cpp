@@ -419,6 +419,8 @@ std::unique_ptr<TreeNode> NodeFactory::CreateNodeFromScheme(ComputeScheme s, Tre
         return std::unique_ptr<Real2DEvenNode>(new Real2DEvenNode(parent));
     case CS_REAL_3D_EVEN:
         return std::unique_ptr<Real3DEvenNode>(new Real3DEvenNode(parent));
+    case CS_REAL_3D_PP:
+        return std::unique_ptr<Real3DPPNode>(new Real3DPPNode(parent));
     case CS_BLUESTEIN:
         return std::unique_ptr<BluesteinNode>(new BluesteinNode(parent));
     case CS_L1D_TRTRT:
@@ -600,7 +602,7 @@ ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaD
     // both input and output.  Subsequent strides + dist on the real
     // side must all be expressible as complex stride + dist; that
     // is, they must all be even.
-    if(realLength[0] % 2 == 0 && nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1
+    if(isEven(realLength[0]) && nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1
        && std::all_of(realStride.begin() + 1, realStride.end(), isEven) && isEven(realDist))
     {
         switch(nodeData.dimension)
@@ -610,6 +612,10 @@ ComputeScheme NodeFactory::DecideRealScheme(const function_pool& pool, NodeMetaD
         case 2:
             return CS_REAL_2D_EVEN;
         case 3:
+            // Try 3D partial-pass first
+            if(use_CS_REAL_3D_PP(pool, nodeData))
+                return CS_REAL_3D_PP;
+
             return CS_REAL_3D_EVEN;
         default:
             throw std::runtime_error("Invalid dimension");
@@ -899,7 +905,8 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
                {rocfft_precision_double, {84, 108, 112, 168}}};
         if(childScheme == CS_2D_RC
            && length_excepted(exceptions, nodeData.precision, nodeData.length[1])
-           && nodeData.rootIsC2C)
+           && (nodeData.rootTransformType == rocfft_transform_type_complex_forward
+               || nodeData.rootTransformType == rocfft_transform_type_complex_inverse))
         {
             return CS_3D_TRTRTR;
         }
@@ -915,7 +922,7 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
 }
 
 bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool,
-                                   NodeMetaData&        nodeData,
+                                   const NodeMetaData&  nodeData,
                                    rocfft_array_type    inArrayType,
                                    rocfft_array_type    outArrayType)
 {
@@ -1057,6 +1064,51 @@ bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData
     return false;
 }
 
+// Batch size for enabling partial-pass 3D kernels may vary by GPU architecture, precision, and length
+static constexpr std::size_t batchLow           = 5;
+static constexpr std::size_t batchLowException1 = 25;
+static constexpr std::size_t batchLowException2 = 20;
+static constexpr std::size_t batchHigh          = 7500;
+
+// Partial pass is currently restricted to batch sizes in the batchLow to batchHigh range,
+// unit stride, and non-planar array types, to target the cases where it has the most performance
+// benefit and avoid regressions in other cases.
+auto check_pp_restrictions =
+    [](const NodeMetaData& nodeData, const size_t& batchLow, const size_t& batchHigh = 0) -> bool {
+    size_t checkiDist = 0, checkoDist = 0;
+
+    auto inputLength = nodeData.length;
+
+    // real-to-complex iDist check is in real units,
+    // which is outputLength[0] * 2 * product of other lengths
+    if(nodeData.placement == rocfft_placement_inplace
+       && nodeData.inArrayType == rocfft_array_type_real)
+        inputLength[0] = nodeData.outputLength[0] * 2;
+    checkiDist = product(inputLength.begin(), inputLength.end());
+    checkoDist = product(nodeData.outputLength.begin(), nodeData.outputLength.end());
+
+    bool distCondition   = (nodeData.iDist == checkiDist && nodeData.oDist == checkoDist);
+    bool strideCondition = (nodeData.inStride.size() && nodeData.inStride[0] == 1)
+                           && (nodeData.outStride.size() && nodeData.outStride[0] == 1);
+    bool arrayTypeCondition = (nodeData.inArrayType != rocfft_array_type_complex_planar)
+                              && (nodeData.inArrayType != rocfft_array_type_hermitian_planar)
+                              && (nodeData.outArrayType != rocfft_array_type_complex_planar)
+                              && (nodeData.outArrayType != rocfft_array_type_hermitian_planar);
+    bool batchCondition
+        = (nodeData.batch >= batchLow && (batchHigh == 0 || nodeData.batch <= batchHigh));
+
+    return (batchCondition && distCondition && strideCondition && arrayTypeCondition);
+};
+
+// Length exceptions for partial-pass 3D kernels may vary by GPU architecture and precision
+auto check_pp_length = [](const std::vector<std::vector<size_t>>& exceptions,
+                          const std::vector<size_t>&              length) -> bool {
+    const bool length_found
+        = std::find(exceptions.begin(), exceptions.end(), length) != exceptions.end();
+
+    return length_found;
+};
+
 bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
 {
     if(!pool.has_function(
@@ -1065,20 +1117,11 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
                    nodeData.length[1],
                    nodeData.length[2],
                    nodeData.precision,
+                   nodeData.rootTransformType,
                    CS_3D_PP)))
         return false;
 
-    auto find_length = [](const std::vector<std::vector<size_t>>& exceptions,
-                          const std::vector<size_t>&              length) -> bool {
-        const bool length_found
-            = std::find(exceptions.begin(), exceptions.end(), length) != exceptions.end();
-
-        return length_found;
-    };
-
-    // Batch size cut-off for enabling partial-pass 3D kernels may vary
-    // by GPU architecture, precision, and length
-    std::size_t cutOffBatch = 5;
+    size_t bLow = batchLow;
     if(nodeData.precision == rocfft_precision_single)
     {
         bool lenExceptionFound = false;
@@ -1086,27 +1129,52 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
         // Set a different batch cut-off for gfx1201/gfx950 when
         // not hitting the excepted lengths in single-precision
         std::vector<std::vector<size_t>> gfx1201LenException = {{52, 64, 64}, {128, 64, 64}};
-        lenExceptionFound = find_length(gfx1201LenException, nodeData.length);
+        lenExceptionFound = check_pp_length(gfx1201LenException, nodeData.length);
         if(get_curr_gcn_arch_name() == "gfx1201" && !lenExceptionFound)
-            cutOffBatch = 25;
+            bLow = batchLowException1;
         std::vector<std::vector<size_t>> gfx950LenException = {{52, 64, 64}};
-        lenExceptionFound = find_length(gfx950LenException, nodeData.length);
+        lenExceptionFound = check_pp_length(gfx950LenException, nodeData.length);
         if(get_curr_gcn_arch_name() == "gfx950" && !lenExceptionFound)
-            cutOffBatch = 25;
+            bLow = batchLowException1;
     }
 
-    // Partial pass is currently restricted to large enough batch sizes,
-    // unite stride, interleaved FFTs.
-    bool batchCondition = (nodeData.batch >= cutOffBatch);
+    return check_pp_restrictions(nodeData, bLow);
+}
 
-    size_t checkDist     = product(nodeData.length.begin(), nodeData.length.end());
-    bool   distCondition = (nodeData.iDist == checkDist && nodeData.oDist == checkDist);
+bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
+{
+    const auto& realLength = nodeData.direction == -1 ? nodeData.length : nodeData.outputLength;
 
-    bool strideCondition = ((nodeData.inStride.size() && nodeData.inStride[0]) == 1
-                            && (nodeData.outStride.size() && nodeData.outStride[0]) == 1);
+    const bool is_default_contiguous_layout
+        = nodeData.is_using_default_contiguous_layout_for(io_data_label::INPUT)
+          && nodeData.is_using_default_contiguous_layout_for(io_data_label::OUTPUT);
 
-    bool arrayTypeCondition = (nodeData.inArrayType != rocfft_array_type_complex_planar
-                               && nodeData.outArrayType != rocfft_array_type_complex_planar);
+    // First check if we can use 2D_SINGLE + 1D kernel, prefer that over partial-pass
+    if(Real3DEvenNode::use_real_2D_single_SBCC(nodeData, pool, is_default_contiguous_layout))
+        return false;
 
-    return (batchCondition && distCondition && strideCondition && arrayTypeCondition);
+    // Now check if we have the kernels for partial-pass
+    if(!pool.has_function(PPFMKey(realLength[0],
+                                  realLength[1],
+                                  realLength[2],
+                                  nodeData.precision,
+                                  nodeData.rootTransformType,
+                                  CS_REAL_3D_PP)))
+        return false;
+
+    // The batch cut-off for real 3D partial-pass is generally higher than complex 3D partial-pass,
+    // and it also varies more across architectures, so we have more fine-grained cut-offs here.
+    size_t bLow = nodeData.precision == rocfft_precision_double ? batchLow : batchLowException1;
+    if(get_curr_gcn_arch_name() == "gfx950" || get_curr_gcn_arch_name() == "gfx90a")
+        bLow = batchLowException2;
+    else if(get_curr_gcn_arch_name() == "gfx942")
+        bLow = batchLow;
+
+    size_t                           bHigh              = 0;
+    std::vector<std::vector<size_t>> gfx950LenException = {{80, 108, 108}};
+    bool lenExceptionFound = check_pp_length(gfx950LenException, nodeData.length);
+    if(lenExceptionFound && get_curr_gcn_arch_name() == "gfx950")
+        bHigh = batchHigh;
+
+    return check_pp_restrictions(nodeData, bLow, bHigh);
 }

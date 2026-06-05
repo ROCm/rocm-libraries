@@ -22,10 +22,10 @@
 
 import os
 import pytest
-import subprocess
 from pathlib import Path
 
 from Tensile import Tensile
+from Tensile.Tests.gpu_detection import has_arch
 
 # The yaml config is defined inline (rather than as a separate .yaml file) to
 # prevent test_config.py's findConfigs() from picking it up as a standalone
@@ -35,7 +35,7 @@ from Tensile import Tensile
 # (one MatrixInstruction) and a single benchmark problem size.
 _CONFIG = """\
 GlobalParameters:
-  ISA: [[9,5,0]]
+  ISA: [[9,4,2]]
   MinimumRequiredVersion: 5.0.0
   NumElementsToValidate: 0
   DataInitTypeBeta: 0
@@ -83,19 +83,7 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 256]
 """
 
-def _get_available_archs() -> list[str]:
-    """Get list of available GPU architectures via rocm_agent_enumerator."""
-    rocmpath = os.environ.get("TENSILE_ROCM_PATH",
-                              os.environ.get("ROCM_PATH", "/opt/rocm"))
-    rocm_agent_enum = os.path.join(rocmpath, "bin/rocm_agent_enumerator")
-    try:
-        output = subprocess.check_output([rocm_agent_enum, "-t", "GPU"])
-        return [line.strip() for line in output.decode().splitlines()
-                if line.strip() and "gfx000" not in line]
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        return []
-
-_HAS_GFX942 = any("gfx950" in arch for arch in _get_available_archs())
+_HAS_GFX942 = has_arch("gfx942")
 
 
 def _write_config(path: str) -> None:

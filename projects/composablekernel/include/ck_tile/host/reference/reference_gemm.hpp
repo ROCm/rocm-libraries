@@ -3,11 +3,18 @@
 
 #pragma once
 
-#include <cstdlib>
-#include <thread>
-
 #include "ck_tile/core.hpp"
+#include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/host/host_tensor.hpp"
+#include "ck_tile/ops/common/tensor_layout.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <iostream>
+#include <thread>
+#include <tuple>
+#include <type_traits>
 
 namespace ck_tile {
 
@@ -460,9 +467,15 @@ CK_TILE_HOST void reference_gemm(const HostTensor<ADataType>& a_m_k,
                                  const BElementOp& b_element_op     = {},
                                  const ACCElementOp& acc_element_op = {})
 {
+    if constexpr(std::is_same_v<ADataType, tf32_t> || std::is_same_v<BDataType, tf32_t>)
+        static_assert(std::is_same_v<ADataType, BDataType>,
+                      "ADataType and BDataType must be the same");
+
     const std::size_t M = a_m_k.get_length(0);
     const std::size_t N = b_k_n.get_length(1);
     const std::size_t K = a_m_k.get_length(1);
+
+    const bool is_gfx950 = (ck_tile::get_device_name() == "gfx950");
 
     auto f_mn = [&](auto m, auto n) {
         AccDataType v_acc = 0;
@@ -471,10 +484,27 @@ CK_TILE_HOST void reference_gemm(const HostTensor<ADataType>& a_m_k,
         {
             AccDataType v_a;
             AccDataType v_b;
-            if constexpr(std::is_same_v<ADataType, pk_int4_t>)
+            if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
             {
-                const pk_int4_t pk_val  = a_element_op(a_m_k(m, k));
+                // HostTensor automatically handles packed indexing: a_m_k(m,k) divides offset by
+                // PackedSize So a_m_k(m,0) and a_m_k(m,1) return the same packed byte
+                const pk_fp4_t pk_val   = a_m_k(m, k);
+                const fp32x2_t fp32_val = pk_val.to_fp32x2(1.0f);
+                const float unpacked    = (k % 2 == 1) ? fp32_val.hi : fp32_val.lo;
+                v_a = ck_tile::type_convert<AccDataType>(a_element_op(unpacked));
+            }
+            else if constexpr(std::is_same_v<ADataType, pk_int4_t>)
+            {
+                // HostTensor automatically handles packed indexing
+                const pk_int4_t pk_val  = a_m_k(m, k);
                 const fp32x2_t fp32_val = pk_int4_t_to_fp32x2_t(pk_val);
+                const float unpacked    = (k % 2 == 1) ? fp32_val.hi : fp32_val.lo;
+                v_a = ck_tile::type_convert<AccDataType>(a_element_op(unpacked));
+            }
+            else if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
+            {
+                const pk_fp4_t pk_val   = a_element_op(a_m_k(m, k));
+                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(pk_val, 1.f);
                 if(k % 2 == 1)
                     v_a = fp32_val.hi;
                 else
@@ -484,10 +514,26 @@ CK_TILE_HOST void reference_gemm(const HostTensor<ADataType>& a_m_k,
             {
                 v_a = ck_tile::type_convert<AccDataType>(a_element_op(a_m_k(m, k)));
             }
-            if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+            if constexpr(std::is_same_v<BDataType, pk_fp4_t>)
             {
-                const pk_int4_t pk_val  = b_element_op(b_k_n(k, n));
+                // HostTensor automatically handles packed indexing
+                const pk_fp4_t pk_val   = b_k_n(k, n);
+                const fp32x2_t fp32_val = pk_val.to_fp32x2(1.0f);
+                const float unpacked    = (k % 2 == 1) ? fp32_val.hi : fp32_val.lo;
+                v_b = ck_tile::type_convert<AccDataType>(b_element_op(unpacked));
+            }
+            else if constexpr(std::is_same_v<BDataType, pk_int4_t>)
+            {
+                // HostTensor automatically handles packed indexing
+                const pk_int4_t pk_val  = b_k_n(k, n);
                 const fp32x2_t fp32_val = pk_int4_t_to_fp32x2_t(pk_val);
+                const float unpacked    = (k % 2 == 1) ? fp32_val.hi : fp32_val.lo;
+                v_b = ck_tile::type_convert<AccDataType>(b_element_op(unpacked));
+            }
+            else if constexpr(std::is_same_v<BDataType, pk_fp4_t>)
+            {
+                const pk_fp4_t pk_val   = b_element_op(b_k_n(k, n));
+                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(pk_val, 1.f);
                 if(k % 2 == 1)
                     v_b = fp32_val.hi;
                 else
@@ -497,7 +543,36 @@ CK_TILE_HOST void reference_gemm(const HostTensor<ADataType>& a_m_k,
             {
                 v_b = ck_tile::type_convert<AccDataType>(b_element_op(b_k_n(k, n)));
             }
-            v_acc += v_a * v_b;
+
+            if constexpr(std::is_same_v<ADataType, tf32_t>)
+            {
+                if(is_gfx950)
+                {
+                    // gfx950: use 3x bf16 emulation
+                    bf16_t v_a_bf16_big   = ck_tile::type_convert<bf16_t>(v_a);
+                    bf16_t v_a_bf16_small = ck_tile::type_convert<bf16_t>(
+                        v_a - type_convert<AccDataType>(v_a_bf16_big));
+                    bf16_t v_b_bf16_big   = ck_tile::type_convert<bf16_t>(v_b);
+                    bf16_t v_b_bf16_small = ck_tile::type_convert<bf16_t>(
+                        v_b - type_convert<AccDataType>(v_b_bf16_big));
+
+                    v_acc += ck_tile::type_convert<AccDataType>(v_a_bf16_big) *
+                                 ck_tile::type_convert<AccDataType>(v_b_bf16_small) +
+                             ck_tile::type_convert<AccDataType>(v_a_bf16_small) *
+                                 ck_tile::type_convert<AccDataType>(v_b_bf16_big) +
+                             ck_tile::type_convert<AccDataType>(v_a_bf16_big) *
+                                 ck_tile::type_convert<AccDataType>(v_b_bf16_big);
+                }
+                else
+                {
+                    // Other architectures: tf32 not supported or handled via fp32 fallback
+                    v_acc += v_a * v_b;
+                }
+            }
+            else
+            {
+                v_acc += v_a * v_b;
+            }
         }
 
         c_m_n(m, n) = ck_tile::type_convert<CDataType>(acc_element_op(v_acc));
@@ -583,7 +658,8 @@ reference_gemm_multiple_abd(const std::array<HostTensor<ADataType>, AsDataType::
 
 template <typename ADataType,
           typename BDataType,
-          typename ScaleDataType,
+          typename AScaleDataType,
+          typename BScaleDataType,
           typename AccDataType,
           typename CDataType,
           typename AElementOp   = ck_tile::identity,
@@ -592,8 +668,8 @@ template <typename ADataType,
 CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
                                     const HostTensor<BDataType>& b_k_n,
                                     HostTensor<CDataType>& c_m_n,
-                                    const HostTensor<ScaleDataType>& scale_a,
-                                    const HostTensor<ScaleDataType>& scale_b,
+                                    const HostTensor<AScaleDataType>& scale_a,
+                                    const HostTensor<BScaleDataType>& scale_b,
                                     const AElementOp&   = {},
                                     const BElementOp&   = {},
                                     const ACCElementOp& = {})
@@ -619,29 +695,22 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
         {
             if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
             {
-                if(k % 2 == 1)
-                    continue; // skip odd k
-
-                auto a_f4x2  = a_m_k(m, k);
+                auto a_f4x2         = a_m_k(m, k);
+                std::size_t raw_off = m * a_m_k.get_stride(0) + k * a_m_k.get_stride(1);
+                auto a_val =
+                    (raw_off % 2 == 0)
+                        ? ck_tile::type_convert<AccDataType>(a_f4x2.template unpack<>(number<0>{}))
+                        : ck_tile::type_convert<AccDataType>(a_f4x2.template unpack<>(number<1>{}));
                 auto a_scale = ck_tile::type_convert<AccDataType>(scale_a(m, k / ScaleBlockSize));
-                auto a_f4_lo =
-                    ck_tile::type_convert<AccDataType>(a_f4x2.template unpack<>(number<0>{}));
-                auto a_f4_hi =
-                    ck_tile::type_convert<AccDataType>(a_f4x2.template unpack<>(number<1>{}));
-
-                a_m_k_scaled(m, k)     = a_f4_lo * a_scale;
-                a_m_k_scaled(m, k + 1) = a_f4_hi * a_scale;
+                a_m_k_scaled(m, k) = a_val * a_scale;
             }
             else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
             {
-                if(k % pk_fp6x16_t::packed_size != 0)
-                    continue;
+                std::size_t raw_off = m * a_m_k.get_stride(0) + k * a_m_k.get_stride(1);
+                std::size_t idx     = raw_off % pk_fp6x16_t::packed_size;
                 auto a_scale = ck_tile::type_convert<AccDataType>(scale_a(m, k / ScaleBlockSize));
-                for(std::size_t k_ = 0; k_ < pk_fp6x16_t::packed_size; k_++)
-                {
-                    a_m_k_scaled(m, k + k_) =
-                        pk_fp6x16_t::fp6_e2m3_to_float(a_m_k(m, k).unpack(k_)) * a_scale;
-                }
+                a_m_k_scaled(m, k) =
+                    pk_fp6x16_t::fp6_e2m3_to_float(a_m_k(m, k).unpack(idx)) * a_scale;
             }
             else
             {
@@ -658,29 +727,22 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
         {
             if constexpr(std::is_same_v<BDataType, pk_fp4_t>)
             {
-                if(k % 2 == 1)
-                    continue; // skip odd k
-
-                auto b_f4x2  = b_k_n(k, n);
+                auto b_f4x2         = b_k_n(k, n);
+                std::size_t raw_off = k * b_k_n.get_stride(0) + n * b_k_n.get_stride(1);
+                auto b_val =
+                    (raw_off % 2 == 0)
+                        ? ck_tile::type_convert<AccDataType>(b_f4x2.template unpack<>(number<0>{}))
+                        : ck_tile::type_convert<AccDataType>(b_f4x2.template unpack<>(number<1>{}));
                 auto b_scale = ck_tile::type_convert<AccDataType>(scale_b(k / ScaleBlockSize, n));
-                auto b_f4_lo =
-                    ck_tile::type_convert<AccDataType>(b_f4x2.template unpack<>(number<0>{}));
-                auto b_f4_hi =
-                    ck_tile::type_convert<AccDataType>(b_f4x2.template unpack<>(number<1>{}));
-
-                b_k_n_scaled(k, n)     = b_f4_lo * b_scale;
-                b_k_n_scaled(k + 1, n) = b_f4_hi * b_scale;
+                b_k_n_scaled(k, n) = b_val * b_scale;
             }
-            else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
+            else if constexpr(std::is_same_v<BDataType, pk_fp6x16_t>)
             {
-                if(k % pk_fp6x16_t::packed_size != 0)
-                    continue;
+                std::size_t raw_off = k * b_k_n.get_stride(0) + n * b_k_n.get_stride(1);
+                std::size_t idx     = raw_off % pk_fp6x16_t::packed_size;
                 auto b_scale = ck_tile::type_convert<AccDataType>(scale_b(k / ScaleBlockSize, n));
-                for(std::size_t k_ = 0; k_ < pk_fp6x16_t::packed_size; k_++)
-                {
-                    b_k_n_scaled(k + k_, n) =
-                        pk_fp6x16_t::fp6_e2m3_to_float(b_k_n(k, n).unpack(k_)) * b_scale;
-                }
+                b_k_n_scaled(k, n) =
+                    pk_fp6x16_t::fp6_e2m3_to_float(b_k_n(k, n).unpack(idx)) * b_scale;
             }
             else
             {
@@ -765,6 +827,10 @@ __global__ void naive_gemm_kernel(ADataType* A,
                                   ck_tile::index_t strideB,
                                   ck_tile::index_t strideC)
 {
+    if constexpr(std::is_same_v<ADataType, tf32_t> || std::is_same_v<BDataType, tf32_t>)
+        static_assert(std::is_same_v<ADataType, BDataType>,
+                      "ADataType and BDataType must be the same");
+
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int row = idx / N; // Compute row index
     int col = idx % N; // Compute column index
@@ -796,7 +862,7 @@ __global__ void naive_gemm_kernel(ADataType* A,
             }
             else if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
             {
-                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(A[a_index / packed_size_a]);
+                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(A[a_index / packed_size_a], 1.0f);
                 if(k % 2 == 1)
                     v_a = fp32_val.hi;
                 else
@@ -816,7 +882,7 @@ __global__ void naive_gemm_kernel(ADataType* A,
             }
             else if constexpr(std::is_same_v<BDataType, pk_fp4_t>)
             {
-                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(B[b_index / packed_size_b]);
+                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(B[b_index / packed_size_b], 1.0f);
                 if(k % 2 == 1)
                     v_b = fp32_val.hi;
                 else
@@ -826,7 +892,33 @@ __global__ void naive_gemm_kernel(ADataType* A,
             {
                 v_b = ck_tile::type_convert<AccDataType>(B[b_index]);
             }
-            acc += v_a * v_b;
+
+            if constexpr(std::is_same_v<ADataType, tf32_t>)
+            {
+#ifdef CK_GFX950_SUPPORT
+                // gfx950: use 3x bf16 emulation
+                bf16_t v_a_bf16_big = ck_tile::type_convert<bf16_t>(v_a);
+                bf16_t v_a_bf16_small =
+                    ck_tile::type_convert<bf16_t>(v_a - type_convert<AccDataType>(v_a_bf16_big));
+                bf16_t v_b_bf16_big = ck_tile::type_convert<bf16_t>(v_b);
+                bf16_t v_b_bf16_small =
+                    ck_tile::type_convert<bf16_t>(v_b - type_convert<AccDataType>(v_b_bf16_big));
+
+                acc += ck_tile::type_convert<AccDataType>(v_a_bf16_big) *
+                           ck_tile::type_convert<AccDataType>(v_b_bf16_small) +
+                       ck_tile::type_convert<AccDataType>(v_a_bf16_small) *
+                           ck_tile::type_convert<AccDataType>(v_b_bf16_big) +
+                       ck_tile::type_convert<AccDataType>(v_a_bf16_big) *
+                           ck_tile::type_convert<AccDataType>(v_b_bf16_big);
+#else
+                // Other architectures: use fp32 fallback
+                acc += v_a * v_b;
+#endif
+            }
+            else
+            {
+                acc += v_a * v_b;
+            }
         }
 
         int c_index = (std::is_same_v<LayoutC, tensor_layout::gemm::RowMajor>)
@@ -858,6 +950,10 @@ __global__ void blockwise_gemm_kernel(ADataType* A,
                                       float* scale_A_ptr,
                                       float* scale_B_ptr)
 {
+    if constexpr(std::is_same_v<ADataType, tf32_t> || std::is_same_v<BDataType, tf32_t>)
+        static_assert(std::is_same_v<ADataType, BDataType>,
+                      "ADataType and BDataType must be the same");
+
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int row = idx / N; // Compute row index
     int col = idx % N; // Compute column index
@@ -908,7 +1004,7 @@ __global__ void blockwise_gemm_kernel(ADataType* A,
             }
             else if constexpr(std::is_same_v<ADataType, pk_fp4_t>)
             {
-                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(A[a_index / packed_size_a]);
+                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(A[a_index / packed_size_a], 1.0f);
                 if(k % 2 == 1)
                     v_a = fp32_val.hi;
                 else
@@ -939,7 +1035,33 @@ __global__ void blockwise_gemm_kernel(ADataType* A,
             {
                 v_b = ck_tile::type_convert<AccDataType>(B[b_index]);
             }
-            acc_temp += v_a * v_b;
+
+            if constexpr(std::is_same_v<ADataType, tf32_t>)
+            {
+#ifdef CK_GFX950_SUPPORT
+                // gfx950: use 3x bf16 emulation
+                bf16_t v_a_bf16_big = ck_tile::type_convert<bf16_t>(v_a);
+                bf16_t v_a_bf16_small =
+                    ck_tile::type_convert<bf16_t>(v_a - type_convert<AccDataType>(v_a_bf16_big));
+                bf16_t v_b_bf16_big = ck_tile::type_convert<bf16_t>(v_b);
+                bf16_t v_b_bf16_small =
+                    ck_tile::type_convert<bf16_t>(v_b - type_convert<AccDataType>(v_b_bf16_big));
+
+                acc_temp += ck_tile::type_convert<AccDataType>(v_a_bf16_big) *
+                                ck_tile::type_convert<AccDataType>(v_b_bf16_small) +
+                            ck_tile::type_convert<AccDataType>(v_a_bf16_small) *
+                                ck_tile::type_convert<AccDataType>(v_b_bf16_big) +
+                            ck_tile::type_convert<AccDataType>(v_a_bf16_big) *
+                                ck_tile::type_convert<AccDataType>(v_b_bf16_big);
+#else
+                // Other architectures: use fp32 fallback
+                acc_temp += v_a * v_b;
+#endif
+            }
+            else
+            {
+                acc_temp += v_a * v_b;
+            }
         }
         // final accumulation
         acc += acc_temp * scale_A * scale_B;

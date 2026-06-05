@@ -35,7 +35,8 @@ hipFFT and hipFFTW share the same public repository located at `<https://github.
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./install/building-installing-hipfft-and-hipfftw>`
+    * :doc:`Install hipFFT <./install/install>`
+    * :doc:`Build from source <./install/building-installing-hipfft-and-hipfftw>`
 
   .. grid-item-card:: Conceptual
 

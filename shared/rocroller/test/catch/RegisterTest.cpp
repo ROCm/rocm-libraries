@@ -460,7 +460,7 @@ TEST_CASE("Register::Value::intersects() works", "[codegen][register]")
 
         auto vcc  = context->getVCC();
         auto scc  = context->getSCC();
-        auto exec = context->getExec();
+        auto exec = context->getEXEC();
 
         CHECK_DOESNT_INTERSECT(a, vcc);
         CHECK_DOESNT_INTERSECT(b, vcc);
@@ -476,7 +476,7 @@ TEST_CASE("Register::Value::intersects() works", "[codegen][register]")
 
         CHECK_INTERSECTS(vcc, context->getVCC());
         CHECK_INTERSECTS(scc, context->getSCC());
-        CHECK_INTERSECTS(exec, context->getExec());
+        CHECK_INTERSECTS(exec, context->getEXEC());
 
         CHECK_INTERSECTS(vcc, context->getVCC_LO());
         CHECK_INTERSECTS(vcc, context->getVCC_HI());
@@ -568,7 +568,7 @@ TEST_CASE("Register::RegisterId and Register::RegisterIdHash() work for special 
         auto context = TestContext::ForTarget(arch);
 
         std::vector<std::shared_ptr<rocRoller::Register::Value>> specialRegisters(
-            {context->getVCC_LO(), context->getVCC_HI(), context->getSCC(), context->getExec()});
+            {context->getVCC_LO(), context->getVCC_HI(), context->getSCC(), context->getEXEC()});
         std::vector<Register::RegisterId> specialRegisterIDs;
         for(auto& specialRegister : specialRegisters)
         {

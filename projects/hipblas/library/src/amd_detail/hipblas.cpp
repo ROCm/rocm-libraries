@@ -57,7 +57,11 @@ static hipblasStatus_t hipblasDemandAlloc(rocblas_handle                   handl
                     status = hipblasConvertStatus(blas_status);
                 else
                 {
-                    status = func();
+                    blas_status = rocblas_set_device_memory_size(handle, size);
+                    if(blas_status != rocblas_status_success)
+                        status = hipblasConvertStatus(blas_status);
+                    else
+                        status = func();
                 }
             }
         }
@@ -319,6 +323,47 @@ hipblasStatus_t hipblasDestroy(hipblasHandle_t handle)
 try
 {
     return hipblasConvertStatus(rocblas_destroy_handle((rocblas_handle)handle));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGetVersion(hipblasHandle_t handle, int* version)
+try
+{
+    if(!version)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+
+    *version = (hipblasVersionMajor * hipblasVersionK + hipblasVersionMinor) * hipblasVersionK
+               + hipblasVersionPatch;
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGetProperty(hipblasLibraryProperty_t type, int* value)
+try
+{
+    if(!value)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+
+    switch(type)
+    {
+    case HIPBLAS_MAJOR_VERSION:
+        *value = hipblasVersionMajor;
+        return HIPBLAS_STATUS_SUCCESS;
+    case HIPBLAS_MINOR_VERSION:
+        *value = hipblasVersionMinor;
+        return HIPBLAS_STATUS_SUCCESS;
+    case HIPBLAS_PATCH_LEVEL:
+        *value = hipblasVersionPatch;
+        return HIPBLAS_STATUS_SUCCESS;
+    default:
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    }
 }
 catch(...)
 {

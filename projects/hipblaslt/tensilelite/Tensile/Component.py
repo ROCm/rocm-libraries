@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,8 @@ Most components should be able to get away with defining their requirements via 
         asmCaps = {"v_fma_f16": True,
                 "v_pk_fma_f16": False}
         #archCaps = {}
-        kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Half),
+        kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.Half),
+                                  "MacDataTypeB": DataType(DataTypeEnum.Half),
                                 "HighPrecisionAccumulate": False}}
 ```
 
@@ -44,7 +45,8 @@ Values in the dictionaries can be lambdas for more advanced logic:
     class FMA_HPA_MAD_MIX(MAC):
         asmCaps = {"v_mad_mix_f32": True}
         #archCaps = {}
-        kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Half),
+        kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.Half),
+                                  "MacDataTypeB": DataType(DataTypeEnum.Half),
                                 "HighPrecisionAccumulate": True},
                 }
 ```
@@ -216,6 +218,17 @@ class LocalRead(Component):
     """
     Local read block.
     """
+    def _getLdsReadMemToken(self, writer, kernel, tP):
+        from rocisa.container import MemTokenData
+        tok = writer.states.ldsReadTokenIdx
+        return MemTokenData([tok]), tok
+
+    def _emitLdsRead(self, writer, kernel, tP, LocalReadX, dst, src, ds, module, comment=""):
+        ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP)
+        fullComment = "%s sync LDS%u" % (comment, ldsMemTokenIdx) if comment else "sync LDS%u" % ldsMemTokenIdx
+        inst = LocalReadX(dst=dst, src=src, ds=ds, comment=fullComment)
+        inst.setMemToken(ldsMemToken)
+        module.add(inst)
 
 class SumUnroll(Component):
     """
@@ -270,6 +283,11 @@ class SIA(Component):
 
 class GlobalWriteComponents(Component):
     pass
+
+class TensorDataMover(Component):
+    """
+    TDM
+    """
 
 # Importing here allows auto-registry of components in the Components directory.
 # Each file must be listed in __all__ in Components/__init__.py

@@ -4,7 +4,7 @@
 version: 2
 
 sphinx:
-   configuration: projects/hipdnn/docs/conf.py
+   configuration: projects/hipdnn/docs/user-guides/conf.py
 
 # RTD by default builds html only
 # Additional formats available for extra build time: htmlzip, pdf, epub
@@ -12,7 +12,7 @@ formats: []
 
 python:
    install:
-   - requirements: projects/hipdnn/docs/sphinx/requirements.txt
+   - requirements: projects/hipdnn/docs/user-guides/sphinx/requirements.txt
 
 # Defines build environment
 build:

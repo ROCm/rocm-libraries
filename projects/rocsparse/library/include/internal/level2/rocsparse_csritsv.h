@@ -34,29 +34,29 @@ extern "C" {
 
 /*! \ingroup level2_module
 *  \details
-*  \p rocsparse_csritsv_zero_pivot returns \ref rocsparse_status_zero_pivot, if either a
+*  \p rocsparse_csritsv_zero_pivot returns \ref rocsparse_status_zero_pivot if either a
 *  structural or numerical zero has been found during
 *  \ref rocsparse_scsritsv_solve "rocsparse_Xcsritsv_solve()" and/or
-*  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()", execution. The first zero pivot \f$j\f$ at
-*  \f$A_{j,j}\f$ is stored in \p position, using same index base as the CSR matrix.
+*  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()" execution. The first zero pivot \f$j\f$ at
+*  \f$A_{j,j}\f$ is stored in \p position, using the same index base as the CSR matrix.
 *
 *  \p position can be in host or device memory. If no zero pivot has been found,
 *  \p position is set to -1 and \ref rocsparse_status_success is returned instead.
 *
-*  \note \p rocsparse_csritsv_zero_pivot is a blocking function. It might influence
-*  performance negatively.
+*  \note \p rocsparse_csritsv_zero_pivot is a blocking function. It might negatively influence
+*  performance.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  descr       descriptor of the sparse CSR matrix.
 *  @param[in]
 *  info        structure that holds the information collected during the analysis step.
 *  @param[inout]
-*  position    pointer to zero pivot \f$j\f$, can be in host or device memory.
+*  position    pointer to zero pivot \f$j\f$, which can be in host or device memory.
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
@@ -83,7 +83,7 @@ rocsparse_status rocsparse_csritsv_zero_pivot(rocsparse_handle          handle,
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  trans       matrix operation type.
 *  @param[in]
@@ -111,7 +111,7 @@ rocsparse_status rocsparse_csritsv_zero_pivot(rocsparse_handle          handle,
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_size \p m or \p nnz is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p csr_val, \p csr_row_ptr,
-*              \p csr_col_ind, \p info or \p buffer_size pointer is invalid.
+*              \p csr_col_ind, \p info, or \p buffer_size pointer is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *  \retval     rocsparse_status_not_implemented
 *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general and \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_triangular.
@@ -175,8 +175,8 @@ rocsparse_status rocsparse_zcsritsv_buffer_size(rocsparse_handle                
 *  analysis meta data can be cleared by \ref rocsparse_csritsv_clear().
 *
 *   Selecting
-*  \ref rocsparse_analysis_policy_reuse policy can greatly improve computation
-*  performance of meta data. However, the user needs to make sure that the sparsity
+*  \ref rocsparse_analysis_policy_reuse policy can greatly improve the computation
+*  performance of metadata. However, the user needs to ensure that the sparsity
 *  pattern remains unchanged. If this cannot be assured,
 *  \ref rocsparse_analysis_policy_force has to be used.
 *
@@ -190,7 +190,7 @@ rocsparse_status rocsparse_zcsritsv_buffer_size(rocsparse_handle                
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  trans       matrix operation type.
 *  @param[in]
@@ -222,7 +222,7 @@ rocsparse_status rocsparse_zcsritsv_buffer_size(rocsparse_handle                
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_size \p m or \p nnz is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p csr_row_ptr,
-*              \p csr_col_ind, \p info or \p temp_buffer pointer is invalid.
+*              \p csr_col_ind, \p info, or \p temp_buffer pointer is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *  \retval     rocsparse_status_not_implemented
 *              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general and \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_triangular.
@@ -290,8 +290,8 @@ rocsparse_status rocsparse_zcsritsv_analysis(rocsparse_handle                han
 *  \details
 *  \p rocsparse_csritsv_clear deallocates all memory that was allocated by
 *  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()". This is
-*  especially useful, if memory is an issue and the analysis data is not
-*  required for further computation, e.g. when switching to another sparse
+*  especially useful if memory is an issue and the analysis data is not
+*  required for further computation, for example, when switching to another sparse
 *  matrix format. Calling \p rocsparse_csritsv_clear is optional. All allocated
 *  resources will be cleared when the opaque \ref rocsparse_mat_info struct is
 *  destroyed using \ref rocsparse_destroy_mat_info().
@@ -300,7 +300,7 @@ rocsparse_status rocsparse_zcsritsv_analysis(rocsparse_handle                han
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  descr       descriptor of the sparse CSR matrix.
 *  @param[inout]
@@ -319,12 +319,12 @@ rocsparse_status rocsparse_csritsv_clear(rocsparse_handle          handle,
                                          rocsparse_mat_info        info);
 
 /*! \ingroup level2_module
-*  \brief Sparse iterative triangular solve using CSR storage format
+*  \brief Sparse iterative triangular solve using the CSR storage format.
 *
 *  \details
-*  \p rocsparse_csritsv_solve solves iteratively with the use of the Jacobi method a sparse triangular linear system of a sparse
+*  \p rocsparse_csritsv_solve solves iteratively, with the use of the Jacobi method, a sparse triangular linear system of a sparse
 *  \f$m \times m\f$ matrix, defined in CSR storage format, a dense solution vector
-*  \f$y\f$ and the right-hand side \f$x\f$ that is multiplied by \f$\alpha\f$, such that
+*  \f$y\f$, and the right-hand side \f$x\f$ that is multiplied by \f$\alpha\f$, such that
 *  \f[
 *    op(A) y = \alpha x,
 *  \f]
@@ -360,11 +360,11 @@ rocsparse_status rocsparse_csritsv_clear(rocsparse_handle          handle,
 *  with \f$\epsilon\f$ = \p host_tol.
 *
 *  \p rocsparse_csritsv_solve requires a user allocated temporary buffer. Its size is
-*  returned by rocsparse_scsritsv_buffer_size "rocsparse_Xcsritsv_buffer_size()".
-*  Furthermore, analysis meta data is required. It can be obtained by
+*  returned by \ref rocsparse_scsritsv_buffer_size "rocsparse_Xcsritsv_buffer_size()".
+*  In addition, analysis metadata is required. It can be obtained by
 *  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()". \p rocsparse_csritsv_solve
 *  reports the first zero pivot (either numerical or structural zero).
-*  The zero pivot status can be checked calling \ref rocsparse_csritsv_zero_pivot(). If
+*  The zero pivot status can be checked by calling \ref rocsparse_csritsv_zero_pivot(). If
 *  \ref rocsparse_diag_type == \ref rocsparse_diag_type_unit, no zero pivot will be
 *  reported, even if \f$A_{j,j} = 0\f$ for some \f$j\f$.
 *
@@ -379,7 +379,7 @@ rocsparse_status rocsparse_csritsv_clear(rocsparse_handle          handle,
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle         handle to the rocsparse library context queue.
+*  handle         handle to the rocSPARSE library context queue.
 *  @param[inout]
 *  host_nmaxiter  maximum number of iterations on input and number of iterations on output. If the output number of iterations is strictly less than the input maximum number of iterations, then the algorithm converged.
 *  @param[in]
@@ -419,7 +419,7 @@ rocsparse_status rocsparse_csritsv_clear(rocsparse_handle          handle,
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_size \p m or \p nnz is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p alpha, \p csr_val,
-*              \p csr_row_ptr, \p csr_col_ind, \p x or \p y pointer is invalid.
+*              \p csr_row_ptr, \p csr_col_ind, \p x, or \p y pointer is invalid.
 *  \retval     rocsparse_status_arch_mismatch the device is not supported.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *  \retval     rocsparse_status_not_implemented
@@ -612,12 +612,12 @@ ROCSPARSE_EXPORT rocsparse_status
 /**@}*/
 
 /*! \ingroup level2_module
-*  \brief Sparse iterative triangular solve using CSR storage format
+*  \brief Sparse iterative triangular solve using the CSR storage format.
 *
 *  \details
-*  \p rocsparse_csritsv_solve_ex solves iteratively with the use of the Jacobi method a sparse triangular linear system of a sparse
+*  \p rocsparse_csritsv_solve_ex solves iteratively, with the use of the Jacobi method, a sparse triangular linear system of a sparse
 *  \f$m \times m\f$ matrix, defined in CSR storage format, a dense solution vector
-*  \f$y\f$ and the right-hand side \f$x\f$ that is multiplied by \f$\alpha\f$, such that
+*  \f$y\f$, and the right-hand side \f$x\f$ that is multiplied by \f$\alpha\f$, such that
 *  \f[
 *    op(A) y = \alpha x,
 *  \f]
@@ -652,14 +652,14 @@ ROCSPARSE_EXPORT rocsparse_status
 *  \f]
 *  with \f$\epsilon\f$ = \p host_tol.
 *
-*  The parameter \p host_nfreeiter is used to control the frequence of the stopping criteria evaluation, thus potentially improving the performance of the algorithm with less norm calculation. Between each iteration of index \f$ k \f$, \p host_nfreeiter are performed without stopping criteria evaluation. Thus, if the convergence is obtained at index \f$ k \f$, that means \f$ (k + 1) \f$ \p host_nfreeiter \f$ + k \f$ iterations have been performed.
+*  The parameter \p host_nfreeiter is used to control the frequence of the stopping criteria evaluation, potentially improving the performance of the algorithm with less norm calculation. Between each iteration of index \f$ k \f$, \p host_nfreeiter are performed without stopping criteria evaluation. Therefore, if the convergence is obtained at index \f$ k \f$, that means \f$ (k + 1) \f$ \p host_nfreeiter \f$ + k \f$ iterations have been performed.
 *
 *  \p rocsparse_csritsv_solve_ex requires a user allocated temporary buffer. Its size is
 *  returned by \ref rocsparse_scsritsv_buffer_size "rocsparse_Xcsritsv_buffer_size()".
 *  Furthermore, analysis meta data is required. It can be obtained by
 *  \ref rocsparse_scsritsv_analysis "rocsparse_Xcsritsv_analysis()". \p rocsparse_csritsv_solve_ex
 *  reports the first zero pivot (either numerical or structural zero). The zero pivot status
-*  can be checked calling rocsparse_csritsv_zero_pivot(). If
+*  can be checked by calling rocsparse_csritsv_zero_pivot(). If
 *  \ref rocsparse_diag_type == \ref rocsparse_diag_type_unit, no zero pivot will be
 *  reported, even if \f$A_{j,j} = 0\f$ for some \f$j\f$.
 *
@@ -674,13 +674,13 @@ ROCSPARSE_EXPORT rocsparse_status
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[inout]
 *  host_nmaxiter     maximum number of iterations on input and number of iterations on output. If the output number of iterations is strictly less than the input maximum number of iterations, then the algorithm converged.
 *  @param[in]
-*  host_nfreeiter    number of free iterations, i.e. the number of iterations performed without stopping criteria evaluation between two iterations with stopping criteria evaluation.
+*  host_nfreeiter    number of free iterations, that is, the number of iterations performed without stopping criteria evaluation between two iterations with stopping criteria evaluation.
 *  @param[in]
-*  host_tol          if the pointer is null then loop will execute \p nmaxiter[0] iterations.
+*  host_tol          if the pointer is null, then loop will execute \p nmaxiter[0] iterations.
 *  @param[out]
 *  host_history      optional array to record the norm of the residual before each iteration.
 *  @param[in]
@@ -716,7 +716,7 @@ ROCSPARSE_EXPORT rocsparse_status
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_size \p m or \p nnz is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p alpha, \p csr_val,
-*              \p csr_row_ptr, \p csr_col_ind, \p x or \p y pointer is invalid.
+*              \p csr_row_ptr, \p csr_col_ind, \p x, or \p y pointer is invalid.
 *  \retval     rocsparse_status_arch_mismatch the device is not supported.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *  \retval     rocsparse_status_not_implemented

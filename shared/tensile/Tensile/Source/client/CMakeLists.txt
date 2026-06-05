@@ -32,6 +32,7 @@ set(client_sources
     source/LibraryUpdateReporter.cpp
     source/MetaRunListener.cpp
     source/PerformanceReporter.cpp
+    source/ProgramOptions.cpp
     source/ProgressListener.cpp
     source/Reference.cpp
     source/ReferenceValidator.cpp
@@ -55,8 +56,6 @@ set_target_properties(TensileClient
                       CXX_STANDARD_REQUIRED ON
                       CXX_EXTENSIONS OFF)
 
-find_package(Boost COMPONENTS program_options REQUIRED)
-
 if (NOT WIN32)
     find_package(ROCmSMI QUIET)
     if(NOT ROCmSMI_FOUND)
@@ -65,11 +64,9 @@ if (NOT WIN32)
     endif()
 endif()
 
-include_directories(${Boost_INCLUDE_DIR})
-
 target_include_directories(TensileClient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")# "${rocm_smi_root}/include")
 
-target_link_libraries(TensileClient PRIVATE TensileHost ${Boost_LIBRARIES})
+target_link_libraries(TensileClient PRIVATE TensileHost)
 
 if(NOT WIN32)
     target_link_libraries(TensileClient PRIVATE TensileHost rocm_smi)
@@ -87,7 +84,7 @@ set_target_properties(tensile_client
                       CXX_STANDARD_REQUIRED ON
                       CXX_EXTENSIONS OFF)
 
-target_link_libraries(tensile_client PRIVATE TensileHost TensileClient ${Boost_LIBRARIES})
+target_link_libraries(tensile_client PRIVATE TensileHost TensileClient)
 if(TENSILE_USE_OPENMP)
     target_link_libraries(tensile_client PRIVATE custom_openmp_cxx)
 endif()

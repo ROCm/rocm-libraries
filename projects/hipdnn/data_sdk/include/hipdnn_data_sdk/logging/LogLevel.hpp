@@ -42,7 +42,7 @@ HIPDNN_HIDDEN inline std::atomic<bool>& getLogLevelInitialized()
 inline std::optional<hipdnnSeverity_t> stringToSeverity(const std::string& level)
 {
     // Normalize input: trim whitespace and convert to lowercase
-    std::string normalized = utilities::toLower(utilities::trim(level));
+    const std::string normalized = utilities::toLower(utilities::trim(level));
 
     if(normalized == "off")
     {
@@ -100,7 +100,7 @@ inline void initializeLogLevel()
         return; // Already initialized
     }
 
-    std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
+    const std::string logLevel = hipdnn_data_sdk::utilities::getEnv("HIPDNN_LOG_LEVEL", "off");
     detail::getLogLevelCache().store(detail::stringToSeverityOrOff(logLevel),
                                      std::memory_order_release);
     detail::getLogLevelInitialized().store(true, std::memory_order_release);
@@ -139,7 +139,7 @@ inline hipdnnSeverity_t getLogLevel()
  */
 inline bool isLogLevelEnabled(hipdnnSeverity_t severity)
 {
-    hipdnnSeverity_t currentLevel = getLogLevel();
+    const hipdnnSeverity_t currentLevel = getLogLevel();
     if(currentLevel == HIPDNN_SEV_OFF)
     {
         return false;

@@ -13,7 +13,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -54,6 +53,8 @@ namespace hipdnn_frontend::graph
 class BatchnormBackwardAttributes : public Attributes<BatchnormBackwardAttributes>
 {
 public:
+    BatchnormBackwardAttributes() = default;
+
     enum class InputNames
     {
         DY = 0,
@@ -227,71 +228,6 @@ public:
                                         std::shared_ptr<TensorAttributes>&& invVariance)
     {
         return set_mean(std::move(mean)).set_inv_variance(std::move(invVariance));
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        auto peerStatsVector = std::vector<int64_t>{};
-        for(const auto& peerStat : peer_stats)
-        {
-            if(peerStat)
-            {
-                peerStatsVector.emplace_back(peerStat->get_uid());
-            }
-        }
-
-        auto mean = get_mean();
-        auto invVariance = get_inv_variance();
-
-        return hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributesDirect(
-            builder,
-            get_dy()->get_uid(),
-            get_x()->get_uid(),
-            mean ? flatbuffers::Optional<int64_t>(mean->get_uid()) : flatbuffers::nullopt,
-            invVariance ? flatbuffers::Optional<int64_t>(invVariance->get_uid())
-                        : flatbuffers::nullopt,
-            get_scale()->get_uid(),
-            &peerStatsVector,
-            get_dx()->get_uid(),
-            get_dscale()->get_uid(),
-            get_dbias()->get_uid());
-    }
-
-    static BatchnormBackwardAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        BatchnormBackwardAttributes attr;
-
-        attr.set_dy(tensorMap.at(fb->dy_tensor_uid()));
-        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
-        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
-
-        if(fb->mean_tensor_uid().has_value())
-        {
-            attr.set_mean(tensorMap.at(fb->mean_tensor_uid().value()));
-        }
-        if(fb->inv_variance_tensor_uid().has_value())
-        {
-            attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid().value()));
-        }
-
-        std::vector<std::shared_ptr<TensorAttributes>> peerStats;
-        if(fb->peer_stats_tensor_uid() != nullptr)
-        {
-            for(auto uid : *fb->peer_stats_tensor_uid())
-            {
-                peerStats.push_back(tensorMap.at(uid));
-            }
-        }
-        attr.set_peer_stats(peerStats);
-
-        attr.set_dx(tensorMap.at(fb->dx_tensor_uid()));
-        attr.set_dscale(tensorMap.at(fb->dscale_tensor_uid()));
-        attr.set_dbias(tensorMap.at(fb->dbias_tensor_uid()));
-
-        return attr;
     }
 };
 typedef BatchnormBackwardAttributes Batchnorm_backward_attributes;

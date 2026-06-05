@@ -225,35 +225,25 @@ rocblas_tbsv_kernel(rocblas_operation transA,
                     int64_t           incx,
                     rocblas_stride    stride_x)
 {
-    uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    const auto* A = load_ptr_batch(Aa, blockIdx.x, shift_A, stride_A);
+    auto*       x = load_ptr_batch(xa, blockIdx.x, shift_x, stride_x);
+
+    if(transA == rocblas_operation_none)
     {
-#endif
-
-        const auto* A = load_ptr_batch(Aa, blockIdx.x, shift_A, stride_A);
-        auto*       x = load_ptr_batch(xa, blockIdx.x, shift_x, stride_x);
-
-        if(transA == rocblas_operation_none)
-        {
-            if(is_upper)
-                rocblas_tbsv_backward_substitution_calc<false, false, BLK_SIZE>(
-                    is_unit_diag, n, k, A, lda, x, incx);
-            else
-                rocblas_tbsv_forward_substitution_calc<false, false, BLK_SIZE>(
-                    is_unit_diag, n, k, A, lda, x, incx);
-        }
-        else if(is_upper)
-            rocblas_tbsv_forward_substitution_calc<CONJ, true, BLK_SIZE>(
+        if(is_upper)
+            rocblas_tbsv_backward_substitution_calc<false, false, BLK_SIZE>(
                 is_unit_diag, n, k, A, lda, x, incx);
         else
-            rocblas_tbsv_backward_substitution_calc<CONJ, true, BLK_SIZE>(
+            rocblas_tbsv_forward_substitution_calc<false, false, BLK_SIZE>(
                 is_unit_diag, n, k, A, lda, x, incx);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
+    else if(is_upper)
+        rocblas_tbsv_forward_substitution_calc<CONJ, true, BLK_SIZE>(
+            is_unit_diag, n, k, A, lda, x, incx);
+    else
+        rocblas_tbsv_backward_substitution_calc<CONJ, true, BLK_SIZE>(
+            is_unit_diag, n, k, A, lda, x, incx);
 }
 
 template <typename TConstPtr, typename TPtr>

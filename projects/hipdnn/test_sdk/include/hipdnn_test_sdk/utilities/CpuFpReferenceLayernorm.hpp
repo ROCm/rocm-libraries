@@ -65,9 +65,38 @@ public:
                 "normalizedDimCount must be between 1 and the number of tensor dimensions.");
         }
 
+        if(scale != nullptr && bias != nullptr && scale->dims().size() != bias->dims().size())
+        {
+            throw std::runtime_error("Scale and bias tensors must have the same rank.");
+        }
+
         // Split dimensions into batch dims and normalized dims
-        std::vector<int64_t> batchDims(dims.begin(), dims.begin() + (ndim - normalizedDimCount));
-        std::vector<int64_t> normalizedDims(dims.begin() + (ndim - normalizedDimCount), dims.end());
+        std::vector<int64_t> batchDims;
+        std::vector<int64_t> normalizedDims;
+        if((scale != nullptr && scale->dims().size() == dims.size())
+           || (bias != nullptr && bias->dims().size() == dims.size())) // Pad with ones
+        {
+            batchDims = std::vector<int64_t>(dims.size(), 1);
+            normalizedDims = std::vector<int64_t>(dims.size(), 1);
+            for(size_t i = 0; i < dims.size(); ++i)
+            {
+                if(static_cast<int64_t>(i) < ndim - normalizedDimCount)
+                {
+                    batchDims[i] = dims[i];
+                }
+                else
+                {
+                    normalizedDims[i] = dims[i];
+                }
+            }
+        }
+        else // Don't pad with ones
+        {
+            batchDims
+                = std::vector<int64_t>(dims.begin(), dims.begin() + (ndim - normalizedDimCount));
+            normalizedDims
+                = std::vector<int64_t>(dims.begin() + (ndim - normalizedDimCount), dims.end());
+        }
 
         for(auto d : normalizedDims)
         {
@@ -173,13 +202,27 @@ private:
         std::vector<int64_t> fullIndices;
         fullIndices.reserve(static_cast<size_t>(ndim));
 
-        // If batchDimCount is 0, the batch iteration was over a padded [1] dim, skip it
-        if(batchDimCount > 0)
+        if(batchIndices.size() == static_cast<size_t>(ndim)
+           && normIndices.size() == static_cast<size_t>(ndim)) // Padded with 1
         {
-            fullIndices.insert(fullIndices.end(), batchIndices.begin(), batchIndices.end());
+            fullIndices.insert(fullIndices.end(),
+                               batchIndices.begin(),
+                               batchIndices.begin() + ndim - normalizedDimCount);
+            fullIndices.insert(fullIndices.end(),
+                               normIndices.begin() + ndim - normalizedDimCount,
+                               normIndices.end());
+        }
+        else // Not padded with 1
+        {
+            // If batchDimCount is 0, the batch iteration was over a padded [1] dim, skip it
+            if(batchDimCount > 0)
+            {
+                fullIndices.insert(fullIndices.end(), batchIndices.begin(), batchIndices.end());
+            }
+
+            fullIndices.insert(fullIndices.end(), normIndices.begin(), normIndices.end());
         }
 
-        fullIndices.insert(fullIndices.end(), normIndices.begin(), normIndices.end());
         return fullIndices;
     }
 };

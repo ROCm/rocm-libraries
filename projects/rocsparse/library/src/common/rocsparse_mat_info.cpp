@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,16 @@
 #include "rocsparse_mat_info.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
+
+const rocsparse::numeric_boost* _rocsparse_mat_info::get_boost() const
+{
+    return &this->m_boost;
+}
+
+rocsparse::numeric_boost* _rocsparse_mat_info::get_boost()
+{
+    return &this->m_boost;
+}
 
 rocsparse_csrsm_info _rocsparse_mat_info::get_csrsm_info()
 {

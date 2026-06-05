@@ -524,7 +524,7 @@ TIMESTAMP              = NO
 # normally produced when WARNINGS is set to YES.
 # The default value is: NO.
 
-EXTRACT_ALL            = YES
+EXTRACT_ALL            = NO
 
 # If the EXTRACT_PRIVATE tag is set to YES, all private members of a class will
 # be included in the documentation.
@@ -952,8 +952,8 @@ WARN_LOGFILE           =
 INPUT                  = ./frontend/include \
                          ./backend/include \
                          ./data_sdk/include \
-                         ./samples \
-                         ./README.md
+                         ./flatbuffers_sdk/include \
+                         ./samples
 
 # This tag can be used to specify the character encoding of the source files
 # that doxygen parses. Internally doxygen uses the UTF-8 encoding. Doxygen uses
@@ -1027,7 +1027,6 @@ FILE_PATTERNS          = *.c \
                          *.inc \
                          *.m \
                          *.markdown \
-                         *.md \
                          *.mm \
                          *.dox \
                          *.py \
@@ -1059,7 +1058,8 @@ RECURSIVE              = YES
 # run.
 
 EXCLUDE                = ./frontend/include/hipdnn_frontend/detail \
-                         ./frontend/include/hipdnn_frontend/node/detail
+                         ./frontend/include/hipdnn_frontend/node/detail \
+                         ./flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp
 
 # The EXCLUDE_SYMLINKS tag can be used to select whether or not files or
 # directories that are symbolic links (a Unix file system feature) are excluded

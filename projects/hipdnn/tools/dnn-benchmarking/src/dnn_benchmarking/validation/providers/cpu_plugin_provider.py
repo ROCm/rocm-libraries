@@ -60,7 +60,7 @@ class CPUPluginReferenceProvider(ReferenceProvider):
         """Compute reference using CPU plugin.
 
         This would use the same execution path as GPU but with CPU engine.
-        Similar to how ABRunner runs two configurations.
+        Similar to running the same graph through two engine selections.
 
         Args:
             graph_json: The graph as a parsed JSON dictionary.

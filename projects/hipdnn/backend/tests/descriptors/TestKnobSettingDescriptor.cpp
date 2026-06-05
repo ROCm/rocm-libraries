@@ -101,7 +101,7 @@ TEST_F(TestKnobSettingDescriptor, FinalizeAlreadyFinalizedFails)
 TEST_F(TestKnobSettingDescriptor, SetAttributeAfterFinalizeFails)
 {
     makeFinalized();
-    std::string knobId = "another_knob";
+    const std::string knobId = "another_knob";
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
                                                              HIPDNN_TYPE_CHAR,
                                                              static_cast<int64_t>(knobId.size()),
@@ -118,7 +118,7 @@ TEST_F(TestKnobSettingDescriptor, SetAttributeUnsupportedAttribute)
 
 TEST_F(TestKnobSettingDescriptor, SetKnobIdAsChar)
 {
-    std::string knobId = "test_knob_id";
+    const std::string knobId = "test_knob_id";
     ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
                                                   HIPDNN_TYPE_CHAR,
                                                   static_cast<int64_t>(knobId.size()),
@@ -142,7 +142,7 @@ TEST_F(TestKnobSettingDescriptor, SetKnobIdNullFails)
 
 TEST_F(TestKnobSettingDescriptor, GetKnobIdAfterFinalize)
 {
-    std::string expectedId = "test_knob_id";
+    const std::string expectedId = "test_knob_id";
     setKnobId(expectedId);
     setInt64Value(42);
     ASSERT_NO_THROW(getDescriptor()->finalize());
@@ -162,7 +162,7 @@ TEST_F(TestKnobSettingDescriptor, GetKnobIdAfterFinalize)
 
 TEST_F(TestKnobSettingDescriptor, SetAndGetInt64Value)
 {
-    int64_t expectedValue = 42;
+    const int64_t expectedValue = 42;
     setKnobId("test_knob");
     setInt64Value(expectedValue);
     ASSERT_NO_THROW(getDescriptor()->finalize());
@@ -175,7 +175,7 @@ TEST_F(TestKnobSettingDescriptor, SetAndGetInt64Value)
 
 TEST_F(TestKnobSettingDescriptor, SetAndGetDoubleValue)
 {
-    double expectedValue = 3.14;
+    const double expectedValue = 3.14;
     setKnobId("test_knob");
     setDoubleValue(expectedValue);
     ASSERT_NO_THROW(getDescriptor()->finalize());
@@ -188,7 +188,7 @@ TEST_F(TestKnobSettingDescriptor, SetAndGetDoubleValue)
 
 TEST_F(TestKnobSettingDescriptor, SetAndGetStringValue)
 {
-    std::string expectedValue = "strval";
+    const std::string expectedValue = "strval";
     setKnobId("test_knob");
     setStringValue(expectedValue);
     ASSERT_NO_THROW(getDescriptor()->finalize());
@@ -273,8 +273,8 @@ TEST_F(TestKnobSettingDescriptor, GetKnobValueTypeMismatchFails)
 
 TEST_F(TestKnobSettingDescriptor, ToKnobSettingTProducesCorrectObject)
 {
-    std::string knobId = "test_knob_100";
-    int64_t value = 42;
+    const std::string knobId = "test_knob_100";
+    const int64_t value = 42;
     setKnobId(knobId);
     setInt64Value(value);
     ASSERT_NO_THROW(getDescriptor()->finalize());
@@ -282,14 +282,14 @@ TEST_F(TestKnobSettingDescriptor, ToKnobSettingTProducesCorrectObject)
     auto knobSettingT = getDescriptor()->toKnobSettingT();
     ASSERT_NE(knobSettingT, nullptr);
     ASSERT_EQ(knobSettingT->knob_id, knobId);
-    ASSERT_EQ(knobSettingT->value.type, hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+    ASSERT_EQ(knobSettingT->value.type, hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
     ASSERT_EQ(knobSettingT->value.AsIntValue()->value, value);
 }
 
 TEST_F(TestKnobSettingDescriptor, ToKnobSettingTWithDoubleValue)
 {
-    std::string knobId = "double_knob";
-    double value = 2.718;
+    const std::string knobId = "double_knob";
+    const double value = 2.718;
     setKnobId(knobId);
     setDoubleValue(value);
     ASSERT_NO_THROW(getDescriptor()->finalize());
@@ -297,7 +297,8 @@ TEST_F(TestKnobSettingDescriptor, ToKnobSettingTWithDoubleValue)
     auto knobSettingT = getDescriptor()->toKnobSettingT();
     ASSERT_NE(knobSettingT, nullptr);
     ASSERT_EQ(knobSettingT->knob_id, knobId);
-    ASSERT_EQ(knobSettingT->value.type, hipdnn_data_sdk::data_objects::KnobValue::FloatValue);
+    ASSERT_EQ(knobSettingT->value.type,
+              hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue);
     ASSERT_DOUBLE_EQ(knobSettingT->value.AsFloatValue()->value, value);
 }
 
@@ -310,7 +311,7 @@ TEST_F(TestKnobSettingDescriptor, ToKnobSettingTBeforeFinalizeFails)
 
 TEST_F(TestKnobSettingDescriptor, GetKnobIdWithElementCount)
 {
-    std::string expectedId = "my_knob";
+    const std::string expectedId = "my_knob";
     makeFinalized(expectedId);
 
     int64_t count = 0;
@@ -323,7 +324,7 @@ TEST_F(TestKnobSettingDescriptor, GetKnobIdWithElementCount)
 
 TEST_F(TestKnobSettingDescriptor, GetKnobValueWithElementCount)
 {
-    int64_t expectedValue = 99;
+    const int64_t expectedValue = 99;
     makeFinalized("knob", expectedValue);
 
     int64_t count = 0;
@@ -336,7 +337,7 @@ TEST_F(TestKnobSettingDescriptor, GetKnobValueWithElementCount)
 
 TEST_F(TestKnobSettingDescriptor, GetStringValueTruncatesToBufferSize)
 {
-    std::string longValue = "a_long_string_value";
+    const std::string longValue = "a_long_string_value";
     setKnobId("test_knob");
     setStringValue(longValue);
     ASSERT_NO_THROW(getDescriptor()->finalize());
@@ -360,7 +361,7 @@ TEST_F(TestKnobSettingDescriptor, GetStringValueTruncatesToBufferSize)
 
 TEST_F(TestKnobSettingDescriptor, GetStringValueSizeQueryWithNullBuffer)
 {
-    std::string expectedValue = "query_size";
+    const std::string expectedValue = "query_size";
     setKnobId("test_knob");
     setStringValue(expectedValue);
     ASSERT_NO_THROW(getDescriptor()->finalize());
@@ -373,7 +374,7 @@ TEST_F(TestKnobSettingDescriptor, GetStringValueSizeQueryWithNullBuffer)
 
 TEST_F(TestKnobSettingDescriptor, GetStringValueSizeQueryNullElementCountFails)
 {
-    std::string expectedValue = "test";
+    const std::string expectedValue = "test";
     setKnobId("test_knob");
     setStringValue(expectedValue);
     ASSERT_NO_THROW(getDescriptor()->finalize());
@@ -386,8 +387,8 @@ TEST_F(TestKnobSettingDescriptor, GetStringValueSizeQueryNullElementCountFails)
 
 TEST_F(TestKnobSettingDescriptor, ToKnobSettingTWithStringValue)
 {
-    std::string knobId = "string_knob";
-    std::string value = "hello_world";
+    const std::string knobId = "string_knob";
+    const std::string value = "hello_world";
     setKnobId(knobId);
     setStringValue(value);
     ASSERT_NO_THROW(getDescriptor()->finalize());
@@ -395,7 +396,8 @@ TEST_F(TestKnobSettingDescriptor, ToKnobSettingTWithStringValue)
     auto knobSettingT = getDescriptor()->toKnobSettingT();
     ASSERT_NE(knobSettingT, nullptr);
     ASSERT_EQ(knobSettingT->knob_id, knobId);
-    ASSERT_EQ(knobSettingT->value.type, hipdnn_data_sdk::data_objects::KnobValue::StringValue);
+    ASSERT_EQ(knobSettingT->value.type,
+              hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue);
     ASSERT_EQ(knobSettingT->value.AsStringValue()->value, value);
 }
 
@@ -405,7 +407,7 @@ TEST_F(TestKnobSettingDescriptor, ToKnobSettingTWithStringValue)
 
 TEST_F(TestKnobSettingDescriptor, SetEmptyKnobIdFails)
 {
-    std::string emptyId;
+    const std::string emptyId;
     ASSERT_THROW_HIPDNN_STATUS(
         getDescriptor()->setAttribute(
             HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, 0, emptyId.c_str()),
@@ -414,7 +416,8 @@ TEST_F(TestKnobSettingDescriptor, SetEmptyKnobIdFails)
 
 TEST_F(TestKnobSettingDescriptor, SetKnobIdExceedsMaxLengthFails)
 {
-    std::string longId(static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_ID_LENGTH + 1), 'x');
+    const std::string longId(static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_ID_LENGTH + 1),
+                             'x');
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
                                                              HIPDNN_TYPE_CHAR,
                                                              static_cast<int64_t>(longId.size()),
@@ -424,7 +427,7 @@ TEST_F(TestKnobSettingDescriptor, SetKnobIdExceedsMaxLengthFails)
 
 TEST_F(TestKnobSettingDescriptor, SetKnobIdAtMaxLengthSucceeds)
 {
-    std::string maxId(static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_ID_LENGTH), 'x');
+    const std::string maxId(static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_ID_LENGTH), 'x');
     ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
                                                   HIPDNN_TYPE_CHAR,
                                                   static_cast<int64_t>(maxId.size()),
@@ -433,7 +436,7 @@ TEST_F(TestKnobSettingDescriptor, SetKnobIdAtMaxLengthSucceeds)
 
 TEST_F(TestKnobSettingDescriptor, SetKnobStringValueExceedsMaxLengthFails)
 {
-    std::string longValue(
+    const std::string longValue(
         static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_STRING_VALUE_LENGTH + 1), 'y');
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
                                                              HIPDNN_TYPE_CHAR,
@@ -444,8 +447,8 @@ TEST_F(TestKnobSettingDescriptor, SetKnobStringValueExceedsMaxLengthFails)
 
 TEST_F(TestKnobSettingDescriptor, SetKnobStringValueAtMaxLengthSucceeds)
 {
-    std::string maxValue(static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_STRING_VALUE_LENGTH),
-                         'y');
+    const std::string maxValue(
+        static_cast<size_t>(KnobSettingDescriptor::MAX_KNOB_STRING_VALUE_LENGTH), 'y');
     ASSERT_NO_THROW(getDescriptor()->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
                                                   HIPDNN_TYPE_CHAR,
                                                   static_cast<int64_t>(maxValue.size()),
@@ -454,7 +457,7 @@ TEST_F(TestKnobSettingDescriptor, SetKnobStringValueAtMaxLengthSucceeds)
 
 TEST_F(TestKnobSettingDescriptor, SetKnobIdNegativeElementCountFails)
 {
-    std::string knobId = "test";
+    const std::string knobId = "test";
     ASSERT_THROW_HIPDNN_STATUS(
         getDescriptor()->setAttribute(
             HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, -1, knobId.c_str()),

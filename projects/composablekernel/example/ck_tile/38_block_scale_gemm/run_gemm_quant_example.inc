@@ -42,7 +42,7 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
         (std::is_same_v<typename TypeConfig::BDataType, ck_tile::fp8_t> ||
          std::is_same_v<typename TypeConfig::BDataType, ck_tile::bf8_t>);
     constexpr bool transpose_c = GemmConfig::TransposeC;
-    constexpr bool eight_warps =
+    constexpr bool eight_waves =
 #ifdef CK_GFX950_SUPPORT
         IS_FP8BLOCKSCALE && (GemmConfig::M_Warp * GemmConfig::N_Warp * GemmConfig::K_Warp == 8) &&
         GemmConfig::K_Warp_Tile == 128;
@@ -50,8 +50,9 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
         false;
 #endif
 
-    using ComputeDataType =
+    using AComputeDataType =
         std::conditional_t<IS_FP8BLOCKSCALE, typename TypeConfig::ADataType, void>;
+    using BComputeDataType = AComputeDataType; // TODO : need to double check
 
     using GemmShape = ck_tile::TileGemmShape<
         ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
@@ -81,11 +82,12 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                                                                  typename TypeConfig::AccDataType,
                                                                  GemmShape,
                                                                  GemmTraits,
-                                                                 ComputeDataType>;
+                                                                 AComputeDataType,
+                                                                 BComputeDataType>;
 
     // Base pipeline selection based on quant mode and preshuffle settings
     constexpr auto base_gemm_pipeline = []() {
-        if constexpr(eight_warps)
+        if constexpr(eight_waves)
             return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
         else if constexpr(GemmConfig::PreshuffleB)
             return ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>{};
@@ -101,9 +103,12 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
     }();
     using BaseGemmPipeline = std::decay_t<decltype(base_gemm_pipeline)>;
 
-    const ck_tile::index_t K_split  = ck_tile::integer_least_multiple(args.K, GemmConfig::K_Tile);
-    const ck_tile::index_t num_loop = TilePartitioner::GetLoopNum(K_split);
-    const bool has_hot_loop         = BaseGemmPipeline::BlockHasHotloop(num_loop);
+    constexpr auto K1 = GemmShape::WarpTile::at(ck_tile::number<2>{});
+    const ck_tile::index_t K_split =
+        args.k_batch == 1 ? ck_tile::integer_least_multiple(args.K, GemmConfig::K_Tile)
+                          : ck_tile::get_splitk_batch_k_read(args.K, args.k_batch, K1);
+    const ck_tile::index_t num_loop    = TilePartitioner::GetLoopNum(K_split);
+    const bool has_hot_loop            = BaseGemmPipeline::BlockHasHotloop(num_loop);
     const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
 
     const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {
@@ -125,7 +130,7 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                                                           GemmShape,
                                                           GemmTraits,
                                                           transpose_c,
-                                                          ComputeDataType,
+                                                          AComputeDataType,
                                                           GemmConfig::Scheduler,
                                                           has_hot_loop_v,
                                                           tail_number_v>,
@@ -139,7 +144,7 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                                                    GemmTraits,
                                                    AQuantGroupSize,
                                                    transpose_c,
-                                                   ComputeDataType,
+                                                   AComputeDataType,
                                                    GemmConfig::Scheduler,
                                                    has_hot_loop_v,
                                                    tail_number_v>,
@@ -152,7 +157,7 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                                                        GemmShape,
                                                        GemmTraits,
                                                        BQuantGroupSize,
-                                                       ComputeDataType,
+                                                       AComputeDataType,
                                                        GemmConfig::Scheduler,
                                                        has_hot_loop_v,
                                                        tail_number_v,
@@ -167,7 +172,7 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                                                         AQuantGroupSize,
                                                         BQuantGroupSize,
                                                         transpose_c,
-                                                        ComputeDataType,
+                                                        AComputeDataType,
                                                         GemmConfig::Scheduler,
                                                         has_hot_loop_v,
                                                         tail_number_v>>>>;
@@ -184,8 +189,8 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                                ck_tile::BQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>;
 
         using ABQuantPipeline = std::conditional_t<
-            eight_warps,
-            ck_tile::ABQuantGemmPipelineAgBgCrAsync<PipelineProblem>,
+            eight_waves,
+            ck_tile::ABQuantGemmPipelineAgBgCrEightWaves<PipelineProblem>,
             std::conditional_t<GemmConfig::DoubleSmemBuffer && GemmConfig::PreshuffleB,
                                ck_tile::WPABQuantBPipelineAgBgCrV2<PipelineProblem>,
                                ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>;
@@ -207,27 +212,44 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
             printf(
                 "TiledPermuteN: %d (QuantGroupSize::kN=%d)\n", TiledPermuteN, BQuantGroupSize::kN);
         }
-        using GemmEpilogue = ck_tile::CShuffleEpilogue<
-            ck_tile::CShuffleEpilogueProblem<typename PipelineProblem::ComputeDataType,
-                                             typename PipelineProblem::ComputeDataType,
-                                             ck_tile::tuple<>,
-                                             typename TypeConfig::AccDataType,
-                                             typename TypeConfig::CDataType,
-                                             ck_tile::tuple<>,
-                                             CLayout,
-                                             CDEElementWise,
-                                             TilePartitioner::MPerBlock,
-                                             TilePartitioner::NPerBlock,
-                                             GemmConfig::M_Warp,
-                                             GemmConfig::N_Warp,
-                                             GemmConfig::M_Warp_Tile,
-                                             GemmConfig::N_Warp_Tile,
-                                             GemmConfig::K_Warp_Tile,
-                                             transpose_c,
-                                             1,
-                                             false,
-                                             1,
-                                             TiledPermuteN>>;
+        using GemmEpilogue = std::conditional_t<
+            TiledPermuteN,
+            ck_tile::PermuteNEpilogue<
+                ck_tile::PermuteNEpilogueProblem<typename PipelineProblem::AComputeDataType,
+                                                 typename PipelineProblem::BComputeDataType,
+                                                 ck_tile::tuple<>,
+                                                 typename TypeConfig::AccDataType,
+                                                 typename TypeConfig::CDataType,
+                                                 ck_tile::tuple<>,
+                                                 CLayout,
+                                                 CDEElementWise,
+                                                 TilePartitioner::MPerBlock,
+                                                 TilePartitioner::NPerBlock,
+                                                 GemmConfig::M_Warp,
+                                                 GemmConfig::N_Warp,
+                                                 GemmConfig::M_Warp_Tile,
+                                                 GemmConfig::N_Warp_Tile,
+                                                 GemmConfig::K_Warp_Tile,
+                                                 transpose_c,
+                                                 false,
+                                                 1>>,
+            ck_tile::CShuffleEpilogue<
+                ck_tile::CShuffleEpilogueProblem<typename PipelineProblem::AComputeDataType,
+                                                 typename PipelineProblem::BComputeDataType,
+                                                 ck_tile::tuple<>,
+                                                 typename TypeConfig::AccDataType,
+                                                 typename TypeConfig::CDataType,
+                                                 ck_tile::tuple<>,
+                                                 CLayout,
+                                                 CDEElementWise,
+                                                 TilePartitioner::MPerBlock,
+                                                 TilePartitioner::NPerBlock,
+                                                 GemmConfig::M_Warp,
+                                                 GemmConfig::N_Warp,
+                                                 GemmConfig::M_Warp_Tile,
+                                                 GemmConfig::N_Warp_Tile,
+                                                 GemmConfig::K_Warp_Tile,
+                                                 transpose_c>>>;
         using Kernel =
             ck_tile::QuantGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue, QuantMode>;
 
@@ -256,7 +278,7 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                       << std::endl;
         }
         float ave_time = 0;
-        using k_attr_t = ck_tile::kernel_attr<eight_warps>;
+        using k_attr_t = ck_tile::kernel_attr<eight_waves>;
         if(s.flush_cache_)
         {
             std::cout << "Flushing cache..." << std::endl;
@@ -1030,6 +1052,7 @@ int run_gemm_example_prec_type(const ck_tile::ArgParser& arg_parser)
         if constexpr(QuantMode == ck_tile::QuantType::AQuantGrouped &&
                      !GemmConfig::APreshuffleQuant)
         {
+
             if(a_layout == "C" && b_layout == "C")
             {
                 return run_gemm_example_with_layouts<GemmConfig,

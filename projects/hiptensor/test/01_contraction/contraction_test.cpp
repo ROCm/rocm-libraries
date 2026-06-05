@@ -52,7 +52,7 @@ namespace hiptensor
         reset();
 
         // Handle our own outputs
-        hiptensorLoggerOpenFile("/dev/null");
+        hiptensor::test::silenceLogger();
         hiptensorLoggerSetCallback(logMessage);
     }
 
@@ -964,9 +964,7 @@ namespace hiptensor
 
                 size_t elementsCD = sizeD / hiptensorDataTypeSize(ADataType);
 
-                auto   eps       = getEpsilon(computeType == HIPTENSOR_COMPUTE_DESC_64F
-                                          ? HIPTENSOR_COMPUTE_DESC_64F
-                                          : HIPTENSOR_COMPUTE_DESC_32F);
+                auto   eps       = getEpsilon(computeType);
                 double tolerance = 2 * nelems_k * eps;
 
                 // use the same default tolerance value as CK

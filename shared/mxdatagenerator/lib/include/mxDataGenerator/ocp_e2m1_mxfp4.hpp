@@ -23,10 +23,9 @@ namespace DGen
         static constexpr bool hasZero = true;
     };
 
-    struct ocp_e2m1_mxfp4
+    struct ocp_e2m1_mxfp4_base
     {
         static constexpr OCP_E2M1_MXFP4_DATA dataInfo{};
-        static constexpr E8M0_SCALE_INFO     scaleInfo{};
 
         static constexpr uint8_t oneMask     = 0b0010;
         static constexpr uint8_t setSignMask = 0b0111;
@@ -44,6 +43,21 @@ namespace DGen
 
         static constexpr uint8_t positiveZeroMask = 0b0000;
         static constexpr uint8_t negativeZeroMask = 0b1000;
+    };
+
+    struct ocp_e2m1_mxfp4 : ocp_e2m1_mxfp4_base
+    {
+        static constexpr ScaleInfo<ScaleType::E8M0> scaleInfo{};
+    };
+
+    struct ocp_e2m1_mxfp4_e5m3 : ocp_e2m1_mxfp4_base
+    {
+        static constexpr ScaleInfo<ScaleType::E5M3> scaleInfo{};
+    };
+
+    struct ocp_e2m1_mxfp4_e4m3 : ocp_e2m1_mxfp4_base
+    {
+        static constexpr ScaleInfo<ScaleType::E4M3> scaleInfo{};
     };
 
 #include "ocp_e2m1_mxfp4_impl.hpp"

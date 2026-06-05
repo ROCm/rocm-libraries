@@ -57,8 +57,8 @@ struct HipEventProfiler
     HipEventPtr start;
     HipEventPtr stop;
 
-    HipEventProfiler(const Handle& handle_);
-    ~HipEventProfiler();
+    MIOPEN_INTERNALS_EXPORT HipEventProfiler(const Handle& handle_);
+    MIOPEN_INTERNALS_EXPORT ~HipEventProfiler();
 };
 
 #if 1 // Keep around other storage techinques -- @pfultz2 27.03.2017

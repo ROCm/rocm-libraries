@@ -27,8 +27,8 @@ namespace DGen
 
     struct ocp_e4m3_mxfp8
     {
-        static constexpr OCP_E4M3_MXFP8_DATA dataInfo{};
-        static constexpr E8M0_SCALE_INFO     scaleInfo{};
+        static constexpr OCP_E4M3_MXFP8_DATA        dataInfo{};
+        static constexpr ScaleInfo<ScaleType::E8M0> scaleInfo{};
 
         static constexpr uint8_t oneMask     = 0b00111000;
         static constexpr uint8_t signBitMask = 0b10000000;

@@ -80,19 +80,14 @@ rocblas_spr2_kernel(bool           host_ptr_mode,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto*       AP = load_ptr_batch(APa, batch, shift_AP, stride_AP);
         const auto* x  = load_ptr_batch(xa, batch, shift_x, stride_x);
         const auto* y  = load_ptr_batch(ya, batch, shift_y, stride_y);
 
         rocblas_spr2_kernel_calc<DIM_X, DIM_Y, N_TX>(is_upper, n, alpha, x, incx, y, incy, AP);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /**

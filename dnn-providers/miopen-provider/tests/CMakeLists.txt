@@ -32,6 +32,7 @@ add_executable(
     engines/plans/TestMiopenConvPlanBuilder.cpp
     engines/plans/TestMiopenConvWrwPlan.cpp
     engines/TestMiopenEngine.cpp
+    common/TestWorkarounds.cpp
     main.cpp
     TestMiopenActivationDescriptor.cpp
     TestMiopenConvDescriptor.cpp
@@ -39,6 +40,7 @@ add_executable(
     TestMiopenHipdnnEnginePluginHandle.cpp
     TestMiopenHipdnnPluginExecutionContext.cpp
     TestMiopenTensor.cpp
+    TestMiopenPluginPublic.cpp
     TestMiopenUtils.cpp
 )
 

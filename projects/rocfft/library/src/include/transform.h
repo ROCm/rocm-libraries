@@ -21,35 +21,13 @@
 #ifndef TRANSFORM_H
 #define TRANSFORM_H
 
-#include "../../../shared/rocfft_hip.h"
-
 #include "callback_map.h"
-
-struct rocfft_execution_info_t
-{
-    void*       workBuffer;
-    size_t      workBufferSize;
-    hipStream_t rocfft_stream = 0; // by default it is stream 0
-    rocfft_execution_info_t()
-        : workBuffer(nullptr)
-        , workBufferSize(0)
-    {
-    }
-    // User-supplied load/store callback function pointers and data.
-    // If specified, there is one function+data per brick in the
-    // input/output.
-    void** load_cb_fns        = nullptr;
-    void** load_cb_data       = nullptr;
-    size_t load_cb_lds_bytes  = 0;
-    void** store_cb_fns       = nullptr;
-    void** store_cb_data      = nullptr;
-    size_t store_cb_lds_bytes = 0;
-};
+#include "exec_info.h"
 
 void TransformPowX(const ExecPlan&                         execPlan,
                    void*                                   in_buffer[],
                    void*                                   out_buffer[],
-                   rocfft_execution_info                   info,
+                   const rocfft_execution_info_internal&   info,
                    size_t                                  multiPlanIdx,
                    const std::map<int, device_callback_t>& callbacks);
 

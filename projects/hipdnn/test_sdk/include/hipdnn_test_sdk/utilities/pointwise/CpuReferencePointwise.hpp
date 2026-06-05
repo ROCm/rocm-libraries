@@ -13,14 +13,14 @@ template <class DeviceExecutor, class OutputType, class... InputTypes>
 class ReferencePointwiseImpl
 {
 public:
-    static bool isApplicable(const hipdnn_data_sdk::data_objects::Node& node)
+    static bool isApplicable(const hipdnn_flatbuffers_sdk::data_objects::Node& node)
     {
         return ReferencePointwiseBase<DeviceExecutor, OutputType, InputTypes...>::isApplicable(
             node);
     }
 
     template <typename... Args>
-    static void pointwiseCompute(hipdnn_data_sdk::data_objects::PointwiseMode operation,
+    static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                  hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
                                  Args&&... args)
     {

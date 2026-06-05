@@ -181,7 +181,8 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
                         bool force_attach_binary                  = false);
 
 namespace conv {
-MIOPEN_INTERNALS_EXPORT bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo);
+MIOPEN_INTERNALS_EXPORT bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo,
+                                                 const ProblemDescription& problem);
 MIOPEN_INTERNALS_EXPORT bool IsEnoughWorkspace(std::string_view where,
                                                const miopen::solver::Id& solver_id,
                                                std::size_t required_size,

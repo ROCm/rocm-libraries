@@ -403,6 +403,8 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
 /// In this example a device-level sum operation is performed on an array of
 /// integer values and integer keys.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_reduce_by_key.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///

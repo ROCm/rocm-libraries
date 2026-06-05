@@ -16,7 +16,7 @@ into the following categories:
 * :ref:`dense_reductions`: Transformation of matrices and problems into equivalent forms.
 * :ref:`dense_linears`: Based on triangular factorizations.
 * :ref:`dense_leastsqr`: Based on orthogonal factorizations.
-* :ref:`dense_eigens`: Eigenproblems for symmetric matrices.
+* :ref:`dense_eigens`: Eigenproblems for general and symmetric matrices.
 * :ref:`dense_svds`: Singular values and related problems for general matrices.
 
 
@@ -327,6 +327,18 @@ hipsolverDn<type><type>gesv()
    :outline:
 .. doxygenfunction:: hipsolverDnSSgesv
 
+.. _dense_sytrs_bufferSize:
+
+hipsolverDn<type>sytrs_bufferSize()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverDnXsytrs_bufferSize
+
+.. _dense_sytrs:
+
+hipsolverDn<type>sytrs()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverDnXsytrs
+
 
 
 .. _dense_leastsqr:
@@ -366,12 +378,24 @@ hipsolverDn<type><type>gels()
 
 .. _dense_eigens:
 
-Symmetric eigensolvers
+General and symmetric eigensolvers
 ================================
 
-.. contents:: List of symmetric eigensolvers
+.. contents:: List of general and symmetric eigensolvers
    :local:
    :backlinks: top
+
+.. _dense_geev_bufferSize:
+
+hipsolverDn<type>geev_bufferSize()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverDnXgeev_bufferSize
+
+.. _dense_geev:
+
+hipsolverDn<type>geev()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverDnXgeev
 
 .. _dense_syevd_bufferSize:
 

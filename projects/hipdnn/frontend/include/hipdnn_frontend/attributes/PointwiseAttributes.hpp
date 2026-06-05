@@ -13,7 +13,6 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <optional>
@@ -58,6 +57,8 @@ namespace hipdnn_frontend::graph
 class PointwiseAttributes : public Attributes<PointwiseAttributes>
 {
 public:
+    PointwiseAttributes() = default;
+
     /// @brief Get the pointwise operation mode
     // NOLINTNEXTLINE(readability-identifier-naming)
     PointwiseMode get_mode() const
@@ -254,82 +255,6 @@ public:
     std::optional<float> elu_alpha = std::nullopt; ///< ELU alpha parameter
     std::optional<float> softplus_beta = std::nullopt; ///< Softplus beta parameter
     // NOLINTEND(readability-identifier-naming)
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::PointwiseAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        auto in0 = get_input_0();
-        auto in1 = get_input_1();
-        auto in2 = get_input_2();
-        auto ot0 = get_output_0();
-
-        return hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(
-            builder,
-            toSdkType(mode),
-            relu_lower_clip,
-            relu_upper_clip,
-            relu_lower_clip_slope,
-            axis,
-            in0->get_uid(),
-            in1 ? flatbuffers::Optional<int64_t>(in1->get_uid()) : flatbuffers::nullopt,
-            in2 ? flatbuffers::Optional<int64_t>(in2->get_uid()) : flatbuffers::nullopt,
-            ot0->get_uid(),
-            swish_beta,
-            elu_alpha,
-            softplus_beta);
-    }
-
-    static PointwiseAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        PointwiseAttributes attr;
-
-        attr.set_mode(fromSdkType(fb->operation()));
-
-        if(fb->relu_lower_clip().has_value())
-        {
-            attr.set_relu_lower_clip(fb->relu_lower_clip().value());
-        }
-        if(fb->relu_upper_clip().has_value())
-        {
-            attr.set_relu_upper_clip(fb->relu_upper_clip().value());
-        }
-        if(fb->relu_lower_clip_slope().has_value())
-        {
-            attr.set_relu_lower_clip_slope(fb->relu_lower_clip_slope().value());
-        }
-        if(fb->swish_beta().has_value())
-        {
-            attr.set_swish_beta(fb->swish_beta().value());
-        }
-        if(fb->elu_alpha().has_value())
-        {
-            attr.set_elu_alpha(fb->elu_alpha().value());
-        }
-        if(fb->softplus_beta().has_value())
-        {
-            attr.set_softplus_beta(fb->softplus_beta().value());
-        }
-        if(fb->axis_tensor_uid().has_value())
-        {
-            attr.set_axis(fb->axis_tensor_uid().value());
-        }
-
-        attr.set_input_0(tensorMap.at(fb->in_0_tensor_uid()));
-        if(fb->in_1_tensor_uid().has_value())
-        {
-            attr.set_input_1(tensorMap.at(fb->in_1_tensor_uid().value()));
-        }
-        if(fb->in_2_tensor_uid().has_value())
-        {
-            attr.set_input_2(tensorMap.at(fb->in_2_tensor_uid().value()));
-        }
-
-        attr.set_output_0(tensorMap.at(fb->out_0_tensor_uid()));
-
-        return attr;
-    }
 };
 typedef PointwiseAttributes Pointwise_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

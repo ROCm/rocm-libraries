@@ -26,7 +26,7 @@ TEST(TestSdkLogging, SdkLogInfoMessageIsCorrectlyPassedToCallback)
                                                  << recorder.getRecordedLogsAsString();
 
     // Build expected message
-    std::string expectedLogSuffix = "Plugin SDK info test message";
+    const std::string expectedLogSuffix = "Plugin SDK info test message";
     // Verify log contains expected message at INFO level
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, expectedLogSuffix))
         << "Expected log containing: \"" << expectedLogSuffix << "\"\n"
@@ -47,7 +47,7 @@ TEST(TestSdkLogging, SdkLogContainsComponentName)
                                                  << recorder.getRecordedLogsAsString();
 
     // Build expected message
-    std::string expectedComponentName = "[hipdnn_sdk]";
+    const std::string expectedComponentName = "[hipdnn_sdk]";
     // Verify log contains expected message at INFO level
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, expectedComponentName))
         << "Expected log containing: \"" << expectedComponentName << "\"\n"
@@ -71,10 +71,10 @@ TEST(TestSdkLogging, SdkLogAllSeverityLevels)
                                                  << recorder.getRecordedLogsAsString();
 
     // Build expected message
-    std::string expectedInfoMessage = "SDK info message";
-    std::string expectedWarnMessage = "SDK warn message";
-    std::string expectedErrorMessage = "SDK error message";
-    std::string expectedFatalMessage = "SDK fatal message";
+    const std::string expectedInfoMessage = "SDK info message";
+    const std::string expectedWarnMessage = "SDK warn message";
+    const std::string expectedErrorMessage = "SDK error message";
+    const std::string expectedFatalMessage = "SDK fatal message";
 
     // Verify log contains expected messages
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, expectedInfoMessage))
@@ -111,10 +111,10 @@ TEST(TestSdkLogging, SdkLogRespectsLogLevel)
                                                  << recorder.getRecordedLogsAsString();
 
     // Build expected message
-    std::string expectedInfoMessage = "SDK info message";
-    std::string expectedWarnMessage = "SDK warn message";
-    std::string expectedErrorMessage = "SDK error message";
-    std::string expectedFatalMessage = "SDK fatal message";
+    const std::string expectedInfoMessage = "SDK info message";
+    const std::string expectedWarnMessage = "SDK warn message";
+    const std::string expectedErrorMessage = "SDK error message";
+    const std::string expectedFatalMessage = "SDK fatal message";
 
     // Verify log contains expected messages
     EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, expectedInfoMessage))

@@ -153,10 +153,10 @@ rocblas_status rocsolver_orgl2_ungl2_template(rocblas_handle handle,
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
 
     // Initialize identity matrix (non used columns)
-    rocblas_int blocksx = (m - 1) / 32 + 1;
-    rocblas_int blocksy = (n - 1) / 32 + 1;
-    ROCSOLVER_LAUNCH_KERNEL(orgl2_init_ident<T>, dim3(blocksx, blocksy, batch_count), dim3(32, 32),
-                            0, stream, m, n, k, A, shiftA, lda, strideA);
+    rocblas_int blocksx = (m - 1) / BS2 + 1;
+    rocblas_int blocksy = (n - 1) / BS2 + 1;
+    ROCSOLVER_LAUNCH_KERNEL(orgl2_init_ident<T>, dim3(blocksx, blocksy, batch_count),
+                            dim3(BS2, BS2), 0, stream, m, n, k, A, shiftA, lda, strideA);
 
     for(rocblas_int j = k - 1; j >= 0; --j)
     {

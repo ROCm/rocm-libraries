@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,21 +52,45 @@ try
     // Check pointer arguments
     ROCSPARSE_CHECKARG_POINTER(2, position);
 
-    // Stream
-    auto bsrsv_info = info->get_bsrsv_info();
+    const auto indextype  = rocsparse::get_indextype<rocsparse_int>();
+    auto       bsrsv_info = info->get_bsrsv_info();
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(
+        handle, 1, bsrsv_info, nullptr, nullptr, handle->pointer_mode, indextype, position));
+    switch(indextype)
     {
-        auto status = bsrsv_info->copy_zero_pivot_async(handle->pointer_mode,
-                                                        rocsparse::get_indextype<rocsparse_int>(),
-                                                        position,
-                                                        handle->stream);
-        if(status == rocsparse_status_zero_pivot)
+    case rocsparse_indextype_i32:
+    {
+        int32_t p;
+        RETURN_IF_HIP_ERROR(
+            hipMemcpyAsync(&p, position, sizeof(int32_t), hipMemcpyDefault, handle->stream));
+        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+        if(p != -1)
         {
-            return status;
+            return rocsparse_status_zero_pivot;
         }
-        RETURN_IF_ROCSPARSE_ERROR(status);
+        return rocsparse_status_success;
     }
-    return rocsparse_status_success;
+    case rocsparse_indextype_i64:
+    {
+        int64_t p;
+        RETURN_IF_HIP_ERROR(
+            hipMemcpyAsync(&p, position, sizeof(int64_t), hipMemcpyDefault, handle->stream));
+        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+        if(p != -1)
+        {
+            return rocsparse_status_zero_pivot;
+        }
+        return rocsparse_status_success;
+    }
+
+    case rocsparse_indextype_u16:
+    {
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                               "rocsparse_indextype_u16 not supported");
+    }
+    }
     // LCOV_EXCL_START
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
 catch(...)
 {

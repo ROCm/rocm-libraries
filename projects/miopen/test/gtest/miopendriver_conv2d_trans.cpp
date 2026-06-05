@@ -69,7 +69,7 @@ class GPU_MIOpenDriverConv2dTransTest_BFP16 : public testing::TestWithParam<std:
 
 void RunMIOpenDriver(const std::vector<TestCase>& testCases)
 {
-    using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X>;
+    using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X, Gpu::gfx115X>;
     using d_mask = disabled<Gpu::gfx900>;
     if(!ShouldRunMIOpenDriverTest<d_mask, e_mask>())
     {

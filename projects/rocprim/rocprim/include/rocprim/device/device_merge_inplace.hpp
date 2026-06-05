@@ -662,6 +662,9 @@ struct merge_inplace_impl
 /// \par Example
 /// \parblock
 /// \code{.cpp}
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_merge_inplace.cpp).
+///
 /// #include <rocprim/rocprim.hpp>
 ///
 /// size_t left_size;  // e.g. 4

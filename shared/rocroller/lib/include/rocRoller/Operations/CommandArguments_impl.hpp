@@ -13,8 +13,6 @@ namespace rocRoller
         {
         case ArgumentType::Value:
             return "Value";
-        case ArgumentType::Limit:
-            return "Limit";
         case ArgumentType::Size:
             return "Size";
         case ArgumentType::Stride:

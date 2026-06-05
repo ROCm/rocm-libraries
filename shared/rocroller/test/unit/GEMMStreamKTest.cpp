@@ -22,7 +22,7 @@ namespace GEMMTests
     // GEMMStreamKMultipleFixupsTestSuite
     // ========================================================================
 
-    // Params: ProblemConfig, StreamKMode, loadPathA, loadPathB, storeLDSD
+    // Params: ProblemConfig, StreamKMode, loadPathA, loadPathB, storePath
     class GEMMStreamKMultipleFixupsTestSuite
         : public BaseGEMMContextFixture<std::tuple<ProblemConfig,
                                                    StreamKMode,
@@ -111,7 +111,9 @@ namespace GEMMTests
                                   SolutionParams::LoadPath::BufferToVGPR,
                                   SolutionParams::LoadPath::GlobalToVGPR,
                                   SolutionParams::LoadPath::GlobalToLDSViaVGPR), /* loadPathB */
-                ::testing::Values(true, false) /* storeLDSD */
+                ::testing::Values(
+                    SolutionParams::StorePath::VGPRToGlobalMemoryWithBuffer,
+                    SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer) /* storePath */
                 )));
 
     // ========================================================================

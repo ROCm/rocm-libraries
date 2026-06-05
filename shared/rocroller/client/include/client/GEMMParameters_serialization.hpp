@@ -126,6 +126,7 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "scalePreTileA", params.scalePretileA);
             iot::mapRequired(io, "scalePreTileB", params.scalePretileB);
 
+            iot::mapRequired(io, "pretileA", params.pretileA);
             iot::mapRequired(io, "pretileB", params.pretileB);
         }
 

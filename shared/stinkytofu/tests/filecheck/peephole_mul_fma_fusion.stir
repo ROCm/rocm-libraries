@@ -1,0 +1,82 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --BuildUseDefChainPass --PeepholeOptimizationPass --print-output
+#
+# MUL+FMA Fusion: v_mul + v_fma with constants → single v_fma with folded constant.
+# v_mul v0,C1,v1 + v_fma v2,C2,v0,v3 → v_fma v2,(C1*C2),v1,v3
+# Converted from PeepholeOptimizationPassTest.*MULFMA*
+
+#--- F32 basic: 2.0 * 3.0 = 6.0
+# CHECK-LABEL: @mul_fma_f32_basic
+# CHECK: v_fma_f32
+# CHECK-SAME: v2
+# CHECK-SAME: 6
+# CHECK-SAME: v1
+# CHECK-SAME: v3
+# CHECK-NOT: v_mul_f32
+
+st.func @mul_fma_f32_basic() {
+^entry:
+  v0 = "st.v_mul_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_fma_f32"(3.0, v0, v3) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- F32 commutative: MUL result in first position of FMA multiply
+# CHECK-LABEL: @mul_fma_f32_commutative
+# CHECK: v_fma_f32
+# CHECK-SAME: 6
+# CHECK-NOT: v_mul_f32
+
+st.func @mul_fma_f32_commutative() {
+^entry:
+  v0 = "st.v_mul_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_fma_f32"(v0, 3.0, v3) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- F16 basic: 2.0 * 3.0 = 6.0
+# CHECK-LABEL: @mul_fma_f16_basic
+# CHECK: v_fma_f16
+# CHECK-SAME: 6
+# CHECK-SAME: v1
+# CHECK-SAME: v3
+# CHECK-NOT: v_mul_f16
+
+st.func @mul_fma_f16_basic() {
+^entry:
+  v0 = "st.v_mul_f16"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_fma_f16"(3.0, v0, v3) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative: MUL result has multiple uses → no fusion
+# CHECK-LABEL: @no_fusion_mulfma_multiple_uses
+# CHECK: v_mul_f32
+# CHECK: v_fma_f32
+# CHECK: v_add_f32
+
+st.func @no_fusion_mulfma_multiple_uses() {
+^entry:
+  v0 = "st.v_mul_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_fma_f32"(3.0, v0, v3) { issueCycles = 1, latencyCycles = 5 }
+  v4 = "st.v_add_f32"(v0, v5) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative: MUL has no constant → no fusion
+# CHECK-LABEL: @no_fusion_mulfma_missing_const
+# CHECK: v_mul_f32
+# CHECK: v_fma_f32
+
+st.func @no_fusion_mulfma_missing_const() {
+^entry:
+  v0 = "st.v_mul_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_fma_f32"(3.0, v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative values: -2.0 * 3.0 = -6.0
+# CHECK-LABEL: @mul_fma_negative
+# CHECK: v_fma_f32
+# CHECK-SAME: -6
+# CHECK-NOT: v_mul_f32
+
+st.func @mul_fma_negative() {
+^entry:
+  v0 = "st.v_mul_f32"(-2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_fma_f32"(3.0, v0, v3) { issueCycles = 1, latencyCycles = 5 }
+}

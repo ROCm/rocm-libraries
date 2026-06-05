@@ -4,6 +4,8 @@
 # generate kernel instances to speed up compilation
 
 import argparse
+import sys
+import importlib.util
 from enum import IntEnum
 from pathlib import Path
 import pkgutil
@@ -18,11 +20,23 @@ class HandlerId(IntEnum):
     WRITE_BLOBS = 1
 
 
+def _load_ops_module(importer, module_name: str):
+    """Load a submodule from codegen.ops, matching Loader.load_module behavior."""
+    spec = importer.find_spec(module_name)
+    loader = spec.loader
+    if hasattr(loader, "load_module"):
+        return loader.load_module(module_name)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    loader.exec_module(module)
+    return module
+
+
 # inspect all modules under 'codegen.ops' and register API handlers
 ops = []
 for importer, module_name, _ in pkgutil.iter_modules(codegen.ops.__path__):
     full_module_name = "%s.%s" % (codegen.ops.__name__, module_name)
-    ops.append(importer.find_spec(module_name).loader.load_module(module_name))
+    ops.append(_load_ops_module(importer, module_name))
 unwanted_prefix = "fmha_"
 handlers = dict(
     [
@@ -139,7 +153,9 @@ if __name__ == "__main__":
         + "  200-299: Only generate instance for Aiter(mha_varlen_fwd) integration\n"
         + "  300-399: Only generate instance for Aiter(mha_bwd) integration\n"
         + "  400-499: Only generate instance for Aiter(mha_varlen_bwd) integration\n"
-        + "  600-699: Only generate instance for aiter::mha_fwd && aiter::mha_fwd_splitkv && aiter::mha_bwd C++ api integration",
+        + "  600-699: Only generate instance for aiter::mha_fwd && aiter::mha_fwd_splitkv && aiter::mha_bwd C++ api integration\n"
+        + "  700: Only generate instance for TransformerEngine integration (fwd + bwd, fp16/bf16 only,\n"
+        + "        invariants: row vlayout, has_lse, no skip/sink/logits/qscale)",
     )
 
     parser.add_argument(

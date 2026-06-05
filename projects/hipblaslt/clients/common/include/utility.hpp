@@ -83,6 +83,7 @@
 #define LIMITED_MEMORY_STRING "Error: Attempting to allocate more memory than available."
 #define TOO_MANY_DEVICES_STRING "Error: Too many devices requested."
 #define HMM_NOT_SUPPORTED "Error: HMM not supported."
+#define KNOWN_BUG_STRING "Known bug for current GPU platform (see known_bugs.yaml)."
 
 // TODO: This is dependent on internal gtest behaviour.
 // Compared with result.message() when a test ended. Note that "Succeeded\n" is
@@ -90,6 +91,9 @@
 #define LIMITED_MEMORY_STRING_GTEST "Succeeded\n" LIMITED_MEMORY_STRING
 #define TOO_MANY_DEVICES_STRING_GTEST "Succeeded\n" TOO_MANY_DEVICES_STRING
 #define HMM_NOT_SUPPORTED_GTEST "Succeeded\n" HMM_NOT_SUPPORTED
+// GTEST_SKIP() prefixes "Skipped\n"; the listener uses strstr() to detect this
+// substring, so trailing details (e.g. matched platforms) can be appended via <<.
+#define KNOWN_BUG_STRING_GTEST "Skipped\n" KNOWN_BUG_STRING
 
 inline bool is_bias_enabled(hipblasLtEpilogue_t value_)
 {

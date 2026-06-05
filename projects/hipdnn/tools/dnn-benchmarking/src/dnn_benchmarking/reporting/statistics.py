@@ -29,11 +29,13 @@ class BenchmarkStats:
 
     Attributes:
         mean_ms: Mean execution time in milliseconds.
+        median_ms: Median execution time in milliseconds.
         std_ms: Standard deviation of execution time in milliseconds.
         min_ms: Minimum execution time in milliseconds.
         max_ms: Maximum execution time in milliseconds.
         p95_ms: 95th percentile execution time in milliseconds.
         p99_ms: 99th percentile execution time in milliseconds.
+        total_ms: Total execution time across all iterations in milliseconds.
     """
 
     mean_ms: float
@@ -42,6 +44,8 @@ class BenchmarkStats:
     max_ms: float
     p95_ms: float
     p99_ms: float
+    total_ms: float = 0.0
+    median_ms: float = 0.0
 
     @classmethod
     def from_timings(cls, timings: List[float]) -> "BenchmarkStats":
@@ -63,12 +67,27 @@ class BenchmarkStats:
 
         return cls(
             mean_ms=float(np.mean(arr)),
+            median_ms=float(np.median(arr)),
             std_ms=float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0,
             min_ms=float(np.min(arr)),
             max_ms=float(np.max(arr)),
             p95_ms=float(np.percentile(arr, 95)),
             p99_ms=float(np.percentile(arr, 99)),
+            total_ms=float(np.sum(arr)),
         )
+
+    def to_dict(self) -> Dict[str, float]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "mean_ms": self.mean_ms,
+            "median_ms": self.median_ms,
+            "std_ms": self.std_ms,
+            "min_ms": self.min_ms,
+            "max_ms": self.max_ms,
+            "p95_ms": self.p95_ms,
+            "p99_ms": self.p99_ms,
+            "total_ms": self.total_ms,
+        }
 
 
 @dataclass

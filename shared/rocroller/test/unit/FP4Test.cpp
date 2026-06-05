@@ -241,14 +241,12 @@ namespace rocRollerTest
             auto commandArgs = command->createArguments();
 
             commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
-            commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)nx * ny);
             commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)nx);
             commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)ny);
             commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)(ny));
             commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)(1));
 
             commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
-            commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)nx * ny);
             commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)nx);
             commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)ny);
             commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)(ny));

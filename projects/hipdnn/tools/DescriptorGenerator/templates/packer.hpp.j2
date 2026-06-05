@@ -1,0 +1,188 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include <hipdnn_frontend/attributes/{{ op.frontend.effective_attributes_include }}.hpp>
+{% if op.data_fields_helper is defined and op.data_fields_helper %}
+#include <hipdnn_frontend/detail/{{ op.data_fields_helper.include }}.hpp>
+{% endif %}
+{% for hdr in op.mode_field_backend_headers %}
+#include "{{ hdr }}"
+{% endfor %}
+#include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
+
+namespace hipdnn_frontend::detail
+{
+
+// Builds a {{ op.effective_packer_operation_label }} operation descriptor from {{ op.frontend.attributes_class }}.
+// Tensor descriptors are created/deduplicated via ensureAndSetTensorRef.
+inline Error {{ op.frontend.packer_function }}(
+    const graph::{{ op.frontend.attributes_class }}& attributes,
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
+    std::vector<ScopedHipdnnBackendDescriptor>& operations)
+{
+    // Create operation descriptor
+    ScopedHipdnnBackendDescriptor opDesc({{ op.descriptor_type_enum }});
+    if(!opDesc.valid())
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Failed to create {{ op.effective_packer_operation_label }} operation descriptor"};
+    }
+
+    // Create tensor descriptors (if needed) and set them on the operation
+{% set tf_map = op.tensor_field_frontend_map %}
+{% for tf in op.tensor_fields %}
+{% set ft = tf_map.get(tf.name) %}
+{% if tf.required %}
+    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
+                                             {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
+                                             attributes.{{ ft.effective_getter_name }}(),
+                                             tensorDescs,
+                                             "{{ op.effective_error_label }} {{ tf.attr_suffix }}"));
+{% else %}
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                             {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
+                                             attributes.{{ ft.effective_getter_name }}(),
+                                             tensorDescs,
+                                             "{{ op.effective_error_label }} {{ tf.attr_suffix }}"));
+{% endif %}
+{% endfor %}
+
+{% if op.data_fields_helper is defined and op.data_fields_helper %}
+    // Pack shared {{ op.data_fields_helper.label }} parameters
+    HIPDNN_CHECK_ERROR({{ op.data_fields_helper.pack_function }}(opDesc.get(), attributes, "{{ op.effective_error_label }}"));
+{% else %}
+    // Set {{ op.packer_params_label }} parameters
+{% for df in op.data_fields %}
+{% if df.is_vector %}
+    HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
+                                            {{ df.attr_name }},
+                                            {{ df.backend_type }},
+                                            attributes.{{ df.frontend_getter }},
+                                            "{{ op.effective_error_label }} {{ df.name }}"));
+{% elif df.is_mode %}
+{% if df.frontend_returns_optional %}
+
+    // Set {{ op.effective_error_label }} mode
+    {
+        auto {{ df.camel_name }}Opt = attributes.{{ df.frontend_getter }};
+        if(!{{ df.camel_name }}Opt.has_value())
+        {
+            return {ErrorCode::INVALID_VALUE, "{{ df.name | replace('_', ' ') }} not set"};
+        }
+        auto {{ df.camel_name }} = hipdnn_frontend::{{ df.backend_converter }}(*{{ df.camel_name }}Opt);
+{% if df.mode_converter_returns_optional %}
+        if(!{{ df.camel_name }}.has_value())
+        {
+            return {ErrorCode::INVALID_VALUE, "Unsupported {{ df.name | replace('_', ' ') }}"};
+        }
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+            opDesc.get(), {{ df.attr_name }}, {{ df.backend_type }}, *{{ df.camel_name }}, "{{ op.effective_error_label }} mode"));
+{% else %}
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+            opDesc.get(), {{ df.attr_name }}, {{ df.backend_type }}, {{ df.camel_name }}, "{{ op.effective_error_label }} mode"));
+{% endif %}
+    }
+{% else %}
+
+    // Set {{ op.effective_error_label }} mode
+    auto {{ df.camel_name }} = hipdnn_frontend::{{ df.backend_converter }}(attributes.{{ df.frontend_getter }});
+{% if df.mode_converter_returns_optional %}
+    if(!{{ df.camel_name }}.has_value())
+    {
+        return {ErrorCode::INVALID_VALUE, "Unsupported {{ df.name | replace('_', ' ') }}"};
+    }
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+        opDesc.get(), {{ df.attr_name }}, {{ df.backend_type }}, *{{ df.camel_name }}, "{{ op.effective_error_label }} mode"));
+{% else %}
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+        opDesc.get(), {{ df.attr_name }}, {{ df.backend_type }}, {{ df.camel_name }}, "{{ op.effective_error_label }} mode"));
+{% endif %}
+{% endif %}
+{% elif df.is_enum %}
+
+    // Set {{ op.effective_error_label }} mode and compute data type
+    auto {{ df.camel_name }}
+        = static_cast<int64_t>(hipdnn_frontend::{{ df.frontend_converter }}(attributes.{{ df.frontend_getter }}));
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+        opDesc.get(), {{ df.attr_name }}, HIPDNN_TYPE_INT64, {{ df.camel_name }}, "{{ op.effective_error_label }} mode"));
+{% elif df.is_optional_scalar %}
+    if(attributes.{{ df.frontend_getter }}.has_value())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+            opDesc.get(), {{ df.attr_name }}, {{ df.backend_type }},
+            *attributes.{{ df.frontend_getter }}, "{{ op.effective_error_label }} {{ df.name }}"));
+    }
+{% elif df.is_scalar %}
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+        opDesc.get(), {{ df.attr_name }}, {{ df.backend_type }}, attributes.{{ df.frontend_getter }}, "{{ op.effective_error_label }} {{ df.name }}"));
+{% endif %}
+{% endfor %}
+{% if op.has_compute_data_type %}
+
+    HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
+                                                 {{ op.compute_data_type_attr }},
+                                                 attributes.compute_data_type,
+                                                 "{{ op.effective_error_label }} compute data type"));
+{% endif %}
+{% endif %}
+{% for edt in op.extra_data_type_fields %}
+{% set edt_access = edt.frontend_member_name if edt.frontend_uses_member_access else edt.frontend_getter %}
+{% if edt.sentinel %}
+
+    // Set {{ edt.name }} (omitted when {{ edt.sentinel }})
+    if(attributes.{{ edt_access }} != {{ edt.sentinel }})
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
+                                                     {{ edt.attr_name }},
+                                                     attributes.{{ edt_access }},
+                                                     "{{ op.effective_error_label }} {{ edt.effective_error_label }}"));
+    }
+{% else %}
+
+    HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
+                                                 {{ edt.attr_name }},
+                                                 attributes.{{ edt_access }},
+                                                 "{{ op.effective_error_label }} {{ edt.effective_error_label }}"));
+{% endif %}
+{% endfor %}
+{% for taf in op.tensor_array_fields %}
+
+    // Set {{ taf.name }} tensor array
+    {
+        auto& {{ taf.camel_name }}Attrs = attributes.{{ taf.frontend_getter }};
+        if(!{{ taf.camel_name }}Attrs.empty())
+        {
+            std::vector<HipdnnBackendDescriptor*> {{ taf.camel_name }}Ptrs;
+            {{ taf.camel_name }}Ptrs.reserve({{ taf.camel_name }}Attrs.size());
+            for(const auto& tensorAttr : {{ taf.camel_name }}Attrs)
+            {
+                auto [errTaf, tafUid] = createOrFindTensorDesc(tensorDescs, tensorAttr);
+                HIPDNN_CHECK_ERROR(errTaf);
+                {{ taf.camel_name }}Ptrs.push_back(tensorDescs.at(tafUid).get());
+            }
+            HIPDNN_CHECK_ERROR(setDescriptorAttrRaw(
+                opDesc.get(), {{ taf.attr_name }}, HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                static_cast<int64_t>({{ taf.camel_name }}Ptrs.size()), {{ taf.camel_name }}Ptrs.data(),
+                "{{ op.effective_error_label }} {{ taf.name }}"));
+        }
+    }
+{% endfor %}
+
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(
+            opDesc.get(), HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "operation name"));
+    }
+
+    // Finalize operation descriptor
+    HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "{{ op.effective_packer_finalize_label }} operation descriptor"));
+
+    operations.push_back(std::move(opDesc));
+    return {};
+}
+
+} // namespace hipdnn_frontend::detail

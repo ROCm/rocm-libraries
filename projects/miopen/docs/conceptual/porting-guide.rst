@@ -618,6 +618,11 @@ Convolution operations
                     const miopenTensorDescriptor_t dbDesc,
                     void *db)
 
+          .. important::
+             ``miopenConvolutionBackwardBias`` is deprecated and will be removed in a future
+             release. The underlying OpenCL kernel has been removed and this function now
+             returns ``miopenStatusNotImplemented``.
+
     *
         - .. code-block:: cpp
 

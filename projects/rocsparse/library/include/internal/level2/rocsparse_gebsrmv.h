@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication using GEBSR storage format
+*  \brief Sparse matrix vector multiplication using the GEBSR storage format.
 *
 *  \details
 *  \p rocsparse_gebsrmv multiplies the scalar \f$\alpha\f$ with a sparse
@@ -54,8 +54,8 @@ extern "C" {
 *  and where \f$m = mb \times row\_block\_dim\f$ and \f$n = nb \times col\_block\_dim\f$.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  Currently, only \p trans == \ref rocsparse_operation_none is supported.
@@ -64,7 +64,7 @@ extern "C" {
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  dir         matrix storage of GEBSR blocks.
 *  @param[in]
@@ -103,10 +103,10 @@ extern "C" {
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p mb, \p nb, \p nnzb, \p row_block_dim
+*  \retval     rocsparse_status_invalid_size \p mb, \p nb, \p nnzb, \p row_block_dim,
 *              or \p col_block_dim is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p descr, \p alpha, \p bsr_val,
-*              \p bsr_row_ind, \p bsr_col_ind, \p x, \p beta or \p y pointer is invalid.
+*              \p bsr_row_ind, \p bsr_col_ind, \p x, \p beta, or \p y pointer is invalid.
 *  \retval     rocsparse_status_arch_mismatch the device is not supported.
 *  \retval     rocsparse_status_not_implemented
 *              \p trans != \ref rocsparse_operation_none or

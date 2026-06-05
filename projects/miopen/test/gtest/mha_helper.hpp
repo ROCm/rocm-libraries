@@ -468,8 +468,8 @@ void MultiHeadAttentionBackwardDataf32(const tensor<T>& q_val,
                                        const tensor<T>& O_val, // attention (O)
                                        const tensor<T>& dO_val,
                                        const tensor<T>& softmax,
-                                       const tensor<T>& attn_max,
-                                       const tensor<T>& z_sum,
+                                       const tensor<T>& /*attn_max*/,
+                                       const tensor<T>& /*z_sum*/,
                                        tensor<T>& dQ_val,
                                        tensor<T>& dK_val,
                                        tensor<T>& dV_val)

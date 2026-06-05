@@ -12,7 +12,7 @@ namespace hipdnn_data_sdk::utilities
 TEST(TestVersionUtils, VersionStringConstructorValidInput)
 {
     Version version;
-    std::vector<std::string> validVersions{"1.12.53", "1.12.53.aw939d94"};
+    const std::vector<std::string> validVersions{"1.12.53", "1.12.53.aw939d94"};
 
     for(const auto& versionStr : validVersions)
     {
@@ -24,7 +24,7 @@ TEST(TestVersionUtils, VersionStringConstructorValidInput)
 TEST(TestVersionUtils, VersionTupleInvalidInput)
 {
     Version version;
-    std::vector<std::string> invalidVersions{"1.12", "1.12.a53", "1", "", "Str1.12.53"};
+    const std::vector<std::string> invalidVersions{"1.12", "1.12.a53", "1", "", "Str1.12.53"};
 
     for(const auto& versionStr : invalidVersions)
     {
@@ -33,6 +33,8 @@ TEST(TestVersionUtils, VersionTupleInvalidInput)
     }
 }
 
+namespace
+{
 std::vector<Version> randomVersions(size_t numberGenerated, unsigned int seed = 0)
 {
     std::mt19937 generator(seed);
@@ -66,6 +68,7 @@ std::vector<std::pair<Version, Version>> randomVersionCartesianProduct(size_t nu
 
     return versionCartesianProducts;
 }
+} // namespace
 
 TEST(TestVersionUtils, VersionTupleEquals)
 {

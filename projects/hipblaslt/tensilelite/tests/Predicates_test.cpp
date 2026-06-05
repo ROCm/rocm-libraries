@@ -66,3 +66,64 @@ TEST(Predicates, ArithmeticIntensity)
     EXPECT_EQ(true, (*pl1)(d));
     EXPECT_EQ(false, (*pl2)(d));
 }
+
+// ----------------------------------------------------------------------------
+// WorkgroupMappingXCCCheck: CPU-only tests with injected cuCount (ROCM-2963).
+// These use the test-only constructor so we don't need a GPU. See
+// docs/solution-selection-unit-test-pattern.md.
+// ----------------------------------------------------------------------------
+
+TEST(Predicates, WorkgroupMappingXCCCheck_38CU_XCC4_Fails)
+{
+    using namespace TensileLite;
+    // 38 % 4 != 0 -> predicate must reject (would have caught ROCM-2963).
+    auto pred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+        std::array<int, 2>{4, -1}, 38u);
+    auto problem = ContractionProblemGemm::GEMM(false, false, 1024, 1024, 1024, 1024, 1024, 1024,
+                                                 1.0, false, 1);
+    EXPECT_FALSE((*pred)(problem)) << "38 CUs with XCC=4 should fail (38 % 4 != 0)";
+}
+
+TEST(Predicates, WorkgroupMappingXCCCheck_38CU_XCC1_Passes)
+{
+    using namespace TensileLite;
+    // 38 % 1 == 0 -> predicate must accept (fix for ROCM-2963).
+    auto pred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+        std::array<int, 2>{1, -1}, 38u);
+    auto problem = ContractionProblemGemm::GEMM(false, false, 1024, 1024, 1024, 1024, 1024, 1024,
+                                                 1.0, false, 1);
+    EXPECT_TRUE((*pred)(problem)) << "38 CUs with XCC=1 should pass (38 % 1 == 0)";
+}
+
+TEST(Predicates, WorkgroupMappingXCCCheck_80CU_XCC4_Passes)
+{
+    using namespace TensileLite;
+    // 80 % 4 == 0 -> predicate must accept.
+    auto pred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+        std::array<int, 2>{4, -1}, 80u);
+    auto problem = ContractionProblemGemm::GEMM(false, false, 1024, 1024, 1024, 1024, 1024, 1024,
+                                                 1.0, false, 1);
+    EXPECT_TRUE((*pred)(problem)) << "80 CUs with XCC=4 should pass (80 % 4 == 0)";
+}
+
+TEST(Predicates, WorkgroupMappingXCCCheck_XCCMinus1_AlwaysPasses)
+{
+    using namespace TensileLite;
+    // value[0] == -1 means no check.
+    auto pred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+        std::array<int, 2>{-1, -1}, 38u);
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    EXPECT_TRUE((*pred)(problem)) << "XCC=-1 should always pass";
+}
+
+TEST(Predicates, WorkgroupMappingXCCCheck_FallbackTreatsXCCAs1)
+{
+    using namespace TensileLite;
+    // When problem is cu-fallback, effective XCC is 1 so 38 % 1 == 0 -> pass.
+    auto pred = std::make_shared<Predicates::Contraction::WorkgroupMappingXCCCheck>(
+        std::array<int, 2>{4, -1}, 38u);
+    auto problem = ContractionProblemGemm::GEMM(false, false, 1024, 1024, 1024, 1024, 1024, 1024,
+                                                 1.0, false, 1);
+    problem.setParams().setFallbackStatus(true);
+    EXPECT_TRUE((*pred)(problem)) << "With fallback status, effective XCC=1 so 38 % 1 == 0";
+}

@@ -35,7 +35,7 @@ public:
 
     ScopedHipdnnBackendDescriptor(hipdnnBackendDescriptor_t descriptor)
         : _descriptor(descriptor)
-        , _valid(true)
+        , _valid(descriptor != nullptr)
     {
     }
 
@@ -63,6 +63,20 @@ public:
         {
             _descriptor = nullptr;
             logBackendError("Failed to create and deserialize graph", status);
+        }
+    }
+
+    explicit ScopedHipdnnBackendDescriptor(const char* jsonGraph, size_t jsonByteSize)
+    {
+        auto status = hipdnnBackend()->backendCreateAndDeserializeJsonGraphExt(
+            &_descriptor, jsonGraph, jsonByteSize);
+
+        _valid = (status == HIPDNN_STATUS_SUCCESS);
+
+        if(!_valid)
+        {
+            _descriptor = nullptr;
+            logBackendError("Failed to create and deserialize JSON graph", status);
         }
     }
 

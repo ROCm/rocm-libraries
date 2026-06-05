@@ -463,5 +463,115 @@ namespace DGen
         return shuffleDims(*inputPtr, srcSizes, dstStrides, srcStrides);
     }
 
+    /**
+     * @brief Compute the output size of preSwizzleScalesGFX1250 after padding
+     *
+     * The gfx1250 dimk swizzle pads the "fast" dimension (the one varying with
+     * the K-block index in MX storage) to a multiple of `dimk = 128 / mxBlock`.
+     * The slow dimension is left unchanged.
+     *
+     * @param slowDim Number of elements along the slow dimension of the
+     *                natural-layout scale buffer (M for transA=T, K/MX for transA=N).
+     * @param fastDim Number of elements along the fast dimension (K/MX for
+     *                transA=T, M for transA=N).
+     * @param mxBlock The MX block size (16 or 32).
+     * @return The total number of bytes in the swizzled, padded output.
+     */
+    inline size_t
+        preSwizzleScalesGFX1250PaddedSize(size_t slowDim, size_t fastDim, size_t mxBlock)
+    {
+        if(mxBlock == 0)
+            throw std::runtime_error("preSwizzleScalesGFX1250PaddedSize: mxBlock must be > 0");
+        size_t const dimk = 128 / mxBlock;
+        if(dimk == 0)
+            throw std::runtime_error(
+                "preSwizzleScalesGFX1250PaddedSize: dimk = 128 / mxBlock must be > 0");
+        return slowDim * roundUp(fastDim, dimk);
+    }
+
+    /**
+     * @brief Pre-swizzle scale data for the gfx1250 (and other non-rocroller WMMA)
+     *        block-scaled MX layout.
+     *
+     * The kernel expects the scale tensor to be viewed as
+     *   `{slowDim, ceil(fastDim / dimk), dimk}`
+     * where `dimk = 128 / mxBlock`, and then permuted by `(1, 0, 2)` to
+     *   `{ceil(fastDim / dimk), slowDim, dimk}`.
+     * The fast dimension is padded with zero scales to a multiple of `dimk`.
+     *
+     * "Slow" / "fast" refer to the natural column-major scale layout the MX
+     * generator produces. For block-scaled inputs:
+     *   - transA = T scaleA: scale is (K/MX rows x M cols) col-major.
+     *     Fast (stride 1) = K/MX. Slow = M.
+     *   - transA = N scaleA: fast = M, slow = K/MX.
+     *   - transB = N scaleB: fast = K/MX, slow = N.
+     *   - transB = T scaleB: fast = N, slow = K/MX.
+     * In hipBLASLt-bench terms `kAlongFast = (isMatrixA == isTranspose)`.
+     *
+     * The algorithm is byte-equivalent to the reference implementation in
+     * mengzcai's `swizzle_mx_scale` (mengzcai/develop-gfx1250-mx-pick-v2),
+     * but is self-contained (no dependency on `TensorDataManipulation.hpp`).
+     *
+     * @param input    The natural-layout scale data (size = slowDim * fastDim).
+     * @param slowDim  Slow (stride > 1) dimension of the natural layout.
+     * @param fastDim  Fast (stride 1) dimension of the natural layout.
+     * @param mxBlock  MX block size (16 or 32).
+     * @return The swizzled scale buffer of size
+     *         `slowDim * roundUp(fastDim, dimk)` (i.e.
+     *         `preSwizzleScalesGFX1250PaddedSize(slowDim, fastDim, mxBlock)`).
+     */
+    template <typename T>
+    inline std::vector<T> preSwizzleScalesGFX1250(std::vector<T> const& input,
+                                                  size_t                slowDim,
+                                                  size_t                fastDim,
+                                                  size_t                mxBlock)
+    {
+        if(mxBlock == 0)
+            throw std::runtime_error("preSwizzleScalesGFX1250: mxBlock must be > 0");
+        size_t const dimk = 128 / mxBlock;
+        if(dimk == 0)
+            throw std::runtime_error(
+                "preSwizzleScalesGFX1250: dimk = 128 / mxBlock must be > 0");
+
+        size_t const expectedInput = slowDim * fastDim;
+        if(expectedInput != input.size())
+        {
+            std::ostringstream msg;
+            msg << "preSwizzleScalesGFX1250: input size " << input.size()
+                << " doesn't match slowDim*fastDim = " << expectedInput;
+            throw std::runtime_error(msg.str());
+        }
+
+        size_t const paddedFast = roundUp(fastDim, dimk);
+        size_t const numTiles   = paddedFast / dimk;
+
+        // Output layout: {numTiles, slowDim, dimk} in row-major (last dim fastest).
+        // Output linear index: outIdx = tile*(slowDim*dimk) + s*dimk + j
+        // where j in [0, dimk), s in [0, slowDim), tile in [0, numTiles).
+        // Source (natural layout) linear index for the same (s, tile, j):
+        //   srcFast = tile*dimk + j
+        //   srcIdx  = s * fastDim + srcFast    (when srcFast < fastDim; else padded)
+        // Padded entries (srcFast >= fastDim) are written as default-constructed T.
+        std::vector<T> output(slowDim * paddedFast, T{});
+
+#pragma omp parallel for collapse(2)
+        for(size_t tile = 0; tile < numTiles; ++tile)
+        {
+            for(size_t s = 0; s < slowDim; ++s)
+            {
+                size_t const outBase = tile * (slowDim * dimk) + s * dimk;
+                for(size_t j = 0; j < dimk; ++j)
+                {
+                    size_t const srcFast = tile * dimk + j;
+                    if(srcFast < fastDim)
+                        output[outBase + j] = input[s * fastDim + srcFast];
+                    // else: leave T{} (zero scale -> kernel ignores padded MX block)
+                }
+            }
+        }
+
+        return output;
+    }
+
 } // namespace DGen
 

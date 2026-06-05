@@ -152,25 +152,17 @@ foreach(i RANGE 0 ${len1})
       endif()
 
       execute_process(COMMAND tar xf ${mat}.tar.gz
-        RESULT_VARIABLE STATUS
-        WORKING_DIRECTORY ${CMAKE_MATRICES_DIR})
-      if(STATUS AND NOT STATUS EQUAL 0)
-        message(FATAL_ERROR "uncompressing failed, aborting.")
-      endif()
+        WORKING_DIRECTORY ${CMAKE_MATRICES_DIR}
+        COMMAND_ERROR_IS_FATAL ANY)
 
       file(RENAME ${CMAKE_MATRICES_DIR}/${mat}/${mat}.mtx ${CMAKE_MATRICES_DIR}/${mat}.mtx)
     else()
       file(RENAME ${ROCSPARSE_MTX_DIR}/${mat}/${mat}.mtx ${CMAKE_MATRICES_DIR}/${mat}.mtx)
     endif()
     execute_process(COMMAND ${ROCSPARSE_MTX2CSR} ${mat}.mtx ${mat}.csr
-      RESULT_VARIABLE STATUS
-      WORKING_DIRECTORY ${CMAKE_MATRICES_DIR})
-    if(STATUS AND NOT STATUS EQUAL 0)
-      message(FATAL_ERROR "${ROCSPARSE_MTX2CSR} failed, aborting.")
-    else()
-      message(STATUS "${mat} success.")
-    endif()
-    # TODO: add 'COMMAND_ERROR_IS_FATAL ANY' once cmake supported version is 3.19
+      WORKING_DIRECTORY ${CMAKE_MATRICES_DIR}
+      COMMAND_ERROR_IS_FATAL ANY)
+    message(STATUS "${mat} success.")
     file(REMOVE_RECURSE ${CMAKE_MATRICES_DIR}/${mat}.tar.gz ${CMAKE_MATRICES_DIR}/${mat} ${CMAKE_MATRICES_DIR}/${mat}.mtx)
 
   endif()

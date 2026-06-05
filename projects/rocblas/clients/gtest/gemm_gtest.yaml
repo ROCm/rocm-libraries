@@ -3588,7 +3588,7 @@ Tests:
   os_flags: LINUX
 
 - name: gemm_PyTorch_offset_overflow
-  category: known_bugs
+  category: nightly
   function:
     - gemm: *single_precision
   matrix_size:
@@ -3718,4 +3718,17 @@ Tests:
 #   beta:  [ 0.0, 0.5, 1.0 ]
 #   api: [ C, FORTRAN ]
 
+# ALMIOPEN-1609: Test k-chunking workaround for 32-bit element offset overflow.
+# With K=508 and lda=8454144, this requires 4 chunks (safe_k=127).
+# K=762 (6 chunks) fails exact BF16 comparison due to intermediate bf16 rounding.
+- name: gemm_ILP64_k_chunking
+  category: stress
+  function:
+    - gemm_ex: *hpa_bf16_precision
+  arguments:
+    - { transA: N, transB: N, M: 8454144, N: 3, K: 508, lda: 8454144, ldb: 508, ldc: 8454144, ldd: 8454144 }
+  alpha: 1
+  beta: 0
+  api: [ C_64 ]
+  os_flags: LINUX
 ...

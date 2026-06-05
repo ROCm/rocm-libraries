@@ -111,38 +111,38 @@ Op3dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
     result.invoker_factory =
         [data_type, blens, clens, astrides, bstrides, cstrides](const std::vector<Kernel> kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel = handle_.Run(kernels.front());
-                decltype(auto) params = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
+                decltype(auto) kernel_ = handle_.Run(kernels.front());
+                decltype(auto) params  = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
 
                 visit_float(data_type, [&](auto as_float) {
                     auto miopen_alpha0 = as_float(*(static_cast<const float*>(params.alpha0)));
                     auto miopen_alpha1 = as_float(*(static_cast<const float*>(params.alpha1)));
                     auto miopen_beta   = as_float(*(static_cast<const float*>(params.beta)));
 
-                    kernel(params.ATensor,
-                           params.BTensor,
-                           params.CTensor,
-                           static_cast<uint64_t>(params.Aoffset),
-                           static_cast<uint64_t>(params.Boffset),
-                           static_cast<uint64_t>(params.Coffset),
-                           static_cast<uint32_t>(blens[1] == 1 ? clens[1] : blens[1]), // b_c,
-                           static_cast<uint32_t>(blens[2] == 1 ? clens[2] : blens[2]), // b_h,
-                           static_cast<uint32_t>(clens[1]),                            // c_c,
-                           static_cast<uint32_t>(clens[2]),                            // c_h,
-                           static_cast<uint32_t>(astrides[0]),                         // a_nstride,
-                           static_cast<uint32_t>(astrides[1]),                         // a_cstride,
-                           static_cast<uint32_t>(astrides[2]),                         // a_hstride,
-                           static_cast<uint32_t>(blens[0] == 1 ? 0 : bstrides[0]),     // b_nstride,
-                           static_cast<uint32_t>(blens[1] == 1 ? 0 : bstrides[1]),     // b_cstride,
-                           static_cast<uint32_t>(blens[2] == 1 ? 0 : bstrides[2]),     // b_hstride,
-                           static_cast<uint32_t>(cstrides[0]),                         // c_nstride,
-                           static_cast<uint32_t>(cstrides[1]),                         // c_cstride,
-                           static_cast<uint32_t>(cstrides[2]),                         // c_hstride,
-                           miopen_alpha0,
-                           miopen_alpha1,
-                           miopen_beta,
-                           static_cast<uint32_t>(clens[0]),
-                           !float_equal(miopen_beta, 0.0));
+                    kernel_(params.ATensor,
+                            params.BTensor,
+                            params.CTensor,
+                            static_cast<uint64_t>(params.Aoffset),
+                            static_cast<uint64_t>(params.Boffset),
+                            static_cast<uint64_t>(params.Coffset),
+                            static_cast<uint32_t>(blens[1] == 1 ? clens[1] : blens[1]), // b_c,
+                            static_cast<uint32_t>(blens[2] == 1 ? clens[2] : blens[2]), // b_h,
+                            static_cast<uint32_t>(clens[1]),                            // c_c,
+                            static_cast<uint32_t>(clens[2]),                            // c_h,
+                            static_cast<uint32_t>(astrides[0]),                     // a_nstride,
+                            static_cast<uint32_t>(astrides[1]),                     // a_cstride,
+                            static_cast<uint32_t>(astrides[2]),                     // a_hstride,
+                            static_cast<uint32_t>(blens[0] == 1 ? 0 : bstrides[0]), // b_nstride,
+                            static_cast<uint32_t>(blens[1] == 1 ? 0 : bstrides[1]), // b_cstride,
+                            static_cast<uint32_t>(blens[2] == 1 ? 0 : bstrides[2]), // b_hstride,
+                            static_cast<uint32_t>(cstrides[0]),                     // c_nstride,
+                            static_cast<uint32_t>(cstrides[1]),                     // c_cstride,
+                            static_cast<uint32_t>(cstrides[2]),                     // c_hstride,
+                            miopen_alpha0,
+                            miopen_alpha1,
+                            miopen_beta,
+                            static_cast<uint32_t>(clens[0]),
+                            !float_equal(miopen_beta, 0.0));
                 });
             };
         };

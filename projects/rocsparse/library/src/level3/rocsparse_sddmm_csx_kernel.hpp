@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -69,6 +69,12 @@ namespace rocsparse
         }
 
         // Each wavefront treats one row/column.
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(WFSIZE % NTHREADS_PER_DOTPRODUCT == 0,
+                      "WFSIZE must be a multiple of NTHREADS_PER_DOTPRODUCT.");
+
         static constexpr uint32_t NUM_SEQS = (WFSIZE / NTHREADS_PER_DOTPRODUCT);
         const uint32_t            bid      = hipBlockIdx_x;
         const uint32_t            tid      = hipThreadIdx_x;
@@ -182,6 +188,13 @@ namespace rocsparse
                                  const J* __restrict__ csx_ind,
                                  rocsparse_index_base csx_base)
     {
+        static_assert(NTHREADS_PER_GROUP > 0
+                          && (NTHREADS_PER_GROUP & (NTHREADS_PER_GROUP - 1)) == 0,
+                      "NTHREADS_PER_GROUP must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % NTHREADS_PER_GROUP == 0,
+                      "BLOCKSIZE must be a multiple of NTHREADS_PER_GROUP.");
+
         static constexpr auto GROUPS_PER_BLOCK = BLOCKSIZE / NTHREADS_PER_GROUP;
 
         const auto lid  = hipThreadIdx_x & (NTHREADS_PER_GROUP - 1);

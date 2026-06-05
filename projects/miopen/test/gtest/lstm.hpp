@@ -30,6 +30,8 @@
 #include "cpu_rnn.hpp"
 #include "workspace.hpp"
 #include "verify.hpp"
+#include "gtest_desc_guard.hpp"
+#include "gtest_handle_guard.hpp"
 
 #include <tuple>
 #include <numeric>
@@ -556,26 +558,28 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
 
-        /// \todo: fix the handle.Write() calls below because they generate
-        /// temporary objects that may get destroyed before the
-        /// miopenRNNForwardInference call happens
+        auto hx_dev = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
+        auto cx_dev = nocx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initCell);
+        auto hy_dev = nohy ? miopen::Allocator::ManageDataPtr{} : handle.Write(hy);
+        auto cy_dev = nocy ? miopen::Allocator::ManageDataPtr{} : handle.Write(cy);
+
         miopenRNNForwardInference(&handle,
                                   rnnDesc,
                                   seqLength,
                                   inputDescs.data(),
                                   input_dev.get(),
                                   &hiddenDesc,
-                                  ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                                  hx_dev.get(),
                                   &hiddenDesc,
-                                  ((nocx) ? nullptr : handle.Write(initCell).get()),
+                                  cx_dev.get(),
                                   &weightDesc,
                                   weights_dev.get(),
                                   outputDescs.data(),
                                   output_dev.get(),
                                   &hiddenDesc,
-                                  ((nohy) ? nullptr : handle.Write(hy).get()),
+                                  hy_dev.get(),
                                   &hiddenDesc,
-                                  ((nocy) ? nullptr : handle.Write(cy).get()),
+                                  cy_dev.get(),
                                   wspace.ptr(),
                                   wspace.size());
 
@@ -920,15 +924,18 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
         wlen[0] = weights.size();
         miopen::TensorDescriptor weightDesc(miopen::deref(rnnDesc).dataType, wlen);
 
+        auto hx_dev = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
+        auto cx_dev = nocx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initCell);
+
         miopenRNNForwardTraining(&handle,
                                  rnnDesc,
                                  seqLength,
                                  inputDescs.data(),
                                  input_dev.get(),
                                  &hiddenDesc,
-                                 ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                                 hx_dev.get(),
                                  &hiddenDesc,
-                                 ((nocx) ? nullptr : handle.Write(initCell).get()),
+                                 cx_dev.get(),
                                  &weightDesc,
                                  weights_dev.get(),
                                  outputDescs.data(),
@@ -1252,6 +1259,11 @@ verify_backward_data_lstm<T>::gpu() const
     std::vector<T> dcx(initHidden.size());
     auto dcx_dev = handle.Write(dcx);
 
+    auto dhy_dev = nodhy ? miopen::Allocator::ManageDataPtr{} : handle.Write(dhy);
+    auto dcy_dev = nodcy ? miopen::Allocator::ManageDataPtr{} : handle.Write(dcy);
+    auto hx_dev  = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
+    auto cx_dev  = nocx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initCell);
+
     miopenRNNBackwardData(&handle,
                           rnnDesc,
                           seqLength,
@@ -1260,15 +1272,15 @@ verify_backward_data_lstm<T>::gpu() const
                           outputDescs.data(),
                           dyin_dev.get(),
                           &hiddenDesc,
-                          ((nodhy) ? nullptr : handle.Write(dhy).get()),
+                          dhy_dev.get(),
                           &hiddenDesc,
-                          ((nodcy) ? nullptr : handle.Write(dcy).get()),
+                          dcy_dev.get(),
                           &weightDesc,
                           weights_dev.get(),
                           &hiddenDesc,
-                          ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                          hx_dev.get(),
                           &hiddenDesc,
-                          ((nocx) ? nullptr : handle.Write(initCell).get()),
+                          cx_dev.get(),
                           inputDescs.data(),
                           dx_dev.get(),
                           &hiddenDesc,
@@ -1428,6 +1440,7 @@ std::vector<T> verify_backward_weights_lstm<T>::gpu() const
     hlens[1] = batch_seq[0];
     hlens[2] = hiddenSize;
     miopen::TensorDescriptor hiddenDesc(miopen::deref(rnnDesc).dataType, hlens);
+    auto hx_dev    = nohx ? miopen::Allocator::ManageDataPtr{} : handle.Write(initHidden);
     auto dy_dev    = handle.Write(dy);
     auto input_dev = handle.Write(input);
 
@@ -1437,7 +1450,7 @@ std::vector<T> verify_backward_weights_lstm<T>::gpu() const
                              inputDescs.data(),
                              input_dev.get(),
                              &hiddenDesc,
-                             ((nohx) ? nullptr : handle.Write(initHidden).get()),
+                             hx_dev.get(),
                              outputDescs.data(),
                              dy_dev.get(),
                              &weightDesc,
@@ -1696,22 +1709,25 @@ struct LSTM_test : Verifier
 #endif
 
         auto&& handle = get_handle();
-        miopenRNNDescriptor_t rnnDesc;
-        miopenCreateRNNDescriptor(&rnnDesc);
-        miopenDropoutDescriptor_t DropoutDesc;
-        miopenCreateDropoutDescriptor(&DropoutDesc);
+        RNNDescGuard rnnDesc;
+        DropoutDescGuard DropoutDesc;
         size_t statesSizeInBytes = 0;
+
+        HandleGuard mio_handle;
+        void* dropout_state_buf = nullptr;
+
+        // See DestroyInternalRnnDropoutDesc — frees the descriptor allocated
+        // by miopenCreateRNNDescriptor that the upcoming Set* will leak.
+        DestroyInternalRnnDropoutDesc(rnnDesc);
 
         if(useDropout != 0)
         {
-            miopenHandle_t mio_handle;
-            miopenCreateWithStream(&mio_handle, handle.GetStream());
+            mio_handle.create(handle.GetStream());
 
             float dropout_rate{0.5f};
             unsigned long long dropout_seed{0ULL};
             miopenDropoutGetStatesSize(mio_handle, &statesSizeInBytes);
 
-            void* dropout_state_buf;
             (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 
             miopenSetDropoutDescriptor(DropoutDesc,
@@ -1956,5 +1972,14 @@ struct LSTM_test : Verifier
             rnnDesc,  input,      dyin,      hx,      rsvgpu,    rsvcpu,           workSpaceBwdData,
             batchSeq, hiddenSize, wei_sz,    batch_n, seqLength, numLayers,        biasMode,
             dirMode,  inputMode,  inVecReal, hx_sz,   nohx,      bool(useDropout), usePadding});
+
+        // Free the DropoutDescriptor that miopenSetRNNDescriptor just allocated.
+        // In the dropout path, the internal pointer aliases the user-owned
+        // DropoutDescGuard — freeing it would double-free.
+        if(useDropout == 0)
+            DestroyInternalRnnDropoutDesc(rnnDesc);
+
+        if(useDropout != 0)
+            (void)hipFree(dropout_state_buf);
     }
 };

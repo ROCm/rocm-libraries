@@ -185,7 +185,7 @@ class TorchGpuTimer(GpuTimerInterface):
 
 def create_gpu_timer(
     backend: Optional[Literal["torch", "auto"]] = "auto",
-) -> GpuTimerInterface:
+) -> Optional[GpuTimerInterface]:
     """Create a GPU timer for the specified or detected backend.
 
     Args:
@@ -203,7 +203,7 @@ def create_gpu_timer(
     if backend == "auto" or backend is None:
         if _is_torch_available():
             return TorchGpuTimer()
-        raise RuntimeError("PyTorch GPU not available for GPU timing")
+        return None
 
     if backend == "torch":
         if not _is_torch_available():

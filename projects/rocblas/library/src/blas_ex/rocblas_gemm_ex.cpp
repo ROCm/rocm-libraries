@@ -96,6 +96,51 @@ rocblas_status rocblas_gemm_ex_get_solutions(rocblas_handle    handle,
             return validArgs;
         }
 
+        auto                    layer_mode = handle->layer_mode;
+        rocblas_internal_logger logger;
+        if(layer_mode & rocblas_layer_mode_log_trace)
+        {
+            auto trans_a_letter = rocblas_transpose_letter(trans_a);
+            auto trans_b_letter = rocblas_transpose_letter(trans_b);
+
+            auto a_type_string       = rocblas_datatype_string(a_type);
+            auto b_type_string       = rocblas_datatype_string(b_type);
+            auto c_type_string       = rocblas_datatype_string(c_type);
+            auto d_type_string       = rocblas_datatype_string(d_type);
+            auto compute_type_string = rocblas_datatype_string(compute_type);
+
+            rocblas_internal_ostream alphass, betass;
+            (void)rocblas_internal_log_trace_alpha_beta_ex(
+                compute_type, alpha, beta, alphass, betass);
+
+            logger.log_trace(handle,
+                             ROCBLAS_API_STR(rocblas_gemm_ex_get_solutions),
+                             trans_a,
+                             trans_b,
+                             m,
+                             n,
+                             k,
+                             alphass.str(),
+                             a,
+                             a_type_string,
+                             lda,
+                             b,
+                             b_type_string,
+                             ldb,
+                             betass.str(),
+                             c,
+                             c_type_string,
+                             ldc,
+                             d,
+                             d_type_string,
+                             ldd,
+                             compute_type_string,
+                             algo,
+                             rocblas_gemm_flags(flags),
+                             list_array,
+                             list_size);
+        }
+
         rocblas_int batch_count = 1;
 
         // TODO: These strides could be 0 ( {} ) instead of 1 ( {1} ) once Tensile is fixed
@@ -154,6 +199,28 @@ rocblas_status rocblas_gemm_ex_get_solutions_by_type(rocblas_handle   handle,
                                                      rocblas_int*     list_size)
 {
 #ifdef BUILD_WITH_TENSILE
+    if(!handle)
+        return rocblas_status_invalid_handle;
+
+    auto                    layer_mode = handle->layer_mode;
+    rocblas_internal_logger logger;
+
+    if(layer_mode & rocblas_layer_mode_log_trace)
+    {
+        auto input_type_string   = rocblas_datatype_string(input_type);
+        auto output_type_string  = rocblas_datatype_string(output_type);
+        auto compute_type_string = rocblas_datatype_string(compute_type);
+
+        logger.log_trace(handle,
+                         ROCBLAS_API_STR(rocblas_gemm_ex_get_solutions_by_type),
+                         input_type_string,
+                         output_type_string,
+                         compute_type_string,
+                         rocblas_gemm_flags(flags),
+                         list_array,
+                         list_size);
+    }
+
     // Create dummy GEMM problem to take advantage of problem templating
     // Most parameters are ignored, just needs to be valid for all types
     rocblas_double_complex alpha{0, 0};

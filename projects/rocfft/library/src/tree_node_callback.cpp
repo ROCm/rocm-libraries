@@ -84,8 +84,8 @@ CallbackType TreeNode::GetCallbackType(bool enable_callbacks) const
         real_even_node      = real_even_node->parent)
     {
         if(real_even_node->scheme != CS_REAL_TRANSFORM_EVEN
-           && real_even_node->scheme != CS_REAL_2D_EVEN
-           && real_even_node->scheme != CS_REAL_3D_EVEN)
+           && real_even_node->scheme != CS_REAL_2D_EVEN && real_even_node->scheme != CS_REAL_3D_EVEN
+           && real_even_node->scheme != CS_REAL_3D_PP)
             continue;
 
         // if we're here, we must be under CS_REAL_*_EVEN

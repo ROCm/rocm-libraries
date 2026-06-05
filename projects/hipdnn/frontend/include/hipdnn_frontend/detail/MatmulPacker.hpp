@@ -17,7 +17,7 @@ inline Error
                           std::vector<ScopedHipdnnBackendDescriptor>& operations)
 {
     // Create operation descriptor
-    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT);
+    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create matmul operation descriptor"};
@@ -25,26 +25,34 @@ inline Error
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_MATMUL_A_EXT,
+                                             HIPDNN_ATTR_OPERATION_MATMUL_ADESC,
                                              attributes.get_a(),
                                              tensorDescs,
                                              "matmul A"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_MATMUL_B_EXT,
+                                             HIPDNN_ATTR_OPERATION_MATMUL_BDESC,
                                              attributes.get_b(),
                                              tensorDescs,
                                              "matmul B"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_MATMUL_C_EXT,
+                                             HIPDNN_ATTR_OPERATION_MATMUL_CDESC,
                                              attributes.get_c(),
                                              tensorDescs,
                                              "matmul C"));
 
     // Set compute data type
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_MATMUL_MATH_PREC_EXT,
+                                                 HIPDNN_ATTR_MATMUL_COMP_TYPE,
                                                  attributes.compute_data_type,
                                                  "matmul compute data type"));
+
+    // Set operation name if provided
+    auto& opName = attributes.get_name();
+    if(!opName.empty())
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(
+            opDesc.get(), HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "matmul operation name"));
+    }
 
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "matmul operation descriptor"));

@@ -30,6 +30,7 @@
 #include <rocRoller/KernelGraph/Transforms/LowerLinear.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTensorContraction.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTile.hpp>
+#include <rocRoller/KernelGraph/Transforms/ModelAddresses.hpp>
 #include <rocRoller/KernelGraph/Transforms/NopExtraScopes.hpp>
 #include <rocRoller/KernelGraph/Transforms/OrderEpilogueBlocks.hpp>
 #include <rocRoller/KernelGraph/Transforms/OrderExchangeNodes.hpp>

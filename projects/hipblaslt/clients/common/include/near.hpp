@@ -39,7 +39,22 @@
 #include "hipblaslt_ostream.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#include <cmath>
 #include <hipblaslt/hipblaslt.h>
+
+#ifdef GOOGLE_TEST
+/*! Compare CPU vs GPU scalars for near_check. GTest ASSERT_NEAR(inf, inf) is ill-formed
+ *  because inf - inf is NaN; treat matching NaN and same-signed infinities as equal. */
+inline void hipblaslt_near_compare_double(double a, double b, double abs_err)
+{
+    if(std::isfinite(a) && std::isfinite(b))
+        ASSERT_NEAR(a, b, abs_err);
+    else if(std::isnan(a) || std::isnan(b))
+        ASSERT_TRUE(std::isnan(a) && std::isnan(b));
+    else
+        ASSERT_TRUE(std::isinf(a) && std::isinf(b) && (a == b));
+}
+#endif
 
 template <class Tc, class Ti, class To>
 static constexpr double sum_error_tolerance_for_gfx11 = std::numeric_limits<Tc>::epsilon();
@@ -126,11 +141,34 @@ double sum_error_tolerance_for_gfx11_type(hipDataType Tc, hipDataType Ti, hipDat
 
 #endif
 
+#ifdef GOOGLE_TEST
+#define NEAR_ASSERT_HALF(a, b, err) \
+    hipblaslt_near_compare_double(static_cast<double>(a), static_cast<double>(b), (err))
+
+#define NEAR_ASSERT_BF16(a, b, err) \
+    hipblaslt_near_compare_double(static_cast<double>(a), static_cast<double>(b), (err))
+
+#define NEAR_ASSERT_FP8(a, b, err) \
+    hipblaslt_near_compare_double(static_cast<double>(float(a)), static_cast<double>(float(b)), (err))
+
+#define HIPBLASLT_NEAR_ASSERT_NEAR_PAIR(a, b, err) \
+    hipblaslt_near_compare_double(static_cast<double>(a), static_cast<double>(b), (err))
+
+#define NEAR_ASSERT_COMPLEX_FLOAT(a, b, err)                                    \
+    do                                                                          \
+    {                                                                           \
+        auto ta = (a), tb = (b);                                                \
+        hipblaslt_near_compare_double(std::real(ta), std::real(tb), (err));     \
+        hipblaslt_near_compare_double(std::imag(ta), std::imag(tb), (err));     \
+    } while(0)
+#else
 #define NEAR_ASSERT_HALF(a, b, err) ASSERT_NEAR(double(a), double(b), err)
 
 #define NEAR_ASSERT_BF16(a, b, err) ASSERT_NEAR(double(a), double(b), err)
 
 #define NEAR_ASSERT_FP8(a, b, err) ASSERT_NEAR(double(float(a)), double(float(b)), err)
+
+#define HIPBLASLT_NEAR_ASSERT_NEAR_PAIR(a, b, err) ASSERT_NEAR((a), (b), (err))
 
 #define NEAR_ASSERT_COMPLEX_FLOAT(a, b, err)                   \
     do                                                         \
@@ -140,6 +178,7 @@ double sum_error_tolerance_for_gfx11_type(hipDataType Tc, hipDataType Ti, hipDat
         ASSERT_NEAR(std::real(ta), std::real(tb), err);        \
         ASSERT_NEAR(std::imag(ta), std::imag(tb), err);        \
     } while(0)
+#endif
 
 #define NEAR_ASSERT_COMPLEX_DOUBLE(a, b, err)                  \
     do                                                         \
@@ -164,7 +203,7 @@ inline void near_check_general(int64_t                        M,
                                const T* hGPU,
                                double                         abs_error)
 {
-    NEAR_CHECK(M, N, lda, 0, hCPU, hGPU, 1, abs_error, ASSERT_NEAR);
+    NEAR_CHECK(M, N, lda, 0, hCPU, hGPU, 1, abs_error, HIPBLASLT_NEAR_ASSERT_NEAR_PAIR);
 }
 
 template <>
@@ -243,7 +282,7 @@ inline void near_check_general(int64_t                        M,
                                int64_t                        batch_count,
                                double                         abs_error)
 {
-    NEAR_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, abs_error, ASSERT_NEAR);
+    NEAR_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, abs_error, HIPBLASLT_NEAR_ASSERT_NEAR_PAIR);
 }
 
 template <>
@@ -360,7 +399,7 @@ void near_check_general(int64_t                                M,
                         int64_t                                batch_count,
                         double                                 abs_error)
 {
-    NEAR_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, abs_error, ASSERT_NEAR);
+    NEAR_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, abs_error, HIPBLASLT_NEAR_ASSERT_NEAR_PAIR);
 }
 
 template <>
@@ -469,7 +508,7 @@ inline void near_check_general(int64_t                              M,
                                int64_t                              batch_count,
                                double                               abs_error)
 {
-    NEAR_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, abs_error, ASSERT_NEAR);
+    NEAR_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, abs_error, HIPBLASLT_NEAR_ASSERT_NEAR_PAIR);
 }
 
 template <>

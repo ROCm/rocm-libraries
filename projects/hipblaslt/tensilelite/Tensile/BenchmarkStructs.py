@@ -64,6 +64,51 @@ def separateParameters(paramSetList):
     return singleVaules, multiValues
 
 
+def _isValidParameterValue(name, value):
+    """Return True if value is a scalar valid value for name."""
+    if name not in validParameters:
+        return False
+    validValues = validParameters[name]
+    return validValues == -1 or value in validValues
+
+
+def _groupedParameterValueOptions(name, value):
+    """Return scalar choices for one parameter inside a group entry."""
+    if not isinstance(value, list):
+        return [value]
+    if len(value) == 0:
+        printExit("You must specify value(s) for parameter \"{}\" in Groups".format(name))
+    if name == "MatrixInstruction" and all(not isinstance(v, list) for v in value):
+        return [value]
+    if name in validParameters and validParameters[name] != -1 and _isValidParameterValue(name, value):
+        return [value]
+    return value
+
+
+def _expandGroupedParameters(paramGroups):
+    """Expand list-valued entries inside Groups into scalar group entries.
+
+    Groups historically contained scalar dictionaries.  Keep list-valued scalar
+    parameters such as MatrixInstruction intact, but allow list-valued entries
+    like NonTemporalA: [0, 1] to expand within that group entry.
+    """
+    expandedParamGroups = []
+    for paramGroup in paramGroups:
+        expandedParamGroup = []
+        for groupEntry in paramGroup:
+            names = []
+            valueOptions = []
+            for name, value in groupEntry.items():
+                names.append(name)
+                valueOptions.append(_groupedParameterValueOptions(name, value))
+
+            for values in itertools.product(*valueOptions):
+                expandedParamGroup.append(dict(zip(names, values)))
+        expandedParamGroups.append(expandedParamGroup)
+
+    return expandedParamGroups
+
+
 def checkCDBufferAndStrides(problemType, problemSizes, isCEqualD):
     """Ensures ldd == ldc when CEqualD"""
     if isCEqualD and problemType["OperationType"] == "GEMM":
@@ -134,7 +179,7 @@ class BenchmarkProcess:
                 for x in getNonNoneFromConfig("BenchmarkCommonParameters", [])]))
         forkParams = dict(itertools.chain(*[x.items() \
                 for x in getNonNoneFromConfig("ForkParameters", [])]))
-        self.paramGroups = forkParams.pop("Groups") if "Groups" in forkParams else []
+        self.paramGroups = _expandGroupedParameters(forkParams.pop("Groups")) if "Groups" in forkParams else []
         self.customKernels = getNonNoneFromConfig("CustomKernels", [])
         self.internalSupportParams = getNonNoneFromConfig("InternalSupportParams", {})
         if self.customKernels == [] and self.internalSupportParams != {}:

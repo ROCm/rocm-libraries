@@ -804,8 +804,8 @@ rocblas_status rocsolver_steqr_template(rocblas_handle handle,
     // Initialize identity matrix
     if(evect == rocblas_evect_tridiagonal)
     {
-        rocblas_int blocks = (n - 1) / 32 + 1;
-        ROCSOLVER_LAUNCH_KERNEL(init_ident<T>, dim3(blocks, blocks, batch_count), dim3(32, 32), 0,
+        rocblas_int blocks = (n - 1) / BS2 + 1;
+        ROCSOLVER_LAUNCH_KERNEL(init_ident<T>, dim3(blocks, blocks, batch_count), dim3(BS2, BS2), 0,
                                 stream, n, n, C, shiftC, ldc, strideC);
     }
 

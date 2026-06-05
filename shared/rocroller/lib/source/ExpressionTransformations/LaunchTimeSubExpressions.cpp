@@ -83,8 +83,11 @@ namespace rocRoller
                 if(!m_allowNewArgs)
                     return nullptr;
 
-                if(ignoreComplexity || !evalTimes[EvaluationTime::KernelExecute]
-                   || complexity(expr) >= m_minComplexity)
+                bool isMagicOperation = std::holds_alternative<MagicMultiple>(*expr)
+                                        || std::holds_alternative<MagicShifts>(*expr)
+                                        || std::holds_alternative<MagicShiftAndSign>(*expr);
+
+                if(ignoreComplexity || isMagicOperation || complexity(expr) >= m_minComplexity)
                     return addLaunchEval(expr);
 
                 return nullptr;

@@ -24,8 +24,9 @@ The rocBLAS public repository is located at
 
   .. grid-item-card:: Installation
 
-    * :doc:`Install rocBLAS on Linux <./install/Linux_Install_Guide>`
-    * :doc:`Install rocBLAS on Windows <./install/Windows_Install_Guide>`
+    * :doc:`Install rocBLAS <./install/install>`
+    * :doc:`Build rocBLAS on Linux <./install/Linux_Install_Guide>`
+    * :doc:`Build rocBLAS on Windows <./install/Windows_Install_Guide>`
 
 .. grid:: 2
   :gutter: 3

@@ -33,6 +33,7 @@
 
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/conv_solution.hpp>
+#include <miopen/export_internals.h>
 #include <miopen/miopen.h>
 #include <miopen/mlo_internal.hpp>
 
@@ -65,14 +66,14 @@ public:
     // valid.
 
     // Returns false if the solver could not be found by its name.
-    bool IsValid() const;
+    MIOPEN_INTERNALS_EXPORT bool IsValid() const;
 
-    uint64_t GetId() const;
+    MIOPEN_INTERNALS_EXPORT uint64_t GetId() const;
     // Returns the name even if the solver is not valid (returns the requested name).
-    const std::string& GetName() const;
+    MIOPEN_INTERNALS_EXPORT const std::string& GetName() const;
 
-    bool IsTunable() const;
-    bool IsDynamic() const;
+    MIOPEN_INTERNALS_EXPORT bool IsTunable() const;
+    MIOPEN_INTERNALS_EXPORT bool IsDynamic() const;
 
 protected:
     Solver(const miopen::solver::SolverBase* solver_base, uint64_t solver_id);
@@ -120,8 +121,10 @@ protected:
     friend Solver GetSolver(const std::string&);
 };
 
-extern template class SolverMixin<miopen::ExecutionContext, miopen::conv::ProblemDescription>;
-extern template class SolverMixin<miopen::ExecutionContext, miopen::batchnorm::ProblemDescription>;
+extern template class MIOPEN_INTERNALS_EXPORT
+    SolverMixin<miopen::ExecutionContext, miopen::conv::ProblemDescription>;
+extern template class MIOPEN_INTERNALS_EXPORT
+    SolverMixin<miopen::ExecutionContext, miopen::batchnorm::ProblemDescription>;
 
 // Convolution solver
 class ConvSolver final
@@ -129,7 +132,7 @@ class ConvSolver final
 {
 public:
     ConvSolver(const miopen::solver::SolverBase* solver_base, uint64_t solver_id) = delete;
-    std::string GetAlgo(miopen::conv::Direction dir) const;
+    MIOPEN_INTERNALS_EXPORT std::string GetAlgo(miopen::conv::Direction dir) const;
 
 protected:
     ConvSolver(const miopen::solver::SolverBase* solver_base,
@@ -162,14 +165,16 @@ protected:
 // dummy if a solver with specified name does not exist.
 
 // Convolution
-const std::vector<ConvSolver>& GetAllConvSolvers();
-std::vector<ConvSolver> GetConvSolvers(const std::vector<std::string>& names);
-ConvSolver GetConvSolver(const std::string& name);
+MIOPEN_INTERNALS_EXPORT const std::vector<ConvSolver>& GetAllConvSolvers();
+MIOPEN_INTERNALS_EXPORT std::vector<ConvSolver>
+GetConvSolvers(const std::vector<std::string>& names);
+MIOPEN_INTERNALS_EXPORT ConvSolver GetConvSolver(const std::string& name);
 
 // Batch normalization
-const std::vector<BatchNormSolver>& GetAllBatchNormSolvers();
-std::vector<BatchNormSolver> GetBatchNormSolvers(const std::vector<std::string>& names);
-BatchNormSolver GetBatchNormSolver(const std::string& name);
+MIOPEN_INTERNALS_EXPORT const std::vector<BatchNormSolver>& GetAllBatchNormSolvers();
+MIOPEN_INTERNALS_EXPORT std::vector<BatchNormSolver>
+GetBatchNormSolvers(const std::vector<std::string>& names);
+MIOPEN_INTERNALS_EXPORT BatchNormSolver GetBatchNormSolver(const std::string& name);
 
 // Examples:
 //

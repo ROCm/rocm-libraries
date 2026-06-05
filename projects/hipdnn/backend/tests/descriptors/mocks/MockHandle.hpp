@@ -14,4 +14,8 @@ struct MockHandle : hipdnnHandle
                 getPluginResourceManager,
                 (),
                 (const, override));
+    MOCK_METHOD(std::shared_ptr<hipdnn_backend::plugin::HeuristicPluginResourceManager>,
+                getHeuristicPluginResourceManager,
+                (),
+                (const, override));
 };

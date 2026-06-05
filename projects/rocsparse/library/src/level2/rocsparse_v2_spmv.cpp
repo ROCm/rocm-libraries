@@ -350,10 +350,7 @@ public:
             // Free device arrays if allocated
             if(device_arrays_allocated && gamma_device_array)
             {
-                // Using hipFree since we can't access handle here - this is a synchronous free
-                // The allocation/deallocation should be managed by the handle for async operations
-                hipError_t err = hipFree(gamma_device_array);
-                (void)err; // Suppress warning about unused return value
+                (void)rocsparse_hipFree(gamma_device_array);
                 gamma_device_array      = nullptr;
                 z_array                 = nullptr;
                 device_arrays_allocated = false;
@@ -412,7 +409,7 @@ public:
             device_array_size = count * sizeof(T) + count * sizeof(const Y*);
 
             // Allocate device memory
-            RETURN_IF_HIP_ERROR(hipMalloc(&gamma_device_array, device_array_size));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&gamma_device_array, device_array_size));
 
             // Setup pointers
             z_array = static_cast<char*>(gamma_device_array) + count * sizeof(T);

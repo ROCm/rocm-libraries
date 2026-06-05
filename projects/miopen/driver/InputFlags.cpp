@@ -257,7 +257,7 @@ TensorParameters InputFlags::GetValueTensor(const std::string& long_name) const
     if(components.empty())
         return {};
 
-    auto parse = [](auto line) {
+    auto parse = [](const std::string& line) {
         auto ret        = std::vector<int>{};
         const auto strs = miopen::SplitDelim(line, 'x');
         for(auto&& str : strs)
@@ -301,7 +301,7 @@ TensorParametersUint64 InputFlags::GetValueTensorUint64(const std::string& long_
     if(components.size() < 1)
         return {};
 
-    auto parse = [](auto line) {
+    auto parse = [](const std::string& line) {
         auto ret        = std::vector<uint64_t>{};
         const auto strs = miopen::SplitDelim(line, 'x');
         for(auto&& str : strs)
@@ -386,12 +386,12 @@ InputFlags::GetValue2dVectorInt(const std::string& long_name) const
 {
     const auto& input     = MapInputs.at(FindShortName(long_name));
     const auto components = miopen::SplitDelim(input.value.c_str(), ',');
-    auto output           = std::vector<std::vector<int32_t>>{};
+    std::vector<std::vector<int32_t>> output;
 
     if(components.size() < 1)
-        return {};
+        return output;
 
-    auto parse = [](auto line) {
+    auto parse = [](const std::string& line) {
         auto ret        = std::vector<int32_t>{};
         const auto strs = miopen::SplitDelim(line, 'x');
         for(auto&& str : strs)
@@ -421,12 +421,11 @@ InputFlags::GetValue2dVectorUint64(const std::string& long_name) const
 {
     const auto& input     = MapInputs.at(FindShortName(long_name));
     const auto components = miopen::SplitDelim(input.value.c_str(), ',');
-    auto output           = std::vector<std::vector<uint64_t>>{};
 
     if(components.size() < 1)
         return {};
 
-    auto parse = [](auto line) {
+    auto parse = [](const std::string& line) {
         auto ret        = std::vector<uint64_t>{};
         const auto strs = miopen::SplitDelim(line, 'x');
         for(auto&& str : strs)
@@ -443,6 +442,7 @@ InputFlags::GetValue2dVectorUint64(const std::string& long_name) const
         return ret;
     };
 
+    auto output = std::vector<std::vector<uint64_t>>{};
     for(auto&& component : components)
     {
         output.push_back(parse(component));

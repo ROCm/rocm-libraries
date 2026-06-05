@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 /*! \ingroup aux_module
- *  \brief Create a hipsparse handle
+ *  \brief Create a hipSPARSE handle.
  *
  *  \details
  *  \p hipsparseCreate creates the hipSPARSE library context. It must be
@@ -41,7 +41,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreate(hipsparseHandle_t* handle);
 
 /*! \ingroup aux_module
- *  \brief Destroy a hipsparse handle
+ *  \brief Destroy a hipSPARSE handle.
  *
  *  \details
  *  \p hipsparseDestroy destroys the hipSPARSE library context and releases all
@@ -79,7 +79,7 @@ const char* hipsparseGetErrorString(hipsparseStatus_t status);
 #endif
 
 /*! \ingroup aux_module
- *  \brief Get hipSPARSE version
+ *  \brief Get the hipSPARSE version.
  *
  *  \details
  *  \p hipsparseGetVersion gets the hipSPARSE library version number.
@@ -91,7 +91,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseGetVersion(hipsparseHandle_t handle, int* version);
 
 /*! \ingroup aux_module
- *  \brief Get hipSPARSE git revision
+ *  \brief Get the hipSPARSE git revision.
  *
  *  \details
  *  \p hipsparseGetGitRevision gets the hipSPARSE library git commit revision (SHA-1).
@@ -100,7 +100,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseGetGitRevision(hipsparseHandle_t handle, char* rev);
 
 /*! \ingroup aux_module
- *  \brief Specify user defined HIP stream
+ *  \brief Specify the user-defined HIP stream.
  *
  *  \details
  *  \p hipsparseSetStream specifies the stream to be used by the hipSPARSE library
@@ -110,7 +110,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSetStream(hipsparseHandle_t handle, hipStream_t streamId);
 
 /*! \ingroup aux_module
- *  \brief Get current stream from library context
+ *  \brief Get the current stream from the library context.
  *
  *  \details
  *  \p hipsparseGetStream gets the hipSPARSE library context stream which is currently
@@ -120,7 +120,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseGetStream(hipsparseHandle_t handle, hipStream_t* streamId);
 
 /*! \ingroup aux_module
- *  \brief Specify pointer mode
+ *  \brief Specify the pointer mode.
  *
  *  \details
  *  \p hipsparseSetPointerMode specifies the pointer mode to be used by the hipSPARSE
@@ -132,7 +132,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSetPointerMode(hipsparseHandle_t handle, hipsparsePointerMode_t mode);
 
 /*! \ingroup aux_module
- *  \brief Get current pointer mode from library context
+ *  \brief Get the current pointer mode from the library context.
  *
  *  \details
  *  \p hipsparseGetPointerMode gets the hipSPARSE library context pointer mode which
@@ -142,7 +142,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseGetPointerMode(hipsparseHandle_t handle, hipsparsePointerMode_t* mode);
 
 /*! \ingroup aux_module
- *  \brief Create a matrix descriptor
+ *  \brief Create a matrix descriptor.
  *  \details
  *  \p hipsparseCreateMatDescr creates a matrix descriptor. It initializes
  *  \ref hipsparseMatrixType_t to \ref HIPSPARSE_MATRIX_TYPE_GENERAL and
@@ -153,7 +153,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateMatDescr(hipsparseMatDescr_t* descrA);
 
 /*! \ingroup aux_module
- *  \brief Destroy a matrix descriptor
+ *  \brief Destroy a matrix descriptor.
  *
  *  \details
  *  \p hipsparseDestroyMatDescr destroys a matrix descriptor and releases all
@@ -163,28 +163,28 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDestroyMatDescr(hipsparseMatDescr_t descrA);
 
 /*! \ingroup aux_module
- *  \brief Copy a matrix descriptor
+ *  \brief Copy a matrix descriptor.
  *  \details
- *  \p hipsparseCopyMatDescr copies a matrix descriptor. Both, source and destination
+ *  \p hipsparseCopyMatDescr copies a matrix descriptor. Both source and destination
  *  matrix descriptors must be initialized prior to calling \p hipsparseCopyMatDescr.
  */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCopyMatDescr(hipsparseMatDescr_t dest, const hipsparseMatDescr_t src);
 
 /*! \ingroup aux_module
- *  \brief Specify the matrix type of a matrix descriptor
+ *  \brief Specify the matrix type of a matrix descriptor.
  *
  *  \details
  *  \p hipsparseSetMatType sets the matrix type of a matrix descriptor. Valid
  *  matrix types are \ref HIPSPARSE_MATRIX_TYPE_GENERAL,
- *  \ref HIPSPARSE_MATRIX_TYPE_SYMMETRIC, \ref HIPSPARSE_MATRIX_TYPE_HERMITIAN or
+ *  \ref HIPSPARSE_MATRIX_TYPE_SYMMETRIC, \ref HIPSPARSE_MATRIX_TYPE_HERMITIAN, or
  *  \ref HIPSPARSE_MATRIX_TYPE_TRIANGULAR.
  */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSetMatType(hipsparseMatDescr_t descrA, hipsparseMatrixType_t type);
 
 /*! \ingroup aux_module
- *  \brief Get the matrix type of a matrix descriptor
+ *  \brief Get the matrix type of a matrix descriptor.
  *
  *  \details
  *  \p hipsparseGetMatType returns the matrix type of a matrix descriptor.
@@ -193,7 +193,7 @@ HIPSPARSE_EXPORT
 hipsparseMatrixType_t hipsparseGetMatType(const hipsparseMatDescr_t descrA);
 
 /*! \ingroup aux_module
- *  \brief Specify the matrix fill mode of a matrix descriptor
+ *  \brief Specify the matrix fill mode of a matrix descriptor.
  *
  *  \details
  *  \p hipsparseSetMatFillMode sets the matrix fill mode of a matrix descriptor.
@@ -204,7 +204,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSetMatFillMode(hipsparseMatDescr_t descrA, hipsparseFillMode_t fillMode);
 
 /*! \ingroup aux_module
- *  \brief Get the matrix fill mode of a matrix descriptor
+ *  \brief Get the matrix fill mode of a matrix descriptor.
  *
  *  \details
  *  \p hipsparseGetMatFillMode returns the matrix fill mode of a matrix descriptor.
@@ -213,7 +213,7 @@ HIPSPARSE_EXPORT
 hipsparseFillMode_t hipsparseGetMatFillMode(const hipsparseMatDescr_t descrA);
 
 /*! \ingroup aux_module
- *  \brief Specify the matrix diagonal type of a matrix descriptor
+ *  \brief Specify the matrix diagonal type of a matrix descriptor.
  *
  *  \details
  *  \p hipsparseSetMatDiagType sets the matrix diagonal type of a matrix
@@ -224,7 +224,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSetMatDiagType(hipsparseMatDescr_t descrA, hipsparseDiagType_t diagType);
 
 /*! \ingroup aux_module
- *  \brief Get the matrix diagonal type of a matrix descriptor
+ *  \brief Get the matrix diagonal type of a matrix descriptor.
  *
  *  \details
  *  \p hipsparseGetMatDiagType returns the matrix diagonal type of a matrix
@@ -234,7 +234,7 @@ HIPSPARSE_EXPORT
 hipsparseDiagType_t hipsparseGetMatDiagType(const hipsparseMatDescr_t descrA);
 
 /*! \ingroup aux_module
- *  \brief Specify the index base of a matrix descriptor
+ *  \brief Specify the index base of a matrix descriptor.
  *
  *  \details
  *  \p hipsparseSetMatIndexBase sets the index base of a matrix descriptor. Valid
@@ -244,7 +244,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSetMatIndexBase(hipsparseMatDescr_t descrA, hipsparseIndexBase_t base);
 
 /*! \ingroup aux_module
- *  \brief Get the index base of a matrix descriptor
+ *  \brief Get the index base of a matrix descriptor.
  *
  *  \details
  *  \p hipsparseGetMatIndexBase returns the index base of a matrix descriptor.
@@ -254,7 +254,7 @@ hipsparseIndexBase_t hipsparseGetMatIndexBase(const hipsparseMatDescr_t descrA);
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 /*! \ingroup aux_module
- *  \brief Create a \p HYB matrix structure
+ *  \brief Create a \p HYB matrix structure.
  *
  *  \details
  *  \p hipsparseCreateHybMat creates a structure that holds the matrix in \p HYB
@@ -265,7 +265,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateHybMat(hipsparseHybMat_t* hybA);
 
 /*! \ingroup aux_module
- *  \brief Destroy a \p HYB matrix structure
+ *  \brief Destroy a \p HYB matrix structure.
  *
  *  \details
  *  \p hipsparseDestroyHybMat destroys a \p HYB structure.
@@ -278,11 +278,11 @@ hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA);
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /* Info structures */
 /*! \ingroup aux_module
- *  \brief Create a bsrsv2 info structure
+ *  \brief Create a bsrsv2 info structure.
  *
  *  \details
  *  \p hipsparseCreateBsrsv2Info creates a structure that holds the bsrsv2 info data
- *  that is gathered during the analysis routines available. It should be destroyed
+ *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyBsrsv2Info().
  */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
@@ -292,7 +292,7 @@ hipsparseStatus_t hipsparseCreateBsrsv2Info(bsrsv2Info_t* info);
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup aux_module
- *  \brief Destroy a bsrsv2 info structure
+ *  \brief Destroy a bsrsv2 info structure.
  *
  *  \details
  *  \p hipsparseDestroyBsrsv2Info destroys a bsrsv2 info structure.
@@ -305,11 +305,11 @@ hipsparseStatus_t hipsparseDestroyBsrsv2Info(bsrsv2Info_t info);
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /* Info structures */
 /*! \ingroup aux_module
- *  \brief Create a bsrsm2 info structure
+ *  \brief Create a bsrsm2 info structure.
  *
  *  \details
  *  \p hipsparseCreateBsrsm2Info creates a structure that holds the bsrsm2 info data
- *  that is gathered during the analysis routines available. It should be destroyed
+ *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyBsrsm2Info().
  */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
@@ -319,7 +319,7 @@ hipsparseStatus_t hipsparseCreateBsrsm2Info(bsrsm2Info_t* info);
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup aux_module
- *  \brief Destroy a bsrsm2 info structure
+ *  \brief Destroy a bsrsm2 info structure.
  *
  *  \details
  *  \p hipsparseDestroyBsrsm2Info destroys a bsrsm2 info structure.
@@ -332,11 +332,11 @@ hipsparseStatus_t hipsparseDestroyBsrsm2Info(bsrsm2Info_t info);
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /* Info structures */
 /*! \ingroup aux_module
- *  \brief Create a bsrilu02 info structure
+ *  \brief Create a bsrilu02 info structure.
  *
  *  \details
  *  \p hipsparseCreateBsrilu02Info creates a structure that holds the bsrilu02 info data
- *  that is gathered during the analysis routines available. It should be destroyed
+ *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyBsrilu02Info().
  */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
@@ -359,11 +359,11 @@ hipsparseStatus_t hipsparseDestroyBsrilu02Info(bsrilu02Info_t info);
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /* Info structures */
 /*! \ingroup aux_module
- *  \brief Create a bsric02 info structure
+ *  \brief Create a bsric02 info structure.
  *
  *  \details
  *  \p hipsparseCreateBsric02Info creates a structure that holds the bsric02 info data
- *  that is gathered during the analysis routines available. It should be destroyed
+ *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyBsric02Info().
  */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
@@ -373,7 +373,7 @@ hipsparseStatus_t hipsparseCreateBsric02Info(bsric02Info_t* info);
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup aux_module
- *  \brief Destroy a bsric02 info structure
+ *  \brief Destroy a bsric02 info structure.
  *
  *  \details
  *  \p hipsparseDestroyBsric02Info destroys a bsric02 info structure.
@@ -386,11 +386,11 @@ hipsparseStatus_t hipsparseDestroyBsric02Info(bsric02Info_t info);
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /* Info structures */
 /*! \ingroup aux_module
- *  \brief Create a csrsv2 info structure
+ *  \brief Create a csrsv2 info structure.
  *
  *  \details
  *  \p hipsparseCreateCsrsv2Info creates a structure that holds the csrsv2 info data
- *  that is gathered during the analysis routines available. It should be destroyed
+ *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyCsrsv2Info().
  */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
@@ -398,7 +398,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateCsrsv2Info(csrsv2Info_t* info);
 
 /*! \ingroup aux_module
- *  \brief Destroy a csrsv2 info structure
+ *  \brief Destroy a csrsv2 info structure.
  *
  *  \details
  *  \p hipsparseDestroyCsrsv2Info destroys a csrsv2 info structure.
@@ -409,11 +409,11 @@ hipsparseStatus_t hipsparseDestroyCsrsv2Info(csrsv2Info_t info);
 
 /* Info structures */
 /*! \ingroup aux_module
- *  \brief Create a csrsm2 info structure
+ *  \brief Create a csrsm2 info structure.
  *
  *  \details
  *  \p hipsparseCreateCsrsm2Info creates a structure that holds the csrsm2 info data
- *  that is gathered during the analysis routines available. It should be destroyed
+ *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyCsrsm2Info().
  */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
@@ -421,7 +421,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateCsrsm2Info(csrsm2Info_t* info);
 
 /*! \ingroup aux_module
- *  \brief Destroy a csrsm2 info structure
+ *  \brief Destroy a csrsm2 info structure.
  *
  *  \details
  *  \p hipsparseDestroyCsrsm2Info destroys a csrsm2 info structure.
@@ -434,11 +434,11 @@ hipsparseStatus_t hipsparseDestroyCsrsm2Info(csrsm2Info_t info);
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /* Info structures */
 /*! \ingroup aux_module
- *  \brief Create a csrilu02 info structure
+ *  \brief Create a csrilu02 info structure.
  *
  *  \details
  *  \p hipsparseCreateCsrilu02Info creates a structure that holds the csrilu02 info data
- *  that is gathered during the analysis routines available. It should be destroyed
+ *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyCsrilu02Info().
  */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
@@ -448,7 +448,7 @@ hipsparseStatus_t hipsparseCreateCsrilu02Info(csrilu02Info_t* info);
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup aux_module
- *  \brief Destroy a csrilu02 info structure
+ *  \brief Destroy a csrilu02 info structure.
  *
  *  \details
  *  \p hipsparseDestroyCsrilu02Info destroys a csrilu02 info structure.
@@ -461,11 +461,11 @@ hipsparseStatus_t hipsparseDestroyCsrilu02Info(csrilu02Info_t info);
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /* Info structures */
 /*! \ingroup aux_module
- *  \brief Create a csric02 info structure
+ *  \brief Create a csric02 info structure.
  *
  *  \details
  *  \p hipsparseCreateCsric02Info creates a structure that holds the csric02 info data
- *  that is gathered during the analysis routines available. It should be destroyed
+ *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyCsric02Info().
  */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
@@ -475,7 +475,7 @@ hipsparseStatus_t hipsparseCreateCsric02Info(csric02Info_t* info);
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup aux_module
- *  \brief Destroy a csric02 info structure
+ *  \brief Destroy a csric02 info structure.
  *
  *  \details
  *  \p hipsparseDestroyCsric02Info destroys a csric02 info structure.
@@ -487,18 +487,18 @@ hipsparseStatus_t hipsparseDestroyCsric02Info(csric02Info_t info);
 
 /* Info structures */
 /*! \ingroup aux_module
- *  \brief Create a csru2csr info structure
+ *  \brief Create a csru2csr info structure.
  *
  *  \details
  *  \p hipsparseCreateCsru2csrInfo creates a structure that holds the csru2csr info data
- *  that is gathered during the analysis routines available. It should be destroyed
+ *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyCsru2csrInfo().
  */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateCsru2csrInfo(csru2csrInfo_t* info);
 
 /*! \ingroup aux_module
- *  \brief Destroy a csru2csr info structure
+ *  \brief Destroy a csru2csr info structure.
  *
  *  \details
  *  \p hipsparseDestroyCsru2csrInfo destroys a csru2csr info structure.
@@ -509,11 +509,11 @@ hipsparseStatus_t hipsparseDestroyCsru2csrInfo(csru2csrInfo_t info);
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /* Info structures */
 /*! \ingroup aux_module
- *  \brief Create a color info structure
+ *  \brief Create a color info structure.
  *
  *  \details
  *  \p hipsparseCreateColorInfo creates a structure that holds the color info data
- *  that is gathered during the analysis routines available. It should be destroyed
+ *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyColorInfo().
  */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
@@ -523,7 +523,7 @@ hipsparseStatus_t hipsparseCreateColorInfo(hipsparseColorInfo_t* info);
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup aux_module
- *  \brief Destroy a color info structure
+ *  \brief Destroy a color info structure.
  *
  *  \details
  *  \p hipsparseDestroyColorInfo destroys a color info structure.
@@ -536,11 +536,11 @@ hipsparseStatus_t hipsparseDestroyColorInfo(hipsparseColorInfo_t info);
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /* Info structures */
 /*! \ingroup aux_module
- *  \brief Create a csrgemm2 info structure
+ *  \brief Create a csrgemm2 info structure.
  *
  *  \details
  *  \p hipsparseCreateCsrgemm2Info creates a structure that holds the csrgemm2 info data
- *  that is gathered during the analysis routines available. It should be destroyed
+ *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyCsrgemm2Info().
  */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
@@ -548,7 +548,7 @@ HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateCsrgemm2Info(csrgemm2Info_t* info);
 
 /*! \ingroup aux_module
- *  \brief Destroy a csrgemm2 info structure
+ *  \brief Destroy a csrgemm2 info structure.
  *
  *  \details
  *  \p hipsparseDestroyCsrgemm2Info destroys a csrgemm2 info structure.
@@ -561,11 +561,11 @@ hipsparseStatus_t hipsparseDestroyCsrgemm2Info(csrgemm2Info_t info);
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /* Info structures */
 /*! \ingroup aux_module
- *  \brief Create a prune info structure
+ *  \brief Create a prune info structure.
  *
  *  \details
  *  \p hipsparseCreatePruneInfo creates a structure that holds the prune info data
- *  that is gathered during the analysis routines available. It should be destroyed
+ *  that is gathered during the analysis routines. It should be destroyed
  *  at the end using hipsparseDestroyPruneInfo().
  */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")

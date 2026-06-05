@@ -29,7 +29,7 @@
 // process control block is accessed using GetEnvironmentVariable and
 // SetEnvironmentVariable.
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 static void rocfft_setenv(const char* var, const char* value)
 {

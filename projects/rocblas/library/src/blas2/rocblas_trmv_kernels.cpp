@@ -141,10 +141,8 @@ rocblas_trmvn_kernel(rocblas_int    n,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         rocblas_trmvn_kernel_calc<DIM_X, DIM_Y, LOWER, UNIT>(
             n,
@@ -153,10 +151,7 @@ rocblas_trmvn_kernel(rocblas_int    n,
             load_ptr_batch(x, batch, shift_x, stride_x),
             incx,
             load_ptr_batch(workspace, batch, shiftw, stride_w));
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <rocblas_int NB,
@@ -184,10 +179,8 @@ rocblas_trmvt_kernel(rocblas_int    n,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         rocblas_trmvt_kernel_calc<NB, LOWER, CONJ, UNIT>(
             n,
@@ -196,10 +189,7 @@ rocblas_trmvt_kernel(rocblas_int    n,
             load_ptr_batch(x, batch, shift_x, stride_x),
             incx,
             load_ptr_batch(workspace, batch, shiftw, stride_w));
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename TConstPtr, typename TPtr, typename TWork>

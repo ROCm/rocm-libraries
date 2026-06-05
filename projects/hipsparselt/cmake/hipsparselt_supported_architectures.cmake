@@ -9,14 +9,14 @@ set(SUPPORTED_ARCHITECTURES "")
 
 if(HIPSPARSELT_ENABLE_ASAN OR BUILD_ADDRESS_SANITIZER)
     # For address sanitizer builds, base and supported are the same
-    list(APPEND BASE_ARCHITECTURES "gfx942:xnack+" "gfx950:xnack+")
+    list(APPEND BASE_ARCHITECTURES "gfx942:xnack+" "gfx950:xnack+" "gfx1250:xnack+")
     set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
 else()
-    list(APPEND BASE_ARCHITECTURES "gfx942" "gfx950")
+    list(APPEND BASE_ARCHITECTURES "gfx942" "gfx950" "gfx1250")
 
     set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
     list(APPEND SUPPORTED_ARCHITECTURES "gfx942:xnack+" "gfx942:xnack-" "gfx950:xnack+"
-         "gfx950:xnack-"
+         "gfx950:xnack-" "gfx1250:xnack+" "gfx1250:xnack-"
     )
 endif()
 

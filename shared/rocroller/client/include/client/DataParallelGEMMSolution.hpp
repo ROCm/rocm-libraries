@@ -66,21 +66,46 @@ namespace rocRoller
                         }
                     };
 
-                    auto pretileB = not solutionParams.types.pretileB.empty();
-
                     m_tagTensorA = command->addOperation(
                         Operations::Tensor(2, typeA, {}, unitStrides(solutionParams.types.transA)));
-                    m_tagA = command->addOperation(Operations::T_Load_Tiled(m_tagTensorA));
 
-                    auto stridesB = pretileB ? std::vector<size_t>{}
-                                             : unitStrides(solutionParams.types.transB);
-                    m_tagTensorB
-                        = command->addOperation(Operations::Tensor(2, typeB, {}, stridesB));
+                    auto loadInputA = m_tagTensorA;
+
+                    auto pretileA = not solutionParams.types.pretileA.empty();
+                    if(pretileA)
+                    {
+                        AssertFatal(solutionParams.types.transA
+                                        == Client::GEMMClient::TransposeType::T,
+                                    "Pretiling A is only supported when A is TransposeType::T.",
+                                    ShowValue(solutionParams.types.transA));
+
+                        AssertFatal(solutionParams.types.pretileA.size() == 2,
+                                    "pretileA must have size 2 (MxK tile dimensions).",
+                                    ShowValue(solutionParams.types.pretileA.size()));
+
+                        loadInputA = command->addOperation(Operations::SubTileTranspose(
+                            loadInputA, solutionParams.types.pretileA, true));
+                    }
+
+                    m_tagA = command->addOperation(Operations::T_Load_Tiled(loadInputA));
+
+                    m_tagTensorB = command->addOperation(
+                        Operations::Tensor(2, typeB, {}, unitStrides(solutionParams.types.transB)));
 
                     auto loadInputB = m_tagTensorB;
 
+                    auto pretileB = not solutionParams.types.pretileB.empty();
                     if(pretileB)
                     {
+                        AssertFatal(solutionParams.types.transB
+                                        == Client::GEMMClient::TransposeType::N,
+                                    "Pretiling B is only supported when B is TransposeType::N.",
+                                    ShowValue(solutionParams.types.transB));
+
+                        AssertFatal(solutionParams.types.pretileB.size() == 2,
+                                    "pretileB must have size 2 (KxN tile dimensions).",
+                                    ShowValue(solutionParams.types.pretileB.size()));
+
                         loadInputB = command->addOperation(Operations::SubTileTranspose(
                             loadInputB, solutionParams.types.pretileB));
                     }
@@ -117,17 +142,15 @@ namespace rocRoller
 
                     if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                     {
-                        auto isPreTiled = not solutionParams.types.scalePretileA.empty();
-
                         m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
                             2,
                             solutionParams.types.scaleTypeA,
                             {},
-                            isPreTiled ? std::vector<size_t>{}
-                                       : unitStrides(solutionParams.types.transA)));
+                            unitStrides(solutionParams.types.transA)));
 
                         auto loadScaleInputA = m_tagTensorScaleA;
 
+                        auto isPreTiled = not solutionParams.types.scalePretileA.empty();
                         if(isPreTiled)
                         {
                             AssertFatal(solutionParams.types.transA == TransposeType::T);
@@ -185,17 +208,15 @@ namespace rocRoller
 
                     if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
                     {
-                        auto isPreTiled = not solutionParams.types.scalePretileB.empty();
-
                         m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
                             2,
                             solutionParams.types.scaleTypeB,
                             {},
-                            isPreTiled ? std::vector<size_t>{}
-                                       : unitStrides(solutionParams.types.transB)));
+                            unitStrides(solutionParams.types.transB)));
 
                         auto loadScaleInputB = m_tagTensorScaleB;
 
+                        auto isPreTiled = not solutionParams.types.scalePretileB.empty();
                         if(isPreTiled)
                         {
                             AssertFatal(solutionParams.types.transB == TransposeType::N);
@@ -650,35 +671,6 @@ namespace rocRoller
                                            {K, N},
                                            problemParams.types.transB == TransposeType::T ? "T"
                                                                                           : "N");
-
-                    if(not problemParams.types.pretileB.empty()
-                       && problemParams.types.pretileB.size() == 2)
-                    {
-                        AssertFatal(problemParams.types.transB == TransposeType::N,
-                                    "Pre-tiling B only supported for TransposeType::N");
-
-                        auto const K     = problemParams.k;
-                        auto const N     = problemParams.n;
-                        auto const tileK = problemParams.types.pretileB[0];
-                        auto const tileN = problemParams.types.pretileB[1];
-
-                        AssertFatal(
-                            K % tileK == 0,
-                            "B matrix dimension K must be divisible by pretileB tile size in K.",
-                            ShowValue(K),
-                            ShowValue(tileK));
-                        AssertFatal(
-                            N % tileN == 0,
-                            "B matrix dimension N must be divisible by pretileB tile size in N.",
-                            ShowValue(N),
-                            ShowValue(tileN));
-
-                        descB
-                            = TensorDescriptor(fromString<DataType>(problemParams.types.typeB),
-                                               {K, N},
-                                               {static_cast<size_t>(tileK * tileN),
-                                                static_cast<size_t>((K / tileK) * tileK * tileN)});
-                    }
 
                     setCommandTensorArg(commandArgs, m_tagTensorA, descA, (float*)nullptr);
                     setCommandTensorArg(commandArgs, m_tagTensorB, descB, (float*)nullptr);

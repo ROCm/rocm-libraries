@@ -536,7 +536,7 @@ namespace HazardObserverTest
 
                 std::vector<Instruction> insts
                     = {Instruction("v_cmpx_eq_u32", {}, {s[0], v[0]}, {}, ""),
-                       Instruction("v_xor_b32", {v[1]}, {v[0], context->getExec()}, {}, ""),
+                       Instruction("v_xor_b32", {v[1]}, {v[0], context->getEXEC()}, {}, ""),
                        Instruction("s_endpgm", {}, {}, {}, "")};
 
                 if(arch.isCDNA1GPU() || arch.isCDNA2GPU())

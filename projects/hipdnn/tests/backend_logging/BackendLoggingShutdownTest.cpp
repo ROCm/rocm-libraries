@@ -51,6 +51,8 @@
 
 #include <hipdnn_backend.h>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -58,26 +60,19 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
 
 namespace
 {
-
-// Cross-platform setenv wrapper for this test.
-void setTestEnv(const char* var, const char* value)
-{
-#ifdef _WIN32
-    _putenv_s(var, value);
-#else
-    setenv(var, value, 1);
-#endif
-}
 
 constexpr size_t NUM_PLAIN_WORKERS = 2;
 constexpr size_t NUM_CALLBACK_WORKERS = 4;
@@ -90,6 +85,13 @@ constexpr auto POST_STOP_DELAY = std::chrono::milliseconds(20);
 
 // Delay after joining all workers, before spawning the post-join thread.
 constexpr auto POST_JOIN_DELAY = std::chrono::milliseconds(50);
+
+// Synchronization for ensuring all workers have produced at least one log
+// before main() returns. Without this, on heavily loaded systems, workers
+// may not get scheduled before the atexit handler disables logging.
+std::atomic<int> gWorkersReady{0};
+std::mutex gReadyMutex;
+std::condition_variable gReadyCV;
 
 // --- User callback infrastructure ---
 
@@ -132,7 +134,7 @@ void slowUserCallback(hipdnnUserLogCallbackHandle_t userHandle,
 void createAndDestroyHandle(const char* context)
 {
     hipdnnHandle_t handle = nullptr;
-    hipdnnStatus_t status = hipdnnCreate(&handle);
+    const hipdnnStatus_t status = hipdnnCreate(&handle);
     if(status == HIPDNN_STATUS_SUCCESS && handle != nullptr)
     {
         hipdnnDestroy(handle);
@@ -140,6 +142,24 @@ void createAndDestroyHandle(const char* context)
     else
     {
         std::cout << "[Test] " << context << ": hipdnnCreate returned " << status << '\n';
+    }
+}
+
+// Run a worker loop that continuously creates/destroys handles until the stop
+// flag is set. Signals readiness after the first API call completes.
+void runWorkerLoop(std::atomic<bool>& stopFlag, const char* context)
+{
+    bool signaled = false;
+    while(!stopFlag.load(std::memory_order_acquire))
+    {
+        createAndDestroyHandle(context);
+        if(!signaled)
+        {
+            gWorkersReady.fetch_add(1, std::memory_order_release);
+            gReadyCV.notify_one();
+            signaled = true;
+        }
+        std::this_thread::yield();
     }
 }
 
@@ -169,11 +189,7 @@ void plainWorker(std::atomic<bool>& stopFlag, int threadId)
     // may call it concurrently, all setting the same value.
     hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO);
 
-    while(!stopFlag.load(std::memory_order_acquire))
-    {
-        createAndDestroyHandle("plain worker (loop)");
-        std::this_thread::yield();
-    }
+    runWorkerLoop(stopFlag, "plain worker (loop)");
 
     // After receiving the stop signal, delay and make one more API call.
     // By this point the atexit handler has set log level to OFF, so the
@@ -201,11 +217,7 @@ void callbackWorker(std::atomic<bool>& stopFlag,
                                  HIPDNN_LOG_CALLBACK_ASYNC,
                                  static_cast<hipdnnUserLogCallbackHandle_t>(cbData));
 
-    while(!stopFlag.load(std::memory_order_acquire))
-    {
-        createAndDestroyHandle("callback worker (loop)");
-        std::this_thread::yield();
-    }
+    runWorkerLoop(stopFlag, "callback worker (loop)");
 
     // Intentionally do NOT deregister the user callback before exiting.
     // This tests that BackendLogState::~BackendLogState (via loggerShutdownLocked)
@@ -293,7 +305,7 @@ struct TestLoggerShutdown
         bool allCallbacksReceived = true;
         for(size_t i = 0; i < NUM_CALLBACK_WORKERS; ++i)
         {
-            int count = callbackData[i].callCount.load();
+            const int count = callbackData[i].callCount.load();
             std::cout << "[Test] Callback worker " << i << " received " << count
                       << " log callbacks\n";
             if(count == 0)
@@ -348,7 +360,7 @@ int main(int argc, char* argv[])
 
     // Set log level via environment variable so the backend logger will produce output.
     // Must be set before any hipDNN function is called (i.e., before worker threads start).
-    setTestEnv("HIPDNN_LOG_LEVEL", "info");
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
 
 #ifdef __linux__
     // Create a temporary file for HIPDNN_LOG_FILE. The file is removed before main()
@@ -358,17 +370,55 @@ int main(int argc, char* argv[])
     // file sink doesn't crash when the underlying file is deleted during operation.
     // Skipped on Windows: remove() would fail because the file is still open (no
     // FILE_SHARE_DELETE with standard fopen).
+    //
+    // This MUST be set before any hipDNN API call (including plugin path setup
+    // below), because the first API call triggers logging initialization via
+    // LOG_API_ENTRY → getBackendLogState(). If HIPDNN_LOG_FILE is not yet set
+    // at that point, spdlog creates a console sink instead of a file sink.
     std::string logFilePath = "./hipdnn_shutdown_test_XXXXXX";
-    int logFd = mkstemp(logFilePath.data());
+    const int logFd = mkstemp(logFilePath.data());
     if(logFd < 0)
     {
         std::cerr << "[Test] FAIL: mkstemp failed\n";
         return 1;
     }
     close(logFd); // Close the fd; spdlog will reopen it by path.
-    setTestEnv("HIPDNN_LOG_FILE", logFilePath.c_str());
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_FILE", logFilePath.c_str());
     std::cout << "[Test] Created temp log file: " << logFilePath << "\n";
 #endif
+
+    // Constrain plugin loading to the known-safe test_good_default_plugin.
+    // Without this, the default plugin discovery may load MIOpen or other plugins
+    // whose static objects can cause segfaults during the static destruction
+    // stress test. Using ABSOLUTE mode ensures only the specified plugin is loaded.
+    //
+    // The API call is made from a helper thread rather than main() because
+    // hipdnnSetEnginePluginPaths_ext() triggers logging initialization via
+    // LOG_API_ENTRY, which calls getBackendLogState(). If called from main(),
+    // main() would acquire a thread_local s_tlRef to BackendLogState, keeping
+    // it alive longer than intended during static destruction. By using a
+    // short-lived helper thread, the s_tlRef is destroyed when the thread
+    // exits, and BackendLogState's lifetime depends only on worker threads.
+    {
+        const std::string pluginPath
+            = (std::filesystem::path(".") / "test_plugins" / "default"
+               / hipdnn_data_sdk::utilities::getLibraryName(TEST_GOOD_DEFAULT_PLUGIN_NAME))
+                  .string();
+        hipdnnStatus_t pluginStatus = HIPDNN_STATUS_SUCCESS;
+        std::thread pluginSetup([&] {
+            const std::array<const char*, 1> paths = {pluginPath.c_str()};
+            pluginStatus = hipdnnSetEnginePluginPaths_ext(
+                paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+        });
+        pluginSetup.join();
+        if(pluginStatus != HIPDNN_STATUS_SUCCESS)
+        {
+            std::cerr << "[Test] FAIL: hipdnnSetEnginePluginPaths_ext returned " << pluginStatus
+                      << '\n';
+            return 1;
+        }
+        std::cout << "[Test] Plugin path set to: " << pluginPath << '\n';
+    }
 
     // Mark the test as started so the destructor knows to run shutdown logic.
     sTestLoggerShutdown.testStarted = true;
@@ -417,11 +467,22 @@ int main(int argc, char* argv[])
     std::cout << "[Test]      After last worker joined, BackendLogState is truly destroyed\n";
     std::cout << "\n";
 
-    // Give worker threads time to run and generate log output before main() returns.
-    // Once main() returns, the atexit handler sets s_loggingShutdown which prevents
-    // all further logging. Without this delay, threads may not have logged at all,
-    // meaning callback workers would receive zero callbacks.
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    // Wait for all worker threads to complete at least one hipDNN API call cycle,
+    // ensuring they have produced log output and (for callback workers) their
+    // registered callbacks have been invoked at least once. This replaces a fixed
+    // delay which could be insufficient on heavily loaded systems.
+    {
+        std::unique_lock<std::mutex> lock(gReadyMutex);
+        if(!gReadyCV.wait_for(lock, std::chrono::seconds(30), [&] {
+               return gWorkersReady.load(std::memory_order_acquire)
+                      >= static_cast<int>(TOTAL_WORKERS);
+           }))
+        {
+            std::cerr << "[Test] FAIL: Not all workers produced logs within 30 seconds ("
+                      << gWorkersReady.load() << "/" << TOTAL_WORKERS << " ready)\n";
+            return 1;
+        }
+    }
 
 #ifdef __linux__
     // Remove the temp log file while spdlog's file sink still has it open.

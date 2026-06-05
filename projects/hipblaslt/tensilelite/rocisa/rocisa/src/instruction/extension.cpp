@@ -32,26 +32,47 @@ namespace nb = nanobind;
 
 void ext_inst(nb::module_ m)
 {
+    // 3-contiguous overloads
     m.def("SLongBranch",
-          &rocisa::SLongBranch,
+          static_cast<std::shared_ptr<rocisa::Module>(*)(const rocisa::Label&, rocisa::ContinuousRegister&, const std::string&, const std::string&)>(&rocisa::SLongBranch),
           nb::arg("label"),
           nb::arg("tmpSgprRes"),
           nb::arg("positiveLabelStr"),
           nb::arg("comment") = "");
     m.def("SGetPositivePCOffset",
-          &rocisa::SGetPositivePCOffset,
+          static_cast<std::shared_ptr<rocisa::Module>(*)(int, const rocisa::Label&, rocisa::ContinuousRegister&)>(&rocisa::SGetPositivePCOffset),
           nb::arg("sgprIdx"),
           nb::arg("label"),
           nb::arg("ContinuousRegister"));
     m.def("SLongBranchPositive",
-          &rocisa::SLongBranchPositive,
+          static_cast<std::shared_ptr<rocisa::Module>(*)(const rocisa::Label&, rocisa::ContinuousRegister&, const std::string&)>(&rocisa::SLongBranchPositive),
           nb::arg("label"),
           nb::arg("tmpSgprRes"),
           nb::arg("comment") = "");
     m.def("SLongBranchNegative",
-          &rocisa::SLongBranchNegative,
+          static_cast<std::shared_ptr<rocisa::Module>(*)(const rocisa::Label&, rocisa::ContinuousRegister&, const std::string&)>(&rocisa::SLongBranchNegative),
           nb::arg("label"),
           nb::arg("tmpSgprRes"),
+          nb::arg("comment") = "");
+    // Split-register overloads (2-aligned pair + 1 offset)
+    m.def("SLongBranch",
+          static_cast<std::shared_ptr<rocisa::Module>(*)(const rocisa::Label&, rocisa::ContinuousRegister&, rocisa::ContinuousRegister&, const std::string&, const std::string&)>(&rocisa::SLongBranch),
+          nb::arg("label"),
+          nb::arg("pcPair"),
+          nb::arg("offSgpr"),
+          nb::arg("positiveLabelStr"),
+          nb::arg("comment") = "");
+    m.def("SLongBranchPositive",
+          static_cast<std::shared_ptr<rocisa::Module>(*)(const rocisa::Label&, rocisa::ContinuousRegister&, rocisa::ContinuousRegister&, const std::string&)>(&rocisa::SLongBranchPositive),
+          nb::arg("label"),
+          nb::arg("pcPair"),
+          nb::arg("offSgpr"),
+          nb::arg("comment") = "");
+    m.def("SLongBranchNegative",
+          static_cast<std::shared_ptr<rocisa::Module>(*)(const rocisa::Label&, rocisa::ContinuousRegister&, rocisa::ContinuousRegister&, const std::string&)>(&rocisa::SLongBranchNegative),
+          nb::arg("label"),
+          nb::arg("pcPair"),
+          nb::arg("offSgpr"),
           nb::arg("comment") = "");
     m.def("SCLongBranchScc0",
           &rocisa::SCLongBranchScc0,
@@ -87,6 +108,30 @@ void ext_inst(nb::module_ m)
           nb::arg("hasSMulHi") = false,
           nb::arg("sign")      = false,
           nb::arg("comment")   = "");
+    m.def("ECvtF16toF32",
+          &rocisa::ECvtF16toF32,
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("sel"),
+          nb::arg("comment") = "");
+    m.def("ECvtF32toF16",
+          &rocisa::ECvtF32toF16,
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("sel")     = nb::none(),
+          nb::arg("comment") = "");
+    m.def("ECvtPkFP8toF32",
+          &rocisa::ECvtPkFP8toF32,
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("sel"),
+          nb::arg("comment") = "");
+    m.def("ECvtPkBF8toF32",
+          &rocisa::ECvtPkBF8toF32,
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("sel"),
+          nb::arg("comment") = "");
     m.def("VCvtBF16toFP32",
           &rocisa::VCvtBF16toFP32,
           nb::arg("dst"),

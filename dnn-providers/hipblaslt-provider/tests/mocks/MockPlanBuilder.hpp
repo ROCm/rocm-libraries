@@ -5,7 +5,7 @@
 
 #include <gmock/gmock.h>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include "engines/plans/PlanBuilderInterface.hpp"
 
@@ -18,18 +18,18 @@ public:
     MOCK_METHOD(bool,
                 isApplicable,
                 (const HipdnnEnginePluginHandle& handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
+                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph),
                 (const, override));
     MOCK_METHOD(size_t,
                 getWorkspaceSize,
                 (const HipdnnEnginePluginHandle& handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
+                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph),
                 (const, override));
 
     MOCK_METHOD(void,
                 buildPlan,
                 (const HipdnnEnginePluginHandle& handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                  HipdnnEnginePluginExecutionContext& executionContext),
                 (const, override));
 };

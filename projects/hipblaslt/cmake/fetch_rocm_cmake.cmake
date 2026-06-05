@@ -32,4 +32,3 @@ include(ROCMPackageConfigHelpers)
 include(ROCMInstallSymlinks)
 include(ROCMCheckTargetIds OPTIONAL)
 include(ROCMClients)
-

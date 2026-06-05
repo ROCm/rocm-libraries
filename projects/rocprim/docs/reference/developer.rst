@@ -11,7 +11,7 @@ rocPRIM Developer guidelines
 Overview
 ========
 
-As explained in :ref:`rocprim-intro`, rocPRIM's operations are part of one of four different hierarchical scopes: *Device/Grid*, :term:`Block`, :term:`Warp`, or *Thread*. This division facilitates re-use in the codebase and provides flexibility for users. Additional developer considerations are:
+rocPRIM's operations are part of one of four different hierarchical scopes: *Device/Grid*, :term:`Block`, :term:`Warp`, or *Thread*. This division facilitates re-use in the codebase and provides flexibility for users. Additional developer considerations are:
 
 * *Device/Grid*: algorithms called from host code, executed on the entire device. The input size is variable and passed as an argument to the function.
 * :term:`Block`: algorithms that are called from device code, executed by one thread block. All threads in a thread block should participate in the function call, and the threads together perform the algorithm. They are defined as structures, to group similar overloads and provide associated types such as the ``storage_type`` defining shared memory storage requirements. The maximum input size is defined by template arguments. Optionally, an actual size can be defined by ``valid_items`` overloads.
@@ -350,11 +350,5 @@ See `Contributing to the ROCm documentation <https://rocm.docs.amd.com/en/latest
 The ``docs/`` directory contains the ``.rst`` files that form this website. These ``.rst`` files use `Breathe directives <https://breathe.readthedocs.io/en/latest/directives.html>`_ to display `Doxygen's special commands <https://www.doxygen.nl/manual/commands.html>`_, which are used in C++ comments to document code.
 
 Algorithms should be documented in their appropriate ``docs/`` subdirectories, like ``block_ops/`` and ``device_ops/``, based on their scope. :ref:`dev-nth_element` for example is a :ref:`device-wide operation <dev-index>`, documented in ``docs/device_ops/nth_element.rst``.
-
-There are several pages that link to the :ref:`dev-nth_element` documentation:
-
-- ``docs/device_ops/index.rst``, which adds :ref:`dev-nth_element` to :ref:`dev-index`.
-- ``docs/reference/ops_summary.rst``, which adds :ref:`dev-nth_element` to :ref:`ops-summary`.
-- ``docs/sphinx/_toc.yml.in``, which adds :ref:`dev-nth_element` to Sphinx its `Table Of Contents <https://github.com/ROCm/rocPRIM/blob/develop/docs/sphinx/_toc.yml.in>`_, and ``docs/sphinx/_toc.yml`` is automatically generated from this file.
 
 Any newly added algorithm should also update these files. As one can easily forget to update one of them, it is recommended to `build and preview the documentation locally <https://github.com/ROCm/rocPRIM/blob/develop/README.md#building-the-documentation-locally>`_.

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +56,19 @@ struct coo_matrix
         , row_ind(nnz_)
         , col_ind(nnz_)
         , val(nnz_){};
+
+    template <memory_mode::value_t THAT_MODE>
+    coo_matrix& operator()(const coo_matrix<THAT_MODE, T, I>& that_, bool transfer = true)
+    {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+        this->define(that_.m, that_.n, that_.nnz, that_.base);
+        this->storage_mode = that_.storage_mode;
+        if(transfer)
+        {
+            this->transfer_from(that_);
+        }
+        return *this;
+    }
 
     explicit coo_matrix(const coo_matrix<MODE, T, I>& that_, bool transfer = true)
         : coo_matrix<MODE, T, I>(that_.m, that_.n, that_.nnz, that_.base)

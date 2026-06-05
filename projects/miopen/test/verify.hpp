@@ -139,6 +139,18 @@ struct square_diff_fn
 };
 static constexpr square_diff_fn square_diff{};
 
+template <class T, std::enable_if_t<!std::is_floating_point_v<T>, bool> = true>
+bool equal_values(T const& lhs, T const& rhs)
+{
+    return lhs == rhs;
+}
+
+template <class T, std::enable_if_t<std::is_floating_point_v<T>, bool> = true>
+bool equal_values(T const& lhs, T const& rhs)
+{
+    return miopen::float_equal_sentinel(lhs, rhs);
+}
+
 template <class R1>
 bool range_empty(R1&& r1)
 {
@@ -151,7 +163,7 @@ auto range_distance(R1&& r1) MIOPEN_RETURNS(std::distance(r1.begin(), r1.end()))
 template <class T>
 bool range_zero(const std::vector<T>& r)
 {
-    return std::all_of(r.begin(), r.end(), [](T x) { return x == T(); });
+    return std::all_of(r.begin(), r.end(), [](T x) { return equal_values(x, T()); });
 }
 
 template <class T>

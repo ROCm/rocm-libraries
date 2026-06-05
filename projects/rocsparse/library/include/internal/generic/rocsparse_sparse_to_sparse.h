@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -37,7 +37,7 @@ extern "C" {
 *  \p rocsparse_sparse_to_sparse_buffer_size calculates the required buffer size in bytes for a given stage \p stage.
 *
 *  @param[in]
-*  handle       handle to the rocsparse library context queue.
+*  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
 *  descr        descriptor of the sparse_to_sparse algorithm.
 *  @param[in]
@@ -74,16 +74,16 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *
 *  \note
 *  The required allocation size (in bytes) to \p buffer_size_in_bytes must be obtained from \ref rocsparse_sparse_to_sparse_buffer_size
-*  for each stage, indeed the required buffer size can be different between stages.
+*  for each stage. The required buffer size can be different between stages.
 *
 *  \note
-*  The format \ref rocsparse_format_bell is not supported.
+*  The \ref rocsparse_format_bell and \ref rocsparse_format_sell formats are not supported.
 *
 *  \note
 *  This routine does not support batched computation.
 *
 *  @param[in]
-*  handle       handle to the rocsparse library context queue.
+*  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
 *  descr        descriptor of the sparse_to_sparse algorithm.
 *  @param[in]
@@ -93,7 +93,7 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  @param[in]
 *  stage        stage of the sparse_to_sparse computation.
 *  @param[in]
-*  buffer_size_in_bytes  size in bytes of the \p buffer
+*  buffer_size_in_bytes  size in bytes of the \p buffer.
 *  @param[in]
 *  buffer  temporary storage buffer allocated by the user.
 *

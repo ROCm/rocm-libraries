@@ -155,7 +155,7 @@ namespace rocRoller::KernelGraph
          *
          * @param graph The kernel graph to modify
          * @param params Index computation parameters
-         * @param target Target coordinate (must have a User coordinate)
+         * @param target Target coordinate (must have a User coordinate with size set)
          * @param buffer Buffer coordinate to connect the Assign to
          * @param context GPU context
          * @param command Command containing argument info
@@ -168,5 +168,15 @@ namespace rocRoller::KernelGraph
                        ContextPtr                context,
                        CommandPtr                command);
 
+        /**
+         * @brief Detect if a LoadLDSTile candidate's index path contains
+         * a non-affine LDS swizzle edge and extract the unroll coordinate
+         * and its compile-time value from the upstream SetCoordinate.
+         *
+         * @param kgraph The kernel graph
+         * @param candidate Control graph tag of the candidate operation
+         * @return (unrollCoord, unrollValue) or (-1, -1) if not applicable
+         */
+        std::pair<int, int> GetInlineUnrollInfo(KernelGraph const& kgraph, int candidate);
     } // namespace AssignIndexExpressionsDetail
 } // namespace rocRoller::KernelGraph

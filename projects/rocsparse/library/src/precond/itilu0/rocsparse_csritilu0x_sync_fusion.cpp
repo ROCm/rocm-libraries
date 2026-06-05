@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -66,7 +66,9 @@ namespace rocsparse
                 floating_data_t<T>* __restrict__ nrms_residual,
                 const floating_data_t<T>* __restrict__ nrm0)
     {
-
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         static constexpr uint32_t nid  = BLOCKSIZE / WFSIZE;
         const J                   lid  = hipThreadIdx_x & (WFSIZE - 1);
         const J                   wid  = hipThreadIdx_x / WFSIZE;
@@ -76,12 +78,15 @@ namespace rocsparse
         {
             __shared__ floating_data_t<T> sdata[BLOCKSIZE / WFSIZE];
 
-            sdata[hipThreadIdx_x] = 0;
+            if(wid < nid)
+            {
+                sdata[wid] = 0;
+            }
             __syncthreads();
 
-            if(row0 < m_)
+            for(; iter < niter_; ++iter)
             {
-                for(; iter < niter_; ++iter)
+                if(row0 < m_)
                 {
                     if(compute_nrm_corr)
                     {
@@ -237,39 +242,43 @@ namespace rocsparse
                             }
                         }
                     }
+                }
 
-                    //
-                    // Finalize nrminf from shared memory.
-                    //
-                    if(compute_nrm_corr)
+                //
+                // Finalize nrminf from shared memory.
+                // All threads must participate in __syncthreads() and blockreduce_max.
+                //
+                if(compute_nrm_corr)
+                {
+                    rocsparse::wfreduce_max<WFSIZE>(&nrminf);
+                    if(lid == (WFSIZE - 1))
                     {
-                        rocsparse::wfreduce_max<WFSIZE>(&nrminf);
-                        if(lid == (WFSIZE - 1))
-                        {
-                            sdata[wid] = nrminf;
-                        }
-                        __syncthreads();
-
-                        rocsparse::blockreduce_max<BLOCKSIZE / WFSIZE>(hipThreadIdx_x, sdata);
-                        nrminf = sdata[0] / nrm0[0];
+                        sdata[wid] = nrminf;
                     }
+                    __syncthreads();
 
-                    if(compute_nrm_residual)
+                    rocsparse::blockreduce_max<BLOCKSIZE / WFSIZE>(hipThreadIdx_x, sdata);
+                    nrminf = sdata[0] / nrm0[0];
+                }
+
+                if(compute_nrm_residual)
+                {
+                    rocsparse::wfreduce_max<WFSIZE>(&nrminf_residual);
+                    if(lid == (WFSIZE - 1))
                     {
-                        rocsparse::wfreduce_max<WFSIZE>(&nrminf_residual);
-                        if(lid == (WFSIZE - 1))
-                        {
-                            sdata[wid] = nrminf_residual;
-                        }
-                        __syncthreads();
-
-                        rocsparse::blockreduce_max<BLOCKSIZE / WFSIZE>(hipThreadIdx_x, sdata);
-                        nrminf_residual = sdata[0] / nrm0[0];
+                        sdata[wid] = nrminf_residual;
                     }
+                    __syncthreads();
 
-                    //
-                    // COPY
-                    //
+                    rocsparse::blockreduce_max<BLOCKSIZE / WFSIZE>(hipThreadIdx_x, sdata);
+                    nrminf_residual = sdata[0] / nrm0[0];
+                }
+
+                //
+                // COPY
+                //
+                if(row0 < m_)
+                {
                     for(J row = row0; row < BLOCKSIZE * (hipBlockIdx_x + 1); row += nid)
                     {
                         if(row < m_)
@@ -292,18 +301,17 @@ namespace rocsparse
                             }
                         }
                     }
+                }
 
-                    if(stopping_criteria)
+                if(stopping_criteria)
+                {
+                    const bool success
+                        = (compute_nrm_corr && compute_nrm_residual)
+                              ? (nrminf <= tol_ && nrminf_residual <= tol_)
+                              : ((compute_nrm_corr) ? (nrminf <= tol_) : (nrminf_residual <= tol_));
+                    if(success)
                     {
-
-                        const bool success = (compute_nrm_corr && compute_nrm_residual)
-                                                 ? (nrminf <= tol_ && nrminf_residual <= tol_)
-                                                 : ((compute_nrm_corr) ? (nrminf <= tol_)
-                                                                       : (nrminf_residual <= tol_));
-                        if(success)
-                        {
-                            break;
-                        }
+                        break;
                     }
                 }
             }

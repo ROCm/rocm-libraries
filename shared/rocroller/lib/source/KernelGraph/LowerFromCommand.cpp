@@ -66,6 +66,35 @@ namespace rocRoller
         }
 
         /**
+         * @brief Helper to convert CommandArgumentPtr vectors to ExpressionPtr vectors.
+         *
+         * Handles literal overrides (if literal value > 0, use it instead of the expression).
+         *
+         * @param args CommandArgument vector
+         * @param literals Optional literal values (if literals[i] > 0, use it instead of args[i])
+         * @return Vector of Expression shared pointers
+         */
+        std::vector<Expression::ExpressionPtr>
+            toExpressionPtrVec(std::vector<CommandArgumentPtr> const& args,
+                               std::vector<size_t> const&             literals = {})
+        {
+            std::vector<Expression::ExpressionPtr> exprs;
+            exprs.reserve(args.size());
+            for(size_t i = 0; i < args.size(); ++i)
+            {
+                if(i < literals.size() && literals[i] > 0)
+                {
+                    exprs.push_back(Expression::literal(literals[i]));
+                }
+                else
+                {
+                    exprs.push_back(std::make_shared<Expression::Expression>(args[i]));
+                }
+            }
+            return exprs;
+        }
+
+        /**
          * @brief Command to KernelGraph translator.
          */
         struct TranslateVisitor
@@ -109,34 +138,29 @@ namespace rocRoller
              */
             void operator()(Operations::T_Load_Linear const& tload)
             {
-                auto tensor  = m_command->getOperation<Operations::Tensor>(tload.getSrcTag());
-                auto sizes   = tensor.sizes();
-                auto strides = tensor.strides();
+                auto tensor = m_command->getOperation<Operations::Tensor>(tload.getSrcTag());
 
-                auto totalSizeExpr = std::make_shared<Expression::Expression>(sizes[0]);
+                auto const sizes   = toExpressionPtrVec(tensor.sizes());
+                auto const strides = toExpressionPtrVec(tensor.strides());
 
-                auto user = m_graph.coordinates.addElement(
-                    User(tload.getTag(),
-                         tensor.data()->name(),
-                         std::make_shared<Expression::Expression>(tensor.limit())));
+                auto user
+                    = m_graph.coordinates.addElement(User(tload.getTag(), tensor.data()->name()));
 
                 std::vector<int> dims;
+                auto             logicalElements = sizes[0];
                 for(size_t i = 0; i < sizes.size(); ++i)
                 {
-                    auto sizeExpr   = std::make_shared<Expression::Expression>(sizes[i]);
-                    auto strideExpr = std::make_shared<Expression::Expression>(strides[i]);
-
                     dims.push_back(
-                        m_graph.coordinates.addElement(SubDimension(i, sizeExpr, strideExpr)));
+                        m_graph.coordinates.addElement(SubDimension(i, sizes[i], strides[i])));
                     if(i > 0)
-                        totalSizeExpr = totalSizeExpr * sizeExpr;
+                        logicalElements = logicalElements * sizes[i];
                 }
 
                 m_graph.coordinates.addElement(Split(), std::vector<int>{user}, dims);
 
                 auto unit_stride = Expression::literal(1u);
                 auto linear      = m_graph.coordinates.addElement(
-                    Linear(tload.getTag(), totalSizeExpr, unit_stride));
+                    Linear(tload.getTag(), logicalElements, unit_stride));
 
                 m_graph.coordinates.addElement(Flatten(), dims, std::vector<int>{linear});
                 m_graph.coordinates.addElement(DataFlow(), {user}, {linear});
@@ -226,98 +250,38 @@ namespace rocRoller
 
                 auto tensor = m_command->getOperation<Operations::Tensor>(srcTag);
 
-                auto const sizes          = tensor.sizes();
-                auto const literalSizes   = tensor.literalSizes();
-                auto const strides        = tensor.strides();
-                auto const literalStrides = tensor.literalStrides();
+                auto const sizes   = toExpressionPtrVec(tensor.sizes(), tensor.literalSizes());
+                auto const strides = toExpressionPtrVec(tensor.strides(), tensor.literalStrides());
 
-                auto user = m_graph.coordinates.addElement(
-                    User(tload.getTag(),
-                         tensor.data()->name(),
-                         std::make_shared<Expression::Expression>(tensor.limit())));
+                auto user
+                    = m_graph.coordinates.addElement(User(tload.getTag(), tensor.data()->name()));
 
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
                 {
-                    std::shared_ptr<Expression::Expression> sizeExpr, strideExpr;
-                    if(literalSizes.size() > i && literalSizes[i] > 0)
-                    {
-                        sizeExpr = std::make_shared<Expression::Expression>(literalSizes[i]);
-                    }
-                    else
-                    {
-                        sizeExpr = std::make_shared<Expression::Expression>(sizes[i]);
-                    }
-                    if(literalStrides.size() > i && literalStrides[i] > 0)
-                    {
-                        strideExpr = std::make_shared<Expression::Expression>(literalStrides[i]);
-                    }
-                    else
-                    {
-                        strideExpr = std::make_shared<Expression::Expression>(strides[i]);
-                    }
-
                     auto dim
-                        = m_graph.coordinates.addElement(SubDimension(i, sizeExpr, strideExpr));
+                        = m_graph.coordinates.addElement(SubDimension(i, sizes[i], strides[i]));
                     dims.push_back(dim);
                 }
 
                 if(subTile)
                 {
-                    // A is MxK and TransposeType::T (row-major),
-                    // therefore: M is slow, K is fast.
-                    //
-                    // Let K' = K/32.
-                    //
-                    // Let AScale be MxK'.  Let T_M and T_K be the
-                    // pre-tile sizes.
-                    //
-                    // Then pre-tiled AScale is; slow-to-fast:
-                    //
-                    //   tileM * ((K / T_K) * T_M * T_K) + tileK * (T_M * T_K) + m * T_K + k
-                    //
-                    // Therefore: strides = {(K' / T_K) * T_M * T_K, T_M * T_K, T_K, 1};
-                    //
-                    // B is KxN and TransposeType::N (col-major),
-                    // therefore: K is fast, N is slow.
-                    //
-                    // Let BScale be K'xN.  Let T_K and T_N be the
-                    // pre-tile sizes.
-                    //
-                    // Then pre-tiled BScale is; slow-to-fast:
-                    //
-                    //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
-                    //
-                    // Therefore: strides = {T_N * T_K, (K' / T_N) * T_N * T_K, 1, T_K};
-                    //
-                    // Then pre-tiled B is; slow-to-fast:
-                    //
-                    //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
-                    //
-                    // Therefore: strides = {T_N * T_K, (K / T_N) * T_N * T_K, 1, T_K};
-
-                    auto const strideDataType = DataType::UInt32;
-
-                    auto sizes   = subTile->tileDimensions();
-                    auto strides = std::vector<uint32_t>{1, static_cast<uint32_t>(sizes[0])};
+                    auto tileSizes = subTile->tileDimensions();
+                    auto tileStrides
+                        = std::vector<uint32_t>{1, static_cast<uint32_t>(tileSizes[0])};
                     if(subTile->isTranspose())
                     {
-                        strides = {static_cast<uint32_t>(sizes[1]), 1};
+                        tileStrides = {static_cast<uint32_t>(tileSizes[1]), 1};
                     }
 
                     dims.push_back(m_graph.coordinates.addElement(
                         SubDimension(dims.size(),
-                                     Expression::literal(sizes[0]),
-                                     Expression::literal(strides[0]))));
+                                     Expression::literal(tileSizes[0]),
+                                     Expression::literal(tileStrides[0]))));
                     dims.push_back(m_graph.coordinates.addElement(
                         SubDimension(dims.size(),
-                                     Expression::literal(sizes[1]),
-                                     Expression::literal(strides[1]))));
-
-                    // TODO: Audit pretile-scale and pretile-B paths
-                    // to make this intuitive.  Ideally the unit tests
-                    // and client would not have to muck around with
-                    // strides.
+                                     Expression::literal(tileSizes[1]),
+                                     Expression::literal(tileStrides[1]))));
                 }
 
                 auto tiled = m_graph.coordinates.addElement(MacroTile(tload.getTag(), dims.size()));
@@ -360,20 +324,20 @@ namespace rocRoller
 
                 auto tensor = m_command->getOperation<Operations::Tensor>(tstore.getDstTag());
 
+                auto const strides = toExpressionPtrVec(tensor.strides());
+                auto const sizes   = toExpressionPtrVec(tensor.sizes());
+
                 std::vector<int> dims;
-                auto             strides = tensor.strides();
                 for(size_t i = 0; i < strides.size(); ++i)
                 {
-                    auto strideExpr = std::make_shared<Expression::Expression>(strides[i]);
-                    auto dim = m_graph.coordinates.addElement(SubDimension(i, nullptr, strideExpr));
+                    auto dim
+                        = m_graph.coordinates.addElement(SubDimension(i, sizes[i], strides[i]));
                     dims.push_back(dim);
                 }
 
                 auto linear = m_dim.at(tstore.getSrcTag());
                 auto user   = m_graph.coordinates.addElement(
-                    User(tstore.getSrcTag(),
-                         tensor.data()->name(),
-                         std::make_shared<Expression::Expression>(tensor.limit())));
+                    User(tstore.getSrcTag(), tensor.data()->name()));
 
                 m_graph.coordinates.addElement(Split(), std::vector<int>{linear}, dims);
                 m_graph.coordinates.addElement(Join(), dims, std::vector<int>{user});
@@ -395,6 +359,11 @@ namespace rocRoller
              *                DestructMacroTile                         Join
              *     MacroTile ------------------> { SubDimension, ... } -----> User
              *
+             * and:
+             *
+             *                DataFlow
+             *     MacroTile ---------> User.
+             *
              */
             void operator()(Operations::T_Store_Tiled const& tstore)
             {
@@ -409,30 +378,21 @@ namespace rocRoller
 
                 auto tensor = m_command->getOperation<Operations::Tensor>(tstore.getDstTag());
 
+                auto const sizes   = toExpressionPtrVec(tensor.sizes(), tensor.literalSizes());
+                auto const strides = toExpressionPtrVec(tensor.strides(), tensor.literalStrides());
+
+                auto user = m_graph.coordinates.addElement(
+                    User(tstore.getSrcTag(), tensor.data()->name()));
+
                 std::vector<int> dims;
-                auto const       strides        = tensor.strides();
-                auto const       literalStrides = tensor.literalStrides();
                 for(size_t i = 0; i < strides.size(); ++i)
                 {
-                    std::shared_ptr<Expression::Expression> strideExpr;
-                    if(literalStrides.size() > i && literalStrides[i] > 0)
-                    {
-                        strideExpr = Expression::literal(literalStrides[i]);
-                    }
-                    else
-                    {
-                        strideExpr = std::make_shared<Expression::Expression>(strides[i]);
-                    }
-
-                    auto dim = m_graph.coordinates.addElement(SubDimension(i, nullptr, strideExpr));
+                    auto dim
+                        = m_graph.coordinates.addElement(SubDimension(i, sizes[i], strides[i]));
                     dims.push_back(dim);
                 }
 
                 auto tile = m_dim.at(tstore.getSrcTag());
-                auto user = m_graph.coordinates.addElement(
-                    User(tstore.getSrcTag(),
-                         tensor.data()->name(),
-                         std::make_shared<Expression::Expression>(tensor.limit())));
 
                 m_graph.coordinates.addElement(DestructMacroTile(), std::vector<int>{tile}, dims);
                 m_graph.coordinates.addElement(Join(), dims, std::vector<int>{user});

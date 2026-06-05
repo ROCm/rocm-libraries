@@ -288,7 +288,7 @@ using config = miopen::batchnorm::detail::proto_config<
     miopen::batchnorm::detail::flt_max,
     miopen::batchnorm::detail::launch_dimension<MIO_BN_GRP0, MIO_BN_GRP1, MIO_BN_GRP2>,
     miopen::batchnorm::detail::
-        architecture_switch<MIO_BN_GFX103X, MIO_BN_GFX110X, MIO_BN_GFX120X, MIO_BN_GFX115X>,
+        architecture_switch<MIO_BN_GFX103X, MIO_BN_GFX110X, MIO_BN_GFX115X, MIO_BN_GFX120X>,
     MIO_BN_VARIANT,
     MIO_BN_NCHW,
     MIO_BN_MAXN,

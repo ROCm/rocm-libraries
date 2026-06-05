@@ -50,60 +50,57 @@ TEST_CASE("SortArguments transform works as expected", "[kernel-graph][SortArgum
     context->kernel()->addCommandArguments(command->getArguments());
 
     kgraph = KG::translate(command);
-    kgraph = rocRollerTest::transform<KG::OrderMemory>(kgraph, false);
-    kgraph = rocRollerTest::transform<KG::UpdateParameters>(kgraph, commandParameters);
-    kgraph = rocRollerTest::transform<KG::AddLDS>(kgraph, commandParameters, context.get());
-    kgraph = rocRollerTest::transform<KG::LowerLinear>(kgraph, context.get());
-    kgraph = rocRollerTest::transform<KG::LowerTile>(kgraph, commandParameters, context.get());
-    kgraph = rocRollerTest::transform<KG::LowerTensorContraction>(
-        kgraph, commandParameters, context.get());
-    kgraph = rocRollerTest::transform<KG::Simplify>(kgraph);
-    kgraph = rocRollerTest::transform<KG::FuseExpressions>(kgraph);
-    kgraph = rocRollerTest::transform<KG::ConnectWorkgroups>(kgraph, context.get());
-    kgraph = rocRollerTest::transform<KG::WorkgroupRemapXCC>(
+    kgraph = transform<KG::OrderMemory>(kgraph, false);
+    kgraph = transform<KG::UpdateParameters>(kgraph, commandParameters);
+    kgraph = transform<KG::AddLDS>(kgraph, commandParameters, context.get());
+    kgraph = transform<KG::LowerLinear>(kgraph, context.get());
+    kgraph = transform<KG::LowerTile>(kgraph, commandParameters, context.get());
+    kgraph = transform<KG::LowerTensorContraction>(kgraph, commandParameters, context.get());
+    kgraph = transform<KG::Simplify>(kgraph);
+    kgraph = transform<KG::FuseExpressions>(kgraph);
+    kgraph = transform<KG::ConnectWorkgroups>(kgraph, context.get());
+    kgraph = transform<KG::WorkgroupRemapXCC>(
         kgraph, context.get(), commandParameters->workgroupRemapXCC);
-    kgraph = rocRollerTest::transform<KG::UnrollLoops>(kgraph, commandParameters, context.get());
-    kgraph = rocRollerTest::transform<KG::FuseLoops>(kgraph);
-    kgraph = rocRollerTest::transform<KG::RemoveDuplicates>(kgraph);
-    kgraph = rocRollerTest::transform<KG::OrderEpilogueBlocks>(kgraph);
-    kgraph = rocRollerTest::transform<KG::CleanLoops>(kgraph);
-    kgraph = rocRollerTest::transform<KG::AddPrefetch>(kgraph, commandParameters, context.get());
-    kgraph = rocRollerTest::transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
-    kgraph = rocRollerTest::transform<KG::AssignIndexExpressions>(kgraph, context.get(), command);
-    kgraph = rocRollerTest::transform<KG::CleanArguments>(kgraph, context.get(), command);
-    kgraph = rocRollerTest::transform<KG::AddDeallocateArguments>(kgraph, context.get());
+    kgraph = transform<KG::UnrollLoops>(kgraph, commandParameters, context.get());
+    kgraph = transform<KG::FuseLoops>(kgraph);
+    kgraph = transform<KG::RemoveDuplicates>(kgraph);
+    kgraph = transform<KG::OrderEpilogueBlocks>(kgraph);
+    kgraph = transform<KG::CleanLoops>(kgraph);
+    kgraph = transform<KG::AddPrefetch>(kgraph, commandParameters, context.get());
+    kgraph = transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
+    kgraph = transform<KG::AssignIndexExpressions>(kgraph, context.get(), command);
+    kgraph = transform<KG::CleanArguments>(kgraph, context.get(), command);
+    kgraph = transform<KG::AddDeallocateArguments>(kgraph, context.get());
 
     std::vector<std::string> argNamesByUse = {"user_Float_Value_8",
                                               "user_Float_Value_6",
                                               "Tensor_0_stride_1",
                                               "Tensor_0_pointer",
-                                              "Tensor_0_extent",
+                                              "Tensor_0_size_1",
                                               "Tensor_2_stride_0",
                                               "Tensor_2_pointer",
-                                              "Tensor_2_extent",
-                                              "Tensor_0_size_1",
+                                              "Tensor_2_size_0",
                                               "Tensor_4_stride_1",
                                               "Tensor_4_pointer",
-                                              "Tensor_4_extent",
+                                              "Tensor_4_size_1",
                                               "Tensor_15_stride_1",
                                               "Tensor_15_pointer",
-                                              "Tensor_15_extent"};
+                                              "Tensor_15_size_1"};
 
     std::vector<std::string> argNamesByUseAndSize = {"Tensor_0_stride_1",
                                                      "Tensor_0_pointer",
-                                                     "Tensor_0_extent",
+                                                     "Tensor_0_size_1",
                                                      "Tensor_2_stride_0",
                                                      "Tensor_2_pointer",
-                                                     "Tensor_2_extent",
+                                                     "Tensor_2_size_0",
                                                      "user_Float_Value_8",
                                                      "user_Float_Value_6",
-                                                     "Tensor_0_size_1",
                                                      "Tensor_4_stride_1",
                                                      "Tensor_4_pointer",
-                                                     "Tensor_4_extent",
+                                                     "Tensor_4_size_1",
                                                      "Tensor_15_stride_1",
                                                      "Tensor_15_pointer",
-                                                     "Tensor_15_extent"};
+                                                     "Tensor_15_size_1"};
 
     SECTION("sortArgumentsByFirstUse function reorders kernel arguments by first use")
     {
@@ -141,7 +138,7 @@ TEST_CASE("SortArguments transform works as expected", "[kernel-graph][SortArgum
 
     SECTION("Applying sortArguments transform reorders kernel arguments by first use and by size")
     {
-        kgraph    = rocRollerTest::transform<KG::SortArguments>(kgraph, context.get());
+        kgraph    = transform<KG::SortArguments>(kgraph, context.get());
         auto args = context->kernel()->arguments();
 
         CHECK(argumentNames(args) == argNamesByUseAndSize);

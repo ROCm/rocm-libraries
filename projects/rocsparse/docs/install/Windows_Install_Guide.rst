@@ -14,49 +14,14 @@ For information on installing and building rocSPARSE on Linux, see :doc:`rocSPAR
 Prerequisites
 =============
 
-rocSPARSE on Windows requires an AMD HIP SDK-enabled platform. It's supported on the
-same Windows versions and toolchains that the HIP SDK supports. For more information, see
-:doc:`HIP SDK installation for Windows <rocm-install-on-windows:index>`.
-
-Installing prebuilt packages
-============================
-
-rocSPARSE can be installed on Windows using the AMD HIP SDK installer.
-For version support information, see the :doc:`System requirements for Windows <rocm-install-on-windows:reference/system-requirements>`.
-
-The simplest way to add rocSPARSE to your code is to use CMake.
-Add the SDK installation location to your ``CMAKE_PREFIX_PATH``.
-
-.. note::
-
-   You must use quotes because the path contains a space.
-
-.. code-block:: shell
-
-   -DCMAKE_PREFIX_PATH="C:\Program Files\AMD\ROCm\7.0"
-
-In your ``CMakeLists.txt`` file, use these lines:
-
-.. code-block:: shell
-
-   find_package(rocsparse)
-   target_link_libraries( your_exe PRIVATE roc::rocsparse )
-
-After rocSPARSE is installed, it can be used just like any other library with a C API.
-To call rocSPARSE, the ``rocsparse.h`` header file must be included in the user code.
-This means the rocSPARSE  import library and dynamic link library respectively become link-time and run-time dependencies
-for the user application.
-
-After the installation, you can find ``rocsparse.h`` in the HIP SDK ``\\include\\rocsparse``
-directory. When you need to include rocSPARSE in your application code, you must only use these two files.
-You can find the other rocSPARSE files included in the HIP SDK ``\\include\\rocsparse\\internal`` directory, but
-do not include these files directly in your source code.
+rocSPARSE requires a ROCm enabled platform. For more information, including a list of supported
+GPUs, see the :doc:`ROCm compatibility matrix <compatibility/compatibility-matrix>`.
 
 Building rocSPARSE from source
 =================================
 
 It isn't necessary to build rocSPARSE from source because it's ready to use after installing
-the prebuilt packages, as described above.
+the prebuilt packages, as described in :doc:`Install rocSPARSE <./install>`.
 To build rocSPARSE from source, follow the instructions in this section.
 
 Requirements

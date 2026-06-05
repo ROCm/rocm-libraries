@@ -27,6 +27,7 @@
 #define GUARD_MIOPEN_KERNEL_BUILD_PARAMETERS_HPP_
 
 #include <algorithm>
+#include <iterator>
 #include <cassert>
 #include <initializer_list>
 #include <string>

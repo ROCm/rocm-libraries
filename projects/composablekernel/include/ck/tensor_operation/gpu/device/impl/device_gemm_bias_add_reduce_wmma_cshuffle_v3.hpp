@@ -12,10 +12,16 @@
 #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/device/device_gemm_reduce.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
+#include "ck/tensor_operation/gpu/grid/epilogue_cshuffle_v3_reduce_wmma.hpp"
+#include "ck/tensor_operation/gpu/grid/epilogue_type.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_wmma_cshuffle_v3.hpp"
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 template <typename GridwiseGemm,
           typename ReduceTrait,
@@ -43,14 +49,15 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                     std::is_same_v<e_data_type, ck::bhalf_t>)))
     {
 #endif
-        using EpilogueType = typename GridwiseGemm::template EpilogueReduceCShuffle<ReduceTrait>;
+        using SelectedEpilogue =
+            get_epilogue_t<EpilogueType::ReduceCShuffle, GridwiseGemm, ReduceTrait>;
         constexpr index_t LDS_size =
-            GridwiseGemm::template GetSharedMemoryNumberOfByte<EpilogueType>();
+            GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>();
         __shared__ char p_shared[LDS_size];
 
         auto splitk_batch_offset = typename GridwiseGemm::SplitKBatchOffset(karg, blockIdx.z);
 
-        auto epilogue_args = EpilogueType(
+        auto epilogue_args = SelectedEpilogue(
             p_reduces_grid, reduce_in_element_ops, reduce_out_element_ops, karg.M, d0_element_op);
 
         GridwiseGemm::template Run<HasMainKBlockLoop, EGlobalMemoryDataOperation, TailNum>(
@@ -705,3 +712,6 @@ struct DeviceGemmBiasAddReduce_Wmma_CShuffleV3
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

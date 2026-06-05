@@ -183,5 +183,10 @@ namespace TensileLite
                           size_t                        elementsToValidate,
                           bool                          tryFastPath = true);
 
+        // Check whether a given contraction problem is eligible for the fast CPU GEMM path.
+        // This inspects problem geometry, data types, and feature flags but does not
+        // look at runtime input buffers.
+        bool isFastPathEligible(ContractionProblemGemm const& problem);
+
     } // namespace Client
 } // namespace TensileLite

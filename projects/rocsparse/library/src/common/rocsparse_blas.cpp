@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,10 +40,10 @@ bool rocsparse::enum_utils::is_invalid(rocsparse::blas_impl value)
     return true;
 }
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse::blas_impl value)
 {
-
 #define CASE(C) \
     case C:     \
         return #C
@@ -53,11 +53,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse::blas_impl value)
         CASE(rocsparse::blas_impl_default);
         CASE(rocsparse::blas_impl_rocblas);
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-// LCOV_EXCL_STOP
 #undef case
 };
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse::blas_create_handle(rocsparse::blas_handle* pblas_handle,
                                                rocsparse::blas_impl    blas_impl)

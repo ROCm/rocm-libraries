@@ -59,6 +59,7 @@ class hardware_t {
     gfx1151,
     gfx1152,
     gfx1153,
+    gfx1250,
     Count
   };
 
@@ -78,6 +79,7 @@ class hardware_t {
     if (str == "gfx1151") return architecture_t::gfx1151;
     if (str == "gfx1152") return architecture_t::gfx1152;
     if (str == "gfx1153") return architecture_t::gfx1153;
+    if (str == "gfx1250") return architecture_t::gfx1250;
     return architecture_t::Count;
   }
 
@@ -94,7 +96,11 @@ class hardware_t {
       case architecture_t::gfx950: return "gfx950";
       case architecture_t::gfx1201: return "gfx1201";
       case architecture_t::gfx1100: return "gfx1100";
+      case architecture_t::gfx1150: return "gfx1150";
       case architecture_t::gfx1151: return "gfx1151";
+      case architecture_t::gfx1152: return "gfx1152";
+      case architecture_t::gfx1153: return "gfx1153";
+      case architecture_t::gfx1250: return "gfx1250";
       default: return "unknown";
     }
   }
@@ -104,7 +110,6 @@ class hardware_t {
    *
    */
   struct architecture_constants {
-    size_t num_xcds;  ///< Number of XCDs (XCD = XGMI Complex Die)
     double mem1_perf_ratio;
     double mem2_perf_ratio;
     double mem3_perf_ratio;
@@ -113,15 +118,13 @@ class hardware_t {
         mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
     double mem_clock_ratio;          ///< Memory clock ratio relative to compute clock
 
-    constexpr architecture_constants(size_t num_xcds,
-                                     double mem1_perf_ratio,
+    constexpr architecture_constants(double mem1_perf_ratio,
                                      double mem2_perf_ratio,
                                      double mem3_perf_ratio,
                                      size_t parallel_mi_cu,
                                      std::tuple<double, double, double> mem_bw_per_wg_coefficients,
                                      double mem_clock_ratio)  // Obtained through microbenchmarking
-        : num_xcds(num_xcds)
-        , mem1_perf_ratio(mem1_perf_ratio)
+        : mem1_perf_ratio(mem1_perf_ratio)
         , mem2_perf_ratio(mem2_perf_ratio)
         , mem3_perf_ratio(mem3_perf_ratio)
         , parallel_mi_cu(parallel_mi_cu)
@@ -133,7 +136,7 @@ class hardware_t {
    * MALL value for those architectures that do not support it.
    * The value '1000' is just a big number.
    */
-  static constexpr double NO_MALL_AVAILABLE =  1.21875121875121875122 * 1000;
+  static constexpr double NO_MALL_AVAILABLE = 1.21875121875121875122 * 1000;
 
   /**
    * @brief Get architecture-specific constants for a given architecture.
@@ -148,28 +151,40 @@ class hardware_t {
   static constexpr architecture_constants get_arch_constants(architecture_t arch) {
     switch (arch) {
       case architecture_t::gfx90a:
-        return {1, 5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5};
+        return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5};
       case architecture_t::gfx942:
-        return {8, 17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5};
+        return {17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5};
       case architecture_t::gfx950:
-        return {8, 17, 1.21875121875121875122 * 7, 6, 4, std::make_tuple(0, 0.008, 0), 1.5};
+        return {17,
+                1.21875121875121875122 * 7,
+                6,
+                4,
+                std::make_tuple(-0.000013, 0.007070, 0.027355),
+                1.5};
       case architecture_t::gfx1201:
-        return {1, 5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5};
+        return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5};
       case architecture_t::gfx1100:
-        return {1, 7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5};
+        return {7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5};
       case architecture_t::gfx1150:
         // AMD Strix Point iGPU
-        return {1, 1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5};
+        return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5};
       case architecture_t::gfx1151:
         // AMD Strix Halo iGPU
-        return {1, 2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5};
+        return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5};
       case architecture_t::gfx1152:
         // AMD Radeon 840M iGPU
-        return {1, 0.849, NO_MALL_AVAILABLE, 0.096, 4, std::make_tuple(0, 0.13, 0), 1.5};
+        return {0.849, NO_MALL_AVAILABLE, 0.096, 4, std::make_tuple(0, 0.13, 0), 1.5};
       case architecture_t::gfx1153:
         // AMD Radeon 820M iGPU
-        return {1, 0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5};
-      default: return {0, 0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
+        return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5};
+      case architecture_t::gfx1250: {
+        // TODO: Update with real gfx1250 constants when available
+        auto c                       = get_arch_constants(architecture_t::gfx950);
+        c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
+        c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
+        return c;
+      }
+      default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
     }
   }
 
@@ -446,7 +461,87 @@ class hardware_t {
              // I4
              {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
          }},
-      };
+        {architecture_t::gfx1250,
+         {
+             // F64
+             // DGEMM: V_WMMA_F64_16x16x4_F64, 16x4 F64 x 4x16 F64 = 16x16 F64
+             {matrix_instruction(16, 16, 4, data_type_t::Double), 16},
+
+             // F32
+             // SGEMM: V_WMMA_F32_16X16X4_F32, 16x4 F32 x 4x16 F32 = 16x16 F32
+             {matrix_instruction(16, 16, 4, data_type_t::Float), 16},
+
+             // F16
+             // HHS: V_WMMA_F16_16X16X32_F16, 16x32 F16 x 32x16 F16 = 16x16 F16
+             // HSS: V_WMMA_F32_16X16X32_F16, 16x32 F16 x 32x16 F16 = 16x16 F32
+             {matrix_instruction(16, 16, 32, data_type_t::Half), 8},
+
+             // BF16
+             // BBS:   V_WMMA_BF16_16X16X32_BF16,    16x32 BF16 x 32x16 BF16 = 16x16 BF16
+             // BSS:   V_WMMA_F32_16X16X32_BF16,     16x32 BF16 x 32x16 BF16 = 16x16 F32
+             // BBSB?: V_WMMA_BF16F32_16X16X32_BF16, 16x32 BF16 x 32x16 BF16 + 16x16 C F32 = 16x16 D BF16
+             {matrix_instruction(16, 16, 32, data_type_t::BFloat16), 8},
+
+             // F8
+             // F8SS: V_WMMA_F32_16X16X64_FP8_FP8,  16x64  FP8 x 64x16  FP8 = 16x16 F32
+             //       V_WMMA_F32_16X16X128_FP8_FP8, 16x128 FP8 x 128x16 FP8 = 16x16 F32
+             // F8HS: V_WMMA_F16_16X16X64_FP8_FP8,  16x64  FP8 x 64x16  FP8 = 16x16 F16
+             //       V_WMMA_F16_16X16X128_FP8_FP8  16x128 FP8 x 128x16 FP8 = 16x16 F16
+             {matrix_instruction(16, 16, 64, data_type_t::Float8), 4},
+             {matrix_instruction(16, 16, 128, data_type_t::Float8), 8},
+
+             // BF8
+             // B8SS: V_WMMA_F32_16X16X64_BF8_BF8,  16x64  BF8 x 64x16  BF8 = 16x16 F32
+             //       V_WMMA_F32_16X16X128_BF8_BF8, 16x128 BF8 x 128x16 BF8 = 16x16 F32
+             // B8HS: V_WMMA_F16_16X16X64_BF8_BF8,  16x64  BF8 x 64x16  BF8 = 16x16 F16
+             //       V_WMMA_F16_16X16X128_BF8_BF8, 16x128 BF8 x 128x16 BF8 = 16x16 F16
+             {matrix_instruction(16, 16, 64, data_type_t::BFloat8), 4},
+             {matrix_instruction(16, 16, 128, data_type_t::BFloat8), 8},
+
+             // F8B8
+             // F8B8SS: V_WMMA_F32_16X16X64_FP8_BF8,  16x64  FP8 x 64x16  BF8 = 16x16 F32
+             //         V_WMMA_F32_16X16X128_FP8_BF8, 16x128 FP8 x 128x16 BF8 = 16x16 F32
+             // F8B8HS: V_WMMA_F16_16X16X64_FP8_BF8,  16x64  FP8 x 64x16  BF8 = 16x16 F16
+             //         V_WMMA_F16_16X16X128_FP8_BF8  16x128 FP8 x 128x16 BF8 = 16x16 F16
+             {matrix_instruction(16, 16, 64, data_type_t::Float8BFloat8), 4},
+             {matrix_instruction(16, 16, 128, data_type_t::Float8BFloat8), 8},
+
+             // B8F8
+             // B8F8SS: V_WMMA_F32_16X16X64_BF8_FP8, 16x64 BF8 x 64x16 FP8 = 16x16 F32
+             //         V_WMMA_F32_16X16X128_BF8_FP8, 16x128 BF8 x 128x16 FP8 = 16x16 F32
+             // B8F8HS: V_WMMA_F16_16X16X64_BF8_FP8, 16x64 BF8 x 64x16 FP8 = 16x16 F16
+             //         V_WMMA_F16_16X16X128_BF8_FP8, 16x128 BF8 x 128x16 FP8 = 16x16 F16
+             {matrix_instruction(16, 16, 64, data_type_t::BFloat8Float8), 4},
+             {matrix_instruction(16, 16, 128, data_type_t::BFloat8Float8), 8},
+
+             // MXF8  TODO this is same as above?
+             // V_WMMA_F32_16x16x128_F8F6F4,  16x128 FP4/6/8 x 128x16 FP4/6/8 = 16x16 F32
+             // {matrix_instruction(16, 16, 128, data_type_t::Float8), 8},
+
+             // F6
+             // V_WMMA_F32_16x16x128_F8F6F4,  16x128 FP4/6/8 x 128x16 FP4/6/8 = 16x16 F32
+             {matrix_instruction(16, 16, 128, data_type_t::Float6), 8},
+
+             // F4
+             // V_WMMA_F32_16x16x128_F8F6F4,  16x128 FP4/6/8 x 128x16 FP4/6/8 = 16x16 F32
+             // V_WMMA_F32_32x16x128_F4
+             {matrix_instruction(16, 16, 128, data_type_t::Float4), 4},
+             {matrix_instruction(32, 16, 128, data_type_t::Float4), 8},
+
+             // I8
+             // V_WMMA_I32_16X16X64_IU8, 16x64 IU8 x 64x16 IU8 = 16x16 I32
+             {matrix_instruction(16, 16, 64, data_type_t::Int8), 8},
+
+             // XF32
+             // x3 emulation: 3 x V_WMMA_BF16_16X16X32_BF16
+             {matrix_instruction(16, 16, 32, data_type_t::XFloat32), 8 * 3},
+
+             // TODO:
+             // ComplexFloat
+             // ComplexDouble
+             // BF6
+             // DOT2
+         }}};
   // clang-format on
 
   architecture_t arch;  ///< GPU architecture type
@@ -500,6 +595,8 @@ class hardware_t {
    * @param N_CU Number of compute units
    * @param lds_capacity LDS capacity in bytes
    * @param constants Architecture-specific constants
+   * @param num_xcds Number of XCDs — provided separately from constants so that
+   *                 it can come from a runtime query or a known-architecture table
    * @param L2_capacity L2 cache capacity in bytes
    * @param compute_clock_ghz Compute clock frequency in GHz
    * @param memory_clock_ghz Memory clock frequency in GHz
@@ -508,6 +605,7 @@ class hardware_t {
              size_t N_CU,
              size_t lds_capacity,
              const architecture_constants& constants,
+             size_t num_xcds,
              size_t L2_capacity,
              double compute_clock_ghz,
              double memory_clock_ghz);
@@ -532,11 +630,14 @@ class hardware_t {
   /**
    * @brief Create hardware_t instance from HIP device properties.
    *
-   *
    * @param properties HIP device properties structure
+   * @param num_xcds_override If non-zero, use this XCD count instead of
+   *                          the hardcoded default. Passed by
+   *                          get_hardware_for_device() after a runtime query.
    * @return hardware_t Configured hardware instance
    */
-  static hardware_t get_hardware_for_properties(hipDeviceProp_t properties);
+  static hardware_t get_hardware_for_properties(hipDeviceProp_t properties,
+                                                size_t num_xcds_override = 0);
 
   /**
    * @brief Create hardware_t instance for a specific HIP device.
@@ -548,6 +649,37 @@ class hardware_t {
    * @return hardware_t Configured hardware instance for the device
    */
   static hardware_t get_hardware_for_device(int deviceId);
+
+  /**
+   * @brief Create hardware_t instance for a specific HIP device using
+   *        caller-provided properties.
+   *
+   * Same as @ref get_hardware_for_device(int) but uses the supplied
+   * `hipDeviceProp_t` instead of re-querying via `hipGetDeviceProperties`.
+   * Callers that have already adjusted fields on `prop` (for example,
+   * overriding `multiProcessorCount` with
+   * `hipDeviceAttributePhysicalMultiProcessorCount` on multi-XCC
+   * architectures) should use this overload so those adjustments are
+   * preserved. The runtime XCC query
+   * (`hipDeviceAttributeNumberOfXccs` on HIP 7+) is still performed
+   * against `deviceId`.
+   *
+   * @warning `prop` must describe the same physical device as `deviceId`,
+   *          aside from intentional field-level overrides the caller has
+   *          applied (e.g. swapping `multiProcessorCount` for the
+   *          physical MP count). Passing a `prop` from one device together
+   *          with a `deviceId` for a different device produces an
+   *          internally-inconsistent `hardware_t` — the XCC count will
+   *          come from `deviceId` while CU count, clocks, LDS/L2 capacity,
+   *          and architecture all come from `prop`. This is not checked.
+   *
+   * @param deviceId HIP device ID used to query the XCC count
+   * @param prop     Caller-owned device properties to model from; must
+   *                 correspond to `deviceId`
+   * @return hardware_t Configured hardware instance for the device
+   */
+  static hardware_t get_hardware_for_device(int deviceId,
+                                            hipDeviceProp_t const& prop);
 
   /**
    * @brief Create hardware_t instance for a specific architecture with specified parameters.
@@ -568,6 +700,21 @@ class hardware_t {
                                           size_t lds_capacity,
                                           size_t L2_capacity,
                                           int compute_clock_khz);
+
+  /**
+   * @brief Get the default (hardcoded) XCD count for a known architecture.
+   *
+   * Legacy fallback table for architectures that predate the runtime XCC
+   * query (hipDeviceAttributeNumberOfXccs, HIP 7.0+). Do NOT add new
+   * architectures here — new hardware should rely solely on the runtime
+   * query via get_hardware_for_device(). Throws for architectures not in
+   * the table.
+   *
+   * @param arch Architecture enum value
+   * @return Number of XCDs for the architecture
+   * @throws std::runtime_error if the architecture has no hardcoded default
+   */
+  static size_t get_default_num_xcds(architecture_t arch);
 
   /**
    * @brief Check if the hardware described by properties is supported.
@@ -628,6 +775,15 @@ class hardware_t {
    * @return true if the architecture has MALL, false otherwise
    */
   bool has_MALL() const;
+
+  /**
+   * @brief Check if hardware supports native TF32 matrix instructions.
+   *
+   * If TF32/XFloat32 is not natively supported, then emulation is required which has some overhead.
+   *
+   * @return true if the architecture has TF32 matrix instructions
+   */
+  bool has_native_TF32() const;
 
  private:
   /**

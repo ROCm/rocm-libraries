@@ -1,0 +1,26 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+include "data_types.fbs";
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+enum ReductionMode : byte {
+    NOT_SET = 0,
+    ADD = 1,
+    MUL = 2,
+    MIN_OP = 3, // MIN is reserved
+    MAX_OP = 4, // MAX is reserved
+    AMAX = 5,
+    AVG = 6,
+    NORM1 = 7,
+    NORM2 = 8,
+    MUL_NO_ZEROS = 9
+}
+
+table ReductionAttributes {
+    mode: ReductionMode;
+    in_tensor_uid: long;
+    out_tensor_uid: long;
+    is_deterministic: bool = false;
+}

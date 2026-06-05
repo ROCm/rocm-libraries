@@ -77,19 +77,23 @@ struct BlockFmhaBwdPipelineDefaultPolicy
                                            typename Problem::BlockFmhaShape::Gemm1BlockWarps,
                                            typename Problem::BlockFmhaShape::Gemm1WarpTile>>;
 
-        using WarpGemm =
-            WarpGemmDispatcher<typename Problem::GemmDataType,
-                               typename Problem::OGradDataType,
-                               typename Problem::AccDataType,
-                               Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
-                               Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
-                               Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
-                               true,
-                               false, // SwizzleAccess
-                               false, // UseStructuredSparsity
-                               (Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 32)
-                                   ? WGAttrNumAccessEnum ::Double
-                                   : WGAttrNumAccessEnum ::Single>;
+#if defined(__gfx11__) || defined(__gfx12__)
+        constexpr auto NumAccess = WGAttrNumAccessEnum::Default;
+#else
+        constexpr auto NumAccess = Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 32
+                                       ? WGAttrNumAccessEnum ::Double
+                                       : WGAttrNumAccessEnum ::Single;
+#endif
+        using WarpGemm = WarpGemmDispatcher<typename Problem::GemmDataType,
+                                            typename Problem::OGradDataType,
+                                            typename Problem::AccDataType,
+                                            Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
+                                            Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
+                                            Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
+                                            true,
+                                            false, // SwizzleAccess
+                                            false, // UseStructuredSparsity
+                                            NumAccess>;
 
         using BlockGemmPolicy =
             BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::GemmDataType,
@@ -149,19 +153,24 @@ struct BlockFmhaBwdPipelineDefaultPolicy
                                            typename Problem::BlockFmhaShape::Gemm3BlockWarps,
                                            typename Problem::BlockFmhaShape::Gemm3WarpTile>>;
 
-        using WarpGemm =
-            WarpGemmDispatcher<typename Problem::GemmDataType,
-                               typename Problem::QDataType,
-                               typename Problem::AccDataType,
-                               Problem::BlockFmhaShape::Gemm3WarpTile::at(number<0>{}),
-                               Problem::BlockFmhaShape::Gemm3WarpTile::at(number<1>{}),
-                               Problem::BlockFmhaShape::Gemm3WarpTile::at(number<2>{}),
-                               true,
-                               false, // SwizzleAccess
-                               false, // UseStructuredSparsity
-                               (Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 32)
-                                   ? WGAttrNumAccessEnum ::Double
-                                   : WGAttrNumAccessEnum ::Single>;
+#if defined(__gfx11__) || defined(__gfx12__)
+        constexpr auto NumAccess = WGAttrNumAccessEnum::Default;
+#else
+        constexpr auto NumAccess = Problem::BlockFmhaShape::Gemm3WarpTile::at(number<2>{}) == 32
+                                       ? WGAttrNumAccessEnum ::Double
+                                       : WGAttrNumAccessEnum ::Single;
+#endif
+
+        using WarpGemm = WarpGemmDispatcher<typename Problem::GemmDataType,
+                                            typename Problem::QDataType,
+                                            typename Problem::AccDataType,
+                                            Problem::BlockFmhaShape::Gemm3WarpTile::at(number<0>{}),
+                                            Problem::BlockFmhaShape::Gemm3WarpTile::at(number<1>{}),
+                                            Problem::BlockFmhaShape::Gemm3WarpTile::at(number<2>{}),
+                                            true,
+                                            false, // SwizzleAccess
+                                            false, // UseStructuredSparsity
+                                            NumAccess>;
 
         using BlockGemmPolicy =
             BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::GemmDataType,
@@ -1677,6 +1686,9 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     CK_TILE_DEVICE static constexpr void PTFromGemm0CToGemm1A(PTOutTensor& pt_out,
                                                               const PInTensor& p_in)
     {
+#if defined(__gfx125__)
+        pt_out.get_thread_buffer() = p_in.get_thread_buffer();
+#else
         if constexpr(Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}) == 16)
         {
             using BlockGemm       = remove_cvref_t<decltype(GetPTOGradTBlockGemm<Problem>())>;
@@ -1706,34 +1718,38 @@ struct BlockFmhaBwdPipelineDefaultPolicy
             constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
             constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                    p_warp_tensor.get_thread_buffer() = p_in.get_y_sliced_thread_data(
-                        merge_sequences(sequence<kIter, mIter>{}, c_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+            static_ford<sequence<KIterPerWarp, MIterPerWarp>>{}([&](auto km) {
+                constexpr auto kIter              = number<km[number<0>{}]>{};
+                constexpr auto mIter              = number<km[number<1>{}]>{};
+                p_warp_tensor.get_thread_buffer() = p_in.get_y_sliced_thread_data(
+                    merge_sequences(sequence<kIter, mIter>{}, c_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
 #if defined(__gfx11__)
-                    PermuteWarpGemmCToA(pt_warp_tensor, p_warp_tensor);
+                PermuteWarpGemmCToA(pt_warp_tensor, p_warp_tensor);
 #else
-                    pt_warp_tensor.get_thread_buffer() = p_warp_tensor.get_thread_buffer();
+                pt_warp_tensor.get_thread_buffer() = p_warp_tensor.get_thread_buffer();
 #endif
-                    pt_out.set_y_sliced_thread_data(
-                        merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, a_warp_y_lengths),
-                        pt_warp_tensor.get_thread_buffer());
-                });
+                pt_out.set_y_sliced_thread_data(
+                    merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, a_warp_y_lengths),
+                    pt_warp_tensor.get_thread_buffer());
             });
         }
         else
         {
             pt_out.get_thread_buffer() = p_in.get_thread_buffer();
         }
+#endif // defined(__gfx125__)
     }
 
     template <typename Problem, typename SGradTOutTensor, typename SGradInTensor>
     CK_TILE_DEVICE static constexpr void SGradTFromGemm2CToGemm3A(SGradTOutTensor& dst_out,
                                                                   const SGradInTensor& ds_in)
     {
+#if defined(__gfx125__)
+        dst_out.get_thread_buffer() = ds_in.get_thread_buffer();
+#else
         if constexpr(Problem::BlockFmhaShape::Gemm3WarpTile::at(number<0>{}) == 16)
         {
             using BlockGemm       = remove_cvref_t<decltype(GetSGradTQTBlockGemm<Problem>())>;
@@ -1763,28 +1779,29 @@ struct BlockFmhaBwdPipelineDefaultPolicy
             constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
             constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                    ds_warp_tensor.get_thread_buffer() = ds_in.get_y_sliced_thread_data(
-                        merge_sequences(sequence<kIter, mIter>{}, c_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+            static_ford<sequence<KIterPerWarp, MIterPerWarp>>{}([&](auto km) {
+                constexpr auto kIter               = number<km[number<0>{}]>{};
+                constexpr auto mIter               = number<km[number<1>{}]>{};
+                ds_warp_tensor.get_thread_buffer() = ds_in.get_y_sliced_thread_data(
+                    merge_sequences(sequence<kIter, mIter>{}, c_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
 #if defined(__gfx11__)
-                    PermuteWarpGemmCToA(dst_warp_tensor, ds_warp_tensor);
+                PermuteWarpGemmCToA(dst_warp_tensor, ds_warp_tensor);
 #else
-                    dst_warp_tensor.get_thread_buffer() = ds_warp_tensor.get_thread_buffer();
+                dst_warp_tensor.get_thread_buffer() = ds_warp_tensor.get_thread_buffer();
 #endif
-                    dst_out.set_y_sliced_thread_data(
-                        merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, a_warp_y_lengths),
-                        dst_warp_tensor.get_thread_buffer());
-                });
+                dst_out.set_y_sliced_thread_data(
+                    merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
+                    merge_sequences(sequence<1, 1>{}, a_warp_y_lengths),
+                    dst_warp_tensor.get_thread_buffer());
             });
         }
         else
         {
             dst_out.get_thread_buffer() = ds_in.get_thread_buffer();
         }
+#endif // defined(__gfx125__)
     }
 
     template <typename Problem>

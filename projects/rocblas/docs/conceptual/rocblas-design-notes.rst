@@ -40,7 +40,7 @@ The environment variables ``ROCBLAS_USE_HIPBLASLT`` and ``ROCBLAS_USE_HIPBLASLT_
 
 .. note::
 
-   The hipBLASLt backend for rocBLAS is currently not supported on Windows builds or static builds,
+   The hipBLASLt backend for rocBLAS is currently not supported on static builds,
    and is not included if building without Tensile.
 
 rocBLAS API and legacy BLAS functions

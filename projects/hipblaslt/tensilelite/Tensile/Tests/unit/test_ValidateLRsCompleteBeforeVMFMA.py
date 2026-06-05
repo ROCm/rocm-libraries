@@ -267,7 +267,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         Case where each LR reads more than 1 WaveTile worth of data.
         Even though there are 4 tiles of A and 4 of B there are only 2 LRAs and 2 LRBs, each loading 2 tiles of A and B respectively.
         """
-        self.setUp({
+        self.setup_method(kernel_updates={
             "MIWaveTileA": 4,
             "MIWaveTileB": 4
         })
@@ -359,10 +359,10 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
     LRB3 needed at 12 (0 of next iter)
     LRA3 needed at 12 (0 of next iter)
     """
-    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None):
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
         kernel_updates = kernel_updates.copy() if kernel_updates else {}
         kernel_updates.update({"UseF32XEmulation": True, "ISA": IsaVersion(9,5,0), "DepthU": 32, "ForceUnrollSubIter": True})
-        super().setUp(kernel_updates)
+        super().setup_method(method, kernel_updates=kernel_updates)
 
     validator_passes = [add_local_read_constraints]
 
@@ -528,7 +528,7 @@ class TestValidateLRsCompleteBeforeVMFMA_MfmaReorder(CMSValidationTestBase):
         - needed_by = 4
         """
         # Use 3x2 tile configuration
-        self.setUp({"MIWaveTileA": 3, "MIWaveTileB": 2})
+        self.setup_method(kernel_updates={"MIWaveTileA": 3, "MIWaveTileB": 2})
         assert self.num_vmfma == 12  # 2 * 3 * 2
         
         # Reorder: Reorder to row-major order.
@@ -576,7 +576,7 @@ class TestValidateLRsCompleteBeforeVMFMA_MfmaReorder(CMSValidationTestBase):
     def test_tf32(self):
         """
         """
-        self.setUp({"UseF32XEmulation": True, "ISA": IsaVersion(9,5,0), "DepthU": 32, "ForceUnrollSubIter": True})
+        self.setup_method(kernel_updates={"UseF32XEmulation": True, "ISA": IsaVersion(9,5,0), "DepthU": 32, "ForceUnrollSubIter": True})
         assert self.num_vmfma == 12
         
         # Row-major reordering: swap middle two groups
@@ -632,8 +632,10 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
     NOTE:   These tests do not include the Pack commands which are REQUIRED for a valid kernel.
             Not including them here in order to test just the LR-VMFMA orderling logic.
     """
-    def setUp(self, kernel_updates: Optional[dict[str, Any]] = None):
-        super().setUp({"ForceUnrollSubIter": True, "MIWaveTileA": 4, "MIWaveTileB": 4, "DepthU": 32})
+    def setup_method(self, method=None, *, kernel_updates: Optional[dict[str, Any]] = None):
+        kernel_updates = kernel_updates.copy() if kernel_updates else {}
+        kernel_updates.update({"ForceUnrollSubIter": True, "MIWaveTileA": 4, "MIWaveTileB": 4, "DepthU": 32})
+        super().setup_method(method, kernel_updates=kernel_updates)
 
     validator_passes = [add_local_read_constraints]
 

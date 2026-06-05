@@ -3,64 +3,81 @@
 This document outlines the development roadmap for hipDNN, a comprehensive graph-based deep learning library for AMD GPUs. For current operation support details, refer to the [Operation Support documentation](./OperationSupport.md).
 
 > [!NOTE]
-> 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements. The hipDNN team will endevor to keep the roadmap up to date but the further out the quarter, the more speculative our plans. 😅
+> 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements. The hipDNN team will endeavor to keep the roadmap up to date but the further out the quarter, the more speculative our plans. 😅
 >
 > ✅ = Done
 >
 > ⏳ = In progress
 
-## P0 ~ Q1 2026 (Current milestone)
+## P0 ~ Q1 2026
 
-**Focus:** Stable foundation, core operations & initial PyTorch integration
+**Focus:** Stable foundation & core operations
 
 ### Conv
 - **Convolution MIOpen plugin support** ✅
   - Including basic fusions ✅
-- **Convolution Fusilli plugin support** ✅
 
 ### Normalization
 - **Batch normalization MIOpen plugin support** ✅
   - Including basic fusions ✅
+- **LayerNorm & RMSNorm frontend API** ✅
 
 ### GEMM
 - **Initial frontend GEMM API support** ✅
-- Fusilli plugin integration (see note) ✅
-- hipBLASLt plugin initial enablement ⏳
+- hipBLASLt plugin initial enablement ✅
+
+### SDPA
+- **SDPA frontend API & backend descriptors** ✅
 
 ### Core
-- **Stable, robust library to build upon** ⏳
-- Kernel engine settings (Engine knob configurations API + implementation) ⏳
+- **Stable, robust library to build upon** ✅
+- Kernel engine settings (Engine knob configurations API + implementation) ✅
   - Ex. Flag for enabling benchmarking mode on MIOpen plugin
+- Initial Python bindings POC ✅
+- Initial benchmarking & performance tooling ✅
+
+> **Notes:**
+> - PyTorch integration was moved to early Q2
+
+## P1 ~ Q2 2026 (Current milestone)
+
+**Focus:** SDPA forward path, GEMM with MX low-precision data types, client auto-tuning, performance-testing CI, and a generated support matrix.
 
 ### PyTorch
 - **PyTorch integration for opt-in hipDNN backend** ⏳
 
-> **Notes:** Fusilli plugin is opt-in, and not defaulted on yet.
-
-## P1 ~ Q2 2026
-
-**Focus:** More operations, basic engine selection heuristic & core improvements
+### SDPA
+- First-wave SDPA forward kernels callable end-to-end through the graph API ⏳
+- Overridable tensor shapes (required for variable sequence lengths) ⏳
+- Note: backward-pass production quality and SDPA feature-flag gating tracked in later quarters
 
 ### GEMM
-- **hipBLASLt plugin expanded operation & datatype support**
+- **hipBLASLt plugin expanded operation & datatype support** ⏳
+- MX GEMMs through the hipBLASLt provider plugin ⏳
+- Documented constraints surfaced for graph builders (alignment, batch, epilogues)
 
-### SDPA
-- Initial limited SDPA frontend API support
-- Initial limited SDPA kernel provider (TBD)
+### Auto-tuning
+- **Client auto-tuning API** ⏳
+- Build N alternative execution plans for a single graph ⏳
+- Sampling run that ranks plans by wall-time and selects a winner ⏳
+- Export auto-tuning result to a config file for reuse across runs ⏳
 
-### Normalization
-- Adding new **HIP kernel provider plugin** to expand normalization support
-- Expanded operation API & coverage to support Layernorm & RMS
-- Expanded layout & datatype coverage for batchnorm
+### Benchmarking & performance testing
+- **Benchmarking & performance Python tools** ⏳
+- Installable as wheels
+- Set up CICD for the project
+
+### Support matrix
+- Integration tests emit structured pass/fail per op × datatype × engine × architecture ✅
+- Generation step produces a human-readable support matrix from those results ✅
+- Matrix published as a regular CI artifact ⏳
 
 ### Heuristics
-- Heuristic plugin API
-- **Initial heuristic plugin**
+- **Engine selection config file support** ⏳
 
 ### Core
-- Plugin SDK utilities to streamline plugin development for new providers ⏳
-- Benchmarking & performance python tools ⏳
-- Python API wrappers ⏳
+- Kernel engine tagging & filtering ✅
+  - Behavioral notes for filtering ✅
 
 ## P2 ~ Q3 2026
 
@@ -68,16 +85,25 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### SDPA
 - Wider SDPA support
+- **CK SDPA plugin for hipDNN** — Composable Kernel-backed SDPA provider plugin
 
 ### Heuristics
-- **Heuristics Plug-in implementation** Phase 2 (Refining and expanding heuristic capabilities)
+- Heuristic plugin API
+- Plugin architecture ⏳
+- **Phase 1 heuristic plugin: providing heuristic engine selection for limited architectures**
+
+### Normalization
+- Expanded LayerNorm & RMSNorm kernel coverage in the HIP kernel provider
+- Expanded layout & datatype coverage for batchnorm
 
 ### Core
 - Add **hipRTC & caching support** to plugin SDK (Empowers plugin developers, and standardizes caching of artifacts)
 - Kernel engine tagging & filtering
-  - Behavioral & numeric notes for filtering
+  - Numeric notes for filtering
   - Client API to enable filtering
-- **Client auto-tuning API**
+- Python API wrappers (general availability beyond POC)
+- Plugin SDK utility expansion to further streamline new-provider development
+
 
 ## P3 ~ Q4 2026 & beyond
 
@@ -88,7 +114,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Additional JIT graph support for operations
 - Improve general operational support for operations:
   - Additional layout support
-  - Additional data-type support
+  - Additional datatype support
 
 ### More framework integrations
 - Currently discussing timelines for various framework integrations. Roadmap will be updated as they are defined.

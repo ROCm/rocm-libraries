@@ -4,15 +4,18 @@
 cmake_minimum_required(VERSION 3.25.2)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(HIP_KERNEL_PLUGIN_VERSION "0.0.1")
-project(hip-kernel-provider VERSION ${HIP_KERNEL_PLUGIN_VERSION} LANGUAGES CXX)
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
 
-if(NOT WIN32)
+dnn_provider_setup_version(hip_kernel_provider ${CMAKE_CURRENT_LIST_DIR})
+
+project(hip-kernel-provider VERSION ${HIP_KERNEL_PROVIDER_VERSION} LANGUAGES CXX)
+
+if(NOT WIN32 AND DEFINED ROCM_PATH)
     # Only set if not already specified by user
     if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
         set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
@@ -32,11 +35,13 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip
-     ${HIP_DIR}/cmake
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+     ${CMAKE_CURRENT_SOURCE_DIR}/../cmake ${ROCM_PATH}/lib/cmake/hip ${HIP_DIR}/cmake
 )
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
+option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
+option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
@@ -51,6 +56,18 @@ if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
     message(VERBOSE "Enabling compile flags for coverage-mapping")
     add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
     add_link_options(-fprofile-instr-generate -fcoverage-mapping)
+endif()
+
+if(ENABLE_ASM_SDPA_ENGINE)
+    message(STATUS "ASM SDPA engine enabled")
+else()
+    message(STATUS "ASM SDPA engine disabled")
+endif()
+
+if(ENABLE_HIP_MLOPS_ENGINE)
+    message(STATUS "HIP kernel engine enabled")
+else()
+    message(STATUS "HIP kernel engine disabled")
 endif()
 
 list(
@@ -81,15 +98,30 @@ list(
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 find_package(hip REQUIRED)
-find_package(hipdnn_data_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+find_package(hiprtc REQUIRED)
+
+# hipdnn SDK dependencies - use targets directly if available (superbuild),
+# otherwise find installed packages (true standalone)
+if(NOT TARGET hipdnn_data_sdk)
+    find_package(hipdnn_data_sdk CONFIG REQUIRED)
+endif()
+if(NOT TARGET hipdnn_flatbuffers_sdk)
+    find_package(hipdnn_flatbuffers_sdk CONFIG REQUIRED)
+endif()
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+endif()
 
 include(CheckToolVersion)
 include(ClangCheck)
 include(ClangTidy)
+include(Sanitizers)
 
 # Setup testing dependencies
 include(Dependencies)
+if(HIPKERNELPROVIDER_ENABLE_TESTS)
+    fetch_gtest_dependency()
+endif()
 include(Tests)
 
 if(WIN32)
@@ -119,9 +151,9 @@ if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
 
     set(CODE_COVERAGE_IGNORE_REGEX ".*_deps.*|.*tests.*|.*integration_tests.*")
     set(CODE_COVERAGE_OBJECTS
-        -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libhip_kernel_plugin.so
-        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_plugin_tests
-        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_plugin_integration_tests
+        -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libhip_kernel_provider.so
+        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_provider_tests
+        -object ./${CMAKE_INSTALL_BINDIR}/hip_kernel_provider_integration_tests
     )
 
     # Creates a coverage target that merges profraw files and generates reports.
@@ -177,7 +209,13 @@ endif()
 # ============================================================================
 # Install
 # ============================================================================
-install(TARGETS hip_kernel_plugin EXPORT hip-kernel-plugin
+install(TARGETS hip_kernel_provider EXPORT hip-kernel-provider
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+
+if(ENABLE_ASM_SDPA_ENGINE)
+    install(DIRECTORY src/engines/asm_sdpa_engine/asm/asm_kernels/
+            DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels
+            FILES_MATCHING PATTERN "*.co")
+endif()

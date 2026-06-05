@@ -3,16 +3,12 @@
 root: index
 subtrees:
 
-  - caption: Installation
+  - caption: Install
     entries:
-    - file: install/hipCUB-prerequisites
-      title: Installation prerequisites
-    - file: install/hipCUB-install-overview
-      title: Installation overview
-    - file: install/hipCUB-install-on-Windows
-      title: Installing on Windows
-    - file: install/hipCUB-install-with-cmake
-      title: Installing on Linux and Windows with CMake
+    - file: install/install
+      title: Install hipCUB
+    - file: install/build
+      title: Build from source
   - caption: Reference
     entries:
     - file: doxygen/html/index

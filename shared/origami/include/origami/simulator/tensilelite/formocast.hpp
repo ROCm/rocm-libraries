@@ -17,7 +17,7 @@ namespace origami
     namespace simulator
     {
         // Load request calculation functions
-        
+
         /**
          * @brief Calculate the L1 cache load request for a matrix tile
          * @param MTX Matrix tile size in the X dimension
@@ -50,7 +50,7 @@ namespace origami
                              double&  tcc_ea0_coalesced);
 
         // GSU overhead calculation functions
-        
+
         /**
          * @brief Calculate memory-bound overhead for matrix operations with Split K for multiple buffers
          * @param M Matrix dimension M
@@ -111,11 +111,11 @@ namespace origami
          * @param math_frequency Math frequency in MHz
          * @return The calculated overhead for Local Split K accumulation and reduction
          */
-        double getLocalSplitKOverhead(double MT0, double MT1, double lsu, uint32_t svw, 
+        double getLocalSplitKOverhead(double MT0, double MT1, double lsu, uint32_t svw,
                              uint32_t numThreads, uint32_t bpeCompute, double math_frequency);
 
         // Cache hit rate calculation functions
-        
+
         /** @brief Structure to hold L1 cache hit rates for both tiles */
         struct L1CacheHitRate {
             double tile0HitRate;  ///< Hit rate for tile 0
@@ -209,6 +209,8 @@ namespace origami
          * @param L2CacheCapacity L2 cache capacity in bytes
          * @param NumCUs Number of compute units
          * @param NumXCDs Number of XCDs (Extended Compute Dies)
+         * @param XCC WorkGroupMapping-XCC factor
+         * @param XCCG WorkGroupMapping-XCCG factor
          * @param gsu Global split-U factor
          * @param wgm Workgroup mapping strategy
          * @param batches Number of batches
@@ -222,12 +224,12 @@ namespace origami
         L2CacheHitRate computeL2CacheHitRate(uint32_t M, uint32_t N, uint32_t K,
                                              uint32_t MT0, uint32_t MT1, uint32_t depthU,
                                              uint32_t L2CacheCapacity, uint32_t NumCUs, uint32_t NumXCDs,
-                                             uint32_t gsu, int32_t wgm, uint32_t batches,
-                                             uint32_t bpeA, uint32_t bpeB, int32_t NTA, int32_t NTB,
-                                             bool isGSUWGMRR);
+                                             int XCC, int XCCG, uint32_t gsu, int32_t wgm,
+                                             uint32_t batches, uint32_t bpeA, uint32_t bpeB, int32_t NTA,
+                                             int32_t NTB, bool isGSUWGMRR);
 
         // Store request calculation functions
-        
+
         /**
          * @brief Calculate L3 store request for matrix output
          * @param M Matrix dimension M
@@ -238,9 +240,9 @@ namespace origami
          * @param edge_req Output parameter for edge store requests
          * @return Total L3 store request value
          */
-        double calculateStoreL3Request(double M, double N, double MT0, double MT1, 
+        double calculateStoreL3Request(double M, double N, double MT0, double MT1,
                                        double& non_edge_req, double& edge_req);
-        
+
         /**
          * @brief Calculate L2 store request for matrix output
          * @param M Matrix dimension M
@@ -254,7 +256,7 @@ namespace origami
          */
         double calculateStoreL2Request(double M, double N, double MT0, double MT1, double SVW,
                                        double& non_edge_req, double& edge_req);
-        
+
         /**
          * @brief Calculate L1 store request for matrix output
          * @param M Matrix dimension M
@@ -270,7 +272,7 @@ namespace origami
                                        double& non_edge_req, double& edge_req);
 
         // FIFO and queue simulation functions
-        
+
         /**
          * @brief Get stall cycles when global read queue is full
          * @param currentCycle Current simulation cycle
@@ -282,7 +284,7 @@ namespace origami
          * @return Stall cycles if FIFO is full, currentCycle otherwise
          */
         int getGlobalReadQueueFullStallCycles(int currentCycle, std::deque<int>& fifo, int bpRead, int numWaves, bool isStall, bool isSgprOffset);
-        
+
         /**
          * @brief Get the cycle when local read operations complete
          * @param currentCycle Current simulation cycle
@@ -291,7 +293,7 @@ namespace origami
          * @return Cycle number if local reads not completed, currentCycle otherwise
          */
         int getLocalReadCompletionCycle(int currentCycle, std::queue<int>& fifo, int numLR);
-        
+
         /**
          * @brief Get stall cycles when local read queue is full
          * @param currentCycle Current simulation cycle
@@ -320,7 +322,7 @@ namespace origami
          * @return Total latency including bank conflict penalty
          */
          int getLocalWriteLatency(int baseLatency, int conflictMultiplier, double bankConflict);
-        
+
         /**
          * @brief Analyze bank conflicts from VGPR state
          * @param vgprState Vector of VGPR state maps for each thread

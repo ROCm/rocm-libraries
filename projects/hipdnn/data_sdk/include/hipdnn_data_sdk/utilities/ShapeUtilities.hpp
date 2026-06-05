@@ -3,9 +3,12 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <iterator>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -67,7 +70,7 @@ inline bool areDimensionsBroadcastCompatible(const std::vector<int64_t>& inputDi
 inline std::vector<int64_t> generateStrides(const std::vector<int64_t>& dim,
                                             const std::vector<int64_t>& strideOrder)
 {
-    size_t numDims = dim.size();
+    const size_t numDims = dim.size();
 
     if(numDims > strideOrder.size())
     {
@@ -142,7 +145,7 @@ inline std::vector<int64_t> strideOrderNhwc(size_t numDims)
 // This is the inverse operation of generateStrides.
 inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strides)
 {
-    size_t numDims = strides.size();
+    const size_t numDims = strides.size();
     std::vector<size_t> indices(numDims);
     std::vector<int64_t> strideOrder(numDims);
     std::iota(indices.begin(), indices.end(), 0);
@@ -221,6 +224,70 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
     }
 
     return strideOrder;
+}
+
+/**
+ * @brief Generates strides that make a specified axis the most tightly packed dimension
+ *
+ * Derives a stride ordering from a reference tensor's strides, optionally rotating
+ * the specified axis to be the most tightly packed (stride=1). Other dimensions
+ * preserve their relative ordering from the reference layout.
+ *
+ * @param referenceStrides Strides of the reference tensor (used to determine dimension ordering)
+ * @param referenceDims Dimensions of the reference tensor (used for singleton tiebreaking)
+ * @param targetDims Dimensions of the tensor to generate strides for
+ * @param axis If set, this dimension index becomes the most tightly packed (stride=1).
+ *             If not set, the reference stride ordering is preserved as-is.
+ * @return Strides for targetDims with the specified axis most tightly packed
+ *
+ * @code{.cpp}
+ * // NCHW input, make axis 1 (C) most packed:
+ * auto strides = generateStridesWithPackedAxis(
+ *     {65536, 1024, 32, 1}, {2, 64, 32, 32}, {2, 64, 32, 32}, 1);
+ * // Returns {64, 1, 4096, 128}
+ * @endcode
+ */
+inline std::vector<int64_t>
+    generateStridesWithPackedAxis(const std::vector<int64_t>& referenceStrides,
+                                  const std::vector<int64_t>& referenceDims,
+                                  const std::vector<int64_t>& targetDims,
+                                  std::optional<int64_t> axis = std::nullopt)
+{
+    const size_t numDims = referenceStrides.size();
+
+    // Sort dimension indices by reference strides ascending,
+    // with singleton-dimension tiebreaker (singletons sort first)
+    std::vector<size_t> sortedIndices(numDims);
+    std::iota(sortedIndices.begin(), sortedIndices.end(), 0);
+    std::sort(sortedIndices.begin(),
+              sortedIndices.end(),
+              [&referenceStrides, &referenceDims](size_t a, size_t b) {
+                  if(referenceStrides[a] != referenceStrides[b])
+                  {
+                      return referenceStrides[a] < referenceStrides[b];
+                  }
+                  return (referenceDims[a] == 1) > (referenceDims[b] == 1);
+              });
+
+    // If axis is set, rotate so the axis dimension becomes most packed
+    if(axis.has_value())
+    {
+        auto axisVal = static_cast<size_t>(axis.value());
+        auto it = std::find(sortedIndices.begin(), sortedIndices.end(), axisVal);
+        if(it != sortedIndices.end())
+        {
+            std::rotate(sortedIndices.begin(), it, sortedIndices.end());
+        }
+    }
+
+    // Build stride order from inverse permutation
+    std::vector<int64_t> strideOrder(numDims);
+    for(size_t i = 0; i < numDims; ++i)
+    {
+        strideOrder[sortedIndices[i]] = static_cast<int64_t>(i);
+    }
+
+    return generateStrides(targetDims, strideOrder);
 }
 
 // Checks if the tensor defined by dims and strides is packed (contiguous in memory).

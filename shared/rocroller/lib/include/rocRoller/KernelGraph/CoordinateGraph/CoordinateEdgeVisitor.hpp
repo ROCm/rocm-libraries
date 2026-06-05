@@ -198,6 +198,38 @@ namespace rocRoller
                 return {result};
             }
 
+            std::vector<Expression::ExpressionPtr> operator()(PairSwap const& e)
+            {
+                using namespace Expression;
+                AssertFatal(srcs.size() == 1 && indexes.size() >= 2);
+                auto col      = indexes[0];
+                auto row      = indexes[1];
+                auto logGrp   = literal(static_cast<unsigned int>(__builtin_ctz(e.rowsPerGroup)));
+                auto groupIdx = row >> logGrp;
+
+                auto swapBit = (groupIdx ^ literal(1u)) & literal(1u);
+                col          = col ^ swapBit;
+                return {col};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(Rotate const& e)
+            {
+                using namespace Expression;
+                AssertFatal(srcs.size() == 1 && indexes.size() >= 2);
+                auto col      = indexes[0];
+                auto row      = indexes[1];
+                auto numPos   = literal(e.numPositions);
+                auto logGrp   = literal(static_cast<unsigned int>(__builtin_ctz(e.rowsPerGroup)));
+                auto groupIdx = row >> logGrp;
+
+                auto halfRotation = (groupIdx >> literal(1u)) << literal(1u);
+                if(e.inverse)
+                    col = (col + halfRotation) & (numPos - literal(1u));
+                else
+                    col = (col + numPos - halfRotation) & (numPos - literal(1u));
+                return {col};
+            }
+
             std::vector<Expression::ExpressionPtr> operator()(PiecewiseAffineJoin const& e)
             {
                 AssertFatal(dsts.size() == e.strides.first.size(),
@@ -503,6 +535,28 @@ namespace rocRoller
                 deltas.emplace(srcTags[0], delta);
                 setComment(index, "DSplit");
                 return {index};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(PairSwap const& e)
+            {
+                AssertFatal(srcs.size() == 1);
+                auto delta = getDelta(dstTags[0]);
+                for(size_t i = 0; i < srcs.size(); ++i)
+                    deltas.emplace(srcTags[i], delta);
+                ReverseEdgeVisitor rev;
+                rev.setLocation(indexes, srcs, dsts, srcTags, dstTags);
+                return rev(e);
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(Rotate const& e)
+            {
+                AssertFatal(srcs.size() == 1);
+                auto delta = getDelta(dstTags[0]);
+                for(size_t i = 0; i < srcs.size(); ++i)
+                    deltas.emplace(srcTags[i], delta);
+                ReverseEdgeVisitor rev;
+                rev.setLocation(indexes, srcs, dsts, srcTags, dstTags);
+                return rev(e);
             }
 
             std::vector<Expression::ExpressionPtr> operator()(PiecewiseAffineJoin const& e)

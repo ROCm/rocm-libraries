@@ -51,7 +51,7 @@ TEST(TestSdkLogging, SdkLogContainsComponentName)
                                                  << recorder.getRecordedLogsAsString();
 
     // SDK logs should contain the "hipdnn_frontend" component name
-    std::string expectedComponentName = "[hipdnn_frontend]";
+    const std::string expectedComponentName = "[hipdnn_frontend]";
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, expectedComponentName))
         << "Expected log containing: \"" << expectedComponentName << "\"\n"
         << "But captured:\n"
@@ -133,15 +133,15 @@ TEST(TestSdkLogging, SdkLogStreamFormatting)
 
     HIPDNN_FE_LOG_INFO("Frontend initialized");
 
-    int value = 42;
-    std::string text = "formatted";
+    const int value = 42;
+    const std::string text = "formatted";
     HIPDNN_SDK_LOG_INFO("SDK " << text << " message with value " << value);
 
     // Verify we got exactly two logs
     ASSERT_EQ(recorder.getRecordedLogCount(), 2) << "Expected 2 logs, but captured:\n"
                                                  << recorder.getRecordedLogsAsString();
 
-    std::string expectedMessage = "SDK formatted message with value 42";
+    const std::string expectedMessage = "SDK formatted message with value 42";
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, expectedMessage))
         << "Expected log containing: \"" << expectedMessage << "\"\n"
         << "But captured:\n"

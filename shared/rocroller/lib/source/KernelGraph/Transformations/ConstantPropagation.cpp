@@ -190,8 +190,8 @@ namespace rocRoller::KernelGraph
                 Expression::DataFlowTag{tag, Register::Type::Scalar, scalarVarType});
         };
 
-        auto condOp
-            = kgraph.control.addElement(ConditionalOp{zero == DF(scalarDFTag), "0 == beta"});
+        auto condOp = kgraph.control.addElement(
+            ConditionalOp{zero == DF(scalarDFTag), ConditionalMode::Branch, "0 == beta"});
 
         // find (parent --e--> head --body--> node)
         auto e           = *only(kgraph.control.getNeighbours<Graph::Direction::Upstream>(head));

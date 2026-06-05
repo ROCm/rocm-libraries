@@ -50,6 +50,8 @@ if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
     add_hiptensor_sample(simple_contraction_c simple_contraction_c.c)
     add_hiptensor_sample(simple_bilinear_contraction_unary_ops simple_bilinear_contraction_unary_ops.cpp)
     add_hiptensor_sample(simple_scale_contraction_unary_ops simple_scale_contraction_unary_ops.cpp)
+    add_hiptensor_sample(simple_trinary_bilinear_contraction_f32_f32_f32_f32_compute_f16 simple_trinary_bilinear_contraction_f32_f32_f32_f32_compute_f16.cpp)
+    add_hiptensor_sample(simple_trinary_scale_contraction_f32_f32_f32_f32_compute_f16 simple_trinary_scale_contraction_f32_f32_f32_f32_compute_f16.cpp)
 
 # If building hipTensor samples as a standalone Cmake project
 else()
@@ -124,5 +126,11 @@ else()
 
     add_executable(simple_scale_contraction_unary_ops simple_scale_contraction_unary_ops.cpp)
     target_link_libraries(simple_scale_contraction_unary_ops PRIVATE hiptensor::hiptensor)
+
+    add_executable(simple_trinary_bilinear_contraction_f32_f32_f32_f32_compute_f16 simple_trinary_bilinear_contraction_f32_f32_f32_f32_compute_f16.cpp)
+    target_link_libraries(simple_trinary_bilinear_contraction_f32_f32_f32_f32_compute_f16 PRIVATE hiptensor::hiptensor)
+
+    add_executable(simple_trinary_scale_contraction_f32_f32_f32_f32_compute_f16 simple_trinary_scale_contraction_f32_f32_f32_f32_compute_f16.cpp)
+    target_link_libraries(simple_trinary_scale_contraction_f32_f32_f32_f32_compute_f16 PRIVATE hiptensor::hiptensor)
 
 endif()

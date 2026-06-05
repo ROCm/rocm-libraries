@@ -154,8 +154,8 @@ miopenStatus_t miopenSetProblemTensorDescriptor(miopenProblem_t problem,
 
     return miopen::try_([&] {
         const auto impl = miopen::hof_match(
-            [&](miopen::Problem& problem) {
-                if(!problem.RegisterTensorDescriptor(id, miopen::deref(descriptor)))
+            [&](miopen::Problem& problem_) {
+                if(!problem_.RegisterTensorDescriptor(id, miopen::deref(descriptor)))
                     MIOPEN_THROW(miopenStatusBadParm,
                                  "Attempt to set tensor descriptor with the same name twice in the "
                                  "same problem");
@@ -261,14 +261,14 @@ miopenStatus_t miopenFindSolutions(miopenHandle_t handle,
         auto& handle_deref        = miopen::deref(handle);
         const auto& problem_deref = miopen::deref(problem).item;
 
-        std::visit([](auto&& problem) { problem.LogDriverCommand(); }, problem_deref);
+        std::visit([](auto&& problem_) { problem_.LogDriverCommand(); }, problem_deref);
 
         const auto& options_deref =
             options == nullptr ? miopen::FindOptions{} : miopen::deref(options);
 
         auto solutions_deref = std::visit(
-            [&](auto&& problem) {
-                return problem.FindSolutions(handle_deref, options_deref, maxSolutions);
+            [&](auto&& problem_) {
+                return problem_.FindSolutions(handle_deref, options_deref, maxSolutions);
             },
             problem_deref);
 

@@ -72,9 +72,10 @@ public:
         return _memory;
     }
 
-    void fillWithValue([[maybe_unused]] T value) override
+    void fillWithValue(T value) override
     {
-        throwNotSupported();
+        T* data = _memory.hostData();
+        std::fill(data, data + _memory.count(), value);
     }
 
     void fillWithRandomValues([[maybe_unused]] T min,

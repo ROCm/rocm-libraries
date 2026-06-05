@@ -106,7 +106,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
 {
     const auto& flag_arg = env::value(MIOPEN_TEST_FLAGS_ARGS);
 
-    const std::vector<std::string> test_cases = {
+    return std::vector<std::string>{
         // clang-format off
         // Forward pooling with NDHWC layout (universal transpose - 3D)
         {"test_pooling3d " + precision + " --all --in_layout NDHWC --out_layout NDHWC " + flag_arg},
@@ -114,8 +114,6 @@ std::vector<std::string> GetTestCases(const std::string& precision)
         {"test_pooling3d " + precision + " --forw 0 --in_layout NDHWC --out_layout NDHWC " + flag_arg}
         // clang-format on
     };
-
-    return test_cases;
 }
 
 } // namespace pooling3d_ndhwc

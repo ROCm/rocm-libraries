@@ -41,4 +41,6 @@ target_link_libraries(
 # make it so tests inside folders can find the mocks folder without having to use a relative path.
 target_include_directories(hipblaslt_plugin_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+clang_tidy_check(hipblaslt_plugin_tests)
+
 add_unit_test_target(hipblaslt_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})

@@ -72,6 +72,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \parblock
 /// In this example multiple sections of data are copied from \p a to \p b .
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_memcpy.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp
 ///

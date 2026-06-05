@@ -234,7 +234,6 @@ TEST(EnumToStringTest, ALL)
 
     verify<ArgumentType>({
         {ArgumentType::Value, "Value"},
-        {ArgumentType::Limit, "Limit"},
         {ArgumentType::Size, "Size"},
         {ArgumentType::Stride, "Stride"},
     });

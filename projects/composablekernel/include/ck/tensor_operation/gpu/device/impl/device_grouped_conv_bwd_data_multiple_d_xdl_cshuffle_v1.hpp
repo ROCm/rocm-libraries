@@ -18,6 +18,7 @@
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include "ck/tensor_operation/operator_transform/transform_conv_ngchw_to_nhwgc.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_multiple_d_xdl_cshuffle.hpp"
+#include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdlops_v2r3.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_elementwise_2d.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_utils.hpp"
 #include "ck/host_utility/device_prop.hpp"
@@ -31,6 +32,7 @@
 #include "ck_tile/builder/reflect/description.hpp"
 #include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_bwd_data_multiple_d_xdl_cshuffle.hpp"
 #endif
+#include "ck/tensor_operation/gpu/device/tensor_size_check.hpp"
 
 namespace ck {
 namespace tensor_operation {
@@ -138,22 +140,30 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
         static_for<0, NumDTensor, 1>{}(
             [&](auto i) { p_ds_grid_grp(i) = p_ds_grid[i] + ds_batch_offset[i]; });
 
-        index_t left     = 0;
-        index_t right    = gemms_count;
-        index_t group_id = index_t((left + right) / 2);
-        while((!(block_args_id >= gemm_kernel_args[group_id].BlockStart_ &&
-                 block_args_id < gemm_kernel_args[group_id].BlockEnd_)) &&
-              left <= right)
+        index_t group_id;
+        if(gemms_count == 1)
         {
-            if(block_args_id < gemm_kernel_args[group_id].BlockStart_)
+            group_id = 0;
+        }
+        else
+        {
+            index_t left  = 0;
+            index_t right = gemms_count;
+            group_id      = index_t((left + right) / 2);
+            while((!(block_args_id >= gemm_kernel_args[group_id].BlockStart_ &&
+                     block_args_id < gemm_kernel_args[group_id].BlockEnd_)) &&
+                  left <= right)
             {
-                right = group_id;
+                if(block_args_id < gemm_kernel_args[group_id].BlockStart_)
+                {
+                    right = group_id;
+                }
+                else
+                {
+                    left = group_id;
+                }
+                group_id = index_t((left + right) / 2);
             }
-            else
-            {
-                left = group_id;
-            }
-            group_id = index_t((left + right) / 2);
         }
 
         if constexpr(HasMainKBlockLoopInAllGemm || NoMainKBlockLoopInAllGemm)
@@ -173,7 +183,8 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
                 gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
                 gemm_kernel_args[group_id].block_2_ctile_map_,
                 KBatch,
-                k_idx);
+                k_idx,
+                gemm_kernel_args[group_id].e_grid_desc_m_n_);
         }
         else
         {
@@ -194,7 +205,8 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
                     gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
                     gemm_kernel_args[group_id].block_2_ctile_map_,
                     KBatch,
-                    k_idx);
+                    k_idx,
+                    gemm_kernel_args[group_id].e_grid_desc_m_n_);
             }
             else
             {
@@ -213,7 +225,8 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
                     gemm_kernel_args[group_id].e_grid_desc_mblock_mperblock_nblock_nperblock_,
                     gemm_kernel_args[group_id].block_2_ctile_map_,
                     KBatch,
-                    k_idx);
+                    k_idx,
+                    gemm_kernel_args[group_id].e_grid_desc_m_n_);
             }
         }
     }
@@ -323,12 +336,28 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
             ? 1
             : 32;
 
-    using DeviceOp = DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1;
-    GET_NXDL_PER_WAVE_IMPL
-    static constexpr auto NXdlPerWave64 = GetNXdlPerWave<true>();
-    static constexpr auto NXdlPerWave32 = GetNXdlPerWave<false>();
-
-    static constexpr index_t NumDTensor          = DsDataType::Size();
+    using DeviceOp                         = DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1;
+    static constexpr auto WarpTileConfig64 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               true>();
+    static constexpr auto WarpTileConfig32 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               false>();
+    static constexpr auto NXdlPerWave64    = WarpTileConfig64.At(3);
+    static constexpr auto NXdlPerWave32    = WarpTileConfig32.At(3);
+    static constexpr index_t NumDTensor    = DsDataType::Size();
     static constexpr GemmSpecialization GemmSpec = GemmSpecialization::MNKPadding;
     static constexpr bool IsSplitKSupported =
         (CDEBlockTransferScalarPerVector_NPerBlock % 2 == 0 || sizeof(EDataType) % 4 == 0) &&
@@ -444,53 +473,146 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
     }
 
 // GridwiseGemm
-#define CK_GRIDWISE_GEMM_BWD_DATA_MULTIPLE_D_TEMPLATE_PARAMETERS                                \
-    ABDataType, ABDataType, AComputeType, AccDataType, CShuffleDataType, DsDataType, EDataType, \
-        AElementwiseOp, BElementwiseOp, CDEElementwiseOp, NumGemmKPrefetchStage, BlockSize,     \
-        MPerBlock, NPerBlock, KPerBlock, AK1, BK1, MPerXDL, NPerXDL, MXdlPerWave, NXdlPerWave_, \
-        ABlockTransferThreadClusterLengths_AK0_M_AK1, ABlockTransferThreadClusterArrangeOrder,  \
-        ABlockTransferSrcAccessOrder, ABlockTransferSrcVectorDim,                               \
-        ABlockTransferSrcScalarPerVector, ABlockTransferDstScalarPerVector_AK1, false,          \
-        ABlockLdsExtraM, BBlockTransferThreadClusterLengths_BK0_N_BK1,                          \
-        BBlockTransferThreadClusterArrangeOrder, BBlockTransferSrcAccessOrder,                  \
-        BBlockTransferSrcVectorDim, BBlockTransferSrcScalarPerVector,                           \
-        BBlockTransferDstScalarPerVector_BK1, false, BBlockLdsExtraN,                           \
-        CShuffleMXdlPerWavePerShuffle, CShuffleNXdlPerWavePerShuffle,                           \
-        CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,                       \
+#define CK_GRIDWISE_GEMM_BWD_DATA_MULTIPLE_D_TEMPLATE_PARAMETERS                                 \
+    ABDataType, ABDataType, AComputeType, AccDataType, CShuffleDataType, DsDataType, EDataType,  \
+        AElementwiseOp, BElementwiseOp, CDEElementwiseOp, NumGemmKPrefetchStage, BlockSize,      \
+        MPerBlock, NPerBlock, KPerBlock, AK1, BK1, WarpTileConfig::At(0), WarpTileConfig::At(1), \
+        WarpTileConfig::At(2), WarpTileConfig::At(3),                                            \
+        ABlockTransferThreadClusterLengths_AK0_M_AK1, ABlockTransferThreadClusterArrangeOrder,   \
+        ABlockTransferSrcAccessOrder, ABlockTransferSrcVectorDim,                                \
+        ABlockTransferSrcScalarPerVector, ABlockTransferDstScalarPerVector_AK1, false,           \
+        ABlockLdsExtraM, BBlockTransferThreadClusterLengths_BK0_N_BK1,                           \
+        BBlockTransferThreadClusterArrangeOrder, BBlockTransferSrcAccessOrder,                   \
+        BBlockTransferSrcVectorDim, BBlockTransferSrcScalarPerVector,                            \
+        BBlockTransferDstScalarPerVector_BK1, false, BBlockLdsExtraN, WarpTileConfig::At(4),     \
+        WarpTileConfig::At(5), CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock, \
         CDEBlockTransferScalarPerVector_NPerBlock, LoopSched, PipelineVersion::v1, BComputeType
 
-#define CK_GRIDWISE_GEMM_BWD_DATA_CTRANSPOSE_TEMPLATE_PARAMETERS                                \
-    ABDataType, ABDataType, AComputeType, AccDataType, CShuffleDataType, DsDataType, EDataType, \
-        BElementwiseOp, AElementwiseOp, CDEElementwiseOp, NumGemmKPrefetchStage, BlockSize,     \
-        NPerBlock, MPerBlock, KPerBlock, BK1, AK1, NPerXDL, MPerXDL, NXdlPerWave_, MXdlPerWave, \
-        BBlockTransferThreadClusterLengths_BK0_N_BK1, BBlockTransferThreadClusterArrangeOrder,  \
-        BBlockTransferSrcAccessOrder, BBlockTransferSrcVectorDim,                               \
-        BBlockTransferSrcScalarPerVector, BBlockTransferDstScalarPerVector_BK1, false,          \
-        BBlockLdsExtraN, ABlockTransferThreadClusterLengths_AK0_M_AK1,                          \
-        ABlockTransferThreadClusterArrangeOrder, ABlockTransferSrcAccessOrder,                  \
-        ABlockTransferSrcVectorDim, ABlockTransferSrcScalarPerVector,                           \
-        ABlockTransferDstScalarPerVector_AK1, false, ABlockLdsExtraM,                           \
-        CShuffleMXdlPerWavePerShuffle, CShuffleNXdlPerWavePerShuffle,                           \
-        CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,                       \
+#define CK_GRIDWISE_GEMM_BWD_DATA_CTRANSPOSE_TEMPLATE_PARAMETERS                                 \
+    ABDataType, ABDataType, AComputeType, AccDataType, CShuffleDataType, DsDataType, EDataType,  \
+        BElementwiseOp, AElementwiseOp, CDEElementwiseOp, NumGemmKPrefetchStage, BlockSize,      \
+        NPerBlock, MPerBlock, KPerBlock, BK1, AK1, WarpTileConfig::At(1), WarpTileConfig::At(0), \
+        WarpTileConfig::At(3), WarpTileConfig::At(2),                                            \
+        BBlockTransferThreadClusterLengths_BK0_N_BK1, BBlockTransferThreadClusterArrangeOrder,   \
+        BBlockTransferSrcAccessOrder, BBlockTransferSrcVectorDim,                                \
+        BBlockTransferSrcScalarPerVector, BBlockTransferDstScalarPerVector_BK1, false,           \
+        BBlockLdsExtraN, ABlockTransferThreadClusterLengths_AK0_M_AK1,                           \
+        ABlockTransferThreadClusterArrangeOrder, ABlockTransferSrcAccessOrder,                   \
+        ABlockTransferSrcVectorDim, ABlockTransferSrcScalarPerVector,                            \
+        ABlockTransferDstScalarPerVector_AK1, false, ABlockLdsExtraM, WarpTileConfig::At(5),     \
+        WarpTileConfig::At(4), CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock, \
         CDEBlockTransferScalarPerVector_NPerBlock, LoopSched, PipelineVersion::v1, BComputeType
 
-    template <index_t NXdlPerWave_>
+    template <typename WarpTileConfig>
     using GridwiseGemmBase = GridwiseGemmMultipleD_xdl_cshuffle<
         CK_GRIDWISE_GEMM_BWD_DATA_MULTIPLE_D_TEMPLATE_PARAMETERS>;
-    template <index_t NXdlPerWave_>
+    template <typename WarpTileConfig>
     using GridwiseGemmCTransposeBase = GridwiseGemmMultipleD_xdl_cshuffle<
         CK_GRIDWISE_GEMM_BWD_DATA_CTRANSPOSE_TEMPLATE_PARAMETERS>;
 #undef CK_GRIDWISE_GEMM_BWD_DATA_MULTIPLE_D_TEMPLATE_PARAMETERS
 #undef CK_GRIDWISE_GEMM_BWD_DATA_CTRANSPOSE_TEMPLATE_PARAMETERS
-    using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
-    using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
+    using GridwiseGemm64 = GridwiseGemmBase<decltype(WarpTileConfig64)>;
+    using GridwiseGemm32 = GridwiseGemmBase<decltype(WarpTileConfig32)>;
 
     using GridwiseGemmCTranspose64 =
         std::conditional_t<CTranspose,
-                           GridwiseGemmCTransposeBase<math::max(NXdlPerWave64, 1)>,
+                           GridwiseGemmCTransposeBase<decltype(WarpTileConfig64)>,
                            GridwiseGemm64>;
     using GridwiseGemmCTranspose32 =
-        std::conditional_t<CTranspose, GridwiseGemmCTransposeBase<NXdlPerWave32>, GridwiseGemm32>;
+        std::conditional_t<CTranspose,
+                           GridwiseGemmCTransposeBase<decltype(WarpTileConfig32)>,
+                           GridwiseGemm32>;
+
+    // Non-grouped GridwiseGemm for single-group specialization.
+    // Uses simpler epilogue and address computation, matching the non-grouped kernel.
+    // Requires AK1 == BK1 (true for all backward data convolution instances).
+    template <index_t NXdlPerWave_>
+    using NonGroupedGridwiseGemmBase =
+        GridwiseGemm_k0mk1_k0nk1_mn_xdlops_v2r3<BlockSize,
+                                                ABDataType,
+                                                AccDataType,
+                                                EDataType,
+                                                InMemoryDataOperationEnum::Set,
+                                                AElementwiseOp,
+                                                BElementwiseOp,
+                                                CDEElementwiseOp,
+                                                MPerBlock,
+                                                NPerBlock,
+                                                KPerBlock / AK1,
+                                                MPerXDL,
+                                                NPerXDL,
+                                                AK1,
+                                                MXdlPerWave,
+                                                NXdlPerWave_,
+                                                ABlockTransferThreadClusterLengths_AK0_M_AK1,
+                                                ABlockTransferThreadClusterArrangeOrder,
+                                                ABlockTransferSrcAccessOrder,
+                                                ABlockTransferSrcVectorDim,
+                                                ABlockTransferSrcScalarPerVector,
+                                                ABlockTransferDstScalarPerVector_AK1,
+                                                false,
+                                                ABlockLdsExtraM,
+                                                BBlockTransferThreadClusterLengths_BK0_N_BK1,
+                                                BBlockTransferThreadClusterArrangeOrder,
+                                                BBlockTransferSrcAccessOrder,
+                                                BBlockTransferSrcVectorDim,
+                                                BBlockTransferSrcScalarPerVector,
+                                                BBlockTransferDstScalarPerVector_BK1,
+                                                false,
+                                                BBlockLdsExtraN,
+                                                Sequence<2, 3, 0, 1, 7, 5, 4, 6>,
+                                                7,
+                                                1>;
+    using NonGroupedGridwiseGemm64 = NonGroupedGridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
+
+    // Flat descriptor type aliases for group_count=1 fast path.
+    // Derived from the _Packed() methods in ConvToGemmBwdDataTransform.
+    // Uses a canonical NHWGK/NHWGC layout for type derivation (the _Packed() methods
+    // have enable_if on layout, but the resulting descriptor types are layout-independent).
+    template <typename Transform, bool Is2D>
+    struct FlatDescTypes
+    {
+        using ADesc = int;
+        using BDesc = int;
+        using CDesc = int;
+    };
+
+    template <typename Transform>
+    struct FlatDescTypes<Transform, true>
+    {
+        using CanonicalTransform = TransformConvBwdDataToGemm_v1<2,
+                                                                 ConvBackwardDataSpecialization,
+                                                                 AK1,
+                                                                 BK1,
+                                                                 MPerBlock,
+                                                                 NPerBlock,
+                                                                 KPerBlock,
+                                                                 DoPadGemmM,
+                                                                 DoPadGemmN,
+                                                                 tensor_layout::convolution::NHWGK,
+                                                                 tensor_layout::convolution::GKYXC,
+                                                                 tensor_layout::convolution::NHWGC,
+                                                                 true,
+                                                                 ABDataType,
+                                                                 EDataType,
+                                                                 1,
+                                                                 index_t,
+                                                                 false>;
+
+        using ADesc = remove_cvref_t<
+            decltype(std::declval<CanonicalTransform>().MakeADescriptor_AK0_M_AK1_Packed())>;
+        using BDesc = remove_cvref_t<
+            decltype(std::declval<CanonicalTransform>().MakeBDescriptor_BK0_N_BK1_Packed())>;
+        using CDesc = remove_cvref_t<
+            decltype(std::declval<CanonicalTransform>().MakeCDescriptor_M_N_Packed())>;
+    };
+
+    using FlatAGridDesc_K0_M_K1 =
+        typename FlatDescTypes<ConvToGemmBwdDataTransform, NDimSpatial == 2>::ADesc;
+    using FlatBGridDesc_K0_N_K1 =
+        typename FlatDescTypes<ConvToGemmBwdDataTransform, NDimSpatial == 2>::BDesc;
+    using FlatCGridDesc_M_N =
+        typename FlatDescTypes<ConvToGemmBwdDataTransform, NDimSpatial == 2>::CDesc;
 
     template <typename EGridDesc_M_N>
     static auto
@@ -547,6 +669,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                      ds_grid_desc_mblock_mperblock_nblock_nperblock,
                  EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock
                      e_grid_desc_mblock_mperblock_nblock_nperblock,
+                 EGridDesc_M_N e_grid_desc_m_n,
                  GroupedGemmBlock2ETileMap block_2_ctile_map,
                  index_t BlockStart,
                  index_t BlockEnd,
@@ -559,6 +682,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
 
               e_grid_desc_mblock_mperblock_nblock_nperblock_(
                   e_grid_desc_mblock_mperblock_nblock_nperblock),
+
+              e_grid_desc_m_n_(e_grid_desc_m_n),
 
               // block-to-e-tile map
               block_2_ctile_map_(block_2_ctile_map),
@@ -574,6 +699,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
         DsGridDesc_MBlock_MPerBlock_NBlock_NPerBlock
             ds_grid_desc_mblock_mperblock_nblock_nperblock_;
         EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock e_grid_desc_mblock_mperblock_nblock_nperblock_;
+        EGridDesc_M_N e_grid_desc_m_n_;
 
         // block-to-e-tile map
         GroupedGemmBlock2ETileMap block_2_ctile_map_;
@@ -693,7 +819,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                  const AElementwiseOp& a_element_op,
                  const BElementwiseOp& b_element_op,
                  const CDEElementwiseOp& cde_element_op,
-                 ck::index_t split_k = 1)
+                 ck::index_t split_k     = 1,
+                 bool stride_overflow_in = false)
             : p_a_grid_{static_cast<const ADataType*>(p_a)},
               p_b_grid_{static_cast<const BDataType*>(p_b)},
               p_ds_grid_{},
@@ -706,10 +833,12 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
               b_g_k_c_xs_lengths_{b_g_k_c_xs_lengths},
               e_g_n_c_wis_lengths_{e_g_n_c_wis_lengths},
               conv_filter_strides_{conv_filter_strides},
+              conv_filter_dilations_{conv_filter_dilations},
               input_left_pads_{input_left_pads},
               input_right_pads_{input_right_pads},
               k_batch_{split_k}
         {
+            stride_overflow             = stride_overflow_in;
             bool image_covered_dilation = true;
             bool image_covered_strides  = true;
             for(index_t d = 0; d < NDimSpatial; d++)
@@ -952,6 +1081,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                                              ds_grid_desc_m_n),
                                      MakeEGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                                          e_grid_desc_m_n),
+                                     e_grid_desc_m_n,
                                      block_2_etile_map,
                                      BlockStart,
                                      BlockEnd,
@@ -961,6 +1091,22 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                         {
                             gemms_grid_size_.push_back(grid_size);
                             grid_size = 0;
+                        }
+
+                        // Build packed descriptors for group_count=1 fast path
+                        if constexpr(NDimSpatial == 2 && !CTranspose)
+                        {
+                            // K must be >= AK1 to ensure K0 = K/AK1 >= 1; otherwise
+                            // the flat descriptor would have K0=0 which is invalid.
+                            if(num_group_ == 1 && a_g_n_k_wos_lengths[2] >= AK1)
+                            {
+                                flat_a_container_.push_back(
+                                    conv_to_gemm_transform_.MakeADescriptor_AK0_M_AK1_Packed());
+                                flat_b_container_.push_back(
+                                    conv_to_gemm_transform_.MakeBDescriptor_BK0_N_BK1_Packed());
+                                flat_c_container_.push_back(
+                                    conv_to_gemm_transform_.MakeCDescriptor_M_N_Packed());
+                            }
                         }
                     }
                 }
@@ -1127,8 +1273,14 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
         std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_;
         std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_lengths_;
         std::array<index_t, NDimSpatial> conv_filter_strides_;
+        std::array<index_t, NDimSpatial> conv_filter_dilations_;
         std::array<index_t, NDimSpatial> input_left_pads_;
         std::array<index_t, NDimSpatial> input_right_pads_;
+
+        // Flat descriptors for group_count=1 fast path
+        std::vector<FlatAGridDesc_K0_M_K1> flat_a_container_;
+        std::vector<FlatBGridDesc_K0_N_K1> flat_b_container_;
+        std::vector<FlatCGridDesc_M_N> flat_c_container_;
 
         const index_t k_batch_;
         index_t num_workgroups_per_Conv_N_;
@@ -1138,6 +1290,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
 
         bool bwd_needs_zero_out;
         long_index_t e_space_size_bytes;
+        bool stride_overflow;
     };
 
     // Invoker
@@ -1204,6 +1357,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                     no_loop_in_all_gemm &= !gemm_kernel_args[i].HasMainKBlockLoop_;
                 }
 
+                // Original multi-group kernel launch
                 auto launch_kernel = [&](auto has_main_k_block_loop, auto no_main_k_block_loop) {
                     constexpr bool has_main_loop = has_main_k_block_loop.value;
                     constexpr bool no_main_loop  = no_main_k_block_loop.value;
@@ -1225,26 +1379,50 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                             has_main_loop,
                             no_main_loop,
                             CTranspose>;
-
-                        return launch_and_time_kernel_with_preprocess(
-                            stream_config,
-                            clear_workspace,
-                            kernel,
-                            dim3(gdx, gdy, gdz),
-                            dim3(BlockSize),
-                            0,
-                            p_b_grid,
-                            p_a_grid,
-                            arg.p_ds_grid_,
-                            p_e_grid,
-                            gemm_kernel_args,
-                            gemms_count_for_set,
-                            arg.b_element_op_,
-                            arg.a_element_op_,
-                            arg.cde_element_op_,
-                            arg.compute_ptr_offset_of_batch_,
-                            arg.compute_ptr_offset_of_n_,
-                            arg.k_batch_);
+                        if(stream_config.flush_cache)
+                        {
+                            return launch_and_time_kernel_with_preprocess_flush_cache(
+                                stream_config,
+                                clear_workspace,
+                                kernel,
+                                dim3(gdx, gdy, gdz),
+                                dim3(BlockSize),
+                                0,
+                                p_b_grid,
+                                p_a_grid,
+                                arg.p_ds_grid_,
+                                p_e_grid,
+                                gemm_kernel_args,
+                                gemms_count_for_set,
+                                arg.b_element_op_,
+                                arg.a_element_op_,
+                                arg.cde_element_op_,
+                                arg.compute_ptr_offset_of_batch_,
+                                arg.compute_ptr_offset_of_n_,
+                                arg.k_batch_);
+                        }
+                        else
+                        {
+                            return launch_and_time_kernel_with_preprocess(
+                                stream_config,
+                                clear_workspace,
+                                kernel,
+                                dim3(gdx, gdy, gdz),
+                                dim3(BlockSize),
+                                0,
+                                p_b_grid,
+                                p_a_grid,
+                                arg.p_ds_grid_,
+                                p_e_grid,
+                                gemm_kernel_args,
+                                gemms_count_for_set,
+                                arg.b_element_op_,
+                                arg.a_element_op_,
+                                arg.cde_element_op_,
+                                arg.compute_ptr_offset_of_batch_,
+                                arg.compute_ptr_offset_of_n_,
+                                arg.k_batch_);
+                        }
                     }
                     else
                     {
@@ -1264,42 +1442,147 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                             has_main_loop,
                             no_main_loop,
                             CTranspose>;
-
-                        return launch_and_time_kernel_with_preprocess(
-                            stream_config,
-                            clear_workspace,
-                            kernel,
-                            dim3(gdx, gdy, gdz),
-                            dim3(BlockSize),
-                            0,
-                            p_a_grid,
-                            p_b_grid,
-                            arg.p_ds_grid_,
-                            p_e_grid,
-                            gemm_kernel_args,
-                            gemms_count_for_set,
-                            arg.a_element_op_,
-                            arg.b_element_op_,
-                            arg.cde_element_op_,
-                            arg.compute_ptr_offset_of_batch_,
-                            arg.compute_ptr_offset_of_n_,
-                            arg.k_batch_);
+                        if(stream_config.flush_cache)
+                        {
+                            return launch_and_time_kernel_with_preprocess_flush_cache(
+                                stream_config,
+                                clear_workspace,
+                                kernel,
+                                dim3(gdx, gdy, gdz),
+                                dim3(BlockSize),
+                                0,
+                                p_a_grid,
+                                p_b_grid,
+                                arg.p_ds_grid_,
+                                p_e_grid,
+                                gemm_kernel_args,
+                                gemms_count_for_set,
+                                arg.a_element_op_,
+                                arg.b_element_op_,
+                                arg.cde_element_op_,
+                                arg.compute_ptr_offset_of_batch_,
+                                arg.compute_ptr_offset_of_n_,
+                                arg.k_batch_);
+                        }
+                        else
+                        {
+                            return launch_and_time_kernel_with_preprocess(
+                                stream_config,
+                                clear_workspace,
+                                kernel,
+                                dim3(gdx, gdy, gdz),
+                                dim3(BlockSize),
+                                0,
+                                p_a_grid,
+                                p_b_grid,
+                                arg.p_ds_grid_,
+                                p_e_grid,
+                                gemm_kernel_args,
+                                gemms_count_for_set,
+                                arg.a_element_op_,
+                                arg.b_element_op_,
+                                arg.cde_element_op_,
+                                arg.compute_ptr_offset_of_batch_,
+                                arg.compute_ptr_offset_of_n_,
+                                arg.k_batch_);
+                        }
                     }
                 };
-                if(has_loop_in_all_gemm)
+
+                // Dispatch: use flat-descriptor path (non-grouped GEMM) for G=1,
+                // NDim=2, no D tensors, and a single sub-GEMM per dispatch
+                // (gemms_count_ == 1, i.e. stride == dilation on every spatial
+                // axis). The non-grouped kernel uses packed (flat) descriptors
+                // with fewer transform layers, but processes exactly one
+                // sub-GEMM per launch. When stride > dilation the implicit GEMM
+                // is split into gemms_count_ sub-GEMMs whose output cells tile
+                // dx disjointly; routing those through the flat path would
+                // require gemms_count_ separate launches, which has been
+                // measured to be 6-32% slower than letting the grouped CShuffle
+                // path walk the sub-GEMMs in a single launch via the packed
+                // descriptor array. The NoShuffle epilogue used by the flat
+                // path is also unary-only, so D tensors fall back here as well.
+                bool used_flat_desc = false;
+                if constexpr(NDimSpatial == 2 && !CTranspose && NumDTensor == 0)
                 {
-                    ave_time += launch_kernel(integral_constant<bool, true>{},
-                                              integral_constant<bool, false>{});
+                    if(arg.num_group_ == 1 && arg.k_batch_ == 1 && arg.gemms_count_ == 1 &&
+                       !arg.flat_a_container_.empty())
+                    {
+                        used_flat_desc          = true;
+                        const index_t flat_idx  = gemm_set_id;
+                        const auto& flat_a      = arg.flat_a_container_[flat_idx];
+                        const auto& flat_b      = arg.flat_b_container_[flat_idx];
+                        const auto& flat_c      = arg.flat_c_container_[flat_idx];
+                        const index_t padded_K0 = flat_a.GetLength(I0);
+                        const bool flat_desc_has_main_loop =
+                            NonGroupedGridwiseGemm64::CalculateHasMainKBlockLoop(padded_K0 * AK1);
+                        const index_t flat_grid_size =
+                            NonGroupedGridwiseGemm64::Block2CTileMap::CalculateGridSize(
+                                flat_c.GetLength(I0), flat_c.GetLength(I1));
+                        if(flat_desc_has_main_loop)
+                        {
+                            const auto kernel = kernel_gemm_xdlops_v2r3<NonGroupedGridwiseGemm64,
+                                                                        ABDataType,
+                                                                        EDataType,
+                                                                        FlatAGridDesc_K0_M_K1,
+                                                                        FlatBGridDesc_K0_N_K1,
+                                                                        FlatCGridDesc_M_N,
+                                                                        true>;
+                            ave_time += launch_and_time_kernel_with_preprocess(stream_config,
+                                                                               clear_workspace,
+                                                                               kernel,
+                                                                               dim3(flat_grid_size),
+                                                                               dim3(BlockSize),
+                                                                               0,
+                                                                               p_a_grid,
+                                                                               p_b_grid,
+                                                                               p_e_grid,
+                                                                               flat_a,
+                                                                               flat_b,
+                                                                               flat_c);
+                        }
+                        else
+                        {
+                            const auto kernel = kernel_gemm_xdlops_v2r3<NonGroupedGridwiseGemm64,
+                                                                        ABDataType,
+                                                                        EDataType,
+                                                                        FlatAGridDesc_K0_M_K1,
+                                                                        FlatBGridDesc_K0_N_K1,
+                                                                        FlatCGridDesc_M_N,
+                                                                        false>;
+                            ave_time += launch_and_time_kernel_with_preprocess(stream_config,
+                                                                               clear_workspace,
+                                                                               kernel,
+                                                                               dim3(flat_grid_size),
+                                                                               dim3(BlockSize),
+                                                                               0,
+                                                                               p_a_grid,
+                                                                               p_b_grid,
+                                                                               p_e_grid,
+                                                                               flat_a,
+                                                                               flat_b,
+                                                                               flat_c);
+                        }
+                    }
                 }
-                else if(no_loop_in_all_gemm)
+
+                if(!used_flat_desc)
                 {
-                    ave_time += launch_kernel(integral_constant<bool, false>{},
-                                              integral_constant<bool, true>{});
-                }
-                else
-                {
-                    ave_time += launch_kernel(integral_constant<bool, false>{},
-                                              integral_constant<bool, false>{});
+                    if(has_loop_in_all_gemm)
+                    {
+                        ave_time += launch_kernel(integral_constant<bool, true>{},
+                                                  integral_constant<bool, false>{});
+                    }
+                    else if(no_loop_in_all_gemm)
+                    {
+                        ave_time += launch_kernel(integral_constant<bool, false>{},
+                                                  integral_constant<bool, true>{});
+                    }
+                    else
+                    {
+                        ave_time += launch_kernel(integral_constant<bool, false>{},
+                                                  integral_constant<bool, false>{});
+                    }
                 }
             }
 
@@ -1492,13 +1775,40 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(arg.stride_overflow)
+            return false;
+
         // gfx11 doesn't support float atomic
         // Todo: Enable splitK for gfx12
         if((ck::is_gfx12_supported() || ck::is_gfx11_supported()) && arg.k_batch_ > 1)
         {
             return false;
         }
-        if(!ck::is_xdl_wmma_supported<AComputeType, BComputeType, MPerXDL, NPerXDL>())
+        if(!ck::is_xdl_wmma_supported<AComputeType,
+                                      BComputeType,
+                                      MPerXDL,
+                                      NPerXDL,
+                                      WarpTileConfig32.At(0),
+                                      WarpTileConfig32.At(1)>())
+        {
+            return false;
+        }
+        if(!is_xdl_wmma_k_supported<AComputeType, KPerBlock>())
+        {
+            return false;
+        }
+        if(!is_xdl_wmma_k_supported<BComputeType, KPerBlock>())
+        {
+            return false;
+        }
+        // This entire device template instantiates XDL (MFMA) kernels, which are
+        // CDNA-only. The shared is_xdl_wmma_supported() helper above can return
+        // true for FP16/BF16 with 16x16 on RDNA (gfx11/gfx12) because it is
+        // also used by WMMA device templates. Reject all instances of this XDL
+        // template on RDNA to avoid launching MFMA kernels on hardware that
+        // does not implement those intrinsics. The corresponding WMMA path
+        // lives in device_grouped_conv_bwd_data_multiple_d_wmma_cshuffle.hpp.
+        if(ck::is_gfx11_supported() || ck::is_gfx12_supported())
         {
             return false;
         }
@@ -1831,6 +2141,89 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                         split_k};
     }
 
+    static auto MakeArgument(
+        const void* p_a,                                                      // output image
+        const void* p_b,                                                      // weight
+        const std::array<const void*, NumDTensor>& p_ds,                      // bias
+        void* p_e,                                                            // input image
+        const std::array<long_index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths, // output image
+        const std::array<long_index_t, NDimSpatial + 3>& a_g_n_k_wos_strides, // output image
+        const std::array<long_index_t, NDimSpatial + 3>& b_g_k_c_xs_lengths,  // weight
+        const std::array<long_index_t, NDimSpatial + 3>& b_g_k_c_xs_strides,  // weight
+        const std::array<std::array<long_index_t, NDimSpatial + 3>, NumDTensor>&
+            ds_g_n_c_wis_lengths, // bias
+        const std::array<std::array<long_index_t, NDimSpatial + 3>, NumDTensor>&
+            ds_g_n_c_wis_strides,                                             // bias
+        const std::array<long_index_t, NDimSpatial + 3>& e_g_n_c_wis_lengths, // input image
+        const std::array<long_index_t, NDimSpatial + 3>& e_g_n_c_wis_strides, // input image
+        const std::array<long_index_t, NDimSpatial>& conv_filter_strides,
+        const std::array<long_index_t, NDimSpatial>& conv_filter_dilations,
+        const std::array<long_index_t, NDimSpatial>& input_left_pads,
+        const std::array<long_index_t, NDimSpatial>& input_right_pads,
+        const AElementwiseOp& a_element_op,
+        const BElementwiseOp& b_element_op,
+        const CDEElementwiseOp& cde_element_op,
+        const ck::index_t split_k = 1)
+    {
+        bool ds_ovf = false;
+        for(index_t d = 0; d < NumDTensor; d++)
+            ds_ovf |= tensor_exceeds_2gb(ds_g_n_c_wis_lengths[d]);
+        const bool stride_ovf = tensor_exceeds_2gb(a_g_n_k_wos_lengths) ||
+                                tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb(e_g_n_c_wis_lengths) || ds_ovf;
+
+        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_strides_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_strides_i32;
+        std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_c_wis_lengths_i32;
+        std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_c_wis_strides_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_dilations_i32;
+        std::array<index_t, NDimSpatial> input_left_pads_i32;
+        std::array<index_t, NDimSpatial> input_right_pads_i32;
+
+        array_convert(a_g_n_k_wos_lengths_i32, a_g_n_k_wos_lengths);
+        array_convert(a_g_n_k_wos_strides_i32, a_g_n_k_wos_strides);
+        array_convert(b_g_k_c_xs_lengths_i32, b_g_k_c_xs_lengths);
+        array_convert(b_g_k_c_xs_strides_i32, b_g_k_c_xs_strides);
+        for(index_t d = 0; d < NumDTensor; d++)
+        {
+            array_convert(ds_g_n_c_wis_lengths_i32[d], ds_g_n_c_wis_lengths[d]);
+            array_convert(ds_g_n_c_wis_strides_i32[d], ds_g_n_c_wis_strides[d]);
+        }
+        array_convert(e_g_n_c_wis_lengths_i32, e_g_n_c_wis_lengths);
+        array_convert(e_g_n_c_wis_strides_i32, e_g_n_c_wis_strides);
+        array_convert(conv_filter_strides_i32, conv_filter_strides);
+        array_convert(conv_filter_dilations_i32, conv_filter_dilations);
+        array_convert(input_left_pads_i32, input_left_pads);
+        array_convert(input_right_pads_i32, input_right_pads);
+
+        return Argument{p_a,
+                        p_b,
+                        p_ds,
+                        p_e,
+                        a_g_n_k_wos_lengths_i32,
+                        a_g_n_k_wos_strides_i32,
+                        b_g_k_c_xs_lengths_i32,
+                        b_g_k_c_xs_strides_i32,
+                        ds_g_n_c_wis_lengths_i32,
+                        ds_g_n_c_wis_strides_i32,
+                        e_g_n_c_wis_lengths_i32,
+                        e_g_n_c_wis_strides_i32,
+                        conv_filter_strides_i32,
+                        conv_filter_dilations_i32,
+                        input_left_pads_i32,
+                        input_right_pads_i32,
+                        a_element_op,
+                        b_element_op,
+                        cde_element_op,
+                        split_k,
+                        stride_ovf};
+    }
+
     static auto MakeInvoker() { return Invoker{}; }
 
     std::unique_ptr<BaseArgument> MakeArgumentPointer(
@@ -1877,6 +2270,89 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1
                                           b_element_op,
                                           cde_element_op,
                                           split_k);
+    }
+
+    std::unique_ptr<BaseArgument> MakeArgumentPointer(
+        const void* p_a,                                                      // output image
+        const void* p_b,                                                      // weight
+        const std::array<const void*, NumDTensor>& p_ds,                      // bias
+        void* p_e,                                                            // input image
+        const std::array<long_index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths, // output image
+        const std::array<long_index_t, NDimSpatial + 3>& a_g_n_k_wos_strides, // output image
+        const std::array<long_index_t, NDimSpatial + 3>& b_g_k_c_xs_lengths,  // weight
+        const std::array<long_index_t, NDimSpatial + 3>& b_g_k_c_xs_strides,  // weight
+        const std::array<std::array<long_index_t, NDimSpatial + 3>, NumDTensor>&
+            ds_g_n_c_wis_lengths, // bias
+        const std::array<std::array<long_index_t, NDimSpatial + 3>, NumDTensor>&
+            ds_g_n_c_wis_strides,                                             // bias
+        const std::array<long_index_t, NDimSpatial + 3>& e_g_n_c_wis_lengths, // input image
+        const std::array<long_index_t, NDimSpatial + 3>& e_g_n_c_wis_strides, // input image
+        const std::array<long_index_t, NDimSpatial>& conv_filter_strides,
+        const std::array<long_index_t, NDimSpatial>& conv_filter_dilations,
+        const std::array<long_index_t, NDimSpatial>& input_left_pads,
+        const std::array<long_index_t, NDimSpatial>& input_right_pads,
+        const AElementwiseOp& a_element_op,
+        const BElementwiseOp& b_element_op,
+        const CDEElementwiseOp& cde_element_op,
+        const ck::index_t split_k = 1) override
+    {
+        bool ds_ovf = false;
+        for(index_t d = 0; d < NumDTensor; d++)
+            ds_ovf |= tensor_exceeds_2gb(ds_g_n_c_wis_lengths[d]);
+        const bool stride_ovf = tensor_exceeds_2gb(a_g_n_k_wos_lengths) ||
+                                tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb(e_g_n_c_wis_lengths) || ds_ovf;
+
+        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_strides_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_strides_i32;
+        std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_c_wis_lengths_i32;
+        std::array<std::array<index_t, NDimSpatial + 3>, NumDTensor> ds_g_n_c_wis_strides_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_dilations_i32;
+        std::array<index_t, NDimSpatial> input_left_pads_i32;
+        std::array<index_t, NDimSpatial> input_right_pads_i32;
+
+        array_convert(a_g_n_k_wos_lengths_i32, a_g_n_k_wos_lengths);
+        array_convert(a_g_n_k_wos_strides_i32, a_g_n_k_wos_strides);
+        array_convert(b_g_k_c_xs_lengths_i32, b_g_k_c_xs_lengths);
+        array_convert(b_g_k_c_xs_strides_i32, b_g_k_c_xs_strides);
+        for(index_t d = 0; d < NumDTensor; d++)
+        {
+            array_convert(ds_g_n_c_wis_lengths_i32[d], ds_g_n_c_wis_lengths[d]);
+            array_convert(ds_g_n_c_wis_strides_i32[d], ds_g_n_c_wis_strides[d]);
+        }
+        array_convert(e_g_n_c_wis_lengths_i32, e_g_n_c_wis_lengths);
+        array_convert(e_g_n_c_wis_strides_i32, e_g_n_c_wis_strides);
+        array_convert(conv_filter_strides_i32, conv_filter_strides);
+        array_convert(conv_filter_dilations_i32, conv_filter_dilations);
+        array_convert(input_left_pads_i32, input_left_pads);
+        array_convert(input_right_pads_i32, input_right_pads);
+
+        return std::make_unique<Argument>(p_a,
+                                          p_b,
+                                          p_ds,
+                                          p_e,
+                                          a_g_n_k_wos_lengths_i32,
+                                          a_g_n_k_wos_strides_i32,
+                                          b_g_k_c_xs_lengths_i32,
+                                          b_g_k_c_xs_strides_i32,
+                                          ds_g_n_c_wis_lengths_i32,
+                                          ds_g_n_c_wis_strides_i32,
+                                          e_g_n_c_wis_lengths_i32,
+                                          e_g_n_c_wis_strides_i32,
+                                          conv_filter_strides_i32,
+                                          conv_filter_dilations_i32,
+                                          input_left_pads_i32,
+                                          input_right_pads_i32,
+                                          a_element_op,
+                                          b_element_op,
+                                          cde_element_op,
+                                          split_k,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseInvoker> MakeInvokerPointer() override

@@ -22,6 +22,29 @@ namespace rocRoller
 {
     namespace KernelGraph::ControlGraph
     {
+        /**
+         * @brief Selects how a ConditionalOp is lowered to GPU instructions.
+         *
+         * Branch:        Scalar branch-based conditional. Suitable for uniform conditions where
+         *                all lanes take the same path.
+         * Exec:          Exec-mask-based conditional for per-lane (VGPR) conditions. Both the
+         *                true and else bodies are always entered; only active lanes satisfying
+         *                the condition execute Body, and only active lanes not satisfying it
+         *                execute Else. EXEC is restored afterward.
+         * BranchAndExec: Like Exec, but additionally branches over each body when EXECZ is set
+         *                (i.e. no lanes are active), avoiding unnecessary work.
+         */
+        enum class ConditionalMode
+        {
+            Branch = 0,
+            Exec,
+            BranchAndExec,
+            Count
+        };
+
+        std::string   toString(ConditionalMode m);
+        std::ostream& operator<<(std::ostream& stream, ConditionalMode m);
+
         /*
          * Control flow graph nodes.
          * Represent operations done on the input.
@@ -113,29 +136,38 @@ namespace rocRoller
         };
 
         /**
-         * ConditionalOp - Represents a conditional.
+         * ConditionalOp - Represents a conditional with one of three execution modes.
          *
-         * Must have nodes connected via the following outgoing edges:
+         * Outgoing edges:
+         *   - Body     : true branch (required)
+         *   - Else     : false branch (optional)
+         *   - Sequence : code that runs after both branches, regardless of the condition
          *
-         * - True  body:
-         * - False body:
+         * The `mode` field selects how the conditional is lowered:
          *
-         * Code that follows the Conditional Op regardless of the validity of the condition should be connected via a Sequence edge.
+         * ConditionalMode::Branch
+         *   Scalar branch-based conditional. Suitable for uniform conditions where all
+         *   lanes take the same path.
+         *   if (condition) { <Body> } else { <Else> }
          *
-         * Currently generates code that behaves like:
+         * ConditionalMode::Exec
+         *   Exec-mask-based conditional for per-lane (VGPR) conditions. Both the true
+         *   and else sections are always executed: only active lanes satisfying the
+         *   condition execute <Body>, and only active lanes not satisfying the condition
+         *   execute <Else>. EXEC is restored afterward.
          *
-         * if(condition)
-         * <True Body>
-         * else
-         * <False Body>
-         * <Sequence>
-         *
+         * ConditionalMode::BranchAndExec
+         *   Like Exec (including EXEC restore), but checks EXECZ after masking: if no
+         *   active lanes satisfy the condition (EXECZ is set), the true body is skipped
+         *   and execution jumps to the else section (where EXECZ is checked again upon
+         *   masking with ~condition). If some active lanes satisfy the condition, the
+         *   true body executes for those lanes and the else body is skipped for all lanes.
         */
         struct ConditionalOp
         {
             Expression::ExpressionPtr condition;
-
-            std::string conditionName;
+            ConditionalMode           mode;
+            std::string               conditionName;
 
             std::string name() const;
             std::string toString() const;

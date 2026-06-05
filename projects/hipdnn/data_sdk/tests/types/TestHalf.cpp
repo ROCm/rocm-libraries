@@ -22,7 +22,7 @@ using namespace hipdnn_data_sdk::types;
 class TestHalf : public ::testing::Test
 {
 protected:
-    static constexpr float K_TOLERANCE = 0.001f; // NOLINT(readability-identifier-naming)
+    static constexpr float K_TOLERANCE = 0.001f;
 
     static bool nearEqual(float a, float b, float tol = K_TOLERANCE)
     {
@@ -42,29 +42,32 @@ protected:
 TEST_F(TestHalf, NumericLimitsSpecificValues)
 {
     // half max is 0x7BFF = (2 - 2^-10) * 2^15 = 65504.0 exactly
-    half maxVal = std::numeric_limits<half>::max();
+    const half maxVal = std::numeric_limits<half>::max();
     auto maxFloat = static_cast<float>(maxVal);
     EXPECT_EQ(maxFloat, 65504.0f);
     EXPECT_EQ(maxVal.data, 0x7BFF);
 
     // half min (smallest positive normal) is 0x0400 = 2^-14 ≈ 6.1035e-5
-    half minVal = std::numeric_limits<half>::min();
+    const half minVal = std::numeric_limits<half>::min();
     auto minFloat = static_cast<float>(minVal);
     EXPECT_GT(minFloat, 6.0e-5f);
     EXPECT_LT(minFloat, 6.2e-5f);
     EXPECT_EQ(minVal.data, 0x0400);
 
     // half lowest is -max = 0xFBFF = -65504.0 exactly
-    half lowestVal = std::numeric_limits<half>::lowest();
+    const half lowestVal = std::numeric_limits<half>::lowest();
     auto lowestFloat = static_cast<float>(lowestVal);
     EXPECT_EQ(lowestFloat, -65504.0f);
     EXPECT_EQ(lowestVal.data, 0xFBFF);
 
     // half epsilon is 2^-10 ≈ 0.0009765625
-    half eps = std::numeric_limits<half>::epsilon();
+    const half eps = std::numeric_limits<half>::epsilon();
     auto epsFloat = static_cast<float>(eps);
     EXPECT_TRUE(nearEqual(epsFloat, 0.0009765625f, 0.0001f));
     EXPECT_EQ(eps.data, 0x1400);
+
+    // half round_error is 0.5
+    EXPECT_EQ(static_cast<float>(std::numeric_limits<half>::round_error()), 0.5f);
 }
 
 // ============================================================================
@@ -91,16 +94,16 @@ TEST_F(TestHalf, NamedConstants)
 
 TEST_F(TestHalf, ConstructLargeValues)
 {
-    half d(1000.0f);
+    const half d(1000.0f);
     EXPECT_TRUE(nearEqual(static_cast<float>(d), 1000.0f, 1.0f));
 
-    half b(3.14159265358979);
+    const half b(3.14159265358979);
     EXPECT_TRUE(nearEqual(static_cast<float>(b), 3.14159f, 0.002f));
 }
 
 TEST_F(TestHalf, ConstructFromInt64)
 {
-    half d(int64_t{1000});
+    const half d(int64_t{1000});
     EXPECT_TRUE(nearEqual(static_cast<float>(d), 1000.0f, 1.0f));
 }
 
@@ -110,36 +113,36 @@ TEST_F(TestHalf, ConstructFromInt64)
 
 TEST_F(TestHalf, Pow)
 {
-    half base(2.0f);
-    half exponent(3.0f);
+    const half base(2.0f);
+    const half exponent(3.0f);
     EXPECT_TRUE(nearEqual(pow(base, exponent), half(8.0f)));
 }
 
 TEST_F(TestHalf, Copysign)
 {
-    half a(3.0f);
-    half b(-1.0f);
+    const half a(3.0f);
+    const half b(-1.0f);
     EXPECT_TRUE(nearEqual(copysign(a, b), half(-3.0f)));
     EXPECT_TRUE(nearEqual(copysign(b, a), half(1.0f)));
 }
 
 TEST_F(TestHalf, Sin)
 {
-    half a(0.0f);
+    const half a(0.0f);
     EXPECT_TRUE(nearEqual(sin(a), half(0.0f)));
 }
 
 TEST_F(TestHalf, Cos)
 {
-    half a(0.0f);
+    const half a(0.0f);
     EXPECT_TRUE(nearEqual(cos(a), half(1.0f)));
 }
 
 TEST_F(TestHalf, Fma)
 {
-    half a(2.0f);
-    half b(3.0f);
-    half c(1.0f);
+    const half a(2.0f);
+    const half b(3.0f);
+    const half c(1.0f);
     EXPECT_TRUE(nearEqual(fma(a, b, c), half(7.0f)));
 }
 
@@ -149,6 +152,6 @@ TEST_F(TestHalf, Fma)
 
 TEST_F(TestHalf, SignalingNaN)
 {
-    half snan = half::from_bits(0x7C01);
+    const half snan = half::from_bits(0x7C01);
     EXPECT_TRUE(isnan(snan));
 }

@@ -429,6 +429,8 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 /// In this example a device-level inclusive sum-by-key operation is performed on an array of
 /// integer values (<tt>short</tt>s are scanned into <tt>int</tt>s).
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_scan_by_key.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///

@@ -1,0 +1,28 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): same-DS-pipeline filter in
+# collectLdsWarDependencies skips ds_store writers vs prior ds_load readers.
+#
+# Three ds_load_b64 with token 0 are followed by a ds_store_b64 with token 0.
+# Inside collectLdsWarDependencies, the per-pair isOnSameDSPipeline filter
+# drops every (ds_store, ds_load) candidate because both are DS memory ops
+# that retire FIFO on dlcnt. The hardware orders them implicitly, so no
+# synthetic s_wait_dscnt is required. The data operand v[20:21] is also
+# independent of the prior reads, so the RAW path emits nothing either.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_war_ds_store
+# CHECK: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: ds_store_b64
+# CHECK-NOT: s_wait_dscnt
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_lds_war_ds_store() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[4:5] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.ds_store_b64"(v100, v[20:21]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}

@@ -26,7 +26,7 @@ typedef enum
 {
     HIPDNN_POINTWISE_ABS = 1, ///< Absolute value: |x|
     HIPDNN_POINTWISE_ADD = 2, ///< Addition: x + y
-    HIPDNN_POINTWISE_ADD_SQUARE = 3, ///< Add and square: (x + y)^2
+    HIPDNN_POINTWISE_ADD_SQUARE = 3, ///< Add x to y squared: x + y^2
     HIPDNN_POINTWISE_BINARY_SELECT = 4, ///< Ternary select based on condition
     HIPDNN_POINTWISE_CEIL = 5, ///< Ceiling function
     HIPDNN_POINTWISE_CMP_EQ = 6, ///< Compare equal: x == y

@@ -32,8 +32,7 @@ Install OS dependencies
 
    .. code-block::
 
-    apt-get install libyaml python3-yaml \
-        libomp-dev libboost-program-options-dev libboost-filesystem-dev
+    apt-get install libyaml-dev python3-yaml libomp-dev
 
 2. Install one of the following, depending on your preferred Tensile data format. If both are installed, ``msgpack`` is preferred:
 
@@ -54,32 +53,26 @@ Install OS dependencies
 Install Tensile from source
 ============================
 
-To install Tensile from source, it is recommended to create a virtual environment first:
+
+First, fetch Tensile standalone with git sparse checkout to avoid cloning all of rocm-libraries.
+
+.. code-block:: bash
+   git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries
+   git sparse-checkout init --cone
+   git sparse-checkout set shared/tensile
+   git checkout develop # or the branch you are starting from
+   cd shared/tensile
+
+Then, install Tensile from source in a virtual environment:
 
 .. code-block:: bash
 
   python3 -m venv .venv
   source .venv/bin/activate
-
-Then, you can install Tensile using pip or git.
-
-Option 1: Install with pip
----------------------------
-
-.. code-block:: bash
-
-  pip3 install git+https://github.com/ROCm/Tensile.git@develop
-
-
-Option 2: Install with git
-----------------------------
-
-.. code-block:: bash
-
-  git clone git@github.com:ROCm/rocm-libraries.git && cd cd rocm-libraries/shared/tensile
   pip3 install .
 
-You can now run Tensile's Python applications.
+You can now run Tensile's Python applications, such as ``Tensile``, ``TensileCreateLibrary``, and others.
 
 Running benchmark
 ===================

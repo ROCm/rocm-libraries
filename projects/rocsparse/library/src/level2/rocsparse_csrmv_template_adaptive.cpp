@@ -839,7 +839,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
     // Clean up temp_storage_ptr
     if(temp_alloc)
     {
-        RETURN_IF_HIP_ERROR(hipFreeAsync(temp_storage_ptr, handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(temp_storage_ptr, handle->stream));
     }
 
     return rocsparse_status_success;

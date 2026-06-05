@@ -32,6 +32,7 @@ Definitions:
     - { M: 1, N: 256, K: 1 }
     - { M: 1, N: 257, K: 1 }
 
+  # Also used by matmul_fp16_accumulator_probe_small (initialization: fp16_accumulator_probe).
   - &small_matrix_size_range
     - { M: 8, N: 8, K: 8, lda: 8, ldb: 8, ldc: 8, ldd: 8 }
     - { M: 16, N: 16, K: 16, lda: 16, ldb: 16, ldc: 16, ldd: 16 }

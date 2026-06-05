@@ -49,9 +49,9 @@ extern "C" {
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
-*  dir             direction that specifies whether to count nonzero elements by \ref rocsparse_direction_row or by
+*  dir             direction that specifies whether to count non-zero elements by \ref rocsparse_direction_row or by
 *                  \ref rocsparse_direction_column in the BSR matrices \f$A\f$, \f$B\f$, \f$C\f$, and \f$D\f$.
 *  @param[in]
 *  trans_A         matrix \f$A\f$ operation type.
@@ -107,21 +107,21 @@ extern "C" {
 *  bsr_col_ind_D   array of \p nnzb_D elements containing the block column indices of the sparse
 *                  BSR matrix \f$D\f$.
 *  @param[inout]
-*  info_C          structure that holds meta data for the sparse BSR matrix \f$C\f$.
+*  info_C          structure that holds metadata for the sparse BSR matrix \f$C\f$.
 *  @param[out]
 *  buffer_size     number of bytes of the temporary storage buffer required by
 *                  rocsparse_bsrgemm_nnzb(), rocsparse_sbsrgemm(), rocsparse_dbsrgemm(),
-*                  rocsparse_cbsrgemm() and rocsparse_zbsrgemm().
+*                  rocsparse_cbsrgemm(), and rocsparse_zbsrgemm().
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_size \p mb, \p nb, \p kb, \p block_dim, \p nnzb_A, \p nnzb_B or
+*  \retval rocsparse_status_invalid_size \p mb, \p nb, \p kb, \p block_dim, \p nnzb_A, \p nnzb_B, or
 *          \p nnzb_D is invalid.
 *  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid,
 *          \p descr_A, \p bsr_row_ptr_A, \p bsr_col_ind_A, \p descr_B,
-*          \p bsr_row_ptr_B or \p bsr_col_ind_B are invalid if \p alpha is valid,
-*          \p descr_D, \p bsr_row_ptr_D or \p bsr_col_ind_D is invalid if \p beta is
-*          valid, \p info_C or \p buffer_size is invalid.
+*          \p bsr_row_ptr_B, or \p bsr_col_ind_B are invalid if \p alpha is valid,
+*          \p descr_D, \p bsr_row_ptr_D, or \p bsr_col_ind_D is invalid if \p beta is
+*          valid, or \p info_C or \p buffer_size are invalid.
 *  \retval rocsparse_status_not_implemented
 *          \p trans_A != \ref rocsparse_operation_none,
 *          \p trans_B != \ref rocsparse_operation_none, or
@@ -236,7 +236,7 @@ rocsparse_status rocsparse_zbsrgemm_buffer_size(rocsparse_handle                
 /*! \ingroup extra_module
 *  \details
 *  \p rocsparse_bsrgemm_nnzb computes the total BSR non-zero block elements and the BSR block row
-*  offsets, that point to the start of every block row of the sparse BSR matrix, of the
+*  offsets that point to the start of every block row of the sparse BSR matrix of the
 *  resulting multiplied matrix C. It is assumed that \p bsr_row_ptr_C has been allocated
 *  with size \p mb+1.
 *  The required buffer size can be obtained by
@@ -253,9 +253,9 @@ rocsparse_status rocsparse_zbsrgemm_buffer_size(rocsparse_handle                
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
-*  dir             direction that specifies whether to count nonzero elements by \ref rocsparse_direction_row or by
+*  dir             direction that specifies whether to count non-zero elements by \ref rocsparse_direction_row or by
 *                  \ref rocsparse_direction_column in the BSR matrices \f$A\f$, \f$B\f$, \f$C\f$, and \f$D\f$.
 *  @param[in]
 *  trans_A         matrix \f$A\f$ operation type.
@@ -316,21 +316,21 @@ rocsparse_status rocsparse_zbsrgemm_buffer_size(rocsparse_handle                
 *  nnzb_C          pointer to the number of non-zero block entries of the sparse BSR
 *                  matrix \f$C\f$.
 *  @param[in]
-*  info_C          structure that holds meta data for the sparse BSR matrix \f$C\f$.
+*  info_C          structure that holds metadata for the sparse BSR matrix \f$C\f$.
 *  @param[in]
-*  temp_buffer     temporary storage buffer allocated by the user, size is returned
+*  temp_buffer     temporary storage buffer allocated by the user. The size is returned
 *                  by rocsparse_sbsrgemm_buffer_size(),
-*                  rocsparse_dbsrgemm_buffer_size(), rocsparse_cbsrgemm_buffer_size() or
+*                  rocsparse_dbsrgemm_buffer_size(), rocsparse_cbsrgemm_buffer_size(), or
 *                  rocsparse_zbsrgemm_buffer_size().
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_size \p mb, \p nb, \p kb, \p block_dim, \p nnzb_A, \p nnzb_B or
+*  \retval rocsparse_status_invalid_size \p mb, \p nb, \p kb, \p block_dim, \p nnzb_A, \p nnzb_B, or
 *          \p nnzb_D is invalid.
 *  \retval rocsparse_status_invalid_pointer \p descr_A, \p bsr_row_ptr_A,
 *          \p bsr_col_ind_A, \p descr_B, \p bsr_row_ptr_B, \p bsr_col_ind_B,
 *          \p descr_D, \p bsr_row_ptr_D, \p bsr_col_ind_D, \p descr_C,
-*          \p bsr_row_ptr_C, \p nnzb_C, \p info_C or \p temp_buffer is invalid.
+*          \p bsr_row_ptr_C, \p nnzb_C, \p info_C, or \p temp_buffer is invalid.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
 *  \retval rocsparse_status_not_implemented
@@ -366,7 +366,7 @@ rocsparse_status rocsparse_bsrgemm_nnzb(rocsparse_handle          handle,
                                         void*                     temp_buffer);
 
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix multiplication using BSR storage format
+*  \brief Sparse matrix sparse matrix multiplication using the BSR storage format.
 *
 *  \details
 *  \p rocsparse_bsrgemm multiplies the scalar \f$\alpha\f$ with the sparse
@@ -404,7 +404,7 @@ rocsparse_status rocsparse_bsrgemm_nnzb(rocsparse_handle          handle,
 *  This function does not produce deterministic results.
 *
 *  It is assumed that \p bsr_row_ptr_C has already been filled and that \p bsr_val_C and
-*  \p bsr_col_ind_C are allocated by the user. \p bsr_row_ptr_C and allocation size of
+*  \p bsr_col_ind_C are allocated by the user. \p bsr_row_ptr_C and the allocation size of
 *  \p bsr_col_ind_C and \p bsr_val_C is defined by the number of non-zero elements of
 *  the sparse BSR matrix C. Both can be obtained by \ref rocsparse_bsrgemm_nnzb(). The
 *  required buffer size for the computation can be obtained by
@@ -421,9 +421,9 @@ rocsparse_status rocsparse_bsrgemm_nnzb(rocsparse_handle          handle,
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
-*  dir             direction that specifies whether to count nonzero elements by \ref rocsparse_direction_row or by
+*  dir             direction that specifies whether to count non-zero elements by \ref rocsparse_direction_row or by
 *                  \ref rocsparse_direction_column in the BSR matrices \f$A\f$, \f$B\f$, \f$C\f$, and \f$D\f$.
 *  @param[in]
 *  trans_A         matrix \f$A\f$ operation type.
@@ -496,23 +496,23 @@ rocsparse_status rocsparse_bsrgemm_nnzb(rocsparse_handle          handle,
 *  bsr_col_ind_C   array of \p nnzb_C block elements containing the block column indices of the
 *                  sparse BSR matrix \f$C\f$.
 *  @param[in]
-*  info_C          structure that holds meta data for the sparse BSR matrix \f$C\f$.
+*  info_C          structure that holds metadata for the sparse BSR matrix \f$C\f$.
 *  @param[in]
-*  temp_buffer     temporary storage buffer allocated by the user, size is returned
+*  temp_buffer     temporary storage buffer allocated by the user. The size is returned
 *                  by rocsparse_sbsrgemm_buffer_size(),
-*                  rocsparse_dbsrgemm_buffer_size(), rocsparse_cbsrgemm_buffer_size() or
+*                  rocsparse_dbsrgemm_buffer_size(), rocsparse_cbsrgemm_buffer_size(), or
 *                  rocsparse_zbsrgemm_buffer_size().
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_size \p mb, \p nb, \p kb, \p block_dim, \p nnzb_A, \p nnzb_B or
+*  \retval rocsparse_status_invalid_size \p mb, \p nb, \p kb, \p block_dim, \p nnzb_A, \p nnzb_B, or
 *          \p nnzb_D is invalid.
 *  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid,
 *          \p descr_A, \p bsr_val_A, \p bsr_row_ptr_A, \p bsr_col_ind_A, \p descr_B,
-*          \p bsr_val_B, \p bsr_row_ptr_B or \p bsr_col_ind_B are invalid if \p alpha
-*          is valid, \p descr_D, \p bsr_val_D, \p bsr_row_ptr_D or \p bsr_col_ind_D is
-*          invalid if \p beta is valid, \p bsr_val_C, \p bsr_row_ptr_C,
-*          \p bsr_col_ind_C, \p info_C or \p temp_buffer is invalid.
+*          \p bsr_val_B, \p bsr_row_ptr_B, or \p bsr_col_ind_B are invalid if \p alpha
+*          is valid, \p descr_D, \p bsr_val_D, \p bsr_row_ptr_D, or \p bsr_col_ind_D is
+*          invalid if \p beta is valid, or \p bsr_val_C, \p bsr_row_ptr_C,
+*          \p bsr_col_ind_C, or \p info_C or \p temp_buffer are invalid.
 *  \retval rocsparse_status_memory_error additional buffer for long rows could not be
 *          allocated.
 *  \retval rocsparse_status_not_implemented

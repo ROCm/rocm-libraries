@@ -149,7 +149,7 @@
       "inherits": ["base-test"],
       "filter": {
         "include": {
-          "name": "public_hipdnn_backend_tests|public_hipdnn_frontend_tests|miopen_plugin_integration_test"
+          "name": "hipdnn_public_backend_tests|hipdnn_public_frontend_tests|miopen_plugin_integration_test"
         }
       }
     },
@@ -160,7 +160,7 @@
       "inherits": ["base-test"],
       "filter": {
         "include": {
-          "name": "public_hipdnn_backend_tests|public_hipdnn_frontend_tests|miopen_plugin_integration_test"
+          "name": "hipdnn_public_backend_tests|hipdnn_public_frontend_tests|miopen_plugin_integration_test"
         }
       }
     }

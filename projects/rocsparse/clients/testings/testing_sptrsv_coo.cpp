@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -31,15 +31,15 @@ void rocsparse_clients::sptrsv_analysis(rocsparse_handle       handle,
                                         rocsparse_dnvec_descr  y,
                                         rocsparse_error*       p_error)
 {
-    void*  buffer;
+    hipStream_t stream;
+    CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
     size_t buffer_size;
     CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_buffer_size(
         handle, sptrsv_descr, A, x, y, rocsparse_sptrsv_stage_analysis, &buffer_size, p_error));
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
-    CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
-
+    device_dense_vector<char> buffer(buffer_size);
     CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size));
-
     CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
                                            sptrsv_descr,
                                            A,
@@ -49,9 +49,9 @@ void rocsparse_clients::sptrsv_analysis(rocsparse_handle       handle,
                                            buffer_size,
                                            buffer,
                                            p_error));
-
-    CHECK_HIP_ERROR(hipDeviceSynchronize());
-    CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+    //
+    // We don't synchronize, this stage is supposed to be synchroneous.
+    //
 }
 
 void rocsparse_clients::sptrsv_compute(rocsparse_handle       handle,
@@ -64,20 +64,20 @@ void rocsparse_clients::sptrsv_compute(rocsparse_handle       handle,
                                        rocsparse_error*       p_error)
 {
 
-    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, pointer_mode));
+    hipStream_t stream;
+    CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
 
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, pointer_mode));
     CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(
         handle, sptrsv_descr, rocsparse_sptrsv_input_scalar_alpha, alpha, sizeof(alpha), p_error));
 
-    void*  buffer;
     size_t buffer_size;
     CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_buffer_size(
         handle, sptrsv_descr, A, x, y, rocsparse_sptrsv_stage_compute, &buffer_size, p_error));
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
-    CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
-
+    device_dense_vector<char> buffer(buffer_size);
     CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size));
-
     CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
                                            sptrsv_descr,
                                            A,
@@ -88,8 +88,7 @@ void rocsparse_clients::sptrsv_compute(rocsparse_handle       handle,
                                            buffer,
                                            p_error));
 
-    CHECK_HIP_ERROR(hipDeviceSynchronize());
-    CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 }
 
 template <typename I, typename T>

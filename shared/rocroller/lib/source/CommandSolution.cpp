@@ -83,6 +83,8 @@ namespace rocRoller
     CommandParameters::CommandParameters()
         : m_waveTilesPerWavefront({1, 1})
     {
+        transposeMemoryAccess.set(LayoutType::ROW_MAJOR, true);
+        transposeMemoryAccess.set(LayoutType::COLUMN_MAJOR, false);
     }
 
     void CommandParameters::setDimensionInfo(Operations::OperationTag                tag,
@@ -268,7 +270,7 @@ namespace rocRoller
         return *it;
     }
 
-    void CommandKernel::generateKernelGraph(std::string name)
+    void CommandKernel::generateKernelGraph()
     {
         TIMER(t, "CommandKernel::generateKernelGraph");
 
@@ -319,11 +321,13 @@ namespace rocRoller
                                            && m_commandParameters->prefetchMixMemOps
                                            && m_commandParameters->prefetchLDSFactor == 1;
 
+        // UpdateParameters should go before IdentifyParallelDimensions so the User.size expression
+        // that it sets is updated in IdentifyParallelDimensions
+        transforms.push_back(std::make_shared<KernelGraph::UpdateParameters>(m_commandParameters));
         transforms.push_back(std::make_shared<KernelGraph::IdentifyParallelDimensions>());
 
         transforms.push_back(std::make_shared<KernelGraph::OrderMemory>(
             !m_commandParameters->allowAmbiguousMemoryNodes));
-        transforms.push_back(std::make_shared<KernelGraph::UpdateParameters>(m_commandParameters));
         transforms.push_back(std::make_shared<KernelGraph::AddLDS>(m_commandParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::LowerLinear>(m_context));
         transforms.push_back(
@@ -434,6 +438,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::SortArguments>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::SetWorkitemCount>(m_context));
+        transforms.push_back(std::make_shared<KernelGraph::ModelAddresses>(m_context));
 
         for(auto const& t : transforms)
         {
@@ -488,7 +493,7 @@ namespace rocRoller
 
         if(m_command)
         {
-            generateKernelGraph(m_name);
+            generateKernelGraph();
             generateKernelSource();
         }
         else

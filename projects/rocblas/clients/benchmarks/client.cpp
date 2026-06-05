@@ -1028,6 +1028,16 @@ void gemm_arg_adjust(Arguments& arg, bool any_stride)
     }
 }
 
+void alpha_beta_stride_adjust(Arguments& arg)
+{
+    if(!arg.alpha_beta_stride)
+        return;
+
+    // only applicable to device pointer mode
+    arg.pointer_mode_host   = false;
+    arg.pointer_mode_device = true;
+}
+
 int run_bench_test(bool               init,
                    Arguments&         arg,
                    const std::string& filter,
@@ -1103,6 +1113,8 @@ int run_bench_test(bool               init,
         {
             gemm_arg_adjust(arg, any_stride);
         }
+
+        alpha_beta_stride_adjust(arg);
 
         if(!strcmp(function, "scal") || !strcmp(function, "scal_batched")
            || !strcmp(function, "scal_strided_batched"))
@@ -1356,6 +1368,16 @@ try
          "Specific stride of strided_batched matrix D, is only applicable to strided batched"
          "BLAS_EX: second dimension * leading dimension.")
 
+        ("alpha_stride",
+         value<rocblas_stride>(&arg.stride_c),
+         "Batch alpha stride for gemv_batched and gemv_strided_batched in device pointer mode."
+         " Alias for stride_c when using batch alpha/beta arrays.")
+
+        ("beta_stride",
+         value<rocblas_stride>(&arg.stride_d),
+         "Batch beta stride for gemv_batched and gemv_strided_batched in device pointer mode."
+         " Alias for stride_d when using batch alpha/beta arrays.")
+
         ("stride_x",
          value<rocblas_stride>(&arg.stride_x)->default_value(128*128),
          "Specific stride of strided_batched vector x, is only applicable to strided batched"
@@ -1595,6 +1617,13 @@ try
     if(vm.find("version") != vm.end() || vm.find("rocblas_tensile_commit_hash") != vm.end())
     {
         return 0;
+    }
+
+    if((vm.count("alpha_stride") || vm.count("beta_stride")) && (arg.stride_c || arg.stride_d))
+    {
+        arg.alpha_beta_stride   = true;
+        arg.pointer_mode_host   = false;
+        arg.pointer_mode_device = true;
     }
 
     // transfer local variable state

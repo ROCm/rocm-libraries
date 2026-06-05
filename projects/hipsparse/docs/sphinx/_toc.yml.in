@@ -10,9 +10,11 @@ subtrees:
 - caption: Install
   entries:
   - file: install/install
-    title: Linux installation guide
-  - file: install/install-windows
-    title: Windows installation guide
+    title: Install hipSPARSE
+  - file: install/build-linux
+    title: Build from source on Linux
+  - file: install/build-windows
+    title: Build from source on Windows
 
 - caption: How to
   entries:

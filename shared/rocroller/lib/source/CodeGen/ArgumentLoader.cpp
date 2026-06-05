@@ -156,7 +156,7 @@ namespace rocRoller
             maxPreloadedSGPRs -= 2;
 
         // Apply the kernel option limit if it was specified.
-        if(optionPreloadedSGPRs > 0)
+        if(optionPreloadedSGPRs >= 0)
             maxPreloadedSGPRs = std::min(maxPreloadedSGPRs, optionPreloadedSGPRs);
 
         int totalAssignedSGPRs = 0;

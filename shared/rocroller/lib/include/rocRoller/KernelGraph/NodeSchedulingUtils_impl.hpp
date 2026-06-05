@@ -15,10 +15,10 @@ namespace rocRoller::KernelGraph::NodeScheduling
         std::unordered_map<int, std::vector<int>> rv;
         for(auto node : theNodes)
         {
-            auto parent = bodyParents(node, graph).take(1).only();
-            AssertFatal(parent.has_value(), "Node has no body parent", ShowValue(node));
+            auto parentPair = containingAncestors(node, graph).take(1).only();
+            AssertFatal(parentPair.has_value(), "Node has no containing ancestor", ShowValue(node));
 
-            rv[*parent].push_back(node);
+            rv[parentPair->first].push_back(node);
         }
         return rv;
     }

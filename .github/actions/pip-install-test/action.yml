@@ -1,0 +1,60 @@
+name: "Test pip install"
+description: "Build a Python package with pip install and run pytest in an isolated venv"
+
+inputs:
+  package_path:
+    description: "Path to the Python package (e.g. shared/stinkytofu)"
+    required: true
+  test_path:
+    description: "Pytest target directory relative to package_path (e.g. test/ or python_module/tests/)"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup MSVC environment
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+    - name: Create venv
+      shell: bash
+      run: |
+        VENV_DIR=$(mktemp -d)
+        python3 -m venv "$VENV_DIR"
+        echo "VENV_DIR=$VENV_DIR" >> "$GITHUB_ENV"
+
+    - name: pip install
+      shell: bash
+      env:
+        CXX: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
+        CC: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang
+        CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
+        CMAKE_GENERATOR: Ninja
+        LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+      run: |
+        if [ -f "$VENV_DIR/bin/activate" ]; then
+          source "$VENV_DIR/bin/activate"
+        else
+          source "$VENV_DIR/Scripts/activate"
+        fi
+        pip install pytest
+        pip install ${{ inputs.package_path }}
+
+    - name: pytest
+      shell: bash
+      env:
+        LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+      run: |
+        if [ -f "$VENV_DIR/bin/activate" ]; then
+          source "$VENV_DIR/bin/activate"
+        else
+          source "$VENV_DIR/Scripts/activate"
+        fi
+        TEST_DIR=$( cd ${{ inputs.package_path }}/${{ inputs.test_path }} && pwd )
+        cd "$VENV_DIR"
+        pytest "$TEST_DIR"
+
+    - name: Cleanup venv
+      shell: bash
+      if: always()
+      run: rm -rf "$VENV_DIR"

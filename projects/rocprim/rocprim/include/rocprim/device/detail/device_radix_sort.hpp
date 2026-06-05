@@ -834,7 +834,7 @@ struct onesweep_histograms_helper
     // Upper bound, this value does not take into account the actual size of the number of bits
     // that are to be considered in the radix sort.
     static constexpr unsigned int max_digit_places
-        = ::rocprim::detail::ceiling_div(sizeof(KeyType) * 8, RadixBits);
+        = ::rocprim::detail::ceiling_div(total_bits, RadixBits);
     static constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     static constexpr unsigned int digits_per_thread
         = ::rocprim::detail::ceiling_div(radix_size, BlockSize);
@@ -851,11 +851,10 @@ struct onesweep_histograms_helper
         counter_type histogram[histogram_counters];
     };
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    unsigned int
+    static constexpr unsigned int
         get_counter(const unsigned stripe_index, const unsigned int place, const unsigned int digit)
     {
-        return (place * radix_size + digit) * atomic_stripes + stripe_index;
+        return (((place * radix_size) + digit) * atomic_stripes) + stripe_index;
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -903,47 +902,51 @@ struct onesweep_histograms_helper
             key_codec::encode_inplace(keys[i], decomposer);
         }
 
-        if constexpr(AllBits)
+        // We will be writing to the histogram stored in LDS.
+        static_assert(histogram_counters
+                      > get_counter(atomic_stripes - 1, max_digit_places - 1, radix_size - 1));
+
+        ROCPRIM_UNROLL
+        for(auto i = 0u; i < ItemsPerThread; ++i)
         {
+            // We iterate over places and early exit if we reach our
+            // end bit earlier. This simplifies the logic and allows
+            // the loop to be unrolled even with dynamic bit ranges.
+            //
+            // We also assume that end_bit <= total_bits here. Else,
+            // the behavior is undefined.
             ROCPRIM_UNROLL
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            for(auto place = 0u; place < max_digit_places; ++place)
             {
-                ROCPRIM_UNROLL
-                for(unsigned int bit = 0, place = 0; bit < sizeof(KeyType) * 8;
-                    bit += RadixBits, ++place)
+                const auto bit = (place * RadixBits) + begin_bit;
+                if constexpr(!AllBits)
                 {
-                    const unsigned int pos = i * BlockSize + flat_id;
-                    if(IsFull || pos < valid_count)
+                    // Begin and end bit do not cover all radix bits.
+                    // We must therefore consistently check if we're
+                    // still within bounds.
+                    if(bit >= end_bit)
                     {
-                        const unsigned int digit
-                            = key_codec::extract_digit(keys[i],
-                                                       bit,
-                                                       min(RadixBits, end_bit - bit),
-                                                       decomposer);
-                        atomic_add(&storage.histogram[get_counter(stripe, place, digit)], 1);
+                        break;
                     }
                 }
-            }
-        }
-        else
-        {
-            ROCPRIM_UNROLL
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
-            {
-                for(unsigned int bit = begin_bit, place = 0; bit < end_bit;
-                    bit += RadixBits, ++place)
+
+                const auto pos = (i * BlockSize) + flat_id;
+                if constexpr(!IsFull)
                 {
-                    const unsigned int pos = i * BlockSize + flat_id;
-                    if(IsFull || pos < valid_count)
+                    // Only check for out-of-bounds on non-full blocks.
+                    if(pos >= valid_count)
                     {
-                        const unsigned int digit
-                            = key_codec::extract_digit(keys[i],
-                                                       bit,
-                                                       min(RadixBits, end_bit - bit),
-                                                       decomposer);
-                        atomic_add(&storage.histogram[get_counter(stripe, place, digit)], 1);
+                        continue;
                     }
                 }
+
+                const auto digit = key_codec::extract_digit(keys[i],
+                                                            bit,
+                                                            min(RadixBits, end_bit - bit),
+                                                            decomposer);
+
+                const auto histogram_offset = get_counter(stripe, place, digit);
+                atomic_add(&storage.histogram[histogram_offset], 1);
             }
         }
 

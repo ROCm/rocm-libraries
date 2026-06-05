@@ -3,7 +3,7 @@
 
 #include "engines/plans/MiopenBatchnormFwdInferencePlan.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace miopen_plugin;
@@ -12,8 +12,8 @@ TEST(TestMiopenBatchnormFwdInferenceParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid batchnorm graph
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the batchnorm node and attributes
     const auto& node = graph.getNode(0);
@@ -23,7 +23,7 @@ TEST(TestMiopenBatchnormFwdInferenceParams, InitializesAllTensorsFromValidGraph)
     // Expect that params construction doesn't throw
     EXPECT_NO_THROW(BatchnormFwdInferenceParams(*attrs, graph.getTensorMap()));
 
-    BatchnormFwdInferenceParams params(*attrs, graph.getTensorMap());
+    const BatchnormFwdInferenceParams params(*attrs, graph.getTensorMap());
     // verify activation optional params are null when no activation is specified
     EXPECT_EQ(params.optActivation(), std::nullopt);
     EXPECT_EQ(params.activationOut(), std::nullopt);
@@ -33,8 +33,8 @@ TEST(TestMiopenBatchnormFwdInferenceParams, InitializesFusedActivationBiasWithAl
 {
     // Create a fused batchnorm fwd + activation graph
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     // Get the two required nodes
     const auto& batchnormInfNode = graph.getNode(0);
@@ -47,7 +47,8 @@ TEST(TestMiopenBatchnormFwdInferenceParams, InitializesFusedActivationBiasWithAl
     ASSERT_NE(pointwiseAttrs, nullptr);
 
     // Construct fused params
-    BatchnormFwdInferenceParams params(*batchnormInfAttrs, *pointwiseAttrs, graph.getTensorMap());
+    const BatchnormFwdInferenceParams params(
+        *batchnormInfAttrs, *pointwiseAttrs, graph.getTensorMap());
 
     // All required tensors should be initialized
     EXPECT_NO_THROW(params.x());

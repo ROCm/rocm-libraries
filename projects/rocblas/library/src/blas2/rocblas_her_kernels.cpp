@@ -96,29 +96,20 @@ rocblas_her_kernel(bool           is_upper,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, 0); //stride_alpha is always 0
         if(!alpha)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         auto*       A = load_ptr_batch(Aa, batch, shift_A, stride_A);
         const auto* x = load_ptr_batch(xa, batch, shift_x, stride_x);
 
         rocblas_her_kernel_calc<DIM_X>(is_upper, n, alpha, x, incx, A, lda);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /**

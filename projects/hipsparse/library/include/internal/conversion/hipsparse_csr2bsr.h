@@ -30,8 +30,8 @@ extern "C" {
 
 /*! \ingroup conv_module
 *  \brief
-*  This function computes the number of nonzero block columns per row and the total number of nonzero blocks in a sparse
-*  BSR matrix given a sparse CSR matrix as input.
+*  This function computes the number of non-zero block columns per row and the total number of non-zero blocks in a sparse
+*  BSR matrix, given a sparse CSR matrix as input.
 *
 *  \details
 *  Consider the matrix:
@@ -46,7 +46,7 @@ extern "C" {
 *
 *  stored as a sparse CSR matrix. This function computes both the BSR row pointer array as well as the total number
 *  of non-zero blocks that results when converting the CSR matrix to the BSR format. Assuming a block dimension of 2,
-*  the above matrix once converted to BSR format looks like:
+*  the above matrix, after conversion to the BSR format, looks like:
 *
 *  \f[
 *   \left[
@@ -72,7 +72,8 @@ extern "C" {
 *  \right]
 *  \f]
 *
-*  and the resulting BSR row pointer array and total non-zero blocks once \p hipsparseXcsr2bsrNnz has been called:
+*  and the resulting BSR row pointer array and total non-zero blocks after \p hipsparseXcsr2bsrNnz has been called
+*  looks like:
 *
 *  \f[
 *    \begin{align}
@@ -91,8 +92,8 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  In particular, it may be the case that \p blockDim does not divide evenly into \p m and/or \p n. In these cases, the
-*  CSR matrix is expanded in size in order to fit full BSR blocks. For example, using the original CSR matrix and block
+*  In particular, it can be the case that \p blockDim does not divide evenly into \p m and/or \p n. In these cases, the
+*  CSR matrix is expanded in size to fit full BSR blocks. For example, using the original CSR matrix and block
 *  dimension 3 instead of 2, the function \p hipsparseXcsr2bsrNnz computes the BSR row pointer array and total number of
 *  non-zero blocks for the BSR matrix:
 *
@@ -124,15 +125,15 @@ extern "C" {
 *  \right]
 *  \f]
 *
-*  See hipsparseScsr2bsr() for full code example.
+*  See hipsparseScsr2bsr() for a full code example.
 *
 *  \note
-*  The routine does support asynchronous execution if the pointer mode is set to device.
+*  The routine supports asynchronous execution if the pointer mode is set to device.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
-*  dirA        direction that specified whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW or by
+*  dirA        direction that specifies whether to count non-zero elements by \ref HIPSPARSE_DIRECTION_ROW or by
 *              \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
 *  m           number of rows of the sparse CSR matrix. Must be non-negative.
@@ -141,21 +142,21 @@ extern "C" {
 *  @param[in]
 *  descrA      descriptor of the sparse CSR matrix. Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *  @param[in]
-*  csrRowPtrA  integer array containing \p m+1 elements that point to the start of each row of the CSR matrix
+*  csrRowPtrA  integer array containing \p m+1 elements that points to the start of each row of the CSR matrix.
 *  @param[in]
-*  csrColIndA  integer array of the column indices for each non-zero element in the CSR matrix
+*  csrColIndA  integer array of the column indices for each non-zero element in the CSR matrix.
 *  @param[in]
-*  blockDim    the block dimension of the BSR matrix. Between \f$1\f$ and \f$\min(m, n)\f$
+*  blockDim    the block dimension of the BSR matrix, which is between \f$1\f$ and \f$\min(m, n)\f$.
 *  @param[in]
 *  descrC      descriptor of the sparse BSR matrix. Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *  @param[out]
-*  bsrRowPtrC  integer array containing \p mb+1 elements that point to the start of each block row of the BSR matrix
+*  bsrRowPtrC  integer array containing \p mb+1 elements that point to the start of each block row of the BSR matrix.
 *  @param[out]
-*  bsrNnzb     total number of nonzero elements in device or host memory.
+*  bsrNnzb     total number of non-zero elements in device or host memory.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p csrRowPtrA, \p csrColIndA,
-*              \p bsrRowPtrC or \p bsrNnzb pointer is invalid.
+*              \p bsrRowPtrC, or \p bsrNnzb pointer is invalid.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
@@ -171,12 +172,12 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
                                        int*                      bsrNnzb);
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse CSR matrix into a sparse BSR matrix
+*  \brief Convert a sparse CSR matrix into a sparse BSR matrix.
 *
 *  \details
 *  \p hipsparseXcsr2bsr completes the conversion of a CSR matrix into a BSR matrix.
-*  It is assumed, that \p bsrValC, \p bsrColIndC and \p bsrRowPtrC are allocated. The
-*  allocation size for \p bsrRowPtr is computed as \p mb+1 where \p mb is the number of
+*  It is assumed that \p bsrValC, \p bsrColIndC, and \p bsrRowPtrC are allocated. The
+*  allocation size for \p bsrRowPtr is computed as \p mb+1, where \p mb is the number of
 *  block rows in the BSR matrix defined as:
 *
 *  \f[
@@ -185,8 +186,8 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
 *    \end{align}
 *  \f]
 *
-*  The allocation size for \p bsrColIndC, i.e. \p bsrNnzb, is computed using
-*  \ref hipsparseXcsr2bsrNnz() which also fills the \p bsrRowPtrC array. The allocation size
+*  The allocation size for \p bsrColIndC, that is, \p bsrNnzb, is computed using
+*  \ref hipsparseXcsr2bsrNnz(), which also fills the \p bsrRowPtrC array. The allocation size
 *  for \p bsrValC is then equal to:
 *
 *  \f[
@@ -252,12 +253,12 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
 *
 *  \note
 *  \p hipsparseXcsr2bsr requires extra temporary storage that is allocated internally if
-*  \p blockDim>16
+*  \p blockDim > 16.
 *
 *  @param[in]
-*  handle       handle to the hipsparse library context queue.
+*  handle       handle to the hipSPARSE library context queue.
 *  @param[in]
-*  dirA         the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN
+*  dirA         the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
 *  m            number of rows in the sparse CSR matrix.
 *  @param[in]
@@ -287,7 +288,7 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p bsrValC, \p bsrRowPtrC,
-*              \p bsrColIndC, \p csrValA, \p csrRowPtrA or \p csrColIndA pointer is invalid.
+*              \p bsrColIndC, \p csrValA, \p csrRowPtrA, or \p csrColIndA pointer is invalid.
 */
 /**@{*/
 HIPSPARSE_EXPORT

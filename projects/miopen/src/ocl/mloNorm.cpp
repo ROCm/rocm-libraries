@@ -49,10 +49,8 @@ inline bool is_tensor_packed(int c, int h, int w, int b_str, int c_str, int h_st
     return h_str == w && c_str == h * h_str && b_str == c * c_str;
 }
 
-int mlo_construct_norm::mloConstructFwd()
+void mlo_construct_norm::mloConstructFwd()
 {
-    int ret = 0;
-
     size_t maxComputeUnits = _ctx.GetStream().GetMaxComputeUnits();
 
     _hw_wave_sz = 64;
@@ -62,14 +60,6 @@ int mlo_construct_norm::mloConstructFwd()
 
     if(pre_pad < 0 || pad < 0)
         MIOPEN_THROW("Wrong LRN kernel size");
-
-    int top_df_stride         = 1;
-    int top_df_channel_stride = 1;
-    int top_df_batch_stride   = 1;
-
-    int bot_df_stride         = 1;
-    int bot_df_channel_stride = 1;
-    int bot_df_batch_stride   = 1;
 
     _grp_tile0     = (_problem.GetOutWidth() <= 16) ? 8 : 16;
     _grp_tile1     = 8;
@@ -83,14 +73,14 @@ int mlo_construct_norm::mloConstructFwd()
                                          _problem.GetInChannelStride(),
                                          _problem.GetInStride());
 
-    int MAP_SZ4 = _problem.GetInWidth() * (is_in_packed ? _problem.GetInHeight() : 1);
+    int map_size_4 = _problem.GetInWidth() * (is_in_packed ? _problem.GetInHeight() : 1);
     int read_unit;
     if(_norm_region == MLO_LRN_ACROSS_CHANNELS)
     {
         _grp_tile0 = (_problem.GetOutWidth() <= 8) ? 8 : 16;
         _grp_tile1 = (_problem.GetOutHeight() <= 8) ? 8 : 16;
-        read_unit  = (MAP_SZ4 % 4 == 0) ? 4 : (MAP_SZ4 % 2 == 0) ? 2 : 1;
-        MAP_SZ4 /= read_unit;
+        read_unit  = (map_size_4 % 4 == 0) ? 4 : (map_size_4 % 2 == 0) ? 2 : 1;
+        map_size_4 /= read_unit;
     }
     else
     {
@@ -98,31 +88,26 @@ int mlo_construct_norm::mloConstructFwd()
         _out_pix_tile0 = (_problem.GetOutWidth() <= 8) ? 1 : 2;
         _out_pix_tile1 = (_problem.GetOutHeight() <= 8) ? 1 : 2;
         read_unit      = 4;
-        MAP_SZ4        = (MAP_SZ4 + 3) / 4;
+        map_size_4     = (map_size_4 + 3) / 4;
     }
-    MAP_SZ4 *= (is_in_packed ? 1 : _problem.GetInHeight());
+    map_size_4 *= (is_in_packed ? 1 : _problem.GetInHeight());
 
     assert(_out_pix_tile0 - 1 <= _norm_area && _out_pix_tile1 - 1 <= _norm_area);
 
-    auto ocl_group_lg2sz0 =
-        static_cast<int>(ceil(log(static_cast<double>(_out_pix_tile0)) / std::numbers::ln2));
-    auto ocl_group_lg2sz1 =
-        static_cast<int>(ceil(log(static_cast<double>(_out_pix_tile1)) / std::numbers::ln2));
-
-    _kernel_file = "MIOpenLRNFwd.cl";
+    _kernel_file = "MIOpenLRNFwd.cpp";
     _kernel_name = (_norm_region == MLO_LRN_ACROSS_CHANNELS) ? "MIOpenLRNAcrossChannels4"
                                                              : "MIOpenLRNWithinChannel_PS";
     if(_norm_region == MLO_LRN_ACROSS_CHANNELS)
     {
         _grp_tile0  = 8 * 8;
         _grp_tile1  = 1;
-        int n_waves = (_problem.GetBatchSize() * MAP_SZ4 + _hw_wave_sz - 1) / _hw_wave_sz;
+        int n_waves = (_problem.GetBatchSize() * map_size_4 + _hw_wave_sz - 1) / _hw_wave_sz;
         if(n_waves <= maxComputeUnits * 8)
         {
-            MAP_SZ4   = _problem.GetInWidth() * (is_in_packed ? _problem.GetInHeight() : 1);
-            read_unit = (MAP_SZ4 % 2 == 0) ? 2 : 1;
-            MAP_SZ4 /= read_unit;
-            MAP_SZ4 *= (is_in_packed ? 1 : _problem.GetInHeight());
+            map_size_4 = _problem.GetInWidth() * (is_in_packed ? _problem.GetInHeight() : 1);
+            read_unit  = (map_size_4 % 2 == 0) ? 2 : 1;
+            map_size_4 /= read_unit;
+            map_size_4 *= (is_in_packed ? 1 : _problem.GetInHeight());
         }
     }
 
@@ -135,8 +120,8 @@ int mlo_construct_norm::mloConstructFwd()
         {
             MIOPEN_LOG_I("Workaround for #1057: "
                          << name << ',' << miopen::GetDataTypeName(_problem.GetInDataType()) << ','
-                         << MAP_SZ4 << ',' << read_unit);
-            MAP_SZ4 *= read_unit;
+                         << map_size_4 << ',' << read_unit);
+            map_size_4 *= read_unit;
             read_unit = 1;
         }
     }
@@ -151,96 +136,65 @@ int mlo_construct_norm::mloConstructFwd()
     auto g_wk_height =
         static_cast<int>((_problem.GetOutHeight() + _grp_tile1 * _out_pix_tile1 - 1) /
                          (_grp_tile1 * _out_pix_tile1));
-    int OUT_VERT_ALIGNED =
+    int out_vert_aligned =
         (g_wk_height * (_grp_tile1 * _out_pix_tile1) == _problem.GetOutHeight()) ? 1 : 0;
-    int OUT_HORIZ_ALIGNED =
+    int out_horiz_aligned =
         (g_wk_width * (_grp_tile0 * _out_pix_tile0) == _problem.GetOutWidth()) ? 1 : 0;
     // currently always 1
-    int DIVBY4 = (MAP_SZ4 * read_unit == _problem.GetInWidth() * _problem.GetInHeight()) ? 1 : 0;
-    int C1x1_PIXLEFT =
-        (DIVBY4 == 1) ? 0
-                      : _problem.GetInWidth() * _problem.GetInHeight() - (MAP_SZ4 - 1) * read_unit;
-
-    std::string READ_TYPE =
-        (read_unit == 1) ? "_FLOAT" : "_FLOAT" + std::to_string(static_cast<long long>(read_unit));
-
+    bool div_by_4 = (map_size_4 * read_unit == _problem.GetInWidth() * _problem.GetInHeight());
+    int c1x1_pixleft =
+        div_by_4 ? 0
+                 : _problem.GetInWidth() * _problem.GetInHeight() - (map_size_4 - 1) * read_unit;
     _comp_options =
-        std::string(" -DMLO_LRN_KERNEL_SZ=") + std::to_string(static_cast<long long>(_norm_area)) +
-        std::string(" -DMLO_LRN_PAD=") + std::to_string(static_cast<long long>(pad)) +
-        std::string(" -DMLO_LRN_KERNEL_SZ1=") + std::to_string(static_cast<long long>(_norm_area)) +
-        std::string(" -DMLO_LRN_PAD1=") + std::to_string(static_cast<long long>(pad)) +
-        std::string(" -DMLO_LRN_KERNEL_SZ0=") + std::to_string(static_cast<long long>(_norm_area)) +
-        std::string(" -DMLO_LRN_PAD0=") + std::to_string(static_cast<long long>(pad)) +
-        std::string(" -DMLO_LRN_PRE_PAD=") + std::to_string(static_cast<long long>(pre_pad)) +
-        std::string(" -DMLO_LRN_PRE_PAD1=") + std::to_string(static_cast<long long>(pre_pad)) +
-        std::string(" -DMLO_LRN_PRE_PAD0=") + std::to_string(static_cast<long long>(pre_pad)) +
-        std::string(" -DMLO_LRN_N_OUTPUTS=") +
+        std::string(" -DKERNEL_SIZE=") + std::to_string(static_cast<long long>(_norm_area)) +
+        std::string(" -DPAD=") + std::to_string(static_cast<long long>(pad)) +
+        std::string(" -DKERNEL_SIZE1=") + std::to_string(static_cast<long long>(_norm_area)) +
+        std::string(" -DPAD0=") + std::to_string(static_cast<long long>(pad)) +
+        std::string(" -DPRE_PAD=") + std::to_string(static_cast<long long>(pre_pad)) +
+        std::string(" -DPRE_PAD1=") + std::to_string(static_cast<long long>(pre_pad)) +
+        std::string(" -DKERNEL_SIZE0=") + std::to_string(static_cast<long long>(_norm_area)) +
+        std::string(" -DPRE_PAD0=") + std::to_string(static_cast<long long>(pre_pad)) +
+        std::string(" -DN_OUTPUTS=") +
         std::to_string(static_cast<long long>(_problem.GetOutChannels())) +
-        std::string(" -DMLO_LRN_N_INPUTS=") +
+        std::string(" -DN_INPUTS=") +
         std::to_string(static_cast<long long>(_problem.GetInChannels())) +
-        std::string(" -DMLO_LRN_N_HORIZ_OUT_PIX=") +
-        std::to_string(static_cast<long long>(_out_pix_tile0)) +
-        std::string(" -DMLO_LRN_N_VERT_OUT_PIX=") +
-        std::to_string(static_cast<long long>(_out_pix_tile1)) +
-        std::string(" -DMLO_LRN_GROUP_SZ0=") + std::to_string(static_cast<long long>(_grp_tile0)) +
-        std::string(" -DMLO_LRN_GROUP_SZ1=") + std::to_string(static_cast<long long>(_grp_tile1)) +
-        std::string(" -DMLO_LRN_GROUP_LG2SZ0=") +
-        std::to_string(static_cast<long long>(ocl_group_lg2sz0)) +
-        std::string(" -DMLO_LRN_GROUP_LG2SZ1=") +
-        std::to_string(static_cast<long long>(ocl_group_lg2sz1)) +
-        std::string(" -DMLO_LRN_BOT_BATCH_STRIDE=") +
+        std::string(" -DHORIZ_OUT_PIX=") + std::to_string(static_cast<long long>(_out_pix_tile0)) +
+        std::string(" -DVERT_OUT_PIX=") + std::to_string(static_cast<long long>(_out_pix_tile1)) +
+        std::string(" -DGROUP_SIZE_X=") + std::to_string(static_cast<long long>(_grp_tile0)) +
+        std::string(" -DGROUP_SIZE_Y=") + std::to_string(static_cast<long long>(_grp_tile1)) +
+        std::string(" -DBOT_BATCH_STRIDE=") +
         std::to_string(static_cast<long long>(_problem.GetInBatchStride())) +
-        std::string(" -DMLO_LRN_BOT_CHANNEL_STRIDE=") +
+        std::string(" -DBOT_CHANNEL_STRIDE=") +
         std::to_string(static_cast<long long>(_problem.GetInChannelStride())) +
-        std::string(" -DMLO_LRN_BOT_STRIDE=") +
+        std::string(" -DBOT_STRIDE=") +
         std::to_string(static_cast<long long>(_problem.GetInStride())) +
-        std::string(" -DMLO_LRN_TOP_BATCH_STRIDE=") +
+        std::string(" -DTOP_BATCH_STRIDE=") +
         std::to_string(static_cast<long long>(_problem.GetOutBatchStride())) +
-        std::string(" -DMLO_LRN_TOP_CHANNEL_STRIDE=") +
+        std::string(" -DTOP_CHANNEL_STRIDE=") +
         std::to_string(static_cast<long long>(_problem.GetOutChannelStride())) +
-        std::string(" -DMLO_LRN_TOP_STRIDE=") +
+        std::string(" -DTOP_STRIDE=") +
         std::to_string(static_cast<long long>(_problem.GetOutStride())) +
-        std::string(" -DMLO_LRN_BOT_WIDTH=") +
+        std::string(" -DBOT_WIDTH=") +
         std::to_string(static_cast<long long>(_problem.GetOutWidth())) +
-        std::string(" -DMLO_LRN_BOT_HEIGHT=") +
+        std::string(" -DBOT_HEIGHT=") +
         std::to_string(static_cast<long long>(_problem.GetOutHeight())) +
-        std::string(" -DMLO_LRN_TOP_WIDTH=") +
+        std::string(" -DTOP_WIDTH=") +
         std::to_string(static_cast<long long>(_problem.GetOutWidth())) +
-        std::string(" -DMLO_LRN_TOP_HEIGHT=") +
+        std::string(" -DTOP_HEIGHT=") +
         std::to_string(static_cast<long long>(_problem.GetOutHeight())) +
-        std::string(" -DMLO_LRN_SCALE_BATCH_STRIDE=") +
+        std::string(" -DSCALE_BATCH_STRIDE=") +
         std::to_string(static_cast<long long>(scale_batch_stride)) +
-        std::string(" -DMLO_LRN_SCALE_CHANNEL_STRIDE=") +
+        std::string(" -DSCALE_CHANNEL_STRIDE=") +
         std::to_string(static_cast<long long>(scale_channel_stride)) +
-        std::string(" -DMLO_LRN_SCALE_STRIDE=") +
-        std::to_string(static_cast<long long>(scale_stride)) +
-        std::string(" -DMLO_LRN_TOPDF_BATCH_STRIDE=") +
-        std::to_string(static_cast<long long>(top_df_batch_stride)) +
-        std::string(" -DMLO_LRN_TOPDF_CHANNEL_STRIDE=") +
-        std::to_string(static_cast<long long>(top_df_channel_stride)) +
-        std::string(" -DMLO_LRN_TOPDF_STRIDE=") +
-        std::to_string(static_cast<long long>(top_df_stride)) +
-        std::string(" -DMLO_LRN_BOTDF_BATCH_STRIDE=") +
-        std::to_string(static_cast<long long>(bot_df_batch_stride)) +
-        std::string(" -DMLO_LRN_BOTDF_CHANNEL_STRIDE=") +
-        std::to_string(static_cast<long long>(bot_df_channel_stride)) +
-        std::string(" -DMLO_LRN_BOTDF_STRIDE=") +
-        std::to_string(static_cast<long long>(bot_df_stride)) +
-        std::string(" -DMLO_LRN_BATCH_SZ=") +
+        std::string(" -DSCALE_STRIDE=") + std::to_string(static_cast<long long>(scale_stride)) +
+        std::string(" -DBATCH_SIZE=") +
         std::to_string(static_cast<long long>(_problem.GetBatchSize())) +
-        std::string(" -DMLO_LRN_N_INPUTS=") +
-        std::to_string(static_cast<long long>(_problem.GetInChannels())) +
-        std::string(" -DMLO_LRN_N_OUTPUTS=") +
-        std::to_string(static_cast<long long>(_problem.GetOutChannels())) +
-        std::string(" -DMLO_LRN_DO_SCALE=") + std::to_string(static_cast<long long>(scale)) +
-        std::string(" -DMLO_OUT_VERT_ALIGNED=") +
-        std::to_string(static_cast<long long>(OUT_VERT_ALIGNED)) +
-        std::string(" -DMLO_OUT_HORIZ_ALIGNED=") +
-        std::to_string(static_cast<long long>(OUT_HORIZ_ALIGNED)) + std::string(" -DMLO_MAP_SZ4=") +
-        std::to_string(static_cast<long long>(MAP_SZ4)) + std::string(" -DMLO_C1x1_PIXLEFT=") +
-        std::to_string(static_cast<long long>(C1x1_PIXLEFT)) + std::string(" -DMLO_DIVBY4=") +
-        std::to_string(static_cast<long long>(DIVBY4)) + std::string(" -DMLO_READ_TYPE=") +
-        READ_TYPE + std::string(" -DMLO_READ_UNIT=") +
+        std::string(" -DDO_SCALE=") + std::to_string(static_cast<long long>(scale)) +
+        std::string(" -DVERT_ALIGNED=") + std::to_string(static_cast<long long>(out_vert_aligned)) +
+        std::string(" -DHORIZ_ALIGNED=") +
+        std::to_string(static_cast<long long>(out_horiz_aligned)) + std::string(" -DMAP_SZ_4=") +
+        std::to_string(static_cast<long long>(map_size_4)) + std::string(" -DC1x1_PIXLEFT=") +
+        std::to_string(static_cast<long long>(c1x1_pixleft)) + std::string(" -DREAD_UNIT=") +
         std::to_string(static_cast<long long>(read_unit)) + getGeneralCompOptions();
 
     _l_wk.clear();
@@ -252,7 +206,7 @@ int mlo_construct_norm::mloConstructFwd()
     if(_norm_region == MLO_LRN_ACROSS_CHANNELS)
     {
 
-        _g_wk.push_back(MAP_SZ4);
+        _g_wk.push_back(map_size_4);
         _g_wk.push_back(1);
         _g_wk.push_back(_problem.GetBatchSize());
     }
@@ -268,14 +222,10 @@ int mlo_construct_norm::mloConstructFwd()
     // calculate workspace
     size_t scale_sz = static_cast<size_t>(_problem.GetBatchSize()) * scale_batch_stride * data_len;
     _workspace_sz   = (doBackward()) ? scale_sz : 0;
-
-    return (ret);
 }
 
-int mlo_construct_norm::mloConstructBwd()
+void mlo_construct_norm::mloConstructBwd()
 {
-    int ret = 0;
-
     _out_pix_tile0 = 1;
     _out_pix_tile1 = 1;
     _grp_tile0     = 8;
@@ -290,10 +240,6 @@ int mlo_construct_norm::mloConstructBwd()
         _out_pix_tile0 = (_in_df_width <= 8) ? 1 : (_in_df_width <= 16) ? 2 : 4;
         _out_pix_tile1 = (_in_df_height <= 8) ? 1 : (_in_df_height <= 16) ? 2 : 4;
     }
-    auto ocl_group_lg2sz0 =
-        static_cast<int>(ceil(log(static_cast<double>(_grp_tile0)) / std::numbers::ln2));
-    auto ocl_group_lg2sz1 =
-        static_cast<int>(ceil(log(static_cast<double>(_grp_tile1)) / std::numbers::ln2));
 
     int pre_pad              = (_norm_area - 1) / 2;
     int pad                  = _norm_area - pre_pad - 1;
@@ -305,69 +251,55 @@ int mlo_construct_norm::mloConstructBwd()
         MIOPEN_THROW("Wrong LRN kernel size");
 
     _comp_options =
-        std::string(" -DMLO_LRN_KERNEL_SZ=") + std::to_string(static_cast<long long>(_norm_area)) +
-        std::string(" -DMLO_LRN_N_OUTPUTS=") +
-        std::to_string(static_cast<long long>(_problem.GetOutChannels())) +
-        std::string(" -DMLO_LRN_N_CHANNELS=") +
-        std::to_string(static_cast<long long>(_problem.GetInChannels())) +
-        std::string(" -DMLO_LRN_PAD=") + std::to_string(static_cast<long long>(pad)) +
-        std::string(" -DMLO_LRN_PRE_PAD=") + std::to_string(static_cast<long long>(pre_pad)) +
-        std::string(" -DMLO_LRN_N_HORIZ_OUT_PIX=") +
-        std::to_string(static_cast<long long>(_out_pix_tile0)) +
-        std::string(" -DMLO_LRN_N_VERT_OUT_PIX=") +
-        std::to_string(static_cast<long long>(_out_pix_tile1)) +
-        std::string(" -DMLO_LRN_GROUP_SZ0=") + std::to_string(static_cast<long long>(_grp_tile0)) +
-        std::string(" -DMLO_LRN_GROUP_SZ1=") + std::to_string(static_cast<long long>(_grp_tile1)) +
-        std::string(" -DMLO_LRN_GROUP_LG2SZ0=") +
-        std::to_string(static_cast<long long>(ocl_group_lg2sz0)) +
-        std::string(" -DMLO_LRN_GROUP_LG2SZ1=") +
-        std::to_string(static_cast<long long>(ocl_group_lg2sz1)) +
-        std::string(" -DMLO_LRN_BOT_BATCH_STRIDE=") +
+        std::string(" -DKERNEL_SIZE=") + std::to_string(static_cast<long long>(_norm_area)) +
+        std::string(" -DOUT_CHANNELS=") +
+        std::to_string(static_cast<long long>(_problem.GetOutChannels())) + std::string(" -DPAD=") +
+        std::to_string(static_cast<long long>(pad)) + std::string(" -DPRE_PAD=") +
+        std::to_string(static_cast<long long>(pre_pad)) + std::string(" -DHORIZ_OUT_PIX=") +
+        std::to_string(static_cast<long long>(_out_pix_tile0)) + std::string(" -DVERT_OUT_PIX=") +
+        std::to_string(static_cast<long long>(_out_pix_tile1)) + std::string(" -DGROUP_SIZE_X=") +
+        std::to_string(static_cast<long long>(_grp_tile0)) + std::string(" -DGROUP_SIZE_Y=") +
+        std::to_string(static_cast<long long>(_grp_tile1)) + std::string(" -DBOT_BATCH_STRIDE=") +
         std::to_string(static_cast<long long>(_problem.GetInBatchStride())) +
-        std::string(" -DMLO_LRN_BOT_CHANNEL_STRIDE=") +
+        std::string(" -DBOT_CHANNEL_STRIDE=") +
         std::to_string(static_cast<long long>(_problem.GetInChannelStride())) +
-        std::string(" -DMLO_LRN_BOT_STRIDE=") +
+        std::string(" -DBOT_STRIDE=") +
         std::to_string(static_cast<long long>(_problem.GetInStride())) +
-        std::string(" -DMLO_LRN_TOP_BATCH_STRIDE=") +
+        std::string(" -DTOP_BATCH_STRIDE=") +
         std::to_string(static_cast<long long>(_problem.GetOutBatchStride())) +
-        std::string(" -DMLO_LRN_TOP_CHANNEL_STRIDE=") +
+        std::string(" -DTOP_CHANNEL_STRIDE=") +
         std::to_string(static_cast<long long>(_problem.GetOutChannelStride())) +
-        std::string(" -DMLO_LRN_TOP_STRIDE=") +
+        std::string(" -DTOP_STRIDE=") +
         std::to_string(static_cast<long long>(_problem.GetOutStride())) +
-        std::string(" -DMLO_LRN_BOT_WIDTH=") +
+        std::string(" -DBOT_WIDTH=") +
         std::to_string(static_cast<long long>(_problem.GetInWidth())) +
-        std::string(" -DMLO_LRN_BOT_HEIGHT=") +
+        std::string(" -DBOT_HEIGHT=") +
         std::to_string(static_cast<long long>(_problem.GetInHeight())) +
-        std::string(" -DMLO_LRN_TOP_WIDTH=") +
+        std::string(" -DTOP_WIDTH=") +
         std::to_string(static_cast<long long>(_problem.GetOutWidth())) +
-        std::string(" -DMLO_LRN_TOP_HEIGHT=") +
+        std::string(" -DTOP_HEIGHT=") +
         std::to_string(static_cast<long long>(_problem.GetOutHeight())) +
-        std::string(" -DMLO_LRN_SCALE_BATCH_STRIDE=") +
+        std::string(" -DSCALE_BATCH_STRIDE=") +
         std::to_string(static_cast<long long>(scale_batch_stride)) +
-        std::string(" -DMLO_LRN_SCALE_CHANNEL_STRIDE=") +
+        std::string(" -DSCALE_CHANNEL_STRIDE=") +
         std::to_string(static_cast<long long>(scale_channel_stride)) +
-        std::string(" -DMLO_LRN_SCALE_STRIDE=") +
-        std::to_string(static_cast<long long>(scale_stride)) +
-        std::string(" -DMLO_LRN_TOPDF_BATCH_STRIDE=") +
+        std::string(" -DSCALE_STRIDE=") + std::to_string(static_cast<long long>(scale_stride)) +
+        std::string(" -DTOPDF_BATCH_STRIDE=") +
         std::to_string(static_cast<long long>(_out_df_batch_stride)) +
-        std::string(" -DMLO_LRN_TOPDF_CHANNEL_STRIDE=") +
+        std::string(" -DTOPDF_CHANNEL_STRIDE=") +
         std::to_string(static_cast<long long>(_out_df_channel_stride)) +
-        std::string(" -DMLO_LRN_TOPDF_STRIDE=") +
-        std::to_string(static_cast<long long>(_out_df_stride)) +
-        std::string(" -DMLO_LRN_BOTDF_BATCH_STRIDE=") +
+        std::string(" -DTOPDF_STRIDE=") + std::to_string(static_cast<long long>(_out_df_stride)) +
+        std::string(" -DBOTDF_BATCH_STRIDE=") +
         std::to_string(static_cast<long long>(_in_df_batch_stride)) +
-        std::string(" -DMLO_LRN_BOTDF_CHANNEL_STRIDE=") +
+        std::string(" -DBOTDF_CHANNEL_STRIDE=") +
         std::to_string(static_cast<long long>(_in_df_channel_stride)) +
-        std::string(" -DMLO_LRN_BOTDF_STRIDE=") +
-        std::to_string(static_cast<long long>(_in_df_stride)) +
-        std::string(" -DMLO_LRN_BATCH_SZ=") +
+        std::string(" -DBOTDF_STRIDE=") + std::to_string(static_cast<long long>(_in_df_stride)) +
+        std::string(" -DBATCH_SIZE=") +
         std::to_string(static_cast<long long>(_problem.GetBatchSize())) +
-        std::string(" -DMLO_LRN_N_INPUTS=") +
-        std::to_string(static_cast<long long>(_problem.GetInChannels())) +
-        std::string(" -DMLO_LRN_N_OUTPUTS=") +
-        std::to_string(static_cast<long long>(_problem.GetOutChannels())) + getGeneralCompOptions();
+        std::string(" -DN_INPUTS=") +
+        std::to_string(static_cast<long long>(_problem.GetInChannels())) + getGeneralCompOptions();
 
-    _kernel_file = "MIOpenLRNBwd.cl";
+    _kernel_file = "MIOpenLRNBwd.cpp";
 
     _l_wk.clear();
     _g_wk.clear();
@@ -394,6 +326,4 @@ int mlo_construct_norm::mloConstructBwd()
         _g_wk.push_back(static_cast<size_t>(_problem.GetInChannels()) * _problem.GetBatchSize());
         _kernel_name = "MIOpenLRNWithinChannelBwd";
     }
-
-    return (ret);
 }

@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -306,7 +306,8 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
 
         numOutputsPrep  = (matrixInstCoal * matrixInstPrep // numThreadInWave) if conThInProcDim else 1
         numOutputsPrep  = numOutputsPrep * matrixInstBPrep * miWaveTitlePrep
-        complexMultiplier = 2 if kernel["ProblemType"]["DataType"].isComplex() else 1
+        datatyp         = kernel["ProblemType"]["MacDataTypeA"] if tP["isA"] else kernel["ProblemType"]["MacDataTypeB"]
+        complexMultiplier = 2 if datatyp.isComplex() else 1
 
         # unify process for dimension M/N
         regStrideCoal = 1                                                                if tP["isA"] else numOutputsPrep

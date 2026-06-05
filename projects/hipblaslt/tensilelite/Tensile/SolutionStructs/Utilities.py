@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,13 +25,16 @@
 import sys
 import math
 
+from Tensile.Common.DataType import DataType
+from rocisa.enum import DataTypeEnum
+
 def getMiInputType(kernel: dict):
   """Select the effective MI operand type for MFMA latency lookup.
 
   Handles three cases based on kernel flags:
     1. EnableF32XdlMathOp + UseF32XEmulation → BFloat16 (BF16 emulation)
     2. EnableF32XdlMathOp only               → F32XdlMathOp (native XF32)
-    3. Neither                               → DataType (plain)
+    3. Neither                               → MacDataTypeA (plain)
 
   UseF32XEmulation implies EnableF32XdlMathOp (guaranteed by Solution.__init__).
 
@@ -40,8 +43,6 @@ def getMiInputType(kernel: dict):
   """
   if kernel["EnableF32XdlMathOp"]:
     if kernel["UseF32XEmulation"]:
-      from rocisa.enum import DataTypeEnum
-      from Tensile.Common.DataType import DataType
       return DataType(DataTypeEnum.BFloat16)
     return kernel["ProblemType"]["F32XdlMathOp"]
   return kernel["ProblemType"]["DataType"]
@@ -86,3 +87,27 @@ def pvar(state, field):
 
 def roundupRatio(dividend, divisor):
   return int(math.ceil(float(dividend) / float(divisor)))
+
+def getRealDataTypeA(dataType):
+    if dataType.value == DataTypeEnum.Float8BFloat8.value:
+        return DataType(DataTypeEnum.Float8)
+    elif dataType.value == DataTypeEnum.BFloat8Float8.value:
+        return DataType(DataTypeEnum.BFloat8)
+    elif dataType.value == DataTypeEnum.Float8BFloat8_fnuz.value:
+        return DataType(DataTypeEnum.Float8_fnuz)
+    elif dataType.value == DataTypeEnum.BFloat8Float8_fnuz.value:
+        return DataType(DataTypeEnum.BFloat8_fnuz)
+    else:
+        return dataType
+
+def getRealDataTypeB(dataType):
+    if dataType.value == DataTypeEnum.Float8BFloat8.value:
+        return DataType(DataTypeEnum.BFloat8)
+    elif dataType.value == DataTypeEnum.BFloat8Float8.value:
+        return DataType(DataTypeEnum.Float8)
+    elif dataType.value == DataTypeEnum.Float8BFloat8_fnuz.value:
+        return DataType(DataTypeEnum.BFloat8_fnuz)
+    elif dataType.value == DataTypeEnum.BFloat8Float8_fnuz.value:
+        return DataType(DataTypeEnum.Float8_fnuz)
+    else:
+        return dataType

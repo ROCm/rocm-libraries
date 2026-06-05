@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include "hipblaslt_test.hpp"
+#include "hipblaslt/hipblaslt-ext.hpp"
 #include <cerrno>
 #include <csetjmp>
 #include <csignal>
@@ -426,4 +427,189 @@ bool match_test_category(const Arguments& arg, const char* category)
     // return valid_category(arg.category);
 
     return true;
+}
+
+TEST(aux_handle_test, set_sm_count_target_default_is_zero)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_NE(handle, nullptr);
+
+    int32_t value = -42;
+    ASSERT_EQ(hipblasLtGetSmCountTarget(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 0);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, set_sm_count_target_round_trip)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtSetSmCountTarget(handle, 96), HIPBLAS_STATUS_SUCCESS);
+    int32_t value = -1;
+    ASSERT_EQ(hipblasLtGetSmCountTarget(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 96);
+
+    // Setting back to 0 (the default sentinel) should round-trip.
+    ASSERT_EQ(hipblasLtSetSmCountTarget(handle, 0), HIPBLAS_STATUS_SUCCESS);
+    value = -1;
+    ASSERT_EQ(hipblasLtGetSmCountTarget(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 0);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, set_sm_count_target_rejects_negative)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtSetSmCountTarget(handle, 64), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(hipblasLtSetSmCountTarget(handle, -1), HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Negative input must leave the previously stored value untouched.
+    int32_t value = -1;
+    ASSERT_EQ(hipblasLtGetSmCountTarget(handle, &value), HIPBLAS_STATUS_SUCCESS);
+    ASSERT_EQ(value, 64);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, get_sm_count_target_rejects_null_pointer)
+{
+    hipblasLtHandle_t handle = nullptr;
+    ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipblasLtGetSmCountTarget(handle, nullptr), HIPBLAS_STATUS_INVALID_VALUE);
+
+    ASSERT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_handle_test, set_sm_count_target_rejects_null_handle)
+{
+    // Exercises the rocblaslt_status_invalid_handle branch in
+    // rocblaslt_set_sm_count_target.
+    ASSERT_EQ(hipblasLtSetSmCountTarget(nullptr, 96), HIPBLAS_STATUS_NOT_INITIALIZED);
+}
+
+TEST(aux_handle_test, get_sm_count_target_rejects_null_handle)
+{
+    // Exercises the rocblaslt_status_invalid_handle branch in
+    // rocblaslt_get_sm_count_target.
+    int32_t value = 0;
+    ASSERT_EQ(hipblasLtGetSmCountTarget(nullptr, &value), HIPBLAS_STATUS_NOT_INITIALIZED);
+}
+
+TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_default_is_disabled)
+{
+    hipblaslt_ext::GemmPreference pref;
+    ASSERT_FALSE(pref.getDynPersistentTileEnabled());
+}
+
+TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_round_trip)
+{
+    hipblaslt_ext::GemmPreference pref;
+    pref.setDynPersistentTileEnabled(true);
+    ASSERT_TRUE(pref.getDynPersistentTileEnabled());
+
+    pref.setDynPersistentTileEnabled(false);
+    ASSERT_FALSE(pref.getDynPersistentTileEnabled());
+}
+
+// Standalone gtests that pin coverage of the invalid-buffer-size branches in
+// rocblaslt_auxiliary.cpp's matmul-descriptor and preference attribute
+// set/get handlers for the three attributes added by this PR. Equivalent
+// assertions exist in the YAML-driven aux_test cases, but those are not
+// always exercised by the host-only coverage build.
+TEST(aux_attr_test, desc_sm_count_target_set_rejects_undersized_buffer)
+{
+    hipblasLtMatmulDesc_t desc = nullptr;
+    ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+              HIPBLAS_STATUS_SUCCESS);
+    const int32_t value = 64;
+    ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
+                                              HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                              &value,
+                                              sizeof(int32_t) - 1),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_attr_test, desc_sm_count_target_get_rejects_undersized_buffer)
+{
+    hipblasLtMatmulDesc_t desc = nullptr;
+    ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+              HIPBLAS_STATUS_SUCCESS);
+    int32_t out         = 0;
+    size_t  sizeWritten = 0;
+    ASSERT_EQ(hipblasLtMatmulDescGetAttribute(desc,
+                                              HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                              &out,
+                                              sizeof(int32_t) - 1,
+                                              &sizeWritten),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    // sizeWritten must still report the required size so callers can resize.
+    ASSERT_EQ(sizeWritten, sizeof(int32_t));
+    ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_attr_test, desc_dyn_persistent_tile_ext_set_rejects_undersized_buffer)
+{
+    hipblasLtMatmulDesc_t desc = nullptr;
+    ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+              HIPBLAS_STATUS_SUCCESS);
+    const int32_t value = 1;
+    ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
+                                              HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                              &value,
+                                              sizeof(int32_t) - 1),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_attr_test, desc_dyn_persistent_tile_ext_get_rejects_undersized_buffer)
+{
+    hipblasLtMatmulDesc_t desc = nullptr;
+    ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+              HIPBLAS_STATUS_SUCCESS);
+    int32_t out         = 0;
+    size_t  sizeWritten = 0;
+    ASSERT_EQ(hipblasLtMatmulDescGetAttribute(desc,
+                                              HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                              &out,
+                                              sizeof(int32_t) - 1,
+                                              &sizeWritten),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    ASSERT_EQ(sizeWritten, sizeof(int32_t));
+    ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_attr_test, pref_sm_count_target_set_rejects_undersized_buffer)
+{
+    hipblasLtMatmulPreference_t pref = nullptr;
+    ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+    const int32_t value = 64;
+    ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                    HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                    &value,
+                                                    sizeof(int32_t) - 1),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    ASSERT_EQ(hipblasLtMatmulPreferenceDestroy(pref), HIPBLAS_STATUS_SUCCESS);
+}
+
+TEST(aux_attr_test, pref_sm_count_target_get_rejects_undersized_buffer)
+{
+    hipblasLtMatmulPreference_t pref = nullptr;
+    ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+    int32_t out         = 0;
+    size_t  sizeWritten = 0;
+    ASSERT_EQ(hipblasLtMatmulPreferenceGetAttribute(pref,
+                                                    HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                    &out,
+                                                    sizeof(int32_t) - 1,
+                                                    &sizeWritten),
+              HIPBLAS_STATUS_INVALID_VALUE);
+    ASSERT_EQ(hipblasLtMatmulPreferenceDestroy(pref), HIPBLAS_STATUS_SUCCESS);
 }

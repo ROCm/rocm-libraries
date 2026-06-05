@@ -1,12 +1,15 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "ck_tile/core/config.hpp"
-#include "ck_tile/core/utility/bit_cast.hpp"
-#include "ck_tile/core/numeric/numeric.hpp"
-#include <hip/hip_fp16.h>
-
 #pragma once
+
+#include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/numeric.hpp"
+#include "ck_tile/core/numeric/type_convert.hpp"
+#include "ck_tile/core/utility/bit_cast.hpp"
+
+#include <hip/hip_fp16.h>
 
 namespace ck_tile {
 
@@ -165,7 +168,7 @@ struct numeric<half_t>
         return bit_cast<half_t>(static_cast<fp16_raw_t>(0x0400));
     }
 
-    // minumum finite value
+    // minimum finite value
     CK_TILE_HOST_DEVICE static constexpr half_t lowest()
     {
         return bit_cast<half_t>(static_cast<fp16_raw_t>(0xFBFF));
@@ -264,93 +267,6 @@ bool operator>(const half_t& x, const half_t& y) { return __hgt(x.to_fp16(), y.t
 CK_TILE_DEVICE
 bool operator>=(const half_t& x, const half_t& y) { return __hge(x.to_fp16(), y.to_fp16()); }
 
-#if 0
-CK_TILE_DEVICE
-half_t operator+(const half_t& x, const half_t& y)
-{
-    return half_t(__hadd(x.to_fp16(), y.to_fp16()));
-}
-
-CK_TILE_DEVICE
-half_t operator-(const half_t& x) { return half_t(__hneg(x.to_fp16())); }
-
-CK_TILE_DEVICE
-half_t operator-(const half_t& x, const half_t& y)
-{
-    return half_t(__hsub(x.to_fp16(), y.to_fp16()));
-}
-
-CK_TILE_DEVICE
-half_t operator*(const half_t& x, const half_t& y)
-{
-    return half_t(__hmul(x.to_fp16(), y.to_fp16()));
-}
-
-CK_TILE_DEVICE
-half_t operator/(const half_t& x, const half_t& y)
-{
-    return half_t(__hdiv(x.to_fp16(), y.to_fp16()));
-}
-
-CK_TILE_DEVICE
-half_t& operator+=(half_t& x, const half_t& y)
-{
-    x = half_t(__hadd(x.to_fp16(), y.to_fp16()));
-    return x;
-}
-
-CK_TILE_DEVICE
-half_t& operator-=(half_t& x, const half_t& y)
-{
-    x = half_t(__hsub(x.to_fp16(), y.to_fp16()));
-    return x;
-}
-
-CK_TILE_DEVICE
-half_t& operator*=(half_t& x, const half_t& y)
-{
-    x = half_t(__hmul(x.to_fp16(), y.to_fp16()));
-    return x;
-}
-
-CK_TILE_DEVICE
-half_t& operator/=(half_t& x, const half_t& y)
-{
-    x = half_t(__hdiv(x.to_fp16(), y.to_fp16()));
-    return x;
-}
-
-CK_TILE_DEVICE
-half_t& operator++(half_t& x)
-{
-    x = half_t(__hadd(x.to_fp16(), half_t(1.0f).to_fp16()));
-    return x;
-}
-
-CK_TILE_DEVICE
-half_t& operator--(half_t& x)
-{
-    x = half_t(__hsub(x.to_fp16(), half_t(1.0f).to_fp16()));
-    return x;
-}
-
-CK_TILE_DEVICE
-half_t operator++(half_t& x, int)
-{
-    half_t y(x);
-    x = half_t(__hadd(x.to_fp16(), half_t(1.0f).to_fp16()));
-    return y;
-}
-
-CK_TILE_DEVICE
-half_t operator--(half_t& x, int)
-{
-    half_t y(x);
-    x = half_t(__hsub(x.to_fp16(), half_t(1.0f).to_fp16()));
-    return y;
-}
-#endif
-
 #if CK_TILE_USE_CUSTOM_DATA_TYPE
 CK_TILE_ARITHMETIC_USING_FLOAT(CK_TILE_HOST, half_t)
 #endif
@@ -407,4 +323,19 @@ constexpr fp16x2_t fp32x2_to_fp16x2(const fp32x2_t& x)
 {
     return fp16x2_t{float_to_fp16(x.x), float_to_fp16(x.y)};
 }
+
+#if !CK_TILE_USE_CUSTOM_DATA_TYPE
+#define CK_TILE_TYPE_CONVERT(dtype_, dname_, stype_, sname_)                    \
+    template <>                                                                 \
+    CK_TILE_HOST_DEVICE constexpr dtype_ type_convert<dtype_, stype_>(stype_ x) \
+    {                                                                           \
+        return sname_##_to_##dname_(x);                                         \
+    }
+
+CK_TILE_TYPE_CONVERT(float, float, fp16_t, fp16)
+CK_TILE_TYPE_CONVERT(fp16_t, fp16, float, float)
+CK_TILE_TYPE_CONVERT(fp16x2_t, fp16x2, fp32x2_t, fp32x2)
+
+#undef CK_TILE_TYPE_CONVERT
+#endif
 } // namespace ck_tile

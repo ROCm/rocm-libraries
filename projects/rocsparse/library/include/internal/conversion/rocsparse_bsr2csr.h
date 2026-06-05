@@ -32,11 +32,11 @@
 extern "C" {
 #endif
 /*! \ingroup conv_module
-*  \brief Convert a sparse BSR matrix into a sparse CSR matrix
+*  \brief Convert a sparse BSR matrix into a sparse CSR matrix.
 *
 *  \details
-*  \p rocsparse_bsr2csr converts a BSR matrix into a CSR matrix. It is assumed,
-*  that \p csr_val, \p csr_col_ind and \p csr_row_ptr are allocated. Allocation size
+*  \p rocsparse_bsr2csr converts a BSR matrix into a CSR matrix. It is assumed
+*  that \p csr_val, \p csr_col_ind, and \p csr_row_ptr are allocated. The allocation size
 *  for \p csr_row_ptr is \p m+1 where:
 *  \f[
 *    m = mb * block\_dim \\
@@ -49,16 +49,16 @@ extern "C" {
 *  \f]
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
-*  dir         the storage format of the blocks, \ref rocsparse_direction_row or \ref rocsparse_direction_column
+*  dir         the storage format of the blocks, \ref rocsparse_direction_row or \ref rocsparse_direction_column.
 *  @param[in]
 *  mb          number of block rows in the sparse BSR matrix.
 *  @param[in]
@@ -88,9 +88,9 @@ extern "C" {
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p mb or \p nb or \p block_dim is invalid.
+*  \retval     rocsparse_status_invalid_size \p mb, \p nb, or \p block_dim is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p bsr_val,
-*              \p bsr_row_ptr, \p bsr_col_ind, \p csr_val, \p csr_row_ptr or
+*              \p bsr_row_ptr, \p bsr_col_ind, \p csr_val, \p csr_row_ptr, or
 *              \p csr_col_ind pointer is invalid.
 *
 *  \par Example

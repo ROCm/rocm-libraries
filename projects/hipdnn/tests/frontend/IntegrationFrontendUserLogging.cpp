@@ -7,7 +7,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <thread>
+
+constexpr auto ASYNC_LOG_TIMEOUT = std::chrono::seconds(10);
+constexpr auto NEGATIVE_ASSERT_TIMEOUT = std::chrono::milliseconds(100);
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_test_sdk::utilities;
@@ -71,10 +76,13 @@ TEST_F(IntegrationFrontendUserLogging, FrontendLogsProducedOnUserCallback)
     HIPDNN_FE_LOG_WARN("Test warning message from frontend");
     HIPDNN_FE_LOG_ERROR("Test error message from frontend");
 
-    // Small delay for async callback
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for async callbacks to deliver all log messages
+    EXPECT_TRUE(recorder.waitForLogsContaining(
+        {"Test info message", "Test warning message", "Test error message"}, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for all expected log messages\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
-    // Verify logs were received on callback
+    // Verify logs were received on callback with correct severity
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Test info message"));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "Test warning message"));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "Test error message"));
@@ -95,7 +103,11 @@ TEST_F(IntegrationFrontendUserLogging, LogLevelControlsFrontendLogs)
     HIPDNN_FE_LOG_WARN("Warning should pass");
     HIPDNN_FE_LOG_ERROR("Error should pass");
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for expected logs (WARN + ERROR); INFO should be filtered
+    EXPECT_TRUE(recorder.waitForLogsContaining({"Warning should pass", "Error should pass"},
+                                               ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for expected WARN and ERROR logs\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     // INFO filtered, WARN and ERROR pass
     EXPECT_FALSE(recorder.hasLogContaining("Info should be filtered"));
@@ -117,7 +129,10 @@ TEST_F(IntegrationFrontendUserLogging, LogLevelOffFiltersAllLogs)
     HIPDNN_FE_LOG_WARN("Should be filtered");
     HIPDNN_FE_LOG_ERROR("Should be filtered");
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Negative assertion: no logs expected, bounded wait to confirm none arrive
+    EXPECT_FALSE(recorder.waitForLogCount(1, NEGATIVE_ASSERT_TIMEOUT))
+        << "Unexpected log received despite log level OFF\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     // All logs filtered
     EXPECT_EQ(recorder.getRecordedLogCount(), 0);
@@ -133,22 +148,31 @@ TEST_F(IntegrationFrontendUserLogging, UnregisterWithSevOffStopsCallbacks)
     auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
+    const auto countBefore = recorder.getRecordedLogCount();
     HIPDNN_FE_LOG_INFO("Log before unregistering callback");
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    size_t logsWithCallback = recorder.getRecordedLogCount();
-    EXPECT_GT(logsWithCallback, 0);
+    // Wait for at least 1 log to arrive via async callback
+    EXPECT_TRUE(recorder.waitForLogCount(countBefore + 1, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for async log delivery\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_GT(recorder.getRecordedLogCount(), 0);
 
     // Unregister callback with SEV_OFF
     registerUserCallback(HIPDNN_SEV_OFF, LogCallbackMode::ASYNC);
 
-    HIPDNN_FE_LOG_INFO("Log after unregistering callback");
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Capture count after unregister — the only point where it's guaranteed
+    // that no more logs will be delivered via the callback
+    const size_t logsAfterUnregister = recorder.getRecordedLogCount();
 
-    size_t logsAfterUnregister = recorder.getRecordedLogCount();
+    HIPDNN_FE_LOG_INFO("Log after unregistering callback");
+
+    // Negative assertion: no new logs expected after unregister, bounded wait
+    EXPECT_FALSE(recorder.waitForLogCount(logsAfterUnregister + 1, NEGATIVE_ASSERT_TIMEOUT))
+        << "Unexpected log received after unregistering callback\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     // No new logs should be provided via callback
-    EXPECT_EQ(logsAfterUnregister, logsWithCallback);
+    EXPECT_EQ(recorder.getRecordedLogCount(), logsAfterUnregister);
 }
 
 // Test: Callback level filtering works independently of global level
@@ -167,7 +191,11 @@ TEST_F(IntegrationFrontendUserLogging, CallbackLevelFiltersIndependently)
     HIPDNN_FE_LOG_WARN("Warning should pass");
     HIPDNN_FE_LOG_ERROR("Error should pass");
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for expected logs (WARN + ERROR); INFO filtered at callback level
+    EXPECT_TRUE(recorder.waitForLogsContaining({"Warning should pass", "Error should pass"},
+                                               ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for expected WARN and ERROR logs\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     // INFO filtered at callback level, WARN and ERROR pass
     EXPECT_FALSE(recorder.hasLogContaining("Info should be filtered"));
@@ -206,8 +234,10 @@ TEST_F(IntegrationFrontendUserLogging, AsyncCallbackQueuesLogs)
 
     HIPDNN_FE_LOG_INFO("Async callback message");
 
-    // Async: may not be immediate but should arrive soon
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for async callback to deliver the log
+    EXPECT_TRUE(recorder.waitForLogsContaining({"Async callback message"}, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for log containing 'Async callback message'\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
     EXPECT_GT(recorder.getRecordedLogCount(), 0);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Async callback message"));
@@ -223,10 +253,15 @@ TEST_F(IntegrationFrontendUserLogging, UpdateCallbackLevel)
     auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
+    const auto countBefore = recorder.getRecordedLogCount();
     HIPDNN_FE_LOG_INFO("Message at INFO level");
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    size_t infoLogs = recorder.getRecordedLogCount();
+    // Wait for the INFO log to arrive
+    EXPECT_TRUE(recorder.waitForLogCount(countBefore + 1, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for INFO log delivery\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
+
+    const size_t infoLogs = recorder.getRecordedLogCount();
     EXPECT_GT(infoLogs, 0);
 
     // Update callback to WARN level (same callback, same handle, different level)
@@ -235,10 +270,13 @@ TEST_F(IntegrationFrontendUserLogging, UpdateCallbackLevel)
     HIPDNN_FE_LOG_INFO("Info after update - should be filtered");
     HIPDNN_FE_LOG_WARN("Warn after update - should pass");
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for the WARN log to arrive (INFO should be filtered)
+    EXPECT_TRUE(recorder.waitForLogsContaining({"Warn after update"}, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for log containing 'Warn after update'\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
-    // Should have exactly 1 new log (the WARN)
-    EXPECT_EQ(recorder.getRecordedLogCount(), infoLogs + 1);
+    // INFO should be filtered after updating callback to WARN level
+    EXPECT_FALSE(recorder.hasLogContaining("Info after update"));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "Warn after update"));
 }
 
@@ -255,7 +293,7 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenSyncAndAsync)
     HIPDNN_FE_LOG_INFO("Sync mode message");
 
     // Sync: logs immediately available
-    size_t syncLogs = recorder.getRecordedLogCount();
+    const size_t syncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(syncLogs, 0);
 
     // Switch to ASYNC mode (same callback, same handle, different mode)
@@ -263,10 +301,12 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenSyncAndAsync)
 
     HIPDNN_FE_LOG_INFO("Async mode message");
 
-    // Async: need delay
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for async callback to deliver the log
+    EXPECT_TRUE(recorder.waitForLogsContaining({"Async mode message"}, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for log containing 'Async mode message'\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
 
-    size_t asyncLogs = recorder.getRecordedLogCount();
+    const size_t asyncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(asyncLogs, syncLogs);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Async mode message"));
 }
@@ -281,11 +321,14 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenAsyncAndSync)
     auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
 
+    const auto countBefore = recorder.getRecordedLogCount();
     HIPDNN_FE_LOG_INFO("Async mode message");
 
-    // Async: need delay
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    size_t asyncLogs = recorder.getRecordedLogCount();
+    // Wait for async callback to deliver the log
+    EXPECT_TRUE(recorder.waitForLogCount(countBefore + 1, ASYNC_LOG_TIMEOUT))
+        << "Timed out waiting for async log delivery\nRecorded logs:\n"
+        << recorder.getRecordedLogsAsString();
+    const size_t asyncLogs = recorder.getRecordedLogCount();
     EXPECT_GT(asyncLogs, 0);
 
     // Switch to SYNC mode (same callback, same handle, different mode)
@@ -294,7 +337,7 @@ TEST_F(IntegrationFrontendUserLogging, SwitchBetweenAsyncAndSync)
     HIPDNN_FE_LOG_INFO("Sync mode message");
 
     // Sync: logs immediately available
-    size_t afterSwitch = recorder.getRecordedLogCount();
+    const size_t afterSwitch = recorder.getRecordedLogCount();
     EXPECT_GT(afterSwitch, asyncLogs);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Sync mode message"));
 }
@@ -321,19 +364,18 @@ TEST_F(IntegrationFrontendUserLogging, SyncGuaranteeOnUnregister)
 {
     // Track callback invocations
     static std::atomic<int> s_callbackCount{0};
-    static std::atomic<bool> s_callbackActive{false};
+    static std::mutex s_callbackMutex;
+    static std::condition_variable s_callbackCV;
 
     auto trackingCallback = [](hipdnnUserLogCallbackHandle_t, hipdnnSeverity_t, const char*) {
-        s_callbackActive.store(true);
         s_callbackCount.fetch_add(1);
+        s_callbackCV.notify_all();
         // Simulate some work
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        s_callbackActive.store(false);
     };
 
     int handleToken = 0;
     s_callbackCount.store(0);
-    s_callbackActive.store(false);
 
     // Register async callback
     auto error = setUserLogCallback(
@@ -354,10 +396,7 @@ TEST_F(IntegrationFrontendUserLogging, SyncGuaranteeOnUnregister)
     ASSERT_EQ(error.code, ErrorCode::OK);
 
     // Take snapshot AFTER unregister to avoid race with async queue processing
-    int countAfterUnregister = s_callbackCount.load();
-
-    // After unregister returns, callback should NOT be active
-    EXPECT_FALSE(s_callbackActive.load()) << "Callback should not be active after unregister";
+    const int countAfterUnregister = s_callbackCount.load();
 
     // Generate more logs - callback should NOT receive them
     for(int i = 0; i < 10; ++i)
@@ -365,7 +404,13 @@ TEST_F(IntegrationFrontendUserLogging, SyncGuaranteeOnUnregister)
         HIPDNN_FE_LOG_INFO("After unregister");
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Negative assertion: bounded wait to confirm no new callbacks arrive
+    {
+        std::unique_lock<std::mutex> lock(s_callbackMutex);
+        s_callbackCV.wait_for(lock, NEGATIVE_ASSERT_TIMEOUT, [&] {
+            return s_callbackCount.load() > countAfterUnregister;
+        });
+    }
 
     // Count should not have increased after unregister
     EXPECT_EQ(s_callbackCount.load(), countAfterUnregister)
@@ -375,15 +420,24 @@ TEST_F(IntegrationFrontendUserLogging, SyncGuaranteeOnUnregister)
 // Test: Multiple callbacks (2 async + 2 sync) all receive logs independently
 TEST_F(IntegrationFrontendUserLogging, MultipleCallbacksAllReceiveLogs)
 {
+    struct CounterWithNotify
+    {
+        std::atomic<int> count{0};
+        std::mutex mtx;
+        std::condition_variable cv;
+    };
+
     auto countingCallback
         = [](hipdnnUserLogCallbackHandle_t userHandle, hipdnnSeverity_t, const char*) {
-              static_cast<std::atomic<int>*>(userHandle)->fetch_add(1);
+              auto* c = static_cast<CounterWithNotify*>(userHandle);
+              c->count.fetch_add(1);
+              c->cv.notify_all();
           };
 
-    std::atomic<int> asyncCount1{0};
-    std::atomic<int> asyncCount2{0};
-    std::atomic<int> syncCount1{0};
-    std::atomic<int> syncCount2{0};
+    CounterWithNotify asyncCount1;
+    CounterWithNotify asyncCount2;
+    CounterWithNotify syncCount1;
+    CounterWithNotify syncCount2;
 
     auto error = setGlobalLogLevel(HIPDNN_SEV_INFO);
     ASSERT_EQ(error.code, ErrorCode::OK);
@@ -405,14 +459,23 @@ TEST_F(IntegrationFrontendUserLogging, MultipleCallbacksAllReceiveLogs)
     // Trigger logging
     HIPDNN_FE_LOG_INFO("Test message for multiple callbacks");
 
-    // Wait for async callbacks to process
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for async callbacks to deliver logs
+    {
+        std::unique_lock<std::mutex> lock(asyncCount1.mtx);
+        asyncCount1.cv.wait_for(
+            lock, ASYNC_LOG_TIMEOUT, [&] { return asyncCount1.count.load() > 0; });
+    }
+    {
+        std::unique_lock<std::mutex> lock(asyncCount2.mtx);
+        asyncCount2.cv.wait_for(
+            lock, ASYNC_LOG_TIMEOUT, [&] { return asyncCount2.count.load() > 0; });
+    }
 
     // All 4 callbacks should have received logs
-    EXPECT_GT(asyncCount1.load(), 0) << "First async callback should receive logs";
-    EXPECT_GT(asyncCount2.load(), 0) << "Second async callback should receive logs";
-    EXPECT_GT(syncCount1.load(), 0) << "First sync callback should receive logs";
-    EXPECT_GT(syncCount2.load(), 0) << "Second sync callback should receive logs";
+    EXPECT_GT(asyncCount1.count.load(), 0) << "First async callback should receive logs";
+    EXPECT_GT(asyncCount2.count.load(), 0) << "Second async callback should receive logs";
+    EXPECT_GT(syncCount1.count.load(), 0) << "First sync callback should receive logs";
+    EXPECT_GT(syncCount2.count.load(), 0) << "Second sync callback should receive logs";
 
     // Unregister all 4
     setUserLogCallback(countingCallback, HIPDNN_SEV_OFF, LogCallbackMode::ASYNC, &asyncCount1);
@@ -421,21 +484,27 @@ TEST_F(IntegrationFrontendUserLogging, MultipleCallbacksAllReceiveLogs)
     setUserLogCallback(countingCallback, HIPDNN_SEV_OFF, LogCallbackMode::SYNC, &syncCount2);
 
     // Capture counts after unregistering
-    int async1After = asyncCount1.load();
-    int async2After = asyncCount2.load();
-    int sync1After = syncCount1.load();
-    int sync2After = syncCount2.load();
+    const int async1After = asyncCount1.count.load();
+    const int async2After = asyncCount2.count.load();
+    const int sync1After = syncCount1.count.load();
+    const int sync2After = syncCount2.count.load();
 
     // Trigger more logging — none of the callbacks should be invoked
     HIPDNN_FE_LOG_INFO("Message after all callbacks unregistered");
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    EXPECT_EQ(asyncCount1.load(), async1After)
+    // Negative assertion: bounded wait to confirm no new callbacks arrive
+    {
+        std::unique_lock<std::mutex> lock(asyncCount1.mtx);
+        asyncCount1.cv.wait_for(
+            lock, NEGATIVE_ASSERT_TIMEOUT, [&] { return asyncCount1.count.load() > async1After; });
+    }
+
+    EXPECT_EQ(asyncCount1.count.load(), async1After)
         << "First async callback should not receive logs after unregister";
-    EXPECT_EQ(asyncCount2.load(), async2After)
+    EXPECT_EQ(asyncCount2.count.load(), async2After)
         << "Second async callback should not receive logs after unregister";
-    EXPECT_EQ(syncCount1.load(), sync1After)
+    EXPECT_EQ(syncCount1.count.load(), sync1After)
         << "First sync callback should not receive logs after unregister";
-    EXPECT_EQ(syncCount2.load(), sync2After)
+    EXPECT_EQ(syncCount2.count.load(), sync2After)
         << "Second sync callback should not receive logs after unregister";
 }

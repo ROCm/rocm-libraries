@@ -33,10 +33,11 @@
 #include <string>
 #include <unordered_set>
 
-#include <boost/lexical_cast.hpp>
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
-namespace po = boost::program_options;
+#include <sstream>
+
+namespace po = Tensile::Client::po;
 
 namespace Tensile
 {

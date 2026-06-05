@@ -25,11 +25,12 @@ The hipRAND public repository is located at `<https://github.com/ROCm/rocm-libra
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./install/installation>`    
+    * :doc:`Install hipRAND <./install/installation>`
+    * :doc:`Build from source <./install/build>`
 
   .. grid-item-card:: How to
 
-    * :doc:`Use hipRAND interfaces <./how-to/use-hiprand-interfaces>`    
+    * :doc:`Use hipRAND interfaces <./how-to/use-hiprand-interfaces>`
 
   .. grid-item-card:: Examples
 

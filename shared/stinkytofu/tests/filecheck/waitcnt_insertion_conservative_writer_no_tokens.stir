@@ -1,0 +1,28 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): conservative fallback for an LDS writer
+# that is missing MemTokenData.
+#
+# The first two ds_load_b64 instructions carry token 0, but the tensor_load_to_lds
+# writer has no MemTokenData modifier. collectLdsWarDependencies cannot prove
+# disjointness against the pending DS reads, so the conservative writer-anchor-
+# missing-tokens branch fires (forceDsDrain) and computeRequiredWaits emits
+# s_wait_dscnt 0 before the tensor_load_to_lds. The same-pipeline filter has no
+# effect here because tensor_load_to_lds lives on tlcnt while ds_load lives on
+# dlcnt.
+#
+# CHECK-LABEL: @waitcnt_insertion_conservative_writer_no_tokens
+# CHECK: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: s_wait_dscnt
+# CHECK-SAME: dlcnt = 0
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_tensorcnt
+
+st.func @waitcnt_insertion_conservative_writer_no_tokens() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1 }
+}

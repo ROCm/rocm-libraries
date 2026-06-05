@@ -5,7 +5,9 @@ subtrees:
 - caption: Install
   entries:
   - file: installation/installlinux
-    title: Installation guide
+    title: Install rocSOLVER
+  - file: installation/build
+    title: Build from source
 
 - caption: Conceptual
   entries:

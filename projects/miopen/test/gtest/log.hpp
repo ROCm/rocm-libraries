@@ -83,8 +83,8 @@ void TestLogCmdBNormFusion(std::function<void(const miopenFusionPlanDescriptor_t
                            std::string sub_str,
                            bool set_env);
 
-void TestLogBufferOn();
+void TestLogBufferOff();
 
-void TestLogBufferEnvDisabled();
+void TestLogBufferEnvEnabled();
 
 void TestLogBufferOffAtHighLevel();

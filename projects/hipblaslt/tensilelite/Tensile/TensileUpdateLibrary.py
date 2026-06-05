@@ -25,8 +25,11 @@
 from . import LibraryIO
 from .Tensile import addCommonArguments, argUpdatedGlobalParameters
 
-from .Common import assignGlobalParameters, print1, restoreDefaultGlobalParameters, HR, \
-                    globalParameters, architectureMap, ensurePath, ParallelMap, __version__
+from .Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters, globalParameters, __version__
+from .Common.Utilities import print1, ensurePath
+from .Common.Constants import HR
+from .Common.Architectures import architectureMap
+from .Common.Parallel import ParallelMap
 
 import argparse
 import copy
@@ -44,6 +47,8 @@ def UpdateLogic(filename, logicPath, outputPath):
     # problem type object to state
     problemTypeState = problemType.state
     problemTypeState["DataType"] = problemTypeState["DataType"].value
+    problemTypeState["MacDataTypeA"] = problemTypeState["MacDataTypeA"].value
+    problemTypeState["MacDataTypeB"] = problemTypeState["MacDataTypeB"].value
     problemTypeState["DataTypeA"] = problemTypeState["DataTypeA"].value
     problemTypeState["DataTypeB"] = problemTypeState["DataTypeB"].value
     problemTypeState["DataTypeE"] = problemTypeState["DataTypeE"].value
@@ -64,6 +69,10 @@ def UpdateLogic(filename, logicPath, outputPath):
         solutionState["ProblemType"] = solutionState["ProblemType"].state
         solutionState["ProblemType"]["DataType"] = \
                 solutionState["ProblemType"]["DataType"].value
+        solutionState["ProblemType"]["MacDataTypeA"] = \
+                solutionState["ProblemType"]["MacDataTypeA"].value
+        solutionState["ProblemType"]["MacDataTypeB"] = \
+                solutionState["ProblemType"]["MacDataTypeB"].value
         solutionState["ProblemType"]["DataTypeA"] = \
                 solutionState["ProblemType"]["DataTypeA"].value
         solutionState["ProblemType"]["DataTypeB"] = \

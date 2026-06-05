@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,10 @@
 #pragma once
 
 #include <cmath>
+
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -391,7 +395,7 @@ namespace TensileLite
 
                 // and nearest K
                 double K = p1.size() > 3 ? p1[3] : p1[2];
-                distance = abs(K - gridK);
+                distance = std::abs(K - gridK);
 
                 return distance;
             }
@@ -410,3 +414,5 @@ namespace TensileLite
 
     } // namespace Matching
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

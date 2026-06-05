@@ -4,40 +4,38 @@
 
 .. _windows-install:
 
-*********************************************
-Installing and building for Microsoft Windows
-*********************************************
+*****************************************
+Install and build for hipBLAS for Windows
+*****************************************
+
+To build hipBLAS as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build hipBLAS standalone using the following
+instructions.
 
 This topic covers how to install hipBLAS on Microsoft Windows from a package and how to build and install it from the source code.
 For a list of installation prerequisites, see :doc:`hipBLAS prerequisites <prerequisites>`.
 
-Installing prebuilt packages
-=============================
+Prerequisites for Microsoft Windows
+===================================
 
-hipBLAS can be installed on Windows using the :doc:`AMD HIP SDK installer <rocm-install-on-windows:index>`.
-For version support information, see the :doc:`System requirements for Windows <rocm-install-on-windows:reference/system-requirements>`.
+*  Here are the prerequisites required to use the rocBLAS backend with AMD components:
 
-The simplest way to use hipBLAS in your code is to use CMake. To install hipBLAS on Windows, follow these steps:
+   * A ROCm-enabled platform. For more information, see :ref:`ROCm Core SDK components <rocm:release-components>`.
+   * A compatible version of `hipblas-common <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas-common>`_.
+   * A compatible version of :doc:`rocBLAS <rocblas:index>`.
+   * For full functionality, a compatible version of :doc:`rocSOLVER <rocsolver:index>` and its dependencies.
+   * hipBLAS is supported on the same Windows versions and toolchains that HIP SDK supports.
 
-#. Add the SDK installation location to ``CMAKE_PREFIX_PATH`` in the CMake configuration command:
-
-   ::
-
-      -DCMAKE_PREFIX_PATH="C:\hipSDK"
-
-
-#. Add the following lines to ``CMakeLists.txt``:
-
-   ::
-
-      find_package(hipblas)
-      target_link_libraries( your_exe PRIVATE roc::hipblas )
+* hipBLAS does not support the cuBLAS backend on Windows.
 
 Building and installing hipBLAS
 ===============================
 
-Most users do not need to build hipBLAS from source because it can be used after installing the prebuilt packages as described above.
-If necessary, users can follow these instructions to build hipBLAS from source.
+Follow these instructions to build hipBLAS from source.
 
 Download the hipBLAS source code
 --------------------------------

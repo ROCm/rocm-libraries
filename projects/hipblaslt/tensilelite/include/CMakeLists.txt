@@ -23,6 +23,7 @@ target_sources(tensilelite-host
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Predicates.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Properties.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/SolutionLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionValidation.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/AMDGPU.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/AMDGPUPredicates.hpp"

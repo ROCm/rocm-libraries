@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,6 +64,9 @@ enum class ABC_dims
     C
 };
 
+void set_host_side_fill_kernel_state(bool enable);
+bool host_side_fill_kernel();
+
 void hipblaslt_init_device(ABC_dims                 ABC_dims,
                            hipblaslt_initialization init,
                            bool                     is_nan,
@@ -73,7 +76,8 @@ void hipblaslt_init_device(ABC_dims                 ABC_dims,
                            size_t                   lda,
                            hipDataType              type,
                            size_t                   stride,
-                           size_t                   batch_count);
+                           size_t                   batch_count,
+                           int norm_dist_one_special_type = -1);
 
 /* ============================================================================================ */
 /*! \brief  matrix/vector initialization: */
@@ -175,6 +179,10 @@ inline void hipblaslt_init(void*       A,
             static_cast<hipblaslt_bf8*>(A), M, N, lda, stride, batch_count);
         break;
 #endif
+    case HIP_R_8F_UE8M0:
+        hipblaslt_init<hipblaslt_e8>(
+            static_cast<hipblaslt_e8*>(A), M, N, lda, stride, batch_count);
+        break;
     case HIP_R_32I:
         hipblaslt_init<int32_t>(static_cast<int32_t*>(A), M, N, lda, stride, batch_count);
         break;
@@ -182,13 +190,13 @@ inline void hipblaslt_init(void*       A,
         hipblaslt_init<hipblasLtInt8>(
             static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count);
         break;
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         hipblaslt_cerr << "hipblaslt_init not supports FP6" << std::endl;
         break;
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         hipblaslt_cerr << "hipblaslt_init not supports BF6" << std::endl;
         break;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         hipblaslt_cerr << "hipblaslt_init not supports FP4" << std::endl;
         break;
     default:
@@ -327,13 +335,13 @@ inline void hipblaslt_init_sin(void*       A,
         hipblaslt_init_sin<hipblasLtInt8>(
             static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count);
         break;
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         hipblaslt_cerr << "hipblaslt_init_sin not supports FP6" << std::endl;
         break;
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         hipblaslt_cerr << "hipblaslt_init_sin not supports BF6" << std::endl;
         break;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         hipblaslt_cerr << "hipblaslt_init_sin not supports FP4" << std::endl;
         break;
     default:
@@ -344,11 +352,8 @@ inline void hipblaslt_init_sin(void*       A,
 
 // Initialize matrix so adjacent entries have alternating sign.
 // In gemm if either A or B are initialized with alternating
-// sign the reduction sum will be summing positive
-// and negative numbers, so it should not get too large.
-// This helps reduce floating point inaccuracies for 16bit
-// arithmetic where the exponent has only 5 bits, and the
-// mantissa 10 bits.
+// Checkerboard ± so first element of each row and column alternates; keeps
+// reduction sums from growing too large (helps 16bit with 5-bit exponent).
 template <typename T>
 inline void hipblaslt_init_alternating_sign(
     T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
@@ -428,13 +433,13 @@ inline void hipblaslt_init_alternating_sign(void*       A,
         hipblaslt_init_alternating_sign<hipblasLtInt8>(
             static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count);
         break;
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         hipblaslt_cerr << "hipblaslt_init_alternating_sign not supports FP6" << std::endl;
         break;
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         hipblaslt_cerr << "hipblaslt_init_alternating_sign not supports BF6" << std::endl;
         break;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         hipblaslt_cerr << "hipblaslt_init_alternating_sign not supports FP4" << std::endl;
         break;
     default:
@@ -523,13 +528,13 @@ inline void hipblaslt_init_hpl_alternating_sign(void*       A,
         hipblaslt_init_hpl_alternating_sign<hipblasLtInt8>(
             static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count);
         break;
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         hipblaslt_cerr << "hipblaslt_init_hpl_alternating_sign not supports FP6" << std::endl;
         break;
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         hipblaslt_cerr << "hipblaslt_init_hpl_alternating_sign not supports BF6" << std::endl;
         break;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         hipblaslt_cerr << "hipblaslt_init_hpl_alternating_sign not supports FP4" << std::endl;
         break;
     default:
@@ -612,13 +617,13 @@ inline void hipblaslt_init_cos(void*       A,
         hipblaslt_init_cos<hipblasLtInt8>(
             static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count);
         break;
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         hipblaslt_cerr << "hipblaslt_init_cos not supports FP6" << std::endl;
         break;
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         hipblaslt_cerr << "hipblaslt_init_cos not supports BF6" << std::endl;
         break;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         hipblaslt_cerr << "hipblaslt_init_cos not supports FP4" << std::endl;
         break;
     default:
@@ -707,17 +712,98 @@ inline void hipblaslt_init_hpl(void*       A,
         hipblaslt_init_hpl<hipblasLtInt8>(
             static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count);
         break;
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         hipblaslt_cerr << "hipblaslt_init_hpl not supports FP6" << std::endl;
         break;
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         hipblaslt_cerr << "hipblaslt_init_hpl not supports BF6" << std::endl;
         break;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         hipblaslt_cerr << "hipblaslt_init_hpl not supports FP4" << std::endl;
         break;
     default:
         hipblaslt_cerr << "Error type in hipblaslt_init_hpl" << std::endl;
+        break;
+    }
+}
+
+// Initialize vector with uniform random values in [-6, 6]
+template <typename T>
+inline void hipblaslt_init_low_precision(
+    std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
+{
+    for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
+        for(size_t i = 0; i < M; ++i)
+            for(size_t j = 0; j < N; ++j)
+                A[i + j * lda + i_batch * stride] = random_low_precision_generator<T>();
+}
+
+template <typename T>
+inline void hipblaslt_init_low_precision(
+    T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
+{
+    for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
+        for(size_t i = 0; i < M; ++i)
+            for(size_t j = 0; j < N; ++j)
+                A[i + j * lda + i_batch * stride] = random_low_precision_generator<T>();
+}
+
+inline void hipblaslt_init_low_precision(void*       A,
+                                         size_t      M,
+                                         size_t      N,
+                                         size_t      lda,
+                                         hipDataType type,
+                                         size_t      stride      = 0,
+                                         size_t      batch_count = 1)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+        hipblaslt_init_low_precision<float>(
+            static_cast<float*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_64F:
+        hipblaslt_init_low_precision<double>(
+            static_cast<double*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_16F:
+        hipblaslt_init_low_precision<hipblasLtHalf>(
+            static_cast<hipblasLtHalf*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_16BF:
+        hipblaslt_init_low_precision<hip_bfloat16>(
+            static_cast<hip_bfloat16*>(A), M, N, lda, stride, batch_count);
+        break;
+#if HIP_FP8_TYPE_FNUZ
+    case HIP_R_8F_E4M3_FNUZ:
+        hipblaslt_init_low_precision<hipblaslt_f8_fnuz>(
+            static_cast<hipblaslt_f8_fnuz*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_8F_E5M2_FNUZ:
+        hipblaslt_init_low_precision<hipblaslt_bf8_fnuz>(
+            static_cast<hipblaslt_bf8_fnuz*>(A), M, N, lda, stride, batch_count);
+        break;
+#endif
+#if HIP_FP8_TYPE_OCP
+    case HIP_R_8F_E4M3:
+        hipblaslt_init_low_precision<hipblaslt_f8>(
+            static_cast<hipblaslt_f8*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_8F_E5M2:
+        hipblaslt_init_low_precision<hipblaslt_bf8>(
+            static_cast<hipblaslt_bf8*>(A), M, N, lda, stride, batch_count);
+        break;
+#endif
+    case HIP_R_32I:
+        hipblaslt_init_low_precision<int32_t>(
+            static_cast<int32_t*>(A), M, N, lda, stride, batch_count);
+        break;
+    case HIP_R_8I:
+        hipblaslt_init_low_precision<hipblasLtInt8>(
+            static_cast<hipblasLtInt8*>(A), M, N, lda, stride, batch_count);
+        break;
+    default:
+        hipblaslt_cerr << "Error type in hipblaslt_init_low_precision" << std::endl;
         break;
     }
 }
@@ -783,13 +869,13 @@ inline void hipblaslt_init_nan(void* A, size_t N, hipDataType type)
     case HIP_R_8I:
         hipblaslt_init_nan<hipblasLtInt8>(static_cast<hipblasLtInt8*>(A), N);
         break;
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         hipblaslt_cerr << "hipblaslt_init_nan not supports FP6" << std::endl;
         break;
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         hipblaslt_cerr << "hipblaslt_init_nan not supports BF6" << std::endl;
         break;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         hipblaslt_cerr << "hipblaslt_init_nan not supports FP4" << std::endl;
         break;
     default:
@@ -846,13 +932,13 @@ inline void hipblaslt_init_nan(void* A, size_t start_offset, size_t end_offset, 
     case HIP_R_8I:
         hipblaslt_init_nan<hipblasLtInt8>(static_cast<hipblasLtInt8*>(A), start_offset, end_offset);
         break;
-    case HIP_R_6F_E2M3_EXT:
+    case HIP_R_6F_E2M3:
         hipblaslt_cerr << "hipblaslt_init_nan not supports FP6" << std::endl;
         break;
-    case HIP_R_6F_E3M2_EXT:
+    case HIP_R_6F_E3M2:
         hipblaslt_cerr << "hipblaslt_init_nan not supports BF6" << std::endl;
         break;
-    case HIP_R_4F_E2M1_EXT:
+    case HIP_R_4F_E2M1:
         hipblaslt_cerr << "hipblaslt_init_nan not supports FP4" << std::endl;
         break;
     default:

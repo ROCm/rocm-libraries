@@ -891,11 +891,14 @@ std::string TensorDescriptor::ToString() const
     std::string result;
     if(this->lens.empty())
         return result;
+
     for(auto i : this->lens)
     {
         result += std::to_string(i) + ", ";
     }
-    return result.substr(0, result.length() - 2);
+    result = result.substr(0, result.length() - 2);
+
+    return result;
 }
 
 std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t)
@@ -1555,11 +1558,11 @@ std::string GetCastTensorBuildOptionFromType(const std::string& buildOption, mio
     std::string option(buildOption);
     switch(type)
     {
-    case miopenInt8: return option += "0";
-    case miopenInt32: return option += "1";
-    case miopenHalf: return option += "2";
-    case miopenFloat: return option += "3";
-    case miopenBFloat16: return option += "4";
+    case miopenInt8: return option += '0';
+    case miopenInt32: return option += '1';
+    case miopenHalf: return option += '2';
+    case miopenFloat: return option += '3';
+    case miopenBFloat16: return option += '4';
     case miopenFloat8_fnuz:
         MIOPEN_THROW(miopenStatusBadParm,
                      "miopenFloat8_fnuz data type not supported in cast tensor.");

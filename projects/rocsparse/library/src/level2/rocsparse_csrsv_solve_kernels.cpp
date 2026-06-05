@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,6 +64,7 @@ namespace rocsparse
                       const J* __restrict__ map,
                       int offset,
                       J* __restrict__ zero_pivot,
+                      int64_t              zero_pivot_stride,
                       rocsparse_index_base idx_base,
                       rocsparse_fill_mode  fill_mode,
                       rocsparse_diag_type  diag_type,
@@ -84,7 +85,8 @@ namespace rocsparse
                                                            done_array + batch_index * m,
                                                            map,
                                                            offset,
-                                                           zero_pivot + batch_index,
+                                                           zero_pivot
+                                                               + batch_index * zero_pivot_stride,
                                                            idx_base,
                                                            fill_mode,
                                                            diag_type);
@@ -111,6 +113,7 @@ namespace rocsparse
                                                 const void* __restrict__ map,
                                                 int64_t offset,
                                                 void* __restrict__ zero_pivot,
+                                                int64_t              zero_pivot_stride,
                                                 rocsparse_index_base idx_base,
                                                 rocsparse_fill_mode  fill_mode,
                                                 rocsparse_diag_type  diag_type,
@@ -143,6 +146,7 @@ namespace rocsparse
             reinterpret_cast<const J* __restrict__>(map),
             0,
             reinterpret_cast<J* __restrict__>(zero_pivot),
+            zero_pivot_stride,
             idx_base,
             fill_mode,
             diag_type,
@@ -164,7 +168,8 @@ namespace rocsparse
                                                 const void* __restrict__ map,
                                                 int64_t offset,
                                                 void* __restrict__ zero_pivot,
-                                                bool is_host_mode)
+                                                int64_t zero_pivot_stride,
+                                                bool    is_host_mode)
     {
         auto          alpha = reinterpret_cast<const T*>(alpha_);
         dim3          csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, batch_count);
@@ -179,21 +184,22 @@ namespace rocsparse
             static_cast<J>(m),
             ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
             alpha_stride,
-            reinterpret_cast<const I* __restrict__>(A->const_row_data),
-            reinterpret_cast<const J* __restrict__>(A->const_col_data),
-            reinterpret_cast<const T* __restrict__>(A->const_val_data),
+            A->const_row_data,
+            A->const_col_data,
+            A->const_val_data,
             csr_val_inc,
             A->batch_stride,
-            reinterpret_cast<const T* __restrict__>(x->const_values),
+            x->const_values,
             x->inc,
             x->batch_stride,
-            reinterpret_cast<T* __restrict__>(y->values),
+            y->values,
             y->inc,
             y->batch_stride,
             done_array,
-            reinterpret_cast<const J* __restrict__>(map),
+            map,
             0,
-            reinterpret_cast<J* __restrict__>(zero_pivot),
+            zero_pivot,
+            zero_pivot_stride,
             A->descr->base,
             A->descr->fill_mode,
             A->descr->diag_type,

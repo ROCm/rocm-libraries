@@ -180,20 +180,14 @@ rocblas_sbmv_kernel(rocblas_int    n,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto beta  = load_scalar(beta_device_host, batch, stride_beta);
         if(!alpha && beta == 1)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const auto* A = cond_load_ptr_batch(alpha, Aa, batch, shifta, stride_A);
@@ -202,10 +196,7 @@ rocblas_sbmv_kernel(rocblas_int    n,
         auto* y = load_ptr_batch(ya, batch, shifty, stride_y);
 
         rocblas_sbmv_kernel_calc<UPPER, DIM_X, DIM_Y>(n, k, alpha, A, lda, x, incx, beta, y, incy);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename T, typename TScal, typename TConstPtr, typename TPtr>

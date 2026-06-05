@@ -59,11 +59,11 @@ MIOPEN_INTERNALS_EXPORT std::vector<char> LoadBinary(const TargetProperties& tar
                                                      const fs::path& name,
                                                      const std::string& args);
 
-void SaveBinary(const std::vector<char>& hsaco,
-                const TargetProperties& target,
-                std::size_t num_cu,
-                const fs::path& name,
-                const std::string& args);
+MIOPEN_INTERNALS_EXPORT void SaveBinary(const std::vector<char>& hsaco,
+                                        const TargetProperties& target,
+                                        std::size_t num_cu,
+                                        const fs::path& name,
+                                        const std::string& args);
 #endif
 
 #ifdef MIOPEN_BUILD_TESTING

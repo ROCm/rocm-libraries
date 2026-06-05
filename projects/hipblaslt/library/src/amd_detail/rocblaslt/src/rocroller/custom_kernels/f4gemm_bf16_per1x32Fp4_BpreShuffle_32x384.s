@@ -10,11 +10,11 @@
 
 // ===== Kernel Code =====
 .text
-.globl _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384E
+.globl f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384
 .p2align 8
-.type _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384E,@function
+.type f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384,@function
 
-_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384E:
+f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384:
 	
 	s_and_b32 s1, s1, 0xffff                                   
 	s_load_dwordx2 s[4:5], s[0:1], 0x0                         
@@ -1267,7 +1267,7 @@ label_0909:
 // ===== Kernel Descriptor (generates .rodata) =====
 .rodata
 .p2align 6
-.amdhsa_kernel _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384E
+.amdhsa_kernel f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384
   .amdhsa_next_free_vgpr 512
   .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
   .amdhsa_group_segment_fixed_size 163840
@@ -1714,14 +1714,14 @@ amdhsa.kernels:
     .kernarg_segment_align: 4
     .kernarg_segment_size: 384
     .max_flat_workgroup_size: 256
-    .name:           _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384E
+    .name:           f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384
     .private_segment_fixed_size: 0
     .reqd_workgroup_size:
       - 256
       - 1
       - 1
     .sgpr_count:     96
-    .symbol:         _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384E.kd
+    .symbol:         f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384.kd
     .vgpr_count:     512
     .wavefront_size: 64
 amdhsa.version:

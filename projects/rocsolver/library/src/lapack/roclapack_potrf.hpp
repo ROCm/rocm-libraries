@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -70,6 +70,29 @@ ROCSOLVER_KERNEL void chk_positive(INFO* iinfo, INFO* info, I j, I batch_count)
         info[id] = iinfo[id] + j;
 }
 
+/******************* Host functions for potrf **********************/
+/*******************************************************************/
+
+// Method to determine configuration for potrf block size depending on n
+// TODO: fine tuning may be required
+template <typename T, typename I>
+I potrf_get_block_size(const I n)
+{
+    if constexpr(sizeof(T) == 4)
+    {
+        return 256;
+    }
+    else if constexpr(sizeof(T) == 8)
+    {
+        if(n <= 6400)
+            return 128;
+        else
+            return 256;
+    }
+
+    return POTF2_MAX_SMALL_SIZE(T);
+}
+
 template <bool BATCHED, bool STRIDED, typename T, typename I>
 void rocsolver_potrf_getMemorySize(const I n,
                                    const rocblas_fill uplo,
@@ -97,7 +120,7 @@ void rocsolver_potrf_getMemorySize(const I n,
         return;
     }
 
-    I nb = POTRF_BLOCKSIZE(T);
+    I nb = potrf_get_block_size<T>(n);
     if(n <= POTRF_POTF2_SWITCHSIZE(T))
     {
         // requirements for calling a single POTF2
@@ -184,7 +207,7 @@ rocblas_status rocsolver_potrf_template(rocblas_handle handle,
 
     // if the matrix is small, use the unblocked (BLAS-levelII) variant of the
     // algorithm
-    I nb = POTRF_BLOCKSIZE(T);
+    I nb = potrf_get_block_size<T>(n);
     if(n <= POTRF_POTF2_SWITCHSIZE(T))
         return rocsolver_potf2_template<T>(handle, uplo, n, A, shiftA, lda, strideA, info,
                                            batch_count, scalars, (T*)work1, pivots);
