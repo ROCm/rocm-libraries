@@ -798,7 +798,8 @@ namespace TensileLite
                 // The kernel extracts the bit at preLoop, then masks bit 31
                 // off in place so the SK4 alias 'SKTiles' reads a clean count.
 
-                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+                AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
+                hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
                 assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
                 // ---- Shared (mode-independent) ----
@@ -807,13 +808,69 @@ namespace TensileLite
                     = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
 
                 // ---- Decide active mode FIRST, so we only do the work that
-                // matches the mode being packed (and only push 6 args). ----
+                // matches the mode being packed (and only push 6 args).
+                // Tri-state mode (OFF/ON/AUTO) lives on the problem; the
+                // debug env override (TENSILE_STREAMK5_FORCE_MODE) trumps
+                // everything when set to 0 or 1. ----
                 int sk5DebugMode = Debug::Instance().streamK5ForceMode();
-                bool effectiveDyn = (sk.dynPersistentTileMode != 0);
+                bool effectiveDyn;
                 if(sk5DebugMode == 0)
+                {
                     effectiveDyn = false;
+                }
                 else if(sk5DebugMode == 1)
+                {
                     effectiveDyn = true;
+                }
+                else
+                {
+                    const int requestedMode = sk.dynPersistentTileMode;
+                    switch(requestedMode)
+                    {
+                    case 0:
+                        effectiveDyn = false;
+                        break;
+                    case 1:
+                        effectiveDyn = true;
+                        break;
+                    case 2:
+                    {
+                        size_t x = 1, y = 1, z = 1, batchSz = 1;
+                        for(size_t i = 0; i < problem.freeIndicesA().size(); ++i)
+                            x *= problem.freeSizeA(i);
+                        for(size_t i = 0; i < problem.freeIndicesB().size(); ++i)
+                            y *= problem.freeSizeB(i);
+                        for(size_t i = 0; i < problem.boundIndices().size(); ++i)
+                            z *= problem.boundSize(i);
+                        for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+                            batchSz *= problem.batchSize(i);
+
+                        origami::problem_t origami_problem = {
+                            .size  = {x, y, z},
+                            .batch = batchSz,
+                        };
+                        origami::config_t origami_config = {
+                            .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                   static_cast<size_t>(sizeMapping.macroTile.y),
+                                   static_cast<size_t>(sizeMapping.depthU)},
+                        };
+
+                        TENSILE_ASSERT_EXC(hipAMDGPU != nullptr
+                                           && hipAMDGPU->analyticalHardware != nullptr);
+                        const auto autoMode = origami::streamk::select_hybrid_mode(
+                            origami_problem,
+                            *(hipAMDGPU->analyticalHardware),
+                            origami_config,
+                            static_cast<size_t>(
+                                problem.getParams().smCountTarget()));
+                        effectiveDyn = (autoMode == origami::hybrid_mode_t::dynamic);
+                        break;
+                    }
+                    default:
+                        effectiveDyn = false;
+                        break;
+                    }
+                }
 
                 if(effectiveDyn)
                 {

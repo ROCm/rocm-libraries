@@ -502,20 +502,51 @@ TEST(aux_handle_test, get_sm_count_target_rejects_null_handle)
     ASSERT_EQ(hipblasLtGetSmCountTarget(nullptr, &value), HIPBLAS_STATUS_NOT_INITIALIZED);
 }
 
-TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_default_is_disabled)
+TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_mode_default_is_off)
 {
     hipblaslt_ext::GemmPreference pref;
-    ASSERT_FALSE(pref.getDynPersistentTileEnabled());
+    ASSERT_EQ(pref.getDynPersistentTileMode(), HIPBLASLT_DYN_PERSISTENT_TILE_OFF);
 }
 
-TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_round_trip)
+TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_mode_round_trip)
 {
     hipblaslt_ext::GemmPreference pref;
-    pref.setDynPersistentTileEnabled(true);
-    ASSERT_TRUE(pref.getDynPersistentTileEnabled());
 
-    pref.setDynPersistentTileEnabled(false);
-    ASSERT_FALSE(pref.getDynPersistentTileEnabled());
+    pref.setDynPersistentTileMode(HIPBLASLT_DYN_PERSISTENT_TILE_ON);
+    ASSERT_EQ(pref.getDynPersistentTileMode(), HIPBLASLT_DYN_PERSISTENT_TILE_ON);
+
+    pref.setDynPersistentTileMode(HIPBLASLT_DYN_PERSISTENT_TILE_AUTO);
+    ASSERT_EQ(pref.getDynPersistentTileMode(), HIPBLASLT_DYN_PERSISTENT_TILE_AUTO);
+
+    pref.setDynPersistentTileMode(HIPBLASLT_DYN_PERSISTENT_TILE_OFF);
+    ASSERT_EQ(pref.getDynPersistentTileMode(), HIPBLASLT_DYN_PERSISTENT_TILE_OFF);
+}
+
+TEST(aux_attr_test, desc_dyn_persistent_tile_ext_set_rejects_out_of_range)
+{
+    hipblasLtMatmulDesc_t desc = nullptr;
+    ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
+              HIPBLAS_STATUS_SUCCESS);
+
+    for(int32_t valid : {int32_t{0}, int32_t{1}, int32_t{2}})
+    {
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
+                                                  HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                  &valid,
+                                                  sizeof(valid)),
+                  HIPBLAS_STATUS_SUCCESS);
+    }
+
+    for(int32_t bad : {int32_t{-1}, int32_t{3}, int32_t{100}})
+    {
+        ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
+                                                  HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                  &bad,
+                                                  sizeof(bad)),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
 }
 
 // Standalone gtests that pin coverage of the invalid-buffer-size branches in

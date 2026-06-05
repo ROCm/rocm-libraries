@@ -21,11 +21,22 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   is co-running on the device or when a persistent grid should be sized
   for a known CU budget. (This is a hint, not a CU reservation.)
 * `HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT` extension attribute
-  (`int32_t` boolean, default `0`) and matching C++ ext methods
-  `hipblaslt_ext::GemmPreference::setDynPersistentTileEnabled()` /
-  `getDynPersistentTileEnabled()`. Opts the matmul in to the hipBLASLt
-  dynamic persistent tile (work-stealing StreamK) scheduler. Exposed
-  via the `ext` API (no analogue in the base cuBLAS / cuBLASLt API).
+  (`int32_t`, default `0`) now accepts the tri-state values from the
+  new `hipblasLtDynPersistentTileMode_t` enum:
+  `HIPBLASLT_DYN_PERSISTENT_TILE_OFF` (0, library default),
+  `HIPBLASLT_DYN_PERSISTENT_TILE_ON` (1, request the dynamic persistent
+  tile path), and `HIPBLASLT_DYN_PERSISTENT_TILE_AUTO` (2, delegate to a
+  calibrated origami heuristic per launch). Values outside `{0,1,2}` are
+  rejected with `HIPBLAS_STATUS_INVALID_VALUE` (previously any non-zero
+  value was silently clamped to 1). The matching C++ ext API on
+  `hipblaslt_ext::GemmPreference` is renamed from
+  `setDynPersistentTileEnabled(bool)` / `getDynPersistentTileEnabled()`
+  to `setDynPersistentTileMode(hipblasLtDynPersistentTileMode_t)` /
+  `getDynPersistentTileMode()` — the bool surface cannot express AUTO.
+  The previous bool API landed in the same release and has no known
+  in-tree callers, so the CHANGELOG flags this as a deliberate rename
+  rather than carrying a misleading bool wrapper. The ext setter is now
+  actually consumed on dispatch (previously a dead channel).
 * `hipblaslt-bench` `--sm_count_target` and `--dyn_persistent_tile` CLI
   options that forward the values into the matmul descriptor before
   launch.

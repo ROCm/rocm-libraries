@@ -232,3 +232,72 @@ class TestStreamK5SixArgCollapse:
             "expected SAndB32(MagicShiftItersPerTile, 0x7FFFFFFF) right "
             "after the mode-bit extraction in _emitModeExtraction"
         )
+
+
+_CONTRACTION_PROBLEM_HPP = (_TENSILELITE_ROOT / "include" / "Tensile"
+                            / "ContractionProblem.hpp")
+_CONTRACTION_SOLUTION_HPP = (_TENSILELITE_ROOT / "include" / "Tensile"
+                             / "ContractionSolution.hpp")
+_CONTRACTION_SOLUTION_CPP = (_TENSILELITE_ROOT / "src"
+                             / "ContractionSolution.cpp")
+
+
+class TestStreamK5HybridAutoMode:
+    def test_contraction_problem_param_setter_renamed_to_mode(self):
+        src = _read(_CONTRACTION_PROBLEM_HPP)
+        assert "setDynPersistentTileMode" in src, (
+            "ContractionProblem.hpp must expose setDynPersistentTileMode(int)"
+        )
+        assert "dynPersistentTileMode()" in src, (
+            "ContractionProblem.hpp must expose dynPersistentTileMode() getter"
+        )
+
+    def test_contraction_problem_legacy_bool_api_removed(self):
+        src = _read(_CONTRACTION_PROBLEM_HPP)
+        assert not re.search(
+            r'\bvoid\s+setDynPersistentTile\s*\(\s*bool\b', src), \
+            "legacy setDynPersistentTile(bool) must be removed"
+        assert not re.search(
+            r'\bbool\s+dynPersistentTile\s*\(\s*\)', src), \
+            "legacy bool dynPersistentTile() getter must be removed"
+
+    def test_contraction_problem_has_sm_count_target_accessor(self):
+        src = _read(_CONTRACTION_PROBLEM_HPP)
+        assert "setSmCountTarget" in src
+        assert "smCountTarget()" in src
+
+    def test_streamk_settings_uses_int_mode(self):
+        src = _read(_CONTRACTION_SOLUTION_HPP)
+        assert re.search(
+            r'dynPersistentTileMode\s*=\s*0', src), \
+            "StreamKSettings::dynPersistentTileMode default 0 not found"
+        assert "smCountTarget" in src
+
+    def test_contraction_solve_dispatches_auto_via_origami(self):
+        src = _read(_CONTRACTION_SOLUTION_CPP)
+        assert "origami::streamk::select_hybrid_mode(" in src, \
+            "SK5 AUTO branch must call origami::streamk::select_hybrid_mode"
+        assert re.search(
+            r'sk\.dynPersistentTileMode\s*=\s*problem\.getParams\(\)\.dynPersistentTileMode\(\)',
+            src), \
+            "sk.dynPersistentTileMode must be sourced from getParams().dynPersistentTileMode()"
+        assert re.search(
+            r'sk\.smCountTarget\s*=\s*problem\.getParams\(\)\.smCountTarget\(\)',
+            src), \
+            "sk.smCountTarget must be sourced from getParams().smCountTarget()"
+
+
+class TestStreamK5SixArgCollapseNoRegression:
+    def test_signature_still_emits_six_sk_args(self):
+        src = _read(_SIGNATURE_PY)
+        m = re.search(
+            r'elif kernel\["StreamK"\] == 5:([\s\S]*?)(?=^\s*elif |^\s*if )',
+            src, re.MULTILINE)
+        assert m, "SK5 elif block not found in Signature.py"
+        block = m.group(1)
+        sk_names = re.findall(r'signature\.addArg\("([^"]+)"', block)
+        assert len(sk_names) == 6, (
+            f"SK5 must still emit exactly 6 SK args; got {len(sk_names)}: {sk_names}"
+        )
+        assert "gemmArgumentSize += 24" in block
+        assert "gemmArgumentSize += 44" not in block
