@@ -31,16 +31,11 @@ if is_windows:
 try:
     import rocm_sdk
 
-    core_shortnames = ["hipdnn"]
-    if is_windows:
-        core_shortnames = [
-            "amd_comgr",
-            "amdhip64",
-            "hiprtc",
-            "hipdnn",
-            "hipblaslt",
-            "miopen",
-        ]
+    core_shortnames = (
+        ["amd_comgr", "amdhip64", "hiprtc", "hipdnn", "hipblaslt", "miopen"]
+        if is_windows
+        else ["hipdnn"]
+    )
 
     rocm_sdk.initialize_process(preload_shortnames=core_shortnames)
 except ImportError:
