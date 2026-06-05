@@ -363,6 +363,31 @@ class TestStridedTensorStorage:
         np.testing.assert_array_equal(storage[0:3], host[0])
         np.testing.assert_array_equal(storage[4:7], host[1])
 
+    def test_get_output_data_returns_contiguous_dense_array(self) -> None:
+        tensor = TensorInfo(
+            uid=15,
+            name="padded_output",
+            dims=[2, 3],
+            strides=[4, 1],
+            data_type="float",
+            is_virtual=False,
+            is_output=True,
+        )
+        storage = np.array([1.0, 2.0, 3.0, -99.0, 4.0, 5.0, 6.0], dtype=np.float32)
+        mock_buffer = MagicMock()
+        mock_buffer.copy_to_host.return_value = storage.tobytes()
+        buffer_manager = BufferManager([tensor])
+        buffer_manager._buffers[tensor.uid] = mock_buffer
+
+        output = buffer_manager.get_output_data(tensor.uid)
+
+        assert output is not None
+        assert output.flags.c_contiguous
+        np.testing.assert_array_equal(
+            output,
+            np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32),
+        )
+
     def test_bfloat16_strided_storage_roundtrips_with_padding(self) -> None:
         tensor = TensorInfo(
             uid=14,
@@ -490,4 +515,26 @@ class TestGraphScopedInputData:
         np.testing.assert_array_equal(storage[4:7], input_data[tensor.uid][1])
         np.testing.assert_array_equal(
             buffer_manager.get_input_data(tensor.uid), input_data[tensor.uid]
+        )
+
+
+class TestPyTorchHostNumpy:
+    """PyTorch reference output extraction returns dense host arrays."""
+
+    def test_host_numpy_returns_contiguous_array_for_strided_tensor(self) -> None:
+        torch = pytest.importorskip("torch")
+        from dnn_benchmarking.execution.pytorch_buffer_manager import (
+            PyTorchCudaBufferManager,
+        )
+
+        tensor = torch.empty_strided((2, 3), (4, 1), dtype=torch.float32)
+        tensor[0] = torch.tensor([1.0, 2.0, 3.0])
+        tensor[1] = torch.tensor([4.0, 5.0, 6.0])
+
+        output = PyTorchCudaBufferManager._host_numpy(tensor)
+
+        assert output.flags.c_contiguous
+        np.testing.assert_array_equal(
+            output,
+            np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32),
         )

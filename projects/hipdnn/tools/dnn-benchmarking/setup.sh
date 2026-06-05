@@ -159,7 +159,9 @@ if needs_install "$HIPDNN_CONFIG"; then
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
         -DHIPDNN_SKIP_TESTS=ON \
-        -DHIPDNN_ENABLE_SDPA=ON
+        -DHIPDNN_ENABLE_SDPA=ON \
+        -DENABLE_CLANG_FORMAT=OFF \
+        -DENABLE_CLANG_TIDY=OFF
     cmake --build "$BUILD_DIR"
     cmake --install "$BUILD_DIR"
     BUILT_HIPDNN=1
@@ -173,7 +175,9 @@ if [ "$BUILT_HIPDNN" -eq 1 ] || needs_install "$MIOPEN_PLUGIN"; then
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
         -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
-        -DMIOPENPROVIDER_SKIP_TESTS=ON
+        -DMIOPENPROVIDER_SKIP_TESTS=ON \
+        -DENABLE_CLANG_FORMAT=OFF \
+        -DENABLE_CLANG_TIDY=OFF
     cmake --build "$MIOPEN_BUILD_DIR"
     cmake --install "$MIOPEN_BUILD_DIR"
 fi
@@ -187,6 +191,7 @@ if [ "$BUILT_HIPDNN" -eq 1 ] || needs_install "$HIPBLASLT_PLUGIN"; then
         -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
         -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
         -DHIPDNN_SKIP_TESTS=ON \
+        -DENABLE_CLANG_FORMAT=OFF \
         -DENABLE_CLANG_TIDY=OFF
     cmake --build "$HIPBLASLT_BUILD_DIR"
     cmake --install "$HIPBLASLT_BUILD_DIR"

@@ -1047,7 +1047,34 @@ class TestCheckCorrectnessOutputCount:
 
         assert result.tolerance_match is False
         assert result.rtol == pytest.approx(1e-2)
-        assert result.atol == pytest.approx(1e-2)
+        assert result.atol == pytest.approx(1e-3)
+
+    def test_small_bf16_output_difference_exceeds_absolute_floor(self):
+        bm = MagicMock()
+        bm.get_output_data.return_value = np.zeros((1,), dtype=np.float32)
+
+        ref_outputs = {
+            7: ReferenceOutput(
+                data=np.array([5e-3], dtype=np.float32),
+                tensor_uid=7,
+            )
+        }
+
+        result = _check_correctness(
+            buffer_manager=bm,
+            tensor_infos=[
+                _make_tensor_info(7, is_output=True, data_type="bfloat16"),
+            ],
+            graph_json={
+                "nodes": [{"type": "PointwiseAttributes", "outputs": {"y": 7}}]
+            },
+            ref_outputs=ref_outputs,
+            reference_provider_name="pytorch",
+            config=SuiteConfig(reference_provider="pytorch"),
+        )
+
+        assert result.tolerance_match is False
+        assert result.atol == pytest.approx(1e-3)
 
     def test_single_explicit_tolerance_overrides_both_values(self):
         bm = MagicMock()

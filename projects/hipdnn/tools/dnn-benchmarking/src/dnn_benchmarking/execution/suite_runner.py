@@ -45,7 +45,7 @@ from ..validation.validator import Validator
 
 
 _BFLOAT16_RTOL = 1e-2
-_BFLOAT16_ATOL = 1e-2
+_BFLOAT16_ATOL = 1e-3
 _HALF_RTOL = 1e-3
 _HALF_ATOL = 1e-3
 _DEFAULT_RTOL = 1e-5
@@ -610,6 +610,8 @@ def run_graph_all_providers(
             reporter.print_engine_result(timed_reference.result)
         pe_results.append(timed_reference.result)
 
+    # A failed timed CUDA reference row is reported as skipped, but validation can
+    # still use the regular reference provider output computed on the same inputs.
     if ref_provider is not None and reference_outputs is None:
         reference_outputs, reference_error = _compute_reference_outputs_once(
             ref_provider,

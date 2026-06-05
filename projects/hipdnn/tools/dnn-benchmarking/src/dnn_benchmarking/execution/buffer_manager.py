@@ -112,7 +112,7 @@ def _dense_from_storage_bytes(
 ) -> np.ndarray:
     """Decode raw storage bytes into a dense logical ndarray."""
     storage = np.frombuffer(data_bytes, dtype=dtype, count=tensor_info.storage_elements)
-    return np.array(_storage_view(storage, tensor_info), copy=True)
+    return np.ascontiguousarray(_storage_view(storage, tensor_info))
 
 
 def _bfloat16_storage_bytes_to_ndarray(
@@ -127,9 +127,9 @@ def _bfloat16_storage_bytes_to_ndarray(
     storage = np.frombuffer(
         data_bytes, dtype=np.uint16, count=tensor_info.storage_elements
     )
-    logical_bf16 = np.array(_storage_view(storage, tensor_info), copy=True)
+    logical_bf16 = np.ascontiguousarray(_storage_view(storage, tensor_info))
     f32_bits = logical_bf16.astype(np.uint32) << np.uint32(16)
-    return f32_bits.view(np.float32).reshape(tensor_info.dims)
+    return np.ascontiguousarray(f32_bits.view(np.float32).reshape(tensor_info.dims))
 
 
 def _encode_dense_to_storage_bytes(data: np.ndarray, tensor_info: TensorInfo) -> bytes:

@@ -84,8 +84,8 @@ class PyTorchCudaBufferManager:
         """Copy a tensor to numpy using the validation representation."""
         host = tensor.detach().cpu()
         if host.dtype == torch.bfloat16:
-            return host.to(dtype=torch.float32).numpy()
-        return host.numpy()
+            host = host.to(dtype=torch.float32)
+        return host.contiguous().numpy()
 
     def load_input_data(self, input_data: Dict[int, np.ndarray]) -> None:
         """Copy pre-generated graph input data into CUDA tensors.
