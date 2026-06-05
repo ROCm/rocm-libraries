@@ -40,7 +40,7 @@ dvc pull
 dvc pull dnn-providers/integration-tests/golden_reference_data/quick/
 ```
 
-CI runs `dvc pull` automatically. You only need this for local development.
+The Linux CI workflow (`therock-ci-linux.yml`) runs `dvc pull` automatically. Other pipelines (Windows, superbuild) may need it wired in separately — see backlog.
 
 > **Note:** DVC commands must be run from the repo root (`rocm-libraries/`), not from a subdirectory.
 
