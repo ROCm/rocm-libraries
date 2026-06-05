@@ -87,8 +87,9 @@ inline std::string describeNodeVariant(const hipdnn_frontend::graph::INode& node
         //
         // We encode which optional params are *set* (not their values
         // — different values within the same set typically share a
-        // solver). Order is fixed and alphabetical to keep the variant
-        // tag deterministic across runs.
+        // solver). Order is fixed (the order below, NOT alphabetical —
+        // it is part of the frozen op_chain format; see RFC 0013 §5.4)
+        // to keep the variant tag deterministic across runs.
         std::string variant(to_string(pw->attributes.get_mode()));
         std::string flags;
         const auto appendFlag = [&](const char* name) {
@@ -149,7 +150,9 @@ inline std::string describeNodeVariant(const hipdnn_frontend::graph::INode& node
     // but is now computed from the actual graph node attributes so the
     // describer is the single source of truth. Snake_case to match the
     // Pointwise flag convention (lower_clip, upper_clip, ...). Order is
-    // alphabetical for deterministic op_chain strings.
+    // fixed — the dimension order below (1x1, grouped, multi_batch,
+    // non_square, padding, stride, dilation), NOT alphabetical; it is
+    // part of the frozen op_chain format (RFC 0013 §5.4).
     const auto convVariant = [](const std::vector<int64_t>& inputDims,
                                 const std::vector<int64_t>& filterDims,
                                 const std::vector<int64_t>& prePadding,

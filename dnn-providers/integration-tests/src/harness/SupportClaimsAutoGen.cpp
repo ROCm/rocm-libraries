@@ -225,6 +225,14 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
         {
             continue;
         }
+        if(record.supportQueryFailed)
+        {
+            // Support status unknown (the query errored) — keep it out of
+            // both S and U so a query failure can't poison the condensed
+            // matchers or trigger a spurious S∩U conflict. RFC 0013 §6.1
+            // Rule C.
+            continue;
+        }
         DtypeCombo combo;
         combo.io = record.ioDtype;
         combo.output = record.outputDtype; // empty == symmetric
@@ -766,7 +774,7 @@ bool checkShrinkagePrecondition(const std::filesystem::path& sidecarPath,
         observed;
     for(const auto& r : records)
     {
-        if(r.opChain.empty())
+        if(r.opChain.empty() || r.supportQueryFailed)
         {
             continue;
         }

@@ -38,10 +38,11 @@ token. Running on `gfx942` produces the gfx942 block. To populate
 multiple arches, run on each in turn — the tool only touches the block
 for the current arch and platform, leaving the others alone.
 
-The build must be **release** (`-DCMAKE_BUILD_TYPE=Release` or the
-generated `NDEBUG`-defining preset). Debug builds can produce different
-gtest parameter strings, which would make the recorded `op_chain` text
-diverge from what `--enforce-support-claims` sees later.
+A **release** build (`-DCMAKE_BUILD_TYPE=Release` or the generated
+`NDEBUG`-defining preset) is recommended for the full-suite run because
+it is much faster; the tool does not require it. Claims are matched on
+`describeGraph` output (op_chain / dtype / layout), which is independent
+of the build type, so a debug-built run produces an equivalent sidecar.
 
 ## What `--write-support-claims` actually does
 

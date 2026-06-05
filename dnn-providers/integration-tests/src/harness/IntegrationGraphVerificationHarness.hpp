@@ -155,13 +155,18 @@ protected:
                 testName = std::string(testInfo->test_suite_name()) + "." + testInfo->name();
             }
             const auto structured = describeGraphStructured(graph);
+            // status.is_bad() => the support query itself errored; record it
+            // as "status unknown" rather than letting an empty engine set
+            // masquerade as a genuine "no support" (which would mis-fire
+            // Rule A in the verifier). See RFC 0013 §6.1 Rule C.
             SupportMatrixCollector::get().recordGraphSupport(
                 graph.graph_attributes.get_name(),
                 structured,
                 testName,
                 status.is_good() ? engineIds : std::vector<int64_t>{},
                 _testCaseNote,
-                _testCaseLayout);
+                _testCaseLayout,
+                status.is_bad());
         }
 
         if(TestConfig::get().hasEngineName())

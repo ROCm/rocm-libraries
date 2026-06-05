@@ -67,36 +67,34 @@ it never observed a graph.
   inherit from `IntegrationGraphVerificationHarness`. Move it to a
   plain `::testing::Test` so it isn't in the harness registry.
 
-## Rule C — zero-coverage matcher
+## Rule C — support status unknown
 
-**Anchor:** `#rule-c-zero-coverage-matcher`
+**Anchor:** `#rule-c-support-status-unknown`
 
-**What triggered it.** A matcher's `op_chains × io_dtypes × layouts`
-cross-product matched zero observed records.
+**What triggered it.** A test reached `verifyGraph()` and recorded an
+observation, but the engine support query (`get_ranked_engine_ids`)
+returned an *error* status rather than a (possibly empty) ranked list.
+Support is therefore **unknown**, not "unsupported". This is a **note**,
+never a hard failure: the observation is excluded from claim evaluation
+(Rules A/D/E), the condenser keeps it out of both the supported and
+unsupported sets, and `--write-support-claims` ignores it.
 
-- In full CI mode (no `--gtest_filter`, no `GTEST_TOTAL_SHARDS`,
-  `--enforce-support-claims` is in effect): hard **FAIL**.
-- In partial runs (any filter or shard env set): downgraded to a
-  **note** because a missing tuple may simply have been filtered out.
+(A hard crash *before* the record is written is a different symptom — it
+surfaces as Rule B, "issue before the test runs".)
 
 **Likely root causes.**
 
-1. The catalog shrank — an `INSTANTIATE_TEST_SUITE_P` was deleted and
-   the matcher's tuples no longer exist. The matcher is stale.
-2. The matcher's `op_chain` string was hand-edited and now doesn't
-   match `describeGraph`'s actual output (typo, casing).
-3. A `describeGraph` format change shipped without a coordinated
-   sidecar regen (this would be a process failure — RFC 0012 §12).
+1. The engine's `get_ranked_engine_ids` returned a bad status — an
+   internal error in the provider's applicability/ranking path.
+2. A dependency the query needs (handle, device, plugin state) was not
+   initialized, so the query bailed out with an error.
 
 **Remediation steps.**
 
-- Regenerate via `--write-support-claims` on hardware. The condensation
-  pass only emits matchers backed by observed tuples, so a stale
-  matcher will drop out of the new file.
-- If you don't want to regenerate, hand-remove the stale matcher.
-- If the issue is a `describeGraph` format change, the fix is broader:
-  bump `[meta].version`, regenerate every engine's sidecar, ship as
-  one coordinated PR.
+- Treat it as a test/engine bug, not a claims bug: fix the underlying
+  support-query failure first.
+- Re-run; once the query returns a real status, the observation flows
+  back into normal claim evaluation (Rule A if it regresses).
 
 ## Rule D — engine over-claim
 
@@ -163,7 +161,6 @@ session. Each prints `Error: ...` and returns non-zero immediately.
 | `GTEST_TOTAL_SHARDS > 1` or `GTEST_SHARD_INDEX` set | Sharding deferred to v2 (§9). |
 | `--gtest_break_on_failure` set | Aborts before the verifier runs. |
 | `--gtest_repeat > 1` | Duplicate records confuse the verifier. |
-| Debug build (`NDEBUG` not defined) | Param strings may differ from release; auto-gen and verifier must agree byte-for-byte. |
 | `--write-support-claims` with non-trivial `--gtest_filter` | Partial baseline would drop existing valid claims. |
 
 For each refusal, the message names which flag/env to remove. They are

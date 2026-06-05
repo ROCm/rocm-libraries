@@ -251,6 +251,42 @@ TEST(TestSupportClaimsCondenser, RecordsWithEmptyOpChainAreSkipped)
     EXPECT_TRUE(result.matchers.empty());
 }
 
+// -- Support status unknown (RFC 0013 §6.1 Rule C) ----------------------
+//
+// A record whose engine support query (get_ranked_engine_ids) errored
+// carries an empty engine set, but support is *unknown*, not
+// "unsupported". The condenser must drop it from both S and U so a query
+// failure never produces a matcher, never lands in unsupportedObservations,
+// and never collides with a genuine S tuple as a spurious S∩U conflict.
+
+TEST(TestSupportClaimsCondenser, StatusUnknownRecordIsExcludedFromSAndU)
+{
+    GraphSupportRecord unknown = makeRecord("ConvFprop", "fp32", "NCHW", /*engineSupports=*/false);
+    unknown.supportQueryFailed = true;
+    auto result = condenseSupportClaims({unknown}, "TEST_ENGINE");
+    EXPECT_TRUE(result.matchers.empty());
+    // Without the exclusion this record would have landed in U.
+    EXPECT_TRUE(result.unsupportedObservations.empty());
+}
+
+TEST(TestSupportClaimsCondenser, StatusUnknownDoesNotCreateSpuriousConflict)
+{
+    // Same (op, dtype, layout) tuple: one test genuinely supports it, a
+    // second test's support query errored. Without the status-unknown
+    // exclusion the errored record would land in U and collide with S as
+    // a spurious conflict. With it, the supported tuple condenses cleanly.
+    GraphSupportRecord supported
+        = makeRecord("ConvFprop", "fp32", "NCHW", /*engineSupports=*/true, "Suite.Good/0");
+    GraphSupportRecord unknown
+        = makeRecord("ConvFprop", "fp32", "NCHW", /*engineSupports=*/false, "Suite.Errored/1");
+    unknown.supportQueryFailed = true;
+    auto result = condenseSupportClaims({supported, unknown}, "TEST_ENGINE");
+    EXPECT_TRUE(result.conflictingObservations.empty());
+    ASSERT_EQ(result.matchers.size(), 1u);
+    EXPECT_TRUE(matcherEquals(result.matchers[0], {{"ConvFprop"}, {sym("fp32")}, {"NCHW"}}));
+    EXPECT_TRUE(result.unsupportedObservations.empty());
+}
+
 // -- Determinism --------------------------------------------------------
 
 TEST(TestSupportClaimsCondenser, OutputIsDeterministicAcrossInputOrder)

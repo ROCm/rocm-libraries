@@ -146,26 +146,24 @@ SupportClaimFinding buildRuleB(const std::string& testName, const ::testing::Tes
     };
 }
 
-SupportClaimFinding
-    buildRuleC(const SupportMatcher& matcher, const SupportBlock& block, bool fullCiMode)
+SupportClaimFinding buildRuleC(const GraphSupportRecord& record)
 {
-    const auto severity
-        = fullCiMode ? SupportClaimFinding::Severity::FAIL : SupportClaimFinding::Severity::NOTE;
     std::ostringstream body;
-    body << "  ZERO-COVERAGE MATCHER (Rule C, " << (fullCiMode ? "FAIL" : "note — partial run")
-         << "):\n"
-         << "    " << matcher.sourceLocation << "\n"
-         << "      arch=" << block.arch
-         << " platform=" << (block.platform.has_value() ? *block.platform : "any") << "\n"
-         << "      op_chains[0] = \"" << (matcher.opChains.empty() ? "" : matcher.opChains.front())
-         << "\"  (and " << (matcher.opChains.empty() ? 0 : matcher.opChains.size() - 1)
-         << " more) -- 0 observed tests in this matcher's cross-product\n"
-         << "      Action: regenerate with --write-support-claims, or hand-edit to remove "
-            "the stale matcher.\n"
+    body << "  SUPPORT STATUS UNKNOWN (Rule C, note):\n"
+         << "    " << record.testName << "\n"
+         << "      observed: op_chain=\"" << record.opChain << "\"\n"
+         << "                " << "dtype_combo" << "=\"" << formatDtypeForDisplay(record)
+         << "\" layout=\"" << record.layout << "\"\n"
+         << "      the engine's support query (get_ranked_engine_ids) returned an error "
+            "status;\n"
+         << "      support is UNKNOWN, not \"unsupported\". This observation is excluded "
+            "from claim evaluation.\n"
+         << "      Action: fix the support-query failure; until then claims for this graph "
+            "cannot be evaluated.\n"
          << "      See docs/support-claims-failures.md" << support_claim_anchors::RULE_C << "\n";
     return SupportClaimFinding{
-        SupportClaimFinding::Rule::C_ZERO_COVERAGE_MATCHER,
-        severity,
+        SupportClaimFinding::Rule::C_STATUS_UNKNOWN,
+        SupportClaimFinding::Severity::NOTE,
         body.str(),
     };
 }
@@ -270,13 +268,11 @@ SupportClaimsVerifier::SupportClaimsVerifier(const SupportClaims& claims,
                                              std::string engineName,
                                              std::string archToken,
                                              std::string platform,
-                                             bool fullCiMode,
                                              std::string artifactPath)
     : _claims(claims)
     , _engineName(std::move(engineName))
     , _archToken(std::move(archToken))
     , _platform(std::move(platform))
-    , _fullCiMode(fullCiMode)
     , _artifactPath(std::move(artifactPath))
 {
 }
@@ -308,6 +304,16 @@ bool SupportClaimsVerifier::runAndReport()
             // Legacy call site that bypassed describeGraphStructured.
             // Can't evaluate against matchers — skip silently so old
             // tests don't block bring-up.
+            continue;
+        }
+
+        if(record.supportQueryFailed)
+        {
+            // Rule C: the support query itself errored, so support is
+            // unknown — not "unsupported". Surface it as a note and skip
+            // Rule A/D/E for this record so a query failure can't be
+            // misreported as a broken claim or an over-claim.
+            _findings.push_back(buildRuleC(record));
             continue;
         }
 
@@ -399,81 +405,8 @@ bool SupportClaimsVerifier::runAndReport()
         }
     }
 
-    // Rule C: every matcher in the active block should cover ≥1
-    // observation. In full CI runs missing coverage is a hard error;
-    // partial runs downgrade to a note because the missing tuple may
-    // simply have been filtered out.
-    if(block != nullptr)
-    {
-        // Observed 6-tuples: (opChain, io, output, compute, intermediate,
-        // layout). output is normalized to io for symmetric records so
-        // forEachTuple's visitor compares against one canonical form.
-        std::set<
-            std::
-                tuple<std::string, std::string, std::string, std::string, std::string, std::string>>
-            observedTuples;
-        for(const auto& record : records)
-        {
-            if(record.opChain.empty())
-            {
-                continue;
-            }
-            const std::string outDtype
-                = record.outputDtype.empty() ? record.ioDtype : record.outputDtype;
-            observedTuples.emplace(record.opChain,
-                                   record.ioDtype,
-                                   outDtype,
-                                   record.computeDtype,
-                                   record.intermediateDtype,
-                                   record.layout);
-        }
-
-        for(const auto& matcher : block->matchers)
-        {
-            bool covered = false;
-            matcher.forEachTuple([&](const std::string& op,
-                                     const std::string& io,
-                                     const std::string& out,
-                                     const std::string& compute,
-                                     const std::string& intermediate,
-                                     const std::string& layout) {
-                if(observedTuples.find({op, io, out, compute, intermediate, layout})
-                   != observedTuples.end())
-                {
-                    covered = true;
-                    return false;
-                }
-                return true;
-            });
-            if(!covered)
-            {
-                _findings.push_back(buildRuleC(matcher, *block, _fullCiMode));
-            }
-        }
-    }
-
     emitFindings(_findings, _archToken, _platform, _engineName, _artifactPath);
     return countSeverity(_findings, SupportClaimFinding::Severity::FAIL) == 0;
-}
-
-bool detectFullCiMode()
-{
-    // Use the project's cross-platform getEnv (MSVC mode errors on
-    // std::getenv via -Werror -Wdeprecated-declarations). getEnv returns
-    // an empty string for unset env vars, which collapses the
-    // unset-vs-empty distinction we don't care about here.
-    const auto envFilter = hipdnn_data_sdk::utilities::getEnv("GTEST_FILTER");
-    const auto envTotalShards = hipdnn_data_sdk::utilities::getEnv("GTEST_TOTAL_SHARDS");
-    const auto envShardIndex = hipdnn_data_sdk::utilities::getEnv("GTEST_SHARD_INDEX");
-    // gtest also exposes the active filter via the flag once
-    // InitGoogleTest has parsed argv. The default "*" means "all tests"
-    // and is treated as a non-filter.
-    const std::string flagFilter = ::testing::GTEST_FLAG(filter);
-    const bool filterIsTrivial = flagFilter.empty() || flagFilter == "*";
-    const bool envFilterUnset = envFilter.empty();
-    const bool envShardUnset
-        = (envTotalShards.empty() || envTotalShards == "1") && envShardIndex.empty();
-    return filterIsTrivial && envFilterUnset && envShardUnset;
 }
 
 } // namespace hipdnn_integration_tests

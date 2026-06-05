@@ -41,6 +41,14 @@ struct GraphSupportRecord
     std::string outputDtype;
     std::string computeDtype;
     std::string intermediateDtype;
+
+    // True when the engine support query (get_ranked_engine_ids) itself
+    // returned an error status, as opposed to succeeding with an empty
+    // support set. A query error means support is *unknown*, not
+    // "unsupported": the verifier must not treat it as a broken claim
+    // (Rule A), and the condenser must keep it out of both the supported
+    // and unsupported sets. See RFC 0013 §6.1 Rule C.
+    bool supportQueryFailed = false;
 };
 
 // Singleton that collects graph-support information during test execution
@@ -89,7 +97,8 @@ public:
                             const std::string& testName,
                             const std::vector<int64_t>& supportingEngineIds,
                             const std::string& note = {},
-                            const std::string& layout = {})
+                            const std::string& layout = {},
+                            bool supportQueryFailed = false)
     {
         if(!_enabled)
         {
@@ -121,6 +130,7 @@ public:
         record.outputDtype = description.outputDtype;
         record.computeDtype = description.computeDtype;
         record.intermediateDtype = description.intermediateDtype;
+        record.supportQueryFailed = supportQueryFailed;
 
         const std::lock_guard<std::mutex> lock(_mutex);
         _records.push_back(std::move(record));

@@ -363,13 +363,6 @@ int main(int argc, char** argv) noexcept
                 static_cast<void>(hipStreamDestroy(stream));
                 return 1;
             }
-#ifndef NDEBUG
-            std::cerr << "Error: --enforce-support-claims/--write-support-claims require a "
-                         "release build; debug builds produce non-deterministic gtest param "
-                         "strings (RFC 0012 §6.4/§8.3).\n";
-            static_cast<void>(hipStreamDestroy(stream));
-            return 1;
-#endif
             if(writeClaims && ::testing::GTEST_FLAG(filter) != ""
                && ::testing::GTEST_FLAG(filter) != "*")
             {
@@ -446,13 +439,11 @@ int main(int argc, char** argv) noexcept
             }
             else
             {
-                const bool fullCi = hipdnn_integration_tests::detectFullCiMode();
                 hipdnn_integration_tests::SupportClaimsVerifier verifier(
                     cfg.getSupportClaims(),
                     std::string(cfg.getEngineName()),
                     cfg.getCurrentArchToken(),
-                    cfg.getCurrentPlatform(),
-                    fullCi);
+                    cfg.getCurrentPlatform());
                 const bool clean = verifier.runAndReport();
                 claimsExit = clean ? 0 : 1;
             }
