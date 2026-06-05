@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdInferencePlan.hpp"
+#include "BatchnormHipKernelCompileOptions.hpp"
 #include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
-#include "hip/HipKernelCompileOptions.hpp"
 
 #include "hip/IKernelCompiler.hpp"
 
@@ -212,13 +212,6 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
         zgridsize = 1;
     }
 
-    // Detect GPU architecture
-    const std::string archName(deviceProperties.gcnArchName);
-    const bool isGfx103x = (archName.find("gfx103") == 0);
-    const bool isGfx110x = (archName.find("gfx110") == 0);
-    const bool isGfx120x = (archName.find("gfx120") == 0);
-    const bool isGfx115x = (archName.find("gfx115") == 0);
-
     // Get activation mode
     auto activationMode = hip_kernel_utils::ActivationMode::PASTHRU;
 
@@ -228,17 +221,14 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     // Prepare compilation options
-    HipKernelCompileOptions options(_inferenceParams.x(), deviceProperties, activationMode);
-    options.add("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
-    options.add("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
-    options.add("HIP_PLUGIN_BN_GRP0", xlocalsize);
-    options.add("HIP_PLUGIN_BN_GRP1", ylocalsize);
-    options.add("HIP_PLUGIN_BN_GRP2", zlocalsize);
-    options.add("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
-    options.add("HIP_PLUGIN_BN_GFX103X", isGfx103x);
-    options.add("HIP_PLUGIN_BN_GFX110X", isGfx110x);
-    options.add("HIP_PLUGIN_BN_GFX120X", isGfx120x);
-    options.add("HIP_PLUGIN_BN_GFX115X", isGfx115x);
+    BatchnormHipKernelCompileOptions options(
+        _inferenceParams.x(), deviceProperties, activationMode);
+    options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
+    options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
+    options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
+    options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
+    options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
+    options.update("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", options);
