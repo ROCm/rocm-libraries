@@ -199,12 +199,13 @@ globalParameters["DataInitTypeMXSB"] = 1
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # StreamK=5 hybrid-mode toggle values driven by the benchmark client.
 # Each list entry causes ClientProblemFactory to replay every base
-# problem with setParams().setDynPersistentTile(value != 0); the SK5
-# kernel then runs the static path (0) or the dynamic per-XCD
-# work-queue path (1). Set to [0, 1] in YAML GlobalParameters to
-# exercise both code paths of an SK5 kernel in a single run. Ignored
-# at the host for non-SK5 solutions. Default keeps behavior unchanged
-# for existing tests.
+# problem with setParams().setDynPersistentTileMode(value); the SK5
+# kernel then runs the static path (0=OFF), the dynamic per-XCD
+# work-queue path (1=ON), or delegates to the origami heuristic
+# (2=AUTO). Set to [0, 1] (or [0, 1, 2]) in YAML GlobalParameters
+# to exercise the SK5 paths in a single run. Ignored at the host
+# for non-SK5 solutions. Default keeps behavior unchanged for
+# existing tests.
 globalParameters["StreamKHybridMode"] = [0]
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.

@@ -36,7 +36,8 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   The previous bool API landed in the same release and has no known
   in-tree callers, so the CHANGELOG flags this as a deliberate rename
   rather than carrying a misleading bool wrapper. The ext setter is now
-  actually consumed on dispatch (previously a dead channel).
+  actually consumed on dispatch (previously a dead channel). See
+  `clients/bench/README.md` for the `--dyn_persistent_tile` CLI mapping.
 * `hipblaslt-bench` `--sm_count_target` and `--dyn_persistent_tile` CLI
   options that forward the values into the matmul descriptor before
   launch.
