@@ -26,7 +26,6 @@ numfig = False
 external_projects_current_project = "rocsolver"
 
 doxygen_root = "doxygen"
-doxysphinx_enabled = True
 doxygen_project = {
     "name": "doxygen",
     "path": "doxygen/xml",
