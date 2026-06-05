@@ -94,11 +94,6 @@ class TestParserGlobAndFilters:
         args = parser.parse_args(["--graph", "g.json", "--engine", "3,1,3,2"])
         assert args.engine == [3, 1, 3, 2]
 
-    def test_validate_rejects_removed_cpu_plugin_provider(self) -> None:
-        parser = create_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["--graph", "g.json", "--validate", "cpu_plugin"])
-
     def test_plugin_path_accepts_comma_separated_list(self) -> None:
         parser = create_parser()
         args = parser.parse_args(

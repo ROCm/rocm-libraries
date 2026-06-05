@@ -25,11 +25,13 @@ Run the provided setup script from the `dnn-benchmarking` directory:
 
 ```bash
 bash setup.sh
-source /workspace/.venv/bin/activate
+source .workspace/.venv/bin/activate
 ```
 
-Use `--workspace <path>` to place the virtual environment, Python bytecode
-cache, and runtime benchmark caches somewhere other than `/workspace`:
+By default, setup uses `/workspace` when it already exists and is writable;
+otherwise it uses `.workspace` under the `dnn-benchmarking` directory. Use
+`--workspace <path>` to place the virtual environment, Python bytecode cache,
+and runtime benchmark caches somewhere else:
 
 ```bash
 bash setup.sh --workspace /tmp/dnn-bench
@@ -38,7 +40,7 @@ source /tmp/dnn-bench/.venv/bin/activate
 
 The default `--torch-mode rocm` flow assumes no system ROCm installation:
 1. Creates a virtual environment under the selected workspace (`--workspace`,
-   `$DNN_BENCH_WORKSPACE`, or `/workspace`)
+   `$DNN_BENCH_WORKSPACE`, writable `/workspace`, or local `.workspace`)
 2. Detects the GPU architecture and installs the matching ROCm PyTorch nightly wheel
 3. Discovers hipDNN from the torch wheel's bundled ROCm SDK libraries
 4. Builds the local MIOpen provider if `libmiopen_plugin.so` is absent, using

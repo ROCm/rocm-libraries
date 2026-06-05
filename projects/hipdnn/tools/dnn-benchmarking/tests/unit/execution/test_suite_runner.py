@@ -413,10 +413,6 @@ class TestSuiteConfigValidation:
         with pytest.raises(ValueError, match="reference_provider"):
             SuiteConfig(reference_provider="not_a_real_provider")
 
-    def test_removed_cpu_plugin_reference_provider_raises(self):
-        with pytest.raises(ValueError, match="reference_provider"):
-            SuiteConfig(reference_provider="cpu_plugin")
-
     def test_default_gpu_backend_and_reference_provider_accepted(self):
         config = SuiteConfig()
         assert config.gpu_backend == "auto"

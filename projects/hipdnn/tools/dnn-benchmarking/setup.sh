@@ -5,9 +5,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HIPDNN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "$HIPDNN_ROOT/../.." && pwd)"
 
+DEFAULT_DNN_BENCH_WORKSPACE="$SCRIPT_DIR/.workspace"
+if [ -d /workspace ] && [ -w /workspace ]; then
+    DEFAULT_DNN_BENCH_WORKSPACE="/workspace"
+fi
+
 BUILD_DIR="$HIPDNN_ROOT/build"
 DEFAULT_ROCM_PREFIX="/opt/rocm"
-DNN_BENCH_WORKSPACE="${DNN_BENCH_WORKSPACE:-/workspace}"
+DNN_BENCH_WORKSPACE="${DNN_BENCH_WORKSPACE:-$DEFAULT_DNN_BENCH_WORKSPACE}"
 VENV_DIR="$DNN_BENCH_WORKSPACE/.venv"
 MIOPEN_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/miopen-provider"
 MIOPEN_BUILD_DIR="$MIOPEN_PROVIDER_DIR/build"
@@ -26,11 +31,10 @@ usage() {
     echo ""
     echo "  --torch-mode <rocm|cpu|existing|none>"
     echo "                       Select how torch is provided. Default: $TORCH_MODE"
-    echo "                         rocm: install ROCm torch nightly, use hipDNN"
-    echo "                               from the torch wheel's bundled ROCm SDK"
-    echo "                               libraries, and install SDK devel only if"
-    echo "                               needed to build the provider. Does not"
-    echo "                               require a system ROCm install."
+    echo "                         rocm: install ROCm torch nightly, use ROCm"
+    echo "                               libraries/toolchain from the torch wheel's"
+    echo "                               bundled ROCm SDK packages, and build local"
+    echo "                               hipDNN/provider artifacts when absent."
     echo "                         cpu:  install CPU-only torch and build bindings"
     echo "                               against installed ROCm/hipDNN."
     echo "                         existing:"
@@ -165,13 +169,17 @@ for root in roots:
         if kind == "libraries":
             if not child.name.startswith("_rocm_sdk_libraries_"):
                 continue
-            if not (
-                child.joinpath("lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake").is_file()
-                and child.joinpath("lib/cmake/hipdnn_backend/hipdnn_backendConfig.cmake").is_file()
-            ):
+            lib_dir = child.joinpath("lib")
+            if not lib_dir.is_dir() or not any(lib_dir.glob("libMIOpen.so*")):
                 continue
         elif kind == "devel":
             if not child.name.startswith("_rocm_sdk_devel"):
+                continue
+            if not (
+                child.joinpath("lib/llvm/bin/clang").is_file()
+                and child.joinpath("lib/llvm/bin/clang++").is_file()
+                and child.joinpath("lib/cmake/hip/hip-config.cmake").is_file()
+            ):
                 continue
             if not (
                 child.joinpath("lib/llvm/bin/clang").is_file()
@@ -204,19 +212,33 @@ discover_rocm_wheel_devel_prefix() {
     find_rocm_wheel_prefix devel
 }
 
+expand_rocm_sdk_devel() {
+    python - <<'PY'
+import importlib.util
+import subprocess
+import sys
+
+if importlib.util.find_spec("rocm_sdk_devel") is None:
+    sys.exit(1)
+
+subprocess.run([sys.executable, "-m", "rocm_sdk", "init"], check=True)
+PY
+}
+
 require_rocm_wheel_libraries_prefix() {
     local prefix status
     if prefix=$(discover_rocm_wheel_libraries_prefix); then
         echo "$prefix"
         return
+    else
+        status=$?
     fi
-    status=$?
     if [ "$status" -ne 1 ]; then
         exit 1
     fi
-    echo "ERROR: no hipDNN CMake configs found in venv ROCm SDK library wheels." >&2
-    echo "Expected exactly one _rocm_sdk_libraries_* package with hipDNN frontend/backend configs." >&2
-    echo "Use a ROCm torch wheel that includes hipDNN, pass --rocm-prefix explicitly, or pass --force-build." >&2
+    echo "ERROR: no usable ROCm SDK libraries package found in this venv." >&2
+    echo "Expected exactly one _rocm_sdk_libraries_* package containing MIOpen libraries." >&2
+    echo "Use a ROCm torch wheel that includes ROCm SDK libraries, pass --rocm-prefix explicitly, or pass --force-build." >&2
     exit 1
 }
 
@@ -226,31 +248,51 @@ ensure_rocm_wheel_devel_prefix() {
     if prefix=$(discover_rocm_wheel_devel_prefix); then
         echo "$prefix"
         return
+    else
+        status=$?
     fi
-    status=$?
     if [ "$status" -ne 1 ]; then
         exit 1
     fi
+
+    if expand_rocm_sdk_devel >&2; then
+        if prefix=$(discover_rocm_wheel_devel_prefix); then
+            echo "$prefix"
+            return
+        else
+            status=$?
+        fi
+        if [ "$status" -ne 1 ]; then
+            exit 1
+        fi
+    fi
+
     if [ -z "$index_url" ]; then
-        echo "ERROR: no ROCm SDK devel wheel found in this venv." >&2
-        echo "Expected exactly one _rocm_sdk_devel package with lib/llvm/bin/clang++." >&2
+        echo "ERROR: no ROCm SDK compiler/toolchain prefix found in this venv." >&2
+        echo "Expected exactly one _rocm_sdk_devel package with lib/llvm/bin/clang++ and hip CMake configs." >&2
         echo "Install rocm-sdk-devel from the same ROCm torch index, or pass --rocm-prefix." >&2
         exit 1
     fi
 
-    echo "ROCm SDK devel wheel not found; installing rocm-sdk-devel from $index_url..." >&2
+    echo "ROCm SDK compiler/toolchain prefix not found; installing rocm-sdk-devel from $index_url..." >&2
     pip install --pre rocm-sdk-devel --index-url "$index_url" >&2
+
+    if ! expand_rocm_sdk_devel >&2; then
+        echo "ERROR: rocm-sdk-devel installed, but its devel payload could not be expanded." >&2
+        exit 1
+    fi
 
     if prefix=$(discover_rocm_wheel_devel_prefix); then
         echo "$prefix"
         return
+    else
+        status=$?
     fi
-    status=$?
     if [ "$status" -ne 1 ]; then
         exit 1
     fi
-    echo "ERROR: rocm-sdk-devel installed, but no usable _rocm_sdk_devel prefix was found." >&2
-    echo "Expected lib/llvm/bin/clang and lib/llvm/bin/clang++ under _rocm_sdk_devel." >&2
+    echo "ERROR: rocm-sdk-devel installed, but no usable ROCm SDK compiler/toolchain prefix was found." >&2
+    echo "Expected lib/llvm/bin/clang, lib/llvm/bin/clang++, and hip CMake configs under _rocm_sdk_devel." >&2
     exit 1
 }
 
@@ -433,14 +475,63 @@ maybe_install_amdsmi() {
     fi
 }
 
+cmake_is_new_enough() {
+    python - <<'PY'
+import re
+import subprocess
+import sys
+
+try:
+    proc = subprocess.run(
+        ["cmake", "--version"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+except FileNotFoundError:
+    sys.exit(1)
+
+match = re.search(r"cmake version (\d+)\.(\d+)\.(\d+)", proc.stdout)
+if not match:
+    sys.exit(1)
+
+version = tuple(int(part) for part in match.groups())
+sys.exit(0 if version >= (3, 25, 2) else 1)
+PY
+}
+
+ensure_cmake() {
+    if cmake_is_new_enough; then
+        return
+    fi
+
+    echo "Installing CMake >= 3.25.2 into the virtual environment..."
+    pip install "cmake>=3.25.2"
+}
+
 build_hipdnn() {
-    local prefix
-    prefix=$(resolve_installed_rocm_prefix)
-    echo "Building and installing hipDNN to $prefix..."
+    local install_prefix="$1"
+    local toolchain_prefix="$2"
+    local cmake_prefix_path="$install_prefix"
+    local cmake_program_path="$toolchain_prefix/bin;$toolchain_prefix/lib/llvm/bin"
+
+    if [ "$toolchain_prefix" != "$install_prefix" ]; then
+        cmake_prefix_path="$install_prefix;$toolchain_prefix"
+    fi
+
+    echo "Building and installing hipDNN to $install_prefix..."
+    echo "Using ROCm compiler/devel prefix: $toolchain_prefix"
+    rm -rf "$BUILD_DIR"
     cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="$prefix" \
-        -DHIPDNN_SKIP_TESTS=ON
+        -DCMAKE_INSTALL_PREFIX="$install_prefix" \
+        -DCMAKE_PREFIX_PATH="$cmake_prefix_path" \
+        -DCMAKE_PROGRAM_PATH="$cmake_program_path" \
+        -DROCM_PATH="$toolchain_prefix" \
+        -DHIPDNN_SKIP_TESTS=ON \
+        -DHIPDNN_SKIP_JSON_LIB=ON \
+        -DENABLE_CLANG_FORMAT=OFF \
+        -DENABLE_CLANG_TIDY=OFF
     cmake --build "$BUILD_DIR"
     cmake --install "$BUILD_DIR"
 }
@@ -468,7 +559,9 @@ build_miopen_provider() {
         -DCMAKE_PREFIX_PATH="$cmake_prefix_path" \
         -DCMAKE_PROGRAM_PATH="$cmake_program_path" \
         -DROCM_PATH="$toolchain_prefix" \
-        -DMIOPENPROVIDER_SKIP_TESTS=ON
+        -DMIOPENPROVIDER_SKIP_TESTS=ON \
+        -DENABLE_CLANG_FORMAT=OFF \
+        -DENABLE_CLANG_TIDY=OFF
     cmake --build "$MIOPEN_BUILD_DIR"
     cmake --install "$MIOPEN_BUILD_DIR"
     echo ""
@@ -530,21 +623,30 @@ echo "Torch mode: $TORCH_MODE"
 # intentionally omits torch so pip never replaces the selected torch wheel.
 install_torch
 pip install -e "$SCRIPT_DIR"
+ensure_cmake
 
 # 3. Select the hipDNN/ROCm prefix used by Python bindings and provider builds.
 BINDING_PREFIX=$(select_binding_prefix)
 echo "Using hipDNN/ROCm prefix: $BINDING_PREFIX"
 
+PROVIDER_TOOLCHAIN_PREFIX=""
+if [ "$FORCE_BUILD" -eq 1 ] || ! prefix_has_hipdnn "$BINDING_PREFIX"; then
+    PROVIDER_TOOLCHAIN_PREFIX=$(select_provider_toolchain_prefix)
+fi
+
 if [ "$FORCE_BUILD" -eq 1 ]; then
-    build_hipdnn
-    BINDING_PREFIX=$(resolve_installed_rocm_prefix)
+    build_hipdnn "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
 elif ! prefix_has_hipdnn "$BINDING_PREFIX"; then
-    echo "ERROR: hipDNN CMake configs were not found under $BINDING_PREFIX." >&2
-    echo "Expected:" >&2
-    echo "  $(hipdnn_config_path "$BINDING_PREFIX")" >&2
-    echo "  $(hipdnn_backend_config_path "$BINDING_PREFIX")" >&2
-    echo "Install ROCm/hipDNN artifacts there, use --rocm-prefix, or pass --force-build." >&2
-    exit 1
+    if [ "$TORCH_MODE" = "rocm" ] || { [ "$TORCH_MODE" = "existing" ] && torch_is_rocm_wheel; }; then
+        build_hipdnn "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+    else
+        echo "ERROR: hipDNN CMake configs were not found under $BINDING_PREFIX." >&2
+        echo "Expected:" >&2
+        echo "  $(hipdnn_config_path "$BINDING_PREFIX")" >&2
+        echo "  $(hipdnn_backend_config_path "$BINDING_PREFIX")" >&2
+        echo "Install ROCm/hipDNN artifacts there, use --rocm-prefix, or pass --force-build." >&2
+        exit 1
+    fi
 fi
 
 # 4. Install amdsmi Python bindings if present in the selected ROCm install.
@@ -559,14 +661,24 @@ maybe_install_amdsmi "$BINDING_PREFIX"
 PLUGIN_DIR="$BINDING_PREFIX/lib/hipdnn_plugins/engines"
 MIOPEN_PLUGIN="$PLUGIN_DIR/libmiopen_plugin.so"
 if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$MIOPEN_PLUGIN" ]; then
-    PROVIDER_TOOLCHAIN_PREFIX=$(select_provider_toolchain_prefix)
+    if [ -z "$PROVIDER_TOOLCHAIN_PREFIX" ]; then
+        PROVIDER_TOOLCHAIN_PREFIX=$(select_provider_toolchain_prefix)
+    fi
     build_miopen_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
 fi
 
 # 6. Install hipDNN Python bindings.
 # Wipe any stale cmake build cache (can reference deleted pip temp envs).
+if [ -z "$PROVIDER_TOOLCHAIN_PREFIX" ]; then
+    PROVIDER_TOOLCHAIN_PREFIX=$(select_provider_toolchain_prefix)
+fi
+PY_BINDING_CMAKE_PREFIX_PATH="$BINDING_PREFIX"
+if [ "$PROVIDER_TOOLCHAIN_PREFIX" != "$BINDING_PREFIX" ]; then
+    PY_BINDING_CMAKE_PREFIX_PATH="$BINDING_PREFIX;$PROVIDER_TOOLCHAIN_PREFIX"
+fi
 rm -rf "$HIPDNN_ROOT/python/build"
-CMAKE_PREFIX_PATH="$BINDING_PREFIX" \
+ROCM_PATH="$PROVIDER_TOOLCHAIN_PREFIX" \
+    CMAKE_PREFIX_PATH="$PY_BINDING_CMAKE_PREFIX_PATH" \
     pip install -e "$HIPDNN_ROOT/python"
 
 # 7. Patch the ROCm PyTorch wheel's bundled libhipdnn_backend.so when the user
