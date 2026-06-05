@@ -36,13 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - language: python
-            build-mode: none
-          - language: actions
-            build-mode: none
-          - language: c-cpp
-            build-mode: none
+        language: [python, actions]
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
