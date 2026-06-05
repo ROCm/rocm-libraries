@@ -599,9 +599,9 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
     // Compute the per-buffer data length, split in dimension splitdim.  If the data isn't perfectly
     // divisible, then any remainder is distributed between lower-index devices.
     auto devdatabatchlength = [](const size_t               splitdim,
-                             const size_t               ngpus,
-                             const std::vector<size_t>& hostdatabatchlengths,
-                             const size_t               igpu) -> std::vector<size_t> {
+                                 const size_t               ngpus,
+                                 const std::vector<size_t>& hostdatabatchlengths,
+                                 const size_t               igpu) -> std::vector<size_t> {
         std::vector<size_t> databatchlengths = hostdatabatchlengths;
         const auto          l                = databatchlengths[splitdim];
         databatchlengths[splitdim]           = l / ngpus + ((igpu < l % ngpus) ? 1 : 0);
@@ -727,9 +727,8 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
         }
         else
         {
-            brick_distances
-                = default_distances(dft_type, placement, fft_io_in, brick_datalengths,
-                                    brick_batches);
+            brick_distances = default_distances(
+                dft_type, placement, fft_io_in, brick_datalengths, brick_batches);
             brick_strides = default_strides(dft_type, placement, fft_io_in, brick_datalengths);
         }
 
@@ -825,15 +824,11 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
                     const auto bufidx = devidx(splitdim, ngpus, hostidx, hostdatabatchlengths);
 
                     std::stringstream idxstrs;
-                    idxstrs << hostidx[0] << " "
-                            << hostidx[1] << " "
-                            << hostidx[2] << " "
-                            << hostidx[3] << " -> "
-                            << bufidx.second[0] << " "
-                            << bufidx.second[1] << " "
-                            << bufidx.second[2] << " "
-                            << bufidx.second[3]
-                            << " in buffer " << bufidx.first << " " << "\t";
+                    idxstrs << hostidx[0] << " " << hostidx[1] << " " << hostidx[2] << " "
+                            << hostidx[3] << " -> " << bufidx.second[0] << " " << bufidx.second[1]
+                            << " " << bufidx.second[2] << " " << bufidx.second[3] << " in buffer "
+                            << bufidx.first << " "
+                            << "\t";
 
                     const size_t hostoffset = std::inner_product(
                         std::begin(hostidx), std::end(hostidx), std::begin(hostdiststrides), 0);
