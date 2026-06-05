@@ -22,7 +22,7 @@ RMSnormPlanBuilder::RMSnormPlanBuilder(const IKernelCompiler& kernelCompiler,
 }
 
 bool RMSnormPlanBuilder::isApplicable(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     auto anyNodeIsNotF32Compute = [&]() {
@@ -79,9 +79,9 @@ bool RMSnormPlanBuilder::isApplicable(
 }
 
 size_t RMSnormPlanBuilder::getMaxWorkspaceSize(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const HipKernelSettings& executionSettings) const
+    [[maybe_unused]] const Settings& executionSettings) const
 {
     // RMS norm plan builder does not require workspace size
     return 0u;
@@ -91,12 +91,12 @@ namespace
 {
 
 void buildPlanFwdSingleNode(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
-    HipKernelContext& executionContext)
+    Context& executionContext)
 {
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes>();
@@ -110,20 +110,20 @@ void buildPlanFwdSingleNode(
 } // namespace
 
 void RMSnormPlanBuilder::initializeExecutionSettings(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
-    [[maybe_unused]] HipKernelSettings& executionSettings) const
+    [[maybe_unused]] Settings& executionSettings) const
 {
 }
 
 void RMSnormPlanBuilder::buildPlan(
-    const HipKernelHandle& handle,
+    const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
-    HipKernelContext& executionContext) const
+    Context& executionContext) const
 {
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
@@ -134,7 +134,7 @@ void RMSnormPlanBuilder::buildPlan(
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> RMSnormPlanBuilder::getCustomKnobs(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};

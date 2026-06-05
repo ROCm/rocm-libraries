@@ -5,10 +5,10 @@
 
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
-#include "HipKernelHandle.hpp"
-#include "HipKernelSettings.hpp"
 #include "SdpaBwdParams.hpp"
 #include "SdpaKernelUtils.hpp"
+#include "core/Handle.hpp"
+#include "core/Settings.hpp"
 
 #include <optional>
 
@@ -22,7 +22,7 @@ namespace asm_sdpa_engine
  *   - A32 (3-kernel path): ODO → DQDKDV → DQ_CONVERT
  *   - A16 (2-kernel path): ODO → DQDKDV (dQ written directly in BF16)
  */
-class SdpaBwdPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
+class SdpaBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
 public:
     /// A32 constructor: requires all 3 kernels (ODO, DQDKDV, DQ_CONVERT).
@@ -41,9 +41,9 @@ public:
     SdpaBwdPlan(SdpaBwdPlan&&) noexcept = default;
     SdpaBwdPlan& operator=(SdpaBwdPlan&&) noexcept = default;
 
-    size_t getWorkspaceSize(const HipKernelHandle& handle) const override;
+    size_t getWorkspaceSize(const Handle& handle) const override;
 
-    void execute(const HipKernelHandle& handle,
+    void execute(const Handle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;

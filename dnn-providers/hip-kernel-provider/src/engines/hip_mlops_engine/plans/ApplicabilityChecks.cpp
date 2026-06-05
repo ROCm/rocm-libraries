@@ -6,7 +6,9 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "ApplicabilityChecks.hpp"
-#include "HipKernelUtils.hpp"
+#include "core/Utils.hpp"
+
+using namespace hip_kernel_provider::core::utils;
 
 namespace hip_kernel_provider
 {
@@ -155,14 +157,14 @@ void IValidator::validateConsistentDataTypes(
         return;
     }
 
-    const auto& firstTensor = hip_kernel_utils::findTensorAttributes(_tensorMap, tensorIds[0]);
+    const auto& firstTensor = findTensorAttributes(_tensorMap, tensorIds[0]);
     const auto referenceType = firstTensor.data_type();
 
     validateDataTypeIsSupported(referenceType, allowedTypes, typeErrorMessage);
 
     for(size_t i = 1; i < tensorIds.size(); ++i)
     {
-        const auto& tensor = hip_kernel_utils::findTensorAttributes(_tensorMap, tensorIds[i]);
+        const auto& tensor = findTensorAttributes(_tensorMap, tensorIds[i]);
         if(tensor.data_type() != referenceType)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -177,7 +179,7 @@ void IValidator::validateFixedDataType(const std::vector<int64_t>& tensorIds,
 {
     for(const auto tensorId : tensorIds)
     {
-        const auto& tensor = hip_kernel_utils::findTensorAttributes(_tensorMap, tensorId);
+        const auto& tensor = findTensorAttributes(_tensorMap, tensorId);
         if(tensor.data_type() != expectedType)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -192,7 +194,7 @@ void IValidator::validateConsistentShapes(const std::vector<int64_t>& tensorIds,
 {
     for(const auto tensorId : tensorIds)
     {
-        const auto& tensorAttr = hip_kernel_utils::findTensorAttributes(_tensorMap, tensorId);
+        const auto& tensorAttr = findTensorAttributes(_tensorMap, tensorId);
         const std::vector<int64_t> dims(tensorAttr.dims()->begin(), tensorAttr.dims()->end());
         if(dims != referenceShape)
         {
