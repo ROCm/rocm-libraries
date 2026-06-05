@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -88,7 +88,8 @@ rocsparselt_status rocsparselt_destroy(const rocsparselt_handle* handle)
         return rocsparselt_status_success;
     }
 
-    auto _handle = reinterpret_cast<_rocsparselt_handle*>(const_cast<rocsparselt_handle*>(handle));
+    auto _handle = reinterpret_cast<_rocsparselt_handle*>(
+        const_cast<rocsparselt_handle*>(handle));
     if(!check_is_init_handle(_handle))
     {
         hipsparselt_cerr << "handle did not initialized or already destroyed" << std::endl;
@@ -96,16 +97,7 @@ rocsparselt_status rocsparselt_destroy(const rocsparselt_handle* handle)
     }
 
     log_api(_handle, __func__, "handle[in]", _handle);
-    // Destruct
-    try
-    {
-        _handle->destroy();
-    }
-    catch(const rocsparselt_status& status)
-    {
-        hipsparselt_cerr << "rocsparselt_destroy status=" << status << std::endl;
-        return status;
-    }
+    _handle->destroy();
     return rocsparselt_status_success;
 }
 
@@ -1118,7 +1110,7 @@ rocsparselt_status
         hipsparselt_cerr << "handle is a NULL pointer" << std::endl;
         return rocsparselt_status_invalid_handle;
     }
-    auto _handle = reinterpret_cast<_rocsparselt_handle*>(const_cast<rocsparselt_handle*>(handle));
+    auto _handle = reinterpret_cast<const _rocsparselt_handle*>(handle);
     if(!check_is_init_handle(_handle))
     {
         hipsparselt_cerr << "handle did not initialized or already destroyed" << std::endl;
@@ -1156,7 +1148,8 @@ rocsparselt_status
             _rocsparselt_matmul_alg_selection tmpAlgSelection(_handle);
 
 #if BUILD_WITH_TENSILE
-            constexpr int requestConfigs = 10; // find top 10 configs.
+            constexpr int requestConfigs =
+                _rocsparselt_matmul_alg_selection::MAX_MATMUL_CONFIGS; // use all available slots
 
             rocsparselt_status status = rocsparselt_status_success;
 
@@ -1259,6 +1252,31 @@ rocsparselt_status
         }
         return rocsparselt_status_success;
     }
+}
+
+/********************************************************************************
+ * \brief destroy algorithm selection descriptor
+ *******************************************************************************/
+rocsparselt_status rocsparselt_matmul_alg_selection_destroy(const rocsparselt_matmul_alg_selection* algSelection)
+{
+    if(algSelection == nullptr)
+    {
+        hipsparselt_cerr << "algSelection is a NULL pointer" << std::endl;
+        return rocsparselt_status_invalid_handle;
+    }
+
+    auto _algSelection = reinterpret_cast<_rocsparselt_matmul_alg_selection*>(
+        const_cast<rocsparselt_matmul_alg_selection*>(algSelection));
+    if(!check_is_init_matmul_alg_selection(_algSelection))
+    {
+        hipsparselt_cerr << "algSelection did not initialized or already destroyed" << std::endl;
+        return rocsparselt_status_invalid_handle;
+    }
+
+    const auto* _log_handle = _algSelection->handle;
+    log_api(_log_handle, __func__, "algSelection[in]", algSelection);
+    _algSelection->clear();
+    return rocsparselt_status_success;
 }
 
 /********************************************************************************

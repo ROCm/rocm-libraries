@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -48,7 +48,7 @@
  */
 typedef struct
 {
-    uint8_t data[11024];
+    uint8_t data[512];
 } rocsparselt_handle;
 
 /*! \ingroup types_module
@@ -62,7 +62,7 @@ typedef struct
  */
 typedef struct
 {
-    uint8_t data[11024];
+    uint8_t data[512];
 } rocsparselt_mat_descr;
 
 /*! \ingroup types_module
@@ -75,7 +75,7 @@ typedef struct
  */
 typedef struct
 {
-    uint8_t data[11024];
+    uint8_t data[512];
 } rocsparselt_matmul_descr;
 
 /*! \ingroup types_module
@@ -86,7 +86,7 @@ typedef struct
  */
 typedef struct
 {
-    uint8_t data[11024];
+    uint8_t data[512];
 } rocsparselt_matmul_alg_selection;
 
 /*! \ingroup types_module
@@ -100,7 +100,7 @@ typedef struct
  */
 typedef struct
 {
-    uint8_t data[11024];
+    uint8_t data[512];
 } rocsparselt_matmul_plan;
 
 // Generic API

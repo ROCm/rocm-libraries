@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -54,8 +54,8 @@ struct _rocsparselt_handle
 
     // device id
     int device;
-    // device properties
-    hipDeviceProp_t properties;
+    // device properties (heap-allocated to keep struct size small)
+    hipDeviceProp_t* properties = nullptr;
     // device wavefront size
     int wavefront_size = 0;
     // asic revision
@@ -81,6 +81,8 @@ struct _rocsparselt_handle
     std::ostream*  log_trace_os  = nullptr;
     std::ostream*  log_bench_os  = nullptr;
 };
+static_assert(sizeof(_rocsparselt_handle) <= sizeof(rocsparselt_handle),
+              "_rocsparselt_handle too large for inline storage in rocsparselt_handle");
 
 /********************************************************************************
  * \brief rocsparse_mat_descr is a structure holding the rocsparselt matrix
@@ -167,6 +169,8 @@ struct _rocsparselt_mat_descr
 
     int64_t c_n = -1;
 };
+static_assert(sizeof(_rocsparselt_mat_descr) <= sizeof(rocsparselt_mat_descr),
+              "_rocsparselt_mat_descr too large for inline storage in rocsparselt_mat_descr");
 
 /********************************************************************************
  * \brief rocsparse_matmul_descr holds the description of the matrix multiplication operation.
@@ -283,6 +287,8 @@ struct _rocsparselt_matmul_descr
 private:
     bool is_reference = true;
 };
+static_assert(sizeof(_rocsparselt_matmul_descr) <= sizeof(rocsparselt_matmul_descr),
+              "_rocsparselt_matmul_descr too large for inline storage in rocsparselt_matmul_descr");
 
 struct __attribute__((packed, aligned(8))) _rocsparselt_matmul_config
 {
@@ -320,6 +326,12 @@ struct _rocsparselt_matmul_alg_selection
     // destructor
     ~_rocsparselt_matmul_alg_selection()
     {
+        clear();
+    }
+
+    void clear()
+    {
+        handle = nullptr;
         is_init = 0;
     };
 
@@ -327,9 +339,16 @@ struct _rocsparselt_matmul_alg_selection
                                     const _rocsparselt_matmul_alg_selection& t);
 
     const _rocsparselt_handle* handle = nullptr;
-    //
 
-    _rocsparselt_matmul_config configs[100];
+    // Maximum number of configs that fit in the 512-byte opaque buffer.
+    // Non-configs fields: handle(8) + alg(4) + config_id(4) + config_max_id(4)
+    //                   + search_iterations(4) + is_init(8) = 32 bytes.
+    // With sizeof(_rocsparselt_matmul_config)=32: (11024-32)/32 = 343 configs.
+    static constexpr int MAX_MATMUL_CONFIGS =
+        static_cast<int>((sizeof(rocsparselt_matmul_alg_selection) - 32)
+                         / sizeof(_rocsparselt_matmul_config));
+
+    _rocsparselt_matmul_config configs[MAX_MATMUL_CONFIGS];
 
     rocsparselt_matmul_alg alg;
     //data of rocsparselt_matmul_alg_attribute
@@ -338,6 +357,8 @@ struct _rocsparselt_matmul_alg_selection
     int       search_iterations = 10;
     uintptr_t is_init           = 0;
 };
+static_assert(sizeof(_rocsparselt_matmul_alg_selection) <= sizeof(rocsparselt_matmul_alg_selection),
+              "_rocsparselt_matmul_alg_selection too large for inline storage");
 
 /********************************************************************************
  * \brief rocsparselt_matmul_plan holds the matrix multiplication execution plan,
@@ -378,6 +399,8 @@ struct _rocsparselt_matmul_plan
     //
     uintptr_t is_init = 0;
 };
+static_assert(sizeof(_rocsparselt_matmul_plan) <= sizeof(rocsparselt_matmul_plan),
+              "_rocsparselt_matmul_plan too large for inline storage");
 
 bool check_is_init_handle(const _rocsparselt_handle* handle);
 bool check_is_init_mat_descr(const _rocsparselt_mat_descr* mat);

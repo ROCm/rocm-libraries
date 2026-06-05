@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -512,6 +512,20 @@ try
                                               (rocsparselt_matmul_alg_selection*)algSelection,
                                               (const rocsparselt_matmul_descr*)matmulDescr,
                                               HIPMatmulAlgToRocSparseLtMatmulAlg(alg)));
+    rocsparselt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipsparselt_status();
+}
+
+hipsparseStatus_t hipsparseLtMatmulAlgSelectionDestroy(const hipsparseLtMatmulAlgSelection_t* algSelection)
+try
+{
+    rocsparselt::Debug::Instance().markerStart("hipsparseLtMatmulAlgSelectionDestroy");
+    auto status = RocSparseLtStatusToHIPStatus(
+        rocsparselt_matmul_alg_selection_destroy((const rocsparselt_matmul_alg_selection*)algSelection));
     rocsparselt::Debug::Instance().markerStop();
     return status;
 }

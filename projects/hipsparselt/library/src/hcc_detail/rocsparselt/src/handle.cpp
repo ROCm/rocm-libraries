@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -92,25 +92,26 @@ void _rocsparselt_handle::init()
     THROW_IF_HIP_ERROR(hipGetDevice(&device));
     log_trace(this, "handle::init", "hipGetDevice");
 
-    THROW_IF_HIP_ERROR(hipGetDeviceProperties(&properties, device));
+    properties = new hipDeviceProp_t;
+    THROW_IF_HIP_ERROR(hipGetDeviceProperties(properties, device));
     log_trace(this, "handle::init", "hipGetDeviceProperties", device);
 
     // Device wavefront size
-    wavefront_size = properties.warpSize;
+    wavefront_size = properties->warpSize;
 
 #if HIP_VERSION >= 307
     // ASIC revision
-    asic_rev = properties.asicRevision;
+    asic_rev = properties->asicRevision;
 #else
     asic_rev = 0;
 #endif
 
 #if HIP_FP8_TYPE_OCP
-    has_fp8_ocp = gpu_arch_match(rocsparselt_internal_get_arch_name(properties), "950")
-                  || gpu_arch_match(rocsparselt_internal_get_arch_name(properties), "1250");
+    has_fp8_ocp = gpu_arch_match(rocsparselt_internal_get_arch_name(*properties), "950")
+                  || gpu_arch_match(rocsparselt_internal_get_arch_name(*properties), "1250");
 #endif
 #if HIP_FP8_TYPE_FNUZ
-    has_fp8_fnuz = gpu_arch_match(rocsparselt_internal_get_arch_name(properties), "942");
+    has_fp8_fnuz = gpu_arch_match(rocsparselt_internal_get_arch_name(*properties), "942");
 #endif
 
     is_init = (uintptr_t)(this);
@@ -119,6 +120,8 @@ void _rocsparselt_handle::init()
 void _rocsparselt_handle::destroy()
 {
     is_init = 0;
+    delete properties;
+    properties = nullptr;
     // Close log files
     if(log_trace_ofs)
     {
@@ -209,7 +212,7 @@ bool check_is_init_matmul_descr(const _rocsparselt_matmul_descr* matmul)
 
 bool check_is_init_matmul_alg_selection(const _rocsparselt_matmul_alg_selection* alg_selection)
 {
-    return alg_selection->is_init != 0
+    return alg_selection != nullptr && alg_selection->is_init != 0
            && alg_selection->is_init == (uintptr_t)alg_selection->handle;
 }
 

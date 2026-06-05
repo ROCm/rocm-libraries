@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -100,7 +100,7 @@
  *  passed to all subsequent library function calls. It should be destroyed at the end
  *  using \ref hipsparseLtDestroy.
  */
-typedef struct hipsparseLtHandle_t {uint8_t data[11024];} hipsparseLtHandle_t;
+typedef struct hipsparseLtHandle_t {uint8_t data[512];} hipsparseLtHandle_t;
 
 /*! \ingroup types_module
  *  \brief Descriptor of the matrix.
@@ -111,7 +111,7 @@ typedef struct hipsparseLtHandle_t {uint8_t data[11024];} hipsparseLtHandle_t;
  *  descriptor must be passed to all subsequent library calls that involve the matrix.
  *  It should be destroyed at the end using \ref hipsparseLtMatDescriptorDestroy.
  */
-typedef struct hipsparseLtMatDescriptor_t {uint8_t data[11024];} hipsparseLtMatDescriptor_t;
+typedef struct hipsparseLtMatDescriptor_t {uint8_t data[512];} hipsparseLtMatDescriptor_t;
 
 /*! \ingroup types_module
  *  \brief Descriptor of the matrix multiplication operation.
@@ -121,7 +121,7 @@ typedef struct hipsparseLtMatDescriptor_t {uint8_t data[11024];} hipsparseLtMatD
  *  the description of the matrix multiplication operation.
  *  It is initialized with the \ref hipsparseLtMatmulDescriptorInit function.
  */
-typedef struct hipsparseLtMatmulDescriptor_t {uint8_t data[11024];} hipsparseLtMatmulDescriptor_t;
+typedef struct hipsparseLtMatmulDescriptor_t {uint8_t data[512];} hipsparseLtMatmulDescriptor_t;
 
 /*! \ingroup types_module
  *  \brief Descriptor of the matrix multiplication algorithm.
@@ -129,7 +129,7 @@ typedef struct hipsparseLtMatmulDescriptor_t {uint8_t data[11024];} hipsparseLtM
  *  \details
  *  It is initialized with the \ref hipsparseLtMatmulAlgSelectionInit function.
  */
-typedef struct hipsparseLtMatmulAlgSelection_t {uint8_t data[11024];} hipsparseLtMatmulAlgSelection_t;
+typedef struct hipsparseLtMatmulAlgSelection_t {uint8_t data[512];} hipsparseLtMatmulAlgSelection_t;
 
 /*! \ingroup types_module
  *  \brief Descriptor of the matrix multiplication execution plan
@@ -140,14 +140,14 @@ typedef struct hipsparseLtMatmulAlgSelection_t {uint8_t data[11024];} hipsparseL
  *  It is initialized and destroyed using the \ref hipsparseLtMatmulPlanInit
  *  and \ref hipsparseLtMatmulPlanDestroy functions, respectively.
  */
-typedef struct hipsparseLtMatmulPlan_t {uint8_t data[11024];} hipsparseLtMatmulPlan_t;
+typedef struct hipsparseLtMatmulPlan_t {uint8_t data[512];} hipsparseLtMatmulPlan_t;
 #elif defined(__HIP_PLATFORM_NVIDIA__)
 typedef __nv_bfloat16 hip_bfloat16;
-typedef struct {uint8_t data[11024];} hipsparseLtHandle_t;
-typedef struct {uint8_t data[11024];} hipsparseLtMatDescriptor_t;
-typedef struct {uint8_t data[11024];} hipsparseLtMatmulDescriptor_t;
-typedef struct {uint8_t data[11024];} hipsparseLtMatmulAlgSelection_t;
-typedef struct {uint8_t data[11024];} hipsparseLtMatmulPlan_t;
+typedef struct {alignas(16) uint8_t data[512];} hipsparseLtHandle_t;
+typedef struct {alignas(16) uint8_t data[512];} hipsparseLtMatDescriptor_t;
+typedef struct {alignas(16) uint8_t data[512];} hipsparseLtMatmulDescriptor_t;
+typedef struct {alignas(16) uint8_t data[512];} hipsparseLtMatmulAlgSelection_t;
+typedef struct {alignas(16) uint8_t data[512];} hipsparseLtMatmulPlan_t;
 #endif
 
 /*! \ingroup types_module
@@ -637,6 +637,23 @@ hipsparseStatus_t
                                       hipsparseLtMatmulAlgSelection_t*     algSelection,
                                       const hipsparseLtMatmulDescriptor_t* matmulDescr,
                                       hipsparseLtMatmulAlg_t               alg);
+
+/*! \ingroup matmul_algo_module
+ *  \brief Destroy to the algorithm selection descriptor.
+ *  \details
+ *  \p hipsparseLtMatmulAlgSelectionDestroy releases the resources used by an instance
+ *  of the algorithm selection. This function is the last call with a specific algorithm selection
+ *  instance.
+ *
+ *  @param[in]
+ *  alogrithm selection descriptor
+ *
+ *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p plan is invalid.
+ */
+HIPSPARSELT_EXPORT
+hipsparseStatus_t
+    hipsparseLtMatmulAlgSelectionDestroy(const hipsparseLtMatmulAlgSelection_t* algselection);
 
 /*! \ingroup matmul_algo_module
  *  \brief Specify the algorithm attribute of a algorithm selection descriptor.
