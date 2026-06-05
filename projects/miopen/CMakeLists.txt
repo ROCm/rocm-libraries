@@ -168,7 +168,12 @@ endif()
 # OPTION - MIOpen Backend
 # - OpenCL
 # - HIP
-set(MIOPEN_DEFAULT_BACKEND "HIP")
+check_cxx_compiler_flag("--cuda-host-only -x hip" HAS_HIP)
+if(HAS_HIP)
+    set(MIOPEN_DEFAULT_BACKEND "HIP")
+else()
+    set(MIOPEN_DEFAULT_BACKEND "OpenCL")
+endif()
 
 if(NOT WIN32)
     include(CheckCXXLinkerFlag)
