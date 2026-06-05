@@ -591,24 +591,37 @@ private:
 /// the caller passes. Used by TransposingSolver to credit the wrapper instead
 /// of the inner NHWC-native solver when it delegates Search/GetSolution.
 /// Restores the previous override (if any) on scope exit, so nesting is safe.
+///
+/// Gated on MIOPEN_PERFORMANCE_LOGS>0: when performance logging is disabled
+/// the constructor and destructor are no-ops, so the thread-local is never
+/// touched and the caller pays only an env-var read plus a branch. This keeps
+/// the override fully zero-impact for normal production paths.
 class ScopedSolverNameOverride
 {
 public:
     ScopedSolverNameOverride(const std::string& wrapper_name, uint64_t wrapper_id)
-        : prev_state(GetSolverNameOverride())
+        : engaged(IsPerformanceLoggingEnabled()), prev_state()
     {
+        if(!engaged)
+            return;
+        prev_state      = GetSolverNameOverride();
         auto& s         = GetSolverNameOverride();
         s.solution_name = wrapper_name;
         s.solver_id     = wrapper_id;
         s.active        = !wrapper_name.empty();
     }
 
-    ~ScopedSolverNameOverride() { GetSolverNameOverride() = prev_state; }
+    ~ScopedSolverNameOverride()
+    {
+        if(engaged)
+            GetSolverNameOverride() = prev_state;
+    }
 
     ScopedSolverNameOverride(const ScopedSolverNameOverride&)            = delete;
     ScopedSolverNameOverride& operator=(const ScopedSolverNameOverride&) = delete;
 
 private:
+    bool engaged;
     SolverNameOverride prev_state;
 };
 
