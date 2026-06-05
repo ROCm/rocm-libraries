@@ -18,6 +18,49 @@ What follows is the stage-by-stage walk for both flows, with code-anchored discu
 
 ---
 
+## Important constraint: `seq_lens` is NOT on `TensorAttributes`
+
+For cuDNN frontend-API compatibility, **`TensorAttributes` will gain `set_ragged_offset(...)` only — not `set_seq_len(...)`**. The `seq_lens` tensor is referenced from the *node-level* attributes (e.g. `SdpaAttributes::set_seq_len_q(...)` and `set_seq_len_kv(...)`), not from the primary tensor's `TensorAttributes`. Furthermore, in the SDPA case, a single `seq_lens_q` tensor is shared across the Q primary and `seq_lens_kv` is shared across K and V — so even conceptually, there is no 1:1 binding between a primary `TensorAttributes` and a `seq_lens` tensor.
+
+This is a hard constraint, and it changes the answers at several stages:
+
+- **At graph-walk time (Stages 2.1 / 2.2)**, looking at a `TensorAttributes` in isolation tells you *whether* it is a ragged primary (does `get_ragged_offset()` return non-null?), and *which* tensor is its `ragged_offset` (a UID lookup). It does **not** tell you whether the primary has a `seq_lens` companion or which tensor that is. Discovering `seq_lens` requires walking the *node* the primary feeds into, and then reading the node's op-specific attributes (`SdpaAttributes::seq_len_q_tensor_uid()`, etc.).
+- **In the test harness's `generateBundles` / `createTensorFromAttribute`**, the bundle-allocation function works one `TensorAttributes` at a time and has no access to the node. So a one-pass walk over `TensorAttributes` can correctly:
+  - Allocate a non-ragged primary (`Tensor<T>`).
+  - Allocate a ragged primary with `ragged_offset` known (whatever the chosen ragged storage type is) — but **cannot** know whether to attach `seq_lens` or which `seq_lens` to use.
+  - Allocate the aux tensors (`ragged_offset`, `seq_lens` as plain `Tensor<int32_t>`) — but cannot distinguish "I'm a ragged_offset" from "I'm a seq_lens" from "I'm an ordinary int32 tensor" by looking at the `TensorAttributes` alone.
+- **In `CpuReferenceGraphExecutor`**, the deserialized flatbuffer graph carries the same constraint: walking the per-tensor `TensorAttributes` map gives ragged_offset wiring; recovering seq_lens wiring requires reading the per-node attributes (`SdpaAttributes::seq_len_q_tensor_uid()`).
+
+**Consequences for the two options:**
+
+- **Option C** *mostly* survives this constraint. Bundle allocation and intermediate allocation use `IrregularTensor<T>` for the primary (which doesn't need to know about `seq_lens` at construction time — it only owns the buffer). The `RaggedView` that *does* need `seq_lens` is constructed at the plan layer (Stage 2.6), where node-level attributes are accessible — `SdpaFwdPlanBuilder` already reads `SdpaAttributes::seq_len_q_tensor_uid()` and can resolve it to the runtime buffer the same way it resolves `q_tensor_uid`. **The bundle and the executor do not need to know that `seq_lens` exists at all.**
+
+  The one exception is `bundle.randomizeTensor(...)` (Stage 2.3) and the output validation `allClose` (Stage 2.11). Both of these need ragged-aware iteration over the *primary*, and ragged-aware iteration requires the `seq_lens` (otherwise valid elements past `seq_lens[b]` get written/compared). Since the bundle doesn't know which `seq_lens` to use, the harness needs an explicit "for each ragged primary, look up the node it feeds into, find its seq_lens UID, and wrap accordingly" step — or it has to accept overfill (randomize/compare *all* physical elements including the per-batch invalid tail).
+
+  **Overfill is acceptable in practice for both operations.** Randomizing into invalid-tail elements is harmless (the GPU kernel ignores them; the CPU reference's loops are bounded by `validSeqLen`, so it also ignores them). Comparing invalid-tail elements is only a problem if the GPU kernel and CPU reference disagree about what value to leave in the padding — and as long as both are seeded identically and neither writes the padding, the values stay equal to their random init. So in C, randomizing the *physical* buffer (length `physicalElementCount`) is correct as long as the post-execute compare also iterates the physical buffer. This is achievable in C without per-batch-seq-lens iteration: just iterate `physicalElementCount` linearly. **Recommend treating Stage 2.3 and Stage 2.11 in C as "iterate the physical buffer," not "iterate the ragged-valid elements."**
+
+- **Option A** *breaks more visibly* under this constraint. The `RaggedTensor` ctor takes `seqLens` as an optional parameter; if it's `nullptr`, the ragged tensor's iterator walks all elements up to padding (whatever the padding-discovery rule is — typically the `ragged_offset[B]` boundary). At bundle-allocation time, there is no way to discover the right `seq_lens` (it's on a node, not on a `TensorAttributes`), so the bundle has to allocate the `RaggedTensor` *without* `seq_lens`. This means:
+  - **The "ragged iteration walks valid elements only" advantage of A at Stage 2.3 (randomize) and Stage 2.11 (compare) is degraded.** Without `seq_lens`, ragged iteration walks all of `ragged_offset[B]` elements, which is "the packed valid region plus alignment padding but minus the per-batch padding inside each batch." This is the same as "the entire physical buffer" if there's no alignment padding; with alignment padding it's slightly less. Either way, it is **not** "valid elements only" — the per-batch invalid tail (elements past `seq_lens[b]` within each batch but within `S_max`) is touched, exactly like C's "iterate the physical buffer" approach.
+  - **The reconciler is partially neutered.** A's `resolveTensor` was supposed to check that the runtime `RaggedTensor::seqLens()` matches the graph's declared seq_lens UID. But with seq_lens not on `TensorAttributes`, the "graph's declared seq_lens UID" lives on the *node*, not the tensor. The reconciler would need to be reframed as "match the runtime's seqLens against the node attribute that the primary feeds into" — which is more complex and operates on a different data than the rest of the reconciler.
+  - **`physical_element_count` discovery still works the same**: it's an attribute of the primary's allocation (sourced from a flatbuffer field or from `ragged_offset`'s last element), and is independent of `seq_lens`.
+
+**Net effect of the constraint.** It eliminates one of A's primary advantages over C in the harness flow (free valid-element-only iteration at randomize and compare time). After this constraint:
+
+| Stage | A advantage before constraint | A advantage after constraint |
+|---|---|---|
+| 2.3 (randomize) | Walks only valid elements automatically | Walks all of `ragged_offset[B]` automatically (no per-batch trimming); functionally equivalent to "iterate physical buffer" |
+| 2.11 (compare) | Walks only valid elements automatically | Walks all of `ragged_offset[B]` automatically; functionally equivalent to "iterate physical buffer" |
+
+C's price for these stages was "wrap in a temporary `RaggedView` to get valid-element iteration" — but C doesn't need to do that either, because overfill is acceptable. C can iterate the `IrregularTensor`'s physical buffer with a simple linear walk (which `IrregularTensor` would need to support — see *Mitigation* below — or which the harness can implement directly by reaching for `rawHostData()` + `elementSpace()`).
+
+After the constraint, the bundle-side stages 2.3 and 2.11 require essentially the same amount of work in A and C: both need "iterate the physical buffer with no per-batch trimming." A gets this from its own iterator hook (if implemented to walk `ragged_offset[B]` elements when `seqLens` is null). C gets this either from `IrregularTensor` exposing a linear iterator over its physical buffer, or from the harness reading `rawHostData()` and walking `elementSpace()` elements directly.
+
+The plan as written says `IrregularTensor`'s `begin()/end()` *throw*. **Under this constraint, that decision should be revisited**: throwing forces the harness into a wrapping step (build a `RaggedView` over `IrregularTensor` + look up `seq_lens` from the node + iterate ragged-aware) that we just established is unnecessary. Allowing `IrregularTensor`'s iterators to walk its physical buffer linearly (treating it as a `prod(dims)`-less dense buffer of `elementSpace` elements) would let the harness use a single `randomizeTensor(uid)` / `allClose(*cpuTensor, *gpuTensor)` loop with no per-UID branching. The "iteration is intentionally NOT supported" position in the plan was defensive against semantic confusion; the constraint shows that the alternative (linear iteration over the physical buffer) is the natural and correct behaviour for the harness's bundle-level use cases.
+
+The rest of this document carries these implications forward into the per-stage analysis. Where A "gets ragged iteration for free" in the older framing, the updated framing is "A and C both reduce to iterating the physical buffer; A does it through its iterator hook with `seqLens==null` semantics; C does it by either (i) supporting linear iteration on `IrregularTensor` or (ii) the harness reaching for `rawHostData()` directly."
+
+---
+
 ## Cast of code (the relevant types and helpers, briefly)
 
 For grounding, here is the cast as it actually exists today:
@@ -300,33 +343,27 @@ for(auto& tensorPair : bundle.tensors) {
 }
 ```
 
-The bundle's `randomizeTensor` calls `it->second->fillTensorWithRandomValues(min, max, seed)` via `ITensor`. For ragged primaries, "randomize" should mean "randomize the valid elements and either zero or leave-uninitialized the padding." Whether the iterator walks valid elements only or the entire physical buffer is decided by the *polymorphic index hook* on the concrete tensor type.
+The bundle's `randomizeTensor` calls `it->second->fillTensorWithRandomValues(min, max, seed)` via `ITensor`. For ragged primaries, "randomize" needs to fill the buffer in a way that the GPU kernel and CPU reference will both produce identical outputs from. **Under the seq_lens-not-on-`TensorAttributes` constraint** (top of this document), the bundle cannot discover the right `seq_lens` for a primary without consulting node-level attributes, so the bundle cannot do "valid elements only" iteration on its own. The correct strategy in both options is therefore "fill the entire physical buffer (or the `ragged_offset[B]`-bounded subset) and rely on neither GPU nor CPU paths writing to padding."
 
-- **Option A.** The primary in the bundle is `RaggedTensor<T>`. Its overridden `makeIndex(...)` returns a `RaggedCompositeIndex` that walks only valid elements (using `raggedOffset()` and `seqLens()`). Randomization Just Works without harness changes.
-- **Option C.** The primary in the bundle is `IrregularTensor<T>`. Its `begin()/end()` *throws* (per the plan's recommendation #3). The bundle's `randomizeTensor` will fail at this stage unless either (i) we make `IrregularTensor` randomizable by some other means (a direct linear walk over the physical buffer, which is wrong for ragged because it touches padding), or (ii) the harness has to wrap the `IrregularTensor` in a `RaggedView` for the duration of initialization and ask the view to iterate. (ii) requires that the harness has access to the aux tensors at this stage, which it does — they're in the same bundle.
+- **Option A.** The primary in the bundle is a `RaggedTensor<T>` with `seqLens == nullptr` (because the bundle didn't have the information needed to attach it). Its overridden `makeIndex(...)` walks the elements implied by the ragged tensor when `seqLens` is null — typically `[0, ragged_offset[B])` linearly. This is **not** "valid elements only"; it includes the per-batch padding tails. That is, however, correct for the randomize use case: the GPU kernel and CPU reference both ignore those tails, so randomizing them is harmless. Randomization works without harness changes.
+- **Option C.** The primary in the bundle is an `IrregularTensor<T>`. As written in the plan, its `begin()/end()` *throws*. The harness's `randomizeTensor` will fail. There are two ways out:
+  - **(c-rand-i)** Allow `IrregularTensor`'s `begin()/end()` to walk its physical buffer linearly (treating it as a `prod(dims)`-less dense buffer of `elementSpace` elements). This is the simpler and more direct fix; see the *Important constraint* section near the top of this document for why throwing was a defensive choice the constraint now contradicts. With this change, `bundle.randomizeTensor(uid)` works as-is for both ragged and non-ragged primaries — no per-UID branching in the harness.
+  - **(c-rand-ii)** Keep `IrregularTensor` non-iterable; have the harness reach for `tensor->rawHostData()` and walk `tensor->elementSpace()` elements directly, bypassing the polymorphic iterator hook for ragged primaries. This is more code in the harness and breaks the `bundle.randomizeTensor` interface.
 
-C's randomization path is therefore:
-
-```cpp
-if (isRaggedPrimary(bundle, uid, graph)) {
-    auto view = makeRaggedViewFromBundle<T>(bundle, uid, graph);
-    view->fillTensorWithRandomValues(min, max, seed);   // ragged-aware iteration
-} else {
-    bundle.tensors[uid]->fillTensorWithRandomValues(min, max, seed);
-}
-```
-
-This is a few lines of code in the harness's `initializeBundle`, but it is real new code and it requires `makeRaggedViewFromBundle` to exist (it is essentially the same factory the plan layer uses in Stage 2.5).
+  Recommend **(c-rand-i)**.
 
 #### Side-by-side at Stage 2.2
 
-| Aspect | Option A | Option C |
-|---|---|---|
-| `bundle.randomizeTensor(uid)` does the right thing for a ragged primary | Yes, via `RaggedTensor`'s polymorphic index hook | Not directly — `IrregularTensor` throws on iteration |
-| Harness code to make initialization ragged-aware | None | Construct a temporary `RaggedView` per ragged primary at init time |
-| Aux tensors need to be initialized before primary | No (their iteration is dense and independent) | Yes, because the temporary `RaggedView` reads `ragged_offset` to know which elements to walk. This is a real ordering constraint on `initializeBundle`. |
+| Aspect | Option A | Option C (with `IrregularTensor` linear iteration) | Option C (as written, `IrregularTensor` throws) |
+|---|---|---|---|
+| `bundle.randomizeTensor(uid)` works on a ragged primary | Yes — walks `[0, ragged_offset[B])` (since `seqLens == nullptr` in the bundle) | Yes — walks the full physical buffer linearly | No — throws |
+| Per-UID harness branching for randomize | None | None | Required (wrap in `RaggedView` or reach for `rawHostData()`) |
+| `RaggedView` needs to be constructible from the bundle at randomize time | N/A | N/A | Yes — requires aux lookup, which requires `seq_lens` discovery from node attributes |
+| Aux tensors need to be initialized before primary | No | No (linear walk is independent of `ragged_offset`) | Yes (the view reads `ragged_offset`) |
 
-A is meaningfully simpler at this stage. C requires the harness to know which UIDs are ragged primaries (cheap — the graph's `TensorAttributes` says) and to construct a throwaway view per ragged primary at init. C also introduces an init-time ordering constraint (`ragged_offset` populated before primary randomized) that A does not have — but A had the *allocation*-time ordering constraint that C did not. The constraints are at different stages but they exist in both options. C's init-time constraint is more sensitive because the aux values are user-supplied data (the harness has to know how to generate them), whereas A's allocation-time constraint is purely structural.
+**Under the seq_lens constraint, A and C-with-linear-iteration are roughly tied at this stage.** Both fill more elements than "valid only" (A walks `ragged_offset[B]`; C walks the full physical buffer including any alignment padding); neither walks "valid only" because the bundle doesn't know `seq_lens`. The difference between A's and C-linear's coverage (alignment padding included by C, excluded by A) is immaterial as long as nothing reads those elements.
+
+C-as-written (throwing iterator) requires real new harness code; the recommendation is to change `IrregularTensor` to support linear iteration, which collapses C to "tied with A" at this stage.
 
 ### Stage 2.3 — `executeGpuGraph(handle, graph, gpuBundle)`
 
@@ -543,25 +580,124 @@ for(const auto& tensorId : outputTensorIds) {
 }
 ```
 
-The validator iterates both tensors element-by-element to compare. For ragged outputs, the comparison should walk only valid elements (comparing padding values is meaningless and may produce false negatives).
+The validator iterates both tensors element-by-element to compare. For ragged **outputs**, the "overfill is acceptable" reasoning that worked for randomize (Stage 2.2) **does not hold** — and this is a meaningful problem for both A and C.
 
-- **Option A.** `cpuTensor` and `gpuTensor` are `RaggedTensor<T>` (since they were allocated as such at Stage 2.1). The validator iterates via the polymorphic index hook and walks valid elements. Works without harness changes.
-- **Option C.** `cpuTensor` and `gpuTensor` are `IrregularTensor<T>`. Their `begin()/end()` throws. The validator needs the harness to wrap them in `RaggedView`s for the comparison, same as it did for randomization at Stage 2.2. Same `makeRaggedViewFromBundle` helper, applied at the validation site.
+#### Why overfill comparison breaks for outputs
 
-Same trade-off as Stage 2.2: A gets it for free; C needs ~5 extra lines in the validation loop to construct views first.
+For an input tensor, the kernel and the CPU reference both read the data and neither writes to padding. Padding values therefore stay byte-equal to whatever was placed there at randomize time, and a full-physical-buffer comparison succeeds. That's why Stage 2.2 (randomize) is fine with overfill.
 
-### Stage 2.10 — Summary of harness changes per option
+For an output tensor, this is no longer guaranteed:
 
-| Stage | Option A change | Option C change |
+- The CPU reference (`CpuFpReferenceSdpa::forward`) writes the output via `o.setHostValue(value, {b, h, sq, dv})` with the inner loop bounded by `validSeqLen_q(b)` (see Stage 2.7). It therefore writes to valid (`b, h, sq, dv`) positions only; **it does not write to padding positions, which retain their randomize-time values.**
+- The GPU kernel may or may not write to output padding. AITER FMHA forward kernels in particular have no contractual guarantee about what happens to elements past `seq_lens_q[b]` in the output buffer. They could:
+  - Leave them untouched (in which case the device buffer keeps whatever value was H→D-copied from the host's randomize-time initialization — comparison succeeds against the CPU side).
+  - Zero them out (in which case the device buffer has zeros at padding positions, while the CPU side has random values — comparison **fails**).
+  - Write partial intermediates, garbage from registers, etc. (in which case comparison fails for harder-to-explain reasons).
+
+We cannot statically guarantee which of these the kernel does, and it varies across kernel versions. **Therefore the comparison of output tensors must be bounded by `seq_lens`** — the validator has to iterate only the valid positions and skip padding entirely.
+
+This is the very "node-attribute walk + seq_lens-aware wrap" that the Stage 2.2 analysis argued was unnecessary. For outputs, it is necessary.
+
+Note that for the SDPA-specific case, the output O is ragged in the *same* way Q is — both use `seq_lens_q`. So the output's `seq_lens` is `SdpaAttributes::seq_len_q_tensor_uid()`. The same node-attribute lookup that the *plan* layer does at Stage 2.6 to attach `seq_lens` to the Q view also gives the harness the seq_lens UID for the O output. The harness already needs to perform this lookup at Stage 2.6 (in the plan layer); duplicating it at Stage 2.9 (in the validation loop) costs a small amount of code but no new infrastructure.
+
+#### What the harness has to add (in both options)
+
+The validation loop must look up the seq_lens for each ragged output (via the node-attribute walk), and construct a seq_lens-aware view to feed the validator. Concretely, this means inverting the relationship between output UIDs and the nodes that produce them: for each `tensorId` in `outputTensorIds`, find the node whose output UID matches `tensorId`, read that node's seq_lens UID, look up the seq_lens runtime tensor in the bundle, and pass it to the validator (or to a wrapper around the output tensor).
+
+This is the same work in A and C; the type of the per-output wrap differs:
+
+- **Option A.** Either:
+  - **(a-out-i)** Construct a *new* `RaggedTensor<T>` with `seqLens` attached, sharing memory with the bundle's `RaggedTensor<T>` (via the aliasing-shared_ptr trick on the underlying storage). This requires either a second ctor on `RaggedTensor` that takes an existing `MigratableMemory` (instead of allocating its own), or an aliasing copy/share constructor. The plan as written does not provide either; both would have to be added.
+  - **(a-out-ii)** Add a mutator `setSeqLens(...)` to `RaggedTensor`. This violates A's "constructor-only / immutable" rule from the plan but is the simplest patch — the harness sets it at validation time, the validator iterates valid-only, then the harness unsets it (or leaves it set since the bundle is about to be discarded).
+  - **(a-out-iii)** Bypass `RaggedTensor`'s iteration entirely and have the validator accept an explicit `seqLens` parameter: `validator->allClose(*cpuTensor, *gpuTensor, *seqLensTensor)`. This is a wider validator-interface change.
+- **Option C.** Construct a `RaggedView<T>` over the output's `IrregularTensor<T>` storage with `seqLens` attached. This is the same view-construction code as the plan layer uses at Stage 2.6, just moved to the validation loop. **No new infrastructure on the tensor types is needed** — `RaggedView` already takes `seqLens` as a ctor argument.
+
+Both options require the **node-attribute lookup** in the validation loop. C avoids the more invasive "second `RaggedTensor` ctor / mutator / validator-signature change" cost that A pays for not having a separate view type.
+
+#### Side-by-side at Stage 2.9 (updated)
+
+| Aspect | Option A | Option C (with `IrregularTensor` linear iteration + widened `RaggedView`) |
 |---|---|---|
-| 2.1 — `generateBundles` / `tryAddTensorToBundles` | New branch in `createTensorFromAttribute` for `RaggedTensor`; **two-pass allocation** (aux before primary); bundle storage shifts `unique_ptr → shared_ptr` | New branch in `createTensorFromAttribute` for `IrregularTensor`; bundle unchanged |
-| 2.2 — `initializeBundle` | None — `RaggedTensor.fillTensorWithRandomValues` walks valid elements | Wrap ragged primaries in temporary `RaggedView` for init; **ordering constraint**: aux populated before primary randomized |
-| 2.5 — `CpuReferenceGraphExecutor` virtual tensor alloc | Same as 2.1 (two-pass + shared_ptr) | New branch returning `IrregularTensor`; no ordering |
-| 2.6 — `SdpaFwdPlan::execute` | Build `ShallowRaggedTensor` (new type) or modify `forward` signature; reconciler is degenerate here | Build `RaggedView` over a `ShallowTensor`-like underlying — *requires widening `RaggedView`'s underlying to `shared_ptr<TensorBase<T>>` as plan currently writes it* |
-| 2.7 — `forward` body | `validSeqLen`-bounded inner loops | Identical |
-| 2.9 — Validation loop | None | Wrap ragged outputs in temporary `RaggedView` for `allClose` |
+| Node-attribute walk needed to discover `seq_lens` for each ragged output | Yes | Yes |
+| Per-output wrap needed for seq_lens-bounded comparison | Yes — but `RaggedTensor` as plan-written doesn't support it (needs new ctor / mutator / signature change) | Yes — `RaggedView<T>` is already constructible from `(IrregularTensor, ragged_offset, seq_lens)` |
+| New tensor-type infrastructure required | One of (second ctor / `setSeqLens` mutator / `allClose` signature change) | None |
+| Lines of code in the validation loop | ~10 + the chosen infrastructure change | ~10 |
 
-A is simpler at 2.2 and 2.9 (free via iterator hook on the owning type); C is simpler at 2.1 and 2.5 (no ordering constraint, no `shared_ptr` shift in the bundle); and at 2.6 the two options converge (both need a non-owning ragged-aware wrapper, and C's plan-as-written must be amended to make this construction site work).
+**The overfill-comparison-is-fine claim from earlier sections of this document was incomplete: it holds for inputs (which the kernels don't write) but fails for outputs (which the kernels may write to padding).** Stage 2.2 (input randomization) is still fine with overfill in both options. Stage 2.9 (output validation) is **not** fine with overfill and requires a `seq_lens`-aware wrap at the validation site in both options.
+
+#### Alternative: the sentinel-skip approach (no node walk required)
+
+The node-attribute walk is unavoidable *if* the validator needs `seq_lens` to know where padding starts. There is, however, an alternative that uses the CPU-side data itself to tell padding from valid elements, eliminating the need for the lookup entirely.
+
+**Sentinel-skip approach:**
+
+1. At Stage 2.2 (input randomization), randomize *inputs* normally (overfill is fine, see Stage 2.2 analysis).
+2. **For ragged outputs, instead of randomizing**, fill the entire physical buffer (both bundles) with a known **sentinel value** that the CPU reference will not legitimately produce. NaN is the natural choice for floating-point types (`std::numeric_limits<T>::quiet_NaN()`); for integer types a magic-number sentinel like `INT_MIN` or some other unused value works.
+3. After both executions, `verifyGraph` iterates element-by-element over the *physical* buffer of each ragged output (no `seq_lens` lookup, no view construction). At each position:
+   - Read the CPU value. If it is bit-equal to the sentinel, the CPU reference did not write this position. That can only happen at padding (the reference's loop is bounded by `validSeqLen_q(b)`, so it writes every valid position). **Skip the compare.**
+   - Otherwise, this is a valid position. Apply the existing tolerance-based equality check between CPU and GPU.
+
+**Why this works:**
+
+- The CPU reference is the authoritative "where are the valid positions?" oracle for a given run, because it writes exactly the valid positions and nowhere else. The presence-of-sentinel test on the CPU side is a perfect padding detector.
+- The harness never needs to know which `seq_lens` was used — it's encoded implicitly in the CPU output.
+- The GPU side's padding behaviour is irrelevant: whatever the kernel does to padding (leave alone, zero out, write garbage) is ignored because we never compare at padding positions.
+- The approach works uniformly across ops without per-op knowledge: any ragged output that uses a CPU reference following the "write only valid positions" rule (which all the existing references do) is comparable this way.
+
+**Cost / infrastructure required:**
+
+- `fillTensorWithSentinelValue` already exists in `TensorBase<T>` (the CPU executor uses it for virtual intermediates at Stage 2.7). The harness needs to call it on ragged outputs at init time instead of randomize, and the validator needs a `allCloseSkipSentinel(cpu, gpu, sentinel, tolerance)` overload (≈10–15 lines).
+- The harness needs to know which output UIDs are ragged (cheap — the graph's `TensorAttributes::has_ragged_offset()` says) so it can fill them with sentinel instead of random.
+- **No node-attribute walk anywhere.**
+- **No new tensor-type infrastructure for either A or C.** Both options handle this approach with the same harness code.
+
+**Caveats:**
+
+- The sentinel must be a value the reference cannot produce, even pathologically. For SDPA forward, NaN can appear if `seq_lens_q[b] == 0` and the row is entirely masked (`sumExp == 0`, then `log(0)` and `0 * (-inf)` show up). Using NaN as the sentinel would mistake those positions for padding. Workarounds: skip batches with `seq_lens_q[b] == 0`, or use a non-NaN magic-number sentinel (e.g. `-0.0`, or some unlikely finite value) and accept that the value is theoretically producible with vanishingly small probability.
+- For low-precision types (bf16, fp16, fp8), the sentinel space is smaller and the "unproducible by reference" property is harder to guarantee. NaN is still safe (NaN representations exist in all these types and propagate through arithmetic in well-defined ways).
+- Initialization-wise, the GPU bundle's output should also be filled with the sentinel (not random), so its host buffer matches the CPU bundle's host buffer at init. The H→D copy in Stage 2.4 propagates the sentinel to device. After kernel execute, the GPU's device buffer at padding positions is whatever the kernel left there; the D→H copy at Stage 2.11 (`markDeviceModified` + `hostData()`) gives the validator something to compare — but the validator's `cpu == sentinel → skip` check means GPU's padding never gets compared, so its value doesn't matter.
+
+**Combining sentinel-skip with the seq_lens wrap:**
+
+The sentinel approach and the seq_lens-wrap approach are not mutually exclusive — they solve the same problem in two different places (validator vs. iteration), and the sentinel approach is strictly cheaper for the harness. There is some defensive value in using both ("belt and suspenders": iterate seq_lens-bounded *and* skip sentinels), but it doubles the work and isn't necessary if the chosen sentinel is reliable.
+
+#### Side-by-side at Stage 2.9 (updated with sentinel-skip alternative)
+
+| Aspect | Option A, seq_lens-wrap | Option C, seq_lens-wrap | Either option, sentinel-skip |
+|---|---|---|---|
+| Node-attribute walk needed | Yes | Yes | **No** |
+| Per-output wrap | Yes — needs new tensor-type infrastructure (second `RaggedTensor` ctor / mutator / signature change) | Yes — `RaggedView` already constructible from `(IrregularTensor, ragged_offset, seq_lens)` | **None** — fill with sentinel at init, skip on sentinel at compare |
+| Validator interface change | One of (three options listed above) | None | `allCloseSkipSentinel(cpu, gpu, sentinel, tol)` overload |
+| Lines of code in the validation loop | ~10 + the chosen infrastructure change | ~10 | ~5 |
+| Sensitive to kernel writing to output padding | Avoided by iterating only valid positions | Avoided by iterating only valid positions | Irrelevant — padding never compared |
+| Sensitive to reference producing the sentinel value | N/A | N/A | Yes (needs care with NaN-producing edge cases) |
+| Works for ops where the harness can't easily walk the producing node | No | No | **Yes** — self-describing via the CPU values |
+
+#### Could we avoid the problem with a kernel-behaviour contract?
+
+Yes, in principle. If the kernel were contractually required to either (i) leave output padding untouched, or (ii) zero-init output padding and have the CPU reference do the same, then a naive full-physical-buffer comparison would work. (i) is achievable with kernel discipline but cannot be statically verified; (ii) requires touching `CpuFpReferenceSdpa::forward` to also write zeros to padding output positions, which is extra code and not what the reference is for.
+
+Neither contractual fix is clean. The two viable approaches are the seq_lens-aware wrap and the sentinel-skip approach. **Sentinel-skip is meaningfully simpler operationally** (no node-attribute walk, no per-output wrap, no per-option infrastructure additions), at the cost of one careful design decision (the choice of sentinel value) and one assumption (the reference never naturally produces the sentinel). The seq_lens-aware wrap is more robust against pathological reference outputs but more invasive in the codebase.
+
+**The sentinel-skip approach is strictly simpler in both A and C** and removes the output-validation stage as a place where A and C differ in implementation cost. If sentinel-skip is adopted, both options reduce to "the bundle's storage type" being the only output-validation question, and the validator runs the same code in both.
+
+### Stage 2.10 — Summary of harness changes per option (updated for the seq_lens constraint, the output-padding finding, and the sentinel-skip alternative)
+
+| Stage | Option A change (with seq_lens-wrap at 2.9) | Option C change (with `IrregularTensor` linear iteration + widened `RaggedView`; seq_lens-wrap at 2.9) | Either option, with sentinel-skip at 2.9 |
+|---|---|---|---|
+| 2.1 — `generateBundles` / `tryAddTensorToBundles` | New branch in `createTensorFromAttribute` for `RaggedTensor` (with `seqLens == nullptr`); **two-pass allocation** (aux before primary); bundle storage shifts `unique_ptr → shared_ptr` | New branch in `createTensorFromAttribute` for `IrregularTensor`; bundle unchanged | Same as the chosen option's column above |
+| 2.2 — `initializeBundle` (**inputs**) | None — `RaggedTensor.fillTensorWithRandomValues` walks `[0, ragged_offset[B])` | None — `IrregularTensor.fillTensorWithRandomValues` walks the full physical buffer | Same; **but** ragged *outputs* are filled with the sentinel instead of randomized (cheap branch on `attr.has_ragged_offset() && is_output(uid)`) |
+| 2.5 — `CpuReferenceGraphExecutor` virtual tensor alloc | Same as 2.1 (two-pass + shared_ptr) | New branch returning `IrregularTensor`; no ordering | Same as the chosen option's column above |
+| 2.6 — `SdpaFwdPlan::execute` | Build `ShallowRaggedTensor` (new type) or modify `forward` signature; reconciler is degenerate here | Build `RaggedView` over a `ShallowTensor`-like underlying | Same as the chosen option's column above |
+| 2.7 — `forward` body | `validSeqLen`-bounded inner loops | Identical | Identical |
+| 2.9 — Validation loop (**output tensors**) | **Required**: node-attribute walk to find each output's `seq_lens` UID, lookup in bundle, **plus** one of (second `RaggedTensor` ctor accepting existing memory / `setSeqLens` mutator / `allClose` signature change) to attach `seqLens` for the compare | **Required**: node-attribute walk to find each output's `seq_lens` UID, lookup in bundle, construct a `RaggedView` over the bundle's `IrregularTensor` with `seqLens` attached, and pass the view to `allClose`. No new tensor-type infrastructure needed | **None** — validator skips elements where CPU side is bit-equal to sentinel; no node walk, no per-output wrap, no `seqLens` lookup. One new validator overload (`allCloseSkipSentinel`) shared across both options. |
+
+**Two output-validation strategies, two cost profiles:**
+
+- **If seq_lens-wrap is chosen at 2.9**: C is meaningfully simpler than A at this stage (C uses `RaggedView`'s existing ctor; A needs new infrastructure on `RaggedTensor`). Combined with C's allocation-stage advantage, C wins at the harness-flow level overall.
+- **If sentinel-skip is chosen at 2.9**: A and C are functionally identical at this stage — neither needs the wrap nor the lookup. The only remaining harness-flow divergences are at Stage 2.1 (allocation: one-pass C vs two-pass A) and Stage 2.6 (which is roughly tied). The choice between A and C reduces almost entirely to the user-facing-ergonomic vs allocation-simplicity tradeoff at Stage 1.2 / Stage 2.1.
+
+A wins on user-facing single-object ergonomic (one `RaggedTensor` vs C's `IrregularTensor` + optional `RaggedView`) in either output-validation strategy.
 
 ---
 
@@ -569,38 +705,64 @@ A is simpler at 2.2 and 2.9 (free via iterator hook on the owning type); C is si
 
 The plan's comparison table is accurate at the *type-system* level, but it overweights the "single source of truth" / "no reconciler" benefits because those benefits apply in a flow (the user-facing flow with a reconciler) that **does not currently exist**. The plan layer in the test harness reconstructs ragged metadata from the graph in both A and C — there is no second source of truth in the harness path for either option to make consistent.
 
-Stripped to what actually differs by stage:
+Stripped to what actually differs by stage (assuming the recommended `IrregularTensor` linear-iteration revision and `RaggedView` underlying widening for C, and accounting for the seq_lens-not-on-`TensorAttributes` constraint and the output-padding finding). Stage 2.9 is shown twice — once per output-validation strategy — because the choice of strategy meaningfully changes whether A and C diverge at that stage.
 
 | Question | A (`RaggedTensor` owning) | C (`IrregularTensor` + `RaggedView`) |
 |---|---|---|
 | At allocation time, can the harness use a one-pass loop? | No — needs aux before primary | Yes |
 | Can the bundle stay `unique_ptr<ITensor>`? | No — must share aux refs | Yes |
-| Does `bundle.randomizeTensor(uid)` automatically iterate valid elements only on ragged primaries? | Yes | No — needs a wrap step |
-| Does `validator.allClose(*cpu, *gpu)` automatically iterate valid elements only? | Yes | No — needs a wrap step |
+| Does `bundle.randomizeTensor(uid)` work on a ragged primary without harness branching? | Yes — walks `[0, ragged_offset[B])` (`seqLens == null` in the bundle) | Yes — walks the full physical buffer linearly (requires the recommended `IrregularTensor` iteration change) |
+| Stage 2.9 with **seq_lens-wrap** strategy: does it work without new tensor-type infrastructure? | **No** — needs second ctor / mutator / `allClose` signature change | **Yes** — `RaggedView` already accepts `seq_lens` at construction |
+| Stage 2.9 with **sentinel-skip** strategy: does it work without new tensor-type infrastructure? | **Yes** — same one validator overload as C | **Yes** — same one validator overload as A |
 | In the plan layer, is a non-owning ragged-aware wrapper required? | Yes (`ShallowRaggedTensor`, or `forward` signature change) | Yes (`RaggedView` over `ShallowTensor`, with widened underlying) |
 | Total new types introduced (for the test-harness-driven scope) | 2 (`RaggedTensor`, `ShallowRaggedTensor`) | 2 (`IrregularTensor`, `RaggedView`) — same count |
 | User-facing single-object ergonomic | Yes — one `RaggedTensor` value | No — `IrregularTensor` for `variantPack`, `RaggedView` for iteration |
-| Risk surface for "primary disagrees with its aux" | A reconciler exists (and is needed only in the user-facing flow) | None |
+| Risk surface for "primary disagrees with its aux" | A reconciler exists (and is needed only in the user-facing flow; degenerate in the harness) | None |
 | Iteration in graph intermediates that are never iterated | Costs `RaggedTensor` ctor with aux refs that no one uses | Costs nothing — `IrregularTensor` exists for this |
 
-**Once Option C is corrected to support a non-owning underlying in `RaggedView`, the cost asymmetries become symmetric**: A pays at the harness allocation/init/validation stages; C pays at the user-facing-single-object stage and at the harness `initializeBundle`/`verifyGraph` wrap-up stages. The total new type counts are equal (2 each). The "single source of truth on the graph" claim that anchors C's recommendation evaporates in the test-harness flow.
+**Bringing the four findings together (seq_lens constraint, reconciler-is-degenerate, output-padding wrap, sentinel-skip alternative):**
+
+- **C wins at Stages 2.1 and 2.5** in both output-validation strategies (one-pass allocation; no `shared_ptr` shift; intermediates get a natural type).
+- **C wins at Stage 2.9 only if the seq_lens-wrap strategy is chosen** (C uses existing primitives; A needs new infrastructure). If sentinel-skip is chosen, A and C are tied at 2.9.
+- **A wins at Stage 1.2 (user-facing single object)** in both strategies.
+- Both options are tied or invariant at Stages 2.2, 2.3, 2.4, 2.6, 2.7, 2.8.
+
+The total new type counts are equal (2 each). The Stage 2.9 advantage of C is contingent on the chosen output-validation strategy; the Stage 2.1 / 2.5 advantage of C is unconditional.
 
 ---
 
 ## Revised recommendation
 
-The plan currently recommends C primarily on the strength of the "single source of truth + no reconciler" argument. That argument is sound **in the user-facing flow with a runtime-side bundle helper** (the *Possible mitigation* sketched in Stage 1.2), but that helper does not exist yet and is out of scope for the RFC's stated scope. In the **test-harness flow as it exists today**, the recommendation is less clear-cut:
+The plan currently recommends C primarily on the strength of the "single source of truth + no reconciler" argument. Four findings in this document refine that recommendation:
 
-- A is simpler at the bundle layer (allocation, randomization, validation: all free via the polymorphic index hook on the owning type), at the price of a two-pass allocation ordering constraint and a `unique_ptr → shared_ptr` shift in `GraphTensorBundle`.
-- C is simpler at the bundle-allocation/intermediate-allocation layer (no ordering constraint, no `shared_ptr` shift), at the price of wrap-step code in `initializeBundle` and `verifyGraph`, and *requires* widening `RaggedView`'s underlying to `shared_ptr<TensorBase<T>>` for the plan-layer construction site to even compile.
+1. **The seq_lens constraint** (`set_seq_len` is not on `TensorAttributes`) removes A's bundle-side "free valid-element iteration" advantage at randomize time.
+2. **The reconciler `resolveTensor` is degenerate in the test-harness flow** (no second declaration to reconcile against).
+3. **The output-padding finding** (GPU kernels may write to output padding while the CPU reference leaves it untouched, so naive full-buffer comparison of outputs is unsafe).
+4. **The sentinel-skip alternative for output validation** (fill ragged outputs with a sentinel value at init; have the validator skip elements where the CPU side is bit-equal to the sentinel) handles (3) without a node-attribute walk or any per-output wrap, and works identically in A and C.
 
-For the user-facing flow, neither option provides a true `TensorAttributes → runtime` one-call helper, because the information required (`physicalElementCount` and the aux runtime tensors) is not on a single `TensorAttributes`. **A multi-input factory (or a runtime-side bundle helper) is needed in both cases.** C makes that factory marginally more natural by separating "the buffer" (`IrregularTensor`, what `variantPack` needs) from "the iterable" (`RaggedView`, what CPU references need); A makes it marginally more natural by giving the user one value that handles both.
+Findings (3) and (4) interact in the conclusion in an interesting way:
+
+- **If finding (4) is adopted** (sentinel-skip), then Stage 2.9 is no longer a place where A and C diverge: both use the same validator overload, no node walk anywhere. The remaining C-vs-A harness asymmetry shrinks to "C avoids the two-pass bundle allocation and `unique_ptr→shared_ptr` shift" — a real win for C but a smaller one than the seq_lens-wrap framing suggested.
+- **If finding (4) is *not* adopted** (i.e. the seq_lens-wrap strategy is used at 2.9), then C is meaningfully simpler than A at Stage 2.9 too, on top of its allocation-stage win.
+
+Either way, A still wins at the user-facing single-object ergonomic (Stage 1.2). That advantage is real but small, and is moderated by the fact that no `TensorAttributes → runtime` one-call helper is possible in either option (`physicalElementCount` plus aux runtime tensors are required inputs).
 
 **Concrete suggestion.**
 
 1. **Add `physical_element_count` to the flatbuffer and to `TensorAttributes`.** Both options need it; sourcing it from the graph is cleaner than recomputing at execute time, and it makes Stage 1.2 user-side ragged allocation tractable for both options.
-2. **Pick the option whose harness-side ergonomics matter more for the near-term work.** If the immediate work is "make `IntegrationGpuSdpaForward` and `IntegrationGpuSdpaBackward` pass with ragged inputs," A's allocate-init-validate "just works" loop is meaningfully easier to land. If the immediate work is "lay the groundwork for an executor-allocated intermediates story that won't paint itself into a corner with the future padded-mode extension," C's two-types story is the more durable foundation, but it needs the plan revisions in this document to actually fit the plan-layer construction site.
-3. **Either way, write the runtime-side `TensorBundle` helper.** Most of the ergonomic distance between A and C *at the user layer* collapses once that helper exists — both options become a one-call factory dispatch from the user's perspective, and the user's two-vs-one-object question is hidden behind the factory.
-4. **Drop the `resolveTensor` reconciler from the plan as currently scoped.** It does not run in the test-harness flow (the only flow this RFC needs to land), and the user-facing flow doesn't have a code path that would construct the redundant declaration the reconciler exists to check. If A is chosen, the reconciler can be added later if and when a user-side path is built that justifies it.
+2. **Adopt the two `RaggedTensorsTentativePlan.md` revisions identified in this document:**
+   - `RaggedView`'s underlying should be `shared_ptr<TensorBase<T>>` (not `shared_ptr<IrregularTensor<T>>`), so the plan layer can construct a view over a `ShallowTensor`-like wrapper.
+   - `IrregularTensor`'s `begin()/end()` should walk its physical buffer linearly, not throw. Under the seq_lens constraint this is the correct semantics; throwing forces unnecessary harness code at Stage 2.2.
+3. **Adopt the sentinel-skip approach for output validation (Stage 2.9).** It's the simplest path — no node-attribute walk, no per-output wrap, no per-option infrastructure additions, ~5 lines in the validation loop plus one `allCloseSkipSentinel` validator overload. Pick a sentinel that the relevant CPU references cannot legitimately produce (NaN for floats with a documented "valid input regime" caveat, or a magic-number sentinel like `-0.0` or a specific finite value that the reference's arithmetic provably cannot reach). The seq_lens-wrap approach remains a viable fallback if a future op turns out to have a reference that *can* produce the sentinel.
+4. **Keep Option C** as the recommendation. The rationale is now:
+   - The "single source of truth on the graph" argument is reduced (it applies to `ragged_offset` only — not `seq_lens` — and is symmetric across A and C for the `ragged_offset` part). This is not a reason to prefer C, but it's not a reason to prefer A either.
+   - The `resolveTensor` reconciler is degenerate in the harness flow and should be dropped from scope.
+   - C's structural advantage in the harness is at Stage 2.1 / 2.5 (one-pass allocation, no `shared_ptr` shift in `GraphTensorBundle`, intermediates get a natural type). This is unconditional regardless of the output-validation strategy.
+   - C also avoids the Stage 2.9 infrastructure cost if the seq_lens-wrap strategy is chosen — but with the sentinel-skip approach recommended above, this advantage is neutralized.
+   - The remaining cost C pays (`IrregularTensor` + `RaggedView` two-type API at the user surface) is real but small, and is partly mitigated by the runtime-side `TensorBundle` helper sketched in the *Possible mitigation* at Stage 1.2.
+5. **Eventually write the runtime-side `TensorBundle` helper.** Hides the `(IrregularTensor, RaggedView)` distinction behind a one-call factory. Out of scope for the immediate RFC.
+6. **Drop the `resolveTensor` reconciler from the plan as currently scoped.** It does not run in the test-harness flow, and the user-facing flow doesn't have a code path that would construct the redundant declaration the reconciler exists to check. If A is ever revisited as a user-facing convenience, the reconciler can be added at that time.
 
-Net: **the choice between A and C is closer than the plan suggests**, the type counts are equal, the user-facing one-call ergonomic does not exist in either option without additional helper work, and the in-scope test-harness flow rewards different things in each option at different stages. A is marginally easier to land in the immediate term; C is marginally more durable past the current scope. Both work.
+Net: **C remains the recommended option, but the case for it is now subtler.** With sentinel-skip adopted at Stage 2.9, the harness-side cost difference between A and C shrinks to the Stage 2.1 / 2.5 (bundle allocation) advantage of C. That's a real and unconditional advantage, but it's a smaller one than the original plan claimed. The original plan's "single source of truth + no reconciler" framing was overweighted; the actual case for C is "simpler bundle/intermediate allocation, equal everywhere else, at the cost of a small user-facing-ergonomic regression that can be hidden behind a `TensorBundle` helper later."
+
+If the user-facing single-object ergonomic ever becomes a higher priority than bundle-allocation simplicity, the case for switching to A would be worth re-examining — but that priority shift isn't on the horizon for the in-scope RFC work.
