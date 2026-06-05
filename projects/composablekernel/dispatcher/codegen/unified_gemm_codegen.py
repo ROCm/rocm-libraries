@@ -198,6 +198,7 @@ class GemmVariant(Enum):
     STANDARD = "standard"
     PRESHUFFLE = "preshuffle"
     MULTI_D = "multi_d"
+    STREAM_K = "stream_k"
 
 
 # TileConfig imported from codegen_common
@@ -340,6 +341,8 @@ class KernelNaming:
             name += "_preshuffle"
         elif config.variant == GemmVariant.MULTI_D:
             name += f"_multid_{config.elementwise_op}_d{config.num_d_tensors}"
+        elif config.variant == GemmVariant.STREAM_K:
+            name += "_streamk"
 
         return name
 
@@ -393,6 +396,15 @@ class CKTileKernelGenerator:
             includes += """
 #include "ck_tile/ops/gemm/pipeline/wp_pipeline_agmem_bgmem_creg_v2.hpp"
 #include "ck_tile/ops/gemm/pipeline/wp_pipeline_agmem_bgmem_creg_base_policy.hpp"
+"""
+
+        if config.variant == GemmVariant.STREAM_K:
+            includes += """
+#include <functional>
+#include <hip/hip_runtime.h>
+#include "ck_tile/host/device_memory.hpp"
+#include "ck_tile/ops/gemm/kernel/streamk_gemm/streamk_gemm_kernel.hpp"
+#include "ck_tile/ops/gemm/kernel/streamk_gemm/streamk_gemm_tile_partitioner.hpp"
 """
 
         return includes
@@ -520,6 +532,9 @@ using ADataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using BDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using CDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.tm.get_output_dtype(self.datatype)]};
 using AccDataType = float;
+using ALayout = {ns_name}::ALayout;
+using BLayout = {ns_name}::BLayout;
+using CLayout = {ns_name}::CLayout;
 #endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 """
 
@@ -545,6 +560,8 @@ using AccDataType = float;
         """Generate launch function"""
         if config.variant == GemmVariant.MULTI_D:
             return self._launch_function_multi_d(config)
+        if config.variant == GemmVariant.STREAM_K:
+            return self._launch_function_streamk(config)
         if config.preshuffle:
             return self._launch_function_preshuffle(config)
         return self._launch_function_standard(config)
@@ -723,6 +740,72 @@ using AccDataType = float;
             args.stride_C
         }};
         return launch(multi_d_args, stream);
+    }}"""
+
+    def _launch_function_streamk(self, config: KernelConfig) -> str:
+        """Generate launch function for Stream-K GEMM (the dispatcher way).
+
+        Stream-K is a single GEMM that splits the K dimension across CUs and
+        reduces partial results through a device workspace. Unlike Tile Engine
+        (which takes an external workspace pointer), the dispatcher allocates the
+        workspace INTERNALLY via DeviceMem inside launch(args, stream).
+
+        Uses the Atomic reduction strategy: partial tiles atomic-add into C, so C
+        must be zeroed before every kernel invocation (handled by the preprocess
+        callback passed to launch_kernel_time_mask).
+        """
+        return f"""
+    static float launch(const ck_tile::StreamKHostArgs& args, const stream_config& stream) {{
+        constexpr auto scheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
+        constexpr auto ReductionStrategy = ck_tile::StreamKReductionStrategy::Atomic;
+
+        using GemmUniversalTraits = TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
+                                            ALayout, BLayout, CLayout, TransposeC,
+                                            UseStructuredSparsity, UsePersistentKernel,
+                                            NumWaveGroups, Preshuffle>;
+
+        using UniversalGemmProblem = UniversalGemmPipelineProblem<
+            ADataType, BDataType, AccDataType, TileShape, GemmUniversalTraits, scheduler>;
+
+        using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
+        {self._epilogue_code(config)}
+
+        using StreamKTilePartitioner =
+            ck_tile::StreamKTilePartitioner<TileShape, ReductionStrategy, UsePersistentKernel>;
+        using StreamKGemmKernel =
+            ck_tile::StreamKKernel<StreamKTilePartitioner, GemmPipeline, GemmEpilogue>;
+
+        auto kargs = StreamKGemmKernel::MakeKernelArgs(args);
+
+        // Allocate the reduction workspace INTERNALLY (dispatcher idiom), not via
+        // an external pointer the way Tile Engine does.
+        const auto ws_size = StreamKGemmKernel::GetWorkSpaceSize(kargs);
+        ck_tile::DeviceMem workspace_dev(ws_size);
+        workspace_dev.SetZero();
+        StreamKGemmKernel::SetWorkSpacePointer(kargs, workspace_dev.GetDeviceBuffer());
+
+        if (!StreamKGemmKernel::IsSupportedArgument(kargs)) {{
+            throw std::runtime_error("Arguments not supported for stream-k kernel!");
+        }}
+
+        const dim3 grids = StreamKGemmKernel::GridSize(kargs.tile_partitioner);
+        const dim3 blocks = StreamKGemmKernel::BlockSize();
+        constexpr int kBlockPerCu = {config.k_block_per_cu};
+
+        // Atomic reduction accumulates into C, so reset buffers before each run.
+        auto reset_data_buffers = [&]() {{
+            if constexpr (ReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic) {{
+                (void)hipMemsetAsync(args.e_ptr, 0,
+                    args.M * args.N * sizeof(CDataType), stream.stream_id_);
+            }} else {{
+                workspace_dev.SetZero();
+            }}
+        }};
+        std::function<void()> preprocess = reset_data_buffers;
+
+        float ave_time = launch_kernel_time_mask(stream, preprocess,
+            make_kernel<kBlockPerCu>(StreamKGemmKernel{{}}, grids, blocks, 0, kargs));
+        return ave_time;
     }}"""
 
     def _epilogue_code(self, config: KernelConfig) -> str:
@@ -1038,6 +1121,14 @@ class UnifiedGemmCodegen:
             if variant == GemmVariant.STANDARD:
                 configs.append(KernelConfig(tile=tile, trait=trait, variant=variant))
 
+            elif variant == GemmVariant.STREAM_K:
+                # Stream-K reuses the standard trait space but requires the cshuffle
+                # epilogue (the only epilogue the stream-K kernel supports).
+                if trait.epilogue == "cshuffle":
+                    configs.append(
+                        KernelConfig(tile=tile, trait=trait, variant=variant)
+                    )
+
             elif variant == GemmVariant.PRESHUFFLE:
                 # Preshuffle needs specific pipeline (preshufflev2) and scheduler (default)
                 # Skip configs that don't use preshuffle-compatible traits
@@ -1154,6 +1245,7 @@ class UnifiedGemmCodegen:
                 GemmVariant.STANDARD: OperatorType.GEMM,
                 GemmVariant.PRESHUFFLE: OperatorType.GEMM_PRESHUFFLE,
                 GemmVariant.MULTI_D: OperatorType.GEMM_MULTI_D,
+                GemmVariant.STREAM_K: OperatorType.GEMM_STREAMK,
             }
             operator = variant_to_operator.get(variant, OperatorType.GEMM)
 
@@ -1403,7 +1495,7 @@ def main():
     parser.add_argument(
         "--variants",
         nargs="+",
-        choices=["standard", "preshuffle", "multi_d"],
+        choices=["standard", "preshuffle", "multi_d", "stream_k"],
         default=["standard"],
         help="Variants to generate",
     )
