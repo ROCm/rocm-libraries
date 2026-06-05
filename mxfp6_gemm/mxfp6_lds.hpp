@@ -217,11 +217,26 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         (void)sa; (void)sb;
 #endif
     };
+    // compute() one K-tile. a[] is read in full per sub-slab (each a[mi] is reused across every
+    // ni, so it cannot be lazily read without flipping to M-major -- N-major is +1.1%, keep it).
+    // b is a CONTINUOUS just-in-time stream across the WHOLE tile: only b_cur + b_next are live
+    // (2 v6i), and the next b's ds_read is issued BEFORE ni's MFMA quartet so its LDS-read
+    // (lgkmcnt) latency overlaps the 4 MFMAs. The stream walks (sub,ni) in order, so at a sub
+    // boundary the NEXT b is (sub+1, 0) -- this hides the per-sub fresh lgkmcnt that ★1 (exp#3)
+    // still paid at each sub's b[0], and lets the next sub's a-read burst sit behind it. Inverse
+    // of the failed exp#2 (hold less + read later), so the shallow per-quartet ladder is kept.
     auto compute = [&](uint32_t cur, const int (*sa)[NDA], const int (*sb)[NDB]) {
+        // prologue: prefetch the very first b (sub 0, ni 0)
+        v6i b_cur = read_op<KT_BYTES>(smem, cur + A_BYTES, wn * N_PW + 0, 0, lane);
+#ifdef NOSCALE
+        int sbv_cur = 127;
+#else
+        int sbv_cur = sb[0][0] & 0xff;
+#endif
 #pragma unroll
         for (int sub = 0; sub < K64_PER_TILE; sub++) {
-            v6i a[M_PW], b[N_PW];
-            int sav[M_PW], sbv[N_PW];
+            v6i a[M_PW];
+            int sav[M_PW];
 #pragma unroll
             for (int mi = 0; mi < M_PW; mi++) {
                 int blk = wm * M_PW + mi;
@@ -233,20 +248,26 @@ __global__ void __launch_bounds__(256, MIN_OCC)
 #endif
             }
 #pragma unroll
-            for (int ni = 0; ni < N_PW; ni++) {
-                int blk = wn * N_PW + ni;
-                b[ni] = read_op<KT_BYTES>(smem, cur + A_BYTES, blk, sub, lane);
+            for (int ni = 0; ni < N_PW; ni++) {  // N-major: B-operand reuse (outer)
+                v6i b_next;
+                int sbv_next = 0;
+                // next b in the continuous stream: (sub,ni+1), or (sub+1,0) across a sub boundary
+                if (sub * N_PW + ni + 1 < K64_PER_TILE * N_PW) {
+                    int nsub = (ni + 1 < N_PW) ? sub : sub + 1;
+                    int nni = (ni + 1 < N_PW) ? ni + 1 : 0;
+                    b_next = read_op<KT_BYTES>(smem, cur + A_BYTES, wn * N_PW + nni, nsub, lane);
 #ifdef NOSCALE
-                sbv[ni] = 127;
+                    sbv_next = 127;
 #else
-                sbv[ni] = (sb[sub][ni / 4] >> (8 * (ni % 4))) & 0xff;
+                    sbv_next = (sb[nsub][nni / 4] >> (8 * (nni % 4))) & 0xff;  // crosses to sb[sub+1][0]
 #endif
-            }
-#pragma unroll
-            for (int ni = 0; ni < N_PW; ni++)  // N-major: B-operand reuse (outer)
+                }
 #pragma unroll
                 for (int mi = 0; mi < M_PW; mi++)
-                    mfma_scale_f32_32x32x64_fp6<0>(acc[mi][ni], a[mi], b[ni], sav[mi], sbv[ni]);
+                    mfma_scale_f32_32x32x64_fp6<0>(acc[mi][ni], a[mi], b_cur, sav[mi], sbv_cur);
+                b_cur = b_next;
+                sbv_cur = sbv_next;
+            }
         }
     };
 
