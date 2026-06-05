@@ -104,9 +104,16 @@ bool checkNumericsImpl(
     std::string kernel_name       = GetKernelName(dDesc.GetType());
     const std::vector<size_t> vld = {size_t{threadsPerBlock}, size_t{1}, size_t{1}};
     const std::vector<size_t> vgd = {numBlocks, size_t{1}, size_t{1}};
-    handle.AddKernel(
-        "MIOpenCheckNumerics", "MIOpenCheckNumerics", program_name, kernel_name, vld, vgd, "")(
-        data, numElements, abnormal_d.get(), computeStats);
+    const std::string build_options =
+        " -DMIOPEN_FP8_CLIPPING=" + std::to_string(MIOPEN_FP8_CLIPPING) +
+        " -DMIOPEN_FP8_IEEE_EXPONENT_BIAS=" + std::to_string(MIOPEN_FP8_IEEE_EXPONENT_BIAS);
+    handle.AddKernel("MIOpenCheckNumerics",
+                     "MIOpenCheckNumerics",
+                     program_name,
+                     kernel_name,
+                     vld,
+                     vgd,
+                     build_options)(data, numElements, abnormal_d.get(), computeStats);
 
     handle.ReadTo(&abnormal_h, abnormal_d, sizeof(CheckNumericsResult));
 

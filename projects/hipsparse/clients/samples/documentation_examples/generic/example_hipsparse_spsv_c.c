@@ -153,7 +153,7 @@ int main(int argc, char* argv[])
 
     // Clear hipSPARSE
     HIPSPARSE_CHECK(hipsparseSpSV_destroyDescr(descr));
-    HIPSPARSE_CHECK(hipsparseDestroyMatDescr(matA));
+    HIPSPARSE_CHECK(hipsparseDestroySpMat(matA));
     HIPSPARSE_CHECK(hipsparseDestroyDnVec(vecX));
     HIPSPARSE_CHECK(hipsparseDestroyDnVec(vecY));
     HIPSPARSE_CHECK(hipsparseDestroy(handle));

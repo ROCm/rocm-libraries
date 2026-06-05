@@ -129,8 +129,8 @@ void InvokerCache::SetAsFound1_0(const std::string& network_config,
         const auto invoker        = item_invokers.find(solver_id);
         if(invoker == item_invokers.end())
         {
-            MIOPEN_THROW("No invoker with solver_id of " + solver_id + " was registered for " +
-                         network_config);
+            MIOPEN_THROW(std::string("No invoker with solver_id of ") + solver_id +
+                         " was registered for " + network_config);
         }
     }
 

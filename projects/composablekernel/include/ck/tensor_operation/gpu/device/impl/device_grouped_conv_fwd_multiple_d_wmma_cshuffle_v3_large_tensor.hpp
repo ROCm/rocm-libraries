@@ -20,11 +20,13 @@
 #include "ck/tensor_operation/gpu/device/device_grouped_conv_fwd_multiple_abd.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include "ck/tensor_operation/gpu/device/matrix_padder.hpp"
+#include "ck/tensor_operation/gpu/grid/epilogue_type.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_wmma_cshuffle_v3.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_utils.hpp"
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 #include "ck/host_utility/io.hpp"
+#include "ck/tensor_operation/gpu/device/tensor_size_check.hpp"
 
 namespace ck {
 namespace tensor_operation {
@@ -50,8 +52,11 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         const ComputePtrOffset compute_ptr_offset_of_n)
 {
 #if defined(__gfx11__) || defined(__gfx12__)
-    using Epilogue = typename GridwiseGemm::EpilogueCShuffle;
-    __shared__ char p_shared[GridwiseGemm::template GetSharedMemoryNumberOfByte<Epilogue>()];
+    using SelectedEpilogue = get_epilogue_t<EpilogueType::CShuffle, GridwiseGemm>;
+
+    constexpr index_t LDS_size =
+        GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>();
+    __shared__ char p_shared[LDS_size];
 
     const index_t block_id_x = __builtin_amdgcn_readfirstlane(blockIdx.x);
     const index_t g_idx      = __builtin_amdgcn_readfirstlane(blockIdx.y);
@@ -147,7 +152,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
 
     const index_t num_k_block_per_scale = GridwiseGemm::GetKBlockPerScale();
 
-    auto epilogue_args = Epilogue{};
+    auto epilogue_args = SelectedEpilogue{};
 
     GridwiseGemm::Base::template Run<decltype(as_grid_desc_ak0_m_ak1),
                                      decltype(bs_grid_desc_bk0_n_bk1),
@@ -155,7 +160,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
                                      decltype(e_grid_desc),
                                      decltype(a_scale_struct),
                                      decltype(b_scale_struct),
-                                     Epilogue,
+                                     SelectedEpilogue,
                                      HasMainKBlockLoop,
                                      EGlobalMemoryDataOperation,
                                      TailNum>(p_as_grid_,
@@ -266,7 +271,6 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
 
     static constexpr auto MWaves = MPerBlock / (MRepeat * MPerWmma);
     static constexpr auto NWaves = NPerBlock / (NRepeat * NPerWmma);
-    static constexpr auto WmmaK  = 16;
 
     using ConvToGemmFwdTransformerIndexT = TransformConvFwdToGemm<NDimSpatial,
                                                                   ConvForwardSpecialization,
@@ -667,13 +671,15 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
                  const std::array<long_index_t, NDimSpatial>& input_right_pads,
                  const AElementwiseOperation& a_element_op,
                  const BElementwiseOperation& b_element_op,
-                 const CDEElementwiseOperation& cde_element_op)
+                 const CDEElementwiseOperation& cde_element_op,
+                 bool stride_overflow_in = false)
             : num_group_{static_cast<index_t>(a_g_n_c_wis_lengths[0])},
               compute_ptr_offset_of_groups_{},
               compute_ptr_offset_of_n_{},
               a_element_op_{a_element_op},
               b_element_op_{b_element_op},
               cde_element_op_{cde_element_op},
+              stride_overflow_{stride_overflow_in},
               a_g_n_c_wis_lengths_{a_g_n_c_wis_lengths},
               a_g_n_c_wis_strides_{a_g_n_c_wis_strides},
               b_g_k_c_xs_lengths_{b_g_k_c_xs_lengths},
@@ -872,6 +878,7 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
         AElementwiseOperation a_element_op_;
         BElementwiseOperation b_element_op_;
         CDEElementwiseOperation cde_element_op_;
+        bool stride_overflow_;
 
         // for checking IsSupportedArgument()
         std::array<long_index_t, NDimSpatial + 3> a_g_n_c_wis_lengths_;
@@ -957,6 +964,9 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(arg.stride_overflow_)
+            return false;
+
         namespace ctc = tensor_layout::convolution;
 
         const long_index_t K = arg.b_g_k_c_xs_lengths_[I1];
@@ -1300,6 +1310,12 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
                  const BElementwiseOperation& b_element_op,
                  const CDEElementwiseOperation& cde_element_op)
     {
+        bool ds_ovf = false;
+        for(index_t d = 0; d < NumDTensor; d++)
+            ds_ovf |= tensor_exceeds_2gb(ds_g_n_k_wos_lengths[d]);
+        const bool stride_ovf = tensor_exceeds_2gb(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb(e_g_n_k_wos_lengths) || ds_ovf;
         return Argument{p_a,
                         p_b,
                         p_ds,
@@ -1318,7 +1334,8 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
                         input_right_pads,
                         a_element_op,
                         b_element_op,
-                        cde_element_op};
+                        cde_element_op,
+                        stride_ovf};
     }
 
     static auto MakeInvoker() { return Invoker{}; }
@@ -1420,6 +1437,12 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
                         const BElementwiseOperation& b_element_op,
                         const CDEElementwiseOperation& cde_element_op) override
     {
+        bool ds_ovf = false;
+        for(index_t d = 0; d < NumDTensor; d++)
+            ds_ovf |= tensor_exceeds_2gb(ds_g_n_k_wos_lengths[d]);
+        const bool stride_ovf = tensor_exceeds_2gb(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb(e_g_n_k_wos_lengths) || ds_ovf;
         return std::make_unique<Argument>(p_a,
                                           p_b,
                                           p_ds,
@@ -1438,7 +1461,8 @@ struct DeviceGroupedConvFwdMultipleD_Wmma_CShuffle_V3_Large_Tensor
                                           input_right_pads,
                                           a_element_op,
                                           b_element_op,
-                                          cde_element_op);
+                                          cde_element_op,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseInvoker> MakeInvokerPointer() override

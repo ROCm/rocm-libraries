@@ -70,7 +70,7 @@ TYPED_TEST(TypedDataTypesTest, TypeInfo_Consistency)
     TensileLite::DataTypeInfo const& fromEnum = TensileLite::DataTypeInfo::Get(MyTypeInfo::Enum);
 
     EXPECT_EQ(fromEnum.dataType, MyTypeInfo::Enum);
-    EXPECT_EQ(fromEnum.elementSize, sizeof(TheType));
+    EXPECT_EQ(fromEnum.elementSize * fromEnum.packing, sizeof(TheType));
     EXPECT_EQ(fromEnum.packing, MyTypeInfo::Packing);
 
     EXPECT_EQ(fromEnum.isComplex, MyTypeInfo::IsComplex);

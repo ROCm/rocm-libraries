@@ -30,6 +30,8 @@
 #include "cpu_rnn.hpp"
 #include "workspace.hpp"
 #include "verify.hpp"
+#include "gtest_desc_guard.hpp"
+#include "gtest_handle_guard.hpp"
 
 #include <tuple>
 #include <numeric>
@@ -1707,22 +1709,25 @@ struct LSTM_test : Verifier
 #endif
 
         auto&& handle = get_handle();
-        miopenRNNDescriptor_t rnnDesc;
-        miopenCreateRNNDescriptor(&rnnDesc);
-        miopenDropoutDescriptor_t DropoutDesc;
-        miopenCreateDropoutDescriptor(&DropoutDesc);
+        RNNDescGuard rnnDesc;
+        DropoutDescGuard DropoutDesc;
         size_t statesSizeInBytes = 0;
+
+        HandleGuard mio_handle;
+        void* dropout_state_buf = nullptr;
+
+        // See DestroyInternalRnnDropoutDesc — frees the descriptor allocated
+        // by miopenCreateRNNDescriptor that the upcoming Set* will leak.
+        DestroyInternalRnnDropoutDesc(rnnDesc);
 
         if(useDropout != 0)
         {
-            miopenHandle_t mio_handle;
-            miopenCreateWithStream(&mio_handle, handle.GetStream());
+            mio_handle.create(handle.GetStream());
 
             float dropout_rate{0.5f};
             unsigned long long dropout_seed{0ULL};
             miopenDropoutGetStatesSize(mio_handle, &statesSizeInBytes);
 
-            void* dropout_state_buf;
             (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 
             miopenSetDropoutDescriptor(DropoutDesc,
@@ -1967,5 +1972,14 @@ struct LSTM_test : Verifier
             rnnDesc,  input,      dyin,      hx,      rsvgpu,    rsvcpu,           workSpaceBwdData,
             batchSeq, hiddenSize, wei_sz,    batch_n, seqLength, numLayers,        biasMode,
             dirMode,  inputMode,  inVecReal, hx_sz,   nohx,      bool(useDropout), usePadding});
+
+        // Free the DropoutDescriptor that miopenSetRNNDescriptor just allocated.
+        // In the dropout path, the internal pointer aliases the user-owned
+        // DropoutDescGuard — freeing it would double-free.
+        if(useDropout == 0)
+            DestroyInternalRnnDropoutDesc(rnnDesc);
+
+        if(useDropout != 0)
+            (void)hipFree(dropout_state_buf);
     }
 };

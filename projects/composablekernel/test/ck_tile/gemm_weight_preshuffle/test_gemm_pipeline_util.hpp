@@ -13,28 +13,6 @@
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
-template <typename PrecType, ck_tile::index_t M_Warp_Tile>
-constexpr ck_tile::index_t get_k_warp_tile()
-{
-#if CK_TILE_USE_WMMA
-    return 16;
-#else
-#if defined(CK_GFX950_SUPPORT)
-    constexpr bool is_8bit_float =
-        std::is_same_v<PrecType, ck_tile::fp8_t> || std::is_same_v<PrecType, ck_tile::bf8_t>;
-    if constexpr(M_Warp_Tile == 32)
-        return is_8bit_float ? 64 : 16;
-    else
-        return is_8bit_float ? 128 : 32;
-#else
-    if constexpr(M_Warp_Tile == 32)
-        return 16;
-    else
-        return 32;
-#endif
-#endif
-}
-
 template <typename ADataType, typename BDataType, typename AccDataType, typename CDataType>
 auto calculate_rtol_atol(const ck_tile::index_t K,
                          const ck_tile::index_t kbatch,
@@ -58,7 +36,8 @@ auto calculate_rtol_atol(const ck_tile::index_t K,
 
 enum struct GemmPipelineType
 {
-    WeightPreshuffleV2
+    WeightPreshuffleV2,
+    WeightPreshuffleTDM
 };
 
 template <GemmPipelineType PT, typename Problem>
@@ -73,6 +52,15 @@ struct GemmPipelineTypeSelector<GemmPipelineType::WeightPreshuffleV2, Problem>
     static constexpr auto GetName() { return "GemmPipelineAgBgCrWeightPreshuffleV2"; }
 };
 
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::WeightPreshuffleTDM, Problem>
+{
+    using base_pipeline = ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegTDM<Problem>;
+    using pipeline      = ck_tile::WeightPreshufflePipelineAGmemBGmemCRegTDM<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrWeightPreshuffleTDM"; }
+};
+
 template <typename Datatype>
 struct config
 {
@@ -83,6 +71,11 @@ struct config
     static constexpr ck_tile::index_t M_Warp = 1;
     static constexpr ck_tile::index_t N_Warp = 4;
     static constexpr ck_tile::index_t K_Warp = 1;
+
+    static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchA =
+        ck_tile::DataCachePrefetchKind::None;
+    static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchB =
+        ck_tile::DataCachePrefetchKind::None;
 };
 
 template <typename Datatype>
@@ -90,7 +83,8 @@ struct config_mn_32x32 : public config<Datatype>
 {
     static constexpr ck_tile::index_t M_Warp_Tile = 32;
     static constexpr ck_tile::index_t N_Warp_Tile = 32;
-    static constexpr ck_tile::index_t K_Warp_Tile = get_k_warp_tile<Datatype, M_Warp_Tile>();
+    static constexpr ck_tile::index_t K_Warp_Tile =
+        ck_tile::get_k_warp_tile<Datatype, M_Warp_Tile>();
 };
 
 template <typename Datatype>
@@ -98,7 +92,8 @@ struct config_mn_16x16 : public config<Datatype>
 {
     static constexpr ck_tile::index_t M_Warp_Tile = 16;
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
-    static constexpr ck_tile::index_t K_Warp_Tile = get_k_warp_tile<Datatype, M_Warp_Tile>();
+    static constexpr ck_tile::index_t K_Warp_Tile =
+        ck_tile::get_k_warp_tile<Datatype, M_Warp_Tile>();
 };
 
 template <typename Datatype>
@@ -114,7 +109,13 @@ struct config_wmma
 
     static constexpr ck_tile::index_t M_Warp_Tile = 16;
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
-    static constexpr ck_tile::index_t K_Warp_Tile = get_k_warp_tile<Datatype, M_Warp_Tile>();
+    static constexpr ck_tile::index_t K_Warp_Tile =
+        ck_tile::get_k_warp_tile<Datatype, M_Warp_Tile>();
+
+    static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchA =
+        ck_tile::DataCachePrefetchKind::None;
+    static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchB =
+        ck_tile::DataCachePrefetchKind::None;
 };
 
 template <typename Tuple>
@@ -130,12 +131,14 @@ class TestCkTileGemmPipeline : public ::testing::Test
     using CDataType                    = std::tuple_element_t<6, Tuple>;
     static constexpr auto Scheduler    = std::tuple_element_t<7, Tuple>::value;
     static constexpr auto PipelineType = std::tuple_element_t<8, Tuple>::value;
+    static constexpr bool Async =
+        ck_tile::tuple_element_or_default_t<Tuple, 9, std::false_type>::value;
 
     using DsLayout   = ck_tile::tuple<>;
     using DsDataType = ck_tile::tuple<>;
 
     static constexpr bool Persistent =
-        ck_tile::tuple_element_or_default_t<Tuple, 9, std::false_type>::value;
+        ck_tile::tuple_element_or_default_t<Tuple, 10, std::false_type>::value;
     // TODO: expose tile size through test t-param ?
 
     template <typename GemmConfig, bool PadM, bool PadN, bool PadK, bool Preshuffle>
@@ -146,8 +149,7 @@ class TestCkTileGemmPipeline : public ::testing::Test
         constexpr bool kPadK      = PadK;
         constexpr bool preshuffle = Preshuffle;
 
-        constexpr bool DoubleSmemBuffer =
-            (PipelineType == GemmPipelineType::WeightPreshuffleV2) ? true : false;
+        constexpr bool DoubleSmemBuffer = true;
 
         // TODO: For now - but this should also be a test parameter
         constexpr bool TransposeC = false;
@@ -169,6 +171,8 @@ class TestCkTileGemmPipeline : public ::testing::Test
         static constexpr bool StructuredSparsity = false;
         static constexpr bool NumWaveGroup       = 1;
 
+        static constexpr ck_tile::index_t VectorSize = 16;
+
         using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<kPadM,
                                                                      kPadN,
                                                                      kPadK,
@@ -180,7 +184,11 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                                                      StructuredSparsity,
                                                                      Persistent,
                                                                      NumWaveGroup,
-                                                                     preshuffle>;
+                                                                     preshuffle,
+                                                                     VectorSize,
+                                                                     GemmConfig::DataCachePrefetchA,
+                                                                     GemmConfig::DataCachePrefetchB,
+                                                                     Async>;
 
         using UniversalGemmProblem = ck_tile::UniversalGemmPipelineProblem<ADataType,
                                                                            BDataType,
@@ -333,7 +341,7 @@ class TestCkTileGemmPipeline : public ::testing::Test
         ck_tile::DeviceMem c_m_n_dev_buf(c_m_n_dev_result.get_element_space_size_in_bytes());
 
         a_m_k_dev_buf.ToDevice(a_m_k.data());
-        ck_tile::HostTensor<BDataType> b_shuffle_host = shuffle_b<GemmConfig>(b_k_n);
+        ck_tile::HostTensor<BDataType> b_shuffle_host = shuffle_b_v0<GemmConfig>(b_k_n);
         if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)
         {
             // Permute vector pk_i4x4 data for device implementation

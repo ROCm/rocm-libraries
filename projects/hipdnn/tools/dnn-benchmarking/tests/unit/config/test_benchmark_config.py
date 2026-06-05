@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from dnn_benchmarking.config import ABTestConfig, BenchmarkConfig, ValidationConfig
+from dnn_benchmarking.config import BenchmarkConfig, SuiteConfig, ValidationConfig
 
 
 class TestBenchmarkConfig:
@@ -72,96 +72,61 @@ class TestBenchmarkConfig:
         assert config.engine_id == -4567890123456789012
 
 
-class TestABTestConfig:
-    """Tests for ABTestConfig dataclass."""
+class TestSuiteConfigPluginPaths:
+    """Tests for SuiteConfig engine/plugin path selection."""
 
-    def test_default_values(self) -> None:
-        """Test that defaults are applied correctly."""
-        config = ABTestConfig()
+    def test_single_plugin_path_applies_to_all_engines(self) -> None:
+        config = SuiteConfig(
+            engine_filter=[1, 2],
+            plugin_paths=[Path("/plugins/a")],
+        )
+        selections = config.engine_selections_for([1, 2])
 
-        assert config.a_path is None
-        assert config.a_id == 1
-        assert config.b_path is None
-        assert config.b_id == 1
-        assert config.rtol == 1e-5
-        assert config.atol == 1e-8
+        assert [s.engine_id for s in selections] == [1, 2]
+        assert [s.plugin_path for s in selections] == [
+            Path("/plugins/a"),
+            Path("/plugins/a"),
+        ]
+        assert config.plugin_path == Path("/plugins/a")
 
-    def test_custom_values(self) -> None:
-        """Test that custom values are stored correctly."""
-        config = ABTestConfig(
-            a_path=Path("/path/to/pluginA"),
-            a_id=1,
-            b_path=Path("/path/to/pluginB"),
-            b_id=2,
-            rtol=1e-3,
-            atol=1e-6,
+    def test_multiple_plugin_paths_follow_engine_order(self) -> None:
+        config = SuiteConfig(
+            engine_filter=[2, 1],
+            plugin_paths=[Path("/plugins/b"), Path("/plugins/a")],
+        )
+        selections = config.engine_selections_for([2, 1])
+
+        assert [s.engine_id for s in selections] == [2, 1]
+        assert [s.plugin_path for s in selections] == [
+            Path("/plugins/b"),
+            Path("/plugins/a"),
+        ]
+        assert config.plugin_path is None
+
+    def test_repeated_engine_ids_keep_distinct_plugin_paths(self) -> None:
+        config = SuiteConfig(
+            engine_filter=[1, 1],
+            plugin_paths=[Path("/plugins/a"), Path("/plugins/b")],
         )
 
-        assert config.a_path == Path("/path/to/pluginA")
-        assert config.a_id == 1
-        assert config.b_path == Path("/path/to/pluginB")
-        assert config.b_id == 2
-        assert config.rtol == 1e-3
-        assert config.atol == 1e-6
+        selections = config.engine_selections_for([1, 1])
 
-    def test_string_path_converted_to_path(self) -> None:
-        """Test that string paths are converted to Path objects."""
-        config = ABTestConfig(
-            a_path="/path/to/pluginA",  # type: ignore
-            b_path="/path/to/pluginB",  # type: ignore
-        )
+        assert [s.engine_id for s in selections] == [1, 1]
+        assert [s.plugin_path for s in selections] == [
+            Path("/plugins/a"),
+            Path("/plugins/b"),
+        ]
 
-        assert isinstance(config.a_path, Path)
-        assert isinstance(config.b_path, Path)
-        assert config.a_path == Path("/path/to/pluginA")
-        assert config.b_path == Path("/path/to/pluginB")
+    def test_multiple_plugin_paths_require_engine_filter(self) -> None:
+        with pytest.raises(ValueError, match="requires --engine"):
+            SuiteConfig(plugin_paths=[Path("/plugins/a"), Path("/plugins/b")])
 
-    def test_negative_ids_accepted(self) -> None:
-        """a_id / b_id may be negative (FNV-1a engine ID hashes)."""
-        config = ABTestConfig(a_id=-1, b_id=-2)
-        assert config.a_id == -1
-        assert config.b_id == -2
-
-    def test_negative_rtol_raises(self) -> None:
-        """Test that negative rtol raises ValueError."""
-        with pytest.raises(ValueError, match="rtol must be non-negative"):
-            ABTestConfig(rtol=-1e-5)
-
-    def test_negative_atol_raises(self) -> None:
-        """Test that negative atol raises ValueError."""
-        with pytest.raises(ValueError, match="atol must be non-negative"):
-            ABTestConfig(atol=-1e-8)
-
-    def test_validate_paths_with_existing_paths(self, tmp_path: Path) -> None:
-        """Test validate_paths succeeds with existing paths."""
-        plugin_a = tmp_path / "pluginA"
-        plugin_b = tmp_path / "pluginB"
-        plugin_a.mkdir()
-        plugin_b.mkdir()
-
-        config = ABTestConfig(a_path=plugin_a, b_path=plugin_b)
-        # Should not raise
-        config.validate_paths()
-
-    def test_validate_paths_with_none_paths(self) -> None:
-        """Test validate_paths succeeds with None paths."""
-        config = ABTestConfig()
-        # Should not raise
-        config.validate_paths()
-
-    def test_validate_paths_nonexistent_a_path(self, tmp_path: Path) -> None:
-        """Test validate_paths raises for nonexistent a_path."""
-        config = ABTestConfig(a_path=tmp_path / "nonexistent")
-
-        with pytest.raises(ValueError, match="Plugin path A does not exist"):
-            config.validate_paths()
-
-    def test_validate_paths_nonexistent_b_path(self, tmp_path: Path) -> None:
-        """Test validate_paths raises for nonexistent b_path."""
-        config = ABTestConfig(b_path=tmp_path / "nonexistent")
-
-        with pytest.raises(ValueError, match="Plugin path B does not exist"):
-            config.validate_paths()
+    def test_plugin_path_count_must_match_engine_count(self) -> None:
+        with pytest.raises(ValueError, match="entry count"):
+            SuiteConfig(
+                engine_filter=[1, 2, 3],
+                plugin_paths=[Path("/plugins/a"), Path("/plugins/b")],
+            )
 
 
 class TestValidationConfig:
