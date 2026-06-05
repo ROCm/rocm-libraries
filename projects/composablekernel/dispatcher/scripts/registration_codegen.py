@@ -249,10 +249,19 @@ def _make_implicit_gemm_conv_key(meta):
 
 
 def make_registration_block(kname, global_idx, op_enum, run_fn_maker, is_supported_fn_maker):
-    """Generate C++ registration code for a single kernel."""
+    """Generate C++ registration code for a single kernel.
+
+    Uses the global-namespace {kname}_Launcher alias exported by the kernel's
+    _decl.hpp header.  When the dispatch library is built with _decl.hpp headers
+    (rather than the full impl headers), this alias resolves to {kname}_Adapter —
+    a thin adapter struct that routes through C-linkage wrapper functions defined
+    in the kernel's .cpp file.  This avoids a compile-time dependency on the CK
+    Tile kernel implementation headers in the registration compilation units.
+    """
     meta = parse_kernel_metadata(kname)
-    ns = f"ns_{kname}"
-    launcher = f"{ns}::{kname}_Launcher"
+    # Use the global-namespace alias exported by {kname}_decl.hpp.
+    # Previously this was ns_{kname}::{kname}_Launcher (from the full impl header).
+    launcher = f"{kname}_Launcher"
     ndim = meta["ndim"]
     is_depthwise = meta.get("is_depthwise", False)
 
@@ -316,14 +325,21 @@ def generate_chunked_registration(headers, output_dir, variant, op_enum,
         lines = [
             "// Auto-generated — do not edit",
             f"// Registration chunk {chunk_idx} for {variant} kernels ({len(chunk_headers)} kernels).",
+            "//",
+            "// Includes _decl.hpp headers (declaration-only, no CK Tile kernel includes).",
+            "// This ensures changes to kernel implementations do not trigger a rebuild",
+            "// of these registration compilation units.",
             "",
             "#pragma clang diagnostic push",
             '#pragma clang diagnostic ignored "-Wheader-hygiene"',
             '#pragma clang diagnostic ignored "-Wunused-parameter"',
         ]
-        # Include only headers for this chunk
+        # Include only the lightweight _decl headers for this chunk.
+        # The _decl headers forward-declare the Launcher struct without pulling in
+        # any CK Tile kernel headers, breaking the dependency on the implementation.
         for h in chunk_headers:
-            lines.append(f'#include "{h.name}"')
+            decl_name = h.stem + "_decl.hpp"
+            lines.append(f'#include "{decl_name}"')
         lines.append("#pragma clang diagnostic pop")
         lines.append("")
         lines.append('#include "ck_tile/dispatcher/grouped_conv_registry.hpp"')

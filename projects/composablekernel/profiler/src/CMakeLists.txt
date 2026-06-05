@@ -180,11 +180,19 @@ if(CK_TILE_DISPATCHER AND SUPPORTED_GPU_TARGETS MATCHES "gfx9")
     -Wno-old-style-cast
   )
 
-  # Link all available dispatcher instance libraries
+  # Link all available dispatcher instance libraries.
+  # Each variant is split into two OBJECT libraries:
+  #   ck_dispatcher_grouped_conv_<variant>          — kernel implementation TUs
+  #   ck_dispatcher_grouped_conv_<variant>_dispatch — registration/dispatch TUs
+  # Both must be linked so the registry is populated and kernels are available.
   foreach(_VARIANT fwd bwd_weight bwd_data)
-    set(_TARGET "ck_dispatcher_grouped_conv_${_VARIANT}")
-    if(TARGET ${_TARGET})
-      target_link_libraries(${PROFILER_EXECUTABLE} PRIVATE ${_TARGET})
+    set(_KERNEL_TARGET   "ck_dispatcher_grouped_conv_${_VARIANT}")
+    set(_DISPATCH_TARGET "ck_dispatcher_grouped_conv_${_VARIANT}_dispatch")
+    if(TARGET ${_KERNEL_TARGET})
+      target_link_libraries(${PROFILER_EXECUTABLE} PRIVATE ${_KERNEL_TARGET})
+    endif()
+    if(TARGET ${_DISPATCH_TARGET})
+      target_link_libraries(${PROFILER_EXECUTABLE} PRIVATE ${_DISPATCH_TARGET})
     endif()
   endforeach()
 endif()

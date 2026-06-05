@@ -1011,6 +1011,91 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
     }}
 #endif"""
 
+    def generate_decl_header(self, config: GroupedConvKernelConfig) -> str:
+        """Generate a lightweight declaration-only header for this kernel.
+
+        The registration/dispatch .cpp files call
+        make_conv_{variant}_run_fn<LauncherType, N>() which instantiates a
+        template that calls LauncherType::launch() — a static method requiring
+        the full Launcher definition.  To break that header dependency we
+        expose the launcher through type-erased C-linkage wrapper functions
+        declared here.  The definitions live in the kernel implementation .cpp
+        so the compiler only needs them when linking, not when compiling the
+        registration TU.
+
+        The generated _Adapter struct wraps these functions in the interface
+        expected by make_conv_*_run_fn / make_conv_*_is_supported_fn.
+        """
+        kernel_name = config.name(self.datatype)
+
+        if self.variant == GroupedConvVariant.BACKWARD_DATA:
+            host_args_type = "ck_tile::GroupedConvBwdDataHostArgs"
+        elif self.variant == GroupedConvVariant.BACKWARD_WEIGHT:
+            host_args_type = "ck_tile::GroupedConvBwdWeightHostArgs"
+        else:
+            host_args_type = "ck_tile::GroupedConvFwdHostArgs<>"
+
+        safe_name = kernel_name.replace("-", "_")
+
+        return f"""// SPDX-License-Identifier: MIT
+// Auto-generated DECLARATION-ONLY header for: {kernel_name}
+// Variant: {self.variant.value}
+//
+// This header does NOT include any CK Tile kernel implementation headers.
+// It declares lightweight C-linkage wrapper functions whose definitions live
+// in {kernel_name}.cpp (which includes the full {kernel_name}.hpp).
+//
+// Registration/dispatch compilation units include this file so they are NOT
+// invalidated when the kernel implementation headers change.
+#pragma once
+
+#include <cstdlib>
+#include <string>
+#include "ck_tile/ops/grouped_convolution/utils/grouped_convolution_utils.hpp"
+#include "ck_tile/host/stream_config.hpp"
+#include "ck_tile/host/convolution_parameter.hpp"
+
+// C-linkage wrappers defined in {kernel_name}.cpp
+// These wrap {kernel_name}_Launcher::launch / is_supported without exposing
+// any CK Tile template machinery to includers of this header.
+extern "C" float  {safe_name}_launch_wrapper(
+    const {host_args_type}& args, const ck_tile::stream_config& s);
+extern "C" bool   {safe_name}_is_supported_wrapper(
+    const ck_tile::conv::ConvParam& param, int k_batch);
+#ifdef CK_EXPERIMENTAL_BUILDER
+// get_instance_string returns a heap-allocated C string; caller must free() it.
+extern "C" char*  {safe_name}_get_instance_string_wrapper();
+#endif
+
+// Adapter struct: presents the same static-method interface that
+// make_conv_*_run_fn<Adapter, NDim>() and
+// make_conv_*_is_supported_fn<Adapter, NDim>() expect, but routes
+// through the C wrappers above — no CK Tile kernel headers needed here.
+struct {kernel_name}_Adapter {{
+    static float launch(const {host_args_type}& args,
+                        const ck_tile::stream_config& s)
+    {{
+        return {safe_name}_launch_wrapper(args, s);
+    }}
+    static bool is_supported(const ck_tile::conv::ConvParam& param, int k_batch)
+    {{
+        return {safe_name}_is_supported_wrapper(param, k_batch);
+    }}
+#ifdef CK_EXPERIMENTAL_BUILDER
+    static std::string get_instance_string()
+    {{
+        char* s = {safe_name}_get_instance_string_wrapper();
+        std::string result(s ? s : "");
+        free(s);
+        return result;
+    }}
+#endif
+}};
+
+// Alias so registration code can use the same name pattern as before
+using {kernel_name}_Launcher = {kernel_name}_Adapter;
+"""
+
     def _get_launch_code(self) -> str:
         """Generate the kernel launch code for the non-two-stage launcher.
 
@@ -1647,6 +1732,69 @@ constexpr const char* CONV_FWD_KERNEL_NAME = {ns_name}::CONV_FWD_KERNEL_NAME;
 #endif
 """
 
+    def generate_decl_header(self, config: DepthwiseConvKernelConfig) -> str:
+        """Generate a lightweight declaration-only header for this depthwise kernel.
+
+        See CKTileGroupedConvKernelGenerator.generate_decl_header() for rationale.
+        Depthwise forward kernels use GroupedConvFwdHostArgs<>.
+        """
+        kernel_name = config.name(self.datatype)
+        safe_name = kernel_name.replace("-", "_")
+        host_args_type = "ck_tile::GroupedConvFwdHostArgs<>"
+
+        return f"""// SPDX-License-Identifier: MIT
+// Auto-generated DECLARATION-ONLY header for: {kernel_name}
+// Variant: forward_depthwise
+//
+// This header does NOT include any CK Tile kernel implementation headers.
+// It declares lightweight C-linkage wrapper functions whose definitions live
+// in {kernel_name}.cpp (which includes the full {kernel_name}.hpp).
+//
+// Registration/dispatch compilation units include this file so they are NOT
+// invalidated when the kernel implementation headers change.
+#pragma once
+
+#include <cstdlib>
+#include <string>
+#include "ck_tile/ops/grouped_convolution/utils/grouped_convolution_utils.hpp"
+#include "ck_tile/host/stream_config.hpp"
+#include "ck_tile/host/convolution_parameter.hpp"
+
+// C-linkage wrappers defined in {kernel_name}.cpp
+extern "C" float  {safe_name}_launch_wrapper(
+    const {host_args_type}& args, const ck_tile::stream_config& s);
+extern "C" bool   {safe_name}_is_supported_wrapper(
+    const ck_tile::conv::ConvParam& param, int k_batch);
+#ifdef CK_EXPERIMENTAL_BUILDER
+extern "C" char*  {safe_name}_get_instance_string_wrapper();
+#endif
+
+// Adapter struct presenting the static-method interface expected by
+// make_conv_fwd_run_fn<Adapter, NDim>() / make_conv_fwd_is_supported_fn<...>().
+struct {kernel_name}_Adapter {{
+    static float launch(const {host_args_type}& args,
+                        const ck_tile::stream_config& s)
+    {{
+        return {safe_name}_launch_wrapper(args, s);
+    }}
+    static bool is_supported(const ck_tile::conv::ConvParam& param, int k_batch)
+    {{
+        return {safe_name}_is_supported_wrapper(param, k_batch);
+    }}
+#ifdef CK_EXPERIMENTAL_BUILDER
+    static std::string get_instance_string()
+    {{
+        char* s = {safe_name}_get_instance_string_wrapper();
+        std::string result(s ? s : "");
+        free(s);
+        return result;
+    }}
+#endif
+}};
+
+using {kernel_name}_Launcher = {kernel_name}_Adapter;
+"""
+
 
 # ============================================================================
 # Dispatcher Wrapper Generator
@@ -2226,7 +2374,14 @@ class UnifiedGroupedConvCodegen:
         datatype: str,
         variant: GroupedConvVariant = GroupedConvVariant.FORWARD,
     ) -> Tuple[Path, Path]:
-        """Generate a single kernel file and dispatcher wrapper. Returns (kernel_path, wrapper_path)."""
+        """Generate a single kernel file and dispatcher wrapper. Returns (kernel_path, wrapper_path).
+
+        In addition to the full implementation header (kernel_name.hpp) and the
+        .cpp compilation unit, this also writes a lightweight declaration-only
+        header (kernel_name_decl.hpp).  Registration/dispatch .cpp files include
+        the _decl variant so that changes to the kernel implementation do not
+        trigger a rebuild of the registration compilation units.
+        """
         if isinstance(config, DepthwiseConvKernelConfig):
             kernel_gen = CKTileDepthwiseConvKernelGenerator(datatype)
             # Depthwise kernels are forward-only, use the forward wrapper generator
@@ -2239,27 +2394,82 @@ class UnifiedGroupedConvCodegen:
         filename = f"{kernel_name}.hpp"
         filepath = self.output_dir / filename
 
-        # Generate kernel header
+        # Generate full implementation header (includes CK Tile kernel headers)
         content = kernel_gen.generate(config)
         filepath.write_text(content)
         self.generated_files.append(filepath)
+
+        # Generate lightweight declaration-only header used by registration code.
+        # This header does NOT include any CK Tile kernel headers, so registration
+        # .cpp files are NOT invalidated when the kernel implementation changes.
+        decl_filename = f"{kernel_name}_decl.hpp"
+        decl_filepath = self.output_dir / decl_filename
+        decl_content = kernel_gen.generate_decl_header(config)
+        decl_filepath.write_text(decl_content)
 
         wrapper_content = wrapper_gen.generate(config, filepath, self.output_dir)
         wrapper_path = self.wrapper_dir / f"dispatcher_wrapper_{kernel_name}.hpp"
         wrapper_path.write_text(wrapper_content)
         self.generated_wrappers.append(wrapper_path)
 
-        # Generate .cpp compilation unit for per-kernel parallel builds
+        # Determine the host args type and safe C identifier for wrapper functions
+        if isinstance(config, DepthwiseConvKernelConfig):
+            host_args_type = "ck_tile::GroupedConvFwdHostArgs<>"
+        elif variant == GroupedConvVariant.BACKWARD_DATA:
+            host_args_type = "ck_tile::GroupedConvBwdDataHostArgs"
+        elif variant == GroupedConvVariant.BACKWARD_WEIGHT:
+            host_args_type = "ck_tile::GroupedConvBwdWeightHostArgs"
+        else:
+            host_args_type = "ck_tile::GroupedConvFwdHostArgs<>"
+
+        safe_name = kernel_name.replace("-", "_")
+
+        # Generate .cpp compilation unit for per-kernel parallel builds.
+        # This file:
+        #   1. Includes the full kernel implementation header.
+        #   2. Defines the C-linkage wrapper functions declared in kernel_name_decl.hpp.
+        #      The registration/dispatch library includes only kernel_name_decl.hpp so
+        #      it is NOT recompiled when the kernel implementation changes.
         cpp_filename = f"{kernel_name}.cpp"
         cpp_filepath = self.output_dir / cpp_filename
         cpp_content = f"""// SPDX-License-Identifier: MIT
 // Auto-generated compilation unit for: {kernel_name}
 // Enables per-kernel parallel compilation with make -j
 
+#include <cstdlib>
+#include <cstring>
 #include "{filename}"
 
+// C-linkage wrapper definitions.
+// Declared in {kernel_name}_decl.hpp and used by the dispatch/registration library.
+// By placing definitions here (in the impl TU) rather than in the header, the
+// registration library can be compiled without including {filename} — it only needs
+// the lightweight _decl.hpp, breaking the dependency on CK Tile kernel headers.
+extern "C" float {safe_name}_launch_wrapper(
+    const {host_args_type}& args, const ck_tile::stream_config& s)
+{{
+    return {kernel_name}_Launcher::launch(args, s);
+}}
+
+extern "C" bool {safe_name}_is_supported_wrapper(
+    const ck_tile::conv::ConvParam& param, int k_batch)
+{{
+    return {kernel_name}_Launcher::is_supported(param, k_batch);
+}}
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+extern "C" char* {safe_name}_get_instance_string_wrapper()
+{{
+    // Returns heap-allocated C string; caller is responsible for free().
+    std::string s = {kernel_name}_Launcher::get_instance_string();
+    char* result = static_cast<char*>(std::malloc(s.size() + 1));
+    if(result) std::memcpy(result, s.c_str(), s.size() + 1);
+    return result;
+}}
+#endif
+
 namespace ck_tile {{ namespace generated {{
-    volatile bool _{kernel_name.replace("-", "_")}_loaded = true;
+    volatile bool _{safe_name}_loaded = true;
 }} }}
 """
         cpp_filepath.write_text(cpp_content)

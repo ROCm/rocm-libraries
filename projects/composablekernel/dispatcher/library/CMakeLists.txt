@@ -80,11 +80,18 @@ function(ck_add_dispatcher_conv_instances VARIANT)
   endif()
   message(STATUS "Dispatcher ${VARIANT} kernels generated (config set: ${DISPATCHER_CONFIG_SET}): ${output}")
 
-  # --- Step 2: Create .cpp wrappers for each generated kernel header ---
-  file(GLOB _KERNEL_HEADERS "${KERNEL_DIR}/${HEADER_PREFIX}*.hpp")
+  # --- Step 2: Collect kernel implementation .cpp files ---
+  # Only match full implementation headers (exclude *_decl.hpp declaration-only headers).
+  # The codegen writes kernel_name.cpp (includes kernel_name.hpp) alongside each
+  # kernel_name_decl.hpp.  The .cpp files are what we compile here.
+  file(GLOB _KERNEL_IMPL_HEADERS "${KERNEL_DIR}/${HEADER_PREFIX}*.hpp")
   set(_KERNEL_SOURCES "")
-  foreach(HEADER ${_KERNEL_HEADERS})
+  foreach(HEADER ${_KERNEL_IMPL_HEADERS})
     get_filename_component(STEM ${HEADER} NAME_WE)
+    # Skip declaration-only headers — they have no matching .cpp to compile
+    if(STEM MATCHES "_decl$")
+      continue()
+    endif()
     set(WRAPPER_CPP "${KERNEL_DIR}/${STEM}.cpp")
     if(NOT EXISTS ${WRAPPER_CPP})
       file(WRITE ${WRAPPER_CPP} "// Auto-generated wrapper\n#include \"${STEM}.hpp\"\n")
@@ -97,16 +104,26 @@ function(ck_add_dispatcher_conv_instances VARIANT)
     return()
   endif()
 
-  # --- Step 3: Add chunked registration .cpp files ---
+  # --- Step 3: Collect chunked registration .cpp files (dispatch layer) ---
   file(GLOB _REG_CPPS "${KERNEL_DIR}/register_*.cpp")
-  foreach(REG_CPP ${_REG_CPPS})
-    list(APPEND _KERNEL_SOURCES "${REG_CPP}")
-    set_source_files_properties("${REG_CPP}" PROPERTIES
-      COMPILE_OPTIONS "-Wno-ctad-maybe-unsupported;-Wno-old-style-cast"
-    )
-  endforeach()
 
-  # --- Step 4: Create OBJECT library ---
+  # =========================================================================
+  # Split into two OBJECT libraries to minimise rebuild scope:
+  #
+  #   <TARGET_NAME>          (ck_dispatcher_grouped_conv_<variant>)
+  #     — kernel implementation .cpp files
+  #     — includes full kernel headers (CK Tile kernel impl headers)
+  #     — rebuilt when kernel implementation headers change
+  #
+  #   <TARGET_NAME>_dispatch (ck_dispatcher_grouped_conv_<variant>_dispatch)
+  #     — registration/dispatch chunk .cpp files
+  #     — includes only *_decl.hpp (forward-declarations, no CK Tile includes)
+  #     — NOT rebuilt when kernel implementation headers change
+  #
+  # The profiler links both via target_link_libraries.
+  # =========================================================================
+
+  # --- Step 4a: Kernel implementation OBJECT library ---
   add_library(${TARGET_NAME} OBJECT ${_KERNEL_SOURCES})
   target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
@@ -127,15 +144,41 @@ function(ck_add_dispatcher_conv_instances VARIANT)
   endif()
   set_target_properties(${TARGET_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+  # --- Step 4b: Dispatch/registration OBJECT library ---
+  set(DISPATCH_TARGET_NAME "${TARGET_NAME}_dispatch")
+  if(_REG_CPPS)
+    add_library(${DISPATCH_TARGET_NAME} OBJECT ${_REG_CPPS})
+    target_include_directories(${DISPATCH_TARGET_NAME} PRIVATE
+      ${PROJECT_SOURCE_DIR}/include
+      ${PROJECT_SOURCE_DIR}/dispatcher/include
+      ${KERNEL_DIR}
+    )
+    # Registration files only need lightweight _decl.hpp headers; compile options
+    # are therefore lighter — no need for the GPU kernel-compilation flags.
+    target_compile_options(${DISPATCH_TARGET_NAME} PRIVATE
+      -Wno-ctad-maybe-unsupported
+      -Wno-old-style-cast
+      -Wno-header-hygiene
+      -Wno-unused-parameter
+    )
+    set_target_properties(${DISPATCH_TARGET_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  else()
+    message(WARNING "Dispatcher ${VARIANT}: no registration .cpp files found")
+  endif()
+
   # Progress monitoring
-  list(LENGTH _KERNEL_SOURCES _TOTAL_COUNT)
-  math(EXPR _KERNEL_COUNT "${_TOTAL_COUNT} - 1")
-  message(STATUS "Dispatcher ${VARIANT}: ${_TOTAL_COUNT} compilation units (${_KERNEL_COUNT} kernels + registration)")
+  list(LENGTH _KERNEL_SOURCES _KERNEL_COUNT)
+  list(LENGTH _REG_CPPS _REG_COUNT)
+  message(STATUS "Dispatcher ${VARIANT}: ${_KERNEL_COUNT} kernel TUs + ${_REG_COUNT} dispatch TUs (separate OBJECT libraries)")
 
   # Convenience ninja target: ninja dispatcher_<variant>_lib
+  set(_ALL_DEPS ${TARGET_NAME})
+  if(TARGET ${DISPATCH_TARGET_NAME})
+    list(APPEND _ALL_DEPS ${DISPATCH_TARGET_NAME})
+  endif()
   add_custom_target(dispatcher_${VARIANT}_lib
-    DEPENDS ${TARGET_NAME}
-    COMMENT "All ${_TOTAL_COUNT} dispatcher ${VARIANT} instances compiled."
+    DEPENDS ${_ALL_DEPS}
+    COMMENT "All dispatcher ${VARIANT} instances compiled (${_KERNEL_COUNT} kernels + ${_REG_COUNT} dispatch TUs)."
   )
 endfunction()
 

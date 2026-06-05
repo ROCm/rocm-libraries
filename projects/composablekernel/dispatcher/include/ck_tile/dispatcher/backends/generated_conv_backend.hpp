@@ -15,7 +15,11 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
 #include "ck_tile/host/convolution_parameter.hpp"
-#include "ck_tile/ops/grouped_convolution.hpp"
+// Include only the utils header (host arg types) rather than the umbrella
+// grouped_convolution.hpp which also pulls in the kernel implementation headers.
+// This keeps the dispatch/registration compilation units free of kernel-header
+// dependencies so they are not rebuilt when a kernel implementation changes.
+#include "ck_tile/ops/grouped_convolution/utils/grouped_convolution_utils.hpp"
 #include <hip/hip_runtime.h>
 #include <functional>
 

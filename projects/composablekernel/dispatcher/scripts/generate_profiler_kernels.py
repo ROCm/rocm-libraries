@@ -78,8 +78,15 @@ def generate_kernels_from_config(config_file, output_dir, arch):
 
 
 def collect_kernel_headers(output_dir, glob_pattern):
-    """Collect all generated .hpp kernel headers matching the variant pattern."""
-    headers = sorted(Path(output_dir).glob(glob_pattern))
+    """Collect all generated .hpp kernel implementation headers matching the variant pattern.
+
+    Excludes *_decl.hpp files — those are the lightweight declaration-only headers
+    generated alongside each implementation header for use by registration code.
+    """
+    headers = sorted(
+        h for h in Path(output_dir).glob(glob_pattern)
+        if not h.name.endswith("_decl.hpp")
+    )
     return headers
 
 
