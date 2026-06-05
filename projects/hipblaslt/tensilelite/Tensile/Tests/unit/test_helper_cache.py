@@ -134,15 +134,15 @@ class TestCheckCache:
 
     def test_returns_none_when_file_zero_size(self, tmp_path):
         from Tensile.Toolchain.HelperKernelCache import _checkCache
-        entry = tmp_path / "some_hash"
-        entry.mkdir()
+        entry = tmp_path / "some_hash" / "gfx942"
+        entry.mkdir(parents=True)
         (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"")
         assert _checkCache(tmp_path, "some_hash") is None
 
     def test_returns_files_on_valid_entry(self, tmp_path):
         from Tensile.Toolchain.HelperKernelCache import _checkCache
-        entry = tmp_path / "some_hash"
-        entry.mkdir()
+        entry = tmp_path / "some_hash" / "gfx942"
+        entry.mkdir(parents=True)
         (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
         (entry / "Kernels.so-000-gfx942-xnack+.hsaco").write_bytes(b"\x7fELF")
         result = _checkCache(tmp_path, "some_hash")
@@ -152,8 +152,8 @@ class TestCheckCache:
 
     def test_ignores_non_hsaco_files(self, tmp_path):
         from Tensile.Toolchain.HelperKernelCache import _checkCache
-        entry = tmp_path / "some_hash"
-        entry.mkdir()
+        entry = tmp_path / "some_hash" / "gfx942"
+        entry.mkdir(parents=True)
         (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
         (entry / "metadata.json").write_text("{}")
         result = _checkCache(tmp_path, "some_hash")
@@ -165,22 +165,26 @@ class TestPopulateCache:
         from Tensile.Toolchain.HelperKernelCache import _populateCache
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
-        src_dir = tmp_path / "src"
-        src_dir.mkdir()
+        # Source hsacoFiles live under <root>/<base-arch>/; _populateCache mirrors
+        # that parent name into the cache layout.
+        src_dir = tmp_path / "src" / "gfx942"
+        src_dir.mkdir(parents=True)
         f1 = src_dir / "Kernels.so-000-gfx942.hsaco"
         f1.write_bytes(b"\x7fELF_data_1")
         _populateCache(cache_dir, "abc123", [f1])
-        cached = cache_dir / "abc123" / "Kernels.so-000-gfx942.hsaco"
+        cached = cache_dir / "abc123" / "gfx942" / "Kernels.so-000-gfx942.hsaco"
         assert cached.exists()
         assert cached.read_bytes() == b"\x7fELF_data_1"
 
     def test_skips_when_entry_exists(self, tmp_path):
         from Tensile.Toolchain.HelperKernelCache import _populateCache
         cache_dir = tmp_path / "cache"
-        entry = cache_dir / "abc123"
+        entry = cache_dir / "abc123" / "gfx942"
         entry.mkdir(parents=True)
         (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"original")
-        src = tmp_path / "new.hsaco"
+        src_dir = tmp_path / "src" / "gfx942"
+        src_dir.mkdir(parents=True)
+        src = src_dir / "new.hsaco"
         src.write_bytes(b"different")
         _populateCache(cache_dir, "abc123", [src])
         assert (entry / "Kernels.so-000-gfx942.hsaco").read_bytes() == b"original"
@@ -190,9 +194,11 @@ class TestPopulateCache:
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
         # Pre-create the final dir to simulate a race
-        (cache_dir / "abc123").mkdir()
-        (cache_dir / "abc123" / "f.hsaco").write_bytes(b"winner")
-        src = tmp_path / "f.hsaco"
+        (cache_dir / "abc123" / "gfx942").mkdir(parents=True)
+        (cache_dir / "abc123" / "gfx942" / "f.hsaco").write_bytes(b"winner")
+        src_dir = tmp_path / "src" / "gfx942"
+        src_dir.mkdir(parents=True)
+        src = src_dir / "f.hsaco"
         src.write_bytes(b"loser")
         _populateCache(cache_dir, "abc123", [src])
         # No leftover tmp dirs
@@ -202,10 +208,12 @@ class TestPopulateCache:
     def test_creates_cache_dir_if_missing(self, tmp_path):
         from Tensile.Toolchain.HelperKernelCache import _populateCache
         cache_dir = tmp_path / "cache" / "subdir"
-        src = tmp_path / "f.hsaco"
+        src_dir = tmp_path / "src" / "gfx942"
+        src_dir.mkdir(parents=True)
+        src = src_dir / "f.hsaco"
         src.write_bytes(b"\x7fELF")
         _populateCache(cache_dir, "abc123", [src])
-        assert (cache_dir / "abc123" / "f.hsaco").exists()
+        assert (cache_dir / "abc123" / "gfx942" / "f.hsaco").exists()
 
 
 class TestEvictStale:
@@ -284,8 +292,9 @@ class TestRestoreRobustness:
         key = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
 
         entry = cache_dir / key
-        entry.mkdir(parents=True)
-        (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
+        archDir = entry / "gfx942"
+        archDir.mkdir(parents=True)
+        (archDir / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
         old_time = time.time() - 20 * 24 * 60 * 60
         os.utime(entry, (old_time, old_time))
 
@@ -309,8 +318,9 @@ class TestRestoreRobustness:
         key = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
 
         entry = cache_dir / key
-        entry.mkdir(parents=True)
-        (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
+        archDir = entry / "gfx942"
+        archDir.mkdir(parents=True)
+        (archDir / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
 
         dest = tmp_path / "dest"
         dest.mkdir()
@@ -338,9 +348,10 @@ class TestRestoreRobustness:
         key = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
 
         entry = cache_dir / key
-        entry.mkdir(parents=True)
-        (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
-        (entry / "Kernels.so-000-gfx1100.hsaco").write_bytes(b"\x7fELF")
+        (entry / "gfx942").mkdir(parents=True)
+        (entry / "gfx942" / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
+        (entry / "gfx1100").mkdir(parents=True)
+        (entry / "gfx1100" / "Kernels.so-000-gfx1100.hsaco").write_bytes(b"\x7fELF")
 
         dest = tmp_path / "dest"
         dest.mkdir()
@@ -360,7 +371,7 @@ class TestRestoreRobustness:
         hit, coPaths = cache.restore(kernel_path, tmp_path, ["gfx942"], compiler, dest)
         assert not hit
         # No leftover partial files in dest
-        assert list(dest.glob("*.hsaco")) == []
+        assert list(dest.rglob("*.hsaco")) == []
 
 
 class TestBuildSourceCodeObjectFilesCache:
@@ -396,7 +407,7 @@ class TestBuildSourceCodeObjectFilesCache:
         """Pre-populate cache, verify _checkCache finds it."""
         from Tensile.Toolchain.HelperKernelCache import _checkCache
         cache_dir = tmp_path / "cache"
-        entry = cache_dir / "test_key"
+        entry = cache_dir / "test_key" / "gfx942"
         entry.mkdir(parents=True)
         (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
         result = _checkCache(cache_dir, "test_key")

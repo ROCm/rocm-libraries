@@ -636,7 +636,11 @@ void common_inst(nb::module_ m_common)
              [](const rocisa::SSetPrior& self, nb::dict&) { return new rocisa::SSetPrior(self); });
 
     nb::class_<rocisa::SBarrier, rocisa::Instruction>(m_common, "SBarrier")
-        .def(nb::init<const std::string&>(), nb::arg("comment") = "")
+        .def(nb::init<bool, bool, bool, const std::string&>(),
+             nb::arg("separate") = false,
+             nb::arg("wait") = false,
+             nb::arg("clusterBarrier") = false,
+             nb::arg("comment") = "")
         .def("getParams", &rocisa::SBarrier::getParams)
         .def("__str__", &rocisa::SBarrier::toString)
         .def("__deepcopy__",

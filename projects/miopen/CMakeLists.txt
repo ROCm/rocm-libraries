@@ -800,6 +800,7 @@ elseif(MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
 endif()
 
 include(ClangTidy)
+# TODO: Remove the -nogpulib workaround once clang-tidy version is bumped to clang-tidy-23+
 enable_clang_tidy(
     CHECKS
         ${MIOPEN_TIDY_CHECKS}
@@ -809,6 +810,7 @@ enable_clang_tidy(
     EXTRA_ARGS
         -DMIOPEN_USE_CLANG_TIDY
         -D__builtin_elementwise_exp10=__builtin_elementwise_exp
+        -nogpulib
 )
 
 include(CppCheck)

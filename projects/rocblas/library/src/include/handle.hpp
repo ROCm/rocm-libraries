@@ -423,6 +423,10 @@ public:
     // default atomics mode does not allows atomic operations
     rocblas_atomics_mode atomics_mode = rocblas_atomics_not_allowed;
 
+    // optional stride between successive alpha/beta values for advanced batched use; 0 is default
+    rocblas_stride stride_alpha = 0;
+    rocblas_stride stride_beta  = 0;
+
     // Selects the benchmark library to be used for solution selection
     rocblas_performance_metric performance_metric = rocblas_default_performance_metric;
 
@@ -449,6 +453,26 @@ public:
     void set_data_ptr(std::shared_ptr<void>& data_ptr)
     {
         this->data_ptr = data_ptr;
+    }
+
+    rocblas_stride get_stride_alpha() const
+    {
+        // only applicable to device mode alpha, load_scalar ignores for value
+        return stride_alpha;
+    }
+    void set_stride_alpha(rocblas_stride stride)
+    {
+        stride_alpha = stride;
+    }
+
+    rocblas_stride get_stride_beta() const
+    {
+        // only applicable to device mode beta, load_scalar ignores for value
+        return stride_beta;
+    }
+    void set_stride_beta(rocblas_stride stride)
+    {
+        stride_beta = stride;
     }
 
     // C interfaces for manipulating device memory

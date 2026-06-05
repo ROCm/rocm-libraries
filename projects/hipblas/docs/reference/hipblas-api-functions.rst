@@ -221,6 +221,11 @@ hipblasAtomicsMode_t
 ---------------------
 .. doxygenenum:: hipblasAtomicsMode_t
 
+hipblasLibraryProperty_t
+---------------------
+.. doxygenenum:: hipblasLibraryProperty_t
+
+
 *****************
 hipBLAS functions
 *****************
@@ -2161,3 +2166,11 @@ hipblasGetAtomicsMode
 hipblasStatusToString
 ----------------------
 .. doxygenfunction:: hipblasStatusToString
+
+hipblasGetVersion
+----------------------
+.. doxygenfunction:: hipblasGetVersion
+
+hipblasGetProperty
+----------------------
+.. doxygenfunction:: hipblasGetProperty
