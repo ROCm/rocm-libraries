@@ -64,3 +64,9 @@ Each arch file starts with the standard back-link header:
 5. **Update the §6/§7/§10 breadcrumbs** — the arch-mixed spots in the
    base runbook ("see your target's arch reference") list the arches
    that have a reference; add the new one where it is concrete.
+6. **Keep each arch file single-arch.** A new arch file's tables should
+   carry only that arch's values — do not replicate the multi-arch
+   comparison columns. (The gfx950 reference's §21.2 / §21.9 still list
+   `gfx942` / `gfx90a` columns for historical continuity from the
+   original monolithic runbook; treat each arch's own file as the
+   source of truth, not those legacy columns.)
