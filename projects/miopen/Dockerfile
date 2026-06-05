@@ -193,6 +193,7 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             -DTHEROCK_ENABLE_ROCPROF_TRACE_DECODER_BINARY=ON \
             -DTHEROCK_ENABLE_ROCGDB=ON \
             -DTHEROCK_AMDGPU_DIST_BUNDLE_NAME=multiarch \
+            -DTHEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     else \
         echo "Building with CMake build type: $THEROCK_BUILD_MODE"; \
@@ -219,6 +220,7 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             -DTHEROCK_ENABLE_ROCGDB=ON \
             -DTHEROCK_AMDGPU_DIST_BUNDLE_NAME=multiarch \
             -DTHEROCK_BUILD_TESTING=OFF \
+            -DTHEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     fi
 
@@ -347,6 +349,7 @@ RUN set -x && \
     -D CMAKE_BUILD_TYPE=Release \
     -D GPU_TARGETS="${THEROCK_ASIC}" \
     -D MIOPEN_REQ_LIBS_ONLY=ON \
+    -D HIPTENSOR_REQ_LIBS_ONLY=OFF \
     -D CMAKE_CXX_FLAGS=" -O3 " .. && \    
     ninja -j ${num_threads} install && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \

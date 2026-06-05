@@ -108,9 +108,10 @@ add_executable(
     TestHeuristicPluginManagerValidationPaths.cpp
     TestSelectionHeuristic.cpp
     TestHeuristicPluginResourceManager.cpp
-    heuristics/TestStaticOrderingBuiltIn.cpp
-    heuristics/TestEngineOverrideConfig.cpp
     heuristics/TestConfigBuiltIn.cpp
+    heuristics/TestDeviceProperties.cpp
+    heuristics/TestEngineOverrideConfig.cpp
+    heuristics/TestStaticOrderingBuiltIn.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestEnginePluginOverride.cpp

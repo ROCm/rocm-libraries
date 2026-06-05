@@ -43,6 +43,7 @@
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
+#include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
@@ -61,6 +62,7 @@ struct PassInfo {
 // List of available passes
 const std::vector<PassInfo> availablePasses = {
     {"StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); }},
+    {"SetMatrixReusePass", []() { return createSetMatrixReusePass(); }},
     {"StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); }},
     {"StinkyBuildImplicitDependencyPass",
      []() { return createStinkyBuildImplicitDependencyPass(); }},
