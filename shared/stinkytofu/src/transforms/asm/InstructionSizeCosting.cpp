@@ -407,8 +407,9 @@ void addAlignmentPaddingFromDirectiveNode(IRBase* node, int64_t baseByteOffset, 
     const int64_t pad = paddingBytesForCodeAlignment(off, N);
     totalBytes += pad;
     if (debugOut && pad != 0)
-        *debugOut << "  [.align " << N << " padding=" << pad << " bytes, total=" << totalBytes
-                  << " bytes]\n";
+        *debugOut << "  [.align " << N << " padding=" << pad
+                  << " bytes, total=" << (baseByteOffset + totalBytes)
+                  << " bytes, totalBytes in BB=" << totalBytes << " bytes]\n";
 }
 
 void addAlignmentPaddingForLabelInstruction(const StinkyInstruction& inst, int64_t baseByteOffset,
@@ -422,7 +423,8 @@ void addAlignmentPaddingForLabelInstruction(const StinkyInstruction& inst, int64
             totalBytes += pad;
             if (debugOut && pad != 0)
                 *debugOut << "  [label .align " << ld->alignment << " padding=" << pad
-                          << " bytes, total=" << totalBytes << " bytes]\n";
+                          << " bytes, total=" << (baseByteOffset + totalBytes)
+                          << " bytes, totalBytes in BB=" << totalBytes << " bytes]\n";
         }
     }
 }

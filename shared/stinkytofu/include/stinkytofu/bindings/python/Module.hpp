@@ -35,9 +35,9 @@
 /*
  * @brief Define the options for the ModuleOptions struct
  * @note This macro is used to define the options for the ModuleOptions struct
- * @note SwPrefetchScratchSgpr: -1 disables SwPrefetchInsertionPass; >=0 runs and uses that scratch.
- *        StinkyAsmModule sets EnableSwPrefetchInsertion = (SwPrefetchScratchSgpr != -1) in its
- * constructor.
+ * @note EnableSwInstructionPrefetchRelStatic: Tensile `SwInstructionPrefetch` YAML → Gfx1250
+ *        SwInstructionPrefetchRelStaticPass (`s_prefetch_inst_pc_rel 0, null, 31`; no scratch
+ * SGPR).
  */
 #define MODULE_OPTIONS_LIST(X)            \
     X(DebugLevel, int)                    \
@@ -67,8 +67,7 @@
     X(EnableRemarks, bool)                \
     X(EnableWaitCntInsertion, bool)       \
     X(VgprMsbMode, int)                   \
-    X(EnableSwPrefetchInsertion, bool)    \
-    X(SwPrefetchScratchSgpr, int)
+    X(EnableSwInstructionPrefetchRelStatic, bool)
 
 namespace stinkytofu {
 /**
