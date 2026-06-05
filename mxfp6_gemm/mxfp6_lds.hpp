@@ -1,8 +1,7 @@
 #pragma once
 // LDS deep-K staged MXFP6 GEMM kernel + tile-grouped scale layout.
-// Paradigm: deep K staged in LDS enlarges the MFMA window > load latency
-// (32x32x64 MFMA, NOT CK's 16x16x128). Beats V17 +3~5% on large aligned shapes.
-// Extracted from test_lds.cpp; shared by test_lds.cpp and the combined dispatcher.
+// Deep K staged in LDS enlarges the MFMA window past the load latency. Uses 32x32x64 MFMA
+// (not 16x16x128: that halves FLOPs/inst and doubles operand bandwidth per FLOP).
 #include "mxfp6_asm_utils.hpp"
 #include "mxfp6_preprocess.hpp"
 #include <vector>
@@ -31,27 +30,20 @@ static TiledScale tile_scale(const PreprocessedScale& ps, int group, int subs) {
     return ts;
 }
 
-// Cooperative async load of a (ROWS x K_TILE) FP6 tile into LDS via buffer_load_dwordx4
-// (MUBUF, LDS dest). The tile's flattened layout in LDS is row-major:
-//   LDS[lds_base + (m*KT_BYTES + ck*16)] = global[gbase + m*row_stride + kt_byte + ck*16]
-// where KT_BYTES = K_TILE*6/8 and CPR = KT_BYTES/16 chunks per row. Each lane fetches its
-// own 16B; load-to-LDS forces LDS dest = M0 + lane*16, so we walk chunks in (m-major,
-// ck-minor) order = exactly the row-major LDS layout above.
+// Cooperative load of a (ROWS x K_TILE) FP6 tile into LDS via buffer_load_dwordx4 (MUBUF,
+// LDS dest = M0 + lane*16). Row-major LDS layout:
+//   LDS[lds_base + m*KT_BYTES + ck*16] = global[gbase + m*row_stride + kt_byte + ck*16]
+// KT_BYTES = K_TILE*6/8, CPR = KT_BYTES/16 chunks/row; each lane fetches its own 16B,
+// walking chunks (m-major, ck-minor) to match the layout.
 //
-// DEFAULT = MUBUF buffer_load_lds: the 64-bit base lives in the buffer descriptor (V#), so
-// each load only computes a 32-bit voffset -> ~half the per-load address VALU vs FLAT
-// global_load_lds (which recomputes a 64-bit addr/load). Measured +0.8% @8192^3, identical
-// correctness/VGPR/occ. The "SALU writes M0 -> load LDS=1" hazard guard (s_nop) is gated by
-// MXFP6_M0_NOP (default OFF for KT192, see below). Define USE_GLOBAL_LDS for the FLAT
-// fallback. See HANDOFF Step 29-30 / memory mxfp6_buffer_vs_global_lds.
+// MUBUF (default): the 64-bit base lives in the buffer descriptor (V#), so each load is just
+// a 32-bit voffset (~half the per-load address VALU vs FLAT). -DUSE_GLOBAL_LDS = FLAT fallback.
 //
-// MXFP6_M0_NOP (default 0 = OFF): emit an explicit s_nop guard for the "SALU writes M0 ->
-// buffer_load(LDS=1)" 1-wait-state hazard. Reviewed (Step 30): for the production KT192 tile
-// the compiler already schedules ~20 instrs between set_m0 and the load, so the nop is
-// redundant; dropping it is 11/11 correct and perf-flat (1799<->1796, latency-bound -> the
-// nop sat in a stall shadow anyway). Default OFF. ⚠️ Set -DMXFP6_M0_NOP=1 for configs that
-// pack many back-to-back loads with no separating instrs (e.g. KT256 single-buffer raced
-// without it -> illegal LDS address); FLAT global_load_lds never needs it (auto-handled).
+// MXFP6_M0_NOP (default 0): explicit s_nop for the "SALU writes M0 -> load(LDS=1)" 1-wait-
+// state hazard. Off for KT192 (compiler already puts many instrs between set_m0 and the load,
+// so it's redundant + free in this latency-bound kernel). Set =1 for configs packing loads
+// back-to-back with no separating instr (KT256 single-buffer raced without it). FLAT handles
+// the hazard automatically.
 #ifndef MXFP6_M0_NOP
 #define MXFP6_M0_NOP 0
 #endif
@@ -106,10 +98,9 @@ __device__ __forceinline__ v6i read_op(const char* smem, uint32_t lds_base, int 
     return ds_read_fp6x32_plain(smem, off);
 }
 
-// Inline-asm global load to VGPR WITHOUT a waitcnt (caller manages vmcnt). Keeps
-// scale loads off the compiler's vmcnt accounting so they don't force a drain of
-// the in-flight global_load_lds prefetch (the typed-load/glds vmcnt conflict that
-// otherwise costs ~13%). "memory" clobber preserves ordering vs the manual waits.
+// Inline-asm global load to VGPR with NO waitcnt (caller manages vmcnt). Keeps scale loads
+// off the compiler's vmcnt accounting so a typed load wouldn't drain the in-flight prefetch.
+// "memory" clobber preserves ordering vs the manual waits.
 __device__ __forceinline__ int asm_load_dword_nowait(const void* a) {
     int v;
     asm volatile("global_load_dword %0, %1, off" : "=v"(v) : "v"(a) : "memory");
@@ -142,9 +133,9 @@ __device__ __forceinline__ void issue_tile(char* smem, uint32_t lds_base, const 
     load_tile_lds<ROWS, KT_BYTES, CPR>(smem, lds_base, gbase, row_stride, kt_byte, wave_id, lane);
 }
 
-// Double-buffered deep-K LDS GEMM: prefetch tile kt+1 while computing tile kt.
-// vmcnt(LOADS_PER_TILE) after issuing the prefetch drains cur's LOADS_PER_TILE loads (vmcnt decrements
-// in issue order) while nxt's LOADS_PER_TILE stay in flight -> real load/compute overlap.
+// Double-buffered deep-K LDS GEMM: prefetch tile kt+1 while computing tile kt (RDB; see the
+// barrier note before the K loop). DB=false uses a single buffer for K-tiles too deep to
+// double-buffer within 160KB LDS.
 template <int M_TILE, int N_TILE, int K_TILE, int WAVES_M, int WAVES_N, int MIN_OCC = 1,
           int SWZ = 0, bool DB = true, typename OutT = float>
 __global__ void __launch_bounds__(256, MIN_OCC)
@@ -174,7 +165,7 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     int tid = threadIdx.x, wave = tid / 64, lane = tid % 64;
     int wm = wave / WAVES_N, wn = wave % WAVES_N;
     // L2-aware WG remap: walk WGs down M within a band of SWZ consecutive n-blocks so
-    // neighboring in-flight WGs share a B band and keep it hot in L2 (V17 +4.4%).
+    // neighbouring in-flight WGs share a B band and keep it hot in L2.
     int wg_m, wg_n;
     if constexpr (SWZ > 0) {
         int mb = gridDim.x, nb = gridDim.y, pid = blockIdx.y * mb + blockIdx.x;
@@ -195,10 +186,9 @@ __global__ void __launch_bounds__(256, MIN_OCC)
 #pragma unroll
         for (int ni = 0; ni < N_PW; ni++) clear_acc(acc[mi][ni]);
 
-    // Coalesced scales (see preshuffle_scale): a wave's M_PW (N_PW) consecutive
-    // 32-blocks are byte-contiguous per lane -> one wide load per k64. Loaded via
-    // asm_load_dword_nowait (manual vmcnt) and double-buffered alongside the LDS
-    // tiles, so they never force a compiler vmcnt drain of the glds prefetch.
+    // Tiled scales: a wave's blocks-per-wave are byte-contiguous per lane, so one wide
+    // no-wait load (manual vmcnt) fetches a whole tile's scales; NDA=1 asserts they fit one
+    // dword. Double-buffered alongside the LDS tiles.
     constexpr int SA_PAD = ((M_PW + 3) / 4) * 4, SB_PAD = ((N_PW + 3) / 4) * 4;
     constexpr int NDA = SA_PAD / 4, NDB = SB_PAD / 4;
     static_assert(NDA == 1 && NDB == 1, "tiled-scale path assumes <=4 blocks/wave");
@@ -260,57 +250,31 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         }
     };
 
-    // ⚠️ RAW DRAIN IS IMPLICIT (Step 31, verified). The async load-to-LDS completes on
-    // VM_CNT, but __syncthreads() lowers to a BARE s_barrier (confirmed by isolated test):
-    // s_barrier only rendezvouses waves, it does NOT wait for memory. So nothing HERE in the
-    // source drains the buffer's loads before the next compute reads them. What actually
-    // provides the RAW vmcnt(0) is the COMPILER: the prefetch's (vmcnt) scale loads are
-    // consumed right after, forcing an s_waitcnt vmcnt(0); since vmcnt is one in-order
-    // counter, that drain also covers the buffer_load_lds. The compiler hoists it to just
-    // before the s_barrier -> in asm each hot-loop barrier is `vmcnt(0); lgkmcnt(0);
-    // s_barrier`. This is correct TODAY (validated bit-exact incl. race-prone 3072^2 etc.,
-    // Step 28) but is an INCIDENTAL guarantee: a NOSCALE build or any refactor that removes
-    // the post-prefetch scale consumption would drop the vmcnt(0) -> silent RAW race. If you
-    // touch the scale path, re-add an explicit wait_vmcnt(0) before these barriers (measured
-    // ~-0.3% then, because it drains a hair earlier than the compiler's placement). The old
-    // wait_vmcnt(LPT_TOT) here was pure no-op (helper emits only vmcnt(0..4), LPT_TOT=20) so
-    // it was deleted -- it never guarded anything. (Step-26 relative-vmcnt idea is also dead:
-    // needs full-asm ds_read, disproven 6 ways in Step 21.)
-    // SYNC: the deep-K double buffer needs both RAW (fill-before-read) and WAR
-    // (read-before-refill) ordering across the block's 4 waves. The naive form uses 4
-    // __syncthreads/2 tiles (2 RAW + 2 WAR). The 2 WAR barriers cost ~6% @8192^3, BUT
-    // simply dropping them is a data race: the recycle prefetch issues an async
-    // global_load_lds that can overwrite a buffer while a slower wave still ds_reads it.
-    // The race is inter-wave skew, peaks at partial grid fill (WG~48-480), and corrupts
-    // real production shapes (e.g. 3072^2 swz0: 27/30 runs) -- NOT shape-gateable.
-    //   FIX = REORDERED double buffer (RDB) below: issue each recycle prefetch AFTER the
-    // RAW __syncthreads instead of before. Then ONE barrier per tile serves both roles --
-    // it sits between a buffer's last read (prior compute) and its async overwrite, which
-    // is exactly the read-before-refill ordering the WAR barriers gave, at 1 barrier/tile.
-    // Structurally correct on ALL shapes (no timing assumption); validated bit-exact vs the
-    // 4-barrier golden across the full race blast-radius (3072^2/6144x2048/4096x3072/5120^2,
-    // K up to 6144, >=30 invocations each, uniq=1) while the naive-drop control fired 27/30.
-    // Recovers a shape-dependent slice: +1.2~2.2% square, +3.5~7.9% rectangular (the shapes
-    // the dispatcher routes to TLDS), zero regression, identical VGPR/AGPR/LDS/occ/spill.
-    // (The remaining gap to the racy +6% is prefetch-before-barrier scheduling, which
-    // provably needs a WAR barrier in a 2-buffer pipeline; triple-buffer would remove WAR
-    // but only fits at KT128, whose shallower window nets -5%. See HANDOFF Step 28.)
+    // ⚠️ RAW drain is IMPLICIT. __syncthreads() is a bare s_barrier (it does NOT wait on
+    // memory); the buffer's loads complete on vmcnt. The required s_waitcnt vmcnt(0) is
+    // supplied by the COMPILER: the prefetch's scale loads are consumed right after and force
+    // a vmcnt(0) which, being one in-order counter, also covers the buffer_load_lds. Correct
+    // today (validated incl. race-prone shapes) but fragile -- a NOSCALE / scale-path refactor
+    // would drop it -> silent RAW race; then re-add an explicit wait_vmcnt(0) before each barrier.
+    //
+    // RDB (reordered double buffer): issue each tile's prefetch AFTER the barrier, so one
+    // barrier/tile covers both RAW (fill-before-read of the buffer being read) and WAR
+    // (read-before-overwrite of the buffer being recycled). Dropping the WAR barrier naively
+    // is an inter-wave-skew race that corrupts partial-grid shapes; RDB is structurally correct.
     int sa0[K64_PER_TILE][NDA], sa1[K64_PER_TILE][NDA], sb0[K64_PER_TILE][NDB], sb1[K64_PER_TILE][NDB];
     if constexpr (DB) {
-        // 2x-unrolled ping-pong: buf0 for even tiles, buf1 for odd. Compile-time
-        // buffer/scale-array selection (no dynamic index). Prefetch next tile (loads+scales)
-        // while computing current; the next tile's loads stay in flight across the compute
-        // and are drained at the NEXT barrier (RAW vmcnt(0) supplied by the compiler via the
-        // scale consumption -- see the IMPLICIT RAW DRAIN note above) -> load/compute overlap.
+        // 2x-unrolled ping-pong: buf0 even tiles, buf1 odd (compile-time bufs, no dynamic
+        // index/spill). Prefetch the next tile while computing the current; its loads stay in
+        // flight and are drained at the next barrier (vmcnt(0) implicit, see note above).
         prefetch(0, 0, sa0, sb0);  // prologue: tile 0 -> buf0
         int kt = 0;
         for (; kt + 1 < k_tiles; kt += 2) {
-            __syncthreads();                           // RAW(buf0)+sync; vmcnt(0) implicit (note above)
-            prefetch(kt + 1, BUF, sa1, sb1);           // tile kt+1 -> buf1 (issued AFTER barrier)
+            __syncthreads();                           // barrier: RAW(buf0) + WAR; prefetch issued AFTER
+            prefetch(kt + 1, BUF, sa1, sb1);           // tile kt+1 -> buf1
             compute(0, sa0, sb0);                      // compute buf0 (buf1 loads in flight)
             bool pf = (kt + 2 < k_tiles);
-            __syncthreads();                           // RAW(buf1)+sync; vmcnt(0) implicit (note above)
-            if (pf) prefetch(kt + 2, 0, sa0, sb0);     // tile kt+2 -> buf0 (issued AFTER barrier)
+            __syncthreads();                           // barrier: RAW(buf1) + WAR; prefetch issued AFTER
+            if (pf) prefetch(kt + 2, 0, sa0, sb0);     // tile kt+2 -> buf0
             compute(BUF, sa1, sb1);                    // compute buf1 (buf0 loads in flight)
         }
         if (kt < k_tiles) {                            // odd tail (buf0 already loaded)
@@ -329,13 +293,10 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         }
     }
 
-    // K-tail: remaining k64 when k_iters % K64_PER_TILE != 0 (lets callers run arbitrary K
-    // WITHOUT padded A/B buffers). Each leftover k64 is a 64-K slab (KT64, single
-    // buffer, naive lane-ordered scales). MEASURED: ~2% SLOWER than K padding @8192^3
-    // (1635 vs 1671) — the KT64 single-buffer tail is less efficient than letting the
-    // padding's extra k64 ride an efficient deep tile. So the production path (v18)
-    // PADS K; this tail is the no-padded-buffers fallback. Gated to tiles whose KT64
-    // cooperative load divides the WG evenly (256*3,512*3 ok; 128*3 not).
+    // K-tail: leftover k64 when k_iters % K64_PER_TILE != 0, for running arbitrary K without
+    // padded A/B buffers. Each k64 is a KT64 single-buffer slab with naive lane-ordered
+    // scales -- slower than K-padding, so production (v18) pads K and this is the no-pad
+    // fallback. Gated to tiles whose KT64 cooperative load divides the WG evenly (256*3,512*3 ok).
     if constexpr (M_TILE * 3 % 256 == 0 && N_TILE * 3 % 256 == 0)
     for (int kc = k_tiles * K64_PER_TILE; kc < k_iters; kc++) {
         load_tile_lds<M_TILE, 48, 3>(smem, 0, Ag, A_row_bytes, kc * 48, wave, lane);
