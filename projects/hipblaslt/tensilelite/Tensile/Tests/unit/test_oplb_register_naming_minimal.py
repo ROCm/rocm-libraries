@@ -583,7 +583,7 @@ class TestOplbRegisterNamingMinimal:
         graph = build_dataflow_graph(_wrap_in_four_part(cms_cap))
 
         lr_identities = {
-            n.identity for n in graph.nodes.values()
+            n.identity for n in graph.nodes
             if _category(n.rocisa_inst) is not None
             and _category(n.rocisa_inst).value == "LR"
         }
@@ -631,7 +631,7 @@ class TestOplbRegisterNamingMinimal:
         graph = build_dataflow_graph(_wrap_in_four_part(noncms_cap))
 
         lr_identities = {
-            n.identity for n in graph.nodes.values()
+            n.identity for n in graph.nodes
             if _category(n.rocisa_inst) is not None
             and _category(n.rocisa_inst).value == "LR"
         }

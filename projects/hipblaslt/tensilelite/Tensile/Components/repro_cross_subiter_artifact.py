@@ -407,8 +407,8 @@ def main():
         # graph nodes. Catches scenarios where the attribute exists but
         # the carve-out consults a different surface (e.g. a free
         # function shadowed by the method, or a per-instance override).
-        # `subj_graph.nodes` is a dict keyed by node identity, not a list.
-        nodes_iter = iter(subj_graph.nodes.values())
+        # `subj_graph.nodes` is a list of GraphNode in execution order.
+        nodes_iter = iter(subj_graph.nodes)
         probe_node = next(nodes_iter, None)
         if probe_node is not None:
             probe_result = probe_node.subiter(1)

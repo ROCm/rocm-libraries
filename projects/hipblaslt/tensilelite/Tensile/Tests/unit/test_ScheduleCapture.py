@@ -323,7 +323,7 @@ class TestCloneLoopBody:
 class TestDataflowGraphShape:
     def test_empty_capture_returns_empty_graph(self):
         g = build_dataflow_graph(None)
-        assert g.nodes == {}
+        assert g.nodes == []
         assert g.edges == []
         assert g.captures == {}
 
@@ -380,8 +380,8 @@ class TestDataflowDataclasses:
         assert edge.edge_kind == "raw_intrawave"
 
     def test_graph_construction(self):
-        g = DataflowGraph(nodes={}, edges=[], captures={})
-        assert g.nodes == {}
+        g = DataflowGraph(nodes=[], edges=[], captures={})
+        assert g.nodes == []
         assert g.edges == []
         assert g.captures == {}
 

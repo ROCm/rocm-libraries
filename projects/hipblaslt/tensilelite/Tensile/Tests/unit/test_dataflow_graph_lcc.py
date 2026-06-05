@@ -116,7 +116,7 @@ class TestLCCInGraph:
         ])
         graph = build_dataflow_graph(_wrap(cap))
 
-        lcc_nodes = [n for n in graph.nodes.values()
+        lcc_nodes = [n for n in graph.nodes
                      if n.body_label == BODY_LABEL_ML and n.category == "LCC"]
         assert len(lcc_nodes) == 2, (
             f"Expected 2 LCC nodes in ML body, got {len(lcc_nodes)}: "
@@ -204,7 +204,7 @@ class TestLCCIssueCycleAccounting:
         g_without = build_dataflow_graph(_wrap(cap_without))
 
         def _ml_node(graph, *, category):
-            matches = [n for n in graph.nodes.values()
+            matches = [n for n in graph.nodes
                        if n.body_label == BODY_LABEL_ML
                        and n.category == category]
             assert len(matches) == 1, (category, matches)
@@ -253,7 +253,7 @@ class TestLCCExclusionGuards:
 
         # The n_ll filler in `_wrap` is a single MFMA — no LCC instructions
         # were ever in that body, so no LCC node should appear there.
-        n_ll_lcc = [n for n in graph.nodes.values()
+        n_ll_lcc = [n for n in graph.nodes
                     if n.body_label == BODY_LABEL_NLL and n.category == "LCC"]
         assert n_ll_lcc == [], (
             f"n_ll body should never carry LCC nodes (macro guards them "

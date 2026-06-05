@@ -516,8 +516,8 @@ class TestStructuralProperties:
         g_b = build_dataflow_graph(_wrap(cap_b))
         # Both graphs should have at least one node tagged 'LRA0'; their
         # identities should be equal (signature is content-based).
-        ids_a = [n.identity for n in g_a.nodes.values() if n.category == "LRA0"]
-        ids_b = [n.identity for n in g_b.nodes.values() if n.category == "LRA0"]
+        ids_a = [n.identity for n in g_a.nodes if n.category == "LRA0"]
+        ids_b = [n.identity for n in g_b.nodes if n.category == "LRA0"]
         assert len(ids_a) == 1
         assert len(ids_b) == 1
         assert ids_a[0] == ids_b[0]
@@ -585,7 +585,7 @@ class TestStructuralProperties:
             make_mfma(0, 8, 32, slot=1, a_src_count=4),
         ])
         g = build_dataflow_graph(_wrap(cap))
-        pack_nodes = [n for n in g.nodes.values() if n.category == "PackA0"]
+        pack_nodes = [n for n in g.nodes if n.category == "PackA0"]
         assert len(pack_nodes) == 1
         # Per EMISSION_ORDINAL_DESIGN.md §4.5 + ORAM1
         # (rocm-libraries-hdem) Approach A, the identity tuple is now

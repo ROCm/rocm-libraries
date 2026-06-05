@@ -151,7 +151,7 @@ class TestCleanComparison:
         # Defensive: the SWait/SBarrier nodes must not have leaked into
         # nodes_by_identity. Subject and reference must have the SAME
         # identity-set sizes despite subject having 3 extra sync ops.
-        assert set(g_ref.nodes.keys()) == set(g_subj.nodes.keys())
+        assert {n.identity for n in g_ref.nodes} == {n.identity for n in g_subj.nodes}
 
     def test_lcc_included_in_identity_set(self):
         """Loop-counter code (category 'LCC' — `SSubU32` + `SCmpEQI32`,
@@ -211,17 +211,17 @@ class TestCleanComparison:
         g_ref = build_dataflow_graph(_wrap(ref_cap))
         g_subj = build_dataflow_graph(_wrap(subj_cap))
         # Identity sets match — both include the LCC node.
-        assert set(g_ref.nodes.keys()) == set(g_subj.nodes.keys())
+        assert {n.identity for n in g_ref.nodes} == {n.identity for n in g_subj.nodes}
         # Per EMISSION_ORDINAL_DESIGN.md §4.5 + ORAM1
         # (rocm-libraries-hdem) Approach A, the identity tuple is now
         # `(canonical_render, emission_ordinal)` (body-blind) with no
         # class_tag slot. Pin the LCC participation by inspecting
         # node.category instead — `category` is the public display
         # attribute for the CMS-shaped role string and stays unchanged.
-        lcc_nodes = [n for n in g_ref.nodes.values() if n.category == "LCC"]
+        lcc_nodes = [n for n in g_ref.nodes if n.category == "LCC"]
         assert lcc_nodes, (
             f"LCC nodes should participate in the identity set as of 2bu.2; "
-            f"got categories {sorted({n.category for n in g_ref.nodes.values()})}"
+            f"got categories {sorted({n.category for n in g_ref.nodes})}"
         )
         assert compare_graphs(g_ref, g_subj) == []
 
@@ -741,7 +741,7 @@ class TestDiagnoseMissingEdgeDefenses:
             resource=None, edge_kind="raw_intrawave",
         )
         # Subject graph has no nodes — both lookups will fail.
-        subj_graph = DataflowGraph(nodes={}, edges=[], captures={})
+        subj_graph = DataflowGraph(nodes=[], edges=[], captures={})
         with pytest.raises(CaptureConsistencyError):
             diagnose_missing_edge(ref_edge, subj_graph)
 

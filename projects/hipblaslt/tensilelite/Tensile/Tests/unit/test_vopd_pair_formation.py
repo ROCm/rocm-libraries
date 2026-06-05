@@ -58,7 +58,7 @@ def _make_graph(*pairs: VopdPair) -> DataflowGraph:
     constructor.
     """
     return DataflowGraph(
-        nodes={},
+        nodes=[],
         edges=[],
         captures={},
         vopd_pairs=list(pairs),

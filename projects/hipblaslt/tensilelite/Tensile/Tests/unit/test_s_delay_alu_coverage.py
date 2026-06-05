@@ -60,7 +60,7 @@ def _make_graph(*instances: SDelayAluInstance) -> DataflowGraph:
     constructor.
     """
     return DataflowGraph(
-        nodes={},
+        nodes=[],
         edges=[],
         captures={},
         s_delay_alu_instances=list(instances),
@@ -79,7 +79,7 @@ class TestSDelayAluValidatorDormant:
     def test_no_rdna35_instructions_returns_no_failures(self):
         # Mirrors the production path on a CDNA4 kernel: no S_DELAY_ALU
         # records emitted, no failures produced.
-        graph = DataflowGraph(nodes={}, edges=[], captures={})
+        graph = DataflowGraph(nodes=[], edges=[], captures={})
         assert validate_s_delay_alu_coverage(graph) == []
 
 

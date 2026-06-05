@@ -1193,9 +1193,10 @@ class DataflowGraph:
     previous-iteration LR0 -> current GR) are represented natively as edges
     between nodes whose body_labels differ.
 
-    nodes is keyed by identity; the comparison rule iterates the top-level
-    edges list. Per-node adjacency is intentionally NOT stored — the
-    diagnostic classifier walks captures[body_label].instructions instead.
+    nodes is an ordered list of GraphNode in ascending execution-position
+    order. The comparison rule iterates the top-level edges list.
+    Per-node adjacency is intentionally NOT stored — the diagnostic
+    classifier walks captures[body_label].instructions instead.
 
     `num_mfma_per_subiter` is copied from FourPartCapture so the
     OrderInverted classifier can derive an MFMA node's inner-unroll
@@ -1209,9 +1210,15 @@ class DataflowGraph:
     case (returns []). The moment the emitter starts emitting VOPD it
     becomes the gating correctness check for §7.6 R-4..R-7.
     """
-    nodes: dict                            # identity -> GraphNode
+    nodes: list                            # List[GraphNode] in execution order (ascending position)
     edges: list                            # list[DataflowEdge]
     captures: dict                         # body_label -> LoopBodyCapture
+    byte_key_writers: dict = field(default_factory=dict)
+    #   Dict[byte_key, List[Tuple[GraphNode, SchedulePosition]]]
+    #   Built alongside latest_writer in Phase 2b.
+    #   Entries are appended in ascending position order.
+    #   C3f will consume this for Phase 0 lookups.
+    #   C3c will populate with (GraphNode, unrolled_position: int) pairs.
     num_mfma_per_subiter: int = 0          # copied from FourPartCapture; 0 ⇒ all-subiter-0
     # Per-architecture timing profile copied from FourPartCapture by
     # `build_dataflow_graph`. `None` means "no profile registered for
@@ -1568,7 +1575,7 @@ _NON_ALU_CATEGORIES = frozenset({
 # choice, not by user-program semantics, and would create spurious
 # identity collisions across captures that picked different wait/nop
 # placement. Used by `build_dataflow_graph` Phase 1 (see the
-# `nodes_by_identity` accumulation below).
+# `nodes_list` accumulation below).
 _NO_DATAFLOW_IDENTITY_CATEGORIES = frozenset({
     InstructionCategory.SWAIT,
     InstructionCategory.SBARRIER,
@@ -1921,7 +1928,7 @@ def build_dataflow_graph(four_part_capture):
     """
     captures = {}
     if four_part_capture is None:
-        return DataflowGraph(nodes={}, edges=[], captures=captures)
+        return DataflowGraph(nodes=[], edges=[], captures=captures)
 
     # Seed captures dict and validate bodies are non-empty.
     # PRO is sourced from the optional `prologue` field; the rest from the
@@ -1960,7 +1967,7 @@ def build_dataflow_graph(four_part_capture):
     # ISA; timing checks are skipped." Tracked: `rocm-libraries-zkzw`.
     arch_profile = four_part_capture.arch_profile
 
-    nodes_by_identity = {}
+    nodes_list = []
     nodes_per_body = {label: [] for label in _BODY_BUILD_ORDER}
 
     # ---------------------------------------------------------------------
@@ -2021,7 +2028,7 @@ def build_dataflow_graph(four_part_capture):
             # (the shared helper) so this site stays in sync with the
             # d3zj per-render / per-ordinal determinism tests.
             if id(tagged_inst) in dataflow_ti_ids:
-                nodes_by_identity[node.identity] = node
+                nodes_list.append(node)
 
         # Stash per-body GraphNodes on the LoopBodyCapture for the helpers.
         body._graph_nodes = nodes_per_body[label]
@@ -2035,9 +2042,15 @@ def build_dataflow_graph(four_part_capture):
     # `_intersection` handles both.
     edges = []
 
+    # Initialize before the guard so both names are always defined even when
+    # nodes_list is empty (the empty-graph path at line 2199 sees [] and {},
+    # not NameError).
+    sorted_nodes = []
+    byte_key_writers = {}
+
     # Skip when nothing was captured — e.g., the no-op build_dataflow_graph(None)
     # contract holds but here we have an empty captures map after seeding.
-    if nodes_by_identity:
+    if nodes_list:
         # Per-byte latest-writer construction. Walk all data-flow nodes in
         # ascending stream-position order; for each node, first emit edges
         # for its reads (consulting the current latest_writer state), then
@@ -2061,7 +2074,7 @@ def build_dataflow_graph(four_part_capture):
         # operand-slot of the producer published this byte
         # (rocm-libraries-wx9.3 phase 3, memo §6.1 step 1).
         latest_writer = {}  # byte_key -> (writer_node, write_resource, write_slot)
-        sorted_nodes = sorted(nodes_by_identity.values(), key=lambda n: n.position)
+        sorted_nodes = sorted(nodes_list, key=lambda n: n.position)
 
         # Track the body_label of the previously processed node so we can
         # detect body-boundary transitions (ML-1 -> ML, ML -> NGL, NGL ->
@@ -2167,6 +2180,7 @@ def build_dataflow_graph(four_part_capture):
                           else write_idx)
                 for bk in _byte_keys_for_resource(write_resource, name_to_idx=n2i):
                     latest_writer[bk] = (node, write_resource, w_slot)
+                    byte_key_writers.setdefault(bk, []).append((node, node.position))
 
     # =========================================================================
     # SBarrier-edge collectors (cross-wave LDS-reuse)
@@ -2196,7 +2210,8 @@ def build_dataflow_graph(four_part_capture):
     barrier_edges = _collect_barrier_edges(all_nodes_in_order)
     edges.extend(barrier_edges)
 
-    return DataflowGraph(nodes=nodes_by_identity, edges=edges, captures=captures,
+    return DataflowGraph(nodes=sorted_nodes, edges=edges, captures=captures,
+                         byte_key_writers=byte_key_writers,
                          num_mfma_per_subiter=num_mfma_per_subiter,
                          arch_profile=arch_profile)
 
@@ -3691,7 +3706,7 @@ def compare_graphs(
         pipeline-integrity question.
         """
         return Counter(_category(n.rocisa_inst).value
-                       for n in graph.nodes.values()
+                       for n in graph.nodes
                        if _category(n.rocisa_inst) in _DATA_FLOW_CATEGORIES)
 
     ref_counts = _data_flow_category_counts(reference)
@@ -3771,8 +3786,8 @@ def diagnose_missing_edge(
     """
     p_id = ref_edge.producer.identity
     c_id = ref_edge.consumer.identity
-    p_node = subj_graph.nodes.get(p_id)
-    c_node = subj_graph.nodes.get(c_id)
+    p_node = next((n for n in reversed(subj_graph.nodes) if n.identity == p_id), None)
+    c_node = next((n for n in reversed(subj_graph.nodes) if n.identity == c_id), None)
 
     # Phase 0 — gating. Missing nodes: raise (not assert; survive python -O).
     if p_node is None or c_node is None:

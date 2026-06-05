@@ -3483,15 +3483,15 @@ class TestSSetPriorCoverage:
         # EMISSION_ORDINAL_DESIGN.md the identity tuple no longer carries a
         # class_tag slot — inspect the node's category (or rocisa class
         # name) directly to confirm the SSetPrior didn't leak in.
-        for ident, node in graph.nodes.items():
+        for node in graph.nodes:
             assert type(node.rocisa_inst).__name__ != "SSetPrior", (
-                f"SSetPrior leaked into nodes_by_identity as {ident!r}; "
+                f"SSetPrior leaked into nodes as {node.identity!r}; "
                 "build_dataflow_graph Phase 1 must skip SSetPrior in "
                 "the cross-graph identity set, mirroring SNop."
             )
             assert node.category != "SSETPRIO", (
-                f"SSetPrior leaked into nodes_by_identity with category="
-                f"{node.category!r} as {ident!r}; mirror SNop's exclusion."
+                f"SSetPrior leaked into nodes with category="
+                f"{node.category!r} as {node.identity!r}; mirror SNop's exclusion."
             )
 
     def test_ssetprio_default_issue_cycle_is_one(self):

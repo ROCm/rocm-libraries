@@ -55,7 +55,7 @@ def _slice_window(graph, body_label: str, lo_pos, hi_pos):
     position. SchedulePosition's `<` is lex over `(loop_index, stream_index)`.
     """
     nodes_in_body = [
-        n for n in graph.nodes.values() if n.body_label == body_label
+        n for n in graph.nodes if n.body_label == body_label
     ]
     nodes_in_body.sort(key=lambda n: n.position)
     return [n for n in nodes_in_body if lo_pos < n.position < hi_pos]
@@ -132,14 +132,14 @@ def _dump_full_stream(graph, out_path):
     for body in body_order:
         nodes = by_body[body]
         n_total = len(nodes)
-        n_dataflow = sum(1 for n in nodes if n.identity in graph.nodes)
+        n_dataflow = sum(1 for n in nodes if any(m.identity == n.identity for m in graph.nodes))
         n_control = n_total - n_dataflow
         lines.append(
             f"// ===== BODY {body} ({n_total} nodes total: "
             f"{n_dataflow} data-flow + {n_control} scheduler-control) ====="
         )
         for n in nodes:
-            in_graph = n.identity in graph.nodes
+            in_graph = any(m.identity == n.identity for m in graph.nodes)
             graph_tag = "" if in_graph else "  [NOT-IN-GRAPH]"
             lines.append(
                 f"// pos={n.position} cat={n.category} name={render_node_label(n)}{graph_tag}\n"
@@ -303,8 +303,8 @@ def test_dump_carveout_assembly_windows(isa_infrastructure, monkeypatch):
         # path; both graphs are still built from real captures. We rely on
         # cross-graph identity equality (TaggedInstruction.identity_for ->
         # `(class_tag, loop_index, canonical_render)`).
-        ref_p = ref_graph.nodes.get(subj_p.identity)
-        ref_c = ref_graph.nodes.get(subj_c.identity)
+        ref_p = next((n for n in ref_graph.nodes if n.identity == subj_p.identity), None)
+        ref_c = next((n for n in ref_graph.nodes if n.identity == subj_c.identity), None)
 
         print(f"\n  Producer (subj):")
         print(f"    identity = {subj_p.identity}")

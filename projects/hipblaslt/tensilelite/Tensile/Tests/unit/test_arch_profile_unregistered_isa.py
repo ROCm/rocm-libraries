@@ -314,7 +314,7 @@ class TestTimingHelpersShortCircuit:
     def test_cvt_to_mfma_gap_ok_returns_arch_not_supported_on_unregistered_isa(self):
         cap = _zero_gap_mfma_to_alu_capture()
         g = build_dataflow_graph(_wrap(cap, arch_profile=None))
-        mfma_nodes = [n for n in g.nodes.values() if n.category == "MFMA"]
+        mfma_nodes = [n for n in g.nodes if n.category == "MFMA"]
         # The producer/consumer don't have to satisfy the CVT->MFMA
         # routing predicate — the helper short-circuits before it
         # consults instruction shape. We pass any two real nodes so
@@ -327,7 +327,7 @@ class TestTimingHelpersShortCircuit:
     def test_mfma_pack_to_cvt_gap_ok_returns_arch_not_supported_on_unregistered_isa(self):
         cap = _zero_gap_mfma_to_alu_capture()
         g = build_dataflow_graph(_wrap(cap, arch_profile=None))
-        mfma_nodes = [n for n in g.nodes.values() if n.category == "MFMA"]
+        mfma_nodes = [n for n in g.nodes if n.category == "MFMA"]
         producer = mfma_nodes[0]
         consumer = mfma_nodes[0]
         check = _mfma_pack_to_cvt_gap_ok(producer, consumer, g)
@@ -448,7 +448,7 @@ class TestEndToEndTimingSuppression:
         assert g.captures, "Graph must contain captures on unregistered-ISA path"
         # MFMA node must still be present; arch-skip is purely a timing
         # property, not an instruction-classification property.
-        mfma_nodes = [n for n in g.nodes.values() if n.category == "MFMA"]
+        mfma_nodes = [n for n in g.nodes if n.category == "MFMA"]
         assert mfma_nodes, "MFMA node must still be classified on unregistered-ISA path"
 
 

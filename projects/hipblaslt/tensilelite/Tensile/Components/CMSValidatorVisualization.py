@@ -103,7 +103,7 @@ def visualize_dataflow_graph(graph, output_path: str,
             g.add_node(nid, label=_node_label(node))
         return nid
 
-    for n in graph.nodes.values():
+    for n in graph.nodes:
         _put(n)
     for e in graph.edges:
         _put(e.producer)
