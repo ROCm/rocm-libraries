@@ -321,10 +321,10 @@ def main():
         description="Validate rule-generated configs against JSON profiler configs."
     )
     parser.add_argument(
-        "--config-set",
-        choices=["tests", "profiler"],
+        "--rule-set",
+        choices=["profiler", "tests", "default"],
         default="profiler",
-        help="Which JSON config set to compare against (default: profiler).",
+        help="Which rule set to generate configs from (default: profiler).",
     )
     parser.add_argument(
         "--extract",
@@ -353,9 +353,10 @@ def main():
     args = parser.parse_args()
 
     print(f"Loading JSON configs from: {CONFIGS_DIR}")
-    print(f"Config set: {args.config_set}")
+    print(f"Rule set: {args.rule_set})")
 
-    json_instances = load_json_instances(args.config_set)
+    json_config_set = "profiler" if args.rule_set == "default" else args.rule_set
+    json_instances = load_json_instances(json_config_set)
     print(f"Loaded {len(json_instances)} JSON instances total.")
 
     if args.extract:
@@ -376,7 +377,7 @@ def main():
         variants=selected_variants,
         ndims=[2, 3],
         datatypes=["fp16", "bf16", "fp32"],
-        config_set=args.config_set,
+        rule_set=args.rule_set,
     )
     # Filter out depthwise configs (validated separately via test_depthwise_tile_math.py)
     generated = [c for c in all_generated if isinstance(c, GroupedConvKernelConfig)]

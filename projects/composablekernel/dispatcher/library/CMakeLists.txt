@@ -14,7 +14,7 @@
 # ---- Configuration (inherits from parent scope) ----
 
 set(DISPATCHER_DIR "${PROJECT_SOURCE_DIR}/dispatcher")
-set(DISPATCHER_CONFIG_SET "tests" CACHE STRING "Dispatcher config set: tests or profiler")
+set(DISPATCHER_RULE_SET "profiler" CACHE STRING "Dispatcher rule set: profiler, tests, or default")
 
 # Extract first GPU target for codegen
 string(REPLACE ";" " " _GPU_TARGETS_SPACE "${GPU_TARGETS}")
@@ -51,7 +51,7 @@ function(ck_add_dispatcher_conv_instances VARIANT)
   set(TARGET_NAME "ck_dispatcher_grouped_conv_${VARIANT}")
 
   # --- Step 1: Run Python codegen at configure time ---
-  # Always regenerate: DISPATCHER_CONFIG_SET is a CACHE variable, so changing it
+  # Always regenerate: DISPATCHER_RULE_SET is a CACHE variable, so changing it
   # triggers a full reconfigure. Wipe the kernel dir first to remove stale files.
   file(REMOVE_RECURSE ${KERNEL_DIR})
   file(MAKE_DIRECTORY ${KERNEL_DIR})
@@ -60,7 +60,7 @@ function(ck_add_dispatcher_conv_instances VARIANT)
             --variant ${VARIANT}
             --output-dir ${KERNEL_DIR}
             --arch ${_GPU_TARGET}
-            --mode ${DISPATCHER_CONFIG_SET}
+            --rule-set ${DISPATCHER_RULE_SET}
     RESULT_VARIABLE ret
     OUTPUT_VARIABLE output
     ERROR_VARIABLE error
@@ -69,7 +69,7 @@ function(ck_add_dispatcher_conv_instances VARIANT)
   if(NOT ret EQUAL 0)
     message(FATAL_ERROR "Dispatcher ${VARIANT} kernel generation failed.\nReturn: ${ret}\nOutput: ${output}\nError: ${error}")
   endif()
-  message(STATUS "Dispatcher ${VARIANT} kernels generated (config set: ${DISPATCHER_CONFIG_SET}): ${output}")
+  message(STATUS "Dispatcher ${VARIANT} kernels generated (rule set: ${DISPATCHER_RULE_SET}): ${output}")
 
   # --- Step 2: Create .cpp wrappers for each generated kernel header ---
   file(GLOB _KERNEL_HEADERS "${KERNEL_DIR}/${HEADER_PREFIX}*.hpp")

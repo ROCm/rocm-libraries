@@ -98,8 +98,12 @@ def main():
     parser.add_argument("--variant", required=True, choices=list(VARIANT_CONFIG.keys()))
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--arch", default="gfx950")
-    parser.add_argument("--mode", default="tests", choices=["tests", "profiler"],
-                        help="Config set: 'profiler' (all) or 'tests' (subset)")
+    parser.add_argument("--rule-set", default="tests",
+                        choices=["profiler", "tests", "default"],
+                        help="Rule set: 'profiler' (full JSON-derived "
+                             "per-(variant,ndim,datatype) rules), 'tests' "
+                             "(~20% stratified subset of profiler), or 'default' "
+                             "(original hand-curated heuristics)")
 
     args = parser.parse_args()
     cfg = VARIANT_CONFIG[args.variant]
@@ -119,14 +123,14 @@ def main():
 
     # --- Step 1: Generate configs from rules ---
     print(f"Generating configs from rules (variant={args.variant}, "
-          f"arch={args.arch}, mode={args.mode})...")
+          f"arch={args.arch}, rule_set={args.rule_set})...")
 
     configs = get_default_configs(
         arch=args.arch,
         variants=[variant_enum],
         ndims=[2, 3],
         datatypes=datatypes,
-        config_set=args.mode,
+        rule_set=args.rule_set,
     )
     print(f"Generated {len(configs)} configs from rules")
 
