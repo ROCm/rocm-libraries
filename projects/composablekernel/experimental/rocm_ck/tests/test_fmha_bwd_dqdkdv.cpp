@@ -442,7 +442,8 @@ TEST(FmhaBwdDqDkDv, RequiredTensorsWithMask)
     constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+        .algorithm = {
+            .mask_type = FmhaMaskType::TOP_LEFT_CAUSAL, .pad_hdim_q = 8, .pad_hdim_v = 8}});
     EXPECT_EQ(S::requiredTensors(k), 9);
 }
 
