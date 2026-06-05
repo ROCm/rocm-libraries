@@ -14,12 +14,15 @@
 # plus the runtime data those entry points read, and the compiled rocisa
 # extension they import. Total ~3.7 MB.
 #
-# The pinned file list below is the exact closure produced by
-# .cmake-work/closure_trace.py (83 reached modules) plus the two package
-# __init__.py that exist in the source tree but are only reached transitively
-# (Tensile/Components/Subtile, Tensile/Toolchain) — both required so the installed
-# package hierarchy is importable. Regenerate with closure_trace.py if the codegen
-# entry points gain or drop first-party imports.
+# The pinned file list below is the static import closure produced by
+# .cmake-work/closure_trace.py, plus the Tensile/Toolchain ancestor __init__.py it
+# reaches only transitively. The Tensile/Components/ subtree is shipped as a whole
+# directory instead of enumerated: Component.py does `from .Components import *` and
+# Components/__init__.py's __all__ force-imports every component module (a plugin
+# pattern a static trace cannot see). It is all codegen -- the tuner/benchmark code
+# lives at the Tensile/ top level and in Utilities/tensile_generator, neither
+# shipped. Regenerate the list with closure_trace.py if the codegen entry points
+# gain or drop first-party imports.
 
 include_guard(GLOBAL)
 
@@ -60,22 +63,6 @@ function(hipblaslt_install_codegen_subset _src)
         Tensile/Common/ValidParameters.py
         Tensile/Common/__init__.py
         Tensile/Component.py
-        Tensile/Components/CMSValidator.py
-        Tensile/Components/CustomSchedule.py
-        Tensile/Components/NonTemporal.py
-        Tensile/Components/Signature.py
-        Tensile/Components/Subtile/InstructionEmitter.py
-        Tensile/Components/Subtile/InstructionScheduler.py
-        Tensile/Components/Subtile/Kernel.py
-        Tensile/Components/Subtile/LogicalScheduler.py
-        Tensile/Components/Subtile/SubtileGREmit.py
-        Tensile/Components/Subtile/SubtileGeometry.py
-        Tensile/Components/Subtile/SubtileLREmit.py
-        Tensile/Components/Subtile/SubtileScaleEmit.py
-        Tensile/Components/Subtile/__init__.py
-        Tensile/Components/TensorDataMover.py
-        Tensile/Components/WorkGroupMappingAlgos.py
-        Tensile/Components/__init__.py
         Tensile/Contractions.py
         Tensile/CustomKernels.py
         Tensile/CustomYamlLoader.py
@@ -136,6 +123,20 @@ function(hipblaslt_install_codegen_subset _src)
             COMPONENT ${_cg_COMPONENT}
         )
     endforeach()
+
+    # Tensile/Components/ is the codegen component-plugin directory: Component.py
+    # does `from .Components import *`, and Components/__init__.py's __all__ force-
+    # imports every component module (MAC_*, LSU, GSU, StreamK, ...). A static
+    # import trace cannot see these, so ship the whole directory. It is all codegen
+    # (the tuner/benchmark code lives at the Tensile/ top level and in
+    # Utilities/tensile_generator, neither of which is shipped).
+    install(
+        DIRECTORY "${_src}/Tensile/Components/"
+        DESTINATION "${_dest}/Tensile/Components"
+        COMPONENT ${_cg_COMPONENT}
+        PATTERN "__pycache__" EXCLUDE
+        PATTERN "*.pyc" EXCLUDE
+    )
 
     # --- Runtime data the codegen reads __file__-relative ---
     # Tensile/Source/: kernel headers copied into the output by Run.py.
