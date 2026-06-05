@@ -79,11 +79,11 @@ If you came here looking for **what is available on a specific
 architecture** (MFMA atom catalog, LDS size / banks / conflict rules,
 transpose-read and cross-lane intrinsics, VGPR / AGPR / occupancy caps,
 chiplet swizzle parameters, buffer-descriptor flags, fp8 / quantization
-support, and compiler caveats), pick your target architecture
-reference: [arch/README.md](arch/README.md) — currently
-[gfx950](arch/gfx950.md) (CDNA4 / MI350X / MI355X, the DSL's default
-target). The base runbook itself stays arch-neutral; the arch reference
-holds the concrete facts.
+support, and compiler caveats), see
+**[§21 Target Architecture Reference](#21-target-architecture-reference)** —
+the single hub that lists the per-arch files (currently gfx950, the
+DSL's default target). The base runbook itself stays arch-neutral; the
+arch reference holds the concrete facts.
 - `utilities/skills/` — focused skill docs (`gemm-optimization`,
   `lds-optimization`, `kernel-trace-analysis`,
   `prefetch-data-load`, `capture-kernel-trace`, `empirical-case-studies`,
@@ -853,9 +853,8 @@ bucket reveals scalar-store kernels immediately.
 ### 6.3 LDS / Shared Memory
 
 > Arch-specific (LDS size / banks / conflict strategy, transpose-read
-> availability): see your target's arch reference
-> ([arch/README.md](arch/README.md); gfx950 →
-> [arch/gfx950.md §21.2](arch/gfx950.md)).
+> availability): see the
+> [architecture reference](#21-target-architecture-reference) (§21.2).
 
 - Use LDS to share input or weights across waves / threads.
 - Avoid LDS if data is not reused enough.
@@ -912,9 +911,8 @@ register-PV + transposed-PV reads.
 ### 6.4 LDS Bank Conflicts
 
 > Arch-specific (per-opcode bank-conflict periods, read/write
-> asymmetry, transpose-read availability): see your target's arch
-> reference ([arch/README.md](arch/README.md); gfx950 →
-> [arch/gfx950.md §21.2](arch/gfx950.md)).
+> asymmetry, transpose-read availability): see the
+> [architecture reference](#21-target-architecture-reference) (§21.2).
 
 - Inspect LDS access patterns, not just total LDS bytes. Use the
   `analyze_lds_conflicts.py` tool under
@@ -950,10 +948,10 @@ Notation:
 - **LDS_avail**: Available LDS per CU on the target architecture.
 
 > Arch-specific (LDS per CU, bank count, and the resulting preferred
-> swizzle): see your target's arch reference §21.2
-> ([arch/README.md](arch/README.md); gfx950 →
-> [arch/gfx950.md §21.2](arch/gfx950.md)). The selection *method*
-> below is arch-neutral; plug in your arch's LDS capacity.
+> swizzle): see the
+> [architecture reference](#21-target-architecture-reference) (§21.2).
+> The selection *method* below is arch-neutral; plug in your arch's LDS
+> capacity.
 
 Two primary approaches exist for eliminating LDS bank conflicts, with
 dramatically different performance characteristics depending on GPU
@@ -995,17 +993,17 @@ else:
 > Arch-specific caveat: on some arches the LLVM backend silently
 > removes explicit scheduling barriers (`s_sched_barrier`,
 > `s_sched_group_barrier`), so you cannot rely on them to mitigate XOR
-> address overhead. Check your target's arch reference §21.3/§21.8
-> (gfx950 → [arch/gfx950.md](arch/gfx950.md): they are dropped there;
-> verify with `probe_isa_inspect.py` that the `sched_barrier`
-> sub-bucket is 0).
+> address overhead. Check the
+> [architecture reference](#21-target-architecture-reference)
+> (§21.3/§21.8); where they are dropped, verify with
+> `probe_isa_inspect.py` that the `sched_barrier` sub-bucket is 0.
 
 Critical asymmetry: conflict periods can differ between `ds_read_b128`
 and `ds_write_b128` (and across arches), so reads and writes may need
 separate swizzle strategies. See
-`utilities/skills/empirical-case-studies.md` (Case Study 2) and your
-target's arch reference §21.2 for the per-opcode conflict-period table
-(gfx950 → [arch/gfx950.md §21.2](arch/gfx950.md)).
+`utilities/skills/empirical-case-studies.md` (Case Study 2) and the
+[architecture reference](#21-target-architecture-reference) (§21.2) for
+the per-opcode conflict-period table.
 
 ### 6.5 Registers
 
@@ -1042,10 +1040,9 @@ The DSL's `MfmaAtom` catalog lives in `helpers/atoms.py::MFMA_*_ATOMS`.
 **Which atoms (and which K widths) are legal depends on the target
 architecture** — the wide-K and fp8 / bf8 / scaled / MX variants in
 particular are not universal. Always select against your target's
-MFMA-atom catalog: see your arch reference §21.1
-([arch/README.md](arch/README.md); gfx950 →
-[arch/gfx950.md §21.1](arch/gfx950.md), which also documents the
-lane-layout-match property of the 32×32 atoms).
+MFMA-atom catalog: see the
+[architecture reference](#21-target-architecture-reference) (§21.1),
+which also documents the lane-layout-match property of the 32×32 atoms.
 
 General selection guidance (then confirm against the arch catalog):
 
@@ -1110,9 +1107,9 @@ layout match, independent of the atom's compute throughput.
 - Fold small dimensions into K if operand layout supports it.
 - Prefer the widest-K atom **that is legal on your target** (e.g.
   `16x16x32` over `16x16x16`, `32x32x16` over `32x32x8`) — but confirm
-  the wide-K variant exists for your arch in the arch MFMA-atom catalog
-  §21.1 ([arch/README.md](arch/README.md); gfx950 →
-  [arch/gfx950.md §21.1](arch/gfx950.md)); do not assume it is present.
+  the wide-K variant exists for your arch in the MFMA-atom catalog (see
+  the [architecture reference](#21-target-architecture-reference)
+  §21.1); do not assume it is present.
 - Fuse filter positions into K for convolution when contiguous.
 - Use Toeplitz-like packing for convolution only when correct and
   worth the complexity.
@@ -1169,10 +1166,10 @@ layout match, independent of the atom's compute throughput.
 
 > Arch-specific (which scheduling intrinsics survive the backend vs are
 > silently dropped or ICE the compiler — `sched_barrier`,
-> `sched_group_barrier`, `iglp_opt`, named/split barriers): see your
-> target's arch reference §21.3/§21.8 ([arch/README.md](arch/README.md);
-> gfx950 → [arch/gfx950.md](arch/gfx950.md)). The gfx950 facts below
-> are illustrative of one such arch.
+> `sched_group_barrier`, `iglp_opt`, named/split barriers): see the
+> [architecture reference](#21-target-architecture-reference)
+> (§21.3/§21.8). The gfx950 facts below are illustrative of one such
+> arch.
 
 - Try compiler scheduling flags only after correctness is stable.
 - On AMD, experiment with `sched_group_barrier(mask, count, sync_id)`,
@@ -1266,8 +1263,8 @@ reference back-to-back in one process.
 ### 8.7 What a good hot-loop schedule looks like
 
 ck_dsl declares ops + dependencies and hands instruction scheduling to the
-backend; on some arches (e.g. gfx950 — see [arch/gfx950.md §21.8](arch/gfx950.md))
-the scheduling *hints* are dropped (§8.4), so you
+backend; on some arches the scheduling *hints* are dropped (§8.4,
+[architecture reference](#21-target-architecture-reference) §21.8), so you
 cannot place instructions directly. You can still shape the schedule indirectly:
 the **order, spacing, and dependency structure of the ops you emit** is the
 backend's starting point, and inside a fenced region (see the "hard scheduling
@@ -1340,8 +1337,8 @@ in the lowered ISA.
 `v_fma` vs `v_mul`+`v_add`). Treat those as the *acceptance test* for the schedule
 you intended, exactly as §8.4 says for `iglp_opt`: a no-op and an
 applied-but-useless change both read as "no perf delta", so check the histogram,
-not the clock. See §10.5 (limits vs hand assembly) and your arch
-reference's §21.8 (gfx950 → [arch/gfx950.md §21.8](arch/gfx950.md)).
+not the clock. See §10.5 (limits vs hand assembly) and the
+[architecture reference](#21-target-architecture-reference) §21.8.
 
 ---
 
@@ -1458,9 +1455,8 @@ bottleneck class, and the kernel structure (§3, §11).
 
 > Arch-specific backend hazards (which intrinsics the LLVM backend
 > silently drops or ICEs on, which `-mllvm` flags are risky on a given
-> arch): see your target's arch reference §21.8
-> ([arch/README.md](arch/README.md); gfx950 →
-> [arch/gfx950.md §21.8](arch/gfx950.md)).
+> arch): see the
+> [architecture reference](#21-target-architecture-reference) (§21.8).
 
 - The DSL ships a conservative pass pipeline:
   `core/passes.py::optimize_kernel` runs canonicalize → conservative
@@ -1542,10 +1538,9 @@ near-assembly results (cf. Triton); the work is always in the backend/scheduler.
 ## 11. ISA And Resource Inspection
 
 > Arch-specific (the `--mcpu` / ISA target to disassemble against, the
-> resource caps the occupancy math uses, which opcodes to expect):
-> see your target's arch reference §21.4/§21.9
-> ([arch/README.md](arch/README.md); gfx950 →
-> [arch/gfx950.md](arch/gfx950.md)).
+> resource caps the occupancy math uses, which opcodes to expect): see
+> the [architecture reference](#21-target-architecture-reference)
+> (§21.4/§21.9).
 
 The DSL's static analysis layer lives at `ck_dsl.analysis`:
 
@@ -1637,9 +1632,8 @@ faster on this shape?" — is for `probe_targeted_bench.py`.
 > Arch-specific: the legal range of several knobs below (MFMA atom and
 > K-pack §12.1.C, LDS layout / swizzle §12.1.F, compiler flags
 > §12.1.M, chiplet swizzle §12.1.L) depends on the target — prune the
-> sweep to what your arch actually supports. See your target's arch
-> reference ([arch/README.md](arch/README.md); gfx950 →
-> [arch/gfx950.md](arch/gfx950.md)).
+> sweep to what your arch actually supports. See the
+> [architecture reference](#21-target-architecture-reference).
 
 ### 12.1 Knob Catalog (Master List)
 
@@ -3120,10 +3114,11 @@ python ck_dsl/dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocpr
 - **Profiling-counter tools**: `utilities/tools/stage4_analyze/`,
   `utilities/tools/stage5_compare/`, `utilities/tools/utils/`.
 - **Benchmark harnesses**: `utilities/tools/stage1_benchmark/`.
-- **Target architecture references**: [`optimization/arch/`](arch/README.md)
-  for per-arch MFMA atoms, LDS specs, cross-lane primitives, register /
-  occupancy caps, chiplet / XCD, buffer descriptors, fp8 / MX support,
-  and compiler caveats (gfx950 → [arch/gfx950.md](arch/gfx950.md)).
+- **Target architecture reference**: see
+  [§21 Target Architecture Reference](#21-target-architecture-reference)
+  — the single hub for per-arch MFMA atoms, LDS specs, cross-lane
+  primitives, register / occupancy caps, chiplet / XCD, buffer
+  descriptors, fp8 / MX support, and compiler caveats.
 
 ---
 
@@ -3131,14 +3126,34 @@ python ck_dsl/dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocpr
 
 The runbook itself is architecture-agnostic — every principle and
 lever applies to any AMDGPU CDNA target. The concrete per-architecture
-facts (MFMA atom catalog, LDS size / banks / conflict periods,
-cross-lane primitives, register / occupancy caps, chiplet / XCD,
-buffer descriptors, fp8 / quantization support, compiler caveats,
-default ISA) now live in per-arch references under
-[`optimization/arch/`](arch/README.md). Pick your target:
-**[arch/gfx950.md](arch/gfx950.md)** (CDNA4 / MI350X / MI355X — the
-DSL's default target). See [arch/README.md](arch/README.md) for the
-index, the 10-subsection template, and how to add a new architecture.
+facts live in per-arch references under
+[`optimization/arch/`](arch/README.md). **This section is the single
+hub for those facts: every "architecture reference" breadcrumb earlier
+in the runbook links here, and this is the only place the base runbook
+points at the arch files directly.**
+
+Pick your target:
+
+- **[arch/gfx950.md](arch/gfx950.md)** — CDNA4 / MI350X / MI355X (the
+  DSL's default target).
+
+See [arch/README.md](arch/README.md) for the index and how to add a new
+architecture. Every arch reference uses the same `21.x` layout, so a
+breadcrumb that cites "§21.2" means subsection 21.2 of your target's
+file:
+
+| Subsection | Topic |
+|---|---|
+| 21.1 | MFMA atom catalog |
+| 21.2 | LDS specifics (size / banks / conflict periods / swizzle) |
+| 21.3 | Cross-lane primitives |
+| 21.4 | Register / occupancy |
+| 21.5 | Chiplet / XCD |
+| 21.6 | Buffer descriptor (AMDGPU) |
+| 21.7 | FP8 / quantization |
+| 21.8 | Compiler caveats |
+| 21.9 | Default ISA target |
+| 21.10 | Pointers to deeper material |
 
 ## Appendix: One-Page Diagnostic Decision Tree
 
@@ -3208,7 +3223,7 @@ Action:  inspect LLVM / ISA (§11, §18); check atom selection (§7.1)
 Symptom: fast but incorrect only on padded / tail shapes
 Likely:  invalid pointer load, bad descriptor valid, vector crosses tail
 Action:  test tiny adversarial shapes (§1.5); inspect buffer-rsrc
-         sentinel path (§6.1, arch ref §21.6 — arch/gfx950.md)
+         sentinel path (§6.1, arch ref §21.6)
 
 Symptom: intermittent wrong answers in async path
 Likely:  missing `s_waitcnt` / barrier, workspace lifetime

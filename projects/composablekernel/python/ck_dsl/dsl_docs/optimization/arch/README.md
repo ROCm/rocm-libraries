@@ -13,7 +13,12 @@ ISA — live in the per-arch files indexed below.
 When the base runbook hits an arch-mixed spot (LDS specifics in
 §6.3/§6.4, MFMA atom selection in §7.1/§7.4, compiler caveats in §10,
 scheduling in §8, ISA inspection in §11, autotuning in §12), it keeps
-the **general principle inline** and defers the concrete arch fact here.
+the **general principle inline** and defers the concrete arch fact to a
+single hub — **§21 Target Architecture Reference** in the runbook. Each
+of those spots links to §21 (not to the arch files directly), and §21 is
+the one place that lists the per-arch files indexed below. That is why
+adding an architecture touches only §21 and the index here, never the
+inline breadcrumbs.
 
 ## Index
 
@@ -59,12 +64,14 @@ Each arch file starts with the standard back-link header:
    own per-arch tables (`helpers/atoms.py`, `helpers/grid.py`,
    `core/lower_llvm.py`, measured LDS / occupancy studies).
 3. **Register it here** — add a row to the Index table above.
-4. **Register it in the base runbook's arch-picker** — the "How to
-   read this document" section names the available arch references.
-5. **Update the §6/§7/§10 breadcrumbs** — the arch-mixed spots in the
-   base runbook ("see your target's arch reference") list the arches
-   that have a reference; add the new one where it is concrete.
-6. **Keep each arch file single-arch.** A new arch file's tables should
+4. **Register it in the base runbook's §21 hub** — add the new file to
+   the "Pick your target" list in
+   [§21 Target Architecture Reference](../optimization_runbook.md#21-target-architecture-reference).
+   That section is the *only* spot in the runbook that links arch files
+   directly; the inline "architecture reference" breadcrumbs throughout
+   §6/§7/§8/§10/§11/§12 already point at §21, so they need no per-arch
+   edits.
+5. **Keep each arch file single-arch.** A new arch file's tables should
    carry only that arch's values — do not replicate the multi-arch
    comparison columns. (The gfx950 reference's §21.2 / §21.9 still list
    `gfx942` / `gfx90a` columns for historical continuity from the
