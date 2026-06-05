@@ -1,6 +1,0 @@
-{
-  "projectKey": "ALMIOPEN",
-  "defaultComponent": "hipDNN",
-  "defaultEpic": "ALMIOPEN-1983",
-  "defaultLabels": ["miopen-API-split"]
-}
