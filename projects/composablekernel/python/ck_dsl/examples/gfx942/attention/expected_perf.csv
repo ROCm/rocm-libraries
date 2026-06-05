@@ -1,0 +1,4 @@
+shape,dtype,config,tflops,median_us,arch,rocm_ver,date
+Fp16_Prefill_GQA_S2048_D128,fp16,wide4,191.1,359.58,gfx942,7.14.0,2026-06-05
+Fp16_Prefill_GQA_S2048_D128,fp16,L4,162.7,422.44,gfx942,7.14.0,2026-06-05
+Fp16_Prefill_GQA_S2048_D64,fp16,narrow_d64,149.1,230.40,gfx942,7.14.0,2026-06-05

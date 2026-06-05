@@ -1011,6 +1011,12 @@ class _Lowerer:
         # we promote to f32 first.
         self._math1(op, "exp2f")
 
+    def _op_math_log2(self, op: Op) -> None:
+        # ``log2f`` is HIP's device runtime base-2 log entry point; for
+        # fp16/bf16 we promote to f32 first (same promote-compute-demote
+        # shape as exp2 above).
+        self._math1(op, "log2f")
+
     def _op_math_rcp(self, op: Op) -> None:
         # AMDGPU has a hardware reciprocal; emit the builtin directly for
         # f32, promote-compute-demote for f16/bf16.
@@ -1627,6 +1633,19 @@ class _Lowerer:
         self._emit(
             f"int {_name(op.result)} = "
             f"__builtin_amdgcn_mbcnt_hi(-1, __builtin_amdgcn_mbcnt_lo(-1, 0));"
+        )
+
+    def _op_tile_perm_b32(self, op: Op) -> None:
+        """``v_perm_b32`` — in-lane byte select across two VGPRs (pure VALU).
+
+        ``__builtin_amdgcn_perm(src0, src1, sel)`` takes two i32 sources and
+        an i32 byte-selector and returns the permuted i32. No cross-lane, no
+        LDS, no ``lgkmcnt``.
+        """
+        src0, src1, sel = op.operands
+        self._emit(
+            f"int {_name(op.result)} = "
+            f"__builtin_amdgcn_perm({_name(src0)}, {_name(src1)}, {_name(sel)});"
         )
 
     def _op_tile_ds_read_tr16_b64(self, op: Op) -> None:

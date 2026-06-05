@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "Canonical gfx942 (CDNA3 / MI300X) SDPA-fwd shapes exercised by the",
+    "ck_dsl unified-attention 2D tiled kernel. These mirror exactly the set",
+    "validated by the ck-dsl-provider integration tests",
+    "(dnn-providers/ck-dsl-provider/integration_tests/IntegrationGpuCkDslSdpaFwdFp16.cpp)",
+    "plus the perf shapes from the gfx942 case study",
+    "(dsl_docs/architecture/attention_2d_gfx942_experiment_summary.md).",
+    "",
+    "Every case is causal (the unified paged kernel is causal-only). GQA is",
+    "expressed via kv_heads < heads (heads % kv_heads == 0). head_size in",
+    "{64,128}; head_size=256 is unsupported on gfx942 (exceeds the 64 KB LDS",
+    "budget) so it is intentionally absent. The harness maps each dense",
+    "[batch, heads, seqlen, head_size] SDPA problem onto the kernel's paged",
+    "layout with block_size=64.",
+    "",
+    "Schema per shape:",
+    "  name        : stable identifier",
+    "  dtype       : fp16 | bf16",
+    "  seqlen_q    : query sequence length per batch element",
+    "  seqlen_k    : key/value sequence length per batch element",
+    "  head_size   : D (per-head dimension)",
+    "  heads       : Hq (query heads)",
+    "  kv_heads    : Hkv (key/value heads; GQA when < heads)",
+    "  batch       : B (number of independent sequences)",
+    "  causal      : true for all gfx942 SDPA-fwd cases",
+    "  group       : correctness | perf  (which scenario set the shape belongs to)"
+  ],
+  "scenarios": {
+    "correctness": [
+      {"name": "Fp16CausalD64",          "dtype": "fp16", "seqlen_q": 64,  "seqlen_k": 64,  "head_size": 64,  "heads": 8, "kv_heads": 8, "batch": 2, "causal": true},
+      {"name": "Fp16CausalD128",         "dtype": "fp16", "seqlen_q": 64,  "seqlen_k": 64,  "head_size": 128, "heads": 8, "kv_heads": 8, "batch": 2, "causal": true},
+      {"name": "Fp16CausalGqaD128",      "dtype": "fp16", "seqlen_q": 64,  "seqlen_k": 64,  "head_size": 128, "heads": 8, "kv_heads": 2, "batch": 2, "causal": true},
+      {"name": "Bf16CausalD64",          "dtype": "bf16", "seqlen_q": 64,  "seqlen_k": 64,  "head_size": 64,  "heads": 8, "kv_heads": 8, "batch": 2, "causal": true},
+      {"name": "Bf16CausalD128",         "dtype": "bf16", "seqlen_q": 64,  "seqlen_k": 64,  "head_size": 128, "heads": 8, "kv_heads": 8, "batch": 2, "causal": true},
+      {"name": "Bf16CausalGqaD128",      "dtype": "bf16", "seqlen_q": 64,  "seqlen_k": 64,  "head_size": 128, "heads": 8, "kv_heads": 2, "batch": 2, "causal": true},
+      {"name": "Fp16CausalMhaD64S512",   "dtype": "fp16", "seqlen_q": 512, "seqlen_k": 512, "head_size": 64,  "heads": 8, "kv_heads": 8, "batch": 1, "causal": true},
+      {"name": "Fp16CausalGqa8D128S512", "dtype": "fp16", "seqlen_q": 512, "seqlen_k": 512, "head_size": 128, "heads": 8, "kv_heads": 1, "batch": 1, "causal": true},
+      {"name": "Fp16CausalGqaD128S528",  "dtype": "fp16", "seqlen_q": 528, "seqlen_k": 528, "head_size": 128, "heads": 8, "kv_heads": 4, "batch": 1, "causal": true},
+      {"name": "Bf16CausalGqa8D128S512", "dtype": "bf16", "seqlen_q": 512, "seqlen_k": 512, "head_size": 128, "heads": 8, "kv_heads": 1, "batch": 1, "causal": true}
+    ],
+    "perf": [
+      {"name": "Fp16_Prefill_GQA_S2048_D128", "dtype": "fp16", "seqlen_q": 2048, "seqlen_k": 2048, "head_size": 128, "heads": 32, "kv_heads": 8, "batch": 1, "causal": true},
+      {"name": "Fp16_Prefill_GQA_S2048_D64",  "dtype": "fp16", "seqlen_q": 2048, "seqlen_k": 2048, "head_size": 64,  "heads": 32, "kv_heads": 8, "batch": 1, "causal": true}
+    ]
+  }
+}

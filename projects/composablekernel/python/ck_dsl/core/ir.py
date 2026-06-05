@@ -527,6 +527,9 @@ class IRBuilder:
     def exp2(self, a: Value) -> Value:
         return self._op("math.exp2", [a], [a.type], result_name_hint="exp2").result
 
+    def log2(self, a: Value) -> Value:
+        return self._op("math.log2", [a], [a.type], result_name_hint="log2").result
+
     def rcp(self, a: Value) -> Value:
         return self._op("math.rcp", [a], [a.type], result_name_hint="rcp").result
 
@@ -2174,6 +2177,38 @@ class IRBuilder:
         )
         return op.results[0], op.results[1]
 
+    def perm_b32(self, src0: Value, src1: Value, sel: Value) -> Value:
+        """`__builtin_amdgcn_perm(src0, src1, sel)` = ``v_perm_b32`` — an
+        in-lane byte-select across two source VGPRs (NO cross-lane, NO
+        ``lgkmcnt``, pure VALU). The 8 bytes ``[src1 (bytes 0..3), src0
+        (bytes 4..7)]`` are addressed by the four nibbles... err, four
+        bytes of ``sel``: result byte ``i`` = byte ``(sel >> (8*i)) &
+        0xFF`` of the concatenated 8-byte source (selector value 0..7
+        picks a source byte; >=8 yields a sign/zero pattern per the ISA).
+
+        This is the op CK's ``transpose_vectors`` uses for the in-register
+        2x2 (f16) / 4x4 (i8) operand transpose at LDS-store time. We expose
+        it so the gfx942 conflict-free-V store path can reshape V from its
+        B-natural ``[HD,T+pad]`` layout into the MFMA-A operand register
+        arrangement WITHOUT the ``ds_swizzle``/``warp_shuffle_xor`` L2
+        serialization wall.
+
+        All three operands must be ``i32`` (bitcast/pack f16 pairs to i32
+        first). Returns the permuted ``i32``.
+        """
+        if (
+            src0.type.name != "i32"
+            or src1.type.name != "i32"
+            or sel.type.name != "i32"
+        ):
+            raise ValueError("perm_b32 requires i32 operands")
+        return self._op(
+            "tile.perm_b32",
+            [src0, src1, sel],
+            [I32],
+            result_name_hint="perm",
+        ).result
+
     def lane_id(self) -> Value:
         """`@llvm.amdgcn.mbcnt.hi(-1, @llvm.amdgcn.mbcnt.lo(-1, 0))` — the
         wave64 lane index (0..63) for the current thread.
@@ -3075,6 +3110,7 @@ PURE_OP_NAMES = {
     "arith.sitofp_f32",
     "arith.cvt_fp8_to_f32",
     "math.exp2",
+    "math.log2",
     "math.rcp",
     "math.rcp_fast",
     "math.sqrt",
@@ -3136,6 +3172,7 @@ PURE_OP_NAMES = {
     "tile.ds_read_tr_b8",
     "tile.ds_swizzle_xor",
     "tile.permlane32_swap",
+    "tile.perm_b32",
 }
 
 

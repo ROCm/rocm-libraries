@@ -1,0 +1,13 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""gfx942 (CDNA3 / MI300X) unified-attention 2D tiled SDPA-fwd examples.
+
+A torch-reference-only parity + benchmark harness for the gfx942 narrow /
+wide (flash-regime) tiled attention kernel in
+``ck_dsl.instances.gfx942.attention_tiled_2d``. Unlike the gfx950 attention
+harness it has **no** Triton/AITER dependency: the oracle is a fp32 torch
+reference, so the example runs on any box with torch + a gfx942 GPU.
+
+Ships the canonical shapes we validate (``shapes.json``) and the measured
+perf baselines to compare against (``expected_perf.csv``); see ``README.md``.
+"""
