@@ -30,6 +30,7 @@ Failures. Tests assert on Failure type and field, NOT on string content.
 """
 
 import pytest
+from collections import Counter
 
 from Tensile.Components.ScheduleCapture import (
     FourPartCapture,
@@ -149,9 +150,9 @@ class TestCleanComparison:
         # which here are identical -> no failures, no identity mismatch.
         assert compare_graphs(g_ref, g_subj) == []
         # Defensive: the SWait/SBarrier nodes must not have leaked into
-        # nodes_by_identity. Subject and reference must have the SAME
-        # identity-set sizes despite subject having 3 extra sync ops.
-        assert {n.identity for n in g_ref.nodes} == {n.identity for n in g_subj.nodes}
+        # the dataflow `nodes` list. Subject and reference must have the
+        # SAME identity multiset despite subject having 3 extra sync ops.
+        assert Counter(n.identity for n in g_ref.nodes) == Counter(n.identity for n in g_subj.nodes)
 
     def test_lcc_included_in_identity_set(self):
         """Loop-counter code (category 'LCC' — `SSubU32` + `SCmpEQI32`,
@@ -210,8 +211,8 @@ class TestCleanComparison:
         ])
         g_ref = build_dataflow_graph(_wrap(ref_cap))
         g_subj = build_dataflow_graph(_wrap(subj_cap))
-        # Identity sets match — both include the LCC node.
-        assert {n.identity for n in g_ref.nodes} == {n.identity for n in g_subj.nodes}
+        # Identity multisets match — both include the LCC node.
+        assert Counter(n.identity for n in g_ref.nodes) == Counter(n.identity for n in g_subj.nodes)
         # Per EMISSION_ORDINAL_DESIGN.md §4.5 + ORAM1
         # (rocm-libraries-hdem) Approach A, the identity tuple is now
         # `(canonical_render, emission_ordinal)` (body-blind) with no
