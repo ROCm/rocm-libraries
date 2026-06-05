@@ -195,7 +195,7 @@ struct BatchNormBwdSpatialImpl<0, FpType, FpPrecType, FpAccumType>
         FpPrecType dyvalues[nloop];
 
         __shared__ FpPrecType lbns;
-#if(HIP_PLUGIN_NRN_OP_ID > 0)
+#if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
         __shared__ FpPrecType lbnb;
 #endif
 
@@ -212,7 +212,7 @@ struct BatchNormBwdSpatialImpl<0, FpType, FpPrecType, FpAccumType>
         if(lid == 0)
         {
             lbns = bnScale[grpid];
-#if(HIP_PLUGIN_NRN_OP_ID > 0)
+#if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
             lbnb = bnBias[grpid];
 #endif
         }
@@ -265,7 +265,7 @@ struct BatchNormBwdSpatialImpl<0, FpType, FpPrecType, FpAccumType>
 #endif // end -- Recalc mean and variance \
     //-------------------------------------------
         pscale = lbns;
-#if(HIP_PLUGIN_NRN_OP_ID > 0)
+#if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
         pbias = lbnb;
 #endif
 
@@ -424,7 +424,7 @@ struct BatchNormBwdSpatialImpl<1, FpType, FpPrecType, FpAccumType>
         unsigned int chwid = grpid * hip_plugin_bn_config::hw;
 
         pscale = bnScale[grpid];
-#if(HIP_PLUGIN_NRN_OP_ID > 0)
+#if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
         pbias = bnBias[grpid];
 #endif
 
@@ -689,7 +689,7 @@ struct BatchNormBwdSpatialImpl<3, FpType, FpPrecType, FpAccumType>
         unsigned int cidx = grpid * hip_plugin_bn_config::hw;
 
         pscale = bnScale[grpid];
-#if(HIP_PLUGIN_NRN_OP_ID > 0)
+#if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
         pbias = bnBias[grpid];
 #endif
 
@@ -1136,7 +1136,7 @@ extern "C" __global__ void
 
     __shared__ fp_prec_c_type lmean[hip_plugin_bn_config::launch_dim.grp0];
     __shared__ fp_prec_c_type livar[hip_plugin_bn_config::launch_dim.grp0];
-#if(HIP_PLUGIN_NRN_OP_ID > 0)
+#if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
     __shared__ fp_prec_c_type lcl_scale[hip_plugin_bn_config::launch_dim.grp0];
     __shared__ fp_prec_c_type lcl_bias[hip_plugin_bn_config::launch_dim.grp0];
 #endif
@@ -1168,7 +1168,7 @@ extern "C" __global__ void
         lmean[xlid] = reinterpret_cast<const fp_prec_c_type*>(savedMean)[xgid];
         livar[xlid] = reinterpret_cast<const fp_prec_c_type*>(savedInvVariance)[xgid];
 #endif
-#if(HIP_PLUGIN_NRN_OP_ID > 0)
+#if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
         lcl_scale[xlid] = reinterpret_cast<const fp_prec_c_type*>(bnScale)[xgid];
         lcl_bias[xlid] = reinterpret_cast<const fp_prec_c_type*>(bnBias)[xgid];
 #endif
@@ -1181,7 +1181,7 @@ extern "C" __global__ void
     {
         mean = lmean[xlid];
         invVar = livar[xlid];
-#if(HIP_PLUGIN_NRN_OP_ID > 0)
+#if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
         pscale = lcl_scale[xlid];
         pbias = lcl_bias[xlid];
 #endif
@@ -1388,7 +1388,7 @@ extern "C" __global__ void
     __shared__ fp_prec_c_type ldbias[hip_plugin_bn_config::launch_dim.grp0];
     __shared__ fp_prec_c_type lmean[hip_plugin_bn_config::launch_dim.grp0];
     __shared__ fp_prec_c_type livar[hip_plugin_bn_config::launch_dim.grp0];
-#if(HIP_PLUGIN_NRN_OP_ID > 0)
+#if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
     __shared__ fp_prec_c_type lbias[hip_plugin_bn_config::launch_dim.grp0];
 #endif
 
@@ -1428,7 +1428,7 @@ extern "C" __global__ void
         livar[xlid] = reinterpret_cast<const fp_prec_c_type*>(savedInvVariance)[xgid];
 #endif
         lscale[xlid] = reinterpret_cast<const fp_prec_c_type*>(bnScale)[xgid];
-#if(HIP_PLUGIN_NRN_OP_ID > 0)
+#if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
         lbias[xlid] = reinterpret_cast<const fp_prec_c_type*>(bnBias)[xgid];
 #endif
         ldscale[xlid] = reinterpret_cast<const fp_prec_c_type*>(delta_scale)[xgid];
@@ -1443,7 +1443,7 @@ extern "C" __global__ void
         mean = lmean[xlid];
         invVar = livar[xlid];
         pscale = lscale[xlid];
-#if(HIP_PLUGIN_NRN_OP_ID > 0)
+#if(HIP_PLUGIN_BN_NRN_OP_ID > 0)
         pbias = lbias[xlid];
 #endif
         dscale = ldscale[xlid];
