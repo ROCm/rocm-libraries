@@ -48,6 +48,7 @@ template <bool kPadM_,
           int VectorSize_                           = 16,
           DataCachePrefetchKind DataCachePrefetchA_ = DataCachePrefetchKind::None,
           DataCachePrefetchKind DataCachePrefetchB_ = DataCachePrefetchKind::None,
+          bool Async_                               = false,
           bool LargeTensors_                        = false>
 struct TileGemmUniversalTraits
 {
@@ -69,6 +70,7 @@ struct TileGemmUniversalTraits
     static constexpr bool Preshuffle                          = Preshuffle_;
     static constexpr DataCachePrefetchKind DataCachePrefetchA = DataCachePrefetchA_;
     static constexpr DataCachePrefetchKind DataCachePrefetchB = DataCachePrefetchB_;
+    static constexpr bool Async                               = Async_;
 };
 
 template <bool kPadM_,
