@@ -809,7 +809,7 @@ namespace TensileLite
                 // ---- Decide active mode FIRST, so we only do the work that
                 // matches the mode being packed (and only push 6 args). ----
                 int sk5DebugMode = Debug::Instance().streamK5ForceMode();
-                bool effectiveDyn = sk.dynPersistentTile;
+                bool effectiveDyn = (sk.dynPersistentTileMode != 0);
                 if(sk5DebugMode == 0)
                     effectiveDyn = false;
                 else if(sk5DebugMode == 1)
@@ -2998,11 +2998,13 @@ namespace TensileLite
                 sk.reduction = origami::reduction_t::tree;
             else
                 sk.reduction = getSKReduction(problem, hardware);
-            // Propagate the StreamK=5 hybrid-mode bit from the problem
-            // (set by the host from the HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT
-            // matmul-descriptor attribute) into the StreamKSettings used
-            // by the kernel-arg packing path below.
-            sk.dynPersistentTile = problem.getParams().dynPersistentTile();
+            // Propagate the StreamK=5 hybrid-mode (tri-state) from the
+            // problem — set by the host from the
+            // HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT matmul-descriptor
+            // attribute — into the StreamKSettings used by the kernel-arg
+            // packing path below.
+            sk.dynPersistentTileMode = problem.getParams().dynPersistentTileMode();
+            sk.smCountTarget         = problem.getParams().smCountTarget();
             sk.grid = getSKGrid(problem, hardware, tiles, sk.reduction);
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
             if(sk.grid > 0

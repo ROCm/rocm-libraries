@@ -2413,12 +2413,13 @@ rocblaslt_status
             __func__,
             "will be deprecated for groupedgemm in the future, please use get_all_algos instead");
     }
-    // The GemmPreference-supplied dyn-persistent-tile mode is threaded
-    // into the contraction problem in tensile_host.cpp's
-    // applyDynPersistentTileMode (added alongside the host-plumbing
-    // changes); consume the parameter here so this commit builds
-    // without unused-parameter warnings.
-    (void)dynPersistentTileMode;
+    // Apply the GemmPreference-supplied dyn-persistent-tile mode onto
+    // every contraction problem currently carried by gemmData so the
+    // SK5 arg-pack and the heuristic-selection paths see the same
+    // mode value. applyDynPersistentTileMode is defined in
+    // tensile_host.cpp (its body needs the TensileDataGemm /
+    // TensileDataGroupedGemm types).
+    applyDynPersistentTileMode(gemmData, gemmType, dynPersistentTileMode);
     rocblaslt_status status = rocblaslt_status_success;
     try
     {

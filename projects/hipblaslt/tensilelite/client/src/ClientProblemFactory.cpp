@@ -484,13 +484,14 @@ namespace TensileLite
                             {
                                 rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensor);
                             }
-                            // StreamK=5 hybrid-mode toggle. See
-                            // ContractionSolution::solve, which OR's bit 31
-                            // into MagicShiftItersPerTile based on this.
+                            // StreamK=5 hybrid-mode toggle (tri-state).
+                            // See ContractionSolution::solve, which either
+                            // takes the requested OFF/ON, or routes AUTO
+                            // through origami::streamk::select_hybrid_mode.
                             if(m < (int)m_streamKHybridMode.size())
                             {
-                                rv.back().setParams().setDynPersistentTile(
-                                    m_streamKHybridMode[m] != 0);
+                                rv.back().setParams().setDynPersistentTileMode(
+                                    m_streamKHybridMode[m]);
                             }
                         }
                     }
