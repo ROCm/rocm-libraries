@@ -485,7 +485,7 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& p
     case miopenConvolutionAlgoGEMM:
 #if MIOPEN_USE_GEMM
         return env::disabled(MIOPEN_DEBUG_CONV_GEMM);
-else
+#else
         return true;
 #endif
     case miopenConvolutionAlgoDirect:
