@@ -58,6 +58,12 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    ```
    On Linux this echoes only provided overrides. On Windows it detects or provisions the wheel-based ROCm install and prints `KEY=VALUE` lines for subsequent commands.
 
+   To **provision or refresh** the wheel-based ROCm install (instead of only detecting an existing one), use the cross-platform `wheel_setup.py`. This is the Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`, so the same wheel-pull workflow runs on Windows or Linux:
+   ```bash
+   python3 <scripts>/wheel_setup.py [--venv-path <path>] [--gpu-targets <arch>] [--sha <commit>] [--pull]
+   ```
+   It creates or reuses a venv, installs ROCm wheels from nightlies (or S3 staging when `--sha` is given), runs `rocm-sdk init`, and prints `ROCM_PATH=`, `ROCM_BIN=`, `GPU_TARGETS=`, and (when applicable) `CLANG_PATH=`. An existing venv is reused untouched unless `--pull` is passed, which deletes and reinstalls it with fresh wheels. Feed the emitted `ROCM_PATH`/`CLANG_PATH`/`GPU_TARGETS` into the configure step and the emitted `ROCM_BIN` into the comgr staging step below.
+
 5. If a clean rebuild was requested, remove the selected build directory using the active host's normal approval/safety flow.
 
 6. Configure from the repository root. Always bind the preset configure to the selected build directory so configure and build operate on the same tree:
@@ -74,6 +80,12 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
 
 8. If the build fails with a stale CMake cache error such as `does not match the source`, clean the selected build directory once, reconfigure with the same `-B <build-dir>` command, and retry once. Do not loop.
 
+9. On Windows, stage the wheel's `amd_comgr.dll` app-local into `<build-dir>/bin` after a successful build:
+   ```bash
+   python3 <scripts>/comgr_stage.py --rocm-bin <rocm-bin> --build-dir <build-dir> --verbose
+   ```
+   The AMD driver leaves an old `amd_comgr.dll` in `C:\Windows\System32` that outranks the wheel's copy on PATH, so MIOpen otherwise loads stale comgr and fails to JIT-build GCN-assembly (Winograd) kernels at runtime. The Win32 loader checks the executable's own directory before System32, so an app-local copy in `<build-dir>/bin` wins; PATH manipulation alone cannot. The helper compares the wheel comgr's PE version against any already-staged copy and **skips the copy when the versions match** (content-hash fallback when version metadata is absent), so it is cheap to re-run. This step is a no-op on Linux. The test runner stages comgr on its own as well, so this build step is belt-and-suspenders that makes the app-local copy present immediately after build.
+
 ## Report
 
 Summarize:
@@ -86,6 +98,8 @@ Summarize:
 
 ## Notes
 
-- `scripts/windows_rocm_setup.py` is bundled in this skill so linked and copied installs work independently.
+- `scripts/windows_rocm_setup.py`, `scripts/wheel_setup.py`, and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently.
+- `wheel_setup.py` is the cross-platform replacement for the external `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; prefer it so the wheel-pull workflow is the same on Windows and Linux.
+- `comgr_stage.py` only does work on Windows. It also emits a diagnostic when `C:\Windows\System32\amd_comgr.dll` is present, explaining that it shadows PATH and is the reason for the app-local copy.
 - Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.
 - Product test execution is intentionally out of scope for this skill.
