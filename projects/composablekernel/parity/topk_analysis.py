@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Task #19 (bridge side) — top-K fastest kernels per problem from a sweep CSV.
 
 Reads the bridge sweep results and, for each problem shape, ranks kernels by
