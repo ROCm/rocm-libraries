@@ -1037,6 +1037,7 @@ void FusedProblem::AddProblemToPlan(FusionPlanDescriptor& plan, const Problem& p
                     plan.AddOp(
                         std::make_shared<BatchNormBwdTrainFusionOpDescriptor>(descriptor.mode));
                     break;
+#ifdef MIOPEN_BETA_API
                 case miopenProblemDirectionInference: {
                     auto smv = problem.GetTensorDescriptorChecked(
                         miopenTensorBatchnormEstimatedMean, "miopenTensorBatchnormEstimatedMean");
@@ -1044,6 +1045,7 @@ void FusedProblem::AddProblemToPlan(FusionPlanDescriptor& plan, const Problem& p
                         descriptor.mode, smv));
                     break;
                 }
+#endif
                 default:
                     MIOPEN_THROW(miopenStatusBadParm,
                                  "Batchnorm only has forward, backward and inference directions");
@@ -1164,6 +1166,7 @@ fusion::FusionInvokeParams FusedProblem::MakeInvokeParams(
                                 buffers.at(miopenTensorBatchnormSavedMean),
                                 buffers.at(miopenTensorBatchnormSavedVariance)));
                         break;
+#ifdef MIOPEN_BETA_API
                     case miopenProblemDirectionInference: {
                         operator_args.params.emplace_back(
                             std::make_unique<miopen::fusion::BatchNormInferenceOpInvokeParam>(
@@ -1174,6 +1177,7 @@ fusion::FusionInvokeParams FusedProblem::MakeInvokeParams(
                                 get_scalar(miopenScalarBatchnormEpsilon, double{})));
                         break;
                     }
+#endif
                     default:
                         MIOPEN_THROW(
                             miopenStatusBadParm,
