@@ -17,6 +17,12 @@ option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Sanitizers.cmake)
 
+option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+if(NOT ENABLE_CLANG_TIDY)
+    message(WARNING "Clang-Tidy is disabled - some build issues may be missed.")
+endif()
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangTidy.cmake)
+
 set(HIPDNN_SAMPLE_NO_RTTI_OPTIONS
     $<$<CXX_COMPILER_ID:MSVC>:/GR->
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-rtti>
@@ -56,6 +62,7 @@ macro(add_hipdnn_sample NAME SOURCE)
     set_target_properties(
         ${NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
     )
+    clang_tidy_check(${NAME})
     list(APPEND HIPDNN_ALL_SAMPLES ${NAME})
 endmacro()
 
@@ -163,28 +170,17 @@ install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_
 find_package(hiprtc REQUIRED)
 include(ExternalProject)
 
-find_program(CLANG_TIDY_EXE NAMES clang-tidy-20 clang-tidy)
 set(EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS "")
 set(EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS "")
-if(CLANG_TIDY_EXE)
-    execute_process(
-        COMMAND "${CLANG_TIDY_EXE}" --version
-        OUTPUT_VARIABLE CLANG_TIDY_VERSION_OUTPUT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
+message(VERBOSE "ENABLE_CLANG_TIDY=${ENABLE_CLANG_TIDY} CLANG_TIDY_EXE=${CLANG_TIDY_EXE}")
+if(ENABLE_CLANG_TIDY AND CLANG_TIDY_EXE)
+    list(APPEND EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS
+        "-DCMAKE_CXX_CLANG_TIDY:STRING=${CLANG_TIDY_EXE}"
     )
-    if(CLANG_TIDY_VERSION_OUTPUT MATCHES "version 20\\.")
-        list(APPEND EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS
-            "-DCMAKE_CXX_CLANG_TIDY:STRING=${CLANG_TIDY_EXE}"
-        )
-    else()
-        message(STATUS "clang-tidy found at ${CLANG_TIDY_EXE} but is not version 20; disabling clang-tidy for example_engine_plugin build")
-        list(APPEND EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS
-            "-UCMAKE_CXX_CLANG_TIDY"
-        )
-    endif()
 else()
     list(APPEND EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS
         "-UCMAKE_CXX_CLANG_TIDY"
+        "-UCLANG_TIDY_EXE"
     )
 endif()
 
@@ -228,8 +224,10 @@ endif()
 ExternalProject_Add(example_engine_plugin
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/example_engine_plugin
     BUILD_ALWAYS TRUE
+    USES_TERMINAL_CONFIGURE TRUE
     USES_TERMINAL_BUILD TRUE
     CMAKE_CACHE_ARGS
+        "-DCMAKE_MESSAGE_LOG_LEVEL:STRING=${CMAKE_MESSAGE_LOG_LEVEL}"
         "-DCMAKE_PREFIX_PATH:STRING=${_example_plugin_prefix_path}"
         "-DCMAKE_CXX_COMPILER:FILEPATH=${CMAKE_CXX_COMPILER}"
         "-DCMAKE_C_COMPILER:FILEPATH=${CMAKE_C_COMPILER}"
@@ -243,6 +241,7 @@ ExternalProject_Add(example_engine_plugin
         "-Dflatbuffers_DIR:PATH=${flatbuffers_DIR}"
         "-Dnlohmann_json_DIR:PATH=${nlohmann_json_DIR}"
         "-DBUILD_ADDRESS_SANITIZER:BOOL=${BUILD_ADDRESS_SANITIZER}"
+        "-DEXAMPLEPROVIDER_ENABLE_CLANG_TIDY:BOOL=${EXAMPLEPROVIDER_ENABLE_CLANG_TIDY}"
         ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS}
     CMAKE_ARGS
         ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS}
