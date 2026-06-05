@@ -1,5 +1,0 @@
-outs:
-- md5: 543085c641f4cab69341c870c5ed1b50
-  size: 8
-  hash: md5
-  path: MIOpen.tensor3.bin

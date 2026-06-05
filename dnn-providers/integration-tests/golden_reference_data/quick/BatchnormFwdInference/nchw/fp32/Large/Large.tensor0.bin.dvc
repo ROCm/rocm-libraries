@@ -1,5 +1,0 @@
-outs:
-- md5: 9c7f4f5f9adc0e173e1a73a67a93f647
-  size: 120000
-  hash: md5
-  path: Large.tensor0.bin
