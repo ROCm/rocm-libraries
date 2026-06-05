@@ -173,12 +173,14 @@
 #endif
 
 // buffer atomic add: floating point
+#ifndef CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT
 #ifndef __HIP_DEVICE_COMPILE__ // for host code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
 #elif defined(__gfx9__) || defined(__gfx12__) // for GPU code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
 #else // for GPU code
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 0
+#endif
 #endif
 
 #if(defined(__gfx90a__) || defined(__gfx94__)) // for GPU code
@@ -348,6 +350,12 @@
 // Will enforce encoding to check Y not pointed to R if set to zero
 #ifndef CK_TILE_ENC_SUPPORT_Y_TO_R
 #define CK_TILE_ENC_SUPPORT_Y_TO_R 0
+#endif
+
+#if defined(_MSC_VER)
+#define CK_TILE_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#else
+#define CK_TILE_NO_UNIQUE_ADDRESS [[no_unique_address]]
 #endif
 
 // Mark unsupported features with a deprecation warning in debug builds

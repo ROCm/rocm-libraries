@@ -30,11 +30,11 @@ class TensorDataMoverLoad(TensorDataMover):
         tc: str = tp["tensorChar"]
         tlu: int = tp["tlu"]
         tIdx: int = 0 if tp["isA"] else 1
-        if kernel["ProblemType"]["Sparse"]:
-            sparse = kernel["ProblemType"]["Sparse"]
-            isWorkGroup0 = (sparse == 1 and (tp["isM"] or tp["isA"])) or \
-                           (sparse == 2 and tp["isB"])
-            tIdx = 0 if isWorkGroup0 else 1
+        if kernel["ProblemType"]["Sparse"] and tp["isM"]:
+            # Metadata follows the sparse tensor's free dimension, but A/B data tensors
+            # keep their normal A->WG0 and B->WG1 mapping. Remapping data tensors here
+            # would request nonexistent strides such as StrideA1J or StrideB0I.
+            tIdx = 0 if kernel["ProblemType"]["Sparse"] == 1 else 1
         bpe: float = tp["bpeGR"] if not tp["isM"] else 0.25
         assert bpe > 0, "bpe must > 0"
         tileStride: str | RegisterContainer = writer.strideRef(tc, tIdx)
