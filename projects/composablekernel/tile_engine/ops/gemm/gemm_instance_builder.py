@@ -142,6 +142,24 @@ class GemmKernelBuilder:
         Returns a list of dicts with keys: name, tile_config, trait_combo.
         Both _list_kernels and _generate_all_individual should use this
         to guarantee identical enumeration and sampling."""
+        tile_configs = self._get_tile_configs()
+        trait_combos = self._generate_trait_combinations()
+
+        kernel_list = []
+        for tile_config in tile_configs:
+            for trait_combo in trait_combos:
+                kernel_name = self._format_kernel_name(trait_combo, tile_config)
+
+                kernel_list.append(
+                    {
+                        "name": kernel_name,
+                        "tile_config": tile_config,
+                        "trait_combo": trait_combo,
+                    }
+                )
+
+        return self._apply_sampling(kernel_list)
+
     def _uses_persistent_trait(self):
         return self.kernel_name_prefix != "batched_gemm"
 
@@ -197,27 +215,6 @@ class GemmKernelBuilder:
             kernel_name += f"_{self._format_tile_config_string(tile_config)}"
 
         return kernel_name
-
-    def _list_kernels(self):
-        """Write kernel list to file for CMake to read (with comprehensive validation)"""
-        # Get configurations using comprehensive validation
-        tile_configs = self._get_tile_configs()
-        trait_combos = self._generate_trait_combinations()
-
-        kernel_list = []
-        for tile_config in tile_configs:
-            for trait_combo in trait_combos:
-                kernel_name = self._format_kernel_name(trait_combo, tile_config)
-
-                kernel_list.append(
-                    {
-                        "name": kernel_name,
-                        "tile_config": tile_config,
-                        "trait_combo": trait_combo,
-                    }
-                )
-
-        return self._apply_sampling(kernel_list)
 
     def _list_kernels(self):
         """Write kernel list to file for CMake to read (with comprehensive validation)"""
@@ -420,10 +417,10 @@ class GemmKernelBuilder:
         pad_m_values = trait_config.get("pad_m").get("values")
         pad_n_values = trait_config.get("pad_n").get("values")
         pad_k_values = trait_config.get("pad_k").get("values")
-        if self.kernel_name_prefix == "gemm_rowcolquant":
+        if self.kernel_name_prefix in ["gemm_rowcolquant", "batched_gemm"]:
             persistent_values = [
                 False
-            ]  # Force disable persistent for gemm_rowcolquant due to shared memory constraints
+            ]  # Force disable persistent where it is unsupported or not part of the trait key
         else:
             persistent_values = trait_config.get("persistent").get("values")
 
@@ -437,6 +434,7 @@ class GemmKernelBuilder:
                 pad_k_values,
                 persistent_values,
             )
+        )
 
         # Filter out unsupported trait combinations
         combinations = []
