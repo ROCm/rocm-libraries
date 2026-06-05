@@ -1,0 +1,159 @@
+{
+    "name": "aotriton_test_varlen_padded_Fp16_H3_N17_DQK24_DV152_CausalOff",
+    "_comment": "Extracted from ROCm/aotriton@59441e8a559425ddfe51fbc8e0acfd1d9beebbac test/test_varlen.py padded-varlen coverage; source parameter family: N_HEADS=3, D_HEAD=(24, 152), n_seqlen=17, causal=False, dropout_p=0.0, dtype=torch.float16, sm_scale='l1', varlen_type='padded'. Representative lengths from the AOTriton SEQLEN_Q/SEQLEN_K domains: seqlens_q=[143, 4, 64, 8, 128, 63, 143, 4, 64, 8, 128, 63, 143, 4, 64, 8, 128], seqlens_k=[63, 128, 4, 143, 8, 64, 63, 128, 4, 143, 8, 64, 63, 128, 4, 143, 8]. This graph serializes padded max-shape tensors and seq_len_q/seq_len_kv descriptors; concrete sequence length contents are runtime input data, not JSON metadata.",
+    "compute_data_type": "float",
+    "io_data_type": "half",
+    "intermediate_data_type": "half",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "query",
+            "dims": [
+                17,
+                3,
+                143,
+                24
+            ],
+            "strides": [
+                10296,
+                3432,
+                24,
+                1
+            ],
+            "data_type": "half",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "key",
+            "dims": [
+                17,
+                3,
+                143,
+                24
+            ],
+            "strides": [
+                10296,
+                3432,
+                24,
+                1
+            ],
+            "data_type": "half",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "value",
+            "dims": [
+                17,
+                3,
+                143,
+                152
+            ],
+            "strides": [
+                65208,
+                21736,
+                152,
+                1
+            ],
+            "data_type": "half",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "output",
+            "dims": [
+                17,
+                3,
+                143,
+                152
+            ],
+            "strides": [
+                65208,
+                21736,
+                152,
+                1
+            ],
+            "data_type": "half",
+            "virtual": false
+        },
+        {
+            "uid": 7,
+            "name": "seq_len_q",
+            "dims": [
+                17
+            ],
+            "strides": [
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 8,
+            "name": "seq_len_kv",
+            "dims": [
+                17
+            ],
+            "strides": [
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "sdpa_node",
+            "type": "SdpaAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "q_tensor_uid": 1,
+                "k_tensor_uid": 2,
+                "v_tensor_uid": 3,
+                "attn_mask_tensor_uid": null,
+                "scale_tensor_uid": null,
+                "seq_len_q_tensor_uid": 7,
+                "seq_len_kv_tensor_uid": 8,
+                "seed_tensor_uid": null,
+                "offset_tensor_uid": null,
+                "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null,
+                "page_table_k_tensor_uid": null,
+                "page_table_v_tensor_uid": null,
+                "block_mask_tensor_uid": null,
+                "sink_token_tensor_uid": null,
+                "descale_q_tensor_uid": null,
+                "descale_k_tensor_uid": null,
+                "descale_v_tensor_uid": null,
+                "descale_s_tensor_uid": null,
+                "scale_s_tensor_uid": null,
+                "scale_o_tensor_uid": null
+            },
+            "outputs": {
+                "o_tensor_uid": 4,
+                "stats_tensor_uid": null,
+                "max_tensor_uid": null,
+                "sum_exp_tensor_uid": null,
+                "rng_dump_tensor_uid": null,
+                "amax_s_tensor_uid": null,
+                "amax_o_tensor_uid": null
+            },
+            "attributes": {
+                "generate_stats": null,
+                "alibi_mask": false,
+                "padding_mask": false,
+                "causal_mask": false,
+                "causal_mask_bottom_right": false,
+                "dropout_probability": null,
+                "attn_scale_value": 0.041666666666666664,
+                "left_bound": null,
+                "right_bound": null,
+                "max_seq_len_kv": 143,
+                "diagonal_alignment": "TOP_LEFT",
+                "mma_core_mode": "UNSET",
+                "implementation": "AUTO"
+            }
+        }
+    ]
+}
