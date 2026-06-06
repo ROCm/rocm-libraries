@@ -1,0 +1,66 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P2-WIDEN designed seed config for gfx90a — DB (FP64/Double) family.
+#
+# The dominant gfx90a seed is a BF16 (BBS) single-ProblemType config; the config
+# harness only reads BenchmarkProblems[0], so the DataType=Double codegen surface
+# (the [4,4,4] FP64 MFMA, ShiftVectorComponents / edge-store handling, 660
+# marginal whole-project lines per attribution-gfx90a.json::gfx90a__DB_yaml) is
+# unreachable from it.
+#
+# Derived from the shipped gfx90a FP64 config
+# Tensile/Tests/common/gemm/f64_gfx90a.yaml (DataType=d, NT, [4,4,4,4] FP64
+# MFMA), reduced to a single VALID fork permutation so the harness emits cleanly
+# regardless of permutation ordering. The parent config's wider ForkParameters
+# sweep (DepthU 8/16, VectorWidth 1/2, GSU 1/2, SourceSwap 0/1) rejects most
+# permutations on this arch (DepthU=8 -> "No valid DepthU"; VectorWidth=2 ->
+# "MIWaveTile0 should be multiple of VectorWidth"); we pin the combination that
+# survives: DepthU=16, VectorWidthA/B=1, GSU=1.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  Device: 0
+  KernelTime: True
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 1
+  DataInitTypeB: 1
+
+BenchmarkProblems:
+  ########################################
+  # DB (Double/FP64, NT) — gfx90a__DB_yaml attribution entry
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Activation: False
+      B2BGemm: False
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - DepthU: [16]
+        - ScheduleIterAlg: [3]
+        - MatrixInstruction:
+          - [4, 4, 4, 4, 1, 1, 1, 1, 1]
+        - AssertFree0ElementMultiple: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - SourceSwap: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 1024]

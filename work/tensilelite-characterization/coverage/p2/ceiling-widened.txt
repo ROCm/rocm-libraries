@@ -1,0 +1,126 @@
+P2-WIDEN CEILING RECEIPT — widened minimal seed set (multi-ProblemType, option b)
+================================================================================
+Date: 2026-06-06
+Branch: users/davidd-amd/tensillite-coverage
+Seed set: gfx942 (6) + gfx950 (6) + gfx90a (3) = 15 per-seed coverage shards,
+          each a distinct ProblemType/DataType family above the marginal>=5 cutoff.
+
+WIDENED COMBINED WHOLE-PROJECT CEILING
+--------------------------------------
+Command (in-container; PROJ=/work/projects/hipblaslt/tensilelite, CON=tl-char):
+  docker exec -w $PROJ $CON rm -f $PROJ/.coverage.seed
+  docker exec -e COVERAGE_FILE=$PROJ/.coverage.seed -w $PROJ $CON \
+    coverage combine --keep \
+      $PROJ/.coverage.seedw_gfx942_dominant $PROJ/.coverage.seedw_gfx942_F8N \
+      $PROJ/.coverage.seedw_gfx942_GG $PROJ/.coverage.seedw_gfx942_Grad \
+      $PROJ/.coverage.seedw_gfx942_DB $PROJ/.coverage.seedw_gfx942_HSS \
+      $PROJ/.coverage.seedw_gfx950_dominant $PROJ/.coverage.seedw_gfx950_BBS \
+      $PROJ/.coverage.seedw_gfx950_HHS $PROJ/.coverage.seedw_gfx950_I8_GSU \
+      $PROJ/.coverage.seedw_gfx950_HSS $PROJ/.coverage.seedw_gfx950_DTL \
+      $PROJ/.coverage.seedw_gfx90a_dominant $PROJ/.coverage.seedw_gfx90a_DB \
+      $PROJ/.coverage.seedw_gfx90a_HHS
+  docker exec -e COVERAGE_FILE=$PROJ/.coverage.seed -w $PROJ $CON coverage report | grep '^TOTAL'
+
+Combined 15 files.
+
+TOTAL (whole project, coverage report):
+  Stmts=54491  Miss=33335  Branch=22648  BrPart=2702  Cover=35.89%
+  => covered statements = 21156 / 54491  =  35.89%
+
+WIDENED CEILING = 35.89% whole-project line coverage (21156 / 54491 covered statements).
+This is the union of all 15 multi-ProblemType seed shards (err==0 only) — the maximum
+the widened seed set reaches.
+
+NOTE on provenance: 6 of the 15 named per-seed shards listed in P2 MEASUREMENTS were
+missing or 0-byte on disk at assemble time (gfx90a_dominant was 0-byte; gfx942_Grad,
+gfx950_dominant, gfx950_BBS, gfx950_I8_GSU, gfx950_DTL were absent). Their test files
+(_codegen/test_seed_*_char.py) and the configs/designed seeds they drive were all present
+and validated, so the missing shards were regenerated here by re-running each test in a
+fresh per-process docker exec with its own COVERAGE_FILE (limit<=8, --cov=Tensile path).
+All 15 tests passed err==0; the combine above uses the real on-disk shards.
+
+UNION ARITHMETIC vs PRIOR SINGLE-PROBLEM CEILING
+------------------------------------------------
+  Prior (single-problem, 3 dominant seeds):  30.53%  = 18383 / 54491 covered stmts
+  Widened (15 multi-ProblemType shards):      35.89%  = 21156 / 54491 covered stmts
+  DELTA:                                      +5.36 points  (+2773 covered statements)
+
+The single dominant seed per arch reads only BenchmarkProblems[0] (one ProblemType/
+DataType), so it cannot reach the F8/GroupedGemm/Gradient/FP64/int8/half/DirectToLds
+emitter families. Adding one seed per distinct family above the marginal>=5 cutoff lifts
+the real reachable ceiling from 30.53% to 35.89%.
+
+PER-SEED TABLE (arch, family, channel, covered_lines, marginal_attr)
+--------------------------------------------------------------------
+  arch     family     channel   covered_lines   marginal_attr
+  -------  ---------  --------  --------------  --------------
+  gfx942   dominant   config            17120           19219
+  gfx942   F8N        config            17218            1133
+  gfx942   GG         config            17980             448
+  gfx942   Grad       config            16843             241
+  gfx942   DB         config            15474              53
+  gfx942   HSS        config            16199              32
+  gfx950   dominant   config            16568           19547
+  gfx950   BBS        config            17451            1277
+  gfx950   HHS        config            17416             276
+  gfx950   I8_GSU     config            15751             192
+  gfx950   HSS        config            16771             146
+  gfx950   DTL        config            15001              74
+  gfx90a   dominant   config            16569           17875
+  gfx90a   DB         config            15576             660
+  gfx90a   HHS        config            17099              15
+
+  (covered_lines = per-shard whole-project covered statements at measure time;
+   marginal_attr = whole-project lines that family uniquely adds over the dominant
+   seed, from the P1 per-input attribution used to design the seed set.)
+
+PER-ARCH FAMILIES KEPT vs EXCLUDED
+==================================
+
+------ gfx942 : 6 kept / 6 excluded ------
+KEPT: dominant (BBS bf16), F8N (fp8), GG (GroupedGemm), Grad (gradient),
+      DB (fp64), HSS (fp16-in/fp32-out).
+EXCLUDED:
+  DTV     — DirectToVgpr (+388) is not a distinct ProblemType/DataType; already covered
+            by the dominant seed's DirectToVgprA:[False,True] fork. Redundant.
+  LSU_MX  — LocalSplitU/MXFP (+366) needs MXFP datatype (F4, MXScaleFormat); the only
+            configs (gemm/gfx950/*mxfp*.yaml) are skip-gfx942 / 'Only for gfx950'.
+            Not arch-compatible with gfx942.
+  MX      — MXFP (+3) same gfx950-only MXFP datatype; no gfx942 config and below the >=5 cutoff.
+  HHS_GG  — fp16 GroupedGemm (+14): same GroupedGemm flag + h-in/h-out ProblemType already
+            reached by the GG seed (grouped_gemm.yaml is fp16 GroupedGemm). Redundant family.
+  SB      — Bias/Aux/ScaleAlphaVec (+3) below the >=5 cutoff; those surfaces already
+            exercised by the F8N seed (fp8n.yaml uses ScaleAB/CD/AlphaVec/Bias).
+  GSU     — GlobalSplitU (+0) marginal_lines=0; GSU=1 already pinned in the dominant fork.
+
+------ gfx950 : 6 kept / 3 excluded ------
+KEPT: dominant (F8/StreamK), BBS (bf16), HHS (half), I8_GSU (int8+GSU),
+      HSS (half-in mixed), DTL (DirectToLds).
+EXCLUDED:
+  MX             — marginal 515 but no shipped mxfp config emits through the CPU config
+                   harness: mx32f4_tn.yaml, mx32f8_tn.yaml, subtile_mxfp4.yaml each fork 8
+                   solutions yet generateKernelObjectsFromSolutions yields 0 kernels
+                   (MXBlock/MXScaleSwizzle path not exercised by this emit harness).
+                   Excluded rather than ship a broken/empty seed.
+  StreamK_F8F8S  — marginal 71 but same F8 DataType already covered by the dominant
+                   F8/StreamK seed; redundant ProblemType/DataType.
+  SB             — marginal 23, SourceBranch/edge is a codegen-path variation, not a
+                   distinct ProblemType/DataType; reachable via existing seeds' edge cases.
+
+------ gfx90a : 3 kept / 2 excluded ------
+KEPT: dominant (BBS bf16), DB (fp64), HHS (half).
+EXCLUDED:
+  HSS — marginal 28 (Half->Single). No common config has this ProblemType at
+        BenchmarkProblems[0] (harness reads only index 0); it appears only as a secondary
+        problem. The half-input MFMA path is already exercised by the HHS seed; the only
+        distinction is the DestDataType=Single conversion variant. Excluded to keep the
+        seed set minimal (one seed per distinct ProblemType/DataType).
+  SB  — marginal 9 (Single->BF16 conversion). No common config has DataType=s /
+        DestDataType=b at BenchmarkProblems[0]; small DestDataType-conversion delta on the
+        FP32 store path; the dominant BBS seed already drives the BF16 PackData surface.
+        Below the practical add-value cutoff.
+
+KEPT/EXCLUDED SUMMARY: 15 kept (6 gfx942 + 6 gfx950 + 3 gfx90a) /
+                       11 excluded (6 gfx942 + 3 gfx950 + 2 gfx90a).
+
+KEPT ARTIFACT: .coverage.seed (widened union) — P3 reuses this as the ceiling baseline.
