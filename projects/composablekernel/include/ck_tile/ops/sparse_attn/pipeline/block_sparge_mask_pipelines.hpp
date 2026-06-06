@@ -8,6 +8,7 @@
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 #include "ck_tile/ops/common/generic_2d_block_shape.hpp"
 #include "ck_tile/ops/topk.hpp"
+#include "ck_tile/ops/sageattention/block/block_sageattention_quant_scale_enum.hpp"
 
 #include <cassert>
 
@@ -150,10 +151,31 @@ block_scan_inclusive_sum_smem(float* buf, float* aux, index_t tid)
 // CPU reference (compute_block_means / Gram compute_block_similarity) bit-for-bit. kBlockSize_
 // comes from the attention pipeline's Problem. sparge only supports hdim == block_size == 128
 // (compile-time tile extents kHdim/kBlock, runtime-asserted).
-template <typename InputType_, index_t kBlockSize_ = 256>
+// quant divisor: int8 uses 127, fp8 uses fp8_t max (SageAttention fp8bf16 Q/K path).
+// Use a literal for fp8 -- numeric<fp8_t>::max() routes through bit_cast<fp8_t>, which is not a
+// constant expression here (and would make this a __host__ value, illegal in device code).
+// OCP E4M3 (CK_TILE_USE_OCP_FP8) max = 448.
+template <typename QuantType>
+CK_TILE_HOST_DEVICE constexpr float sparge_quant_absmax_divisor()
+{
+    if constexpr(std::is_same_v<QuantType, fp8_t>)
+        return 448.0f;
+    else
+        return 127.0f;
+}
+
+template <typename InputType_,
+          index_t kBlockSize_                            = 256,
+          BlockSageAttentionQuantScaleEnum QScale        = BlockSageAttentionQuantScaleEnum::NO_SCALE,
+          typename QuantType_                            = int8_t>
 struct BlockSpargePreprocessPipeline
 {
     using InputType = remove_cvref_t<InputType_>;
+    using QuantType = remove_cvref_t<QuantType_>;
+    static constexpr float kQuantDivisor = sparge_quant_absmax_divisor<QuantType>();
+
+    static constexpr bool kDoQuant =
+        (QScale != BlockSageAttentionQuantScaleEnum::NO_SCALE);
 
     static constexpr index_t kBlockSize   = kBlockSize_;
     static constexpr index_t kHdim        = 128; // sparge head dim (compile-time tile M)
@@ -222,6 +244,14 @@ struct BlockSpargePreprocessPipeline
         index_t stride_seq;     // tokens stride in elements; hdim for BHSD, H*hdim for BSHD
         float simthreshold;
         const float* km_ptr;    // [hdim] K-mean; nullptr disables (Q always nullptr)
+
+        // Quantization (QScale != NO_SCALE). Per-warp row-wise INT8 quant fused into the
+        // [token, hidden] tile pass: scale[token-group] = absmax(group tokens x full hidden)/127,
+        // int8 = round(val / scale). NO_SCALE leaves these unused (zero-overhead path).
+        QuantType* int8_out;       // [block_size, hdim] quant out (token-major, hdim stride 1)
+        float*  scale_out;         // [block_size / tokens_per_scale] scales for this block
+        index_t tokens_per_scale;  // PERWARP: Q=32, K=64 (kBlockScaleSize)
+        index_t int8_stride_seq;   // token stride of int8_out in elements
     };
 
     // LDS: km[hdim] | per-token inv-norm[block_size] | cross-warp reduce scratch.
@@ -234,7 +264,130 @@ struct BlockSpargePreprocessPipeline
             decltype(BlockReduce2d<ReduceProblem>::template MakeYBlockTile<x_block_tile>());
         constexpr index_t reduce_bytes =
             BlockReduce2dCrossWarpSync<ReduceProblem>::template GetSmemSize<y_block_tile>();
-        return static_cast<index_t>((kHdim + kBlock) * sizeof(float)) + reduce_bytes;
+        // Quant reuses km[hdim] | inv_norm[block] slots and additionally needs a per-token
+        // absmax[block] scratch (the sim path is mutually unaffected: quant runs after sim).
+        constexpr index_t quant_bytes =
+            kDoQuant ? static_cast<index_t>(kBlock * sizeof(float)) : 0;
+        return static_cast<index_t>((kHdim + kBlock) * sizeof(float)) + reduce_bytes +
+               quant_bytes;
+    }
+
+    // ---- Per-warp row-wise INT8 quantization (fused sub-pass) ----
+    // Reuses the non-transposed [token (M), hidden (N)] tile orientation (same as sim Pass 1):
+    //   per-token absmax = AbsMax over hidden (N) via BlockReduce2d (raw value, NOT km-centered),
+    //   group token absmax over `tokens_per_scale` consecutive tokens -> scale = absmax/127,
+    //   sweep tile -> int8 = round(val / scale). scale_out holds kBlock/tokens_per_scale scales.
+    // s_absmax is a [kBlock] LDS scratch (one slot per token-within-block).
+    CK_TILE_DEVICE void quantize_block(const InputType* slice,
+                                       const Params&     params,
+                                       index_t           count,
+                                       index_t           s_start,
+                                       float*            s_absmax,
+                                       void*             s_reduce) const
+    {
+        const index_t tid = get_thread_id();
+        const index_t tps = params.tokens_per_scale;
+
+        const auto naive_q = make_naive_tensor_view<address_space_enum::global>(
+            slice,
+            make_tuple(params.seqlen, kHdim),
+            make_tuple(params.stride_seq, 1),
+            number<1>{},
+            number<1>{});
+        const auto padded_q = pad_tensor_view(
+            naive_q,
+            make_tuple(number<kBlock>{}, number<kHdim>{}),
+            sequence<1, 0>{}); // pad token axis (M); hidden axis (N) is exact 128
+
+        auto q_window = make_tile_window(
+            padded_q,
+            make_tuple(number<kBlock>{}, number<kHdim>{}),
+            {s_start, 0},
+            MakeXBlockTileDistribution());
+
+        auto reduce       = BlockReduce2d<ReduceProblem>{};
+        auto reduce_sync  = BlockReduce2dSync<ReduceProblem>{};
+        auto reduce_xwarp = BlockReduce2dCrossWarpSync<ReduceProblem>{};
+        auto absmax_func  = ReduceOp::AbsMax{};
+
+        auto q_tile = load_tile(q_window);
+
+        // per-token absmax over hidden (N); OOB tokens (>= count) reduce to 0, harmless.
+        auto abs_tile = make_static_distributed_tensor<ComputeDataType>(
+            decltype(q_tile)::get_tile_distribution());
+        sweep_tile(q_tile, [&](auto idx) {
+            abs_tile(idx) = type_convert<ComputeDataType>(q_tile[idx]);
+        });
+        auto amax_tile =
+            reduce(abs_tile, absmax_func.GetIdentityValue<ComputeDataType>(), absmax_func);
+        reduce_sync(amax_tile, absmax_func);
+        if constexpr(kNeedCrossWarpSync)
+            reduce_xwarp(amax_tile, s_reduce, absmax_func);
+
+        // stage per-token absmax in LDS (indexed by token-within-block).
+        for(index_t t = tid; t < kBlock; t += kBlockSize)
+            s_absmax[t] = 0.0f;
+        block_sync_lds();
+        sweep_tile_span(decltype(amax_tile)::get_distributed_spans()[number<0>{}], [&](auto idx0) {
+            constexpr auto t_idx = make_tuple(idx0);
+            const auto tile_idx  = get_x_indices_from_distributed_indices(
+                amax_tile.get_tile_distribution(), t_idx);
+            const index_t t = tile_idx.at(number<0>{});
+            if(t < count)
+                s_absmax[t] = amax_tile[t_idx];
+        });
+        block_sync_lds();
+
+        // group absmax over tokens_per_scale consecutive tokens -> scale = absmax/127.
+        const index_t num_scale = kBlock / tps;
+        for(index_t g = tid; g < num_scale; g += kBlockSize)
+        {
+            float a = 0.0f;
+            const index_t g0 = g * tps;
+            for(index_t t = 0; t < tps; ++t)
+                a = max(a, s_absmax[g0 + t]);
+            // store the scale; reuse s_absmax[g] is unsafe (read by sweep), write scale_out.
+            params.scale_out[g] = a / kQuantDivisor;
+        }
+        block_sync_lds();
+
+        // sweep tile -> quant = round(val / scale[token-group]). OOB tokens skipped.
+        const auto int8_view = make_naive_tensor_view<address_space_enum::global>(
+            params.int8_out,
+            make_tuple(params.seqlen, kHdim),
+            make_tuple(params.int8_stride_seq, 1),
+            number<1>{},
+            number<1>{});
+        const auto int8_padded = pad_tensor_view(
+            int8_view,
+            make_tuple(number<kBlock>{}, number<kHdim>{}),
+            sequence<1, 0>{});
+        auto int8_window = make_tile_window(
+            int8_padded,
+            make_tuple(number<kBlock>{}, number<kHdim>{}),
+            {s_start, 0},
+            MakeXBlockTileDistribution());
+
+        auto out_tile = make_static_distributed_tensor<QuantType>(
+            decltype(q_tile)::get_tile_distribution());
+        sweep_tile(q_tile, [&](auto idx) {
+            const auto tile_idx = get_x_indices_from_distributed_indices(
+                q_tile.get_tile_distribution(), idx);
+            const index_t t = tile_idx.at(number<0>{}); // token-within-block (M)
+            QuantType q8    = QuantType{0};
+            if(t < count)
+            {
+                const float sc  = params.scale_out[t / tps];
+                const float v   = type_convert<ComputeDataType>(q_tile[idx]);
+                const float r   = (sc > 0.0f) ? (v / sc) : 0.0f;
+                if constexpr(std::is_same_v<QuantType, fp8_t>)
+                    q8 = type_convert<fp8_t>(r);
+                else
+                    q8 = type_convert<int8_t>(saturates<int8_t>{}(r));
+            }
+            out_tile(idx) = q8;
+        });
+        store_tile(int8_window, out_tile);
     }
 
     CK_TILE_DEVICE void operator()(
@@ -265,6 +418,24 @@ struct BlockSpargePreprocessPipeline
             if(sim_out != nullptr && tid == 0)
                 *sim_out = 1.0f;
             return;
+        }
+
+        // INT8 quant sub-pass (independent of mean/sim; reads raw values). Its absmax
+        // scratch sits past the cross-warp reduce region.
+        if constexpr(kDoQuant)
+        {
+            using x_block_tile =
+                decltype(make_static_distributed_tensor<ComputeDataType>(
+                    MakeXBlockTileDistribution()));
+            using y_block_tile =
+                decltype(BlockReduce2d<ReduceProblem>::template MakeYBlockTile<x_block_tile>());
+            constexpr index_t reduce_floats =
+                BlockReduce2dCrossWarpSync<ReduceProblem>::template GetSmemSize<y_block_tile>() /
+                static_cast<index_t>(sizeof(float));
+            float* s_absmax =
+                reinterpret_cast<float*>(s_reduce) + reduce_floats;
+            quantize_block(slice, params, count, s_start, s_absmax, s_reduce);
+            block_sync_lds();
         }
 
         // km_ptr is WG-uniform; stage it in LDS so the tile sweep can index it by hidden
@@ -436,6 +607,226 @@ struct BlockSpargePreprocessPipeline
             *sim_out = u_norm_sq / (static_cast<float>(count) * static_cast<float>(count));
     }
 
+};
+
+// ----------------------------- PERTENSOR global Q/K quantization -----------------------------
+// SageAttention PERTENSOR quantizes Q (or K) to QuantType (INT8 or FP8) with a single
+// per-(batch,head) global scale:
+//   scale = absmax_over_all_tokens_and_hidden( X ) / kQuantDivisor,   x_q = round(X / scale).
+// One work-group handles a full (batch, head) X slice [seqlen, hdim]; it accumulates the global
+// absmax across all token blocks (transposed [hdim(M), token(N)] tile, AbsMax along the token axis
+// -> per-channel [M], then max across channels -> one scalar), then re-sweeps the same blocks to
+// write the quantized output. hdim == 128 (compile-time tile M/N). It emits a single scalar scale
+// (not per-channel), one per (batch, head).
+template <typename InputType_, index_t kBlockSize_ = 256, typename QuantType_ = int8_t>
+struct BlockSpargeQKQuantPipeline
+{
+    using InputType       = remove_cvref_t<InputType_>;
+    using QuantType       = remove_cvref_t<QuantType_>;
+    using ComputeDataType = float;
+    static constexpr float kQuantDivisor = sparge_quant_absmax_divisor<QuantType>();
+
+    static constexpr index_t kBlockSize = kBlockSize_;
+    static constexpr index_t kHdim      = 128; // hidden dim (compile-time tile)
+    static constexpr index_t kBlock     = 128; // token tile extent
+
+    struct BlockShape
+    {
+        static constexpr index_t Block_M = kHdim;
+        static constexpr index_t Block_N = kBlock;
+
+        static constexpr index_t WarpPerBlock_M = 4;
+        static constexpr index_t WarpPerBlock_N = 1;
+
+        static constexpr index_t ThreadPerWarp_M = 16;
+        static constexpr index_t ThreadPerWarp_N = 4;
+
+        static constexpr index_t Vector_M = 1;
+        static constexpr index_t Vector_N = 2;
+
+        static constexpr index_t Repeat_M =
+            Block_M / (WarpPerBlock_M * ThreadPerWarp_M * Vector_M);
+        static constexpr index_t Repeat_N =
+            Block_N / (WarpPerBlock_N * ThreadPerWarp_N * Vector_N);
+
+        static constexpr index_t BlockSize = kBlockSize;
+    };
+
+    using ReduceProblem = BlockReduce2dProblem<ComputeDataType, ComputeDataType, BlockShape>;
+    static constexpr bool kNeedCrossWarpSync = (BlockShape::WarpPerBlock_N > 1);
+
+    CK_TILE_DEVICE static constexpr auto MakeXBlockTileDistribution()
+    {
+        using S = BlockShape;
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<S::Repeat_M, S::WarpPerBlock_M, S::ThreadPerWarp_M, S::Vector_M>,
+                      sequence<S::Repeat_N, S::WarpPerBlock_N, S::ThreadPerWarp_N, S::Vector_N>>,
+                tuple<sequence<1, 2>, sequence<1, 2>>,
+                tuple<sequence<1, 1>, sequence<2, 2>>,
+                sequence<1, 1, 2, 2>,
+                sequence<0, 3, 0, 3>>{});
+    }
+
+    struct Params
+    {
+        index_t seqlen;
+        index_t hdim;
+        index_t stride_seq;      // token stride in elements of the bf16 input
+        index_t int8_stride_seq; // token stride in elements of the int8 output
+    };
+
+    // LDS: per-channel absmax[hdim] | block reduce scratch (max over channels at the end).
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize(index_t /*hdim*/)
+    {
+        using x_block_tile =
+            decltype(make_static_distributed_tensor<ComputeDataType>(
+                MakeXBlockTileDistribution()));
+        using y_block_tile =
+            decltype(BlockReduce2d<ReduceProblem>::template MakeYBlockTile<x_block_tile>());
+        constexpr index_t reduce_bytes =
+            BlockReduce2dCrossWarpSync<ReduceProblem>::template GetSmemSize<y_block_tile>();
+        // Need kHdim floats for per-channel absmax plus block-reduce scratch (kBlockSize floats).
+        return static_cast<index_t>((kHdim + kBlockSize) * sizeof(float)) + reduce_bytes;
+    }
+
+    // slice         : bf16 X for this (batch, head) = [seqlen, hdim]
+    // int8_out      : quantized X output (QuantType: INT8 or FP8) for this (batch, head) = [seqlen,
+    //                 hdim]. Name kept as int8_out for historical reasons; it carries QuantType.
+    // scale_out     : single float global scale for this (batch, head)
+    CK_TILE_DEVICE void operator()(const InputType* slice,
+                                   QuantType*        int8_out,
+                                   float*            scale_out,
+                                   const Params&     params,
+                                   void*             smem) const
+    {
+        const index_t tid = get_thread_id();
+        assert(params.hdim == kHdim && "sparge QK quant tile path requires hdim == 128");
+
+        float* s_absmax = reinterpret_cast<float*>(smem);            // [kHdim] per-channel
+        float* s_scr    = s_absmax + kHdim;                          // [kBlockSize] reduce scratch
+        void*  s_reduce = reinterpret_cast<void*>(s_scr + kBlockSize);
+
+        for(index_t d = tid; d < kHdim; d += kBlockSize)
+            s_absmax[d] = 0.0f;
+        block_sync_lds();
+
+        auto reduce       = BlockReduce2d<ReduceProblem>{};
+        auto reduce_sync  = BlockReduce2dSync<ReduceProblem>{};
+        auto reduce_xwarp = BlockReduce2dCrossWarpSync<ReduceProblem>{};
+        auto absmax_func  = ReduceOp::AbsMax{};
+
+        // Transposed view [hdim(M), token(N)]; reduce AbsMax over N -> per-channel [M].
+        const auto naive_t = make_naive_tensor_view<address_space_enum::global>(
+            slice,
+            make_tuple(params.seqlen, kHdim),
+            make_tuple(params.stride_seq, 1),
+            number<1>{},
+            number<1>{});
+        const auto transposed = transform_tensor_view(
+            naive_t,
+            make_tuple(make_pass_through_transform(kHdim),
+                       make_pass_through_transform(params.seqlen)),
+            make_tuple(sequence<1>{}, sequence<0>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+        const auto padded_t = pad_tensor_view(
+            transposed,
+            make_tuple(number<kHdim>{}, number<kBlock>{}),
+            sequence<0, 1>{});
+
+        // ---- Pass 1: per-channel absmax across all token blocks ----
+        for(index_t s_start = 0; s_start < params.seqlen; s_start += kBlock)
+        {
+            auto x_window = make_tile_window(
+                padded_t,
+                make_tuple(number<kHdim>{}, number<kBlock>{}),
+                {0, s_start},
+                MakeXBlockTileDistribution());
+            auto x_tile = load_tile(x_window);
+
+            auto abs_tile = make_static_distributed_tensor<ComputeDataType>(
+                decltype(x_tile)::get_tile_distribution());
+            sweep_tile(x_tile, [&](auto idx) {
+                abs_tile(idx) = type_convert<ComputeDataType>(x_tile[idx]);
+            });
+            auto amax_tile =
+                reduce(abs_tile, absmax_func.GetIdentityValue<ComputeDataType>(), absmax_func);
+            reduce_sync(amax_tile, absmax_func);
+            if constexpr(kNeedCrossWarpSync)
+                reduce_xwarp(amax_tile, s_reduce, absmax_func);
+
+            sweep_tile_span(decltype(amax_tile)::get_distributed_spans()[number<0>{}],
+                            [&](auto idx0) {
+                constexpr auto m_idx = make_tuple(idx0);
+                const auto tile_idx  = get_x_indices_from_distributed_indices(
+                    amax_tile.get_tile_distribution(), m_idx);
+                const index_t m = tile_idx.at(number<0>{});
+                s_absmax[m]     = max(s_absmax[m], amax_tile[m_idx]);
+            });
+            block_sync_lds();
+        }
+
+        // ---- Reduce per-channel absmax -> single global scalar -> scale = absmax/kQuantDivisor ----
+        float local_max = 0.0f;
+        for(index_t d = tid; d < kHdim; d += kBlockSize)
+            local_max = max(local_max, s_absmax[d]);
+        const float global_amax = block_reduce_max_f32<kBlockSize>(local_max, s_scr, tid);
+        const float scale = (global_amax > 0.0f) ? (global_amax / kQuantDivisor) : 1.0f;
+        if(tid == 0)
+            scale_out[0] = scale;
+        block_sync_lds();
+
+        // ---- Pass 2: write quant = round(X[s,c] / scale) (QuantType) in natural [token, hidden] ----
+        const auto naive_in = make_naive_tensor_view<address_space_enum::global>(
+            slice,
+            make_tuple(params.seqlen, kHdim),
+            make_tuple(params.stride_seq, 1),
+            number<1>{},
+            number<1>{});
+        const auto padded_in = pad_tensor_view(
+            naive_in,
+            make_tuple(number<kBlock>{}, number<kHdim>{}),
+            sequence<1, 0>{}); // pad token axis (M); hidden (N) exact 128
+
+        const auto naive_out = make_naive_tensor_view<address_space_enum::global>(
+            int8_out,
+            make_tuple(params.seqlen, kHdim),
+            make_tuple(params.int8_stride_seq, 1),
+            number<1>{},
+            number<1>{});
+        const auto padded_out = pad_tensor_view(
+            naive_out,
+            make_tuple(number<kBlock>{}, number<kHdim>{}),
+            sequence<1, 0>{});
+
+        for(index_t s_start = 0; s_start < params.seqlen; s_start += kBlock)
+        {
+            auto in_window = make_tile_window(
+                padded_in,
+                make_tuple(number<kBlock>{}, number<kHdim>{}),
+                {s_start, 0},
+                MakeXBlockTileDistribution());
+            auto out_window = make_tile_window(
+                padded_out,
+                make_tuple(number<kBlock>{}, number<kHdim>{}),
+                {s_start, 0},
+                MakeXBlockTileDistribution());
+
+            auto in_tile  = load_tile(in_window);
+            auto out_tile = make_static_distributed_tensor<QuantType>(
+                decltype(in_tile)::get_tile_distribution());
+            sweep_tile(in_tile, [&](auto idx) {
+                const float v = type_convert<ComputeDataType>(in_tile[idx]);
+                const float r = (scale > 0.0f) ? (v / scale) : 0.0f;
+                if constexpr(std::is_same_v<QuantType, fp8_t>)
+                    out_tile(idx) = type_convert<fp8_t>(r);
+                else
+                    out_tile(idx) = type_convert<int8_t>(saturates<int8_t>{}(r));
+            });
+            store_tile(out_window, out_tile);
+        }
+    }
 };
 
 // Per Q-block: scores + softmax + sort-based selection -> delta-encoded LUT.

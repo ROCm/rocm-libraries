@@ -159,6 +159,30 @@ At the C++ API level, `ck_tile::sparge_hyperparam_args` carries one device point
 ### sparge — actual sparsity readout
 `-print_sparsity=1` appends `sparsity=X` to the report and rescales TFlops / GB/s by the actual ratio. Without it the metrics use the input `-sparsity` threshold, which may diverge from the realised ratio under topk / sim / sink / CDF modes.
 
+### SpargeAttention-Sage (quantized)
+`-api=sparge_sage` fuses sparge's block selection with **SageAttention** low-bit quantization: Q/K are quantized to **INT8 or FP8** and V to **per-channel FP8**, so the masked-out blocks are skipped *and* the surviving blocks compute on quantized MFMA. Q/K quantization runs on-device; V's per-channel FP8 quantization runs on the host.
+
+> [!IMPORTANT]
+> Requires **gfx950 / MI350**. The pipeline uses transpose-load (`ds_read_tr`) plus FP8/INT8 MFMA; other architectures are not supported. `-prec=bf16` is mandatory (the wrapper rejects `fp16`).
+
+Flags:
+* `-prec=bf16` — required; the I/O dtype is bf16 (quant dtypes are `i8fp8bf16` / `fp8bf16`).
+* `-qscale=perwarp|blockscale|perthread|pertensor` — quantization scale granularity.
+* `-qkdtype=int8|fp8` — Q/K quant dtype (default `int8`; pass `fp8` for FP8 Q/K).
+* Inherits sparge's selection and feature flags: `-sparsity` / `-sparge_mode`, `-mode=1` (group), `-mask=t/b/g.../xt` (causal / generic / SWA), `-bias=e:0/1/2` (elementwise), `-bias=a[:1]` (ALIBI, needs `-mask`), GQA (`-h_k`), `-sink=1`, `-print_sparsity=1`.
+
+Examples:
+```
+# INT8 Q/K, per-channel FP8 V, per-warp scale, top-left causal
+./bin/tile_example_sparse_attn_fwd -api=sparge_sage -prec=bf16 -qkdtype=int8 -qscale=perwarp \
+    -b=1 -h=16 -d=128 -s=16384 -sparsity=0.5 -mask=t -print_sparsity=1
+# FP8 Q/K, group mode, GQA
+./bin/tile_example_sparse_attn_fwd -api=sparge_sage -prec=bf16 -qkdtype=fp8 -qscale=pertensor \
+    -mode=1 -b=2 -h=8 -h_k=2 -d=128 -s=1024 -sparsity=0.5
+```
+
+Performance (b=2 h=8 d=128 sparsity=0.5, s=16384): sparge_sage **2.34 ms** vs sparge 3.46 ms vs dense 6.2 ms — about **2.65x over dense**, and quantization nets roughly **1.5x over plain sparge** at long sequence length.
+
 ## C++ API integration
 The high-level `sparge_sparse_attention` allocates and frees a workspace each call. For repeated calls, use the lower-level `fmha_sparge_fwd` directly: pre-allocate the workspace via `compute_sparge_workspace_layout(args).total_bytes` and assign it to `args.workspace_ptr` once.
 
@@ -168,5 +192,5 @@ cu_seqlens fields on all three args structs (`seqstart_*_ptr / seqlen_*_ptr / cu
 Reported TFlops is `attention FLOP / total kernel time`. For sparge, total time includes K-mean / preprocess / mask-prediction passes that contribute no attention FLOP, so a direct TFlops comparison against a dense baseline understates sparge's attention pipeline rate. Prefer **latency** (or speedup vs dense at the same shape) as the primary metric. Pair with `-print_sparsity=1` for accurate ratio-based TFlops / GB/s.
 
 ## scripts
-* `script/benchmark_sparse_attn.sh` — benchmark all variants across precisions, layouts, sparsity levels.
-* `script/smoke_test_sparse_attn.sh` — correctness tests for all variants under various masks.
+* `script/benchmark_sparse_attn.sh` — benchmark all variants (incl. quantized `sparge_sage`, bf16-only) across precisions, layouts, sparsity levels.
+* `script/smoke_test_sparse_attn.sh` — correctness tests for all variants (incl. `sparge_sage` across `qkdtype`×`qscale`) under various masks.

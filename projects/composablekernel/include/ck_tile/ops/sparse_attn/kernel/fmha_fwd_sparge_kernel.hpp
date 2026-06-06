@@ -53,6 +53,15 @@ struct SpargePreprocessOneSideKargs
     const int32_t* seqlen_ptr          = nullptr;
     const int32_t* seqstart_block_ptr  = nullptr;
     index_t        total_blocks        = 0;
+
+    // Quantization outputs (sparge_sage). When int8_out != nullptr the preprocess pipeline
+    // additionally produces per-warp row-wise INT8 quant of this side. Layout matches the raw
+    // input (token-major, hdim stride 1, same batch/head/seq strides via int8_* below); scale_out
+    // is [batch, nhead, num_block_scale] with num_block_scale = ceil(seqlen / tokens_per_scale).
+    int8_t*  int8_out         = nullptr;
+    float*   scale_out        = nullptr;
+    index_t  tokens_per_scale = 0;       // PERWARP: Q=32, K=64
+    index_t  num_block_scale  = 0;       // ceil(seqlen / tokens_per_scale) (batch mode)
 };
 
 // Fused K+Q preprocess: one launch covers both sides. The grid's x axis concatenates the
@@ -88,13 +97,20 @@ sparge_block_to_batch(const int32_t* seqstart_block_ptr, index_t batch, index_t 
 // so the (batch, head, block) decode is free. Group mode is batch-outer/head-mid packed:
 // the x axis is the total_blocks count and a binary search over seqstart_block_ptr recovers
 // (batch, block_in_batch); y = head.
-template <typename InputType_, bool kIsGroupMode_ = false, index_t kBlockSize_ = 256>
+template <typename InputType_,
+          bool kIsGroupMode_                              = false,
+          index_t kBlockSize_                             = 256,
+          BlockSageAttentionQuantScaleEnum QScale_        = BlockSageAttentionQuantScaleEnum::NO_SCALE,
+          typename QuantType_                             = int8_t>
 struct FmhaFwdSpargePreprocessOneSideKernel
 {
     using InputType = remove_cvref_t<InputType_>;
-    using Pipeline  = BlockSpargePreprocessPipeline<InputType, kBlockSize_>;
+    using QuantType = remove_cvref_t<QuantType_>;
+    using Pipeline  = BlockSpargePreprocessPipeline<InputType, kBlockSize_, QScale_, QuantType>;
 
     static constexpr bool kIsGroupMode = kIsGroupMode_;
+    static constexpr BlockSageAttentionQuantScaleEnum QScale = QScale_;
+    static constexpr bool kDoQuant = (QScale_ != BlockSageAttentionQuantScaleEnum::NO_SCALE);
 
     static constexpr index_t kBlockSize  = Pipeline::kBlockSize;
     static constexpr index_t kBlockPerCu = 4;
@@ -135,6 +151,9 @@ struct FmhaFwdSpargePreprocessOneSideKernel
         long_index_t mean_out_off;
         long_index_t sim_out_off;
         long_index_t km_bh_off;
+        // Packed scale-block index (group): the (batch,head,block) origin in scale units,
+        // = packed_idx * scales_per_block. Batch mode leaves it 0 (recomputed below).
+        long_index_t scale_packed_block = 0;
 
         if constexpr(kIsGroupMode)
         {
@@ -166,6 +185,8 @@ struct FmhaFwdSpargePreprocessOneSideKernel
             sim_out_off  = packed_idx;
             km_bh_off =
                 static_cast<long_index_t>(batch_id) * kargs.nhead + head_id;
+            // Same packed block index, in scale units (scales_per_block applied below).
+            scale_packed_block = packed_idx;
         }
         else
         {
@@ -201,6 +222,48 @@ struct FmhaFwdSpargePreprocessOneSideKernel
         pp.km_ptr       = kargs.km_ptr
             ? kargs.km_ptr + km_bh_off * static_cast<long_index_t>(kargs.hdim) : nullptr;
 
+        // Quant outputs (sparge_sage). int8 buffer shares the raw input token layout (same
+        // batch/head/seq strides); the pipeline re-applies the block_id*block_size window.
+        // Batch: scale buffer is [batch, nhead, num_block_scale]. Group: int8 reuses the packed
+        // token layout (batch_offset = seqstart*seq_stride already), and scales are packed by the
+        // same batch-outer/head-mid block index used for means/sim, times scales_per_block.
+        if constexpr(kDoQuant)
+        {
+            const index_t tps = kargs.tokens_per_scale;
+            pp.int8_out        = nullptr;
+            pp.scale_out       = nullptr;
+            pp.tokens_per_scale = tps;
+            pp.int8_stride_seq  = kargs.seq_stride;
+            if(kargs.int8_out != nullptr && tps > 0)
+            {
+                // int8 origin = (batch, head) seq start; the pipeline re-applies the
+                // block_id * block_size window internally (matching the raw slice's mean path
+                // which also pre-slices only to batch/head and windows on block_id).
+                pp.int8_out = reinterpret_cast<QuantType*>(kargs.int8_out) + batch_offset +
+                              static_cast<long_index_t>(head_id) * kargs.head_stride;
+                const index_t scales_per_block = kargs.block_size / tps;
+                if constexpr(kIsGroupMode)
+                {
+                    // scale origin = packed block index * scales_per_block. Per-(batch,head)
+                    // K-scales form a contiguous run over local block positions, which the
+                    // attention kernel indexes by k_abs_pos / tps.
+                    pp.scale_out = kargs.scale_out +
+                                   scale_packed_block *
+                                       static_cast<long_index_t>(scales_per_block);
+                }
+                else
+                {
+                    // scale origin = [batch, head, block_id * (block_size / tps)] within
+                    // num_block_scale-strided rows.
+                    const long_index_t bh =
+                        static_cast<long_index_t>(batch_id) * kargs.nhead + head_id;
+                    pp.scale_out = kargs.scale_out +
+                                   bh * static_cast<long_index_t>(kargs.num_block_scale) +
+                                   static_cast<long_index_t>(block_id) * scales_per_block;
+                }
+            }
+        }
+
         Pipeline{}(slice, mean_out, sim_out, pp, smem_raw);
     }
 };
@@ -208,15 +271,25 @@ struct FmhaFwdSpargePreprocessOneSideKernel
 // Two distinct kernel types (K side and Q side) so the launch chain issues two separate
 // kernel calls. They share the implementation but are different C++ types, which keeps the
 // "two kernel calls" structure explicit and lets each get its own grid.
-template <typename InputType_, bool kIsGroupMode_ = false, index_t kBlockSize_ = 256>
+template <typename InputType_,
+          bool kIsGroupMode_                       = false,
+          index_t kBlockSize_                      = 256,
+          BlockSageAttentionQuantScaleEnum QScale_ = BlockSageAttentionQuantScaleEnum::NO_SCALE,
+          typename QuantType_                      = int8_t>
 struct FmhaFwdSpargePreprocessKKernel
-    : FmhaFwdSpargePreprocessOneSideKernel<InputType_, kIsGroupMode_, kBlockSize_>
+    : FmhaFwdSpargePreprocessOneSideKernel<InputType_, kIsGroupMode_, kBlockSize_, QScale_,
+                                           QuantType_>
 {
 };
 
-template <typename InputType_, bool kIsGroupMode_ = false, index_t kBlockSize_ = 256>
+template <typename InputType_,
+          bool kIsGroupMode_                       = false,
+          index_t kBlockSize_                      = 256,
+          BlockSageAttentionQuantScaleEnum QScale_ = BlockSageAttentionQuantScaleEnum::NO_SCALE,
+          typename QuantType_                      = int8_t>
 struct FmhaFwdSpargePreprocessQKernel
-    : FmhaFwdSpargePreprocessOneSideKernel<InputType_, kIsGroupMode_, kBlockSize_>
+    : FmhaFwdSpargePreprocessOneSideKernel<InputType_, kIsGroupMode_, kBlockSize_, QScale_,
+                                           QuantType_>
 {
 };
 
@@ -224,10 +297,16 @@ struct FmhaFwdSpargePreprocessQKernel
 // are data-independent, so one grid covering both saves a kernel launch (host dispatch is the
 // dominant cost at short sequence lengths). Per-side outputs are written at identical offsets,
 // leaving mask-prediction untouched.
-template <typename InputType_, bool kIsGroupMode_ = false, index_t kBlockSize_ = 256>
+template <typename InputType_,
+          bool kIsGroupMode_                       = false,
+          index_t kBlockSize_                      = 256,
+          BlockSageAttentionQuantScaleEnum QScale_ = BlockSageAttentionQuantScaleEnum::NO_SCALE,
+          typename QuantType_                      = int8_t>
 struct FmhaFwdSpargePreprocessFusedKernel
 {
-    using Side = FmhaFwdSpargePreprocessOneSideKernel<InputType_, kIsGroupMode_, kBlockSize_>;
+    using Side =
+        FmhaFwdSpargePreprocessOneSideKernel<InputType_, kIsGroupMode_, kBlockSize_, QScale_,
+                                             QuantType_>;
 
     static constexpr bool    kIsGroupMode = kIsGroupMode_;
     static constexpr index_t kBlockSize   = Side::kBlockSize;
@@ -280,6 +359,111 @@ struct FmhaFwdSpargePreprocessFusedKernel
                 return;
             Side::run_side(kargs.q, gx - k_x, gy, gz, smem_raw);
         }
+    }
+};
+
+// ----------------------------- PERTENSOR global Q/K INT8 quantization -----------------------------
+// Device-side SageAttention PERTENSOR Q/K quant: one work-group per (batch, head) computes the
+// global absmax over the full X slice [seqlen, hdim], emits one scale = absmax/127 and INT8 X.
+// Used for both Q and K (with their own head counts). Batch mode: 2D grid (head, batch). Group mode:
+// same grid, per-batch token window from seqstart (X int8 packed [1, H, total_tokens, D]). The
+// single scale lands at scale_out[batch_id * nhead + head_id] for both modes.
+struct SpargeQKQuantKargs
+{
+    const void* x_ptr;     // bf16 X (Q or K)
+    void*       int8_ptr;  // int8 X output
+    float*      scale_ptr; // [batch, nhead] one scale per (batch, head)
+
+    index_t batch;
+    index_t nhead;
+    index_t seqlen;        // batch mode: per-sequence length
+    index_t hdim;
+
+    index_t batch_stride_x; // bf16 X strides
+    index_t nhead_stride_x;
+    index_t stride_x;       // token stride
+
+    index_t batch_stride_int8; // int8 X strides
+    index_t nhead_stride_int8;
+    index_t stride_int8;
+
+    // Group / varlen mode (batch leaves all nullptr).
+    const int32_t* seqstart_ptr = nullptr; // [batch+1] token cumsum
+    const int32_t* seqlen_ptr   = nullptr; // [batch] (nullptr -> diff of seqstart)
+};
+
+template <typename InputType_, bool kIsGroupMode_ = false, index_t kBlockSize_ = 256,
+          typename QuantType_ = int8_t>
+struct FmhaFwdSpargeQKQuantKernel
+{
+    using InputType = remove_cvref_t<InputType_>;
+    using QuantType = remove_cvref_t<QuantType_>;
+    using Pipeline  = BlockSpargeQKQuantPipeline<InputType, kBlockSize_, QuantType>;
+
+    static constexpr bool    kIsGroupMode = kIsGroupMode_;
+    static constexpr index_t kBlockSize   = Pipeline::kBlockSize;
+    static constexpr index_t kBlockPerCu  = 4;
+
+    CK_TILE_HOST static dim3 GridSize(const SpargeQKQuantKargs& kargs)
+    {
+        return dim3(static_cast<uint32_t>(kargs.nhead),
+                    static_cast<uint32_t>(kargs.batch),
+                    1);
+    }
+
+    CK_TILE_HOST static constexpr dim3 BlockSize() { return dim3(kBlockSize); }
+
+    CK_TILE_HOST static std::size_t GetSmemSize(index_t hdim)
+    {
+        return static_cast<std::size_t>(Pipeline::GetSmemSize(hdim));
+    }
+
+    CK_TILE_DEVICE void operator()(SpargeQKQuantKargs kargs) const
+    {
+        extern __shared__ char smem_raw[];
+
+        const index_t head_id  = static_cast<index_t>(blockIdx.x);
+        const index_t batch_id = static_cast<index_t>(blockIdx.y);
+
+        long_index_t x_batch_off, int8_batch_off;
+        index_t      seqlen_actual;
+        if constexpr(kIsGroupMode)
+        {
+            const long_index_t start =
+                static_cast<long_index_t>(kargs.seqstart_ptr[batch_id]);
+            x_batch_off    = start * kargs.stride_x;    // packed token offset (bf16)
+            int8_batch_off = start * kargs.stride_int8; // packed token offset (int8)
+            seqlen_actual  = __builtin_amdgcn_readfirstlane(
+                kargs.seqlen_ptr != nullptr
+                    ? kargs.seqlen_ptr[batch_id]
+                    : (kargs.seqstart_ptr[batch_id + 1] - kargs.seqstart_ptr[batch_id]));
+        }
+        else
+        {
+            x_batch_off    = static_cast<long_index_t>(batch_id) * kargs.batch_stride_x;
+            int8_batch_off = static_cast<long_index_t>(batch_id) * kargs.batch_stride_int8;
+            seqlen_actual  = kargs.seqlen;
+        }
+
+        const auto* slice =
+            reinterpret_cast<const InputType*>(kargs.x_ptr) + x_batch_off +
+            static_cast<long_index_t>(head_id) * kargs.nhead_stride_x;
+        auto* int8_out =
+            reinterpret_cast<QuantType*>(kargs.int8_ptr) + int8_batch_off +
+            static_cast<long_index_t>(head_id) * kargs.nhead_stride_int8;
+
+        // One global scale per (batch, head); packed [batch, nhead] for both batch and group.
+        float* scale_out =
+            kargs.scale_ptr +
+            static_cast<long_index_t>(batch_id) * kargs.nhead + head_id;
+
+        typename Pipeline::Params pp;
+        pp.seqlen          = seqlen_actual;
+        pp.hdim            = kargs.hdim;
+        pp.stride_seq      = kargs.stride_x;
+        pp.int8_stride_seq = kargs.stride_int8;
+
+        Pipeline{}(slice, int8_out, scale_out, pp, smem_raw);
     }
 };
 

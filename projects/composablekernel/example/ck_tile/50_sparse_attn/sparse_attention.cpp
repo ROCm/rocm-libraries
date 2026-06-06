@@ -4,6 +4,7 @@
 #include "sparse_attention.h"
 #include "sparse_attn_fwd.hpp"
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/sageattention/pipeline/tile_sageattn_traits.hpp"
 #include "ck_tile/host/host_tensor.hpp"
 #include "ck_tile/host/device_memory.hpp"
 #include "ck_tile/host/hip_check_error.hpp"
@@ -596,6 +597,249 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
     }
 }
 
+template <typename DataType_>
+float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
+                                   const ck_tile::HostTensor<DataType_>& TK,
+                                   const ck_tile::HostTensor<ck_tile::fp8_t>& TVfp8,
+                                   const ck_tile::HostTensor<float>& TVdescale,
+                                   ck_tile::HostTensor<DataType_>& Y,
+                                   int batch,
+                                   int nhead,
+                                   int nhead_k,
+                                   int seqlen_q,
+                                   int seqlen_k,
+                                   int hdim_q,
+                                   int hdim_v,
+                                   bool i_perm,
+                                   bool o_perm,
+                                   const ck_tile::sparge_hyperparam_args& hp,
+                                   int block_size,
+                                   float scale_s,
+                                   int causal_type,
+                                   int window_left,
+                                   int window_right,
+                                   int mask_type,
+                                   const ck_tile::stream_config& stream_config,
+                                   const std::string& qscale,
+                                   const std::vector<int32_t>& seqlen_qs,
+                                   const std::vector<int32_t>& seqlen_ks,
+                                   int bias_type,
+                                   const void* bias_ptr,
+                                   ck_tile::index_t stride_bias,
+                                   ck_tile::index_t nhead_stride_bias,
+                                   ck_tile::index_t batch_stride_bias,
+                                   const std::string& data_type)
+{
+    static_assert(std::is_same_v<DataType_, ck_tile::bf16_t>,
+                  "sparge_sage stage 3 supports bf16 input only");
+    const bool is_group_mode = !seqlen_qs.empty();
+    const char* tag = is_group_mode ? "[sparge_sage group]" : "[sparge_sage]";
+
+    if(hdim_q != 128 || hdim_v != 128 || block_size != 128)
+    {
+        std::cerr << tag << " only hdim=block_size=128 supported.\n";
+        return -1.0f;
+    }
+
+    const float scale = (scale_s != 0.0f)
+                            ? scale_s
+                            : 1.0f / ck_tile::sqrt(static_cast<float>(hdim_q));
+
+    // Group mode: cumsum per-batch lengths -> seqstart token / block tables (matches sparge).
+    auto cumsum = [](const std::vector<int32_t>& v) {
+        std::vector<int32_t> out(v.size() + 1, 0);
+        for(size_t i = 0; i < v.size(); ++i) out[i + 1] = out[i] + v[i];
+        return out;
+    };
+    std::vector<int32_t> seqstart_q, seqstart_k, seqstart_q_block, seqstart_k_block,
+        lut_batch_offsets;
+    int32_t total_q_tokens = seqlen_q;
+    int32_t total_k_tokens = seqlen_k;
+    int32_t total_q_blocks = 0, total_k_blocks = 0, total_qk_blocks = 0;
+    if(is_group_mode)
+    {
+        seqstart_q     = cumsum(seqlen_qs);
+        seqstart_k     = cumsum(seqlen_ks);
+        total_q_tokens = seqstart_q.back();
+        total_k_tokens = seqstart_k.back();
+        std::vector<int32_t> q_blocks(batch), k_blocks(batch);
+        for(int b = 0; b < batch; ++b)
+        {
+            q_blocks[b] = (seqlen_qs[b] + block_size - 1) / block_size;
+            k_blocks[b] = (seqlen_ks[b] + block_size - 1) / block_size;
+        }
+        seqstart_q_block = cumsum(q_blocks);
+        seqstart_k_block = cumsum(k_blocks);
+        lut_batch_offsets.assign(batch + 1, 0);
+        for(int b = 0; b < batch; ++b)
+            lut_batch_offsets[b + 1] = lut_batch_offsets[b] + q_blocks[b] * k_blocks[b];
+        total_q_blocks  = seqstart_q_block.back();
+        total_k_blocks  = seqstart_k_block.back();
+        total_qk_blocks = lut_batch_offsets.back();
+    }
+
+    (void)hipGetLastError();
+    ck_tile::DeviceMem q_buf(TQ.get_element_space_size_in_bytes());
+    ck_tile::DeviceMem k_buf(TK.get_element_space_size_in_bytes());
+    ck_tile::DeviceMem v_buf(TVfp8.get_element_space_size_in_bytes());
+    ck_tile::DeviceMem o_buf(Y.get_element_space_size_in_bytes());
+    ck_tile::DeviceMem vdescale_buf(TVdescale.get_element_space_size_in_bytes());
+    o_buf.SetZero();
+    q_buf.ToDevice(TQ.data());
+    k_buf.ToDevice(TK.data());
+    v_buf.ToDevice(TVfp8.data()); // host-prequantized fp8 V (sageattn-style).
+    vdescale_buf.ToDevice(TVdescale.data());
+
+    ck_tile::DeviceMem seqstart_q_buf(is_group_mode ? seqstart_q.size() * sizeof(int32_t) : 0);
+    ck_tile::DeviceMem seqstart_k_buf(is_group_mode ? seqstart_k.size() * sizeof(int32_t) : 0);
+    ck_tile::DeviceMem seqstart_q_block_buf(
+        is_group_mode ? seqstart_q_block.size() * sizeof(int32_t) : 0);
+    ck_tile::DeviceMem seqstart_k_block_buf(
+        is_group_mode ? seqstart_k_block.size() * sizeof(int32_t) : 0);
+    ck_tile::DeviceMem lut_batch_offsets_buf(
+        is_group_mode ? lut_batch_offsets.size() * sizeof(int32_t) : 0);
+    if(is_group_mode)
+    {
+        seqstart_q_buf.ToDevice(seqstart_q.data());
+        seqstart_k_buf.ToDevice(seqstart_k.data());
+        seqstart_q_block_buf.ToDevice(seqstart_q_block.data());
+        seqstart_k_block_buf.ToDevice(seqstart_k_block.data());
+        lut_batch_offsets_buf.ToDevice(lut_batch_offsets.data());
+    }
+
+    // Strides over the packed token totals (group) or per-seq dims (batch).
+    auto st = compute_strides(nhead, nhead_k, total_q_tokens, total_k_tokens,
+                              hdim_q, hdim_v, i_perm, o_perm, /*is_v_rowmajor=*/true);
+
+    fmha_sparge_sage_fwd_args args{};
+    args.q_ptr          = q_buf.GetDeviceBuffer();
+    args.k_ptr          = k_buf.GetDeviceBuffer();
+    args.v_ptr          = v_buf.GetDeviceBuffer(); // host-prequantized fp8 V
+    args.o_ptr          = o_buf.GetDeviceBuffer();
+    args.v_descale_ptr  = vdescale_buf.GetDeviceBuffer();
+    // Batch: per-seq lengths drive blocks/grid. Group: seqlen_q/k carry the MAX (num_blocks for
+    // mask smem + grid m-tiles); per-batch lengths live in the seqstart tables.
+    args.seqlen_q       = seqlen_q;
+    args.seqlen_k       = seqlen_k;
+    args.batch          = batch;
+    args.max_seqlen_q   = seqlen_q;
+    args.hdim_q         = hdim_q;
+    args.hdim_v         = hdim_v;
+    args.nhead_q        = nhead;
+    args.nhead_k        = nhead_k;
+    args.scale_s        = scale;
+    args.stride_q       = st.stride_q;
+    args.stride_k       = st.stride_k;
+    args.stride_v       = st.stride_v;
+    args.stride_o       = st.stride_o;
+    args.nhead_stride_q = st.nhead_stride_q;
+    args.nhead_stride_k = st.nhead_stride_k;
+    args.nhead_stride_v = st.nhead_stride_v;
+    args.nhead_stride_o = st.nhead_stride_o;
+    args.batch_stride_q = st.batch_stride_q;
+    args.batch_stride_k = st.batch_stride_k;
+    args.batch_stride_v = st.batch_stride_v;
+    args.batch_stride_o = st.batch_stride_o;
+    args.pp_block_size  = block_size;
+    args.causal_type       = causal_type;
+    args.window_size_left  = window_left;
+    args.window_size_right = window_right;
+    args.mask_type         = mask_type;
+    // qscale -> per-token-group quantization granularity (matches TileSageAttnTraits
+    // kBlockScaleSizeQ/K so the attention descale stride agrees with preprocess).
+    // Compile-time guard: pin the host literals below to TileSageAttnTraits (the source of
+    // truth) so a trait change can't silently desync the descale stride.
+    {
+        using QSE = ck_tile::BlockSageAttentionQuantScaleEnum;
+        static_assert(
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERWARP>::kBlockScaleSizeQ == 32 &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERWARP>::kBlockScaleSizeK == 64 &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERTHREAD>::kBlockScaleSizeQ == 4 &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERTHREAD>::kBlockScaleSizeK == 16 &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::BLOCKSCALE>::kBlockScaleSizeQ == 128 &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::BLOCKSCALE>::kBlockScaleSizeK == 128 &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERTENSOR>::kBlockScaleSizeQ == 128 &&
+            ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERTENSOR>::kBlockScaleSizeK == 128,
+            "host block_scale_size literals must match TileSageAttnTraits::kBlockScaleSizeQ/K");
+    }
+    if(qscale == "blockscale" || qscale == "pertensor")
+    {
+        // PERTENSOR uses one global per-(b,h) scale; block_scale_size 128 keeps the workspace
+        // sizing (ceil(S/128) scales) >= the single scale the global-absmax quant writes.
+        args.block_scale_size_q = 128; // whole 128-token block -> 1 scale
+        args.block_scale_size_k = 128;
+    }
+    else if(qscale == "perthread")
+    {
+        args.block_scale_size_q = 4;  // PERTHREAD Q
+        args.block_scale_size_k = 16; // PERTHREAD K
+    }
+    else // perwarp (default)
+    {
+        args.block_scale_size_q = 32; // PERWARP Q
+        args.block_scale_size_k = 64; // PERWARP K
+    }
+    // v_descale per-channel [batch, nhead_k, hdim_v].
+    args.nhead_stride_v_descale = hdim_v;
+    args.batch_stride_v_descale = nhead_k * hdim_v;
+    args.hp = hp;
+    // Bias buffer (already on device). ALIBI: slopes + per-batch stride. ELEMENTWISE: dense
+    // [.., Sq, Sk] + row/head/batch strides.
+    args.bias_ptr          = bias_ptr;
+    args.stride_bias       = stride_bias;
+    args.nhead_stride_bias = nhead_stride_bias;
+    args.batch_stride_bias = batch_stride_bias;
+
+    if(is_group_mode)
+    {
+        args.seqstart_q_ptr       = seqstart_q_buf.GetDeviceBuffer();
+        args.seqstart_k_ptr       = seqstart_k_buf.GetDeviceBuffer();
+        args.seqstart_q_block_ptr = seqstart_q_block_buf.GetDeviceBuffer();
+        args.seqstart_k_block_ptr = seqstart_k_block_buf.GetDeviceBuffer();
+        args.lut_batch_offset_ptr = lut_batch_offsets_buf.GetDeviceBuffer();
+        args.total_q_blocks       = total_q_blocks;
+        args.total_k_blocks       = total_k_blocks;
+        args.total_qk_blocks      = total_qk_blocks;
+        args.total_q_tokens       = total_q_tokens;
+        args.total_k_tokens       = total_k_tokens;
+    }
+
+    const auto ws = is_group_mode ? compute_sparge_sage_workspace_layout_group(args)
+                                  : compute_sparge_sage_workspace_layout(args);
+    ck_tile::DeviceMem workspace(ws.total_bytes);
+    workspace.SetZero();
+    args.workspace_ptr = workspace.GetDeviceBuffer();
+
+    fmha_sparge_sage_fwd_traits traits;
+    traits.hdim_q        = hdim_q;
+    traits.hdim_v        = hdim_v;
+    traits.data_type     = data_type; // "i8fp8bf16" (INT8 Q/K) or "fp8bf16" (FP8 Q/K)
+    traits.qscale        = qscale;
+    traits.is_group_mode = is_group_mode;
+    traits.has_mask      = (causal_type != 0);
+    traits.bias_type     = bias_type;
+
+    float ave_time = fmha_sparge_sage_fwd(traits, args, stream_config);
+    if(ave_time < 0)
+        std::cerr << tag << " ERROR: dispatch failed.\n";
+
+    HIP_CHECK_ERROR(hipStreamSynchronize(stream_config.stream_id_));
+    o_buf.FromDevice(Y.data(), Y.get_element_space_size_in_bytes());
+    return ave_time;
+}
+
+#define INSTANTIATE_SPARGE_SAGE(T)                                                     \
+    template float sparge_sage_sparse_attention<T>(                                    \
+        const ck_tile::HostTensor<T>&, const ck_tile::HostTensor<T>&,                  \
+        const ck_tile::HostTensor<ck_tile::fp8_t>&, const ck_tile::HostTensor<float>&, \
+        ck_tile::HostTensor<T>&, int, int, int, int, int, int, int, bool, bool,        \
+        const ck_tile::sparge_hyperparam_args&, int, float,                            \
+        int, int, int, int,                                                            \
+        const ck_tile::stream_config&, const std::string&,                             \
+        const std::vector<int32_t>&, const std::vector<int32_t>&,                      \
+        int, const void*, ck_tile::index_t, ck_tile::index_t, ck_tile::index_t,        \
+        const std::string&)
+
 #define INSTANTIATE_JENGA(T)                                                           \
     template float jenga_sparse_attention<T>(const ck_tile::HostTensor<T>&,            \
                                              const ck_tile::HostTensor<T>&,            \
@@ -654,6 +898,7 @@ INSTANTIATE_VSA(ck_tile::half_t);
 INSTANTIATE_VSA(ck_tile::bf16_t);
 INSTANTIATE_SPARGE(ck_tile::half_t);
 INSTANTIATE_SPARGE(ck_tile::bf16_t);
+INSTANTIATE_SPARGE_SAGE(ck_tile::bf16_t);
 
 #undef INSTANTIATE_JENGA
 #undef INSTANTIATE_VSA

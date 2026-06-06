@@ -155,6 +155,51 @@ target_compile_options(${SPARSE_ATTN_SPARGE_INSTANCES} PRIVATE
   -Wno-float-equal
 )
 
+# Sparge_sage (quantized sparge)
+set(SPARSE_ATTN_SPARGE_SAGE_CODE_GEN_ARGS
+  ${CMAKE_CURRENT_LIST_DIR}/generate.py
+  --api fwd_sparge_sage
+  --receipt 600
+)
+
+execute_process(
+  COMMAND ${Python3_EXECUTABLE} ${SPARSE_ATTN_SPARGE_SAGE_CODE_GEN_ARGS}
+  --list_blobs ${CMAKE_CURRENT_BINARY_DIR}/sparge_sage_blob_list.txt
+  RESULT_VARIABLE ret
+)
+if(ret AND NOT ret EQUAL 0)
+  message(FATAL_ERROR "Failed to generate sparge_sage kernel list")
+endif()
+
+file(STRINGS ${CMAKE_CURRENT_BINARY_DIR}/sparge_sage_blob_list.txt SPARSE_ATTN_SPARGE_SAGE_GEN_BLOBS)
+
+add_custom_command(
+  OUTPUT ${SPARSE_ATTN_SPARGE_SAGE_GEN_BLOBS}
+  COMMAND ${Python3_EXECUTABLE} ${SPARSE_ATTN_SPARGE_SAGE_CODE_GEN_ARGS}
+  --output_dir ${CMAKE_CURRENT_BINARY_DIR}
+  DEPENDS ${CODE_GEN_SCRIPTS}
+  COMMENT "Generate CK Tile sparge_sage Sparse Attention kernels"
+)
+
+set(SPARSE_ATTN_SPARGE_SAGE_INSTANCES "tile_sparse_attn_sparge_sage_instances")
+
+add_library(${SPARSE_ATTN_SPARGE_SAGE_INSTANCES} OBJECT EXCLUDE_FROM_ALL
+  ${SPARSE_ATTN_SPARGE_SAGE_GEN_BLOBS}
+)
+target_include_directories(${SPARSE_ATTN_SPARGE_SAGE_INSTANCES} PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}
+  ${PROJECT_SOURCE_DIR}/include/ck_tile/ops/sparse_attn
+)
+set_source_files_properties(${SPARSE_ATTN_SPARGE_SAGE_GEN_BLOBS} PROPERTIES LANGUAGE HIP)
+set_property(TARGET ${SPARSE_ATTN_SPARGE_SAGE_INSTANCES} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS})
+
+target_compile_options(${SPARSE_ATTN_SPARGE_SAGE_INSTANCES} PRIVATE
+  -DCK_TILE_USE_BUFFER_ADDRESSING_BUILTIN
+  -DCK_TILE_FMHA_FWD_FAST_EXP2
+  -Wno-undefined-func-template
+  -Wno-float-equal
+)
+
 # Unified example executable
 set(EXAMPLE_SPARSE_ATTN_FWD "tile_example_sparse_attn_fwd")
 message(DEBUG "adding unified example ${EXAMPLE_SPARSE_ATTN_FWD}")
@@ -163,6 +208,7 @@ add_executable(${EXAMPLE_SPARSE_ATTN_FWD} EXCLUDE_FROM_ALL
   sparse_attention.cpp
 )
 target_link_libraries(${EXAMPLE_SPARSE_ATTN_FWD}
+  ${SPARSE_ATTN_SPARGE_SAGE_INSTANCES}
   ${SPARSE_ATTN_SPARGE_INSTANCES}
   ${SPARSE_ATTN_VSA_INSTANCES}
   ${SPARSE_ATTN_JENGA_INSTANCES}

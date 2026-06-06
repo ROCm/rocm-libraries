@@ -73,5 +73,20 @@ for s in 4096 8192 16384 ; do
 done
 done
 
+# --- SpargeAttention-Sage (quantized; bf16 only, requires gfx950/MI350) ---
+if [ "$prec" = "bf16" ] ; then
+echo "--- SpargeAttention-Sage (quantized) ---"
+for qkdtype in int8 fp8 ; do
+for sparsity in 0.3 0.5 0.7 ; do
+for s in 4096 8192 16384 ; do
+    "$EXE" -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=perwarp \
+           -b=1 -h=16 -d=128 -s=$s -sparsity=$sparsity \
+           -iperm=$perm -operm=$perm -kname=1 -v=$VALID -warmup=$WARMUP -repeat=$REPEAT \
+           -print_sparsity=1
+done
+done
+done
+fi
+
 done
 done

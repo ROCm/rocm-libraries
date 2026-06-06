@@ -114,3 +114,44 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
                                     // Group-mode (empty → batch mode):
                                     const std::vector<int32_t>& seqlen_qs = {},
                                     const std::vector<int32_t>& seqlen_ks = {});
+
+// sparge_sage (quantized sparge): bf16 Q/K (device-quantized to INT8 in the fused preprocess),
+// caller-provided FP8 V + per-channel v_descale. Batch / no-mask / no-bias / PERWARP / hdim128.
+// Returns GPU time in ms (negative on error).
+template <typename DataType_>
+float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,    // bf16 [B,H,S,D]
+                                   const ck_tile::HostTensor<DataType_>& TK,    // bf16 [B,Hk,Sk,D]
+                                   const ck_tile::HostTensor<ck_tile::fp8_t>& TVfp8,  // [B,Hk,Sk,Dv]
+                                   const ck_tile::HostTensor<float>& TVdescale, // [B,Hk,Dv]
+                                   ck_tile::HostTensor<DataType_>& Y,           // bf16 [B,H,S,Dv]
+                                   int batch,
+                                   int nhead,
+                                   int nhead_k,
+                                   int seqlen_q,
+                                   int seqlen_k,
+                                   int hdim_q,
+                                   int hdim_v,
+                                   bool i_perm,
+                                   bool o_perm,
+                                   const ck_tile::sparge_hyperparam_args& hp,
+                                   int block_size,
+                                   float scale_s,
+                                   int causal_type,
+                                   int window_left,
+                                   int window_right,
+                                   int mask_type,
+                                   const ck_tile::stream_config& stream_config,
+                                   const std::string& qscale = "perwarp",
+                                   // Group / varlen mode: non-empty -> packed Q/K/V/O with these
+                                   // per-batch lengths; max_seqlen taken from seqlen_q/seqlen_k.
+                                   const std::vector<int32_t>& seqlen_qs = {},
+                                   const std::vector<int32_t>& seqlen_ks = {},
+                                   // Bias: 0=no_bias, 1=elementwise, 2=alibi. bias_ptr is the device
+                                   // bias buffer (alibi slopes or dense [.., Sq, Sk]); the strides
+                                   // are alibi's batch stride / elementwise's row/head/batch strides.
+                                   int bias_type            = 0,
+                                   const void* bias_ptr     = nullptr,
+                                   ck_tile::index_t stride_bias       = 0,
+                                   ck_tile::index_t nhead_stride_bias = 0,
+                                   ck_tile::index_t batch_stride_bias = 0,
+                                   const std::string& data_type       = "i8fp8bf16");

@@ -112,6 +112,199 @@ compute_global_k_mean(const HostTensor<T>& k_bhsd,
     return km;
 }
 
+// Scalar reference for the per-warp row-wise INT8 quantization fused into preprocess.
+// Mirrors BlockSpargePreprocessPipeline::quantize_block bit-for-bit:
+//   per-token absmax over the full hidden dim (raw values, NOT km-centered),
+//   group absmax over `tokens_per_scale` consecutive tokens, scale = absmax / 127,
+//   int8 = type_convert<int8_t>(saturates<int8_t>{}(val / scale)).
+// Inputs are [batch, nhead, seqlen, hdim]. Outputs:
+//   q_int8 [batch, nhead, seqlen, hdim], q_scale [batch, nhead, num_block_scale]
+//   with num_block_scale = num_blocks * (block_size / tokens_per_scale), grouped per
+//   128-token block (block_size / tokens_per_scale scales per block), matching the
+//   device per-block scale_out layout concatenated over blocks.
+template <typename T>
+void reference_sparge_rowwise_quant(const HostTensor<T>& data_bhsd,
+                                    index_t              batch,
+                                    index_t              nhead,
+                                    index_t              seqlen,
+                                    index_t              hdim,
+                                    index_t              block_size,
+                                    index_t              tokens_per_scale,
+                                    HostTensor<int8_t>&  int8_out,   // [B,H,S,D]
+                                    HostTensor<float>&   scale_out)  // [B,H,num_block_scale]
+{
+    const index_t num_blocks      = (seqlen + block_size - 1) / block_size;
+    const index_t scales_per_blk  = block_size / tokens_per_scale;
+    const index_t num_block_scale = num_blocks * scales_per_blk;
+
+    for(index_t b = 0; b < batch; ++b)
+        for(index_t h = 0; h < nhead; ++h)
+            for(index_t blk = 0; blk < num_blocks; ++blk)
+            {
+                const index_t s_start = blk * block_size;
+                const index_t s_end   = std::min(s_start + block_size, seqlen);
+
+                for(index_t g = 0; g < scales_per_blk; ++g)
+                {
+                    // group absmax over tokens_per_scale tokens x full hidden.
+                    float amax = 0.0f;
+                    for(index_t tt = 0; tt < tokens_per_scale; ++tt)
+                    {
+                        const index_t s = s_start + g * tokens_per_scale + tt;
+                        if(s >= s_end)
+                            continue;
+                        for(index_t d = 0; d < hdim; ++d)
+                        {
+                            float v = type_convert<float>(data_bhsd(b, h, s, d));
+                            amax    = std::max(amax, std::abs(v));
+                        }
+                    }
+                    const float scale = amax / 127.0f;
+                    const index_t scale_idx =
+                        (b * nhead + h) * num_block_scale + blk * scales_per_blk + g;
+                    scale_out.mData[static_cast<size_t>(scale_idx)] = scale;
+
+                    for(index_t tt = 0; tt < tokens_per_scale; ++tt)
+                    {
+                        const index_t s = s_start + g * tokens_per_scale + tt;
+                        if(s >= s_end)
+                            continue;
+                        for(index_t d = 0; d < hdim; ++d)
+                        {
+                            float v = type_convert<float>(data_bhsd(b, h, s, d));
+                            float r = (scale > 0.0f) ? (v / scale) : 0.0f;
+                            int8_out(b, h, s, d) =
+                                type_convert<int8_t>(saturates<int8_t>{}(r));
+                        }
+                    }
+                }
+            }
+}
+
+// FP8 variant of reference_sparge_rowwise_quant (SageAttention fp8bf16 Q/K path). Same per-warp
+// row-wise grouping, but scale = absmax / fp8_max and quant = type_convert<fp8_t> (no integer
+// saturate; the fp8 conversion itself clamps). Outputs the fp8-roundtripped value as float so the
+// caller can dequantize bit-for-bit (val_deq = float(fp8) * scale), matching the device.
+template <typename T>
+void reference_sparge_rowwise_quant_fp8(const HostTensor<T>& data_bhsd,
+                                        index_t              batch,
+                                        index_t              nhead,
+                                        index_t              seqlen,
+                                        index_t              hdim,
+                                        index_t              block_size,
+                                        index_t              tokens_per_scale,
+                                        HostTensor<float>&   fp8_as_float, // [B,H,S,D] float(fp8)
+                                        HostTensor<float>&   scale_out)    // [B,H,num_block_scale]
+{
+    const index_t num_blocks      = (seqlen + block_size - 1) / block_size;
+    const index_t scales_per_blk  = block_size / tokens_per_scale;
+    const index_t num_block_scale = num_blocks * scales_per_blk;
+    const float   fp8_max         = type_convert<float>(numeric<fp8_t>::max());
+
+    for(index_t b = 0; b < batch; ++b)
+        for(index_t h = 0; h < nhead; ++h)
+            for(index_t blk = 0; blk < num_blocks; ++blk)
+            {
+                const index_t s_start = blk * block_size;
+                const index_t s_end   = std::min(s_start + block_size, seqlen);
+
+                for(index_t g = 0; g < scales_per_blk; ++g)
+                {
+                    float amax = 0.0f;
+                    for(index_t tt = 0; tt < tokens_per_scale; ++tt)
+                    {
+                        const index_t s = s_start + g * tokens_per_scale + tt;
+                        if(s >= s_end)
+                            continue;
+                        for(index_t d = 0; d < hdim; ++d)
+                        {
+                            float v = type_convert<float>(data_bhsd(b, h, s, d));
+                            amax    = std::max(amax, std::abs(v));
+                        }
+                    }
+                    const float scale = amax / fp8_max;
+                    const index_t scale_idx =
+                        (b * nhead + h) * num_block_scale + blk * scales_per_blk + g;
+                    scale_out.mData[static_cast<size_t>(scale_idx)] = scale;
+
+                    for(index_t tt = 0; tt < tokens_per_scale; ++tt)
+                    {
+                        const index_t s = s_start + g * tokens_per_scale + tt;
+                        if(s >= s_end)
+                            continue;
+                        for(index_t d = 0; d < hdim; ++d)
+                        {
+                            float v = type_convert<float>(data_bhsd(b, h, s, d));
+                            float r = (scale > 0.0f) ? (v / scale) : 0.0f;
+                            fp8_t q = type_convert<fp8_t>(r);
+                            fp8_as_float(b, h, s, d) = type_convert<float>(q);
+                        }
+                    }
+                }
+            }
+}
+
+// PERTENSOR reference quant (SageAttention global per-(batch,head) scale). Mirrors
+// BlockSpargeQKQuantPipeline: scale = absmax_over_all_tokens_and_hidden(X) / divisor (127 for
+// INT8), x = round(X / scale). Emits one scale per (b,h) at scale_out[(b*nhead+h)]. INT8 path.
+template <typename T>
+void reference_sparge_global_quant(const HostTensor<T>& data_bhsd,
+                                   index_t              batch,
+                                   index_t              nhead,
+                                   index_t              seqlen,
+                                   index_t              hdim,
+                                   HostTensor<int8_t>&  int8_out,  // [B,H,S,D]
+                                   HostTensor<float>&   scale_out) // [B,H] (one scale per b,h)
+{
+    for(index_t b = 0; b < batch; ++b)
+        for(index_t h = 0; h < nhead; ++h)
+        {
+            float amax = 0.0f;
+            for(index_t s = 0; s < seqlen; ++s)
+                for(index_t d = 0; d < hdim; ++d)
+                    amax = std::max(amax, std::abs(type_convert<float>(data_bhsd(b, h, s, d))));
+            const float scale = (amax > 0.0f) ? (amax / 127.0f) : 1.0f;
+            scale_out.mData[static_cast<size_t>(b * nhead + h)] = scale;
+            for(index_t s = 0; s < seqlen; ++s)
+                for(index_t d = 0; d < hdim; ++d)
+                {
+                    float v = type_convert<float>(data_bhsd(b, h, s, d));
+                    int8_out(b, h, s, d) =
+                        type_convert<int8_t>(saturates<int8_t>{}(v / scale));
+                }
+        }
+}
+
+// FP8 variant of reference_sparge_global_quant: scale = absmax / fp8_max, fp8 round-trip.
+template <typename T>
+void reference_sparge_global_quant_fp8(const HostTensor<T>& data_bhsd,
+                                       index_t              batch,
+                                       index_t              nhead,
+                                       index_t              seqlen,
+                                       index_t              hdim,
+                                       HostTensor<float>&   fp8_as_float, // [B,H,S,D] float(fp8)
+                                       HostTensor<float>&   scale_out)    // [B,H]
+{
+    const float fp8_max = type_convert<float>(numeric<fp8_t>::max());
+    for(index_t b = 0; b < batch; ++b)
+        for(index_t h = 0; h < nhead; ++h)
+        {
+            float amax = 0.0f;
+            for(index_t s = 0; s < seqlen; ++s)
+                for(index_t d = 0; d < hdim; ++d)
+                    amax = std::max(amax, std::abs(type_convert<float>(data_bhsd(b, h, s, d))));
+            const float scale = (amax > 0.0f) ? (amax / fp8_max) : 1.0f;
+            scale_out.mData[static_cast<size_t>(b * nhead + h)] = scale;
+            for(index_t s = 0; s < seqlen; ++s)
+                for(index_t d = 0; d < hdim; ++d)
+                {
+                    float v = type_convert<float>(data_bhsd(b, h, s, d));
+                    fp8_t q = type_convert<fp8_t>(v / scale);
+                    fp8_as_float(b, h, s, d) = type_convert<float>(q);
+                }
+        }
+}
+
 // Generic inter-token causal / sliding-window masking parameters.
 struct sparge_causal_params
 {

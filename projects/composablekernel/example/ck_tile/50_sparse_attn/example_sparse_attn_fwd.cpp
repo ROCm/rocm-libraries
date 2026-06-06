@@ -16,7 +16,12 @@ auto create_args(int argc, char* argv[])
                 "sparse attention API:\n"
                 "  jenga:        block sparse attention (one-hot mask)\n"
                 "  vsa:          block sparse attention (LUT format)\n"
-                "  sparge: SpargeAttention (preprocess + mask prediction + attention)")
+                "  sparge: SpargeAttention (preprocess + mask prediction + attention)\n"
+                "  sparge_sage: quantized SpargeAttention (INT8 QK, FP8 V; -qscale)")
+        .insert("qscale", "perwarp",
+                "sparge_sage quantization scale mode: perwarp|blockscale|perthread")
+        .insert("qkdtype", "int8",
+                "sparge_sage Q/K quant dtype: int8 (i8fp8bf16) | fp8 (fp8bf16). V is always fp8.")
         .insert("v", "1", "0:no validation, 1:validation")
         .insert("b", "1", "batch size")
         .insert("h", "4", "num of head for q")
@@ -130,6 +135,8 @@ auto run(const ck_tile::ArgParser& arg_parser)
     sparse_attn_mode mode       = static_cast<sparse_attn_mode>(arg_parser.get_uint32("mode"));
     bool json_out               = arg_parser.get_bool("json");
     std::string json_file       = arg_parser.get_str("jsonfile");
+    std::string qscale          = arg_parser.get_str("qscale");
+    std::string qkdtype         = arg_parser.get_str("qkdtype");
 
     if(nhead_k < 0)
         nhead_k = nhead;
@@ -155,7 +162,8 @@ auto run(const ck_tile::ArgParser& arg_parser)
         pvthreshd, sparge_mode, perhead_test,
         sparsity_per_head, sim_per_head, pvthreshd_per_head,
         smooth_k, print_sparsity,
-        stream_config, mode, json_out, json_file, bias_str, scale_s, logits_soft_cap);
+        stream_config, mode, json_out, json_file, bias_str, scale_s, logits_soft_cap,
+        qscale, qkdtype);
 }
 
 int main(int argc, char* argv[])

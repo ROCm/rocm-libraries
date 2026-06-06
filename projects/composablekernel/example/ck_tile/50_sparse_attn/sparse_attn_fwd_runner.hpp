@@ -878,9 +878,14 @@ sparse_attn_result sparse_attn_fwd_run(
     const std::string& json_file = std::string(),
     const std::string& bias_str  = "n",
     float scale_s_user = 0.0f,        // 0 ⇒ default 1/sqrt(d)
-    float logits_soft_cap_user = 0.0f) // 0 ⇒ disabled (Gemma-style: s = cap*tanh(s/cap))
+    float logits_soft_cap_user = 0.0f, // 0 ⇒ disabled (Gemma-style: s = cap*tanh(s/cap))
+    const std::string& qscale = "perwarp", // sparge_sage quant scale mode
+    const std::string& qkdtype = "int8")   // sparge_sage Q/K quant dtype: int8 | fp8
 {
     using T = typename FmhaSparseFwdTypeConfig<DataTypeConfig>::QDataType;
+    // sparge_sage Q/K quant dtype string for the dispatch traits.data_type.
+    const std::string sage_data_type = (qkdtype == "fp8") ? "fp8bf16" : "i8fp8bf16";
+    const bool sage_qk_fp8 = (qkdtype == "fp8");
 
     if(block_size != 128 || hdim_q != 128 || hdim_v != 128)
     {
@@ -1630,6 +1635,306 @@ sparse_attn_result sparse_attn_fwd_run(
             }
         }
     }
+    else if(api == "sparge_sage" && mode == sparse_attn_mode::batch)
+    {
+        if constexpr(!std::is_same_v<T, ck_tile::bf16_t>)
+        {
+            std::cout << ", sparge_sage requires -prec=bf16" << std::flush << std::endl;
+            return sparse_attn_result::skipped;
+        }
+        else
+        {
+            if(qscale != "perwarp" && qscale != "blockscale" && qscale != "perthread" &&
+               qscale != "pertensor")
+            {
+                std::cerr << "error: -qscale must be perwarp|blockscale|perthread|pertensor for "
+                             "sparge_sage, got '"
+                          << qscale << "'\n";
+                return sparse_attn_result::failure;
+            }
+            if(!i_perm || !o_perm)
+            {
+                std::cout << ", sparge_sage stage 3: requires iperm=operm=1" << std::flush
+                          << std::endl;
+                return sparse_attn_result::skipped;
+            }
+            // sparge_sage bias scope: NO_BIAS / ALIBI / ELEMENTWISE_BIAS. Bias (float == SaccDataType)
+            // is added to the descaled fp32 s_acc; elementwise tiles load into the gemm0 C (s_acc)
+            // distribution so the int8-MFMA layout aligns by construction.
+            bias_info bi_sage = bias_info::decode(bias_str);
+            if(bi_sage.type == bias_enum::alibi && causal_type == 0)
+            {
+                std::cout << ", sparge_sage: alibi requires a causal mask (-mask=t/b)"
+                          << std::flush << std::endl;
+                return sparse_attn_result::skipped;
+            }
+            // Slopes/elementwise addressed as float (== SaccDataType).
+            auto bs_sage = setup_bias<float>(bi_sage, batch, nhead, seqlen_q, seqlen_k,
+                                             causal_type, seed + 500, "sparge_sage");
+
+            const bool mode_is_topk = (sparge_mode == "topk");
+            const float scalar_topk = mode_is_topk ? (1.0f - sparsity) : 0.0f;
+            const float scalar_cdf  = mode_is_topk ? 0.0f : (1.0f - sparsity);
+
+            ck_tile::sparge_hyperparam_args hp;
+            hp.cdfthreshd   = scalar_cdf;
+            hp.topk         = scalar_topk;
+            hp.simthreshold = 0.0f;
+            hp.smooth_k     = false;
+
+            // ---- Host-quantize V to FP8 with per-channel (hdim_v) descale (sageattn-style) ----
+            // Inputs are i_perm = [B, Hk, Sk, Dv]. scale[b,hk,dv] = absmax_over_seq / fp8_max.
+            // V is prequantized on the host (matching sageattn, which produces fp8 V + per-channel
+            // descale outside the kernel) so the attention kernel only consumes fp8 V.
+            const float fp8_max =
+                ck_tile::type_convert<float>(ck_tile::numeric<ck_tile::fp8_t>::max());
+            ck_tile::HostTensor<ck_tile::fp8_t> v_fp8({batch, nhead_k, seqlen_k, hdim_v});
+            ck_tile::HostTensor<float> v_descale({batch, nhead_k, hdim_v});
+            ck_tile::HostTensor<T> v_dequant({batch, nhead_k, seqlen_k, hdim_v});
+            for(ck_tile::index_t b = 0; b < batch; ++b)
+                for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                    for(ck_tile::index_t dv = 0; dv < hdim_v; ++dv)
+                    {
+                        float amax = 0.0f;
+                        for(ck_tile::index_t s = 0; s < seqlen_k; ++s)
+                            amax = std::max(amax,
+                                std::abs(to_float_for_compare(v_host(b, h, s, dv))));
+                        const float sc = (amax > 0.0f) ? amax / fp8_max : 1.0f;
+                        v_descale(b, h, dv) = sc;
+                        for(ck_tile::index_t s = 0; s < seqlen_k; ++s)
+                        {
+                            const float vv = to_float_for_compare(v_host(b, h, s, dv));
+                            const auto q8 =
+                                ck_tile::type_convert<ck_tile::fp8_t>(vv / sc);
+                            v_fp8(b, h, s, dv) = q8;
+                            v_dequant(b, h, s, dv) = ck_tile::type_convert<T>(
+                                ck_tile::type_convert<float>(q8) * sc);
+                        }
+                    }
+
+            // Q/K must be in i_perm = [B, H, S, D] (bf16); make_qkv_tensor with i_perm=1 already is.
+            float ave = -1.0f;
+            try
+            {
+                ave = sparge_sage_sparse_attention<T>(
+                    q_host, k_host, v_fp8, v_descale, output_host,
+                    batch, nhead, nhead_k, seqlen_q, seqlen_k, hdim_q, hdim_v,
+                    i_perm, o_perm, hp, block_size, scale_s_user,
+                    causal_type, mask_decoded.left, mask_decoded.right,
+                    static_cast<int>(mask_decoded.type), stream_config, qscale,
+                    {}, {},
+                    bs_sage.args.type, bs_sage.args.ptr, bs_sage.args.stride_bias,
+                    bs_sage.args.nhead_stride_bias, bs_sage.args.batch_stride_bias,
+                    sage_data_type);
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "\nError: " << e.what() << std::endl;
+                return sparse_attn_result::failure;
+            }
+            if(ave < 0)
+            {
+                std::cout << ", not supported yet" << std::flush << std::endl;
+                return sparse_attn_result::skipped;
+            }
+            ave_time = ave;
+            if(stream_config.time_kernel_)
+                print_perf(static_cast<double>(ave_time), flop, num_byte);
+
+            if(do_validation)
+            {
+                // Predicted block mask (selection uses fp16 means, quant-independent).
+                auto q_ref = to_bhsd(q_host, i_perm);
+                auto k_ref = to_bhsd(k_host, i_perm);
+                ck_tile::sparge_block_predict_params rp;
+                rp.cdfthreshd   = scalar_cdf;
+                rp.topk         = scalar_topk;
+                rp.simthreshold = 0.0f;
+                rp.attention_sink = false;
+                rp.smooth_k       = false;
+                rp.scale          = scale;
+                ck_tile::sparge_causal_params cp;
+                cp.causal_type  = causal_type;
+                cp.window_left  = mask_decoded.left;
+                cp.window_right = mask_decoded.right;
+                auto cpu_mask = ck_tile::reference_sparge_mask_prediction<T>(
+                    q_ref, k_ref, batch, nhead, nhead_k, seqlen_q, seqlen_k,
+                    hdim_q, block_size, block_size, rp, cp);
+
+                // Dequantize Q/K with the SAME quant granularity the kernel uses for this qscale,
+                // so the validation faithfully models the kernel's quant (instead of always PERWARP
+                // and leaning on dequant(quant(x))~=x tolerance). Granularity (tokens per scale):
+                //   perwarp 32/64, perthread 4/16, blockscale 128/128, pertensor = whole (b,h).
+                // INT8 uses scale=absmax/127; fp8 uses scale=absmax/fp8_max with an fp8 round-trip.
+                const bool qs_pertensor = (qscale == "pertensor");
+                const ck_tile::index_t gran_q =
+                    (qscale == "perthread") ? 4 : (qscale == "blockscale") ? 128 : 32;
+                const ck_tile::index_t gran_k =
+                    (qscale == "perthread") ? 16 : (qscale == "blockscale") ? 128 : 64;
+                ck_tile::HostTensor<T> q_deq({batch, nhead, seqlen_q, hdim_q});
+                ck_tile::HostTensor<T> k_deq({batch, nhead_k, seqlen_k, hdim_q});
+                if(qs_pertensor)
+                {
+                    // PERTENSOR: one global scale per (b,h) over all tokens x hidden.
+                    ck_tile::HostTensor<float> q_sc({batch, nhead});
+                    ck_tile::HostTensor<float> k_sc({batch, nhead_k});
+                    if(sage_qk_fp8)
+                    {
+                        ck_tile::HostTensor<float> q_qf({batch, nhead, seqlen_q, hdim_q});
+                        ck_tile::HostTensor<float> k_qf({batch, nhead_k, seqlen_k, hdim_q});
+                        ck_tile::reference_sparge_global_quant_fp8<T>(
+                            q_ref, batch, nhead, seqlen_q, hdim_q, q_qf, q_sc);
+                        ck_tile::reference_sparge_global_quant_fp8<T>(
+                            k_ref, batch, nhead_k, seqlen_k, hdim_q, k_qf, k_sc);
+                        for(ck_tile::index_t b = 0; b < batch; ++b)
+                            for(ck_tile::index_t h = 0; h < nhead; ++h)
+                                for(ck_tile::index_t s = 0; s < seqlen_q; ++s)
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        q_deq(b, h, s, d) = ck_tile::type_convert<T>(
+                                            q_qf(b, h, s, d) * q_sc(b, h));
+                        for(ck_tile::index_t b = 0; b < batch; ++b)
+                            for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                                for(ck_tile::index_t s = 0; s < seqlen_k; ++s)
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        k_deq(b, h, s, d) = ck_tile::type_convert<T>(
+                                            k_qf(b, h, s, d) * k_sc(b, h));
+                    }
+                    else
+                    {
+                        ck_tile::HostTensor<int8_t> q_i8({batch, nhead, seqlen_q, hdim_q});
+                        ck_tile::HostTensor<int8_t> k_i8({batch, nhead_k, seqlen_k, hdim_q});
+                        ck_tile::reference_sparge_global_quant<T>(
+                            q_ref, batch, nhead, seqlen_q, hdim_q, q_i8, q_sc);
+                        ck_tile::reference_sparge_global_quant<T>(
+                            k_ref, batch, nhead_k, seqlen_k, hdim_q, k_i8, k_sc);
+                        for(ck_tile::index_t b = 0; b < batch; ++b)
+                            for(ck_tile::index_t h = 0; h < nhead; ++h)
+                                for(ck_tile::index_t s = 0; s < seqlen_q; ++s)
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        q_deq(b, h, s, d) = ck_tile::type_convert<T>(
+                                            static_cast<float>(q_i8(b, h, s, d)) * q_sc(b, h));
+                        for(ck_tile::index_t b = 0; b < batch; ++b)
+                            for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                                for(ck_tile::index_t s = 0; s < seqlen_k; ++s)
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        k_deq(b, h, s, d) = ck_tile::type_convert<T>(
+                                            static_cast<float>(k_i8(b, h, s, d)) * k_sc(b, h));
+                    }
+                }
+                else
+                {
+                    const ck_tile::index_t nbs_q =
+                        ((seqlen_q + block_size - 1) / block_size) * (block_size / gran_q);
+                    const ck_tile::index_t nbs_k =
+                        ((seqlen_k + block_size - 1) / block_size) * (block_size / gran_k);
+                    ck_tile::HostTensor<float> q_sc({batch, nhead, nbs_q});
+                    ck_tile::HostTensor<float> k_sc({batch, nhead_k, nbs_k});
+                    const ck_tile::index_t scales_per_blk_q = block_size / gran_q;
+                    const ck_tile::index_t scales_per_blk_k = block_size / gran_k;
+                    if(sage_qk_fp8)
+                    {
+                        ck_tile::HostTensor<float> q_qf({batch, nhead, seqlen_q, hdim_q});
+                        ck_tile::HostTensor<float> k_qf({batch, nhead_k, seqlen_k, hdim_q});
+                        ck_tile::reference_sparge_rowwise_quant_fp8<T>(
+                            q_ref, batch, nhead, seqlen_q, hdim_q, block_size, gran_q, q_qf, q_sc);
+                        ck_tile::reference_sparge_rowwise_quant_fp8<T>(
+                            k_ref, batch, nhead_k, seqlen_k, hdim_q, block_size, gran_k, k_qf, k_sc);
+                        for(ck_tile::index_t b = 0; b < batch; ++b)
+                            for(ck_tile::index_t h = 0; h < nhead; ++h)
+                                for(ck_tile::index_t s = 0; s < seqlen_q; ++s)
+                                {
+                                    const ck_tile::index_t blk = s / block_size;
+                                    const ck_tile::index_t g   = (s % block_size) / gran_q;
+                                    const float sc = q_sc(b, h, blk * scales_per_blk_q + g);
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        q_deq(b, h, s, d) =
+                                            ck_tile::type_convert<T>(q_qf(b, h, s, d) * sc);
+                                }
+                        for(ck_tile::index_t b = 0; b < batch; ++b)
+                            for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                                for(ck_tile::index_t s = 0; s < seqlen_k; ++s)
+                                {
+                                    const ck_tile::index_t blk = s / block_size;
+                                    const ck_tile::index_t g   = (s % block_size) / gran_k;
+                                    const float sc = k_sc(b, h, blk * scales_per_blk_k + g);
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        k_deq(b, h, s, d) =
+                                            ck_tile::type_convert<T>(k_qf(b, h, s, d) * sc);
+                                }
+                    }
+                    else
+                    {
+                        ck_tile::HostTensor<int8_t> q_i8({batch, nhead, seqlen_q, hdim_q});
+                        ck_tile::HostTensor<int8_t> k_i8({batch, nhead_k, seqlen_k, hdim_q});
+                        ck_tile::reference_sparge_rowwise_quant<T>(
+                            q_ref, batch, nhead, seqlen_q, hdim_q, block_size, gran_q, q_i8, q_sc);
+                        ck_tile::reference_sparge_rowwise_quant<T>(
+                            k_ref, batch, nhead_k, seqlen_k, hdim_q, block_size, gran_k, k_i8, k_sc);
+                        for(ck_tile::index_t b = 0; b < batch; ++b)
+                            for(ck_tile::index_t h = 0; h < nhead; ++h)
+                                for(ck_tile::index_t s = 0; s < seqlen_q; ++s)
+                                {
+                                    const ck_tile::index_t blk = s / block_size;
+                                    const ck_tile::index_t g   = (s % block_size) / gran_q;
+                                    const float sc = q_sc(b, h, blk * scales_per_blk_q + g);
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        q_deq(b, h, s, d) = ck_tile::type_convert<T>(
+                                            static_cast<float>(q_i8(b, h, s, d)) * sc);
+                                }
+                        for(ck_tile::index_t b = 0; b < batch; ++b)
+                            for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                                for(ck_tile::index_t s = 0; s < seqlen_k; ++s)
+                                {
+                                    const ck_tile::index_t blk = s / block_size;
+                                    const ck_tile::index_t g   = (s % block_size) / gran_k;
+                                    const float sc = k_sc(b, h, blk * scales_per_blk_k + g);
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        k_deq(b, h, s, d) = ck_tile::type_convert<T>(
+                                            static_cast<float>(k_i8(b, h, s, d)) * sc);
+                                }
+                    }
+                }
+
+                // Blocked attention on dequantized Q/K/V. q_deq/k_deq/v_dequant are BHSD; pass
+                // i_perm/o_perm = true so to_bhsd is identity inside validate_vs_blocked_ref.
+                // ALIBI: feed the dense [1,h,sq,sk] bias matching ck_tile::Alibi VERTICAL output
+                // (slope[h]*k); the reference adds it in the scaled-QK domain, same as the kernel.
+                auto gpu_out = to_bhsd(output_host, o_perm);
+                ck_tile::HostTensor<T> ref_out({batch, nhead, seqlen_q, hdim_v});
+                if(bi_sage.type == bias_enum::alibi)
+                {
+                    using BiasT = float;
+                    auto alibi_dense = alibi_to_dense<BiasT>(
+                        bs_sage.alibi_slopes_host, nhead, seqlen_q, seqlen_k);
+                    ck_tile::reference_blocked_attention<T, uint8_t, BiasT>(
+                        q_deq, k_deq, v_dequant, cpu_mask, ref_out, block_size, block_size, scale,
+                        causal_type, mask_decoded.left, mask_decoded.right,
+                        /*logits_soft_cap=*/0.0f, &alibi_dense, /*bias_rank=*/1);
+                }
+                else if(bi_sage.type == bias_enum::elementwise_bias)
+                {
+                    using BiasT = float;
+                    ck_tile::reference_blocked_attention<T, uint8_t, BiasT>(
+                        q_deq, k_deq, v_dequant, cpu_mask, ref_out, block_size, block_size, scale,
+                        causal_type, mask_decoded.left, mask_decoded.right,
+                        /*logits_soft_cap=*/0.0f, &(*bs_sage.elementwise_host), bi_sage.rank_info);
+                }
+                else
+                {
+                    ck_tile::reference_blocked_attention<T, uint8_t>(
+                        q_deq, k_deq, v_dequant, cpu_mask, ref_out, block_size, block_size, scale,
+                        causal_type, mask_decoded.left, mask_decoded.right,
+                        /*logits_soft_cap=*/0.0f);
+                }
+                // Quantization tolerance: int8 QK + fp8 V -> atol ~0.07; fp8 QK is coarser
+                // (3-bit mantissa) so relax to atol ~0.18 / rtol 0.15 (matches SageAttention fp8).
+                const double q_rtol = sage_qk_fp8 ? 0.15 : 0.1;
+                const double q_atol = sage_qk_fp8 ? 0.18 : 0.07;
+                pass = validate_tensors(gpu_out, ref_out, q_rtol, q_atol,
+                                        "sparge_sage vs dequant ref");
+            }
+        }
+    }
     else if(api == "sparge" && mode == sparse_attn_mode::group)
     {
         // Sparge group: per-seq lengths -> packed Q/K/V/O -> dispatch (preprocess +
@@ -1812,6 +2117,339 @@ sparse_attn_result sparse_attn_fwd_run(
                 pass = pass && sub_pass;
             }
             std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;
+        }
+    }
+    else if(api == "sparge_sage" && mode == sparse_attn_mode::group)
+    {
+        if constexpr(!std::is_same_v<T, ck_tile::bf16_t>)
+        {
+            std::cout << ", sparge_sage requires -prec=bf16" << std::flush << std::endl;
+            return sparse_attn_result::skipped;
+        }
+        else
+        {
+            if(qscale != "perwarp" && qscale != "blockscale" && qscale != "perthread" &&
+               qscale != "pertensor")
+            {
+                std::cerr << "error: -qscale must be perwarp|blockscale|perthread|pertensor for "
+                             "sparge_sage, got '" << qscale << "'\n";
+                return sparse_attn_result::failure;
+            }
+            if(!i_perm || !o_perm)
+            {
+                std::cout << ", sparge_sage group: requires iperm=operm=1" << std::flush
+                          << std::endl;
+                return sparse_attn_result::skipped;
+            }
+            // sparge_sage bias scope: NO_BIAS / ALIBI / ELEMENTWISE_BIAS (see batch branch).
+            bias_info bi_sage = bias_info::decode(bias_str);
+            if(bi_sage.type == bias_enum::alibi && causal_type == 0)
+            {
+                std::cout << ", sparge_sage: alibi requires a causal mask (-mask=t/b)"
+                          << std::flush << std::endl;
+                return sparse_attn_result::skipped;
+            }
+
+            const bool mode_is_topk = (sparge_mode == "topk");
+            const float scalar_topk = mode_is_topk ? (1.0f - sparsity) : 0.0f;
+            const float scalar_cdf  = mode_is_topk ? 0.0f : (1.0f - sparsity);
+
+            ck_tile::sparge_hyperparam_args hp;
+            hp.cdfthreshd   = scalar_cdf;
+            hp.topk         = scalar_topk;
+            hp.simthreshold = 0.0f;
+            hp.smooth_k     = false;
+
+            // Per-batch lengths (same scaffolding as the sparge/vsa group branches).
+            const int32_t sq_min = std::max(int32_t{block_size}, seqlen_q / 2);
+            const int32_t sk_min = std::max(int32_t{block_size}, seqlen_k / 2);
+            const int32_t sq_avg = (sq_min + seqlen_q) / 2;
+            const int32_t sk_avg = (sk_min + seqlen_k) / 2;
+            auto seqlen_qs = generate_seqlens_group(batch, sq_avg, sq_min, seqlen_q, seed + 300);
+            auto seqlen_ks = (seqlen_q == seqlen_k && sq_min == sk_min)
+                                 ? seqlen_qs
+                                 : generate_seqlens_group(batch, sk_avg, sk_min, seqlen_k,
+                                                          seed + 301);
+            const auto seqstart_q_host = to_seqstarts(seqlen_qs);
+            const auto seqstart_k_host = to_seqstarts(seqlen_ks);
+            const int32_t total_q = seqstart_q_host.back();
+            const int32_t total_k = seqstart_k_host.back();
+
+            // Packed bf16 Q/K and bf16 V (V then host-quantized to FP8 per-batch/channel).
+            auto q_packed = make_qkv_tensor<T>(1, nhead,   total_q, hdim_q, i_perm);
+            auto k_packed = make_qkv_tensor<T>(1, nhead_k, total_k, hdim_q, i_perm);
+            auto v_packed = make_qkv_tensor<T>(1, nhead_k, total_k, hdim_v, i_perm);
+            auto o_packed = ck_tile::HostTensor<T>({1, nhead, total_q, hdim_v});
+            ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed}(q_packed);
+            ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed + 1}(k_packed);
+            ck_tile::FillUniformDistribution<T>{-0.5f, 0.5f, seed + 2}(v_packed);
+
+            // Host-quantize packed V to FP8 with per-(batch,channel) descale (sageattn-style
+            // prequant). The packed V is [1, Hk, total_k, Dv]; index token = seqstart_k + s within
+            // batch b. v_descale is [batch, nhead_k, hdim_v] (per-batch channel scale).
+            const float fp8_max =
+                ck_tile::type_convert<float>(ck_tile::numeric<ck_tile::fp8_t>::max());
+            ck_tile::HostTensor<ck_tile::fp8_t> v_fp8({1, nhead_k, total_k, hdim_v});
+            ck_tile::HostTensor<float> v_descale({batch, nhead_k, hdim_v});
+            ck_tile::HostTensor<T> v_dequant({1, nhead_k, total_k, hdim_v});
+            for(int32_t b = 0; b < batch; ++b)
+                for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                    for(ck_tile::index_t dv = 0; dv < hdim_v; ++dv)
+                    {
+                        const int32_t s0 = seqstart_k_host[b];
+                        const int32_t sk = seqlen_ks[b];
+                        float amax = 0.0f;
+                        for(int32_t s = 0; s < sk; ++s)
+                            amax = std::max(amax,
+                                std::abs(to_float_for_compare(v_packed(0, h, s0 + s, dv))));
+                        const float sc = (amax > 0.0f) ? amax / fp8_max : 1.0f;
+                        v_descale(b, h, dv) = sc;
+                        for(int32_t s = 0; s < sk; ++s)
+                        {
+                            const float vv = to_float_for_compare(v_packed(0, h, s0 + s, dv));
+                            const auto q8 = ck_tile::type_convert<ck_tile::fp8_t>(vv / sc);
+                            v_fp8(0, h, s0 + s, dv) = q8;
+                            v_dequant(0, h, s0 + s, dv) = ck_tile::type_convert<T>(
+                                ck_tile::type_convert<float>(q8) * sc);
+                        }
+                    }
+
+            // Bias addressed as float. ALIBI: rank-1 [nhead] slopes shared across sub-batches.
+            // ELEMENTWISE: dense [1,1,maxSq,maxSk] shared plane (rank-0 default); each sub-batch
+            // reads + validates its own [sq,sk] slice.
+            auto bs_sage = setup_bias<float>(bi_sage, batch, nhead, seqlen_q, seqlen_k,
+                                             causal_type, seed + 500, "sparge_sage");
+
+            float ave = -1.0f;
+            try
+            {
+                ave = sparge_sage_sparse_attention<T>(
+                    q_packed, k_packed, v_fp8, v_descale, o_packed,
+                    batch, nhead, nhead_k, seqlen_q, seqlen_k, hdim_q, hdim_v,
+                    i_perm, o_perm, hp, block_size, scale_s_user,
+                    causal_type, mask_decoded.left, mask_decoded.right,
+                    static_cast<int>(mask_decoded.type), stream_config, qscale,
+                    seqlen_qs, seqlen_ks,
+                    bs_sage.args.type, bs_sage.args.ptr, bs_sage.args.stride_bias,
+                    bs_sage.args.nhead_stride_bias, bs_sage.args.batch_stride_bias,
+                    sage_data_type);
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "\nError: " << e.what() << std::endl;
+                return sparse_attn_result::failure;
+            }
+            if(ave < 0)
+            {
+                std::cout << ", not supported yet" << std::flush << std::endl;
+                return sparse_attn_result::skipped;
+            }
+            ave_time = ave;
+            std::cout << ", sq:" << format_int_vec(seqlen_qs)
+                      << ", sk:" << format_int_vec(seqlen_ks) << std::flush;
+
+            if(do_validation)
+            {
+                pass = true;
+                // Faithful per-qscale granularity (tokens per scale) for the dequant reference:
+                //   perwarp 32/64, perthread 4/16, blockscale 128/128, pertensor = whole sequence.
+                const bool qs_pertensor = (qscale == "pertensor");
+                const ck_tile::index_t gran_q =
+                    (qscale == "perthread") ? 4 : (qscale == "blockscale") ? 128 : 32;
+                const ck_tile::index_t gran_k =
+                    (qscale == "perthread") ? 16 : (qscale == "blockscale") ? 128 : 64;
+                const ck_tile::index_t scales_per_blk_q = block_size / gran_q;
+                const ck_tile::index_t scales_per_blk_k = block_size / gran_k;
+                for(int32_t b = 0; b < batch; ++b)
+                {
+                    const int32_t sq = seqlen_qs[b];
+                    const int32_t sk = seqlen_ks[b];
+                    auto q_b = slice_packed_to_b1(q_packed, seqstart_q_host[b], sq, nhead,
+                                                  hdim_q, i_perm);
+                    auto k_b = slice_packed_to_b1(k_packed, seqstart_k_host[b], sk, nhead_k,
+                                                  hdim_q, i_perm);
+                    auto o_b = slice_packed_to_b1(o_packed, seqstart_q_host[b], sq, nhead,
+                                                  hdim_v, o_perm);
+
+                    auto q_ref_b = to_bhsd(q_b, i_perm);
+                    auto k_ref_b = to_bhsd(k_b, i_perm);
+                    ck_tile::sparge_block_predict_params rp;
+                    rp.cdfthreshd   = scalar_cdf;
+                    rp.topk         = scalar_topk;
+                    rp.simthreshold = 0.0f;
+                    rp.attention_sink = false;
+                    rp.smooth_k       = false;
+                    rp.scale          = scale;
+                    ck_tile::sparge_causal_params cp;
+                    cp.causal_type  = causal_type;
+                    cp.window_left  = mask_decoded.left;
+                    cp.window_right = mask_decoded.right;
+                    auto cpu_mask_b = ck_tile::reference_sparge_mask_prediction<T>(
+                        q_ref_b, k_ref_b, /*batch=*/1, nhead, nhead_k, sq, sk,
+                        hdim_q, block_size, block_size, rp, cp);
+
+                    // Dequantize Q/K of this sub-batch with the kernel's quant granularity for this
+                    // qscale (INT8: absmax/127, fp8: absmax/fp8_max + fp8 round-trip). PERTENSOR uses
+                    // one global scale per sequence/head (the group packed-quant scope per (seq,h)).
+                    ck_tile::HostTensor<T> q_deq({1, nhead, sq, hdim_q});
+                    ck_tile::HostTensor<T> k_deq({1, nhead_k, sk, hdim_q});
+                    if(qs_pertensor)
+                    {
+                        ck_tile::HostTensor<float> q_sc({1, nhead});
+                        ck_tile::HostTensor<float> k_sc({1, nhead_k});
+                        if(sage_qk_fp8)
+                        {
+                            ck_tile::HostTensor<float> q_qf({1, nhead, sq, hdim_q});
+                            ck_tile::HostTensor<float> k_qf({1, nhead_k, sk, hdim_q});
+                            ck_tile::reference_sparge_global_quant_fp8<T>(
+                                q_ref_b, 1, nhead, sq, hdim_q, q_qf, q_sc);
+                            ck_tile::reference_sparge_global_quant_fp8<T>(
+                                k_ref_b, 1, nhead_k, sk, hdim_q, k_qf, k_sc);
+                            for(ck_tile::index_t h = 0; h < nhead; ++h)
+                                for(int32_t s = 0; s < sq; ++s)
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        q_deq(0, h, s, d) = ck_tile::type_convert<T>(
+                                            q_qf(0, h, s, d) * q_sc(0, h));
+                            for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                                for(int32_t s = 0; s < sk; ++s)
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        k_deq(0, h, s, d) = ck_tile::type_convert<T>(
+                                            k_qf(0, h, s, d) * k_sc(0, h));
+                        }
+                        else
+                        {
+                            ck_tile::HostTensor<int8_t> q_i8({1, nhead, sq, hdim_q});
+                            ck_tile::HostTensor<int8_t> k_i8({1, nhead_k, sk, hdim_q});
+                            ck_tile::reference_sparge_global_quant<T>(
+                                q_ref_b, 1, nhead, sq, hdim_q, q_i8, q_sc);
+                            ck_tile::reference_sparge_global_quant<T>(
+                                k_ref_b, 1, nhead_k, sk, hdim_q, k_i8, k_sc);
+                            for(ck_tile::index_t h = 0; h < nhead; ++h)
+                                for(int32_t s = 0; s < sq; ++s)
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        q_deq(0, h, s, d) = ck_tile::type_convert<T>(
+                                            static_cast<float>(q_i8(0, h, s, d)) * q_sc(0, h));
+                            for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                                for(int32_t s = 0; s < sk; ++s)
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        k_deq(0, h, s, d) = ck_tile::type_convert<T>(
+                                            static_cast<float>(k_i8(0, h, s, d)) * k_sc(0, h));
+                        }
+                    }
+                    else
+                    {
+                        const ck_tile::index_t nbs_q =
+                            ((sq + block_size - 1) / block_size) * scales_per_blk_q;
+                        const ck_tile::index_t nbs_k =
+                            ((sk + block_size - 1) / block_size) * scales_per_blk_k;
+                        ck_tile::HostTensor<float> q_sc({1, nhead, nbs_q});
+                        ck_tile::HostTensor<float> k_sc({1, nhead_k, nbs_k});
+                        if(sage_qk_fp8)
+                        {
+                            ck_tile::HostTensor<float> q_qf({1, nhead, sq, hdim_q});
+                            ck_tile::HostTensor<float> k_qf({1, nhead_k, sk, hdim_q});
+                            ck_tile::reference_sparge_rowwise_quant_fp8<T>(
+                                q_ref_b, 1, nhead, sq, hdim_q, block_size, gran_q, q_qf, q_sc);
+                            ck_tile::reference_sparge_rowwise_quant_fp8<T>(
+                                k_ref_b, 1, nhead_k, sk, hdim_q, block_size, gran_k, k_qf, k_sc);
+                            for(ck_tile::index_t h = 0; h < nhead; ++h)
+                                for(int32_t s = 0; s < sq; ++s)
+                                {
+                                    const ck_tile::index_t blk = s / block_size;
+                                    const ck_tile::index_t g   = (s % block_size) / gran_q;
+                                    const float sc = q_sc(0, h, blk * scales_per_blk_q + g);
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        q_deq(0, h, s, d) =
+                                            ck_tile::type_convert<T>(q_qf(0, h, s, d) * sc);
+                                }
+                            for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                                for(int32_t s = 0; s < sk; ++s)
+                                {
+                                    const ck_tile::index_t blk = s / block_size;
+                                    const ck_tile::index_t g   = (s % block_size) / gran_k;
+                                    const float sc = k_sc(0, h, blk * scales_per_blk_k + g);
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        k_deq(0, h, s, d) =
+                                            ck_tile::type_convert<T>(k_qf(0, h, s, d) * sc);
+                                }
+                        }
+                        else
+                        {
+                            ck_tile::HostTensor<int8_t> q_i8({1, nhead, sq, hdim_q});
+                            ck_tile::HostTensor<int8_t> k_i8({1, nhead_k, sk, hdim_q});
+                            ck_tile::reference_sparge_rowwise_quant<T>(
+                                q_ref_b, 1, nhead, sq, hdim_q, block_size, gran_q, q_i8, q_sc);
+                            ck_tile::reference_sparge_rowwise_quant<T>(
+                                k_ref_b, 1, nhead_k, sk, hdim_q, block_size, gran_k, k_i8, k_sc);
+                            for(ck_tile::index_t h = 0; h < nhead; ++h)
+                                for(int32_t s = 0; s < sq; ++s)
+                                {
+                                    const ck_tile::index_t blk = s / block_size;
+                                    const ck_tile::index_t g   = (s % block_size) / gran_q;
+                                    const float sc = q_sc(0, h, blk * scales_per_blk_q + g);
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        q_deq(0, h, s, d) = ck_tile::type_convert<T>(
+                                            static_cast<float>(q_i8(0, h, s, d)) * sc);
+                                }
+                            for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                                for(int32_t s = 0; s < sk; ++s)
+                                {
+                                    const ck_tile::index_t blk = s / block_size;
+                                    const ck_tile::index_t g   = (s % block_size) / gran_k;
+                                    const float sc = k_sc(0, h, blk * scales_per_blk_k + g);
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                        k_deq(0, h, s, d) = ck_tile::type_convert<T>(
+                                            static_cast<float>(k_i8(0, h, s, d)) * sc);
+                                }
+                        }
+                    }
+
+                    // dequantized V slice (BHSD) for this batch.
+                    ck_tile::HostTensor<T> v_deq_b({1, nhead_k, sk, hdim_v});
+                    for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                        for(int32_t s = 0; s < sk; ++s)
+                            for(ck_tile::index_t dv = 0; dv < hdim_v; ++dv)
+                                v_deq_b(0, h, s, dv) =
+                                    v_dequant(0, h, seqstart_k_host[b] + s, dv);
+
+                    auto gpu_out_b = to_bhsd(o_b, o_perm);
+                    ck_tile::HostTensor<T> ref_out({1, nhead, sq, hdim_v});
+                    if(bi_sage.type == bias_enum::alibi)
+                    {
+                        using BiasT = float;
+                        auto alibi_dense = alibi_to_dense<BiasT>(
+                            bs_sage.alibi_slopes_host, nhead, sq, sk);
+                        ck_tile::reference_blocked_attention<T, uint8_t, BiasT>(
+                            q_deq, k_deq, v_deq_b, cpu_mask_b, ref_out, block_size, block_size,
+                            scale, causal_type, mask_decoded.left, mask_decoded.right,
+                            /*logits_soft_cap=*/0.0f, &alibi_dense, /*bias_rank=*/1);
+                    }
+                    else if(bi_sage.type == bias_enum::elementwise_bias)
+                    {
+                        using BiasT = float;
+                        auto bias_b = slice_elementwise_bias_to_b1<BiasT>(
+                            *bs_sage.elementwise_host, bi_sage.rank_info, b, nhead, sq, sk);
+                        ck_tile::reference_blocked_attention<T, uint8_t, BiasT>(
+                            q_deq, k_deq, v_deq_b, cpu_mask_b, ref_out, block_size, block_size,
+                            scale, causal_type, mask_decoded.left, mask_decoded.right,
+                            /*logits_soft_cap=*/0.0f, &bias_b, bi_sage.rank_info);
+                    }
+                    else
+                    {
+                        ck_tile::reference_blocked_attention<T, uint8_t>(
+                            q_deq, k_deq, v_deq_b, cpu_mask_b, ref_out, block_size, block_size,
+                            scale, causal_type, mask_decoded.left, mask_decoded.right,
+                            /*logits_soft_cap=*/0.0f);
+                    }
+                    const double g_rtol = sage_qk_fp8 ? 0.15 : 0.1;
+                    const double g_atol = sage_qk_fp8 ? 0.18 : 0.07;
+                    bool sub_pass = validate_tensors(
+                        gpu_out_b, ref_out, g_rtol, g_atol,
+                        std::string("sparge_sage group sub-batch ") + std::to_string(b));
+                    pass = pass && sub_pass;
+                }
+                std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;
+            }
         }
     }
     else

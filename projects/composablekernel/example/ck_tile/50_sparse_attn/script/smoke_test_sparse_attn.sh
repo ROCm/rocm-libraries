@@ -228,6 +228,49 @@ done
 done
 
 # ============================================================================
+# SpargeAttention-Sage (quantized) tests
+# sparge block selection + SageAttention quantization (INT8/FP8 QK + per-channel
+# FP8 V). bf16 ONLY (-prec=fp16 is rejected by the wrapper). Requires gfx950/MI350.
+# ============================================================================
+echo ""
+echo "=== SpargeAttention-Sage (quantized) ==="
+for qkdtype in int8 fp8 ; do
+for qscale in perwarp blockscale perthread pertensor ; do
+for perm in 0 1 ; do
+    # no mask
+    run_exe $COMMON_ARGS -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=1 -h=4 -d=128 -s=4096 -sparsity=0.5 -iperm=$perm -operm=$perm
+    # Top-left causal
+    run_exe $COMMON_ARGS -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=1 -h=4 -d=128 -s=4096 -sparsity=0.5 -mask=t -iperm=$perm -operm=$perm
+    # GQA
+    run_exe $COMMON_ARGS -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=1 -h=8 -h_k=2 -d=128 -s=4096 -sparsity=0.5 -iperm=$perm -operm=$perm
+    # Elementwise bias rank=1
+    run_exe $COMMON_ARGS -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=e:1 -iperm=$perm -operm=$perm
+    # ALIBI (requires causal mask)
+    run_exe $COMMON_ARGS -api=sparge_sage -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=2 -h=4 -d=128 -s=2048 -sparsity=0.5 -bias=a -mask=t -iperm=$perm -operm=$perm
+done
+done
+done
+
+# ============================================================================
+# Sparge-Sage group tests (s=1024 keeps CPU mask reference tractable per sub-batch)
+# bf16 ONLY; requires gfx950/MI350.
+# ============================================================================
+echo ""
+echo "=== Sparge-Sage group ==="
+for qkdtype in int8 fp8 ; do
+for qscale in perwarp pertensor ; do
+for perm in 0 1 ; do
+    # no mask
+    run_exe $COMMON_ARGS -api=sparge_sage -mode=1 -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -iperm=$perm -operm=$perm
+    # Top-left causal
+    run_exe $COMMON_ARGS -api=sparge_sage -mode=1 -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=2 -h=4 -d=128 -s=1024 -sparsity=0.5 -mask=t -iperm=$perm -operm=$perm
+    # GQA
+    run_exe $COMMON_ARGS -api=sparge_sage -mode=1 -prec=bf16 -qkdtype=$qkdtype -qscale=$qscale -b=2 -h=8 -h_k=2 -d=128 -s=1024 -sparsity=0.5 -iperm=$perm -operm=$perm
+done
+done
+done
+
+# ============================================================================
 # Summary
 # ============================================================================
 # ============================================================================

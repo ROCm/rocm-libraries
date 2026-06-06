@@ -7,6 +7,10 @@
 
 namespace ck_tile {
 
+// Guard against the identical definition in tile_sageattn_shape.hpp when both headers land in
+// one TU (e.g. sparge_sage, which mixes fmha + sageattention shapes).
+#ifndef CK_TILE_CEIL_TO_QUALIFIED_TILE_LENGTH_DEFINED
+#define CK_TILE_CEIL_TO_QUALIFIED_TILE_LENGTH_DEFINED
 template <index_t Headdim>
 static CK_TILE_HOST_DEVICE constexpr index_t ceil_to_qualified_tile_length()
 {
@@ -26,6 +30,7 @@ static CK_TILE_HOST_DEVICE constexpr index_t ceil_to_qualified_tile_length()
         static_assert(Headdim == 0,
                       "only Headdim of 48, 96, 160, 192 and power-of-two is supported");
 };
+#endif
 
 template <typename BlockTile_, // sequence<...
           typename Gemm0BlockWarps_,
