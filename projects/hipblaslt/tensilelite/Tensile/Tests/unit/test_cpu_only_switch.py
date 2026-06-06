@@ -130,7 +130,6 @@ def test_arg_validation():
 import Tensile.Common.Architectures as Arch
 from Tensile.Common.Types import IsaVersion
 
-
 _ARCH_ISA = {
     "gfx942": IsaVersion(9, 4, 2),
     "gfx950": IsaVersion(9, 5, 0),
@@ -191,6 +190,7 @@ def test_isa_belt_spoof(monkeypatch, _restore_gp, arch):
 def test_isa_primary_path(monkeypatch, _restore_gp):
     """T4: the primary --cpu-only --gpu-targets path builds isaList directly from the
     target arch and never calls detectGlobalCurrentISA."""
+
     # Spy: detection must never be reached on the --gpu-targets path.
     def _no_detect(*a, **k):
         raise AssertionError("detectGlobalCurrentISA called on the --gpu-targets path")
@@ -312,7 +312,8 @@ _SEED_SIZES = [(128, 128, 1, 512), (256, 256, 1, 1024)]
 
 class _ProblemSizesStub:
     """Minimal stand-in for ProblemSizes carrying just ``.problems`` (the attribute the
-    synthetic-CSV writer reads), in ProblemSizesMock style (SolutionStructs/Problem.py)."""
+    synthetic-CSV writer reads), in ProblemSizesMock style (SolutionStructs/Problem.py).
+    """
 
     def __init__(self, sizes):
         self.problems = [Problem(sizes=list(s)) for s in sizes]
@@ -328,7 +329,9 @@ def test_no_side_effects(monkeypatch, _restore_gp, tmp_path):
         raise AssertionError("subprocess.Popen launched the client under CpuOnly")
 
     def _no_run(*a, **k):
-        raise AssertionError("subprocess.run shelled out (pip/hip install) under CpuOnly")
+        raise AssertionError(
+            "subprocess.run shelled out (pip/hip install) under CpuOnly"
+        )
 
     def _no_exe(*a, **k):
         raise AssertionError("getClientExecutablePath called under CpuOnly")
@@ -378,7 +381,8 @@ def test_synthetic_csv_schema(tmp_path, arch, monkeypatch):
     numSolutions = 1
 
     BenchmarkProblems._writeSyntheticResultsCSV(
-        resultsFileName, problemSizes, arch, numSolutions)
+        resultsFileName, problemSizes, arch, numSolutions
+    )
 
     # (1) Writer-side sentinel: the hardcoded perf-unit column must stay "GFlops".
     with open(resultsFileName, newline="") as f:
@@ -467,8 +471,11 @@ def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, a
 
     output_dir = tmp_path / "output"
     args = [
-        str(_E2E_CONFIG), str(output_dir),
-        "--cpu-only", "--gpu-targets", arch,
+        str(_E2E_CONFIG),
+        str(output_dir),
+        "--cpu-only",
+        "--gpu-targets",
+        arch,
         *tensile_args,
     ]
 
@@ -488,7 +495,9 @@ def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, a
 
     # A library-logic artifact exists -> LibraryLogic.main (addFromCSV) ran to completion.
     logic_artifacts = list((output_dir / "3_LibraryLogic").glob("*.yaml"))
-    assert logic_artifacts, "no 3_LibraryLogic artifact produced; addFromCSV did not run"
+    assert (
+        logic_artifacts
+    ), "no 3_LibraryLogic artifact produced; addFromCSV did not run"
 
 
 # --- Tier 3: off-path equivalence (the downstream-trust gate) (commit 6) ---------
@@ -504,14 +513,25 @@ def _make_problem_type():
 
     d = {
         "OperationType": "GEMM",
-        "DataType": "S", "DestDataType": "S", "ComputeDataType": "S",
-        "TransposeA": 0, "TransposeB": 0, "Batched": True, "UseBeta": True,
-        "TotalIndices": 4, "NumIndicesC": 3,
-        "IndicesFree": [0, 1], "IndicesBatch": [2], "IndicesSummation": [3],
-        "IndexAssignmentsA": [0, 3, 2], "IndexAssignmentsB": [3, 1, 2],
-        "ComplexConjugateA": False, "ComplexConjugateB": False,
+        "DataType": "S",
+        "DestDataType": "S",
+        "ComputeDataType": "S",
+        "TransposeA": 0,
+        "TransposeB": 0,
+        "Batched": True,
+        "UseBeta": True,
+        "TotalIndices": 4,
+        "NumIndicesC": 3,
+        "IndicesFree": [0, 1],
+        "IndicesBatch": [2],
+        "IndicesSummation": [3],
+        "IndexAssignmentsA": [0, 3, 2],
+        "IndexAssignmentsB": [3, 1, 2],
+        "ComplexConjugateA": False,
+        "ComplexConjugateB": False,
         "ActivationComputeDataType": "S",
-        "UseBias": 1, "BiasSrc": "D",
+        "UseBias": 1,
+        "BiasSrc": "D",
         "HighPrecisionAccumulate": False,
     }
     return ProblemType.FromOriginalState(d)
@@ -535,16 +555,28 @@ def test_off_path_text_golden(tmp_path, monkeypatch, _restore_gp):
 
     # --- writeRunScript golden (forBenchmark=True) ---
     monkeypatch.setattr(
-        ClientWriter, "getClientExecutablePath", lambda: "/TENSILE_CLIENT_EXE")
+        ClientWriter, "getClientExecutablePath", lambda: "/TENSILE_CLIENT_EXE"
+    )
     build_dir = tmp_path / "build"
     build_dir.mkdir()
-    config_paths = ["/SRC/ClientParameters.ini", "/SRC/ClientParameters_Granularity.ini"]
+    config_paths = [
+        "/SRC/ClientParameters.ini",
+        "/SRC/ClientParameters_Granularity.ini",
+    ]
     run_script = ClientWriter.writeRunScript(
-        str(build_dir), True, False, "hipcc", "hipcc", str(build_dir),
-        configPaths=list(config_paths))
+        str(build_dir),
+        True,
+        False,
+        "hipcc",
+        "hipcc",
+        str(build_dir),
+        configPaths=list(config_paths),
+    )
     produced_sh = Path(run_script).read_text()
     golden_sh = (_TEST_DATA / "cpu_only_runscript.golden.sh").read_text()
-    assert produced_sh == golden_sh, "writeRunScript output drifted from the develop golden"
+    assert (
+        produced_sh == golden_sh
+    ), "writeRunScript output drifted from the develop golden"
 
     # --- writeClientConfigIni golden ---
     class _FactorDimArgs:
@@ -571,7 +603,9 @@ def test_off_path_text_golden(tmp_path, monkeypatch, _restore_gp):
     )
     produced_ini = params_path.read_text().replace(str(source_dir), "/SRC")
     golden_ini = (_TEST_DATA / "cpu_only_clientconfig.golden.ini").read_text()
-    assert produced_ini == golden_ini, "writeClientConfigIni output drifted from the develop golden"
+    assert (
+        produced_ini == golden_ini
+    ), "writeClientConfigIni output drifted from the develop golden"
 
 
 def test_off_path_real_branches(monkeypatch, _restore_gp):
@@ -608,7 +642,9 @@ def test_off_path_real_branches(monkeypatch, _restore_gp):
     monkeypatch.setattr(Tensile, "get_gpu_max_frequency", _hip_ok)
     ran = _run_freq_block()
     assert ran is True, "CpuOnly OFF must enter the real frequency-probe block"
-    assert freq_calls["hip"] == 1, "CpuOnly OFF must call the real get_gpu_max_frequency"
+    assert (
+        freq_calls["hip"] == 1
+    ), "CpuOnly OFF must call the real get_gpu_max_frequency"
 
     # --- Seam 3: runClient takes the real launch path (writeRunScript is reached). ---
     # We don't run the launch GPU-less; we only prove the CpuOnly short-circuit at
@@ -636,5 +672,6 @@ def test_off_path_real_branches(monkeypatch, _restore_gp):
             outputPath=out,
             configPaths=[str(out / "ClientParameters.ini")],
         )
-    assert reached["writeRunScript"] == 1, (
-        "CpuOnly OFF must fall through the runClient stub to the real launch path")
+    assert (
+        reached["writeRunScript"] == 1
+    ), "CpuOnly OFF must fall through the runClient stub to the real launch path"
