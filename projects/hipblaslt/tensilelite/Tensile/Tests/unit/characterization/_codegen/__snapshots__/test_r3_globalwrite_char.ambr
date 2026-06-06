@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_r3_globalwrite_gfx942_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8NBS_BH_SABV_SAV_UserArgs_MT64x6gbgCz0sy3qEKEtyqBGcfmhDsOLaX6htQNyc3z52EJAQ=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8NBS_BH_SABV_SAV_UserArgs_MT64x6nm1yK95E9_AVhejsmdLILLqKObh6iUAh3w3iIB7k-4k=',
+      'err': 0,
+    }),
+  ])
+# ---

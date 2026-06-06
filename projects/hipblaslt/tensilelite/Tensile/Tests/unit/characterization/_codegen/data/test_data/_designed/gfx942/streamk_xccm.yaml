@@ -1,0 +1,76 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R3 designed StreamK-XCCMapping config for gfx942 codegen characterization.
+#
+# Goal: exercise the non-power-of-2 branch in XCCMappingOn.__call__
+# (methodology-A missing range: lines 78-79 of Tensile/Components/StreamK.py).
+#
+# Coverage targets:
+#   Lines 78-79:  XCCMappingOn non-power-of-2 branch
+#                 Condition: (divisor & (divisor - 1)) != 0
+#                 StreamKXCCMapping=3 => 3 & 2 = 2 != 0 => triggers lines 78-79
+#                 which allocate extra temp SGPRs via checkOutAligned(2, 2, "sTmp")
+#   Lines 59-109: XCCMappingOn.__call__ full body (skGrid VReadfirstlane disabled
+#                 on gfx942 since isStreamKConstantsToVgprEnabled=False there)
+#
+# gfx942 supports StreamKXCCMapping ∈ {0, 2, 3, 4, 5, 6, 7, 8}.
+# StreamKXCCMapping=3 is non-power-of-2 (valid values exclude 1).
+# StreamK=[1] with StreamKAtomic=[0] is the minimal sweep.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # SGEMM NT, Batched, XCCMapping=3
+  # StreamKXCCMapping=3 (non-power-of-2) exercises lines 78-79 in XCCMappingOn.__call__
+  # which allocates extra temp SGPRs (checkOutAligned(2, 2, "sTmp")) for the
+  # scalarStaticDivideAndRemainder calls with non-power-of-2 divisors.
+  ########################################
+  -
+    - # ProblemType: SGEMM NT
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: False
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4, 4, 2, 2]
+        - StreamK: [1]
+        - StreamKAtomic: [0]
+        - StreamKXCCMapping: [3]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - DepthU: [16]
+        - LocalReadVectorWidth: [1]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [0]
+        - GlobalSplitU: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - MIArchVgpr: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - StoreRemapVectorWidth: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1024]

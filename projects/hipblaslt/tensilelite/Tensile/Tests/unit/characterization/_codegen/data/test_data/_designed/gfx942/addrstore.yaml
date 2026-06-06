@@ -1,0 +1,76 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Addressing-arms characterization seed config for gfx942 codegen.
+#
+# Target: AsmAddressCalculation.py missing ranges (addressing arms):
+#   - 320-352  : ScaleAlphaVec arm (optSingleColVgpr) -- UseScaleAlphaVec=1
+#   - 382-396  : ScaleAlphaVec arm (optSharedColVgpr) -- UseScaleAlphaVec=1
+#   - 397-410  : ScaleAVec arm     (optSharedColVgpr) -- UseScaleAB="Vector"
+#   - 411-424  : ScaleBVec arm     (optSharedColVgpr) -- UseScaleAB="Vector"
+#   - 452-466  : ScaleAlphaVec arm (else branch)      -- UseScaleAlphaVec=1
+#   - 467-480  : ScaleAVec arm     (else branch)      -- UseScaleAB="Vector"
+#   - 481-494  : ScaleBVec arm     (else branch)      -- UseScaleAB="Vector"
+#
+# Knob family: Address calculation + scaled vector types
+#   - DataType: f8n  (fp8 normalized; enables UseScaleAB="Vector" on gfx942)
+#   - UseScaleAB: "Vector"  gates ScaleAVec (lines 397-410, 467-480) and
+#                           ScaleBVec (lines 411-424, 481-494) arms
+#   - UseScaleAlphaVec: 1   gates ScaleAlphaVec (lines 320-324, 382-396,
+#                           452-466) arms
+#   - MatrixInstruction: 2 MFMA shapes sweep different coordOffset1 ranges:
+#       [16,16,32,1,1,4,4,2,2] -> MT128x128 (MIWaveGroup[1]=2)
+#       [16,16,32,1,1,4,4,4,4] -> MT256x256 (MIWaveGroup[1]=4)
+#     Together they cover different optSingleColVgpr / optSharedColVgpr
+#     branches by varying the element batch structure.
+#
+# 2 emitted kernels (well under <=8 budget).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeScaleA: 21
+  DataInitTypeScaleB: 21
+  DataInitTypeScaleAlphaVec: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # F8NSS (fp8-norm in / fp32 out / fp32 compute) TN
+  # UseScaleAB: Vector + UseScaleAlphaVec: 1 gates AsmAddressCalculation.py
+  # ScaleAVec/ScaleBVec/ScaleAlphaVec addressing arms (lines 320-494).
+  # Two MatrixInstruction shapes sweep optSingleColVgpr / optSharedColVgpr.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8n
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+      Activation: False
+      UseScaleAB: "Vector"
+      UseScaleAlphaVec: 1
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+          - [16, 16, 32, 1, 1, 4, 4, 4, 4]
+        - DepthU: [32]
+        - GlobalSplitU: [1]
+        - SourceSwap: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

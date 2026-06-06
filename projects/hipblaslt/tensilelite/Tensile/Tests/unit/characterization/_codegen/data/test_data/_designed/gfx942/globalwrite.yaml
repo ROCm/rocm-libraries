@@ -1,0 +1,81 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# GlobalWriteBatch.py characterization config for gfx942 codegen.
+#
+# Target: GlobalWriteBatch.py missing ranges 224-331, 374-405, 459-542
+#
+# Design rationale:
+#   - UseScaleAB: "Vector" (ProblemType) gates lines 223-231 (interleaved wait
+#     path UseScaleAB block) and 286-288 (non-interleaved wait path UseScaleAB block)
+#   - UseScaleAlphaVec: 1 gates lines 229-231 (interleaved) and 289-291 (non-interleaved)
+#   - StorePriorityOpt: [0, 1] fork gates alphaBeforeLoadC (line 385) when
+#     MIArchVgpr + beta + (StorePriorityOpt or StoreSyncOpt) are all true
+#   - MIArchVgpr: [1] required for alphaBeforeLoadC path
+#   - The edge=True kernel path (lines 452-455) is exercised by non-multiple free dims
+#     which cause the solver to produce edge batches (any assembly kernel that has
+#     an edge store path exercises lines 452-455, 459-542 on those code paths)
+#   - StoreVectorWidth: [1, 2] varies store width to exercise store-width gates
+#
+# fp8n-bf16 rowwise (UseScaleAB=Vector) shape is the canonical gfx942 rowwise case
+# used in fp8n_rowwise.yaml and gemm_ck_gfx942.yaml.
+#
+# 2 fork permutations (StorePriorityOpt x 2) = 2 kernels (well within limit=8).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeScaleA: 21
+  DataInitTypeScaleB: 21
+  DataInitTypeScaleAlphaVec: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # F8nBS (fp8n-fnuz in / bf16 out / f32 compute) TN
+  # UseScaleAB=Vector gates GlobalWriteBatch.py lines 223-231 (interleaved wait),
+  # 286-288 (non-interleaved wait).
+  # UseScaleAlphaVec=1 gates lines 229-231 and 289-291.
+  # StorePriorityOpt fork gates alphaBeforeLoadC path (lines 385-405).
+  # MIArchVgpr=1 required for alphaBeforeLoadC (KernelWriterAssembly.py:15721).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8n
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      UseScaleAB: "Vector"
+      UseScaleAlphaVec: 1
+      UseBias: 0
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 4, 1, 1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [1]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [1]
+        - MIArchVgpr: [1]
+        - StorePriorityOpt: [0, 1]
+        - StoreRemapVectorWidth: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

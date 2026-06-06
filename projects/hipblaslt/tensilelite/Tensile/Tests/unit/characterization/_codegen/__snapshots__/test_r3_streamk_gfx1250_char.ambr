@@ -1,0 +1,17 @@
+# serializer version: 1
+# name: test_r3_streamk_gfx1250_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgEtIrR_sppeIymflLgX-rc4TMYT2oQQaN02qIqXtYTtk=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgeR_9iLgK-5lspBt7MZODUIiafGb8dumJ_vmzAwc3jGo=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgtBbUsscyUHX30brwsRTnbUO1qIxJVaGG-uI5HxDKBU8=',
+      'err': 0,
+    }),
+  ])
+# ---

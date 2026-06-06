@@ -299,7 +299,8 @@ Stage 1 — coverage efficiency (minimal custom seed set + goldens):
 Stage 2 — coverage expansion:
 - [x] **P4 round 1 (done, 2026-06-06)** cheap standalone/library-mgmt modules. Dynamic workflow `wf_f333c274-b78` (8 Haiku authors) → driver-run **deterministic methodology-A gate** (Part A bulk `-n4` + Part B `cpu_only_switch` isolated + `coverage combine` — avoids a pre-existing `problemTypeToEnum` xdist flake; see `coverage/p4/RANKING-AND-METHODOLOGY.md`). **68.85% → 69.21%** (+0.36 pts, 15723→15492 miss), 6 tests kept (verify_stinky/mergeLogic/benchclient/updatelib/gensummations/retunelib), 2 dropped as 0-marginal (BenchmarkProblems/LibraryLogic). Full `-m unit` 2620 passed / 0 failed / 201 skipped. Receipt `coverage/p4/master-baseline-R1.txt`.
 - [x] **P4 round 2 (done, 2026-06-06)** codegen emit widening. Dynamic workflow `wf_ee11a589-d3b` (12 Sonnet designers, ForkParameters sweeps) → driver deterministic gate. **69.21% → 72.53%** (+3.32 pts, 15492→13470 miss, 2022 lines). 11 tests kept (per-target miss: WorkGroupMapping 364→32, GlobalWriteBatch 787→518, KWA 3987→3558, KW 1879→1664, StreamK 883→685, Subtile 313→155, ShiftVector 293→188, MAC/Activation/LRA/AsmStoreState + gsu/solution/kwconv add 62 via KWA/KW per leave-3-out). 1 dropped (localread, <cutoff). Fixed in-flight: 4 agents committed golden tests without seeding `.ambr` (seeded via `--snapshot-update`). Full `-m unit` 2631 passed / 0 failed / 201 skipped. Receipt `coverage/p4/master-baseline-R2.txt`.
-- [ ] **P4** expansion rounds 3..n (repeat until >=80% or no further gain). **NEXT = round 3** (remaining KWA/KW/Solution/StreamK/GlobalWriteBatch depth + client/run path via the switch; gap to 80% ~7.47 pts).
+- [x] **P4 round 3 (done, 2026-06-06)** deeper codegen + client/run path (switch). Dynamic workflow `wf_85433c15-e08` (14 Sonnet designers, all kept/stable) → driver deterministic gate (4-process: bulk `-n4` + cpu_only + ClientPath + TensileCreateLibraryRun isolated + combine). **72.53% → 75.35%** (+2.82 pts, 13470→11899 miss, 1571 lines). Standouts: LibraryLogic 535→142, LraTileAssignment 279→46, GlobalWriteBatch 518→362, StreamK 685→548, KWA 3558→3383, KW 1664→1555, TensileCreateLibrary/Run 275→197, ClientWriter 221→158. Full `-m unit` 2836 passed / 0 failed / 201 skipped. Receipt `coverage/p4/master-baseline-R3.txt`.
+- [ ] **P4** expansion rounds 4..n (repeat until >=80% or no further gain). **NEXT = round 4** (remaining KWA 3383 / KW 1555 / Solution 1292 / LocalRead 497 / StreamK 548 / GlobalWriteBatch 362 / Activation 279 depth; gap to 80% ~4.65 pts ≈ ~2550 lines). Diminishing returns watch: round deltas +0.36 → +3.32 → +2.82.
 - [ ] **P5** whole-project gate: >=80% or documented ceiling; `golden-governance.md`; `recommendations.md`.
 - [ ] **P6** mutation validation; survivors → P4 backlog; tree clean.
 
@@ -373,6 +374,16 @@ Stage 2 — coverage expansion:
   seed YAMLs relocated under `_codegen/data/test_data/_designed/**` so `findConfigs` (which skips
   `test_data` paths) stops auto-running them through the GPU `Tensile.Tensile()` path — no
   `config_helpers.py` change. Full `-m unit` **2528 passed / 201 skipped / 0 failed**. Commit `ec7524bd1be`.
+- 2026-06-06 — **P4 round 3 — 72.53% → 75.35% (+2.82 pts, 14 candidates / 15 test files), `coverage/p4/master-baseline-R3.txt`.**
+  Deeper codegen + client/run path (switch-enabled) via dynamic workflow `wf_85433c15-e08` (14 Sonnet
+  designers, all kept + two-run-stable; agents seeded their own `.ambr` this round). 1571 lines
+  (13470→11899 miss). Standouts: LibraryLogic 535→142 (the R1 0-gain target, now driven via real
+  analysis), LraTileAssignment 279→46, GlobalWriteBatch 518→362, StreamK 685→548, KWA 3558→3383,
+  KW 1664→1555, TensileCreateLibrary/Run 275→197, ClientWriter 221→158, TensorDataMover 158→108.
+  GSU.py stayed a dead-end on its named target (256, −1; the reduction arms 442-588 need a multi-kernel
+  GSU path the single-config harness can't trigger — a P5 ceiling candidate) but its emit feeds KWA/KW.
+  Gate extended to 4 processes (bulk + cpu_only + ClientPath + TensileCreateLibraryRun isolated) since the
+  two new client-path suites also run full Tensile flows (problemTypeToEnum). 2836 passed / 0 failed / 201 skipped.
 - 2026-06-06 — **P4 round 2 — 69.21% → 72.53% (+3.32 pts, 11 tests), `coverage/p4/master-baseline-R2.txt`.**
   Codegen emit widening via dynamic workflow `wf_ee11a589-d3b` (12 Sonnet ForkParameters designers;
   driver gate+commit). 2022 lines covered (15492→13470 miss). Biggest per-target wins: WorkGroupMapping
