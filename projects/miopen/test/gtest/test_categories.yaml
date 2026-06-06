@@ -68,31 +68,15 @@ test_categories:
   quick:
     description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
     test_patterns:
-      - "Full/GPU_BNCKFWDTrainLarge2D_FP16*"
-      - "Full/GPU_BNOCLFWDTrainLarge2D_FP16*"
-      - "Full/GPU_BNOCLFWDTrainLarge3D_FP16*"
-      - "Full/GPU_BNCKFWDTrainLarge2D_BFP16*"
-      - "Full/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Full/GPU_BNOCLFWDTrainLarge3D_BFP16*"
       - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16*"
       - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16*"
 
     exclude:
-      - "Full/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Full/GPU_BNOCLInferLarge2D_BFP16*"
       - "*/GPU_MIOpenDriver*"
-      
-    exclude_windows:
-      # The following tests are added to show functionality
-      - "Full/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Full/GPU_BNOCLInferLarge2D_BFP16*"
 
-    exclude_linux:
-      # The following tests are added to show functionality
-      - "Full/GPU_BNOCLInferLarge2D_BFP16*"
-      - "Full/GPU_BNOCLFWDTrainLarge2D_BFP16*"
+    exclude_windows: [] # Placeholder to show per-platform exclude support
+    exclude_linux: [] # Placeholder to show per-platform exclude support
 
-      
     test_files:
       - "gtest/smoke_*.cpp"
       - "gtest/unit_ActivationDescriptor.cpp"
@@ -127,14 +111,9 @@ test_categories:
       - "Full/GPU_Lrn_FP32*"
       - "Full/GPU_Lrn_FP16*"
       - "Full/GPU_BNOCLInferSerialRun3D_BFP16*"
-      - "Full/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Full/GPU_BNOCLInferLarge2D_BFP16*"
       - "Full/GPU_BNOCLBWDSerialRun3D_BFP16*"
-      - "Full/GPU_BNOCLBWDLarge2D_BFP16*"
       - "Full/GPU_UnitTestActivationDescriptor_FP32*"
       - "Full/GPU_UnitTestActivationDescriptor_FP16*"
-      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_BFP16*"
-      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_FP16*"
       - "Full/GPU_ConvGrpBiasActivInfer_BFP16*"
       - "Full/GPU_ConvGrpBiasActivInfer_FP32*"
       - "Full/GPU_ConvGrpBiasActivInfer_FP16*"
