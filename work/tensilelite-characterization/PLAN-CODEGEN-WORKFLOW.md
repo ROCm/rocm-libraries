@@ -72,6 +72,17 @@ last `coverage/master-baseline-*.txt` as the current BEFORE, continue at the fir
 item in §8. Exact, reproducible coverage commands live in `coverage-methodology.md` /
 `coverage-methodology.html` — cite them, don't reinvent.
 
+> **⚠️ CURRENT STATE (2026-06-06) — authoritative; read before acting.** **P0, P1, P2, P3 are
+> DONE and committed.** Stage 1 shipped a **widened 15-seed set** spanning multiple ProblemType
+> families for **gfx942 / gfx950 / gfx90a** (not the original "set-cover over existing inputs"
+> nor an all-arch sweep). Current **whole-project ceiling = 35.89%** (seed suite); develop
+> `-m unit` baseline = 22.47%. **NEXT = P4** (Stage-2 expansion). The authoritative status is
+> **§8 (checklist) + §11 (log) + `BASELINE-AND-PROGRESS.md`**. Sections **§4 and §5 below are the
+> ORIGINAL Stage-1/Stage-2 narrative (historical framing)** — their `PHASE 0/1/2/3` numbering
+> predates the §8 `P0–P6` renumber and their "set-cover / all-arch" wording was superseded by the
+> 2026-06-05/06 decisions. Do **not** re-run P0–P3 from §4/§5; start at the first unchecked §8
+> item (P4).
+
 ---
 
 ## 1. Hard rules (carried from PLAN-80 — do not relax)
@@ -88,7 +99,12 @@ item in §8. Exact, reproducible coverage commands live in `coverage-methodology
    register/addr/temp-label numbering) — assembly text is order-coupled via rocisa
    scheduler state (PLAN-80 P2).
 5. **Pin, don't fix, latent bugs.** Snapshot actual current behavior; log in
-   `DECISIONS.md`. Source changes are forbidden.
+   `DECISIONS.md`. Source changes are forbidden — **with one controlled exception: P6 mutation
+   testing** (§5 / WORKFLOW-SPECS P6). Mutants are temporary source edits that live **only inside
+   throwaway per-mutant git worktrees**, are **always reverted**, are **never committed**, and
+   never touch the campaign worktree. After P6 the campaign worktree must be byte-for-byte
+   add-only (`git status --porcelain` shows nothing from mutation). P0.5 (the GPU-mock switch) is
+   *also* source-changing but is a **separate PR/branch**, not part of this add-only campaign.
 
 ---
 
@@ -161,7 +177,7 @@ which are outside codegen) is all that ever needs mocking.
 - Result on the de-risk subset: merged 59.18% / 65.93% across the two core codegen files
   (`KernelWriterAssembly.py` / `KernelWriter.py`) from 4 existing tests.
 
-### PHASE 1 — Coverage-efficiency set (set-cover over existing inputs)  ⏳
+### PHASE 1 — Coverage-efficiency set (set-cover over existing inputs)  ✅ DONE (historical framing — see §8 P1; superseded by the widened seed set)
 - **Goal:** the **smallest set of existing inputs that reproduces the maximum coverage
   reachable from (1) test configs + (2) logic files** — per arch. This is the empirical
   **current ceiling** and the **fast harness** for Stage 2.
@@ -176,7 +192,7 @@ which are outside codegen) is all that ever needs mocking.
   one-line set-cover justification per kept input; full `-m unit` 0 failed.
 - **This phase does NOT add tests to raise coverage** — it only selects and measures.
 
-### PHASE 2 — Generate goldens for the efficiency set  ⏳
+### PHASE 2 — Generate goldens for the efficiency set  ✅ DONE as §8 P3 ({basename,err} goldens, 15 seeds, reproduces 35.89%)
 - **Goal:** record real **inputs/outputs (goldens)** for every input kept in Phase 1, so the
   set becomes a committed, re-runnable characterization suite.
 - **Generate:** one agent per kept input → `--snapshot-update` in-container → snapshot the
@@ -192,7 +208,7 @@ which are outside codegen) is all that ever needs mocking.
 
 ## 5. STAGE 2 — Coverage expansion (iteratively close gaps to ≥80%)
 
-### PHASE 3 — Iteratively close coverage gaps  ⏳ (repeats until target/ceiling)
+### PHASE 3 — Iteratively close coverage gaps  ⏳ = §8 **P4 (NEXT)** (repeats until target/ceiling)
 Each **round** is one workflow run:
 - **Enumerate (rank gaps):** run `--cov-report=term-missing` on the current suite; rank
   uncovered code by missing-statement yield.
