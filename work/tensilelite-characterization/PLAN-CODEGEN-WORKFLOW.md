@@ -51,7 +51,8 @@
 >   (the fast harness). Stage 2 = gap-targeted custom inputs to ≥80% or documented ceiling.
 > - **Scope of this run.** `/orchestration-plan` emitted ready-to-run Dynamic-Workflow plans
 >   for **all remaining phases (now P1–P6)** in `WORKFLOW-SPECS.md`; each phase = one workflow
->   run, gated by a human checkpoint.
+>   run, gated by a machine checkpoint (verification receipt + baseline commit + progress-log
+>   update), with **no human approval between phases** once launched.
 > - **GPU boundary is narrow; one prerequisite PR (P0.5), not an ADD-ONLY relax.** The codegen
 >   emit, **solution derivation** (`_generateForkedSolutions` — CPU-only, like
 >   `parseLibraryLogicFile`), **and TensileCreateLibrary** (a *cross-compiler*: host-side
@@ -114,8 +115,15 @@ item in §8. Exact, reproducible coverage commands live in `coverage-methodology
 ## 2. Orchestration model (every phase = one workflow run)
 
 **One workflow per phase / per expansion round** (separate runs). Workflows take no mid-run
-input, so each ends at its barrier and a **human checkpoint** (full `-m unit` + baseline
-commit) gates the next.
+input, so each ends at its barrier and a **machine checkpoint** (full `-m unit` + baseline
+receipt + scope/clean-tree check + explicit-path commit + §8/§11 update) gates the next. No
+human approval is required between phases. After a phase passes its machine checkpoint, the
+driver/lead immediately launches the next unchecked phase or expansion round.
+
+If a phase cannot pass its machine checkpoint, it must write the named failure/deferred artifact
+(`resistance.md`, `round-<N>-deferred.txt`, `CEILING-FINDINGS.md`, mutation leak report, etc.),
+update §11, commit only safe report artifacts, and return a structured failure/deferred result
+instead of asking for human input.
 
 **Common 4-stage shape:**
 
@@ -224,7 +232,8 @@ Each **round** is one workflow run:
   remainder is provably GPU-only/unreachable (→ `resistance.md`).
 - The Phase-1 efficiency set is what makes each round's re-measure fast.
 
-> Rounds are gap-driven, not a fixed list. Expect several; checkpoint each. Independent work
+> Rounds are gap-driven, not a fixed list. Expect several; each round machine-checkpoints and
+> auto-continues while it is still making progress. Independent work
 > can proceed in parallel across TensileLite's components — the **codegen modules**,
 > **TensileCreateLibrary** (the build system), and the **Tensile(Lite)** tuning workflow —
 > since they touch different code.
@@ -288,8 +297,8 @@ Stage 1 — coverage efficiency (minimal custom seed set + goldens):
 - [x] **P3 (done, 2026-06-06)** goldens for the seed set; fast suite reproduces the P2 ceiling; baseline.
 
 Stage 2 — coverage expansion:
-- [ ] **P4** expansion round 1 (rank whole-project gaps → cheapest input → golden → re-measure delta, marginal-yield).
-- [ ] **P4** expansion rounds 2..n (repeat until >=80% or no further gain).
+- [x] **P4 round 1 (done, 2026-06-06)** cheap standalone/library-mgmt modules. Dynamic workflow `wf_f333c274-b78` (8 Haiku authors) → driver-run **deterministic methodology-A gate** (Part A bulk `-n4` + Part B `cpu_only_switch` isolated + `coverage combine` — avoids a pre-existing `problemTypeToEnum` xdist flake; see `coverage/p4/RANKING-AND-METHODOLOGY.md`). **68.85% → 69.21%** (+0.36 pts, 15723→15492 miss), 6 tests kept (verify_stinky/mergeLogic/benchclient/updatelib/gensummations/retunelib), 2 dropped as 0-marginal (BenchmarkProblems/LibraryLogic). Full `-m unit` 2620 passed / 0 failed / 201 skipped. Receipt `coverage/p4/master-baseline-R1.txt`.
+- [ ] **P4** expansion rounds 2..n (repeat until >=80% or no further gain). **NEXT = round 2 (codegen emit widening — KWA/KW/Solution/Components, the bulk of the ~10.8-pt gap).**
 - [ ] **P5** whole-project gate: >=80% or documented ceiling; `golden-governance.md`; `recommendations.md`.
 - [ ] **P6** mutation validation; survivors → P4 backlog; tree clean.
 
@@ -363,6 +372,19 @@ Stage 2 — coverage expansion:
   seed YAMLs relocated under `_codegen/data/test_data/_designed/**` so `findConfigs` (which skips
   `test_data` paths) stops auto-running them through the GPU `Tensile.Tensile()` path — no
   `config_helpers.py` change. Full `-m unit` **2528 passed / 201 skipped / 0 failed**. Commit `ec7524bd1be`.
+- 2026-06-06 — **P4 round 1 — 68.85% → 69.21% (+0.36 pts, 6 tests), `coverage/p4/master-baseline-R1.txt`.**
+  Cheap standalone/library-mgmt modules via dynamic workflow `wf_f333c274-b78` (8 Haiku authors;
+  driver did the gate+commit, not an Assemble agent — the agent variant returned prematurely on a
+  Monitor). Kept (per-file miss): verify_stinky 101→24, mergeLogic 133→89, benchclient 92→50,
+  updatelib 97→63, gensummations 107→83, retunelib 93→81 (=231 lines). Dropped 2 as 0 whole-project
+  marginal (BenchmarkProblems 111→111, LibraryLogic 535→535 — already full-suite-covered; remain R2/R3
+  targets). Fixed in-flight: an ADD-ONLY violation (mergeLogic tests appended to an existing tracked
+  file → relocated to a new `test_merge_logic_char.py`) and a stray duplicate `test_retunelib_char.py`
+  at `Tests/unit/` root (import-mismatch). **Gate made deterministic** (Part A bulk `-n4` + Part B
+  `cpu_only_switch` isolated + combine) to dodge a **pre-existing latent product flake**:
+  `SolutionStructs/Problem.py:711 problemTypeToEnum()` mutates a ProblemType dict in place
+  (DataType→int), intermittently breaking `cpu_only_end_to_end`'s `F32XdlMathOp.isSingle()` when xdist
+  co-schedules them. Full `-m unit` 2620 passed / 0 failed / 201 skipped.
 - 2026-06-06 — **P3 done.** Recorded order-invariant `{basename,err}` digest goldens (syrupy
   `__snapshots__/*.ambr`) for all 15 seed tests; each golden verified stable across two no-update
   runs. Seed suite reproduces the P2 ceiling exactly: union of the 15 `err==0`
