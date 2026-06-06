@@ -351,14 +351,28 @@ def test_no_side_effects(monkeypatch, _restore_gp, tmp_path):
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx90a"])
-def test_synthetic_csv_schema(tmp_path, arch):
-    """T7 (schema-drift sentinel): the synthetic CSV is fed through the REAL
-    LibraryLogic.addFromCSV and parses without error, yielding the expected perfMetric
-    and one consumed row per seeded problem size. If the client CSV contract changes
-    upstream so that addFromCSV's column expectations drift, this fails."""
-    import Tensile.LibraryLogic as LibraryLogic
+def test_synthetic_csv_schema(tmp_path, arch, monkeypatch):
+    """T7 (schema-drift sentinel): feed the synthetic CSV through the REAL
+    LibraryLogic.addFromCSV and pin two independent contracts.
+
+    (1) Writer side -- the perf-unit column the writer hardcodes. We assert the produced
+        header's column 0 is literally ``GFlops``. Asserting only ``perfMetric`` would be
+        hollow: addFromCSV maps the recognized ``GFlops`` AND any *unrecognized* unit to
+        the same ``DeviceEfficiency`` (LibraryLogic.py:440-446 -- the else fallback), so a
+        drift of the writer's hardcoded unit to e.g. ``TFlops`` would go undetected. The
+        header assert makes writer-side unit drift fail loudly.
+
+    (2) Reader side -- addFromCSV consumes the schema and records one winner per seeded
+        exact size, through the SAME ``UseEffLike=True`` branch the real Tensile flow
+        takes by default (the prior version forced ``UseEffLike=False``, exercising a
+        branch the benchmark path never uses). ``read_max_freq()`` is env-only (reads
+        ``MAX_FREQ``, LibraryLogic.py:1546), not a device probe, so both sub-cases run
+        GPU-less: MAX_FREQ unset -> ``round(GFlops)``; MAX_FREQ set -> ``round(GFlops/freq, 2)``.
+        This pins the synthetic 1000.0 value through the division the default branch does.
+    """
     from Tensile.LibraryLogic import LogicAnalyzer
 
+    GFLOPS = BenchmarkProblems._CPU_ONLY_SYNTHETIC_GFLOPS
     resultsFileName = str(tmp_path / "results.csv")
     problemSizes = _ProblemSizesStub(_SEED_SIZES)
     numSolutions = 1
@@ -366,34 +380,51 @@ def test_synthetic_csv_schema(tmp_path, arch):
     BenchmarkProblems._writeSyntheticResultsCSV(
         resultsFileName, problemSizes, arch, numSolutions)
 
-    # Drive the REAL addFromCSV. Build a lightweight analyzer carrying only the attributes
-    # addFromCSV reads on the exact-size path; the parser logic itself is the real code.
-    analyzer = LogicAnalyzer.__new__(LogicAnalyzer)
-    analyzer.numIndices = len(_SEED_SIZES[0])
-    analyzer.exactProblemSizes = set(_SEED_SIZES)
-    analyzer.rangeProblemSizes = set()
-    analyzer.exactWinners = {}
-    analyzer.perfMetric = None
+    # (1) Writer-side sentinel: the hardcoded perf-unit column must stay "GFlops".
+    with open(resultsFileName, newline="") as f:
+        headerCols = f.readline().rstrip("\n").split(",")
+    assert headerCols[0] == "GFlops"
 
     # solutionMap: CSV solution-column index -> solution id (identity for one solution).
     solutionMap = {i: i for i in range(numSolutions)}
 
-    # UseEffLike must be False so addFromCSV does not call read_max_freq() (a device probe).
-    saved_eff = globalParameters.get("UseEffLike")
-    globalParameters["UseEffLike"] = False
-    try:
+    def _consume():
+        # Fresh analyzer carrying only the attributes addFromCSV reads on the exact-size
+        # path; the parser / winner / perf-metric logic itself is the real code.
+        analyzer = LogicAnalyzer.__new__(LogicAnalyzer)
+        analyzer.numIndices = len(_SEED_SIZES[0])
+        analyzer.exactProblemSizes = set(_SEED_SIZES)
+        analyzer.rangeProblemSizes = set()
+        analyzer.exactWinners = {}
+        analyzer.perfMetric = None
         analyzer.addFromCSV(resultsFileName, numSolutions, solutionMap)
-    finally:
-        globalParameters["UseEffLike"] = saved_eff
+        return analyzer
 
-    # Header row -> perfMetric derived from the "GFlops" unit column.
+    # (2) Reader side on the real-flow branch: UseEffLike=True (the Tensile default).
+    monkeypatch.setitem(globalParameters, "UseEffLike", True)
+
+    # 2a. MAX_FREQ unset -> read_max_freq() returns None -> perf == round(GFlops).
+    monkeypatch.delenv("MAX_FREQ", raising=False)
+    analyzer = _consume()
+    # Recognized "GFlops" unit -> DeviceEfficiency (pinned real by the header assert above,
+    # so this is the recognized branch, not the unrecognized-unit fallback).
     assert analyzer.perfMetric == "DeviceEfficiency"
     # One winner recorded per seeded exact problem size (schema parsed correctly).
     assert set(analyzer.exactWinners.keys()) == set(_SEED_SIZES)
     for size in _SEED_SIZES:
         winnerSolId, perf = analyzer.exactWinners[size]
         assert winnerSolId == 0
-        assert perf == 1000.0
+        assert perf == round(GFLOPS)
+
+    # 2b. MAX_FREQ set -> perf == round(GFlops / freq, 2), pinning the synthetic value
+    #     through the frequency division the default branch performs.
+    monkeypatch.setenv("MAX_FREQ", "200")
+    analyzer = _consume()
+    expected = round(GFLOPS / 200.0, 2)
+    assert set(analyzer.exactWinners.keys()) == set(_SEED_SIZES)
+    for size in _SEED_SIZES:
+        _, perf = analyzer.exactWinners[size]
+        assert perf == expected
 
 
 def test_determinism(tmp_path):
