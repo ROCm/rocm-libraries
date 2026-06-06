@@ -370,6 +370,14 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 # resets it to False between runs/tests.
 globalParameters["CpuOnly"] = False
 
+# Companion plumbing for --cpu-only: the target gfx arch the belt spoof in
+# _detectGlobalCurrentISA returns when the direct ISA-detection path is reached
+# without an arch (e.g. a test calling detectGlobalCurrentISA directly). The primary
+# path supplies the arch via --gpu-targets and never reaches detection. Undocumented;
+# not exposed via --global-parameters. Reset here so restoreDefaultGlobalParameters
+# clears it between runs/tests.
+globalParameters["CpuOnlyArch"] = "gfx942"
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)
