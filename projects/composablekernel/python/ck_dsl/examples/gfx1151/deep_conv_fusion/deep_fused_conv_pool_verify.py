@@ -402,19 +402,23 @@ def main() -> int:
     # geometry.
     parser.add_argument("--pool-tile-h", type=int, default=2)
     parser.add_argument("--pool-tile-w", type=int, default=64)
-    # Warp grid along M/N. conv1 mfmas_n = tile_n/(warp_n*16) and the number of
-    # independent MMA accumulator chains = mfmas_m*mfmas_n. The latency-bound
-    # conv1 GEMM wins from both more chains and amortizing each A-fragment LDS
-    # read across more MMAs. Default 4x1 (mfmas_m=8, mfmas_n=2 -> 16 chains,
-    # 2 MMA/A-read, block_size=128) measured ~+10% bit-exact on the gfx1151 board
-    # vs the old 4x2 (8 chains, mfmas_n=1); 8x1 is the conservative middle (8
-    # chains, 2 MMA/A-read, block_size=256, ~+7%).
-    parser.add_argument("--warp-m", type=int, default=4)
+    # Warp grid along M/N. warp_m = #waves along M (= block_size/32 at warp_n=1).
+    # The latency-bound conv1 iu4 GEMM (~90% of wall) hides its exposed LDS-read
+    # latency with more resident waves/WG, so MORE warps win here (one WG/CU
+    # resident; warps are free latency-hiding). Default 16x1 (block_size=512)
+    # measured best on the gfx1151 board with the full lever stack (native_int +
+    # direct + fused_c0a1 + prefetch_k + sched_fuse, pt2x64/tile_m=512): rotated
+    # 4-round bit-exact A/B 2026-06-06 = 12.22 ms vs 8x1 13.66 ms (+10.5%) vs
+    # 4x1 15.13 ms (+23.8%). NOTE this reverses the older w4x1-best result, which
+    # was measured WITHOUT the fused/ILP levers; with them on, max waves wins.
+    parser.add_argument("--warp-m", type=int, default=16)
     parser.add_argument("--warp-n", type=int, default=1)
     parser.add_argument(
         "--direct",
-        action="store_true",
-        help="use the direct-conv0 footprint-cache A operand (vs im2col)",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="use the direct-conv0 footprint-cache A operand (vs im2col); "
+        "DEFAULT ON (--no-direct for the im2col A path)",
     )
     # multi-lever campaign toggles
     parser.add_argument(
@@ -473,10 +477,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--native-int",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="conv0 uses the native wmma_i32_16x16x16_iu8 atom (raw int8 -> i8 "
         "LDS -> exact i32 acc) instead of the fp16-emulation path; conv1 uses "
-        "native packed-int4 WMMA when available",
+        "native packed-int4 WMMA when available. DEFAULT ON "
+        "(--no-native-int for the fp16-emulation path)",
     )
     parser.add_argument(
         "--batch-loads",
@@ -506,21 +512,35 @@ def main() -> int:
     parser.add_argument(
         "--conv1-prefetch-k",
         dest="conv1_prefetch_k",
-        action="store_true",
-        default=False,
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Lever 4: conv1 cross-k-step fragment prefetch (load all k-step A/B "
         "frags up front so k=1 ds_read latency overlaps k=0 MMAs); native-int "
-        "byte-coded conv1 path only, correctness-neutral (A/B candidate)",
+        "conv1 path only, correctness-neutral. DEFAULT ON; MUST pair with "
+        "--conv1-sched-fuse (alone it is unstable) (--no-conv1-prefetch-k to off)",
     )
     parser.add_argument(
         "--conv1-sched-fuse",
         dest="conv1_sched_fuse",
-        action="store_true",
-        default=False,
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Lever 5: conv1 fused k-step schedule group (one DS_READ+MFMA group "
         "over all k-steps instead of per-step barriers, letting the scheduler "
-        "overlap k=1 loads with k=0 MMAs); native-int byte-coded conv1 path only, "
-        "correctness-neutral, pairs with --conv1-prefetch-k (A/B candidate)",
+        "overlap k=1 loads with k=0 MMAs); native-int conv1 path only, "
+        "correctness-neutral. DEFAULT ON; pairs with --conv1-prefetch-k "
+        "(--no-conv1-sched-fuse to off)",
+    )
+    parser.add_argument(
+        "--fused-c0a1",
+        dest="fused_c0a1",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="L6: fused conv0->conv1 register handoff via permlanex16 (gfx11 FMHA "
+        "C->A transpose). Reorients conv0 (W0 as WMMA-A) so the acc lands lane=m, "
+        "slot=k0, then transposes k0<->m in-register (permlanex16 + v_perm + "
+        "nibble-pack) into the conv1 A-fragment -- deletes c0_smem, its scatter, "
+        "and the handoff barrier. native-int direct conv0 only. DEFAULT ON "
+        "(--no-fused-c0a1 to off)",
     )
     args = parser.parse_args()
 
@@ -560,6 +580,7 @@ def main() -> int:
         static_direct_kmap=args.static_direct_kmap,
         packed_c0_handoff=args.packed_c0,
         repack_c0=args.repack_c0,
+        fused_c0a1=args.fused_c0a1,
         butterfly_conv01=args.butterfly,
         native_int=args.native_int,
         batch_loads=args.batch_loads,

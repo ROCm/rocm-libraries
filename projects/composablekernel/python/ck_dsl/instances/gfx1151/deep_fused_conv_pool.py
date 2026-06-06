@@ -144,6 +144,24 @@ class Gfx1151DeepFusedConvPoolSpec:
     # cross-WMMA handoff barrier is the expensive part, not the VALU. Kept behind
     # the flag as a documented negative result; do not enable.
     repack_c0: bool = False
+    # L6: fused conv0->conv1 register handoff via permlanex16 (the gfx11 FMHA
+    # C->A transpose). False (default) -> conv0 writes requantized i4 codes to
+    # c0_smem, a full-WG barrier, then conv1 re-reads them (the LDS round-trip IS
+    # the k0<->m transpose). True -> REORIENT conv0 (swap the b.mma operands so
+    # W0 is WMMA-A and the footprint is WMMA-B): the conv0 acc then lands as
+    # acc[k0_row, m_col] with lane->m, slot->k0. We requant each acc atom in
+    # register, then transpose k0<->m WITHOUT LDS using one permlanex16 per word
+    # (swap with the lane^16 partner) + v_perm_b32 byte-interleave + nibble-pack,
+    # producing the conv1 A-fragment <2 x i32> directly in registers. This deletes
+    # c0_smem, its scatter, and barrier 2 -- the cross-WMMA handoff the roofline
+    # probe attributed ~part of the 90% conv1 wall to. The transpose is mandatory
+    # (HW-fixed WMMA lane layouts) but CK's gfx11 pipelines pay it in 3 VALU/word
+    # via the permute network, NOT an LDS round-trip -- falsifying the repack_c0 /
+    # butterfly "ds_bpermute is the only vehicle" assumption. native_int + direct
+    # conv0 only (needs the iu8 acc + iu4 conv1 register frags). Mutually
+    # exclusive with packed_c0_handoff / repack_c0 (all three target the handoff).
+    # Correctness-preserving (same accs, explicit lane transpose). Board A/B pending.
+    fused_c0a1: bool = False
     # L4: butterfly register-fusion of conv0 -> conv1. ANALYZED NON-LEVER on
     # gfx1151 WMMA -- rejected by is_valid_spec (no codegen). The idea was to
     # transpose the conv0 WMMA C-fragment in-register straight into conv1's
@@ -307,6 +325,8 @@ class Gfx1151DeepFusedConvPoolSpec:
             parts.append("pfk")
         if self.conv1_sched_fuse:
             parts.append("schfuse")
+        if self.fused_c0a1:
+            parts.append("fusedc0a1")
         parts.append("i8i4_realquant")
         return kernel_name_join(*parts)
 
@@ -339,6 +359,7 @@ def make_deep_fused_conv_pool_spec(
     static_direct_kmap: bool = False,
     packed_c0_handoff: bool = False,
     repack_c0: bool = False,
+    fused_c0a1: bool = False,
     butterfly_conv01: bool = False,
     native_int: bool = False,
     batch_loads: bool = True,
@@ -391,6 +412,7 @@ def make_deep_fused_conv_pool_spec(
         static_direct_kmap=static_direct_kmap,
         packed_c0_handoff=packed_c0_handoff,
         repack_c0=repack_c0,
+        fused_c0a1=fused_c0a1,
         butterfly_conv01=butterfly_conv01,
         native_int=native_int,
         batch_loads=batch_loads,
@@ -514,6 +536,22 @@ def is_valid_spec(
             return False, "repack_c0 and packed_c0_handoff are mutually exclusive"
         if c.K % 2:
             return False, "repack_c0 requires even conv0 channels"
+    if spec.fused_c0a1:
+        if not (spec.native_int and spec.direct_conv0):
+            return (
+                False,
+                "fused_c0a1 is only implemented for native direct conv0",
+            )
+        if spec.packed_c0_handoff or spec.repack_c0:
+            return (
+                False,
+                "fused_c0a1 is mutually exclusive with packed_c0_handoff/repack_c0",
+            )
+        # The handoff produces one conv1 A-frag per (m-atom, k0-atom). conv0's N
+        # atoms over k0 (mfmas_n) must equal conv1's K atoms (c.K//16), which
+        # holds iff K0 is a whole number of 16-wide WMMA atoms.
+        if spec.problem.conv.K % _WMMA:
+            return False, "fused_c0a1 requires conv0 K0 divisible by 16"
     return True, "ok"
 
 
@@ -1517,6 +1555,122 @@ def _wmma_gemm_conv1_i4_packed_from_lds(
     return accs
 
 
+def _fuse_c0_to_conv1_a_regs(
+    b: IRBuilder,
+    op0,
+    accs0: Sequence[Value],
+    grid: WarpGrid,
+    code_fn,
+) -> List[List[Value]]:
+    """In-register conv0->conv1 handoff (the fused_c0a1 transpose).
+
+    Consumes the REORIENTED conv0 accumulators (``acc[k0, m]``: lane ``L`` holds
+    ``m = m_atom_base + L%16``; slot ``s``, ``half = L//16`` -> ``k0_local =
+    2s + half``) and produces the conv1 iu4 A-fragments directly in registers,
+    deleting c0_smem, the conv0 scatter, and the handoff barrier.
+
+    For each acc atom ``(mi, kk)`` the 8 i32 slots requant to 8 int4 byte codes
+    of ONE k0 parity; the other parity lives on lane ``L^16``. One
+    ``permlanex16`` per 4-code word fetches the partner, a half-dependent
+    ``select`` orders even/odd k0, ``v_perm_b32`` interleaves the bytes into
+    contiguous k0 order, and the existing nibble-pack builds the ``<2 x i32>``
+    A-fragment (slot0 = k0_local 0..7, slot1 = 8..15). Lane ``L`` and ``L^16``
+    reconstruct identical fragments, satisfying the iu4 A-operand cross-half
+    duplication.
+
+    Returns ``a_frags[mi][kk]`` for ``mi in range(mfmas_m)``, ``kk in
+    range(mfmas_n)`` (conv0 N atoms over k0 == conv1 K atoms).
+    """
+    mfmas_m = grid.mfmas_per_warp_m
+    mfmas_n = grid.mfmas_per_warp_n
+    is_lo = b.cmp_lt(grid.lane, b.const_i32(16))  # half == 0 (wave32)
+    out: List[List[Value]] = [[None] * mfmas_n for _ in range(mfmas_m)]
+    for mi in range(mfmas_m):
+        for kk in range(mfmas_n):
+            acc = accs0[mi * mfmas_n + kk]
+            codes = [code_fn(b.vec_extract(acc, s)) for s in range(op0.c_frag_len)]
+            words = b.bitcast(b.vec_pack(codes, I8), VectorType(I32, 2))
+            lo = b.vec_extract(words, 0)  # this half's k0_local {0,2,4,6}+half
+            hi = b.vec_extract(words, 1)  # this half's k0_local {8,10,12,14}+half
+            plo = b.permlanex16(lo)  # partner half (lane^16)
+            phi = b.permlanex16(hi)
+            e_lo = b.select(is_lo, lo, plo)  # even k0_local 0,2,4,6
+            o_lo = b.select(is_lo, plo, lo)  # odd  k0_local 1,3,5,7
+            e_hi = b.select(is_lo, hi, phi)  # even k0_local 8,10,12,14
+            o_hi = b.select(is_lo, phi, hi)  # odd  k0_local 9,11,13,15
+            # v_perm sources: 0..3 = arg b LSB-first, 4..7 = arg a LSB-first.
+            ord0 = b.byte_perm(o_lo, e_lo, 0x05010400)  # k0_local 0,1,2,3
+            ord1 = b.byte_perm(o_lo, e_lo, 0x07030602)  # k0_local 4,5,6,7
+            ord2 = b.byte_perm(o_hi, e_hi, 0x05010400)  # k0_local 8,9,10,11
+            ord3 = b.byte_perm(o_hi, e_hi, 0x07030602)  # k0_local 12,13,14,15
+            s0 = _pack_i4_codes_to_i32(
+                b, b.bitcast(b.vec_pack([ord0, ord1], I32), VectorType(I8, 8))
+            )
+            s1 = _pack_i4_codes_to_i32(
+                b, b.bitcast(b.vec_pack([ord2, ord3], I32), VectorType(I8, 8))
+            )
+            out[mi][kk] = b.vec_pack([s0, s1], I32)
+    return out
+
+
+def _wmma_gemm_conv1_i4_from_regs(
+    b: IRBuilder,
+    op,
+    a_frags: Sequence[Sequence[Value]],
+    w1_smem: Value,
+    grid: WarpGrid,
+    k_total: int,
+    policy=None,
+    prefetch_k: bool = False,
+    sched_fuse: bool = False,
+) -> List[Value]:
+    """conv1 iu4 GEMM with A from the in-register fused handoff and B (W1) from
+    packed LDS. Twin of :func:`_wmma_gemm_conv1_i4_from_lds` minus the c0_smem
+    A loads/pack -- only the W1 fragments touch LDS now.
+
+    A is already register-resident (the fused handoff), so the only cross-k-step
+    latency to hide is the W1 B-fragment ds_read at k=1. ``prefetch_k`` hoists ALL
+    k-step B loads before any MMA so the k=1 ds_read overlaps the k=0 MMAs;
+    ``sched_fuse`` replaces the per-k-step sched_group_barrier with one combined
+    group after the loop so the post-RA scheduler may pull the k=1 loads ahead of
+    the k=0 MMAs (the per-step barrier otherwise pins them per k-step). Both are
+    pure load/schedule reordering -- identical MMAs/accs, bit-exact."""
+    mfmas_m = grid.mfmas_per_warp_m
+    mfmas_n = grid.mfmas_per_warp_n
+    k_atoms = k_total // _WMMA
+    b_map = op.b_layout()
+    _b_k, b_col = b_map.coord(b, grid.lane, 0)  # b_col = lane % 16
+    warp_n_off = grid.warp_n_off(b)
+    n_ds = mfmas_n  # one 8-byte W1 load per n-atom per k-step
+
+    def load_b(kk: int) -> List[Value]:
+        k_tile_base = b.const_i32(kk * _WMMA)
+        out = []
+        for ni in range(mfmas_n):
+            atom_off = b.add(warp_n_off, b.const_i32(ni * _WMMA))
+            out.append(
+                _load_frag_iu4_packed_from_lds(b, w1_smem, b_col, atom_off, k_tile_base)
+            )
+        return out
+
+    accs = [b.zero_vec(I32, op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    per_step = None if sched_fuse else policy
+
+    b_all = [load_b(kk) for kk in range(k_atoms)] if prefetch_k else None
+    for kk in range(k_atoms):
+        b_cols = b_all[kk] if prefetch_k else load_b(kk)
+        flat = 0
+        for mi in range(mfmas_m):
+            for ni in range(mfmas_n):
+                accs[flat] = b.mma(op, a_frags[mi][kk], b_cols[ni], accs[flat])
+                flat += 1
+        _emit_wmma_k_sched(b, per_step, n_ds, mfmas_m * mfmas_n)
+
+    if sched_fuse:
+        _emit_wmma_k_sched(b, policy, n_ds * k_atoms, mfmas_m * mfmas_n * k_atoms)
+    return accs
+
+
 def _stage_conv1_w1(
     b: IRBuilder,
     spec: Gfx1151DeepFusedConvPoolSpec,
@@ -1863,8 +2017,19 @@ def _wmma_gemm_conv0_direct_int(
     w0_smem: Value,
     grid: WarpGrid,
     policy=None,
+    reorient: bool = False,
 ) -> List[Value]:
-    """Direct native-int conv0: A from raw input footprint, B from i8 W0 LDS."""
+    """Direct native-int conv0: A from raw input footprint, B from i8 W0 LDS.
+
+    With ``reorient`` (the fused_c0a1 handoff) the two WMMA operands are SWAPPED:
+    W0 is fed as the A operand and the footprint as the B operand. Both iu8
+    fragments share the lane->l%16, slot->k_base ABI so the swap is free, but it
+    transposes the accumulator from ``C[m, k0]`` (lane->k0, slot->m) to
+    ``C[k0, m]`` (lane->m, slot->k0) -- the distribution the conv1 iu4 A-fragment
+    needs, so the k0<->m handoff transpose becomes an in-register permlanex16
+    instead of an LDS round-trip. acc atom ``(mi, ni)`` then holds m-atom ``mi``
+    on the lanes and k0-atom ``ni`` in the slots; the math is identical
+    (``acc[k0,m] = sum_c W0[k0,c]*foot[m,c]``), so requant codes are bit-exact."""
     mfmas_m = grid.mfmas_per_warp_m
     mfmas_n = grid.mfmas_per_warp_n
     k_atoms = spec.kpad // _WMMA
@@ -1906,7 +2071,11 @@ def _wmma_gemm_conv0_direct_int(
         flat = 0
         for mi in range(mfmas_m):
             for ni in range(mfmas_n):
-                accs[flat] = b.mma(op, a_rows[mi], b_cols[ni], accs[flat])
+                if reorient:
+                    # Swap operands: W0 -> A (row=k0), footprint -> B (col=m).
+                    accs[flat] = b.mma(op, b_cols[ni], a_rows[mi], accs[flat])
+                else:
+                    accs[flat] = b.mma(op, a_rows[mi], b_cols[ni], accs[flat])
                 flat += 1
         _emit_wmma_k_sched(b, policy, n_ds, mfmas_m * mfmas_n)
     return accs
@@ -2382,7 +2551,13 @@ def build_deep_fused_conv_pool(
     c0_dtype = I8 if spec.native_int else F16
     w1_dtype = I8 if spec.native_int else F16
     c0_cols = c.K // 2 if spec.packed_c0_handoff else c.K
-    c0_smem = b.smem_alloc(c0_dtype, [spec.tile_m, c0_cols], name_hint="C0_smem")
+    # fused_c0a1 hands conv0->conv1 off entirely in registers (permlanex16
+    # transpose), so the C0 LDS tile -- and its scatter + barrier -- are gone.
+    c0_smem = (
+        None
+        if spec.fused_c0a1
+        else b.smem_alloc(c0_dtype, [spec.tile_m, c0_cols], name_hint="C0_smem")
+    )
     # Lever 2: extra packed-byte C0 buffer (2 codes/byte) produced by a lane-local
     # LDS->LDS repack so conv1 loads A as a bitcast instead of packing on load.
     c0_packed_smem = (
@@ -2403,7 +2578,14 @@ def build_deep_fused_conv_pool(
         _stage_conv0_w0_int(b, spec, W0, w0_smem, grid)
         b.sync()
         accs0 = _wmma_gemm_conv0_direct_int(
-            b, spec, op0, a0_smem, w0_smem, grid, policy=policy
+            b,
+            spec,
+            op0,
+            a0_smem,
+            w0_smem,
+            grid,
+            policy=policy,
+            reorient=spec.fused_c0a1,
         )
     elif spec.native_int:
         _stage_conv0_a_int(b, spec, X, a0_smem, grid)
@@ -2458,7 +2640,25 @@ def build_deep_fused_conv_pool(
     # the W1 HBM loads are issued before the conv0 epilogue scatter so their
     # latency overlaps the scatter's VALU/LDS work; a single barrier then gates
     # conv1 on both producers.
-    if spec.native_int:
+    if spec.native_int and spec.fused_c0a1:
+        # In-register handoff: no scatter, no c0_smem, no handoff barrier. Stage
+        # W1 (its global loads overlap the register transpose), build the conv1
+        # A-fragments in registers, then ONE barrier gates conv1 on W1 only.
+        _stage_conv1_w1_packed(b, spec, W1, w1_smem, grid)
+        a_frags = _fuse_c0_to_conv1_a_regs(b, op0, accs0, grid, conv0_code_i8)
+        b.sync()
+        accs1 = _wmma_gemm_conv1_i4_from_regs(
+            b,
+            op1,
+            a_frags,
+            w1_smem,
+            grid,
+            c.K,
+            policy=policy,
+            prefetch_k=spec.conv1_prefetch_k,
+            sched_fuse=spec.conv1_sched_fuse,
+        )
+    elif spec.native_int:
         if spec.early_w1:
             _stage_conv1_w1_packed(b, spec, W1, w1_smem, grid)
             if spec.packed_c0_handoff:

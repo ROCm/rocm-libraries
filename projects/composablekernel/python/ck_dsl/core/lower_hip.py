@@ -1621,6 +1621,29 @@ class _Lowerer:
             f'"+v"({_name(r0)}), "+v"({_name(r1)}));'
         )
 
+    def _op_tile_permlanex16(self, op: Op) -> None:
+        """``v_permlanex16_b32`` swap with the ``lane ^ 16`` partner.
+
+        Selector immediates ``0x76543210``/``0xfedcba98`` request source
+        lane ``L ^ 16`` for every destination lane; ``fi=true`` reads
+        across EXEC so both 16-lane halves see each other. ``old`` is a
+        don't-care (all lanes overwritten) so we reuse the input.
+        """
+        (v,) = op.operands
+        self._emit(
+            f"int {_name(op.result)} = __builtin_amdgcn_permlanex16("
+            f"{_name(v)}, {_name(v)}, 0x76543210u, 0xfedcba98u, false, true);"
+        )
+
+    def _op_tile_byte_perm(self, op: Op) -> None:
+        """``v_perm_b32`` byte shuffle via ``__builtin_amdgcn_perm``."""
+        a, b = op.operands
+        sel = int(op.attrs["sel"]) & 0xFFFFFFFF
+        self._emit(
+            f"int {_name(op.result)} = __builtin_amdgcn_perm("
+            f"{_name(a)}, {_name(b)}, {sel}u);"
+        )
+
     def _op_tile_lane_id(self, op: Op) -> None:
         # Wave64 lane index: ``mbcnt.hi(-1, mbcnt.lo(-1, 0))``. The result
         # is a per-lane i32 in [0, 64).

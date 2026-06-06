@@ -508,6 +508,14 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "amdgcn.permlane32.swap": (
         "declare { i32, i32 } @llvm.amdgcn.permlane32.swap(i32, i32, i1, i1)"
     ),
+    # gfx11 ``v_permlanex16_b32`` — swap each lane with its ``lane ^ 16``
+    # partner within a 32-lane group via a permute network (NOT the LDS
+    # unit). One VALU op; this is the cheap cross-half vehicle CK's gfx11
+    # FMHA pipelines use for the WMMA C->A transpose. Args:
+    # (old, src, sel_lo, sel_hi, fi, bound_ctrl).
+    "amdgcn.permlanex16": (
+        "declare i32 @llvm.amdgcn.permlanex16(i32, i32, i32, i32, i1, i1)"
+    ),
     # gfx950 ``v_mfma_f32_32x32x16_bf16`` — wider MFMA shape (32x32
     # output × 16-K) than the 16x16x32 we use elsewhere. Same FLOPs
     # per cycle (1024 cycles per inst either way at the per-CTA level)
@@ -2494,6 +2502,33 @@ class _Lowerer:
         r0, r1 = op.results
         self._current().emit(f"  {r0.name} = extractvalue {{ i32, i32 }} {tmp}, 0")
         self._current().emit(f"  {r1.name} = extractvalue {{ i32, i32 }} {tmp}, 1")
+
+    def _op_tile_permlanex16(self, op: Op) -> None:
+        """``v_permlanex16_b32`` swap with the ``lane ^ 16`` partner.
+
+        Selectors ``0x76543210``/``0xfedcba98`` request source lane ``L ^ 16``
+        for every destination lane; ``bound_ctrl=true`` writes every lane so
+        the ``old`` operand is a don't-care (we reuse ``src``). Full warps are
+        active so ``fi=false`` suffices for both halves to see each other.
+        """
+        (v,) = op.operands
+        self._need("amdgcn.permlanex16")
+        src = self._operand(v)
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.permlanex16("
+            f"i32 {src}, i32 {src}, i32 1985229328, i32 -19088744, "
+            f"i1 false, i1 true)"
+        )
+
+    def _op_tile_byte_perm(self, op: Op) -> None:
+        """``v_perm_b32`` byte shuffle via ``llvm.amdgcn.perm``."""
+        a, b = op.operands
+        sel = int(op.attrs["sel"]) & 0xFFFFFFFF
+        self._need("amdgcn.perm")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.perm("
+            f"i32 {self._operand(a)}, i32 {self._operand(b)}, i32 {sel})"
+        )
 
     def _op_tile_ds_read_tr16_b64(self, op: Op) -> None:
         """`ds_read_b64_tr_b16` -- gfx950 transpose-read of a 16x16 fp16 tile.
