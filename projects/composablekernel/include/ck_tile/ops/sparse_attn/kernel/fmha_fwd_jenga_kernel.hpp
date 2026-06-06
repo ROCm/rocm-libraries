@@ -373,13 +373,16 @@ struct FmhaFwdJengaKernel
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        return ck_tile::max(FmhaPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
+        // Pipeline/epilogue smem plus staging for block_relation_onehot: each of the
+        // kBlockSize threads stages 4 bools via amd_direct_load_global_to_lds<bool, 4>.
+        return ck_tile::max(FmhaPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize()) +
+               static_cast<ck_tile::index_t>(kBlockSize * 4 * sizeof(bool));
     }
 
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
-        // Extra LDS for staging block_relation_onehot (256 bools); keep 4B alignment for LDS loads.
-        __shared__ char smem_ptr[GetSmemSize() + 256 * sizeof(int)];
+        // GetSmemSize() already includes the block_relation_onehot staging region.
+        __shared__ char smem_ptr[GetSmemSize()];
 
         const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
 
@@ -442,7 +445,9 @@ struct FmhaFwdJengaKernel
             batch_offset_v;
 
         // sparse mask: batch-mode is rectangular [B,H,Qblks,Kblks];
-        // group-mode is packed [H, sum_b(q_blocks[b]*k_blocks[b])] indexed via mask_batch_offset_ptr.
+        // group-mode is batch-outer/head-mid packed: per-batch block [H, q_b*k_b]
+        // (X_b via mask_batch_offset_ptr adjacent diff), blocks concatenated across batch.
+        // new_index = Xstart_b * H + head * X_b + local.
         const bool* block_relation_onehot_ptr = [&]() -> const bool* {
             const auto* base = reinterpret_cast<const bool*>(kargs.block_relation_onehot_ptr);
             if constexpr(kIsGroupMode)
@@ -450,12 +455,13 @@ struct FmhaFwdJengaKernel
                 const index_t k_blocks_b =
                     ck_tile::integer_divide_ceil(seqlen_k_actual, FmhaPipeline::kN0);
                 // WG-uniform; readfirstlane keeps these in SGPR.
-                const long_index_t per_head_size = __builtin_amdgcn_readfirstlane(
-                    kargs.mask_batch_offset_ptr[kargs.batch]);
-                const long_index_t batch_off = __builtin_amdgcn_readfirstlane(
+                const long_index_t xstart_b = __builtin_amdgcn_readfirstlane(
                     kargs.mask_batch_offset_ptr[i_batch]);
+                const long_index_t x_b = __builtin_amdgcn_readfirstlane(
+                    kargs.mask_batch_offset_ptr[i_batch + 1]) - xstart_b;
                 const long_index_t off =
-                    static_cast<long_index_t>(i_nhead) * per_head_size + batch_off +
+                    xstart_b * kargs.num_head_q +
+                    static_cast<long_index_t>(i_nhead) * x_b +
                     static_cast<long_index_t>(i_tile_m) * k_blocks_b;
                 return base + off;
             }

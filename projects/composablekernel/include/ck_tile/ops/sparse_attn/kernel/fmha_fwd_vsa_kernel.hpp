@@ -446,8 +446,10 @@ struct FmhaFwdVSAKernel
             static_cast<long_index_t>(i_nhead / kargs.nhead_ratio_qk) * kargs.nhead_stride_v +
             batch_offset_v;
 
-        // sparse LUT/vbn: batch is rectangular; group is packed
-        // (LUT via lut_batch_offset_ptr, vbn via seqstart_q_block_ptr).
+        // sparse LUT/vbn: batch is rectangular; group is batch-outer/head-mid packed.
+        // Per-batch block is [H, X_b] (LUT X_b = q_b*k_b via lut_batch_offset_ptr,
+        // vbn X_b = q_b via seqstart_q_block_ptr); blocks concatenated across batch.
+        // new_index = Xstart_b * H + head * X_b + local.
         const int* lut_ptr = [&]() -> const int* {
             const auto* base = reinterpret_cast<const int*>(kargs.lut_ptr);
             if constexpr(kIsGroupMode)
@@ -455,12 +457,13 @@ struct FmhaFwdVSAKernel
                 const index_t k_blocks_b =
                     ck_tile::integer_divide_ceil(seqlen_k_actual, FmhaPipeline::kN0);
                 // WG-uniform; readfirstlane keeps these in SGPR.
-                const long_index_t per_head_size = __builtin_amdgcn_readfirstlane(
-                    kargs.lut_batch_offset_ptr[kargs.batch]);
-                const long_index_t batch_off = __builtin_amdgcn_readfirstlane(
+                const long_index_t xstart_b = __builtin_amdgcn_readfirstlane(
                     kargs.lut_batch_offset_ptr[i_batch]);
+                const long_index_t x_b = __builtin_amdgcn_readfirstlane(
+                    kargs.lut_batch_offset_ptr[i_batch + 1]) - xstart_b;
                 const long_index_t off =
-                    static_cast<long_index_t>(i_nhead) * per_head_size + batch_off +
+                    xstart_b * kargs.num_head_q +
+                    static_cast<long_index_t>(i_nhead) * x_b +
                     static_cast<long_index_t>(i_tile_m) * k_blocks_b;
                 return base + off;
             }
@@ -474,28 +477,28 @@ struct FmhaFwdVSAKernel
                            ck_tile::integer_divide_ceil(kargs.seqlen_k, FmhaPipeline::kN0);
             }
         }();
-        const int* valid_block_num_ptr = [&]() -> const int* {
+        const int valid_block_num_value = [&]() -> int {
             const auto* base = reinterpret_cast<const int*>(kargs.valid_block_num_ptr);
             if constexpr(kIsGroupMode)
             {
-                const long_index_t per_head_size = __builtin_amdgcn_readfirstlane(
-                    kargs.seqstart_q_block_ptr[kargs.batch]);
-                const long_index_t batch_off = __builtin_amdgcn_readfirstlane(
+                const long_index_t xstart_b = __builtin_amdgcn_readfirstlane(
                     kargs.seqstart_q_block_ptr[i_batch]);
+                const long_index_t x_b = __builtin_amdgcn_readfirstlane(
+                    kargs.seqstart_q_block_ptr[i_batch + 1]) - xstart_b;
                 const long_index_t off =
-                    static_cast<long_index_t>(i_nhead) * per_head_size + batch_off +
+                    xstart_b * kargs.num_head_q +
+                    static_cast<long_index_t>(i_nhead) * x_b +
                     static_cast<long_index_t>(i_tile_m);
-                return base + off;
+                return base[off];
             }
             else
             {
-                return base +
-                       static_cast<long_index_t>(i_batch * kargs.num_head_q + i_nhead) *
-                           ck_tile::integer_divide_ceil(kargs.seqlen_q, FmhaPipeline::kM0) +
-                       i_tile_m;
+                return base[
+                    static_cast<long_index_t>(i_batch * kargs.num_head_q + i_nhead) *
+                        ck_tile::integer_divide_ceil(kargs.seqlen_q, FmhaPipeline::kM0) +
+                    i_tile_m];
             }
         }();
-        const int valid_block_num_value = valid_block_num_ptr[0];
 
         ODataType* o_ptr = reinterpret_cast<ODataType*>(kargs.o_ptr) +
                            static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_o +

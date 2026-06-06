@@ -303,7 +303,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
             });
             for(index_t o = get_warp_size() / 2; o > 0; o /= 2) // intra-warp max
             {
-                const float v_remote = __shfl_xor(lane_max_diff, o);
+                const float v_remote = warp_shuffle_down(lane_max_diff, static_cast<uint32_t>(o));
                 if(v_remote > lane_max_diff)
                     lane_max_diff = v_remote;
             }
@@ -311,7 +311,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
             const index_t warp_id = ck_tile::get_warp_id();
             if(lane_id == 0)
                 skip_scratch[warp_id] = lane_max_diff;
-            __syncthreads();
+            block_sync_lds();
             float block_max_diff = -ck_tile::numeric<float>::infinity();
             #pragma unroll
             for(index_t w = 0; w < kNumWarps; ++w)

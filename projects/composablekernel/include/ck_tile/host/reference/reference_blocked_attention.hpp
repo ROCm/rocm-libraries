@@ -14,24 +14,6 @@
 
 namespace ck_tile {
 
-template <typename AccT, typename T>
-CK_TILE_HOST_DEVICE constexpr AccT to_acc(T value)
-{
-    if constexpr(std::is_same_v<T, ck_tile::bf16_t>)
-    {
-#if CK_TILE_USE_CUSTOM_DATA_TYPE
-        return static_cast<AccT>(value);
-#else
-        return static_cast<AccT>(
-            ck_tile::bf16_to_float_raw(ck_tile::bit_cast<ck_tile::bf16_raw_t>(value)));
-#endif
-    }
-    else
-    {
-        return static_cast<AccT>(value);
-    }
-}
-
 // Reference implementation: blocked attention (for sparse attention tests).
 template <typename T, typename MaskT, typename BiasT = T, typename AccT = float>
 void reference_blocked_attention(
@@ -143,7 +125,7 @@ void reference_blocked_attention(
                             for(index_t d = 0; d < hdim; ++d)
                             {
                                 score +=
-                                    to_acc<AccT>(q(b, h, sq, d)) * to_acc<AccT>(k(b, hk, sk, d));
+                                    type_convert<AccT>(q(b, h, sq, d)) * type_convert<AccT>(k(b, hk, sk, d));
                             }
                             if(has_soft_cap)
                             {
@@ -154,7 +136,7 @@ void reference_blocked_attention(
                                 score = score * scale;
                                 if(has_bias)
                                 {
-                                    score += to_acc<AccT>((*bias)(bias_b, bias_h, sq, sk));
+                                    score += type_convert<AccT>((*bias)(bias_b, bias_h, sq, sk));
                                 }
                             }
                             scores.push_back(score);
@@ -197,12 +179,12 @@ void reference_blocked_attention(
                                 for(index_t sk = k_start; sk < k_end; ++sk)
                                 {
                                     out_val += scores[score_idx] *
-                                               to_acc<AccT>(v(b, hk, sk, dv));
+                                               type_convert<AccT>(v(b, hk, sk, dv));
                                     score_idx++;
                                 }
                             }
                         }
-                        output(b, h, sq, dv) = static_cast<T>(out_val);
+                        output(b, h, sq, dv) = type_convert<T>(out_val);
                     }
                 }
             }

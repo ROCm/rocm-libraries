@@ -37,17 +37,23 @@ HostTensor<float> compute_block_means(
                 {
                     float sum = 0.0f;
                     for(index_t s = s_start; s < s_end; ++s)
-                        sum += static_cast<float>(data_bhsd(b, h, s, d));
+                        sum += type_convert<float>(data_bhsd(b, h, s, d));
                     means(b, h, blk, d) = sum / static_cast<float>(count);
                 }
             }
     return means;
 }
 
+// Block self-similarity = mean over the full pairwise cosine Gram matrix of the block's
+// tokens, matching upstream SpargeAttn (utils.py: L2-normalize each token, grams=x@x^T,
+// sim = sum(grams)/(BS*BS)). Using the identity
+//   sum_{i,j} <t_i/|t_i|, t_j/|t_j|> = || sum_i (t_i/|t_i|) ||^2
+// we accumulate the unit-vector sum u[d] and report ||u||^2 / count^2. The `means`
+// argument is unused for the Gram formula but kept for signature compatibility.
 template <typename T>
 HostTensor<float> compute_block_similarity(
     const HostTensor<T>& data_bhsd,
-    const HostTensor<float>& means,
+    [[maybe_unused]] const HostTensor<float>& means,
     index_t batch,
     index_t nhead,
     index_t num_blocks,
@@ -63,28 +69,26 @@ HostTensor<float> compute_block_similarity(
                 index_t s_start = blk * block_size;
                 index_t s_end   = std::min(s_start + block_size, seqlen);
                 index_t count   = s_end - s_start;
-                float mean_norm_sq       = 0.0f;
-                for(index_t d = 0; d < hdim; ++d)
-                {
-                    float m = means(b, h, blk, d);
-                    mean_norm_sq += m * m;
-                }
-                float mean_norm = std::sqrt(mean_norm_sq + 1e-8f);
-                float total_sim = 0.0f;
+                std::vector<float> u(static_cast<size_t>(hdim), 0.0f);
                 for(index_t s = s_start; s < s_end; ++s)
                 {
-                    float dot      = 0.0f;
-                    float tok_norm = 0.0f;
+                    float tok_norm_sq = 0.0f;
                     for(index_t d = 0; d < hdim; ++d)
                     {
-                        float v = static_cast<float>(data_bhsd(b, h, s, d));
-                        dot += v * means(b, h, blk, d);
-                        tok_norm += v * v;
+                        float v = type_convert<float>(data_bhsd(b, h, s, d));
+                        tok_norm_sq += v * v;
                     }
-                    tok_norm = std::sqrt(tok_norm + 1e-8f);
-                    total_sim += dot / (tok_norm * mean_norm);
+                    float inv_norm = 1.0f / std::sqrt(tok_norm_sq + 1e-8f);
+                    for(index_t d = 0; d < hdim; ++d)
+                    {
+                        float v = type_convert<float>(data_bhsd(b, h, s, d));
+                        u[static_cast<size_t>(d)] += v * inv_norm;
+                    }
                 }
-                sim(b, h, blk) = total_sim / static_cast<float>(count);
+                float u_norm_sq = 0.0f;
+                for(index_t d = 0; d < hdim; ++d)
+                    u_norm_sq += u[static_cast<size_t>(d)] * u[static_cast<size_t>(d)];
+                sim(b, h, blk) = u_norm_sq / (static_cast<float>(count) * static_cast<float>(count));
             }
     return sim;
 }
@@ -102,13 +106,22 @@ compute_global_k_mean(const HostTensor<T>& k_bhsd,
             {
                 float sum = 0.0f;
                 for(index_t s = 0; s < seqlen_k; ++s)
-                    sum += static_cast<float>(k_bhsd(b, h, s, d));
+                    sum += type_convert<float>(k_bhsd(b, h, s, d));
                 km(b, h, d) = sum / static_cast<float>(seqlen_k);
             }
     return km;
 }
 
-struct sparge_mask_prediction_params
+// Generic inter-token causal / sliding-window masking parameters.
+struct sparge_causal_params
+{
+    int causal_type  = 0;
+    int window_left  = -1;
+    int window_right = -1;
+};
+
+// Q/K block mask-prediction parameters (which K-blocks to select per Q-block).
+struct sparge_block_predict_params
 {
     float cdfthreshd   = 0.0f;
     float topk         = 0.0f;
@@ -118,11 +131,9 @@ struct sparge_mask_prediction_params
     std::vector<float> topk_per_head;
     std::vector<float> simthreshold_per_head;
 
-    int  causal_type    = 0;
-    bool attention_sink = false;
-    int  window_left    = -1;
-    int  window_right   = -1;
-    bool smooth_k       = true;
+    bool  attention_sink = false;
+    bool  smooth_k       = true;
+    float scale          = 0.0f;  // 0 => default 1/sqrt(hdim); else caller-provided
 };
 
 namespace detail {
@@ -144,31 +155,33 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                                index_t hdim,
                                index_t block_size_q,
                                index_t block_size_k,
-                               const sparge_mask_prediction_params& params)
+                               const sparge_block_predict_params& params,
+                               const sparge_causal_params& causal)
 {
     const float topk_scalar       = params.topk;
     const float cdf_scalar        = params.cdfthreshd;
     const float sim_scalar        = params.simthreshold;
-    const int causal_type         = params.causal_type;
+    const int causal_type         = causal.causal_type;
     const bool attention_sink     = params.attention_sink;
-    const int window_left         = params.window_left;
-    const int window_right        = params.window_right;
+    const int window_left         = causal.window_left;
+    const int window_right        = causal.window_right;
 
     index_t num_q_blocks = (seqlen_q + block_size_q - 1) / block_size_q;
     index_t num_k_blocks = (seqlen_k + block_size_k - 1) / block_size_k;
-    float scale          = 1.0f / std::sqrt(static_cast<float>(hdim));
+    float scale          = (params.scale != 0.0f)
+                               ? params.scale
+                               : 1.0f / std::sqrt(static_cast<float>(hdim));
 
     auto q_means = compute_block_means(q_bhsd, batch, nhead, num_q_blocks,
                                        block_size_q, seqlen_q, hdim);
     auto q_sim = compute_block_similarity(q_bhsd, q_means, batch, nhead, num_q_blocks,
                                           block_size_q, seqlen_q, hdim);
 
-    HostTensor<float> k_means({batch, nhead_k, num_k_blocks, hdim});
-    HostTensor<float> k_sim({batch, nhead_k, num_k_blocks});
-    k_means = compute_block_means(k_bhsd, batch, nhead_k, num_k_blocks,
-                                  block_size_k, seqlen_k, hdim);
-    k_sim   = compute_block_similarity(k_bhsd, k_means, batch, nhead_k, num_k_blocks,
+    // Create k_means/k_sim the same way as q_means/q_sim (no extra empty allocation).
+    auto k_means = compute_block_means(k_bhsd, batch, nhead_k, num_k_blocks,
                                        block_size_k, seqlen_k, hdim);
+    auto k_sim   = compute_block_similarity(k_bhsd, k_means, batch, nhead_k, num_k_blocks,
+                                            block_size_k, seqlen_k, hdim);
     if(params.smooth_k)
     {
         const auto km = compute_global_k_mean(k_bhsd, batch, nhead_k, seqlen_k, hdim);
@@ -179,17 +192,17 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                         k_means(b, h, blk, d) -= km(b, h, d);
     }
 
-    HostTensor<float> k_means_exp({batch, nhead, num_k_blocks, hdim});
-    HostTensor<float> k_sim_exp({batch, nhead, num_k_blocks});
+    HostTensor<float> k_means_expand({batch, nhead, num_k_blocks, hdim});
+    HostTensor<float> k_sim_expand({batch, nhead, num_k_blocks});
     for(index_t b = 0; b < batch; ++b)
         for(index_t h = 0; h < nhead; ++h)
         {
             index_t h_k = h / (nhead / nhead_k);
             for(index_t blk = 0; blk < num_k_blocks; ++blk)
             {
-                k_sim_exp(b, h, blk) = k_sim(b, h_k, blk);
+                k_sim_expand(b, h, blk) = k_sim(b, h_k, blk);
                 for(index_t d = 0; d < hdim; ++d)
-                    k_means_exp(b, h, blk, d) = k_means(b, h_k, blk, d);
+                    k_means_expand(b, h, blk, d) = k_means(b, h_k, blk, d);
             }
         }
 
@@ -221,7 +234,9 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                                (first_q - window_left + causal_delta) / block_size_k)
                     : index_t{0};
 
-                if(head_simthreshold > 0.0f && q_sim(b, h, qi) < head_simthreshold)
+                // qi block lacks intra-block similarity: attend all causal-valid K blocks
+                // (official ~sim_qblocks => sim <= threshold)
+                if(head_simthreshold > 0.0f && q_sim(b, h, qi) <= head_simthreshold)
                 {
                     for(index_t kj = 0; kj < num_k_blocks; ++kj)
                         mask(b, h, qi, kj) =
@@ -236,20 +251,25 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                     {
                         row[static_cast<size_t>(kj)] = -1e30f;
                     }
-                    else if(head_simthreshold > 0.0f && k_sim_exp(b, h, kj) < head_simthreshold)
+                    // kj block lacks intra-block similarity: exclude from the softmax
+                    // competition (official pooled_score[~sim_kblocks]=-inf); it is
+                    // force-selected after the loop. ~sim => sim <= threshold.
+                    else if(head_simthreshold > 0.0f && k_sim_expand(b, h, kj) <= head_simthreshold)
                     {
-                        row[static_cast<size_t>(kj)] = 1e6f;
+                        row[static_cast<size_t>(kj)] = -1e30f;
                     }
                     else
                     {
+                        // compute the qi & kj block attention score
                         float dot = 0.0f;
                         for(index_t d = 0; d < hdim; ++d)
-                            dot += q_means(b, h, qi, d) * k_means_exp(b, h, kj, d);
+                            dot += q_means(b, h, qi, d) * k_means_expand(b, h, kj, d);
                         row[static_cast<size_t>(kj)] = dot * scale;
                     }
                 }
 
                 float mx = *std::max_element(row.begin(), row.end());
+                // compute normalized attention probability over K blocks (softmax)
                 std::vector<float> probs(static_cast<size_t>(num_k_blocks));
                 float se = 0.0f;
                 for(index_t kj = 0; kj < num_k_blocks; ++kj)
@@ -280,11 +300,33 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                     auto kj = indices[static_cast<size_t>(idx)];
                     if(causal_type && (kj > causal_max_kj || kj < causal_min_kj))
                         continue;
-                    mask(b, h, qi, kj) = 1;
-                    cum += probs[static_cast<size_t>(kj)];
-                    n_selected++;
-                    if(topk_mode ? (n_selected >= n_target) : (cum >= head_cdfthreshd))
-                        break;
+                    if(topk_mode)
+                    {
+                        mask(b, h, qi, kj) = 1;
+                        if(++n_selected >= n_target)
+                            break;
+                    }
+                    else
+                    {
+                        // official CDF (searchsorted right=True => #{cdf <= thr}): stop
+                        // before the block that pushes the cumulative past cdfthreshd; keep
+                        // at least one.
+                        const float next = cum + probs[static_cast<size_t>(kj)];
+                        if(n_selected != 0 && next > head_cdfthreshd)
+                            break;
+                        mask(b, h, qi, kj) = 1;
+                        cum = next;
+                        ++n_selected;
+                    }
+                }
+
+                // Force-include low-similarity K blocks (official final_map[~sim_kblocks]=1).
+                // They were excluded from the softmax competition above (row=-1e30).
+                if(head_simthreshold > 0.0f)
+                {
+                    for(index_t kj = 0; kj < num_k_blocks; ++kj)
+                        if(k_sim_expand(b, h, kj) <= head_simthreshold)
+                            mask(b, h, qi, kj) = 1;
                 }
 
                 if(attention_sink && num_k_blocks > 0)

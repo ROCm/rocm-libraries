@@ -115,13 +115,145 @@ using fmha_kernel_{F_idx} =
 using trait_{F_idx} = fmha_sparge_fwd_traits_<{F_hdim}, {F_dtype}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
                         {F_pipeline_enum}, {F_logits_cpp}/*logits*/, fmha_mask_{F_idx}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_mode}, {F_bias}>;
 
+// ---- 1. Fused K+Q preprocess callable (both sides' block means + optional sim) ----
+// K and Q are data-independent; fusing them into one launch saves a host kernel dispatch
+// (the dominant cost at short seqlen). Outputs land at the same offsets as the split
+// kernels, so mask-prediction is unchanged. smooth_k is a no-op: km_ptr stays nullptr.
+static auto make_preprocess_callable_{F_idx}(const fmha_sparge_fwd_args& a,
+                                             float* d_k_means,
+                                             float* d_q_means,
+                                             float* d_k_sim,
+                                             float* d_q_sim,
+                                             ck_tile::index_t num_k_blocks,
+                                             ck_tile::index_t num_q_blocks)
+{{
+    using pp_ = typename fmha_kernel_{F_idx}::PreprocessFusedKernel;
+    constexpr bool is_group = trait_{F_idx}::kIsGroupMode;
+
+    ck_tile::SpargePreprocessFusedKargs pp_kargs;
+
+    pp_kargs.k.data         = a.k_ptr;
+    pp_kargs.k.means        = d_k_means;
+    pp_kargs.k.sim          = d_k_sim;
+    pp_kargs.k.batch        = a.batch;
+    pp_kargs.k.nhead        = a.nhead_k;
+    pp_kargs.k.seqlen       = a.seqlen_k;
+    pp_kargs.k.hdim         = a.hdim_q;
+    pp_kargs.k.block_size   = a.pp_block_size;
+    pp_kargs.k.num_blocks   = num_k_blocks;
+    pp_kargs.k.batch_stride = a.batch_stride_k;
+    pp_kargs.k.head_stride  = a.nhead_stride_k;
+    pp_kargs.k.seq_stride   = a.stride_k;
+    pp_kargs.k.simthreshold = a.hp.simthreshold;
+    pp_kargs.k.km_ptr       = nullptr;  // Preprocess emits unsmoothed; SKC subtracts km after.
+
+    pp_kargs.q.data         = a.q_ptr;
+    pp_kargs.q.means        = d_q_means;
+    pp_kargs.q.sim          = d_q_sim;
+    pp_kargs.q.batch        = a.batch;
+    pp_kargs.q.nhead        = a.nhead_q;
+    pp_kargs.q.seqlen       = a.seqlen_q;
+    pp_kargs.q.hdim         = a.hdim_q;
+    pp_kargs.q.block_size   = a.pp_block_size;
+    pp_kargs.q.num_blocks   = num_q_blocks;
+    pp_kargs.q.batch_stride = a.batch_stride_q;
+    pp_kargs.q.head_stride  = a.nhead_stride_q;
+    pp_kargs.q.seq_stride   = a.stride_q;
+    pp_kargs.q.simthreshold = a.hp.simthreshold;
+    pp_kargs.q.km_ptr       = nullptr;  // Q side never subtracts km.
+
+    if constexpr(is_group)
+    {{
+        pp_kargs.k.seqstart_ptr       = static_cast<const int32_t*>(a.seqstart_k_ptr);
+        pp_kargs.k.seqlen_ptr         = static_cast<const int32_t*>(a.seqlen_k_ptr);
+        pp_kargs.k.seqstart_block_ptr = static_cast<const int32_t*>(a.seqstart_k_block_ptr);
+        pp_kargs.k.total_blocks       = a.total_k_blocks;
+        pp_kargs.q.seqstart_ptr       = static_cast<const int32_t*>(a.seqstart_q_ptr);
+        pp_kargs.q.seqlen_ptr         = static_cast<const int32_t*>(a.seqlen_q_ptr);
+        pp_kargs.q.seqstart_block_ptr = static_cast<const int32_t*>(a.seqstart_q_block_ptr);
+        pp_kargs.q.total_blocks       = a.total_q_blocks;
+    }}
+
+    return ck_tile::make_kernel<pp_::kBlockPerCu>(
+        pp_{{}}, pp_::GridSize(pp_kargs), pp_::BlockSize(),
+        pp_::GetSmemSize(a.hdim_q), pp_kargs);
+}}
+
+// ---- 2. Mask prediction callable ----
+static auto make_mask_prediction_callable_{F_idx}(const fmha_sparge_fwd_args& a,
+                                                  float* d_k_means,
+                                                  float* d_q_means,
+                                                  float* d_k_sim,
+                                                  float* d_q_sim,
+                                                  int32_t* d_lut,
+                                                  int32_t* d_vbn,
+                                                  ck_tile::index_t num_q_blocks,
+                                                  ck_tile::index_t num_k_blocks)
+{{
+    using mp_ = typename fmha_kernel_{F_idx}::MaskPredictionKernel;
+    constexpr bool is_group = trait_{F_idx}::kIsGroupMode;
+
+    ck_tile::SpargeMaskPredictionKargs mp_kargs;
+    mp_kargs.k_means             = d_k_means;
+    mp_kargs.q_means             = d_q_means;
+    mp_kargs.k_sim               = d_k_sim;
+    mp_kargs.q_sim               = d_q_sim;
+    mp_kargs.lut_out             = d_lut;
+    mp_kargs.valid_block_num_out = d_vbn;
+    mp_kargs.batch               = a.batch;
+    mp_kargs.nhead_q             = a.nhead_q;
+    mp_kargs.nhead_k             = a.nhead_k;
+    mp_kargs.nhead_ratio_qk      = a.nhead_q / a.nhead_k;
+    mp_kargs.num_q_blocks        = num_q_blocks;
+    mp_kargs.num_k_blocks        = num_k_blocks;
+    mp_kargs.hdim                = a.hdim_q;
+    mp_kargs.scale               = a.scale_s;
+    mp_kargs.cdfthreshd             = a.hp.cdfthreshd;
+    mp_kargs.topk                    = a.hp.topk;
+    mp_kargs.simthreshold           = a.hp.simthreshold;
+    mp_kargs.cdfthreshd_per_head    = reinterpret_cast<const float*>(a.hp.cdfthreshd_per_head_ptr);
+    mp_kargs.topk_per_head           = reinterpret_cast<const float*>(a.hp.topk_per_head_ptr);
+    mp_kargs.simthreshold_per_head  = reinterpret_cast<const float*>(a.hp.simthreshold_per_head_ptr);
+    mp_kargs.causal_type         = static_cast<ck_tile::index_t>(a.causal_type);
+    mp_kargs.attention_sink      = a.attention_sink;
+    mp_kargs.seqlen_q            = a.seqlen_q;
+    mp_kargs.seqlen_k            = a.seqlen_k;
+    mp_kargs.block_size          = a.pp_block_size;
+    mp_kargs.window_left         = a.window_size_left;
+    mp_kargs.window_right        = a.window_size_right;
+    if constexpr(is_group)
+    {{
+        mp_kargs.seqstart_q_ptr       = static_cast<const int32_t*>(a.seqstart_q_ptr);
+        mp_kargs.seqstart_k_ptr       = static_cast<const int32_t*>(a.seqstart_k_ptr);
+        mp_kargs.seqlen_q_ptr         = static_cast<const int32_t*>(a.seqlen_q_ptr);
+        mp_kargs.seqlen_k_ptr         = static_cast<const int32_t*>(a.seqlen_k_ptr);
+        mp_kargs.seqstart_q_block_ptr = static_cast<const int32_t*>(a.seqstart_q_block_ptr);
+        mp_kargs.seqstart_k_block_ptr = static_cast<const int32_t*>(a.seqstart_k_block_ptr);
+        mp_kargs.lut_batch_offset_ptr = static_cast<const int32_t*>(a.lut_batch_offset_ptr);
+        mp_kargs.total_q_blocks       = a.total_q_blocks;
+        mp_kargs.total_k_blocks       = a.total_k_blocks;
+    }}
+
+    return ck_tile::make_kernel<mp_::kBlockPerCu>(
+        mp_{{}}, mp_::GridSize(mp_kargs), mp_::BlockSize(),
+        mp_::GetSmemSize(a.hdim_q, num_k_blocks), mp_kargs);
+}}
+
+// ---- 3. Attention callable ----
+// `a` is taken by value; the caller must have already set a.internal_lut_ptr / a.internal_vbn_ptr.
+static auto make_attention_callable_{F_idx}(fmha_sparge_fwd_args a)
+{{
+    using k_ = fmha_kernel_{F_idx};
+
+    auto [kargs, grids] = fmha_fwd_create_kargs_and_grids<k_>(a);
+    const dim3 blocks                      = k_::BlockSize();
+    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
+    return ck_tile::make_kernel<kBlockPerCu>(k_{{}}, grids, blocks, 0, kargs);
+}}
+
 template<>
 float fmha_sparge_fwd_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_sparge_fwd_args a)
 {{
-    using k_  = fmha_kernel_{F_idx};
-    using pp_ = typename k_::PreprocessKernel;
-    using mp_ = typename k_::MaskPredictionKernel;
-
     if(s.log_level_ > 0)
         std::cout << ", " << "{F_kernel_name}" << std::flush;
 
@@ -163,105 +295,17 @@ float fmha_sparge_fwd_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_spar
     int32_t* d_lut     = reinterpret_cast<int32_t*>(workspace + ws_layout.lut_off);
     int32_t* d_vbn     = reinterpret_cast<int32_t*>(workspace + ws_layout.vbn_off);
 
-    // ---- 1. Preprocess callable (K + Q block means + optional sim) ----
-    ck_tile::SpargePreprocessKargs pp_kargs;
-    pp_kargs.k_data        = a.k_ptr;
-    pp_kargs.q_data        = a.q_ptr;
-    pp_kargs.k_means       = d_k_means;
-    pp_kargs.k_sim         = d_k_sim;
-    pp_kargs.q_means       = d_q_means;
-    pp_kargs.q_sim         = d_q_sim;
-    pp_kargs.batch         = a.batch;
-    pp_kargs.nhead_k       = a.nhead_k;
-    pp_kargs.nhead_q       = a.nhead_q;
-    pp_kargs.seqlen_k      = a.seqlen_k;
-    pp_kargs.seqlen_q      = a.seqlen_q;
-    pp_kargs.hdim          = a.hdim_q;
-    pp_kargs.block_size    = a.pp_block_size;
-    pp_kargs.num_k_blocks  = num_k_blocks;
-    pp_kargs.num_q_blocks  = num_q_blocks;
-    pp_kargs.k_total_wg    = is_group
-        ? a.nhead_k * a.total_k_blocks
-        : a.batch * a.nhead_k * num_k_blocks;
-    pp_kargs.k_batch_stride = a.batch_stride_k;
-    pp_kargs.k_head_stride  = a.nhead_stride_k;
-    pp_kargs.k_seq_stride   = a.stride_k;
-    pp_kargs.q_batch_stride = a.batch_stride_q;
-    pp_kargs.q_head_stride  = a.nhead_stride_q;
-    pp_kargs.q_seq_stride   = a.stride_q;
-    pp_kargs.simthreshold  = a.hp.simthreshold;
-    pp_kargs.km_ptr         = nullptr;  // Preprocess emits unsmoothed; SKC subtracts km after.
-    if constexpr(is_group)
-    {{
-        pp_kargs.seqstart_q_ptr       = static_cast<const int32_t*>(a.seqstart_q_ptr);
-        pp_kargs.seqstart_k_ptr       = static_cast<const int32_t*>(a.seqstart_k_ptr);
-        pp_kargs.seqlen_q_ptr         = static_cast<const int32_t*>(a.seqlen_q_ptr);
-        pp_kargs.seqlen_k_ptr         = static_cast<const int32_t*>(a.seqlen_k_ptr);
-        pp_kargs.seqstart_q_block_ptr = static_cast<const int32_t*>(a.seqstart_q_block_ptr);
-        pp_kargs.seqstart_k_block_ptr = static_cast<const int32_t*>(a.seqstart_k_block_ptr);
-        pp_kargs.total_q_blocks       = a.total_q_blocks;
-        pp_kargs.total_k_blocks       = a.total_k_blocks;
-    }}
+    auto pp_callable = make_preprocess_callable_{F_idx}(
+        a, d_k_means, d_q_means, d_k_sim, d_q_sim, num_k_blocks, num_q_blocks);
+    auto mp_callable = make_mask_prediction_callable_{F_idx}(
+        a, d_k_means, d_q_means, d_k_sim, d_q_sim, d_lut, d_vbn, num_q_blocks, num_k_blocks);
 
-    auto pp_callable = ck_tile::make_kernel<pp_::kBlockPerCu>(
-        pp_{{}}, pp_::GridSize(pp_kargs), pp_::BlockSize(),
-        pp_::GetSmemSize(a.hdim_q), pp_kargs);
-
-    // ---- 2. Mask prediction callable ----
-    ck_tile::SpargeMaskPredictionKargs mp_kargs;
-    mp_kargs.k_means             = d_k_means;
-    mp_kargs.q_means             = d_q_means;
-    mp_kargs.k_sim               = d_k_sim;
-    mp_kargs.q_sim               = d_q_sim;
-    mp_kargs.lut_out             = d_lut;
-    mp_kargs.valid_block_num_out = d_vbn;
-    mp_kargs.batch               = a.batch;
-    mp_kargs.nhead_q             = a.nhead_q;
-    mp_kargs.nhead_k             = a.nhead_k;
-    mp_kargs.nhead_ratio_qk      = a.nhead_q / a.nhead_k;
-    mp_kargs.num_q_blocks        = num_q_blocks;
-    mp_kargs.num_k_blocks        = num_k_blocks;
-    mp_kargs.hdim                = a.hdim_q;
-    mp_kargs.cdfthreshd             = a.hp.cdfthreshd;
-    mp_kargs.topk                    = a.hp.topk;
-    mp_kargs.simthreshold           = a.hp.simthreshold;
-    mp_kargs.cdfthreshd_per_head    = reinterpret_cast<const float*>(a.hp.cdfthreshd_per_head_ptr);
-    mp_kargs.topk_per_head           = reinterpret_cast<const float*>(a.hp.topk_per_head_ptr);
-    mp_kargs.simthreshold_per_head  = reinterpret_cast<const float*>(a.hp.simthreshold_per_head_ptr);
-    mp_kargs.causal_type         = static_cast<ck_tile::index_t>(a.causal_type);
-    mp_kargs.attention_sink      = a.attention_sink;
-    mp_kargs.seqlen_q            = a.seqlen_q;
-    mp_kargs.seqlen_k            = a.seqlen_k;
-    mp_kargs.block_size          = a.pp_block_size;
-    mp_kargs.window_left         = a.window_size_left;
-    mp_kargs.window_right        = a.window_size_right;
-    if constexpr(is_group)
-    {{
-        mp_kargs.seqstart_q_ptr       = static_cast<const int32_t*>(a.seqstart_q_ptr);
-        mp_kargs.seqstart_k_ptr       = static_cast<const int32_t*>(a.seqstart_k_ptr);
-        mp_kargs.seqlen_q_ptr         = static_cast<const int32_t*>(a.seqlen_q_ptr);
-        mp_kargs.seqlen_k_ptr         = static_cast<const int32_t*>(a.seqlen_k_ptr);
-        mp_kargs.seqstart_q_block_ptr = static_cast<const int32_t*>(a.seqstart_q_block_ptr);
-        mp_kargs.seqstart_k_block_ptr = static_cast<const int32_t*>(a.seqstart_k_block_ptr);
-        mp_kargs.lut_batch_offset_ptr = static_cast<const int32_t*>(a.lut_batch_offset_ptr);
-        mp_kargs.total_q_blocks       = a.total_q_blocks;
-        mp_kargs.total_k_blocks       = a.total_k_blocks;
-    }}
-
-    auto mp_callable = ck_tile::make_kernel<mp_::kBlockPerCu>(
-        mp_{{}}, mp_::GridSize(mp_kargs), mp_::BlockSize(),
-        mp_::GetSmemSize(a.hdim_q, num_k_blocks), mp_kargs);
-
-    // ---- 3. Attention callable ----
     a.internal_lut_ptr = d_lut;
     a.internal_vbn_ptr = d_vbn;
-    auto [kargs, grids] = fmha_fwd_create_kargs_and_grids<k_>(a);
-    const dim3 blocks                      = k_::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    auto attn_callable = ck_tile::make_kernel<kBlockPerCu>(k_{{}}, grids, blocks, 0, kargs);
+    auto attn_callable = make_attention_callable_{F_idx}(a);
 
-    // Single launch chain — 3 kernels (was 4 with KMean, was 4 with SKC).
-    // pp -> mp -> attn   (km subtraction proven to be a no-op for selection)
+    // Single launch chain — 3 kernels: fused K+Q preprocess, mask-pred, attn.
+    // (K/Q preprocess fused into one launch; km subtraction proven a no-op for selection)
     float r = ck_tile::launch_kernel(s, pp_callable, mp_callable, attn_callable);
     (void)sim_enabled; // sim path no longer needs a special branch.
 

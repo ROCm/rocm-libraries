@@ -3,6 +3,11 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/reduce/block/block_reduce2d.hpp"
+#include "ck_tile/ops/reduce/block/block_reduce2d_problem.hpp"
+#include "ck_tile/ops/reduce/block/block_reduce.hpp"
+#include "ck_tile/ops/common/generic_2d_block_shape.hpp"
+#include "ck_tile/ops/topk.hpp"
 
 #include <cassert>
 
@@ -16,20 +21,24 @@ block_reduce_smem(T val, T* scratch, index_t tid, Op op, T identity)
 {
     for(index_t off = get_warp_size() / 2; off > 0; off /= 2)
         val = op(val, warp_shuffle_down(val, static_cast<unsigned>(off)));
-    if(tid % get_warp_size() == 0)
-        scratch[tid / get_warp_size()] = val;
-    __builtin_amdgcn_s_barrier();
+    if(get_lane_id() == 0)
+        scratch[get_warp_id()] = val;
+    block_sync_lds();
 
+    // get_warp_size() is a compile-time constant in the kernel, so num_warps is constexpr.
+    constexpr index_t num_warps = (BlockSize + get_warp_size() - 1) / get_warp_size();
+    static_assert((num_warps & (num_warps - 1)) == 0,
+                  "cross-warp reduction assumes num_warps is a power of two");
     if(tid < static_cast<index_t>(get_warp_size()))
     {
-        const index_t num_warps = (BlockSize + get_warp_size() - 1) / get_warp_size();
         T v = (tid < num_warps) ? scratch[tid] : identity;
-        for(index_t off = get_warp_size() / 2; off > 0; off /= 2)
+        // Only num_warps lanes carry data; start the shuffle at num_warps/2.
+        for(index_t off = num_warps / 2; off > 0; off /= 2)
             v = op(v, warp_shuffle_down(v, static_cast<unsigned>(off)));
         if(tid == 0)
             scratch[0] = v;
     }
-    __builtin_amdgcn_s_barrier();
+    block_sync_lds();
     return scratch[0];
 }
 
@@ -64,6 +73,17 @@ block_reduce_min_i32(int32_t val, int32_t* scratch, index_t tid)
 // In-place descending bitonic sort with int32 payload. N must be power of two.
 // Inner stages with j < warp_size stay within a wavefront, so wave_barrier
 // suffices in place of the CTA-wide s_barrier.
+//
+// Kept as an explicit LDS algorithm rather than ck_tile tile-distribution: each
+// stage compare-exchanges element i with element (i ^ j) where j is a runtime loop
+// variable, i.e. a runtime-varying cross-thread access. A ck_tile distributed tensor
+// only exposes operator[] on a compile-time tile_distributed_index into the calling
+// thread's own registers (static_distributed_tensor.hpp asserts is_static on the
+// index; tile_distributed_index carries its coordinates as non-type template params
+// and cannot be built from a runtime index_t). ck_tile also has no tile-level sort
+// primitive (only BlockReduce2d, which collapses an axis). So the runtime cross-lane
+// exchange has to go through LDS + block_sync_lds / wave_barrier, as below.
+// __builtin_amdgcn_wave_barrier has no ck_tile wrapper, so it is retained verbatim.
 template <index_t N>
 CK_TILE_DEVICE void
 bitonic_sort_desc_smem(float* keys, int32_t* vals, index_t tid)
@@ -90,7 +110,7 @@ bitonic_sort_desc_smem(float* keys, int32_t* vals, index_t tid)
                 }
             }
             if(j >= wsz)
-                __builtin_amdgcn_s_barrier();
+                block_sync_lds();
             else
                 __builtin_amdgcn_wave_barrier();
         }
@@ -98,33 +118,100 @@ bitonic_sort_desc_smem(float* keys, int32_t* vals, index_t tid)
 }
 
 // Hillis-Steele inclusive prefix sum on first N elements; aux is scratch of size >= N.
+//
+// Kept as an explicit LDS scan for the same reason as bitonic_sort_desc_smem: thread i
+// reads element (i - d) with d a runtime loop variable. ck_tile tile-distribution cannot
+// express this -- a distributed tensor only allows compile-time-indexed access to a
+// thread's own registers (no runtime cross-thread read), and there is no tile-level
+// inclusive-scan primitive (BlockReduce2d only collapses an axis, it cannot emit a
+// per-position prefix). The runtime neighbor read therefore stays an LDS round-trip.
 template <index_t N>
 CK_TILE_DEVICE void
 block_scan_inclusive_sum_smem(float* buf, float* aux, index_t tid)
 {
     if(tid < N) aux[tid] = buf[tid];
-    __builtin_amdgcn_s_barrier();
+    block_sync_lds();
 
     for(index_t d = 1; d < N; d <<= 1)
     {
         float v   = (tid < N) ? aux[tid] : 0.0f;
         float add = (tid >= d && tid < N) ? aux[tid - d] : 0.0f;
-        __builtin_amdgcn_s_barrier();
+        block_sync_lds();
         if(tid < N) aux[tid] = v + add;
-        __builtin_amdgcn_s_barrier();
+        block_sync_lds();
     }
     if(tid < N) buf[tid] = aux[tid];
-    __builtin_amdgcn_s_barrier();
+    block_sync_lds();
 }
 
-// Per-block mean + optional cosine similarity. Reads fp16/bf16, converts on the fly.
-template <typename InputType_>
+// Per-block mean + optional cosine similarity (reads fp16/bf16, converts on the fly).
+// Tile-programmed (qianfengz): the token block is loaded as a transposed [hdim, token] tile
+// and both quantities are reduced along the token axis with BlockReduce2d; numerics match the
+// CPU reference (compute_block_means / Gram compute_block_similarity) bit-for-bit. kBlockSize_
+// comes from the attention pipeline's Problem. sparge only supports hdim == block_size == 128
+// (compile-time tile extents kHdim/kBlock, runtime-asserted).
+template <typename InputType_, index_t kBlockSize_ = 256>
 struct BlockSpargePreprocessPipeline
 {
     using InputType = remove_cvref_t<InputType_>;
 
-    static constexpr index_t kBlockSize   = 256;
+    static constexpr index_t kBlockSize   = kBlockSize_;
+    static constexpr index_t kHdim        = 128; // sparge head dim (compile-time tile M)
+    static constexpr index_t kBlock       = 128; // sparge block_size  (compile-time tile N)
     static constexpr float   kNormEpsilon = 1e-8f; // sqrt argument floor
+
+    using ComputeDataType = float;
+
+    // Tile [M = hdim, N = token]; reduce along N -> per-channel [hdim] vector.
+    // The reduced result is written by sweeping the M span, so M MUST stay within a warp: if N
+    // needed a cross-warp reduce (WarpPerBlock_N > 1), BlockReduce2dCrossWarpSync broadcasts each
+    // warp's lane-0 partial and overwrites every M position -> mean collapses to mean[d mod
+    // period]. So reduce N wholly inside one warp (WarpPerBlock_N = 1, no Stage 3) and put the
+    // warps on M. Layout (warp_size 64, kBlockSize 256 -> 4 warps):
+    //   M = Repeat_M(2) * WarpPerBlock_M(4) * ThreadPerWarp_M(16) * Vector_M(1) = 128
+    //   N = Repeat_N(16) * WarpPerBlock_N(1) * ThreadPerWarp_N(4) * Vector_N(2) = 128
+    struct BlockShape
+    {
+        static constexpr index_t Block_M = kHdim;
+        static constexpr index_t Block_N = kBlock;
+
+        static constexpr index_t WarpPerBlock_M = 4;
+        static constexpr index_t WarpPerBlock_N = 1;
+
+        static constexpr index_t ThreadPerWarp_M = 16;
+        static constexpr index_t ThreadPerWarp_N = 4;
+
+        static constexpr index_t Vector_M = 1;
+        static constexpr index_t Vector_N = 2;
+
+        static constexpr index_t Repeat_M =
+            Block_M / (WarpPerBlock_M * ThreadPerWarp_M * Vector_M);
+        static constexpr index_t Repeat_N =
+            Block_N / (WarpPerBlock_N * ThreadPerWarp_N * Vector_N);
+
+        static constexpr index_t BlockSize = kBlockSize;
+    };
+
+    using ReduceProblem =
+        BlockReduce2dProblem<ComputeDataType, ComputeDataType, BlockShape>;
+
+    static constexpr bool kNeedCrossWarpSync = (BlockShape::WarpPerBlock_N > 1);
+
+    // X-tile distribution: 2D [M, N], reducing the N (token) axis. Mirrors the rmsnorm2d
+    // default policy MakeXBlockTileDistribution encoding.
+    CK_TILE_DEVICE static constexpr auto MakeXBlockTileDistribution()
+    {
+        using S = BlockShape;
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<S::Repeat_M, S::WarpPerBlock_M, S::ThreadPerWarp_M, S::Vector_M>,
+                      sequence<S::Repeat_N, S::WarpPerBlock_N, S::ThreadPerWarp_N, S::Vector_N>>,
+                tuple<sequence<1, 2>, sequence<1, 2>>,
+                tuple<sequence<1, 1>, sequence<2, 2>>,
+                sequence<1, 1, 2, 2>,
+                sequence<0, 3, 0, 3>>{});
+    }
 
     struct Params
     {
@@ -137,9 +224,17 @@ struct BlockSpargePreprocessPipeline
         const float* km_ptr;    // [hdim] K-mean; nullptr disables (Q always nullptr)
     };
 
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize(index_t hdim)
+    // LDS: km[hdim] | per-token inv-norm[block_size] | cross-warp reduce scratch.
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize(index_t /*hdim*/)
     {
-        return static_cast<index_t>((hdim + kBlockSize) * sizeof(float));
+        using x_block_tile =
+            decltype(make_static_distributed_tensor<ComputeDataType>(
+                MakeXBlockTileDistribution()));
+        using y_block_tile =
+            decltype(BlockReduce2d<ReduceProblem>::template MakeYBlockTile<x_block_tile>());
+        constexpr index_t reduce_bytes =
+            BlockReduce2dCrossWarpSync<ReduceProblem>::template GetSmemSize<y_block_tile>();
+        return static_cast<index_t>((kHdim + kBlock) * sizeof(float)) + reduce_bytes;
     }
 
     CK_TILE_DEVICE void operator()(
@@ -149,11 +244,15 @@ struct BlockSpargePreprocessPipeline
         const Params& params,
         void* smem) const
     {
-        const index_t tid  = static_cast<index_t>(threadIdx.x);
+        const index_t tid  = get_thread_id();
         const index_t hdim = params.hdim;
 
-        float* s_mean    = reinterpret_cast<float*>(smem);
-        float* s_scratch = s_mean + hdim;
+        assert(params.hdim == kHdim && params.block_size == kBlock &&
+               "sparge preprocess tile path requires hdim == block_size == 128");
+
+        float* s_km        = reinterpret_cast<float*>(smem);          // [kHdim]
+        float* s_inv_norm  = s_km + kHdim;                             // [kBlock]
+        void*  s_reduce    = reinterpret_cast<void*>(s_inv_norm + kBlock);
 
         const index_t s_start = params.block_id * params.block_size;
         const index_t s_end   = min(s_start + params.block_size, params.seqlen);
@@ -168,78 +267,332 @@ struct BlockSpargePreprocessPipeline
             return;
         }
 
-        // km_ptr is WG-uniform — null-check hoisted out of all inner loops.
+        // km_ptr is WG-uniform; stage it in LDS so the tile sweep can index it by hidden
+        // channel (the M axis) without re-reading global memory per element.
         const bool has_km = (params.km_ptr != nullptr);
-        // Pass 1: block mean (subtract km if smoothing)
-        for(index_t d = tid; d < hdim; d += kBlockSize)
-        {
-            const float km = has_km ? params.km_ptr[d] : 0.0f;
-            float sum = 0.0f;
-            for(index_t s = s_start; s < s_end; ++s)
-                sum += type_convert<float>(
-                    slice[static_cast<long_index_t>(s) * params.stride_seq + d]) - km;
-            float m     = sum / static_cast<float>(count);
-            s_mean[d]   = m;
-            mean_out[d] = m;
-        }
-        __builtin_amdgcn_s_barrier();
+        for(index_t d = tid; d < kHdim; d += kBlockSize)
+            s_km[d] = has_km ? params.km_ptr[d] : 0.0f;
+        block_sync_lds();
 
-        // Pass 2: cosine similarity (optional; same km treatment)
-        if(sim_out != nullptr && params.simthreshold > 0.0f)
-        {
-            float local_norm_sq = 0.0f;
-            for(index_t d = tid; d < hdim; d += kBlockSize)
-                local_norm_sq += s_mean[d] * s_mean[d];
-            float mean_norm = __builtin_sqrtf(
-                block_reduce_sum_f32<kBlockSize>(local_norm_sq, s_scratch, tid) + kNormEpsilon);
+        // Transposed token view: global [seqlen, hdim] (stride [stride_seq, 1]) -> tile axes
+        // [hdim (M), token (N)]; pad token axis to kBlock (OOB tokens read as 0, harmless for
+        // both the mean sum and the Gram unit-vector sum). Then window onto this block.
+        const auto naive = make_naive_tensor_view<address_space_enum::global>(
+            slice,
+            make_tuple(params.seqlen, kHdim),
+            make_tuple(params.stride_seq, 1),
+            number<1>{},
+            number<1>{});
+        const auto transposed = transform_tensor_view(
+            naive,
+            make_tuple(make_pass_through_transform(kHdim),
+                       make_pass_through_transform(params.seqlen)),
+            make_tuple(sequence<1>{}, sequence<0>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+        const auto padded = pad_tensor_view(
+            transposed,
+            make_tuple(number<kHdim>{}, number<kBlock>{}),
+            sequence<0, 1>{});
 
-            float local_sim_sum = 0.0f;
-            for(index_t s = s_start + tid; s < s_end; s += kBlockSize)
-            {
-                float dot      = 0.0f;
-                float tok_norm = 0.0f;
-                for(index_t d = 0; d < hdim; ++d)
-                {
-                    const float km = has_km ? params.km_ptr[d] : 0.0f;
-                    float v = type_convert<float>(
-                        slice[static_cast<long_index_t>(s) * params.stride_seq + d]) - km;
-                    dot += v * s_mean[d];
-                    tok_norm += v * v;
-                }
-                tok_norm = __builtin_sqrtf(tok_norm + kNormEpsilon);
-                local_sim_sum += dot / (tok_norm * mean_norm);
-            }
-            float avg_sim =
-                block_reduce_sum_f32<kBlockSize>(local_sim_sum, s_scratch, tid) /
-                static_cast<float>(count);
-            if(tid == 0)
-                *sim_out = avg_sim;
-        }
-        else if(sim_out != nullptr && tid == 0)
+        auto x_window = make_tile_window(
+            padded,
+            make_tuple(number<kHdim>{}, number<kBlock>{}),
+            {0, s_start},
+            MakeXBlockTileDistribution());
+
+        auto reduce        = BlockReduce2d<ReduceProblem>{};
+        auto reduce_sync   = BlockReduce2dSync<ReduceProblem>{};
+        auto reduce_xwarp  = BlockReduce2dCrossWarpSync<ReduceProblem>{};
+        auto add_func      = ReduceOp::Add{};
+
+        // ---- Pass 1: block mean = (1/count) * sum_token (t - km) ----
+        // load [hdim, block_size] tile, subtract km[m], reduce-sum along token (N).
+        auto x_tile = load_tile(x_window);
+        auto centered = make_static_distributed_tensor<ComputeDataType>(
+            decltype(x_tile)::get_tile_distribution());
+        sweep_tile(x_tile, [&](auto idx) {
+            const auto tile_idx = get_x_indices_from_distributed_indices(
+                x_tile.get_tile_distribution(), idx);
+            const index_t m = tile_idx.at(number<0>{}); // hidden channel
+            centered(idx) = type_convert<ComputeDataType>(x_tile[idx]) - s_km[m];
+        });
+
+        auto mean_tile = reduce(centered, add_func.GetIdentityValue<ComputeDataType>(), add_func);
+        reduce_sync(mean_tile, add_func);
+        if constexpr(kNeedCrossWarpSync)
+            reduce_xwarp(mean_tile, s_reduce, add_func);
+
+        const float inv_count = 1.0f / static_cast<float>(count);
+        // Write the per-channel mean. mean_tile is the reduced [M] tensor (replicated across
+        // the threads that reduced a given m); duplicate stores carry identical values.
+        constexpr auto mean_spans = decltype(mean_tile)::get_distributed_spans();
+        sweep_tile_span(mean_spans[number<0>{}], [&](auto idx0) {
+            constexpr auto m_idx = make_tuple(idx0);
+            const auto tile_idx  = get_x_indices_from_distributed_indices(
+                mean_tile.get_tile_distribution(), m_idx);
+            const index_t m = tile_idx.at(number<0>{});
+            mean_out[m]     = mean_tile[m_idx] * inv_count;
+        });
+
+        if(!(sim_out != nullptr && params.simthreshold > 0.0f))
         {
-            *sim_out = 1.0f;
+            if(sim_out != nullptr && tid == 0)
+                *sim_out = 1.0f;
+            return;
         }
+
+        // ---- Pass 2: block self-similarity = mean of the full pairwise cosine Gram matrix ----
+        //   sim = (1/count^2) sum_{i,j} cos(t_i, t_j),  t = token - km.
+        // Via the identity sum_{i,j}<t_i/|t_i|, t_j/|t_j|> = ||sum_i t_i/|t_i| ||^2 we accumulate
+        // the unit-vector sum u[d] and report ||u||^2 / count^2 (matches upstream SpargeAttn).
+
+        // Step 1: per-token inv-norm 1/|t_s|. BlockReduce2d only reduces N, so to get a per-token
+        // (not per-channel) squared sum, load a [token(M), hidden(N)] tile (non-transposed window).
+        const auto naive_tn = make_naive_tensor_view<address_space_enum::global>(
+            slice,
+            make_tuple(params.seqlen, kHdim),
+            make_tuple(params.stride_seq, 1),
+            number<1>{},
+            number<1>{});
+        const auto padded_tn = pad_tensor_view(
+            naive_tn,
+            make_tuple(number<kBlock>{}, number<kHdim>{}),
+            sequence<1, 0>{}); // pad token axis (M); hidden axis (N) is exact 128
+
+        auto xt_window = make_tile_window(
+            padded_tn,
+            make_tuple(number<kBlock>{}, number<kHdim>{}),
+            {s_start, 0},
+            MakeXBlockTileDistribution());
+
+        auto xt_tile = load_tile(xt_window);
+        // squared centered, reduce-sum hidden (N) -> per-token norm^2 [token(M)]
+        auto sq_tile = make_static_distributed_tensor<ComputeDataType>(
+            decltype(xt_tile)::get_tile_distribution());
+        sweep_tile(xt_tile, [&](auto idx) {
+            const auto tile_idx = get_x_indices_from_distributed_indices(
+                xt_tile.get_tile_distribution(), idx);
+            const index_t d = tile_idx.at(number<1>{}); // hidden channel (N)
+            const float v   = type_convert<ComputeDataType>(xt_tile[idx]) - s_km[d];
+            sq_tile(idx)    = v * v;
+        });
+
+        auto norm_tile = reduce(sq_tile, add_func.GetIdentityValue<ComputeDataType>(), add_func);
+        reduce_sync(norm_tile, add_func);
+        if constexpr(kNeedCrossWarpSync)
+            reduce_xwarp(norm_tile, s_reduce, add_func);
+
+        // Stage per-token inv-norm into LDS (indexed by token-within-block).
+        constexpr auto norm_spans = decltype(norm_tile)::get_distributed_spans();
+        sweep_tile_span(norm_spans[number<0>{}], [&](auto idx0) {
+            constexpr auto t_idx = make_tuple(idx0);
+            const auto tile_idx  = get_x_indices_from_distributed_indices(
+                norm_tile.get_tile_distribution(), t_idx);
+            const index_t t = tile_idx.at(number<0>{}); // token-within-block
+            if(t < count)
+                s_inv_norm[t] = 1.0f / ck_tile::sqrt(norm_tile[t_idx] + kNormEpsilon);
+        });
+        block_sync_lds();
+
+        // Step 2: u[d] = sum_token normalize(t)[d]. Reuse the transposed [hidden, token] tile:
+        // multiply each centered element by its token's inv-norm, reduce-sum along token (N).
+        auto unit_tile = make_static_distributed_tensor<ComputeDataType>(
+            decltype(x_tile)::get_tile_distribution());
+        sweep_tile(x_tile, [&](auto idx) {
+            const auto tile_idx = get_x_indices_from_distributed_indices(
+                x_tile.get_tile_distribution(), idx);
+            const index_t m = tile_idx.at(number<0>{}); // hidden channel
+            const index_t n = tile_idx.at(number<1>{}); // token-within-block
+            const float v   = type_convert<ComputeDataType>(x_tile[idx]) - s_km[m];
+            const float inv = (n < count) ? s_inv_norm[n] : 0.0f;
+            unit_tile(idx)  = v * inv;
+        });
+
+        auto u_tile = reduce(unit_tile, add_func.GetIdentityValue<ComputeDataType>(), add_func);
+        reduce_sync(u_tile, add_func);
+        if constexpr(kNeedCrossWarpSync)
+            reduce_xwarp(u_tile, s_reduce, add_func);
+
+        // sim = ||u||^2 / count^2. u_tile is the per-channel [M] reduced vector, replicated
+        // across the threads that reduced a given m. Stash each channel's u into LDS (indexed
+        // by m; duplicate stores carry identical values), reusing the km slots which are no
+        // longer needed, then sum u[m]^2 over the hidden axis with one tile-free strided pass.
+        sweep_tile_span(decltype(u_tile)::get_distributed_spans()[number<0>{}], [&](auto idx0) {
+            constexpr auto m_idx = make_tuple(idx0);
+            const auto tile_idx  = get_x_indices_from_distributed_indices(
+                u_tile.get_tile_distribution(), m_idx);
+            const index_t m = tile_idx.at(number<0>{});
+            s_km[m]         = u_tile[m_idx];
+        });
+        block_sync_lds();
+
+        float local_u_sq = 0.0f;
+        for(index_t m = tid; m < kHdim; m += kBlockSize)
+            local_u_sq += s_km[m] * s_km[m];
+
+        float u_norm_sq =
+            block_reduce_sum_f32<kBlockSize>(local_u_sq, reinterpret_cast<float*>(s_reduce), tid);
+        if(tid == 0)
+            *sim_out = u_norm_sq / (static_cast<float>(count) * static_cast<float>(count));
     }
 
 };
 
 // Per Q-block: scores + softmax + sort-based selection -> delta-encoded LUT.
+// kMaxKBlocksPow2_ caps the K-block sort capacity (must be a power of two). With
+// BLKK=128 the default 256 covers seqlen_k up to 32k. It is a template parameter so
+// callers can codegen smaller variants; the bitonic sort uses one thread per element,
+// hence the static_assert(kBlockSize >= kMaxKBlocksPow2) below.
+template <index_t kMaxKBlocksPow2_ = 256, index_t kBlockSize_ = 256>
 struct BlockSpargeMaskPredictionPipeline
 {
-    static constexpr index_t kBlockSize      = 256;
-    static constexpr index_t kMaxKBlocksPow2 = 256; // seqlen_k up to 32k @ BLKK=128
+    static constexpr index_t kBlockSize      = kBlockSize_;
+    static constexpr index_t kMaxKBlocksPow2 = kMaxKBlocksPow2_;
+    static_assert((kMaxKBlocksPow2 & (kMaxKBlocksPow2 - 1)) == 0 && kMaxKBlocksPow2 > 0,
+                  "kMaxKBlocksPow2 must be a power of two");
+    static_assert(kBlockSize >= kMaxKBlocksPow2,
+                  "bitonic sort uses one thread per element: need kBlockSize >= kMaxKBlocksPow2");
     // Cross-warp scratch: kBlockSize / min_warp_size = 256/32 = 8; round up for safety.
     static constexpr index_t kReduceScratchSlots = (kBlockSize + 31) / 32;
     // OOB sentinel: finite (not -INF) so softmax max-subtract avoids inf-inf=NaN.
     static constexpr float   kScoreOOB           = -1.0e30f;
     static constexpr float   kScoreSelected      = -2.0f;
 
+    static constexpr index_t kHdim = 128; // sparge head dim (compile-time tile reduce extent)
+
+    // ---- score = dot(q_mean, k_means[k]) via ck_tile tile-programming (qianfengz) ----
+    // The k_mean rows for kScoreTileM consecutive K-blocks load as a [kScoreTileM (M), hdim (N)]
+    // tile, multiply elementwise by the WG-uniform q_mean, and reduce along hidden (N) ->
+    // kScoreTileM scores; the loop sweeps this window across num_k_blocks.
+    using ComputeDataType = float;
+
+    static constexpr index_t kScoreTileM = 16; // K-blocks reduced per tile window
+
+    // Tile [M = kScoreTileM K-blocks, N = hdim]; reduce along N (hidden). Per qianfengz's
+    // prescribed layout the M (K-block) axis is carried by the warps (WarpPerBlock_M = 4) and N
+    // is reduced wholly inside a warp (WarpPerBlock_N = 1), so Stage 1 (thread) + Stage 2 (warp
+    // shuffle) fully reduce N with no cross-warp step -- each M-block's score is complete and
+    // can be scattered directly (no M-collapse, no hand-rolled combine). Layout (warp_size 64,
+    // kBlockSize 256 -> 4 warps), [M, N] = [4W*4T, 2E*16T*4E]:
+    //   M = Repeat_M(1) * WarpPerBlock_M(4) * ThreadPerWarp_M(4)  * Vector_M(1) = 16
+    //   N = Repeat_N(2) * WarpPerBlock_N(1) * ThreadPerWarp_N(16) * Vector_N(4) = 128
+    struct ScoreBlockShape
+    {
+        static constexpr index_t Block_M = kScoreTileM;
+        static constexpr index_t Block_N = kHdim;
+
+        static constexpr index_t WarpPerBlock_M = 4;
+        static constexpr index_t WarpPerBlock_N = 1;
+
+        static constexpr index_t ThreadPerWarp_M = 4;
+        static constexpr index_t ThreadPerWarp_N = 16;
+
+        static constexpr index_t Vector_M = 1;
+        static constexpr index_t Vector_N = 4;
+
+        static constexpr index_t Repeat_M =
+            Block_M / (WarpPerBlock_M * ThreadPerWarp_M * Vector_M);
+        static constexpr index_t Repeat_N =
+            Block_N / (WarpPerBlock_N * ThreadPerWarp_N * Vector_N);
+
+        static constexpr index_t BlockSize = kBlockSize;
+    };
+
+    using ScoreReduceProblem =
+        BlockReduce2dProblem<ComputeDataType, ComputeDataType, ScoreBlockShape>;
+
+    static constexpr bool kScoreNeedCrossWarpSync = (ScoreBlockShape::WarpPerBlock_N > 1);
+
+    CK_TILE_DEVICE static constexpr auto MakeScoreXBlockTileDistribution()
+    {
+        using S = ScoreBlockShape;
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<S::Repeat_M, S::WarpPerBlock_M, S::ThreadPerWarp_M, S::Vector_M>,
+                      sequence<S::Repeat_N, S::WarpPerBlock_N, S::ThreadPerWarp_N, S::Vector_N>>,
+                tuple<sequence<1, 2>, sequence<1, 2>>,
+                tuple<sequence<1, 1>, sequence<2, 2>>,
+                sequence<1, 1, 2, 2>,
+                sequence<0, 3, 0, 3>>{});
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr index_t GetScoreReduceSmemSize()
+    {
+        using x_block_tile =
+            decltype(make_static_distributed_tensor<ComputeDataType>(
+                MakeScoreXBlockTileDistribution()));
+        using y_block_tile =
+            decltype(BlockReduce2d<ScoreReduceProblem>::template MakeYBlockTile<x_block_tile>());
+        return BlockReduce2dCrossWarpSync<ScoreReduceProblem>::template GetSmemSize<y_block_tile>();
+    }
+
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize(index_t hdim, index_t num_k_blocks)
     {
         // [q_mean | scores | sort_keys | sort_vals | aux | scratch | n_target]
+        // The score-reduce cross-warp scratch overlaps the trailing scratch region, which
+        // is unused during the score pass; size the buffer to cover the larger of the two.
+        const index_t reduce_scratch =
+            max(static_cast<index_t>((kReduceScratchSlots + 1) * sizeof(int32_t)),
+                GetScoreReduceSmemSize());
         return static_cast<index_t>(
-            (hdim + num_k_blocks + 3 * kMaxKBlocksPow2) * sizeof(float)
-            + (kReduceScratchSlots + 1) * sizeof(int32_t));
+            (hdim + num_k_blocks + 3 * kMaxKBlocksPow2) * sizeof(float)) + reduce_scratch;
+    }
+
+    // ---- ck_tile tile-programmed top-k (TopK mode, N <= warp_size) ----
+    // BlockTopkStream2D (ops/topk) does an iterative argmax via block_tile_reduce + xor-shuffle,
+    // emitting the top-k column indices. Its xor_sync has no cross-warp stage, so N is bounded to
+    // warp_size: the dispatch routes only N <= warp_size here; larger N and the CDF path (need a
+    // full sort + prefix sum) keep the LDS bitonic+scan. Runs on warp 0; caller fences/broadcasts.
+    template <index_t N>
+    CK_TILE_DEVICE static void topk_select_ck_tile(const float* score_lds,
+                                                   float*       val_out_lds,
+                                                   int32_t*     idx_out_lds,
+                                                   index_t      k)
+    {
+        static_assert(N > 0 && (N & (N - 1)) == 0, "N must be power of two");
+        constexpr index_t LanesPerRow = N; // whole row in one warp
+
+        // [row(1), col(N)] warp-per-row input distribution (mirrors topk_softmax policy).
+        constexpr auto in_dstr = make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<1>,
+                tuple<sequence<1, 1, 1>, sequence<1, LanesPerRow, 1>>,
+                tuple<sequence<1>, sequence<1, 2>>,
+                tuple<sequence<1>, sequence<2, 1>>,
+                sequence<1, 2, 2>,
+                sequence<0, 0, 2>>{});
+        // [row(1), single-element-per-step] output distribution (top-k streamed column-wise).
+        constexpr auto out_dstr = make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<LanesPerRow>,
+                tuple<sequence<1, 1, 1>, sequence<1>>,
+                tuple<sequence<1>, sequence<1, 0>>,
+                tuple<sequence<1>, sequence<2, 0>>,
+                sequence<1, 2>,
+                sequence<0, 0>>{});
+
+        auto in_view = make_tensor_view<address_space_enum::lds>(
+            score_lds,
+            make_naive_tensor_descriptor_packed(make_tuple(number<1>{}, number<N>{})));
+        auto in_win = make_tile_window_linear(
+            in_view, make_tuple(number<1>{}, number<N>{}), {0, 0}, in_dstr);
+
+        auto out_view = make_tensor_view<address_space_enum::lds>(
+            val_out_lds,
+            make_naive_tensor_descriptor_packed(make_tuple(number<1>{}, number<N>{})));
+        auto out_win = make_tile_window_linear(
+            out_view, make_tuple(number<1>{}, number<N>{}), {0, 0}, out_dstr);
+
+        auto idx_view = make_tensor_view<address_space_enum::lds>(
+            idx_out_lds,
+            make_naive_tensor_descriptor_packed(make_tuple(number<1>{}, number<N>{})));
+        auto idx_win = make_tile_window_linear(
+            idx_view, make_tuple(number<1>{}, number<N>{}), {0, 0}, out_dstr);
+
+        auto x = load_tile(in_win);
+        using topk_problem = BlockTopkStream2DProblem<float, int32_t, LanesPerRow>;
+        BlockTopkStream2D<topk_problem>{}(x, out_win, idx_win, k);
     }
 
     struct MaskRunArgs
@@ -257,6 +610,7 @@ struct BlockSpargeMaskPredictionPipeline
         bool    attention_sink;
         index_t seqlen_q, seqlen_k, block_size;
         index_t window_left, window_right;
+        float   scale;          // softmax scale for q/k mean scores (passed in by caller)
     };
 
     CK_TILE_DEVICE void run_with_indices(const MaskRunArgs& args, void* smem) const
@@ -287,10 +641,19 @@ struct BlockSpargeMaskPredictionPipeline
         const index_t window_left    = args.window_left;
         const index_t window_right   = args.window_right;
 
-        const index_t tid = static_cast<index_t>(threadIdx.x);
+        const index_t tid = get_thread_id();
 
+        assert(hdim == kHdim && "sparge mask tile score path requires hdim == 128");
+
+        // smem layout
         float* q_mean_smem = reinterpret_cast<float*>(smem);
         float* scores_smem = q_mean_smem + hdim;
+        float*   sort_keys_smem = scores_smem + num_k_blocks;
+        int32_t* sort_vals_smem = reinterpret_cast<int32_t*>(sort_keys_smem + kMaxKBlocksPow2);
+        float*   aux_smem       = reinterpret_cast<float*>(sort_vals_smem + kMaxKBlocksPow2);
+        int32_t* scratch_i32    = reinterpret_cast<int32_t*>(aux_smem + kMaxKBlocksPow2);
+        int32_t* n_target_smem  = scratch_i32 + kReduceScratchSlots;
+        float*   scratch_f32    = reinterpret_cast<float*>(scratch_i32);
 
         {
             const float* q_src =
@@ -299,7 +662,7 @@ struct BlockSpargeMaskPredictionPipeline
                 static_cast<long_index_t>(q_block) * hdim;
             for(index_t d = tid; d < hdim; d += kBlockSize)
                 q_mean_smem[d] = q_src[d];
-            __builtin_amdgcn_s_barrier();
+            block_sync_lds();
         }
 
         // Causal bounds
@@ -317,30 +680,94 @@ struct BlockSpargeMaskPredictionPipeline
         const float* k_mean_base =
             k_means +
             (static_cast<long_index_t>(b) * nhead_k + kv_head) * num_k_blocks * hdim;
-        const float scale = 1.0f / __builtin_sqrtf(static_cast<float>(hdim));
+        const float scale = args.scale;
 
-        for(index_t k = tid; k < num_k_blocks; k += kBlockSize)
+        // ---- score[k] = dot(q_mean, k_means[k]) * scale, reduced along hidden (N) ----
+        // tile-programming (qianfengz): load the K-mean rows for a window of kScoreTileM
+        // K-blocks as a [kScoreTileM (M), hdim (N)] tile, multiply by the broadcast q_mean,
+        // and BlockReduce2d-sum along N. OOB tokens past num_k_blocks read 0 (padded view),
+        // yielding 0 scores that are overwritten with kScoreOOB below. Causal-excluded
+        // K-blocks are likewise stamped kScoreOOB after the reduction.
         {
-            float score = kScoreOOB;
-            if(!causal_type || (k >= causal_min_k && k <= causal_max_k))
-            {
-                const float* k_mean = k_mean_base + static_cast<long_index_t>(k) * hdim;
-                float dot = 0.0f;
-                for(index_t d = 0; d < hdim; ++d)
-                    dot += q_mean_smem[d] * k_mean[d];
-                score = dot * scale;
-            }
-            scores_smem[k] = score;
-        }
-        __builtin_amdgcn_s_barrier();
+            const auto km_view = make_naive_tensor_view<address_space_enum::global>(
+                k_mean_base,
+                make_tuple(num_k_blocks, kHdim),
+                make_tuple(static_cast<index_t>(kHdim), 1),
+                number<1>{},
+                number<1>{});
+            const auto km_padded = pad_tensor_view(
+                km_view,
+                make_tuple(number<kScoreTileM>{}, number<kHdim>{}),
+                sequence<1, 0>{}); // pad K-block axis (M); hidden axis (N) is exact 128
 
-        // smem layout
-        float*   sort_keys_smem = scores_smem + num_k_blocks;
-        int32_t* sort_vals_smem = reinterpret_cast<int32_t*>(sort_keys_smem + kMaxKBlocksPow2);
-        float*   aux_smem       = reinterpret_cast<float*>(sort_vals_smem + kMaxKBlocksPow2);
-        int32_t* scratch_i32    = reinterpret_cast<int32_t*>(aux_smem + kMaxKBlocksPow2);
-        int32_t* n_target_smem  = scratch_i32 + kReduceScratchSlots;
-        float*   scratch_f32    = reinterpret_cast<float*>(scratch_i32);
+            auto reduce       = BlockReduce2d<ScoreReduceProblem>{};
+            auto reduce_sync  = BlockReduce2dSync<ScoreReduceProblem>{};
+            auto add_func     = ReduceOp::Add{};
+
+            for(index_t k0 = 0; k0 < num_k_blocks; k0 += kScoreTileM)
+            {
+                auto km_window = make_tile_window(
+                    km_padded,
+                    make_tuple(number<kScoreTileM>{}, number<kHdim>{}),
+                    {k0, 0},
+                    MakeScoreXBlockTileDistribution());
+
+                auto km_tile = load_tile(km_window);
+                // elementwise q_mean[d] * k_mean[k][d] (q_mean broadcast by hidden channel)
+                auto prod_tile = make_static_distributed_tensor<ComputeDataType>(
+                    decltype(km_tile)::get_tile_distribution());
+                sweep_tile(km_tile, [&](auto idx) {
+                    const auto tile_idx = get_x_indices_from_distributed_indices(
+                        km_tile.get_tile_distribution(), idx);
+                    const index_t d = tile_idx.at(number<1>{}); // hidden channel (N)
+                    prod_tile(idx)  = q_mean_smem[d] *
+                                      type_convert<ComputeDataType>(km_tile[idx]);
+                });
+
+                // M is on the warps and N is reduced wholly within a warp (WarpPerBlock_N = 1),
+                // so Stage 1 + Stage 2 give the complete per-M-block score -- scatter directly.
+                auto score_tile =
+                    reduce(prod_tile, add_func.GetIdentityValue<ComputeDataType>(), add_func);
+                reduce_sync(score_tile, add_func);
+
+                sweep_tile_span(
+                    decltype(score_tile)::get_distributed_spans()[number<0>{}],
+                    [&](auto idx0) {
+                        constexpr auto m_idx = make_tuple(idx0);
+                        const auto tile_idx  = get_x_indices_from_distributed_indices(
+                            score_tile.get_tile_distribution(), m_idx);
+                        const index_t k = k0 + tile_idx.at(number<0>{});
+                        if(k < num_k_blocks)
+                            scores_smem[k] = score_tile[m_idx] * scale;
+                    });
+                block_sync_lds();
+            }
+        }
+
+        // Stamp causal-excluded K-blocks with the OOB sentinel.
+        if(causal_type)
+        {
+            for(index_t k = tid; k < num_k_blocks; k += kBlockSize)
+                if(k < causal_min_k || k > causal_max_k)
+                    scores_smem[k] = kScoreOOB;
+            block_sync_lds();
+        }
+
+        // Exclude low-similarity K blocks from the softmax/selection competition (official
+        // pooled_score[~sim_kblocks]=-inf). They are force-selected after selection below;
+        // ~sim => sim <= threshold. Use the finite OOB sentinel to avoid NaN if a whole row
+        // is excluded.
+        if(k_sim != nullptr && head_simthreshold > 0.0f)
+        {
+            const float* k_sim_row =
+                k_sim +
+                static_cast<long_index_t>(b) * nhead_k * num_k_blocks +
+                static_cast<long_index_t>(kv_head) * num_k_blocks;
+            for(index_t k = tid; k < num_k_blocks; k += kBlockSize)
+                if(k_sim_row[k] <= head_simthreshold)
+                    scores_smem[k] = kScoreOOB;
+            block_sync_lds();
+        }
 
         // Parallel softmax; normalize only for CDF mode (TopK is scaling-invariant).
         float local_max = -INFINITY;
@@ -351,7 +778,7 @@ struct BlockSpargeMaskPredictionPipeline
         float local_sum = 0.0f;
         for(index_t k = tid; k < num_k_blocks; k += kBlockSize)
         {
-            float p = __expf(scores_smem[k] - max_score);
+            float p = ck_tile::exp(scores_smem[k] - max_score);
             scores_smem[k] = p;
             local_sum += p;
         }
@@ -363,10 +790,11 @@ struct BlockSpargeMaskPredictionPipeline
             const float rcp = (sum_exp > 0.0f) ? (1.0f / sum_exp) : 0.0f;
             for(index_t k = tid; k < num_k_blocks; k += kBlockSize)
                 scores_smem[k] *= rcp;
-            __builtin_amdgcn_s_barrier();
+            block_sync_lds();
         }
 
         // Dispatch sort+select to smallest pow-of-2 >= num_k_blocks
+        const index_t warp_size = static_cast<index_t>(get_warp_size());
         int32_t n_target = 0;
         auto do_select = [&](auto N_const) {
             constexpr index_t N_pow2 = decltype(N_const)::value;
@@ -379,7 +807,40 @@ struct BlockSpargeMaskPredictionPipeline
                 sort_keys_smem[tid] = p;
                 sort_vals_smem[tid] = valid ? static_cast<int32_t>(tid) : int32_t{-1};
             }
-            __builtin_amdgcn_s_barrier();
+            block_sync_lds();
+
+            // TopK path with the row inside a single warp: use the ck_tile tile-programmed
+            // BlockTopkStream2D (iterative argmax) instead of the LDS bitonic sort. CDF mode
+            // and wider rows (N > warp_size) keep the bitonic+scan below.
+            if constexpr(N_pow2 <= 64) // bound by max warp_size; runtime-guarded below too
+            {
+                if(topk_mode && N_pow2 <= warp_size)
+                {
+                    n_target = max(
+                        int32_t{1},
+                        static_cast<int32_t>(head_topk * static_cast<float>(num_k_blocks)));
+                    // top-n_target original block indices -> sort_vals_smem (idx output);
+                    // aux_smem is throwaway value scratch. Warp 0 owns the row.
+                    if(tid < warp_size)
+                        topk_select_ck_tile<N_pow2>(
+                            sort_keys_smem, aux_smem, sort_vals_smem, n_target);
+                    block_sync_lds();
+
+                    if(tid < static_cast<index_t>(n_target))
+                    {
+                        int32_t orig = sort_vals_smem[tid];
+                        if(orig >= 0 && orig < static_cast<int32_t>(num_k_blocks))
+                        {
+                            const bool causal_ok = !causal_type ||
+                                (orig >= causal_min_k && orig <= causal_max_k);
+                            if(causal_ok)
+                                scores_smem[orig] = kScoreSelected;
+                        }
+                    }
+                    block_sync_lds();
+                    return;
+                }
+            }
 
             bitonic_sort_desc_smem<N_pow2>(sort_keys_smem, sort_vals_smem, tid);
             // Cumsum scan only needed for the CDF threshold path.
@@ -393,10 +854,13 @@ struct BlockSpargeMaskPredictionPipeline
             }
             else
             {
-                int32_t cand = num_k_blocks + 1;
+                // official CDF: num_to_select = searchsorted(cdf, thr, right=True) = #{cdf
+                // <= thr}, i.e. the first index whose inclusive prefix exceeds the threshold
+                // (the block that crosses the threshold is NOT selected). Clamped to >= 1.
+                int32_t cand = num_k_blocks;
                 if(tid < static_cast<index_t>(num_k_blocks) &&
-                   sort_keys_smem[tid] >= head_cdfthreshd)
-                    cand = static_cast<int32_t>(tid) + 1;
+                   sort_keys_smem[tid] > head_cdfthreshd)
+                    cand = static_cast<int32_t>(tid);
                 int32_t reduced = block_reduce_min_i32<kBlockSize>(cand, scratch_i32, tid);
                 if(tid == 0)
                 {
@@ -404,7 +868,7 @@ struct BlockSpargeMaskPredictionPipeline
                     if(reduced < 1)            reduced = 1;
                     n_target_smem[0] = reduced;
                 }
-                __builtin_amdgcn_s_barrier();
+                block_sync_lds();
                 n_target = n_target_smem[0];
             }
 
@@ -419,7 +883,7 @@ struct BlockSpargeMaskPredictionPipeline
                         scores_smem[orig] = kScoreSelected;
                 }
             }
-            __builtin_amdgcn_s_barrier();
+            block_sync_lds();
         };
 
         if(num_k_blocks <= 32)        do_select(integral_constant<index_t, 32>{});
@@ -438,11 +902,11 @@ struct BlockSpargeMaskPredictionPipeline
             {
                 const bool causal_ok = !causal_type ||
                     (tid >= causal_min_k && tid <= causal_max_k);
-                if(k_sim_row[tid] < head_simthreshold && causal_ok &&
+                if(k_sim_row[tid] <= head_simthreshold && causal_ok &&
                    scores_smem[tid] != kScoreSelected)
                     scores_smem[tid] = kScoreSelected;
             }
-            __builtin_amdgcn_s_barrier();
+            block_sync_lds();
         }
 
         // (Empty-selection fallback runs after the LUT scan below — reuses its n_total.)
@@ -454,7 +918,7 @@ struct BlockSpargeMaskPredictionPipeline
                 q_sim[static_cast<long_index_t>(b) * nhead_q * num_q_blocks +
                       static_cast<long_index_t>(head) * num_q_blocks +
                       q_block];
-            if(q_block_sim < head_simthreshold)
+            if(q_block_sim <= head_simthreshold)
             {
                 const index_t lo = causal_type ? causal_min_k : index_t{0};
                 const index_t hi = causal_type ? causal_max_k : (num_k_blocks - 1);
@@ -462,20 +926,20 @@ struct BlockSpargeMaskPredictionPipeline
                    scores_smem[tid] != kScoreSelected)
                     scores_smem[tid] = kScoreSelected;
             }
-            __builtin_amdgcn_s_barrier();
+            block_sync_lds();
         }
 
         // Attention sink
         if(tid == 0 && attention_sink && num_k_blocks > 0 &&
            scores_smem[0] != kScoreSelected)
             scores_smem[0] = kScoreSelected;
-        __builtin_amdgcn_s_barrier();
+        block_sync_lds();
 
         // LUT build: flag -> scan -> compact -> delta
         if(tid < kMaxKBlocksPow2)
             sort_keys_smem[tid] = (tid < num_k_blocks &&
                                    scores_smem[tid] == kScoreSelected) ? 1.0f : 0.0f;
-        __builtin_amdgcn_s_barrier();
+        block_sync_lds();
 
         block_scan_inclusive_sum_smem<kMaxKBlocksPow2>(sort_keys_smem, aux_smem, tid);
 
@@ -505,7 +969,7 @@ struct BlockSpargeMaskPredictionPipeline
             int pos = static_cast<int>(sort_keys_smem[tid]) - 1;
             sort_vals_smem[pos] = static_cast<int32_t>(tid);
         }
-        __builtin_amdgcn_s_barrier();
+        block_sync_lds();
 
         if(tid < n_after_scan)
         {
@@ -542,9 +1006,10 @@ struct BlockSpargeMaskPredictionPipeline
         index_t block_size,
         index_t window_left,
         index_t window_right,
+        float scale,
         void* smem) const
     {
-        const index_t gid = static_cast<index_t>(blockIdx.x);
+        const index_t gid = get_block_id();
 
         const index_t q_block = gid % num_q_blocks;
         const index_t head    = (gid / num_q_blocks) % nhead_q;
@@ -591,6 +1056,7 @@ struct BlockSpargeMaskPredictionPipeline
         args.block_size     = block_size;
         args.window_left    = window_left;
         args.window_right   = window_right;
+        args.scale          = scale;
         run_with_indices(args, smem);
     }
 };

@@ -459,7 +459,9 @@ inline std::vector<int32_t> seqlens_to_blocks(const std::vector<int32_t>& seqlen
     return blocks;
 }
 
-// Packed [H, sum_b(q_blocks[b] * k_blocks[b])] uint8_t, indexed via mask_batch_offsets.
+// Batch-outer/head-mid packed uint8_t: per-batch block [H, q_b*k_b] (row-inner contiguous),
+// blocks concatenated across batch. linear idx = base*nhead + h*(qb_n*kb_n) + qb*kb_n + kb,
+// where base = mask_batch_offsets[b] (single-head pair cumulative).
 inline ck_tile::HostTensor<uint8_t> generate_random_block_mask_group(
     const std::vector<int32_t>& q_blocks_per_b,
     const std::vector<int32_t>& k_blocks_per_b,
@@ -478,7 +480,10 @@ inline ck_tile::HostTensor<uint8_t> generate_random_block_mask_group(
     }
     const int32_t per_head_size = mask_batch_offsets_out[batch];
 
+    // 2D allocation kept for total-element sizing; data written via the batch-outer
+    // packed linear index (kernel reads the flat backing buffer).
     ck_tile::HostTensor<uint8_t> mask({nhead, per_head_size});
+    uint8_t* mask_data = mask.data();
     std::mt19937 rng(seed);
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
 
@@ -489,11 +494,13 @@ inline ck_tile::HostTensor<uint8_t> generate_random_block_mask_group(
             const int32_t qb_n  = q_blocks_per_b[b];
             const int32_t kb_n  = k_blocks_per_b[b];
             const int32_t base  = mask_batch_offsets_out[b];
+            const int64_t blk0  = static_cast<int64_t>(base) * nhead +
+                                  static_cast<int64_t>(h) * qb_n * kb_n;
             for(int32_t qb = 0; qb < qb_n; ++qb)
                 for(int32_t kb = 0; kb < kb_n; ++kb)
                 {
                     const bool is_diag = ensure_diagonal && (qb == kb);
-                    mask(h, base + qb * kb_n + kb) =
+                    mask_data[blk0 + qb * kb_n + kb] =
                         (is_diag || dist(rng) > sparsity) ? 1 : 0;
                 }
         }
@@ -541,17 +548,24 @@ slice_packed_mask_to_b1(const ck_tile::HostTensor<uint8_t>& packed_mask,
     const int32_t qb_n = q_blocks_per_b[batch_idx];
     const int32_t kb_n = k_blocks_per_b[batch_idx];
     const int32_t base = mask_batch_offsets[batch_idx];
+    const uint8_t* mask_data = packed_mask.data();
     ck_tile::HostTensor<uint8_t> sub({1, nhead, qb_n, kb_n});
     for(ck_tile::index_t h = 0; h < nhead; ++h)
+    {
+        const int64_t blk0 = static_cast<int64_t>(base) * nhead +
+                             static_cast<int64_t>(h) * qb_n * kb_n;
         for(int32_t qb = 0; qb < qb_n; ++qb)
             for(int32_t kb = 0; kb < kb_n; ++kb)
-                sub(0, h, qb, kb) = packed_mask(h, base + qb * kb_n + kb);
+                sub(0, h, qb, kb) = mask_data[blk0 + qb * kb_n + kb];
+    }
     return sub;
 }
 
 // Convert packed jenga-style mask into VSA's group LUT + valid_block_num format.
-// lut: int32 delta-encoded K-block indices, zero-padded per q-block row.
-// vbn: [H, sum_b(q_blocks[b])] int32 valid count per q-block.
+// All three buffers use the batch-outer/head-mid packed layout:
+//   lut: linear idx = mask_base*nhead + h*(qb_n*kb_n) + qb*kb_n + col  (X_b = q_b*k_b)
+//   vbn: linear idx = vbn_base*nhead  + h*qb_n        + qb            (X_b = q_b)
+// lut is delta-encoded K-block indices, zero-padded per q-block row.
 inline void block_map_to_lut_group(
     const ck_tile::HostTensor<uint8_t>& packed_mask,
     const std::vector<int32_t>& q_blocks_per_b,
@@ -564,6 +578,10 @@ inline void block_map_to_lut_group(
     const auto batch = static_cast<int32_t>(q_blocks_per_b.size());
     const auto nhead = static_cast<ck_tile::index_t>(packed_mask.get_lengths()[0]);
 
+    const uint8_t* mask_data = packed_mask.data();
+    int32_t*       lut_data  = lut_packed.data();
+    int32_t*       vbn_data  = vbn_packed.data();
+
     for(ck_tile::index_t h = 0; h < nhead; ++h)
     {
         for(int32_t b = 0; b < batch; ++b)
@@ -572,23 +590,28 @@ inline void block_map_to_lut_group(
             const int32_t kb_n      = k_blocks_per_b[b];
             const int32_t mask_base = mask_batch_offsets[b];
             const int32_t vbn_base  = seqstart_q_block_host[b];
+            // Batch-outer/head-mid packed bases for this (batch, head).
+            const int64_t lut_blk0 = static_cast<int64_t>(mask_base) * nhead +
+                                     static_cast<int64_t>(h) * qb_n * kb_n;
+            const int64_t vbn_blk0 = static_cast<int64_t>(vbn_base) * nhead +
+                                     static_cast<int64_t>(h) * qb_n;
             for(int32_t qb = 0; qb < qb_n; ++qb)
             {
                 int32_t valid = 0;
                 int32_t prev  = -1;
                 for(int32_t kb = 0; kb < kb_n; ++kb)
                 {
-                    if(static_cast<float>(packed_mask(h, mask_base + qb * kb_n + kb)) > 0.5f)
+                    if(static_cast<float>(mask_data[lut_blk0 + qb * kb_n + kb]) > 0.5f)
                     {
-                        lut_packed(h, mask_base + qb * kb_n + valid) =
+                        lut_data[lut_blk0 + qb * kb_n + valid] =
                             (prev < 0) ? kb : (kb - prev);
                         prev = kb;
                         ++valid;
                     }
                 }
-                vbn_packed(h, vbn_base + qb) = valid;
+                vbn_data[vbn_blk0 + qb] = valid;
                 for(int32_t i = valid; i < kb_n; ++i)
-                    lut_packed(h, mask_base + qb * kb_n + i) = 0;
+                    lut_data[lut_blk0 + qb * kb_n + i] = 0;
             }
         }
     }
@@ -1520,22 +1543,25 @@ sparse_attn_result sparse_attn_fwd_run(
             auto q_ref = to_bhsd(q_host, i_perm);
             auto k_ref = to_bhsd(k_host, i_perm);
 
-            ck_tile::sparge_mask_prediction_params rp;
+            ck_tile::sparge_block_predict_params rp;
             rp.cdfthreshd            = scalar_cdf;
             rp.topk                   = scalar_topk;
             rp.simthreshold          = scalar_sim;
             rp.cdfthreshd_per_head   = h_cdf;    // empty when !perhead_test → CPU uses scalar
             rp.topk_per_head          = h_topk;
             rp.simthreshold_per_head = h_sim;
-            rp.causal_type            = causal_type;
             rp.attention_sink         = attention_sink;
-            rp.window_left            = mask_decoded.left;
-            rp.window_right           = mask_decoded.right;
             rp.smooth_k               = smooth_k;
+            rp.scale                  = scale;
+
+            ck_tile::sparge_causal_params cp;
+            cp.causal_type            = causal_type;
+            cp.window_left            = mask_decoded.left;
+            cp.window_right           = mask_decoded.right;
 
             auto cpu_mask = ck_tile::reference_sparge_mask_prediction<T>(
                 q_ref, k_ref, batch, nhead, nhead_k, seqlen_q, seqlen_k,
-                hdim_q, block_size, block_size, rp);
+                hdim_q, block_size, block_size, rp, cp);
 
             if(bi.type == bias_enum::elementwise_bias)
             {
@@ -1718,15 +1744,18 @@ sparse_attn_result sparse_attn_fwd_run(
         if(do_validation)
         {
             pass = true;
-            ck_tile::sparge_mask_prediction_params rp;
+            ck_tile::sparge_block_predict_params rp;
             rp.cdfthreshd     = scalar_cdf;
             rp.topk            = scalar_topk;
             rp.simthreshold   = scalar_sim;
-            rp.causal_type     = causal_type;
             rp.attention_sink  = attention_sink;
-            rp.window_left     = mask_decoded.left;
-            rp.window_right    = mask_decoded.right;
             rp.smooth_k        = smooth_k;
+            rp.scale           = scale;
+
+            ck_tile::sparge_causal_params cp;
+            cp.causal_type     = causal_type;
+            cp.window_left     = mask_decoded.left;
+            cp.window_right    = mask_decoded.right;
 
             for(int32_t b = 0; b < batch; ++b)
             {
@@ -1741,7 +1770,7 @@ sparse_attn_result sparse_attn_fwd_run(
                 auto k_ref_b = to_bhsd(k_b, i_perm);
                 auto cpu_mask_b = ck_tile::reference_sparge_mask_prediction<T>(
                     q_ref_b, k_ref_b, /*batch=*/1, nhead, nhead_k, sq, sk,
-                    hdim_q, block_size, block_size, rp);
+                    hdim_q, block_size, block_size, rp, cp);
 
                 bool sub_pass;
                 if(bi.type == bias_enum::elementwise_bias)
