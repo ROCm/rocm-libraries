@@ -142,7 +142,8 @@ stinkytofu::MUBUFModifiers buildMUBUFModifiersForBufferOp(
 stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocMod,
                                                const std::map<std::string, int>& asmCaps) {
     bool hasSCOPEModifier = asmCaps.count("HasSCOPEModifier") && asmCaps.at("HasSCOPEModifier");
-    return stinkytofu::SMEMModifiers(rocMod.glc, rocMod.nv, rocMod.offset, hasSCOPEModifier);
+    return stinkytofu::SMEMModifiers(rocMod.glc, rocMod.nv != rocisa::NonVolatile::NV_NONE,
+                                     rocMod.offset, hasSCOPEModifier);
 }
 
 stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst) {
@@ -457,20 +458,12 @@ static MatrixFmtModifiers extractMatrixFormats(std::string_view instString) {
     return fmts;
 }
 
-/// WMMA/MFMA matrix operand reuse hints from rocisa toString() (matrix_a_reuse / matrix_b_reuse).
-static void applyMfmaReuseFromAsmString(MFMAModifiers& mod, const std::string& instString) {
-    mod.reuseA = instString.find("matrix_a_reuse") != std::string::npos;
-    mod.reuseB = instString.find("matrix_b_reuse") != std::string::npos;
-}
-
 /// Helper to handle MXMFMA instruction modifiers
 void handleMXMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instString) {
     // MXMFMA does not support neg_lo/neg_hi modifiers; only matrix formats.
     auto fmts = extractMatrixFormats(instString);
     if (!fmts.empty()) stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
-    MFMAModifiers mod;
-    applyMfmaReuseFromAsmString(mod, instString);
-    stinkyInst->addModifier<MFMAModifiers>(mod);
+    stinkyInst->addModifier<MFMAModifiers>(MFMAModifiers{});
 }
 
 /// Helper to handle MFMA instruction modifiers
@@ -480,7 +473,6 @@ void handleMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instS
 
     MFMAModifiers mod;
     mod.negBits = extractNegModifiers(instString);
-    applyMfmaReuseFromAsmString(mod, instString);
     stinkyInst->addModifier<MFMAModifiers>(mod);
 }
 
@@ -488,7 +480,6 @@ void handleMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instS
 void handleSMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instString) {
     MFMAModifiers mod;
     mod.negBits = extractNegModifiers(instString);
-    applyMfmaReuseFromAsmString(mod, instString);
     stinkyInst->addModifier<MFMAModifiers>(mod);
 }
 
@@ -1229,6 +1220,11 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 
             // Convert signature to StinkyTofu format, using the wavefrontSize passed from Python
             auto stinkySig = toStinkySignature(signature, archArray, moduleOptions.wavefrontSize);
+
+            // Expose per-wave VGPR allocation on the Function.
+            stinkyModule->getFunction().setMetaData(
+                kSigTotalVgprsMetaKey,
+                static_cast<uint64_t>(stinkySig->kernelDescriptor.totalVgprs));
 
             // Set optimization config
             std::array<int, 2> tt = {moduleOptions.TileA0, moduleOptions.TileB0};

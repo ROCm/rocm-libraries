@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -16,6 +17,9 @@
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
+
+namespace
+{
 
 // SDPA-specific runner: iterates over data types with BHSD and BSHD layouts.
 // Both layouts are controlled via strides on TensorAttributes.
@@ -32,6 +36,8 @@ bool runSdpa(F&& f)
     return allPassed;
 }
 
+} // namespace
+
 template <typename InputType, typename IntermediateType>
 bool SampleRunner::operator()(const TensorLayout& layout)
 {
@@ -41,23 +47,23 @@ bool SampleRunner::operator()(const TensorLayout& layout)
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
     // SDPA dimensions: [batch, num_heads, seq_len, head_dim]
-    constexpr int64_t batch = 2;
-    constexpr int64_t numHeads = 4;
-    constexpr int64_t seqLen = 128;
-    constexpr int64_t headDim = 128;
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t NUM_HEADS = 4;
+    constexpr int64_t SEQ_LEN = 128;
+    constexpr int64_t HEAD_DIM = 128;
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto qAttr = createTensor({batch, numHeads, seqLen, headDim}, inputType, layout);
-    auto kAttr = createTensor({batch, numHeads, seqLen, headDim}, inputType, layout);
-    auto vAttr = createTensor({batch, numHeads, seqLen, headDim}, inputType, layout);
+    auto qAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
+    auto kAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
+    auto vAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
 
     graph::SdpaAttributes sdpaAttributes;
     sdpaAttributes.set_name("sdpa_fprop_node");
-    sdpaAttributes.set_attn_scale_value(1.0f / std::sqrt(static_cast<float>(headDim)));
+    sdpaAttributes.set_attn_scale_value(1.0f / std::sqrt(static_cast<float>(HEAD_DIM)));
 
     auto [oAttr, statsAttr] = graph->sdpa(qAttr, kAttr, vAttr, std::move(sdpaAttributes));
     oAttr->set_output(true);
@@ -81,9 +87,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     variantPack[vAttr->get_uid()] = vTensor.memory().deviceData();
     variantPack[oAttr->get_uid()] = oTensor.memory().deviceData();
 
-    int64_t workspaceSize;
+    int64_t workspaceSize = 0;
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
-    utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+    const utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
 
@@ -106,14 +112,14 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
         utilities::Tensor<InputType> oRefTensor(oAttr->get_dim(), layout);
 
-        auto attnScale = 1.0f / std::sqrt(static_cast<float>(headDim));
+        const auto attnScale = 1.0f / std::sqrt(static_cast<float>(HEAD_DIM));
 
         hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::forward(
             qTensor, kTensor, vTensor, oRefTensor, attnScale);
 
         // SDPA involves two matrix multiplies and softmax, requiring more generous
         // tolerances than single-operation validation.
-        float tolerance;
+        float tolerance = 0.0f;
         if constexpr(std::is_same_v<InputType, float>)
         {
             tolerance = 2e-4f;
@@ -130,7 +136,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         auto oValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool oValid = oValidator.allClose(oRefTensor, oTensor);
+        const bool oValid = oValidator.allClose(oRefTensor, oTensor);
 
         std::cout << "CPU reference validation:\n";
         std::cout << "  output: " << (oValid ? "successful" : "failed") << "\n";
@@ -144,21 +150,26 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
 int main(int argc, char* argv[])
 {
-    auto config = parseCommandLineArgs(argc, argv);
-
-    auto [handle, handleError] = createHipdnnHandle();
-    HIPDNN_FE_CHECK(handleError);
-
-    bool allPassed = runSdpa(SampleRunner{*handle, config});
-
-    if(allPassed)
+    try
     {
-        std::cout << "All SDPA forward runs completed successfully.\n";
-        return 0;
-    }
-    else
-    {
+        auto config = parseCommandLineArgs(argc, argv);
+
+        auto [handle, handleError] = createHipdnnHandle();
+        HIPDNN_FE_CHECK(handleError);
+
+        const bool allPassed = runSdpa(SampleRunner{*handle, config});
+
+        if(allPassed)
+        {
+            std::cout << "All SDPA forward runs completed successfully.\n";
+            return 0;
+        }
         std::cout << "One or more SDPA forward runs failed validation.\n";
+        return 1;
+    }
+    catch(const std::exception& e)
+    {
+        std::fprintf(stderr, "Unhandled exception: %s\n", e.what());
         return 1;
     }
 }

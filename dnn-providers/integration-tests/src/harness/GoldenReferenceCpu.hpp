@@ -56,14 +56,7 @@ protected:
     }
 };
 
-inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
-{
-    return testing::ValuesIn(
-        hipdnn_test_sdk::utilities::filesInDirectoryWithExtReturnEmptyPathOnThrow(
-            hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
-                / "../lib/hipdnn_reference_data" / subDirectory,
-            ".json"));
-}
+using hipdnn_test_sdk::utilities::getGoldenReferenceParams;
 }
 
 #endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB

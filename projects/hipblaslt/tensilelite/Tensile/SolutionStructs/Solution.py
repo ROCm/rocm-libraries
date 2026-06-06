@@ -200,6 +200,8 @@ _skipTypeCheck = {
     "F32XdlMathOp",  # Also converted to DataType
 }
 
+_cacheHintTensors = ("A", "B", "C", "D", "E", "MXSA", "MXSB", "WS", "Metadata")
+_cacheHintLoadTensors = ("A", "B", "C", "E", "MXSA", "MXSB", "WS", "Metadata")
 
 # Module-level collector that accumulates type mismatches across all Solution
 # instances during a build.  Key is (param_name, actual_type_name,
@@ -826,12 +828,16 @@ class Solution(collections.abc.Mapping):
       state["Use64bShadowLimit"] = False
       state["Use64bShadowLimitMX"] = False
 
-      # DepthU should be multiple of 2 * MIK. DepthU=-1 case, set DepthU=2*MIK*LSU
-      duUnit = 2 * state["MatrixInstK"] * state["LocalSplitU"]
+      # DepthU must be a multiple of numSubIterK * MIK * LSU, where numSubIterK is the
+      # number of K-subtiles per depth-U iteration: 1 for fp8 (AB_B8, subtileShape K=1),
+      # 2 for fp4/bf16 (AB_B4/AB_B16, subtileShape K=2).
+      dtype_a = state["ProblemType"]["DataTypeA"]
+      numSubIterK = 1 if dtype_a.is8bitFloat() else 2
+      duUnit = numSubIterK * state["MatrixInstK"] * state["LocalSplitU"]
       if state["DepthU"] == -1:
         state["DepthU"] = duUnit
       if state["DepthU"] % duUnit != 0:
-        reject(state, printRejectionReason, "UseSubtileImpl=1 support only DepthU multiple of 2 * MatrixInstK * LocalSplitU")
+        reject(state, printRejectionReason, f"UseSubtileImpl=1 support only DepthU multiple of {numSubIterK} * MatrixInstK * LocalSplitU")
 
       for tc in ('A', 'B'):
         dtype = state["ProblemType"][f"DataType{tc}"]
@@ -1568,11 +1574,36 @@ class Solution(collections.abc.Mapping):
       print2("in assignDerivedParameters, state['Valid'] = False")
       return
 
-    if not isaInfoMap[isa].asmCaps["HasNTModifier"]:
-      # force to disable nt flag if it is not supported by arch
+    if not isaInfoMap[isa].asmCaps["HasNTModifier"] and not isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
       for ch in ["", "A", "B", "C", "D", "E", "WS", "Metadata"]:
         if state["NonTemporal%s"%ch] >= 4:
           state["NonTemporal%s"%ch] -= 4
+
+    if state["TemporalHint"] != -1:
+      for ch in _cacheHintTensors:
+        state["TemporalHint%s"%ch] = state["TemporalHint"]
+
+    if state["NonVolatile"] != -1:
+      for ch in _cacheHintTensors:
+        state["NonVolatile%s"%ch] = state["NonVolatile"]
+
+    if not isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
+      unsupportedTH = [
+        "TemporalHint%s"%ch for ch in _cacheHintTensors
+        if state["TemporalHint%s"%ch] != 0
+      ]
+      if unsupportedTH:
+        reject(state, printRejectionReason, "TemporalHint is not supported on this platform (%s)" % ", ".join(unsupportedTH))
+        return
+
+    if not isaInfoMap[isa].asmCaps.get("HasNVModifier", False):
+      unsupportedNV = [
+        "NonVolatile%s"%ch for ch in _cacheHintTensors
+        if state["NonVolatile%s"%ch] != 0
+      ]
+      if unsupportedNV:
+        reject(state, printRejectionReason, "NonVolatile is not supported on this platform (%s)" % ", ".join(unsupportedNV))
+        return
 
     if state["WavefrontSize"] == 32 and not isaInfoMap[isa].archCaps["HasWave32"]:
       reject(state, printRejectionReason, "WavefrontSize=32 not supported for ISA {}".format(isa))
@@ -1750,6 +1781,43 @@ class Solution(collections.abc.Mapping):
       state["NonTemporalC"] = state["NonTemporal"]
       state["NonTemporalD"] = state["NonTemporal"]
       state["NonTemporalMetadata"] = state["NonTemporal"]
+
+    if isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
+      droppedNT = sorted(
+        "NonTemporal%s"%ch for ch in ("",) + _cacheHintTensors
+        if state["NonTemporal%s"%ch] >= 4
+      )
+      if droppedNT:
+        printWarning(
+          "gfx1250 ignores the NonTemporal nt bit (0x4) on %s; use TemporalHint*=1 (TH_NT) for non-temporal hints."
+          % ", ".join(droppedNT)
+        )
+
+      reservedLoadHints = [
+        "TemporalHint%s"%ch for ch in _cacheHintLoadTensors
+        if state["TemporalHint%s"%ch] == 7
+      ]
+      if reservedLoadHints:
+        reject(
+          state,
+          printRejectionReason,
+          "TemporalHint=7 is reserved for loads (%s)" % ", ".join(reservedLoadHints),
+        )
+        return
+
+      # TODO: Remove this reject once amdclang++ supports SCOPE_SYS with LU/WB hints.
+      invalidScopeParams = [
+        "NonTemporal%s"%ch for ch in _cacheHintTensors
+        if state["TemporalHint%s"%ch] == 3 and state["NonTemporal%s"%ch] & 0x3 == 0x3
+      ]
+      if invalidScopeParams:
+        reject(
+          state,
+          printRejectionReason,
+          "TemporalHint=3 maps to LU/WB and is not valid with SCOPE_SYS (%s)"
+          % ", ".join(invalidScopeParams),
+        )
+        return
 
     # Init vars early since there are early-exit return statements below
     # tentative init for UseGeneralizedNLCOneA/B

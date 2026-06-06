@@ -4,6 +4,22 @@ import re
 import platform
 import argparse
 import contextlib
+import shlex
+
+
+def _format_extra_args(extra_args):
+    """Format a list of extra command-line args for CMake add_test().
+
+    Each arg is shell-quoted with shlex.quote so that values containing spaces
+    or shell metacharacters are preserved as a single argument by CTest. Empty
+    or None inputs produce an empty string (no leading space).
+    """
+    if not extra_args:
+        return ""
+    if isinstance(extra_args, str):
+        # Allow YAML authors to write a single string instead of a list.
+        extra_args = shlex.split(extra_args)
+    return " " + " ".join(shlex.quote(str(a)) for a in extra_args)
 
 
 # Allowlist patterns for YAML-sourced values
@@ -257,6 +273,7 @@ def main():
             exclude = category_info.get("exclude", [])
             if exclude is None:
                 exclude = []
+            extra_args = category_info.get("extra_args", []) or []
 
             # Add OS-specific exclusions
             if is_windows:
@@ -284,7 +301,11 @@ def main():
                 "exclude_string": exclude_string,
                 "labels": labels[:],  # Make a copy
                 "timeout": timeout,
+                "extra_args": (
+                    list(extra_args) if isinstance(extra_args, list) else extra_args
+                ),
             }
+            extra_args_string = _format_extra_args(extra_args)
 
             # Build complete pattern string for this category test
             if exclude_string:
@@ -299,7 +320,9 @@ def main():
             # =======================================================================
             print("add_test(")
             print(f"  NAME {target_name}_{category_name}_suite")
-            print(f"  COMMAND {target_name} --gtest_filter={pattern_string}")
+            print(
+                f"  COMMAND {target_name} --gtest_filter={pattern_string}{extra_args_string}"
+            )
             print(f"  WORKING_DIRECTORY {working_dir}")
             print(")")
 
@@ -317,7 +340,7 @@ def main():
             if install_file_handle:
                 try:
                     install_file_handle.write(
-                        f'add_test({target_name}_{category_name}_suite "../{target_name}" --gtest_filter={pattern_string})\n'
+                        f'add_test({target_name}_{category_name}_suite "../{target_name}" --gtest_filter={pattern_string}{extra_args_string})\n'
                     )
                     env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
                     install_file_handle.write(
@@ -414,6 +437,7 @@ def main():
                 cat_exclude_string = cat_data["exclude_string"]
                 cat_labels = cat_data["labels"]
                 timeout = cat_data["timeout"]
+                cat_extra_args_string = _format_extra_args(cat_data.get("extra_args"))
 
                 # Build combined pattern string: positive - category_excludes:gpu_excludes
                 combined_exclude_string = ""
@@ -436,7 +460,9 @@ def main():
                 print(f"# GPU exclusion for {gpu_arch} - {category_name} category")
                 print("add_test(")
                 print(f"  NAME {target_name}_{category_name}_{gpu_arch}_suite")
-                print(f"  COMMAND {target_name} --gtest_filter={pattern_string}")
+                print(
+                    f"  COMMAND {target_name} --gtest_filter={pattern_string}{cat_extra_args_string}"
+                )
                 print(f"  WORKING_DIRECTORY {working_dir}")
                 print(")")
 
@@ -454,7 +480,7 @@ def main():
                 if install_file_handle:
                     try:
                         install_file_handle.write(
-                            f'add_test({target_name}_{category_name}_{gpu_arch}_suite "../{target_name}" --gtest_filter={pattern_string})\n'
+                            f'add_test({target_name}_{category_name}_{gpu_arch}_suite "../{target_name}" --gtest_filter={pattern_string}{cat_extra_args_string})\n'
                         )
                         env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
                         install_file_handle.write(
