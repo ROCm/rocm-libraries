@@ -294,3 +294,116 @@ def test_frequency_probe_skipped(monkeypatch, _restore_gp):
     assert ran is True
     assert seen["hip"] == 1
     assert calls == {"hip": 0, "smi": 0, "user": 0}  # smi/user untouched
+
+
+# --- Client device-launch stub + synthetic results CSV (commit 5) ---------------
+
+import subprocess
+from pathlib import Path
+
+import Tensile.ClientWriter as ClientWriter
+import Tensile.BenchmarkProblems as BenchmarkProblems
+from Tensile.SolutionStructs.Problem import Problem
+
+# Per-arch seeded problem sizes (the data stub: mirror ProblemSizesMockDummy's [128,128,1,512]).
+# Two distinct sizes prove one CSV data row per seeded size.
+_SEED_SIZES = [(128, 128, 1, 512), (256, 256, 1, 1024)]
+
+
+class _ProblemSizesStub:
+    """Minimal stand-in for ProblemSizes carrying just ``.problems`` (the attribute the
+    synthetic-CSV writer reads), in ProblemSizesMock style (SolutionStructs/Problem.py)."""
+
+    def __init__(self, sizes):
+        self.problems = [Problem(sizes=list(s)) for s in sizes]
+
+
+def test_no_side_effects(monkeypatch, _restore_gp, tmp_path):
+    """T6: on the --cpu-only runClient path, the device boundary is never touched:
+    no subprocess.Popen launch, no getClientExecutablePath, no subprocess.run
+    (pip/hip install), and builtins.input is never read. runClient returns 0."""
+    globalParameters["CpuOnly"] = True
+
+    def _no_popen(*a, **k):
+        raise AssertionError("subprocess.Popen launched the client under CpuOnly")
+
+    def _no_run(*a, **k):
+        raise AssertionError("subprocess.run shelled out (pip/hip install) under CpuOnly")
+
+    def _no_exe(*a, **k):
+        raise AssertionError("getClientExecutablePath called under CpuOnly")
+
+    monkeypatch.setattr(subprocess, "Popen", _no_popen)
+    monkeypatch.setattr(subprocess, "run", _no_run)
+    monkeypatch.setattr(ClientWriter, "getClientExecutablePath", _no_exe)
+    # builtins.input is already monkeypatched to raise by the autouse _no_stdin fixture.
+
+    rc = ClientWriter.runClient(
+        libraryLogicPath=None,
+        forBenchmark=True,
+        enableTileSelection=False,
+        cxxCompiler="hipcc",
+        cCompiler="hipcc",
+        outputPath=tmp_path,
+        configPaths=[str(tmp_path / "ClientParameters.ini")],
+    )
+    assert rc == 0
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx90a"])
+def test_synthetic_csv_schema(tmp_path, arch):
+    """T7 (schema-drift sentinel): the synthetic CSV is fed through the REAL
+    LibraryLogic.addFromCSV and parses without error, yielding the expected perfMetric
+    and one consumed row per seeded problem size. If the client CSV contract changes
+    upstream so that addFromCSV's column expectations drift, this fails."""
+    import Tensile.LibraryLogic as LibraryLogic
+    from Tensile.LibraryLogic import LogicAnalyzer
+
+    resultsFileName = str(tmp_path / "results.csv")
+    problemSizes = _ProblemSizesStub(_SEED_SIZES)
+    numSolutions = 1
+
+    BenchmarkProblems._writeSyntheticResultsCSV(
+        resultsFileName, problemSizes, arch, numSolutions)
+
+    # Drive the REAL addFromCSV. Build a lightweight analyzer carrying only the attributes
+    # addFromCSV reads on the exact-size path; the parser logic itself is the real code.
+    analyzer = LogicAnalyzer.__new__(LogicAnalyzer)
+    analyzer.numIndices = len(_SEED_SIZES[0])
+    analyzer.exactProblemSizes = set(_SEED_SIZES)
+    analyzer.rangeProblemSizes = set()
+    analyzer.exactWinners = {}
+    analyzer.perfMetric = None
+
+    # solutionMap: CSV solution-column index -> solution id (identity for one solution).
+    solutionMap = {i: i for i in range(numSolutions)}
+
+    # UseEffLike must be False so addFromCSV does not call read_max_freq() (a device probe).
+    saved_eff = globalParameters.get("UseEffLike")
+    globalParameters["UseEffLike"] = False
+    try:
+        analyzer.addFromCSV(resultsFileName, numSolutions, solutionMap)
+    finally:
+        globalParameters["UseEffLike"] = saved_eff
+
+    # Header row -> perfMetric derived from the "GFlops" unit column.
+    assert analyzer.perfMetric == "DeviceEfficiency"
+    # One winner recorded per seeded exact problem size (schema parsed correctly).
+    assert set(analyzer.exactWinners.keys()) == set(_SEED_SIZES)
+    for size in _SEED_SIZES:
+        winnerSolId, perf = analyzer.exactWinners[size]
+        assert winnerSolId == 0
+        assert perf == 1000.0
+
+
+def test_determinism(tmp_path):
+    """T8: producing the synthetic CSV twice for the same arch yields byte-identical
+    files (no randomness, no timestamps)."""
+    problemSizes = _ProblemSizesStub(_SEED_SIZES)
+    f1 = str(tmp_path / "a.csv")
+    f2 = str(tmp_path / "b.csv")
+
+    BenchmarkProblems._writeSyntheticResultsCSV(f1, problemSizes, "gfx942", 1)
+    BenchmarkProblems._writeSyntheticResultsCSV(f2, problemSizes, "gfx942", 1)
+
+    assert Path(f1).read_bytes() == Path(f2).read_bytes()
