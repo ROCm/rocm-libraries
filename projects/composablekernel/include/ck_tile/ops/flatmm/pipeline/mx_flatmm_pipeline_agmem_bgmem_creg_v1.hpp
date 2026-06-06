@@ -590,8 +590,8 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
     // to disambiguate this overload from the runtime-dispatching overload
     // below, mirroring the same trick used by the non-MX
     // FlatmmPipelineAGmemBGmemCRegV1 (lines 536-545 vs 1024-1043).
-    template <bool HasHotLoop_                       = HasHotLoop,
-              ck_tile::TailNumber TailNum_           = TailNum,
+    template <bool HasHotLoop_             = HasHotLoop,
+              ck_tile::TailNumber TailNum_ = TailNum,
               typename ADramBlockWindowTmp,
               typename AElementFunction,
               typename BFlatBlockWindowTmp,
@@ -665,8 +665,8 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         return Underlying::template TailHandler<true>(RunPipeline, has_hot_loop, tail_num);
     }
 
-    template <bool HasHotLoop_                       = HasHotLoop,
-              ck_tile::TailNumber TailNum_           = TailNum,
+    template <bool HasHotLoop_             = HasHotLoop,
+              ck_tile::TailNumber TailNum_ = TailNum,
               typename ADramBlockWindowTmp,
               typename BFlatBlockWindowTmp,
               typename ScaleADramBlockWindowTmp,

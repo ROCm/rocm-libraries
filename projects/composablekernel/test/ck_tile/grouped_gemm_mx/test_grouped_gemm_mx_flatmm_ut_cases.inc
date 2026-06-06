@@ -37,11 +37,7 @@ constexpr int init_method = 1;
 TYPED_TEST(TestGroupedGemmMXFlatmm, Basic_4Groups)
 {
     // K values hit one class each: 256 (A), 512 (B), 768 (C), 1024 (D).
-    this->Run({128, 256, 384, 512},
-              {512, 1024, 512, 1024},
-              {256, 512, 768, 1024},
-              4,
-              init_method);
+    this->Run({128, 256, 384, 512}, {512, 1024, 512, 1024}, {256, 512, 768, 1024}, 4, init_method);
 }
 
 TYPED_TEST(TestGroupedGemmMXFlatmm, Single_Group)

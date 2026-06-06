@@ -357,19 +357,18 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
                                                        FlatmmConfig::TileParitionerGroupNum,
                                                        FlatmmConfig::TileParitionerM01>;
 
-        using GemmTraits =
-            ck_tile::TileGemmUniversalTraits<FlatmmConfig::kPadM,
-                                             FlatmmConfig::kPadN,
-                                             FlatmmConfig::kPadK,
-                                             FlatmmConfig::DoubleSmemBuffer,
-                                             ALayout,
-                                             BLayout,
-                                             CLayout,
-                                             FlatmmConfig::TransposeC,
-                                             FlatmmConfig::UseStructuredSparsity,
-                                             /*Persistent=*/false,
-                                             FlatmmConfig::NumWaveGroups,
-                                             /*UseAsyncCopy=*/true>;
+        using GemmTraits = ck_tile::TileGemmUniversalTraits<FlatmmConfig::kPadM,
+                                                            FlatmmConfig::kPadN,
+                                                            FlatmmConfig::kPadK,
+                                                            FlatmmConfig::DoubleSmemBuffer,
+                                                            ALayout,
+                                                            BLayout,
+                                                            CLayout,
+                                                            FlatmmConfig::TransposeC,
+                                                            FlatmmConfig::UseStructuredSparsity,
+                                                            /*Persistent=*/false,
+                                                            FlatmmConfig::NumWaveGroups,
+                                                            /*UseAsyncCopy=*/true>;
 
         using MXPipelineProblem =
             ck_tile::MXFlatmmPipelineProblem<ADataType,
