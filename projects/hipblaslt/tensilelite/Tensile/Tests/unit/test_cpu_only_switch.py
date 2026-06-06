@@ -407,3 +407,203 @@ def test_determinism(tmp_path):
     BenchmarkProblems._writeSyntheticResultsCSV(f2, problemSizes, "gfx942", 1)
 
     assert Path(f1).read_bytes() == Path(f2).read_bytes()
+
+
+# --- Tier 2: end-to-end ("it actually works") (commit 6) ------------------------
+
+_E2E_CONFIG = Path(__file__).parent / "test_data" / "cpu_only.yaml"
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx90a"])
+def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, arch):
+    """T9: drive the full benchmark flow GPU-less via
+    Tensile.Tensile([cfg, out, "--cpu-only", "--gpu-targets", arch, *tensile_args]).
+
+    Mirrors test_keep_build_tmp.py, but exercises the BENCHMARK path (no --build-only):
+    codegen -> cross-compile -> stubbed client launch -> deterministic synthetic results
+    CSV -> LibraryLogic.addFromCSV. The flow must complete without exception, leave a
+    results .csv under the output dir, and produce a 3_LibraryLogic artifact (proving
+    addFromCSV ran end-to-end, not just that branches were reached). The autouse
+    _no_stdin fixture guarantees builtins.input is never read.
+
+    GPU-less note: LibraryLogic's createLibraryLogic asks getCUCount()
+    (LibraryIO.py:686), which probes rocminfo unless the documented ``CU`` env-var
+    escape hatch is set. We set CU here (the code's own GPU-less escape) rather than
+    touch out-of-scope LibraryIO source. This is a separate device probe from the three
+    seams the --cpu-only switch owns (ISA detect / frequency probe / client launch).
+    """
+    monkeypatch.setenv("CU", "304")
+
+    output_dir = tmp_path / "output"
+    args = [
+        str(_E2E_CONFIG), str(output_dir),
+        "--cpu-only", "--gpu-targets", arch,
+        *tensile_args,
+    ]
+
+    Tensile.Tensile(args)
+
+    # A results CSV was produced (the synthetic stub wrote it; the real device never ran).
+    results_csvs = list(output_dir.rglob("*.csv"))
+    assert results_csvs, "no results .csv produced under the output dir"
+
+    # The benchmark-data CSV the LibraryLogic step consumes exists and carries our
+    # deterministic synthetic perf value.
+    benchmark_data = list((output_dir / "2_BenchmarkData").glob("*.csv"))
+    assert benchmark_data, "no 2_BenchmarkData CSV (addFromCSV input) produced"
+    text = benchmark_data[0].read_text()
+    assert text.splitlines()[0].startswith("GFlops")  # addFromCSV perf-unit header
+    assert "1000.0" in text  # the fixed synthetic GFlops value
+
+    # A library-logic artifact exists -> LibraryLogic.main (addFromCSV) ran to completion.
+    logic_artifacts = list((output_dir / "3_LibraryLogic").glob("*.yaml"))
+    assert logic_artifacts, "no 3_LibraryLogic artifact produced; addFromCSV did not run"
+
+
+# --- Tier 3: off-path equivalence (the downstream-trust gate) (commit 6) ---------
+
+_TEST_DATA = Path(__file__).parent / "test_data"
+
+
+def _make_problem_type():
+    """Build the canonical single-batch GEMM ContractionsProblemType used to capture the
+    commit-1 golden: operationIdentifier == Contraction_l_Ailk_Bljk_Cijk_Dijk, S types,
+    UseBias=1 / BiasSrc="D" (matching the golden's use-bias=1 / bias-source=3)."""
+    from Tensile.Contractions import ProblemType
+
+    d = {
+        "OperationType": "GEMM",
+        "DataType": "S", "DestDataType": "S", "ComputeDataType": "S",
+        "TransposeA": 0, "TransposeB": 0, "Batched": True, "UseBeta": True,
+        "TotalIndices": 4, "NumIndicesC": 3,
+        "IndicesFree": [0, 1], "IndicesBatch": [2], "IndicesSummation": [3],
+        "IndexAssignmentsA": [0, 3, 2], "IndexAssignmentsB": [3, 1, 2],
+        "ComplexConjugateA": False, "ComplexConjugateB": False,
+        "ActivationComputeDataType": "S",
+        "UseBias": 1, "BiasSrc": "D",
+        "HighPrecisionAccumulate": False,
+    }
+    return ProblemType.FromOriginalState(d)
+
+
+def test_off_path_text_golden(tmp_path, monkeypatch, _restore_gp):
+    """T10: with CpuOnly OFF, writeRunScript() and writeClientConfigIni() produce text
+    byte-identical to the goldens captured from develop in commit 1. These functions are
+    CPU-only (no device/freq/detect), so the golden is capturable and reproducible
+    GPU-less. This is the literal 'byte-identical when off' proof for the touched output.
+
+    Variable paths (the per-run tempdir, the client exe) are normalized to the same
+    fixed sentinels the commit-1 capture used (/SRC, /TENSILE_CLIENT_EXE), so only the
+    emitted structure -- not the host-specific paths -- is compared.
+    """
+    from Tensile.SolutionStructs.Problem import ProblemSizesMockDummy
+
+    # restoreDefaultGlobalParameters() populates every key the writers read; CpuOnly OFF.
+    restoreDefaultGlobalParameters()
+    globalParameters["CpuOnly"] = False
+
+    # --- writeRunScript golden (forBenchmark=True) ---
+    monkeypatch.setattr(
+        ClientWriter, "getClientExecutablePath", lambda: "/TENSILE_CLIENT_EXE")
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    config_paths = ["/SRC/ClientParameters.ini", "/SRC/ClientParameters_Granularity.ini"]
+    run_script = ClientWriter.writeRunScript(
+        str(build_dir), True, False, "hipcc", "hipcc", str(build_dir),
+        configPaths=list(config_paths))
+    produced_sh = Path(run_script).read_text()
+    golden_sh = (_TEST_DATA / "cpu_only_runscript.golden.sh").read_text()
+    assert produced_sh == golden_sh, "writeRunScript output drifted from the develop golden"
+
+    # --- writeClientConfigIni golden ---
+    class _FactorDimArgs:
+        factorDims = [0]
+
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    params_path = source_dir / "ClientParameters.ini"
+    ClientWriter.writeClientConfigIni(
+        forBenchmark=True,
+        problemSizes=ProblemSizesMockDummy(),
+        biasTypeArgs="",
+        factorDimArgs=_FactorDimArgs(),
+        activationArgs="",
+        icacheFlushArgs="",
+        problemType=_make_problem_type(),
+        sourceDir=str(source_dir),
+        codeObjectFiles=["TensileLibrary_gfx942.co"],
+        resultsFileName="/DATA/benchmark.csv",
+        parametersFilePath=str(params_path),
+        deviceId=0,
+        gfxName="gfx942",
+        libraryFile="/LIB/gfx942/TensileLibrary.dat",
+    )
+    produced_ini = params_path.read_text().replace(str(source_dir), "/SRC")
+    golden_ini = (_TEST_DATA / "cpu_only_clientconfig.golden.ini").read_text()
+    assert produced_ini == golden_ini, "writeClientConfigIni output drifted from the develop golden"
+
+
+def test_off_path_real_branches(monkeypatch, _restore_gp):
+    """T11: with CpuOnly OFF, the new switch code is inert -- the REAL device-bound
+    branches are taken at each of the three seams (ISA detection, frequency probe, client
+    launch). Proves the gates added by this PR fall through to the original code paths
+    when the switch is off.
+    """
+    globalParameters["CpuOnly"] = False
+
+    # --- Seam 1: ISA detection takes the real shell-out parse path (not the spoof). ---
+    class _FakeProc:
+        returncode = 0
+        stdout = b"gfx942\n"
+
+    isa_calls = {"n": 0}
+
+    def _fake_run(*a, **k):
+        isa_calls["n"] += 1
+        return _FakeProc()
+
+    monkeypatch.setattr(Arch, "run", _fake_run)
+    isa = Arch.detectGlobalCurrentISA(0, "amdgpu-arch")
+    assert isa_calls["n"] == 1, "CpuOnly OFF must reach the real ISA shell-out path"
+    assert isa == IsaVersion(9, 4, 2)
+
+    # --- Seam 2: the frequency-probe block runs (get_gpu_max_frequency is called). ---
+    freq_calls = {"hip": 0}
+
+    def _hip_ok(device_id):
+        freq_calls["hip"] += 1
+        return 1700  # deterministic non-zero -> smi/user not needed
+
+    monkeypatch.setattr(Tensile, "get_gpu_max_frequency", _hip_ok)
+    ran = _run_freq_block()
+    assert ran is True, "CpuOnly OFF must enter the real frequency-probe block"
+    assert freq_calls["hip"] == 1, "CpuOnly OFF must call the real get_gpu_max_frequency"
+
+    # --- Seam 3: runClient takes the real launch path (writeRunScript is reached). ---
+    # We don't run the launch GPU-less; we only prove the CpuOnly short-circuit at
+    # ClientWriter.py is NOT taken when off, by spying writeRunScript. The real path
+    # would proceed to getClientExecutablePath/Popen after this point.
+    reached = {"writeRunScript": 0}
+
+    def _spy_write_run_script(*a, **k):
+        reached["writeRunScript"] += 1
+        raise RuntimeError("stop after proving the real launch path was entered")
+
+    monkeypatch.setattr(ClientWriter, "writeRunScript", _spy_write_run_script)
+
+    import os as _os
+    import tempfile as _tempfile
+
+    out = Path(_tempfile.mkdtemp(prefix="t11_"))
+    with pytest.raises(RuntimeError, match="stop after proving"):
+        ClientWriter.runClient(
+            libraryLogicPath=None,
+            forBenchmark=True,
+            enableTileSelection=False,
+            cxxCompiler="hipcc",
+            cCompiler="hipcc",
+            outputPath=out,
+            configPaths=[str(out / "ClientParameters.ini")],
+        )
+    assert reached["writeRunScript"] == 1, (
+        "CpuOnly OFF must fall through the runClient stub to the real launch path")
