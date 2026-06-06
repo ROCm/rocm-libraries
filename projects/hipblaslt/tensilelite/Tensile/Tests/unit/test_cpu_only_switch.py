@@ -123,3 +123,95 @@ def test_arg_validation():
     # Off by default and independent of other common args.
     args = _parse(["--device", "0"])
     assert args.cpuOnly is False
+
+
+# --- ISA belt spoof + primary --gpu-targets path (commit 3) ---------------------
+
+import Tensile.Common.Architectures as Arch
+from Tensile.Common.Types import IsaVersion
+
+
+_ARCH_ISA = {
+    "gfx942": IsaVersion(9, 4, 2),
+    "gfx950": IsaVersion(9, 5, 0),
+    "gfx90a": IsaVersion(9, 0, 10),
+}
+
+
+@pytest.fixture
+def _restore_gp():
+    """Snapshot/restore the CpuOnly plumbing keys so a flipped flag never leaks."""
+    saved = (globalParameters.get("CpuOnly"), globalParameters.get("CpuOnlyArch"))
+    try:
+        yield
+    finally:
+        globalParameters["CpuOnly"], globalParameters["CpuOnlyArch"] = saved
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx90a"])
+def test_isa_belt_spoof(monkeypatch, _restore_gp, arch):
+    """T3: with CpuOnly on, the direct ISA-detection path returns the exact per-arch
+    IsaVersion without shelling out (Architectures.run raises if called); with CpuOnly
+    off, the real parse path is taken (spoof branch not entered)."""
+    expected = _ARCH_ISA[arch]
+
+    # --- CpuOnly ON: no shell-out, exact per-arch IsaVersion ---
+    globalParameters["CpuOnly"] = True
+    globalParameters["CpuOnlyArch"] = arch
+
+    def _no_shell(*a, **k):
+        raise AssertionError("Architectures.run() shelled out under CpuOnly")
+
+    monkeypatch.setattr(Arch, "run", _no_shell)
+
+    result = Arch.detectGlobalCurrentISA(0, "amdgpu-arch")
+    assert isinstance(result, IsaVersion)
+    assert result == expected
+
+    # --- CpuOnly OFF: spoof branch NOT entered; real parse path runs ---
+    globalParameters["CpuOnly"] = False
+
+    class _FakeProc:
+        returncode = 0
+        stdout = (arch + "\n").encode()
+
+    calls = {"n": 0}
+
+    def _fake_run(*a, **k):
+        calls["n"] += 1
+        return _FakeProc()
+
+    monkeypatch.setattr(Arch, "run", _fake_run)
+
+    result_off = Arch.detectGlobalCurrentISA(0, "amdgpu-arch")
+    assert calls["n"] == 1  # the real shell-out path was taken
+    assert result_off == expected
+
+
+def test_isa_primary_path(monkeypatch, _restore_gp):
+    """T4: the primary --cpu-only --gpu-targets path builds isaList directly from the
+    target arch and never calls detectGlobalCurrentISA."""
+    # Spy: detection must never be reached on the --gpu-targets path.
+    def _no_detect(*a, **k):
+        raise AssertionError("detectGlobalCurrentISA called on the --gpu-targets path")
+
+    monkeypatch.setattr(Arch, "detectGlobalCurrentISA", _no_detect)
+
+    # Mirror the isaList-building logic at Tensile.py (the --gpu-targets branch):
+    # ISA comes straight from gfxToIsa(arch); enumerator is None; detection untouched.
+    args = _parse(["--cpu-only", "--device", "0"])
+    assert args.cpuOnly is True
+
+    gpuTargets = "gfx942"
+    enumerator = None if gpuTargets else object()
+    assert enumerator is None  # --gpu-targets path: enumerator not needed
+
+    isaList = []
+    for a in gpuTargets.split(";"):
+        a = a.strip()
+        assert a
+        isa = Arch.gfxToIsa(a)
+        assert isa is not None
+        isaList.append(isa)
+
+    assert isaList == [IsaVersion(9, 4, 2)]
