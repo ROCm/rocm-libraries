@@ -70,35 +70,36 @@ invoke build-client \
 Tensile/bin/Tensile Tensile/Tests/common/exception/<test>.yaml tensile-out
 ```
 
-### Rebuilding rocisa after C++ changes
+### Rebuilding after C++ changes
 
-The rebuild command depends on how rocisa was installed:
+`invoke build-client` builds the tensilelite-client executable only — it does
+**not** rebuild the rocisa Python module (`_rocisa.so`).  If you edit rocisa or
+stinkytofu C++ sources you must re-run `invoke rocisa` for those changes to
+take effect in Python:
 
-**If installed via `invoke rocisa`** (scikit-build-core build dir is `rocisa/build`):
+| What you changed | Command to rebuild |
+|---|---|
+| rocisa C++ sources | `invoke rocisa` |
+| stinkytofu C++ sources | `invoke rocisa` |
+| tensilelite-client C++ sources | `invoke build-client` |
+| rocisa `pyproject.toml` or `CMakeLists.txt` | `invoke rocisa` |
 
-```bash
-invoke rocisa   # re-runs pip install -e; scikit-build-core does an incremental rebuild
-# or directly:
-cmake --build rocisa/build --target _rocisa
-```
-
-**If installed via `invoke build-client`** (cmake build dir is `build_tmp`):
-
-```bash
-cmake --build build_tmp --target _rocisa
-```
-
-**If using a custom cmake build directory:**
+Example workflow after editing stinkytofu or rocisa code:
 
 ```bash
-cmake --build <build_dir> --target _rocisa
+# 1. Rebuild the rocisa Python module (includes stinkytofu)
+invoke rocisa
+
+# 2. Rebuild the C++ client (if needed)
+invoke build-client
 ```
 
-If you forget to rebuild, importing rocisa will raise an `ImportError` listing the stale files:
+If you forget to rebuild, importing rocisa will raise an `ImportError` listing
+the stale source files:
 
 ```
 ImportError: rocisa C++ sources are newer than the built _rocisa.so — bindings are stale.
-  Modified: .../rocisa/src/main.cpp
+  Modified: .../shared/stinkytofu/src/ir/asm/Function.cpp
   Rebuild:  cmake --build <build_dir> --target _rocisa
 ```
 
@@ -150,6 +151,17 @@ Use these flags when you want to override or make that behavior explicit:
 * `--export-compile-commands`: Explicitly force `CMAKE_EXPORT_COMPILE_COMMANDS=ON`
 * `--bundle-python-deps`: Explicitly force `HIPBLASLT_BUNDLE_PYTHON_DEPS=ON`
 * `--enable-rocprof`: Sets `TENSILELITE_CLIENT_ENABLE_ROCPROFSDK=ON`
+
+### Speeding Up Builds with ccache
+
+Install ccache to cache compiled objects across rebuilds:
+
+```bash
+sudo apt install ccache    # Ubuntu/Debian
+```
+
+`invoke rocisa` and `invoke build-client` will detect ccache automatically
+and use it as the compiler launcher. No additional configuration is needed.
 
 ### Environment Variables
 

@@ -57,7 +57,14 @@ __global__ void compress_kernel(const Ti*      in,
     constexpr int    metadata_tiles_y = 8;
     constexpr int    tiles_y          = 4;
 
-    using c_type = std::conditional_t<std::is_same<__hip_fp8_e4m3, Ti>::value || std::is_same<__hip_fp8_e5m2, Ti>::value, float, Ti>;
+    using c_type = std::conditional_t<false
+#if HIP_FP8_TYPE_OCP
+        || std::is_same<__hip_fp8_e4m3, Ti>::value || std::is_same<__hip_fp8_e5m2, Ti>::value
+#endif
+#if HIP_FP8_TYPE_FNUZ
+        || std::is_same<__hip_fp8_e4m3_fnuz, Ti>::value || std::is_same<__hip_fp8_e5m2_fnuz, Ti>::value
+#endif
+        , float, Ti>;
     const c_type ZERO_C = static_cast<c_type>(0.0f);
     const Ti     ZERO   = static_cast<Ti>(0.0f);
 
@@ -253,6 +260,14 @@ rocsparselt_status rocsparselt_smfmac_compress_impl(const _rocsparselt_handle*  
     case HIP_R_8F_E5M2:
         return rocsparselt_smfmac_compress_template<__hip_fp8_e5m2>(
             COMPRESS_PARAMS(__hip_fp8_e5m2));
+#endif
+#if HIP_FP8_TYPE_FNUZ
+    case HIP_R_8F_E4M3_FNUZ:
+        return rocsparselt_smfmac_compress_template<__hip_fp8_e4m3_fnuz>(
+            COMPRESS_PARAMS(__hip_fp8_e4m3_fnuz));
+    case HIP_R_8F_E5M2_FNUZ:
+        return rocsparselt_smfmac_compress_template<__hip_fp8_e5m2_fnuz>(
+            COMPRESS_PARAMS(__hip_fp8_e5m2_fnuz));
 #endif
     default:
         log_error(handle,

@@ -17,9 +17,10 @@
 
 #define DEBUG_LOG 0
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 // Currently we do not have a elegant way to put single lds buffer & double lds buffer pipe in same
@@ -649,6 +650,11 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
         index_t BK0;
         index_t MBlock;
         index_t NBlock;
+        // When true, the caller guarantees p_c_grid is already zeroed before
+        // launch, so the device invoker skips its own hipMemsetAsync for the
+        // KBatch > 1 split-K atomic-accumulation path. Defaults to false, which
+        // preserves the original zero-init behavior.
+        bool skip_zero_init = false;
     };
 
     // Argument
@@ -1287,4 +1293,6 @@ struct GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3
 };
 
 } // namespace ck
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

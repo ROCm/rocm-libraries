@@ -84,6 +84,6 @@ class Validator:
         result = self._comparator.compare(output_a, output_b, "A", "B")
 
         if result.passed:
-            return (True, f"A/B outputs match (rtol={self._rtol}, atol={self._atol})")
+            return (True, f"Outputs match (rtol={self._rtol}, atol={self._atol})")
         else:
-            return (False, f"A/B mismatch: {result.message}")
+            return (False, f"Output mismatch: {result.message}")
