@@ -1,0 +1,74 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P2 designed StreamK config for gfx942 codegen characterization.
+#
+# Goal: exercise the uncovered branches of Tensile/Components/StreamK.py
+# (methodology-A missing ranges: 202, 316, 326-409, 464+) on gfx942.
+#
+# StreamK family sweep:
+#   - StreamK: [1, 2, 3]  -- SK modes 1, 2, 3 (mode 4 is dynamic; 0 disables SK)
+#   - StreamKAtomic: [0, 1]  -- 1 requires SGEMM (f32) and triggers atomic SK path
+#   - StreamKXCCMapping: [0]  -- gfx942 XCC mapping; keep 0 to avoid XCC interactions
+#
+# ProblemType: SGEMM NT (f32), Batched=True (StridedBatched requirement for SK)
+# Large K (1024) to make SK meaningful.
+# limit=8 kernels: 3 SK modes x 2 atomic modes = 6 valid combos (SK=1+Atomic=1 allowed,
+# SK=2+Atomic=1 allowed, SK=3+Atomic=1 allowed per the validation code).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # SGEMM (f32 in/out/compute) NT, Batched
+  # StreamK family sweep for gfx942 coverage:
+  #   StreamK=[1,2,3] x StreamKAtomic=[0,1] => up to 6 combos (within limit=8)
+  # StreamKAtomic=1 requires SGEMM (f32) => this ProblemType works.
+  ########################################
+  -
+    - # ProblemType: SGEMM NT
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: False
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4, 4, 2, 2]
+        - StreamK: [1, 2, 3]
+        - StreamKAtomic: [0, 1]
+        - StreamKXCCMapping: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - DepthU: [16]
+        - LocalReadVectorWidth: [1]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [0]
+        - GlobalSplitU: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - MIArchVgpr: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - StoreRemapVectorWidth: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1024]

@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_r2_lra_gfx942_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bjlk_HHS_BH_UserArgs_MT16x8x64_SN_LDSBZ8kA5s7mQXcFkurK8H4X3cn8MaJVElXiKpP8GvPMJrw=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bjlk_HHS_BH_UserArgs_MT64x4x64_SN_LDSBC5Ofbu4wNUGrqeOzrFnQZ4nGAHxyOEY_DNlX0v8Taf0=',
+      'err': 0,
+    }),
+  ])
+# ---

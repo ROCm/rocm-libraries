@@ -1,0 +1,29 @@
+# serializer version: 1
+# name: test_r2_streamk_gfx942_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16EYl6eo-MsPqdZurhmcJNaZE9Jp6Ca4zhdY8KaXq6BXo=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16EYl6eo-MsPqdZurhmcJNaZE9Jp6Ca4zhdY8KaXq6BXo=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16SvE6Pkp90bZZddTrPKuFh205QNJOq_oNTGaIkH_XXPA=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16SvE6Pkp90bZZddTrPKuFh205QNJOq_oNTGaIkH_XXPA=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16oQBk8xgBtV_Dw1_14K3_DNjtzDWVdfjOfLCl7tzZzvY=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI16x16oQBk8xgBtV_Dw1_14K3_DNjtzDWVdfjOfLCl7tzZzvY=',
+      'err': 0,
+    }),
+  ])
+# ---

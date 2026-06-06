@@ -1,0 +1,82 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P2 DESIGNED subtile config for gfx950 — SubtileGREmit characterization.
+#
+# Targets the uncovered ranges in Tensile/Components/Subtile/SubtileGREmit.py:
+#   359-411  (_emitGR_TLU0 — subtile GR buffer load emit)
+#   528-639  (_grComputeSubtileOffsets_legacy, _grComputeRowPartition_legacy
+#             loadRatioGR=1.0/0.5/2.0 branches)
+#   658-834  (_grComputeAllOffsets_legacy, _grSwizzleColIds_legacy,
+#             _graTileAssignment_legacy)
+#   856-903  (emitSingleBufferLoad / globalReadDoSubtile)
+#
+# All missing lines live in the UseSubtileImpl=1 / DirectToLds code path.
+# UseSubtileImpl=1 activates SubtileBasedKernel which calls graTileAssignment()
+# (lines 657+) and emitSubtileBufferLoad() (lines 856+).  The GRTag_1x2/2x2
+# dispatch path (lines 359-411) is entered for non-trivial subtile grids
+# (wave-group size > 1x1).
+#
+# ForkParameters: 4 MatrixInstruction shapes × 2 StreamK × 1 PGR = 8 kernels.
+# The MI shapes cover:
+#   [16,16,32,1,1, 2,2, 1,1]  — 1x1 WG, loadRatioGR = 1.0
+#   [16,16,32,1,1, 4,4, 2,2]  — 2x2 WG, loadRatioGR = 1.0 (2x2 grid)
+#   [16,16,32,1,1, 4,2, 2,2]  — asymmetric MIWT (4x2), loadRatioGR variant
+#   [16,16,32,1,1, 2,4, 2,2]  — asymmetric MIWT (2x4), loadRatioGR variant
+# StreamK={0,3} exercises the non-persistent and persistent SK code paths.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  NewClient: 2
+  Device: 0
+  MaxLDS: 163840
+  DeviceLDS: 163840
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # BF16 TN — UseSubtileImpl=1 / DirectToLds sweep
+  # Exercises SubtileGREmit legacy + new emit paths on gfx950.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  2, 2,  1, 1]   # 1x1 WG  — single-wave subtile (loadRatioGR=1.0)
+          - [16, 16, 32, 1,  1,  4, 4,  2, 2]   # 2x2 WG  — 2x2 localSubtileGrid
+          - [16, 16, 32, 1,  1,  4, 2,  2, 2]   # 2x2 WG  — asymmetric MIWT 4x2
+          - [16, 16, 32, 1,  1,  2, 4,  2, 2]   # 2x2 WG  — asymmetric MIWT 2x4
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [0]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StaggerU: [0]
+        - StreamK: [0, 3]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 128]

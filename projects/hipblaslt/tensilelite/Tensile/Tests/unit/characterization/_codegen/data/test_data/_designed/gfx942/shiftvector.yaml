@@ -1,0 +1,66 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P4-widen ShiftVectorComponents characterization seed for gfx942.
+#
+# Target: Tensile/Components/ShiftVectorComponents.py
+# Missing ranges (methodology-A): 47-200 (ShiftVectorComponentsVALU.__call__),
+# 238 (AllThread dispatch), 438-439 (large-mb branch), 552-784 (AllThread body).
+#
+# Strategy: sweep VectorWidthA=[1,2,4] with a VALU kernel
+# (WorkGroup + ThreadTile instead of MatrixInstruction) so
+# EnableMatrixInstruction=False routes into ShiftVectorComponentsVALU (lines
+# 47-200). AssertFree0ElementMultiple=1 ensures edge shifting runs.
+# VectorWidth variations cover lines 121-122 (log2 shift) and the per-VW
+# per-element loop at lines 164-180 with different widths.
+#
+# Three fork permutations: VW=1, VW=2, VW=4. Each emits one VALU kernel.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # fp32 NT, VALU path - edge shift sweep
+  # EnableMatrixInstruction=False via WorkGroup + ThreadTile (no MatrixInstruction)
+  # AssertFree0ElementMultiple=1 ensures non-multiple dims -> edge shift triggered
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      ComputeDataType: s
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - WorkGroup:
+          - [16, 16, 1]
+        - ThreadTile:
+          - [4, 4]
+          - [4, 8]
+          - [8, 4]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - GlobalReadVectorWidthA: [2]
+        - GlobalReadVectorWidthB: [2]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [16]
+        - ScheduleIterAlg: [1]
+        - GlobalSplitU: [1]
+        - AssertFree0ElementMultiple: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255, 255, 1, 255]
