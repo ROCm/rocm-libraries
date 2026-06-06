@@ -198,6 +198,30 @@ class Gfx1151DeepFusedConvPoolSpec:
     # vectorized maxpool chunk conditions (tile_n % 8 == 0). Correctness-neutral
     # (signed max over identical values). STATIC-ISA / board A/B pending.
     pk_maxpool: bool = False
+    # Lever 4: conv1 cross-k-step fragment prefetch. False (default) -> the conv1
+    # iu4 GEMM hoists all A/B fragment LDS loads inside each k-step then issues
+    # the MMAs, so the k=1 ds_read latency (lgkmcnt) is exposed at the top of the
+    # k=1 iteration with nothing to overlap it (k_atoms=2, so this is the only
+    # cross-step slack). True -> load ALL k-step A/B fragments up front (k=0 and
+    # k=1 together) before any MMA, so the k=1 loads are in flight during the k=0
+    # MMAs and their latency hides behind conv1 WMMA compute. Costs ~+18 VGPR
+    # (the extra in-flight k=1 frags; ~110 -> ~128, within the wave32 256 budget).
+    # Native-int byte-coded conv1 path only (the from_lds variant, not packed).
+    # Correctness-neutral (pure load reordering, same MMAs/accs). Board A/B pending.
+    conv1_prefetch_k: bool = False
+    # Lever 5: conv1 fused k-step schedule group. False (default) -> the conv1
+    # iu4 GEMM emits a per-k-step sched_group_barrier(DS_READ, n_ds) +
+    # sched_group_barrier(MFMA, n_mma) pair, which pins each k-step's LDS reads
+    # and MMAs into separate scheduling regions and BLOCKS the k=1 ds_read from
+    # overlapping the k=0 MMAs (this is why the IR-level conv1_prefetch_k hoist
+    # was a static no-op -- the per-step hint overrode the emission order). True
+    # -> suppress the per-step hints and emit ONE combined group after the loop
+    # (DS_READ over all k_atoms loads, then MFMA over all k_atoms MMAs) so the
+    # post-RA scheduler may pull every conv1 LDS read ahead of every conv1 MMA,
+    # hiding the k=1 LDS latency behind k=0 WMMA compute. Native-int byte-coded
+    # conv1 path only (the from_lds variant). Correctness-neutral (scheduling
+    # hint only; identical MMAs/accs). Pairs with conv1_prefetch_k. Board A/B pending.
+    conv1_sched_fuse: bool = False
     # Per-node inverse requant multipliers (fold act/weight/out scales).
     m0: float = 0.0625  # conv0 int32 -> int8
     m0b: float = 0.5  # conv0 int8 -> int4
@@ -279,6 +303,10 @@ class Gfx1151DeepFusedConvPoolSpec:
             parts.append("nativeiu8")
         if self.pk_maxpool:
             parts.append("pkpool")
+        if self.conv1_prefetch_k:
+            parts.append("pfk")
+        if self.conv1_sched_fuse:
+            parts.append("schfuse")
         parts.append("i8i4_realquant")
         return kernel_name_join(*parts)
 
@@ -315,6 +343,8 @@ def make_deep_fused_conv_pool_spec(
     native_int: bool = False,
     batch_loads: bool = True,
     pk_maxpool: bool = False,
+    conv1_prefetch_k: bool = False,
+    conv1_sched_fuse: bool = False,
     m0: float = 0.0625,
     m0b: float = 0.5,
     m1: float = 0.25,
@@ -365,6 +395,8 @@ def make_deep_fused_conv_pool_spec(
         native_int=native_int,
         batch_loads=batch_loads,
         pk_maxpool=pk_maxpool,
+        conv1_prefetch_k=conv1_prefetch_k,
+        conv1_sched_fuse=conv1_sched_fuse,
         m0=m0,
         m0b=m0b,
         m1=m1,
@@ -1359,11 +1391,22 @@ def _wmma_gemm_conv1_i4_from_lds(
     grid: WarpGrid,
     k_total: int,
     policy=None,
+    prefetch_k: bool = False,
+    sched_fuse: bool = False,
 ) -> List[Value]:
     """Native iu4 conv1 GEMM from C0 byte codes and packed W1 LDS.
 
     A (C0) is byte-per-int4-code LDS and is packed on fragment load. B (W1) is
     already packed two int4 values per byte, staged directly from HBM.
+
+    With ``prefetch_k`` the A/B fragments for ALL k-steps are loaded up front
+    (before any MMA) so the k=1 ds_read latency overlaps the k=0 MMAs; default
+    keeps the per-k-step hoist (k=1 loads exposed at the k=1 iteration top).
+
+    With ``sched_fuse`` the per-k-step DS_READ->MFMA sched_group_barrier pair is
+    suppressed and ONE combined group (all k_atoms loads, then all k_atoms MMAs)
+    is emitted after the loop, so the post-RA scheduler may interleave the k=1
+    loads with the k=0 MMAs instead of being pinned per k-step.
     """
     mfmas_m = grid.mfmas_per_warp_m
     mfmas_n = grid.mfmas_per_warp_n
@@ -1377,27 +1420,55 @@ def _wmma_gemm_conv1_i4_from_lds(
     # A: two 8-byte LDS loads then pack; B: one 8-byte LDS load.
     n_ds = 2 * mfmas_m + mfmas_n
 
-    accs = [b.zero_vec(I32, op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
-    for kk in range(k_atoms):
+    def load_a(kk: int) -> List[Value]:
         k_tile_base = b.const_i32(kk * _WMMA)
-        a_rows = []
+        out = []
         for mi in range(mfmas_m):
             atom_off = b.add(warp_m_off, b.const_i32(mi * _WMMA))
-            a_rows.append(
+            out.append(
                 _load_frag_iu4_codes_from_lds(b, c0_smem, a_row, atom_off, k_tile_base)
             )
-        b_cols = []
+        return out
+
+    def load_b(kk: int) -> List[Value]:
+        k_tile_base = b.const_i32(kk * _WMMA)
+        out = []
         for ni in range(mfmas_n):
             atom_off = b.add(warp_n_off, b.const_i32(ni * _WMMA))
-            b_cols.append(
+            out.append(
                 _load_frag_iu4_packed_from_lds(b, w1_smem, b_col, atom_off, k_tile_base)
             )
-        flat = 0
-        for mi in range(mfmas_m):
-            for ni in range(mfmas_n):
-                accs[flat] = b.mma(op, a_rows[mi], b_cols[ni], accs[flat])
-                flat += 1
-        _emit_wmma_k_sched(b, policy, n_ds, mfmas_m * mfmas_n)
+        return out
+
+    accs = [b.zero_vec(I32, op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    # Per-step hint is suppressed when fusing; the combined group is emitted once
+    # after the loop instead.
+    per_step = None if sched_fuse else policy
+
+    if prefetch_k:
+        a_all = [load_a(kk) for kk in range(k_atoms)]
+        b_all = [load_b(kk) for kk in range(k_atoms)]
+        for kk in range(k_atoms):
+            a_rows, b_cols = a_all[kk], b_all[kk]
+            flat = 0
+            for mi in range(mfmas_m):
+                for ni in range(mfmas_n):
+                    accs[flat] = b.mma(op, a_rows[mi], b_cols[ni], accs[flat])
+                    flat += 1
+            _emit_wmma_k_sched(b, per_step, n_ds, mfmas_m * mfmas_n)
+    else:
+        for kk in range(k_atoms):
+            a_rows = load_a(kk)
+            b_cols = load_b(kk)
+            flat = 0
+            for mi in range(mfmas_m):
+                for ni in range(mfmas_n):
+                    accs[flat] = b.mma(op, a_rows[mi], b_cols[ni], accs[flat])
+                    flat += 1
+            _emit_wmma_k_sched(b, per_step, n_ds, mfmas_m * mfmas_n)
+
+    if sched_fuse:
+        _emit_wmma_k_sched(b, policy, n_ds * k_atoms, mfmas_m * mfmas_n * k_atoms)
     return accs
 
 
@@ -2427,7 +2498,15 @@ def build_deep_fused_conv_pool(
             )
         else:
             accs1 = _wmma_gemm_conv1_i4_from_lds(
-                b, op1, c0_smem, w1_smem, grid, c.K, policy=policy
+                b,
+                op1,
+                c0_smem,
+                w1_smem,
+                grid,
+                c.K,
+                policy=policy,
+                prefetch_k=spec.conv1_prefetch_k,
+                sched_fuse=spec.conv1_sched_fuse,
             )
     else:
         if spec.early_w1:
