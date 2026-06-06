@@ -201,9 +201,11 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     // sa/sb are caller-named arrays (compile-time buf0/buf1) -> no dynamic index/spill.
     auto prefetch = [&](int kt, uint32_t base, int (*sa)[NDA], int (*sb)[NDB]) {
         int kb = kt * KT_BYTES;
-        issue_tile<M_TILE, KT_BYTES, ROW_CHUNKS>(smem, base + 0, Ag, A_row_bytes, kb, wave, lane);
-        issue_tile<N_TILE, KT_BYTES, ROW_CHUNKS>(smem, base + A_BYTES, Bg, B_row_bytes, kb, wave, lane);
 #ifndef NOSCALE
+        // Scales FIRST: issue the 2 no-wait global_load_dwordxN BEFORE the 18 buffer_load so they
+        // enter the memory queue ahead of the tile loads (previously queued behind them -> back-
+        // pressure stall). No-wait manual-vmcnt, different address, writes VGPR (not LDS), consumed
+        // only in this tile's compute -> pure issue-order change; RAW / sync semantics unchanged.
         const char* pa = reinterpret_cast<const char*>(sA) +
                          (size_t)((sa_grp * k_tiles + kt) * 64 + lane) * K64_PER_TILE * SA_PAD;
         const char* pb = reinterpret_cast<const char*>(sB) +
@@ -216,6 +218,8 @@ __global__ void __launch_bounds__(256, MIN_OCC)
 #else
         (void)sa; (void)sb;
 #endif
+        issue_tile<M_TILE, KT_BYTES, ROW_CHUNKS>(smem, base + 0, Ag, A_row_bytes, kb, wave, lane);
+        issue_tile<N_TILE, KT_BYTES, ROW_CHUNKS>(smem, base + A_BYTES, Bg, B_row_bytes, kb, wave, lane);
     };
     // compute() one K-tile. a[] is read in full per sub-slab (each a[mi] is reused across every
     // ni, so it cannot be lazily read without flipping to M-major -- N-major is +1.1%, keep it).
