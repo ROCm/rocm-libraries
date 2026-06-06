@@ -354,9 +354,10 @@ typedef enum rocsparselt_atomics_mode_
 
 typedef enum rocsparselt_split_k_mode_
 {
+    rocsparselt_invalid_mode = 0,
     rocsparselt_splik_k_mode_one_kernel
-    = 0, /**< Use the same SP-MM kernel to do the final reduction */
-    rocsparselt_split_k_mode_two_kernels = 1, /**< Use anoghter kernel to do the final reduction */
+    = 1, /**< Use the same SP-MM kernel to do the final reduction */
+    rocsparselt_split_k_mode_two_kernels = 2, /**< Use anoghter kernel to do the final reduction */
 } rocsparselt_split_k_mode;
 
 #ifdef __cplusplus

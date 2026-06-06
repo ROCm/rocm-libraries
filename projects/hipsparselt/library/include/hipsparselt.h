@@ -266,8 +266,13 @@ typedef enum {
  *  The \ref hipsparseLtSplitKMode_t enumeration is used by the `HIPSPARSELT_MATMUL_SPLIT_K_MODE` attribute in \ref hipsparseLtMatmulAlgAttribute_t.
  */
 typedef enum {
-   HIPSPARSELT_SPLIT_K_MODE_ONE_KERNEL = 0,  /**< Use the same SP-MM kernel to do the final reduction. */
-   HIPSPARSELT_SPLIT_K_MODE_TWO_KERNELS = 1, /**< Use another kernel to do the final reduction. */
+   HIPSPARSELT_INVALID_MODE             = 0,
+   HIPSPARSELT_SPLIT_K_MODE_ONE_KERNEL  = 1,  /**< Use the same SP-MM kernel to do the final reduction. */
+   HIPSPARSELT_SPLIT_K_MODE_TWO_KERNELS = 2, /**< Use another kernel to do the final reduction. */
+   HIPSPARSELT_HEURISTIC,
+   HIPSPARSELT_DATAPARALLEL,
+   HIPSPARSELT_SPLITK,
+   HIPSPARSELT_STREAMK,
 } hipsparseLtSplitKMode_t;
 
 // clang-format on

@@ -1044,7 +1044,9 @@ rocsparselt_status
             case rocsparselt_matmul_activation_tanh_beta:
                 retrive_data(_matmulDescr->activation_tanh_beta);
                 break;
-
+            case rocsparselt_matmul_activation_gelu_scaling:
+                retrive_data(_matmulDescr->activation_gelu_scaling);
+                break;
             case rocsparselt_matmul_bias_pointer:
                 if((status = validateGetAttributeDataSize<void*>(dataSize))
                    != rocsparselt_status_success)

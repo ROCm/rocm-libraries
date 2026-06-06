@@ -261,6 +261,8 @@ rocsparselt_split_k_mode HIPSplitKModeToRocSparseLtSplitKMode(hipsparseLtSplitKM
 {
     switch(mode)
     {
+    case HIPSPARSELT_INVALID_MODE:
+        return rocsparselt_invalid_mode;
     case HIPSPARSELT_SPLIT_K_MODE_ONE_KERNEL:
         return rocsparselt_splik_k_mode_one_kernel;
     case HIPSPARSELT_SPLIT_K_MODE_TWO_KERNELS:
@@ -902,6 +904,8 @@ void hipsparseLtInitialize()
 hipsparseStatus_t hipsparseLtGetVersion(const hipsparseLtHandle_t* handle, int* version)
 try
 {
+    if(version == nullptr)
+        return HIPSPARSE_STATUS_INVALID_VALUE;
     *version = hipsparseltVersionMajor * 100000 + hipsparseltVersionMinor * 100
                + hipsparseltVersionPatch;
 
@@ -915,6 +919,9 @@ catch(...)
 hipsparseStatus_t hipsparseLtGetProperty(hipLibraryPropertyType propertyType, int* value)
 try
 {
+    if(value == nullptr)
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+
     switch(propertyType)
     {
     case HIP_LIBRARY_MAJOR_VERSION:
@@ -957,6 +964,9 @@ catch(...)
 hipsparseStatus_t hipsparseLtGetArchName(char** archName)
 try
 {
+    if(archName == nullptr)
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+
     *archName = nullptr;
     auto arch = rocsparselt_internal_get_arch_name();
     *archName = (char*)malloc((arch.size() + 1) * sizeof(char));
