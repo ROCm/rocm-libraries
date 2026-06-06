@@ -4657,6 +4657,41 @@ struct ConvWinogradNHWCTransposingBase : TransposingSolver<Derived,
             },
         }};
     }
+
+    /// Gate the transposing wrapper on the problem's canonical layout.
+    ///
+    /// This wrapper exists only to serve non-default (e.g. NHWC/NDHWC) layouts by
+    /// transposing tensors to the inner solver's native NCHW/NCDHW. When the problem's
+    /// canonical layout is already default, the inner NCHW solver applies directly and
+    /// the wrapper must abstain.
+    ///
+    /// This guard is also required for correct find-db/perf-db attribution. The db key
+    /// is serialized from the canonical (HeuristicUpdateLayouts-resolved) layout fields
+    /// -- GetInLayout()/GetWeightsLayout()/GetOutLayout() -- which collapse to a single
+    /// NCHW/NCDHW token exactly when IsLayoutDefault() is true. The generic base's
+    /// IsApplicable instead decides "is a transpose needed" from each descriptor's raw
+    /// GetLayout_str(), which is derived from the stride ordering. For a problem with
+    /// degenerate spatial dims (e.g. 1x1) a tensor can be byte-for-byte identical to
+    /// NCHW yet still report NHWC (its irrelevant unit-extent strides happen to be
+    /// ordered that way). Such a tensor is packed, so its stride ordering is never
+    /// serialized into the key and the problem keys as uniform-NCHW -- but the base sees
+    /// a layout "difference", finds the inner applicable on the (no-op) transposed
+    /// problem, and the wrapper gets tuned and recorded under a uniform-NCHW key it
+    /// cannot serve when the problem is later reconstructed from that key (packed NCHW
+    /// strides => wrapper correctly abstains => find-db/perf-db lookup mismatch).
+    ///
+    /// Gating on IsLayoutDefault() keeps applicability consistent with the key: the
+    /// wrapper is dropped exactly on uniform-NCHW/NCDHW keys (where the inner solver is
+    /// the correct attribution) and preserved on genuine divergent-layout keys (where a
+    /// transpose really is required). Note this keys off the canonical layout fields,
+    /// not raw strides, so an explicitly NHWC-declared problem (keyed with an NHWC tail)
+    /// still goes through the wrapper even when its spatial dims are degenerate.
+    bool IsApplicable(const ExecutionContext& ctx, const Problem& problem) const override
+    {
+        if(problem.IsLayoutDefault())
+            return false;
+        return Base::IsApplicable(ctx, problem);
+    }
 };
 
 /// Non-tunable transposing wrapper for NHWC winograd solvers.
