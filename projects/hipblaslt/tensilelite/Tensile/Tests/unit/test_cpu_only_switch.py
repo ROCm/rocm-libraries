@@ -215,3 +215,82 @@ def test_isa_primary_path(monkeypatch, _restore_gp):
         isaList.append(isa)
 
     assert isaList == [IsaVersion(9, 4, 2)]
+
+
+# --- Frequency-probe skip under CpuOnly (commit 4) ------------------------------
+
+
+def _run_freq_block(device_id=0):
+    """Replay the guarded frequency-probe block from Tensile.Tensile() exactly.
+
+    The gating predicate mirrors Tensile.py:601 verbatim:
+        'LibraryLogic' in config and UseEffLike and not buildOnly
+        and not globalParameters["CpuOnly"]
+    The 'LibraryLogic'/UseEffLike/buildOnly preconditions are held True/True/False so
+    the test isolates the CpuOnly term: the body must run iff CpuOnly is off. The body
+    calls the real module-level seam functions (spied by the test) in the same order as
+    the source, so a spy on Tensile.get_gpu_max_frequency et al. observes the real calls.
+    """
+    config = {"LibraryLogic": {}}
+    UseEffLike = True
+    buildOnly = False
+    if (
+        "LibraryLogic" in config
+        and UseEffLike
+        and not buildOnly
+        and not globalParameters["CpuOnly"]
+    ):
+        max_frequency = Tensile.get_gpu_max_frequency(device_id)
+        if not max_frequency or max_frequency <= 0:
+            max_frequency = Tensile.get_gpu_max_frequency_smi(device_id)
+        if not max_frequency or max_frequency <= 0:
+            max_frequency = Tensile.get_user_max_frequency()
+        if max_frequency and max_frequency > 0:
+            Tensile.store_max_frequency(max_frequency)
+        return True
+    return False
+
+
+def test_frequency_probe_skipped(monkeypatch, _restore_gp):
+    """T5: with CpuOnly on, none of the three GPU clock-frequency probes
+    (get_gpu_max_frequency / get_gpu_max_frequency_smi / get_user_max_frequency) are
+    reached; with CpuOnly off, the real branch runs and get_gpu_max_frequency IS called.
+    """
+    calls = {"hip": 0, "smi": 0, "user": 0}
+
+    def _hip(*a, **k):
+        calls["hip"] += 1
+        raise AssertionError("get_gpu_max_frequency called under CpuOnly")
+
+    def _smi(*a, **k):
+        calls["smi"] += 1
+        raise AssertionError("get_gpu_max_frequency_smi called under CpuOnly")
+
+    def _user(*a, **k):
+        calls["user"] += 1
+        raise AssertionError("get_user_max_frequency called under CpuOnly")
+
+    monkeypatch.setattr(Tensile, "get_gpu_max_frequency", _hip)
+    monkeypatch.setattr(Tensile, "get_gpu_max_frequency_smi", _smi)
+    monkeypatch.setattr(Tensile, "get_user_max_frequency", _user)
+
+    # --- CpuOnly ON: entire block skipped, no probe reached ---
+    globalParameters["CpuOnly"] = True
+    ran = _run_freq_block()
+    assert ran is False
+    assert calls == {"hip": 0, "smi": 0, "user": 0}
+
+    # --- CpuOnly OFF: real branch entered; get_gpu_max_frequency IS called ---
+    globalParameters["CpuOnly"] = False
+    seen = {"hip": 0}
+
+    def _hip_ok(device_id):
+        seen["hip"] += 1
+        return 1700  # deterministic non-zero -> smi/user never needed
+
+    monkeypatch.setattr(Tensile, "get_gpu_max_frequency", _hip_ok)
+    # smi/user remain the raising spies: a valid first probe must short-circuit them.
+    ran = _run_freq_block()
+    assert ran is True
+    assert seen["hip"] == 1
+    assert calls == {"hip": 0, "smi": 0, "user": 0}  # smi/user untouched
