@@ -265,7 +265,7 @@ Prerequisite (separate source PR, NOT part of the ADD-ONLY campaign):
 Stage 1 — coverage efficiency (minimal custom seed set + goldens):
 - [x] **P0** validate method + inventory; commit `d6ae0b113d9`.
 - [x] **P1 (first slice, 2026-06-05)** config harness path built + smoked (`_codegen/config_harness.py`, `emit_kernels_from_config`, CPU-only — independently re-smoked on `Tests/common/gemm/fp16_tn.yaml`); 29 curated inputs (gfx942/gfx950/gfx90a) measured isolated → `attribution-<arch>.json` (greedy set-cover marginal ranking). Commits `0d818440d0c`, `97a331c434f`. **Remaining P1b (widen):** corpus sample + single-parameter `ForkParameters` probes for parameter-level attribution.
-- [x] **P2 (done, widened — option b, 2026-06-06)** minimal custom seed set, **multi-ProblemType per arch** (single-config-per-arch undershot at 30.53%; widened to a per-arch seed *set* spanning distinct high-yield families). 15 seed tests (gfx942/gfx950/gfx90a), each isolated-measured; union **whole-project ceiling = 35.89%** (21156/54491), recorded in `coverage/p2/ceiling-widened.txt`. Designed seed YAMLs live under `_codegen/data/test_data/_designed/**` (the `test_data` path keeps them out of `findConfigs` GPU auto-discovery — no `config_helpers.py` change). Full `-m unit` 0 failed (2528 passed/201 skipped). Commit `cd688aaaf53`.
+- [x] **P2 (done, widened — option b, 2026-06-06)** minimal custom seed set, **multi-ProblemType per arch** (single-config-per-arch undershot at 30.53%; widened to a per-arch seed *set* spanning distinct high-yield families). 15 seed tests (gfx942/gfx950/gfx90a), each isolated-measured; union **whole-project ceiling = 35.89%** (21156/54491), recorded in `coverage/p2/ceiling-widened.txt`. Designed seed YAMLs live under `_codegen/data/test_data/_designed/**` (the `test_data` path keeps them out of `findConfigs` GPU auto-discovery — no `config_helpers.py` change). Full `-m unit` 0 failed (2528 passed/201 skipped). Commit `ec7524bd1be`.
 - [ ] **P3** goldens for the seed set; fast suite reproduces the P2 ceiling; baseline.
 
 Stage 2 — coverage expansion:
@@ -343,4 +343,4 @@ Stage 2 — coverage expansion:
   (21156/54491, +2773 stmts), `coverage/p2/ceiling-widened.txt`. Blocker fixed add-only: designed
   seed YAMLs relocated under `_codegen/data/test_data/_designed/**` so `findConfigs` (which skips
   `test_data` paths) stops auto-running them through the GPU `Tensile.Tensile()` path — no
-  `config_helpers.py` change. Full `-m unit` **2528 passed / 201 skipped / 0 failed**. Commit `cd688aaaf53`.
+  `config_helpers.py` change. Full `-m unit` **2528 passed / 201 skipped / 0 failed**. Commit `ec7524bd1be`.
