@@ -91,6 +91,19 @@ if(GPU_TARGETS MATCHES "gfx95|gfx125")
         target_link_libraries(test_tile_mx_flatmm_${DTYPE} PRIVATE mx_flatmm_test_instances)
     endforeach()
 
+    # Standalone regression test for the multi-tile-per-CTA LDS race in
+    # MXFlatmmKernel's persistent path (Risk 1 in the GroupedMXFlatmmKernel
+    # debug report). Builds its kernel inline -- does NOT link to
+    # mx_flatmm_test_instances. Exercises only FP8xFP8 (the bug is at the
+    # kernel layer, not the type layer).
+    add_gtest_executable(test_tile_mx_flatmm_persistent
+        test_mx_flatmm_persistent.cpp
+    )
+    target_include_directories(test_tile_mx_flatmm_persistent PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_options(test_tile_mx_flatmm_persistent PRIVATE ${TEST_FLATMM_COMPILE_OPTIONS})
+
     # Umbrella target to build all flatmm tests at once
     add_custom_target(test_tile_mx_flatmm_all)
     add_dependencies(test_tile_mx_flatmm_all
@@ -99,6 +112,7 @@ if(GPU_TARGETS MATCHES "gfx95|gfx125")
         test_tile_mx_flatmm_fp6fp6
         test_tile_mx_flatmm_fp8fp4
         test_tile_mx_flatmm_fp4fp8
+        test_tile_mx_flatmm_persistent
     )
 else()
     message(DEBUG "Skipping ck_tile MX flatmm tests for current target")
