@@ -124,30 +124,43 @@ Full `-m unit` gate (our branch): **2543 passed / 201 skipped / 0 failed** (pass
 
 ## 4. Where we are now
 
-- **Stage-1 codegen seed set: 35.89% whole-project, CPU-only** — the committed, goldened,
-  fast-reproducing efficiency baseline for Stage-2 expansion.
-- **develop `-m unit` baseline: 22.47%.** Campaign delta so far (seeds vs develop): roughly
-  +13 points, but across methodologies A↔B (treat as approximate).
-- **Open measurement (for strict rigor):** the full `-m unit` whole-project `Cover%` on
-  **HEAD** (seeds + all existing characterization) has **not** been re-run with methodology A
-  since P3. The last comparable full-suite figure is the stale pre-P2 30.62%. Recommended next
-  rigorous step before/with P4: re-run the tox `coverage-unit` env on HEAD to get the true
-  current full-suite number and the apples-to-apples develop→now delta.
+**HEAD whole-project coverage = 68.85%** (measured, methodology A — the develop-comparable one).
 
-### The gap to 80% (honest framing)
-From a develop baseline of ~22% (or the seed-set 35.89%), whole-project ≥80% CPU-only is a
-large climb. A material share of the remainder is **not CPU-reachable today**: the **client
-perf-run** and the **device probes** (incl. ISA detection) — i.e. the work gated on the
-**GPU-mock prerequisite (P0.5 / Track A)**, see `GPU-MOCK-PR.md`. P4 must tag those targets
-`needs_cpu_only_switch` and skip them until that PR lands; the honest ceiling without it is
-expected to sit well below 80% and must be **documented with per-region evidence**, never
-inflated. (Rigor rule: every reported number is measured with a saved receipt; every
-"unreachable" claim carries file:line evidence.)
+| Run (methodology A: tox coverage-unit, `--cov=Tensile --cov=rocisa`, `-m unit`) | Commit | Stmts | Miss | **Cover** | Line-only | Tests |
+| --- | --- | --- | --- | --- | --- | --- |
+| develop baseline | `8f9a5fe9ad8` | 55124 | 40861 | **22.47%** | 25.87% | 1237 / 201 skip |
+| **HEAD (now)** | `6f1e20b1a7f` | 54867 | 15723 | **68.85%** | 71.34% | 2560 / 201 skip / 0 fail |
+
+**Apples-to-apples develop → now delta: +46.38 points** (22.47% → 68.85%). Receipt:
+`coverage/head-unit-baseline.txt`. This open item from the prior revision is now **RESOLVED**.
+
+Note the two numbers measure different scopes — keep them straight:
+- **68.85%** = the **entire `-m unit` suite** on HEAD (prior PLAN-80 characterization suite +
+  this campaign's P2/P3 seeds + the cherry-picked `--cpu-only` switch tests). This is the true
+  current whole-project coverage and the right number for the ≥80% gate.
+- **35.89%** = the **15-seed subset only** (methodology B), the Stage-1 fast harness — not the
+  whole picture.
+
+**Switch integrated (2026-06-06):** the 8 `gpu-mocks` `--cpu-only` commits were cherry-picked
+onto this branch (HEAD `6f1e20b1a7f`; `test_cpu_only_switch.py` 17/17). So the client/perf-run +
+device/ISA-probe paths now execute CPU-only and contribute **real line coverage** here (perf
+*decisions* are synthetic — see `GPU-MOCK-PR.md` caveat). P4 can now run with `haveSwitch=true`
+(no targets need to be skipped as switch-gated). The branch is therefore **no longer strictly
+add-only** — it carries the switch source by deliberate decision.
+
+### The gap to 80% (honest framing — now small)
+We are at **68.85%**; the target is **≥80%** → a **~11.15-point** gap, far smaller than the
+seed-only (35.89%) framing implied, and the switch has already unblocked the previously
+GPU-gated client/perf-run + ISA paths. P4 expansion now ranks the *remaining* whole-project gaps
+(measured term-missing on this 68.85% baseline) and closes them cheapest-first. Rigor rule
+stands: every reported delta is measured with a saved receipt; any "unreachable" remainder that
+keeps us below 80% must carry file:line evidence, never a hand-wave.
 
 ---
 
 ## 5. Receipt index
 - develop: `coverage/develop-unit-20260605-155701.log`, `coverage/develop-common-20260605-155701.log`
+- **HEAD (now), methodology A: `coverage/head-unit-baseline.txt` (68.85%)** (raw `head-unit-coverage.log` kept local, not committed — 728KB pytest -v)
 - our branch pre-P2: `coverage/CURRENT-full-package.txt`
 - P2: `coverage/p2/ceiling.txt`, `coverage/p2/ceiling-widened.txt`, `coverage/p2/unit-gate.txt`
 - P3: `coverage/p3/master-baseline-p3.txt`, `coverage/p3/unit-gate.txt`

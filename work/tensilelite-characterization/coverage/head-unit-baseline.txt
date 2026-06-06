@@ -1,0 +1,26 @@
+HEAD whole-project coverage — methodology A (apples-to-apples with the develop baseline)
+========================================================================================
+Commit:   6f1e20b1a7f  (coverage branch, AFTER cherry-picking the 8 gpu-mocks --cpu-only commits)
+Date:     2026-06-06
+Env:      tox -e coverage-unit  (in tl-char container)
+Command:  pytest --cov=Tensile --cov=rocisa --cov-config=pyproject.toml -n 4 -m unit Tensile/Tests/unit
+          coverage report --show-missing
+Runtime:  747s (rocisa rebuild + xdist run)
+
+TOTAL                                                     54867  15723  22780   3079  68.85%
+  => branch-inclusive Cover = 68.85% ; line-only = (54867-15723)/54867 = 71.34%
+Tests:    2560 passed, 201 skipped, 0 failed
+
+Compare (same methodology A):
+  develop @ 8f9a5fe9ad8 (-m unit):   22.47%  (55124 stmts)   [coverage/develop-unit-20260605-155701.log]
+  HEAD    @ 6f1e20b1a7f (-m unit):   68.85%  (54867 stmts)   [this file]
+  => apples-to-apples develop -> now delta: +46.38 points.
+
+Notes:
+- This is the WHOLE unit suite on our branch (prior PLAN-80 characterization suite + this
+  campaign's P2/P3 seeds + the cherry-picked cpu-only switch tests), NOT just the 15-seed subset
+  (which alone is 35.89%, methodology B).
+- The --cpu-only switch is now present on this branch, so the client/perf-run + ISA-probe paths
+  execute CPU-only and contribute REAL line coverage here (perf *decisions* are synthetic — see
+  GPU-MOCK-PR.md caveat).
+- Gap to the >=80% target: ~11.15 points.

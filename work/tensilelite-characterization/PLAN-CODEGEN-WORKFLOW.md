@@ -73,15 +73,18 @@ item in §8. Exact, reproducible coverage commands live in `coverage-methodology
 `coverage-methodology.html` — cite them, don't reinvent.
 
 > **⚠️ CURRENT STATE (2026-06-06) — authoritative; read before acting.** **P0, P1, P2, P3 are
-> DONE and committed.** Stage 1 shipped a **widened 15-seed set** spanning multiple ProblemType
-> families for **gfx942 / gfx950 / gfx90a** (not the original "set-cover over existing inputs"
-> nor an all-arch sweep). Current **whole-project ceiling = 35.89%** (seed suite); develop
-> `-m unit` baseline = 22.47%. **NEXT = P4** (Stage-2 expansion). The authoritative status is
-> **§8 (checklist) + §11 (log) + `BASELINE-AND-PROGRESS.md`**. Sections **§4 and §5 below are the
-> ORIGINAL Stage-1/Stage-2 narrative (historical framing)** — their `PHASE 0/1/2/3` numbering
-> predates the §8 `P0–P6` renumber and their "set-cover / all-arch" wording was superseded by the
-> 2026-06-05/06 decisions. Do **not** re-run P0–P3 from §4/§5; start at the first unchecked §8
-> item (P4).
+> DONE and committed**, and the **`--cpu-only` GPU-mock switch is integrated** (8 `gpu-mocks`
+> commits cherry-picked onto this branch; HEAD `6f1e20b1a7f`; `test_cpu_only_switch.py` 17/17).
+> Stage 1 shipped a **widened 15-seed set** (gfx942 / gfx950 / gfx90a; seed-subset ceiling
+> 35.89%, methodology B). **The true current whole-project coverage is 68.85%** (HEAD, full
+> `-m unit`, methodology A = tox coverage-unit, `--cov=Tensile --cov=rocisa`; develop baseline
+> 22.47% → **+46.38 pts**; receipt `coverage/head-unit-baseline.txt`). **Gap to ≥80% ≈ 11 pts.**
+> Because the switch is present, **P4 runs with `haveSwitch=true`** — no targets are skipped as
+> switch-gated; the branch is therefore **no longer strictly add-only** (carries switch source by
+> decision). **NEXT = P4** (Stage-2 expansion, rank term-missing on the 68.85% baseline).
+> Authoritative status: **§8 + §11 + `BASELINE-AND-PROGRESS.md`**. Sections **§4/§5 below are the
+> ORIGINAL narrative (historical framing)** — `PHASE 0/1/2/3` predates the §8 `P0–P6` renumber;
+> do **not** re-run P0–P3 from them; start at the first unchecked §8 item (P4).
 
 ---
 
