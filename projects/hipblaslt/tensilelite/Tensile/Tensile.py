@@ -223,6 +223,10 @@ def addCommonArguments(argParser):
     argParser.add_argument("--mx-scale-format", dest="MXScaleFormat", type=int, default=0, \
         help="MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
     argParser.add_argument("--rocm-agent-enumerator", default=None, action="store", dest="rocm_agent_enumerator")
+    argParser.add_argument("--cpu-only", dest="cpuOnly", action="store_true", default=False, \
+        help="Run the benchmark flow GPU-less for a target arch (requires --gpu-targets): spoof ISA "
+             "detection, skip the GPU clock-frequency probe, and stub the client launch with a "
+             "synthetic results CSV. For CPU-only CI/coverage; perf numbers are synthetic.")
     argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters, default=[])
 
 
@@ -510,6 +514,11 @@ def Tensile(userArgs):
 
     addCommonArguments(argParser)
     args = argParser.parse_args(userArgs)
+    # Stash the --cpu-only flag in undocumented internal plumbing so the deep seams
+    # (Architectures ISA spoof, frequency-probe skip, ClientWriter launch stub) can read
+    # it without threading a new parameter through executeStepsInConfig. Set once here,
+    # after parsing. Kept out of the documented --global-parameters surface.
+    globalParameters["CpuOnly"] = args.cpuOnly
     configPaths = args.ConfigFile
     altFormat = args.AlternateFormat
     useCache = args.useCache
