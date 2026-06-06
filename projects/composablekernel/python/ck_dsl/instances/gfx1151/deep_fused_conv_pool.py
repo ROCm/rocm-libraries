@@ -46,7 +46,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
-from ...core.ir import F16, I8, I32, IRBuilder, PtrType, Value, VectorType
+from ...core.ir import F16, I8, I16, I32, IRBuilder, PtrType, Value, VectorType
 from ...helpers.geometry import WarpGrid
 from ...helpers.schedule import DS_READ, MFMA, SchedulePolicy
 from ...helpers.spec import kernel_name_join
@@ -187,6 +187,17 @@ class Gfx1151DeepFusedConvPoolSpec:
     # pairs. Default ON. Only the footprint loads coalesce so far (the W1 b128
     # load is still serialized in _stage_conv1_w1_packed -- a further lever).
     batch_loads: bool = True
+    # Lever 3: packed-int16 maxpool reduction. False (default) -> the maxpool
+    # 2x2 max runs per-channel in full-width i32 (v_cmp + v_cndmask, ~144 ops
+    # for the 24-channel reduction; v_pk_* count = 0 in the ISA). True -> widen
+    # the int4 codes to <N x i16> and reduce 4 corners with vector_smax so the
+    # gfx11 backend selects v_pk_max_i16 (2 channels/op). The i8->i16 widen
+    # replaces the i8->i32 widen the scalar path already pays (the 96 v_bfe_i32),
+    # so the win is the reduction collapse; a small i16->i32 re-extract is added
+    # at the nibble-pack boundary. Native-int finalpack path only; requires the
+    # vectorized maxpool chunk conditions (tile_n % 8 == 0). Correctness-neutral
+    # (signed max over identical values). STATIC-ISA / board A/B pending.
+    pk_maxpool: bool = False
     # Per-node inverse requant multipliers (fold act/weight/out scales).
     m0: float = 0.0625  # conv0 int32 -> int8
     m0b: float = 0.5  # conv0 int8 -> int4
@@ -266,6 +277,8 @@ class Gfx1151DeepFusedConvPoolSpec:
             parts.append("butterfly")
         if self.native_int:
             parts.append("nativeiu8")
+        if self.pk_maxpool:
+            parts.append("pkpool")
         parts.append("i8i4_realquant")
         return kernel_name_join(*parts)
 
@@ -301,6 +314,7 @@ def make_deep_fused_conv_pool_spec(
     butterfly_conv01: bool = False,
     native_int: bool = False,
     batch_loads: bool = True,
+    pk_maxpool: bool = False,
     m0: float = 0.0625,
     m0b: float = 0.5,
     m1: float = 0.25,
@@ -350,6 +364,7 @@ def make_deep_fused_conv_pool_spec(
         butterfly_conv01=butterfly_conv01,
         native_int=native_int,
         batch_loads=batch_loads,
+        pk_maxpool=pk_maxpool,
         m0=m0,
         m0b=m0b,
         m1=m1,
@@ -2152,7 +2167,29 @@ def _emit_maxpool_finalpack_i8(
             and spec.tile_n % cw == 0
             and ((out_k + cw - 1) // cw) * cw <= spec.tile_n
         )
-        if vec_pool:
+        if vec_pool and spec.pk_maxpool:
+            # Packed-int16 reduction: widen each corner chunk i8 -> <cw x i16>
+            # and max across the 4 corners with vector_smax so the gfx11 backend
+            # selects v_pk_max_i16 (2 channels/op). Initialising the accumulator
+            # from the first corner (rather than a -8 splat) keeps it bit-exact
+            # to the scalar path and avoids an i16 constant. The i8->i16 cast
+            # replaces the scalar path's i8->i32 sext; a single i16->i32
+            # re-extract per channel feeds the unchanged nibble pack below.
+            n_chunks = (out_k + cw - 1) // cw
+            for ck in range(n_chunks):
+                acc16 = None
+                for conv_m in corners:
+                    raw = b.smem_load_vN(
+                        c1_smem, conv_m, b.const_i32(ck * cw), dtype=I8, n=cw
+                    )
+                    w16 = b.vector_sext(raw, I16)  # signed widen i8 -> i16
+                    acc16 = w16 if acc16 is None else b.vector_smax(acc16, w16)
+                for j in range(cw):
+                    ch = ck * cw + j
+                    if ch >= out_k:
+                        break
+                    chmax[ch] = b.sext(b.vec_extract(acc16, j), I32)
+        elif vec_pool:
             n_chunks = (out_k + cw - 1) // cw
             for conv_m in corners:
                 for ck in range(n_chunks):

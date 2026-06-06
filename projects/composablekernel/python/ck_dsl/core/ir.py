@@ -1358,6 +1358,21 @@ class IRBuilder:
             result_name_hint=f"vtr{v.type.count}",
         ).result
 
+    def vector_sext(self, v: Value, target: Type) -> Value:
+        """Sign-extend each lane of an integer vector to a wider element type
+        (e.g. ``<N x i8>`` -> ``<N x i16>``). Lowers to an LLVM vector ``sext``;
+        the AMDGPU backend keeps the packed layout so a following packed op
+        (``v_pk_max_i16`` etc.) can consume it."""
+        if not isinstance(v.type, VectorType):
+            raise ValueError("vector_sext expects vector input")
+        return self._op(
+            "vector.sext",
+            [v],
+            [VectorType(target, v.type.count)],
+            attrs={"target": target.name},
+            result_name_hint=f"vsx{v.type.count}",
+        ).result
+
     def smem_store_f16(
         self, smem: Value, indices: Sequence[Value], value: Value
     ) -> None:
@@ -3095,6 +3110,7 @@ PURE_OP_NAMES = {
     "vector.max",
     "vector.cmp",
     "vector.trunc",
+    "vector.sext",
     "vector.sum",
     "vector.reduce_max",
     "vector.splat",

@@ -482,6 +482,15 @@ def main() -> int:
         action="store_false",
         help="disable Lever 1 footprint load batching (A/B baseline)",
     )
+    parser.add_argument(
+        "--pk-maxpool",
+        dest="pk_maxpool",
+        action="store_true",
+        default=False,
+        help="Lever 3: packed-int16 maxpool reduction (v_pk_max_i16) instead of "
+        "per-channel i32 cmp/cndmask; native-int finalpack path only, "
+        "correctness-neutral (A/B candidate)",
+    )
     args = parser.parse_args()
 
     if args.arch not in ("gfx1151", "gfx11-generic"):
@@ -521,6 +530,7 @@ def main() -> int:
         butterfly_conv01=args.butterfly,
         native_int=args.native_int,
         batch_loads=args.batch_loads,
+        pk_maxpool=args.pk_maxpool,
     )
     ok, why = is_valid_spec(spec, arch=args.arch)
     if not ok:

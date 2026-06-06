@@ -3320,13 +3320,22 @@ class _Lowerer:
 
     def _op_vector_smax(self, op: Op) -> None:
         a, b = op.operands
-        cmp = self._fresh("vsmax.cmp")
+        # Prefer the ``llvm.smax.v<N>i<W>`` intrinsic over icmp+select: the
+        # AMDGPU backend reliably lowers the i16 vector form to packed
+        # ``v_pk_max_i16`` (2 lanes/op), whereas the cmp+vselect form is left
+        # as scalar v_cmp/v_cndmask. Register the decl dynamically so the
+        # call-site stays element/width-agnostic.
+        vec_ty = a.type
+        count = vec_ty.count  # type: ignore[attr-defined]
+        elem_ty = vec_ty.elem  # type: ignore[attr-defined]
+        width = elem_ty.name[1:]  # "i16" -> "16"
+        intrin = f"llvm.smax.v{count}i{width}"
+        vec_llvm = _llvm_type(vec_ty)
+        self._decls[intrin] = f"declare {vec_llvm} @{intrin}({vec_llvm}, {vec_llvm})"
+        self._need(intrin)
         self._current().emit(
-            f"  {cmp} = icmp sgt {_llvm_type(a.type)} {self._operand(a)}, {self._operand(b)}"
-        )
-        self._current().emit(
-            f"  {op.result.name} = select <{op.result.type.count} x i1> {cmp}, "
-            f"{_llvm_type(a.type)} {self._operand(a)}, {_llvm_type(b.type)} {self._operand(b)}"
+            f"  {op.result.name} = call {vec_llvm} @{intrin}("
+            f"{vec_llvm} {self._operand(a)}, {vec_llvm} {self._operand(b)})"
         )
 
     def _op_vector_smin(self, op: Op) -> None:
@@ -3344,6 +3353,13 @@ class _Lowerer:
         (v,) = op.operands
         self._current().emit(
             f"  {op.result.name} = trunc {_llvm_type(v.type)} {self._operand(v)} "
+            f"to {_llvm_type(op.result.type)}"
+        )
+
+    def _op_vector_sext(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = sext {_llvm_type(v.type)} {self._operand(v)} "
             f"to {_llvm_type(op.result.type)}"
         )
 

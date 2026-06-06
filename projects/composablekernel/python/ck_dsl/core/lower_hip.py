@@ -1869,6 +1869,16 @@ class _Lowerer:
         for i in range(n):
             self._emit(f"{nice}[{i}] = ({elem_cpp}){_name(v)}[{i}];")
 
+    def _op_vector_sext(self, op: Op) -> None:
+        (v,) = op.operands
+        n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
+        res_t = _type_to_hip(op.result.type)
+        elem_cpp = _type_to_hip(op.result.type.elem)
+        nice = _name(op.result)
+        self._emit(f"{res_t} {nice};")
+        for i in range(n):
+            self._emit(f"{nice}[{i}] = ({elem_cpp}){_name(v)}[{i}];")
+
     def _op_vector_fma(self, op: Op) -> None:
         a, bb, cc = op.operands
         n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
