@@ -254,7 +254,17 @@ struct BlockSpargePreprocessPipeline
         index_t int8_stride_seq;   // token stride of int8_out in elements
     };
 
-    // LDS: km[hdim] | per-token inv-norm[block_size] | cross-warp reduce scratch.
+    // Shared input-block staging: load the [token, hidden] block from global ONCE into LDS (as
+    // InputType, natural non-transposed layout = coalesced read), then mean / quant / sim all
+    // re-read it from LDS in whatever orientation they need instead of re-loading global. Cuts
+    // the 2-3 redundant global passes over the same K/Q block to a single load (qianfengz :185).
+    // kBlock*kHdim InputType = 128*128*2 = 32KB (bf16/fp16) -- well under the 64KB LDS budget once
+    // added to the (km|inv_norm|reduce|absmax) scratch (~1.5KB).
+    static constexpr index_t kStageBytes =
+        static_cast<index_t>(kBlock * kHdim * sizeof(InputType));
+
+    // LDS: stage[kBlock*kHdim InputType] | km[hdim] | per-token inv-norm[block_size] |
+    //      cross-warp reduce scratch | (quant) per-token absmax[block_size].
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize(index_t /*hdim*/)
     {
         using x_block_tile =
@@ -268,8 +278,32 @@ struct BlockSpargePreprocessPipeline
         // absmax[block] scratch (the sim path is mutually unaffected: quant runs after sim).
         constexpr index_t quant_bytes =
             kDoQuant ? static_cast<index_t>(kBlock * sizeof(float)) : 0;
-        return static_cast<index_t>((kHdim + kBlock) * sizeof(float)) + reduce_bytes +
+        return kStageBytes +
+               static_cast<index_t>((kHdim + kBlock) * sizeof(float)) + reduce_bytes +
                quant_bytes;
+    }
+
+    // Non-transposed LDS view of the staged block: [token (M), hidden (N)], stride [kHdim, 1].
+    CK_TILE_DEVICE static auto MakeStageViewTN(InputType* p_stage)
+    {
+        return make_tensor_view<address_space_enum::lds>(
+            p_stage,
+            make_naive_tensor_descriptor(
+                make_tuple(number<kBlock>{}, number<kHdim>{}),
+                make_tuple(number<kHdim>{}, number<1>{})));
+    }
+
+    // Transposed LDS view of the same staged block: [hidden (M), token (N)]. Same underlying
+    // [token, hidden] storage, axes swapped so the mean/sim reduce-along-token tile reads it.
+    CK_TILE_DEVICE static auto MakeStageViewTransposed(InputType* p_stage)
+    {
+        const auto tn = MakeStageViewTN(p_stage);
+        return transform_tensor_view(
+            tn,
+            make_tuple(make_pass_through_transform(number<kHdim>{}),
+                       make_pass_through_transform(number<kBlock>{})),
+            make_tuple(sequence<1>{}, sequence<0>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
     }
 
     // ---- Per-warp row-wise INT8 quantization (fused sub-pass) ----
@@ -278,7 +312,7 @@ struct BlockSpargePreprocessPipeline
     //   group token absmax over `tokens_per_scale` consecutive tokens -> scale = absmax/127,
     //   sweep tile -> int8 = round(val / scale). scale_out holds kBlock/tokens_per_scale scales.
     // s_absmax is a [kBlock] LDS scratch (one slot per token-within-block).
-    CK_TILE_DEVICE void quantize_block(const InputType* slice,
+    CK_TILE_DEVICE void quantize_block(InputType*        p_stage,
                                        const Params&     params,
                                        index_t           count,
                                        index_t           s_start,
@@ -288,21 +322,13 @@ struct BlockSpargePreprocessPipeline
         const index_t tid = get_thread_id();
         const index_t tps = params.tokens_per_scale;
 
-        const auto naive_q = make_naive_tensor_view<address_space_enum::global>(
-            slice,
-            make_tuple(params.seqlen, kHdim),
-            make_tuple(params.stride_seq, 1),
-            number<1>{},
-            number<1>{});
-        const auto padded_q = pad_tensor_view(
-            naive_q,
-            make_tuple(number<kBlock>{}, number<kHdim>{}),
-            sequence<1, 0>{}); // pad token axis (M); hidden axis (N) is exact 128
-
+        // Read the block from the shared LDS staging buffer ([token (M), hidden (N)]) instead of
+        // re-loading global. Block extent is exactly [kBlock, kHdim] (no token padding needed).
+        const auto stage_tn = MakeStageViewTN(p_stage);
         auto q_window = make_tile_window(
-            padded_q,
+            stage_tn,
             make_tuple(number<kBlock>{}, number<kHdim>{}),
-            {s_start, 0},
+            {0, 0},
             MakeXBlockTileDistribution());
 
         auto reduce       = BlockReduce2d<ReduceProblem>{};
@@ -403,7 +429,10 @@ struct BlockSpargePreprocessPipeline
         assert(params.hdim == kHdim && params.block_size == kBlock &&
                "sparge preprocess tile path requires hdim == block_size == 128");
 
-        float* s_km        = reinterpret_cast<float*>(smem);          // [kHdim]
+        // Shared input-block staging buffer at the head of LDS; the rest of the scratch follows.
+        InputType* s_stage = reinterpret_cast<InputType*>(smem);       // [kBlock*kHdim]
+        float* s_km        = reinterpret_cast<float*>(
+            reinterpret_cast<char*>(smem) + kStageBytes);              // [kHdim]
         float* s_inv_norm  = s_km + kHdim;                             // [kBlock]
         void*  s_reduce    = reinterpret_cast<void*>(s_inv_norm + kBlock);
 
@@ -420,6 +449,40 @@ struct BlockSpargePreprocessPipeline
             return;
         }
 
+        // ---- Stage the [token, hidden] block from global into LDS ONCE ----
+        // Coalesced non-transposed load; OOB tokens (>= count) read as 0 via the padded view,
+        // which the existing mean/quant/sim math already tolerates (sum/absmax/Gram contributions
+        // are zero). All subsequent passes re-read this buffer from LDS, eliminating the prior
+        // 2-3 redundant global passes over the same data.
+        {
+            const auto naive_in = make_naive_tensor_view<address_space_enum::global>(
+                slice,
+                make_tuple(params.seqlen, kHdim),
+                make_tuple(params.stride_seq, 1),
+                number<1>{},
+                number<1>{});
+            const auto padded_in = pad_tensor_view(
+                naive_in,
+                make_tuple(number<kBlock>{}, number<kHdim>{}),
+                sequence<1, 0>{}); // pad token axis (M); hidden axis (N) is exact 128
+            auto in_window = make_tile_window(
+                padded_in,
+                make_tuple(number<kBlock>{}, number<kHdim>{}),
+                {s_start, 0},
+                MakeXBlockTileDistribution());
+
+            auto stage_view = MakeStageViewTN(s_stage);
+            auto stage_window = make_tile_window(
+                stage_view,
+                make_tuple(number<kBlock>{}, number<kHdim>{}),
+                {0, 0},
+                MakeXBlockTileDistribution());
+
+            auto in_tile = load_tile(in_window);
+            store_tile(stage_window, in_tile);
+            block_sync_lds();
+        }
+
         // INT8 quant sub-pass (independent of mean/sim; reads raw values). Its absmax
         // scratch sits past the cross-warp reduce region.
         if constexpr(kDoQuant)
@@ -434,7 +497,7 @@ struct BlockSpargePreprocessPipeline
                 static_cast<index_t>(sizeof(float));
             float* s_absmax =
                 reinterpret_cast<float*>(s_reduce) + reduce_floats;
-            quantize_block(slice, params, count, s_start, s_absmax, s_reduce);
+            quantize_block(s_stage, params, count, s_start, s_absmax, s_reduce);
             block_sync_lds();
         }
 
@@ -445,30 +508,14 @@ struct BlockSpargePreprocessPipeline
             s_km[d] = has_km ? params.km_ptr[d] : 0.0f;
         block_sync_lds();
 
-        // Transposed token view: global [seqlen, hdim] (stride [stride_seq, 1]) -> tile axes
-        // [hdim (M), token (N)]; pad token axis to kBlock (OOB tokens read as 0, harmless for
-        // both the mean sum and the Gram unit-vector sum). Then window onto this block.
-        const auto naive = make_naive_tensor_view<address_space_enum::global>(
-            slice,
-            make_tuple(params.seqlen, kHdim),
-            make_tuple(params.stride_seq, 1),
-            number<1>{},
-            number<1>{});
-        const auto transposed = transform_tensor_view(
-            naive,
-            make_tuple(make_pass_through_transform(kHdim),
-                       make_pass_through_transform(params.seqlen)),
-            make_tuple(sequence<1>{}, sequence<0>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
-        const auto padded = pad_tensor_view(
+        // Transposed token view of the staged block in LDS -> tile axes [hdim (M), token (N)].
+        // (Same data the global transposed view used to read; OOB tokens were already zeroed at
+        // stage time, so the mean sum and Gram unit-vector sum are unchanged.)
+        const auto transposed = MakeStageViewTransposed(s_stage);
+        auto x_window = make_tile_window(
             transposed,
             make_tuple(number<kHdim>{}, number<kBlock>{}),
-            sequence<0, 1>{});
-
-        auto x_window = make_tile_window(
-            padded,
-            make_tuple(number<kHdim>{}, number<kBlock>{}),
-            {0, s_start},
+            {0, 0},
             MakeXBlockTileDistribution());
 
         auto reduce        = BlockReduce2d<ReduceProblem>{};
@@ -518,22 +565,13 @@ struct BlockSpargePreprocessPipeline
         // the unit-vector sum u[d] and report ||u||^2 / count^2 (matches upstream SpargeAttn).
 
         // Step 1: per-token inv-norm 1/|t_s|. BlockReduce2d only reduces N, so to get a per-token
-        // (not per-channel) squared sum, load a [token(M), hidden(N)] tile (non-transposed window).
-        const auto naive_tn = make_naive_tensor_view<address_space_enum::global>(
-            slice,
-            make_tuple(params.seqlen, kHdim),
-            make_tuple(params.stride_seq, 1),
-            number<1>{},
-            number<1>{});
-        const auto padded_tn = pad_tensor_view(
-            naive_tn,
-            make_tuple(number<kBlock>{}, number<kHdim>{}),
-            sequence<1, 0>{}); // pad token axis (M); hidden axis (N) is exact 128
-
+        // (not per-channel) squared sum, read the [token(M), hidden(N)] tile from the staged LDS
+        // block (non-transposed orientation) -- same data, no extra global pass.
+        const auto stage_tn = MakeStageViewTN(s_stage);
         auto xt_window = make_tile_window(
-            padded_tn,
+            stage_tn,
             make_tuple(number<kBlock>{}, number<kHdim>{}),
-            {s_start, 0},
+            {0, 0},
             MakeXBlockTileDistribution());
 
         auto xt_tile = load_tile(xt_window);
