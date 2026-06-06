@@ -24,13 +24,24 @@ pytestmark = pytest.mark.unit
 
 _ARCH = "gfx90a"
 _SEED = "Tensile/Tests/common/gemm/fp16_tn.yaml"
+_LIMIT = 6
 
 
 def test_seed_gfx90a_hhs_emits_assembly():
     """The gfx90a fp16 (HHS) seed emits real AMDGCN assembly, every kernel err==0."""
-    results = emit_kernels_from_config(_SEED, limit=6, arch=_ARCH)
+    results = emit_kernels_from_config(_SEED, limit=_LIMIT, arch=_ARCH)
     assert len(results) >= 1
     assert all(err == 0 for (_b, _s, err) in results)
     for base, src, _err in results:
         assert src and len(src.splitlines()) > 1
         assert base.startswith("Cijk_")
+
+
+def test_gfx90a_hhs_golden(snapshot):
+    """Order-invariant {basename, err} digest golden for the gfx90a HHS seed."""
+    results = emit_kernels_from_config(_SEED, limit=_LIMIT, arch=_ARCH)
+    digest = sorted(
+        ({"basename": b, "err": e} for (b, _s, e) in results),
+        key=lambda d: d["basename"],
+    )
+    assert digest == snapshot

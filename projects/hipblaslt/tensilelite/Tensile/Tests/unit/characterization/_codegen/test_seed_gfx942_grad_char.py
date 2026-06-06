@@ -11,7 +11,7 @@ common gradient config (``Tests/common/gradient/fp16_gradient_bias.yaml``,
 BenchmarkProblems[0] is an fp16 Gradient + Bias + Activation GEMM) and asserts
 every emitted kernel is real gfx942 assembly with err==0.
 
-No snapshot (that is P3); this proves the family seed emits cleanly.
+P3 golden: order-invariant {basename, err} digest snapshot recorded below.
 """
 
 import os
@@ -39,3 +39,13 @@ def test_seed_gfx942_grad_emits_assembly():
     results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
     assert len(results) >= 1
     assert all(err == 0 for (_b, _s, err) in results)
+
+
+def test_gfx942_grad_golden(snapshot):
+    """P3 golden: order-invariant digest of {basename, err} per emitted kernel."""
+    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+    digest = sorted(
+        ({"basename": b, "err": e} for (b, _s, e) in results),
+        key=lambda d: d["basename"],
+    )
+    assert digest == snapshot

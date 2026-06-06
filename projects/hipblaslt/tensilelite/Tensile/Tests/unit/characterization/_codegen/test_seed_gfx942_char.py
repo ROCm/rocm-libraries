@@ -45,3 +45,13 @@ def test_seed_gfx942_emits_assembly():
         assert ".amdgcn_target" in src
         assert "gfx942" in src
         assert base.startswith("Cijk_")
+
+
+def test_gfx942_dominant_golden(snapshot):
+    """P3 golden: order-invariant {basename, err} digest of the gfx942 seed emit."""
+    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+    digest = sorted(
+        ({"basename": b, "err": e} for (b, _s, e) in results),
+        key=lambda d: d["basename"],
+    )
+    assert digest == snapshot

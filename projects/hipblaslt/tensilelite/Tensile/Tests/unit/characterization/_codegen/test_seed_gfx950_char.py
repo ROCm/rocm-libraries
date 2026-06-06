@@ -45,3 +45,13 @@ def test_seed_gfx950_emits_assembly():
         assert ".amdgcn_target" in src
         assert "gfx950" in src
         assert base.startswith("Cijk_")
+
+
+def test_gfx950_dominant_golden(snapshot):
+    """P3 golden: order-invariant {basename, err} digest for the gfx950 dominant seed."""
+    results = emit_kernels_from_config(_SEED, limit=_LIMIT, arch=_ARCH)
+    digest = sorted(
+        ({"basename": b, "err": e} for (b, _s, e) in results),
+        key=lambda d: d["basename"],
+    )
+    assert digest == snapshot

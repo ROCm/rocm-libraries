@@ -43,3 +43,13 @@ def test_seed_gfx90a_db_emits_assembly():
     for base, src, _err in results:
         assert src and len(src.splitlines()) > 1
         assert base.startswith("Cijk_")
+
+
+def test_gfx90a_db_golden(snapshot):
+    """Order-invariant {basename, err} digest for the gfx90a DB seed (P3 golden)."""
+    results = emit_kernels_from_config(_SEED, limit=6, arch=_ARCH)
+    digest = sorted(
+        ({"basename": b, "err": e} for (b, _s, e) in results),
+        key=lambda d: d["basename"],
+    )
+    assert digest == snapshot

@@ -12,7 +12,7 @@ existing validated common GroupedGemm config
 fp16 GroupedGemm + Bias + Activation) and asserts every emitted kernel is real
 gfx942 assembly with err==0.
 
-No snapshot (that is P3); this proves the family seed emits cleanly.
+P3 adds an order-invariant {basename, err} snapshot golden for this seed.
 """
 
 import os
@@ -35,9 +35,21 @@ _COMMON = os.path.join(
 # GroupedGemm flag the dominant seed lacks.
 _CONFIG = os.path.join(_COMMON, "groupedgemm", "grouped_gemm.yaml")
 
+_LIMIT = 8
+
 
 def test_seed_gfx942_gg_emits_assembly():
     """The GroupedGemm family seed config emits real gfx942 assembly, all err==0."""
-    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+    results = emit_kernels_from_config(_CONFIG, limit=_LIMIT, arch=_ARCH)
     assert len(results) >= 1
     assert all(err == 0 for (_b, _s, err) in results)
+
+
+def test_gfx942_gg_golden(snapshot):
+    """Order-invariant {basename, err} digest golden for the GG family seed (P3)."""
+    results = emit_kernels_from_config(_CONFIG, limit=_LIMIT, arch=_ARCH)
+    digest = sorted(
+        ({"basename": b, "err": e} for (b, _s, e) in results),
+        key=lambda d: d["basename"],
+    )
+    assert digest == snapshot

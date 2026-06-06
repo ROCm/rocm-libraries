@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_gfx950_bbs_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_UserArgs_MT64x16EgblItT7ZfOWH1YcgeI4YTk6fFN-5vyqp6RUntiHuEs=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_UserArgs_MT64x16_m_XGCRxiNG0mGUM7jtFEiUq1EQjOeniBO4chYM83jY=',
+      'err': 0,
+    }),
+  ])
+# ---

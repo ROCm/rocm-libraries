@@ -39,3 +39,13 @@ def test_seed_gfx942_db_emits_assembly():
     results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
     assert len(results) >= 1
     assert all(err == 0 for (_b, _s, err) in results)
+
+
+def test_gfx942_db_golden(snapshot):
+    """Order-invariant {basename, err} digest golden for the gfx942 fp64 seed."""
+    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+    digest = sorted(
+        ({"basename": b, "err": e} for (b, _s, e) in results),
+        key=lambda d: d["basename"],
+    )
+    assert digest == snapshot

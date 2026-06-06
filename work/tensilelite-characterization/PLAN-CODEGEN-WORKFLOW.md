@@ -266,7 +266,7 @@ Stage 1 — coverage efficiency (minimal custom seed set + goldens):
 - [x] **P0** validate method + inventory; commit `d6ae0b113d9`.
 - [x] **P1 (first slice, 2026-06-05)** config harness path built + smoked (`_codegen/config_harness.py`, `emit_kernels_from_config`, CPU-only — independently re-smoked on `Tests/common/gemm/fp16_tn.yaml`); 29 curated inputs (gfx942/gfx950/gfx90a) measured isolated → `attribution-<arch>.json` (greedy set-cover marginal ranking). Commits `0d818440d0c`, `97a331c434f`. **Remaining P1b (widen):** corpus sample + single-parameter `ForkParameters` probes for parameter-level attribution.
 - [x] **P2 (done, widened — option b, 2026-06-06)** minimal custom seed set, **multi-ProblemType per arch** (single-config-per-arch undershot at 30.53%; widened to a per-arch seed *set* spanning distinct high-yield families). 15 seed tests (gfx942/gfx950/gfx90a), each isolated-measured; union **whole-project ceiling = 35.89%** (21156/54491), recorded in `coverage/p2/ceiling-widened.txt`. Designed seed YAMLs live under `_codegen/data/test_data/_designed/**` (the `test_data` path keeps them out of `findConfigs` GPU auto-discovery — no `config_helpers.py` change). Full `-m unit` 0 failed (2528 passed/201 skipped). Commit `ec7524bd1be`.
-- [ ] **P3** goldens for the seed set; fast suite reproduces the P2 ceiling; baseline.
+- [x] **P3 (done, 2026-06-06)** goldens for the seed set; fast suite reproduces the P2 ceiling; baseline.
 
 Stage 2 — coverage expansion:
 - [ ] **P4** expansion round 1 (rank whole-project gaps → cheapest input → golden → re-measure delta, marginal-yield).
@@ -344,3 +344,9 @@ Stage 2 — coverage expansion:
   seed YAMLs relocated under `_codegen/data/test_data/_designed/**` so `findConfigs` (which skips
   `test_data` paths) stops auto-running them through the GPU `Tensile.Tensile()` path — no
   `config_helpers.py` change. Full `-m unit` **2528 passed / 201 skipped / 0 failed**. Commit `ec7524bd1be`.
+- 2026-06-06 — **P3 done.** Recorded order-invariant `{basename,err}` digest goldens (syrupy
+  `__snapshots__/*.ambr`) for all 15 seed tests; each golden verified stable across two no-update
+  runs. Seed suite reproduces the P2 ceiling exactly: union of the 15 `err==0`
+  `.coverage.seedw_*` shards → whole-project TOTAL **35.89%** (21156/54491, **+0 vs P2**).
+  Master-baseline `coverage/p3/master-baseline-p3.txt`; full `-m unit` **2543 passed / 201
+  skipped / 0 failed** (728 snapshots passed), `coverage/p3/unit-gate.txt`. Commit `1d66d19`.

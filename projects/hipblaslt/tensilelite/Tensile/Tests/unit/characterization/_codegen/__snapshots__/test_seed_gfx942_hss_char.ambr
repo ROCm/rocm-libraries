@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_gfx942_hss_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_HSS_BH_Bias_S_UserArgs_MT64x16x32kbJfZTju63P4pYCRXchFfgBo9OiWfrx5e8w9C2hfa0w=',
+      'err': 0,
+    }),
+  ])
+# ---

@@ -12,7 +12,7 @@ BenchmarkProblems[0], so this drives an authored single-permutation seed
 (``data/_designed/gfx942/hss.yaml``) and asserts the emitted kernel is real
 gfx942 assembly with err==0.
 
-No snapshot (that is P3); this proves the family seed emits cleanly.
+P3: snapshot golden added — order-invariant {basename, err} digest per kernel.
 """
 
 import os
@@ -40,3 +40,13 @@ def test_seed_gfx942_hss_emits_assembly():
     results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
     assert len(results) >= 1
     assert all(err == 0 for (_b, _s, err) in results)
+
+
+def test_gfx942_hss_golden(snapshot):
+    """P3 golden: order-invariant {basename, err} digest of every emitted kernel."""
+    results = emit_kernels_from_config(_CONFIG, limit=8, arch=_ARCH)
+    digest = sorted(
+        ({"basename": b, "err": e} for (b, _s, e) in results),
+        key=lambda d: d["basename"],
+    )
+    assert digest == snapshot

@@ -28,3 +28,13 @@ def test_seed_gfx950_dtl_emits_assembly():
     results = emit_kernels_from_config(_SEED, limit=8, arch=_ARCH)
     assert len(results) >= 1
     assert all(err == 0 for (_b, _s, err) in results)
+
+
+def test_gfx950_dtl_golden(snapshot):
+    """Order-invariant golden: pin {basename, err} for every emitted DTL kernel."""
+    results = emit_kernels_from_config(_SEED, limit=8, arch=_ARCH)
+    digest = sorted(
+        ({"basename": b, "err": e} for (b, _s, e) in results),
+        key=lambda d: d["basename"],
+    )
+    assert digest == snapshot
