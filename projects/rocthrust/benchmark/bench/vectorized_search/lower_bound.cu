@@ -90,7 +90,7 @@ void run_benchmark(
     gpu_times.push_back(duration);
   }
 
-  state.SetBytesProcessed(0);
+  state.SetBytesProcessed(state.iterations() * needles * sizeof(T));
   state.SetItemsProcessed(state.iterations() * needles);
 
   const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
