@@ -63,6 +63,12 @@ static constexpr unsigned OZ2_S_MAX = 20;
 /* Alignment for INT8 arrays (128 bytes = 128 INT8 elements) */
 static constexpr size_t OZ2_ALIGN = 128;
 
+/* Shared-memory tile dimension for the transpose-aware scale kernels.
+ * The tiled kernels use a block of OZ2_STILE x OZ2_STILE = 32x32 = 1024
+ * threads to convert strided global reads into coalesced ones via shared
+ * memory transposition.                                                      */
+static constexpr int OZ2_STILE = 32;
+
 static __host__ __device__ size_t oz2_pad(size_t n)
 {
     return (n + OZ2_ALIGN - 1) / OZ2_ALIGN * OZ2_ALIGN;
@@ -977,6 +983,90 @@ oz2_scaleA_kernel(const double* __restrict__ A,
 }
 
 /**
+ * oz2_scaleA_N_kernel — transA=N specialisation of oz2_scaleA_kernel.
+ *
+ * For transA=N, A is stored column-major as A[j*lda+i] (j=k-index, i=m-index).
+ * The standard block(64,4) reads A with stride=lda (non-coalesced for large k).
+ * This kernel uses a 32x32 shared-memory tile to transpose the access pattern:
+ *
+ *   Load phase  (tx=i-offset, ty=j-offset): reads A[j*lda+i] — tx varies fast
+ *               -> OZ2_STILE consecutive m-elements per half-warp -> coalesced.
+ *   Write phase (tx=j-offset, ty=i-offset): writes A8i[j+i*lda8i] — tx varies
+ *               fast -> OZ2_STILE consecutive k-elements -> coalesced.
+ *
+ * sval[OZ2_STILE][OZ2_STILE+1] (PAD=1) avoids 32-way LDS bank conflicts; at
+ * most a 2-way conflict remains at the warp seam, costing <=1 extra LDS cycle.
+ *
+ * Grid:  ((m+OZ2_STILE-1)/OZ2_STILE, (k+OZ2_STILE-1)/OZ2_STILE)
+ * Block: (OZ2_STILE, OZ2_STILE) = 1024 threads = 16 wavefronts on MI300/MI350
+ */
+__global__ static void
+oz2_scaleA_N_kernel(const double* __restrict__ A,
+                    int64_t m, int64_t k, int64_t lda,
+                    int8_t*  __restrict__       A8i,
+                    size_t                      lda8i,
+                    size_t                      cola8i,
+                    const int16_t* __restrict__ sftA,
+                    unsigned                    t_start,
+                    unsigned                    t_count,
+                    bool                        do_pass3)
+{
+    /* tx = i-offset (m) during load / j-offset (k) during write
+     * ty = j-offset (k) during load / i-offset (m) during write             */
+    const int tx = static_cast<int>(threadIdx.x);
+    const int ty = static_cast<int>(threadIdx.y);
+
+    const int64_t i_base = static_cast<int64_t>(blockIdx.x) * OZ2_STILE;
+    const int64_t j_base = static_cast<int64_t>(blockIdx.y) * OZ2_STILE;
+
+    /* sval[ty=j-offset][tx=i-offset+PAD], PAD=1 avoids 32-way LDS bank
+     * conflicts during the transposed read in the write phase.               */
+    __shared__ double sval[OZ2_STILE][OZ2_STILE + 1];
+
+    /* ------------------------------------------------------------------
+     * Load phase: tx=i-offset (fast), ty=j-offset.
+     * A[j*lda+i] with consecutive tx -> coalesced reads for transA=N.
+     * ------------------------------------------------------------------ */
+    const int64_t i_load = i_base + tx;
+    const int64_t j_load = j_base + ty;
+    double val = 0.0;
+    if(i_load < m && j_load < k)
+        val = A[j_load * lda + i_load];
+    sval[ty][tx] = val;
+    __syncthreads();
+
+    /* ------------------------------------------------------------------
+     * Write phase: tx=j-offset (fast), ty=i-offset.
+     * Reads sval[tx][ty] (transposed, <=2-way bank conflict with PAD=1).
+     * A8i[j+i*lda8i] with consecutive tx -> coalesced writes.
+     * ------------------------------------------------------------------ */
+    const int64_t j_write = j_base + tx;
+    const int64_t i_write = i_base + ty;
+    if(j_write >= k || i_write >= m) return;
+
+    val = sval[tx][ty];
+    const int16_t sft  = sftA[i_write];
+    const double  ival = trunc(ldexp(val, static_cast<int>(sft)));
+
+    const size_t stride = lda8i * cola8i;
+    const size_t offset = static_cast<size_t>(j_write)
+                        + static_cast<size_t>(i_write) * lda8i;
+
+    for(unsigned t_local = 0; t_local < t_count; ++t_local) {
+        const unsigned t  = t_start + t_local;
+        const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
+        const float   rf  = static_cast<float>(r);
+        float rf2 = fmaf(rintf(rf * cInvModF[t]),
+                         static_cast<float>(cNegMod[t]), rf);
+        if(do_pass3) {
+            rf2 = fmaf(rintf(rf2 * cInvModF[t]),
+                       static_cast<float>(cNegMod[t]), rf2);
+        }
+        A8i[t_local * stride + offset] = static_cast<int8_t>(static_cast<int32_t>(rf2));
+    }
+}
+
+/**
  * oz2_scaleB_kernel
  * Grid: ((k+63)/64, (n+3)/4), Block: (64,4)
  * threadIdx.x covers k (j-index, fast) and threadIdx.y covers n (l-index, slow).
@@ -1022,6 +1112,76 @@ oz2_scaleB_kernel(const double* __restrict__ B,
                        static_cast<float>(cNegMod[t]), rf2);
         }
         /* Write to local slice index t_local (B8i is reused per chunk). */
+        B8i[t_local * stride + offset] = static_cast<int8_t>(static_cast<int32_t>(rf2));
+    }
+}
+
+/**
+ * oz2_scaleB_T_kernel — transB=T specialisation of oz2_scaleB_kernel.
+ *
+ * For transB=T, B is stored column-major as B[j*ldb+l] (j=k-index, l=n-index).
+ * Uses the same 32x32 shared-memory transpose as oz2_scaleA_N_kernel:
+ *
+ *   Load phase  (tx=l-offset, ty=j-offset): reads B[j*ldb+l] -> coalesced.
+ *   Write phase (tx=j-offset, ty=l-offset): writes B8i[j+l*ldb8i] -> coalesced.
+ *
+ * Grid:  ((n+OZ2_STILE-1)/OZ2_STILE, (k+OZ2_STILE-1)/OZ2_STILE)
+ * Block: (OZ2_STILE, OZ2_STILE)
+ */
+__global__ static void
+oz2_scaleB_T_kernel(const double* __restrict__ B,
+                    int64_t k, int64_t n, int64_t ldb,
+                    int8_t*  __restrict__       B8i,
+                    size_t                      ldb8i,
+                    const int16_t* __restrict__ sftB,
+                    unsigned                    t_start,
+                    unsigned                    t_count,
+                    bool                        do_pass3)
+{
+    /* tx = l-offset (n) during load / j-offset (k) during write
+     * ty = j-offset (k) during load / l-offset (n) during write             */
+    const int tx = static_cast<int>(threadIdx.x);
+    const int ty = static_cast<int>(threadIdx.y);
+
+    const int64_t l_base = static_cast<int64_t>(blockIdx.x) * OZ2_STILE;
+    const int64_t j_base = static_cast<int64_t>(blockIdx.y) * OZ2_STILE;
+
+    __shared__ double sval[OZ2_STILE][OZ2_STILE + 1];
+
+    /* Load phase: tx=l-offset (fast), ty=j-offset.
+     * B[j*ldb+l] with consecutive tx -> coalesced reads for transB=T.       */
+    const int64_t l_load = l_base + tx;
+    const int64_t j_load = j_base + ty;
+    double val = 0.0;
+    if(l_load < n && j_load < k)
+        val = B[j_load * ldb + l_load];
+    sval[ty][tx] = val;
+    __syncthreads();
+
+    /* Write phase: tx=j-offset (fast), ty=l-offset.
+     * B8i[j+l*ldb8i] with consecutive tx -> coalesced writes.               */
+    const int64_t j_write = j_base + tx;
+    const int64_t l_write = l_base + ty;
+    if(j_write >= k || l_write >= n) return;
+
+    val = sval[tx][ty];
+    const int16_t sft  = sftB[l_write];
+    const double  ival = trunc(ldexp(val, static_cast<int>(sft)));
+
+    const size_t stride = ldb8i * static_cast<size_t>(n);
+    const size_t offset = static_cast<size_t>(j_write)
+                        + static_cast<size_t>(l_write) * ldb8i;
+
+    for(unsigned t_local = 0; t_local < t_count; ++t_local) {
+        const unsigned t  = t_start + t_local;
+        const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
+        const float   rf  = static_cast<float>(r);
+        float rf2 = fmaf(rintf(rf * cInvModF[t]),
+                         static_cast<float>(cNegMod[t]), rf);
+        if(do_pass3) {
+            rf2 = fmaf(rintf(rf2 * cInvModF[t]),
+                       static_cast<float>(cNegMod[t]), rf2);
+        }
         B8i[t_local * stride + offset] = static_cast<int8_t>(static_cast<int32_t>(rf2));
     }
 }
@@ -1383,16 +1543,43 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
      * Scale kernel block (64,4): threadIdx.x covers k (fast) → coalesced
      * A8i/B8i writes.  Grid x → k-index, grid y → m-index (A) or n-index (B).
      * This setup is constant across iterations so we compute it once here.   */
-    const dim3 blk_scale(64, 4);
-    const dim3 gA_scale((k + 63) / 64, (m + 3) / 4);
-    const dim3 gB_scale((k + 63) / 64, (n + 3) / 4);
+    /* Scale kernel grid/block: depend on transpose orientation.
+     *
+     * transA=T / transB=N: block(64,4), threadIdx.x=k-index (fast) gives
+     *   coalesced reads and coalesced A8i/B8i writes.
+     *
+     * transA=N / transB=T: block(OZ2_STILE,OZ2_STILE) tiled-transpose kernel;
+     *   threadIdx.x covers m/n (fast) in the load phase (coalesced reads from
+     *   A/B) and covers k (fast) in the write phase (coalesced A8i/B8i writes).
+     * Grids are sized accordingly so total thread count is unchanged.         */
+    const dim3 blk_scaleA = tA
+        ? dim3(64u, 4u)
+        : dim3(static_cast<unsigned>(OZ2_STILE), static_cast<unsigned>(OZ2_STILE));
+    const dim3 gA_scale   = tA
+        ? dim3(static_cast<unsigned>((k + 63) / 64),
+               static_cast<unsigned>((m +  3) /  4))
+        : dim3(static_cast<unsigned>((m + OZ2_STILE - 1) / OZ2_STILE),
+               static_cast<unsigned>((k + OZ2_STILE - 1) / OZ2_STILE));
+
+    const dim3 blk_scaleB = !tB
+        ? dim3(64u, 4u)
+        : dim3(static_cast<unsigned>(OZ2_STILE), static_cast<unsigned>(OZ2_STILE));
+    const dim3 gB_scale   = !tB
+        ? dim3(static_cast<unsigned>((k + 63) / 64),
+               static_cast<unsigned>((n +  3) /  4))
+        : dim3(static_cast<unsigned>((n + OZ2_STILE - 1) / OZ2_STILE),
+               static_cast<unsigned>((k + OZ2_STILE - 1) / OZ2_STILE));
+
     const bool do_pass3 = (num_moduli >= 19u);
 
     /* Parts 2a-d (continued): chunk loop configuration.
-     * Block (32,16) = 512 threads = 8 wavefronts on MI300, improving memory-
-     * bandwidth saturation for the chunk_accum and finalize kernels.        */
-    const dim3 blk_acc(32, 16);
-    const dim3 grid_acc((m + 31) / 32, (n + 15) / 16);
+     * Block (64,8) = 512 threads = 8 wavefronts on MI300/MI350.  Each 64-thread
+     * wavefront covers 64 consecutive m-elements (one full row of C32i/Zhi/Zlo
+     * in the column-major layout), yielding two clean 256-byte HBM transactions
+     * per wavefront per slice — more efficient than (32,16) which spans two
+     * l-rows and touches separate cache-line groups per warp.               */
+    const dim3 blk_acc(64, 8);
+    const dim3 grid_acc((m + 63) / 64, (n + 7) / 8);
     /* strideA8i / strideB8i: stride between consecutive slices within the
      * chunk buffer (in elements).  Unchanged — the chunk buffer is laid out
      * identically to a full buffer, just with fewer slices.                 */
@@ -1443,15 +1630,31 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
                                 ? chunk_size : (num_moduli - chunk_start);
 
         /* Part 1f: extract INT8 slices for this chunk.
-         * Writes to A8i[0..actual-1] and B8i[0..actual-1], reusing the
-         * same buffer that held the previous chunk's slices.                */
+         * Dispatch the coalescing-optimal kernel for the given transpose:
+         *   transA=T -> oz2_scaleA_kernel   (block(64,4),    k fast)
+         *   transA=N -> oz2_scaleA_N_kernel (block(32,32),   tiled transpose)
+         *   transB=N -> oz2_scaleB_kernel   (block(64,4),    k fast)
+         *   transB=T -> oz2_scaleB_T_kernel (block(32,32),   tiled transpose)
+         * Both reads and writes are coalesced in all four cases.            */
         _pstart();
-        hipLaunchKernelGGL(oz2_scaleA_kernel, gA_scale, blk_scale, 0, stream,
-                           A, m, k, lda, tA, A8i, lda8i, cola8i, sftA,
-                           chunk_start, actual, do_pass3);
-        hipLaunchKernelGGL(oz2_scaleB_kernel, gB_scale, blk_scale, 0, stream,
-                           B, k, n, ldb, tB, B8i, ldb8i, sftB,
-                           chunk_start, actual, do_pass3);
+        if(tA) {
+            hipLaunchKernelGGL(oz2_scaleA_kernel, gA_scale, blk_scaleA, 0, stream,
+                               A, m, k, lda, tA, A8i, lda8i, cola8i, sftA,
+                               chunk_start, actual, do_pass3);
+        } else {
+            hipLaunchKernelGGL(oz2_scaleA_N_kernel, gA_scale, blk_scaleA, 0, stream,
+                               A, m, k, lda, A8i, lda8i, cola8i, sftA,
+                               chunk_start, actual, do_pass3);
+        }
+        if(!tB) {
+            hipLaunchKernelGGL(oz2_scaleB_kernel, gB_scale, blk_scaleB, 0, stream,
+                               B, k, n, ldb, tB, B8i, ldb8i, sftB,
+                               chunk_start, actual, do_pass3);
+        } else {
+            hipLaunchKernelGGL(oz2_scaleB_T_kernel, gB_scale, blk_scaleB, 0, stream,
+                               B, k, n, ldb, B8i, ldb8i, sftB,
+                               chunk_start, actual, do_pass3);
+        }
         _pstop(_t_scale);
 
         /* Update batch count only if the last chunk is partial */
