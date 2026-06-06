@@ -552,11 +552,6 @@ def Tensile(userArgs):
     print1("# Restoring default globalParameters")
     restoreDefaultGlobalParameters()
 
-    # Stash the --cpu-only flag in undocumented internal plumbing so the deep seams
-    # (Architectures ISA spoof, frequency-probe skip, ClientWriter launch stub) can read
-    # it without threading a new parameter through executeStepsInConfig. Set AFTER
-    # restoreDefaultGlobalParameters() (which would otherwise clobber it back to the
-    # default False). Kept out of the documented --global-parameters surface.
     globalParameters["CpuOnly"] = args.cpuOnly
 
     if args.LogicFormat:

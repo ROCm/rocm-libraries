@@ -70,10 +70,6 @@ _CACHE_FIELDS = {
     "CustomKernelWildcard": "customKernelWildcard",
 }
 
-# Deterministic synthetic GFlops value emitted per (problem size, solution) cell in the
-# --cpu-only results CSV. Fixed (never random / never timestamped) so the file is
-# byte-identical across runs (T8) and the value is large enough that addFromCSV's winner
-# selection has a well-defined winner. See the CSV-fidelity caveat in GPU-MOCK-PR.md.
 _CPU_ONLY_SYNTHETIC_GFLOPS = 1000.0
 
 
@@ -92,7 +88,6 @@ def _writeSyntheticResultsCSV(resultsFileName, problemSizes, gfxName, numSolutio
     """
     problems = list(problemSizes.problems)
     numIndices = len(problems[0].sizes) if problems else 0
-    # At least one solution column so addFromCSV's solutionStartIdx is well-defined.
     numSolutions = max(int(numSolutions), 1)
 
     header = ["GFlops"]
@@ -688,11 +683,6 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                 configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
             returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
 
-            # --cpu-only plumbing: runClient covered the config/run-script writing then
-            # stubbed the device launch (returncode 0). The device never produced a perf
-            # CSV, so synthesize a deterministic one here in the addFromCSV schema. We are
-            # inside the `not os.path.exists(resultsFileName)` branch, so this honors the
-            # existing skip-if-already-benchmarked guard.
             if globalParameters["CpuOnly"]:
                 numSolutions = len(solutions) if solutions else 1
                 _writeSyntheticResultsCSV(resultsFileName, benchmarkStep.problemSizes,

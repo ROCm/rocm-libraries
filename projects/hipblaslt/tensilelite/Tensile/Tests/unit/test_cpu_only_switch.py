@@ -73,36 +73,28 @@ def _parse(argv):
 def test_flag_default_off(monkeypatch):
     """T1: flag absent->False, present->True; internal plumbing key resets to False;
     flag is not on the --global-parameters surface."""
-    # Absent -> default False.
     args = _parse([])
     assert args.cpuOnly is False
 
-    # Present -> True.
     args = _parse(["--cpu-only"])
     assert args.cpuOnly is True
 
-    # The undocumented internal plumbing key exists and defaults False, and
-    # restoreDefaultGlobalParameters() resets it to False.
     assert defaultGlobalParameters["CpuOnly"] is False
-    globalParameters["CpuOnly"] = True  # simulate a prior run flipping it on
+    globalParameters["CpuOnly"] = True
     restoreDefaultGlobalParameters()
     try:
         assert globalParameters["CpuOnly"] is False
     finally:
         restoreDefaultGlobalParameters()
 
-    # The flag must NOT be advertised on the documented --global-parameters help surface.
     argParser = argparse.ArgumentParser()
     Tensile.addCommonArguments(argParser)
     help_text = argParser.format_help()
-    # --cpu-only is its own flag, present in help...
     assert "--cpu-only" in help_text
-    # ...but it is not threaded through the --global-parameters key=value mechanism.
     gp_action = next(
         a for a in argParser._actions if "--global-parameters" in a.option_strings
     )
     assert "CpuOnly" not in (gp_action.help or "")
-    # And eval-style --global-parameters parsing never references CpuOnly.
     assert "cpuOnly" not in (gp_action.help or "")
 
 
@@ -116,16 +108,11 @@ def test_arg_validation():
     """
     args = _parse(["--cpu-only"])
     assert args.cpuOnly is True
-    # gpuTargets lives on the Tensile() main parser, not addCommonArguments; the common
-    # parser must not synthesize or require it, so the attribute is simply absent here.
     assert not hasattr(args, "gpuTargets")
 
-    # Off by default and independent of other common args.
     args = _parse(["--device", "0"])
     assert args.cpuOnly is False
 
-
-# --- ISA belt spoof + primary --gpu-targets path (commit 3) ---------------------
 
 import Tensile.Common.Architectures as Arch
 from Tensile.Common.Types import IsaVersion
@@ -154,7 +141,6 @@ def test_isa_belt_spoof(monkeypatch, _restore_gp, arch):
     off, the real parse path is taken (spoof branch not entered)."""
     expected = _ARCH_ISA[arch]
 
-    # --- CpuOnly ON: no shell-out, exact per-arch IsaVersion ---
     globalParameters["CpuOnly"] = True
     globalParameters["CpuOnlyArch"] = arch
 
@@ -167,7 +153,6 @@ def test_isa_belt_spoof(monkeypatch, _restore_gp, arch):
     assert isinstance(result, IsaVersion)
     assert result == expected
 
-    # --- CpuOnly OFF: spoof branch NOT entered; real parse path runs ---
     globalParameters["CpuOnly"] = False
 
     class _FakeProc:
@@ -183,7 +168,7 @@ def test_isa_belt_spoof(monkeypatch, _restore_gp, arch):
     monkeypatch.setattr(Arch, "run", _fake_run)
 
     result_off = Arch.detectGlobalCurrentISA(0, "amdgpu-arch")
-    assert calls["n"] == 1  # the real shell-out path was taken
+    assert calls["n"] == 1
     assert result_off == expected
 
 
@@ -191,20 +176,17 @@ def test_isa_primary_path(monkeypatch, _restore_gp):
     """T4: the primary --cpu-only --gpu-targets path builds isaList directly from the
     target arch and never calls detectGlobalCurrentISA."""
 
-    # Spy: detection must never be reached on the --gpu-targets path.
     def _no_detect(*a, **k):
         raise AssertionError("detectGlobalCurrentISA called on the --gpu-targets path")
 
     monkeypatch.setattr(Arch, "detectGlobalCurrentISA", _no_detect)
 
-    # Mirror the isaList-building logic at Tensile.py (the --gpu-targets branch):
-    # ISA comes straight from gfxToIsa(arch); enumerator is None; detection untouched.
     args = _parse(["--cpu-only", "--device", "0"])
     assert args.cpuOnly is True
 
     gpuTargets = "gfx942"
     enumerator = None if gpuTargets else object()
-    assert enumerator is None  # --gpu-targets path: enumerator not needed
+    assert enumerator is None
 
     isaList = []
     for a in gpuTargets.split(";"):
@@ -215,9 +197,6 @@ def test_isa_primary_path(monkeypatch, _restore_gp):
         isaList.append(isa)
 
     assert isaList == [IsaVersion(9, 4, 2)]
-
-
-# --- Frequency-probe skip under CpuOnly (commit 4) ------------------------------
 
 
 def _run_freq_block(device_id=0):
@@ -274,29 +253,24 @@ def test_frequency_probe_skipped(monkeypatch, _restore_gp):
     monkeypatch.setattr(Tensile, "get_gpu_max_frequency_smi", _smi)
     monkeypatch.setattr(Tensile, "get_user_max_frequency", _user)
 
-    # --- CpuOnly ON: entire block skipped, no probe reached ---
     globalParameters["CpuOnly"] = True
     ran = _run_freq_block()
     assert ran is False
     assert calls == {"hip": 0, "smi": 0, "user": 0}
 
-    # --- CpuOnly OFF: real branch entered; get_gpu_max_frequency IS called ---
     globalParameters["CpuOnly"] = False
     seen = {"hip": 0}
 
     def _hip_ok(device_id):
         seen["hip"] += 1
-        return 1700  # deterministic non-zero -> smi/user never needed
+        return 1700
 
     monkeypatch.setattr(Tensile, "get_gpu_max_frequency", _hip_ok)
-    # smi/user remain the raising spies: a valid first probe must short-circuit them.
     ran = _run_freq_block()
     assert ran is True
     assert seen["hip"] == 1
-    assert calls == {"hip": 0, "smi": 0, "user": 0}  # smi/user untouched
+    assert calls == {"hip": 0, "smi": 0, "user": 0}
 
-
-# --- Client device-launch stub + synthetic results CSV (commit 5) ---------------
 
 import subprocess
 from pathlib import Path
@@ -305,8 +279,6 @@ import Tensile.ClientWriter as ClientWriter
 import Tensile.BenchmarkProblems as BenchmarkProblems
 from Tensile.SolutionStructs.Problem import Problem
 
-# Per-arch seeded problem sizes (the data stub: mirror ProblemSizesMockDummy's [128,128,1,512]).
-# Two distinct sizes prove one CSV data row per seeded size.
 _SEED_SIZES = [(128, 128, 1, 512), (256, 256, 1, 1024)]
 
 
@@ -339,7 +311,6 @@ def test_no_side_effects(monkeypatch, _restore_gp, tmp_path):
     monkeypatch.setattr(subprocess, "Popen", _no_popen)
     monkeypatch.setattr(subprocess, "run", _no_run)
     monkeypatch.setattr(ClientWriter, "getClientExecutablePath", _no_exe)
-    # builtins.input is already monkeypatched to raise by the autouse _no_stdin fixture.
 
     rc = ClientWriter.runClient(
         libraryLogicPath=None,
@@ -384,17 +355,13 @@ def test_synthetic_csv_schema(tmp_path, arch, monkeypatch):
         resultsFileName, problemSizes, arch, numSolutions
     )
 
-    # (1) Writer-side sentinel: the hardcoded perf-unit column must stay "GFlops".
     with open(resultsFileName, newline="") as f:
         headerCols = f.readline().rstrip("\n").split(",")
     assert headerCols[0] == "GFlops"
 
-    # solutionMap: CSV solution-column index -> solution id (identity for one solution).
     solutionMap = {i: i for i in range(numSolutions)}
 
     def _consume():
-        # Fresh analyzer carrying only the attributes addFromCSV reads on the exact-size
-        # path; the parser / winner / perf-metric logic itself is the real code.
         analyzer = LogicAnalyzer.__new__(LogicAnalyzer)
         analyzer.numIndices = len(_SEED_SIZES[0])
         analyzer.exactProblemSizes = set(_SEED_SIZES)
@@ -404,24 +371,17 @@ def test_synthetic_csv_schema(tmp_path, arch, monkeypatch):
         analyzer.addFromCSV(resultsFileName, numSolutions, solutionMap)
         return analyzer
 
-    # (2) Reader side on the real-flow branch: UseEffLike=True (the Tensile default).
     monkeypatch.setitem(globalParameters, "UseEffLike", True)
 
-    # 2a. MAX_FREQ unset -> read_max_freq() returns None -> perf == round(GFlops).
     monkeypatch.delenv("MAX_FREQ", raising=False)
     analyzer = _consume()
-    # Recognized "GFlops" unit -> DeviceEfficiency (pinned real by the header assert above,
-    # so this is the recognized branch, not the unrecognized-unit fallback).
     assert analyzer.perfMetric == "DeviceEfficiency"
-    # One winner recorded per seeded exact problem size (schema parsed correctly).
     assert set(analyzer.exactWinners.keys()) == set(_SEED_SIZES)
     for size in _SEED_SIZES:
         winnerSolId, perf = analyzer.exactWinners[size]
         assert winnerSolId == 0
         assert perf == round(GFLOPS)
 
-    # 2b. MAX_FREQ set -> perf == round(GFlops / freq, 2), pinning the synthetic value
-    #     through the frequency division the default branch performs.
     monkeypatch.setenv("MAX_FREQ", "200")
     analyzer = _consume()
     expected = round(GFLOPS / 200.0, 2)
@@ -443,8 +403,6 @@ def test_determinism(tmp_path):
 
     assert Path(f1).read_bytes() == Path(f2).read_bytes()
 
-
-# --- Tier 2: end-to-end ("it actually works") (commit 6) ------------------------
 
 _E2E_CONFIG = Path(__file__).parent / "test_data" / "cpu_only.yaml"
 
@@ -481,26 +439,20 @@ def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, a
 
     Tensile.Tensile(args)
 
-    # A results CSV was produced (the synthetic stub wrote it; the real device never ran).
     results_csvs = list(output_dir.rglob("*.csv"))
     assert results_csvs, "no results .csv produced under the output dir"
 
-    # The benchmark-data CSV the LibraryLogic step consumes exists and carries our
-    # deterministic synthetic perf value.
     benchmark_data = list((output_dir / "2_BenchmarkData").glob("*.csv"))
     assert benchmark_data, "no 2_BenchmarkData CSV (addFromCSV input) produced"
     text = benchmark_data[0].read_text()
-    assert text.splitlines()[0].startswith("GFlops")  # addFromCSV perf-unit header
-    assert "1000.0" in text  # the fixed synthetic GFlops value
+    assert text.splitlines()[0].startswith("GFlops")
+    assert "1000.0" in text
 
-    # A library-logic artifact exists -> LibraryLogic.main (addFromCSV) ran to completion.
     logic_artifacts = list((output_dir / "3_LibraryLogic").glob("*.yaml"))
     assert (
         logic_artifacts
     ), "no 3_LibraryLogic artifact produced; addFromCSV did not run"
 
-
-# --- Tier 3: off-path equivalence (the downstream-trust gate) (commit 6) ---------
 
 _TEST_DATA = Path(__file__).parent / "test_data"
 
@@ -549,11 +501,9 @@ def test_off_path_text_golden(tmp_path, monkeypatch, _restore_gp):
     """
     from Tensile.SolutionStructs.Problem import ProblemSizesMockDummy
 
-    # restoreDefaultGlobalParameters() populates every key the writers read; CpuOnly OFF.
     restoreDefaultGlobalParameters()
     globalParameters["CpuOnly"] = False
 
-    # --- writeRunScript golden (forBenchmark=True) ---
     monkeypatch.setattr(
         ClientWriter, "getClientExecutablePath", lambda: "/TENSILE_CLIENT_EXE"
     )
@@ -578,7 +528,6 @@ def test_off_path_text_golden(tmp_path, monkeypatch, _restore_gp):
         produced_sh == golden_sh
     ), "writeRunScript output drifted from the develop golden"
 
-    # --- writeClientConfigIni golden ---
     class _FactorDimArgs:
         factorDims = [0]
 
@@ -616,7 +565,6 @@ def test_off_path_real_branches(monkeypatch, _restore_gp):
     """
     globalParameters["CpuOnly"] = False
 
-    # --- Seam 1: ISA detection takes the real shell-out parse path (not the spoof). ---
     class _FakeProc:
         returncode = 0
         stdout = b"gfx942\n"
@@ -632,12 +580,11 @@ def test_off_path_real_branches(monkeypatch, _restore_gp):
     assert isa_calls["n"] == 1, "CpuOnly OFF must reach the real ISA shell-out path"
     assert isa == IsaVersion(9, 4, 2)
 
-    # --- Seam 2: the frequency-probe block runs (get_gpu_max_frequency is called). ---
     freq_calls = {"hip": 0}
 
     def _hip_ok(device_id):
         freq_calls["hip"] += 1
-        return 1700  # deterministic non-zero -> smi/user not needed
+        return 1700
 
     monkeypatch.setattr(Tensile, "get_gpu_max_frequency", _hip_ok)
     ran = _run_freq_block()
@@ -646,10 +593,6 @@ def test_off_path_real_branches(monkeypatch, _restore_gp):
         freq_calls["hip"] == 1
     ), "CpuOnly OFF must call the real get_gpu_max_frequency"
 
-    # --- Seam 3: runClient takes the real launch path (writeRunScript is reached). ---
-    # We don't run the launch GPU-less; we only prove the CpuOnly short-circuit at
-    # ClientWriter.py is NOT taken when off, by spying writeRunScript. The real path
-    # would proceed to getClientExecutablePath/Popen after this point.
     reached = {"writeRunScript": 0}
 
     def _spy_write_run_script(*a, **k):
