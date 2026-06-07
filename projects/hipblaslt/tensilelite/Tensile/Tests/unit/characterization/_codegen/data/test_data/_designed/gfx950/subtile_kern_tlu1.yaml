@@ -1,0 +1,88 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P5 DESIGNED subtile-kernel TLU1 config for gfx950.
+#
+# Targets Tensile/Components/Subtile/Kernel.py uncovered TLU1 arms:
+#   151-152  (ABGRTile.__init__: GRTag_TLU1 branch — contiguousDim='M')
+#   159, 163, 167, 175  (ABGRTile properties hit via ABGRTile instantiation)
+#   188, 191, 194, 197  (ABGRTile emit methods reached during codegen)
+#   222-223  (ABLRTile.__init__: LRTag_TLU1 branch — contiguousDim='M')
+#   230, 234, 247, 250, 253  (ABLRTile properties/emit methods via LRTag_TLU1)
+#
+# Mechanism: NN layout (TransposeA=0, TransposeB=0) sets TLUA=True, TLUB=False.
+# Solution.py line 841 selects _ABTilePairA="AB_B16_TLU1" when TLUA=True for
+# BF16. This causes ABGRTile and ABLRTile to be instantiated with GRTag_TLU1
+# and LRTag_TLU1 tags, hitting the 'M'-contiguous branches.
+#
+# TransposeLDS=1 is valid: requires TLUA=0 OR TLUB=0 (Solution.py line 4931).
+# Here TLUB=False (TLUB = strideIdxB < unrollIdxB; for TransposeB=0/N, stride
+# along N is slow dim, so TLUB=False), so the constraint is satisfied.
+# UseSubtileImpl=1 requires StreamK=3 (SK DP-before-SK mode).
+#
+# ForkParameters: 3 MatrixInstruction shapes x 1 StreamK = 3 kernels (< 8 limit).
+# MI shapes cover varied wave-group configs for A (TLU1) and B (standard):
+#   [16,16,32,1,1, 2,2, 2,2]  — symmetric 2x2 WG
+#   [16,16,32,1,1, 4,4, 2,2]  — larger 2x2 WG, wider tile
+#   [16,16,32,1,1, 4,2, 2,2]  — asymmetric MIWT (4x2)
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  NewClient: 2
+  Device: 0
+  MaxLDS: 163840
+  DeviceLDS: 163840
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # BF16 NN — UseSubtileImpl=1 / TLU1 sweep
+  # NN layout (TransposeA=0, TransposeB=0) sets TLUA=True, TLUB=False.
+  # AB_B16_TLU1 geometry selected for A (TLUA=True + BF16).
+  # Exercises TLU1 arms in Kernel.py lines 151-253.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  2, 2,  2, 2]   # symmetric 2x2 WG — TLU1 path for A
+          - [16, 16, 32, 1,  1,  4, 4,  2, 2]   # 2x2 WG — wider tile
+          - [16, 16, 32, 1,  1,  4, 2,  2, 2]   # asymmetric MIWT 4x2
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [0]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - StaggerU: [0]
+        - StreamK: [3]
+        - UseSubtileImpl: [1]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - LocalReadVectorWidth: [8]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 128]

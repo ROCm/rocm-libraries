@@ -1,0 +1,90 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P5 designed sparse-pack config for gfx942 codegen characterization.
+#
+# Goal: exercise the MFMA pack scheduler for sparse kernels (KW 2155-2377),
+# which is gated by:
+#   schedulePackConsiderMetadata = kernel["ProblemType"]["Sparse"]
+#                                  and not kernel["DirectToVgprSparseMetadata"]
+#
+# When schedulePackConsiderMetadata=True, KernelWriter.scheduleMacro enters the
+# else branch at line 2153 which runs the full instPerPack / packItems
+# scheduling loop (lines 2155-2377) for packItemsA, packItemsB, packItemsM.
+#
+# Config design:
+#   - Sparse: 1  (2:4 structured-sparse A matrix)
+#   - DirectToVgprSparseMetadata: 0  (metadata via LDS, not VGPRs)
+#   - DataType H / DestDataType H / ComputeDataType s (HHS), bpe=2 < 4
+#   - NT orientation (TransposeA=0, TransposeB=1):
+#       TLUA=True (M fast in A), TLUB=True (N fast in transposed B)
+#   - TransposeLDS: [0] sets UnrollMajorLDSA=0 and UnrollMajorLDSB=0
+#     so BOTH A and B generate pack items (bpeDS < 4 and not UnrollMajorLDS)
+#   - MatrixInstruction [16,16,32,1,...] valid gfx942 SMFMA HH shape
+#   - ScheduleIterAlg: 3  (required for the schedulePackConsiderMetadata path)
+#
+# For Step 2 (lines 2263-2300) and Step 3 (2302-2377) coverage:
+#   - MIWaveTile [2,2] gives multiple MFMA per iteration; pack items for A
+#     AND B are interleaved across iterations, exercising the scheduling logic.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HHS (f16 in / f16 out / f32 compute) NT, Sparse=1 (2:4 sparse A)
+  # NT + TransposeLDS=0: BOTH A and B pack items generated
+  # DirectToVgprSparseMetadata=0: schedulePackConsiderMetadata=True
+  # -> else branch at KW 2153: schedules packItemsA + packItemsB
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # SMFMA [16,16,32,1] is the valid gfx942 sparse half-half shape.
+        # MIWaveTile [1,1] and [2,2] exercise different pack scheduling patterns.
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  1, 1,  1, 1]
+          - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - DirectToVgprSparseMetadata: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - ExpandPointerSwap: [0]
+        - StaggerU: [0]
+        - WorkGroupMapping: [8]
+        - 1LDSBuffer: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

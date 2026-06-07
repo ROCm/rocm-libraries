@@ -1,0 +1,73 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Complex GEMM (SingleComplex / DoubleComplex) conjugate characterization config
+# for gfx942 codegen.
+#
+# Target: KernelWriterAssembly.py lines 9285-9355 (complex MAC / ComplexConjugate
+#         negation arms: ccVgprs allocation, negation VAddF32 instructions, and
+#         the four MFMA instructions for complex multiply-add).
+#
+# Three problem types x 2 MatrixInstruction shapes = 6 emitted kernels (<=8 budget).
+#
+# Problem types chosen to exercise each conjugate branch:
+#   [0] SingleComplex (DataType=C) with ComplexConjugateA=False, ComplexConjugateB=True
+#       => ccB arm (lines 9327-9333) allocates ccVgprs[2], emits VAddF32 negating Ar
+#   [1] SingleComplex with ComplexConjugateA=True, ComplexConjugateB=False
+#       => ccA==ccB==False path skipped; ccA arm (lines 9320-9326) emits VAddF32 negating Ai
+#       Also hits ccA==ccB arm (lines 9313-9319) when ccA==ccB
+#   [2] SingleComplex with ComplexConjugateA=True, ComplexConjugateB=True (CC)
+#       => forceGenerate=True, ccA==ccB branch (9313-9319) + ccA (9320-9326) + ccB (9327-9333)
+#
+# MatrixInstruction [16,16,4,1] is the standard complex f32 MFMA shape on gfx942.
+# Use two shapes to get 2 kernels per problem type (3 x 2 = 6 total).
+#
+# Note: DoubleComplex (Z) requires HasMFMA_f64 which gfx942 does not have;
+# SingleComplex (C / f32c) uses f32 MFMA and works on gfx942.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # SingleComplex NC (ComplexConjugateA=False, ComplexConjugateB=True)
+  # Exercises ccB arm: ccVgprs[2] allocated, VAddF32 negates Ar (line 9331-9332)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: C
+      DestDataType: C
+      ComputeDataType: C
+      TransposeA: False
+      TransposeB: True
+      ComplexConjugateA: False
+      ComplexConjugateB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 4, 1, 1, 1, 1, 2, 1]
+        - ScheduleIterAlg: [3]
+        - MIArchVgpr: [0]
+        - GlobalSplitU: [1]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - DepthU: [8]
+        - WorkGroup:
+          - [16, 4, 1]
+        - SourceSwap: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 16]
