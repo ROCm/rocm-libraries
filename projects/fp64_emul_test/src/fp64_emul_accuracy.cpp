@@ -214,18 +214,37 @@ randmat_kernel(size_t n_elems, double* __restrict__ A, double phi, uint64_t seed
 }
 
 /* =========================================================================
- * dd_gemm_kernel — double-double reference GEMM
+ * dd_gemm_kernel — double-double reference GEMM, all 4 transpose modes.
+ *
+ * Computes C_dd = op(A) × op(B) where op is N or T.
+ * All matrices are square N×N column-major (leading dim = N).
+ *
+ * transA=false (N): op(A)[i,j] = A[i + j*m]   (A is m×k, lda=m)
+ * transA=true  (T): op(A)[i,j] = A[j + i*k]   (A is k×m, lda=k)
+ * transB=false (N): op(B)[i,j] = B[i + j*k]   (B is k×n, ldb=k)
+ * transB=true  (T): op(B)[i,j] = B[j + i*n]   (B is n×k, ldb=n)
+ *
+ * For square N×N all leading dims equal N, so the formulas simplify to:
+ *   A load: transA ? A[a_col + row*N] : A[row + a_col*N]
+ *   B load: transB ? B[col  + b_row*N] : B[b_row + col*N]
+ *
  * ========================================================================= */
+
 static constexpr int DD_TILE = 32;
 
 __global__ static void
 dd_gemm_kernel(size_t m, size_t n, size_t k,
                const double* __restrict__ A,
                const double* __restrict__ B,
-               double2* __restrict__      C_dd)
+               double2* __restrict__      C_dd,
+               bool transA, bool transB)
 {
     const size_t row = static_cast<size_t>(blockIdx.y) * DD_TILE + threadIdx.y;
     const size_t col = static_cast<size_t>(blockIdx.x) * DD_TILE + threadIdx.x;
+
+    /* Leading dims for the stored (pre-transpose) matrices (square: all = N). */
+    const size_t ldA = transA ? k : m;
+    const size_t ldB = transB ? n : k;
 
     __shared__ double Asub[DD_TILE][DD_TILE + 1];
     __shared__ double Bsub[DD_TILE][DD_TILE + 1];
@@ -235,13 +254,22 @@ dd_gemm_kernel(size_t m, size_t n, size_t k,
     const int num_tiles = static_cast<int>((k + DD_TILE - 1) / DD_TILE);
 
     for(int t = 0; t < num_tiles; ++t) {
+        /* a_col: index along the contracted k-dimension */
         const size_t a_col = static_cast<size_t>(t * DD_TILE) + threadIdx.x;
-        Asub[threadIdx.y][threadIdx.x] =
-            (row < m && a_col < k) ? A[row + a_col * m] : 0.0;
+        if(row < m && a_col < k)
+            Asub[threadIdx.y][threadIdx.x] = transA
+                ? A[a_col + row * ldA]   /* A^T[row, a_col] = A[a_col, row] */
+                : A[row   + a_col * ldA]; /* A[row, a_col] */
+        else
+            Asub[threadIdx.y][threadIdx.x] = 0.0;
 
         const size_t b_row = static_cast<size_t>(t * DD_TILE) + threadIdx.y;
-        Bsub[threadIdx.y][threadIdx.x] =
-            (b_row < k && col < n) ? B[b_row + col * k] : 0.0;
+        if(b_row < k && col < n)
+            Bsub[threadIdx.y][threadIdx.x] = transB
+                ? B[col   + b_row * ldB] /* B^T[b_row, col] = B[col, b_row] */
+                : B[b_row + col   * ldB]; /* B[b_row, col] */
+        else
+            Bsub[threadIdx.y][threadIdx.x] = 0.0;
 
         __syncthreads();
 
@@ -290,13 +318,14 @@ static void launch_randmat(size_t m, size_t n, double* d_A, double phi,
 
 static void launch_dd_gemm(size_t N,
                            const double* d_A, const double* d_B,
-                           double2* d_C_dd, hipStream_t stream)
+                           double2* d_C_dd, hipStream_t stream,
+                           bool transA, bool transB)
 {
     const dim3 block(DD_TILE, DD_TILE);
     const dim3 grid(static_cast<unsigned>((N + DD_TILE - 1) / DD_TILE),
                     static_cast<unsigned>((N + DD_TILE - 1) / DD_TILE));
     hipLaunchKernelGGL(dd_gemm_kernel, grid, block, 0, stream,
-                       N, N, N, d_A, d_B, d_C_dd);
+                       N, N, N, d_A, d_B, d_C_dd, transA, transB);
 }
 
 static std::pair<double, double>
@@ -407,6 +436,17 @@ struct DgemmRunner {
                 "passing nullptr algo\n");
     }
 
+    /* Update transpose attributes on the matmul descriptor and re-query
+     * the heuristic (workspace size may change for the emulation path). */
+    void update_trans(hipblasOperation_t tA, hipblasOperation_t tB)
+    {
+        HLT_CHECK(hipblasLtMatmulDescSetAttribute(
+            desc, HIPBLASLT_MATMUL_DESC_TRANSA, &tA, sizeof(tA)));
+        HLT_CHECK(hipblasLtMatmulDescSetAttribute(
+            desc, HIPBLASLT_MATMUL_DESC_TRANSB, &tB, sizeof(tB)));
+        requery();
+    }
+
     void run(const double* A, const double* B, double* D,
              void* workspace, size_t workspace_bytes,
              hipStream_t stream) const
@@ -511,6 +551,8 @@ struct Config {
     unsigned            min_s        = 2;
     unsigned            max_s        = 20;
     std::vector<double> phi_list     = {0.5, 1.0, 2.0, 4.0};
+    /* Each entry is {transa, transb} where each char is 'N' or 'T'. */
+    std::vector<std::pair<char,char>> trans_list = {{'N','N'},{'N','T'},{'T','N'},{'T','T'}};
     bool                run_adaptive = true;
     bool                check_errors = true;
 };
@@ -525,17 +567,41 @@ static void print_usage(const char* prog)
         "  --max-s S      Maximum num_moduli for emulation (default: 20)\n"
         "  --phi-list P   Comma-separated phi values\n"
         "                 (default: 0.5,1,2,4  — same as GEMMul8)\n"
+        "  --trans T      Comma-separated transpose combinations to run\n"
+        "                 Each is two chars from {N,T}: NN,NT,TN,TT\n"
+        "                 (default: NN,NT,TN,TT — all four)\n"
         "  --no-adaptive  Skip the adaptive-s (library-default) run\n"
         "  --no-check     Skip the double-double reference GEMM and error\n"
         "                 computation.  err_max and err_med are printed as 'nan'.\n"
         "                 Useful for fast timing-only sweeps at large N.\n"
         "  -h, --help     Print this help and exit\n"
         "\n"
-        "Output: CSV with columns  phi,N,algo,crt_bits,err_max,err_med,ms_per_run\n"
+        "Output: CSV columns: phi,N,transa,transb,algo,crt_bits,err_max,err_med,ms_per_run\n"
         "  algo = 'DGEMM'              native FP64 (emulation disabled)\n"
         "  algo = 'OS2-accu-adaptive'  adaptive s (library default, s<=16)\n"
         "  algo = 'OS2-accu-sN'        fixed N moduli\n",
         prog);
+}
+
+static std::vector<std::pair<char,char>> parse_trans_list(const std::string& s)
+{
+    std::vector<std::pair<char,char>> v;
+    size_t pos = 0;
+    while(pos <= s.size()) {
+        const size_t next = s.find(',', pos);
+        const std::string t = (next == std::string::npos)
+                              ? s.substr(pos)
+                              : s.substr(pos, next - pos);
+        if(t.size() >= 2) {
+            const char ta = static_cast<char>(std::toupper(static_cast<unsigned char>(t[0])));
+            const char tb = static_cast<char>(std::toupper(static_cast<unsigned char>(t[1])));
+            if((ta == 'N' || ta == 'T') && (tb == 'N' || tb == 'T'))
+                v.push_back({ta, tb});
+        }
+        if(next == std::string::npos) break;
+        pos = next + 1;
+    }
+    return v;
 }
 
 static std::vector<double> parse_phi_list(const std::string& s)
@@ -572,6 +638,8 @@ static Config parse_args(int argc, char** argv)
             cfg.max_s = static_cast<unsigned>(std::stoul(argv[++i]));
         } else if((a == "--phi-list") && i + 1 < argc) {
             cfg.phi_list = parse_phi_list(argv[++i]);
+        } else if((a == "--trans") && i + 1 < argc) {
+            cfg.trans_list = parse_trans_list(argv[++i]);
         } else if(a == "--no-adaptive") {
             cfg.run_adaptive = false;
         } else if(a == "--no-check") {
@@ -674,10 +742,26 @@ int main(int argc, char** argv)
     ensure_ws(emulated.workspaceSize());   /* emulation workspace for default num_moduli */
 
     /* ── CSV header ───────────────────────────────────────────────────── */
-    std::printf("phi,N,algo,crt_bits,err_max,err_med,ms_per_run,workspace_MiB\n");
+    std::printf("phi,N,transa,transb,algo,crt_bits,err_max,err_med,ms_per_run,workspace_MiB\n");
     std::fflush(stdout);
 
-    /* ── Main sweep ───────────────────────────────────────────────────── */
+    /* ── Main sweep: outer = transpose combination, inner = phi ──────── */
+    for(const auto& tc : cfg.trans_list) {
+        const char cTA = tc.first;
+        const char cTB = tc.second;
+        const hipblasOperation_t tA = (cTA == 'T') ? HIPBLAS_OP_T : HIPBLAS_OP_N;
+        const hipblasOperation_t tB = (cTB == 'T') ? HIPBLAS_OP_T : HIPBLAS_OP_N;
+        const bool bTA = (cTA == 'T');
+        const bool bTB = (cTB == 'T');
+
+        /* Update both runners to use the new transpose combination. */
+        native.update_trans(tA, tB);
+        emulated.update_trans(tA, tB);
+        ensure_ws(native.workspaceSize());
+        ensure_ws(emulated.workspaceSize());
+
+        std::fprintf(stderr, "=== transA=%c transB=%c ===\n", cTA, cTB);
+
     for(double phi : cfg.phi_list) {
 
         /* Fill A, B on GPU */
@@ -687,13 +771,13 @@ int main(int argc, char** argv)
 
         /* Double-double reference (skipped when --no-check) */
         if(cfg.check_errors) {
-            launch_dd_gemm(N, d_A, d_B, d_C_dd, stream);
+            launch_dd_gemm(N, d_A, d_B, d_C_dd, stream, bTA, bTB);
             HIP_CHECK(hipStreamSynchronize(stream));
         }
 
         /* ── Native DGEMM ─────────────────────────────────────────────── */
         {
-            ensure_ws(native.workspaceSize());  /* typically 0 for native FP64 */
+            ensure_ws(native.workspaceSize());
             auto fn = [&]{ native.run(d_A, d_B, d_D, d_ws, ws_bytes, stream); };
             double ms = run_and_time(fn, num_runs, num_runs, stream);
 
@@ -702,18 +786,15 @@ int main(int argc, char** argv)
                 std::tie(err_max, err_med) = compute_errors(
                     N, d_D, d_C_dd, d_err, h_err, stream);
 
-            /* Native DGEMM uses no emulation workspace. */
-            std::printf("%.4g,%zu,DGEMM,%.1f,%.4e,%.4e,%.3f,0.000\n",
-                        phi, N, 53.0, err_max, err_med, ms);
+            std::printf("%.4g,%zu,%c,%c,DGEMM,%.1f,%.4e,%.4e,%.3f,0.000\n",
+                        phi, N, cTA, cTB, 53.0, err_max, err_med, ms);
             std::fflush(stdout);
         }
 
         /* ── Adaptive-s emulation run ─────────────────────────────────── */
         if(cfg.run_adaptive) {
-            /* DYNAMIC: library selects num_moduli automatically (≤ 16 by default). */
             HLT_CHECK(hipblasLtSetFixedPointEmulationMantissaControl(
                 emulated.handle, HIPBLAS_EMULATION_MANTISSA_CONTROL_DYNAMIC));
-            /* Re-query so heur.workspaceSize reflects the adaptive configuration.    */
             emulated.requery();
             const size_t emu_ws = emulated.workspaceSize();
             ensure_ws(emu_ws);
@@ -726,21 +807,18 @@ int main(int argc, char** argv)
                 std::tie(err_max, err_med) = compute_errors(
                     N, d_D, d_C_dd, d_err, h_err, stream);
 
-            /* Report crt_bits as the library default upper-bound (16 moduli → 125.4 bits) */
-            std::printf("%.4g,%zu,OS2-accu-adaptive,%.1f,%.4e,%.4e,%.3f,%.3f\n",
-                        phi, N, CRT_BITS[16], err_max, err_med, ms,
-                        emu_ws / (1024.0 * 1024.0));
+            std::printf("%.4g,%zu,%c,%c,OS2-accu-adaptive,%.1f,%.4e,%.4e,%.3f,%.3f\n",
+                        phi, N, cTA, cTB, CRT_BITS[16],
+                        err_max, err_med, ms, emu_ws / (1024.0 * 1024.0));
             std::fflush(stdout);
         }
 
         /* ── Emulation sweep over num_moduli = min_s .. max_s ─────────── */
         for(unsigned s = cfg.min_s; s <= cfg.max_s; ++s) {
-            /* FIXED: use the computed bit count that selects exactly s moduli */
             HLT_CHECK(hipblasLtSetFixedPointEmulationMantissaControl(
                 emulated.handle, HIPBLAS_EMULATION_MANTISSA_CONTROL_FIXED));
             HLT_CHECK(hipblasLtSetFixedPointEmulationMaxMantissaBitCount(
                 emulated.handle, bits_for_moduli(s)));
-            /* Re-query: workspace size changes with s. */
             emulated.requery();
             const size_t emu_ws = emulated.workspaceSize();
             ensure_ws(emu_ws);
@@ -756,13 +834,13 @@ int main(int argc, char** argv)
             char algo_name[32];
             std::snprintf(algo_name, sizeof(algo_name), "OS2-accu-s%u", s);
 
-            std::printf("%.4g,%zu,%s,%.1f,%.4e,%.4e,%.3f,%.3f\n",
-                        phi, N, algo_name, CRT_BITS[s],
-                        err_max, err_med, ms,
-                        emu_ws / (1024.0 * 1024.0));
+            std::printf("%.4g,%zu,%c,%c,%s,%.1f,%.4e,%.4e,%.3f,%.3f\n",
+                        phi, N, cTA, cTB, algo_name, CRT_BITS[s],
+                        err_max, err_med, ms, emu_ws / (1024.0 * 1024.0));
             std::fflush(stdout);
         }
-    }
+    } /* phi loop */
+    } /* trans loop */
 
     /* ── Cleanup ──────────────────────────────────────────────────────── */
     emulated.destroy();

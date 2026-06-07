@@ -69,6 +69,9 @@ def parse_algo(algo):
         return "OS2-accu", int(m.group(1))
     return algo, None
 
+# ── Linestyles for the four transpose combinations ────────────────────────────
+TRANS_LINESTYLE = {"NN": "-", "NT": "--", "TN": "-.", "TT": ":"}
+
 # ── Load data ─────────────────────────────────────────────────────────────────
 def load(csv_path):
     df = pd.read_csv(csv_path)
@@ -85,14 +88,34 @@ def load(csv_path):
     df["err_med"] = df["err_med"].astype(float)
     df["ms_per_run"] = df["ms_per_run"].astype(float)
 
+    # Transpose columns — backward-compatible: default to 'N' if absent.
+    if "transa" in df.columns:
+        df["transa"] = df["transa"].astype(str).str.strip().str.upper()
+    else:
+        df["transa"] = "N"
+    if "transb" in df.columns:
+        df["transb"] = df["transb"].astype(str).str.strip().str.upper()
+    else:
+        df["transb"] = "N"
+    # Combined tag used for legend labels and linestyle selection.
+    df["trans"] = df["transa"] + df["transb"]
+
     return df
 
 # ── Figure 1: max relative error vs N, one subplot per phi ───────────────────
 def plot_accuracy_vs_N(df, out_path):
-    phi_vals = sorted(df["phi"].unique())
-    n_phi    = len(phi_vals)
-    ncols    = min(2, n_phi)
-    nrows    = (n_phi + ncols - 1) // ncols
+    phi_vals   = sorted(df["phi"].unique())
+    # Restrict to NT and TN: with A==B these give C = A×A^T and A^T×A (PSD),
+    # avoiding catastrophic cancellation in off-diagonal elements that inflates
+    # per-element relative errors.
+    trans_vals = [t for t in sorted(df["trans"].unique()) if t in ("NT", "TN")]
+    if not trans_vals:
+        return   # no NT/TN data — skip accuracy plot
+    n_phi      = len(phi_vals)
+    n_trans    = len(trans_vals)
+    # Layout: rows = phi, cols = trans (or 1 if only one trans)
+    ncols = n_trans
+    nrows = n_phi
 
     fig, axes = plt.subplots(nrows, ncols,
                              figsize=(6.5 * ncols, 4.5 * nrows),
@@ -103,52 +126,50 @@ def plot_accuracy_vs_N(df, out_path):
 
     N_vals = sorted(df["N"].unique())
 
-    for ax_idx, phi in enumerate(phi_vals):
-        ax = axes[ax_idx // ncols][ax_idx % ncols]
-        sub = df[df["phi"] == phi]
+    for row_idx, phi in enumerate(phi_vals):
+        for col_idx, trans in enumerate(trans_vals):
+            ax  = axes[row_idx][col_idx]
+            sub = df[(df["phi"] == phi) & (df["trans"] == trans)]
 
-        # Native DGEMM — single dashed line
-        dgemm = sub[sub["method"] == "DGEMM"].sort_values("N")
-        if not dgemm.empty:
-            ax.semilogy(dgemm["N"], dgemm["err_max"],
-                        color="black", linestyle="--", linewidth=1.8,
-                        marker="x", markersize=6, label="DGEMM (native)")
+            # Native DGEMM
+            dgemm = sub[sub["method"] == "DGEMM"].sort_values("N")
+            if not dgemm.empty:
+                ax.semilogy(dgemm["N"], dgemm["err_max"],
+                            color="black", linestyle="--", linewidth=1.8,
+                            marker="x", markersize=6, label="DGEMM (native)")
 
-        # Adaptive OS2-accu — default settings, s selected per call
-        adaptive = sub[sub["method"] == "OS2-accu-adaptive"].sort_values("N")
-        if not adaptive.empty:
-            ax.semilogy(adaptive["N"], adaptive["err_max"],
-                        color="crimson", linestyle="-.", linewidth=2.0,
-                        marker="*", markersize=9,
-                        label="OS2-accu-adaptive (s≤16, default)")
+            # Adaptive OS2-accu
+            adaptive = sub[sub["method"] == "OS2-accu-adaptive"].sort_values("N")
+            if not adaptive.empty:
+                ax.semilogy(adaptive["N"], adaptive["err_max"],
+                            color="crimson", linestyle="-.", linewidth=2.0,
+                            marker="*", markersize=9,
+                            label="OS2-accu-adaptive (s≤16)")
 
-        # Emulation lines for highlighted s values
-        for s in HIGHLIGHT_S:
-            emul = sub[(sub["method"] == "OS2-accu") & (sub["s"] == s)].sort_values("N")
-            if emul.empty:
-                continue
-            ax.semilogy(emul["N"], emul["err_max"],
-                        color=s_color(s), linewidth=1.4,
-                        marker="o", markersize=5,
-                        label=f"OS2-accu s={s} ({emul['crt_bits'].iloc[0]:.0f} bits)")
+            # Emulation lines for highlighted s values
+            for s in HIGHLIGHT_S:
+                emul = sub[(sub["method"] == "OS2-accu") & (sub["s"] == s)].sort_values("N")
+                if emul.empty:
+                    continue
+                ax.semilogy(emul["N"], emul["err_max"],
+                            color=s_color(s), linewidth=1.4,
+                            marker="o", markersize=5,
+                            label=f"s={s} ({emul['crt_bits'].iloc[0]:.0f} bits)")
 
-        # Machine epsilon reference
-        ax.axhline(EPS_FP64, color="gray", linestyle=":", linewidth=0.9,
-                   label=r"$\varepsilon_{64}$ = 2.2×10⁻¹⁶")
+            # Machine epsilon reference
+            ax.axhline(EPS_FP64, color="gray", linestyle=":", linewidth=0.9,
+                       label=r"$\varepsilon_{64}$")
 
-        ax.set_xscale("log", base=2)
-        ax.set_yscale("log")
-        ax.set_xlabel("N  (M = N = K = N)")
-        ax.set_ylabel("max relative error")
-        ax.set_title(f"phi = {phi}")
-        ax.set_xticks(N_vals)
-        ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-        ax.legend(loc="upper left", framealpha=0.85)
-        ax.grid(True, which="both", linestyle=":", alpha=0.4)
-
-    # Hide unused subplots
-    for ax_idx in range(n_phi, nrows * ncols):
-        axes[ax_idx // ncols][ax_idx % ncols].set_visible(False)
+            ax.set_xscale("log", base=2)
+            ax.set_yscale("log")
+            ax.set_xlabel("N  (M = N = K = N)")
+            ax.set_ylabel("max relative error")
+            title_trans = f"transA={trans[0]} transB={trans[1]}" if len(trans) >= 2 else trans
+            ax.set_title(f"phi={phi}  {title_trans}")
+            ax.set_xticks(N_vals)
+            ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+            ax.legend(loc="upper left", framealpha=0.85, fontsize=7)
+            ax.grid(True, which="both", linestyle=":", alpha=0.4)
 
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
@@ -158,54 +179,65 @@ def plot_accuracy_vs_N(df, out_path):
 
 # ── Figure 2: runtime vs N ────────────────────────────────────────────────────
 def plot_runtime_vs_N(df, out_path):
-    """One line per algo, aggregated over phi (mean across phi values)."""
-    N_vals = sorted(df["N"].unique())
+    """One subplot per transpose combination, aggregated over phi (mean)."""
+    N_vals     = sorted(df["N"].unique())
+    trans_vals = sorted(df["trans"].unique())
+    n_trans    = len(trans_vals)
 
-    # Average runtime over phi (runtime shouldn't depend on phi, but average
-    # anyway to smooth out any noise)
-    agg = df.groupby(["method", "s", "N", "crt_bits"], dropna=False)["ms_per_run"].mean().reset_index()
+    # Layout: up to 2 columns, enough rows to fit all trans combos.
+    ncols = min(2, n_trans)
+    nrows = (n_trans + ncols - 1) // ncols
 
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.set_title("Runtime vs N  (mean over phi values)")
+    # Average runtime over phi; keep trans in the grouping.
+    agg = (df.groupby(["method", "s", "N", "crt_bits", "trans"], dropna=False)
+             ["ms_per_run"].mean().reset_index())
 
-    # Native DGEMM
-    dgemm = agg[agg["method"] == "DGEMM"].sort_values("N")
-    if not dgemm.empty:
-        ax.loglog(dgemm["N"], dgemm["ms_per_run"],
-                  color="black", linestyle="--", linewidth=2,
-                  marker="x", markersize=7, label="DGEMM (native)")
+    fig, axes = plt.subplots(nrows, ncols,
+                             figsize=(7 * ncols, 5 * nrows),
+                             squeeze=False)
+    fig.suptitle("Runtime vs N  (mean over phi values)", fontsize=12)
 
-    # Adaptive OS2-accu — default settings
-    adaptive = agg[agg["method"] == "OS2-accu-adaptive"].sort_values("N")
-    if not adaptive.empty:
-        ax.loglog(adaptive["N"], adaptive["ms_per_run"],
-                  color="crimson", linestyle="-.", linewidth=2.2,
-                  marker="*", markersize=8,
-                  label="OS2-accu-adaptive (s≤16, default)")
+    for ax_idx, trans in enumerate(trans_vals):
+        ax  = axes[ax_idx // ncols][ax_idx % ncols]
+        sub = agg[agg["trans"] == trans]
+        title_trans = f"transA={trans[0]} transB={trans[1]}" if len(trans) >= 2 else trans
+        ax.set_title(title_trans)
 
-    # All OS2-accu-s* lines, coloured by s
-    s_vals = sorted(agg[agg["method"] == "OS2-accu"]["s"].dropna().unique())
-    for s in s_vals:
-        emul = agg[(agg["method"] == "OS2-accu") & (agg["s"] == s)].sort_values("N")
-        if emul.empty:
-            continue
-        bits = emul["crt_bits"].iloc[0]
-        ax.loglog(emul["N"], emul["ms_per_run"],
-                  color=s_color(s), linewidth=1.2, alpha=0.85,
-                  marker="o", markersize=4,
-                  label=f"s={s}  ({bits:.0f} bits)")
+        dgemm = sub[sub["method"] == "DGEMM"].sort_values("N")
+        if not dgemm.empty:
+            ax.loglog(dgemm["N"], dgemm["ms_per_run"],
+                      color="black", linestyle="--", linewidth=2,
+                      marker="x", markersize=7, label="DGEMM (native)")
 
-    ax.set_xscale("log", base=2)
-    ax.set_xlabel("N  (M = N = K = N)")
-    ax.set_ylabel("time per GEMM call  (ms)")
-    ax.set_xticks(N_vals)
-    ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+        adaptive = sub[sub["method"] == "OS2-accu-adaptive"].sort_values("N")
+        if not adaptive.empty:
+            ax.loglog(adaptive["N"], adaptive["ms_per_run"],
+                      color="crimson", linestyle="-.", linewidth=2.2,
+                      marker="*", markersize=8, label="OS2-accu-adaptive")
 
-    # Colourbar-style legend: split into two columns
-    handles, labels = ax.get_legend_handles_labels()
-    ax.legend(handles, labels, loc="upper left",
-              ncol=2, fontsize=7.5, framealpha=0.85)
-    ax.grid(True, which="both", linestyle=":", alpha=0.4)
+        s_vals = sorted(sub[sub["method"] == "OS2-accu"]["s"].dropna().unique())
+        for s in s_vals:
+            emul = sub[(sub["method"] == "OS2-accu") & (sub["s"] == s)].sort_values("N")
+            if emul.empty:
+                continue
+            bits = emul["crt_bits"].iloc[0]
+            ax.loglog(emul["N"], emul["ms_per_run"],
+                      color=s_color(s), linewidth=1.2, alpha=0.85,
+                      marker="o", markersize=4,
+                      label=f"s={s} ({bits:.0f} bits)")
+
+        ax.set_xscale("log", base=2)
+        ax.set_xlabel("N  (M = N = K = N)")
+        ax.set_ylabel("time per GEMM call  (ms)")
+        ax.set_xticks(N_vals)
+        ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles, labels, loc="upper left", ncol=2, fontsize=7, framealpha=0.85)
+        ax.grid(True, which="both", linestyle=":", alpha=0.4)
+
+    # Hide unused subplots
+    for ax_idx in range(n_trans, nrows * ncols):
+        axes[ax_idx // ncols][ax_idx % ncols].set_visible(False)
 
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
@@ -215,83 +247,80 @@ def plot_runtime_vs_N(df, out_path):
 
 # ── Figure 3: max relative error vs num_moduli (accuracy/cost tradeoff) ───────
 def plot_accuracy_vs_s(df, out_path):
-    """One subplot per phi; one line per N; x-axis = num_moduli."""
-    phi_vals = sorted(df["phi"].unique())
-    n_phi    = len(phi_vals)
-    ncols    = min(2, n_phi)
-    nrows    = (n_phi + ncols - 1) // ncols
+    """Rows = phi × trans combinations; one line per N; x-axis = num_moduli."""
+    phi_vals   = sorted(df["phi"].unique())
+    # Restrict to NT/TN (PSD output when A==B — no catastrophic cancellation).
+    trans_vals = [t for t in sorted(df["trans"].unique()) if t in ("NT", "TN")]
+    if not trans_vals:
+        return
+    n_phi      = len(phi_vals)
+    n_trans    = len(trans_vals)
+    ncols      = n_trans
+    nrows      = n_phi
 
-    N_vals = sorted(df["N"].unique())
-    N_cmap = cm.get_cmap("viridis", len(N_vals) + 1)
+    N_vals  = sorted(df["N"].unique())
+    N_cmap  = cm.get_cmap("viridis", len(N_vals) + 1)
     N_color = {N: N_cmap(i / len(N_vals)) for i, N in enumerate(N_vals)}
 
     fig, axes = plt.subplots(nrows, ncols,
                              figsize=(6.5 * ncols, 4.5 * nrows),
                              squeeze=False)
-    fig.suptitle("Max relative error vs num_moduli (s)\n"
-                 "(accuracy / cost tradeoff)",
+    fig.suptitle("Max relative error vs num_moduli (s)  (accuracy / cost tradeoff)",
                  fontsize=12)
 
-    # Shared legend elements
     legend_n = [Line2D([0], [0], color=N_color[N], linewidth=1.5,
                        marker="o", markersize=5, label=f"N={N}")
                 for N in N_vals]
 
-    for ax_idx, phi in enumerate(phi_vals):
-        ax = axes[ax_idx // ncols][ax_idx % ncols]
-        sub = df[(df["phi"] == phi) & (df["method"] == "OS2-accu")]
+    for row_idx, phi in enumerate(phi_vals):
+        for col_idx, trans in enumerate(trans_vals):
+            ax  = axes[row_idx][col_idx]
+            sub = df[(df["phi"] == phi) & (df["trans"] == trans)
+                     & (df["method"] == "OS2-accu")]
 
-        for N in N_vals:
-            row = sub[sub["N"] == N].sort_values("s")
-            if row.empty:
-                continue
-            ax.semilogy(row["s"], row["err_max"],
-                        color=N_color[N], linewidth=1.4,
-                        marker="o", markersize=5)
+            for N in N_vals:
+                row = sub[sub["N"] == N].sort_values("s")
+                if row.empty:
+                    continue
+                ax.semilogy(row["s"], row["err_max"],
+                            color=N_color[N], linewidth=1.4,
+                            marker="o", markersize=5)
 
-        ax.axhline(EPS_FP64, color="gray", linestyle=":", linewidth=0.9,
-                   label=r"$\varepsilon_{64}$")
+            ax.axhline(EPS_FP64, color="gray", linestyle=":", linewidth=0.9)
 
-        # Also mark the DGEMM error level for reference (use a representative N)
-        dgemm_sub = df[(df["phi"] == phi) & (df["method"] == "DGEMM")]
-        if not dgemm_sub.empty:
-            # Use largest N as reference
-            ref_N = dgemm_sub["N"].max()
-            dgemm_err = dgemm_sub[dgemm_sub["N"] == ref_N]["err_max"].values
-            if len(dgemm_err) > 0:
-                ax.axhline(dgemm_err[0], color="black", linestyle="--",
-                           linewidth=0.9, alpha=0.7,
-                           label=f"DGEMM (N={ref_N})")
+            dgemm_sub = df[(df["phi"] == phi) & (df["trans"] == trans)
+                           & (df["method"] == "DGEMM")]
+            if not dgemm_sub.empty:
+                ref_N = dgemm_sub["N"].max()
+                dgemm_err = dgemm_sub[dgemm_sub["N"] == ref_N]["err_max"].values
+                if len(dgemm_err) > 0:
+                    ax.axhline(dgemm_err[0], color="black", linestyle="--",
+                               linewidth=0.9, alpha=0.7)
 
-        # Horizontal reference lines: max accuracy achieved by the adaptive run,
-        # one per N, in the same colour as the corresponding fixed-s curve.
-        # The intersection of each coloured curve with its dashed peer marks
-        # the minimum fixed s that matches the adaptive accuracy for that N.
-        adaptive_sub = df[(df["phi"] == phi) & (df["method"] == "OS2-accu-adaptive")]
-        for N in N_vals:
-            arow = adaptive_sub[adaptive_sub["N"] == N]
-            if arow.empty:
-                continue
-            ax.axhline(arow["err_max"].values[0],
-                       color=N_color[N], linestyle="--", linewidth=1.2, alpha=0.75)
+            adaptive_sub = df[(df["phi"] == phi) & (df["trans"] == trans)
+                              & (df["method"] == "OS2-accu-adaptive")]
+            for N in N_vals:
+                arow = adaptive_sub[adaptive_sub["N"] == N]
+                if arow.empty:
+                    continue
+                ax.axhline(arow["err_max"].values[0],
+                           color=N_color[N], linestyle="--",
+                           linewidth=1.2, alpha=0.75)
 
-        ax.set_xlabel("num_moduli  (s)")
-        ax.set_ylabel("max relative error")
-        ax.set_title(f"phi = {phi}")
-        ax.set_xticks(range(2, 21))
-        ax.legend(handles=legend_n + [
-            Line2D([0], [0], color="gray", linestyle=":", linewidth=0.9,
-                   label=r"$\varepsilon_{64}$"),
-            Line2D([0], [0], color="black", linestyle="--", linewidth=0.9,
-                   label="DGEMM level"),
-            Line2D([0], [0], color="gray", linestyle="--", linewidth=1.2,
-                   label="OS2-accu-adaptive (dashed)"),
-        ], loc="upper right", framealpha=0.85)
-        ax.grid(True, which="both", linestyle=":", alpha=0.4)
-
-    # Hide unused subplots
-    for ax_idx in range(n_phi, nrows * ncols):
-        axes[ax_idx // ncols][ax_idx % ncols].set_visible(False)
+            ax.set_xlabel("num_moduli  (s)")
+            ax.set_ylabel("max relative error")
+            title_trans = f"transA={trans[0]} transB={trans[1]}" if len(trans) >= 2 else trans
+            ax.set_title(f"phi={phi}  {title_trans}")
+            ax.set_xticks(range(2, 21))
+            ax.legend(handles=legend_n + [
+                Line2D([0], [0], color="gray", linestyle=":", linewidth=0.9,
+                       label=r"$\varepsilon_{64}$"),
+                Line2D([0], [0], color="black", linestyle="--", linewidth=0.9,
+                       label="DGEMM level"),
+                Line2D([0], [0], color="gray", linestyle="--", linewidth=1.2,
+                       label="adaptive (dashed)"),
+            ], loc="upper right", framealpha=0.85, fontsize=7)
+            ax.grid(True, which="both", linestyle=":", alpha=0.4)
 
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
@@ -301,57 +330,65 @@ def plot_accuracy_vs_s(df, out_path):
 
 # ── Figure: TFlop/s vs N ─────────────────────────────────────────────────────
 def plot_tflops_vs_N(df, out_path):
-    """Effective throughput in TFlop/s vs N for DGEMM and selected s values.
-    TFlop/s = 2*N^3 / (ms_per_run * 1e-3) / 1e12 = 2*N^3 / (ms_per_run * 1e9).
-    Aggregated as mean over phi values.  Linear y-axis, log2 x-axis."""
-    N_vals = sorted(df["N"].unique())
+    """One subplot per transpose combination, TFlop/s vs N."""
+    N_vals     = sorted(df["N"].unique())
+    trans_vals = sorted(df["trans"].unique())
+    n_trans    = len(trans_vals)
 
-    # Compute TFlop/s per row
+    ncols = min(2, n_trans)
+    nrows = (n_trans + ncols - 1) // ncols
+
     df = df.copy()
     df["tflops"] = 2.0 * df["N"].astype(float)**3 / (df["ms_per_run"] * 1e9)
 
-    # Average over phi
-    agg = df.groupby(["method", "s", "N", "crt_bits"], dropna=False)["tflops"].mean().reset_index()
+    agg = (df.groupby(["method", "s", "N", "crt_bits", "trans"], dropna=False)
+             ["tflops"].mean().reset_index())
 
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.set_title("Effective throughput vs N  (mean over phi values)")
+    fig, axes = plt.subplots(nrows, ncols,
+                             figsize=(7 * ncols, 5 * nrows),
+                             squeeze=False)
+    fig.suptitle("Effective throughput vs N  (mean over phi values)", fontsize=12)
 
-    # Native DGEMM
-    dgemm = agg[agg["method"] == "DGEMM"].sort_values("N")
-    if not dgemm.empty:
-        ax.plot(dgemm["N"], dgemm["tflops"],
-                color="black", linestyle="--", linewidth=2,
-                marker="x", markersize=7, label="DGEMM (native)")
+    for ax_idx, trans in enumerate(trans_vals):
+        ax  = axes[ax_idx // ncols][ax_idx % ncols]
+        sub = agg[agg["trans"] == trans]
+        title_trans = f"transA={trans[0]} transB={trans[1]}" if len(trans) >= 2 else trans
+        ax.set_title(title_trans)
 
-    # Adaptive OS2-accu — default settings
-    adaptive = agg[agg["method"] == "OS2-accu-adaptive"].sort_values("N")
-    if not adaptive.empty:
-        ax.plot(adaptive["N"], adaptive["tflops"],
-                color="crimson", linestyle="-.", linewidth=2.2,
-                marker="*", markersize=8,
-                label="OS2-accu-adaptive (s≤16, default)")
+        dgemm = sub[sub["method"] == "DGEMM"].sort_values("N")
+        if not dgemm.empty:
+            ax.plot(dgemm["N"], dgemm["tflops"],
+                    color="black", linestyle="--", linewidth=2,
+                    marker="x", markersize=7, label="DGEMM (native)")
 
-    # Selected OS2-accu-s* lines
-    for s in HIGHLIGHT_S:
-        emul = agg[(agg["method"] == "OS2-accu") & (agg["s"] == s)].sort_values("N")
-        if emul.empty:
-            continue
-        bits = emul["crt_bits"].iloc[0]
-        ax.plot(emul["N"], emul["tflops"],
-                color=s_color(s), linewidth=1.4,
-                marker="o", markersize=5,
-                label=f"s={s}  ({bits:.0f} bits)")
+        adaptive = sub[sub["method"] == "OS2-accu-adaptive"].sort_values("N")
+        if not adaptive.empty:
+            ax.plot(adaptive["N"], adaptive["tflops"],
+                    color="crimson", linestyle="-.", linewidth=2.2,
+                    marker="*", markersize=8, label="OS2-accu-adaptive")
 
-    ax.set_xscale("log", base=2)
-    ax.set_xlabel("N  (M = N = K = N)")
-    ax.set_ylabel("TFlop/s")
-    ax.set_xticks(N_vals)
-    ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+        for s in HIGHLIGHT_S:
+            emul = sub[(sub["method"] == "OS2-accu") & (sub["s"] == s)].sort_values("N")
+            if emul.empty:
+                continue
+            bits = emul["crt_bits"].iloc[0]
+            ax.plot(emul["N"], emul["tflops"],
+                    color=s_color(s), linewidth=1.4,
+                    marker="o", markersize=5,
+                    label=f"s={s} ({bits:.0f} bits)")
 
-    handles, labels = ax.get_legend_handles_labels()
-    ax.legend(handles, labels, loc="upper left",
-              ncol=2, fontsize=7.5, framealpha=0.85)
-    ax.grid(True, which="both", linestyle=":", alpha=0.4)
+        ax.set_xscale("log", base=2)
+        ax.set_xlabel("N  (M = N = K = N)")
+        ax.set_ylabel("TFlop/s")
+        ax.set_xticks(N_vals)
+        ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles, labels, loc="upper left", ncol=2, fontsize=7, framealpha=0.85)
+        ax.grid(True, which="both", linestyle=":", alpha=0.4)
+
+    # Hide unused subplots
+    for ax_idx in range(n_trans, nrows * ncols):
+        axes[ax_idx // ncols][ax_idx % ncols].set_visible(False)
 
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
@@ -361,14 +398,21 @@ def plot_tflops_vs_N(df, out_path):
 
 # ── Bonus: median error vs s ──────────────────────────────────────────────────
 def plot_median_accuracy_vs_s(df, out_path):
-    """Same as Figure 3 but using err_med instead of err_max."""
-    phi_vals = sorted(df["phi"].unique())
-    n_phi    = len(phi_vals)
-    ncols    = min(2, n_phi)
-    nrows    = (n_phi + ncols - 1) // ncols
+    """Same as Figure 3 but using err_med; rows = phi, cols = trans.
+    Median error is shown for all 4 transpose types — unlike max error, the
+    median is insensitive to the few near-zero elements that inflate err_max
+    for NN and TT when A==B."""
+    phi_vals   = sorted(df["phi"].unique())
+    trans_vals = sorted(df["trans"].unique())   # all 4 transposes
+    if not trans_vals:
+        return
+    n_phi      = len(phi_vals)
+    n_trans    = len(trans_vals)
+    ncols      = n_trans
+    nrows      = n_phi
 
-    N_vals = sorted(df["N"].unique())
-    N_cmap = cm.get_cmap("viridis", len(N_vals) + 1)
+    N_vals  = sorted(df["N"].unique())
+    N_cmap  = cm.get_cmap("viridis", len(N_vals) + 1)
     N_color = {N: N_cmap(i / len(N_vals)) for i, N in enumerate(N_vals)}
 
     fig, axes = plt.subplots(nrows, ncols,
@@ -380,56 +424,55 @@ def plot_median_accuracy_vs_s(df, out_path):
                        marker="o", markersize=5, label=f"N={N}")
                 for N in N_vals]
 
-    for ax_idx, phi in enumerate(phi_vals):
-        ax = axes[ax_idx // ncols][ax_idx % ncols]
-        sub = df[(df["phi"] == phi) & (df["method"] == "OS2-accu")]
+    for row_idx, phi in enumerate(phi_vals):
+        for col_idx, trans in enumerate(trans_vals):
+            ax  = axes[row_idx][col_idx]
+            sub = df[(df["phi"] == phi) & (df["trans"] == trans)
+                     & (df["method"] == "OS2-accu")]
 
-        for N in N_vals:
-            row = sub[sub["N"] == N].sort_values("s")
-            if row.empty:
-                continue
-            ax.semilogy(row["s"], row["err_med"],
-                        color=N_color[N], linewidth=1.4,
-                        marker="o", markersize=5)
+            for N in N_vals:
+                row = sub[sub["N"] == N].sort_values("s")
+                if row.empty:
+                    continue
+                ax.semilogy(row["s"], row["err_med"],
+                            color=N_color[N], linewidth=1.4,
+                            marker="o", markersize=5)
 
-        ax.axhline(EPS_FP64, color="gray", linestyle=":", linewidth=0.9,
-                   label=r"$\varepsilon_{64}$")
+            ax.axhline(EPS_FP64, color="gray", linestyle=":", linewidth=0.9)
 
-        # DGEMM median error reference
-        dgemm_sub = df[(df["phi"] == phi) & (df["method"] == "DGEMM")]
-        if not dgemm_sub.empty:
-            ref_N = dgemm_sub["N"].max()
-            dgemm_err_med = dgemm_sub[dgemm_sub["N"] == ref_N]["err_med"].values
-            if len(dgemm_err_med) > 0:
-                ax.axhline(dgemm_err_med[0], color="black", linestyle="--",
-                           linewidth=0.9, alpha=0.7,
-                           label=f"DGEMM median (N={ref_N})")
+            dgemm_sub = df[(df["phi"] == phi) & (df["trans"] == trans)
+                           & (df["method"] == "DGEMM")]
+            if not dgemm_sub.empty:
+                ref_N = dgemm_sub["N"].max()
+                dgemm_err_med = dgemm_sub[dgemm_sub["N"] == ref_N]["err_med"].values
+                if len(dgemm_err_med) > 0:
+                    ax.axhline(dgemm_err_med[0], color="black", linestyle="--",
+                               linewidth=0.9, alpha=0.7)
 
-        # Horizontal reference lines: median accuracy achieved by the adaptive run.
-        adaptive_sub = df[(df["phi"] == phi) & (df["method"] == "OS2-accu-adaptive")]
-        for N in N_vals:
-            arow = adaptive_sub[adaptive_sub["N"] == N]
-            if arow.empty:
-                continue
-            ax.axhline(arow["err_med"].values[0],
-                       color=N_color[N], linestyle="--", linewidth=1.2, alpha=0.75)
+            adaptive_sub = df[(df["phi"] == phi) & (df["trans"] == trans)
+                              & (df["method"] == "OS2-accu-adaptive")]
+            for N in N_vals:
+                arow = adaptive_sub[adaptive_sub["N"] == N]
+                if arow.empty:
+                    continue
+                ax.axhline(arow["err_med"].values[0],
+                           color=N_color[N], linestyle="--",
+                           linewidth=1.2, alpha=0.75)
 
-        ax.set_xlabel("num_moduli  (s)")
-        ax.set_ylabel("median relative error")
-        ax.set_title(f"phi = {phi}")
-        ax.set_xticks(range(2, 21))
-        ax.legend(handles=legend_n + [
-            Line2D([0], [0], color="gray", linestyle=":", linewidth=0.9,
-                   label=r"$\varepsilon_{64}$"),
-            Line2D([0], [0], color="black", linestyle="--", linewidth=0.9,
-                   label="DGEMM median"),
-            Line2D([0], [0], color="gray", linestyle="--", linewidth=1.2,
-                   label="OS2-accu-adaptive (dashed)"),
-        ], loc="upper right", framealpha=0.85)
-        ax.grid(True, which="both", linestyle=":", alpha=0.4)
-
-    for ax_idx in range(n_phi, nrows * ncols):
-        axes[ax_idx // ncols][ax_idx % ncols].set_visible(False)
+            ax.set_xlabel("num_moduli  (s)")
+            ax.set_ylabel("median relative error")
+            title_trans = f"transA={trans[0]} transB={trans[1]}" if len(trans) >= 2 else trans
+            ax.set_title(f"phi={phi}  {title_trans}")
+            ax.set_xticks(range(2, 21))
+            ax.legend(handles=legend_n + [
+                Line2D([0], [0], color="gray", linestyle=":", linewidth=0.9,
+                       label=r"$\varepsilon_{64}$"),
+                Line2D([0], [0], color="black", linestyle="--", linewidth=0.9,
+                       label="DGEMM median"),
+                Line2D([0], [0], color="gray", linestyle="--", linewidth=1.2,
+                       label="adaptive (dashed)"),
+            ], loc="upper right", framealpha=0.85, fontsize=7)
+            ax.grid(True, which="both", linestyle=":", alpha=0.4)
 
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
@@ -460,15 +503,23 @@ def main():
     print(f"  Rows   : {len(df)}")
     print(f"  N vals : {sorted(df['N'].unique())}")
     print(f"  phi    : {sorted(df['phi'].unique())}")
+    print(f"  trans  : {sorted(df['trans'].unique())}")
     print(f"  algos  : {sorted(df['algo'].unique())}")
     print()
 
     print("Generating plots ...")
-    plot_accuracy_vs_N(df,        f"{prefix}_accuracy_vs_N.pdf")
-    plot_runtime_vs_N(df,         f"{prefix}_runtime_vs_N.pdf")
-    plot_tflops_vs_N(df,          f"{prefix}_tflops_vs_N.pdf")
-    plot_accuracy_vs_s(df,        f"{prefix}_accuracy_vs_s.pdf")
-    plot_median_accuracy_vs_s(df, f"{prefix}_median_accuracy_vs_s.pdf")
+    has_accuracy = df["err_max"].notna().any()
+    if not has_accuracy:
+        print("  Note: all err_max are NaN — skipping accuracy plots "
+              "(re-run without --no-check to include them)")
+
+    if has_accuracy:
+        plot_accuracy_vs_N(df,        f"{prefix}_accuracy_vs_N.pdf")
+    plot_runtime_vs_N(df,             f"{prefix}_runtime_vs_N.pdf")
+    plot_tflops_vs_N(df,              f"{prefix}_tflops_vs_N.pdf")
+    if has_accuracy:
+        plot_accuracy_vs_s(df,        f"{prefix}_accuracy_vs_s.pdf")
+        plot_median_accuracy_vs_s(df, f"{prefix}_median_accuracy_vs_s.pdf")
 
     print("\nDone.")
 
