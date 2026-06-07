@@ -1,0 +1,55 @@
+{
+  "id": "4480256b782f32e867dd3bf96665dc8ae5b6a883",
+  "branch_id": "4480256b782f32e867dd3bf96665dc8ae5b6a883",
+  "file": "Tensile/KernelWriterAssembly.py",
+  "function": "calculateLoopNumIter",
+  "branch_kind": "if",
+  "location": {
+    "line": 7089,
+    "col": 6
+  },
+  "predicate_source": "tailLoop",
+  "predicate_normalized": {
+    "op": "lt",
+    "lhs": { "var": "loopIdx" },
+    "rhs": { "const": 0 }
+  },
+  "referenced_symbols": [
+    "tailLoop"
+  ],
+  "public_inputs": [
+    {
+      "name": "AssertSummationElementMultiple",
+      "kind": "yaml",
+      "note": "YAML solution parameter int. Valid values: {1,2,4,8,16,32,64,128}. ValidParameters.py line 489. Controls NoTailLoop via: NoTailLoop = (AssertSummationElementMultiple % DepthU == 0). When NoTailLoop is True, the tail-loop code path (loopIdx=-1) is skipped entirely."
+    },
+    {
+      "name": "DepthU",
+      "kind": "yaml",
+      "note": "YAML solution parameter int. Valid range: -1 and 2..1024. ValidParameters.py line 862. Controls NoTailLoop via: NoTailLoop = (AssertSummationElementMultiple % DepthU == 0). Also used in TailloopInNll eligibility checks (Solution.py 3861)."
+    }
+  ],
+  "derived_symbols": [
+    {
+      "name": "tailLoop",
+      "derived_from": "loopIdx"
+    },
+    {
+      "name": "loopIdx",
+      "derived_from": "call-site convention: -1 for tail loop path, non-negative for summation loop path"
+    },
+    {
+      "name": "NoTailLoop",
+      "derived_from": "AssertSummationElementMultiple, DepthU"
+    }
+  ],
+  "derivation_chain": [
+    "KernelWriterAssembly.py 7081: tailLoop = (loopIdx < 0); predicate at 7089 is 'if tailLoop'",
+    "KernelWriter.py 5352: 'if not kernel[NoTailLoop]' gates all tail-loop code paths; when NoTailLoop is True the call calculateLoopNumIter(..., -1) is never reached",
+    "Solution.py 3845-3847: NoTailLoop = True iff (AssertSummationElementMultiple % DepthU == 0); else False",
+    "ValidParameters.py 489,862: AssertSummationElementMultiple in {1,2,4,8,16,32,64,128}; DepthU in {-1}|range(2,1025) -- both are direct YAML solution keys",
+    "KernelWriter.py 5433-5446: within the tail-loop section, HasWMMA_V3 (gpu-probe) controls ordering of calculateLoopNumIter(-1) calls but does not affect whether tailLoop itself is True -- it is always True in that section"
+  ],
+  "external_state": [],
+  "phase": "Slice"
+}

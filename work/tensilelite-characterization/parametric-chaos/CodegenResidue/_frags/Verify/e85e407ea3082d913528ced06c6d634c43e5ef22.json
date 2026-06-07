@@ -1,0 +1,10 @@
+{
+  "branch_id": "e85e407ea3082d913528ced06c6d634c43e5ef22",
+  "predicate": "tailLoop",
+  "location": "Tensile/KernelWriterAssembly.py:7475",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Independently re-established the claim against REAL source in-container. Confirmed KernelWriterAssembly.py line 7472 tailLoop = loopIdx < 0 and line 7475 if tailLoop: inside closeLoop(self, kernel, tPA, tPB, loopIdx, ...) (def at 7458). loopIdx is a function parameter; predicate is a pure integer comparison. Re-executed all examples against the actual expression loopIdx < 0: true loopIdx=-2 -> True (OK), loopIdx=-1 -> True (OK); false loopIdx=0 -> False (OK), loopIdx=1 -> False (OK). All 4 reproduce exactly as claimed. Verified call-site provenance: KernelWriter.py:3532 passes literal -2 gated by if useTailloopInNll: (TailloopInNll); KernelWriter.py:5818/5820/5856 pass literal -1 from the tail-loop body; normal-unroll closes (4399/4416/4420/4424/5879) pass self.states.unrollIdx (>=0). loopIdx is ALWAYS a call-site integer, never derived from kernel[] inside closeLoop, so the predicate proper is fully-static. Both polarities satisfiable over the integer domain. Confirming SAT as claimed; no upgrade made.",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/e85e407ea3082d913528ced06c6d634c43e5ef22.json"
+}

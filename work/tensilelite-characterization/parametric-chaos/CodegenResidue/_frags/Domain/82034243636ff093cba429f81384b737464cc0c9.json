@@ -1,0 +1,44 @@
+{
+  "branch_id": "82034243636ff093cba429f81384b737464cc0c9",
+  "phase": "Domain",
+  "predicate": "kernel[\"SuppressNoLoadLoop\"]",
+  "site": "Tensile/KernelWriterAssembly.py:7094",
+  "domains": {
+    "SuppressNoLoadLoop": {
+      "type": "bool",
+      "values": [false, true],
+      "note": "ValidParameters.py:323 lists [False, True]; default False (GlobalParameters.py:445). Primary YAML input for the predicate when HalfPLR==0 and TailloopInNll is not effective. Subject to validity suppression at Solution.py:1845-1847."
+    },
+    "HalfPLR": {
+      "type": "int",
+      "values": [0, 1],
+      "note": "ValidParameters.py:1048 lists [0,1,2,3]; default 0 (GlobalParameters.py:560). 0 = no override. Any non-zero value unconditionally sets SuppressNoLoadLoop=True (Solution.py:2281-2283). Values 1,2,3 are equivalent for this predicate; domain [0,1] suffices to exercise both sides."
+    },
+    "TailloopInNll": {
+      "type": "bool",
+      "values": [false, true],
+      "note": "ValidParameters.py:990 lists [False, True]; default False (GlobalParameters.py:535). When True and its own validity constraints pass (Solution.py:3850-3869), unconditionally sets SuppressNoLoadLoop=False — the final override dominating all prior assignments."
+    },
+    "BufferLoad": {
+      "type": "bool",
+      "values": [false, true],
+      "note": "ValidParameters.py:388 lists [False, True]; default True (GlobalParameters.py:454). Required True for bufferLoad=True (Solution.py:1828). If False, bufferLoad=False, which causes the validity gate (Solution.py:1846) to force SuppressNoLoadLoop=False when yaml value is True."
+    },
+    "KernelLanguage": {
+      "type": "enum",
+      "values": ["Assembly"],
+      "note": "ValidParameters.py:915 - only valid value is 'Assembly'. No variation possible; always contributes True to bufferLoad computation."
+    },
+    "PrefetchGlobalRead": {
+      "type": "int",
+      "values": [0, 1],
+      "note": "ValidParameters.py:282 lists [0,1,2,...,16]; default 1 (GlobalParameters.py:442). Validity gate at Solution.py:1846 requires PGR==1 for SuppressNoLoadLoop to remain True. Domain [0,1] covers the gate: 1=pass, 0=fail."
+    },
+    "GlobalSplitU": {
+      "type": "int",
+      "values": [-1, 1, 2],
+      "note": "ValidParameters.py:315 lists range(-1,1024+1); default 1 (GlobalParameters.py:475). Validity gate at Solution.py:1846 requires GSU==1 OR GSU==-1. Domain [-1,1,2]: -1 and 1 exercise the True-gate path; 2 exercises the False-gate path."
+    }
+  },
+  "rationale": "Predicate is a fully-derived bool driven by three sequential override steps: (1) yaml_SuppressNoLoadLoop guarded by bufferLoad+PGR+GSU validity (Solution.py:1845-1847); (2) HalfPLR != 0 forces True unconditionally (Solution.py:2281-2283); (3) TailloopInNll effective forces False unconditionally (Solution.py:3867-3869). KernelLanguage has only one valid value (Assembly). All other domains use the minimal value set that exercises both sides of the branch: for bool inputs [False, True]; for integer guards [boundary values that pass/fail the equality checks]."
+}

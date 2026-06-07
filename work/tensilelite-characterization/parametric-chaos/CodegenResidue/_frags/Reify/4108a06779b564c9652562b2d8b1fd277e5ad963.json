@@ -1,0 +1,18 @@
+{
+  "branch_id": "4108a06779b564c9652562b2d8b1fd277e5ad963",
+  "site": "Tensile/KernelWriter.py:4145",
+  "predicate": "doReadB",
+  "reified": true,
+  "test_file": "Tensile/Tests/unit/characterization/CodegenResidue/test_pchaos_KernelWriter_L4145_char.py",
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/CodegenResidue/test_pchaos_KernelWriter_L4145_char.py"
+  ],
+  "passed": true,
+  "tests_run": 11,
+  "tests_passed": 11,
+  "tests_failed": 0,
+  "pytest_cmd": "pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/CodegenResidue/test_pchaos_KernelWriter_L4145_char.py",
+  "strategy": "pure-helper-plus-witness-table",
+  "description": "Pure Python reimplementation of the 4-step doReadB assignment chain (KernelWriter.py:4029-4063). CPU-only, no GPU, no rocisa.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Reify/4108a06779b564c9652562b2d8b1fd277e5ad963.json"
+}

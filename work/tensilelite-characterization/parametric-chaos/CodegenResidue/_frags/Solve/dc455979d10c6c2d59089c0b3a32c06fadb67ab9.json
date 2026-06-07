@@ -1,0 +1,51 @@
+{
+  "branch_id": "dc455979d10c6c2d59089c0b3a32c06fadb67ab9",
+  "file": "Tensile/KernelWriterAssembly.py",
+  "line": 2267,
+  "predicate_text": "self.states.archCaps[\"SgprPreloadPad\"]",
+  "enclosing_function": "defineAndResources",
+  "guard_context": "self.states.numSgprPreload > 0",
+  "solver": "z3",
+  "solver_version": "4.16.0",
+  "solver_status": "sat",
+  "classification": "solver-backed-under-assumptions",
+  "assumptions": [
+    "SgprPreloadPad is encoded directly from its sole definition in rocisa/rocisa/include/hardware_caps.hpp:524 (checkInList(isa,{9,5,0}) || checkInList(isa,{9,0,10}) || (isa[0]==9 && isa[1]==4)); the Z3 model assumes this C++ source is the only producer of the value, which the slice derivation_path confirms.",
+    "ISA triple is restricted to the seeded enum domain [[9,5,0],[9,4,2],[9,0,10],[11,0,0]]. The predicate generalizes to any ISA but the witness search was bounded to the seeded enum.",
+    "Predicate is int-as-bool: nonzero map value == True. SgprPreloadPad is 0/1 so the boolean encoding is exact.",
+    "kernel[PreloadKernArgs] and self.states.numSgprPreload only gate the OUTER if at line 2266; they do not affect the value of SgprPreloadPad itself, so they are not part of this predicate's model."
+  ],
+  "z3_encoding": "isa_major,isa_minor,isa_patch :: Int constrained to Or over seeded enum triples; sgpr_pad = Or(And(maj==9,minr==5,pat==0), And(maj==9,minr==0,pat==10), And(maj==9,minr==4)); predicate True <=> sgpr_pad.",
+  "op_surface_used": ["boolean(Or/And/Not)", "compare(==)"],
+  "true_examples": [
+    {"kernel[ISA]": [9, 4, 2], "self.states.archCaps[SgprPreloadPad]": 1, "predicate": true, "source": "z3-model"},
+    {"kernel[ISA]": [9, 5, 0], "self.states.archCaps[SgprPreloadPad]": 1, "predicate": true, "source": "rocisa-ground-truth"},
+    {"kernel[ISA]": [9, 0, 10], "self.states.archCaps[SgprPreloadPad]": 1, "predicate": true, "source": "rocisa-ground-truth"}
+  ],
+  "false_examples": [
+    {"kernel[ISA]": [11, 0, 0], "self.states.archCaps[SgprPreloadPad]": 0, "predicate": false, "source": "z3-model+rocisa-ground-truth"}
+  ],
+  "z3_truth_table": [
+    {"isa": [9, 5, 0], "predicate": true},
+    {"isa": [9, 4, 2], "predicate": true},
+    {"isa": [9, 0, 10], "predicate": true},
+    {"isa": [11, 0, 0], "predicate": false}
+  ],
+  "ground_truth_rocisa": {
+    "method": "rocIsa.getInstance().init(isa,'/opt/rocm/lib/llvm/bin/clang++',False); setKernel(isa,64); getArchCaps()['SgprPreloadPad']",
+    "(9,5,0)": 1,
+    "(9,4,2)": 1,
+    "(9,0,10)": 1,
+    "(11,0,0)": 0,
+    "note": "Live rocisa values match the Z3 model and the C++ definition exactly."
+  },
+  "pure_helper": "from typing import Tuple\n\n\ndef sgpr_preload_pad(isa: Tuple[int, int, int]) -> bool:\n    \"\"\"Pure mirror of rocisa hardware_caps.hpp:524 SgprPreloadPad.\n\n    SgprPreloadPad = checkInList(isa,{9,5,0}) || checkInList(isa,{9,0,10})\n                     || (isa[0]==9 && isa[1]==4)\n    The predicate at KernelWriterAssembly.py:2267 is int-as-bool truthiness of this.\n    \"\"\"\n    return isa == (9, 5, 0) or isa == (9, 0, 10) or (isa[0] == 9 and isa[1] == 4)",
+  "crosshair": {
+    "version": "0.0.106",
+    "result": "no-counterexample",
+    "exit_code": 0,
+    "contract": "post: _ == (isa == (9,5,0) or isa == (9,0,10) or (isa[0]==9 and isa[1]==4))",
+    "caveat": "Absence of a counterexample is NOT a proof. The contract is a tautology over the helper's own definition, so this only confirms CrossHair runs cleanly on the extracted pure form and finds no contradiction; it does not prove equivalence to the live C++ for arbitrary ISA tuples."
+  },
+  "notes": "SgprPreloadPad is a pure function of the ISA triple (no filesystem/env/GPU probe at evaluation time per slice notes). Classification is solver-backed-under-assumptions rather than fully-static because the truth value is produced by a C++ rocisa call (archCaps map populated by initArchCaps) whose result is reproduced in Z3 from the source definition; the Z3 model and live rocisa agree on all four seeded ISAs. TRUE witness ISA=(9,4,2) [gfx94x], FALSE witness ISA=(11,0,0) [gfx11xx]."
+}

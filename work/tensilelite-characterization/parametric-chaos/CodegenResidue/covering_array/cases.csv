@@ -1,0 +1,15 @@
+case_id,BufferLoad,KernelLanguage,PrefetchGlobalRead,AssertFree0ElementMultiple,AssertFree1ElementMultiple,DepthU,DirectToLds,EnableMatrixInstruction,ForceUnrollSubIter,GlobalReadVectorWidthA,GlobalReadVectorWidthB,GlobalSplitU
+0,false,"""Assembly""",0,1,1,16,0,true,true,1,1,-1
+1,true,"""Assembly""",1,4,4,32,1,false,false,4,4,1
+2,false,"""Assembly""",1,1,4,16,2,false,true,4,1,2
+3,true,"""Assembly""",0,4,1,32,2,true,false,1,4,-1
+4,false,"""Assembly""",0,4,1,16,3,false,true,1,4,1
+5,true,"""Assembly""",0,1,4,32,3,true,false,4,1,2
+6,false,"""Assembly""",1,1,1,32,0,true,false,4,4,1
+7,true,"""Assembly""",0,4,1,16,0,false,true,1,1,2
+8,false,"""Assembly""",0,1,1,16,1,true,true,1,1,-1
+9,false,"""Assembly""",1,1,4,16,3,false,false,1,1,-1
+10,false,"""Assembly""",0,1,4,16,0,true,true,4,1,-1
+11,false,"""Assembly""",0,1,1,32,0,true,true,1,1,-1
+12,false,"""Assembly""",0,1,1,16,1,true,true,1,4,2
+13,false,"""Assembly""",0,1,1,16,2,true,true,1,1,1

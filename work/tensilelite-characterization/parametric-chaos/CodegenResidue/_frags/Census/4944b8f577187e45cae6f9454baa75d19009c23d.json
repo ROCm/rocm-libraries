@@ -1,0 +1,16 @@
+{
+  "id": "4944b8f577187e45cae6f9454baa75d19009c23d",
+  "file": "Tensile/KernelWriter.py",
+  "function": "setupNewTile",
+  "branch_kind": "if",
+  "location": {
+    "line": 2611,
+    "col": 4
+  },
+  "predicate_source": "not kernel[\"UseSubtileImpl\"]",
+  "referenced_symbols": [
+    "kernel"
+  ],
+  "derived_symbols": [],
+  "rank": 5
+}

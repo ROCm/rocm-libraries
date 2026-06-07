@@ -1,0 +1,54 @@
+{
+  "branch_id": "462514797d3e1591ba82ea84a51eda8e5ec867fc",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Domain/462514797d3e1591ba82ea84a51eda8e5ec867fc.json",
+  "domains": {
+    "DepthU": {
+      "type": "int",
+      "values": [16, 32],
+      "min": 16,
+      "max": 64
+    },
+    "LocalSplitU": {
+      "type": "int",
+      "values": [1, 2]
+    },
+    "InnerUnroll": {
+      "type": "int",
+      "values": [1, 2]
+    },
+    "MatrixInstruction": {
+      "type": "enum",
+      "values": [[16, 16, 4, 1], [16, 16, 16, 1]]
+    },
+    "EnableMatrixInstruction": {
+      "type": "bool"
+    },
+    "LocalReadVectorWidthA": {
+      "type": "int",
+      "values": [1, 4]
+    },
+    "UnrollMajorLDSA": {
+      "type": "bool"
+    },
+    "PrefetchLocalRead": {
+      "type": "int",
+      "values": [0, 1, 2],
+      "min": 0,
+      "max": 4
+    },
+    "PrefetchGlobalRead": {
+      "type": "int",
+      "values": [0, 1]
+    },
+    "ForceUnrollSubIter": {
+      "type": "bool"
+    },
+    "UseCustomMainLoopSchedule": {
+      "type": "bool"
+    },
+    "ISA": {
+      "type": "enum",
+      "values": ["gfx942", "gfx1100"]
+    }
+  }
+}

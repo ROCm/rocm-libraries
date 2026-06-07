@@ -1,0 +1,59 @@
+{
+  "id": "e85e407ea3082d913528ced06c6d634c43e5ef22",
+  "branch_id": "e85e407ea3082d913528ced06c6d634c43e5ef22",
+  "file": "Tensile/KernelWriterAssembly.py",
+  "function": "closeLoop",
+  "branch_kind": "if",
+  "location": {
+    "line": 7475,
+    "col": 4
+  },
+  "predicate_source": "tailLoop",
+  "predicate_normalized": {
+    "op": "lt",
+    "lhs": {
+      "op": "name",
+      "var": "loopIdx"
+    },
+    "rhs": {
+      "const": 0
+    }
+  },
+  "referenced_symbols": [
+    "tailLoop"
+  ],
+  "public_inputs": [
+    {
+      "name": "AssertSummationElementMultiple",
+      "kind": "yaml",
+      "note": "YAML solution parameter (int, default 1). GlobalParameters.py:466. Participates in NoTailLoop gate: Solution.py:3846 sets NoTailLoop=True when AssertSummationElementMultiple%DepthU==0, suppressing the tail-loop code path. When NoTailLoop=False, KernelBody emits closeLoop(loopIdx=-1) calls, making tailLoop=True at line 7475."
+    },
+    {
+      "name": "DepthU",
+      "kind": "yaml",
+      "note": "YAML solution parameter (int, default -1 = auto-derived). GlobalParameters.py:491. Auto-resolved to 2*MatrixInstK*LocalSplitU when -1 (Solution.py:831-832). Participates in NoTailLoop gate (Solution.py:3846: AssertSummationElementMultiple%DepthU==0). Larger DepthU makes NoTailLoop=True more likely, suppressing the tailLoop=True branch."
+    },
+    {
+      "name": "TailloopInNll",
+      "kind": "yaml",
+      "note": "YAML solution parameter (bool, default False). GlobalParameters.py:535. When True (and not disabled by Solution.py:3858-3864 checks), KernelWriter.py:3532 calls closeLoop(loopIdx=-2), the tailloopInNll path, which also satisfies loopIdx<0 => tailLoop=True at line 7475."
+    }
+  ],
+  "derived_symbols": [
+    {
+      "name": "tailLoop",
+      "derived_from": "loopIdx"
+    },
+    {
+      "name": "loopIdx",
+      "derived_from": "call-site-literal"
+    },
+    {
+      "name": "kernel[NoTailLoop]",
+      "derived_from": "AssertSummationElementMultiple,DepthU"
+    }
+  ],
+  "derivation_notes": "tailLoop = (loopIdx < 0). loopIdx is a call-site literal, never derived from kernel[] inside closeLoop(). Call sites with loopIdx=-1 (KernelWriter.py:5818,5820,5856) are inside the tail-loop block guarded by 'if not kernel[NoTailLoop]:' (line 5352). Call sites with loopIdx=-2 (KernelWriter.py:3532) are guarded by 'if useTailloopInNll:' which requires kernel[TailloopInNll]=True. Call sites with loopIdx=self.states.unrollIdx (>=0) never make tailLoop=True. The predicate therefore depends on YAML keys AssertSummationElementMultiple, DepthU (gating the -1 path via NoTailLoop), and TailloopInNll (gating the -2 path). No OS environment variables, filesystem probes, or hardware probes are involved.",
+  "external_state": [],
+  "phase": "Slice"
+}

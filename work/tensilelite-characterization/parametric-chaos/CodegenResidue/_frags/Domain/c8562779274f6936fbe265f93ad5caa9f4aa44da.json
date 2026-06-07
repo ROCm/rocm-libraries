@@ -1,0 +1,32 @@
+{
+  "branch_id": "c8562779274f6936fbe265f93ad5caa9f4aa44da",
+  "phase": "Domain",
+  "domains": {
+    "tc": {
+      "type": "enum",
+      "values": ["A", "B"],
+      "note": "tP['tensorChar'] is the literal string cM assigned in KernelWriter._initKernel via getTensorParameters: 'A' for tensorParametersA, 'B' for tensorParametersB. These are the only two call-site values."
+    },
+    "kernel[DirectToLdsA]": {
+      "type": "bool",
+      "values": [false, true],
+      "note": "True when DirectToLds==1 or DirectToLds==2 (Solution.py:722). False when DirectToLds==0 or DirectToLds==3. May be forced False by isDirectToLdsDoable() rejection or BufferLoad=False."
+    },
+    "kernel[DirectToLdsB]": {
+      "type": "bool",
+      "values": [false, true],
+      "note": "True when DirectToLds==1 or DirectToLds==3 (Solution.py:723). False when DirectToLds==0 or DirectToLds==2. Same conditional reset logic as DirectToLdsA."
+    },
+    "DirectToLds": {
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "values": [0, 1, 2, 3],
+      "note": "YAML/MsgPack solution parameter. 0=no DTL (default, GlobalParameters.py:461), 1=both A+B, 2=A only, 3=B only. Drives DirectToLdsA and DirectToLdsB derivations."
+    }
+  },
+  "predicate_coverage": {
+    "true_branch": "kernel['DirectToLds%s'%tc] is truthy: tc='A' with DirectToLds in {1,2}, or tc='B' with DirectToLds in {1,3}",
+    "false_branch": "kernel['DirectToLds%s'%tc] is falsy: tc='A' with DirectToLds in {0,3}, or tc='B' with DirectToLds in {0,2}"
+  }
+}

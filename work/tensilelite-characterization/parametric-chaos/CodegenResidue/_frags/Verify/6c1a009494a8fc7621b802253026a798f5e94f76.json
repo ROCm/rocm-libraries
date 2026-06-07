@@ -1,0 +1,55 @@
+{
+  "branch_id": "6c1a009494a8fc7621b802253026a798f5e94f76",
+  "unit": "Tensile/KernelWriter.py:4152",
+  "predicate": "kernel[\"HalfPLRB\"]",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Re-established against REAL code in container tl-char. (1) Predicate verbatim at KernelWriter.py:4152 if kernel[\"HalfPLRB\"]:. (2) Derivation verbatim at Tensile/SolutionStructs/Solution.py:2280 state[\"HalfPLRB\"] = bool(halfPLR & 0x02) (halfPLR=state[\"HalfPLR\"]). (3) Domain confirmed \"HalfPLR\": [0,1,2,3] at Tensile/Common/ValidParameters.py:1048. Re-executed claimed witnesses against the real bitwise-and derivation: TRUE HalfPLR=2,3 -> HalfPLRB=True (reproduce), FALSE HalfPLR=0,1 -> HalfPLRB=False (reproduce). Exhaustive over [0,1,2,3] matches truth table {0,1}->False,{2,3}->True. Both polarities reachable -> fully-static SAT confirmed. No upgrade; claim sat, verdict SAT.",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/6c1a009494a8fc7621b802253026a798f5e94f76.json",
+  "reproduced_true_examples": [
+    {
+      "assignment": {
+        "HalfPLR": 2
+      },
+      "derived": {
+        "HalfPLRB": true
+      },
+      "predicate_value": true
+    },
+    {
+      "assignment": {
+        "HalfPLR": 3
+      },
+      "derived": {
+        "HalfPLRB": true
+      },
+      "predicate_value": true
+    }
+  ],
+  "reproduced_false_examples": [
+    {
+      "assignment": {
+        "HalfPLR": 0
+      },
+      "derived": {
+        "HalfPLRB": false
+      },
+      "predicate_value": false
+    },
+    {
+      "assignment": {
+        "HalfPLR": 1
+      },
+      "derived": {
+        "HalfPLRB": false
+      },
+      "predicate_value": false
+    }
+  ],
+  "real_code_refs": {
+    "predicate": "Tensile/KernelWriter.py:4152",
+    "derivation": "Tensile/SolutionStructs/Solution.py:2280",
+    "valid_params": "Tensile/Common/ValidParameters.py:1048"
+  }
+}

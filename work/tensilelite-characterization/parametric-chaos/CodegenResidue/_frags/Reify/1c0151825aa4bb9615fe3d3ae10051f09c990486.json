@@ -1,0 +1,52 @@
+{
+  "branch_id": "1c0151825aa4bb9615fe3d3ae10051f09c990486",
+  "phase": "Reify",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Reify/1c0151825aa4bb9615fe3d3ae10051f09c990486.json",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/CodegenResidue/test_pchaos_KernelWriter_L951_char.py"
+  ],
+  "passed": true,
+  "test_count": 24,
+  "test_runner_result": "24 passed in 0.24s",
+  "source_location": {
+    "file": "Tensile/KernelWriter.py",
+    "line": 951,
+    "col": 4,
+    "enclosing_function": "_makeSubIterSchedule",
+    "branch_kind": "elif"
+  },
+  "predicate": "scheduleIterAlg == 1",
+  "pure_helper": "schedule_iter_alg_is_one(schedule_iter_alg: int, nll_last: bool, tailloop_in_nll: bool) -> bool",
+  "witnesses_pinned": {
+    "true_witness": {
+      "scheduleIterAlg": 1,
+      "NLLlast": false,
+      "tailloopInNll": false
+    },
+    "false_witnesses": [
+      {
+        "scheduleIterAlg": 0,
+        "NLLlast": false,
+        "tailloopInNll": false,
+        "reason": "handled by if==0 at line 882"
+      },
+      {
+        "scheduleIterAlg": 2,
+        "NLLlast": false,
+        "tailloopInNll": false,
+        "reason": "falls through to elif at line 998"
+      },
+      {
+        "scheduleIterAlg": 1,
+        "NLLlast": true,
+        "tailloopInNll": true,
+        "reason": "assumption-dependent: config=1 but forced to 0 at line 880"
+      }
+    ]
+  },
+  "notes": [
+    "ADD-ONLY: new file only, no existing files modified.",
+    "24 tests pass in 0.24s."
+  ]
+}

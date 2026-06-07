@@ -1,0 +1,13 @@
+{
+  "branch_id": "462514797d3e1591ba82ea84a51eda8e5ec867fc",
+  "predicate": "doReadA",
+  "location": "Tensile/KernelWriter.py:4065 (_loopBody)",
+  "confirmed": false,
+  "status": "UNKNOWN",
+  "method": "Re-read real source KernelWriter.py:4024-4061; confirmed pure_helper is a faithful extract of the doReadA chain (init doReadA = u < LoopIters/nIPCR_A - numItersPLR via py3 true-division; ForceUnrollSubIter override to (u==0); OR with hasLiveLdsData(=PGR) and doNext(=uNext>localWriteEndIter); then AND iui*nRICR_A < InnerUnroll). Re-executed all 4 claimed examples in tl-char against the chain: ALL reproduced (TRUE-z3 True, TRUE-crosshair True, FALSE-z3 False, FALSE-crosshair False; exit 0). HOWEVER classification is runtime-dependent / solver_status unknown: examples proven only BY VALUE of derived intermediates, NOT reachable from seeded config input domains. Branch is not a pure function of config; neither solver nor checker exhibited it from real config inputs. Per checker rule, do not upgrade; status stays UNKNOWN.",
+  "downgraded_to": "unknown",
+  "reproduced_examples": {"TRUE-z3":"True","TRUE-crosshair":"True","FALSE-z3":"False","FALSE-crosshair":"False"},
+  "helper_faithful_to_source": true,
+  "notes": "Helper transcription correct and all witnesses reproduce, so by-value examples are sound for pinning helper behavior. But original claim never established config-input reachability (solver_status=unknown, runtime-dependent). CHECKER must not upgrade a weaker claim. confirmed=false / UNKNOWN.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/462514797d3e1591ba82ea84a51eda8e5ec867fc.json"
+}

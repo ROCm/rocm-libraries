@@ -1,0 +1,40 @@
+{
+  "id": "aa1d28b3a0100f8f5ed22327c7a3d75e3d537e37",
+  "branch_id": "aa1d28b3a0100f8f5ed22327c7a3d75e3d537e37",
+  "phase": "Solve",
+  "file": "Tensile/KernelWriter.py",
+  "function": "_makeSubIterSchedule",
+  "location": {"line": 884, "col": 6},
+  "branch_kind": "if",
+  "predicate_source": "kernel[\"HalfPLR\"]",
+  "predicate_semantics": "Python truthiness test on an integer. `if kernel[\"HalfPLR\"]:` is taken iff HalfPLR != 0. HalfPLR is a validated YAML solution benchmark parameter with valid values [0,1,2,3] (ValidParameters.py:1048), default 0. Read directly with no transformation inside _makeSubIterSchedule.",
+  "solver": "z3",
+  "solver_status": "sat",
+  "z3_encoding": {
+    "vars": {"HalfPLR": "Int"},
+    "domain": "And(HalfPLR >= 0, HalfPLR <= 3)",
+    "predicate": "HalfPLR != 0",
+    "note": "Truthiness of int over seeded discrete domain {0,1,2,3}. Bounded-int domain exhaustively enumerated; result exact over the full seeded domain."
+  },
+  "z3_model_output": {
+    "true_model": "[HalfPLR = 1]",
+    "false_model": "[HalfPLR = 0]",
+    "enumeration": {"0": false, "1": true, "2": true, "3": true}
+  },
+  "true_examples": [
+    {"HalfPLR": 1},
+    {"HalfPLR": 2},
+    {"HalfPLR": 3}
+  ],
+  "false_examples": [
+    {"HalfPLR": 0}
+  ],
+  "classification": "fully-static",
+  "pure_helper": "def half_plr_enabled(half_plr: int) -> bool:\n    \"\"\"Mirror of branch at KernelWriter.py:884 -- `if kernel[\\\"HalfPLR\\\"]`.\n    HalfPLR is a validated YAML int in {0,1,2,3}; branch taken iff truthy (non-zero).\n    pre: 0 <= half_plr <= 3\n    post: __return__ == (half_plr != 0)\n    \"\"\"\n    return bool(half_plr)",
+  "crosshair": {
+    "version": "0.0.106",
+    "result": "no counterexample (exit 0)",
+    "caveat": "Absence of a counterexample is NOT a proof. Corroborates the Z3 enumeration that bool(half_plr) == (half_plr != 0) over 0<=half_plr<=3."
+  },
+  "notes": "Trivially static: integer truthiness on a validated YAML parameter, no runtime/external/object state. Branch taken for HalfPLR in {1,2,3}; not taken for HalfPLR == 0. The integer is a bit flag (bit0=A, bit1=B); any non-zero value takes the branch."
+}

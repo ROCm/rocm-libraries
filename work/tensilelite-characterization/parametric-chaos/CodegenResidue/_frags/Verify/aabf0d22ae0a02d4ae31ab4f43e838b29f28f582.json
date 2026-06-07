@@ -1,0 +1,8 @@
+{
+  "branch_id": "aabf0d22ae0a02d4ae31ab4f43e838b29f28f582",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Independent re-derivation from REAL source (not the claimed helper). Read KernelWriterAssembly.py:16790-16798 (enableEdge legs + predicate EdgeType==ShiftPtr and enableEdge), Solution.py:2214-2215 (enableTDMA=bool(TDMInst&0x01), enableTDMB=bool(TDMInst&0x02)), Solution.py:4570-4578 (GuaranteeNoPartialA/B), Solution.py:4992-4995 (EdgeType default ShiftPtr, forced None iff enableTDMA and enableTDMB). All four derivations match the helper exactly. Transcribed source semantics into a fresh in-container Python function (NOT importing the claimed pure_helper) and re-evaluated all witnesses: true[0]=True OK, true[1]=True OK, false[0]=False OK, false[1]=False OK -> ALL_OK. true_examples establish predicate SAT; false_examples establish Not(predicate) SAT, so branch is genuinely two-sided reachable over the seeded discrete domain. Classification fully-static confirmed: pure boolean/integer arithmetic over YAML-derived params + TLUA/TLUB layout bools; no isinstance, nodeType dispatch, filesystem, or GPU probe in cited lines.",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/aabf0d22ae0a02d4ae31ab4f43e838b29f28f582.json"
+}

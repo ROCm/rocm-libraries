@@ -1,0 +1,16 @@
+{
+  "id": "7b6b7c5fa8d48c75aa699041eed7a307cb3b9947",
+  "file": "Tensile/KernelWriter.py",
+  "function": "_makeSubIterSchedule",
+  "branch_kind": "if",
+  "location": {
+    "line": 882,
+    "col": 4
+  },
+  "predicate_source": "scheduleIterAlg == 0",
+  "referenced_symbols": [
+    "scheduleIterAlg"
+  ],
+  "derived_symbols": [],
+  "rank": 2
+}

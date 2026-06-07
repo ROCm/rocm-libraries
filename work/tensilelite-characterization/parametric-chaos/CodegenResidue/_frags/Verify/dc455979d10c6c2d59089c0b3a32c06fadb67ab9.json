@@ -1,0 +1,18 @@
+{
+  "branch_id": "dc455979d10c6c2d59089c0b3a32c06fadb67ab9",
+  "predicate": "self.states.archCaps[\"SgprPreloadPad\"]",
+  "location": "Tensile/KernelWriterAssembly.py:2267",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Re-established SAT by re-executing all claimed examples against the ACTUAL predicate producer (live rocisa) plus source and pure-helper cross-checks. (1) Confirmed predicate text at KernelWriterAssembly.py:2267 == self.states.archCaps[SgprPreloadPad] (int-as-bool). (2) Confirmed sole producer hardware_caps.hpp:524: rv[SgprPreloadPad] = checkInList(isa,{9,5,0}) || checkInList(isa,{9,0,10}) || (isa[0]==9 && isa[1]==4). (3) LIVE rocisa ground truth via rocisa.rocIsa.getInstance().init(tuple(isa),clang++,False)+setKernel(tuple(isa),64)+getArchCaps()[SgprPreloadPad]: (9,4,2)->1(True), (9,5,0)->1(True), (9,0,10)->1(True), (11,0,0)->0(False). All four match claimed examples EXACTLY. (4) Pure helper reproduced all four. Both TRUE and FALSE witnesses exist => SAT, not downgraded. NOTE: claim notes described init/setKernel/getArchCaps as top-level functions, but real API is rocisa.rocIsa.getInstance() methods (init/setKernel take tuple not list); harmless description discrepancy, values identical. Classification solver-backed-under-assumptions is appropriate.",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/dc455979d10c6c2d59089c0b3a32c06fadb67ab9.json",
+  "checked_true_examples": [
+    {"isa": [9, 4, 2], "live_rocisa": 1, "predicate": true, "matches_claim": true},
+    {"isa": [9, 5, 0], "live_rocisa": 1, "predicate": true, "matches_claim": true},
+    {"isa": [9, 0, 10], "live_rocisa": 1, "predicate": true, "matches_claim": true}
+  ],
+  "checked_false_examples": [
+    {"isa": [11, 0, 0], "live_rocisa": 0, "predicate": false, "matches_claim": true}
+  ]
+}

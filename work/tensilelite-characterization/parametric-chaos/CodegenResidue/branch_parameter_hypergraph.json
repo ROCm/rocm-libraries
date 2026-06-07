@@ -1,0 +1,645 @@
+{
+  "nodes": [
+    {
+      "branch_id": "0902ebf1cd3edc0bc1aac9c97f8dfd41cba0c700",
+      "file": "Tensile/KernelWriterAssembly.py",
+      "function": "computeLoadSrd",
+      "branch_kind": "if",
+      "location": {
+        "line": 4250,
+        "col": 6
+      },
+      "predicate_source": "self.states.groOffsetInMacroTile",
+      "referenced_symbols": [
+        "self"
+      ]
+    },
+    {
+      "branch_id": "1c0151825aa4bb9615fe3d3ae10051f09c990486",
+      "file": "Tensile/KernelWriter.py",
+      "function": "_makeSubIterSchedule",
+      "branch_kind": "elif",
+      "location": {
+        "line": 951,
+        "col": 4
+      },
+      "predicate_source": "scheduleIterAlg == 1",
+      "referenced_symbols": [
+        "scheduleIterAlg"
+      ]
+    },
+    {
+      "branch_id": "24d207463aa7b7dbc424872db6e75313529bf4d6",
+      "file": "Tensile/KernelWriterAssembly.py",
+      "function": "checkResources",
+      "branch_kind": "if",
+      "location": {
+        "line": 1902,
+        "col": 4
+      },
+      "predicate_source": "self.states.overflowedResources",
+      "referenced_symbols": [
+        "self"
+      ]
+    },
+    {
+      "branch_id": "2829358caa879be3c22e412e96e81fe8c9fd7610",
+      "file": "Tensile/KernelWriterAssembly.py",
+      "function": "macroAndSet",
+      "branch_kind": "if",
+      "location": {
+        "line": 1839,
+        "col": 4
+      },
+      "predicate_source": "not kernel[\"EnableMatrixInstruction\"]",
+      "referenced_symbols": [
+        "kernel"
+      ]
+    },
+    {
+      "branch_id": "3a433f9e15d67650bc2250f006f451f96af7633f",
+      "file": "Tensile/KernelWriter.py",
+      "function": "_loopBody",
+      "branch_kind": "if",
+      "location": {
+        "line": 4072,
+        "col": 10
+      },
+      "predicate_source": "kernel[\"HalfPLRA\"]",
+      "referenced_symbols": [
+        "kernel"
+      ]
+    },
+    {
+      "branch_id": "3f01b4a2dfe0491afbd472d98feb9213944f7ddb",
+      "file": "Tensile/KernelWriter.py",
+      "function": "multiple_b32",
+      "branch_kind": "if",
+      "location": {
+        "line": 9867,
+        "col": 8
+      },
+      "predicate_source": "self.enableAsserts",
+      "referenced_symbols": [
+        "self"
+      ]
+    },
+    {
+      "branch_id": "4108a06779b564c9652562b2d8b1fd277e5ad963",
+      "file": "Tensile/KernelWriter.py",
+      "function": "_loopBody",
+      "branch_kind": "if",
+      "location": {
+        "line": 4145,
+        "col": 8
+      },
+      "predicate_source": "doReadB",
+      "referenced_symbols": [
+        "doReadB"
+      ]
+    },
+    {
+      "branch_id": "4480256b782f32e867dd3bf96665dc8ae5b6a883",
+      "file": "Tensile/KernelWriterAssembly.py",
+      "function": "calculateLoopNumIter",
+      "branch_kind": "if",
+      "location": {
+        "line": 7089,
+        "col": 4
+      },
+      "predicate_source": "tailLoop",
+      "referenced_symbols": [
+        "tailLoop"
+      ]
+    },
+    {
+      "branch_id": "462514797d3e1591ba82ea84a51eda8e5ec867fc",
+      "file": "Tensile/KernelWriter.py",
+      "function": "_loopBody",
+      "branch_kind": "if",
+      "location": {
+        "line": 4065,
+        "col": 8
+      },
+      "predicate_source": "doReadA",
+      "referenced_symbols": [
+        "doReadA"
+      ]
+    },
+    {
+      "branch_id": "4944b8f577187e45cae6f9454baa75d19009c23d",
+      "file": "Tensile/KernelWriter.py",
+      "function": "setupNewTile",
+      "branch_kind": "if",
+      "location": {
+        "line": 2611,
+        "col": 4
+      },
+      "predicate_source": "not kernel[\"UseSubtileImpl\"]",
+      "referenced_symbols": [
+        "kernel"
+      ]
+    },
+    {
+      "branch_id": "6c1a009494a8fc7621b802253026a798f5e94f76",
+      "file": "Tensile/KernelWriter.py",
+      "function": "_loopBody",
+      "branch_kind": "if",
+      "location": {
+        "line": 4152,
+        "col": 10
+      },
+      "predicate_source": "kernel[\"HalfPLRB\"]",
+      "referenced_symbols": [
+        "kernel"
+      ]
+    },
+    {
+      "branch_id": "7b6b7c5fa8d48c75aa699041eed7a307cb3b9947",
+      "file": "Tensile/KernelWriter.py",
+      "function": "_makeSubIterSchedule",
+      "branch_kind": "if",
+      "location": {
+        "line": 882,
+        "col": 4
+      },
+      "predicate_source": "scheduleIterAlg == 0",
+      "referenced_symbols": [
+        "scheduleIterAlg"
+      ]
+    },
+    {
+      "branch_id": "82034243636ff093cba429f81384b737464cc0c9",
+      "file": "Tensile/KernelWriterAssembly.py",
+      "function": "calculateLoopNumIter",
+      "branch_kind": "if",
+      "location": {
+        "line": 7094,
+        "col": 8
+      },
+      "predicate_source": "kernel[\"SuppressNoLoadLoop\"]",
+      "referenced_symbols": [
+        "kernel"
+      ]
+    },
+    {
+      "branch_id": "8e5e952554311fd1ed0f31ac8dc00295e8616cbe",
+      "file": "Tensile/KernelWriterAssembly.py",
+      "function": "defineAndResources",
+      "branch_kind": "if",
+      "location": {
+        "line": 2266,
+        "col": 6
+      },
+      "predicate_source": "self.states.numSgprPreload > 0",
+      "referenced_symbols": [
+        "self"
+      ]
+    },
+    {
+      "branch_id": "aa1d28b3a0100f8f5ed22327c7a3d75e3d537e37",
+      "file": "Tensile/KernelWriter.py",
+      "function": "_makeSubIterSchedule",
+      "branch_kind": "if",
+      "location": {
+        "line": 884,
+        "col": 6
+      },
+      "predicate_source": "kernel[\"HalfPLR\"]",
+      "referenced_symbols": [
+        "kernel"
+      ]
+    },
+    {
+      "branch_id": "aabf0d22ae0a02d4ae31ab4f43e838b29f28f582",
+      "file": "Tensile/KernelWriterAssembly.py",
+      "function": "writeBiasToGlobal",
+      "branch_kind": "if",
+      "location": {
+        "line": 16798,
+        "col": 4
+      },
+      "predicate_source": "kernel[\"EdgeType\"] == \"ShiftPtr\" and enableEdge",
+      "referenced_symbols": [
+        "enableEdge",
+        "kernel"
+      ]
+    },
+    {
+      "branch_id": "c8562779274f6936fbe265f93ad5caa9f4aa44da",
+      "file": "Tensile/KernelWriterAssembly.py",
+      "function": "directToLdsM0Update",
+      "branch_kind": "if",
+      "location": {
+        "line": 10892,
+        "col": 4
+      },
+      "predicate_source": "kernel[\"DirectToLds%s\"%tc]",
+      "referenced_symbols": [
+        "kernel",
+        "tc"
+      ]
+    },
+    {
+      "branch_id": "dc455979d10c6c2d59089c0b3a32c06fadb67ab9",
+      "file": "Tensile/KernelWriterAssembly.py",
+      "function": "defineAndResources",
+      "branch_kind": "if",
+      "location": {
+        "line": 2267,
+        "col": 8
+      },
+      "predicate_source": "self.states.archCaps[\"SgprPreloadPad\"]",
+      "referenced_symbols": [
+        "self"
+      ]
+    },
+    {
+      "branch_id": "e85e407ea3082d913528ced06c6d634c43e5ef22",
+      "file": "Tensile/KernelWriterAssembly.py",
+      "function": "closeLoop",
+      "branch_kind": "if",
+      "location": {
+        "line": 7475,
+        "col": 4
+      },
+      "predicate_source": "tailLoop",
+      "referenced_symbols": [
+        "tailLoop"
+      ]
+    },
+    {
+      "branch_id": "f6884744123d833fb9c2adb4d3d9b29f52dfa5b0",
+      "file": "Tensile/KernelWriterAssembly.py",
+      "function": "defineAndResources",
+      "branch_kind": "if",
+      "location": {
+        "line": 2182,
+        "col": 4
+      },
+      "predicate_source": "self.do[\"PreLoop\"]",
+      "referenced_symbols": [
+        "self"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "branch_id": "0902ebf1cd3edc0bc1aac9c97f8dfd41cba0c700",
+      "predicate_source": "self.states.groOffsetInMacroTile",
+      "public_inputs": [
+        {
+          "name": "BufferLoad",
+          "kind": "yaml",
+          "note": "YAML solution parameter bool default True. GlobalParameters.py line 454. groOffsetInMacroTile=1 when BufferLoad True and len(PackedC0IndicesX)==1 and len(PackedC1IndicesX)==1. KernelWriter._initKernel line 6631."
+        },
+        {
+          "name": "TransposeA",
+          "kind": "yaml",
+          "note": "YAML ProblemType key bool default False. Controls IndexAssignmentsA in Problem.initGEMM. Feeds IndicesFree then PackedC0/C1IndicesX length."
+        },
+        {
+          "name": "TransposeB",
+          "kind": "yaml",
+          "note": "YAML ProblemType key bool default True. Controls IndexAssignmentsB in Problem.initGEMM. Same indirect path as TransposeA."
+        },
+        {
+          "name": "Batched",
+          "kind": "yaml",
+          "note": "YAML ProblemType key bool default False. Adds batch dim to IndexAssignments and sets NumIndicesC=3 (else 2)."
+        },
+        {
+          "name": "IndexAssignmentsA",
+          "kind": "yaml",
+          "note": "YAML ProblemType key list-of-int. For standard GEMM derived from TransposeA+Batched. For TensorContraction set directly. Feeds IndicesFree and PackedC0IndicesX length."
+        },
+        {
+          "name": "IndexAssignmentsB",
+          "kind": "yaml",
+          "note": "YAML ProblemType key list-of-int. For standard GEMM derived from TransposeB+Batched. For TensorContraction set directly. Feeds IndicesFree and PackedC1IndicesX length."
+        },
+        {
+          "name": "NumIndicesC",
+          "kind": "yaml",
+          "note": "YAML ProblemType key int. For GEMM auto-derived from Batched (2 or 3). Bounds free-index scan in Problem.assignDerivedParameters lines 1100-1107."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "1c0151825aa4bb9615fe3d3ae10051f09c990486",
+      "predicate_source": "scheduleIterAlg == 1",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "24d207463aa7b7dbc424872db6e75313529bf4d6",
+      "predicate_source": "self.states.overflowedResources",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "2829358caa879be3c22e412e96e81fe8c9fd7610",
+      "predicate_source": "not kernel[\"EnableMatrixInstruction\"]",
+      "public_inputs": [
+        {
+          "name": "EnableMatrixInstruction",
+          "kind": "yaml",
+          "note": "YAML solution parameter (bool: True/False). Defined in ValidParameters.py:1054 as newMIValidParameters key. PRIMARY path: explicit key in solution YAML config, stored via Solution.__init__ config->state assignment (Solution.py:509-511). IMPLICIT path (legacy YAML without the key): derived in assignProblemIndependentDerivedParameters (Solution.py:613-623) as True when MIBlock (6-elem) + MIWaveGroup (2-elem) + MIWaveTile (2-elem) are present, or False when WorkGroup (3-elem) + ThreadTile (2-elem) are present; otherwise the solution is rejected. No os.environ, filesystem, or hardware probes affect this key."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "3a433f9e15d67650bc2250f006f451f96af7633f",
+      "predicate_source": "kernel[\"HalfPLRA\"]",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "3f01b4a2dfe0491afbd472d98feb9213944f7ddb",
+      "predicate_source": "self.enableAsserts",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "4108a06779b564c9652562b2d8b1fd277e5ad963",
+      "predicate_source": "doReadB",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "4480256b782f32e867dd3bf96665dc8ae5b6a883",
+      "predicate_source": "tailLoop",
+      "public_inputs": [
+        {
+          "name": "AssertSummationElementMultiple",
+          "kind": "yaml",
+          "note": "YAML solution parameter int. Valid values: {1,2,4,8,16,32,64,128}. ValidParameters.py line 489. Controls NoTailLoop via: NoTailLoop = (AssertSummationElementMultiple % DepthU == 0). When NoTailLoop is True, the tail-loop code path (loopIdx=-1) is skipped entirely."
+        },
+        {
+          "name": "DepthU",
+          "kind": "yaml",
+          "note": "YAML solution parameter int. Valid range: -1 and 2..1024. ValidParameters.py line 862. Controls NoTailLoop via: NoTailLoop = (AssertSummationElementMultiple % DepthU == 0). Also used in TailloopInNll eligibility checks (Solution.py 3861)."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "462514797d3e1591ba82ea84a51eda8e5ec867fc",
+      "predicate_source": "doReadA",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "4944b8f577187e45cae6f9454baa75d19009c23d",
+      "predicate_source": "not kernel[\"UseSubtileImpl\"]",
+      "public_inputs": [
+        {
+          "name": "UseSubtileImpl",
+          "kind": "yaml"
+        },
+        {
+          "name": "ISA (yaml GlobalParameters.ISA)",
+          "kind": "yaml"
+        },
+        {
+          "name": "ISA (--gpu-targets arg)",
+          "kind": "cli"
+        },
+        {
+          "name": "ISA (amdgpu-arch detection)",
+          "kind": "gpu-probe"
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "6c1a009494a8fc7621b802253026a798f5e94f76",
+      "predicate_source": "kernel[\"HalfPLRB\"]",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "7b6b7c5fa8d48c75aa699041eed7a307cb3b9947",
+      "predicate_source": "scheduleIterAlg == 0",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "82034243636ff093cba429f81384b737464cc0c9",
+      "predicate_source": "kernel[\"SuppressNoLoadLoop\"]",
+      "public_inputs": [
+        {
+          "name": "SuppressNoLoadLoop",
+          "kind": "yaml",
+          "note": "YAML solution parameter (bool: False/True). Declared in GlobalParameters.py:445 with default False. Valid values: [False, True] (ValidParameters.py:323). PRIMARY input for the predicate when HalfPLR==0 and TailloopInNll is not effective. Subject to suppression: if True but NOT(bufferLoad AND PGR==1 AND (GSU==1 OR GSU==-1)) then forced back to False (Solution.py:1845-1847)."
+        },
+        {
+          "name": "HalfPLR",
+          "kind": "yaml",
+          "note": "YAML solution parameter (int: 0/1/2/3). Declared in GlobalParameters.py with default 0. Valid values: [0, 1, 2, 3] (ValidParameters.py). When HalfPLR != 0, Solution.assignDerivedParameters line 2283 unconditionally sets state[\"SuppressNoLoadLoop\"] = True, overriding yaml_SuppressNoLoadLoop. This is the dominant path to True."
+        },
+        {
+          "name": "TailloopInNll",
+          "kind": "yaml",
+          "note": "YAML solution parameter (bool: False/True). Declared in GlobalParameters.py with default False. When TailloopInNll == True AND it survives its own validity constraint checks (Solution.py:3858-3864), Solution.assignDerivedParameters line 3869 unconditionally sets state[\"SuppressNoLoadLoop\"] = False, overriding all prior values."
+        },
+        {
+          "name": "BufferLoad",
+          "kind": "yaml",
+          "note": "YAML solution parameter (bool: True/False). Declared in GlobalParameters.py with default True. Used at Solution.py:1828 in bufferLoad = state[\"BufferLoad\"] AND state[\"KernelLanguage\"]==\"Assembly\". If bufferLoad is False, SuppressNoLoadLoop is forced False via validity check at line 1846."
+        },
+        {
+          "name": "KernelLanguage",
+          "kind": "yaml",
+          "note": "YAML solution parameter (str). Declared in GlobalParameters.py with default \"Assembly\". Used in bufferLoad computation at Solution.py:1828. If KernelLanguage != \"Assembly\", bufferLoad=False, which forces SuppressNoLoadLoop to False."
+        },
+        {
+          "name": "PrefetchGlobalRead",
+          "kind": "yaml",
+          "note": "YAML solution parameter (int). Declared in GlobalParameters.py with default 1. Used at Solution.py:1846 in the validity gate: SuppressNoLoadLoop is forced False unless PGR==1."
+        },
+        {
+          "name": "GlobalSplitU",
+          "kind": "yaml",
+          "note": "YAML solution parameter (int). Declared in GlobalParameters.py with default 1. Used at Solution.py:1846 in the validity gate: SuppressNoLoadLoop is forced False unless GSU==1 or GSU==-1."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "8e5e952554311fd1ed0f31ac8dc00295e8616cbe",
+      "predicate_source": "self.states.numSgprPreload > 0",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "aa1d28b3a0100f8f5ed22327c7a3d75e3d537e37",
+      "predicate_source": "kernel[\"HalfPLR\"]",
+      "public_inputs": [
+        {
+          "name": "HalfPLR",
+          "kind": "yaml",
+          "note": "YAML solution benchmark parameter. Valid values: [0,1,2,3] (ValidParameters.py:1048). Default: 0 (GlobalParameters.py:560). Integer flag: bit0 enables HalfPLR for A, bit1 for B. Read directly as kernel[HalfPLR] with no further transformation inside _makeSubIterSchedule. Validated and stored in Solution._state via assignParameterWithDefault (Solution.py:484)."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "aabf0d22ae0a02d4ae31ab4f43e838b29f28f582",
+      "predicate_source": "kernel[\"EdgeType\"] == \"ShiftPtr\" and enableEdge",
+      "public_inputs": [
+        {
+          "name": "TDMInst",
+          "kind": "yaml",
+          "note": "YAML solution param. enableTDMA=bool(TDMInst&1), enableTDMB=bool(TDMInst&2). When both True, EdgeType forced to None (Solution.py:4994-4995)."
+        },
+        {
+          "name": "BufferLoad",
+          "kind": "yaml",
+          "note": "YAML solution param (ValidParameters.py:388). Used in enableEdge computation."
+        },
+        {
+          "name": "AssertFree0ElementMultiple",
+          "kind": "yaml",
+          "note": "YAML solution param (ValidParameters.py:507). Feeds GuaranteeNoPartialA when TLUA=True."
+        },
+        {
+          "name": "GlobalReadVectorWidthA",
+          "kind": "yaml",
+          "note": "YAML solution param (ValidParameters.py:808). GuaranteeNoPartialA = AF0EM % GRVWA == 0 when TLUA."
+        },
+        {
+          "name": "AssertFree1ElementMultiple",
+          "kind": "yaml",
+          "note": "YAML solution param (ValidParameters.py:515). Feeds GuaranteeNoPartialB when TLUB=True."
+        },
+        {
+          "name": "GlobalReadVectorWidthB",
+          "kind": "yaml",
+          "note": "YAML solution param (ValidParameters.py:809). GuaranteeNoPartialB = AF1EM % GRVWB == 0 when TLUB."
+        },
+        {
+          "name": "ProblemType.BiasSrc",
+          "kind": "yaml",
+          "note": "YAML problem param (Problem.py:427). Default D. enableEdge=True only when BiasSrc in {A,B} with partial load possible."
+        },
+        {
+          "name": "ProblemType.TLUA",
+          "kind": "derived-local",
+          "note": "Derived from index layout (Problem.py:1200): strideIdxA < unrollIdxA. Governs which AF*EM drives GuaranteeNoPartialA."
+        },
+        {
+          "name": "ProblemType.TLUB",
+          "kind": "derived-local",
+          "note": "Derived from index layout (Problem.py:1203): strideIdxB < unrollIdxB. Governs which AF*EM drives GuaranteeNoPartialB."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "c8562779274f6936fbe265f93ad5caa9f4aa44da",
+      "predicate_source": "kernel[\"DirectToLds%s\"%tc]",
+      "public_inputs": [
+        {
+          "name": "DirectToLds",
+          "kind": "yaml",
+          "note": "YAML/MsgPack solution parameter. Integer 0-3: 0=no DTL, 1=both A+B, 2=A only, 3=B only. Default 0 (GlobalParameters.py:461). Drives kernel[DirectToLdsA]=(DirectToLds==1 or DirectToLds==2) and kernel[DirectToLdsB]=(DirectToLds==1 or DirectToLds==3) via Solution.py:722-723."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "dc455979d10c6c2d59089c0b3a32c06fadb67ab9",
+      "predicate_source": "self.states.archCaps[\"SgprPreloadPad\"]",
+      "public_inputs": [
+        {
+          "name": "kernel[ISA]",
+          "kind": "yaml",
+          "description": "ISA triple (major, minor, patch) from solution YAML logic file key ISA. In TensileCreateLibrary path: parsed from YAML; in Tensile benchmarking path: comes from --gpu-targets CLI arg or GPU detection."
+        },
+        {
+          "name": "--architecture",
+          "kind": "cli",
+          "description": "TensileCreateLibrary --architecture flag (dest=Architecture). Semicolon/underscore-separated gfx arch list. Converted to IsaVersion via gfxToIsa(). Primary public input when building a library (not benchmarking)."
+        },
+        {
+          "name": "kernel[PreloadKernArgs]",
+          "kind": "yaml",
+          "description": "Boolean solution parameter from YAML logic file. Default True. Controls outer gate numSgprPreload > 0. May be forced False by rocmVersion check or ISA constraint in Solution.assignDerivedParameters."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "e85e407ea3082d913528ced06c6d634c43e5ef22",
+      "predicate_source": "tailLoop",
+      "public_inputs": [
+        {
+          "name": "AssertSummationElementMultiple",
+          "kind": "yaml",
+          "note": "YAML solution parameter (int, default 1). GlobalParameters.py:466. Participates in NoTailLoop gate: Solution.py:3846 sets NoTailLoop=True when AssertSummationElementMultiple%DepthU==0, suppressing the tail-loop code path. When NoTailLoop=False, KernelBody emits closeLoop(loopIdx=-1) calls, making tailLoop=True at line 7475."
+        },
+        {
+          "name": "DepthU",
+          "kind": "yaml",
+          "note": "YAML solution parameter (int, default -1 = auto-derived). GlobalParameters.py:491. Auto-resolved to 2*MatrixInstK*LocalSplitU when -1 (Solution.py:831-832). Participates in NoTailLoop gate (Solution.py:3846: AssertSummationElementMultiple%DepthU==0). Larger DepthU makes NoTailLoop=True more likely, suppressing the tailLoop=True branch."
+        },
+        {
+          "name": "TailloopInNll",
+          "kind": "yaml",
+          "note": "YAML solution parameter (bool, default False). GlobalParameters.py:535. When True (and not disabled by Solution.py:3858-3864 checks), KernelWriter.py:3532 calls closeLoop(loopIdx=-2), the tailloopInNll path, which also satisfies loopIdx<0 => tailLoop=True at line 7475."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "f6884744123d833fb9c2adb4d3d9b29f52dfa5b0",
+      "predicate_source": "self.do[\"PreLoop\"]",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    }
+  ],
+  "note": "edges with edge_source=census-defuse were reconstructed deterministically from the extractor's intra-function def-use because the Slice agent did not persist a fragment for that branch."
+}

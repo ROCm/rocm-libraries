@@ -1,0 +1,59 @@
+{
+  "branch_id": "1c0151825aa4bb9615fe3d3ae10051f09c990486",
+  "phase": "Solve",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Solve/1c0151825aa4bb9615fe3d3ae10051f09c990486.json",
+  "source_location": {
+    "file": "Tensile/KernelWriter.py",
+    "line": 951,
+    "col": 4,
+    "enclosing_function": "_makeSubIterSchedule",
+    "branch_kind": "elif"
+  },
+  "predicate": "scheduleIterAlg == 1",
+  "semantics": "Selects schedule-iteration algorithm #1 (the 'do half the local reads first' simple scheduler) inside _makeSubIterSchedule. The function-local `scheduleIterAlg` is seeded from self.states.scheduleIterAlg (== kernel[\"_ScheduleIterAlg\"], the remap of the ScheduleIterAlg enum; value 4 -> 0) at line 877, then FORCED to 0 when (NLLlast and tailloopInNll) at lines 878-880. The elif at 951 fires iff the resulting value == 1. self.states.scheduleIterAlg itself is 0 unless KernelLanguage selects the Assembly path (lines 6243 vs 6247).",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "solver-backed-under-assumptions",
+  "domains": {
+    "scheduleIterAlg": {"type": "enum", "values": [0, 1, 2, 3], "note": "function-local int derived from kernel[\"_ScheduleIterAlg\"]; ScheduleIterAlg YAML/CLI enum is [0,1,2,3,4] with 4 remapped to 0 (Solution.py:599). Domain [0,1,2,3] covers True(1) and False(0,2,3)."},
+    "KernelLanguage": {"type": "enum", "values": ["Assembly"], "note": "ValidParameters.py:915 - only valid value. On non-Assembly path states.scheduleIterAlg is pinned 0 (line 6247), so pred would be always-False; not in scope."},
+    "NLLlast": {"type": "bool", "values": [false, true], "note": "ASSUMPTION knob: live loop/codegen state. When (NLLlast and tailloopInNll) the local value is forced to 0, making pred False regardless of the config enum."},
+    "tailloopInNll": {"type": "bool", "values": [false, true], "note": "ASSUMPTION knob: live loop/codegen state (see NLLlast)."}
+  },
+  "encoding": {
+    "method": "Integer variable scheduleIterAlg constrained to {0,1,2,3}; predicate = (scheduleIterAlg == 1). The runtime override is modeled in the pure_helper as eff = 0 if (nll_last and tailloop_in_nll) else schedule_iter_alg, then eff == 1.",
+    "op_surface": ["compare(==)", "boolean(and)", "conditional(if/else)"],
+    "note": "Core branch is a single integer == comparison over a finite enum -> fully tractable in z3. The NLLlast/tailloopInNll force-to-0 override is the only non-config dependency; it is an upstream guard, not part of the 951 comparison itself."
+  },
+  "z3_model": {
+    "z3_version": "4.16.0",
+    "true_witness": {"scheduleIterAlg": 1},
+    "false_witness": {"scheduleIterAlg": 0},
+    "all_true_over_domain": [1],
+    "all_false_over_domain": [0, 2, 3],
+    "z3_agrees_with_reference_python": true,
+    "executed_in_container": true
+  },
+  "true_examples": [
+    {"scheduleIterAlg": 1, "KernelLanguage": "Assembly", "NLLlast": false, "tailloopInNll": false, "reason": "config _ScheduleIterAlg=1 and no NLL force-to-0 -> local scheduleIterAlg==1 -> elif fires (schedule alg #1)"}
+  ],
+  "false_examples": [
+    {"scheduleIterAlg": 0, "KernelLanguage": "Assembly", "NLLlast": false, "tailloopInNll": false, "reason": "_ScheduleIterAlg=0 -> handled by the if at line 882, elif skipped"},
+    {"scheduleIterAlg": 2, "KernelLanguage": "Assembly", "NLLlast": false, "tailloopInNll": false, "reason": "_ScheduleIterAlg=2 -> falls through to elif at line 998"},
+    {"scheduleIterAlg": 1, "KernelLanguage": "Assembly", "NLLlast": true, "tailloopInNll": true, "reason": "config is 1 but (NLLlast and tailloopInNll) forces local value to 0 at line 880 -> pred False (assumption-dependent)"}
+  ],
+  "pure_helper": "def schedule_iter_alg_is_one(schedule_iter_alg: int, nll_last: bool, tailloop_in_nll: bool) -> bool:\n    \"\"\"Pure model of KernelWriter.py:951 predicate `scheduleIterAlg == 1`.\n    Mirrors lines 877-880: local scheduleIterAlg seeded from kernel[\\\"_ScheduleIterAlg\\\"]\n    (enum in {0,1,2,3}) but FORCED to 0 when (NLLlast and tailloopInNll). Branch fires iff ==1.\n    pre: 0 <= schedule_iter_alg <= 3\n    post: __return__ == ((0 if (nll_last and tailloop_in_nll) else schedule_iter_alg) == 1)\n    \"\"\"\n    eff = 0 if (nll_last and tailloop_in_nll) else schedule_iter_alg\n    return eff == 1",
+  "crosshair": {
+    "ran": true,
+    "tool_version": "0.0.106",
+    "analysis_kind": "PEP316",
+    "result": "no counterexample to postcondition (exit 0)",
+    "caveat": "CrossHair: absence of a counterexample is NOT a proof of correctness."
+  },
+  "notes": [
+    "z3 4.16.0 actually executed in-container; TRUE witness scheduleIterAlg=1, FALSE witness scheduleIterAlg=0; full-domain partition {1} true / {0,2,3} false; agrees with python reference.",
+    "classification = solver-backed-under-assumptions: the 951 comparison itself is a pure finite-enum integer ==, fully solvable; but the EFFECTIVE value can be overridden to 0 by the (NLLlast and tailloopInNll) live-loop guard at 878-880, and the enum is only non-zero on the Assembly KernelLanguage path (line 6243). Witnesses are valid under the stated assumptions (Assembly path, override not firing).",
+    "Reachability: also gated by the if-chain order (if==0 at 882 handles 0; this elif only reached when scheduleIterAlg != 0).",
+    "ScheduleIterAlg config value 4 is remapped to 0 (_ScheduleIterAlg), so user value 4 makes this predicate False, same as 0."
+  ]
+}

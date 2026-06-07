@@ -1,0 +1,19 @@
+{
+  "branch_id": "0902ebf1cd3edc0bc1aac9c97f8dfd41cba0c700",
+  "predicate": "self.states.groOffsetInMacroTile",
+  "site": "Tensile/KernelWriterAssembly.py:4250",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "checker",
+  "downgraded_to": null,
+  "checks": {
+    "predicate_site_real": "Line 4250 is a bare truthy test on the int field self.states.groOffsetInMacroTile; no compare/arith/bit operator. Taken branch re-asserts len(PackedC0IndicesX)==1 and len(PackedC1IndicesX)==1. Matches claim.",
+    "derivation_real": "KernelWriter.py:6631 sets groOffsetInMacroTile=1 iff len(PackedC0IndicesX)==1 and len(PackedC1IndicesX)==1 and BufferLoad, else 0. Exactly matches claimed pure_helper.",
+    "true_examples_reproduced": "gro=1 -> pred True; BufferLoad=True,lenPC0=1,lenPC1=1 -> derived gro=1 -> pred True. Both match.",
+    "false_examples_reproduced": "gro=0 -> pred False; BufferLoad=True,lenPC0=2,lenPC1=2 -> derived gro=0 -> False; BufferLoad=False,lenPC0=1,lenPC1=1 -> derived gro=0 -> False. All match.",
+    "contract_grid_check": "Real derivation over c0,c1 in 0..4 x bl in {F,T} matches (c0==1 and c1==1 and bl) at every point.",
+    "z3_reproduced": "z3 4.16.0 in-container: encoder boundary P_true sat@gro=1, P_false sat@gro=0; public surface true sat, false_packed sat, false_noBufferLoad sat."
+  },
+  "notes": "Independently re-established. Real predicate site (4250) and derivation (KernelWriter.py:6631) match the claim verbatim. All 2 true and 3 false examples reproduce against the actual derivation executed in-container (tl-char). z3 4.16.0 re-run independently confirms both polarities sat at the encoder boundary (int seeded {0,1}) and over the public-input surface. Classification solver-backed-under-assumptions kept, NOT upgraded: sat proven at encoder boundary and structural derivation confirmed against source, but public-input witnesses rest on the assumed derivation, not an end-to-end re-derivation from raw YAML. No counter-model found. confirmed=true, status=SAT, no downgrade.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/0902ebf1cd3edc0bc1aac9c97f8dfd41cba0c700.json"
+}

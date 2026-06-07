@@ -1,0 +1,114 @@
+{
+  "id": "aabf0d22ae0a02d4ae31ab4f43e838b29f28f582",
+  "branch_id": "aabf0d22ae0a02d4ae31ab4f43e838b29f28f582",
+  "file": "Tensile/KernelWriterAssembly.py",
+  "function": "writeBiasToGlobal",
+  "branch_kind": "if",
+  "location": {
+    "line": 16798,
+    "col": 4
+  },
+  "predicate_source": "kernel[\"EdgeType\"] == \"ShiftPtr\" and enableEdge",
+  "predicate_normalized": {
+    "op": "and",
+    "args": [
+      {
+        "op": "compare",
+        "ops": [
+          "Eq"
+        ],
+        "left": {
+          "subscript": {
+            "var": "kernel"
+          },
+          "key": {
+            "const": "EdgeType"
+          }
+        },
+        "comparators": [
+          {
+            "const": "ShiftPtr"
+          }
+        ]
+      },
+      {
+        "var": "enableEdge"
+      }
+    ]
+  },
+  "referenced_symbols": [
+    "enableEdge",
+    "kernel"
+  ],
+  "public_inputs": [
+    {
+      "name": "TDMInst",
+      "kind": "yaml",
+      "note": "YAML solution param. enableTDMA=bool(TDMInst&1), enableTDMB=bool(TDMInst&2). When both True, EdgeType forced to None (Solution.py:4994-4995)."
+    },
+    {
+      "name": "BufferLoad",
+      "kind": "yaml",
+      "note": "YAML solution param (ValidParameters.py:388). Used in enableEdge computation."
+    },
+    {
+      "name": "AssertFree0ElementMultiple",
+      "kind": "yaml",
+      "note": "YAML solution param (ValidParameters.py:507). Feeds GuaranteeNoPartialA when TLUA=True."
+    },
+    {
+      "name": "GlobalReadVectorWidthA",
+      "kind": "yaml",
+      "note": "YAML solution param (ValidParameters.py:808). GuaranteeNoPartialA = AF0EM % GRVWA == 0 when TLUA."
+    },
+    {
+      "name": "AssertFree1ElementMultiple",
+      "kind": "yaml",
+      "note": "YAML solution param (ValidParameters.py:515). Feeds GuaranteeNoPartialB when TLUB=True."
+    },
+    {
+      "name": "GlobalReadVectorWidthB",
+      "kind": "yaml",
+      "note": "YAML solution param (ValidParameters.py:809). GuaranteeNoPartialB = AF1EM % GRVWB == 0 when TLUB."
+    },
+    {
+      "name": "ProblemType.BiasSrc",
+      "kind": "yaml",
+      "note": "YAML problem param (Problem.py:427). Default D. enableEdge=True only when BiasSrc in {A,B} with partial load possible."
+    },
+    {
+      "name": "ProblemType.TLUA",
+      "kind": "derived-local",
+      "note": "Derived from index layout (Problem.py:1200): strideIdxA < unrollIdxA. Governs which AF*EM drives GuaranteeNoPartialA."
+    },
+    {
+      "name": "ProblemType.TLUB",
+      "kind": "derived-local",
+      "note": "Derived from index layout (Problem.py:1203): strideIdxB < unrollIdxB. Governs which AF*EM drives GuaranteeNoPartialB."
+    }
+  ],
+  "derived_symbols": [
+    {
+      "name": "enableEdge",
+      "derived_from": "BufferLoad, GuaranteeNoPartialA, GuaranteeNoPartialB, ProblemType.BiasSrc",
+      "derivation": "Local bool init False (line 16790). True if (not (BufferLoad and GNpA) and BiasSrc==A) or (not (BufferLoad and GNpB) and BiasSrc==B). Lines 16794-16797."
+    },
+    {
+      "name": "kernel[EdgeType]",
+      "derived_from": "TDMInst",
+      "derivation": "Default ShiftPtr (Solution.py:4993). Overridden to None when enableTDMA and enableTDMB (Solution.py:4994-4995)."
+    },
+    {
+      "name": "kernel[GuaranteeNoPartialA]",
+      "derived_from": "ProblemType.TLUA, AssertFree0ElementMultiple, GlobalReadVectorWidthA",
+      "derivation": "Solution.py:4570-4573: True if not TLUA, else AF0EM%GRVWA==0."
+    },
+    {
+      "name": "kernel[GuaranteeNoPartialB]",
+      "derived_from": "ProblemType.TLUB, AssertFree1ElementMultiple, GlobalReadVectorWidthB",
+      "derivation": "Solution.py:4575-4578: True if not TLUB, else AF1EM%GRVWB==0."
+    }
+  ],
+  "external_state": [],
+  "phase": "Slice"
+}

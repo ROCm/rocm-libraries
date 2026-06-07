@@ -1,0 +1,16 @@
+{
+  "id": "e85e407ea3082d913528ced06c6d634c43e5ef22",
+  "file": "Tensile/KernelWriterAssembly.py",
+  "function": "closeLoop",
+  "branch_kind": "if",
+  "location": {
+    "line": 7475,
+    "col": 4
+  },
+  "predicate_source": "tailLoop",
+  "referenced_symbols": [
+    "tailLoop"
+  ],
+  "derived_symbols": [],
+  "rank": 19
+}

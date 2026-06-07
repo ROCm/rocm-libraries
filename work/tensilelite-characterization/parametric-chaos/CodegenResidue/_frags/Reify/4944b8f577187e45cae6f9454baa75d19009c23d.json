@@ -1,0 +1,24 @@
+{
+  "branch_id": "4944b8f577187e45cae6f9454baa75d19009c23d",
+  "site": "Tensile/KernelWriter.py:2611",
+  "predicate_source": "not kernel[\"UseSubtileImpl\"]",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/CodegenResidue/test_pchaos_KernelWriter_L2611_char.py"
+  ],
+  "test_basename": "test_pchaos_KernelWriter_L2611_char.py",
+  "passed": true,
+  "pytest_result": "9 passed in 0.27s",
+  "tests": [
+    "test_subtile_branch_not_taken_true_raw_false_gfx950",
+    "test_subtile_branch_not_taken_true_raw_false_non_gfx950",
+    "test_subtile_branch_not_taken_true_raw_true_non_gfx950",
+    "test_subtile_branch_not_taken_false_raw_true_gfx950",
+    "test_subtile_branch_not_taken_truth_table[False-True-True]",
+    "test_subtile_branch_not_taken_truth_table[False-False-True]",
+    "test_subtile_branch_not_taken_truth_table[True-True-False]",
+    "test_subtile_branch_not_taken_truth_table[True-False-True]",
+    "test_solution_usesubtileimpl_derivation_ast"
+  ],
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Reify/4944b8f577187e45cae6f9454baa75d19009c23d.json"
+}

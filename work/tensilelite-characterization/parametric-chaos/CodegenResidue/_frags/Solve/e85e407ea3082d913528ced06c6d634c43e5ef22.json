@@ -1,0 +1,39 @@
+{
+  "id": "e85e407ea3082d913528ced06c6d634c43e5ef22",
+  "branch_id": "e85e407ea3082d913528ced06c6d634c43e5ef22",
+  "phase": "Solve",
+  "file": "Tensile/KernelWriterAssembly.py",
+  "function": "closeLoop",
+  "location": {"line": 7475, "col": 4},
+  "branch_kind": "if",
+  "predicate_source": "tailLoop",
+  "predicate_z3": "loopIdx < 0  (tailLoop = loopIdx < 0)",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "fully-static",
+  "domains_used": {
+    "loopIdx": {"type": "int", "values": [-2, -1, 0, 1]}
+  },
+  "true_examples": [
+    {"loopIdx": -2, "tailLoop": true, "note": "z3 model. loopIdx=-2 is the tailloopInNll call site (KernelWriter.py:3532), reached when kernel[TailloopInNll]=True. tailLoop = (-2 < 0) = True -> branch at line 7475 taken."},
+    {"loopIdx": -1, "tailLoop": true, "note": "tail-loop call site (KernelWriter.py:5818/5820/5856), reached when kernel[NoTailLoop]=False (AssertSummationElementMultiple % DepthU != 0). tailLoop = (-1 < 0) = True."}
+  ],
+  "false_examples": [
+    {"loopIdx": 0, "tailLoop": false, "note": "z3 model. loopIdx=self.states.unrollIdx (>=0), the normal unroll close. tailLoop = (0 < 0) = False -> branch at line 7475 NOT taken."},
+    {"loopIdx": 1, "tailLoop": false, "note": "unrollIdx>0 for multi-summation problems. tailLoop = (1 < 0) = False."}
+  ],
+  "pure_helper": "def tail_loop_taken(loopIdx: int) -> bool:\n    \"\"\"Predicate at KernelWriterAssembly.py:7475 (closeLoop): tailLoop = (loopIdx < 0).\n\n    post: __return__ == (loopIdx < 0)\n    \"\"\"\n    tailLoop = loopIdx < 0\n    return tailLoop\n\n\ndef loopidx_to_tail(no_tail_loop: bool, tailloop_in_nll: bool, is_normal_unroll_close: bool) -> bool:\n    \"\"\"Composition: YAML gates -> call-site loopIdx -> tailLoop branch.\n\n    post: __return__ == ((not is_normal_unroll_close) and (tailloop_in_nll or (not no_tail_loop)))\n    \"\"\"\n    if is_normal_unroll_close:\n        loopIdx = 0\n    elif tailloop_in_nll:\n        loopIdx = -2\n    elif not no_tail_loop:\n        loopIdx = -1\n    else:\n        loopIdx = 0\n    return loopIdx < 0\n",
+  "crosshair": {
+    "tool": "crosshair 0.0.106",
+    "analysis_kind": "PEP316",
+    "result": "no counterexample (exit 0, empty output) within timeout 120s for both postconditions",
+    "caveat": "Absence of a counterexample is NOT a proof of correctness; it corroborates the z3 result but does not exhaustively verify."
+  },
+  "z3_run": {
+    "true_model": {"loopIdx": -2},
+    "false_model": {"loopIdx": 0},
+    "raw": "{\"true\": [\"sat\", -2], \"false\": [\"sat\", 0]}"
+  },
+  "notes": "Predicate at line 7475 is a pure integer comparison: tailLoop = (loopIdx < 0). loopIdx is ALWAYS a call-site integer literal (or self.states.unrollIdx >= 0), never derived from kernel[] inside closeLoop. Every value <0 is True, every >=0 is False (z3: sat for both polarities). The seeded YAML keys (AssertSummationElementMultiple, DepthU, TailloopInNll) and derived kernel[NoTailLoop] do not enter this expression directly; they gate which call site is reached (loopIdx=-2 via KernelWriter.py:3532 under TailloopInNll; loopIdx=-1 via :5818/5820/5856 under 'if not kernel[NoTailLoop]') one level up. No isinstance/nodeType dispatch, no os/filesystem/gpu probes. Classification fully-static. solver_status=sat: models exist for both True (loopIdx=-2) and False (loopIdx=0).",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Solve/e85e407ea3082d913528ced06c6d634c43e5ef22.json"
+}

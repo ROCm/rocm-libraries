@@ -1,0 +1,70 @@
+{
+  "id": "24d207463aa7b7dbc424872db6e75313529bf4d6",
+  "branch_id": "24d207463aa7b7dbc424872db6e75313529bf4d6",
+  "phase": "Solve",
+  "file": "Tensile/KernelWriterAssembly.py",
+  "function": "checkResources",
+  "location": {
+    "line": 1902,
+    "col": 4
+  },
+  "branch_kind": "if",
+  "predicate_source": "self.states.overflowedResources",
+  "predicate_semantics": "Truthiness test on an int field. self.states.overflowedResources is a StateValues dataclass field (KernelWriter.py:183), typed int and initialized to 0. The branch `if self.states.overflowedResources:` is taken iff the field holds a nonzero value. Within checkResources and upstream code it is assigned a resource-overflow CODE in {1..8} by 8 independent write-paths (see slice write_paths): code 1 = vgprPool.size() > regCaps[MaxVgpr]; code 2 = sgprPool.size() > regCaps[MaxSgpr] or allocTmpSgpr overflow listener; code 3 = half/bf16 single-element store; code 4 = numWorkGroupsPerExecUnit < 1; code 5 = ClusterLocalRead/oneBuffer scheduling conflict; code 6 = _ScheduleIterAlg==2 and CUOccupancy<2; code 7 = invalidLSUCode (empty LSU acc-VGPR range); code 8 = LdsNumBytes > archCaps[DeviceLDS]. The PREDICATE OPERATOR itself (int truthiness) is trivially solver-tractable; what DRIVES the field value is the aggregate of register-pool sizes and occupancy figures computed during full kernel generation plus rocisa per-ISA caps -- none expressible as a direct CLI/YAML input at this site.",
+  "domains": {
+    "self.states.overflowedResources": {
+      "type": "int",
+      "min": 0,
+      "max": 8,
+      "values": [
+        0,
+        1
+      ]
+    }
+  },
+  "solver": "z3",
+  "solver_status": "sat-bounded",
+  "z3_encoding": {
+    "vars": {
+      "overflowedResources": "Int in [0,8]"
+    },
+    "domain": "And(overflowedResources >= 0, overflowedResources <= 8)",
+    "predicate": "overflowedResources != 0",
+    "predicate_note": "Python truthiness of an int n is (n != 0). The seeded domain is the int range [0,8] (representative values {0,1}); the SAT result is bounded to that integer range, hence solver_status=sat-bounded."
+  },
+  "z3_model_output": {
+    "z3_version": "4.16.0",
+    "true_check": "sat",
+    "true_model": "[overflowedResources = 1]",
+    "false_check": "sat",
+    "false_model": "[overflowedResources = 0]",
+    "validation": "Both Z3 models re-evaluated through Python int truthiness bool(n): TRUE model bool(1)=True, FALSE model bool(0)=False (exact match). z3 4.16.0 run in-container tl-char, real model output."
+  },
+  "true_examples": [
+    {
+      "self.states.overflowedResources": 1,
+      "why": "Field = 1 (code=1: vgprPool.size() > regCaps['MaxVgpr']). Nonzero -> truthy -> branch taken. Z3 model. Representative of any nonzero code 1..8."
+    },
+    {
+      "self.states.overflowedResources": 8,
+      "why": "Field = 8 (code=8: kernel['LdsNumBytes'] > archCaps['DeviceLDS']). Any nonzero overflow code makes the predicate True; this is the upper bound of the seeded domain. By-value witness (set by an upstream LDS-capacity write-path, not directly solvable at this site)."
+    }
+  ],
+  "false_examples": [
+    {
+      "self.states.overflowedResources": 0,
+      "why": "Field = 0 (initial value; no overflow path fired: every register pool fits, occupancy OK, no LSU/LDS/scheduling/dtype overflow). Falsy -> branch NOT taken. Z3 model. Dominant runtime case for a valid solution."
+    }
+  ],
+  "classification": "solver-backed-under-assumptions",
+  "pure_helper": "def overflowed_resources_branch(overflowed_resources: int) -> bool:\n    \"\"\"Pure model of KernelWriterAssembly.py:1902 branch predicate.\n\n    `if self.states.overflowedResources:` -- truthiness of an int field.\n    overflowedResources is a StateValues int (KernelWriter.py:183), init 0,\n    set to a resource-overflow code in {1..8} by any of 8 upstream write-paths.\n    The branch is taken iff the field holds a nonzero code.\n\n    pre: 0 <= overflowed_resources <= 8\n    post: __return__ == (overflowed_resources != 0)\n    \"\"\"\n    return bool(overflowed_resources)",
+  "pure_helper_file": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Solve/helper_24d20746.py",
+  "crosshair": {
+    "version": "0.0.106",
+    "target": "overflowed_resources_branch (post-condition __return__ == (n != 0) over pre 0<=n<=8)",
+    "result": "no counterexample (exit 0, per_condition_timeout=20s)",
+    "caveat": "Absence of a counterexample is NOT a proof. CrossHair confirms the post-condition holds over the seeded precondition, cross-checking the Z3 SAT witnesses. The domain is finite (9 values) so the Z3 models are the load-bearing evidence; CrossHair corroborates the pure operator only -- it says nothing about which upstream write-path actually fires at runtime."
+  },
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Solve/24d207463aa7b7dbc424872db6e75313529bf4d6.json",
+  "notes": "CLASSIFICATION RATIONALE -- solver-backed-under-assumptions (NOT fully-static, NOT purely runtime-dependent). The branch PREDICATE is a bare int-truthiness test, which Z3 solves both ways over the seeded [0,8] domain (true_val=1, false_val=0, both sat, re-validated by Python bool()). The ASSUMPTION is that the field self.states.overflowedResources independently carries one of its possible values: in reality the value is produced by 8 distinct upstream write-paths whose conditions depend on vgprPool.size()/sgprPool.size() (register high-water marks accumulated across the entire kernel-generation pass), getOccupancy() output, numWorkGroupsPerExecUnit (rocisa PhysicalMaxVgprCU + getNextFreeVgpr high-water), invalidLSUCode (LSU scheduling), and rocisa per-ISA regCaps/archCaps/asmCaps tables. Those drivers are runtime/codegen-state, not direct CLI/YAML inputs at this site, so the witnesses for the field VALUE are by-value (code=8) / solver-modeled over the seeded int (codes 0,1). The predicate operator is decidable and witnessed; the precondition on the field's value is supplied as an assumption -> solver-backed-under-assumptions. No isinstance / nodeType dispatch / os / filesystem at the predicate operator; the rocisa caps are static per-ISA tables (not live GPU queries, per slice notes) but are still upstream codegen state rather than predicate inputs."
+}

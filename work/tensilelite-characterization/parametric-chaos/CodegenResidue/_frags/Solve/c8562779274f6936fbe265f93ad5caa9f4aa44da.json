@@ -1,0 +1,63 @@
+{
+  "branch_id": "c8562779274f6936fbe265f93ad5caa9f4aa44da",
+  "phase": "Solve",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Solve/c8562779274f6936fbe265f93ad5caa9f4aa44da.json",
+  "source_location": {
+    "file": "Tensile/KernelWriterAssembly.py",
+    "line": 10892,
+    "col": 4,
+    "enclosing_function": "directToLdsM0Update",
+    "branch_kind": "if"
+  },
+  "predicate": "kernel[\"DirectToLds%s\"%tc]",
+  "semantics": "tc = tP[\"tensorChar\"] is a compile-time-constant string in {\"A\",\"B\"} fixed by the call-site (KernelWriter.getTensorParameters passes cM=\"A\" for tensorParametersA, \"B\" for tensorParametersB). So this single source branch is TWO concrete predicates: kernel[\"DirectToLdsA\"] (tc=A) and kernel[\"DirectToLdsB\"] (tc=B). Both booleans are derived from the YAML/MsgPack solution int DirectToLds (0-3, default 0) via Solution.py:722-723: DirectToLdsA = (DirectToLds==1 or DirectToLds==2); DirectToLdsB = (DirectToLds==1 or DirectToLds==3). The branch guards DTL-specific m0/LDS-address emission; entering it also asserts kernel[\"LocalWriteUseSgpr%s\"%tc].",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "solver-backed-under-assumptions",
+  "domains": {
+    "DirectToLds": {"type": "int", "min": 0, "max": 3, "values": [0,1,2,3], "note": "YAML/MsgPack solution parameter. 0=no DTL, 1=both A+B, 2=A only, 3=B only. Default 0 (GlobalParameters.py:461)."},
+    "tc": {"type": "enum", "values": ["A","B"], "note": "Compile-time constant tensorChar from the call-site; NOT a free solver variable. Each value yields a distinct concrete predicate, solved independently."},
+    "kernel[DirectToLdsA]": {"type": "bool", "values": [false,true], "note": "Derived: (DirectToLds==1 or DirectToLds==2). Solution.py:722."},
+    "kernel[DirectToLdsB]": {"type": "bool", "values": [false,true], "note": "Derived: (DirectToLds==1 or DirectToLds==3). Solution.py:723."}
+  },
+  "encoding": {
+    "method": "Integer var DirectToLds constrained to {0,1,2,3}. Two predicates encoded: tc=A -> Or(DTL==1, DTL==2); tc=B -> Or(DTL==1, DTL==3). Solve each for sat (predicate True) and sat (Not predicate -> False).",
+    "op_surface": ["compare(==)", "boolean(Or)", "format(%-string, compile-time constant tc)", "subscript(kernel[..] -> derived bool)"],
+    "note": "The %-format and dict subscript resolve to a compile-time-constant key per call-site, so the only free input is the integer DirectToLds. Fully tractable finite-domain integer/boolean problem."
+  },
+  "z3_model": {
+    "z3_version": "4.16.0",
+    "executed_in_container": true,
+    "true_witness": {"tc=A": {"DirectToLds": 1}, "tc=B": {"DirectToLds": 1}},
+    "false_witness": {"tc=A": {"DirectToLds": 0}, "tc=B": {"DirectToLds": 0}},
+    "all_true_over_domain": {"tc=A": [1,2], "tc=B": [1,3]},
+    "all_false_over_domain": {"tc=A": [0,3], "tc=B": [0,2]},
+    "z3_agrees_with_reference_python": true
+  },
+  "true_examples": [
+    {"DirectToLds": 1, "tc": "A", "kernel[DirectToLdsA]": true, "reason": "DTL=1 (both A+B) -> DirectToLdsA True -> branch taken for the A call-site"},
+    {"DirectToLds": 2, "tc": "A", "kernel[DirectToLdsA]": true, "reason": "DTL=2 (A only) -> DirectToLdsA True -> branch taken for A"},
+    {"DirectToLds": 1, "tc": "B", "kernel[DirectToLdsB]": true, "reason": "DTL=1 (both A+B) -> DirectToLdsB True -> branch taken for B"},
+    {"DirectToLds": 3, "tc": "B", "kernel[DirectToLdsB]": true, "reason": "DTL=3 (B only) -> DirectToLdsB True -> branch taken for B"}
+  ],
+  "false_examples": [
+    {"DirectToLds": 0, "tc": "A", "kernel[DirectToLdsA]": false, "reason": "DTL=0 (no DTL, default) -> DirectToLdsA False -> branch skipped for A"},
+    {"DirectToLds": 3, "tc": "A", "kernel[DirectToLdsA]": false, "reason": "DTL=3 (B only) -> DirectToLdsA False -> branch skipped for the A call-site"},
+    {"DirectToLds": 0, "tc": "B", "kernel[DirectToLdsB]": false, "reason": "DTL=0 (no DTL) -> DirectToLdsB False -> branch skipped for B"},
+    {"DirectToLds": 2, "tc": "B", "kernel[DirectToLdsB]": false, "reason": "DTL=2 (A only) -> DirectToLdsB False -> branch skipped for the B call-site"}
+  ],
+  "pure_helper": "def kernel_direct_to_lds(direct_to_lds: int, tc: str) -> bool:\n    \"\"\"Pure model of KernelWriterAssembly.py:10892 predicate kernel[\\\"DirectToLds%s\\\"%tc].\n    tc is a compile-time-constant tensorChar in {\\\"A\\\",\\\"B\\\"}. The boolean kernel[\\\"DirectToLdsA\\\"]/\n    kernel[\\\"DirectToLdsB\\\"] is derived from the YAML int DirectToLds via Solution.py:722-723:\n      DirectToLdsA = (DirectToLds==1 or DirectToLds==2)\n      DirectToLdsB = (DirectToLds==1 or DirectToLds==3)\n    pre: 0 <= direct_to_lds <= 3\n    pre: tc == \\\"A\\\" or tc == \\\"B\\\"\n    post: __return__ == ((direct_to_lds == 1 or direct_to_lds == 2) if tc == \\\"A\\\" else (direct_to_lds == 1 or direct_to_lds == 3))\n    \"\"\"\n    if tc == \\\"A\\\":\n        return direct_to_lds == 1 or direct_to_lds == 2\n    return direct_to_lds == 1 or direct_to_lds == 3",
+  "crosshair": {
+    "ran": true,
+    "tool_version": "0.0.106",
+    "analysis_kind": "PEP316",
+    "result": "no counterexample to postcondition (exit 0)",
+    "caveat": "CrossHair: absence of a counterexample is NOT a proof of correctness."
+  },
+  "notes": [
+    "z3 4.16.0 actually executed in-container. TRUE/FALSE witnesses found for BOTH compile-time selectors tc=A and tc=B; full-domain partition: tc=A True={1,2} False={0,3}; tc=B True={1,3} False={0,2}. z3 agrees with the python reference on all 4 domain points for both selectors.",
+    "classification = solver-backed-under-assumptions: the comparison itself is a pure finite-domain integer/boolean predicate (fully solvable), but the witnesses assume the derived kernel[DirectToLdsA/B] flags actually equal the raw Solution.py:722-723 formula. Solution.py:1830-1832 FORCES both flags False when BufferLoad=False or KernelLanguage!=Assembly, and isDirectToLdsDoable() (Solution.py:3923-3926) may also reset them. Under those upstream guards a config DTL=1/2/3 can still yield a False branch. Witnesses are valid under the assumptions: BufferLoad=True, KernelLanguage=Assembly, isDirectToLdsDoable passes.",
+    "tc is NOT a solver variable: it is a compile-time constant per call-site, so the source branch reifies into two concrete predicates rather than one with a free string. Both were solved.",
+    "Entering the branch additionally asserts kernel[LocalWriteUseSgpr%s%tc] (assert at KernelWriterAssembly.py:10895) -- a downstream invariant, not part of this guard."
+  ]
+}

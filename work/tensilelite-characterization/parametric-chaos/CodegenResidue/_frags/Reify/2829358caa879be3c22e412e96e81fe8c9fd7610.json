@@ -1,0 +1,13 @@
+{
+  "branch_id": "2829358caa879be3c22e412e96e81fe8c9fd7610",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Reify/2829358caa879be3c22e412e96e81fe8c9fd7610.json",
+  "kind": "char-test",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/CodegenResidue/test_pchaos_KernelWriterAssembly_L1839_char.py"
+  ],
+  "passed": true,
+  "reason": "3 tests pass: predicate semantics (true/false witness) + ValidParameters domain pin. Import corrected to Tensile.Common.ValidParameters.newMIValidParameters.",
+  "pytest_cmd": "docker exec -w /work/projects/hipblaslt/tensilelite tl-char pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/CodegenResidue/test_pchaos_KernelWriterAssembly_L1839_char.py",
+  "pytest_result": "3 passed in 0.37s"
+}

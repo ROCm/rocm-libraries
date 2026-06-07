@@ -1,0 +1,1 @@
+{"kind": "op-surface", "source": "Tensile/Configuration.py", "evaluator": "ExpressionEvaluator", "supported_node_types": ["Module", "Expr", "BinOp", "BoolOp", "Compare", "UnaryOp", "Call", "Assign", "Name", "Attribute", "IfExp", "Num", "Constant", "Str"], "op_categories": ["arith/bit", "assign", "boolean", "call", "compare", "conditional", "leaf", "root", "unary"]}

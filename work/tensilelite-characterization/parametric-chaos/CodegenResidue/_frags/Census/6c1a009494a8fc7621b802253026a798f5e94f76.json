@@ -1,0 +1,16 @@
+{
+  "id": "6c1a009494a8fc7621b802253026a798f5e94f76",
+  "file": "Tensile/KernelWriter.py",
+  "function": "_loopBody",
+  "branch_kind": "if",
+  "location": {
+    "line": 4152,
+    "col": 10
+  },
+  "predicate_source": "kernel[\"HalfPLRB\"]",
+  "referenced_symbols": [
+    "kernel"
+  ],
+  "derived_symbols": [],
+  "rank": 9
+}

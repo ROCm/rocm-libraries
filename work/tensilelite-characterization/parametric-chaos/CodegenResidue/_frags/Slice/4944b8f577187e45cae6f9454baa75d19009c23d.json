@@ -1,0 +1,75 @@
+{
+  "branch_id": "4944b8f577187e45cae6f9454baa75d19009c23d",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Slice/4944b8f577187e45cae6f9454baa75d19009c23d.json",
+  "predicate_normalized": {
+    "op": "Not",
+    "lhs": {
+      "var": "kernel[UseSubtileImpl]"
+    },
+    "rhs": null,
+    "site": "Tensile/KernelWriter.py:2611",
+    "enclosing_function": "setupNewTile",
+    "note": "kernel[UseSubtileImpl] at this point is the post-derivation value: (yaml_UseSubtileImpl AND isgfx950), where isgfx950 = (state[ISA] == IsaVersion(9,5,0)). The predicate is True when the user did NOT request UseSubtileImpl, OR when the target ISA is not gfx950. Canonical: NOT(user_UseSubtileImpl AND (ISA == gfx950))."
+  },
+  "public_inputs": [
+    {
+      "name": "UseSubtileImpl",
+      "kind": "yaml"
+    },
+    {
+      "name": "ISA (yaml GlobalParameters.ISA)",
+      "kind": "yaml"
+    },
+    {
+      "name": "ISA (--gpu-targets arg)",
+      "kind": "cli"
+    },
+    {
+      "name": "ISA (amdgpu-arch detection)",
+      "kind": "gpu-probe"
+    }
+  ],
+  "derived_symbols": [
+    {
+      "name": "isgfx950",
+      "derived_from": "ISA (== IsaVersion(9,5,0) comparison, Solution.py:812)"
+    },
+    {
+      "name": "kernel[UseSubtileImpl]",
+      "derived_from": "UseSubtileImpl AND isgfx950 (Solution.assignDerivedParameters, Solution.py:813)"
+    }
+  ],
+  "external_state": [],
+  "derivation_chain": [
+    {
+      "step": 1,
+      "file": "Tensile/Common/GlobalParameters.py:463",
+      "description": "UseSubtileImpl declared in defaultBenchmarkCommonParameters with default value False. Valid values are [False, True] (ValidParameters.py:422). The parameter is a solution-level YAML config key."
+    },
+    {
+      "step": 2,
+      "file": "Tensile/Common/GlobalParameters.py:146",
+      "description": "globalParameters[ISA] defaults to []. The ISA is populated by one of three mutually exclusive paths: (a) --gpu-targets CLI arg parsed in Tensile.py:511,646-653 via gfxToIsa(); (b) config[GlobalParameters][ISA] from YAML (Tensile.py:654-655); (c) detectGlobalCurrentISA(device_id, enumerator) via subprocess call to amdgpu-arch (Tensile.py:658, Architectures.py:257-267) when neither (a) nor (b) is provided."
+    },
+    {
+      "step": 3,
+      "file": "Tensile/SolutionStructs/Solution.py:491-501",
+      "description": "Solution.__init__ assigns state[ISA] from config[ISA] (if present, set by TensileCreateLibrary path) or targetIsas[0] (derived from isaInfoMap populated from step 2)."
+    },
+    {
+      "step": 4,
+      "file": "Tensile/SolutionStructs/Solution.py:811-813",
+      "description": "Solution.assignDerivedParameters computes isgfx950 = (state[ISA] == IsaVersion(9,5,0)), then overwrites state[UseSubtileImpl] = state[UseSubtileImpl] and isgfx950. This ANDs the user-requested yaml value with the ISA identity check. No asmCaps probe is involved."
+    },
+    {
+      "step": 5,
+      "file": "Tensile/KernelWriter.py:2571,2611",
+      "description": "setupNewTile receives kernel (a Solution Mapping object) as its first argument. kernel[UseSubtileImpl] reads the already-derived value from step 4. The predicate is True when UseSubtileImpl is False (either user-config False or non-gfx950 ISA forced it to False)."
+    }
+  ],
+  "constraints_for_predicate_true": {
+    "UseSubtileImpl_raw": "False (OR ISA != gfx950 so the AND forces False regardless)",
+    "equivalent_bool": "NOT(UseSubtileImpl == True AND ISA == IsaVersion(9,5,0))"
+  },
+  "notes": "The extractor seed def-use was empty ([]). Backward slice was performed by reading Solution.py:811-813 and GlobalParameters/ValidParameters declarations. Two public inputs govern the predicate: (1) UseSubtileImpl yaml parameter (user can set True in solution YAML; default False); (2) ISA, which can arrive via three entry-points (yaml GlobalParameters.ISA, --gpu-targets CLI flag, or amdgpu-arch gpu-probe subprocess). All three ISA entry-points are tagged separately with their source-category. No os.environ keys, no filesystem probes, and no asmCaps hardware capability flags participate in computing kernel[UseSubtileImpl]. The isgfx950 comparison is a pure Python equality on the IsaVersion namedtuple, not a hardware probe."
+}

@@ -1,0 +1,43 @@
+{
+  "branch_id": "aabf0d22ae0a02d4ae31ab4f43e838b29f28f582",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Domain/aabf0d22ae0a02d4ae31ab4f43e838b29f28f582.json",
+  "domains": {
+    "TDMInst": {
+      "type": "enum",
+      "values": [0, 3]
+    },
+    "BufferLoad": {
+      "type": "bool"
+    },
+    "AssertFree0ElementMultiple": {
+      "type": "int",
+      "min": 1,
+      "max": 4,
+      "values": [1, 4]
+    },
+    "GlobalReadVectorWidthA": {
+      "type": "int",
+      "values": [1, 4]
+    },
+    "AssertFree1ElementMultiple": {
+      "type": "int",
+      "min": 1,
+      "max": 4,
+      "values": [1, 4]
+    },
+    "GlobalReadVectorWidthB": {
+      "type": "int",
+      "values": [1, 4]
+    },
+    "ProblemType.BiasSrc": {
+      "type": "enum",
+      "values": ["A", "B", "D"]
+    },
+    "ProblemType.TLUA": {
+      "type": "bool"
+    },
+    "ProblemType.TLUB": {
+      "type": "bool"
+    }
+  }
+}

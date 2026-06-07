@@ -1,0 +1,50 @@
+{
+  "branch_id": "3a433f9e15d67650bc2250f006f451f96af7633f",
+  "role": "checker",
+  "verdict": "CONFIRMED",
+  "confirmed": true,
+  "status": "SAT",
+  "downgraded_to": null,
+  "claimed_solver_status": "sat-bounded",
+  "source_location": {
+    "file": "Tensile/KernelWriter.py",
+    "line": 4072,
+    "enclosing_function": "_loopBody",
+    "branch_kind": "if",
+    "predicate_source": "kernel[\"HalfPLRA\"]"
+  },
+  "real_code_checks": {
+    "predicate_line_verified": "Tensile/KernelWriter.py:4072 is verbatim 'if kernel[\"HalfPLRA\"]:' (bare truthiness test on dict value).",
+    "derivation_line_verified": "state[\"HalfPLRA\"] = bool(halfPLR & 0x01) at Tensile/SolutionStructs/Solution.py:2279, halfPLR = state[\"HalfPLR\"] (int). Matches claimed pure helper exactly.",
+    "path_note": "Claim/Solve frag cite 'Solution.py:2279'; actual file is Tensile/SolutionStructs/Solution.py:2279 (same line number, identical content). Cosmetic path imprecision only."
+  },
+  "python_reproduction": {
+    "method": "Re-executed actual derivation bool(halfPLR & 0x01) in-container for each claimed example.",
+    "true_examples": [
+      {"HalfPLR": 1, "actual_HalfPLRA": true, "claimed": true, "match": true},
+      {"HalfPLR": 3, "actual_HalfPLRA": true, "claimed": true, "match": true}
+    ],
+    "false_examples": [
+      {"HalfPLR": 0, "actual_HalfPLRA": false, "claimed": false, "match": true},
+      {"HalfPLR": 2, "actual_HalfPLRA": false, "claimed": false, "match": true}
+    ],
+    "full_truth_table_0_3": {"0": false, "1": true, "2": false, "3": true},
+    "all_examples_reproduced": true
+  },
+  "z3_independent_check": {
+    "solver": "z3",
+    "modeling": "Modeled with z3.BitVec (real bitwise-AND HalfPLR & 1 == 1), independent of the claim's (HalfPLR % 2 == 1) re-encoding; verified they agree over the bounded domain.",
+    "true_witness_sat": true,
+    "true_witness_model_HalfPLR": 1,
+    "false_witness_sat": true,
+    "false_witness_model_HalfPLR": 0,
+    "bitand_vs_python_equivalence_0_3": "z3 bit-AND == python bool(v & 0x01) for all v in {0,1,2,3}."
+  },
+  "classification_review": {
+    "claimed": "fully-static",
+    "checker_agrees": true,
+    "rationale": "Value fully determined by integer config param HalfPLR via constant bitwise-AND; no isinstance/nodeType/os/gpu probe in the predicate. Fully-static correct. sat-bounded justified by HalfPLR in {0,1,2,3}; relation generalizes (true iff low bit set)."
+  },
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/3a433f9e15d67650bc2250f006f451f96af7633f.json",
+  "notes": "All four claimed examples reproduce against the real derivation expression. z3 sat re-established independently for both TRUE and FALSE witnesses. No upgrade; claim was sat-bounded and confirmed at SAT. No downgrade warranted."
+}

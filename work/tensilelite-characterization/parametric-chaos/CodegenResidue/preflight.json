@@ -1,0 +1,103 @@
+{
+  "ok": true,
+  "checks": [
+    {
+      "name": "container_responds",
+      "passed": true,
+      "detail": "docker exec tl-char true exited 0"
+    },
+    {
+      "name": "work_mount_cwd",
+      "passed": true,
+      "detail": "docker exec -w /work/projects/hipblaslt/tensilelite tl-char pwd => /work/projects/hipblaslt/tensilelite"
+    },
+    {
+      "name": "input_file_Solution.py",
+      "passed": true,
+      "detail": "Tensile/SolutionStructs/Solution.py exists in container at PROJ"
+    },
+    {
+      "name": "input_file_KernelWriter.py",
+      "passed": true,
+      "detail": "Tensile/KernelWriter.py exists in container at PROJ"
+    },
+    {
+      "name": "input_file_KernelWriterAssembly.py",
+      "passed": true,
+      "detail": "Tensile/KernelWriterAssembly.py exists in container at PROJ"
+    },
+    {
+      "name": "stdlib_ast_import",
+      "passed": true,
+      "detail": "python -c import ast => OK (stdlib always available)"
+    },
+    {
+      "name": "py_compile_Solution.py",
+      "passed": true,
+      "detail": "python -m py_compile Tensile/SolutionStructs/Solution.py => exit 0"
+    },
+    {
+      "name": "py_compile_KernelWriter.py",
+      "passed": true,
+      "detail": "python -m py_compile Tensile/KernelWriter.py => exit 0"
+    },
+    {
+      "name": "py_compile_KernelWriterAssembly.py",
+      "passed": true,
+      "detail": "python -m py_compile Tensile/KernelWriterAssembly.py => exit 0"
+    },
+    {
+      "name": "pip_layer_imports",
+      "passed": true,
+      "detail": "import ast,z3,crosshair,hypothesis,pysmt => ALL OK"
+    },
+    {
+      "name": "helper_script_branch_extractor.py",
+      "passed": true,
+      "detail": "WF/branch_extractor.py exists and py_compile => exit 0"
+    },
+    {
+      "name": "helper_script_harvest_constraints.py",
+      "passed": true,
+      "detail": "WF/harvest_constraints.py exists and py_compile => exit 0"
+    },
+    {
+      "name": "helper_script_covering_array.py",
+      "passed": true,
+      "detail": "WF/covering_array.py exists and py_compile => exit 0"
+    },
+    {
+      "name": "output_dir_writable",
+      "passed": true,
+      "detail": "mkdir -p created Census/Slice/Domain/Solve/Verify/Reify under _frags; host ls confirms all 6 subdirs present"
+    },
+    {
+      "name": "git_baseline_captured",
+      "passed": true,
+      "detail": "git status --porcelain at worktree root => 64 modified/untracked lines (pre-write baseline)"
+    }
+  ],
+  "optional_tools": [
+    {
+      "tool": "codeql",
+      "available": false
+    },
+    {
+      "tool": "acts",
+      "available": false
+    },
+    {
+      "tool": "pict",
+      "available": false
+    },
+    {
+      "tool": "daikon",
+      "available": false
+    },
+    {
+      "tool": "atheris",
+      "available": false
+    }
+  ],
+  "git_baseline_lines": 64
+}

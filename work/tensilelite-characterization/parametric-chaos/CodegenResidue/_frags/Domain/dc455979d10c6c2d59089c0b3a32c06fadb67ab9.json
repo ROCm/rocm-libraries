@@ -1,0 +1,31 @@
+{
+  "branch_id": "dc455979d10c6c2d59089c0b3a32c06fadb67ab9",
+  "phase": "Domain",
+  "predicate": "self.states.archCaps[\"SgprPreloadPad\"]",
+  "site": "Tensile/KernelWriterAssembly.py:2267",
+  "domains": {
+    "kernel[ISA]": {
+      "type": "enum",
+      "values": [
+        [9, 5, 0],
+        [9, 4, 2],
+        [9, 0, 10],
+        [11, 0, 0]
+      ],
+      "note": "ISA triple (major, minor, patch). cpp SgprPreloadPad expression: checkInList(isa,{9,5,0}) || checkInList(isa,{9,0,10}) || (isa[0]==9 && isa[1]==4). True: (9,5,0)=gfx950, (9,4,2)=gfx942, (9,0,10)=gfx90a. False: (11,0,0)=gfx1100. Four values cover True on three distinct sub-conditions and False on one non-gfx9 arch. Note: Tensile gfx908->(9,0,8) which is False; gfx90a->(9,0,10) which is True."
+    },
+    "kernel[PreloadKernArgs]": {
+      "type": "bool",
+      "values": [true, false],
+      "note": "YAML solution parameter, default True. Controls outer guard numSgprPreload > 0 (line 2266). Must be True for the predicate at line 2267 to be evaluated. Both sides needed: True to exercise the predicate, False to verify the outer guard prevents entry."
+    },
+    "self.states.archCaps[SgprPreloadPad]": {
+      "type": "int",
+      "min": 0,
+      "max": 1,
+      "values": [0, 1],
+      "note": "Derived int-as-bool from kernel[ISA] via rocisa initArchCaps(). Value 1 for (9,5,0), (9,0,10), (9,4,*); value 0 for all other ISAs including gfx11xx, gfx12xx, gfx906, gfx908. Python truthiness: nonzero = True, zero = False."
+    }
+  },
+  "rationale": "The predicate is a pure ISA lookup: int value from a C++ map, treated as bool. The domain for kernel[ISA] selects four representative triples that exercise all three conditions of the C++ OR expression (one per True sub-condition) plus one False case. PreloadKernArgs must be True for code to reach line 2267; False provides the guard-false path. archCaps[SgprPreloadPad] is a derived symbol with only two reachable values (0 or 1)."
+}

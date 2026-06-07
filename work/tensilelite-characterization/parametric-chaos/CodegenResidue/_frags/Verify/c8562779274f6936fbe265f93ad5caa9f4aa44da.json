@@ -1,0 +1,8 @@
+{
+  "branch_id": "c8562779274f6936fbe265f93ad5caa9f4aa44da",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Independently re-established against real code in tl-char. (1) Predicate verbatim at KernelWriterAssembly.py:10892 = if kernel[DirectToLds%s%tc]. (2) tc=tP[tensorChar] is compile-time-constant per call-site (found in enclosing fn), so source reifies into two selectors A/B. (3) Real derivation in Tensile/SolutionStructs/Solution.py:722-723 verified verbatim and EXECUTED for DTL 0..3: DTL0->A=F,B=F; DTL1->A=T,B=T; DTL2->A=T,B=F; DTL3->A=F,B=T. (4) All 4 true_examples + 4 false_examples reproduce against pure helper AND executed real derivation. (5) Exhaustive helper-vs-real over full 4x2 domain: ALL_CONSISTENT. (6) Confirmed guard Solution.py:1828-1832 (bufferLoad gate forces DirectToLdsA/B False), justifying solver-backed-under-assumptions; classification not upgraded. SAT confirmed.",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/c8562779274f6936fbe265f93ad5caa9f4aa44da.json"
+}

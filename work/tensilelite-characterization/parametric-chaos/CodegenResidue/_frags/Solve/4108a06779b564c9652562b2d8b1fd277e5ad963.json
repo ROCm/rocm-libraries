@@ -1,0 +1,80 @@
+{
+  "branch_id": "4108a06779b564c9652562b2d8b1fd277e5ad963",
+  "predicate_site": "Tensile/KernelWriter.py:4145",
+  "predicate_source": "doReadB",
+  "function": "_loopBody",
+  "branch_kind": "if",
+  "solver": "z3",
+  "solver_version": "4.16.0",
+  "solver_status": "sat",
+  "classification": "solver-backed-under-assumptions",
+  "encoding": {
+    "op_surface": "Truthy test on local int/bool doReadB whose value at line 4145 is the result of the assignment chain at lines 4029, 4036, 4046, 4063. Operators: integer compare (<), conditional (if ForceUnrollSubIter), boolean OR, boolean AND, integer multiply. True-division (LoopIters/numIterPerCoalescedReadB) encoded by multiplying through by numIterPerCoalescedReadB (>0): u*nIPCRB < LoopIters - numItersPLR*nIPCRB. Mirrors Configuration.py ExpressionEvaluator op-surface.",
+    "z3_decls": [
+      "u = Int (seeded 0..3)",
+      "iui = Int (seeded 0..1)",
+      "LoopIters = Int (seeded {1,2,4,8})",
+      "InnerUnroll = Int (seeded {1,2,4})",
+      "PrefetchGlobalRead = Int (seeded 0..2); hasLiveLdsData == (PrefetchGlobalRead != 0)",
+      "numIterPerCoalescedReadB = Int (derived, >=1; abstracted 1..8)",
+      "numItersPLR = Int (derived, >=0; abstracted 0..2)",
+      "numReadsIterCoalescedB = Int (derived, >=1; abstracted 1..8)",
+      "ForceUnrollSubIter = Bool (derived)",
+      "doNext = Bool (derived: uNext > localWriteEndIter)"
+    ],
+    "predicate": "doReadB == And( Or( If(ForceUnrollSubIter, u==0, u*numIterPerCoalescedReadB < LoopIters - numItersPLR*numIterPerCoalescedReadB), And(PrefetchGlobalRead != 0, doNext) ), iui*numReadsIterCoalescedB < InnerUnroll )",
+    "derivation_encoding": {
+      "note": "doReadB combines public ints (u, iui, LoopIters, InnerUnroll, PrefetchGlobalRead) with DERIVED state vars computed at kernel setup. numItersPLR = PrefetchLocalRead%(LoopIters//WLR) [MI] or PrefetchLocalRead%LoopIters (KernelWriter.py:6312,6314), HalfPLR may force =1 (6483). numReadsIterCoalescedB = ceil(lrvwUnrollB/MIInputPerThreadB) [MI] or lrvwUnrollB//NumDotElements if UseDotInstruction else 1 (6455,6458). numIterPerCoalescedReadB = max(1, numReadsIterCoalescedB//InnerUnroll) (6460). lrvwUnrollB = LocalReadVectorWidthB if UnrollMajorLDSB else 1. ForceUnrollSubIter is a derived bool (Solution.py:2034-2037). doNext = uNext>localWriteEndIter, localWriteEndIter=LoopIters-numItersPLR-1 (3035), uNext=u in normal scheduler path (3985). Because witnesses fix these derived vars, classification is solver-backed-under-assumptions.",
+      "assumption_realizing_witnesses": "numIterPerCoalescedReadB=1, numReadsIterCoalescedB=1, numItersPLR=0 is realized by: UnrollMajorLDSB=False (=> lrvwUnrollB=1 => numReadsIterCoalescedB=ceil(1/MIInputPerThreadB)=1 for any MIInputPerThreadB>=1; => numIterPerCoalescedReadB=max(1,1//InnerUnroll)=1) and PrefetchLocalRead=0 with HalfPLR=0 (=> numItersPLR=0)."
+    }
+  },
+  "queries": {
+    "true": "sat",
+    "false": "sat",
+    "false_via_inner_unroll_gate": "sat",
+    "false_via_ForceUnrollSubIter": "sat",
+    "true_via_nextloop_OR_arm": "sat"
+  },
+  "true_examples": [
+    {
+      "u": 1, "iui": 0, "LoopIters": 2, "InnerUnroll": 1, "PrefetchGlobalRead": 1,
+      "numIterPerCoalescedReadB": 1, "numItersPLR": 0, "numReadsIterCoalescedB": 1,
+      "ForceUnrollSubIter": false, "doNext": false,
+      "_eval_doReadB": true,
+      "_note": "z3 model, verified by python reimpl. Normal arm: u=1 < LoopIters/nIPCRB - numItersPLR = 2/1 - 0 = 2.0 (true). Inner-unroll gate iui*nRICB=0 < InnerUnroll=1 (true). Branch TAKEN.",
+      "_public_inputs": "UnrollMajorLDSB=False, PrefetchLocalRead=0, HalfPLR=0, ForceUnrollSubIter=False realize the assumed derived vars."
+    },
+    {
+      "u": 1, "iui": 0, "LoopIters": 2, "InnerUnroll": 1, "PrefetchGlobalRead": 1,
+      "numIterPerCoalescedReadB": 1, "numItersPLR": 0, "numReadsIterCoalescedB": 1,
+      "ForceUnrollSubIter": true, "doNext": true,
+      "_eval_doReadB": true,
+      "_note": "z3 model (true_via_nextloop_OR_arm), verified. ForceUnrollSubIter+u!=0 zeroes the base (doReadB=0), but hasLiveLdsData(PGR=1)&doNext makes the OR-arm true; gate passes. Branch TAKEN via next-loop prefetch arm. Load-bearing: same model with doNext=False evaluates False."
+    }
+  ],
+  "false_examples": [
+    {
+      "u": 1, "iui": 1, "LoopIters": 2, "InnerUnroll": 1, "PrefetchGlobalRead": 1,
+      "numIterPerCoalescedReadB": 1, "numItersPLR": 0, "numReadsIterCoalescedB": 1,
+      "ForceUnrollSubIter": true, "doNext": false,
+      "_eval_doReadB": false,
+      "_note": "z3 model (primary false), verified. ForceUnrollSubIter+u=1!=0 => base=0; no next-loop (doNext=False); AND gate iui*nRICB=1 < InnerUnroll=1 is FALSE anyway. Branch SKIPPED."
+    },
+    {
+      "u": 1, "iui": 1, "LoopIters": 2, "InnerUnroll": 1, "PrefetchGlobalRead": 1,
+      "numIterPerCoalescedReadB": 1, "numItersPLR": 0, "numReadsIterCoalescedB": 1,
+      "ForceUnrollSubIter": false, "doNext": false,
+      "_eval_doReadB": false,
+      "_note": "z3 model (false_via_inner_unroll_gate), verified. Normal arm true (u=1<2.0) but inner-unroll gate iui*nRICB=1 < InnerUnroll=1 is FALSE, so AND zeroes doReadB. Branch SKIPPED -- isolates the 4063 gate as load-bearing clause."
+    },
+    {
+      "u": 1, "iui": 1, "LoopIters": 2, "InnerUnroll": 1, "PrefetchGlobalRead": 1,
+      "numIterPerCoalescedReadB": 1, "numItersPLR": 0, "numReadsIterCoalescedB": 1,
+      "ForceUnrollSubIter": true, "doNext": false,
+      "_eval_doReadB": false,
+      "_note": "z3 model (false_via_ForceUnrollSubIter), verified. Documents the ForceUnrollSubIter u!=0 zeroing path explicitly."
+    }
+  ],
+  "notes": "Tractable integer/boolean predicate; all five Z3 queries SAT. Models cross-checked against a faithful Python reimplementation of the 4029/4036/4046/4063 assignment chain (5/5 OK). Classification solver-backed-under-assumptions: witnesses fix derived kernel-setup state (numIterPerCoalescedReadB, numItersPLR, numReadsIterCoalescedB, ForceUnrollSubIter, doNext) computed from public params (UnrollMajorLDSB, LocalReadVectorWidthB, MIInputPerThreadB, PrefetchLocalRead, HalfPLR, InnerUnroll), not read directly at the site. Three independent True paths (normal threshold compare, ForceUnrollSubIter+u==0, hasLiveLdsData&doNext OR-arm) gated by one inner-unroll AND clause (iui*numReadsIterCoalescedB < InnerUnroll); witnesses cover taking and flipping each. CrossHair not run: site is the tail of a multi-statement derivation with conditional reassignment, not a clean single-input pure helper -- modeled directly in Z3.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Solve/4108a06779b564c9652562b2d8b1fd277e5ad963.json"
+}

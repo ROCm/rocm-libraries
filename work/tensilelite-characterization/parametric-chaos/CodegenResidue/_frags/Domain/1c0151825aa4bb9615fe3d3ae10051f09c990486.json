@@ -1,0 +1,26 @@
+{
+  "branch_id": "1c0151825aa4bb9615fe3d3ae10051f09c990486",
+  "phase": "Domain",
+  "predicate": "scheduleIterAlg == 1",
+  "site": "Tensile/KernelWriter.py:951",
+  "domains": {
+    "ScheduleIterAlg": {
+      "type": "enum",
+      "values": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "note": "ValidParameters.py:349 lists [0,1,2,3,4]. Value 4 is remapped to _ScheduleIterAlg=0 (Solution.py:599). Using [0,1,2,3] covers both sides: 1 makes scheduleIterAlg==1 True; 0/2/3 make it False."
+    },
+    "KernelLanguage": {
+      "type": "enum",
+      "values": [
+        "Assembly"
+      ],
+      "note": "ValidParameters.py:915 - only valid value is Assembly. No variation possible."
+    }
+  },
+  "rationale": "The predicate tests function-local scheduleIterAlg == 1. ScheduleIterAlg values 0-3 map directly to _ScheduleIterAlg; value 4 maps to 0. Domain [0,1,2,3] covers True (1) and False (0,2,3)."
+}

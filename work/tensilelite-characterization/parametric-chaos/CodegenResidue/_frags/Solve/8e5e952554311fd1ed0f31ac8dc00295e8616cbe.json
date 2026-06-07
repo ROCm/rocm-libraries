@@ -1,0 +1,66 @@
+{
+  "branch_id": "8e5e952554311fd1ed0f31ac8dc00295e8616cbe",
+  "file": "Tensile/KernelWriterAssembly.py",
+  "function": "defineAndResources",
+  "location": {"line": 2266, "col": 6},
+  "predicate_source": "self.states.numSgprPreload > 0",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "fully-static",
+  "encoding": {
+    "note": "numSgprPreload computed in KernelWriter.py:8447-8451 then min-clamped later in Components/Signature.py:117. At line 2266 (defineAndResources) the value is the pre-Signature-clamp result. Computation: numSgprPreload = 0 if not PreloadKernArgs else (archCaps['MaxSgprPreload'] - states.rpga - kernel['ProblemType']['NumIndicesC']). states.rpga is a constant 2. Predicate is a pure integer comparison (>0) over CLI/YAML-derived inputs; no live-object dispatch, isinstance, filesystem or GPU probe.",
+    "op_surface": ["bool", "compare(>)", "arith(sub)", "conditional(if)"],
+    "free_vars": {
+      "PreloadKernArgs": {"type": "bool", "values": [false, true]},
+      "archCaps[\"MaxSgprPreload\"]": {"type": "int", "values": [16, 32]},
+      "kernel[\"ProblemType\"][\"NumIndicesC\"]": {"type": "int", "values": [2, 3]},
+      "states.rpga": {"type": "int", "values": [2]}
+    },
+    "derived": {
+      "self.states.numSgprPreload (pre-clamp)": "0 if not PreloadKernArgs else MaxSgprPreload - rpga - NumIndicesC; over seeded domains in {0,11,12,27,28}"
+    },
+    "predicate_iff": "numSgprPreload>0  <=>  PreloadKernArgs (over the seeded domains, since pre-clamp value is >=11 whenever PreloadKernArgs is True)"
+  },
+  "true_examples": [
+    {
+      "PreloadKernArgs": true,
+      "archCaps[\"MaxSgprPreload\"]": 16,
+      "kernel[\"ProblemType\"][\"NumIndicesC\"]": 3,
+      "states.rpga": 2,
+      "self.states.numSgprPreload (pre-clamp)": 11,
+      "predicate_value": true,
+      "proof": "z3-model"
+    },
+    {
+      "PreloadKernArgs": true,
+      "archCaps[\"MaxSgprPreload\"]": 32,
+      "kernel[\"ProblemType\"][\"NumIndicesC\"]": 2,
+      "states.rpga": 2,
+      "self.states.numSgprPreload (pre-clamp)": 28,
+      "predicate_value": true,
+      "proof": "derived (z3-domain enumeration)"
+    }
+  ],
+  "false_examples": [
+    {
+      "PreloadKernArgs": false,
+      "archCaps[\"MaxSgprPreload\"]": 16,
+      "kernel[\"ProblemType\"][\"NumIndicesC\"]": 2,
+      "states.rpga": 2,
+      "self.states.numSgprPreload (pre-clamp)": 0,
+      "predicate_value": false,
+      "proof": "z3-model"
+    }
+  ],
+  "pure_helper": "def num_sgpr_preload_positive(preload_kern_args: bool, max_sgpr_preload: int, num_indices_c: int, rpga: int) -> bool:\n    \"\"\"Mirror of KernelWriter.py:8447-8451 numSgprPreload computation followed by the\n    line-2266 predicate `self.states.numSgprPreload > 0` (pre-Signature-clamp).\n\n    pre: max_sgpr_preload in (16, 32)\n    pre: num_indices_c in (2, 3)\n    pre: rpga == 2\n    post: __return__ == preload_kern_args\n    \"\"\"\n    num_sgpr_preload = 0\n    if preload_kern_args:\n        num_sgpr_preload = max_sgpr_preload - rpga - num_indices_c\n    return num_sgpr_preload > 0",
+  "crosshair": {
+    "tool": "crosshair 0.0.106",
+    "result": "Confirmed over all paths (no counterexample to post: __return__ == preload_kern_args over seeded domains)",
+    "caveat": "CrossHair absence-of-counterexample is bounded symbolic exploration, NOT a formal proof; corroborates the z3 SAT models. A deliberately-wrong post (__return__ == True) DID yield the expected counterexample f(False,32,3,2), confirming the checker is live."
+  },
+  "z3_models_raw": {
+    "true": {"PreloadKernArgs": true, "MaxSgprPreload": 16, "NumIndicesC": 3, "rpga": 2, "numSgprPreload_preclamp": 11},
+    "false": {"PreloadKernArgs": false, "MaxSgprPreload": 16, "NumIndicesC": 2, "rpga": 2, "numSgprPreload_preclamp": 0}
+  },
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Solve/8e5e952554311fd1ed0f31ac8dc00295e8616cbe.json"
+}

@@ -1,0 +1,16 @@
+{
+  "id": "dc455979d10c6c2d59089c0b3a32c06fadb67ab9",
+  "file": "Tensile/KernelWriterAssembly.py",
+  "function": "defineAndResources",
+  "branch_kind": "if",
+  "location": {
+    "line": 2267,
+    "col": 8
+  },
+  "predicate_source": "self.states.archCaps[\"SgprPreloadPad\"]",
+  "referenced_symbols": [
+    "self"
+  ],
+  "derived_symbols": [],
+  "rank": 15
+}

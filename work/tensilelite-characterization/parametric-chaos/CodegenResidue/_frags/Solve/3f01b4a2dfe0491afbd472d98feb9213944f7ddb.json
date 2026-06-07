@@ -1,0 +1,58 @@
+{
+  "branch_id": "3f01b4a2dfe0491afbd472d98feb9213944f7ddb",
+  "predicate_site": "Tensile/KernelWriter.py:9867",
+  "predicate_source": "self.enableAsserts",
+  "enclosing_function": "Assert.multiple_b32",
+  "branch_kind": "if",
+  "solver": "z3",
+  "solver_version": "4.16.0",
+  "solver_status": "sat",
+  "classification": "fully-static",
+  "encoding": {
+    "op_surface": "bare boolean read (truthiness test; no boolean/compare/arith/bit/unary/conditional operators)",
+    "z3_decls": [
+      "EnableAsserts = Bool(\"EnableAsserts\")   # public YAML/global param",
+      "self_enableAsserts = Bool(\"self_enableAsserts\")  # instance attr"
+    ],
+    "derivation_constraint": "self_enableAsserts == EnableAsserts  (pure pass-through, no transform)",
+    "z3_predicate": "P == self_enableAsserts",
+    "domain": {
+      "self.enableAsserts": {"type": "bool", "values": [false, true]},
+      "GlobalParameters.EnableAsserts": {"type": "bool", "values": [false, true]}
+    }
+  },
+  "z3_model_true": {"check": "sat", "model": {"EnableAsserts": "True", "self_enableAsserts": "True"}},
+  "z3_model_false": {"check": "sat", "model": {"EnableAsserts": "False", "self_enableAsserts": "False"}},
+  "true_examples": [
+    {"GlobalParameters.EnableAsserts": true, "self.enableAsserts": true, "branch_taken": true, "z3_proven": true, "python_confirmed": true}
+  ],
+  "false_examples": [
+    {"GlobalParameters.EnableAsserts": false, "self.enableAsserts": false, "branch_taken": false, "z3_proven": true, "python_confirmed": true}
+  ],
+  "derivation_chain": [
+    {"step": 1, "file": "Tensile/Common/Types.py:55,83", "description": "DebugConfig.enableAsserts is a bool field, default False (Types.py:55). makeDebugConfig sets enableAsserts = config[\"EnableAsserts\"] when the key is present (Types.py:82-83), else keeps False. No transform applied."},
+    {"step": 2, "file": "Tensile/Tensile.py:669", "description": "debugConfig = makeDebugConfig(config[\"GlobalParameters\"]). The public input is the YAML GlobalParameters.EnableAsserts boolean. User-configurable; default False."},
+    {"step": 3, "file": "Tensile/KernelWriter.py:521", "description": "self.db[\"EnableAsserts\"] = self.debugConfig.enableAsserts. Identity copy into the db dict."},
+    {"step": 4, "file": "Tensile/KernelWriter.py:6115", "description": "self.asmAssert = Assert(self.states.laneSGPRCount, kernel[\"WavefrontSize\"], self.db[\"EnableAsserts\"]). The db flag is passed positionally as the enableAsserts ctor arg."},
+    {"step": 5, "file": "Tensile/KernelWriter.py:9789,9793", "description": "Assert.__init__(self, laneSGPRCount, wavefrontSize, enableAsserts) stores self.enableAsserts = enableAsserts. Pure pass-through; no further mutation of self.enableAsserts anywhere in the class."},
+    {"step": 6, "file": "Tensile/KernelWriter.py:9867", "description": "multiple_b32: `if self.enableAsserts:` gates emission of the assert-multiple SGPR codegen block. Truthiness test on the pass-through bool."}
+  ],
+  "public_inputs": [
+    {"name": "GlobalParameters.EnableAsserts", "kind": "yaml", "default": false, "note": "User-settable boolean in the YAML GlobalParameters block; controls assertion codegen (requires 2 SGPR per comment at KernelWriter.py:521)."}
+  ],
+  "derived_symbols": [
+    {"name": "self.enableAsserts", "derived_from": "GlobalParameters.EnableAsserts via identity pass-through (Types -> db -> Assert ctor)"}
+  ],
+  "external_state": [],
+  "pure_helper": "def assert_codegen_emitted(enable_asserts: bool) -> bool:\n    \"\"\"Mirror of the predicate at KernelWriter.py:9867 (`if self.enableAsserts:`).\n    Derivation is a pure pass-through:\n      self.enableAsserts == self.db[\"EnableAsserts\"] == self.debugConfig.enableAsserts\n        == config[\"GlobalParameters\"].get(\"EnableAsserts\", False)\n    Public input: YAML GlobalParameters.EnableAsserts (bool, default False).\n    Returns True iff the assert-multiple codegen block is emitted.\n    \"\"\"\n    return enable_asserts",
+  "crosshair": {
+    "ran": true,
+    "version": "0.0.106",
+    "contract": "post: _ == enable_asserts (identity on bool)",
+    "result": "no counterexample found (exit 0, no output)",
+    "caveat": "Absence of a counterexample is NOT a proof. Result is consistent with the identity derivation; the bool domain is exhaustively {False, True} so the contract holds by inspection as well."
+  },
+  "classification_rationale": "Tractable bare-boolean predicate over a single public YAML input (GlobalParameters.EnableAsserts). z3 proves BOTH polarities satisfiable; Python confirms branch_taken == self.enableAsserts == EnableAsserts. Unlike self.do[\"PreLoop\"] (pinned to a True singleton at __init__), EnableAsserts is genuinely user-configurable (default False, set True via YAML), so both branches are reachable at runtime through public input. Hence fully-static, not solver-backed-under-assumptions.",
+  "notes": "No isinstance/nodeType dispatch, no os/filesystem/gpu probe, no asmCaps. self.enableAsserts is never reassigned after Assert.__init__. Same EnableAsserts flag also gates KernelWriter.py:8393 and the sibling predicates at 9801 (assertCommon) and 9814 (assertCmpCommon) within the same Assert class. The op-surface is empty (bare read), so the z3 encoding is a single boolean equality between the derived attr and the seeded public input.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Solve/3f01b4a2dfe0491afbd472d98feb9213944f7ddb.json"
+}

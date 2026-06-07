@@ -1,0 +1,8 @@
+{
+  "branch_id": "4944b8f577187e45cae6f9454baa75d19009c23d",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Re-established against REAL code. (1) KernelWriter.py:2611 confirmed = `if not kernel[\"UseSubtileImpl\"]:`. (2) Derivation at Tensile/SolutionStructs/Solution.py:812-813 confirmed (fragment slice path said Solution.py:811-813; real module path is Tensile/SolutionStructs/Solution.py, same line numbers): isgfx950 = state[ISA] == IsaVersion(9,5,0); state[UseSubtileImpl] = state[UseSubtileImpl] and isgfx950. (3) Re-ran all witnesses in-container with the ACTUAL IsaVersion from Tensile.SolutionStructs.Solution: true_ex1(False,(9,5,0))->True, true_ex2(False,(9,4,2))->True, true_ex3(True,(9,4,2))->True, false_ex1(True,(9,5,0))->False. ALL_OK. (4) Exhaustive over raw{T,F} x ISA{(9,5,0),(9,4,2),(9,0,0),(11,0,0),(12,0,0)}: branch predicate False iff (raw=True,ISA=(9,5,0)) -- the unique claimed false model; both polarities satisfiable. Pure helper mirrors real expression. Classification not upgraded (solver-backed-under-assumptions): ISA reaches derivation via multi-step path incl runtime gpu-probe; once bound the predicate is pure. All execution in-container tl-char.",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/4944b8f577187e45cae6f9454baa75d19009c23d.json"
+}

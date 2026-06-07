@@ -1,0 +1,22 @@
+{
+  "branch_id": "dc455979d10c6c2d59089c0b3a32c06fadb67ab9",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/CodegenResidue/test_pchaos_KernelWriterAssembly_L2267_char.py"
+  ],
+  "passed": true,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Reify/dc455979d10c6c2d59089c0b3a32c06fadb67ab9.json",
+  "runner_output": "8 passed in 0.21s",
+  "tests": [
+    "test_sgpr_preload_pad_true_gfx94x",
+    "test_sgpr_preload_pad_true_gfx950",
+    "test_sgpr_preload_pad_true_gfx90a",
+    "test_sgpr_preload_pad_false_gfx11xx",
+    "test_predicate_int_as_bool_one_is_true",
+    "test_predicate_int_as_bool_zero_is_false",
+    "test_sgpr_preload_pad_true_gfx940",
+    "test_sgpr_preload_pad_false_gfx12xx"
+  ],
+  "kind": "pure-helper",
+  "notes": "Pure-helper test: sgpr_preload_pad(isa) mirrors hardware_caps.hpp:524 SgprPreloadPad definition. All four seeded ISA ground-truth witnesses (9,4,2)->True, (9,5,0)->True, (9,0,10)->True, (11,0,0)->False pinned. Plus int-as-bool encoding assertion and two boundary ISAs. CPU-only, no rocisa import needed."
+}

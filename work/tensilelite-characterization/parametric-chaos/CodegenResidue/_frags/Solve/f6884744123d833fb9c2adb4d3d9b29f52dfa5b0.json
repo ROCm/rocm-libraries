@@ -1,0 +1,26 @@
+{
+  "branch_id": "f6884744123d833fb9c2adb4d3d9b29f52dfa5b0",
+  "predicate_site": "Tensile/KernelWriterAssembly.py:2182",
+  "predicate_source": "self.do[\"PreLoop\"]",
+  "solver": "z3",
+  "solver_version": "4.16.0",
+  "solver_status": "sat",
+  "classification": "solver-backed-under-assumptions",
+  "encoding": {
+    "op_surface": "bare boolean read (no boolean/compare/arith/bit/unary/conditional operators)",
+    "z3_decl": "self_do_PreLoop = Bool(\"self_do_PreLoop\")",
+    "predicate": "P == self_do_PreLoop",
+    "domain": {"self.do[\"PreLoop\"]": {"type": "bool", "values": [true, false]}}
+  },
+  "true_examples": [
+    {"self.do[\"PreLoop\"]": true}
+  ],
+  "false_examples": [
+    {"self.do[\"PreLoop\"]": false}
+  ],
+  "z3_model_true": {"self_do_PreLoop": "True", "check": "sat"},
+  "z3_model_false": {"self_do_PreLoop": "False", "check": "sat"},
+  "pure_helper": null,
+  "runtime_note": "In the free-boolean abstraction over the seeded domain, z3 proves BOTH polarities satisfiable (true_check=sat, false_check=sat). However, self.do[\"PreLoop\"] is assigned the Python literal True exactly once in KernelWriter.__init__() (KernelWriter.py:485) and is never reassigned anywhere in the codebase (verified: only reads at KernelWriterAssembly.py:2182,2353,7226). The reachable runtime domain is therefore the singleton {True}; the FALSE branch is structurally dead. The FALSE witness is solver-valid under the seeded domain assumption but unreachable at runtime. Classification is solver-backed-under-assumptions: sat for both polarities under the assumed domain, with the binding constraint (the __init__ literal) pinning the live value to True.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Solve/f6884744123d833fb9c2adb4d3d9b29f52dfa5b0.json"
+}

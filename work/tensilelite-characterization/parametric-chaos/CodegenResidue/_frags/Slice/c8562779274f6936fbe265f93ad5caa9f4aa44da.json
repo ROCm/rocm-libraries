@@ -1,0 +1,55 @@
+{
+  "id": "c8562779274f6936fbe265f93ad5caa9f4aa44da",
+  "branch_id": "c8562779274f6936fbe265f93ad5caa9f4aa44da",
+  "file": "Tensile/KernelWriterAssembly.py",
+  "function": "directToLdsM0Update",
+  "branch_kind": "if",
+  "location": {
+    "line": 10892,
+    "col": 4
+  },
+  "predicate_source": "kernel[DirectToLds_tc]",
+  "predicate_normalized": {
+    "op": "subscript",
+    "var": "kernel",
+    "key": {
+      "op": "format",
+      "template": "DirectToLds%s",
+      "args": [
+        {
+          "var": "tc"
+        }
+      ]
+    }
+  },
+  "referenced_symbols": [
+    "kernel",
+    "tc"
+  ],
+  "public_inputs": [
+    {
+      "name": "DirectToLds",
+      "kind": "yaml",
+      "note": "YAML/MsgPack solution parameter. Integer 0-3: 0=no DTL, 1=both A+B, 2=A only, 3=B only. Default 0 (GlobalParameters.py:461). Drives kernel[DirectToLdsA]=(DirectToLds==1 or DirectToLds==2) and kernel[DirectToLdsB]=(DirectToLds==1 or DirectToLds==3) via Solution.py:722-723."
+    }
+  ],
+  "derived_symbols": [
+    {
+      "name": "tc",
+      "derived_from": "directToLdsM0Update call-site constant",
+      "derivation": "KernelWriterAssembly.py:10885 -- tc = tP[tensorChar]. tensorChar is the literal string cM (A or B) assigned in KernelWriter.getTensorParameters (KernelWriter.py:9110). cM is the constant string passed at each getTensorParameters call: A for tensorParametersA, B for tensorParametersB (KernelWriter.py:6567-6568). tc is a compile-time constant relative to the call-site."
+    },
+    {
+      "name": "kernel[DirectToLdsA]",
+      "derived_from": "DirectToLds",
+      "derivation": "Solution.py:722 -- state[DirectToLdsA] = state[DirectToLds] == 1 or state[DirectToLds] == 2. Forced False when BufferLoad=False or KernelLanguage!=Assembly (Solution.py:1830-1832). May also be reset if isDirectToLdsDoable() fails (Solution.py:3923-3926)."
+    },
+    {
+      "name": "kernel[DirectToLdsB]",
+      "derived_from": "DirectToLds",
+      "derivation": "Solution.py:723 -- state[DirectToLdsB] = state[DirectToLds] == 1 or state[DirectToLds] == 3. Same conditional reset logic as DirectToLdsA."
+    }
+  ],
+  "external_state": [],
+  "phase": "Slice"
+}

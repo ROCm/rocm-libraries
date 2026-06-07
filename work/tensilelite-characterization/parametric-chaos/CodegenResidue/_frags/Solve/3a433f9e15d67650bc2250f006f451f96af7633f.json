@@ -1,0 +1,54 @@
+{
+  "branch_id": "3a433f9e15d67650bc2250f006f451f96af7633f",
+  "solver": "z3",
+  "solver_status": "sat-bounded",
+  "classification": "fully-static",
+  "source_location": {
+    "file": "Tensile/KernelWriter.py",
+    "line": 4072,
+    "enclosing_function": "_loopBody",
+    "branch_kind": "if"
+  },
+  "predicate_source": "kernel[\"HalfPLRA\"]",
+  "encoding": {
+    "vars": {
+      "HalfPLR": {"z3_sort": "Int", "origin": "Solution param HalfPLR (int)", "bound": "0 <= HalfPLR <= 3 (seeded domain)"},
+      "HalfPLRA": {"z3_sort": "Bool", "origin": "derived: Solution.py:2279 state[\"HalfPLRA\"] = bool(HalfPLR & 0x01)"}
+    },
+    "z3_predicate": "HalfPLRA  (with derived constraint HalfPLRA == ((HalfPLR % 2) == 1))",
+    "op_surface": ["bit:and(0x01)", "cast:bool", "subscript:kernel[]"],
+    "notes": "Predicate is a bare truthiness test on the dict value kernel[\"HalfPLRA\"]. HalfPLRA is not free: Solution.py:2279 derives it as bool(HalfPLR & 0x01) from the int param HalfPLR. Bit-AND with 0x01 modeled in z3 as (HalfPLR % 2 == 1). True iff HalfPLR is odd."
+  },
+  "true_examples": [
+    {"HalfPLR": 1, "HalfPLRA": true, "z3_proven": true, "python_confirmed": true},
+    {"HalfPLR": 3, "HalfPLRA": true, "z3_proven": false, "python_confirmed": true}
+  ],
+  "false_examples": [
+    {"HalfPLR": 0, "HalfPLRA": false, "z3_proven": true, "python_confirmed": true},
+    {"HalfPLR": 2, "HalfPLRA": false, "z3_proven": false, "python_confirmed": true}
+  ],
+  "grid_enumeration": {
+    "domain": "HalfPLR in {0,1,2,3}; HalfPLRA derived = bool(HalfPLR & 0x01) (4 cells)",
+    "true_cells": [{"HalfPLR": 1, "HalfPLRA": true}, {"HalfPLR": 3, "HalfPLRA": true}],
+    "false_cells": [{"HalfPLR": 0, "HalfPLRA": false}, {"HalfPLR": 2, "HalfPLRA": false}]
+  },
+  "pure_helper": "def half_plr_a(half_plr: int) -> bool:\n    \"\"\"Mirror of Solution.py:2279 derivation read by KernelWriter.py:4072 predicate.\n    kernel[\\\"HalfPLRA\\\"] == bool(HalfPLR & 0x01). True iff HalfPLR is odd.\n    HalfPLR seeded domain: int {0,1,2,3}.\n    \"\"\"\n    return bool(half_plr & 0x01)",
+  "crosshair": {
+    "ran": true,
+    "version": "0.0.106",
+    "result": "no counterexample",
+    "contracts_checked": [
+      "post: __return__ == (half_plr % 2 == 1)",
+      "post: implies(half_plr % 2 == 0, not __return__)"
+    ],
+    "caveat": "Absence of a counterexample from CrossHair is NOT a proof of correctness; it is bounded symbolic exploration over int."
+  },
+  "verification": {
+    "python_repro": true,
+    "method": "Evaluated bool(v & 0x01) for v in 0..3 in-container; truth table {0:F,1:T,2:F,3:T} matches z3 model and grid exactly.",
+    "true_witness_check": "HalfPLR=1 -> HalfPLRA=True -> predicate True",
+    "false_witness_check": "HalfPLR=0 -> HalfPLRA=False -> predicate False"
+  },
+  "classification_rationale": "Predicate kernel[\"HalfPLRA\"] is a truthiness test on a Solution dict entry that is a pure compile-time-derived boolean: HalfPLRA = bool(HalfPLR & 0x01), a bitwise AND of an integer solution parameter with a constant. No isinstance on live objects, no nodeType dispatch over a parsed tree, no os/filesystem/gpu probe participates in the predicate. The value is fully determined by the integer config param HalfPLR. Hence fully-static. solver_status is sat-bounded because HalfPLR was bounded to the seeded domain {0,1,2,3}; the relation generalizes to any int (true iff low bit set).",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Solve/3a433f9e15d67650bc2250f006f451f96af7633f.json"
+}

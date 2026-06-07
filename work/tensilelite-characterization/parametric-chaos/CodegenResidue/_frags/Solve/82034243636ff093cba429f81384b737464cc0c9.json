@@ -1,0 +1,43 @@
+{
+  "branch_id": "82034243636ff093cba429f81384b737464cc0c9",
+  "phase": "Solve",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Solve/82034243636ff093cba429f81384b737464cc0c9.json",
+  "file": "Tensile/KernelWriterAssembly.py",
+  "function": "calculateLoopNumIter",
+  "branch_kind": "if",
+  "location": {"line": 7094, "col": 8},
+  "predicate_source": "kernel[\"SuppressNoLoadLoop\"]",
+  "solver": "z3",
+  "solver_version": "4.16.0",
+  "solver_status": "sat",
+  "classification": "solver-backed-under-assumptions",
+  "encoding": {
+    "note": "kernel[\"SuppressNoLoadLoop\"] at the site is the fully-derived boolean. Encoded the three sequential override steps from Solution.assignDerivedParameters: (1) validity gate 1845-1847, (2) HalfPLR override 2282-2283, (3) TailloopInNll override 3850-3869. bufferLoad = BufferLoad AND KernelLanguage=='Assembly' (1828).",
+    "z3_formula": "final = If(tailEff, False, If(HalfPLR!=0, True, If(yaml_snll, If(And(bufLoad&&KL=='Assembly', PGR==1, Or(GSU==1,GSU==-1)), yaml_snll, False), False)))",
+    "assumption_boundary": "TailloopInNll_effective is modeled as a free boolean constrained by Implies(tailEff, TailloopInNll). Whether yaml TailloopInNll actually survives its inner validity block (3858-3864) depends on params OUTSIDE the seeded domain: EnableMatrixInstruction, asmCaps HasWMMA, NoTailLoop, DepthU>1 & power-of-2, LocalSplitU==1, ProblemType MXBlockA/MXBlockB. This is why the classification is solver-backed-under-assumptions rather than fully-static.",
+    "domain": {
+      "SuppressNoLoadLoop": [false, true],
+      "HalfPLR": [0, 1],
+      "TailloopInNll": [false, true],
+      "TailloopInNll_effective": "free bool, Implies(tailEff -> TailloopInNll)",
+      "BufferLoad": [false, true],
+      "KernelLanguage": ["Assembly"],
+      "PrefetchGlobalRead": [0, 1],
+      "GlobalSplitU": [-1, 1, 2]
+    }
+  },
+  "true_examples": [
+    {"label": "path_A_direct_yaml", "SuppressNoLoadLoop": true, "HalfPLR": 0, "TailloopInNll": false, "TailloopInNll_effective": false, "BufferLoad": true, "KernelLanguage": "Assembly", "PrefetchGlobalRead": 1, "GlobalSplitU": -1, "derived_value": true, "via": "yaml True survives the validity gate"},
+    {"label": "path_B_halfplr", "SuppressNoLoadLoop": false, "HalfPLR": 1, "TailloopInNll": false, "TailloopInNll_effective": false, "BufferLoad": false, "KernelLanguage": "Assembly", "PrefetchGlobalRead": 0, "GlobalSplitU": -1, "derived_value": true, "via": "HalfPLR!=0 unconditionally forces True after the gate"}
+  ],
+  "false_examples": [
+    {"label": "gate_rejects_yaml_true", "SuppressNoLoadLoop": true, "HalfPLR": 0, "TailloopInNll": false, "TailloopInNll_effective": false, "BufferLoad": true, "KernelLanguage": "Assembly", "PrefetchGlobalRead": 0, "GlobalSplitU": -1, "derived_value": false, "via": "PGR!=1 so the validity gate forces the yaml True back to False"},
+    {"label": "tailloop_override_beats_halfplr", "SuppressNoLoadLoop": false, "HalfPLR": 1, "TailloopInNll": true, "TailloopInNll_effective": true, "BufferLoad": false, "KernelLanguage": "Assembly", "PrefetchGlobalRead": 0, "GlobalSplitU": -1, "derived_value": false, "via": "TailloopInNll effective is the final override; sets False even after HalfPLR set True"}
+  ],
+  "cross_check": "z3 models were cross-checked against a faithful pure-python re-implementation of the three Solution.py override blocks; all four witnesses agree.",
+  "pure_helper": null,
+  "reified_test": "Tensile/Tests/unit/characterization/CodegenResidue/test_pchaos_KWA_L7094_char.py",
+  "reified_test_status": "6 passed in 0.21s (pytest -p no:cacheprovider -m unit -q, CPU-only, no coverage)",
+  "external_state": [],
+  "notes": "No os.environ / filesystem / GPU probe participates in deriving kernel[\"SuppressNoLoadLoop\"]; all inputs are YAML solution parameters, hence solver-backed (not runtime-dependent). It is NOT fully-static only because TailloopInNll_effective's survival depends on params outside the seeded domain. Override precedence is sequential: gate(1845) -> HalfPLR True(2283) -> TailloopInNll False(3869), so the last applicable override wins."
+}

@@ -1,0 +1,34 @@
+{
+  "branch_id": "3f01b4a2dfe0491afbd472d98feb9213944f7ddb",
+  "predicate_location": "Tensile/KernelWriter.py:9867",
+  "predicate": "if self.enableAsserts:",
+  "enclosing": "Assert.multiple_b32",
+  "checker": "adversarial-reverify",
+  "confirmed": true,
+  "status": "SAT",
+  "downgraded_to": null,
+  "method": "Re-established vs REAL code in tl-char. (1) KernelWriter.py:9867 is bare bool `if self.enableAsserts:` in Assert.multiple_b32; ctor arg (9793); built at 6115 from self.db['EnableAsserts']=self.debugConfig.enableAsserts (521). (2) Tensile/Common/Types.py makeDebugConfig defaults False (70), sets =config['EnableAsserts'] iff present (82-83); pure pass-through default False; lines 55/83 match claim. (3) Re-ran examples vs REAL makeDebugConfig: {EnableAsserts:True}->True, {EnableAsserts:False}->False, {}->False. ALL_MATCH. (4) Exercised REAL Assert.multiple_b32: False -> empty Module 0 items (branch not taken); True -> ENTERS if-block (reaches 9870 via traceback lineno). NameError at 9870 is pre-existing import-scope detail inside block, irrelevant, only proves True branch entered. Public YAML input, default False, both polarities reachable => fully-static. Claim reproduces exactly.",
+  "true_examples": [
+    {
+      "GlobalParameters.EnableAsserts": true,
+      "self.enableAsserts": true,
+      "branch_taken": true,
+      "reproduced": true
+    }
+  ],
+  "false_examples": [
+    {
+      "GlobalParameters.EnableAsserts": false,
+      "self.enableAsserts": false,
+      "branch_taken": false,
+      "reproduced": true
+    },
+    {
+      "GlobalParameters.EnableAsserts": "absent-default",
+      "self.enableAsserts": false,
+      "branch_taken": false,
+      "reproduced": true
+    }
+  ],
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/3f01b4a2dfe0491afbd472d98feb9213944f7ddb.json"
+}

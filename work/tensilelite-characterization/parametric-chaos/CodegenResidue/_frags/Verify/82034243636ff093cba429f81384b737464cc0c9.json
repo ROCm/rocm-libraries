@@ -1,0 +1,21 @@
+{
+  "branch_id": "82034243636ff093cba429f81384b737464cc0c9",
+  "phase": "Verify",
+  "predicate": "kernel[\"SuppressNoLoadLoop\"]",
+  "site": "Tensile/KernelWriterAssembly.py:7094 (calculateLoopNumIter, tailLoop block)",
+  "confirmed": true,
+  "status": "SAT",
+  "downgraded_to": null,
+  "method": "Independent re-derivation against REAL code. (1) Confirmed predicate at KernelWriterAssembly.py:7094 is the bare 'if kernel[SuppressNoLoadLoop]:' (the fully-derived boolean). (2) Located the ONLY three writes to state[SuppressNoLoadLoop] in SolutionStructs/Solution.py at lines 1847, 2283, 3869 (grep of all references; line 2411 is a READ into a supportedParameters dict, not a write). Read each block: 1845-1847 validity gate forces False unless (bufferLoad AND PGR==1 AND GSU in {1,-1}) with bufferLoad=BufferLoad AND KernelLanguage=='Assembly'; 2281-2283 'if state[HalfPLR]:' forces True; 3849-3869 forces False when TailloopInNll survives its inner validity block (depends on EnableMatrixInstruction, asmCaps HasWMMA, NoTailLoop, DepthU pow2, LocalSplitU, MXBlockA/B). Source order 1847<2283<3869 confirms claimed precedence (last applicable override wins). (3) Re-implemented the 3 steps in source order and re-executed ALL FOUR claimed witnesses in-container: path_A_direct_yaml->True, path_B_halfplr->True, gate_rejects_yaml_true->False, tailloop_override_beats_halfplr->False -- ALL_MATCH. (4) z3 4.16 cross-check of the claimed formula over the seeded domain returned sat for BOTH polarities. (5) Ran the reified add-only char test test_pchaos_KWA_L7094_char.py with 'pytest -p no:cacheprovider -m unit -q' (no coverage): 6 passed in 0.21s. Classification 'solver-backed-under-assumptions' is honest and NOT upgraded: the TailloopInNll_effective boundary genuinely depends on params outside the seeded domain, correctly modeled as a free bool with Implies(tailEff -> TailloopInNll). No runtime/GPU/filesystem dependency at the derivation. All checks pass; claim reproduces exactly.",
+  "true_examples_reproduced": [
+    {"label": "path_A_direct_yaml", "derived": true, "expected": true, "match": true},
+    {"label": "path_B_halfplr", "derived": true, "expected": true, "match": true}
+  ],
+  "false_examples_reproduced": [
+    {"label": "gate_rejects_yaml_true", "derived": false, "expected": false, "match": true},
+    {"label": "tailloop_override_beats_halfplr", "derived": false, "expected": false, "match": true}
+  ],
+  "z3_recheck": {"polarity_true": "sat", "polarity_false": "sat"},
+  "reified_test": {"node": "Tensile/Tests/unit/characterization/CodegenResidue/test_pchaos_KWA_L7094_char.py", "result": "6 passed in 0.21s", "coverage": false},
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/82034243636ff093cba429f81384b737464cc0c9.json"
+}
