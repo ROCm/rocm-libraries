@@ -27,15 +27,15 @@
 
 st.func @loop_carried_local_prefix() {
 ^entry:
-  v[20:21] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[20:21] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
   "st.s_branch"("loop")
   Successors: ^loop
 ^loop:
-  v[30:31] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
-  v[32:33] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
-  v[34:35] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[30:31] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[32:33] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[34:35] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
   a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[40:47], a[10:17]) { mod.mfma = { reuseA = false, reuseB = false } }
-  v[20:21] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[20:21] = "st.ds_load_b64"(v0) { mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
   "st.s_cbranch_scc1"("loop", SCC0)
   Successors: ^loop, ^exit
 ^exit:

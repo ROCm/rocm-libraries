@@ -67,16 +67,16 @@
 
 st.func @waitcnt_insertion_tensor_diamond_merge_depths() {
 ^entry:
-  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [11] } }
-  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1) { issueCycles = 1, latencyCycles = 2 }
-  "st.s_cbranch_scc1"("p_shallow", SCC0) { issueCycles = 1, latencyCycles = 1 }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [11] } }
+  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1)
+  "st.s_cbranch_scc1"("p_shallow", SCC0)
   Successors: ^p_shallow, ^p_deep
 ^p_deep:
-  "st.tensor_load_to_lds"(s[4:7], s[18:25]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [12] } }
-  "st.tensor_load_to_lds"(s[8:11], s[26:33]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [12] } }
+  "st.tensor_load_to_lds"(s[4:7], s[18:25]) { mod.memtoken = { tokens = [12] } }
+  "st.tensor_load_to_lds"(s[8:11], s[26:33]) { mod.memtoken = { tokens = [12] } }
   Successors: ^merge
 ^p_shallow:
   Successors: ^merge
 ^merge:
-  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [11] } }
+  "st.s_barrier"() { mod.memtoken = { tokens = [11] } }
 }

@@ -46,15 +46,15 @@
 
 st.func @waitcnt_insertion_lds_war_tensor_load_2token() {
 ^entry:
-  v[66:69] = "st.ds_load_tr16_b128"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 2560, gds = false }, mod.memtoken = { tokens = [0] } }
-  v[36:39] = "st.ds_load_tr16_b128"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 3072, gds = false }, mod.memtoken = { tokens = [0] } }
-  v[40:43] = "st.ds_load_tr16_b128"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 3584, gds = false }, mod.memtoken = { tokens = [0] } }
-  v[70:73] = "st.ds_load_tr16_b128"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 3072, gds = false }, mod.memtoken = { tokens = [0] } }
-  v[74:77] = "st.ds_load_tr16_b128"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 3584, gds = false }, mod.memtoken = { tokens = [0] } }
-  v[12:15] = "st.ds_load_tr16_b128"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
-  v[16:19] = "st.ds_load_tr16_b128"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 512, gds = false }, mod.memtoken = { tokens = [1] } }
-  v[46:49] = "st.ds_load_tr16_b128"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
-  v[50:53] = "st.ds_load_tr16_b128"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 512, gds = false }, mod.memtoken = { tokens = [1] } }
-  "st.tensor_load_to_lds"(s[48:51], s[52:59]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
-  "st.tensor_load_to_lds"(s[60:63], s[64:71]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  v[66:69] = "st.ds_load_tr16_b128"(v11) { mod.ds = { na = 1, offset = 2560, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[36:39] = "st.ds_load_tr16_b128"(v10) { mod.ds = { na = 1, offset = 3072, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[40:43] = "st.ds_load_tr16_b128"(v10) { mod.ds = { na = 1, offset = 3584, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[70:73] = "st.ds_load_tr16_b128"(v11) { mod.ds = { na = 1, offset = 3072, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[74:77] = "st.ds_load_tr16_b128"(v11) { mod.ds = { na = 1, offset = 3584, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[12:15] = "st.ds_load_tr16_b128"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[16:19] = "st.ds_load_tr16_b128"(v10) { mod.ds = { na = 1, offset = 512, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[46:49] = "st.ds_load_tr16_b128"(v11) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[50:53] = "st.ds_load_tr16_b128"(v11) { mod.ds = { na = 1, offset = 512, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[48:51], s[52:59]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[60:63], s[64:71]) { mod.memtoken = { tokens = [0] } }
 }

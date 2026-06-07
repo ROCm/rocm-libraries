@@ -360,22 +360,12 @@ const char* counterName(CounterKind c) {
     }
 }
 
-// Tightest current-queue wait for counter `c` contributed by a consumer's
-// (possibly nested) PHI source. Walks the PHI's incoming values down to the
-// leaf memops and scans the consumer's LIVE per-pred queues for them via
-// countFrom().
-//
-// This is what lets a loop-carried value be waited on correctly. The
-// precomputed PhiSummary records the carried producer's depth AT THE LOOP
-// HEADER MERGE -- where, on the back-edge path, the next-iteration reload
-// sits at the queue tail (countFrom == 1 => wait 0). Reading that frozen
-// scalar makes every downstream consumer drain to 0, even though many more
-// DS ops are issued between the header and the consumer. Scanning the live
-// queue instead counts those intervening ops (the leaf producer has flowed
-// through the merges/appends and now sits deeper), yielding the correct
-// "keep the pipeline full" wait. A leaf producer that has already drained
-// out of the queue contributes nothing (it is complete -> no wait), which
-// is exactly right. `seen` guards against PHI cycles.
+// Tightest wait for counter `c` from a (possibly nested) PHI consumer source.
+// Recurses through the PHI inputs to the leaf memops and scans the LIVE per-pred
+// queues for each leaf via countFrom() (countFrom == 1 => tail => wait 0). We
+// scan the live queue rather than the frozen PhiSummary depth so intervening
+// ops are counted, keeping the pipeline full. A leaf that has already drained
+// out of the queue contributes no wait. `seen` guards against PHI cycles.
 int phiCurrentQueueWait(StinkyInstruction* phi, CounterKind c, const DataflowState& state,
                         std::unordered_set<StinkyInstruction*>& seen) {
     if (!seen.insert(phi).second) return WaitCountSpec::kUnused;

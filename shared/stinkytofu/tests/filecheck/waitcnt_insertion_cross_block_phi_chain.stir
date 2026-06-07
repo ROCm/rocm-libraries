@@ -42,9 +42,9 @@
 
 st.func @waitcnt_insertion_cross_block_phi_chain() {
 ^entry:
-  v0 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
-  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1) { issueCycles = 1, latencyCycles = 2 }
-  "st.s_cbranch_scc1"("p2", SCC0) { issueCycles = 1, latencyCycles = 1 }
+  v0 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1)
+  "st.s_cbranch_scc1"("p2", SCC0)
   Successors: ^p1, ^p2
 ^p1:
   "st.s_branch"("mid")
@@ -53,8 +53,8 @@ st.func @waitcnt_insertion_cross_block_phi_chain() {
   "st.s_branch"("mid")
   Successors: ^mid
 ^mid:
-  SCC1 = "st.s_cmp_eq_u32"(s14, 0x1) { issueCycles = 1, latencyCycles = 2 }
-  "st.s_cbranch_scc1"("q2", SCC1) { issueCycles = 1, latencyCycles = 1 }
+  SCC1 = "st.s_cmp_eq_u32"(s14, 0x1)
+  "st.s_cbranch_scc1"("q2", SCC1)
   Successors: ^q1, ^q2
 ^q1:
   "st.s_branch"("exit")
@@ -63,6 +63,6 @@ st.func @waitcnt_insertion_cross_block_phi_chain() {
   "st.s_branch"("exit")
   Successors: ^exit
 ^exit:
-  v30 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
-  v7 = "st.v_add_f32"(v0, v1) { issueCycles = 1, latencyCycles = 1 }
+  v30 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
+  v7 = "st.v_add_f32"(v0, v1)
 }

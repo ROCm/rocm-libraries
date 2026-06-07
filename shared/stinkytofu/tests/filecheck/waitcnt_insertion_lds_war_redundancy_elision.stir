@@ -20,8 +20,8 @@
 
 st.func @waitcnt_insertion_lds_war_redundancy_elision() {
 ^entry:
-  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
-  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
-  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[0:7], a[10:17]) { issueCycles = 4, latencyCycles = 8, mod.mfma = { reuseA = false, reuseB = false } }
-  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[0:7], a[10:17]) { mod.mfma = { reuseA = false, reuseB = false } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
 }

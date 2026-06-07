@@ -48,17 +48,17 @@
 
 st.func @waitcnt_insertion_buffer_diamond_promotion() {
 ^entry:
-  v[0:3] = "st.buffer_load_b128"(v8, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
-  v[4:7] = "st.buffer_load_b128"(v8, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 16, glc = false, slc = false, nt = false, lds = false } }
-  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1) { issueCycles = 1, latencyCycles = 2 }
-  "st.s_cbranch_scc1"("p_shallow", SCC0) { issueCycles = 1, latencyCycles = 1 }
+  v[0:3] = "st.buffer_load_b128"(v8, s[0:3], 0) { mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v[4:7] = "st.buffer_load_b128"(v8, s[0:3], 0) { mod.mubuf = { offen = true, offset12 = 16, glc = false, slc = false, nt = false, lds = false } }
+  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1)
+  "st.s_cbranch_scc1"("p_shallow", SCC0)
   Successors: ^p_shallow, ^p_deep
 ^p_deep:
-  v[20:23] = "st.buffer_load_b128"(v100, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
-  v[24:27] = "st.buffer_load_b128"(v101, s[0:3], 0) { issueCycles = 12, latencyCycles = 116, mod.mubuf = { offen = true, offset12 = 16, glc = false, slc = false, nt = false, lds = false } }
+  v[20:23] = "st.buffer_load_b128"(v100, s[0:3], 0) { mod.mubuf = { offen = true, offset12 = 0, glc = false, slc = false, nt = false, lds = false } }
+  v[24:27] = "st.buffer_load_b128"(v101, s[0:3], 0) { mod.mubuf = { offen = true, offset12 = 16, glc = false, slc = false, nt = false, lds = false } }
   Successors: ^merge
 ^p_shallow:
   Successors: ^merge
 ^merge:
-  v100 = "st.v_add_f32"(v0, v0) { issueCycles = 1, latencyCycles = 1 }
+  v100 = "st.v_add_f32"(v0, v0)
 }

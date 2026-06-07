@@ -31,7 +31,7 @@
 
 st.func @waitcnt_insertion_conservative_tensor_barrier_untagged() {
 ^entry:
-  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
-  "st.tensor_load_to_lds"(s[4:7], s[18:25]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [2] } }
-  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1 }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[4:7], s[18:25]) { mod.memtoken = { tokens = [2] } }
+  "st.s_barrier"()
 }

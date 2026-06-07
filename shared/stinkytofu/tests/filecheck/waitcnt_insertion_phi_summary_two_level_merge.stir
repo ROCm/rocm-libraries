@@ -45,26 +45,26 @@
 
 st.func @waitcnt_insertion_phi_summary_two_level_merge() {
 ^entry:
-  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1) { issueCycles = 1, latencyCycles = 2 }
-  "st.s_cbranch_scc1"("p2", SCC0) { issueCycles = 1, latencyCycles = 1 }
+  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1)
+  "st.s_cbranch_scc1"("p2", SCC0)
   Successors: ^p1, ^p2
 ^p1:
-  v0 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
-  v20 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 4, gds = false } }
-  v21 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 8, gds = false } }
+  v0 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 0, gds = false } }
+  v20 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 4, gds = false } }
+  v21 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 8, gds = false } }
   Successors: ^mid
 ^p2:
-  v1 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false } }
-  v22 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 20, gds = false } }
+  v1 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 16, gds = false } }
+  v22 = "st.ds_load_b32"(v10) { mod.ds = { na = 1, offset = 20, gds = false } }
   Successors: ^mid
 ^mid:
-  SCC1 = "st.s_cmp_eq_u32"(s14, 0x1) { issueCycles = 1, latencyCycles = 2 }
-  "st.s_cbranch_scc1"("q2", SCC1) { issueCycles = 1, latencyCycles = 1 }
+  SCC1 = "st.s_cmp_eq_u32"(s14, 0x1)
+  "st.s_cbranch_scc1"("q2", SCC1)
   Successors: ^q1, ^q2
 ^q1:
   Successors: ^exit
 ^q2:
   Successors: ^exit
 ^exit:
-  v7 = "st.v_add_f32"(v0, v1) { issueCycles = 1, latencyCycles = 1 }
+  v7 = "st.v_add_f32"(v0, v1)
 }
