@@ -694,9 +694,9 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))
 
     if kernel["enableTDMB"]:
-      # Alias B descriptor onto A for multi-wave to reduce SGPR pressure.
-      # The subtile emitter reinits the shared descriptor before each B load.
-      if prod(kernel["MIWaveGroup"]) > 1:
+      # Upstream parity model aliases B to A for multi-wave.
+      # Subtile uses separate descriptors (SGPRs are per-wave).
+      if not kernel["UseSubtileImpl"] and prod(kernel["MIWaveGroup"]) > 1:
         module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
         module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
         if kernel["ProblemType"]["MXBlockB"]:

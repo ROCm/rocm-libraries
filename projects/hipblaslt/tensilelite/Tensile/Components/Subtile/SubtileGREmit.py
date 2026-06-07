@@ -881,18 +881,6 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
       tc = tileInfo.tc
       group0 = "tdm%sGroup0" % tc
       group1 = "tdm%sGroup1" % tc
-      # When descriptors are aliased (multi-wave SGPR saving), reinit the
-      # shared descriptor with the correct tensor's global/LDS addr before
-      # each tensor_load_to_lds.  After GR_INC the descriptor holds the
-      # *other* tensor's state, so both A and B need a reinit.
-      if prod(kernel["MIWaveGroup"]) > 1:
-        module.addComment0("TDM: reinit shared descriptor for %s" % tc)
-        module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("Address%s" % tc, 2),
-                           comment="sync descriptor global addr for %s" % tc))
-        module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0),
-                          src1=hex(0x80000000), comment="restore type field"))
-        module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr("tdmLdsAddr%s" % tc),
-                           comment="sync descriptor LDS addr for %s" % tc))
       module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), None, None,
                                  comment="TDM: global->LDS for %s" % tc))
     return module
