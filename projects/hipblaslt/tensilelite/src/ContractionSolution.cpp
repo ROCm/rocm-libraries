@@ -45,6 +45,8 @@
 #include <cstdlib>
 #include <random>
 
+#include <sstream>
+
 #ifdef ENABLE_ROCTX
 #include <roctracer/roctx.h>
 #endif
@@ -567,6 +569,7 @@ namespace TensileLite
             = calculateAutoStaggerU(problem, hardware, sk.grid, autoWGM);
         uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
+        AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problem, hardware);
 
         {
             int idx = 0;
@@ -878,7 +881,8 @@ namespace TensileLite
                                           autoStaggerUMapping,
                                           autoStaggerU,
                                           autoStaggerUStrideShift,
-                                          autoGsuVal);
+                                          autoGsuVal,
+                                          ntab);
 
 	// NOTE: an assumption here is A & B must be both MX data types or non-MX data types.
 	//       Mixing is not supported.
@@ -1321,6 +1325,102 @@ namespace TensileLite
         return gsuVal;
     }
 
+    ContractionSolution::AdaptiveGemmNTAB
+        ContractionSolution::calculateAdaptiveGemmNTAB(Problem const&  problem,
+                                                      Hardware const* hardware) const
+    {
+        // Hardware is currently unused: the heuristic below is purely
+        // shape/alignment/iter-count based and has been validated.
+        // Kept in the signature so a future ISA-specific fallback (e.g. a
+        // different L1 policy on a new arch) can plug in without touching
+        // every call site.
+        (void)hardware;
+
+        AdaptiveGemmNTAB result{};
+        if(sizeMapping.adaptiveGemmNTAB == 0)
+            return result;
+
+        const uint32_t MT0    = sizeMapping.macroTile.x;                    // MT_M
+        const uint32_t MT1    = sizeMapping.macroTile.y;                    // MT_N
+        const uint32_t depthU = static_cast<uint32_t>(sizeMapping.depthU);  // MT_K
+
+        const uint32_t bpeA    = static_cast<uint32_t>(problem.a().elementBytes());
+        const uint32_t bpeB    = static_cast<uint32_t>(problem.b().elementBytes());
+        const uint32_t minLenA = 128 / bpeA; // elements that fit one 128 B cache line
+        const uint32_t minLenB = 128 / bpeB;
+
+        const uint32_t ldA = problem.a().strides()[1];
+        const uint32_t ldB = problem.b().strides()[1];
+
+        const uint32_t M = problem.freeSizeA(0);
+        const uint32_t N = problem.freeSizeB(0);
+        const uint32_t K = problem.boundSize(0);
+
+        // Stride-1 (contiguous) macro-tile dim per transpose. A and B are
+        // both col-major tensors, so stride-1 is whichever index is the
+        // leading one in the Tensile tensor name:
+        //   transA()==false  (Ailk): stride-1 = i (=M) -> contigA = MT_M (=MT0)
+        //   transA()==true   (Alik): stride-1 = l (=K) -> contigA = MT_K (=depthU)
+        //   transB()==false  (Bljk): stride-1 = l (=K) -> contigB = MT_K (=depthU)
+        //   transB()==true   (Bjlk): stride-1 = j (=N) -> contigB = MT_N (=MT1)
+        // Note the A/B asymmetry: Tensile's transA()==true shifts A's contig
+        // from M to K, but transB()==true shifts B's contig from K to N.
+        const bool     transA  = problem.transA();
+        const bool     transB  = problem.transB();
+        const uint32_t contigA = transA ? depthU : MT0;
+        const uint32_t contigB = transB ? MT1    : depthU;
+
+        // Shape gate. NT=4 (cache bypass) is only profitable when the OTHER
+        // dim fits in one macro-tile: then the dominant tensor has no
+        // cross-WG reuse in L1 (every WG streams its slab once), so bypassing
+        // L1 is pure win and frees L1 for the short side. Dense (non-skinny)
+        // GEMMs still reuse each line across WGs; skip NT=4 there.
+        const bool skinnyA = (N <= MT1);
+        const bool skinnyB = (M <= MT0);
+        const bool longA   = (static_cast<uint64_t>(M) >= static_cast<uint64_t>(MT0) * 256);
+        const bool longB   = (static_cast<uint64_t>(N) >= static_cast<uint64_t>(MT1) * 128);
+
+        // Alignment gate. NT=4 has to consume whole 128 B cache lines;
+        // otherwise each straddling load pulls two lines from HBM and the
+        // bypass savings evaporate. Both the contiguous macro-tile dim AND
+        // the leading stride must be cache-line multiples.
+        const bool alignedA = (contigA % minLenA == 0) && (ldA % minLenA == 0);
+        const bool alignedB = (contigB % minLenB == 0) && (ldB % minLenB == 0);
+
+        // Main-loop iteration floor. The NTA/NTB kernArg bits only drive the
+        // main unroll body; PGR prefetches and the tail loop run under the
+        // static NonTemporalA/B kernel parameter. loopIters > 2 guarantees
+        // at least one main-body iter under PGR=2 so the bypass actually
+        // executes; at or below 2 iters everything lives in PGR/tail and the
+        // runtime choice is a no-op (pure overhead).
+        const uint32_t loopIters = (depthU > 0) ? (K / depthU) : 0;
+        const bool     enough    = loopIters > 2;
+
+        // These constraints are intentionally conservative: keep the gate off
+        // small problems where bypassing L1 has no streaming benefit.
+        if(skinnyA && longA && alignedA && enough)
+            result.nta = 4;
+        if(skinnyB && longB && alignedB && enough)
+            result.ntb = 4;
+
+        static const char* envStr = std::getenv("TENSILE_ADAPTIVE_GEMM_NTAB_ALGO");
+        if(envStr != nullptr)
+        {
+            std::cout << "AdaptiveGemmNTAB: nta=" << result.nta << " ntb=" << result.ntb
+                      << " (M=" << M << " N=" << N << " K=" << K
+                      << " MT0=" << MT0 << " MT1=" << MT1 << " DU=" << depthU
+                      << " transA=" << transA << " transB=" << transB
+                      << " contigA=" << contigA << " contigB=" << contigB
+                      << " minLenA=" << minLenA << " minLenB=" << minLenB
+                      << " ldA=" << ldA << " ldB=" << ldB
+                      << " loopIters=" << loopIters
+                      << " longA=" << longA << " longB=" << longB << ")"
+                      << "\n";
+        }
+
+        return result;
+    }
+
     template <bool T_Debug, bool Legacy, typename KA>
     void ContractionSolution::kernelArgs(uint32_t                            gemmCount,
                                          uint32_t                            argType,
@@ -1333,8 +1433,9 @@ namespace TensileLite
                                          size_t                              autoWGMXCCCHUNK,
                                          size_t                              autoStaggerUMapping,
                                          size_t                              autoStaggerU,
-                                         size_t   autoStaggerUStrideShift,
-                                         uint32_t autoGsuVal) const
+                                         size_t       autoStaggerUStrideShift,
+                                         uint32_t     autoGsuVal,
+                                         AdaptiveGemmNTAB ntab) const
     {
         if constexpr(!Legacy)
         {
@@ -1360,6 +1461,30 @@ namespace TensileLite
         uint32_t       internalArg0        = 0;
         uint32_t       internalArg1        = 0;
 
+        // GSU bit-width depends on InternalArgsSupport.version:
+        //   v <  3: GSU occupies bits 0..13 (mask 0x3FFF, max 16383)
+        //   v >= 3: GSU narrowed to bits 0..11 (mask 0x0FFF, max 4095);
+        //           bits 12/13 carry NTA / NTB for AdaptiveGemmNTAB.
+        constexpr uint32_t kGsuMaskV3   = 0x0FFF;
+        constexpr uint32_t kNtaBitPos   = 12;
+        constexpr uint32_t kNtbBitPos   = 13;
+        const bool         useNtabBits  = (internalArgsSupport.version >= 3);
+        const uint32_t     gsuMask      = useNtabBits ? kGsuMaskV3 : mask14;
+        // Belt-and-suspenders: if a v<3 solution somehow has AGNTAB!=0, that's a codegen bug.
+        assert((useNtabBits || sizeMapping.adaptiveGemmNTAB == 0)
+               && "AdaptiveGemmNTAB requires InternalArgsSupport.version >= 3");
+        // Only forward NT bits if both the kernel knows the new layout AND the
+        // solution actually opted in to AdaptiveGemmNTAB. Otherwise leave bits clear
+        // so a v<3 kernel reading 0x3FFF doesn't see them folded into GSU.
+        const uint32_t ntaBit = (useNtabBits && sizeMapping.adaptiveGemmNTAB != 0
+                                 && ntab.nta == 4)
+                                    ? 1
+                                    : 0;
+        const uint32_t ntbBit = (useNtabBits && sizeMapping.adaptiveGemmNTAB != 0
+                                 && ntab.ntb == 4)
+                                    ? 1
+                                    : 0;
+
         if(internalArgsSupport.wgm && internalArgsSupport.version == 0)
         {
             if(wgm > 255)
@@ -1376,7 +1501,7 @@ namespace TensileLite
             {
                 internalArg1 = wgm;
             }
-            else if(internalArgsSupport.version == 2 && !internalArgsSupport.useSFC)
+            else if(internalArgsSupport.version >= 2 && !internalArgsSupport.useSFC)
             {
                 // NB: get value from param= set in runtime / vs value from sizeMapping: from logic yaml.
                 //     param: default values: [xcc = 0, xccg = 0]. So when we never set xcc/xccg in runtime: we always get from sizeMapping.
@@ -1396,7 +1521,7 @@ namespace TensileLite
                 }
                 internalArg1 = internalArg1 | (wgmxccg << 22) | (wgmxcc << 16) | (mask16 & wgm);
             }
-            else if(internalArgsSupport.version == 2 && internalArgsSupport.useSFC)
+            else if(internalArgsSupport.version >= 2 && internalArgsSupport.useSFC)
             {
                 internalArg1 = wgm;
             }
@@ -1410,8 +1535,26 @@ namespace TensileLite
                                             : sizeMapping.globalSplitUWorkGroupMappingRoundRobin;
         }
 
-        internalArg0
-            = internalArg0 | ((uint32_t)gsuc << 15) | ((uint32_t)gsuwgmrr << 14) | (mask14 & gsu);
+        // Runtime sanity: GSU must fit in the available bits (12 or 14, depending on version).
+        if(((uint32_t)gsu & ~gsuMask) != 0)
+        {
+            std::stringstream gsuMaskHex;
+            gsuMaskHex << "0x" << std::hex << gsuMask;
+            std::string msg
+                = std::string("GSU value ") + std::to_string((uint32_t)gsu)
+                  + " exceeds the GSU bit-field in internalArg0 (max allowed="
+                  + std::to_string(gsuMask) + ", gsuMask=" + gsuMaskHex.str()
+                  + ", InternalArgsSupport.version="
+                  + std::to_string(internalArgsSupport.version) + ", AdaptiveGemmNTAB="
+                  + std::to_string(sizeMapping.adaptiveGemmNTAB)
+                  + "). When AdaptiveGemmNTAB is enabled (version>=3), GSU is narrowed"
+                  + " from bits 0..13 (max 16383) to bits 0..11 (max 4095) because"
+                  + " bits 12/13 carry the NTA/NTB selector.";
+            throw std::runtime_error(msg.c_str());
+        }
+        internalArg0 = internalArg0 | ((uint32_t)gsuc << 15) | ((uint32_t)gsuwgmrr << 14)
+                       | (ntbBit << kNtbBitPos) | (ntaBit << kNtaBitPos)
+                       | (gsuMask & (uint32_t)gsu);
 
         // StaggerU
         if(internalArgsSupport.staggerU)
@@ -1544,8 +1687,9 @@ namespace TensileLite
                           << ", StaggerU: " << autoStaggerU
                           << ", StaggerUStrideShift: " << autoStaggerUStrideShift << std::endl;
             }
+            AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problem, &hardware);
             if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
-            {           
+            {
                 kernelArgs<T_Debug, false>( 1,
                                             3,
                                             rv.args,
@@ -1558,10 +1702,11 @@ namespace TensileLite
                                             autoStaggerUMapping,
                                             autoStaggerU,
                                             autoStaggerUStrideShift,
-                                            autoGsuVal);                                           
+                                            autoGsuVal,
+                                            ntab);
             }
             else
-            {   
+            {
                 kernelArgs<T_Debug, false>( 1,
                                             0,
                                             rv.args,
@@ -1574,8 +1719,9 @@ namespace TensileLite
                                             autoStaggerUMapping,
                                             autoStaggerU,
                                             autoStaggerUStrideShift,
-                                            autoGsuVal);
-            }            
+                                            autoGsuVal,
+                                            ntab);
+            }
         }
         singleCallArgs<T_Debug, true>(
             problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
@@ -1751,6 +1897,7 @@ namespace TensileLite
                 = calculateAutoWGM(problems[0], &hardware, 0);
             auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
                 = calculateAutoStaggerU(problems[0], &hardware, 0, autoWGM);
+            AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problems[0], &hardware);
 
             if(internalArgsSupport.useUniversalArgs)
             {
@@ -1771,7 +1918,8 @@ namespace TensileLite
                                            autoStaggerUMapping,
                                            autoStaggerU,
                                            autoStaggerUStrideShift,
-                                           autoGsuVal);
+                                           autoGsuVal,
+                                           ntab);
                 // For user input
                 if(argType == KERNELARGTYPE::USERARGS)
                 {
@@ -1803,7 +1951,8 @@ namespace TensileLite
                                           autoStaggerUMapping,
                                           autoStaggerU,
                                           autoStaggerUStrideShift,
-                                          autoGsuVal);
+                                          autoGsuVal,
+                                          ntab);
             }
 
             rv.args.append<void const*>("Synchronizer", (void*)inputs.grouped[0].Synchronizer);

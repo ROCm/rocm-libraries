@@ -245,8 +245,11 @@ class SuiteConfig:
         benchmark_iters: Number of benchmark iterations for timing.
         seed: Optional random seed for reproducible inputs.
         engine_filter: If set, ordered engine selections to run.
-        rtol: Relative tolerance for correctness comparison.
-        atol: Absolute tolerance for correctness comparison.
+        rtol: Optional relative tolerance override for correctness comparison.
+            If only one of ``rtol`` or ``atol`` is set, the provided tolerance is
+            used for both. If neither is set, validation uses dtype-aware
+            defaults.
+        atol: Optional absolute tolerance override for correctness comparison.
         gpu_backend: GPU timer backend to use.
         reference_provider: Reference provider name for correctness checking.
         verbose: If True, print rich per-engine block per graph instead of summary.
@@ -258,8 +261,8 @@ class SuiteConfig:
     benchmark_iters: int = 100
     seed: Optional[int] = None
     engine_filter: Optional[List[int]] = None
-    rtol: float = 1e-5
-    atol: float = 1e-8
+    rtol: Optional[float] = None
+    atol: Optional[float] = None
     gpu_backend: str = "auto"
     reference_provider: str = "none"
     verbose: bool = False
@@ -272,9 +275,9 @@ class SuiteConfig:
             raise ValueError("warmup_iters must be non-negative")
         if self.benchmark_iters <= 0:
             raise ValueError("benchmark_iters must be positive")
-        if self.rtol < 0:
+        if self.rtol is not None and self.rtol < 0:
             raise ValueError("rtol must be non-negative")
-        if self.atol < 0:
+        if self.atol is not None and self.atol < 0:
             raise ValueError("atol must be non-negative")
         if self.engine_filter is not None:
             if len(self.engine_filter) == 0:
@@ -306,6 +309,18 @@ class SuiteConfig:
                 f"Invalid reference_provider: '{self.reference_provider}'. "
                 f"Valid options: {valid_reference_providers}"
             )
+
+    @property
+    def tolerance_override(self) -> Optional[tuple[float, float]]:
+        """Return explicit validation tolerances, or None for dtype-aware defaults."""
+        if self.rtol is None and self.atol is None:
+            return None
+
+        value = self.rtol if self.rtol is not None else self.atol
+        return (
+            self.rtol if self.rtol is not None else value,
+            self.atol if self.atol is not None else value,
+        )
 
     @property
     def plugin_path(self) -> Optional[Path]:

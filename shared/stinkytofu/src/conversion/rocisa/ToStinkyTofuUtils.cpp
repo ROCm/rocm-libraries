@@ -1221,6 +1221,11 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             // Convert signature to StinkyTofu format, using the wavefrontSize passed from Python
             auto stinkySig = toStinkySignature(signature, archArray, moduleOptions.wavefrontSize);
 
+            // Expose per-wave VGPR allocation on the Function.
+            stinkyModule->getFunction().setMetaData(
+                kSigTotalVgprsMetaKey,
+                static_cast<uint64_t>(stinkySig->kernelDescriptor.totalVgprs));
+
             // Set optimization config
             std::array<int, 2> tt = {moduleOptions.TileA0, moduleOptions.TileB0};
             std::array<int, 2> sg = {moduleOptions.SubGroup0, moduleOptions.SubGroup1};

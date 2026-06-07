@@ -7,14 +7,14 @@ Benchmarking and validation tool for hipDNN graphs.
 > **Caution**: This tool is in early development and subject to change.
 > Do not use it in build workflows or CI pipelines.
 
-This tool loads serialized hipDNN graphs, executes them via the MIOpen plugin, and captures performance metrics. PyTorch is optional but strongly recommended: when installed (ROCm or CUDA build) it provides GPU kernel-event timing and `torch.cuda.synchronize()` for accurate E2E timing. Without it, host-side E2E timings are still reported but may not capture full GPU execution.
+This tool loads serialized hipDNN graphs, executes them via installed hipDNN engine plugins, and captures performance metrics. PyTorch is optional but strongly recommended: when installed (ROCm or CUDA build) it provides GPU kernel-event timing and `torch.cuda.synchronize()` for accurate E2E timing. Without it, host-side E2E timings are still reported but may not capture full GPU execution.
 
 ## Requirements
 
 - Python 3.9+
 - numpy
 - hipdnn_frontend (installed hipDNN Python bindings)
-- AMD GPU with ROCm + MIOpen plugin
+- AMD GPU with ROCm + hipDNN provider plugins for the graphs under test
 - PyTorch *(optional)* — ROCm or CUDA build enables GPU kernel-event timing, the `--backend pytorch` executor, and the `--validate pytorch` reference provider. Not listed in `pyproject.toml` because it must come from the ROCm/CUDA nightly index.
 
 ## Installation
@@ -44,11 +44,12 @@ The default `--torch-mode rocm` flow assumes no system ROCm installation:
 1. Creates a virtual environment under the selected workspace (`--workspace`,
    `$DNN_BENCH_WORKSPACE`, writable `/workspace`, or local `.workspace`)
 2. Detects the GPU architecture and installs the matching ROCm PyTorch nightly wheel
-3. Discovers hipDNN from the torch wheel's bundled ROCm SDK libraries
-4. Builds the local MIOpen provider if `libmiopen_plugin.so` is absent, using
-   the bundled ROCm SDK devel wheel for compiler/toolchain discovery when
-   needed
-5. Installs the hipDNN Python bindings against the selected ROCm SDK libraries
+3. Discovers ROCm libraries from the torch wheel's bundled ROCm SDK libraries
+4. Builds local hipDNN when CMake configs are absent from the selected prefix
+5. Builds the local MIOpen, hipBLASLt, and hip-kernel providers when their
+   installed artifacts are missing, using the bundled ROCm SDK devel wheel for
+   compiler/toolchain discovery when needed
+6. Installs the hipDNN Python bindings against the selected ROCm SDK libraries
 
 The selected prefix is printed as `Using hipDNN/ROCm prefix: ...`; pass its
 `lib/hipdnn_plugins/engines` directory to `--plugin-path` when benchmarking.
@@ -192,7 +193,7 @@ python -m dnn_benchmarking --config sample_configs/config.toml.example --iters 5
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--validate` | Reference provider for correctness validation: `pytorch` or `none` | `none` |
+| `--validate` | Reference provider for correctness validation: `pytorch` or `none`. `--validate pytorch` also reports a timed PyTorch reference row when PyTorch GPU execution is available. | `none` |
 
 #### Suite Options
 
@@ -206,8 +207,10 @@ Used by reference validation and suite-mode tolerance checks.
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--rtol` | Relative tolerance for output comparison | 1e-5 |
-| `--atol` | Absolute tolerance for output comparison | 1e-8 |
+| `--rtol` | Relative tolerance for output comparison. Overrides dtype-aware defaults when set; if set without `--atol`, also applies as absolute tolerance. | dtype-aware |
+| `--atol` | Absolute tolerance for output comparison. Overrides dtype-aware defaults when set; if set without `--rtol`, also applies as relative tolerance. | dtype-aware |
+
+Automatic validation tolerances are dtype-aware. BF16 outputs use `rtol=1e-2`, `atol=1e-3`; this allows BF16 output quantization and accumulation-order differences while keeping the absolute floor low enough to catch small-magnitude failures.
 
 ## Output
 
@@ -331,6 +334,10 @@ LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest
 
 # Only GPU tests
 LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest -m gpu
+
+# GPU tests with explicit hipDNN engine plugin directories
+LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest -m gpu \
+  --dnn-plugin-paths /path/to/hipdnn_plugins/engines
 ```
 
 ### GPU Tests
@@ -345,6 +352,10 @@ export HIPDNN_PREFIX=/opt/rocm
 LD_LIBRARY_PATH=$HIPDNN_PREFIX/lib:$LD_LIBRARY_PATH pytest
 ```
 
+GPU tests auto-discover provider build-tree, selected-prefix, and `/opt/rocm`
+plugin installs. Use `--dnn-plugin-paths` with a comma-separated directory list
+when testing custom engine plugin builds.
+
 **Note:** Set `LD_LIBRARY_PATH=<selected-prefix>/lib` when running GPU tests to ensure hipdnn_frontend can load ROCm libraries.
 
 Strict profiling tests that require real profiler artifacts are skipped by
@@ -356,4 +367,4 @@ LD_LIBRARY_PATH=$HIPDNN_PREFIX/lib:$LD_LIBRARY_PATH pytest --profiling-strict -m
 
 ## Limitations
 
-- Engine comparison reports engines side by side only; use `--validate` for reference-output correctness checks.
+- Engine comparison and timed validation-provider rows are reported side by side. Reference rows are timing baselines and are not counted as hipDNN engine pass/fail combinations; use `--validate` for reference-output correctness checks.

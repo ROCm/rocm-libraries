@@ -16,6 +16,10 @@ DNN_BENCH_WORKSPACE="${DNN_BENCH_WORKSPACE:-$DEFAULT_DNN_BENCH_WORKSPACE}"
 VENV_DIR="$DNN_BENCH_WORKSPACE/.venv"
 MIOPEN_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/miopen-provider"
 MIOPEN_BUILD_DIR="$MIOPEN_PROVIDER_DIR/build"
+HIP_KERNEL_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/hip-kernel-provider"
+HIP_KERNEL_BUILD_DIR="$HIP_KERNEL_PROVIDER_DIR/build"
+HIPBLASLT_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/hipblaslt-provider"
+HIPBLASLT_BUILD_DIR="$HIPBLASLT_PROVIDER_DIR/build"
 
 FORCE_BUILD=0
 AUTO_YES=0
@@ -55,11 +59,11 @@ usage() {
     echo "                       nightly selection. Supported: gfx90a, gfx942, gfx950."
     echo "  --rocm-prefix <path> Explicit ROCm/hipDNN prefix for binding/provider"
     echo "                       builds. Takes precedence over venv discovery."
-    echo "  --force-build        Build hipDNN and the MIOpen provider from source,"
+    echo "  --force-build        Build hipDNN and provider plugins from source,"
     echo "                       overwriting artifacts under the selected ROCm prefix."
     echo "  -y                   Skip confirmation prompts."
     echo ""
-    echo "  The installed plugin will be at:"
+    echo "  The installed plugins will be at:"
     echo "    <selected-prefix>/lib/hipdnn_plugins/engines/"
     echo "  Pass that path to --plugin-path when benchmarking."
 }
@@ -554,9 +558,14 @@ build_hipdnn() {
     cmake --install "$BUILD_DIR"
 }
 
-build_miopen_provider() {
-    local install_prefix="$1"
-    local toolchain_prefix="$2"
+build_provider() {
+    local name="$1"
+    local provider_dir="$2"
+    local build_dir="$3"
+    local install_prefix="$4"
+    local toolchain_prefix="$5"
+    shift 5
+
     local cmake_prefix_path="$install_prefix"
     local cmake_program_path="$toolchain_prefix/bin;$toolchain_prefix/lib/llvm/bin"
 
@@ -564,26 +573,58 @@ build_miopen_provider() {
         cmake_prefix_path="$install_prefix;$toolchain_prefix"
     fi
 
-    if [ ! -d "$MIOPEN_PROVIDER_DIR" ]; then
-        echo "Error: miopen-provider not found at $MIOPEN_PROVIDER_DIR" >&2
+    if [ ! -d "$provider_dir" ]; then
+        echo "Error: $name not found at $provider_dir" >&2
         exit 1
     fi
-    echo "Building and installing MIOpen provider to $install_prefix..."
+
+    echo "Building and installing $name to $install_prefix..."
     echo "Using ROCm compiler/devel prefix: $toolchain_prefix"
-    rm -rf "$MIOPEN_BUILD_DIR"
-    cmake -S "$MIOPEN_PROVIDER_DIR" -B "$MIOPEN_BUILD_DIR" \
+    rm -rf "$build_dir"
+    cmake -S "$provider_dir" -B "$build_dir" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$install_prefix" \
         -DCMAKE_PREFIX_PATH="$cmake_prefix_path" \
         -DCMAKE_PROGRAM_PATH="$cmake_program_path" \
         -DROCM_PATH="$toolchain_prefix" \
-        -DMIOPENPROVIDER_SKIP_TESTS=ON \
         -DENABLE_CLANG_FORMAT=OFF \
-        -DENABLE_CLANG_TIDY=OFF
-    cmake --build "$MIOPEN_BUILD_DIR"
-    cmake --install "$MIOPEN_BUILD_DIR"
+        -DENABLE_CLANG_TIDY=OFF \
+        "$@"
+    cmake --build "$build_dir"
+    cmake --install "$build_dir"
+}
+
+build_miopen_provider() {
+    build_provider \
+        "MIOpen provider" \
+        "$MIOPEN_PROVIDER_DIR" \
+        "$MIOPEN_BUILD_DIR" \
+        "$1" \
+        "$2" \
+        -DMIOPENPROVIDER_SKIP_TESTS=ON
     echo ""
-    echo "MIOpen plugin installed to: $install_prefix/lib/hipdnn_plugins/engines/"
+    echo "MIOpen plugin installed to: $1/lib/hipdnn_plugins/engines/"
+}
+
+build_hipblaslt_provider() {
+    build_provider \
+        "hipBLASLt provider" \
+        "$HIPBLASLT_PROVIDER_DIR" \
+        "$HIPBLASLT_BUILD_DIR" \
+        "$1" \
+        "$2" \
+        -DHIPDNN_SKIP_TESTS=ON
+}
+
+build_hip_kernel_provider() {
+    build_provider \
+        "hip-kernel-provider" \
+        "$HIP_KERNEL_PROVIDER_DIR" \
+        "$HIP_KERNEL_BUILD_DIR" \
+        "$1" \
+        "$2" \
+        -DHIPKERNELPROVIDER_ENABLE_TESTS=OFF \
+        -DENABLE_ASM_SDPA_ENGINE=ON
 }
 
 FORCE_BUILD_PREFIX=$(resolve_installed_rocm_prefix)
@@ -652,11 +693,14 @@ if [ "$FORCE_BUILD" -eq 1 ] || ! prefix_has_hipdnn "$BINDING_PREFIX"; then
     PROVIDER_TOOLCHAIN_PREFIX=$(select_provider_toolchain_prefix)
 fi
 
+BUILT_HIPDNN=0
 if [ "$FORCE_BUILD" -eq 1 ]; then
     build_hipdnn "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+    BUILT_HIPDNN=1
 elif ! prefix_has_hipdnn "$BINDING_PREFIX"; then
     if [ "$TORCH_MODE" = "rocm" ] || { [ "$TORCH_MODE" = "existing" ] && torch_is_rocm_wheel; }; then
         build_hipdnn "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+        BUILT_HIPDNN=1
     else
         echo "ERROR: hipDNN CMake configs were not found under $BINDING_PREFIX." >&2
         echo "Expected:" >&2
@@ -672,18 +716,34 @@ fi
 # GPU snapshot in metrics/gpu_smi.py degrades gracefully if amdsmi is absent.
 maybe_install_amdsmi "$BINDING_PREFIX"
 
-# 5. Build/install the MIOpen provider if the selected prefix does not already
-# contain the specific MIOpen provider plugin. This keeps the ROCm torch wheel
-# flow self-contained: torch supplies ROCm + hipDNN, and setup.sh adds the local
-# provider plugin when needed.
+# 5. Build/install provider plugins if the selected prefix does not already
+# contain the specific plugin artifacts. This keeps the ROCm torch wheel flow
+# self-contained: torch supplies ROCm libraries, setup.sh adds local hipDNN and
+# provider artifacts when needed.
 PLUGIN_DIR="$BINDING_PREFIX/lib/hipdnn_plugins/engines"
 MIOPEN_PLUGIN="$PLUGIN_DIR/libmiopen_plugin.so"
-if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$MIOPEN_PLUGIN" ]; then
+HIPBLASLT_PLUGIN="$PLUGIN_DIR/libhipblaslt_plugin.so"
+HIP_KERNEL_PLUGIN="$PLUGIN_DIR/libhip_kernel_provider.so"
+if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || \
+    [ ! -f "$MIOPEN_PLUGIN" ] || [ ! -f "$HIPBLASLT_PLUGIN" ] || \
+    [ ! -f "$HIP_KERNEL_PLUGIN" ]; then
     if [ -z "$PROVIDER_TOOLCHAIN_PREFIX" ]; then
         PROVIDER_TOOLCHAIN_PREFIX=$(select_provider_toolchain_prefix)
     fi
+fi
+
+if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || [ ! -f "$MIOPEN_PLUGIN" ]; then
     build_miopen_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
 fi
+if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || [ ! -f "$HIPBLASLT_PLUGIN" ]; then
+    build_hipblaslt_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+fi
+if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || [ ! -f "$HIP_KERNEL_PLUGIN" ]; then
+    build_hip_kernel_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+fi
+
+echo ""
+echo "hipDNN plugins installed to: $PLUGIN_DIR/"
 
 # 6. Install hipDNN Python bindings.
 # Wipe any stale cmake build cache (can reference deleted pip temp envs).
