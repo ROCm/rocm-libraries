@@ -89,9 +89,10 @@ def main() -> int:
     ap.add_argument("--warmup", type=int, default=200)
     ap.add_argument("--seed", type=int, default=123)
     ap.add_argument(
-        "--l2only",
-        action="store_true",
-        help="focused base vs compv3 vs compv4 confirmation set",
+        "--suite",
+        choices=["next", "combo", "warp", "persistent", "sched"],
+        default="next",
+        help="candidate set to compare against the current winner baseline",
     )
     args = ap.parse_args()
 
@@ -100,18 +101,24 @@ def main() -> int:
             h=args.h, w=args.w, c=8, k0=32, k1=24, **kw
         )
 
-    # Shared optimized base (direct-conv0 default, pt2x16, bs256). Every config
-    # below is this base plus one or more of the multi-lever toggles, so the
-    # interleaved A/B isolates the lever(s) on top of the current best kernel.
+    # Shared optimized base: current winning full-shape stack. Every config below
+    # is this base plus one candidate toggle, so the interleaved A/B isolates the
+    # next-winner hypotheses on top of the current best kernel.
     base_kw = dict(
         pool_tile_h=2,
-        pool_tile_w=16,
-        warp_m=4,
-        warp_n=2,
+        pool_tile_w=64,
+        warp_m=16,
+        warp_n=1,
         vectorize_conv0_a=True,
         vectorize_maxpool=True,
         early_w1=True,
         direct_conv0=True,
+        native_int=True,
+        fused_c0a1=True,
+        batch_loads=True,
+        sched_policy="compv4",
+        conv1_prefetch_k=True,
+        conv1_sched_fuse=True,
     )
 
     def bspec(**kw):
@@ -120,30 +127,64 @@ def main() -> int:
         return spec(**merged)
 
     # First entry is the baseline; ratios are reported against it.
-    # Per-lever isolation then the composition stacks (L1=waves_per_eu,
-    # L2=sched_policy, L3=mask_maxpool; L4 butterfly is a rejected non-lever).
-    full = [
-        Cfg("base direct-conv0", bspec()),
-        # --- per lever ---
-        Cfg("L1 wpe2", bspec(waves_per_eu=2)),
-        Cfg("L2 sch compv3", bspec(sched_policy="compv3")),
-        Cfg("L2 sch compv4", bspec(sched_policy="compv4")),
-        Cfg("L3 maskpool", bspec(mask_maxpool=True)),
-        # --- compositions ---
-        Cfg("L1+L2", bspec(waves_per_eu=2, sched_policy="compv3")),
-        Cfg("L1+L3", bspec(waves_per_eu=2, mask_maxpool=True)),
-        Cfg("L2+L3", bspec(sched_policy="compv3", mask_maxpool=True)),
-        Cfg(
-            "L1+L2+L3", bspec(waves_per_eu=2, sched_policy="compv3", mask_maxpool=True)
-        ),
-    ]
-    # Focused L2 confirmation set (delta was inside the spread in the full run):
-    l2only = [
-        Cfg("base direct-conv0", bspec()),
-        Cfg("L2 sch compv3", bspec(sched_policy="compv3")),
-        Cfg("L2 sch compv4", bspec(sched_policy="compv4")),
-    ]
-    configs = l2only if args.l2only else full
+    suites = {
+        "next": [
+            Cfg("winner", bspec()),
+            Cfg("pk-maxpool", bspec(pk_maxpool=True)),
+            Cfg("conv1-int8", bspec(conv1_int8=True)),
+            Cfg("i8+pk", bspec(conv1_int8=True, pk_maxpool=True)),
+            Cfg("static-kmap", bspec(static_direct_kmap=True)),
+            Cfg("persist8", bspec(persistent=True, persistent_ctas=8)),
+            Cfg("persist16", bspec(persistent=True, persistent_ctas=16)),
+            Cfg("persist32", bspec(persistent=True, persistent_ctas=32)),
+        ],
+        "combo": [
+            Cfg("winner", bspec()),
+            Cfg("conv1-int8", bspec(conv1_int8=True)),
+            Cfg("i8+pk", bspec(conv1_int8=True, pk_maxpool=True)),
+            Cfg("i8+static", bspec(conv1_int8=True, static_direct_kmap=True)),
+            Cfg(
+                "i8+static+pk",
+                bspec(conv1_int8=True, static_direct_kmap=True, pk_maxpool=True),
+            ),
+            Cfg(
+                "persist8+i8",
+                bspec(persistent=True, persistent_ctas=8, conv1_int8=True),
+            ),
+            Cfg(
+                "persist8+all",
+                bspec(
+                    persistent=True,
+                    persistent_ctas=8,
+                    conv1_int8=True,
+                    static_direct_kmap=True,
+                    pk_maxpool=True,
+                ),
+            ),
+        ],
+        "warp": [
+            Cfg("winner", bspec()),
+            Cfg("warp8x1", bspec(warp_m=8, warp_n=1)),
+            Cfg("warp16x1", bspec(warp_m=16, warp_n=1)),
+            Cfg("warp8x2", bspec(warp_m=8, warp_n=2)),
+        ],
+        "persistent": [
+            Cfg("winner", bspec()),
+            Cfg("persist4", bspec(persistent=True, persistent_ctas=4)),
+            Cfg("persist8", bspec(persistent=True, persistent_ctas=8)),
+            Cfg("persist16", bspec(persistent=True, persistent_ctas=16)),
+            Cfg("persist32", bspec(persistent=True, persistent_ctas=32)),
+        ],
+        "sched": [
+            Cfg("winner", bspec()),
+            Cfg("compv3", bspec(sched_policy="compv3")),
+            Cfg("compv4", bspec(sched_policy="compv4")),
+            Cfg("intrawave", bspec(sched_policy="intrawave")),
+            Cfg("no-pfk", bspec(conv1_prefetch_k=False)),
+            Cfg("no-schfuse", bspec(conv1_sched_fuse=False)),
+        ],
+    }
+    configs = suites[args.suite]
 
     print(f"shape H={args.h} W={args.w} C=8 K0=32 K1=24")
     rt = Runtime()

@@ -1358,6 +1358,21 @@ class IRBuilder:
             result_name_hint=f"vtr{v.type.count}",
         ).result
 
+    def vector_sext(self, v: Value, target: Type) -> Value:
+        """Sign-extend each lane of an integer vector to a wider element type
+        (e.g. ``<N x i8>`` -> ``<N x i16>``). Lowers to an LLVM vector ``sext``;
+        the AMDGPU backend keeps the packed layout so a following packed op
+        (``v_pk_max_i16`` etc.) can consume it."""
+        if not isinstance(v.type, VectorType):
+            raise ValueError("vector_sext expects vector input")
+        return self._op(
+            "vector.sext",
+            [v],
+            [VectorType(target, v.type.count)],
+            attrs={"target": target.name},
+            result_name_hint=f"vsx{v.type.count}",
+        ).result
+
     def smem_store_f16(
         self, smem: Value, indices: Sequence[Value], value: Value
     ) -> None:
@@ -2173,6 +2188,56 @@ class IRBuilder:
             result_name_hint="psw",
         )
         return op.results[0], op.results[1]
+
+    def permlanex16(self, v: Value) -> Value:
+        """`__builtin_amdgcn_permlanex16(old, v, 0x76543210, 0xfedcba98,
+        false, true)` — swap each lane's value with its ``lane ^ 16``
+        partner within a 32-lane group.
+
+        This is a permute-NETWORK VALU op (NOT an LDS/ds_bpermute op): the
+        two 32-bit selector immediates (``0x76543210`` for lanes 0..15,
+        ``0xfedcba98`` for lanes 16..31) request, for each destination
+        lane, the source lane ``L ^ 16``. ``bound_ctrl=true`` writes every
+        destination lane, so the ``old`` operand is a don't-care (we reuse
+        ``v``); full warps are active so ``fi=false`` is enough for both
+        halves to see each other (matches CK's gfx11 usage exactly).
+
+        This is the cheap cross-half vehicle CK's gfx11 FMHA pipelines use
+        for the C→A transpose (`PermuteWarpGemmCToA`); a single VALU op,
+        no LDS round-trip, no barrier. Operand must be ``i32``.
+        """
+        if v.type.name != "i32":
+            raise ValueError("permlanex16 requires an i32 operand")
+        return self._op(
+            "tile.permlanex16",
+            [v],
+            [I32],
+            result_name_hint="plx16",
+        ).result
+
+    def byte_perm(self, a: Value, b: Value, sel: int) -> Value:
+        """`__builtin_amdgcn_perm(a, b, sel)` — the ``v_perm_b32`` byte
+        shuffle: build a 32-bit result by selecting four bytes out of the
+        eight source bytes ``{b.b0,b.b1,b.b2,b.b3, a.b0,a.b1,a.b2,a.b3}``
+        (indices 0..3 = ``b`` LSB-first, 4..7 = ``a`` LSB-first).
+
+        ``sel`` is a packed i32: result byte ``k`` (k=0 is LSB) is the
+        source byte numbered ``(sel >> 8*k) & 0xff``. E.g.
+        ``perm(0x11223344, 0x55667788, 0x05010400) == 0x33774488``.
+
+        Used to interleave even/odd k0 byte-codes when assembling the
+        fused conv1 A-fragment from the conv0 accumulator. ``a`` and ``b``
+        must be ``i32``; ``sel`` is a compile-time constant.
+        """
+        if a.type.name != "i32" or b.type.name != "i32":
+            raise ValueError("byte_perm requires i32 operands")
+        return self._op(
+            "tile.byte_perm",
+            [a, b],
+            [I32],
+            attrs={"sel": int(sel) & 0xFFFFFFFF},
+            result_name_hint="bperm",
+        ).result
 
     def lane_id(self) -> Value:
         """`@llvm.amdgcn.mbcnt.hi(-1, @llvm.amdgcn.mbcnt.lo(-1, 0))` — the
@@ -3095,6 +3160,7 @@ PURE_OP_NAMES = {
     "vector.max",
     "vector.cmp",
     "vector.trunc",
+    "vector.sext",
     "vector.sum",
     "vector.reduce_max",
     "vector.splat",
@@ -3136,6 +3202,8 @@ PURE_OP_NAMES = {
     "tile.ds_read_tr_b8",
     "tile.ds_swizzle_xor",
     "tile.permlane32_swap",
+    "tile.permlanex16",
+    "tile.byte_perm",
 }
 
 

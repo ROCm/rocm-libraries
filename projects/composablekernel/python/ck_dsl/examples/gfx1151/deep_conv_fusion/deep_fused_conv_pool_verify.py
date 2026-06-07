@@ -394,15 +394,31 @@ def main() -> int:
     parser.add_argument("--c", type=int, default=8)
     parser.add_argument("--k0", type=int, default=32)
     parser.add_argument("--k1", type=int, default=24)
-    # Best measured tile for the native-int direct path on gfx1151: a
-    # wide-short 2x32 pool tile (tile_m=256) is memory/latency-bound-optimal,
-    # ~16.1 ms full-shape vs ~18.5 ms for 8x8 (both bit-exact).
+    # Best measured tile for the native-int direct path on gfx1151: a wide-short
+    # 2x64 pool tile (conv tile 4x128 -> tile_m=512) is memory/latency-bound-
+    # optimal, pairing with batch_loads + warp 4x1 for ~13.0 ms full-shape
+    # (bit-exact). tile_m=512 is also what the warp 4x1 MMA-depth win below was
+    # validated at (mfmas_m=8); narrower pool tiles shrink tile_m and change that
+    # geometry.
     parser.add_argument("--pool-tile-h", type=int, default=2)
-    parser.add_argument("--pool-tile-w", type=int, default=32)
+    parser.add_argument("--pool-tile-w", type=int, default=64)
+    # Warp grid along M/N. warp_m = #waves along M (= block_size/32 at warp_n=1).
+    # The latency-bound conv1 iu4 GEMM (~90% of wall) hides its exposed LDS-read
+    # latency with more resident waves/WG, so MORE warps win here (one WG/CU
+    # resident; warps are free latency-hiding). Default 16x1 (block_size=512)
+    # measured best on the gfx1151 board with the full lever stack (native_int +
+    # direct + fused_c0a1 + prefetch_k + sched_fuse, pt2x64/tile_m=512): rotated
+    # 4-round bit-exact A/B 2026-06-06 = 12.22 ms vs 8x1 13.66 ms (+10.5%) vs
+    # 4x1 15.13 ms (+23.8%). NOTE this reverses the older w4x1-best result, which
+    # was measured WITHOUT the fused/ILP levers; with them on, max waves wins.
+    parser.add_argument("--warp-m", type=int, default=16)
+    parser.add_argument("--warp-n", type=int, default=1)
     parser.add_argument(
         "--direct",
-        action="store_true",
-        help="use the direct-conv0 footprint-cache A operand (vs im2col)",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="use the direct-conv0 footprint-cache A operand (vs im2col); "
+        "DEFAULT ON (--no-direct for the im2col A path)",
     )
     # multi-lever campaign toggles
     parser.add_argument(
@@ -461,10 +477,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--native-int",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="conv0 uses the native wmma_i32_16x16x16_iu8 atom (raw int8 -> i8 "
         "LDS -> exact i32 acc) instead of the fp16-emulation path; conv1 uses "
-        "native packed-int4 WMMA when available",
+        "native packed-int4 WMMA when available. DEFAULT ON "
+        "(--no-native-int for the fp16-emulation path)",
     )
     parser.add_argument(
         "--batch-loads",
@@ -481,6 +499,78 @@ def main() -> int:
         dest="batch_loads",
         action="store_false",
         help="disable Lever 1 footprint load batching (A/B baseline)",
+    )
+    parser.add_argument(
+        "--pk-maxpool",
+        dest="pk_maxpool",
+        action="store_true",
+        default=False,
+        help="Lever 3: packed-int16 maxpool reduction (v_pk_max_i16) instead of "
+        "per-channel i32 cmp/cndmask; native-int finalpack path only, "
+        "correctness-neutral (A/B candidate)",
+    )
+    parser.add_argument(
+        "--conv1-prefetch-k",
+        dest="conv1_prefetch_k",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Lever 4: conv1 cross-k-step fragment prefetch (load all k-step A/B "
+        "frags up front so k=1 ds_read latency overlaps k=0 MMAs); native-int "
+        "conv1 path only, correctness-neutral. DEFAULT ON; MUST pair with "
+        "--conv1-sched-fuse (alone it is unstable) (--no-conv1-prefetch-k to off)",
+    )
+    parser.add_argument(
+        "--conv1-sched-fuse",
+        dest="conv1_sched_fuse",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Lever 5: conv1 fused k-step schedule group (one DS_READ+MFMA group "
+        "over all k-steps instead of per-step barriers, letting the scheduler "
+        "overlap k=1 loads with k=0 MMAs); native-int conv1 path only, "
+        "correctness-neutral. DEFAULT ON; pairs with --conv1-prefetch-k "
+        "(--no-conv1-sched-fuse to off)",
+    )
+    parser.add_argument(
+        "--fused-c0a1",
+        dest="fused_c0a1",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="L6: fused conv0->conv1 register handoff via permlanex16 (gfx11 FMHA "
+        "C->A transpose). Reorients conv0 (W0 as WMMA-A) so the acc lands lane=m, "
+        "slot=k0, then transposes k0<->m in-register (permlanex16 + v_perm + "
+        "nibble-pack) into the conv1 A-fragment -- deletes c0_smem, its scatter, "
+        "and the handoff barrier. native-int direct conv0 only. DEFAULT ON "
+        "(--no-fused-c0a1 to off)",
+    )
+    parser.add_argument(
+        "--conv1-int8",
+        dest="conv1_int8",
+        action="store_true",
+        default=False,
+        help="L6b: do conv1 contraction in int8 (iu8 atom) instead of int4 "
+        "(iu4). Skips the per-handoff nibble squeeze -- hands the 16 contiguous "
+        "k0 byte codes straight through as a <4 x i32> iu8 A-fragment and stages "
+        "W1 byte-per-code. Codes stay int4-range so dot products are bit-"
+        "identical to iu4 (no reference change). native-int fused_c0a1 only. "
+        "DEFAULT OFF.",
+    )
+    parser.add_argument(
+        "--persistent",
+        dest="persistent",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Persistent kernel: launch only --persistent-ctas resident CTAs and "
+        "grid-stride over the tile strip, staging the tile-invariant W0/W1 into "
+        "LDS once per CTA (not once per tile). Requires native_int + direct + "
+        "fused_c0a1 (the default winning lever stack). DEFAULT OFF.",
+    )
+    parser.add_argument(
+        "--persistent-ctas",
+        dest="persistent_ctas",
+        type=int,
+        default=16,
+        help="number of resident CTAs for --persistent (perf knob; target "
+        "~#CU(8)*resident-WG/CU; the grid-stride loop covers all tiles regardless)",
     )
     args = parser.parse_args()
 
@@ -509,6 +599,8 @@ def main() -> int:
         k1=args.k1,
         pool_tile_h=args.pool_tile_h,
         pool_tile_w=args.pool_tile_w,
+        warp_m=args.warp_m,
+        warp_n=args.warp_n,
         direct_conv0=direct,
         waves_per_eu=args.waves_per_eu,
         sched_policy=args.sched,
@@ -518,9 +610,16 @@ def main() -> int:
         static_direct_kmap=args.static_direct_kmap,
         packed_c0_handoff=args.packed_c0,
         repack_c0=args.repack_c0,
+        fused_c0a1=args.fused_c0a1,
         butterfly_conv01=args.butterfly,
         native_int=args.native_int,
         batch_loads=args.batch_loads,
+        pk_maxpool=args.pk_maxpool,
+        conv1_prefetch_k=args.conv1_prefetch_k,
+        conv1_sched_fuse=args.conv1_sched_fuse,
+        conv1_int8=args.conv1_int8,
+        persistent=args.persistent,
+        persistent_ctas=args.persistent_ctas,
     )
     ok, why = is_valid_spec(spec, arch=args.arch)
     if not ok:
