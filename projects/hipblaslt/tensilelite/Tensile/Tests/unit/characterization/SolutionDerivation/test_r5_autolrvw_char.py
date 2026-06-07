@@ -305,3 +305,43 @@ def test_gfx950_mx_fp8_explicit_lrvw_valid(_gp_assigned, gfx950_iim, gfx950_asse
     if sol.get("Valid"):
         assert sol.get("LocalReadVectorWidthA") == 16
         assert sol.get("LocalReadVectorWidthB") == 16
+
+
+# ===========================================================================
+# P6 survivor-2 kill: pin the isAutoLRVW False default (the explicit-LRVW path).
+#
+# isAutoLRVW returns False on the explicit (LocalReadVectorWidth != -1) path, so
+# the auto-derivation / LDS-pad recompute block — gated on `autoLRVWA or
+# autoLRVWB` — is SKIPPED and the user's width survives verbatim. The prior
+# explicit test used LRVW=16, where wlr = 16 // MIInputPerThread(32) == 1, so
+# the recompute block leaves 16 unchanged even if entered; that is why flipping
+# the `autoLRVW = False` default to True went undetected.
+#
+# A WIDE explicit width (LRVW=64, valid here because TransposeLDS=1) makes
+# wlr = 64 // 32 == 2 > 1. On correct code the block is skipped (autoLRVW=False)
+# and the derived LocalReadVectorWidth{A,B} stays 64. With the default flipped to
+# True the explicit path wrongly enters the block, altering the width (and, given
+# a latent calcLdsPad arity bug on that branch, raising) — either way the
+# pass-through assertion below fails, killing the mutant.
+# ===========================================================================
+
+def test_gfx950_mx_fp8_explicit_wide_lrvw_preserved(_gp_assigned, gfx950_iim, gfx950_assembler):
+    """Explicit wide LRVW=64 must pass through unchanged (isAutoLRVW False default)."""
+    sol = _make_gfx950_mx_fp8_solution(
+        gfx950_iim, gfx950_assembler,
+        LocalReadVectorWidth=64,
+    )
+    assert sol is not None
+    # Explicit LRVW=64 is valid for FP8 on gfx950 with TransposeLDS=1.
+    assert sol.get("Valid") is True, (
+        "Expected Valid=True for gfx950 MX FP8 + explicit LRVW=64; "
+        "got invalid (check rejection log above)"
+    )
+    # isAutoLRVW must return False on the explicit path -> recompute block skipped
+    # -> the user-specified width survives unchanged on BOTH operands.
+    assert sol.get("LocalReadVectorWidthA") == 64, (
+        f"explicit LRVW=64 must be preserved, got {sol.get('LocalReadVectorWidthA')}"
+    )
+    assert sol.get("LocalReadVectorWidthB") == 64, (
+        f"explicit LRVW=64 must be preserved, got {sol.get('LocalReadVectorWidthB')}"
+    )

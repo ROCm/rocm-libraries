@@ -244,3 +244,50 @@ def test_double_and_int32_dispatch(dtype, act):
     """Double/Int32 branches of multi-type functions return a Module."""
     mod = _mod(dtype, act)
     assert type(mod).__name__ == "Module"
+
+
+# ---------------------------------------------------------------------------
+# P6 survivor-1 kill: pin the Relu clamp FLOOR operand (src1 == 0).
+#
+# getReluModule emits a max-style instruction per compute dtype to compute
+# max(0, x) (int8-saturate additionally clamps to 127 via VMed3I32). The
+# existing relu tests assert only that a Module emits and which VALU op is used
+# — none pins the clamp bound, so mutating the floor (e.g. VMaxF32 src1 0 -> 1)
+# was undetected. These assertions pin the floor operand to 0 for every dtype,
+# killing that mutant and its per-dtype analogues (half/single/double/int).
+# Renderings (code before the '//' comment):
+#   half      v_pk_max_f16 v1, v0, 0
+#   single    v_max_f32    v1, v0, 0
+#   double    v_max_f64    v[1:2], v[0:1], 0
+#   int32     v_max_i32    v1, v0, 0
+#   int8-sat  v_med3_i32   v1, v0, 0, v0     (// x = min(127, max(0, x)))
+# In every case the third token (src1) is the clamp floor and must be 0.
+# ---------------------------------------------------------------------------
+
+def _relu_clamp_floor_operand(dtype_code, *, saturate=False):
+    """Return the src1 (clamp-floor) operand string of the Relu max instruction.
+
+    Locates the emitted instruction whose comment computes ``max(0, x)`` and
+    returns its third operand (dst, src0, src1) with whitespace stripped.
+    """
+    mod = _mod(dtype_code, "relu", saturate=saturate)
+    for it in mod.items():
+        line = str(it)
+        code = line.split("//", 1)[0]
+        if "max(0, x" in line:  # matches both 'x = max(0, x)' and the int8 min/max
+            operands = [tok.strip() for tok in code.split(",")]
+            assert len(operands) >= 3, f"unexpected relu instruction: {code!r}"
+            return operands[2]
+    raise AssertionError(f"no max(0,x) clamp instruction emitted for relu {dtype_code} (sat={saturate})")
+
+
+@pytest.mark.parametrize("dtype_code,saturate", [
+    ("H", False),   # VMaxPKF16
+    ("S", False),   # VMaxF32   (the P6 survivor's exact mutant line)
+    ("D", False),   # VMaxF64
+    ("I", False),   # VMaxI32
+    ("I", True),    # VMed3I32 (int8 saturate: floor 0, ceil 127)
+])
+def test_relu_clamp_floor_is_zero(dtype_code, saturate):
+    """Relu clamp floor (src1 of the max op) must be exactly 0 — pins max(0, x)."""
+    assert _relu_clamp_floor_operand(dtype_code, saturate=saturate) == "0"

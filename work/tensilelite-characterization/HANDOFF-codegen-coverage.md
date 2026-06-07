@@ -13,8 +13,10 @@ The campaign is **DONE**. Whole-project methodology-A coverage is **80.70%** (�
 line-only 83.48%) — up from the develop baseline **22.47%** (**+58.23 pts**); the P4 Stage-2
 expansion I ran added **+11.85 pts** over 7 gap-driven rounds. Every round is committed, add-only,
 deterministic, with full `-m unit` **0 failed** (3326 passed / 201 skipped). P5 certified the gate;
-P6 mutation-validated the suite (4 killed / 2 survived, worktree clean). **Nothing is pushed** —
-all local on branch `users/davidd-amd/tensillite-coverage`.
+P6 mutation-validated the suite (4 killed / 2 survived, worktree clean); **P7 (2026-06-07) killed
+both P6 survivors** with add-only assertion tests (`wf/p7-survivor-kill.sh` → `ALL KILLED`), so the
+mutation backlog is now empty. **Nothing is pushed** — all local on branch
+`users/davidd-amd/tensillite-coverage`.
 
 ## 2. Where everything is
 
@@ -68,8 +70,13 @@ concurrently (it deleted shards mid-run once). rm only the specific shard names.
 1. **Push / open PR** when ready (David pushes; I never push — see memory `no-push-local-proof-first`).
    Note the branch carries the `--cpu-only` switch source (a separate gpu-mocks PR's commits) by
    decision; the coverage campaign itself is strictly add-only (no non-test `Tensile/*.py` modified).
-2. **P6 survivors → stronger assertions** (`p4-backlog.md`): (a) Activation Relu clamp operand not
-   pinned; (b) Solution auto-LRVW default not pinned. Both lines are covered but under-asserted.
+2. ~~**P6 survivors → stronger assertions**~~ **DONE (P7, 2026-06-07).** Both mutants now KILLED by
+   add-only assertion tests; verified via `wf/p7-survivor-kill.sh` (`coverage/p7/survivor-kill-report.txt`
+   = `ALL KILLED`). (a) Relu clamp floor `src1==0` pinned across dtypes in
+   `Activation/test_r4_activation2_char.py::test_relu_clamp_floor_is_zero`; (b) explicit wide `LRVW=64`
+   pass-through pinned in `SolutionDerivation/test_r5_autolrvw_char.py::test_gfx950_mx_fp8_explicit_wide_lrvw_preserved`
+   (the prior explicit-`LRVW=16` test could not catch it: `16 // MIInputPerThread(32) == 1` left the
+   width unchanged even when the buggy branch was entered). See `p4-backlog.md` (STATUS header).
 3. **Upstream-fix candidates** (`recommendations.md`, OUTSIDE this add-only campaign):
    - `SolutionStructs/Problem.py:711 problemTypeToEnum()` mutates a ProblemType dict in place
      (DataType→int) → the `cpu_only_end_to_end` xdist flake. A non-mutating copy lets the gate run

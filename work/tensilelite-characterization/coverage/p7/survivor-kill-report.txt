@@ -1,0 +1,8 @@
+P7 survivor-kill verification — eb5f2e2e34f
+============================================================
+MUTANT               VERDICT   DETAIL
+m3_activation_relu   KILLED    base_rc=0 mut_rc=1 revert=ok | 1 failed, 4 passed in 2.73s
+m4_sol_autolrvw      KILLED    base_rc=0 mut_rc=1 revert=ok | 1 failed in 3.53s
+============================================================
+CLEAN: no non-test source leak (mutated files reverted).
+P7_RESULT: ALL KILLED
