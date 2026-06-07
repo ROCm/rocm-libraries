@@ -117,6 +117,41 @@ full `mutmut` re-run + manual equivalence audit (not agent self-report):
 - Artifacts: `workflow/{mutation-report.json, survivor-ledger.md, recommendations.md}`
   (synthesis summary tables were stale on first write — corrected against ground truth).
 
+## Value of mutation testing (two perspectives)
+
+**(1) It measures test QUALITY, not quantity.** Coverage only proves a line ran;
+it cannot tell whether any test would notice the line's behavior changing. Slice-1
+began at ~80% coverage yet **131 covered mutants survived** — each a line executed
+but never pinned. Mutation testing localized every weakness to an exact line *and*
+the distinguishing input (e.g. `ceilDivide`'s `numerator < 0 or denominator < 0`
+passed even flipped to `and`; `hash_combine`'s `shift` kwarg unpinned). Result:
+118 "executed-but-unchecked" lines became behavior-pinning assertions (suite
+110 → 184 tests; covered score 77.5% → 99.3%), with the genuinely-untestable
+(4 equivalent), no-contract noise (9 pragma'd), and refactor candidates (design
+smells) cleanly separated. Far more actionable than a coverage %.
+
+**(2) It makes LLM-generated tests TRUSTWORTHY and blocks fraudulent claims.** An
+LLM can write an always-true test, assert the wrong thing, or just *claim* a kill.
+Mutation testing replaces trust with a deterministic gate: a kill counts only if
+`base_rc==0 and mut_rc!=0 and revert=='ok'`, checked by `wf/mutmut-verify.sh` —
+never the model's say-so. What the gate + discipline actually caught here (none
+taken on faith):
+
+- **9 of 118** LLM-authored tests **failed the gate on the first pass** → rejected
+  as not-real-kills, repaired, re-proven (verify → verify2 kill-matrices).
+- the model's **4 equivalence claims were independently audited** by a human/Claude
+  pass (the report's rule: never let the model decide equivalence) — one looked
+  killable until full path analysis confirmed it equivalent.
+- an **inflated synthesis summary** (agent counts summed 133 ≠ 131; over-stated
+  kill count) was **caught by a validating step and corrected** to ground truth.
+- the final result was **certified by an independent fresh `mutmut` re-run**,
+  immune to any agent self-report.
+
+LLMs propose; the deterministic harness disposes. That loop is what lets AI test
+generation scale without scaling unverified claims. (The tutorial notebook
+`parametric-chaos-notebook/characterization-testing.ipynb` §7 makes the gate
+runnable — it rejects a fabricated kill live.)
+
 ## Out of scope / next
 
 - **84 no-test mutants** = coverage gaps (lines no test exercises), a different
