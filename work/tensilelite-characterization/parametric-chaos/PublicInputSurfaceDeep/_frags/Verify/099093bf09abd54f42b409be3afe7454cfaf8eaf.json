@@ -1,0 +1,13 @@
+{
+  "branch_id": "099093bf09abd54f42b409be3afe7454cfaf8eaf",
+  "predicate": "not cacheValid",
+  "location": "Tensile/BenchmarkProblems.py:557 (_benchmarkProblemType)",
+  "confirmed": true,
+  "status": "SAT",
+  "downgraded_to": null,
+  "method": "Re-read REAL predicate at BenchmarkProblems.py:557 (if not cacheValid) and re-derived the law from source: cacheValid=False initial (L541), set True only inside if useCache: (L542) when matchCO is not None (L549-551). matchCO from _loadCacheIfMatches/_loadLegacyCacheIfMatches -> _readCacheIfValid (L131-147) returns non-None ONLY when os.path.isfile(cache.yaml) AND _cacheDataMatches(params). So cacheValid == (useCache AND fs==present_matching), matching the claim. Re-executed all 3 true_examples + 1 false_example in-container against a faithful model AND the claimed pure helper solution_generation_runs: all 4 reproduce. Exhaustive 2x3 table reproduced 5/6 TRUE-branch points (only useCache=True & present_matching is the FALSE cache-hit point) -- matches claimed 5/6. Independently re-ran z3 4.16.0 in-container with the harvested law: BOTH branches SAT (recompile fs=missing/cacheValid=False; cache-hit useCache=True/fs=present_matching/cacheValid=True). Verified --use-cache is genuine public CLI input: Tensile.py:503 argparse store_true default False -> config[UseCache] (L595) -> _benchmarkProblemType useCache arg (L470) -> predicate. present_matching half is external filesystem state, so classification solver-backed-under-assumptions is honest.",
+  "examples_reproduced": {"true_examples": 3, "false_examples": 1, "exhaustive_true_points": "5/6"},
+  "z3_independent": {"version": "4.16.0", "not_cacheValid": "sat", "cacheValid": "sat"},
+  "notes": "No upgrade applied. Claim was sat/solver-backed-under-assumptions; verified at that level. CrossHair correctly flagged as bounded (not a proof); authoritative completeness is the exhaustive z3/table enumeration, independently reproduced. No GPU/env-var dependence reaches this predicate; CPU-only.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Verify/099093bf09abd54f42b409be3afe7454cfaf8eaf.json"
+}

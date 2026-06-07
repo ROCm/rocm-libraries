@@ -1,0 +1,16 @@
+{
+  "id": "0d3cd6b0f66334e1de87f9308a6b6fa141445428",
+  "file": "Tensile/BenchmarkProblems.py",
+  "function": "_generateCustomKernelSolutions",
+  "branch_kind": "if",
+  "location": {
+    "line": 304,
+    "col": 12
+  },
+  "predicate_source": "failOnMismatch",
+  "referenced_symbols": [
+    "failOnMismatch"
+  ],
+  "derived_symbols": [],
+  "rank": 8
+}

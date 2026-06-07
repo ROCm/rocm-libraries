@@ -1,0 +1,31 @@
+{
+  "id": "d2f6f0df95db1dd2e280fe5b92edb75f8acc175d",
+  "file": "Tensile/LibraryIO.py",
+  "function": "getCUCount",
+  "branch_kind": "if",
+  "location": {"line": 689, "col": 4},
+  "predicate_source": "CU is None",
+  "domains": {"CU": {"type": "str", "values": [null, "64"]}},
+  "branch_id": "d2f6f0df95db1dd2e280fe5b92edb75f8acc175d",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "solver-backed-under-assumptions",
+  "encoding": {
+    "model": "CU = os.environ.get(\"CU\", None). os.environ.get(k, default) returns None iff key absent, else a str. So `CU is None` <=> env var CU is unset. Strings have no null in z3, so nullability is modeled with present:Bool (env var set?) and cu_str:String (the value when set, constrained to the seeded non-None member \"64\"). predicate := Not(present).",
+    "vars": ["present : Bool", "cu_str : String"],
+    "constraints": ["Implies(present, cu_str == \"64\")"],
+    "predicate": "Not(present)",
+    "op_surface": ["unary(is None / Not)", "compare(== StringVal)"],
+    "note": "Pure nullability check. z3 4.16.0 exhaustively decides over the complete seeded domain {None, \"64\"}: both the unset case (predicate True) and the set case (predicate False) are sat. Mirrors ExpressionEvaluator unary+compare ops."
+  },
+  "true_examples": [
+    {"CU": null, "env": "CU unset", "model": {"present": "False"}, "eval": "os.environ.get(\"CU\", None) is None == True", "source": "z3-model+runtime-confirmed"}
+  ],
+  "false_examples": [
+    {"CU": "64", "env": "CU=64", "model": {"present": "True", "cu_str": "64"}, "eval": "os.environ.get(\"CU\", None) is None == False (CU == \"64\")", "source": "z3-model+runtime-confirmed"}
+  ],
+  "pure_helper": "from typing import Optional\n\ndef cu_is_none(cu_env: Optional[str]) -> bool:\n    # Mirror of LibraryIO.getCUCount:689 guard.\n    # cu_env = os.environ.get(\"CU\", None); branch taken when cu_env is None.\n    return cu_env is None",
+  "crosshair_note": "crosshair 0.0.106 ran on cu_is_none but reported no checkable functions (the helper carries no pre/post contract to falsify). The helper is total and trivially exact; CrossHair neither found a counterexample nor proved anything here -- absence of a counterexample is not a proof. The predicate is instead exhaustively decided by z3 over the complete 2-element seeded domain.",
+  "runtime_note": "The predicate LOGIC is fully static (string nullability) and exhaustively solved by z3 over the complete seeded domain {None, \"64\"}. The value originates from os.environ.get(\"CU\", None), an external-state read at call time. UNLIKE os.name (interpreter-set, not driveable from public input), the CU environment variable IS publicly settable: any caller/CI can export CU=<n> or leave it unset, so a caller CAN drive either branch from outside the process. Classification is solver-backed-under-assumptions: under the assumption that CU is read from os.environ (with the seeded value space), z3 decides both branches; the actual taken branch is determined by the runtime environment, not chosen by the solver. Runtime confirmed: unset -> CU=None, (CU is None)=True; CU=64 -> CU=\"64\", (CU is None)=False. When the predicate is True the function falls through to a rocminfo subprocess probe (GPU/host dependent); the char-test CI host has no GPU, so an unset CU leads to printExit(\"Failed to get Compute Unit count...\"). Setting CU short-circuits the probe entirely.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Solve/d2f6f0df95db1dd2e280fe5b92edb75f8acc175d.json"
+}

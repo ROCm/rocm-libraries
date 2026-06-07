@@ -1,0 +1,47 @@
+{
+  "branch_id": "6ff09bcdcc5703903cfcdef2e13b07dfd86ec4fb",
+  "source_file": "Tensile/BenchmarkProblems.py",
+  "source_line": 657,
+  "predicate": "not os.path.exists(resultsFileName) or globalParameters[\"ForceRedoBenchmarkProblems\"]",
+  "reified": true,
+  "test_file": "Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_BenchmarkProblems_L657_char.py",
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_BenchmarkProblems_L657_char.py"
+  ],
+  "passed": true,
+  "passed_count": 8,
+  "failed_count": 0,
+  "run_command": "pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_BenchmarkProblems_L657_char.py",
+  "strategy": "pure-helper",
+  "helper_fn": "benchmark_rerun_guard(exists: bool, force: bool) -> bool",
+  "witnesses": {
+    "true": [
+      {
+        "exists": false,
+        "force": false,
+        "guard": true
+      },
+      {
+        "exists": false,
+        "force": true,
+        "guard": true
+      },
+      {
+        "exists": true,
+        "force": true,
+        "guard": true
+      }
+    ],
+    "false": [
+      {
+        "exists": true,
+        "force": false,
+        "guard": false
+      }
+    ]
+  },
+  "unique_false_confirmed": true,
+  "cpu_only": true,
+  "add_only": true,
+  "schema": "REIFY_SCHEMA_v1"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "09380ac263b6fa5b5ce1fae3b659c59c5e2178a5",
+  "file": "Tensile/Toolchain/Validators.py",
+  "function": "_validateExecutable",
+  "branch_kind": "guard-return",
+  "location": {
+    "line": 237,
+    "col": 8
+  },
+  "predicate_source": "_exeExists(Path(file))",
+  "referenced_symbols": [
+    "Path",
+    "_exeExists",
+    "file"
+  ],
+  "derived_symbols": [],
+  "rank": 1
+}

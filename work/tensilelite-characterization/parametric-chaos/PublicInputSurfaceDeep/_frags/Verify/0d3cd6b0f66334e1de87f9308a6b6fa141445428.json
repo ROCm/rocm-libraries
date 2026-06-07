@@ -1,0 +1,8 @@
+{
+  "branch_id": "0d3cd6b0f66334e1de87f9308a6b6fa141445428",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Re-established the real derivation chain in-container against the ACTUAL source: BenchmarkStructs.BenchmarkStep.__init__ (inspect.getsource) sets self.customKernelWildcard = (self.customKernels == [\"*\"]); BenchmarkProblems.py:576 passes failOnMismatch = not benchmarkStep.customKernelWildcard into _generateCustomKernelSolutions, where line 304 branches on failOnMismatch. Re-executed all 3 claimed examples against (a) the derivation logic and (b) the claimed pure_helper over the seeded domain {[], [\"some_kernel_name\"], [\"*\"]}: true examples [] -> True and [\"some_kernel_name\"] -> True; false example [\"*\"] -> False. All evaluations matched the claimed results exactly (ALL_MATCH True). Predicate is fully-static: pure boolean of public YAML field CustomKernels, failOnMismatch == (CustomKernels != [\"*\"]). Reachability caveat in the claim is accurate and does not affect predicate truth values. The [] true model is vacuous for line-304 execution but the predicate value is still correct.",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Verify/0d3cd6b0f66334e1de87f9308a6b6fa141445428.json"
+}

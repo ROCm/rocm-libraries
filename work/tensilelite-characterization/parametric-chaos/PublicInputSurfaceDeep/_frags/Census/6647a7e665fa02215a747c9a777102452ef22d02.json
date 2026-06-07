@@ -1,0 +1,17 @@
+{
+  "id": "6647a7e665fa02215a747c9a777102452ef22d02",
+  "file": "Tensile/BenchmarkProblems.py",
+  "function": "_benchmarkProblemType",
+  "branch_kind": "if",
+  "location": {
+    "line": 586,
+    "col": 12
+  },
+  "predicate_source": "len(solutions) == 0",
+  "referenced_symbols": [
+    "len",
+    "solutions"
+  ],
+  "derived_symbols": [],
+  "rank": 11
+}

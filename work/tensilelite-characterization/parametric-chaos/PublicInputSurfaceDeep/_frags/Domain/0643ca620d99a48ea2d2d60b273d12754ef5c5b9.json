@@ -1,0 +1,20 @@
+{
+  "branch_id": "0643ca620d99a48ea2d2d60b273d12754ef5c5b9",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Domain/0643ca620d99a48ea2d2d60b273d12754ef5c5b9.json",
+  "domains": {
+    "solution[ProblemType]": {
+      "type": "enum",
+      "values": [
+        "matches_config_problemType",
+        "differs_from_config_problemType"
+      ]
+    },
+    "problemType": {
+      "type": "enum",
+      "values": [
+        "matches_kernel_problemType",
+        "differs_from_kernel_problemType"
+      ]
+    }
+  }
+}

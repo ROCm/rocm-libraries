@@ -1,0 +1,16 @@
+{
+  "id": "c03b6953169e51d676e1f454d11aef7debf7110a",
+  "file": "Tensile/Toolchain/Validators.py",
+  "function": "_posixSearchPaths",
+  "branch_kind": "if",
+  "location": {
+    "line": 97,
+    "col": 4
+  },
+  "predicate_source": "os.environ.get(\"ROCM_PATH\")",
+  "referenced_symbols": [
+    "os"
+  ],
+  "derived_symbols": [],
+  "rank": 19
+}

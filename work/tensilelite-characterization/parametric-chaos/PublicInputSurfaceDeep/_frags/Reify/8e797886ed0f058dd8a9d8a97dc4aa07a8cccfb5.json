@@ -1,0 +1,11 @@
+{
+  "branch_id": "8e797886ed0f058dd8a9d8a97dc4aa07a8cccfb5",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_BenchmarkProblems_L740_char.py"
+  ],
+  "passed": true,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Reify/8e797886ed0f058dd8a9d8a97dc4aa07a8cccfb5.json",
+  "kind": "pure_helper",
+  "reason": "9 tests pass (0 failed). Pure-helper _force_or_missing(force, file_exists) models BenchmarkProblems.py:740 if globalParameters ForceRedoBenchmarkProblems or not os.path.exists(newResultsFileName). Full 2x2 truth table covered (4 pure-helper tests). Integration pins: arm1 via globalParameters dict (force=True->True, force=False->False contribution verified), arm1 default type pin, arm2 via tmp_path filesystem probe (file absent->True, file present->False). All 9 tests deterministic, CPU-only, pytestmark=unit."
+}

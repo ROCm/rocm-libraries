@@ -1,0 +1,69 @@
+{
+  "branch_id": "8fc5b4598eb96fa53f4a1b7e36901b460b6300bb",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Solve/8fc5b4598eb96fa53f4a1b7e36901b460b6300bb.json",
+  "source_location": {
+    "file": "Tensile/Toolchain/Validators.py",
+    "line": 226,
+    "col": 4,
+    "node_type": "if (guard-raise)",
+    "enclosing_function": "_validateExecutable"
+  },
+  "predicate_text": "not any((supportedCxxCompiler(file), supportedCCompiler(file), supportedOffloadBundler(file), supportedHip(file), supportedDeviceEnumerator(file)))",
+  "predicate_effect": "When True the guard raises ValueError(`{file}` is not a supported toolchain component ...); when False control falls through to the absolute-path / search-path resolution.",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "solver-backed-under-assumptions",
+  "assumptions": [
+    "os.name == \"posix\" (the Linux container tl-char). The five supported* helpers each branch on os.name == \"nt\": on Windows _windowsWithExtensions appends PATHEXT extensions to every target, and supportedDeviceEnumerator accepts hipinfo/hipInfo instead of rocm_agent_enumerator/amdgpu-arch. The solved table below is the POSIX table; the Windows table differs (hipinfo would flip to accepted, amdgpu-arch to rejected, and PATHEXT-suffixed spellings become accepted).",
+    "file is drawn from the seeded domain {amdclang++, amdgpu-arch, hipinfo, gcc}; the supported* booleans were computed by CALLING the real Validators.py functions in-container, not hand-modeled."
+  ],
+  "encoding": {
+    "free_variables": [
+      {
+        "z3_name": "file",
+        "sort": "EnumSort File {amdclang++, amdgpu-arch, hipinfo, gcc}",
+        "meaning": "the executable-name string argument to _validateExecutable; here the seeded 4-value domain"
+      }
+    ],
+    "derived_booleans_posix": {
+      "supportedCxxCompiler(file)":      {"amdclang++": true,  "amdgpu-arch": false, "hipinfo": false, "gcc": false},
+      "supportedCCompiler(file)":        {"amdclang++": false, "amdgpu-arch": false, "hipinfo": false, "gcc": false},
+      "supportedOffloadBundler(file)":   {"amdclang++": false, "amdgpu-arch": false, "hipinfo": false, "gcc": false},
+      "supportedHip(file)":              {"amdclang++": false, "amdgpu-arch": false, "hipinfo": false, "gcc": false},
+      "supportedDeviceEnumerator(file)": {"amdclang++": false, "amdgpu-arch": true,  "hipinfo": false, "gcc": false}
+    },
+    "z3_predicate": "Not(Or(Cxx(file), C(file), Off(file), Hip(file), Dev(file)))  where each supported* is an If-chain over the EnumSort tied to the computed POSIX table",
+    "op_surface": "boolean(any/Or/Not) over equality compares (file == const) and constant booleans -- within the harvested boolean/compare op-surface; no arithmetic/bit ops needed.",
+    "reduction_notes": "any((a,b,c,d,e)) == Or(a,b,c,d,e); the guard is its negation. Each supported* helper is a pure string membership test (_supportedComponent: component == target OR basename(component) == target, with Windows-only PATHEXT expansion). On POSIX with file constant, every supported* is a constant boolean, so the predicate is a finite table over the 4-value enum -- fully decidable. z3 returns concrete file values for both polarities."
+  },
+  "z3_run": {
+    "true_check": "sat",
+    "true_model": "[file = hipinfo]",
+    "false_check": "sat",
+    "false_model": "[file = amdclang++]",
+    "exhaustive_table_posix": {
+      "amdclang++": {"any_supported": true,  "predicate_not_any": false},
+      "amdgpu-arch": {"any_supported": true,  "predicate_not_any": false},
+      "hipinfo":    {"any_supported": false, "predicate_not_any": true},
+      "gcc":        {"any_supported": false, "predicate_not_any": true}
+    },
+    "note": "Real z3 4.16.0 output in tl-char. Both polarities SAT over the seeded domain; the predicate is a genuine function of the public input file (and os.name)."
+  },
+  "true_examples": [
+    {"file": "hipinfo", "os.name": "posix", "result": true, "how": "hipinfo is the WINDOWS device enumerator; on POSIX supportedDeviceEnumerator accepts only rocm_agent_enumerator/amdgpu-arch, so all five supported* are False -> any(...) False -> guard True -> ValueError raised. (Cross-platform footgun: the same name is accepted on Windows.)"},
+    {"file": "gcc", "os.name": "posix", "result": true, "how": "gcc matches no supported toolchain component on any platform -> guard True -> ValueError raised."}
+  ],
+  "false_examples": [
+    {"file": "amdclang++", "os.name": "posix", "result": false, "how": "supportedCxxCompiler(amdclang++) is True -> any(...) True -> guard False -> falls through to path/search resolution."},
+    {"file": "amdgpu-arch", "os.name": "posix", "result": false, "how": "supportedDeviceEnumerator(amdgpu-arch) is True on POSIX -> any(...) True -> guard False -> falls through."}
+  ],
+  "public_inputs": [
+    {"name": "file", "kind": "cli/api string (toolchain component name passed to validateToolchain/_validateExecutable)"}
+  ],
+  "external_state": [
+    "os.name (platform: posix vs nt) -- selects which supported* targets apply (PATHEXT expansion + hipinfo device enumerator). Treated as an assumption (posix) rather than a solved variable."
+  ],
+  "pure_helper": "from os.path import basename\n\nPOSIX_SUPPORTED = frozenset([\n    \"amdclang\", \"clang\",            # C compiler\n    \"amdclang++\", \"clang++\",        # C++/HIP compiler\n    \"clang-offload-bundler\",        # offload bundler\n    \"hipcc\", \"hipconfig\",           # hip\n    \"rocm_agent_enumerator\", \"amdgpu-arch\",  # device enumerator (posix)\n])\n\ndef toolchain_component_rejected(file: str) -> bool:\n    \"\"\"Pure POSIX model of the Validators.py:226 guard (os.name != \\\"nt\\\").\n    True  <=> `file` matches NONE of the supported components -> ValueError raised.\n    Mirrors _supportedComponent: matches the raw string OR its basename.\"\"\"\n    return not (file in POSIX_SUPPORTED or basename(file) in POSIX_SUPPORTED)\n",
+  "pure_helper_notes": "Differential test in-container against the REAL guard (real_guard = not any((supportedCxxCompiler,...))) over {seeded domain + clang/hipcc/hipconfig/rocm_agent_enumerator/clang-offload-bundler/amdclang/clang++ + path-prefixed /opt/rocm/bin/amdclang++ and /opt/rocm/bin/hipinfo + empty string + . + x/amdgpu-arch}: 0 mismatches -- the helper exactly reproduces the POSIX guard including basename matching. CrossHair 0.0.106 run on the helper (with post: (not __return__) == (file in POSIX_SUPPORTED or basename(file) in POSIX_SUPPORTED), pre len(file)<30): no counterexample within per_condition_timeout=40s. CrossHair absence-of-counterexample is NOT a proof. Helper models POSIX only; the Windows guard additionally expands PATHEXT and swaps the device-enumerator target set.",
+  "notes": "Add-only deliverable analysis; no repo files modified. Witnesses are solver-derived over the public input `file` (z3 sat for both polarities), under the assumption os.name==posix. solver_status=sat; classification=solver-backed-under-assumptions because the supported* op-surface is gated on the external os.name. A reified add-only char test for adjacent _validateExecutable behavior already exists at Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_Validators_L237_char.py."
+}

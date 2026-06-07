@@ -1,0 +1,11 @@
+{
+  "branch_id": "0d3cd6b0f66334e1de87f9308a6b6fa141445428",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_BenchmarkProblems_L304_char.py"
+  ],
+  "passed": true,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Reify/0d3cd6b0f66334e1de87f9308a6b6fa141445428.json",
+  "kind": "pure-helper",
+  "reason": "6 pure-helper tests pin the fail_on_mismatch predicate (BenchmarkProblems.py:304) across all three z3-exhaustive domain members: CustomKernels=[] -> True (vacuous), CustomKernels=[some_kernel_name] -> True (reachable), CustomKernels=[*] -> False. Derivation-chain pin verifies both steps (BenchmarkStructs wildcard assignment + BenchmarkProblems negation). All 6 passed in-container (pytest -p no:cacheprovider -m unit -q). CPU-only, deterministic, add-only."
+}

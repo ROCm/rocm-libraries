@@ -1,0 +1,8 @@
+{
+  "branch_id": "85cf4fadab769afb7630d9199eb219b232714b41",
+  "confirmed": true,
+  "status": "UNKNOWN",
+  "method": "Independently re-established the claim against real code. Read ClientWriter.py:795-806: getClientExecutablePath() sets clientExe = globalParameters.get(\"PrebuiltClient\") then guards `if not os.path.isfile(clientExe):` -> raises FileNotFoundError; else returns clientExe. Matches claimed predicate exactly. Re-executed both polarities against the ACTUAL predicate in-container (tl-char): TRUE clientExe=/nonexistent/tensile_client -> os.path.isfile==False -> not False==True (guard-raise taken); FALSE clientExe=<real NamedTemporaryFile> -> isfile==True -> not True==False (guard skipped). Also exercised the REAL function end-to-end via Tensile.ClientWriter.globalParameters + getClientExecutablePath: PrebuiltClient=missing path -> FileNotFoundError raised; PrebuiltClient=existing tempfile -> returns path unchanged; PrebuiltClient unset -> os.path.isfile(None) raises TypeError (neither branch polarity), confirming the seeded absent_key note. Per checker rules the solver self-declared solver_status=unknown / runtime-dependent (predicate reduces to a single free filesystem boolean, no input space solved), so status is NOT upgraded and remains UNKNOWN; confirmed=true because I actually exhibited both polarities and the absent_key TypeError against real code/runtime.",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Verify/85cf4fadab769afb7630d9199eb219b232714b41.json"
+}

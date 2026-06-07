@@ -1,0 +1,64 @@
+{
+  "branch_id": "8e797886ed0f058dd8a9d8a97dc4aa07a8cccfb5",
+  "source_location": {
+    "file": "Tensile/BenchmarkProblems.py",
+    "line": 740,
+    "node_type": "if",
+    "enclosing_function": "main"
+  },
+  "predicate_text": "globalParameters[\"ForceRedoBenchmarkProblems\"] or not os.path.exists(newResultsFileName)",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "solver-backed-under-assumptions",
+  "z3_version": "4.16.0",
+  "encoding": {
+    "op_surface": ["BoolOp.Or", "UnaryOp.Not"],
+    "variables": {
+      "GlobalParameters.ForceRedoBenchmarkProblems": "z3.Bool - public boolean input (YAML GlobalParameters / --global-parameters CLI; default True)",
+      "filesystem_results_csv_exists": "z3.Bool - ABSTRACTION of the runtime probe os.path.exists(newResultsFileName); free boolean, not solver-derivable from public inputs alone",
+      "GlobalParameters.CSVExportWinner": "z3.Bool - present in seeded domain; only selects the _CSVWinner filename suffix, does NOT enter the predicate truth value"
+    },
+    "formula": "P = Or(ForceRedo, Not(filesystem_results_csv_exists))",
+    "assumptions": [
+      "filesystem_results_csv_exists is modeled as a free boolean standing in for os.path.exists(newResultsFileName). Its concrete value is determined at runtime by (a) CLI OutputPath, (b) YAML BenchmarkProblems problem-type name + enumerate idx, (c) YAML CSVExportWinner suffix, and (d) whether a prior run wrote that CSV. It is NOT a pure function of public inputs, hence under-assumptions.",
+      "Python or/not over total booleans modeled as classical Or/Not. Short-circuit semantics do not change the truth value of the total expression; when ForceRedo is True the os.path.exists call is never evaluated at runtime, but the modeled truth value is identical."
+    ]
+  },
+  "truth_table": [
+    {"GlobalParameters.ForceRedoBenchmarkProblems": false, "filesystem_results_csv_exists": false, "P": true},
+    {"GlobalParameters.ForceRedoBenchmarkProblems": false, "filesystem_results_csv_exists": true,  "P": false},
+    {"GlobalParameters.ForceRedoBenchmarkProblems": true,  "filesystem_results_csv_exists": false, "P": true},
+    {"GlobalParameters.ForceRedoBenchmarkProblems": true,  "filesystem_results_csv_exists": true,  "P": true}
+  ],
+  "true_examples": [
+    {
+      "GlobalParameters.ForceRedoBenchmarkProblems": false,
+      "filesystem_results_csv_exists": false,
+      "GlobalParameters.CSVExportWinner": false,
+      "_meta": "z3-proven. Arm 2 satisfies: results CSV absent -> not os.path.exists(...) is True -> benchmark (re)runs. Minimal witness with Force off."
+    },
+    {
+      "GlobalParameters.ForceRedoBenchmarkProblems": true,
+      "filesystem_results_csv_exists": true,
+      "GlobalParameters.CSVExportWinner": false,
+      "_meta": "z3-proven. Default-config witness: Force=True (the GlobalParameters.py default) short-circuits the Or; benchmark always runs regardless of CSV presence."
+    }
+  ],
+  "false_examples": [
+    {
+      "GlobalParameters.ForceRedoBenchmarkProblems": false,
+      "filesystem_results_csv_exists": true,
+      "GlobalParameters.CSVExportWinner": false,
+      "_meta": "z3-proven. The ONLY falsifying region: Force must be off AND the results CSV must already exist on disk -> skip (already benchmarked). Reachable only after a prior run produced the CSV and ForceRedoBenchmarkProblems was overridden to False via YAML/CLI."
+    }
+  ],
+  "validity": {"p_sat": true, "not_p_sat": true, "tautology": false, "unsat": false},
+  "pure_helper": "def force_redo_or_missing(force_redo: bool, results_csv_exists: bool) -> bool:\n    \"\"\"Pure model of BenchmarkProblems.py:740 predicate.\n    P = globalParameters['ForceRedoBenchmarkProblems'] or not os.path.exists(newResultsFileName)\n    'results_csv_exists' abstracts the os.path.exists filesystem probe.\n    post: __return__ == (force_redo or (not results_csv_exists))\n    \"\"\"\n    return force_redo or (not results_csv_exists)",
+  "crosshair": {
+    "ran": true,
+    "status": "no counterexample found (exit 0, within default bounds)",
+    "caveat": "CrossHair absence-of-counterexample is NOT a formal proof. Helper is total over 2 booleans; contract is trivially consistent with the z3 truth table."
+  },
+  "notes": "Two-arm short-circuit Or. Arm 1 (ForceRedoBenchmarkProblems) is a fully-static public boolean (YAML/CLI, default True). Arm 2 (not os.path.exists(newResultsFileName)) is a genuine filesystem probe whose value is external runtime state, abstracted here as a free boolean. Because the overall predicate is decidable once that probe is treated as a seeded boolean, this is solver-backed-under-assumptions rather than fully-static: the FALSE region (Force=False AND file-exists) cannot be reached from public inputs alone without a prior run having written the CSV to OutputPath/2_BenchmarkData. CSVExportWinner only affects the target filename, never the predicate truth value. No GPU/env-var probes reach this branch.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Solve/8e797886ed0f058dd8a9d8a97dc4aa07a8cccfb5.json"
+}

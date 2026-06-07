@@ -1,0 +1,17 @@
+{
+  "id": "e278ed047bbb383a726397da8dc7cf105d6771a2",
+  "file": "Tensile/ClientWriter.py",
+  "function": "writeClientConfigIni",
+  "branch_kind": "assert",
+  "location": {
+    "line": 574,
+    "col": 4
+  },
+  "predicate_source": "os.path.exists(sourceDir)",
+  "referenced_symbols": [
+    "os",
+    "sourceDir"
+  ],
+  "derived_symbols": [],
+  "rank": 7
+}

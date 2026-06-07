@@ -1,0 +1,17 @@
+{
+  "id": "bfe92c77b1f3ce5268c7240ac3328dd245ebb518",
+  "file": "Tensile/Toolchain/Validators.py",
+  "function": "_windowsSearchPaths",
+  "branch_kind": "if",
+  "location": {
+    "line": 73,
+    "col": 4
+  },
+  "predicate_source": "Path(defaultPath).exists()",
+  "referenced_symbols": [
+    "Path",
+    "defaultPath"
+  ],
+  "derived_symbols": [],
+  "rank": 15
+}

@@ -1,0 +1,88 @@
+{
+  "branch_id": "c03b6953169e51d676e1f454d11aef7debf7110a",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Solve/c03b6953169e51d676e1f454d11aef7debf7110a.json",
+  "source_location": {
+    "file": "Tensile/Toolchain/Validators.py",
+    "line": 97,
+    "node_type": "if",
+    "enclosing_function": "_posixSearchPaths"
+  },
+  "predicate_text": "os.environ.get(\"ROCM_PATH\")",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "runtime-dependent",
+  "encoding": {
+    "free_variables": [
+      {
+        "z3_name": "present",
+        "sort": "Bool",
+        "meaning": "is the 'ROCM_PATH' key present in os.environ at call time? (False => get() returns None)"
+      },
+      {
+        "z3_name": "ROCM_PATH_val",
+        "sort": "String",
+        "meaning": "string value of os.environ['ROCM_PATH'] when present; length distinguishes ''(falsy) from non-empty(truthy)"
+      }
+    ],
+    "z3_predicate": "And(present, Length(ROCM_PATH_val) > 0)",
+    "reduction_notes": "os.environ.get('ROCM_PATH') returns None when the key is absent, else the (possibly empty) string value. The 'if' tests Python truthiness of that result; for str/None the only truthy case is a non-empty string. Mirrored from Configuration.py ExpressionEvaluator truthiness on str/None (None->falsy, ''->falsy, non-empty->truthy). Op-surface: unary truthiness over a Str|None leaf -- no arith/bit/compare on public int/bool inputs. ROCM_PATH is a genuine public input (a process env var the caller controls), so the input space IS solvable; but the branch direction is fixed at process-launch time by the environment, hence classification=runtime-dependent (os/env probe) per the rubric."
+  },
+  "z3_run": {
+    "true_check": "sat",
+    "true_model": "[present = True, ROCM_PATH_val = \"A\"]",
+    "false_check": "sat",
+    "false_model": "[present = False, ROCM_PATH_val = (unconstrained)]",
+    "note": "Both polarities SAT. TRUE picks any non-empty string ('A'); FALSE satisfied by key-absent (present=False => get()==None). Empty-string ('' with present=True) is the other independent FALSE witness, confirmed in the seeded-domain truth table.",
+    "seeded_domain_truth_table": {
+      "null (key absent => None)": false,
+      "\"\" (empty string)": false,
+      "\"/opt/rocm\" (non-empty)": true
+    },
+    "live_environ_confirmation": {
+      "ROCM_PATH unset": "os.environ.get('ROCM_PATH') -> None ; bool -> False",
+      "ROCM_PATH=''": "os.environ.get('ROCM_PATH') -> '' ; bool -> False",
+      "ROCM_PATH='/opt/rocm'": "os.environ.get('ROCM_PATH') -> '/opt/rocm' ; bool -> True"
+    }
+  },
+  "true_examples": [
+    {
+      "ROCM_PATH": "/opt/rocm",
+      "get_result": "/opt/rocm",
+      "result": true,
+      "how": "Env var set to a canonical non-empty posix path -> get() truthy -> branch body runs: split on os.pathsep, append Path(p)/'bin' and Path(p)/'lib'/'llvm'/'bin' per entry."
+    },
+    {
+      "ROCM_PATH": "A",
+      "get_result": "A",
+      "result": true,
+      "how": "z3-derived minimal witness: ANY non-empty string is truthy; content irrelevant to branch direction (only used to build Path entries in the body)."
+    }
+  ],
+  "false_examples": [
+    {
+      "ROCM_PATH": null,
+      "get_result": null,
+      "result": false,
+      "how": "Env var absent -> get() returns None -> falsy -> ROCM_PATH-derived entries skipped; only DEFAULT_ROCM_* paths (and PATH) used. (z3: present=False.)"
+    },
+    {
+      "ROCM_PATH": "",
+      "get_result": "",
+      "result": false,
+      "how": "Env var set but empty -> get() returns '' -> falsy -> branch body skipped, same as absent. (z3: present=True, Length(val)==0.)"
+    }
+  ],
+  "public_inputs": [
+    {
+      "name": "ROCM_PATH",
+      "kind": "env",
+      "detail": "os.environ.get('ROCM_PATH') at Validators.py:97. Truthiness (non-empty string) selects whether ROCM_PATH-derived bin/llvm-bin search paths are prepended."
+    }
+  ],
+  "external_state": [
+    "os.environ['ROCM_PATH'] -- process environment variable; presence and emptiness determine branch direction"
+  ],
+  "pure_helper": "from typing import Optional\n\n\ndef rocm_path_branch_taken(rocm_path_get: Optional[str]) -> bool:\n    \"\"\"Mirror of `if os.environ.get(\"ROCM_PATH\"):` at Validators.py:97.\n\n    Argument is the value returned by os.environ.get(\"ROCM_PATH\"):\n      - None when the env var is absent\n      - the (possibly empty) string value otherwise\n\n    Returns True iff the branch body executes (get() is truthy), which for\n    str|None is exactly: a non-empty string.\n\n    pre: rocm_path_get is None or isinstance(rocm_path_get, str)\n    post: __return__ == (rocm_path_get is not None and len(rocm_path_get) > 0)\n    \"\"\"\n    return bool(rocm_path_get)\n",
+  "pure_helper_notes": "CrossHair `check` run in-container on rocm_path_branch_taken with post `__return__ == (rocm_path_get is not None and len(rocm_path_get) > 0)` and pre `rocm_path_get is None or isinstance(rocm_path_get, str)` -> NO counterexample (exit 0) within the time budget, corroborating the z3 encoding. NOTE: CrossHair absence of a counterexample is NOT a proof.",
+  "notes": "Add-only deliverable analysis; no repo files modified. z3 actually run in-container (z3 4.16.0): both polarities SAT, models reproduced above, cross-checked against live os.environ.get for unset/empty/non-empty. Witnesses are env-var values the caller controls. Classification runtime-dependent because branch outcome is fixed by the os environment at launch rather than parsed CLI/YAML config; nevertheless the env-var input space is fully solvable and both sides reachable by setting/unsetting/emptying ROCM_PATH."
+}

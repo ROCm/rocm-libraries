@@ -1,0 +1,91 @@
+{
+  "branch_id": "09380ac263b6fa5b5ce1fae3b659c59c5e2178a5",
+  "source_location": {
+    "file": "Tensile/Toolchain/Validators.py",
+    "line": 237,
+    "function": "_validateExecutable",
+    "branch_kind": "guard-return"
+  },
+  "predicate_raw": "_exeExists(Path(file))",
+  "semantics": "os.access(Path(file), os.X_OK) -> True iff path exists AND caller has execute permission",
+  "solver": "z3",
+  "solver_status": "unknown",
+  "classification": "runtime-dependent",
+  "rationale": "The predicate is a live filesystem probe (os.access X_OK). Its truth value is determined entirely by external state (path existence + execute permission bits), not by any symbolic boolean/integer/comparison structure over the public CLI input `file`. z3 cannot constrain the filesystem, so solver_status=unknown for the concrete predicate. A boolean ABSTRACTION (access == exists AND executable) is trivially SAT for both branches (solver_models), and a pure helper modeling that abstraction was checked with CrossHair (no counterexample, exit 0).",
+  "encoder_boundary": "Op-surface from Configuration.py ExpressionEvaluator (boolean/compare/arith/bit/unary/conditional) does not apply: the predicate is a single opaque call (os.access) over a filesystem path string. No arithmetic/comparison sub-structure to encode; the only tractable model is the boolean abstraction below.",
+  "solver_models": {
+    "abstraction": "exe_exists := And(exists, executable)   (exists,executable : Bool)",
+    "true_model": {
+      "check": "sat",
+      "assignment": {
+        "exists": true,
+        "executable": true
+      }
+    },
+    "false_model": {
+      "check": "sat",
+      "assignment": {
+        "executable": false
+      }
+    }
+  },
+  "true_examples": [
+    {
+      "file": "/usr/bin/g++",
+      "by": "value",
+      "observed_in_container": {
+        "exists": true,
+        "X_OK": true,
+        "_exeExists": true
+      },
+      "note": "Confirmed by running _exeExists(Path('/usr/bin/g++')) in tl-char (real filesystem). Drives true_branch: return file."
+    }
+  ],
+  "false_examples": [
+    {
+      "file": "/nonexistent/path/to/compiler",
+      "by": "value",
+      "observed_in_container": {
+        "exists": false,
+        "X_OK": false,
+        "_exeExists": false
+      },
+      "note": "Path does not exist. Drives false_branch: raise FileNotFoundError."
+    },
+    {
+      "file": "/tmp/not_executable_file",
+      "by": "value",
+      "observed_in_container": {
+        "exists": true,
+        "X_OK": false,
+        "_exeExists": false
+      },
+      "note": "Exists but no execute bit (chmod 0o644). Also drives false_branch: raise FileNotFoundError."
+    }
+  ],
+  "pure_helper": "def exe_exists_model(exists: bool, executable: bool) -> bool:\n    \"\"\"Pure model of _exeExists(Path(file)) == os.access(file, os.X_OK).\n\n    post: __return__ == (exists and executable)\n    post: __return__ <= exists\n    \"\"\"\n    return exists and executable",
+  "crosshair": {
+    "tool": "crosshair check",
+    "per_condition_timeout_s": 15,
+    "result": "no counterexample (exit 0)",
+    "caveat": "Absence of a counterexample is NOT a proof; CrossHair explores bounded paths/time."
+  },
+  "reified_test": {
+    "path": "Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_Validators_L237_char.py",
+    "tests": [
+      "test_exeexists_true_executable_file",
+      "test_exeexists_false_nonexistent",
+      "test_exeexists_false_exists_not_executable"
+    ],
+    "status": "3 passed in tl-char (pytest -m unit, CPU-only, deterministic via tmp_path)"
+  },
+  "public_inputs": [
+    {
+      "name": "file (via --cxx-compiler / --c-compiler / --offload-bundler / --assembler CLI flags)",
+      "kind": "cli"
+    }
+  ],
+  "external_state": [
+    "filesystem: os.access(Path(file), os.X_OK) -> path existence + execute permission bits"
+  ]
+}

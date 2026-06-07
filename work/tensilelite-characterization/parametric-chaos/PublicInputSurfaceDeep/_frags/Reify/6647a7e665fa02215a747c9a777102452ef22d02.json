@@ -1,0 +1,24 @@
+{
+  "branch_id": "6647a7e665fa02215a747c9a777102452ef22d02",
+  "kind": "char_test",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_BenchmarkProblems_L586_char.py"
+  ],
+  "passed": true,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Reify/6647a7e665fa02215a747c9a777102452ef22d02.json",
+  "run_cmd": "docker exec -w /work/projects/hipblaslt/tensilelite tl-char pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_BenchmarkProblems_L586_char.py",
+  "result": "9 passed in 0.21s",
+  "tests": [
+    "test_no_fork_params_no_custom_kernels_true",
+    "test_all_fork_rejected_all_custom_rejected_true",
+    "test_no_fork_params_custom_kernels_all_rejected_true",
+    "test_fork_params_all_rejected_no_custom_kernels_true",
+    "test_fork_params_some_survive_no_custom_false",
+    "test_no_fork_params_custom_kernel_survives_false",
+    "test_both_sources_have_survivors_false",
+    "test_exhaustive_2x2x2x2_table",
+    "test_derivation_law_matches_helper_all_rows"
+  ],
+  "note": "Pure-helper test only (non-canonical unit). Helper no_valid_solutions mirrors BenchmarkProblems.py:586 if len(solutions)==0. Exhaustive 2^4 table + derivation-law pin both pass. pytestmark=pytest.mark.unit, CPU-only, add-only."
+}

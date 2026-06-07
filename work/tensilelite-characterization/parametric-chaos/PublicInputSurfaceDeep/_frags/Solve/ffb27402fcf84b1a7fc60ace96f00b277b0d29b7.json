@@ -1,0 +1,54 @@
+{
+  "id": "ffb27402fcf84b1a7fc60ace96f00b277b0d29b7",
+  "file": "Tensile/Toolchain/Validators.py",
+  "function": "supportedDeviceEnumerator",
+  "branch_kind": "guard-return",
+  "location": {
+    "line": 195,
+    "col": 4
+  },
+  "predicate_source": "os.name == \"nt\"",
+  "domains": {
+    "os.name": {
+      "type": "enum",
+      "values": [
+        "posix",
+        "nt"
+      ]
+    }
+  },
+  "branch_id": "ffb27402fcf84b1a7fc60ace96f00b277b0d29b7",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "runtime-dependent",
+  "encoding": {
+    "sort": "EnumSort(OsName, [posix, nt])",
+    "var": "os_name : OsName",
+    "predicate": "os_name == nt",
+    "op_surface": [
+      "compare(==)"
+    ],
+    "note": "Pure boolean over a single enum equality; mirrors ExpressionEvaluator compare op. Exhaustively decided over the complete seeded domain (both enum members checked). z3 4.16.0 returned a model for both the True and False assertion."
+  },
+  "true_examples": [
+    {
+      "os.name": "nt",
+      "eval": "(nt == nt) == True",
+      "source": "z3-model",
+      "branch_taken": "return _supportedComponent(enumerator, [hipinfo, hipInfo])"
+    }
+  ],
+  "false_examples": [
+    {
+      "os.name": "posix",
+      "eval": "(posix == nt) == False",
+      "source": "z3-model",
+      "branch_taken": "return _supportedComponent(enumerator, [rocm_agent_enumerator, amdgpu-arch])"
+    }
+  ],
+  "pure_helper": "def device_enumerator_is_windows(os_name: str) -> bool:\n    # True when supportedDeviceEnumerator takes the Windows branch (hipinfo/hipInfo)\n    return os_name == \"nt\"",
+  "runtime_note": "Predicate logic is fully static and exhaustively solved by z3 over the complete enum domain {posix, nt}: nt->True, posix->False. But os.name is a runtime OS probe set by the CPython interpreter at startup from the live platform kernel; it is NOT reachable from any CLI arg, YAML key, env var, or Tensile public input. A caller cannot drive this branch without changing the host OS (or monkeypatching os.name, as Tensile/Tests/unit/test_ClientExecutable.py does). Hence classification=runtime-dependent: witnesses are real z3 models but the taken branch is environment-determined. On the char-test host (posix, verified os.name==posix in tl-char) the Windows branch is unreachable. Sibling guard line 86 (_windowsWithExtensions, branch cc98dba0) is the same probe, classified identically.",
+  "solver_assumptions": "os.name treated as a free enum variable over seeded domain {posix, nt}. In production os.name is fixed per host and not an input; posix is the only reachable branch on the char-test host without monkeypatch. java/Jython excluded since this is CPython.",
+  "crosshair_note": "Not run. pure_helper is a single string equality with an obvious bijection over two domain values; z3 already exhaustively decided both members. Absence of a CrossHair counterexample would not be a proof anyway.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Solve/ffb27402fcf84b1a7fc60ace96f00b277b0d29b7.json"
+}

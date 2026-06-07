@@ -1,0 +1,23 @@
+{
+  "id": "85cf4fadab769afb7630d9199eb219b232714b41",
+  "file": "Tensile/ClientWriter.py",
+  "function": "getClientExecutablePath",
+  "branch_kind": "guard-raise",
+  "location": {
+    "line": 798,
+    "col": 2
+  },
+  "predicate_source": "not os.path.isfile(clientExe)",
+  "referenced_symbols": [
+    "clientExe",
+    "os"
+  ],
+  "derived_symbols": [
+    {
+      "name": "clientExe",
+      "derived_from": "globalParameters.get(\"PrebuiltClient\")",
+      "category": "global-parameter"
+    }
+  ],
+  "rank": 0
+}

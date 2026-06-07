@@ -1,0 +1,8 @@
+{
+  "branch_id": "8fc5b4598eb96fa53f4a1b7e36901b460b6300bb",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Re-established against REAL code at Tensile/Toolchain/Validators.py:226 (_validateExecutable guard `not any((supportedCxxCompiler, supportedCCompiler, supportedOffloadBundler, supportedHip, supportedDeviceEnumerator))`). Confirmed os.name==posix in tl-char. Imported and CALLED the five real supported* helpers and re-evaluated the guard over the claimed examples + extras: hipinfo->rejected=True, gcc->rejected=True (true_examples => ValueError raised, guard True); amdclang++->rejected=False, amdgpu-arch->rejected=False (false_examples => falls through, guard False). All 4 claimed examples reproduce exactly. Differential test of pure helper toolchain_component_rejected vs the real guard over 16-element domain: 0 mismatches. Source predicate text matches claim verbatim. supportedDeviceEnumerator (L196-197) branches on os.name, so solver-backed-under-assumptions (os.name pinned posix) is justified, not inflated; on Windows hipinfo flips to accepted and amdgpu-arch to rejected, consistent with notes. ADD-ONLY honored: git status shows Validators.py unmodified; reified adjacent test test_pchaos_Validators_L237_char.py exists in TESTDIR. SAT (guard satisfiable for both raise and fall-through outcomes).",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Verify/8fc5b4598eb96fa53f4a1b7e36901b460b6300bb.json"
+}

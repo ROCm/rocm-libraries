@@ -1,0 +1,60 @@
+{
+  "branch_id": "bfe92c77b1f3ce5268c7240ac3328dd245ebb518",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Solve/bfe92c77b1f3ce5268c7240ac3328dd245ebb518.json",
+  "source_location": {
+    "file": "Tensile/Toolchain/Validators.py",
+    "line": 73,
+    "node_type": "if",
+    "enclosing_function": "_windowsSearchPaths"
+  },
+  "predicate_text": "Path(defaultPath).exists()",
+  "solver": "z3",
+  "solver_status": "unknown",
+  "classification": "runtime-dependent",
+  "encoding": {
+    "free_variables": [
+      {
+        "z3_name": "filesystem__C__Program_Files_AMD_ROCm",
+        "sort": "Bool",
+        "meaning": "result of stat() on the fixed path 'C:/Program Files/AMD/ROCm' at call time"
+      }
+    ],
+    "z3_predicate": "filesystem__C__Program_Files_AMD_ROCm",
+    "reduction_notes": "defaultPath is the module constant DEFAULT_ROCM_BIN_PATH_WINDOWS = Path('C:/Program Files/AMD/ROCm'). The argument string is fully constant; Path(const).exists() therefore reduces to a single filesystem boolean probe with NO public-input, CLI, YAML, env, or arithmetic dependency. z3 over this single free boolean is trivially SAT for both polarities, which is not a real solve of any input space -- hence solver_status=unknown (the witnesses are runtime/filesystem state, given by value, not solver-derived from inputs)."
+  },
+  "z3_run": {
+    "true_check": "sat",
+    "true_model": "[filesystem__C__Program_Files_AMD_ROCm = True]",
+    "false_check": "sat",
+    "false_model": "[filesystem__C__Program_Files_AMD_ROCm = False]",
+    "note": "Trivially SAT: the only free variable is external filesystem state, so SAT here does not constitute a public-input solve."
+  },
+  "runtime_probe": {
+    "platform": "linux-container (tl-char)",
+    "actual_value": "Path('C:/Program Files/AMD/ROCm').exists() == False",
+    "note": "On this Linux container the path does not exist (False). On a Windows host with ROCm installed at the default location it would be True. The enclosing _windowsSearchPaths is only invoked on Windows (callers gate on os.name == 'nt')."
+  },
+  "true_examples": [
+    {
+      "filesystem:C:/Program Files/AMD/ROCm": true,
+      "defaultPath": "C:/Program Files/AMD/ROCm",
+      "result": true,
+      "how": "Windows host with ROCm installed at the default location -> directory exists -> exists() is True; _windowsLatestRocmBin(defaultPath) is then probed for X.Y subdirs."
+    }
+  ],
+  "false_examples": [
+    {
+      "filesystem:C:/Program Files/AMD/ROCm": false,
+      "defaultPath": "C:/Program Files/AMD/ROCm",
+      "result": false,
+      "how": "Any host where 'C:/Program Files/AMD/ROCm' does not exist (every Linux/macOS box, and Windows without a default-location ROCm install) -> exists() is False -> the default-ROCm-bin search branch is skipped."
+    }
+  ],
+  "public_inputs": [],
+  "external_state": [
+    "filesystem:C:/Program Files/AMD/ROCm"
+  ],
+  "pure_helper": null,
+  "pure_helper_notes": "No pure helper can be extracted: the branch condition is exclusively a side-effecting filesystem stat on a hardcoded path. There are no boolean/integer/comparison public inputs to fold into a deterministic predicate function, so CrossHair is not applicable.",
+  "notes": "Add-only deliverable analysis; no repo files modified. The witnesses are filesystem-state values, not solver-proven over inputs; both polarities are reachable purely by toggling whether the constant Windows ROCm path exists on disk."
+}

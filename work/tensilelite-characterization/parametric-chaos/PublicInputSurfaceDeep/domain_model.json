@@ -1,0 +1,242 @@
+{
+  "0643ca620d99a48ea2d2d60b273d12754ef5c5b9": {
+    "solution[ProblemType]": {
+      "type": "enum",
+      "values": [
+        "matches_config_problemType",
+        "differs_from_config_problemType"
+      ]
+    },
+    "problemType": {
+      "type": "enum",
+      "values": [
+        "matches_kernel_problemType",
+        "differs_from_kernel_problemType"
+      ]
+    }
+  },
+  "6ff09bcdcc5703903cfcdef2e13b07dfd86ec4fb": {
+    "os.path.exists(resultsFileName)": {
+      "type": "bool",
+      "values": [
+        false,
+        true
+      ],
+      "note": "Models filesystem state: whether the results CSV already exists on disk. False = file absent (benchmark not yet run or output path is new); True = file present (prior run cached results). Both values are needed: False drives the first predicate operand to True; True with ForceRedo=False drives the whole predicate to False."
+    },
+    "globalParameters[\"ForceRedoBenchmarkProblems\"]": {
+      "type": "bool",
+      "values": [
+        false,
+        true
+      ],
+      "note": "Hardcoded default True (GlobalParameters.py:101). Overridable via YAML GlobalParameters section or CLI --global-parameters flag. False = reuse cached results when file exists; True = always rerun benchmark client. Both values needed: True drives predicate to True regardless of file existence; False is required to reach the False branch (file must also exist)."
+    }
+  },
+  "83e4a1ea64ad6c21c9b6c0f1729ba8b58eefa9a9": {
+    "cachePath": {
+      "type": "str",
+      "values": [
+        "__nonexistent__",
+        "__existing_regular_file__"
+      ],
+      "notes": "str path passed to os.path.isfile. Two values cover both predicate branches: a path where no file exists (isfile=False, guard fires) and a path where a regular file exists (isfile=True, guard skipped). Directory paths also yield isfile=False so collapse to the absent case."
+    },
+    "os": {
+      "type": "str",
+      "values": [
+        "os"
+      ],
+      "notes": "Python stdlib os module; invariant singleton not user-supplied."
+    }
+  },
+  "9a47d378ae60f3b7013ec37c14e996c9825948cf": {
+    "file": {
+      "type": "str",
+      "values": [
+        "/opt/rocm/bin/amdclang++",
+        "amdclang++",
+        "./amdclang++",
+        "C:/Program Files/AMD/ROCm/5.7/bin/clang++.exe"
+      ]
+    }
+  },
+  "099093bf09abd54f42b409be3afe7454cfaf8eaf": {
+    "cacheValid": {
+      "type": "bool",
+      "values": [
+        false,
+        true
+      ]
+    },
+    "useCache": {
+      "type": "bool",
+      "values": [
+        false,
+        true
+      ]
+    },
+    "filesystem_cache_state": {
+      "type": "enum",
+      "values": [
+        "missing",
+        "present_matching",
+        "present_mismatching"
+      ]
+    }
+  },
+  "0d3cd6b0f66334e1de87f9308a6b6fa141445428": {
+    "failOnMismatch": {
+      "type": "bool",
+      "values": [
+        true,
+        false
+      ]
+    },
+    "benchmarkStep.customKernelWildcard": {
+      "type": "bool",
+      "values": [
+        false,
+        true
+      ]
+    },
+    "BenchmarkProblems[N][1+].CustomKernels": {
+      "type": "enum",
+      "values": [
+        [],
+        [
+          "some_kernel_name"
+        ],
+        [
+          "*"
+        ]
+      ]
+    }
+  },
+  "3ae422d17a07911474102c74d1a2bf4a79523ede": {
+    "os.name": {
+      "type": "enum",
+      "values": [
+        "posix",
+        "nt"
+      ]
+    }
+  },
+  "6647a7e665fa02215a747c9a777102452ef22d02": {
+    "len(solutions)": {
+      "type": "int",
+      "min": 0,
+      "max": null,
+      "values": [
+        0,
+        1
+      ]
+    },
+    "solutions": {
+      "type": "int",
+      "min": 0,
+      "max": null,
+      "values": [
+        0,
+        1
+      ]
+    },
+    "ForkParameters_present": {
+      "type": "bool",
+      "values": [
+        true,
+        false
+      ]
+    },
+    "CustomKernels_count": {
+      "type": "int",
+      "min": 0,
+      "max": null,
+      "values": [
+        0,
+        1
+      ]
+    },
+    "use_cache": {
+      "type": "bool",
+      "values": [
+        true,
+        false
+      ]
+    }
+  },
+  "927cbfe5d8104abfb79b7aa686d161a270cf0867": {
+    "metaDataFilePath": {
+      "type": "str",
+      "values": [
+        "/tmp/lib_absent/library/gfx90a/metadata.yaml",
+        "/tmp/lib_present/library/gfx90a/metadata.yaml"
+      ]
+    },
+    "libraryRootPath": {
+      "type": "str",
+      "values": [
+        "/tmp/lib_absent",
+        "/tmp/lib_present"
+      ]
+    },
+    "archs": {
+      "type": "str",
+      "values": [
+        null,
+        "gfx90a"
+      ]
+    },
+    "problemTypeDict": {
+      "type": "str",
+      "values": [
+        null,
+        "{}"
+      ]
+    }
+  },
+  "cc98dba04c70eae953a89ae32af1df2b3f42fb17": {
+    "os.name": {
+      "type": "enum",
+      "values": [
+        "posix",
+        "nt"
+      ]
+    }
+  },
+  "d2f6f0df95db1dd2e280fe5b92edb75f8acc175d": {
+    "CU": {
+      "type": "str",
+      "values": [
+        null,
+        "64"
+      ]
+    }
+  },
+  "e278ed047bbb383a726397da8dc7cf105d6771a2": {
+    "sourceDir": {
+      "type": "str",
+      "values": [
+        "/tmp/tensile_output/1_ClientParameters/source",
+        "/tmp/tensile_output/1_BenchmarkProblems/groupA/step0/caches/abc123def456/source",
+        "/nonexistent/path/source"
+      ]
+    },
+    "os.path.exists(sourceDir)": {
+      "type": "bool",
+      "values": [
+        true,
+        false
+      ]
+    }
+  },
+  "ffb27402fcf84b1a7fc60ace96f00b277b0d29b7": {
+    "os.name": {
+      "type": "enum",
+      "values": [
+        "posix",
+        "nt"
+      ]
+    }
+  }
+}

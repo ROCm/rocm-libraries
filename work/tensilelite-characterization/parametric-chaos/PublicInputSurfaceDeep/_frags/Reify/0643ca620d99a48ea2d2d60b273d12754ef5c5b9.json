@@ -1,0 +1,49 @@
+{
+  "branch_id": "0643ca620d99a48ea2d2d60b273d12754ef5c5b9",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_BenchmarkProblems_L302_char.py"
+  ],
+  "passed": true,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Reify/0643ca620d99a48ea2d2d60b273d12754ef5c5b9.json",
+  "source_location": {
+    "file": "Tensile/BenchmarkProblems.py",
+    "line": 302,
+    "enclosing_function": "_generateCustomKernelSolutions",
+    "branch_kind": "if"
+  },
+  "predicate": "solution[\"ProblemType\"] != problemType",
+  "test_count": 10,
+  "pytest_result": "10 passed in 0.22s",
+  "pure_helper": "problemtype_mismatch(kernel_state, config_state) -> bool",
+  "true_witness": {
+    "kernel_state": {
+      "DataType": "h",
+      "OperationType": "GEMM",
+      "ActivationType": "none"
+    },
+    "config_state": {
+      "DataType": "s",
+      "OperationType": "GEMM",
+      "ActivationType": "none"
+    },
+    "result": true
+  },
+  "false_witness": {
+    "kernel_state": {
+      "DataType": "s",
+      "OperationType": "GEMM",
+      "ActivationType": "relu"
+    },
+    "config_state": {
+      "DataType": "s",
+      "OperationType": "GEMM",
+      "ActivationType": "none"
+    },
+    "result": false,
+    "note": "ActivationType relu normalised away by line 301"
+  },
+  "kind": "pure-helper",
+  "cpu_only": true,
+  "add_only": true
+}

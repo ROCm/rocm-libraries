@@ -1,0 +1,83 @@
+{
+  "branch_id": "85cf4fadab769afb7630d9199eb219b232714b41",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Solve/85cf4fadab769afb7630d9199eb219b232714b41.json",
+  "source_location": {
+    "file": "Tensile/ClientWriter.py",
+    "line": 798,
+    "node_type": "guard-raise",
+    "enclosing_function": "getClientExecutablePath"
+  },
+  "predicate_text": "not os.path.isfile(clientExe)",
+  "solver": "z3",
+  "solver_version": "4.16.0",
+  "solver_status": "unknown",
+  "classification": "runtime-dependent",
+  "encoding": {
+    "free_variables": [
+      {
+        "z3_name": "isfile_clientExe",
+        "sort": "Bool",
+        "meaning": "result of os.path.isfile(clientExe) at call time, where clientExe = globalParameters.get(\"PrebuiltClient\")"
+      }
+    ],
+    "z3_predicate": "Not(isfile_clientExe)",
+    "op_surface": ["unary(not / boolean)", "call(os.path.isfile -> filesystem probe)"],
+    "reduction_notes": "clientExe is derived from globalParameters.get(\"PrebuiltClient\") (a GlobalParameters dict value, public-input controllable as a path string). The predicate's truth is decided entirely by os.path.isfile(clientExe), a live filesystem stat() at call time. After folding the path string, the branch reduces to a single free filesystem boolean with no integer/yaml/cli arithmetic structure to solve. z3 over this single free boolean is trivially SAT for both polarities -- which does NOT constitute a public-input solve. Hence solver_status=unknown and classification=runtime-dependent: the controlling fact is external filesystem state, given by value, not solver-derived. NOTE on the absent_key domain value: when PrebuiltClient is absent, globalParameters.get returns None and os.path.isfile(None) raises TypeError BEFORE the `not` is applied -- that domain point does not yield either polarity of the branch; it raises. Only string-path values of clientExe reach a well-defined predicate."
+  },
+  "z3_run": {
+    "true_check": "sat",
+    "true_model": "[isfile_clientExe = False]",
+    "false_check": "sat",
+    "false_model": "[isfile_clientExe = True]",
+    "note": "Trivially SAT in both polarities: the sole free variable is external filesystem state. SAT here is not a solve of any public-input space."
+  },
+  "runtime_probe": {
+    "platform": "linux-container (tl-char)",
+    "method": "executed os.path.isfile() over the seeded clientExe domain points and the absent-key (None) case",
+    "path_is_file": "os.path.isfile('/tmp/<real tempfile>') == True  -> predicate (not isfile) == False",
+    "path_no_file": "os.path.isfile('/nonexistent/tensile_client') == False -> predicate (not isfile) == True",
+    "absent_key": "os.path.isfile(None) raises TypeError('stat: path should be string, bytes, os.PathLike or integer, not NoneType') -- branch not reached; raises before `not`"
+  },
+  "assumptions": [
+    "clientExe = globalParameters.get(\"PrebuiltClient\") is a public-input controllable path string (via --prebuilt-client / GlobalParameters[\"PrebuiltClient\"])",
+    "os.path.isfile(clientExe) is modeled as a free boolean = live filesystem state at call time",
+    "the absent_key domain value (PrebuiltClient unset -> clientExe is None) raises TypeError and is therefore not a witness of either branch polarity"
+  ],
+  "true_examples": [
+    {
+      "clientExe": "/nonexistent/tensile_client",
+      "GlobalParameters_PrebuiltClient": "/path/to/nonexistent/client",
+      "filesystem_clientExe_state": "path_no_file",
+      "isfile_clientExe": false,
+      "predicate": true,
+      "note": "PrebuiltClient points at a path with no file on disk -> os.path.isfile==False -> `not False`==True -> guard-raise taken (FileNotFoundError). Runtime-confirmed."
+    }
+  ],
+  "false_examples": [
+    {
+      "clientExe": "/valid/existing/tensile_client",
+      "GlobalParameters_PrebuiltClient": "/path/to/existing/client",
+      "filesystem_clientExe_state": "path_is_file",
+      "isfile_clientExe": true,
+      "predicate": false,
+      "note": "PrebuiltClient points at an existing regular file -> os.path.isfile==True -> `not True`==False -> guard skipped, clientExe returned. Runtime-confirmed (with a real tempfile standing in for the existing client path)."
+    }
+  ],
+  "exception_examples": [
+    {
+      "clientExe": null,
+      "GlobalParameters_PrebuiltClient": "<absent>",
+      "filesystem_clientExe_state": "absent_key",
+      "predicate": "TypeError",
+      "note": "PrebuiltClient absent -> globalParameters.get returns None -> os.path.isfile(None) raises TypeError before `not` is applied. Not a True or False witness of the branch."
+    }
+  ],
+  "pure_helper": "def client_exe_missing(isfile_result: bool) -> bool:\n    \"\"\"Pure model of ClientWriter.py:798 guard `if not os.path.isfile(clientExe):`\n    where clientExe = globalParameters.get(\"PrebuiltClient\").\n    isfile_result is the boolean returned by os.path.isfile(clientExe) at call time\n    (defined only when clientExe is a real path string; isfile(None) raises TypeError).\n    Returns True iff the file is missing (the guard-raise branch is taken).\n\n    post: __return__ == (not isfile_result)\n    \"\"\"\n    return not isfile_result\n",
+  "crosshair": {
+    "version": "in-container crosshair check, exit 0",
+    "status": "no-counterexample",
+    "postcondition": "__return__ == (not isfile_result)",
+    "note": "CrossHair check exit 0: no counterexample found for the postcondition. Absence of a counterexample is NOT a proof. The helper isolates the pure boolean part; the filesystem stat() itself is not modeled by CrossHair."
+  },
+  "notes": "Guard-raise on a filesystem probe over a public-input-derived path. z3 was actually run (v4.16.0): both polarities SAT, but only over a single free filesystem boolean, so it does not solve an input space -> solver_status=unknown, classification=runtime-dependent. Real runtime probe confirms: path-with-no-file -> predicate True (raise), existing-file -> predicate False (return), and the absent-key (None) domain point raises TypeError rather than taking either branch. Both representative witnesses given by value and runtime-confirmed."
+}

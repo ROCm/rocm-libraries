@@ -1,0 +1,28 @@
+{
+  "branch_id": "e278ed047bbb383a726397da8dc7cf105d6771a2",
+  "location": "Tensile/ClientWriter.py:574",
+  "predicate": "os.path.exists(sourceDir)",
+  "confirmed": true,
+  "status": "UNKNOWN",
+  "method": "Read real code in-container: ClientWriter.py:574 in writeClientConfigIni is exactly `assert os.path.exists(sourceDir), f\"sourceDir={sourceDir} does not exist\"`, matching the claim. Re-executed both witnesses in-container (docker exec tl-char python3): FALSE example sourceDir='/nonexistent/path/source' -> os.path.exists=False -> AssertionError 'sourceDir=/nonexistent/path/source does not exist' (reproduced verbatim). TRUE example -> created dir via os.makedirs -> os.path.exists=True -> assert passes (reproduced). Runtime-dependence independently exhibited: identical string '/tmp/tmp9ueh30zh/source' returns exists=False before os.makedirs and exists=True after - same VALUE, opposite RESULT, proving the predicate is not decidable from the input string domain. Sole op is an impure FS syscall outside the harvested op-surface; no surrounding boolean structure, no pure helper extractable, CrossHair N/A. Witnesses are by-value, not solver-proven. Affirming the claim's own runtime-dependent/unknown status; not upgrading to SAT (no solver model constrains the FS result) and not weakening it.",
+  "downgraded_to": null,
+  "classification": "runtime-dependent",
+  "true_example_reproduced": {
+    "sourceDir": "/tmp/<tmpdir>/source (after os.makedirs)",
+    "exists": true,
+    "assert": "passes",
+    "by": "value"
+  },
+  "false_example_reproduced": {
+    "sourceDir": "/nonexistent/path/source",
+    "exists": false,
+    "assert": "raises AssertionError",
+    "by": "value"
+  },
+  "runtime_dependence_demo": {
+    "same_string": "/tmp/tmp9ueh30zh/source",
+    "before_makedirs_exists": false,
+    "after_makedirs_exists": true
+  },
+  "frag_path": "/work/work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Verify/e278ed047bbb383a726397da8dc7cf105d6771a2.json"
+}

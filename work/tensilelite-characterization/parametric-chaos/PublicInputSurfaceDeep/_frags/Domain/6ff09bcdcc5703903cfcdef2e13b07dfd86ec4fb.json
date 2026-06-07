@@ -1,0 +1,16 @@
+{
+  "branch_id": "6ff09bcdcc5703903cfcdef2e13b07dfd86ec4fb",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Domain/6ff09bcdcc5703903cfcdef2e13b07dfd86ec4fb.json",
+  "domains": {
+    "os.path.exists(resultsFileName)": {
+      "type": "bool",
+      "values": [false, true],
+      "note": "Models filesystem state: whether the results CSV already exists on disk. False = file absent (benchmark not yet run or output path is new); True = file present (prior run cached results). Both values are needed: False drives the first predicate operand to True; True with ForceRedo=False drives the whole predicate to False."
+    },
+    "globalParameters[\"ForceRedoBenchmarkProblems\"]": {
+      "type": "bool",
+      "values": [false, true],
+      "note": "Hardcoded default True (GlobalParameters.py:101). Overridable via YAML GlobalParameters section or CLI --global-parameters flag. False = reuse cached results when file exists; True = always rerun benchmark client. Both values needed: True drives predicate to True regardless of file existence; False is required to reach the False branch (file must also exist)."
+    }
+  }
+}

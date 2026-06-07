@@ -1,0 +1,45 @@
+{
+  "id": "6869457874b8963d9b4896f00511d65f19f5b4d8",
+  "file": "Tensile/LibraryIO.py",
+  "function": "getCUCount",
+  "branch_kind": "if",
+  "location": {"line": 701, "col": 4},
+  "predicate_source": "CU is None",
+  "referenced_symbols": ["CU"],
+  "derived_symbols": [
+    {"name": "CU", "derived_from": "os.environ.get(\"CU\", None)", "category": "env"}
+  ],
+  "solver": "z3",
+  "solver_version": "4.16.0",
+  "solver_status": "sat",
+  "classification": "solver-backed-under-assumptions",
+  "encoding": {
+    "note": "CU = os.environ.get(\"CU\", None) is modeled as an optional int via a presence boolean (cu_present) and seeded value (cu_value). Predicate `CU is None` == Not(cu_present). Domain seed: cu_value==64 when present. The seeded rocminfo_output str is downstream (it can repopulate CU only AFTER this branch is taken) and does not affect the value of this predicate at the env-read point.",
+    "vars": {"cu_present": "Bool", "cu_value": "Int (==64 when present)"},
+    "predicate_z3": "Not(cu_present)",
+    "op_surface": ["compare(is/identity-as-null)", "boolean(not)"]
+  },
+  "assumptions": [
+    "env-var presence is a free boolean (public input: os.environ[\"CU\"])",
+    "seeded CU value is 64 when present"
+  ],
+  "true_examples": [
+    {"CU": null, "rocminfo_output": "", "env_CU_set": false, "predicate": true, "note": "env var CU unset -> os.environ.get returns None -> branch taken; runtime-confirmed"}
+  ],
+  "false_examples": [
+    {"CU": 64, "rocminfo_output": "Compute Unit: 64", "env_CU_set": true, "predicate": false, "note": "env var CU=\"64\" set -> os.environ.get returns \"64\" (not None) -> branch skipped; runtime-confirmed"}
+  ],
+  "runtime_confirmation": {
+    "method": "executed os.environ.get(\"CU\", None) with env unset and env CU=\"64\"",
+    "env_unset_result": "CU=None, (CU is None)=True",
+    "env_set_result": "CU=\"64\", (CU is None)=False"
+  },
+  "pure_helper": "from typing import Optional\n\ndef cu_is_none(cu_env: Optional[str]) -> bool:\n    \"\"\"Pure model of LibraryIO.py:701 gate `if CU is None:` where\n    CU = os.environ.get(\"CU\", None). Returns True iff env var unset.\n\n    post: __return__ == (cu_env is None)\n    \"\"\"\n    CU = cu_env\n    return CU is None\n",
+  "crosshair": {
+    "version": "0.0.106",
+    "status": "no-counterexample",
+    "postcondition": "__return__ == (cu_env is None)",
+    "note": "CrossHair exit 0: no counterexample found. Absence of a counterexample is NOT a proof."
+  },
+  "notes": "Branch is a nullness test on an env-derived public input (os.environ[\"CU\"]). Tractable: z3 sat for both polarities under the stated assumptions, and both polarities runtime-confirmed by executing the exact env read. Classified solver-backed-under-assumptions because the controlling value comes from the OS environment (modeled as a free presence boolean), not pure constant folding. The seeded rocminfo_output domain affects only the post-branch repopulation of CU (the subprocess/regex path), not this predicate."
+}

@@ -1,0 +1,22 @@
+{
+  "id": "d2f6f0df95db1dd2e280fe5b92edb75f8acc175d",
+  "file": "Tensile/LibraryIO.py",
+  "function": "getCUCount",
+  "branch_kind": "if",
+  "location": {
+    "line": 689,
+    "col": 4
+  },
+  "predicate_source": "CU is None",
+  "referenced_symbols": [
+    "CU"
+  ],
+  "derived_symbols": [
+    {
+      "name": "CU",
+      "derived_from": "os.environ.get(\"CU\", None)",
+      "category": "env"
+    }
+  ],
+  "rank": 10
+}

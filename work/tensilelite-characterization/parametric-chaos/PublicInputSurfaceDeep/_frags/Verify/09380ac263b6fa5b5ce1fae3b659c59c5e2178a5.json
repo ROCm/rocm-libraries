@@ -1,0 +1,29 @@
+{
+  "branch_id": "09380ac263b6fa5b5ce1fae3b659c59c5e2178a5",
+  "source_location": {
+    "file": "Tensile/Toolchain/Validators.py",
+    "line": 237,
+    "function": "_validateExecutable",
+    "predicate": "_exeExists(Path(file))"
+  },
+  "checker_role": "adversarial-verify",
+  "confirmed": true,
+  "status": "UNKNOWN",
+  "downgraded_to": null,
+  "method": "Re-read REAL source: Validators.py:237 is `if _exeExists(Path(file)): return file` else (L238) raise FileNotFoundError; _exeExists (L200-210) == `os.access(file, os.X_OK)`. Predicate is a pure filesystem probe over CLI input `file`, no symbolic structure -> z3 genuinely unknown for the concrete predicate; claim self-classifies runtime-dependent and does NOT over-assert SAT. Re-executed all 3 claimed by-value witnesses against the REAL _exeExists in tl-char: /usr/bin/g++ -> exists=True X_OK=True _exeExists=True (TRUE branch, return file); /nonexistent/path/to/compiler -> False (FALSE branch); /tmp/not_executable_file chmod 0o644 -> exists=True X_OK=False _exeExists=False (FALSE branch). All 3 MATCH claimed observed_in_container exactly. Both branches exhibited with real values. Reified add-only test ran green: 3 passed in 0.38s (CPU-only, tmp_path-deterministic, no skew, pins ACTUAL behavior). Status held at UNKNOWN per checker rule: cannot upgrade a runtime-dependent/unknown claim to SAT; confirmed=true because the claimed behavior reproduces exactly and no over-claim was made; downgraded_to=null (no stronger claim to downgrade).",
+  "reproduced_examples": {
+    "true_branch": [
+      {"file": "/usr/bin/g++", "exists": true, "X_OK": true, "_exeExists": true, "matches_claim": true}
+    ],
+    "false_branch": [
+      {"file": "/nonexistent/path/to/compiler", "exists": false, "X_OK": false, "_exeExists": false, "matches_claim": true},
+      {"file": "/tmp/not_executable_file (chmod 0o644)", "exists": true, "X_OK": false, "_exeExists": false, "matches_claim": true}
+    ]
+  },
+  "reified_test": {
+    "path": "Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_Validators_L237_char.py",
+    "result": "3 passed in 0.38s",
+    "skew_audit": "clean: tmp_path-deterministic, pytestmark=unit, CPU-only, exercises _exeExists (== the L237 predicate body) for both branches; no golden inflation"
+  },
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Verify/09380ac263b6fa5b5ce1fae3b659c59c5e2178a5.json"
+}

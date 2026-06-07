@@ -1,0 +1,37 @@
+{
+  "id": "83e4a1ea64ad6c21c9b6c0f1729ba8b58eefa9a9",
+  "file": "Tensile/BenchmarkProblems.py",
+  "function": "_readCacheIfValid",
+  "branch_kind": "guard-return",
+  "location": {"line": 133, "col": 4},
+  "predicate_source": "not os.path.isfile(cachePath)",
+  "referenced_symbols": ["os", "cachePath"],
+  "solver": "z3",
+  "solver_status": "unknown",
+  "classification": "runtime-dependent",
+  "encoder_boundary_note": "os.path.isfile is a filesystem probe, NOT in the harvested op-surface (boolean/compare/arith/bit/unary/conditional mirrored from Configuration.py ExpressionEvaluator). Its truth depends on (string path value, live filesystem state), so it is modeled only as an uninterpreted Bool isfile=Bool('os_path_isfile_cachePath'); the branch predicate is Not(isfile). Under that encoding Z3 reports both polarities sat trivially because the seeded cachePath domain ('__nonexistent__'/'__existing_regular_file__') is a placeholder pair, not a constraint the solver can relate to the probe result. The two domain tokens are exactly the two filesystem preconditions, not two distinct string values that determine the outcome.",
+  "true_examples": [
+    {"cachePath": "/tmp/tmpXXXX/cache.yaml", "os.path.isfile(cachePath)": false, "not os.path.isfile(cachePath)": true, "by": "value", "precondition": "no regular file at cachePath (file absent, or path is a directory / dangling symlink). Domain token __nonexistent__. This is the cache-miss path: _readCacheIfValid returns None and the caller proceeds to (re)build the benchmark step."}
+  ],
+  "false_examples": [
+    {"cachePath": "/tmp/tmpXXXX/cache.yaml", "os.path.isfile(cachePath)": true, "not os.path.isfile(cachePath)": false, "by": "value", "precondition": "a regular file exists at cachePath. Domain token __existing_regular_file__. This is the cache-hit path: control falls through to LibraryIO.read(cachePath) and content validation (_cacheDataMatches)."}
+  ],
+  "z3_model": {
+    "encoding": "isfile = Bool('os_path_isfile_cachePath'); pred = Not(isfile); uninterpreted external predicate",
+    "true_check": "sat",
+    "true_model": "[os_path_isfile_cachePath = False]",
+    "false_check": "sat",
+    "false_model": "[os_path_isfile_cachePath = True]"
+  },
+  "empirical_confirmation": {
+    "method": "in-container python: same cachePath string, probed before and after creating the file",
+    "cachePath": "/tmp/tmp<rand>/cache.yaml",
+    "before_create": {"os.path.isfile": false, "predicate_not_isfile": true},
+    "after_create": {"os.path.isfile": true, "predicate_not_isfile": false},
+    "directory_arg": {"os.path.isfile": false, "predicate_not_isfile": true, "note": "isfile is False for a directory, so a dir at cachePath also takes the True (cache-miss) branch"},
+    "conclusion": "Identical input string value yields opposite predicate results depending solely on live filesystem state -> runtime-dependent, not statically decidable from the seeded string domain."
+  },
+  "pure_helper": null,
+  "notes": "Guard-return at the top of _readCacheIfValid. Predicate is the cache-miss guard: True iff no regular file exists at cachePath, in which case the function returns None before any LibraryIO.read / YAML parse / _cacheDataMatches validation. cachePath is caller-derived: _loadCacheIfMatches passes os.path.join(cacheDir,'cache.yaml') (cacheDir = stepBaseDir/caches/<sha256[:12] cacheKey>); _loadLegacyCacheIfMatches passes os.path.join(stepBaseDir,'cache.yaml'). All upstream path components are deterministic given public inputs (OutputPath CLI + BenchmarkProblems YAML), but the leaf predicate itself is a pure os.path.isfile filesystem probe and therefore runtime-dependent. Witnesses are by VALUE (not solver-proven): TRUE = no file at cachePath (cache miss); FALSE = a regular file at cachePath (cache hit). To pin TRUE downstream: call with a cachePath that does not point at a regular file -> returns None. To pin FALSE: create a regular file at cachePath -> control proceeds to LibraryIO.read. Z3 4.16.0 was actually run in-container; the uninterpreted-Bool model is the maximal sound encoding given the op-surface boundary (os.path.isfile is outside it). Mirrors sibling e278ed04... (os.path.exists assert in ClientWriter.py).",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Solve/83e4a1ea64ad6c21c9b6c0f1729ba8b58eefa9a9.json"
+}

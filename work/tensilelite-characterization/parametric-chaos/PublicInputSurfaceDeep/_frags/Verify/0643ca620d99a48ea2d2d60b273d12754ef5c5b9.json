@@ -1,0 +1,19 @@
+{
+  "branch_id": "0643ca620d99a48ea2d2d60b273d12754ef5c5b9",
+  "location": "Tensile/BenchmarkProblems.py:302",
+  "predicate": "solution[\"ProblemType\"] != problemType",
+  "confirmed": true,
+  "status": "SAT",
+  "downgraded_to": null,
+  "method": "Re-extracted real predicate (BenchmarkProblems.py:300-302) and real ProblemType.__ne__/__eq__ (SolutionStructs/Problem.py:1354-1360). __eq__ = isinstance(other,ProblemType) and self.state==other.state; __ne__ = not __eq__. Confirmed line 301 normalises solution[ProblemType][ActivationType] <- problemType[ActivationType] BEFORE the line-302 check. Built REAL ProblemType objects in-container and evaluated the actual != operator. TRUE example (config DataType=s vs kernel DataType=h, act normalised): ker!=cfg => True (kernel rejected) -- reproduced. FALSE example (only ActivationType differs, normalised away): ker!=cfg => False (kernel accepted) -- reproduced. eq reciprocal of ne in both. isinstance assumption holds (both ProblemType). Fully-matching case => ne False. Both branches reachable; no runtime/GPU/OS gate. NOTE: ActivationType relu/all/none collapse to same state repr in this construction path, so the FALSE-example relu-vs-none narrative is mechanism-imprecise (act diff would not have mattered pre-301) -- but the claimed RESULT (ne=False) reproduces exactly, so verdict stands. solver-backed-under-assumptions apt: reduction relies on callsite isinstance(static True) + state-dict equality.",
+  "reproduced": {
+    "true_example_ne": true,
+    "false_example_ne": false,
+    "eq_true": false,
+    "eq_false": true,
+    "matching_case_ne": false,
+    "isinstance_static_true": true
+  },
+  "helper_validated": true,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Solve/0643ca620d99a48ea2d2d60b273d12754ef5c5b9.json"
+}

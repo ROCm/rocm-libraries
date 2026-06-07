@@ -1,0 +1,8 @@
+{
+  "branch_id": "8e797886ed0f058dd8a9d8a97dc4aa07a8cccfb5",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Re-read REAL predicate Tensile/BenchmarkProblems.py:740-741 in-container (tl-char): if globalParameters[\"ForceRedoBenchmarkProblems\"] or not os.path.exists(newResultsFileName): -- exact match. Pure model P(force,exists)=force or (not exists); re-executed all claimed examples in-container: TRUE[force=F,exists=F]->True OK; TRUE[force=T,exists=T]->True OK; FALSE[force=F,exists=T]->False OK. Full truth table matches: false ONLY when force=F AND exists=T. Independently re-derived in z3 4.16.0: P sat, Not(P) sat (model Force=F,exists=T) => not tautology, not unsat; proved Not(P)==And(Not(Force),exists). Confirmed CSVExportWinner (line 730) only selects csvSuffix in newResultsFileName, never enters truth value. Classification solver-backed-under-assumptions upheld: arm2 is genuine os.path.exists probe (external state), false region unreachable from public inputs alone. Claim NOT upgraded. All 3 witnesses reproduce.",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Verify/8e797886ed0f058dd8a9d8a97dc4aa07a8cccfb5.json"
+}

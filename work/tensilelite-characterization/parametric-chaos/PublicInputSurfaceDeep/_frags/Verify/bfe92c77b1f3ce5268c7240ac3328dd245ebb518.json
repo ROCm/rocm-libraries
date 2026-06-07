@@ -1,0 +1,18 @@
+{
+  "branch_id": "bfe92c77b1f3ce5268c7240ac3328dd245ebb518",
+  "predicate": "Path(defaultPath).exists()",
+  "location": "Tensile/Toolchain/Validators.py:73",
+  "claimed_solver_status": "unknown",
+  "claimed_classification": "runtime-dependent",
+  "confirmed": false,
+  "status": "UNKNOWN",
+  "downgraded_to": "unknown",
+  "method": "Re-established against REAL code in tl-char (docker exec -w /work/projects/hipblaslt/tensilelite). (1) sed confirms line 73 is `if Path(defaultPath).exists():` inside _windowsSearchPaths. (2) defaultPath = DEFAULT_ROCM_BIN_PATH_WINDOWS = Path(C:/Program Files/AMD/ROCm) (Validators.py:35); inspect.getsource shows defaultPath bound directly to the constant, NO public input (CLI/YAML/env/arith) flows in; sole free variable is a filesystem stat of a fixed literal. (3) Live probe: Path(defaultPath).exists() => False; os.name == posix. FALSE example reproduces exactly (actual=False). TRUE example (Windows host with ROCm at default location) is filesystem-state-dependent, NOT exhibitable on Linux container -- value-asserted, not solver-derived. Per checker rules for runtime-dependent/unknown: confirmed=false unless BOTH behaviors exhibitable; only FALSE is. z3 solve was a trivial single-free-Bool tautology, not a real input-space solve. Claim self-classifies as unknown/runtime-dependent, which I corroborate. Status UNKNOWN; no upgrade.",
+  "reproduced_examples": {
+    "false_example": {"reproduced": true, "actual": false, "expected": false, "how": "Path(DEFAULT_ROCM_BIN_PATH_WINDOWS).exists() == False on tl-char Linux (os.name=posix)"},
+    "true_example": {"reproduced": false, "reason": "Requires Windows host with C:/Program Files/AMD/ROCm present; not exhibitable on Linux container."}
+  },
+  "counter_model_search": "N/A (claim is runtime-dependent/unknown, not unsat). No public-input free variables; only free variable is a side-effecting filesystem stat of a hardcoded path. CrossHair N/A (no pure helper).",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Verify/bfe92c77b1f3ce5268c7240ac3328dd245ebb518.json",
+  "notes": "ADD-ONLY: wrote only this Verify fragment; no repo files modified. Claim self-classification (runtime-dependent, unknown) is accurate and not inflated; FALSE branch confirmed live, TRUE branch non-reproducible here. confirmed=false (cannot exhibit full claimed behavior set); matches claim UNKNOWN posture, no upgrade."
+}

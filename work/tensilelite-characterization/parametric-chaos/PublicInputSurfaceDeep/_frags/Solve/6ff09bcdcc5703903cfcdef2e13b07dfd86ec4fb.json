@@ -1,0 +1,44 @@
+{
+  "branch_id": "6ff09bcdcc5703903cfcdef2e13b07dfd86ec4fb",
+  "source_file": "Tensile/BenchmarkProblems.py",
+  "source_line": 657,
+  "enclosing_function": "_benchmarkProblemType",
+  "predicate": "not os.path.exists(resultsFileName) or globalParameters[\"ForceRedoBenchmarkProblems\"]",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "solver-backed-under-assumptions",
+  "op_surface": ["BoolOr", "BoolNot"],
+  "domains": {
+    "os.path.exists(resultsFileName)": {"type": "bool", "values": [false, true]},
+    "globalParameters[\"ForceRedoBenchmarkProblems\"]": {"type": "bool", "values": [false, true]}
+  },
+  "encoding": "Two free booleans e=os.path.exists(resultsFileName), f=globalParameters[ForceRedoBenchmarkProblems]; predicate = Or(Not(e), f). Pure boolean disjunction within the harvested op-surface (Or/Not); no arithmetic/compare/subscript-of-runtime needed once the two operands are abstracted to the seeded booleans.",
+  "z3_truth_table": [
+    {"os.path.exists(resultsFileName)": false, "ForceRedoBenchmarkProblems": false, "pred": true},
+    {"os.path.exists(resultsFileName)": false, "ForceRedoBenchmarkProblems": true,  "pred": true},
+    {"os.path.exists(resultsFileName)": true,  "ForceRedoBenchmarkProblems": false, "pred": false},
+    {"os.path.exists(resultsFileName)": true,  "ForceRedoBenchmarkProblems": true,  "pred": true}
+  ],
+  "true_examples": [
+    {"os.path.exists(resultsFileName)": false, "ForceRedoBenchmarkProblems": false,
+     "meaning": "results CSV does not exist and ForceRedo off -> guard True -> runClient executes (benchmark runs because no prior results)"},
+    {"os.path.exists(resultsFileName)": true, "ForceRedoBenchmarkProblems": true,
+     "meaning": "results CSV exists but ForceRedoBenchmarkProblems=True (the hardcoded default) -> guard True -> benchmark reruns regardless of cached CSV"}
+  ],
+  "false_examples": [
+    {"os.path.exists(resultsFileName)": true, "ForceRedoBenchmarkProblems": false,
+     "meaning": "UNIQUE false assignment: results CSV already present AND ForceRedo disabled -> guard False -> takes else branch print1(\"# Already benchmarked; skipping.\")"}
+  ],
+  "pure_helper": "def benchmark_rerun_guard(results_csv_exists: bool, force_redo: bool) -> bool:\n    \"\"\"Mirror of BenchmarkProblems.py:657 elif guard. True iff the benchmark client should (re)run.\"\"\"\n    return (not results_csv_exists) or force_redo",
+  "crosshair": {
+    "checked_postcondition": "__return__ == ((not results_csv_exists) or force_redo)",
+    "result": "no counterexample (exit 0)",
+    "caveat": "CrossHair: absence of counterexample is NOT a proof. The authoritative proof is the z3 exhaustive 4-row truth table above (all assignments enumerated over the finite bool x bool domain)."
+  },
+  "assumptions": [
+    "os.path.exists(resultsFileName) is abstracted to a free boolean per the seeded domain. In live execution it is a filesystem syscall on resultsFileName = OutputPath/1_BenchmarkProblems/<groupName>/<stepName>/../Data/<stepName>.csv (derived from CLI OutputPath + YAML BenchmarkProblems config). The boolean disjunction itself is fully static once that operand is fixed.",
+    "globalParameters[ForceRedoBenchmarkProblems] is a YAML/CLI-controlled bool (hardcoded default True). To even reach a False predicate it must be set False via YAML GlobalParameters or --global-parameters; otherwise the guard is unconditionally True and the benchmark always reruns."
+  ],
+  "runtime_note": "elif reached only when buildOnly=False (line 655). Short-circuit Or: if results CSV is absent the ForceRedo operand is not evaluated.",
+  "schema": "PREDICATE_SCHEMA_v1"
+}

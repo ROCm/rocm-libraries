@@ -1,0 +1,16 @@
+{
+  "branch_id": "9a47d378ae60f3b7013ec37c14e996c9825948cf",
+  "file": "Tensile/Toolchain/Validators.py",
+  "location": {
+    "line": 236,
+    "col": 4
+  },
+  "predicate_source": "Path(file).is_absolute()",
+  "reified": true,
+  "test_file": "Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_Validators_L236_char.py",
+  "test_count": 10,
+  "passed": true,
+  "run_command": "docker exec -w /work/projects/hipblaslt/tensilelite tl-char pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/PublicInputSurfaceDeep/test_pchaos_Validators_L236_char.py",
+  "result": "10 passed in 0.21s",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Reify/9a47d378ae60f3b7013ec37c14e996c9825948cf.json"
+}

@@ -1,0 +1,571 @@
+{
+  "nodes": [
+    {
+      "branch_id": "0643ca620d99a48ea2d2d60b273d12754ef5c5b9",
+      "file": "Tensile/BenchmarkProblems.py",
+      "function": "_generateCustomKernelSolutions",
+      "branch_kind": "if",
+      "location": {
+        "line": 302,
+        "col": 8
+      },
+      "predicate_source": "solution[\"ProblemType\"] != problemType",
+      "referenced_symbols": [
+        "problemType",
+        "solution"
+      ]
+    },
+    {
+      "branch_id": "09380ac263b6fa5b5ce1fae3b659c59c5e2178a5",
+      "file": "Tensile/Toolchain/Validators.py",
+      "function": "_validateExecutable",
+      "branch_kind": "guard-return",
+      "location": {
+        "line": 237,
+        "col": 8
+      },
+      "predicate_source": "_exeExists(Path(file))",
+      "referenced_symbols": [
+        "Path",
+        "_exeExists",
+        "file"
+      ]
+    },
+    {
+      "branch_id": "099093bf09abd54f42b409be3afe7454cfaf8eaf",
+      "file": "Tensile/BenchmarkProblems.py",
+      "function": "_benchmarkProblemType",
+      "branch_kind": "if",
+      "location": {
+        "line": 557,
+        "col": 8
+      },
+      "predicate_source": "not cacheValid",
+      "referenced_symbols": [
+        "cacheValid"
+      ]
+    },
+    {
+      "branch_id": "0d3cd6b0f66334e1de87f9308a6b6fa141445428",
+      "file": "Tensile/BenchmarkProblems.py",
+      "function": "_generateCustomKernelSolutions",
+      "branch_kind": "if",
+      "location": {
+        "line": 304,
+        "col": 12
+      },
+      "predicate_source": "failOnMismatch",
+      "referenced_symbols": [
+        "failOnMismatch"
+      ]
+    },
+    {
+      "branch_id": "3ae422d17a07911474102c74d1a2bf4a79523ede",
+      "file": "Tensile/ClientWriter.py",
+      "function": "writeRunScript",
+      "branch_kind": "if",
+      "location": {
+        "line": 366,
+        "col": 4
+      },
+      "predicate_source": "os.name != \"nt\"",
+      "referenced_symbols": [
+        "os"
+      ]
+    },
+    {
+      "branch_id": "6647a7e665fa02215a747c9a777102452ef22d02",
+      "file": "Tensile/BenchmarkProblems.py",
+      "function": "_benchmarkProblemType",
+      "branch_kind": "if",
+      "location": {
+        "line": 586,
+        "col": 12
+      },
+      "predicate_source": "len(solutions) == 0",
+      "referenced_symbols": [
+        "len",
+        "solutions"
+      ]
+    },
+    {
+      "branch_id": "6869457874b8963d9b4896f00511d65f19f5b4d8",
+      "file": "Tensile/LibraryIO.py",
+      "function": "getCUCount",
+      "branch_kind": "if",
+      "location": {
+        "line": 701,
+        "col": 4
+      },
+      "predicate_source": "CU is None",
+      "referenced_symbols": [
+        "CU"
+      ]
+    },
+    {
+      "branch_id": "6ff09bcdcc5703903cfcdef2e13b07dfd86ec4fb",
+      "file": "Tensile/BenchmarkProblems.py",
+      "function": "_benchmarkProblemType",
+      "branch_kind": "elif",
+      "location": {
+        "line": 657,
+        "col": 8
+      },
+      "predicate_source": "not os.path.exists(resultsFileName) or globalParameters[\"ForceRedoBenchmarkProblems\"]",
+      "referenced_symbols": [
+        "globalParameters",
+        "os",
+        "resultsFileName"
+      ]
+    },
+    {
+      "branch_id": "83e4a1ea64ad6c21c9b6c0f1729ba8b58eefa9a9",
+      "file": "Tensile/BenchmarkProblems.py",
+      "function": "_readCacheIfValid",
+      "branch_kind": "guard-return",
+      "location": {
+        "line": 133,
+        "col": 4
+      },
+      "predicate_source": "not os.path.isfile(cachePath)",
+      "referenced_symbols": [
+        "cachePath",
+        "os"
+      ]
+    },
+    {
+      "branch_id": "85cf4fadab769afb7630d9199eb219b232714b41",
+      "file": "Tensile/ClientWriter.py",
+      "function": "getClientExecutablePath",
+      "branch_kind": "guard-raise",
+      "location": {
+        "line": 798,
+        "col": 2
+      },
+      "predicate_source": "not os.path.isfile(clientExe)",
+      "referenced_symbols": [
+        "clientExe",
+        "os"
+      ]
+    },
+    {
+      "branch_id": "8e797886ed0f058dd8a9d8a97dc4aa07a8cccfb5",
+      "file": "Tensile/BenchmarkProblems.py",
+      "function": "main",
+      "branch_kind": "if",
+      "location": {
+        "line": 740,
+        "col": 12
+      },
+      "predicate_source": "globalParameters[\"ForceRedoBenchmarkProblems\"] \\",
+      "referenced_symbols": [
+        "globalParameters",
+        "newResultsFileName",
+        "os"
+      ]
+    },
+    {
+      "branch_id": "8fc5b4598eb96fa53f4a1b7e36901b460b6300bb",
+      "file": "Tensile/Toolchain/Validators.py",
+      "function": "_validateExecutable",
+      "branch_kind": "guard-raise",
+      "location": {
+        "line": 226,
+        "col": 4
+      },
+      "predicate_source": "not any((",
+      "referenced_symbols": [
+        "any",
+        "file",
+        "supportedCCompiler",
+        "supportedCxxCompiler",
+        "supportedDeviceEnumerator",
+        "supportedHip",
+        "supportedOffloadBundler"
+      ]
+    },
+    {
+      "branch_id": "927cbfe5d8104abfb79b7aa686d161a270cf0867",
+      "file": "Tensile/ClientWriter.py",
+      "function": "CreateBenchmarkClientParametersForSizes",
+      "branch_kind": "if",
+      "location": {
+        "line": 787,
+        "col": 6
+      },
+      "predicate_source": "not os.path.exists(metaDataFilePath)",
+      "referenced_symbols": [
+        "metaDataFilePath",
+        "os"
+      ]
+    },
+    {
+      "branch_id": "9a47d378ae60f3b7013ec37c14e996c9825948cf",
+      "file": "Tensile/Toolchain/Validators.py",
+      "function": "_validateExecutable",
+      "branch_kind": "if",
+      "location": {
+        "line": 236,
+        "col": 4
+      },
+      "predicate_source": "Path(file).is_absolute()",
+      "referenced_symbols": [
+        "Path",
+        "file"
+      ]
+    },
+    {
+      "branch_id": "bfe92c77b1f3ce5268c7240ac3328dd245ebb518",
+      "file": "Tensile/Toolchain/Validators.py",
+      "function": "_windowsSearchPaths",
+      "branch_kind": "if",
+      "location": {
+        "line": 73,
+        "col": 4
+      },
+      "predicate_source": "Path(defaultPath).exists()",
+      "referenced_symbols": [
+        "Path",
+        "defaultPath"
+      ]
+    },
+    {
+      "branch_id": "c03b6953169e51d676e1f454d11aef7debf7110a",
+      "file": "Tensile/Toolchain/Validators.py",
+      "function": "_posixSearchPaths",
+      "branch_kind": "if",
+      "location": {
+        "line": 97,
+        "col": 4
+      },
+      "predicate_source": "os.environ.get(\"ROCM_PATH\")",
+      "referenced_symbols": [
+        "os"
+      ]
+    },
+    {
+      "branch_id": "cc98dba04c70eae953a89ae32af1df2b3f42fb17",
+      "file": "Tensile/Toolchain/Validators.py",
+      "function": "_windowsWithExtensions",
+      "branch_kind": "guard-raise",
+      "location": {
+        "line": 86,
+        "col": 4
+      },
+      "predicate_source": "not os.name == \"nt\"",
+      "referenced_symbols": [
+        "os"
+      ]
+    },
+    {
+      "branch_id": "d2f6f0df95db1dd2e280fe5b92edb75f8acc175d",
+      "file": "Tensile/LibraryIO.py",
+      "function": "getCUCount",
+      "branch_kind": "if",
+      "location": {
+        "line": 689,
+        "col": 4
+      },
+      "predicate_source": "CU is None",
+      "referenced_symbols": [
+        "CU"
+      ]
+    },
+    {
+      "branch_id": "e278ed047bbb383a726397da8dc7cf105d6771a2",
+      "file": "Tensile/ClientWriter.py",
+      "function": "writeClientConfigIni",
+      "branch_kind": "assert",
+      "location": {
+        "line": 574,
+        "col": 4
+      },
+      "predicate_source": "os.path.exists(sourceDir)",
+      "referenced_symbols": [
+        "os",
+        "sourceDir"
+      ]
+    },
+    {
+      "branch_id": "ffb27402fcf84b1a7fc60ace96f00b277b0d29b7",
+      "file": "Tensile/Toolchain/Validators.py",
+      "function": "supportedDeviceEnumerator",
+      "branch_kind": "guard-return",
+      "location": {
+        "line": 195,
+        "col": 4
+      },
+      "predicate_source": "os.name == \"nt\"",
+      "referenced_symbols": [
+        "os"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "branch_id": "0643ca620d99a48ea2d2d60b273d12754ef5c5b9",
+      "predicate_source": "solution[\"ProblemType\"] != problemType",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "09380ac263b6fa5b5ce1fae3b659c59c5e2178a5",
+      "predicate_source": "_exeExists(Path(file))",
+      "public_inputs": [
+        {
+          "name": "file (via --cxx-compiler CLI flag)",
+          "kind": "cli"
+        },
+        {
+          "name": "file (via --c-compiler CLI flag)",
+          "kind": "cli"
+        },
+        {
+          "name": "file (via --offload-bundler CLI flag)",
+          "kind": "cli"
+        },
+        {
+          "name": "file (via --assembler CLI flag)",
+          "kind": "cli"
+        },
+        {
+          "name": "ToolchainDefaults default (os.name)",
+          "kind": "derived-local"
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [
+        "filesystem: os.access(Path(file), os.X_OK)",
+        "os.name: selects Linux vs Windows defaults in ToolchainDefaults"
+      ],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "099093bf09abd54f42b409be3afe7454cfaf8eaf",
+      "predicate_source": "not cacheValid",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "0d3cd6b0f66334e1de87f9308a6b6fa141445428",
+      "predicate_source": "failOnMismatch",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "3ae422d17a07911474102c74d1a2bf4a79523ede",
+      "predicate_source": "os.name != \"nt\"",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "6647a7e665fa02215a747c9a777102452ef22d02",
+      "predicate_source": "len(solutions) == 0",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "6869457874b8963d9b4896f00511d65f19f5b4d8",
+      "predicate_source": "CU is None",
+      "public_inputs": [
+        {
+          "kind": "env",
+          "name": "os.environ.get(\"CU\", None)"
+        }
+      ],
+      "derived_symbols": [
+        {
+          "name": "CU",
+          "derived_from": "os.environ.get(\"CU\", None)",
+          "category": "env"
+        }
+      ],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "6ff09bcdcc5703903cfcdef2e13b07dfd86ec4fb",
+      "predicate_source": "not os.path.exists(resultsFileName) or globalParameters[\"ForceRedoBenchmarkProblems\"]",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "83e4a1ea64ad6c21c9b6c0f1729ba8b58eefa9a9",
+      "predicate_source": "not os.path.isfile(cachePath)",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "85cf4fadab769afb7630d9199eb219b232714b41",
+      "predicate_source": "not os.path.isfile(clientExe)",
+      "public_inputs": [
+        {
+          "kind": "global-parameter",
+          "name": "globalParameters.get(\"PrebuiltClient\")"
+        }
+      ],
+      "derived_symbols": [
+        {
+          "name": "clientExe",
+          "derived_from": "globalParameters.get(\"PrebuiltClient\")",
+          "category": "global-parameter"
+        }
+      ],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "8e797886ed0f058dd8a9d8a97dc4aa07a8cccfb5",
+      "predicate_source": "globalParameters[\"ForceRedoBenchmarkProblems\"] \\",
+      "public_inputs": [
+        {
+          "name": "GlobalParameters.ForceRedoBenchmarkProblems",
+          "kind": "yaml"
+        },
+        {
+          "name": "--global-parameters ForceRedoBenchmarkProblems",
+          "kind": "cli"
+        },
+        {
+          "name": "OutputPath",
+          "kind": "cli"
+        },
+        {
+          "name": "BenchmarkProblems",
+          "kind": "yaml"
+        },
+        {
+          "name": "GlobalParameters.CSVExportWinner",
+          "kind": "yaml"
+        }
+      ],
+      "derived_symbols": [
+        {
+          "name": "newResultsFileName",
+          "derived_from": "os.path.join(benchmarkDataPath, \"{}_{:02d}{}.csv\")",
+          "category": "filesystem"
+        }
+      ],
+      "external_state": [
+        "filesystem:os.path.exists(<OutputPath>/2_BenchmarkData/<str(ProblemType)>_<idx>[_CSVWinner].csv)"
+      ],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "8fc5b4598eb96fa53f4a1b7e36901b460b6300bb",
+      "predicate_source": "not any((",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "927cbfe5d8104abfb79b7aa686d161a270cf0867",
+      "predicate_source": "not os.path.exists(metaDataFilePath)",
+      "public_inputs": [
+        {
+          "kind": "yaml",
+          "name": "os.path.join(libraryPath, \"metadata.yaml\")"
+        }
+      ],
+      "derived_symbols": [
+        {
+          "name": "metaDataFilePath",
+          "derived_from": "os.path.join(libraryPath, \"metadata.yaml\")",
+          "category": "yaml"
+        }
+      ],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "9a47d378ae60f3b7013ec37c14e996c9825948cf",
+      "predicate_source": "Path(file).is_absolute()",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "bfe92c77b1f3ce5268c7240ac3328dd245ebb518",
+      "predicate_source": "Path(defaultPath).exists()",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "c03b6953169e51d676e1f454d11aef7debf7110a",
+      "predicate_source": "os.environ.get(\"ROCM_PATH\")",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "cc98dba04c70eae953a89ae32af1df2b3f42fb17",
+      "predicate_source": "not os.name == \"nt\"",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "d2f6f0df95db1dd2e280fe5b92edb75f8acc175d",
+      "predicate_source": "CU is None",
+      "public_inputs": [
+        {
+          "kind": "env",
+          "name": "os.environ.get(\"CU\", None)"
+        }
+      ],
+      "derived_symbols": [
+        {
+          "name": "CU",
+          "derived_from": "os.environ.get(\"CU\", None)",
+          "category": "env"
+        }
+      ],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "e278ed047bbb383a726397da8dc7cf105d6771a2",
+      "predicate_source": "os.path.exists(sourceDir)",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "ffb27402fcf84b1a7fc60ace96f00b277b0d29b7",
+      "predicate_source": "os.name == \"nt\"",
+      "public_inputs": [
+        {
+          "name": "os.name",
+          "kind": "os"
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [
+        "os.name (Python stdlib os module attribute; set at interpreter startup from the host OS kernel: posix on Linux/macOS, nt on Windows NT)"
+      ],
+      "edge_source": "slice-agent"
+    }
+  ],
+  "note": "edges with edge_source=census-defuse were reconstructed deterministically from the extractor's intra-function def-use because the Slice agent did not persist a fragment for that branch."
+}

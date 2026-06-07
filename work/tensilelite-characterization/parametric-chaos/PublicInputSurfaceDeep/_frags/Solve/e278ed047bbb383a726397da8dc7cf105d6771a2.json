@@ -1,0 +1,45 @@
+{
+  "branch_id": "e278ed047bbb383a726397da8dc7cf105d6771a2",
+  "source_file": "Tensile/ClientWriter.py",
+  "source_line": 574,
+  "enclosing_function": "writeClientConfigIni",
+  "branch_kind": "assert",
+  "predicate": "os.path.exists(sourceDir)",
+  "solver": "z3",
+  "solver_status": "unknown",
+  "classification": "runtime-dependent",
+  "op_surface": [],
+  "domains": {
+    "sourceDir": {"type": "str", "values": ["/tmp/tensile_output/1_ClientParameters/source", "/tmp/tensile_output/1_BenchmarkProblems/groupA/step0/caches/abc123def456/source", "/nonexistent/path/source"]},
+    "os.path.exists(sourceDir)": {"type": "bool", "values": [true, false]}
+  },
+  "encoding": "Bare single-call filesystem probe. os.path.exists is NOT in the harvested op-surface (boolean/compare/arith/bit/unary/conditional) and there is no surrounding boolean structure to solve (unlike BenchmarkProblems.py:657 where exists is one operand of an Or/Not). The maximal sound encoding is a single uninterpreted boolean e = os.path.exists(sourceDir), unconstrained by the seeded sourceDir string domain. Z3 run in-container confirms both polarities are trivially sat: TRUE check sat with model [os_path_exists_sourceDir = True]; FALSE check sat with model [os_path_exists_sourceDir = False]. Because the result is a function of (string value, live filesystem state) rather than the string value alone, the predicate is not statically decidable from inputs in the op-surface.",
+  "z3_truth_table": [
+    {"os.path.exists(sourceDir)": true, "pred": true},
+    {"os.path.exists(sourceDir)": false, "pred": false}
+  ],
+  "z3_models": {
+    "true_check": "sat",
+    "true_model": "[os_path_exists_sourceDir = True]",
+    "false_check": "sat",
+    "false_model": "[os_path_exists_sourceDir = False]"
+  },
+  "empirical_runtime_evidence": "In-container: same string value /tmp/<tmpdir>/source returns os.path.exists == False before os.makedirs and == True after. Identical input value, opposite result => the predicate depends on external filesystem state, not just sourceDir.",
+  "true_examples": [
+    {"sourceDir": "/tmp/tensile_output/1_ClientParameters/source", "os.path.exists(sourceDir)": true, "by": "value", "precondition": "directory exists on disk (created by makedirs upstream before writeClientConfigIni); assert passes and writeClientConfigIni proceeds"}
+  ],
+  "false_examples": [
+    {"sourceDir": "/nonexistent/path/source", "os.path.exists(sourceDir)": false, "by": "value", "precondition": "no such directory on disk; assert raises AssertionError sourceDir=/nonexistent/path/source does not exist"}
+  ],
+  "pure_helper": null,
+  "assumptions": [
+    "os.path.exists(sourceDir) is a filesystem syscall, abstracted to a free boolean per the seeded domain. There is no other operand or operator in the predicate, so nothing is statically solvable: truth is entirely determined by the live filesystem at call time.",
+    "sourceDir is computed upstream from CLI OutputPath + benchmark/client config (e.g. OutputPath/1_ClientParameters/source). The assert is a defensive guard, not a value-driven branch."
+  ],
+  "runtime_note": "Assert at function entry of writeClientConfigIni. TRUE-witness: create sourceDir via os.makedirs then call -> assert passes. FALSE-witness: pass a non-existent path -> AssertionError. Both witnesses are by VALUE (not solver-proven) because the predicate is an external FS probe.",
+  "crosshair": {
+    "result": "not applicable",
+    "caveat": "No pure helper extractable: the sole operation is an impure os.path.exists side-channel into the filesystem."
+  },
+  "schema": "PREDICATE_SCHEMA_v1"
+}
