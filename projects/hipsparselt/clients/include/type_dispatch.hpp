@@ -89,9 +89,27 @@ auto hipsparselt_spmm_dispatch(const Arguments& arg)
             switch(TBias)
             {
             case HIP_R_16F:
-                return TEST<__half, __half, float, __half, __half>{}(arg);
+                switch(TGate)
+                {
+                case HIP_R_16F:
+                    return TEST<__half, __half, float, __half, __half>{}(arg);
+                case HIP_R_32F:
+                    return TEST<__half, __half, float, __half, float>{}(arg);
+                default:
+                    break;
+                }
+                break;
             case HIP_R_32F:
-                return TEST<__half, __half, float, float, __half>{}(arg);
+                switch(TGate)
+                {
+                case HIP_R_16F:
+                    return TEST<__half, __half, float, float, __half>{}(arg);
+                case HIP_R_32F:
+                    return TEST<__half, __half, float, float, float>{}(arg);
+                default:
+                    break;
+                }
+                break;
             default:
                 break;
             }
@@ -101,9 +119,27 @@ auto hipsparselt_spmm_dispatch(const Arguments& arg)
             switch(TBias)
             {
             case HIP_R_16BF:
-                return TEST<hip_bfloat16, hip_bfloat16, float, hip_bfloat16, hip_bfloat16>{}(arg);
+                switch(TGate)
+                {
+                case HIP_R_16BF:
+                    return TEST<hip_bfloat16, hip_bfloat16, float, hip_bfloat16, hip_bfloat16>{}(arg);
+                case HIP_R_32F:
+                    return TEST<hip_bfloat16, hip_bfloat16, float, hip_bfloat16, float>{}(arg);
+                default:
+                    break;
+                }
+                break;
             case HIP_R_32F:
-                return TEST<hip_bfloat16, hip_bfloat16, float, float, hip_bfloat16>{}(arg);
+                switch(TGate)
+                {
+                case HIP_R_16BF:
+                    return TEST<hip_bfloat16, hip_bfloat16, float, float, hip_bfloat16>{}(arg);
+                case HIP_R_32F:
+                    return TEST<hip_bfloat16, hip_bfloat16, float, float, float>{}(arg);
+                default:
+                    break;
+                }
+                break;
             default:
                 break;
             }

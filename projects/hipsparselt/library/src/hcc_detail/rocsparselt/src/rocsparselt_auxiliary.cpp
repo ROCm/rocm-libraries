@@ -993,13 +993,19 @@ rocsparselt_status
                     return rocsparselt_status_invalid_value;
                 }
                 const auto* matA = _matmulDescr->matrix_A;
-                if(_gateDesc->type != matA->type)
+                hipDataType compute_dt = (_matmulDescr->compute_type == rocsparselt_compute_i32)
+                                             ? HIP_R_32I
+                                             : HIP_R_32F;
+                if(_gateDesc->type != matA->type && _gateDesc->type != matD->type
+                   && _gateDesc->type != compute_dt)
                 {
-                    hipsparselt_cerr << "gate_residual_desc value type must match matrix A value type"
+                    hipsparselt_cerr << "gate_residual_desc value type must match matrix A, matrix D "
+                                        "or compute value type"
                                      << std::endl;
                     log_error(_handle,
                               __func__,
-                              "gate_residual_desc value type must match matrix A value type");
+                              "gate_residual_desc value type must match matrix A, matrix D or compute "
+                              "value type");
                     return rocsparselt_status_invalid_value;
                 }
                 if(_matmulDescr->gate_residual_desc != nullptr)
