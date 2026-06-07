@@ -314,7 +314,7 @@ struct CounterEmitState {
     }
 };
 
-// Trim every per-pred queue in a counter to keep at most @p keep tail ops.
+// Trim every per-pred queue in a counter to keep at most `keep` tail ops.
 void trimQueues(std::vector<PerPredQueue>& qs, int keep) {
     for (auto& q : qs) {
         if (keep <= 0) {
@@ -360,7 +360,7 @@ const char* counterName(CounterKind c) {
     }
 }
 
-// Tightest current-queue wait for counter @p c contributed by a consumer's
+// Tightest current-queue wait for counter `c` contributed by a consumer's
 // (possibly nested) PHI source. Walks the PHI's incoming values down to the
 // leaf memops and scans the consumer's LIVE per-pred queues for them via
 // countFrom().
@@ -375,7 +375,7 @@ const char* counterName(CounterKind c) {
 // through the merges/appends and now sits deeper), yielding the correct
 // "keep the pipeline full" wait. A leaf producer that has already drained
 // out of the queue contributes nothing (it is complete -> no wait), which
-// is exactly right. @p seen guards against PHI cycles.
+// is exactly right. `seen` guards against PHI cycles.
 int phiCurrentQueueWait(StinkyInstruction* phi, CounterKind c, const DataflowState& state,
                         std::unordered_set<StinkyInstruction*>& seen) {
     if (!seen.insert(phi).second) return WaitCountSpec::kUnused;
@@ -424,7 +424,7 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
             if (required[c] == WaitCountSpec::kUnused || w < required[c]) required[c] = w;
         };
 
-        // For each src dep on counter @c c that appears in some per-pred
+        // For each src dep on counter `c` that appears in some per-pred
         // queue, contribute its (countFrom - 1) wait via tightenRequired.
         // The final required[c] is min over all (dep, pred) hits because
         // the emitted wait must drain on every constrained path.
@@ -609,12 +609,13 @@ void WaitDataflow::reportCounterOverflow() const {
         for (int c = 0; c < CK_Count; ++c) {
             if (overflowSites.find({bb, static_cast<CounterKind>(c)}) == overflowSites.end())
                 continue;
-            std::cerr << "[WaitDataflow] warning: block '" << bb->getLabel() << "' overflowed the "
-                      << counterName(static_cast<CounterKind>(c))
-                      << " in-flight window (kMaxInFlight=" << kMaxInFlight
-                      << "): the counter was issued past its hardware window without draining, so "
-                         "the oldest provably-complete op(s) were dropped. Confirm a drain (barrier "
-                         "/ wait) is not required here.\n";
+            std::cerr
+                << "[WaitDataflow] warning: block '" << bb->getLabel() << "' overflowed the "
+                << counterName(static_cast<CounterKind>(c))
+                << " in-flight window (kMaxInFlight=" << kMaxInFlight
+                << "): the counter was issued past its hardware window without draining, so "
+                   "the oldest provably-complete op(s) were dropped. Confirm a drain (barrier "
+                   "/ wait) is not required here.\n";
         }
     }
 }
@@ -668,6 +669,7 @@ bool WaitDataflow::solve() {
             // Fixed point reached: surface any counter that overflowed its
             // hardware in-flight window (issued past the cap without draining).
             reportCounterOverflow();
+            PASS_DEBUG({ std::cerr << "[WaitDataflow] converged in " << iter << " iterations\n"; });
             return true;
         }
     }

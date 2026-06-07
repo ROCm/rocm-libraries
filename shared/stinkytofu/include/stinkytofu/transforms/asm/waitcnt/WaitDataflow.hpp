@@ -123,9 +123,9 @@ struct DataflowResult {
 class WaitDataflow {
    public:
     /// Predicate deciding whether a RAW dependency carried on a given counter
-    /// must be drained at consumer @p inst. This is the per-counter "constraint
+    /// must be drained at consumer `inst`. This is the per-counter "constraint
     /// to emit a wait": return true to force the dataflow to consider draining
-    /// this counter for @p inst, false to skip it.
+    /// this counter for `inst`, false to skip it.
     using RawWaitPredicate = std::function<bool(const StinkyInstruction& inst)>;
 
     WaitDataflow(Function& func, const DominanceInfo& domInfo, const std::vector<BasicBlock*>& rpo);
@@ -138,7 +138,7 @@ class WaitDataflow {
 
     /// Override the per-counter RAW-wait constraint used by transferBlock.
     /// Must be called before solve(). Passing an empty predicate restores
-    /// counter @p c to its built-in default (DS/buffer drain at every
+    /// counter `c` to its built-in default (DS/buffer drain at every
     /// consumer; tensor drains only at a barrier).
     ///
     /// Example -- make the tensor counter also drain at any DS op:

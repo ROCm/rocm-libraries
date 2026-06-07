@@ -56,7 +56,7 @@ bool isOnSamePipeline(const StinkyInstruction& a, const StinkyInstruction& b) {
     return classifyMemOp(a) == CK_DS && classifyMemOp(b) == CK_DS;
 }
 
-/// Collect the concrete memops on counter @p c that @p consumer transitively
+/// Collect the concrete memops on counter `c` that `consumer` transitively
 /// depends on, flattening PHI sources to their incoming defs.
 std::unordered_set<StinkyInstruction*> collectMemOpDeps(StinkyInstruction* consumer,
                                                         CounterKind c) {
@@ -78,7 +78,7 @@ std::unordered_set<StinkyInstruction*> collectMemOpDeps(StinkyInstruction* consu
     return result;
 }
 
-/// Set / tighten a specific counter field in @p spec.
+/// Set / tighten a specific counter field in `spec`.
 void setCounter(WaitCountSpec& spec, CounterKind c, int w) {
     switch (c) {
         case CK_DS:
@@ -108,8 +108,8 @@ int getCounter(const WaitCountSpec& spec, CounterKind c) {
     }
 }
 
-/// Compute the strictest required wait on counter @p c if only path
-/// through @p pred were live. @p deps is the consumer's dep set on @p c.
+/// Compute the strictest required wait on counter `c` if only path
+/// through `pred` were live. `deps` is the consumer's dep set on `c`.
 /// Returns -1 when no dep is in flight on this path.
 int perPredRequiredWait(const DataflowResult& dfr, BasicBlock* pred, CounterKind c,
                         const std::unordered_set<StinkyInstruction*>& deps) {

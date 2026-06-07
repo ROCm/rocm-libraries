@@ -44,8 +44,8 @@ class WaitPlanOptimizer {
     /// Human-readable name for debug / logging.
     virtual const char* getName() const = 0;
 
-    /// Rewrite @p plan in place. @p dfr is the converged dataflow result
-    /// (per-block entry/exit states). @p func gives access to CFG structure.
+    /// Rewrite `plan` in place. `dfr` is the converged dataflow result
+    /// (per-block entry/exit states). `func` gives access to CFG structure.
     virtual void rewrite(WaitInsertionPlan& plan, const DataflowResult& dfr, Function& func) = 0;
 };
 
