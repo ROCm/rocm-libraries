@@ -19,17 +19,22 @@ export const meta = {
 // ---------------------------------------------------------------------------
 const PROJ = '/work/projects/hipblaslt/tensilelite'
 const WF = '/work/work/tensilelite-characterization/wf/parametric-chaos'
-const OUT = '/work/work/tensilelite-characterization/parametric-chaos/PublicInputSurface'
+// SURFACE names the deliverable/test bucket so distinct runs (public-input, deeper, codegen
+// residue) never clobber each other. Default = Run-1's PublicInputSurface (Run-1 reproducible).
+const SURFACE = args?.surface ?? 'PublicInputSurface'
+const OUT = '/work/work/tensilelite-characterization/parametric-chaos/' + SURFACE
 const FRAGS = OUT + '/_frags'
-const TESTDIR = PROJ + '/Tensile/Tests/unit/characterization/PublicInputSurface'
+const TESTDIR = PROJ + '/Tensile/Tests/unit/characterization/' + SURFACE
 // Host equivalents (Write tool writes to host; the mount makes them visible in-container):
-const HOUT = 'work/tensilelite-characterization/parametric-chaos/PublicInputSurface'
+const HOUT = 'work/tensilelite-characterization/parametric-chaos/' + SURFACE
 
 const files = args?.files ?? [
   'Tensile/Tensile.py', 'Tensile/Configuration.py',
   'Tensile/Common/GlobalParameters.py', 'Tensile/CustomYamlLoader.py',
 ]
 const maxUnits = args?.maxUnits ?? 20
+// Constraint-harvest scan targets (modules with their own AST-constraint machinery).
+const scan = args?.scan ?? ['Tensile/Configuration.py', 'Tensile/TensileBenchmarkCluster.py']
 
 const SHARED = [
   'ENVIRONMENT (paths are INSIDE container tl-char unless prefixed "host:"):',
@@ -260,7 +265,7 @@ const census = await agent(
   '      {units:[...], total_branches, files} on stdout. CAPTURE that stdout.\n\n' +
   '2) Constraint harvest:\n' +
   '   docker exec -w $PROJ tl-char python ' + WF + '/harvest_constraints.py \\\n' +
-  '     --root $PROJ --outdir ' + OUT + ' --scan Tensile/Configuration.py Tensile/TensileBenchmarkCluster.py\n' +
+  '     --root $PROJ --outdir ' + OUT + ' --scan ' + scan.join(' ') + '\n' +
   '   -> writes ' + OUT + '/constraints_harvested.jsonl ; prints {constraints_harvested, op_surface_size,...}.\n\n' +
   'Then for EACH returned unit, write a census fragment to host ' + HOUT + '/_frags/Census/<branch_id>.json\n' +
   '(the unit object verbatim). Verify file_inventory.csv, branch_census.jsonl, constraints_harvested.jsonl\n' +

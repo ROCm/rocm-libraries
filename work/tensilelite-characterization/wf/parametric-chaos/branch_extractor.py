@@ -31,9 +31,38 @@ def _names(node):
     return sorted({n.id for n in ast.walk(node) if isinstance(n, ast.Name)})
 
 
+# Byte-identical, O(n)-amortized replacement for ast.get_source_segment(src, node, padded=False).
+# The stdlib helper re-splits the WHOLE source on every call (O(file) each); called per-branch and
+# per-statement that is O(file^2) and takes minutes on the 18k-line KernelWriterAssembly.py. Here we
+# split each source exactly ONCE (holding a reference so the object identity can't be id-reused) and
+# slice the relevant line(s) only. Output is identical to the stdlib (verified by diff on every Run).
+_SEG_LAST = [None, None]  # [source_obj, lines]
+
+
+def _seg(source, node):
+    try:
+        if node.end_lineno is None or node.end_col_offset is None:
+            return None
+        lineno = node.lineno - 1
+        end_lineno = node.end_lineno - 1
+        col_offset = node.col_offset
+        end_col_offset = node.end_col_offset
+    except AttributeError:
+        return None
+    if _SEG_LAST[0] is not source:
+        _SEG_LAST[0] = source
+        _SEG_LAST[1] = ast._splitlines_no_ff(source)
+    lines = _SEG_LAST[1]
+    if end_lineno == lineno:
+        return lines[lineno].encode()[col_offset:end_col_offset].decode()
+    first = lines[lineno].encode()[col_offset:].decode()
+    last = lines[end_lineno].encode()[:end_col_offset].decode()
+    return first + "".join(lines[lineno + 1:end_lineno]) + last
+
+
 def _first_line(file_src, node):
     try:
-        seg = ast.get_source_segment(file_src, node)
+        seg = _seg(file_src, node)
         if seg:
             return seg.strip().splitlines()[0][:240]
     except Exception:
@@ -144,7 +173,7 @@ class DefUseCollector(ast.NodeVisitor):
     def visit_Assign(self, node):
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             try:
-                vtext = ast.get_source_segment(self.src, node.value) or ast.unparse(node.value)
+                vtext = _seg(self.src, node.value) or ast.unparse(node.value)
             except Exception:
                 vtext = ""
             if any(h in vtext for h in PUBLIC_SOURCE_HINTS):
@@ -159,7 +188,7 @@ def _body_text(file_src, body):
     out = []
     for st in body:
         try:
-            out.append(ast.get_source_segment(file_src, st) or ast.unparse(st))
+            out.append(_seg(file_src, st) or ast.unparse(st))
         except Exception:
             pass
     return "\n".join(out)
