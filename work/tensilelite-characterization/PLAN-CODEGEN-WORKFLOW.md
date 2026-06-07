@@ -73,19 +73,21 @@ last `coverage/master-baseline-*.txt` as the current BEFORE, continue at the fir
 item in §8. Exact, reproducible coverage commands live in `coverage-methodology.md` /
 `coverage-methodology.html` — cite them, don't reinvent.
 
-> **⚠️ CURRENT STATE (2026-06-06) — authoritative; read before acting.** **P0, P1, P2, P3 are
-> DONE and committed**, and the **`--cpu-only` GPU-mock switch is integrated** (8 `gpu-mocks`
-> commits cherry-picked onto this branch; HEAD `6f1e20b1a7f`; `test_cpu_only_switch.py` 17/17).
-> Stage 1 shipped a **widened 15-seed set** (gfx942 / gfx950 / gfx90a; seed-subset ceiling
-> 35.89%, methodology B). **The true current whole-project coverage is 68.85%** (HEAD, full
-> `-m unit`, methodology A = tox coverage-unit, `--cov=Tensile --cov=rocisa`; develop baseline
-> 22.47% → **+46.38 pts**; receipt `coverage/head-unit-baseline.txt`). **Gap to ≥80% ≈ 11 pts.**
-> Because the switch is present, **P4 runs with `haveSwitch=true`** — no targets are skipped as
-> switch-gated; the branch is therefore **no longer strictly add-only** (carries switch source by
-> decision). **NEXT = P4** (Stage-2 expansion, rank term-missing on the 68.85% baseline).
-> Authoritative status: **§8 + §11 + `BASELINE-AND-PROGRESS.md`**. Sections **§4/§5 below are the
-> ORIGINAL narrative (historical framing)** — `PHASE 0/1/2/3` predates the §8 `P0–P6` renumber;
-> do **not** re-run P0–P3 from them; start at the first unchecked §8 item (P4).
+> **✅ CURRENT STATE (2026-06-06) — CAMPAIGN COMPLETE; authoritative.** **P0–P6 are ALL DONE and
+> committed.** Whole-project methodology-A coverage = **80.70%** (≥80% target MET; line-only 83.48%),
+> final receipt `coverage/p5/master-baseline-final.txt`. **develop 22.47% → 80.70% = +58.23 pts**; the
+> P4 Stage-2 expansion added **+11.85 pts** over 7 gap-driven rounds (R1 69.21 → R2 72.53 → R3 75.35 →
+> R4 76.68 → R5 78.18 → R6 78.78 → R7 80.70). Full `-m unit`: **3326 passed / 201 skipped / 0 failed**.
+> Campaign commits: R1 `702ce1a534e` … R7 `663a0390391`, P5 `56a34aa384b`, P6 `a5aa1c990ab`.
+> The `--cpu-only` switch is integrated (8 cherry-picked `gpu-mocks` commits) so the branch carries that
+> switch source by decision; **the coverage campaign itself is strictly ADD-ONLY** (verified: no
+> non-test `Tensile/*.py` modified). Nothing pushed — all local on `users/davidd-amd/tensillite-coverage`.
+> **NEXT (optional follow-ups, NOT campaign-blocking):** push/PR review; the 2 P6 survivors in
+> `p4-backlog.md` (assertion-strength); upstream-fix candidates in `recommendations.md`
+> (`problemTypeToEnum` in-place mutation; deterministic coverage for the multiprocessing codegen path).
+> Handoff: **`HANDOFF-codegen-coverage.md`**. Authoritative status: **§8 + §11 + `BASELINE-AND-PROGRESS.md`**.
+> Sections **§4/§5 below are the ORIGINAL narrative (historical framing)** — `PHASE 0/1/2/3` predates the
+> §8 `P0–P6` renumber; do not re-run anything from them.
 
 ---
 
@@ -304,7 +306,6 @@ Stage 2 — coverage expansion:
 - [x] **P4 round 5 (done, 2026-06-06)** remaining reachable KWA/KW/Solution clusters. Dynamic workflow `wf_dc503b3d-983` → driver 4-process gate. **76.68% → 78.18%** (+1.50 pts, 11168→10443 miss, 725 lines). 5 kept: fp8 global-read conversion + complex GEMM (KWA 2974→2775), MFMA pack scheduler (KW 1472→1217, the 222-line block), auto-LRVW derivation (Solution), Subtile/Kernel. 4 design-rejected (lsu_store/streamk_fixup/gwb_atomic/shiftvec3 — resisted CPU-only → P5 ceiling evidence) + lsu_emit2 dropped (LocalRead coverage non-deterministic). 2953 passed / 0 failed / 201 skipped. Receipt `coverage/p4/master-baseline-R5.txt`.
 - [x] **P4 round 6 (done, 2026-06-06)** closing push (arch-breadth + Solution/Activation/Subtile/ClientWriter/LibraryLogic). Dynamic workflow `wf_e0c1b177-1ee` → driver 4-process gate. **78.18% → 78.78%** (+0.60 pts, 10443→10144 miss, 299 lines). **Key finding: arch-breadth largely FAILED** (6 rich per-arch configs added only ~11 whole-project lines — the arch-specific asm-cap arms were already covered by existing `test_emit_<arch>` + prior rounds). Real contributors: Subtile/GREmit −86, LibraryLogic −66, ClientWriter −52 (new `ClientConfigIni` suite, 53 tests), Solution −44, Activation −23. 11 kept; dropped rich_gfx950 (design-reject), gwb2 + asmstore2 (verifier stable=false AND 0 named-target marginal — confirmed 0 whole-project: re-gate identical 78.78%). 3183 passed / 0 failed. Receipt `coverage/p4/master-baseline-R6.txt`.
 - [x] **P4 round 7 (done, 2026-06-06) — ≥80% TARGET MET.** Final expansion via dynamic workflow `wf_99f528fd-716` (10 Sonnet designers, relaxed pass/fail verify so coverage-jitter tests that genuinely add lines aren't wrongly dropped). **78.78% → 80.70%** (+1.92 pts, 10144→9064 miss, 1080 lines). StreamK 547→232 (the fixup arms WERE emit-reachable — earlier "needs device grid" was wrong), Solution 1121→823, TensileCreateLibrary/Run 197→49, Subtile/LogicalScheduler 151→55, GSU 238→192, LocalRead 489→449, BenchmarkProblems 111→80, AsmAddressCalculation 163→143, KWA 2767→2718. 3326 passed / 0 failed / 201 skipped. Receipt `coverage/p4/master-baseline-R7.txt`.
-- [ ] **P5** whole-project gate (≥80% ACHIEVED at 80.70%) + golden-governance.md + recommendations.md. **NEXT.**
 - [x] **P5 (done, 2026-06-06) — ≥80% GATE CERTIFIED.** Final combined methodology-A gate = **80.70%** (line-only 83.48%), `coverage/p5/master-baseline-final.txt`. `golden-governance.md` (key by arch+compiler; stable-arch digest change = regression; evolving-arch keep N generations) and `recommendations.md` (outcome, what worked / didn't, honest remaining-gap classification, upstream-fix candidates) written. ≥80% met, so no CEILING-FINDINGS required; the hard residue is documented in recommendations.md.
 - [x] **P6 (done, 2026-06-06) — suite validated, tree clean.** Bounded mutation sample (6 mutants) run **strictly serially in the campaign worktree with guaranteed revert** (`wf/p6-mutation.sh` — the `tl-char` container is bound to this worktree, so the spec's parallel throwaway-worktree isolation isn't container-visible; serial+trap-revert is the safe realization). **4 KILLED / 2 SURVIVED**; campaign worktree verified **clean of mutation** (independent `git status` check, no leak). Killed: MergeLib size-count, MergeLib dup-trim, BenchmarkProblems `_cacheDataMatches`, StreamK fixup guard. Survived (assertion-strength gaps → `p4-backlog.md`): Activation Relu clamp operand not pinned; Solution auto-LRVW default not pinned. Report `coverage/p6/mutation-report.txt`. **CAMPAIGN P0–P6 COMPLETE.**
 

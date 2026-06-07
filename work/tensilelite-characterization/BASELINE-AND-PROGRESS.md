@@ -122,9 +122,13 @@ Full `-m unit` gate (our branch): **2543 passed / 201 skipped / 0 failed** (pass
 
 ---
 
-## 4. Where we are now
+## 4. Where we are now — CAMPAIGN COMPLETE (≥80% MET)
 
-**HEAD whole-project coverage = 68.85%** (measured, methodology A — the develop-comparable one).
+**Final whole-project coverage = 80.70%** (methodology A; line-only 83.48%), commit `663a0390391`,
+receipt `coverage/p5/master-baseline-final.txt`. **develop 22.47% → 80.70% = +58.23 pts.** P0–P6 all
+done (P5 gate certified, P6 mutation 4-killed/2-survived, tree clean). The row table below is the full
+per-round trajectory; the prose under it (switch integration, "gap to 80%") is **pre-P4 historical
+context**, kept for provenance.
 
 | Run (methodology A: tox coverage-unit, `--cov=Tensile --cov=rocisa`, `-m unit`) | Commit | Stmts | Miss | **Cover** | Line-only | Tests |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -164,13 +168,11 @@ device/ISA-probe paths now execute CPU-only and contribute **real line coverage*
 (no targets need to be skipped as switch-gated). The branch is therefore **no longer strictly
 add-only** — it carries the switch source by deliberate decision.
 
-### The gap to 80% (honest framing — now small)
-We are at **68.85%**; the target is **≥80%** → a **~11.15-point** gap, far smaller than the
-seed-only (35.89%) framing implied, and the switch has already unblocked the previously
-GPU-gated client/perf-run + ISA paths. P4 expansion now ranks the *remaining* whole-project gaps
-(measured term-missing on this 68.85% baseline) and closes them cheapest-first. Rigor rule
-stands: every reported delta is measured with a saved receipt; any "unreachable" remainder that
-keeps us below 80% must carry file:line evidence, never a hand-wave.
+### The gap to 80% — CLOSED
+(Historical: at the start of P4 we were at 68.85%, an ~11.15-pt gap.) **P4 closed it over 7 rounds to
+80.70%.** The remaining ~19.3% (9064 stmts) is classified honestly in `recommendations.md` (hardest
+KWA/KW/Solution arms + the coarse `{basename,err}` golden limit + the multiprocessing coverage
+measurement artifact). Every reported delta has a saved receipt (`coverage/p4/master-baseline-R<N>.txt`).
 
 ---
 
@@ -180,5 +182,11 @@ keeps us below 80% must carry file:line evidence, never a hand-wave.
 - our branch pre-P2: `coverage/CURRENT-full-package.txt`
 - P2: `coverage/p2/ceiling.txt`, `coverage/p2/ceiling-widened.txt`, `coverage/p2/unit-gate.txt`
 - P3: `coverage/p3/master-baseline-p3.txt`, `coverage/p3/unit-gate.txt`
+- **P4 rounds 1–7: `coverage/p4/master-baseline-R{1..7}.txt`** + per-round gate logs
+  `coverage/p4/gate-R{N}-{main,cpu,client,tcl}.log`; ranking/method `coverage/p4/RANKING-AND-METHODOLOGY.md`,
+  `coverage/p4/gap-by-miss.tsv`, `coverage/p4/head-term-missing-raw.txt`
+- **P5 final gate: `coverage/p5/master-baseline-final.txt` (80.70%)**; `golden-governance.md`, `recommendations.md`
+- **P6 mutation: `coverage/p6/mutation-report.txt`** (4 killed / 2 survived); survivors `p4-backlog.md`; harness `wf/p6-mutation.sh`
+- workflow scripts (provenance): `wf/p4-round{1..7}.mjs`
 - attribution: `_codegen/attribution-{gfx942,gfx950,gfx90a}.json`
 - prior campaign baselines (PLAN-80): `coverage/master-baseline-*.txt`
