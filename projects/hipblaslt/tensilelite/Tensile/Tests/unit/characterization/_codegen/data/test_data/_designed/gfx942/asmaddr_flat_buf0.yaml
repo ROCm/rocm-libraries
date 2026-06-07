@@ -1,0 +1,66 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# asmaddr_flat_buf0: fp32 NN GEMM with BufferStore=False (flat addressing).
+#
+# Target: AsmAddressCalculation.py flat-store arms (not reachable with BufferStore=1):
+#   - 544-547 : edgeProtectCode else branch (non-BufferStore coord0/coord1 bounds)
+#   - 549-551 : edgeProtectCode beta path (SMovB64 exec mask update)
+#   - 574-593 : emitAddressSetupCode flat global-offset + 64-bit vectorMultiply
+#   - 769-775 : emitLdChange flat path (VAddCOU32/VAddCCOU32 64-bit addr)
+#
+# Mechanism: BufferStore=False forces the flat (non-buffer) addressing path in
+#   every address-calc method.  UseBeta=True (beta path) ensures the edgeProtect
+#   beta SMovB64 branch is taken (line 549-551).
+#   Simple fp32 NN, Batched=True, single MFMA shape, edge=True implied for any
+#   non-power-of-2 problem or when VectorWidth < WGSize (the emit always generates
+#   the edge path when edge-check is possible).
+#
+# Constraints for BufferStore=False:
+#   - No UseBias (requires BufferStore)
+#   - No UseE (requires BufferStore)
+#   - No StreamK (Atomic-StreamK requires BufferStore)
+#   - No UseSubtileImpl (forces BufferStore=1)
+#
+# 1 emitted kernel (well under <=8 budget).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 1
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # SSS (fp32 in / fp32 out) NN batched, flat addressing (BufferStore=0).
+  # UseBeta=True drives the beta path in edgeProtectCode (line 549-551).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 2, 2, 2, 2]
+        - BufferStore: [0]
+        - DepthU: [16]
+        - GlobalSplitU: [1]
+        - SourceSwap: [0]
+        - PrefetchGlobalRead: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

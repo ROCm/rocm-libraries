@@ -1,0 +1,134 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P7 DESIGNED config for gfx950 LocalReadMFMA ConvertAfterDS (FP8->FP16) paths.
+#
+# Target missing ranges in Tensile/Components/LocalRead.py:
+#   1163-1320 : ConvertAfterDS + (bpe != bpeDS) + UnrollMajorLDS arms:
+#     1169-1199 : UnrollMajorLDS path with Hascvtf16_fp8_sf32 / HasCvtFP8toF16 / fallback
+#     1200-1229 : lrvwTileA==1 / lrvwTileB==1 single-vgpr conversion arm
+#     1217-1229 : lrvwTileA==2 / lrvwTileB==2 two-vgpr conversion arm with pack+perm
+#
+# Gate analysis:
+#   Line 1163: if kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]):
+#     tP["bpe"]   = bytes/element of the output data type (half = 2)
+#     tP["bpeDS"] = bytes/element of the LDS data type (fp8 = 1)
+#   Line 1169: if kernel["UnrollMajorLDS%s"%tc]:
+#     true when UnrollMajorLDS = TLU for the non-transposed side
+#
+# ConvertAfterDS=True constraints (from Solution.py):
+#   - DataType must be Half or BFloat16
+#   - At least one of DataTypeA/DataTypeB must be float8
+#   - DirectToLds or DirectToVgpr required when FP8 is used
+#
+# Config: F8HS TN (DataTypeA=F8, DataType=h) with ConvertAfterDS=1
+#   - TransposeA=1 (TLU_A=0 -> UnrollMajorLDSA=True when TLU_A=0)
+#   - LocalReadVectorWidth fork [1, 8] covers lrvwTile=1 and lrvwTile>1 arms
+#   - DirectToLds=1 for the DTL path
+#
+# Note: FP8 DirectToLds on gfx950 doesn't use enableLDSTr (HasLDSTrB64B8=0),
+# but ConvertAfterDS enables the DS-read + convert-in-registers path.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  MaxLDS: 163840
+  DeviceLDS: 163840
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # F8HS TN — FP8 A (input) read into FP16 registers via ConvertAfterDS
+  # DataType=h (half output), DataTypeA=F8 (fp8 input)
+  # TransposeA=1 -> TLU_A=0 -> UnrollMajorLDSA=True (K-major LDS layout)
+  # Lines 1169+: UnrollMajorLDS path in ConvertAfterDS arm
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: F8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - ConvertAfterDS: [1]
+      ForkParameters:
+        # Two MI shapes for variety
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+          - [32, 32, 16, 1, 1, 1, 1, 2, 2]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        # LocalReadVectorWidth fork: covers lrvwTile=1 (arm 1200+) and wide (arm 1217+)
+        - LocalReadVectorWidth: [1, 8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - SourceSwap: [1]
+        - ExpandPointerSwap: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+
+  ########################################
+  # F8HS NT — FP8 A (input) non-transposed, B half, ConvertAfterDS
+  # TransposeA=0 -> TLU_A=1 -> UnrollMajorLDSA=False -> non-UMLDS arm (line 1200+)
+  # lrvwTileB=1 arm (since B is regular half, not fp8)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: F8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - ConvertAfterDS: [1]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [1]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - SourceSwap: [1]
+        - ExpandPointerSwap: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

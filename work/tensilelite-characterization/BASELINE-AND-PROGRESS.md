@@ -135,7 +135,10 @@ Full `-m unit` gate (our branch): **2543 passed / 201 skipped / 0 failed** (pass
 | P4 round 3 | `53a124520ad` | 54867 | 11899 | **75.35%** | 78.31% | 2836 / 201 skip / 0 fail |
 | P4 round 4 | `e305247adf7` | 54867 | 11168 | **76.68%** | 79.65% | 2928 / 201 skip / 0 fail |
 | P4 round 5 | `a4bc4c30490` | 54867 | 10443 | **78.18%** | 80.97% | 2953 / 201 skip / 0 fail |
-| **P4 round 6** | (this commit) | 54867 | 10144 | **78.78%** | 81.51% | 3183 / 201 skip / 0 fail |
+| P4 round 6 | `07ba402360b` | 54867 | 10144 | **78.78%** | 81.51% | 3183 / 201 skip / 0 fail |
+| **P4 round 7 (≥80% MET)** | (this commit) | 54867 | 9064 | **80.70%** | 83.48% | 3326 / 201 skip / 0 fail |
+
+**Whole-project methodology-A coverage = 80.70% ≥ 80% target.** develop 22.47% → now 80.70% = **+58.23 points**.
 
 > **P4 measures with a deterministic 2-process methodology-A gate** (Part A bulk `-n4`, Part B
 > `cpu_only_switch` isolated, then `coverage combine`). The single-process `-n4` gate is run-to-run

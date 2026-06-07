@@ -1,0 +1,82 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R6 DESIGNED config — gfx950 HHS GEMM: HalfPLR + SuppressNoLoadLoop.
+#
+# Targets uncovered arms in Tensile/KernelWriterAssembly.py for gfx950:
+#
+#   ~7109-7118  (SuppressNoLoadLoop + HalfPLR, MIWaveGroup product == 1):
+#     Lines inside the else-branch of `if prod(kernel["MIWaveGroup"]) > 1:`
+#     within the HalfPLR block in `tailLoopNumIter`. Requires:
+#     SuppressNoLoadLoop=True, HalfPLR=1 (or 2,3), MIWaveGroup=[1,1].
+#
+# Config: gfx950 half/half/s (HHS) TN GEMM with MI [16,16,32,1] and small
+# wave tile (MIWaveTile=[1,1] => MIWaveGroup=[1,1] = product 1), HalfPLR,
+# SuppressNoLoadLoop=True to hit the target HalfPLR else-branch.
+#
+# ForkParameters: 2 MI shapes = 2 permutations. Limit=2 ensures <=8.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  NewClient: 2
+  Device: 0
+  MaxLDS: 163840
+  DeviceLDS: 163840
+  PrintSolutionRejectionReason: False
+
+BenchmarkProblems:
+  ########################################
+  # HHS TN — HalfPLR + SuppressNoLoadLoop, MIWaveGroup=[1,1]
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # MIWaveTile [1,1] + MIWaveGroup [1,1] => prod(MIWaveGroup) = 1
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+          - [32, 32, 16, 1, 1, 1, 1, 1, 1]
+        - HalfPLR: [1]
+        - SuppressNoLoadLoop: [1]
+        - DepthU: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - 1LDSBuffer: [0]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - StaggerU: [0]
+        - SourceSwap: [1]
+        - StoreVectorWidth: [-1]
+        - StreamK: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 128]
