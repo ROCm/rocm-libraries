@@ -950,6 +950,8 @@ void testing_spmm(const Arguments& arg)
                               : HIPSPARSE_OPERATION_NON_TRANSPOSE;
         }
 
+#define activation_act_param \
+    tM, tN, ldd, hD_gold_act + pos, hD_gold_act + pos, arg.activation_arg1, arg.activation_arg2
 #define activation_param \
     tM, tN, ldd, hD_gold_act + pos, hD_gold + pos, arg.activation_arg1, arg.activation_arg2
 #define bias_act_param M, N, ldd, hD_gold_act + pos, hD_gold_act + pos, hBias + bias_stride* i
@@ -1003,31 +1005,63 @@ void testing_spmm(const Arguments& arg)
 
                 if(activation_on)
                 {
-                    switch(arg.activation_type)
+                    if(arg.gate_residual)
                     {
-                    case hipsparselt_activation_type::clippedrelu:
-                        activation(activation_param, ::_clippedrelu);
-                        break;
-                    case hipsparselt_activation_type::gelu:
-                        activation(activation_param, ::_gelu);
-                        break;
-                    case hipsparselt_activation_type::relu:
-                        activation(activation_param, ::_relu);
-                        break;
-                    case hipsparselt_activation_type::abs:
-                        activation(activation_param, ::_abs);
-                        break;
-                    case hipsparselt_activation_type::leakyrelu:
-                        activation(activation_param, ::_leakyrelu);
-                        break;
-                    case hipsparselt_activation_type::sigmoid:
-                        activation(activation_param, ::_sigmoid);
-                        break;
-                    case hipsparselt_activation_type::tanh:
-                        activation(activation_param, ::_tanh);
-                        break;
-                    default:
-                        continue;
+                        switch(arg.activation_type)
+                        {
+                        case hipsparselt_activation_type::clippedrelu:
+                            activation(activation_act_param, ::_clippedrelu);
+                            break;
+                        case hipsparselt_activation_type::gelu:
+                            activation(activation_act_param, ::_gelu);
+                            break;
+                        case hipsparselt_activation_type::relu:
+                            activation(activation_act_param, ::_relu);
+                            break;
+                        case hipsparselt_activation_type::abs:
+                            activation(activation_act_param, ::_abs);
+                            break;
+                        case hipsparselt_activation_type::leakyrelu:
+                            activation(activation_act_param, ::_leakyrelu);
+                            break;
+                        case hipsparselt_activation_type::sigmoid:
+                            activation(activation_act_param, ::_sigmoid);
+                            break;
+                        case hipsparselt_activation_type::tanh:
+                            activation(activation_act_param, ::_tanh);
+                            break;
+                        default:
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        switch(arg.activation_type)
+                        {
+                        case hipsparselt_activation_type::clippedrelu:
+                            activation(activation_param, ::_clippedrelu);
+                            break;
+                        case hipsparselt_activation_type::gelu:
+                            activation(activation_param, ::_gelu);
+                            break;
+                        case hipsparselt_activation_type::relu:
+                            activation(activation_param, ::_relu);
+                            break;
+                        case hipsparselt_activation_type::abs:
+                            activation(activation_param, ::_abs);
+                            break;
+                        case hipsparselt_activation_type::leakyrelu:
+                            activation(activation_param, ::_leakyrelu);
+                            break;
+                        case hipsparselt_activation_type::sigmoid:
+                            activation(activation_param, ::_sigmoid);
+                            break;
+                        case hipsparselt_activation_type::tanh:
+                            activation(activation_param, ::_tanh);
+                            break;
+                        default:
+                            break;
+                        }
                     }
                 }
 
@@ -1063,6 +1097,7 @@ void testing_spmm(const Arguments& arg)
                                            arg.alpha_vector_scaling ? hAlpahVector : (float*)nullptr,
                                            false);
         }
+#undef activation_act_param
 #undef activation_param
 #undef bias_act_param
 #undef bias_param
