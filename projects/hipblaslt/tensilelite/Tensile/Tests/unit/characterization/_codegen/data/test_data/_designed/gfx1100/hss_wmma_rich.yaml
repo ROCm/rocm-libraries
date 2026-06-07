@@ -1,0 +1,84 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Rich gfx1100 (RDNA3 / navi31) WMMA characterization config.
+#
+# DataType family: HSS (fp16-in / fp32-out / f32-compute) with Bias + Activation.
+# Architecture: gfx1100, WavefrontSize=32, MatrixInstruction=[16,16,16,1] (WMMA V1).
+#
+# Target: KernelWriter.py arch-gated WMMA codegen arms reached by gfx1100:
+#   - HHH_WMMA branch (line 6737): EnableMatrixInstruction + HasWMMA + fp16 -> fp16
+#   - HasWMMA_V1 gates at lines 1012, 1071, 1222, 2046, 7030, 7081, 7118, 7167, 7198
+#   - WavefrontSize==32 branches (lines 384, 6676, 9815, 9870, 9878, 9884)
+#   - Activation + Bias epilogue paths (ActivationFuncCall=True, UseBias=1)
+#   - GlobalSplitU=2 (MultipleBuffer) path for arch-breadth
+#   - MIWaveTile fork: [1,1] vs [3,1] (different macro-tile shapes)
+#
+# ForkParameters axes: MatrixInstruction (1) x GlobalSplitU (2) = 2 kernels.
+# Bounded well under the 8-kernel limit.
+#
+# Valid for gfx1100: MatrixInstruction=[16,16,16,1] (WMMA), WavefrontSize=32,
+# HSS (DataType h, DestDataType s, ComputeDataType s, HighPrecisionAccumulate).
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HSS TN (fp16-in / fp32-out) -- gfx1100 WMMA V1, bias + activation
+  # MatrixInstruction=[16,16,16,1]: the canonical WMMA instruction for gfx1100.
+  # GlobalSplitU fork: 1 (base), 2 (MultipleBuffer GSU path).
+  # WavefrontSize forced to 32 (gfx1100 / RDNA3 native wave width).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+      Batched: True
+      Activation: True
+      ActivationType: all
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # WMMA V1 instruction for gfx1100: [M, N, K, B] = [16, 16, 16, 1]
+        # MIWaveTile [1,1] -> MacroTile 32x32 (compact, low-register)
+        # MIWaveTile [3,1] -> MacroTile 96x32 (wider M, exercises MIWaveTileA>1)
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  4, 1 ]
+          - [16, 16, 16, 1,  1,   3, 1,  4, 1 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1]
+        - SourceSwap: [1]
+        # GlobalSplitU fork: 1 (default) vs 2 (MultipleBuffer GSU path)
+        - GlobalSplitU: [1, 2]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: relu]

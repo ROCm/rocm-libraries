@@ -1,0 +1,86 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R6 rich gfx908 (CDNA1 / arcturus) codegen characterization config.
+#
+# gfx908 ISA (9,0,8) has distinct MFMA shapes from gfx942/gfx950 — exercises
+# arch-gated KernelWriterAssembly / KernelWriter / Components paths that are
+# NOT reached by other arch tests.
+#
+# Key arch-breadth features exercised:
+#   MI shape fork: [16,16,16,1] (HHS 16x16 tile) vs [32,32,8,1] (larger 32x32 tile)
+#   GSU fork: GlobalSplitU=1 vs GlobalSplitU=4 (MultipleBuffer)
+#   Bias: UseBias=1, BiasSrc=D
+#   Activation: hipblaslt_all
+#   UseScaleAlphaVec=1 (gates GlobalWriteBatch.py 289-291, 559-565)
+#   StorePriorityOpt fork: False vs True (gates alphaBeforeLoadC path)
+#
+# DataType: h (fp16 in/out, f32 compute) matches gfx908 HHS curated shape.
+# Both MI shapes are in validMFMA["HH"] per Tensile/Common/ValidParameters.py.
+# Total fork permutations = 2 MI x 2 GSU x 2 StorePriorityOpt = 8; limit=8 gives all.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeScaleAlphaVec: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HHS (fp16 in / fp16 out / f32 compute) NT, batched
+  # Bias + Activation + UseScaleAlphaVec
+  # Fork: 2 MI shapes x 2 GSU x 2 StorePriorityOpt = 8 permutations
+  ########################################
+  -
+    - # ProblemType — matches gfx908 HHS curated logic (DataType: h, HPA, SAV=1)
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 1
+      BiasSrc: D
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseScaleAlphaVec: 1
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # Two valid gfx908 HH (fp16) MFMA shapes in 9-element format:
+        #   [16,16,16,1,1,1,1,1,1] = native HHS 16x16 tile (K=16)
+        #   [32,32,8,1,1,1,1,1,1]  = larger 32x32 tile (K=8), exercises wider MT path
+        # Both are in validMFMA["HH"] - verified against Tensile/Common/ValidParameters.py.
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,  1, 1,  1, 1]
+          - [32, 32,  8, 1,  1,  1, 1,  1, 1]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - ClusterLocalRead: [0]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [4]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1]
+        - SourceSwap: [1]
+        # GSU=1 (off-path) vs GSU=4 (on-path, MultipleBuffer)
+        - GlobalSplitU: [1, 4]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        # StorePriorityOpt gates alphaBeforeLoadC arm
+        - StorePriorityOpt: [False, True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 16, 1, 32]
+        - BiasTypeArgs: ['h']
+        - ActivationArgs:
+          - [Enum: relu]

@@ -1,0 +1,73 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R6 DESIGNED config: SubtileGREmit loadRatioGR variant coverage for gfx950.
+#
+# Targets uncovered legacy-path branches in SubtileGREmit.py that depend on
+# wave-group shape (MIWaveGroup) selecting different loadRatioGR values:
+#
+#   711-713  _grComputeRowPartition_legacy loadRatioGR==2.0 branch:
+#            WG=(4,4) + FP8 -> bytesPerLoad(numWaves=16)/globalGRTileSize = 2.0
+#
+#   731-739  _grComputeAllOffsets_legacy loadRatioGR==0.5 + bpe==1 FP8 rotation:
+#            WG=(1,1) + FP8 (bpe=1) -> loadRatioGR = 0.5 -> numGRPerSubtile=2,
+#            inner loop (i=1) hits the FP8 K_group intra-block +2 rotation.
+#
+# ForkParameters: 2 MatrixInstruction shapes -> 2 kernels.
+#   [16,16,128, 1,1, 1,1, 2,2]  WG=(1,1): loadRatioGR=0.5, numGRPerSubtile=2
+#   [16,16,128, 1,1, 4,4, 2,2]  WG=(4,4): loadRatioGR=2.0, numGRPerSubtile=1
+# StreamK=3 (persistent SK) required for gfx950 UseSubtileImpl kernels.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  NewClient: 2
+  Device: 0
+  MaxLDS: 163840
+  DeviceLDS: 163840
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # F8->S TN — UseSubtileImpl=1 / DirectToLds=1
+  # WG=(1,1): loadRatioGR=0.5, FP8 K_group rotation path
+  # WG=(4,4): loadRatioGR=2.0, wave-cooperative expansion path
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  1, 1,  2, 2]   # WG=(1,1) -> loadRatioGR=0.5
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]   # WG=(4,4) -> loadRatioGR=2.0
+        - DepthU: [256]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [0]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StaggerU: [0]
+        - StreamK: [3]
+        - UseSubtileImpl: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
