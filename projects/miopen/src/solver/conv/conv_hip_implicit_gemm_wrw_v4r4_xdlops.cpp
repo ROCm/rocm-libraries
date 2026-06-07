@@ -1120,16 +1120,12 @@ bool ConvHipImplicitGemmWrwV4R4Xdlops::IsApplicable(const ExecutionContext& ctx,
     {
         const auto det_flag = problem.GetConv().attribute.deterministic.Get();
         std::cerr << "[DEBUG WrwV4R4Xdlops::IsApplicable] deterministic=" << det_flag
-                  << " gemm_k_block=" << gemm_k_block
-                  << " gemm_m=" << gemm_m
-                  << " gemm_n=" << gemm_n
-                  << " gemm_k_total=" << gemm_k_total
+                  << " gemm_k_block=" << gemm_k_block << " gemm_m=" << gemm_m
+                  << " gemm_n=" << gemm_n << " gemm_k_total=" << gemm_k_total
                   << " GemmMPerBlock=" << config.GemmMPerBlock
                   << " GemmNPerBlock=" << config.GemmNPerBlock
-                  << " GemmKPerBlock=" << config.GemmKPerBlock
-                  << " GemmKPack=" << config.GemmKPack
-                  << " reject=" << (det_flag != 0 && gemm_k_block > 2 ? "YES" : "NO")
-                  << std::endl;
+                  << " GemmKPerBlock=" << config.GemmKPerBlock << " GemmKPack=" << config.GemmKPack
+                  << " reject=" << (det_flag != 0 && gemm_k_block > 2 ? "YES" : "NO") << std::endl;
         if(det_flag != 0 && gemm_k_block > 2)
             return false;
     }
