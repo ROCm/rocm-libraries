@@ -542,6 +542,36 @@ def main() -> int:
         "and the handoff barrier. native-int direct conv0 only. DEFAULT ON "
         "(--no-fused-c0a1 to off)",
     )
+    parser.add_argument(
+        "--conv1-int8",
+        dest="conv1_int8",
+        action="store_true",
+        default=False,
+        help="L6b: do conv1 contraction in int8 (iu8 atom) instead of int4 "
+        "(iu4). Skips the per-handoff nibble squeeze -- hands the 16 contiguous "
+        "k0 byte codes straight through as a <4 x i32> iu8 A-fragment and stages "
+        "W1 byte-per-code. Codes stay int4-range so dot products are bit-"
+        "identical to iu4 (no reference change). native-int fused_c0a1 only. "
+        "DEFAULT OFF.",
+    )
+    parser.add_argument(
+        "--persistent",
+        dest="persistent",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Persistent kernel: launch only --persistent-ctas resident CTAs and "
+        "grid-stride over the tile strip, staging the tile-invariant W0/W1 into "
+        "LDS once per CTA (not once per tile). Requires native_int + direct + "
+        "fused_c0a1 (the default winning lever stack). DEFAULT OFF.",
+    )
+    parser.add_argument(
+        "--persistent-ctas",
+        dest="persistent_ctas",
+        type=int,
+        default=16,
+        help="number of resident CTAs for --persistent (perf knob; target "
+        "~#CU(8)*resident-WG/CU; the grid-stride loop covers all tiles regardless)",
+    )
     args = parser.parse_args()
 
     if args.arch not in ("gfx1151", "gfx11-generic"):
@@ -587,6 +617,9 @@ def main() -> int:
         pk_maxpool=args.pk_maxpool,
         conv1_prefetch_k=args.conv1_prefetch_k,
         conv1_sched_fuse=args.conv1_sched_fuse,
+        conv1_int8=args.conv1_int8,
+        persistent=args.persistent,
+        persistent_ctas=args.persistent_ctas,
     )
     ok, why = is_valid_spec(spec, arch=args.arch)
     if not ok:

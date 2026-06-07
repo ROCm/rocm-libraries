@@ -240,6 +240,47 @@ class Gfx1151DeepFusedConvPoolSpec:
     # conv1 path only (the from_lds variant). Correctness-neutral (scheduling
     # hint only; identical MMAs/accs). Pairs with conv1_prefetch_k. Board A/B pending.
     conv1_sched_fuse: bool = False
+    # Lever 6: do conv1 contraction in int8 (iu8 atom) instead of int4 (iu4).
+    # False (default) -> the fused_c0a1 handoff squeezes the 16 contiguous-k0
+    # int8 byte codes into a packed <2 x i32> int4 A-fragment (8 codes/i32) via
+    # two _pack_i4_codes_to_i32 calls, and conv1 uses the iu4 atom with a packed
+    # int4 W1 B-fragment. True -> skip the nibble squeeze and hand the int8 byte
+    # codes straight through as a <4 x i32> iu8 A-fragment (4 codes/i32), and
+    # conv1 uses the iu8 atom with a byte-per-code W1. gfx11 iu8 and iu4 atoms are
+    # BOTH 16x16x16, so this is matrix-count-neutral; the only difference is
+    # fragment pack-math and W1/LDS footprint. The CODES stay int4-range
+    # ([-8,7]), so iu8 and iu4 produce identical integer dot products ->
+    # BIT-EXACT, no reference change. native_int + fused_c0a1 only. Board A/B
+    # pending. The hypothesis (delete the per-handoff nibble squeeze) carries the
+    # repack_c0 caveat: static VALU reduction may not yield wall-time gains if the
+    # pack hides under WMMA/LDS latency -- the ISA gate decides before board.
+    conv1_int8: bool = False
+    # Persistent kernel. False (default) -> one output tile per CTA: the grid is
+    # (1, H_tiles, W_tiles) = 16,200 tiny CTAs, and every CTA re-stages the
+    # tile-invariant weights W0 (conv0 3x3) and W1 (conv1 1x1) global->LDS even
+    # though they are identical for all spatial tiles. True -> launch only
+    # `persistent_ctas` CTAs and grid-stride over the tile strip
+    # (tile_idx = block_id_x; tile_idx < num_tiles; tile_idx += persistent_ctas),
+    # staging W0/W1 into LDS ONCE before the loop (read from global once per CTA,
+    # not once per tile). Only X (input footprint) and Y (output) stream per tile.
+    # The redundant pre-conv1 barrier is dropped (W1 is staged+synced before the
+    # loop and never rewritten; the fused_c0a1 handoff is register-only). An
+    # inter-tile barrier at the loop head guards a0_smem/c1_smem reuse across tiles.
+    #
+    # RISK: the kernel is latency/overhead-bound on the ~8-CU iGPU slice and today
+    # leans on the 16,200-deep CTA queue for free inter-CTA prologue/epilogue
+    # overlap; collapsing to ~#CU*WG CTAs exposes per-tile footprint-load/store
+    # latency unless occupancy (resident WG/CU) is preserved. native_int +
+    # direct_conv0 + fused_c0a1 only (the live winning path; the only path with no
+    # per-tile c0_smem and a register weight/handoff). Board A/B + ISA gate pending.
+    persistent: bool = False
+    # Persistent grid size (number of resident CTAs that grid-stride over tiles).
+    # Load-bearing perf knob (see `persistent`): under-subscribing exposes conv1
+    # barriers/bubbles; target ~ #CU(8) * steady-state-WG/CU. The grid-stride loop
+    # covers ALL tiles for any value, so this is perf-only, swept on the board.
+    # Default 16 = 8 CU * 2 WG/CU starting point; pair with a waves_per_eu sweep
+    # (occupancy is what preserves steady-state latency hiding under persistence).
+    persistent_ctas: int = 16
     # Per-node inverse requant multipliers (fold act/weight/out scales).
     m0: float = 0.0625  # conv0 int32 -> int8
     m0b: float = 0.5  # conv0 int8 -> int4
@@ -325,8 +366,12 @@ class Gfx1151DeepFusedConvPoolSpec:
             parts.append("pfk")
         if self.conv1_sched_fuse:
             parts.append("schfuse")
+        if self.conv1_int8:
+            parts.append("conv1iu8")
         if self.fused_c0a1:
             parts.append("fusedc0a1")
+        if self.persistent:
+            parts.append(f"persist{self.persistent_ctas}")
         parts.append("i8i4_realquant")
         return kernel_name_join(*parts)
 
@@ -366,6 +411,9 @@ def make_deep_fused_conv_pool_spec(
     pk_maxpool: bool = False,
     conv1_prefetch_k: bool = False,
     conv1_sched_fuse: bool = False,
+    conv1_int8: bool = False,
+    persistent: bool = False,
+    persistent_ctas: int = 16,
     m0: float = 0.0625,
     m0b: float = 0.5,
     m1: float = 0.25,
@@ -419,6 +467,9 @@ def make_deep_fused_conv_pool_spec(
         pk_maxpool=pk_maxpool,
         conv1_prefetch_k=conv1_prefetch_k,
         conv1_sched_fuse=conv1_sched_fuse,
+        conv1_int8=conv1_int8,
+        persistent=persistent,
+        persistent_ctas=persistent_ctas,
         m0=m0,
         m0b=m0b,
         m1=m1,
@@ -552,6 +603,21 @@ def is_valid_spec(
         # holds iff K0 is a whole number of 16-wide WMMA atoms.
         if spec.problem.conv.K % _WMMA:
             return False, "fused_c0a1 requires conv0 K0 divisible by 16"
+    if spec.conv1_int8:
+        if not (spec.native_int and spec.fused_c0a1):
+            return False, (
+                "conv1_int8 only implemented for the native_int fused_c0a1 "
+                "register handoff path"
+            )
+    if spec.persistent:
+        if not (spec.native_int and spec.direct_conv0 and spec.fused_c0a1):
+            return False, (
+                "persistent requires native_int + direct_conv0 + fused_c0a1 "
+                "(the only path with register weight/handoff and no per-tile "
+                "c0_smem, so W0/W1 can be hoisted above the grid-stride loop)"
+            )
+        if spec.persistent_ctas <= 0:
+            return False, "persistent_ctas must be positive"
     return True, "ok"
 
 
@@ -561,6 +627,11 @@ def deep_fused_conv_pool_grid(
     p = spec.problem
     h_tiles = p.pool_ho // spec.pool_tile_h
     w_tiles = p.pool_wo // spec.pool_tile_w
+    if spec.persistent:
+        # Launch only persistent_ctas resident CTAs; each grid-strides over the
+        # flattened tile strip (tile_idx = block_id_x, += persistent_ctas). The
+        # loop covers all h_tiles*w_tiles tiles regardless of the CTA count.
+        return (spec.persistent_ctas, 1, 1)
     if spec.w_fast:
         return (1, w_tiles, h_tiles)
     return (1, h_tiles, w_tiles)
@@ -888,8 +959,14 @@ def _stage_input_footprint_int(
     x_ptr: Value,
     inp_smem: Value,
     grid: WarpGrid,
+    h_blk: Value = None,
+    w_blk: Value = None,
 ) -> None:
-    """Direct native-int conv0: cache the raw int8 input halo footprint."""
+    """Direct native-int conv0: cache the raw int8 input halo footprint.
+
+    Persistent mode threads the loop-carried tile coords in via ``h_blk``/
+    ``w_blk``; otherwise they fall back to the per-CTA block ids (byte-identical).
+    """
     p = spec.problem
     c = p.conv
     bs = spec.block_size
@@ -902,8 +979,9 @@ def _stage_input_footprint_int(
     c_fw = b.const_i32(foot_w)
     c_npix = b.const_i32(npix)
 
-    h_blk = b.block_id_z() if spec.w_fast else b.block_id_y()
-    w_blk = b.block_id_y() if spec.w_fast else b.block_id_z()
+    if h_blk is None:
+        h_blk = b.block_id_z() if spec.w_fast else b.block_id_y()
+        w_blk = b.block_id_y() if spec.w_fast else b.block_id_z()
     ih0 = b.sub(
         b.mul(b.mul(h_blk, b.const_i32(spec.conv_tile_h)), b.const_i32(c.sH)),
         b.const_i32(c.pH),
@@ -1561,6 +1639,7 @@ def _fuse_c0_to_conv1_a_regs(
     accs0: Sequence[Value],
     grid: WarpGrid,
     code_fn,
+    int8: bool = False,
 ) -> List[List[Value]]:
     """In-register conv0->conv1 handoff (the fused_c0a1 transpose).
 
@@ -1603,6 +1682,13 @@ def _fuse_c0_to_conv1_a_regs(
             ord1 = b.byte_perm(o_lo, e_lo, 0x07030602)  # k0_local 4,5,6,7
             ord2 = b.byte_perm(o_hi, e_hi, 0x05010400)  # k0_local 8,9,10,11
             ord3 = b.byte_perm(o_hi, e_hi, 0x07030602)  # k0_local 12,13,14,15
+            if int8:
+                # iu8 A-fragment is <4 x i32>, slot j = K bytes [4j..4j+3]
+                # little-endian. ordN already holds the 4 contiguous k0 byte
+                # codes for that slot, so hand them through directly -- no nibble
+                # squeeze. Codes stay int4-range, so iu8 reads them bit-exactly.
+                out[mi][kk] = b.vec_pack([ord0, ord1, ord2, ord3], I32)
+                continue
             s0 = _pack_i4_codes_to_i32(
                 b, b.bitcast(b.vec_pack([ord0, ord1], I32), VectorType(I8, 8))
             )
@@ -1650,6 +1736,59 @@ def _wmma_gemm_conv1_i4_from_regs(
             atom_off = b.add(warp_n_off, b.const_i32(ni * _WMMA))
             out.append(
                 _load_frag_iu4_packed_from_lds(b, w1_smem, b_col, atom_off, k_tile_base)
+            )
+        return out
+
+    accs = [b.zero_vec(I32, op.c_frag_len) for _ in range(mfmas_m * mfmas_n)]
+    per_step = None if sched_fuse else policy
+
+    b_all = [load_b(kk) for kk in range(k_atoms)] if prefetch_k else None
+    for kk in range(k_atoms):
+        b_cols = b_all[kk] if prefetch_k else load_b(kk)
+        flat = 0
+        for mi in range(mfmas_m):
+            for ni in range(mfmas_n):
+                accs[flat] = b.mma(op, a_frags[mi][kk], b_cols[ni], accs[flat])
+                flat += 1
+        _emit_wmma_k_sched(b, per_step, n_ds, mfmas_m * mfmas_n)
+
+    if sched_fuse:
+        _emit_wmma_k_sched(b, policy, n_ds * k_atoms, mfmas_m * mfmas_n * k_atoms)
+    return accs
+
+
+def _wmma_gemm_conv1_i8_from_regs(
+    b: IRBuilder,
+    op,
+    a_frags: Sequence[Sequence[Value]],
+    w1_smem: Value,
+    grid: WarpGrid,
+    k_total: int,
+    policy=None,
+    prefetch_k: bool = False,
+    sched_fuse: bool = False,
+) -> List[Value]:
+    """conv1 iu8 GEMM with A from the in-register fused handoff and B (W1) from
+    byte-per-code i8 LDS. Twin of :func:`_wmma_gemm_conv1_i4_from_regs` but the
+    iu8 atom: A-fragments are the unsqueezed ``<4 x i32>`` byte codes and W1 is
+    one 16-byte row per K atom (one ``ds_read_b128`` per n-atom). The conv0 codes
+    stay int4-range, so the iu8 dot products are bit-identical to the iu4 path.
+    ``prefetch_k``/``sched_fuse`` are pure load/schedule reordering -- bit-exact."""
+    mfmas_m = grid.mfmas_per_warp_m
+    mfmas_n = grid.mfmas_per_warp_n
+    k_atoms = k_total // _WMMA
+    b_map = op.b_layout()
+    _b_k, b_col = b_map.coord(b, grid.lane, 0)  # b_col = lane % 16
+    warp_n_off = grid.warp_n_off(b)
+    n_ds = mfmas_n  # one 16-byte W1 load (ds_read_b128) per n-atom per k-step
+
+    def load_b(kk: int) -> List[Value]:
+        k_tile_base = b.const_i32(kk * _WMMA)
+        out = []
+        for ni in range(mfmas_n):
+            atom_off = b.add(warp_n_off, b.const_i32(ni * _WMMA))
+            out.append(
+                _load_frag_iu8_from_lds(b, w1_smem, b_col, atom_off, k_tile_base)
             )
         return out
 
@@ -1749,6 +1888,54 @@ def _stage_conv1_w1_packed(
         packed = b.vector_select(valid, raw, zero_vec)
         with b.scf_if(in_range):
             b.smem_store_vN(w1_smem, [n, c0], packed, n=bytes_per_row)
+
+
+def _stage_conv1_w1_i8(
+    b: IRBuilder,
+    spec: Gfx1151DeepFusedConvPoolSpec,
+    w1_ptr: Value,
+    w1_smem: Value,
+    grid: WarpGrid,
+) -> None:
+    """Unpack packed-int4 conv1 weights ``W1[K1, K0/2]`` (2 codes/byte, low
+    nibble = even k0) into ``w1_smem[tile_n, K0]`` as sign-extended int4 codes in
+    i8 lanes (byte-per-code), for the iu8 conv1 atom; padding -> 0. Twin of
+    :func:`_stage_conv1_w1` but stores int8 bytes instead of fp16 codes."""
+    from ...helpers.i4_dequant import unpack_i4_byte_to_pair_i32
+
+    p = spec.problem
+    c = p.conv
+    k0 = c.K  # conv1 K
+    k1 = p.conv1_channels
+    bs = spec.block_size
+    bytes_per_row = k0 // 2
+    total = spec.tile_n * bytes_per_row  # one thread-element per packed byte
+    ept = (total + bs - 1) // bs
+
+    c_bpr = b.const_i32(bytes_per_row)
+    c_k1 = b.const_i32(k1)
+    c_total = b.const_i32(total)
+    c0 = b.const_i32(0)
+    zero_i8 = b.trunc(c0, I8)
+
+    for e in range(ept):
+        idx = b.add(b.const_i32(e * bs), grid.tid)
+        in_range = b.cmp_lt(idx, c_total)
+        sidx = b.select(in_range, idx, c0)
+        n = b.div(sidx, c_bpr)
+        kb = b.mod(sidx, c_bpr)  # byte column
+        valid = b.land(in_range, b.cmp_lt(n, c_k1))
+        off = b.add(b.mul(n, c_bpr), kb)
+        safe_off = b.select(valid, off, c0)
+        byte = b.global_load(w1_ptr, safe_off, I8)
+        lo_i32, hi_i32 = unpack_i4_byte_to_pair_i32(b, byte)
+        lo_i8 = b.select(valid, b.trunc(lo_i32, I8), zero_i8)
+        hi_i8 = b.select(valid, b.trunc(hi_i32, I8), zero_i8)
+        k_lo = b.mul(kb, b.const_i32(2))
+        k_hi = b.add(k_lo, b.const_i32(1))
+        with b.scf_if(in_range):
+            b.smem_store_vN(w1_smem, [n, k_lo], lo_i8, n=1)
+            b.smem_store_vN(w1_smem, [n, k_hi], hi_i8, n=1)
 
 
 def _emit_wmma_k_sched(b: IRBuilder, policy, n_ds: int, n_mma: int) -> None:
@@ -2367,8 +2554,14 @@ def _emit_maxpool_finalpack_i8(
     c1_smem: Value,
     y_ptr: Value,
     grid: WarpGrid,
+    h_blk: Value = None,
+    w_blk: Value = None,
 ) -> None:
-    """Native integer maxpool over byte int4 codes; final mf=1 pack is no-op."""
+    """Native integer maxpool over byte int4 codes; final mf=1 pack is no-op.
+
+    Persistent mode threads the loop-carried tile coords in via ``h_blk``/
+    ``w_blk``; otherwise they fall back to the per-CTA block ids (byte-identical).
+    """
     p = spec.problem
     out_k = p.conv1_channels
     conv_tile_w = spec.pool_tile_w * p.pool_stride_w
@@ -2380,8 +2573,9 @@ def _emit_maxpool_finalpack_i8(
     c_pool_wo = b.const_i32(p.pool_wo)
     c_words = b.const_i32(words)
     c_0xf = b.const_i32(0xF)
-    h_blk = b.block_id_z() if spec.w_fast else b.block_id_y()
-    w_blk = b.block_id_y() if spec.w_fast else b.block_id_z()
+    if h_blk is None:
+        h_blk = b.block_id_z() if spec.w_fast else b.block_id_y()
+        w_blk = b.block_id_y() if spec.w_fast else b.block_id_z()
     block_ph = b.mul(h_blk, b.const_i32(spec.pool_tile_h))
     block_pw = b.mul(w_blk, b.const_i32(spec.pool_tile_w))
     in_range = b.cmp_lt(grid.tid, b.const_i32(n_pix))
@@ -2565,10 +2759,113 @@ def build_deep_fused_conv_pool(
         if spec.repack_c0
         else None
     )
-    w1_cols = c.K // 2 if spec.native_int else c.K
+    # conv1_int8 stores W1 byte-per-code (full K columns) for the iu8 atom; the
+    # default packed-int4 path stores 2 codes/byte (K/2 columns).
+    if spec.native_int:
+        w1_cols = c.K if spec.conv1_int8 else c.K // 2
+    else:
+        w1_cols = c.K
     w1_smem = b.smem_alloc(w1_dtype, [spec.tile_n, w1_cols], name_hint="W1_smem")
     c1_dtype = I8 if spec.native_int else F16
     c1_smem = b.smem_alloc(c1_dtype, [spec.tile_m, spec.tile_n], name_hint="C1_smem")
+
+    if spec.persistent:
+        # Persistent grid-stride variant. is_valid_spec guarantees native_int +
+        # direct_conv0 + fused_c0a1, so W0/W1 are tile-invariant and there is no
+        # per-tile c0_smem: stage both weights into LDS ONCE before the loop, then
+        # grid-stride over the flattened tile strip streaming only X (footprint)
+        # and Y (output) per tile.
+        def conv0_code_i8(p0: Value) -> Value:
+            q0 = _quant_i8_shift(b, p0, 4)  # m0 = 1/16
+            q0r = _relu_i32(b, b.sext(q0, I32))
+            return _quant_i4_shift(b, q0r, 1)  # m0b = 1/2
+
+        def conv1_code_i8(p1: Value) -> Value:
+            q1 = _quant_i4_shift(b, p1, 2)  # m1 = 1/4
+            return b.trunc(_relu_i32(b, b.sext(q1, I32)), I8)
+
+        # Weights resident: staged once per CTA (vs once per tile), one barrier.
+        _stage_conv0_w0_int(b, spec, W0, w0_smem, grid)
+        if spec.conv1_int8:
+            _stage_conv1_w1_i8(b, spec, W1, w1_smem, grid)
+        else:
+            _stage_conv1_w1_packed(b, spec, W1, w1_smem, grid)
+        b.sync()
+
+        h_tiles = p.pool_ho // spec.pool_tile_h
+        w_tiles = p.pool_wo // spec.pool_tile_w
+        num_tiles = h_tiles * w_tiles
+        c_wtiles = b.const_i32(w_tiles)
+        loop = b.scf_for(
+            b.block_id_x(),
+            b.const_i32(num_tiles),
+            b.const_i32(spec.persistent_ctas),
+            iv_name="tile_idx",
+        )
+        with loop as tile_idx:
+            # Scalarize the tile index + coords (uniform across the wave -> SGPR,
+            # no per-lane VGPR address math), mirroring CK Tile's
+            # amd_wave_read_first_lane(block_id) persistent pattern.
+            ti = b.readfirstlane(tile_idx)
+            h_blk = b.div(ti, c_wtiles)
+            w_blk = b.mod(ti, c_wtiles)
+
+            # Inter-tile guard: the previous tile's maxpool reads c1_smem and its
+            # conv0 GEMM read a0_smem; this barrier orders those completions before
+            # this tile reuses a0_smem/c1_smem. (On the first iteration it pairs
+            # with the pre-loop weight-staging barrier.)
+            b.sync()
+            _stage_input_footprint_int(
+                b, spec, X, a0_smem, grid, h_blk=h_blk, w_blk=w_blk
+            )
+            b.sync()  # footprint store -> conv0 GEMM read of a0_smem
+            accs0 = _wmma_gemm_conv0_direct_int(
+                b,
+                spec,
+                op0,
+                a0_smem,
+                w0_smem,
+                grid,
+                policy=policy,
+                reorient=True,
+            )
+            # conv1: register handoff (no scatter/c0_smem/barrier). W1 is already
+            # resident and never rewritten, so the pre-conv1 barrier is dropped.
+            if spec.conv1_int8:
+                a_frags = _fuse_c0_to_conv1_a_regs(
+                    b, op0, accs0, grid, conv0_code_i8, int8=True
+                )
+                accs1 = _wmma_gemm_conv1_i8_from_regs(
+                    b,
+                    op0,
+                    a_frags,
+                    w1_smem,
+                    grid,
+                    c.K,
+                    policy=policy,
+                    prefetch_k=spec.conv1_prefetch_k,
+                    sched_fuse=spec.conv1_sched_fuse,
+                )
+            else:
+                a_frags = _fuse_c0_to_conv1_a_regs(b, op0, accs0, grid, conv0_code_i8)
+                accs1 = _wmma_gemm_conv1_i4_from_regs(
+                    b,
+                    op1,
+                    a_frags,
+                    w1_smem,
+                    grid,
+                    c.K,
+                    policy=policy,
+                    prefetch_k=spec.conv1_prefetch_k,
+                    sched_fuse=spec.conv1_sched_fuse,
+                )
+            _scatter_codes_to_i8_lds(b, op1, accs1, c1_smem, grid, conv1_code_i8)
+            b.sync()  # conv1 scatter -> maxpool read of c1_smem
+            _emit_maxpool_finalpack_i8(
+                b, spec, c1_smem, Y, grid, h_blk=h_blk, w_blk=w_blk
+            )
+
+        return b.kernel
 
     # ---- conv0: int8 -> WMMA -> Quant(i32->i8)->ReLU->Quant(i8->i4)
     # native_int: raw int8 -> i8 LDS -> native iu8 WMMA -> exact i32 acc.
@@ -2644,20 +2941,41 @@ def build_deep_fused_conv_pool(
         # In-register handoff: no scatter, no c0_smem, no handoff barrier. Stage
         # W1 (its global loads overlap the register transpose), build the conv1
         # A-fragments in registers, then ONE barrier gates conv1 on W1 only.
-        _stage_conv1_w1_packed(b, spec, W1, w1_smem, grid)
-        a_frags = _fuse_c0_to_conv1_a_regs(b, op0, accs0, grid, conv0_code_i8)
-        b.sync()
-        accs1 = _wmma_gemm_conv1_i4_from_regs(
-            b,
-            op1,
-            a_frags,
-            w1_smem,
-            grid,
-            c.K,
-            policy=policy,
-            prefetch_k=spec.conv1_prefetch_k,
-            sched_fuse=spec.conv1_sched_fuse,
-        )
+        if spec.conv1_int8:
+            # int8 conv1: byte-per-code W1 + unsqueezed <4 x i32> A-frags + iu8
+            # atom. Codes stay int4-range, so this is bit-identical to the iu4
+            # path -- it only deletes the per-handoff nibble squeeze.
+            _stage_conv1_w1_i8(b, spec, W1, w1_smem, grid)
+            a_frags = _fuse_c0_to_conv1_a_regs(
+                b, op0, accs0, grid, conv0_code_i8, int8=True
+            )
+            b.sync()
+            accs1 = _wmma_gemm_conv1_i8_from_regs(
+                b,
+                op0,
+                a_frags,
+                w1_smem,
+                grid,
+                c.K,
+                policy=policy,
+                prefetch_k=spec.conv1_prefetch_k,
+                sched_fuse=spec.conv1_sched_fuse,
+            )
+        else:
+            _stage_conv1_w1_packed(b, spec, W1, w1_smem, grid)
+            a_frags = _fuse_c0_to_conv1_a_regs(b, op0, accs0, grid, conv0_code_i8)
+            b.sync()
+            accs1 = _wmma_gemm_conv1_i4_from_regs(
+                b,
+                op1,
+                a_frags,
+                w1_smem,
+                grid,
+                c.K,
+                policy=policy,
+                prefetch_k=spec.conv1_prefetch_k,
+                sched_fuse=spec.conv1_sched_fuse,
+            )
     elif spec.native_int:
         if spec.early_w1:
             _stage_conv1_w1_packed(b, spec, W1, w1_smem, grid)
