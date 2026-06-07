@@ -81,12 +81,42 @@ static __host__ __device__ size_t oz2_pad(size_t n)
  * (current behaviour, no extra memory); for small N it picks larger k.     */
 static constexpr size_t OZ2_CHUNK_TARGET_BYTES = 2ull << 30;   /* 2 GiB    */
 
+/* oz2_compute_scale_chunk_size — number of moduli covered by ONE pair of
+ * scale kernel invocations (oz2_scaleA_kernel + oz2_scaleB_kernel).
+ * A and B are each read from HBM once per scale chunk, so a larger value
+ * means fewer re-reads of the FP64 input matrices.
+ *
+ * The target keeps the combined A8i + B8i buffer below
+ * OZ2_SCALE_CHUNK_TARGET_BYTES.  The result is clamped to be at least
+ * gemm_chunk_sz (so every GEMM chunk fits inside one scale chunk) and at
+ * most num_moduli.  For small/medium matrices the result equals num_moduli
+ * (A and B are read exactly once); for very large matrices it gracefully
+ * degrades toward gemm_chunk_sz.                                           */
+static constexpr size_t OZ2_SCALE_CHUNK_TARGET_BYTES = 8ull << 30;  /* 8 GiB */
+
 static unsigned oz2_compute_chunk_size(int64_t m, int64_t n, unsigned num_moduli)
 {
     const size_t mn4 = static_cast<size_t>(m) * static_cast<size_t>(n) * 4u;
     if(mn4 == 0u) return num_moduli;
     const size_t k = std::max(size_t(1), OZ2_CHUNK_TARGET_BYTES / mn4);
     return static_cast<unsigned>(std::min(static_cast<size_t>(num_moduli), k));
+}
+
+static unsigned oz2_compute_scale_chunk_size(int64_t m, int64_t n, int64_t k,
+                                              unsigned num_moduli,
+                                              unsigned gemm_chunk_sz)
+{
+    const size_t lda8i       = oz2_pad(static_cast<size_t>(k));
+    const size_t cola8i      = oz2_pad(static_cast<size_t>(m));
+    const size_t ldb8i       = lda8i;
+    /* Combined A8i + B8i bytes per modulus slice. */
+    const size_t slice_bytes = lda8i * cola8i                             /* A8i slice */
+                             + ldb8i * static_cast<size_t>(n);            /* B8i slice */
+    if(slice_bytes == 0u) return num_moduli;
+    const size_t s = std::min(static_cast<size_t>(num_moduli),
+                              std::max(static_cast<size_t>(gemm_chunk_sz),
+                                       OZ2_SCALE_CHUNK_TARGET_BYTES / slice_bytes));
+    return static_cast<unsigned>(s);
 }
 
 /* =========================================================================
@@ -602,21 +632,22 @@ unsigned fp64EmulationEffectiveNumModuli(const _rocblaslt_handle* h)
  * ========================================================================= */
 size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_moduli)
 {
-    const size_t lda8i      = oz2_pad(static_cast<size_t>(k));
-    const size_t cola8i     = oz2_pad(static_cast<size_t>(m));
-    const size_t ldb8i      = lda8i;
-    const size_t ldc32i     = cola8i;
-    const size_t padn       = oz2_pad(static_cast<size_t>(n));
-    const size_t szC32i     = ldc32i * static_cast<size_t>(n);
-    const unsigned chunk_sz = oz2_compute_chunk_size(m, n, num_moduli);
+    const size_t lda8i       = oz2_pad(static_cast<size_t>(k));
+    const size_t cola8i      = oz2_pad(static_cast<size_t>(m));
+    const size_t ldb8i       = lda8i;
+    const size_t ldc32i      = cola8i;
+    const size_t padn        = oz2_pad(static_cast<size_t>(n));
+    const size_t szC32i      = ldc32i * static_cast<size_t>(n);
+    const unsigned gemm_sz   = oz2_compute_chunk_size(m, n, num_moduli);
+    const unsigned scale_sz  = oz2_compute_scale_chunk_size(m, n, k, num_moduli, gemm_sz);
 
-    return   chunk_sz * lda8i * cola8i * sizeof(int8_t)                   /* A8i batch  */
-           + chunk_sz * ldb8i * static_cast<size_t>(n) * sizeof(int8_t)   /* B8i batch  */
-           + chunk_sz * szC32i * sizeof(int32_t)                           /* C32i batch */
+    return   scale_sz * lda8i * cola8i * sizeof(int8_t)                   /* A8i batch  */
+           + scale_sz * ldb8i * static_cast<size_t>(n) * sizeof(int8_t)   /* B8i batch  */
+           + gemm_sz  * szC32i * sizeof(int32_t)                           /* C32i batch */
            + szC32i * sizeof(double) * 2                                   /* Zhi + Zlo  */
            + cola8i * sizeof(int16_t)                                      /* sftA       */
            + padn   * sizeof(int16_t)                                      /* sftB       */
-           + sizeof(uint32_t);                                              /* nan_flag   */
+           + sizeof(uint32_t);                                             /* nan_flag   */
 }
 
 /**
@@ -1204,7 +1235,8 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
      * oz2_chunk_accum_kernel call.  Reduces non-GEMM kernel launches from
      * (s+1) to (ceil(s/chunk_size)+1) while keeping C32i batch ≤ 256 MiB.
      * ------------------------------------------------------------------ */
-    const unsigned chunk_size = oz2_compute_chunk_size(m, n, num_moduli);
+    const unsigned chunk_size       = oz2_compute_chunk_size(m, n, num_moduli);
+    const unsigned scale_chunk_size = oz2_compute_scale_chunk_size(m, n, k, num_moduli, chunk_size);
 
     /* ------------------------------------------------------------------
      * Padding / stride constants — needed both for the INT8 workspace
@@ -1227,17 +1259,17 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
      *   padn       = padding(n)          — padded n for sftB alignment
      *   chunk_size = oz2_compute_chunk_size(m,n,s) — number of C32i slices
      *
-     *   A8i        [chunk_size × lda8i × cola8i]  INT8  (reused each chunk; pos 0 = A8i_high)
-     *   B8i        [chunk_size × ldb8i × n]       INT8  (reused each chunk; pos 0 = B8i_high)
-     *   C32i_batch [chunk_size × ldc32i × n]      INT32 (batch, re-used each chunk)
+     *   A8i        [scale_chunk_size × lda8i × cola8i]  INT8  (pos 0 = A8i_high)
+     *   B8i        [scale_chunk_size × ldb8i × n]       INT8  (pos 0 = B8i_high)
+     *   C32i_batch [chunk_size × ldc32i × n]            INT32 (batch, re-used each GEMM chunk)
      *   Zhi        [ldc32i × n]                   FP64  CRT accumulator hi
      *   Zlo        [ldc32i × n]                   FP64  CRT accumulator lo
      *   sftA       [cola8i]                        INT16 per-row shifts for A
      *   sftB       [padn]                          INT16 per-col shifts for B
      *   nan_flag   [1]                             UINT32 Inf/NaN detection
      * ------------------------------------------------------------------ */
-    const size_t szA8i    = chunk_size * lda8i * cola8i;
-    const size_t szB8i    = chunk_size * ldb8i * static_cast<size_t>(n);
+    const size_t szA8i    = scale_chunk_size * lda8i * cola8i;
+    const size_t szB8i    = scale_chunk_size * ldb8i * static_cast<size_t>(n);
     // szC32i already computed above
     const size_t szZhi    = szC32i;
     const size_t szZlo    = szC32i;
@@ -1365,24 +1397,24 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
                        C32i, m, n, ldc32i, sftB, accu_log2P);
     _pstop(_t_refine);
 
-    /* Parts 1f + 2a-d: per-chunk scaling + INT8 GEMMs + CRT accumulation.
+    /* Parts 1f + 2a-d: two-level loop — scale chunks (outer) × GEMM chunks (inner).
      *
-     * A8i and B8i each hold only chunk_size slices and are reused every
-     * iteration.  For each chunk of chunk_size consecutive moduli:
-     *   0. oz2_scaleA/B_kernel fills A8i[0..actual-1] and B8i[0..actual-1]
-     *      by reading A and B for moduli [chunk_start, chunk_start+actual).
-     *   1. One strided-batch GEMM covering all 'actual' slices at once.
-     *   2. One oz2_chunk_accum_kernel folds them into Zhi/Zlo in registers.
+     * Outer loop (scale chunks of size scale_chunk_size):
+     *   oz2_scaleA/B_kernel reads A and B ONCE and writes scale_chunk_size INT8
+     *   slices into A8i[0..actual_scale-1] / B8i[0..actual_scale-1].
      *
-     * For small problems (chunk_size == num_moduli) the loop runs once and
-     * A and B are each read exactly once — identical to the previous design.
-     * For large problems (chunk_size < num_moduli) the loop runs multiple
-     * times with repeated reads of A and B, but the A8i+B8i workspace shrinks
-     * from num_moduli×N² to chunk_size×N² INT8 elements — a large saving.
+     * Inner loop (GEMM chunks of size chunk_size within one scale chunk):
+     *   A strided-batch INT8 GEMM over chunk_size slices (A8i_gemm / B8i_gemm
+     *   point into the pre-computed scale buffer at offset gemm_local).
+     *   One oz2_chunk_accum_kernel folds the results into Zhi/Zlo.
+     *
+     * A and B are re-read ceil(num_moduli / scale_chunk_size) times instead of
+     * ceil(num_moduli / chunk_size) times.  For small/medium matrices
+     * scale_chunk_size == num_moduli, so A and B are read exactly once.
      *
      * Scale kernel block (64,4): threadIdx.x covers k (fast) → coalesced
      * A8i/B8i writes.  Grid x → k-index, grid y → m-index (A) or n-index (B).
-     * This setup is constant across iterations so we compute it once here.   */
+     * This setup is constant across both loop levels.                        */
     /* Scale kernel: block(64,4), threadIdx.x=k-index (fast) for all transpose
      * orientations.  A8i/B8i writes are always coalesced.  For transA=N the
      * FP64 reads from A have stride=lda (non-coalesced), but keeping INT8
@@ -1404,18 +1436,18 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
      * l-rows and touches separate cache-line groups per warp.               */
     const dim3 blk_acc(64, 8);
     const dim3 grid_acc((m + 63) / 64, (n + 7) / 8);
-    /* strideA8i / strideB8i: stride between consecutive slices within the
-     * chunk buffer (in elements).  Unchanged — the chunk buffer is laid out
-     * identically to a full buffer, just with fewer slices.                 */
+    /* strideA8i / strideB8i: stride between consecutive moduli slices within
+     * the scale buffer (in INT8 elements).  Used by the scale kernels to
+     * write the t_local-th slice, and by the inner GEMM loop to compute
+     * A8i_gemm / B8i_gemm offsets into the pre-computed scale chunk.       */
     const size_t strideA8i = lda8i * cola8i;
     const size_t strideB8i = ldb8i * static_cast<size_t>(n);
 
-    /* Create batch layout objects once before the loop.  For typical problem
-     * sizes chunk_size == num_moduli, so the loop body executes only once and
-     * these objects are never recreated.  For very large matrices (chunk_size
-     * < num_moduli) only the BATCH_COUNT attribute is updated on the last
-     * (partial) chunk — the three expensive Create/Destroy pairs are avoided
-     * for all full chunks.                                                   */
+    /* Create batch layout objects once before the outer scale loop.
+     * BATCH_COUNT is updated only when actual_gemm changes (i.e. the last
+     * partial inner GEMM chunk, or when the next outer iteration resets to
+     * chunk_size).  The three Create/Destroy pairs are avoided for all but
+     * the final partial GEMM batch.                                         */
     hipblasLtMatrixLayout_t layoutA_b  = nullptr;
     hipblasLtMatrixLayout_t layoutB_b  = nullptr;
     hipblasLtMatrixLayout_t layoutCD_b = nullptr;
@@ -1449,52 +1481,64 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     hipblasLtMatrixLayoutSetAttribute(layoutCD_b,
         HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_C_b, sizeof(stride_C_b));
 
-    for(unsigned chunk_start = 0; chunk_start < num_moduli; chunk_start += chunk_size) {
-        const unsigned actual = (chunk_start + chunk_size <= num_moduli)
-                                ? chunk_size : (num_moduli - chunk_start);
+    for(unsigned scale_start = 0; scale_start < num_moduli; scale_start += scale_chunk_size) {
+        const unsigned actual_scale = (scale_start + scale_chunk_size <= num_moduli)
+                                      ? scale_chunk_size : (num_moduli - scale_start);
 
-        /* Part 1f: extract INT8 slices for this chunk.
-         * block(64,4) handles all transpose cases via branch;
-         * A8i/B8i writes are always coalesced (k-index fast).  */
+        /* Part 1f: extract INT8 slices for all actual_scale moduli in this
+         * scale chunk.  A and B are each read from HBM exactly once here,
+         * writing scale_chunk_size (or fewer) slices into A8i and B8i.
+         * When scale_chunk_size == num_moduli A and B are read once in total;
+         * otherwise ceil(num_moduli / scale_chunk_size) reads of each.      */
         _pstart();
         hipLaunchKernelGGL(oz2_scaleA_kernel, gA_scale, blk_scale, 0, stream,
                            A, m, k, lda, tA, A8i, lda8i, cola8i, sftA,
-                           chunk_start, actual, do_pass3);
+                           scale_start, actual_scale, do_pass3);
         hipLaunchKernelGGL(oz2_scaleB_kernel, gB_scale, blk_scale, 0, stream,
                            B, k, n, ldb, tB, B8i, ldb8i, sftB,
-                           chunk_start, actual, do_pass3);
+                           scale_start, actual_scale, do_pass3);
         _pstop(_t_scale);
 
-        /* Update batch count only if the last chunk is partial */
-        if(static_cast<int32_t>(actual) != batch_cur) {
-            batch_cur = static_cast<int32_t>(actual);
-            hipblasLtMatrixLayoutSetAttribute(layoutA_b,
-                HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch_cur, sizeof(batch_cur));
-            hipblasLtMatrixLayoutSetAttribute(layoutB_b,
-                HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch_cur, sizeof(batch_cur));
-            hipblasLtMatrixLayoutSetAttribute(layoutCD_b,
-                HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch_cur, sizeof(batch_cur));
+        /* Parts 2c-d: GEMM + accumulate for each GEMM chunk within this
+         * scale chunk.  A8i_gemm / B8i_gemm are offset pointers into the
+         * pre-computed scale-chunk buffers — A and B are NOT re-read here.  */
+        for(unsigned gemm_local = 0; gemm_local < actual_scale; gemm_local += chunk_size) {
+            const unsigned actual_gemm = (gemm_local + chunk_size <= actual_scale)
+                                         ? chunk_size : (actual_scale - gemm_local);
+
+            /* Update batch count only when the GEMM batch size changes. */
+            if(static_cast<int32_t>(actual_gemm) != batch_cur) {
+                batch_cur = static_cast<int32_t>(actual_gemm);
+                hipblasLtMatrixLayoutSetAttribute(layoutA_b,
+                    HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch_cur, sizeof(batch_cur));
+                hipblasLtMatrixLayoutSetAttribute(layoutB_b,
+                    HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch_cur, sizeof(batch_cur));
+                hipblasLtMatrixLayoutSetAttribute(layoutCD_b,
+                    HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch_cur, sizeof(batch_cur));
+            }
+
+            /* Offset into the pre-computed scale chunk for this GEMM batch. */
+            const int8_t* const A8i_gemm = A8i + gemm_local * strideA8i;
+            const int8_t* const B8i_gemm = B8i + gemm_local * strideB8i;
+
+            _pstart();
+            hipblasLtMatmul(settings.handle, matmulDesc,
+                            &one_i,
+                            A8i_gemm, layoutA_b,
+                            B8i_gemm, layoutB_b,
+                            &zero_i,
+                            C32i_batch, layoutCD_b, C32i_batch, layoutCD_b,
+                            nullptr, nullptr, 0, stream);
+            _pstop(_t_int8);
+
+            const unsigned global_chunk_start = scale_start + gemm_local;
+            const bool is_first = (global_chunk_start == 0);
+            _pstart();
+            hipLaunchKernelGGL(oz2_chunk_accum_kernel, grid_acc, blk_acc, 0, stream,
+                               C32i_batch, Zhi, Zlo, m, n, ldc32i,
+                               global_chunk_start, actual_gemm, is_first);
+            _pstop(_t_accum);
         }
-
-        /* Part 2c: batched INT8 GEMM over 'actual' slices.
-         * A8i and B8i always start at slice 0 of their buffers (no offset
-         * needed since the scale kernels above wrote to positions 0..actual-1). */
-        _pstart();
-        hipblasLtMatmul(settings.handle, matmulDesc,
-                        &one_i,
-                        A8i, layoutA_b,
-                        B8i, layoutB_b,
-                        &zero_i,
-                        C32i_batch, layoutCD_b, C32i_batch, layoutCD_b,
-                        nullptr, nullptr, 0, stream);
-        _pstop(_t_int8);
-
-        const bool is_first = (chunk_start == 0);
-        _pstart();
-        hipLaunchKernelGGL(oz2_chunk_accum_kernel, grid_acc, blk_acc, 0, stream,
-                           C32i_batch, Zhi, Zlo, m, n, ldc32i,
-                           chunk_start, actual, is_first);
-        _pstop(_t_accum);
     }
 
     hipblasLtMatrixLayoutDestroy(layoutCD_b);
@@ -1524,16 +1568,19 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         std::FILE* _f = std::fopen(_pf, "a");
         if(_f) {
             if(std::ftell(_f) == 0)
-                std::fprintf(_f,
-                    "m,n,k,num_moduli,chunk_size,"
-                    "t_prelim_ms,t_prelim_gemm_ms,t_refine_ms,"
-                    "t_scale_ms,t_int8_gemm_ms,t_accum_ms,"
-                    "t_finalize_ms,t_total_ms\n");
             std::fprintf(_f,
-                "%lld,%lld,%lld,%u,%u,"
+                "m,n,k,num_moduli,scale_chunk_size,gemm_chunk_size,"
+                "workspace_bytes,"
+                "t_prelim_ms,t_prelim_gemm_ms,t_refine_ms,"
+                "t_scale_ms,t_int8_gemm_ms,t_accum_ms,"
+                "t_finalize_ms,t_total_ms\n");
+            std::fprintf(_f,
+                "%lld,%lld,%lld,%u,%u,%u,"
+                "%llu,"
                 "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n",
                 (long long)m, (long long)n, (long long)k,
-                num_moduli, chunk_size,
+                num_moduli, scale_chunk_size, chunk_size,
+                (unsigned long long)wsBytes,
                 _t_prelim, _t_prelim_gemm, _t_refine,
                 _t_scale, _t_int8, _t_accum, _t_finalize, _t_total);
             std::fclose(_f);
