@@ -90,12 +90,37 @@ tree clean; it exits non-zero when any row is not a kill. (Earlier I had only
 validated the `mutmut show`/`apply`/`git checkout` mechanism by hand on
 `mutmut_1`; this is the full-script proof.)
 
-## Status / next
+## Campaign result (Phase 2-4, dynamic workflow — DONE)
 
-- Phase 0 scaffold: **done** (`[tool.mutmut]` config, `tox mutation-unit`,
-  `wf/mutmut-verify.sh`, `.gitignore`).
-- Phase 1 pilot: **done** (population + score above).
-- **Next = Phase 2–4 (the dynamic workflow):** triage the 131 survivors into the 5
-  buckets, author add-only killing tests for the test-fixable ones, kill-proof them
-  serially via `wf/mutmut-verify.sh`, then synthesize the report. (Optionally also
-  address the 84 no-test mutants as a coverage-gap follow-up.)
+The dynamic workflow `wf/triage-workflow.js` (27 parallel per-function triage
+agents → single serial kill-proof → bounded repair → serial pragma apply →
+synthesis) triaged all 131 survivors and the result was certified by a fresh
+full `mutmut` re-run + manual equivalence audit (not agent self-report):
+
+| | before | after |
+|---|--------|-------|
+| total mutants | 665 | 654 (−11: 3 pragma'd lines) |
+| killed | 450 | **566** |
+| **survived** | **131** | **4** |
+| no-tests | 84 | 84 |
+
+- **131 survivors → 4.** Disposition: **118 killed** by new add-only tests
+  (26 files / 74 test fns, each proven `base_rc=0 mut_rc=1` by `wf/mutmut-verify.sh`),
+  **9 removed** by 3 `# pragma: no mutate` markers (I/O-noise lines), **4 remain
+  equivalent**.
+- All **4 remaining survivors independently verified genuinely equivalent**
+  (regex under `re.IGNORECASE`; `-1→+1` default where `1` is degenerate-valid;
+  unused `value` param; `open` default mode). ⇒ **100% of non-equivalent covered
+  mutants killed**; covered score **77.5% → 99.3%** (566/570), raw 67.7% → 86.5%.
+- Source changed **only** by 3 pragma comments (no code edits). Slice suite green:
+  **184 passed / 70 snapshots / 0 failed**.
+- Artifacts: `workflow/{mutation-report.json, survivor-ledger.md, recommendations.md}`
+  (synthesis summary tables were stale on first write — corrected against ground truth).
+
+## Out of scope / next
+
+- **84 no-test mutants** = coverage gaps (lines no test exercises), a different
+  problem from assertion strength — deferred as a coverage follow-up.
+- Next slices (smallest-first): `Common/ValidParameters.py`, `CustomYamlLoader.py`,
+  `BenchmarkSplitter.py`, `Configuration.py`, `LibraryIO.py`, then SolutionStructs.
+- CI: pilot stays report-only; set a per-slice floor at CI phase 3 once stable.
