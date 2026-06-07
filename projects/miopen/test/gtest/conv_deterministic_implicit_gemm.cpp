@@ -143,7 +143,13 @@ protected:
 
         problem.SetupFloats(ctx);
 
-        if(!solv.IsApplicable(ctx, problem))
+        const bool applicable = solv.IsApplicable(ctx, problem);
+        std::cerr << "[DEBUG DeterministicTest] solver=" << solv.SolverDbId()
+                  << " GPU=" << handle.GetDeviceName() << " config=" << config
+                  << " deterministic=" << conv_desc.attribute.deterministic.Get()
+                  << " applicable=" << applicable << std::endl;
+
+        if(!applicable)
         {
             GTEST_SKIP() << solv.SolverDbId() << " Not Applicable on this GPU/config";
         }
@@ -326,7 +332,10 @@ protected:
                     output.desc, weights.desc, input.desc, conv_desc, CONV_DIR};
         }();
         problem_ndet.SetupFloats(ctx);
-        if(!solv.IsApplicable(ctx, problem_ndet))
+        const bool applicable_ndet = solv.IsApplicable(ctx, problem_ndet);
+        std::cerr << "[DEBUG RejectionTest] solver=" << solv.SolverDbId() << " config=" << config
+                  << " applicable_without_det=" << applicable_ndet << std::endl;
+        if(!applicable_ndet)
             GTEST_SKIP() << solv.SolverDbId() << " Not Applicable on this GPU/config";
 
         // With deterministic mode: solver must reject this shape
@@ -343,7 +352,10 @@ protected:
         }();
         problem_det.SetupFloats(ctx);
 
-        EXPECT_FALSE(solv.IsApplicable(ctx, problem_det))
+        const bool applicable_det = solv.IsApplicable(ctx, problem_det);
+        std::cerr << "[DEBUG RejectionTest] solver=" << solv.SolverDbId()
+                  << " applicable_with_det=" << applicable_det << " expected=false" << std::endl;
+        EXPECT_FALSE(applicable_det)
             << solv.SolverDbId() << " must reject non-deterministic shape in deterministic mode";
     }
 };
@@ -489,16 +501,17 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                              1,
                              1}));
 
-// WrwV4R4Xdlops: N=4 allows gemm_k_block>1; shape chosen so gemm_k_block>2 → must be rejected
+// WrwV4R4Xdlops: N=8, H=W=8 → gemm_k_block=4 > 2 → AtomicAdd → must be rejected
+// (N=4,H=28,W=28 produced gemm_k_block=1 due to divisibility, so changed to this config)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_ConvDeterministicRejection_WrwV4R4Xdlops_BFP16,
                          testing::Values(DeterministicTestConfig{
                              //  N   C   K   H   W  y  x  ph pw sh sw dh dw
-                             4,
+                             8,
                              192,
                              16,
-                             28,
-                             28,
+                             8,
+                             8,
                              1,
                              1,
                              0,
