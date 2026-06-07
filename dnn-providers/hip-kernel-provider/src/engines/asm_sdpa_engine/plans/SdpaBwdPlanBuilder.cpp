@@ -2,22 +2,25 @@
 // SPDX-License-Identifier:  MIT
 
 #include "plans/SdpaBwdPlanBuilder.hpp"
-#include "HipKernelUtils.hpp"
 #include "asm/AsmKernelPath.hpp"
+#include "core/Utils.hpp"
 #include "plans/SdpaBwdPlan.hpp"
 
 #include <cmath>
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <utility>
 
 namespace asm_sdpa_engine
 {
 
+// Engine knob identifier for accumulator precision (a32 vs a16)
+static constexpr const char* K_ACC_TYPE_KNOB_NAME = "sdpa.bwd.accumulator_type";
+
 bool SdpaBwdPlanBuilder::isApplicable(
-    const HipKernelHandle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -145,9 +148,9 @@ bool SdpaBwdPlanBuilder::isApplicable(
 }
 
 size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
-    const HipKernelHandle& /* handle */,
+    const Handle& /* handle */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const HipKernelSettings& /* executionSettings */) const
+    const Settings& executionSettings) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -161,34 +164,67 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     auto seqLenQ = static_cast<size_t>(qTensor->dims()->Get(2));
     auto headDim = static_cast<size_t>(qTensor->dims()->Get(3));
 
-    return sdpaBwdDBufferSize(batch, headsQ, seqLenQ)
-           + sdpaBwdDqAccBufferSize(batch, headsQ, seqLenQ, headDim);
+    const AccumulatorType accType
+        = executionSettings.accumulatorType.value_or(AccumulatorType::A32);
+
+    return sdpaBwdWorkspaceSize(batch, headsQ, seqLenQ, headDim, accType);
 }
 
 void SdpaBwdPlanBuilder::initializeExecutionSettings(
-    const HipKernelHandle& /* handle */,
+    const Handle& /* handle */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
-    HipKernelSettings& /* executionSettings */) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    Settings& executionSettings) const
 {
-    HIPDNN_PLUGIN_LOG_ERROR("SdpaBwdPlanBuilder::initializeExecutionSettings not implemented");
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    if(!engineConfig.isValid() || !engineConfig.hasKnobSetting(K_ACC_TYPE_KNOB_NAME))
+    {
+        return; // No user preference — default (nullopt → A32) applies
+    }
+
+    const auto& knobSetting = engineConfig.getKnobSettingByName(K_ACC_TYPE_KNOB_NAME);
+
+    if(knobSetting.valueType() != KnobValue::StringValue)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "accumulator_type knob value must be a string");
+    }
+
+    const auto& value = knobSetting.valueAs<StringValue>().value()->str();
+
+    if(value == "a32")
+    {
+        executionSettings.accumulatorType = AccumulatorType::A32;
+    }
+    else if(value == "a16")
+    {
+        executionSettings.accumulatorType = AccumulatorType::A16;
+    }
+    else
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                                       "Invalid accumulator_type: '" + value
+                                                           + "'. Must be 'a32' or 'a16'");
+    }
 }
 
 void SdpaBwdPlanBuilder::buildPlan(
-    const HipKernelHandle& /* handle */,
+    const Handle& /* handle */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
-    HipKernelContext& executionContext) const
+    Context& executionContext) const
 {
     // -------------------------------------------------------------------------
-    // 1. Load 3 kernel modules and get kernel functions from modules
+    // 1. Determine accumulator type and load kernel modules
     // -------------------------------------------------------------------------
+    const AccumulatorType accType
+        = executionContext.executionSettings().accumulatorType.value_or(AccumulatorType::A32);
+
     const std::string odoCoPath
         = asm_kernels::getAsmKernelPath("gfx942/fmha_v3_bwd/MI300/bwd_hd128_odo_bf16.co");
     const std::string dqdkdvCoPath = asm_kernels::getAsmKernelPath(
         "gfx942/fmha_v3_bwd/MI300/bwd_hd128_bf16_a32_rtne_psskddv.co");
-    const std::string postCoPath = asm_kernels::getAsmKernelPath(
-        "gfx942/fmha_v3_bwd/MI300/bwd_hd128_dq_convert_bf16_rtne.co");
 
     auto odoKernel = loadKernelModule(odoCoPath, "_ZN5aiter23fmha_bwd_hd128_odo_bf16E");
     if(!odoKernel)
@@ -203,11 +239,18 @@ void SdpaBwdPlanBuilder::buildPlan(
         return;
     }
 
-    auto postKernel
-        = loadKernelModule(postCoPath, "_ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtneE");
-    if(!postKernel)
+    // DQ_CONVERT kernel: only needed for a32 accumulator path
+    std::optional<HipModuleGuard> postKernel;
+    if(accType == AccumulatorType::A32)
     {
-        return;
+        const std::string postCoPath = asm_kernels::getAsmKernelPath(
+            "gfx942/fmha_v3_bwd/MI300/bwd_hd128_dq_convert_bf16_rtne.co");
+        postKernel
+            = loadKernelModule(postCoPath, "_ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtneE");
+        if(!postKernel)
+        {
+            return;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -369,16 +412,49 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.statsStrideHead = statsStrideHead;
     params.statsStrideBatch = statsStrideBatch;
     params.attnScale = attnScale;
+    params.accumulatorType = accType;
 
-    executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
-        std::move(*odoKernel), std::move(*dqdkdvKernel), std::move(*postKernel), params));
+    if(accType == AccumulatorType::A32)
+    {
+        executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
+            std::move(*odoKernel), std::move(*dqdkdvKernel), std::move(*postKernel), params));
+    }
+    else
+    {
+        executionContext.setPlan(
+            std::make_unique<SdpaBwdPlan>(std::move(*odoKernel), std::move(*dqdkdvKernel), params));
+    }
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(
-    const HipKernelHandle& /* handle */,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */) const
+    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    return {};
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    if(!isApplicable(handle, opGraph))
+    {
+        return {};
+    }
+
+    std::vector<KnobT> knobs;
+
+    KnobT accKnob;
+    accKnob.knob_id = K_ACC_TYPE_KNOB_NAME;
+    accKnob.description
+        = "Accumulator precision for backward dQ gradient: a32 (FP32, 3-kernel) or a16 (BF16, "
+          "2-kernel)";
+
+    StringValueT defaultValue;
+    defaultValue.value = "a32";
+    accKnob.default_value.Set(defaultValue);
+
+    StringConstraintT constraint;
+    constraint.valid_values.emplace_back("a32");
+    constraint.valid_values.emplace_back("a16");
+    accKnob.constraint.Set(constraint);
+
+    knobs.push_back(std::move(accKnob));
+    return knobs;
 }
 
 } // namespace asm_sdpa_engine

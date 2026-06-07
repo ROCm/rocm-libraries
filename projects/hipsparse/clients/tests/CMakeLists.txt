@@ -90,8 +90,8 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_const_dnvec_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_coo_aos.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_bsr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_sell.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_axpby.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_gather.cpp"
@@ -128,6 +128,12 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_coo.cpp"
 )
+
+if(HIPSPARSE_ENABLE_SPMV_BSR)
+    target_sources(hipsparse-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_bsr.cpp"
+    )
+endif()
 
 if(HIPSPARSE_ENABLE_HIP)
     target_sources(hipsparse-test PRIVATE

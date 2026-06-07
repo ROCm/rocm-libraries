@@ -26,7 +26,8 @@ HipblasltMatrixLayout::HipblasltMatrixLayout(
     //   we need to use the dimensions and the strides as-is since hipBLASLT expects column-major layout.
     // - If this is row-major matrix (strides[rank-1] == 1):
     //   we need to swap the dimensions and the strides.
-    uint64_t rows, cols;
+    uint64_t rows;
+    uint64_t cols;
     int64_t ld;
     if(strides[rank - 1] == 1) // row-major matrix
     {
@@ -48,7 +49,7 @@ HipblasltMatrixLayout::HipblasltMatrixLayout(
     }
 
     THROW_ON_HIPBLASLT_FAILURE(
-        hipblasLtMatrixLayoutCreate(&_matrix_layout,
+        hipblasLtMatrixLayoutCreate(&_matrixLayout,
                                     hipblaslt_utils::tensorDataTypeToHipDataType(tensor.dataType()),
                                     rows,
                                     cols,
@@ -57,33 +58,33 @@ HipblasltMatrixLayout::HipblasltMatrixLayout(
 
 HipblasltMatrixLayout::HipblasltMatrixLayout(HipblasltMatrixLayout&& other) noexcept
     : _uid(other._uid)
-    , _matrix_layout(other._matrix_layout)
+    , _matrixLayout(other._matrixLayout)
 {
-    other._matrix_layout = nullptr;
+    other._matrixLayout = nullptr;
 }
 
 HipblasltMatrixLayout& HipblasltMatrixLayout::operator=(HipblasltMatrixLayout&& other) noexcept
 {
     if(this != &other)
     {
-        if(_matrix_layout != nullptr)
+        if(_matrixLayout != nullptr)
         {
-            LOG_ON_HIPBLASLT_FAILURE(hipblasLtMatrixLayoutDestroy(_matrix_layout));
+            LOG_ON_HIPBLASLT_FAILURE(hipblasLtMatrixLayoutDestroy(_matrixLayout));
         }
 
         _uid = other._uid;
-        _matrix_layout = other._matrix_layout;
+        _matrixLayout = other._matrixLayout;
 
-        other._matrix_layout = nullptr;
+        other._matrixLayout = nullptr;
     }
     return *this;
 }
 
 HipblasltMatrixLayout::~HipblasltMatrixLayout()
 {
-    if(_matrix_layout != nullptr)
+    if(_matrixLayout != nullptr)
     {
-        LOG_ON_HIPBLASLT_FAILURE(hipblasLtMatrixLayoutDestroy(_matrix_layout));
+        LOG_ON_HIPBLASLT_FAILURE(hipblasLtMatrixLayoutDestroy(_matrixLayout));
     }
 }
 
@@ -94,25 +95,25 @@ int64_t HipblasltMatrixLayout::uid() const
 
 hipblasLtMatrixLayout_t HipblasltMatrixLayout::matrixLayout() const
 {
-    return _matrix_layout;
+    return _matrixLayout;
 }
 
 void HipblasltMatrixLayout::setBatchCount(int64_t count)
 {
-    PLUGIN_THROW_IF_NULL(_matrix_layout,
+    PLUGIN_THROW_IF_NULL(_matrixLayout,
                          HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                          "Failed to set batch count: matrixLayout is nullptr");
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatrixLayoutSetAttribute(
-        _matrix_layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &count, sizeof(count)));
+        _matrixLayout, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &count, sizeof(count)));
 }
 
 void HipblasltMatrixLayout::setStridedBatchOffset(int64_t stride)
 {
-    PLUGIN_THROW_IF_NULL(_matrix_layout,
+    PLUGIN_THROW_IF_NULL(_matrixLayout,
                          HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                          "Failed to set strided batch offset: matrixLayout is nullptr");
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatrixLayoutSetAttribute(
-        _matrix_layout, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride, sizeof(stride)));
+        _matrixLayout, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride, sizeof(stride)));
 }
 
 } // namespace hipblaslt_plugin
