@@ -79,7 +79,7 @@ static __host__ __device__ size_t oz2_pad(size_t n)
  * The target keeps the C32i batch (chunk_size × ldc32i × n × 4 B) below
  * OZ2_CHUNK_TARGET_BYTES.  For large N this naturally falls back to k=1
  * (current behaviour, no extra memory); for small N it picks larger k.     */
-static constexpr size_t OZ2_CHUNK_TARGET_BYTES = 2ull << 30;   /* 2 GiB    */
+static constexpr size_t OZ2_CHUNK_TARGET_BYTES = 8ull << 30;   /* 8 GiB    */
 
 /* oz2_compute_scale_chunk_size — number of moduli covered by ONE pair of
  * scale kernel invocations (oz2_scaleA_kernel + oz2_scaleB_kernel).
@@ -1071,7 +1071,16 @@ oz2_scaleB_kernel(const double* __restrict__ B,
  * Compared to launching one kernel per modulus (old approach), this reduces
  * the number of Zhi/Zlo read-modify-write round-trips from chunk_size to 1
  * per chunk, and cuts kernel launches from (s+1) to (ceil(s/k)+1).
+ *
+ * Template parameter HAS_LO:
+ *   true  — s ≥ 8: cQpiLo[t] is non-zero; fuse dc×cQpiLo[t] into a FMA
+ *            with the local_lo update, saving one multiply vs the separate
+ *            lo = dc*cQpiLo[t] + two-add form.
+ *   false — s ≤ 7: cQpiLo[t] = 0 for all t (single-double qPi suffices);
+ *            skip the lo multiply entirely and reduce local_lo += err,
+ *            saving two FP64 ops per modulus.
  * ========================================================================= */
+template <bool HAS_LO>
 __global__ static void
 oz2_chunk_accum_kernel(const int32_t* __restrict__ C32i_batch,
                        double*        __restrict__ Zhi,
@@ -1100,12 +1109,18 @@ oz2_chunk_accum_kernel(const int32_t* __restrict__ C32i_batch,
         /* Reduce to symmetric residue mod m_t (exact dc * qPiHi[t] in double) */
         const double dc      = fma(cNegMod[t], rint(dc_raw * cInvMod[t]), dc_raw);
         const double hi      = dc * cQpiHi[t];
-        const double lo      = dc * cQpiLo[t];
-        /* 2Sum accumulation into local registers */
+        /* 2Sum accumulation of hi into local_hi */
         const double new_hi  = local_hi + hi;
         const double err     = hi - (new_hi - local_hi);
         local_hi = new_hi;
-        local_lo += err + lo;
+        /* lo update — two variants selected at compile time:
+         *   HAS_LO=true:  fuse dc×cQpiLo[t] and the lo+err accumulation into
+         *                 one FMA, saving one multiply over the split form.
+         *   HAS_LO=false: cQpiLo[t] == 0 for all t (s ≤ 7); skip entirely. */
+        if constexpr (HAS_LO)
+            local_lo = fma(dc, cQpiLo[t], local_lo + err);
+        else
+            local_lo += err;
     }
 
     /* Merge local double-double into global Zhi/Zlo */
@@ -1534,9 +1549,14 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
             const unsigned global_chunk_start = scale_start + gemm_local;
             const bool is_first = (global_chunk_start == 0);
             _pstart();
-            hipLaunchKernelGGL(oz2_chunk_accum_kernel, grid_acc, blk_acc, 0, stream,
-                               C32i_batch, Zhi, Zlo, m, n, ldc32i,
-                               global_chunk_start, actual_gemm, is_first);
+            if(num_moduli <= 7u)
+                hipLaunchKernelGGL(oz2_chunk_accum_kernel<false>, grid_acc, blk_acc, 0, stream,
+                                   C32i_batch, Zhi, Zlo, m, n, ldc32i,
+                                   global_chunk_start, actual_gemm, is_first);
+            else
+                hipLaunchKernelGGL(oz2_chunk_accum_kernel<true>, grid_acc, blk_acc, 0, stream,
+                                   C32i_batch, Zhi, Zlo, m, n, ldc32i,
+                                   global_chunk_start, actual_gemm, is_first);
             _pstop(_t_accum);
         }
     }
