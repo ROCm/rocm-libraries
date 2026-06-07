@@ -53,20 +53,42 @@ gaps, not assertion gaps — triage filters them.
 | timeout | ⏰ | 0 |
 | suspicious | 🤔 | 0 |
 
-Mutation score on covered mutants = 450 / (450+131) = **77.5%**. The 84 no-test
-mutants are coverage gaps (a different problem from assertion strength).
+Counts cross-checked: `mutmut results` lists exactly **84 "no tests" + 131
+"survived"** (textual labels); killed = 665 − 215 = **450** (matches the
+`665/665 🎉450` progress line; 450+84+131 = 665). Scope verified: every mutant is
+in one of the 5 slice-1 files (no leak).
 
-Representative survivors (textbook missing-assertion-strength): `x_ceilDivide`
-(many — e.g. `mutmut_1`: `numerator < 0 or denominator < 0` → `and`),
-`x_choose_multiplier`, `x_isRhel8`, `x_wmmaV3InputVgprLayout`.
+Mutation score, reported two ways (no cherry-picking):
+- **raw** = 450 / 665 = **67.7%** (counts the 84 no-test mutants as not-killed).
+- **on covered mutants** = 450 / (450+131) = **77.5%** (excludes the 84 no-test;
+  those are coverage gaps — a different problem from assertion strength).
 
-## Harness validation (the verifier's mechanism, proven)
+Baseline is green independently of mutmut: the two slice-1 char dirs run
+`110 passed, 70 snapshots, 0 failed` (direct pytest in `tl-mut`).
+
+Survivors span `x_ceilDivide` (many — e.g. `mutmut_1`: `numerator < 0 or
+denominator < 0` → `and`), `x_choose_multiplier`, `x_isRhel8`,
+`x_wmmaV3InputVgprLayout`. These are **not yet triaged** — bucket assignment
+(missing-assertion-strength / wrong-granularity / equivalent / unhelpful /
+design-smell) is Phase 2 work; `mutmut_1` merely *looks like* a weak-assertion
+case pending verification.
+
+## Harness validation (the script run end-to-end)
 
 `wf/mutmut-verify.sh` is manifest-driven + serial and materializes mutants via
-`mutmut apply`. Proven on `Tensile.Common.Utilities.x_ceilDivide__mutmut_1`:
-`mutmut show` → diff; `mutmut apply <id>` mutated the real source (visible via the
-bind mount + host `git diff`); `git -C <src> checkout --` reverted clean. Apply →
-run → revert path works.
+`mutmut apply`. It was executed end-to-end on a 2-row manifest (artifacts in
+`verify-selftest/kill_matrix.tsv`):
+
+| mutant | role | base_rc | mut_rc | revert | verdict |
+|--------|------|---------|--------|--------|---------|
+| `x_ceilDivide__mutmut_10` | killed mutant | 0 | 1 | ok | **KILLED** |
+| `x_ceilDivide__mutmut_1` | survivor (negative control, same covering test) | 0 | 0 | ok | **BAD** (not-killed) |
+
+So the script correctly proves a kill (test passes clean, fails mutated, source
+reverts) AND does **not** false-claim a kill for a survivor; trap-revert left the
+tree clean; it exits non-zero when any row is not a kill. (Earlier I had only
+validated the `mutmut show`/`apply`/`git checkout` mechanism by hand on
+`mutmut_1`; this is the full-script proof.)
 
 ## Status / next
 

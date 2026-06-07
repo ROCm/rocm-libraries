@@ -1,0 +1,9 @@
+mutmut-verify — b6ba561190b — 2026-06-07T17:36:43Z
+container=tl-mut  src=/home/davdixon/projects/rocm-libraries/.claude/worktrees/tensilelite-mutation/projects/hipblaslt/tensilelite  proj=/work/projects/hipblaslt/tensilelite
+============================================================
+MUTANT                       VERDICT  DETAIL
+Tensile.Common.Utilities.x_ceilDivide__mutmut_10 KILLED   base_rc=0 mut_rc=1
+Tensile.Common.Utilities.x_ceilDivide__mutmut_1 BAD      base_rc=0 mut_rc=0 revert=ok (expected clean=0 mut_nz=true)
+============================================================
+CLEAN: no mutated-source leak.
+RESULT: FAILURE (see above)
