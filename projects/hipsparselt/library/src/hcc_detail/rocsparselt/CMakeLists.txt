@@ -28,6 +28,4 @@ target_include_directories(hipsparselt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/
 set(tensile_source_files "${CMAKE_CURRENT_SOURCE_DIR}/src/tensile_host.cpp")
 list(APPEND hipsparselt_source_backend ${tensile_source_files})
 
-# roc::tensilelite-host is the shared TensileLite host library co-exported by the
-# hipBLASLt package (find_package(hipblaslt CONFIG) in the top-level CMakeLists).
 target_link_libraries(hipsparselt PRIVATE roc::tensilelite-host)

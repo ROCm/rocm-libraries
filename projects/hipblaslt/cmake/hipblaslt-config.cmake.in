@@ -23,23 +23,12 @@ block(SCOPE_FOR VARIABLES)
     endif()
 endblock()
 
-# --- Device-library codegen (Phase 3) ---
-# Expose hipblaslt_create_device_library() to consumers (e.g. hipSPARSELt) so they
-# can build TensileLite device libraries against this binary hipBLASLt install with
-# no hipBLASLt source tree present. The codegen subset (Tensile import closure +
-# vendored rocisa) ships under <prefix>/@CMAKE_INSTALL_DATADIR@/hipblaslt/codegen.
-# Only wired up when that subset is actually present in the install (i.e. the
-# package was built with HIPBLASLT_INSTALL_CODEGEN ON).
 get_filename_component(_hipblaslt_prefix "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 set(_hipblaslt_codegen_root "${_hipblaslt_prefix}/@CMAKE_INSTALL_DATADIR@/hipblaslt/codegen")
 if(EXISTS "${_hipblaslt_codegen_root}/Tensile")
-    # Point the codegen function at the installed Tensile package (TensileLogic
-    # gate script + known_bugs.yaml live under it). Respect a caller override.
     if(NOT HIPBLASLT_CODEGEN_ROOT)
         set(HIPBLASLT_CODEGEN_ROOT "${_hipblaslt_codegen_root}")
     endif()
-    # D1: found interpreter + PYTHONPATH into the installed codegen (Tensile/ and
-    # rocisa/ are both direct children, so a single entry resolves both imports).
     if(NOT HIPBLASLT_PYTHON_COMMAND)
         find_dependency(Python3 COMPONENTS Interpreter)
         set(HIPBLASLT_PYTHON_COMMAND

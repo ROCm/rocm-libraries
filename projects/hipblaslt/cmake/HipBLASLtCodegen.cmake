@@ -1,46 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
-#
-# HipBLASLtCodegen.cmake — the single source of truth for turning TensileLite
-# library-logic YAMLs into device code-object libraries.
-#
-# Defines hipblaslt_create_device_library(), used both by hipBLASLt's own
-# device-library build (against the source tree) and, once exported through
-# hipblaslt-config.cmake, by downstream consumers (e.g. hipSPARSELt) building
-# against a binary-only hipBLASLt install with no hipBLASLt source tree present.
-#
-# Variables read from the calling scope (set in-tree by hipBLASLt's CMakeLists;
-# set by hipblaslt-config.cmake for installed consumers):
-#   HIPBLASLT_PYTHON_COMMAND  - REQUIRED. Interpreter command used to run the
-#                               codegen. In-tree this is the found Python (or the
-#                               bundled-python wrapper); for installed consumers
-#                               hipblaslt-config sets it so that `-m
-#                               Tensile.TensileCreateLibrary` resolves against the
-#                               installed codegen subset (PYTHONPATH).
-#   HIPBLASLT_CODEGEN_ROOT    - REQUIRED. Directory containing the `Tensile/`
-#                               codegen package. In-tree: <src>/tensilelite.
-#                               Installed: <prefix>/share/hipblaslt/codegen.
-#                               Used to locate Tensile/bin/TensileLogic and
-#                               Tensile/TensileLogic/known_bugs.yaml.
-#   HIPBLASLT_PYTHON_DEPS     - OPTIONAL. Extra DEPENDS for the codegen custom
-#                               commands (in-tree: the built `_rocisa` target so
-#                               codegen re-runs when rocisa changes). Empty for
-#                               installed consumers.
 
 include_guard(GLOBAL)
 
-# hipblaslt_create_device_library(
-#     LOGIC_PATH <dir>            # required: library-logic YAMLs to compile
-#     OUTPUT_DIR <dir>            # required: device libs land in <dir>/library
-#     [TARGET <name>]            # default: tensilelite-device-libraries
-#     [ARCHES <gfx>...]          # default: ${GPU_TARGETS}
-#     [CXX_COMPILER <path>]      # default: ${CMAKE_CXX_COMPILER}
-#     [OFFLOAD_BUNDLER <path>]
-#     [JOBS <n>]
-#     [LOGIC_FILTER <glob>]
-#     [ASAN] [YAML_FORMAT] [NO_COMPRESS] [EXPERIMENTAL]
-#     [NO_LAZY_LOAD] [ASM_COMMENTS] [KEEP_BUILD_TMP] [ASM_DEBUG]
-# )
 function(hipblaslt_create_device_library)
     set(_opts ASAN YAML_FORMAT NO_COMPRESS EXPERIMENTAL NO_LAZY_LOAD ASM_COMMENTS KEEP_BUILD_TMP ASM_DEBUG)
     set(_one TARGET LOGIC_PATH OUTPUT_DIR CXX_COMPILER OFFLOAD_BUNDLER JOBS LOGIC_FILTER)
@@ -63,7 +25,6 @@ function(hipblaslt_create_device_library)
         message(FATAL_ERROR "hipblaslt_create_device_library: HIPBLASLT_CODEGEN_ROOT is not set")
     endif()
 
-    # --- Defaults ---
     if(NOT _cdl_TARGET)
         set(_cdl_TARGET "tensilelite-device-libraries")
     endif()
@@ -79,9 +40,6 @@ function(hipblaslt_create_device_library)
 
     file(MAKE_DIRECTORY "${_cdl_OUTPUT_DIR}/library")
 
-    # --- Assemble TensileCreateLibrary options ---
-    # Architectures are passed as a single semicolon-separated value; escape the
-    # separator so it survives list expansion into the custom-command argv.
     list(JOIN _cdl_ARCHES "$<SEMICOLON>" _arches_semi)
     set(_opts_list "--architecture=${_arches_semi}" "--cxx-compiler=${_cdl_CXX_COMPILER}")
     if(_cdl_OFFLOAD_BUNDLER)
@@ -118,15 +76,7 @@ function(hipblaslt_create_device_library)
         list(APPEND _opts_list "--disable-asm-comments")
     endif()
 
-    # --- Pre-build gate: validate all library logic YAMLs (WorkGroup,
-    # MatrixInstruction, WorkGroupMappingXCC vs CU count, etc.) before generating
-    # .dat files. Fails the build if any solution fails validation so bad logic is
-    # never compiled. ---
     set(_known_bugs "${HIPBLASLT_CODEGEN_ROOT}/Tensile/TensileLogic/known_bugs.yaml")
-    # Stamp DEPENDS include known_bugs.yaml but not every library logic YAML
-    # (thousands of files; CONFIGURE_DEPENDS globs are costly). After editing logic
-    # only, run scripts/run_tensile_logic_check.py or touch the stamp input to
-    # force re-validation.
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
@@ -143,7 +93,6 @@ function(hipblaslt_create_device_library)
         USES_TERMINAL
     )
 
-    # --- Generate device libraries ---
     set(_output_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}.stamp")
     set(_tcl_command
         ${HIPBLASLT_PYTHON_COMMAND} -m Tensile.TensileCreateLibrary
@@ -158,10 +107,7 @@ function(hipblaslt_create_device_library)
         COMMAND ${_tcl_command}
         COMMAND ${CMAKE_COMMAND} -E touch "${_output_stamp}"
         DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${_logic_stamp}"
-        # Because the command can contain special characters
         VERBATIM
-        # Because this can be very long running and difficult to debug deadlocks
-        # without streaming.
         USES_TERMINAL
     )
 

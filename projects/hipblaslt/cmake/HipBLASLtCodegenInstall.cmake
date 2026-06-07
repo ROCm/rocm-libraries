@@ -1,36 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
-#
-# HipBLASLtCodegenInstall.cmake — install the *codegen subset* of TensileLite so
-# downstream consumers (e.g. hipSPARSELt) can call hipblaslt_create_device_library()
-# against a binary-only hipBLASLt install with no hipBLASLt source tree present.
-#
-# This is NOT the full TensileLite Python tree (that 90 MB tree, including the
-# tuner/benchmark code and the 84 MB Tensile/CustomKernels/ assembly, ships only
-# under HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS for artifact-based testing).
-# Here we ship only the static import closure of
-#   python -m Tensile.TensileCreateLibrary   (device-library codegen)
-#   Tensile/bin/TensileLogic                 (the pre-build --check-all gate)
-# plus the runtime data those entry points read, and the compiled rocisa
-# extension they import. Total ~3.7 MB.
-#
-# The pinned file list below is the static import closure produced by
-# .cmake-work/closure_trace.py, plus the Tensile/Toolchain ancestor __init__.py it
-# reaches only transitively. The Tensile/Components/ subtree is shipped as a whole
-# directory instead of enumerated: Component.py does `from .Components import *` and
-# Components/__init__.py's __all__ force-imports every component module (a plugin
-# pattern a static trace cannot see). It is all codegen -- the tuner/benchmark code
-# lives at the Tensile/ top level and in Utilities/tensile_generator, neither
-# shipped. Regenerate the list with closure_trace.py if the codegen entry points
-# gain or drop first-party imports.
 
 include_guard(GLOBAL)
 
-# hipblaslt_install_codegen_subset(<tensilelite-source-dir> [COMPONENT <name>])
-#   <tensilelite-source-dir>  the in-tree tensilelite/ dir holding Tensile/ + rocisa/
-# Installs into ${CMAKE_INSTALL_DATADIR}/hipblaslt/codegen/ :
-#   Tensile/<closure .py>, Tensile/Source/, Tensile/bin/TensileLogic,
-#   Tensile/TensileLogic/known_bugs.yaml, rocisa/{__init__.py,_rocisa.so,stinkytofu}
 function(hipblaslt_install_codegen_subset _src)
     set(_opts "")
     set(_one COMPONENT)
@@ -42,7 +14,6 @@ function(hipblaslt_install_codegen_subset _src)
 
     set(_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/codegen")
 
-    # --- Pinned Tensile codegen import closure (85 .py) ---
     set(_codegen_py
         Tensile/Activation.py
         Tensile/AsmAddressCalculation.py
@@ -124,12 +95,6 @@ function(hipblaslt_install_codegen_subset _src)
         )
     endforeach()
 
-    # Tensile/Components/ is the codegen component-plugin directory: Component.py
-    # does `from .Components import *`, and Components/__init__.py's __all__ force-
-    # imports every component module (MAC_*, LSU, GSU, StreamK, ...). A static
-    # import trace cannot see these, so ship the whole directory. It is all codegen
-    # (the tuner/benchmark code lives at the Tensile/ top level and in
-    # Utilities/tensile_generator, neither of which is shipped).
     install(
         DIRECTORY "${_src}/Tensile/Components/"
         DESTINATION "${_dest}/Tensile/Components"
@@ -138,8 +103,6 @@ function(hipblaslt_install_codegen_subset _src)
         PATTERN "*.pyc" EXCLUDE
     )
 
-    # --- Runtime data the codegen reads __file__-relative ---
-    # Tensile/Source/: kernel headers copied into the output by Run.py.
     install(
         DIRECTORY "${_src}/Tensile/Source/"
         DESTINATION "${_dest}/Tensile/Source"
@@ -147,23 +110,17 @@ function(hipblaslt_install_codegen_subset _src)
         PATTERN "__pycache__" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
     )
-    # known_bugs.yaml: consumed by the TensileLogic --check-all gate (not a .py,
-    # so not part of the import closure above).
     install(
         FILES "${_src}/Tensile/TensileLogic/known_bugs.yaml"
         DESTINATION "${_dest}/Tensile/TensileLogic"
         COMPONENT ${_cg_COMPONENT}
     )
-    # The TensileLogic gate is invoked as a script (keep +x).
     install(
         PROGRAMS "${_src}/Tensile/bin/TensileLogic"
         DESTINATION "${_dest}/Tensile/bin"
         COMPONENT ${_cg_COMPONENT}
     )
 
-    # D1 safety net: the third-party pip deps of the codegen import closure. Not
-    # vendored (unlike rocisa) — the consumer's interpreter must have them. Shipped
-    # as a manifest so a TheRock/packaging step can pip-install if needed.
     install(
         FILES "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/codegen-requirements.txt"
         DESTINATION "${_dest}"
@@ -171,10 +128,6 @@ function(hipblaslt_install_codegen_subset _src)
         COMPONENT ${_cg_COMPONENT}
     )
 
-    # --- Vendored rocisa (D2: not a package; rides along as a codegen impl
-    # detail). rocisa/__init__.py does `from . import _rocisa`, so the compiled
-    # extension must sit inside the rocisa/ package dir. _build_info.py is NOT
-    # shipped, so the package's source-staleness check self-skips on installs.
     install(
         FILES "${_src}/rocisa/rocisa/__init__.py"
         DESTINATION "${_dest}/rocisa"
@@ -187,11 +140,6 @@ function(hipblaslt_install_codegen_subset _src)
             COMPONENT ${_cg_COMPONENT}
         )
     endif()
-    # stinkytofu is linked PRIVATE into _rocisa. When it is a STATIC library it is
-    # absorbed into _rocisa.so (self-contained, nothing extra to ship); only when
-    # it is a separate SHARED library must we co-install it next to _rocisa so the
-    # binding resolves at runtime. Guarding on the target TYPE also avoids a
-    # generate-time error from TARGET_SONAME_FILE on a non-shared target.
     if(TARGET stinkytofu AND NOT WIN32)
         get_target_property(_st_type stinkytofu TYPE)
         if(_st_type STREQUAL "SHARED_LIBRARY")

@@ -73,9 +73,6 @@ endif()
 cmake_dependent_option(HIPSPARSELT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
 option(HIPSPARSELT_ENABLE_OPENMP "Enable OpenMP support." ON)
 option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
-# The dependency-fetch opt-in is defined where it is used now that hipBLASLt is
-# consumed as a binary package (find_package) rather than fetched / added as a
-# source subdirectory -- see cmake/fetch_lapack.cmake and cmake/fetch_google_test.cmake.
 option(HIPSPARSELT_ENABLE_THEROCK "Enable TheRock support." OFF)
 
 set(HIPSPARSELT_COVERAGE_GTEST_FILTER "" CACHE STRING "GTest filter for coverage tests.")
@@ -146,11 +143,6 @@ if(HIPSPARSELT_ENABLE_CUDA)
 endif()
 
 if(HIPSPARSELT_ENABLE_HIP)
-    # hipBLASLt is consumed as a binary package (Phase 2 + Phase 3): no hipBLASLt
-    # source tree is added. find_package provides BOTH roc::tensilelite-host -- the
-    # shared libtensilelite-host.so this fork links (Phase 2) -- AND the exported
-    # hipblaslt_create_device_library() function (Phase 3). This replaces the old
-    # add_subdirectory of the hipBLASLt source tree that used to build both in-tree.
     find_package(hipblaslt CONFIG REQUIRED)
 
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
@@ -158,11 +150,6 @@ if(HIPSPARSELT_ENABLE_HIP)
     )
 
     if(HIPSPARSELT_ENABLE_DEVICE)
-        # Build this fork's sparse-GEMM device libraries from its own library logic
-        # via the exported codegen function. Output to ${CMAKE_BINARY_DIR}/Tensile
-        # (build-tree code-object path) and install the resulting library/ tree to
-        # ${CMAKE_INSTALL_LIBDIR}/hipsparselt (install-tree path) -- both are what
-        # tensile_host.cpp probes at runtime to load the *.co modules.
         set(_hipsparselt_logic
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
         )

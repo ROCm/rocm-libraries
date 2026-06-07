@@ -19,14 +19,8 @@ if(NOT HIPBLASLT_LIBLOGIC_PATH)
     set(HIPBLASLT_LIBLOGIC_PATH "${hipblaslt_SOURCE_DIR}/library")
 endif()
 
-# hipBLASLt's own device-library build runs the codegen against the source tree:
-# locate the Tensile package (TensileLogic gate, known_bugs.yaml) there.
 set(HIPBLASLT_CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite")
 
-# Map hipBLASLt's cache knobs / feature flags onto the codegen function's
-# optional arguments. The function itself is the single source of truth for the
-# codegen invocation; downstream consumers (hipSPARSELt) call it the same way via
-# the exported HipBLASLtCodegen.cmake (see hipblaslt-config.cmake).
 set(_codegen_flags "")
 if(HIPBLASLT_ENABLE_ASAN)
     list(APPEND _codegen_flags ASAN)
