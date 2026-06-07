@@ -306,7 +306,7 @@ Stage 2 — coverage expansion:
 - [x] **P4 round 7 (done, 2026-06-06) — ≥80% TARGET MET.** Final expansion via dynamic workflow `wf_99f528fd-716` (10 Sonnet designers, relaxed pass/fail verify so coverage-jitter tests that genuinely add lines aren't wrongly dropped). **78.78% → 80.70%** (+1.92 pts, 10144→9064 miss, 1080 lines). StreamK 547→232 (the fixup arms WERE emit-reachable — earlier "needs device grid" was wrong), Solution 1121→823, TensileCreateLibrary/Run 197→49, Subtile/LogicalScheduler 151→55, GSU 238→192, LocalRead 489→449, BenchmarkProblems 111→80, AsmAddressCalculation 163→143, KWA 2767→2718. 3326 passed / 0 failed / 201 skipped. Receipt `coverage/p4/master-baseline-R7.txt`.
 - [ ] **P5** whole-project gate (≥80% ACHIEVED at 80.70%) + golden-governance.md + recommendations.md. **NEXT.**
 - [x] **P5 (done, 2026-06-06) — ≥80% GATE CERTIFIED.** Final combined methodology-A gate = **80.70%** (line-only 83.48%), `coverage/p5/master-baseline-final.txt`. `golden-governance.md` (key by arch+compiler; stable-arch digest change = regression; evolving-arch keep N generations) and `recommendations.md` (outcome, what worked / didn't, honest remaining-gap classification, upstream-fix candidates) written. ≥80% met, so no CEILING-FINDINGS required; the hard residue is documented in recommendations.md.
-- [ ] **P6** mutation validation; survivors → P4 backlog; tree clean.
+- [x] **P6 (done, 2026-06-06) — suite validated, tree clean.** Bounded mutation sample (6 mutants) run **strictly serially in the campaign worktree with guaranteed revert** (`wf/p6-mutation.sh` — the `tl-char` container is bound to this worktree, so the spec's parallel throwaway-worktree isolation isn't container-visible; serial+trap-revert is the safe realization). **4 KILLED / 2 SURVIVED**; campaign worktree verified **clean of mutation** (independent `git status` check, no leak). Killed: MergeLib size-count, MergeLib dup-trim, BenchmarkProblems `_cacheDataMatches`, StreamK fixup guard. Survived (assertion-strength gaps → `p4-backlog.md`): Activation Relu clamp operand not pinned; Solution auto-LRVW default not pinned. Report `coverage/p6/mutation-report.txt`. **CAMPAIGN P0–P6 COMPLETE.**
 
 ---
 
@@ -378,6 +378,11 @@ Stage 2 — coverage expansion:
   seed YAMLs relocated under `_codegen/data/test_data/_designed/**` so `findConfigs` (which skips
   `test_data` paths) stops auto-running them through the GPU `Tensile.Tensile()` path — no
   `config_helpers.py` change. Full `-m unit` **2528 passed / 201 skipped / 0 failed**. Commit `ec7524bd1be`.
+- 2026-06-06 — **P6 done — suite validated; campaign worktree clean of mutation.** Bounded 6-mutant
+  serial run (`wf/p6-mutation.sh`, trap-guaranteed revert; container is bound to the campaign worktree so
+  per-mutant worktrees aren't visible — serial is the safe realization): **4 killed / 2 survived**, no leak.
+  Survivors → `p4-backlog.md` (Activation Relu clamp operand + Solution auto-LRVW default — both executed
+  but not finely asserted). `coverage/p6/mutation-report.txt`. **P0–P6 COMPLETE; ≥80% achieved (80.70%).**
 - 2026-06-06 — **P5 done — ≥80% gate CERTIFIED at 80.70%** (line-only 83.48%), `coverage/p5/master-baseline-final.txt`.
   `golden-governance.md` + `recommendations.md` written (outcome, reuse patterns, honest remaining-gap
   classification + upstream-fix candidates). No CEILING-FINDINGS needed (target met). NEXT = P6 mutation.
