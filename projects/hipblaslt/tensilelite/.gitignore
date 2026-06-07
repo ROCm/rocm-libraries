@@ -1,1 +1,10 @@
 .tox/
+
+# mutmut mutation-testing artifacts (copy dir + cache)
+mutants/
+.mutmut-cache
+mutmut-stats.json
+
+# coverage.py data files (incl. multiprocessing per-pid shards from mutmut stats)
+.coverage
+.coverage.*
