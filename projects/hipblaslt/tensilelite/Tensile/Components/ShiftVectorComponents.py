@@ -35,17 +35,12 @@ from rocisa.functions import vectorStaticRemainder, vectorStaticDivide, vectorSt
 from ..Common import log2
 from ..KernelWriterModules import *
 
-# To avoid circular import, we define the base class inline.
-# Component.py imports all Components/* at module level (line 294: from .Components import *)
-# If we import from Component here, it triggers a circular dependency.
-# The Component base class is abstract and empty, so we can safely define a minimal version here.
 import abc
 
 class Component(abc.ABC):
     """Minimal Component base class to avoid circular import."""
     kernel = {}
 
-# Define ShiftVectorComponents base class
 class ShiftVectorComponents(Component):
     """Shift vector components block."""
     pass

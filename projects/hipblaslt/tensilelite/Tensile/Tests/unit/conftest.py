@@ -1,5 +1,6 @@
 """Shared pytest fixtures for unit tests"""
 import pytest
+from typing import List, Dict, Any, Optional, Callable
 from unittest.mock import Mock
 from types import SimpleNamespace
 from Tensile.Common.DataType import DataType
@@ -14,34 +15,34 @@ class SgprAllocator:
         sgprGridY = sgprs.alloc()  # 6
         sgprGridX = sgprs.alloc()  # 7
     """
-    def __init__(self, start=5):
+    def __init__(self, start: int = 5) -> None:
         self._current = start
 
-    def alloc(self):
+    def alloc(self) -> int:
         """Allocate and return next sequential sgpr number"""
         val = self._current
         self._current += 1
         return val
 
-    def alloc_many(self, count):
+    def alloc_many(self, count: int) -> List[int]:
         """Allocate multiple sequential sgprs and return as list"""
         return [self.alloc() for _ in range(count)]
 
 
 @pytest.fixture
-def basic_kernel():
+def basic_kernel() -> Dict[str, int]:
     """Basic kernel configuration for WorkGroupMappingAlgos tests"""
     return {"WavefrontSize": 64}
 
 
 @pytest.fixture
-def sgpr_alloc():
+def sgpr_alloc() -> SgprAllocator:
     """Fixture that provides an SgprAllocator for sequential sgpr allocation"""
     return SgprAllocator(start=5)
 
 
 @pytest.fixture
-def basic_state():
+def basic_state() -> Dict[str, Any]:
     """Create a basic state configuration shared across all KernelWriterBetaOnly tests"""
     return {
         "ProblemType": {
@@ -61,9 +62,12 @@ def basic_state():
     }
 
 
-def create_mock_writer(add_alloc_tmp_sgpr=False, add_alloc_tmp_sgpr_list=False,
-                       add_labels=False, label_prefix="TestPrefix", label_name_inc=None,
-                       add_full_writer=False):
+def create_mock_writer(add_alloc_tmp_sgpr: bool = False,
+                       add_alloc_tmp_sgpr_list: bool = False,
+                       add_labels: bool = False,
+                       label_prefix: str = "TestPrefix",
+                       label_name_inc: Optional[Callable] = None,
+                       add_full_writer: bool = False) -> Mock:
     """Create a mock writer object with configurable components.
 
     This is a shared helper to avoid duplicating mock writer creation across test classes.
