@@ -112,6 +112,12 @@ class UnifiedAttention3DTiledSpec:
     kv_storage_dtype: Optional[str] = None
     tile_size_override: Optional[int] = None
     use_invariant_hoist: bool = False
+    # Wide KV feed: replace the gfx942 1-DWORD (4-byte) async buffer_load_lds DMA
+    # with wide 128-bit (8-half) synchronous global->register->LDS loads (the same
+    # vehicle the in-kernel fp8 path and the 2D cfvst V feed use). 4x fewer load
+    # instructions -> less VMEM issue pressure on the memory-bound decode segment.
+    # fp16/bf16 only (the fp8 path already loads wide). Signature-tracked.
+    use_wide_kv_load: bool = False
 
     def __post_init__(self):
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
@@ -162,6 +168,7 @@ class UnifiedAttention3DTiledSpec:
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
             "hoist" if self.use_invariant_hoist else "",
+            "wkv" if self.use_wide_kv_load else "",
         )
 
 
@@ -624,6 +631,32 @@ def build_unified_attention_3d_tiled(
             v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(value_rsrc, v_dst, voff, zero_soff, ASYNC_LDS_DWORDS)
 
+    # Wide KV feed (opt-in): 8-half (16-byte / b128) synchronous global->register
+    # ->LDS loads, mirroring the in-kernel fp8 loader and the 2D cfvst V store.
+    # Fills K/V_lds identically to the async path (every linear half written once
+    # with the correct paged value) -- only the per-lane load WIDTH changes from
+    # 1 DWORD to 4 DWORDs, cutting load-instruction count 4x. The dim axis is
+    # contiguous in the paged cache (stride = KV_BYTES) so 8 consecutive halves
+    # are a legal coalesced b128 load.
+    WIDE_ELEMS = 8
+    WIDE_OK = (T * HD) % (THREADS * WIDE_ELEMS) == 0
+    wide_chunks_per_thread = (T * HD) // (THREADS * WIDE_ELEMS) if WIDE_OK else 0
+
+    def _issue_wide_load(src, lds, kv_tile_idx: Value, buf_idx: Value) -> None:
+        for call in range(wide_chunks_per_thread):
+            chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
+            linear_half = b.mul(chunk_id, b.const_i32(WIDE_ELEMS))
+            row = b.div(linear_half, b.const_i32(HD))
+            col = b.mod(linear_half, b.const_i32(HD))
+            voff, _ = paged_kv_desc.offset(
+                b, tile_idx=kv_tile_idx, linear_half=linear_half, kv_head=kv_head_idx
+            )
+            # paged_kv_desc uses BYTE strides; global_load_vN is element-indexed,
+            # so convert (exact: every stride is a multiple of KV_BYTES).
+            elem_off = b.div(voff, b.const_i32(KV_BYTES))
+            vec = b.global_load_vN(src, elem_off, dtype, n=WIDE_ELEMS, align=16)
+            b.smem_store_vN(lds, [buf_idx, row, col], vec, WIDE_ELEMS)
+
     fp8_elems_per_chunk = 8
     fp8_total_chunks = (T * HD) // fp8_elems_per_chunk
     if KV_FP8:
@@ -667,15 +700,21 @@ def build_unified_attention_3d_tiled(
             packed = dequant_fp8x8_to_dtype(b, fp8_vec, scale, dtype)
             b.smem_store_vN(lds, [buf_idx, row, col], packed, fp8_elems_per_chunk)
 
+    WIDE_KV = spec.use_wide_kv_load and not KV_FP8 and WIDE_OK
+
     def _issue_k(tile_idx: Value, buf_idx: Value) -> None:
         if KV_FP8:
             _issue_fp8_dequant_loads(tile_idx, buf_idx, "K")
+        elif WIDE_KV:
+            _issue_wide_load(key, K_lds, tile_idx, buf_idx)
         else:
             _issue_k_load(tile_idx, buf_idx)
 
     def _issue_v(tile_idx: Value, buf_idx: Value) -> None:
         if KV_FP8:
             _issue_fp8_dequant_loads(tile_idx, buf_idx, "V")
+        elif WIDE_KV:
+            _issue_wide_load(value, V_lds, tile_idx, buf_idx)
         else:
             _issue_v_load(tile_idx, buf_idx)
 

@@ -350,7 +350,6 @@ def supports_native_unified_attention_tiled(
     arch = _resolve_attention_arch()
     _, _, supports_tiled_2d = _tiled_2d_impl(arch)
     gfx942_flash = _enable_gfx942_fp16_flash(problem)
-    gfx942_wide = _gfx942_flash_wide_setting() if gfx942_flash else 0
     num_warps = (
         _select_gfx942_flash_num_warps(problem)
         if gfx942_flash
@@ -372,8 +371,9 @@ def supports_native_unified_attention_tiled(
         arch=arch,
         use_mfma_32x32x8=gfx942_flash,
         use_transposed_qk_32x32=gfx942_flash,
-        use_k_single_buffer=gfx942_flash and gfx942_wide == 0,
-        use_conflict_free_v_store=gfx942_flash and gfx942_wide in (2, 4),
+        use_k_single_buffer=gfx942_flash and _gfx942_flash_use_single_buffer(problem),
+        use_conflict_free_v_store=gfx942_flash and _gfx942_flash_use_cfvst(problem),
+        use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
     )
 
 
@@ -460,9 +460,13 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # gfx942 D64 mw=32 path, while the direct gfx942 harness validates T=64.
     if _resolve_attention_arch() == "gfx942" and problem.head_size == 64:
         return problem.block_size
-    # gfx942 D128 fp16 L4 (shipped): the level-4 fitter fixes T=64 on every
-    # D128 fp16 shape (K single-buffer BLOCK_M<=tile + 64 KB LDS cap). Mirror it
-    # so the standalone DSL grid / cache key / spec stay coherent.
+    # gfx942 D128 fp16: T=64 is optimal for the overlapped sliced-K ring. An
+    # exhaustive ~1200-kernel micro-lever sweep (exhaustive_sweep.py) showed
+    # T=64+ring+mask-limit is 21-23% faster than the T=128 ring and beats Torch
+    # SDPA at S2048 (221us vs 230us) and S4096 (680us vs 976us = 1.44x). The
+    # earlier T=128 conclusion was an incomplete comparison (T=64-double vs
+    # T=128-ring; T=64-RING was never measured). T=64 also lets L4 fix the tile
+    # for the non-ring D128 path (K single-buffer BLOCK_M<=tile + 64 KB LDS cap).
     if _enable_gfx942_l4(problem):
         return 64
     # bf16 transposed-combo sliding-window. Paired with the combo's
@@ -952,8 +956,30 @@ def _gfx942_flash_wide_setting() -> int:
 
 
 def _select_gfx942_flash_num_warps(problem: UnifiedAttentionProblem) -> int:
+    # D64 prefill: the exhaustive tier-2 winner uses BLOCK_M=64 (num_warps=2)
+    # with single-buffer K + no-cfvst V + mask-limit -> 141us vs 154us for the
+    # wide4 cfvst geometry at S2048 (~8%, exhaustive_sweep.py tier2). D128 keeps
+    # the wide (num_warps=4) ring geometry.
+    if problem.head_size == 64:
+        return 2
     wide = _gfx942_flash_wide_setting()
     return wide if wide in (2, 4) else 1
+
+
+def _gfx942_flash_use_cfvst(problem: UnifiedAttentionProblem) -> bool:
+    # D64 winner feeds V through the naive transposed-x8 path (no cfvst); D128
+    # uses the conflict-free V store (cfvst) under the wide4 ring geometry.
+    if problem.head_size == 64:
+        return False
+    return _gfx942_flash_wide_setting() in (2, 4)
+
+
+def _gfx942_flash_use_single_buffer(problem: UnifiedAttentionProblem) -> bool:
+    # D64 winner single-buffers K (BLOCK_M=64 <= tile=64 so Q still aliases the
+    # single slot); D128 double-buffers (or rings) K.
+    if problem.head_size == 64:
+        return True
+    return not _gfx942_flash_use_cfvst(problem)
 
 
 def _gfx942_flash_kv_cache_policy(problem: UnifiedAttentionProblem) -> str:
@@ -976,16 +1002,27 @@ def _enable_gfx942_flash_mask_limit(problem: UnifiedAttentionProblem) -> bool:
         return problem.head_size == 64
     if env in ("d128", "128"):
         return problem.head_size == 128
-    # Default: D64 is a measured win; D128 regressed in the current hot loop, so
-    # keep it selectable but not default until the deeper pipeline changes land.
-    return problem.head_size == 64
+    # Default ON for both D64 and D128. D128 mask-limit regressed on the older
+    # T=128 / non-ring hot loop, but the exhaustive sweep (exhaustive_sweep.py)
+    # shows it is a small positive on the now-default T=64 sliced-K ring path and
+    # is part of the validated best D128 config (T=64+ring+mask-limit), which
+    # beats Torch at S2048/S4096. D64 remains a measured win.
+    return True
 
 
 def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool:
     if not (_enable_gfx942_fp16_flash(problem) and problem.head_size == 128):
         return False
     env = __import__("os").environ.get("HIPDNN_GFX942_K_SLICED_RING", "").strip().lower()
-    return env in ("1", "on", "enable", "enabled", "yes", "true")
+    if env in ("0", "off", "disable", "disabled", "no", "false"):
+        return False
+    if env in ("1", "on", "enable", "enabled", "yes", "true"):
+        return True
+    # Default ON for prefill: the T=128 overlapped sliced-K ring is the
+    # validated measured-win regime (see _select_2d_tile_size). Decode-ish
+    # D128 fp16 normally routes to the 3D split-KV path; keep the rare
+    # 2D-decode case on the legacy T=64 geometry until separately validated.
+    return problem.max_seqlen_q > 1
 
 
 def _enable_gfx942_flash_k_sliced_ldsseq(problem: UnifiedAttentionProblem) -> bool:
@@ -1130,9 +1167,9 @@ def _tiled_spec_from_problem(
 ):
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(_resolve_attention_arch())
     if _enable_gfx942_fp16_flash(problem):
-        wide = _gfx942_flash_wide_setting()
-        num_warps = wide if wide in (2, 4) else 1
-        use_cfvst = wide in (2, 4)
+        num_warps = _select_gfx942_flash_num_warps(problem)
+        use_cfvst = _gfx942_flash_use_cfvst(problem)
+        use_single = _gfx942_flash_use_single_buffer(problem)
         use_mask_limit = _enable_gfx942_flash_mask_limit(problem)
         return UnifiedAttention2DTiledSpec(
             head_size=problem.head_size,
@@ -1158,7 +1195,7 @@ def _tiled_spec_from_problem(
             use_transposed_mask_once=use_mask_limit,
             use_transposed_mask_limit=use_mask_limit,
             use_conflict_free_v_store=use_cfvst,
-            use_k_single_buffer=not use_cfvst,
+            use_k_single_buffer=use_single,
             use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
             use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
             use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
@@ -1333,6 +1370,27 @@ def _enable_gfx942_3d_invariant_hoist(problem: UnifiedAttentionProblem) -> bool:
     return env in ("1", "on", "enable", "enabled", "yes", "true")
 
 
+def _enable_gfx942_3d_wide_kv_load(problem: UnifiedAttentionProblem) -> bool:
+    """Wide 128-bit direct global->register->LDS KV feed for the 3D decode
+    segment kernel (replaces the gfx942 1-DWORD async DMA). fp16/bf16 only.
+
+    Opt-in via HIPDNN_GFX942_3D_WKV while it is A/B'd against the async path;
+    promoted to default once the win is confirmed.
+    """
+    if _resolve_attention_arch() != "gfx942":
+        return False
+    if _kv_storage_dtype(problem) is not None:  # fp8 path already loads wide
+        return False
+    env = __import__("os").environ.get("HIPDNN_GFX942_3D_WKV", "").strip().lower()
+    if env in ("0", "off", "disable", "disabled", "no", "false"):
+        return False
+    # Default ON: validated bit-identical and ~8% faster on D128 decode, neutral
+    # on D64, never slower (decode_ab.py A/B). Strict improvement over the 1-DWORD
+    # async DMA. (The remaining decode gap vs Torch is structural -- 64-thread /
+    # narrow-MFMA / LDS round-trip -- and needs the segment-kernel restructure.)
+    return True
+
+
 def _tiled_3d_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ):
@@ -1355,6 +1413,7 @@ def _tiled_3d_spec_from_problem(
         kv_storage_dtype=_kv_storage_dtype(problem),
         tile_size_override=tile_size_override,
         use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem),
+        use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem),
     )
 
 
@@ -1376,6 +1435,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _gfx942_3d_tile_size_override(problem),
         _select_3d_waves_per_eu(problem),
         _enable_gfx942_3d_invariant_hoist(problem),
+        _enable_gfx942_3d_wide_kv_load(problem),
         _kv_storage_dtype(problem),
     )
 

@@ -636,8 +636,8 @@ class UnifiedAttention2DTiledSpec:
                 and self.use_conflict_free_v_store
             ):
                 raise ValueError("use_k_sliced_ring requires the transposed-x8 cfvst path")
-            if self.dtype != "fp16" or self.head_size != 128 or self.tile_size_eff != 64:
-                raise ValueError("use_k_sliced_ring v1 is restricted to fp16 D128 T64")
+            if self.dtype != "fp16" or self.head_size != 128 or self.tile_size_eff not in (64, 128):
+                raise ValueError("use_k_sliced_ring v1 is restricted to fp16 D128 T in {64,128}")
         if self.use_k_sliced_ldsseq and not self.use_k_sliced_ring:
             raise ValueError("use_k_sliced_ldsseq requires use_k_sliced_ring")
         if self.use_q_direct_global:
@@ -895,6 +895,7 @@ def supports_tiled_2d(
     use_transposed_qk_32x32: bool = False,
     use_k_single_buffer: bool = False,
     use_conflict_free_v_store: bool = False,
+    use_k_sliced_ring: bool = False,
 ) -> Tuple[bool, str]:
     # The gfx942 variant runs the narrow 16x16x16 default path. The arch gate
     # admits gfx942 (narrow atom present + non-transpose V pipeline selectable)
@@ -1028,6 +1029,32 @@ def supports_tiled_2d(
         _t_eff = tile_size if tile_size is not None else block_size
         _block_m = num_warps * block_m_per_warp
         if use_mfma_32x32x8 and use_transposed_qk_32x32:
+            if use_k_sliced_ring:
+                # Overlapped sliced-K ring (CK Tile geometry): K is staged as a
+                # 3-slot ring of 32-head-dim slices (not double-buffered at full
+                # HD), Q is fed direct-from-global (no Q_lds), and V uses the
+                # conflict-free CK packed layout. This is what lets T=128 fit the
+                # 64 KB cap where the naive 2*T*HD K buffer would not.
+                _K_SLICE_HD = 32
+                _K_SLICE_SLOTS = 3
+                _k_bytes = _K_SLICE_SLOTS * _t_eff * _K_SLICE_HD * _BPE
+                # CK conflict-free transposed-V slot map (mirrors V_T_CK_SLOTS in
+                # build_unified_attention_2d_tiled): kgroups*ngroups*group_stride.
+                _v_kpack = 8
+                _v_pixels = 64
+                _v_nper_row = _v_pixels // _v_kpack
+                _v_ngroups = head_size // _v_nper_row
+                _v_kgroups = _t_eff // _v_kpack
+                _v_bytes = _v_kgroups * _v_ngroups * (_v_pixels + _v_kpack) * _BPE
+                _lds_x8 = _k_bytes + _v_bytes
+                if _lds_x8 > _LDS_CAPACITY_BYTES:
+                    return (
+                        False,
+                        f"gfx942 transposed-x8 sliced-K ring estimated LDS "
+                        f"{_lds_x8} B exceeds the {arch} {_LDS_CAPACITY_BYTES} B "
+                        f"LDS budget",
+                    )
+                return True, "supported"
             k_slots = 1 if use_k_single_buffer else 2
             q_lds = 0 if _block_m <= 2 * _t_eff else _block_m * head_size * _BPE
             v_pad = 8 if use_conflict_free_v_store else 0
