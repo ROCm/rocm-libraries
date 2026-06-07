@@ -1,0 +1,56 @@
+{
+  "branch_id": "f8b5af6a1a52ab6cc03341058e19039cdae910dc",
+  "file": "Tensile/Configuration.py",
+  "function": "__rlt__",
+  "location": {
+    "line": 224,
+    "col": 8
+  },
+  "predicate_source": "isinstance(lhs, Parameter)",
+  "solver": "z3",
+  "solver_status": "unknown",
+  "classification": "runtime-dependent",
+  "domains": {
+    "lhs": {
+      "type": "enum",
+      "values": [
+        "Parameter(name=x, initialValue=1)",
+        "42",
+        "3.14",
+        "'hello'"
+      ],
+      "note": "lhs is the left operand of a reflected less-than (Parameter.__rlt__(self, lhs)); it is whatever live object Python places on the left of `<` when the right side is a Parameter. Seeded with one real Parameter instance and three non-Parameter primitives (int/float/str)."
+    },
+    "Parameter": {
+      "type": "str",
+      "values": ["<class 'Tensile.Configuration.Parameter'>"],
+      "note": "The class object used as the isinstance() second arg; a constant, not an input."
+    }
+  },
+  "encoding": "isinstance(lhs, Parameter) is a unary runtime type-test, not an arithmetic/comparison/boolean op over a scalar input -- it is outside the ExpressionEvaluator scalar op-surface. z3 cannot derive an object's runtime type from first principles, so the predicate is modeled as a finite enum: lhs ranges over the 4 seeded values (z3 Datatype Lhs = {v_param, v_42, v_314, v_hello}), with a tag function is_parameter(Lhs)->Bool pinned to ground truth obtained from an in-container isinstance probe (v_param=True, others=False). pred = is_parameter(lhs). This is a bounded model over the seeded enum -- the type tags are supplied by the runtime, not proven by the solver -- hence solver_status=unknown / classification=runtime-dependent per the isinstance-on-live-object rule.",
+  "true_examples": [
+    {"lhs": "Parameter(name=x, initialValue=1)"}
+  ],
+  "false_examples": [
+    {"lhs": "42"},
+    {"lhs": "3.14"},
+    {"lhs": "'hello'"}
+  ],
+  "z3_output": {
+    "true_check": "sat",
+    "true_model": {"lhs": "v_param"},
+    "false_check": "sat",
+    "false_model": {"lhs": "v_42"},
+    "note": "Bounded over the seeded enum with ground-truth type tags pinned. Both branch sides are reachable (sat). The solver decides which enum element is selected; it does NOT decide the isinstance result itself -- that tag is harvested from the live Python probe below."
+  },
+  "python_ground_truth": {
+    "isinstance(Parameter(name=x, initialValue=1), Parameter)": true,
+    "isinstance(42, Parameter)": false,
+    "isinstance(3.14, Parameter)": false,
+    "isinstance('hello', Parameter)": false,
+    "probe": "from Tensile.Configuration import Parameter; isinstance(val, Parameter) run in-container (cwd=tensilelite, PYTHONPATH set)"
+  },
+  "pure_helper": null,
+  "notes": "Branch at Configuration.py:224 is the guard inside Parameter.__rlt__(self, lhs): `if isinstance(lhs, Parameter): return lhs.value < self.value` else `return lhs < self.value`. The predicate's truth is fixed entirely by the RUNTIME TYPE of the live left operand, not by any public CLI/yaml/int/bool value, so it is runtime-dependent (solver_status=unknown). z3 was actually run in-container and returns BOTH sides sat over the seeded enum (TRUE: lhs=v_param; FALSE: lhs=v_42), but only because the per-element type tags were pinned from a live isinstance probe -- the solver cannot prove an object's class on its own. Representative witnesses by value: TRUE = a Parameter instance Parameter(name=x, initialValue=1) (then the guard compares .value attributes: lhs.value < self.value); FALSE = any non-Parameter (42 / 3.14 / 'hello') (then bare lhs < self.value, which for str-vs-int would itself raise TypeError -- a separate downstream behavior, not this guard). No PURE helper extractable for CrossHair: the predicate is a single bare isinstance type-test with no relational postcondition to falsify; the would-be helper `def is_param(x): return isinstance(x, Parameter)` has no nontrivial contract, and CrossHair cannot synthesize arbitrary live class instances anyway -- absence of a counterexample would not be a proof. The load-bearing evidence is the in-container Python ground-truth probe plus the bounded z3 reachability check.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Solve/f8b5af6a1a52ab6cc03341058e19039cdae910dc.json"
+}

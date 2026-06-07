@@ -1,0 +1,52 @@
+{
+  "branch_id": "4914224d6e015f0cc6a041a74683fe38f6eae196",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Solve/4914224d6e015f0cc6a041a74683fe38f6eae196.json",
+  "source_location": {
+    "file": "Tensile/Common/GlobalParameters.py",
+    "line": 660,
+    "enclosing_function": "assignGlobalParameters",
+    "branch_kind": "if"
+  },
+  "predicate": "not versionIsCompatible(config[\"MinimumRequiredVersion\"])",
+  "semantics": "Branch fires (True) when the YAML-supplied MinimumRequiredVersion is INCOMPATIBLE with baked-in __version__=5.0.0. versionIsCompatible returns False when qMajor != tMajor, OR int(qMinor) > tMinor, OR (qMinor==tMinor and int(qStep) > tStep). The predicate is the negation, so True == incompatible == printExit fires.",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "fully-static",
+  "domains": {
+    "config[\"MinimumRequiredVersion\"]": {"type": "str", "values": ["4.0.0", "5.0.0", "5.0.1", "5.1.0"]},
+    "__version__": {"type": "str", "values": ["5.0.0"], "note": "baked-in constant at Tensile/__init__.py:30; not runtime-injectable"}
+  },
+  "encoding": {
+    "method": "Decompose each dotted version string into (major,minor,step) integers; select config version by an integer index over the finite seeded domain; encode versionIsCompatible as z3.And(qMajor==tMajor, Not(qMinor>tMinor), Implies(qMinor==tMinor, Not(qStep>tStep))); predicate = Not(compatible).",
+    "op_surface": ["compare(!=,>,==)", "boolean(and,not,implies)", "conditional(If)"],
+    "note": "Source compares qMinor==tMinor as STRINGS; over the seeded domain all minors are single-digit so string and integer equality coincide. Modeled as integer equality (sound for this domain)."
+  },
+  "z3_model": {
+    "true_witness": {"config[\"MinimumRequiredVersion\"]": "4.0.0"},
+    "false_witness": {"config[\"MinimumRequiredVersion\"]": "5.0.0"},
+    "all_true_over_domain": ["4.0.0", "5.0.1", "5.1.0"],
+    "all_false_over_domain": ["5.0.0"],
+    "z3_agrees_with_reference_python": true
+  },
+  "true_examples": [
+    {"config[\"MinimumRequiredVersion\"]": "4.0.0", "__version__": "5.0.0", "reason": "qMajor 4 != tMajor 5 -> incompatible -> not(False)=True"},
+    {"config[\"MinimumRequiredVersion\"]": "5.0.1", "__version__": "5.0.0", "reason": "same major/minor, qStep 1 > tStep 0 -> incompatible -> True"},
+    {"config[\"MinimumRequiredVersion\"]": "5.1.0", "__version__": "5.0.0", "reason": "qMinor 1 > tMinor 0 -> incompatible -> True"}
+  ],
+  "false_examples": [
+    {"config[\"MinimumRequiredVersion\"]": "5.0.0", "__version__": "5.0.0", "reason": "exact match -> compatible -> not(True)=False; branch skipped"}
+  ],
+  "pure_helper": "def minimum_version_rejected(qMajor: int, qMinor: int, qStep: int, tMajor: int, tMinor: int, tStep: int) -> bool:\n    \"\"\"Pure model of: not versionIsCompatible(MinimumRequiredVersion).\n    True == config version INCOMPATIBLE with Tensile __version__ (branch fires -> printExit).\n    pre: 0 <= qMajor <= 9 and 0 <= qMinor <= 9 and 0 <= qStep <= 9\n    pre: 0 <= tMajor <= 9 and 0 <= tMinor <= 9 and 0 <= tStep <= 9\n    post: __return__ == (qMajor != tMajor or qMinor > tMinor or (qMinor == tMinor and qStep > tStep))\n    \"\"\"\n    if qMajor != tMajor:\n        return True\n    if qMinor > tMinor:\n        return True\n    if qMinor == tMinor:\n        if qStep > tStep:\n            return True\n    return False",
+  "crosshair": {
+    "ran": true,
+    "tool_version": "0.0.106",
+    "result": "no counterexample to postcondition (exit 0)",
+    "caveat": "CrossHair: absence of a counterexample is NOT a proof of correctness."
+  },
+  "notes": [
+    "Pure function of (a) YAML config value and (b) baked-in __version__. No os.environ / filesystem / GPU probes influence this predicate -> fully-static.",
+    "Reachability guard: line 659 (if \"MinimumRequiredVersion\" in config) gates line 660; only the YAML Tensile.py:665 call path can supply this key (TensileCreateLibrary/Run.py:908 CLI path never does).",
+    "Z3 models were actually executed in-container (z3 4.16.0) and agree with the reference Python implementation across the full seeded domain.",
+    "Latent source detail: versionIsCompatible compares qMinor==tMinor as strings, not ints; harmless on this single-digit domain but a real bug for multi-digit minors (e.g. \"5.10.0\")."
+  ]
+}

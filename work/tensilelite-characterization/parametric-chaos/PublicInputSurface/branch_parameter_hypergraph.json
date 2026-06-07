@@ -1,0 +1,640 @@
+{
+  "nodes": [
+    {
+      "branch_id": "01e8ac7f371264a85285039d91ea87c8514acc62",
+      "file": "Tensile/Tensile.py",
+      "function": "Tensile",
+      "branch_kind": "elif",
+      "location": {
+        "line": 529,
+        "col": 4
+      },
+      "predicate_source": "not altFormat and len(configPaths) != 1",
+      "referenced_symbols": [
+        "altFormat",
+        "configPaths",
+        "len"
+      ]
+    },
+    {
+      "branch_id": "05506103d2678e4391d5a18d052fcc09b0d5981f",
+      "file": "Tensile/Configuration.py",
+      "function": "evaluate",
+      "branch_kind": "if",
+      "location": {
+        "line": 630,
+        "col": 8
+      },
+      "predicate_source": "nodeType == \"Module\"",
+      "referenced_symbols": [
+        "nodeType"
+      ]
+    },
+    {
+      "branch_id": "2075748886b1e54fc040f8498f92177c7cd92130",
+      "file": "Tensile/Configuration.py",
+      "function": "evaluate",
+      "branch_kind": "elif",
+      "location": {
+        "line": 730,
+        "col": 8
+      },
+      "predicate_source": "nodeType == \"Attribute\"",
+      "referenced_symbols": [
+        "nodeType"
+      ]
+    },
+    {
+      "branch_id": "26bfafbb23efa47fd74a1aba8ef61b99db52d41a",
+      "file": "Tensile/Configuration.py",
+      "function": "evaluate",
+      "branch_kind": "elif",
+      "location": {
+        "line": 692,
+        "col": 8
+      },
+      "predicate_source": "nodeType == \"Assign\"",
+      "referenced_symbols": [
+        "nodeType"
+      ]
+    },
+    {
+      "branch_id": "26f1acfe1ff93095519d418855bb9593f2c4f4bb",
+      "file": "Tensile/Tensile.py",
+      "function": "Tensile",
+      "branch_kind": "if",
+      "location": {
+        "line": 603,
+        "col": 4
+      },
+      "predicate_source": "'LibraryLogic' in config and UseEffLike and not buildOnly and not globalParameters[\"CpuOnly\"]",
+      "referenced_symbols": [
+        "UseEffLike",
+        "buildOnly",
+        "config",
+        "globalParameters"
+      ]
+    },
+    {
+      "branch_id": "2c7170bfd056c780a059b396e0cbb8a938384ecc",
+      "file": "Tensile/Tensile.py",
+      "function": "<module>",
+      "branch_kind": "if",
+      "location": {
+        "line": 25,
+        "col": 0
+      },
+      "predicate_source": "__name__ == \"__main__\"",
+      "referenced_symbols": [
+        "__name__"
+      ]
+    },
+    {
+      "branch_id": "3c77ffccaeef2b9473df16d6b5d08fdc8abd2b24",
+      "file": "Tensile/Configuration.py",
+      "function": "createUnaryOp",
+      "branch_kind": "if",
+      "location": {
+        "line": 579,
+        "col": 8
+      },
+      "predicate_source": "isinstance(op, str)",
+      "referenced_symbols": [
+        "isinstance",
+        "op",
+        "str"
+      ]
+    },
+    {
+      "branch_id": "4914224d6e015f0cc6a041a74683fe38f6eae196",
+      "file": "Tensile/Common/GlobalParameters.py",
+      "function": "assignGlobalParameters",
+      "branch_kind": "if",
+      "location": {
+        "line": 660,
+        "col": 8
+      },
+      "predicate_source": "not versionIsCompatible(config[\"MinimumRequiredVersion\"])",
+      "referenced_symbols": [
+        "config",
+        "versionIsCompatible"
+      ]
+    },
+    {
+      "branch_id": "5e52e9474f011ad59cd92b98ce1af6cfe93e980b",
+      "file": "Tensile/Configuration.py",
+      "function": "checkConstraints",
+      "branch_kind": "if",
+      "location": {
+        "line": 929,
+        "col": 8
+      },
+      "predicate_source": "self.ConstraintsKey in self",
+      "referenced_symbols": [
+        "self"
+      ]
+    },
+    {
+      "branch_id": "765305e2fbcf1ee08927bffdac198278bded30ee",
+      "file": "Tensile/Tensile.py",
+      "function": "argUpdatedGlobalParameters",
+      "branch_kind": "if",
+      "location": {
+        "line": 239,
+        "col": 4
+      },
+      "predicate_source": "args.platform",
+      "referenced_symbols": [
+        "args"
+      ]
+    },
+    {
+      "branch_id": "766aca336236aae2b14b573c47e639e5adb3307d",
+      "file": "Tensile/Configuration.py",
+      "function": "__lt__",
+      "branch_kind": "guard-return",
+      "location": {
+        "line": 218,
+        "col": 8
+      },
+      "predicate_source": "isinstance(rhs, Parameter)",
+      "referenced_symbols": [
+        "Parameter",
+        "isinstance",
+        "rhs"
+      ]
+    },
+    {
+      "branch_id": "8226b3bb80ef12780d069187df1f3cf8965ca735",
+      "file": "Tensile/Configuration.py",
+      "function": "evaluate",
+      "branch_kind": "elif",
+      "location": {
+        "line": 673,
+        "col": 8
+      },
+      "predicate_source": "nodeType == \"Call\"",
+      "referenced_symbols": [
+        "nodeType"
+      ]
+    },
+    {
+      "branch_id": "8f7c4911b799bc7d021ccf4a43f7d5feeebda093",
+      "file": "Tensile/Tensile.py",
+      "function": "Tensile",
+      "branch_kind": "if",
+      "location": {
+        "line": 536,
+        "col": 8
+      },
+      "predicate_source": "not os.path.exists(restoreLogPath)",
+      "referenced_symbols": [
+        "os",
+        "restoreLogPath"
+      ]
+    },
+    {
+      "branch_id": "aa18a787b08bf05166d8f981c6cefe39f0e5a016",
+      "file": "Tensile/Tensile.py",
+      "function": "restore_prob_sol_map",
+      "branch_kind": "if",
+      "location": {
+        "line": 409,
+        "col": 16
+      },
+      "predicate_source": "runningTuning",
+      "referenced_symbols": [
+        "runningTuning"
+      ]
+    },
+    {
+      "branch_id": "b87e16eec6cac88fae0c65b8009dd7c5c5e4536c",
+      "file": "Tensile/Configuration.py",
+      "function": "__le__",
+      "branch_kind": "guard-return",
+      "location": {
+        "line": 230,
+        "col": 8
+      },
+      "predicate_source": "isinstance(rhs, Parameter)",
+      "referenced_symbols": [
+        "Parameter",
+        "isinstance",
+        "rhs"
+      ]
+    },
+    {
+      "branch_id": "c63babfc10d38c09385da1dacf9fbb9c2c64c067",
+      "file": "Tensile/Tensile.py",
+      "function": "Tensile",
+      "branch_kind": "if",
+      "location": {
+        "line": 534,
+        "col": 4
+      },
+      "predicate_source": "args.RestoreLog",
+      "referenced_symbols": [
+        "args"
+      ]
+    },
+    {
+      "branch_id": "cab4f49fe2f435431e9ffccc9c89367a371c595b",
+      "file": "Tensile/Configuration.py",
+      "function": "createBinaryOp",
+      "branch_kind": "if",
+      "location": {
+        "line": 534,
+        "col": 8
+      },
+      "predicate_source": "isinstance(op, str)",
+      "referenced_symbols": [
+        "isinstance",
+        "op",
+        "str"
+      ]
+    },
+    {
+      "branch_id": "d8f43265b665a4b721072cb052d2fbd64d526645",
+      "file": "Tensile/Tensile.py",
+      "function": "Tensile",
+      "branch_kind": "if",
+      "location": {
+        "line": 526,
+        "col": 4
+      },
+      "predicate_source": "altFormat and len(configPaths) > 2",
+      "referenced_symbols": [
+        "altFormat",
+        "configPaths",
+        "len"
+      ]
+    },
+    {
+      "branch_id": "f6f7dc557d11e74207703507849f2e84fc1ef107",
+      "file": "Tensile/Common/GlobalParameters.py",
+      "function": "assignGlobalParameters",
+      "branch_kind": "if",
+      "location": {
+        "line": 659,
+        "col": 4
+      },
+      "predicate_source": "\"MinimumRequiredVersion\" in config",
+      "referenced_symbols": [
+        "config"
+      ]
+    },
+    {
+      "branch_id": "f8b5af6a1a52ab6cc03341058e19039cdae910dc",
+      "file": "Tensile/Configuration.py",
+      "function": "__rlt__",
+      "branch_kind": "guard-return",
+      "location": {
+        "line": 224,
+        "col": 8
+      },
+      "predicate_source": "isinstance(lhs, Parameter)",
+      "referenced_symbols": [
+        "Parameter",
+        "isinstance",
+        "lhs"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "branch_id": "01e8ac7f371264a85285039d91ea87c8514acc62",
+      "predicate_source": "not altFormat and len(configPaths) != 1",
+      "public_inputs": [
+        {
+          "kind": "cli",
+          "name": "args.AlternateFormat"
+        },
+        {
+          "kind": "cli",
+          "name": "args.ConfigFile"
+        }
+      ],
+      "derived_symbols": [
+        {
+          "name": "altFormat",
+          "derived_from": "args.AlternateFormat",
+          "category": "cli"
+        },
+        {
+          "name": "configPaths",
+          "derived_from": "args.ConfigFile",
+          "category": "cli"
+        }
+      ],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "05506103d2678e4391d5a18d052fcc09b0d5981f",
+      "predicate_source": "nodeType == \"Module\"",
+      "public_inputs": [
+        {
+          "name": "expressionStr",
+          "kind": "derived-local",
+          "description": "A Python expression string passed to addConstraint(expressionStr). In the only call sites present in Configuration.py (lines 806-810) these are hard-coded string literals in the source (e.g. 'Program.Network.PORT >= MaxPort'). The string is then passed to ast.parse(expressionStr, mode='exec') to produce the ast.Module. There is no CLI, YAML, env-var, or filesystem path through which this string is injected at runtime in the current codebase.",
+          "call_sites": [
+            "Configuration.py:806 - literal \"Program.Network.PORT >= MaxPort\"",
+            "Configuration.py:807 - literal \"False if Program.UI.WindowSize > 2000 and Program.UI.Antialiasing else True\"",
+            "Configuration.py:810 - literal \"Program.Network.PORT = Program.Network.MaxPort if Program.Network.PORT > Program.Network.MaxPort\""
+          ],
+          "example_value": "x < 10"
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "2075748886b1e54fc040f8498f92177c7cd92130",
+      "predicate_source": "nodeType == \"Attribute\"",
+      "public_inputs": [
+        {
+          "name": "expressionStr",
+          "kind": "derived-local",
+          "description": "The constraint expression string passed to ProjectConfig.addConstraint(). All production call sites supply hard-coded string literals: TensileBenchmarkCluster.py:283 passes 'BenchmarkTaskSize > 0' and line 288 passes 'RunDeployStep or RunBenchmarkStep or RunResultsStep'. Neither of those strings contains dotted attribute access, so the 'Attribute' branch (line 730) is unreachable in production execution. The only expressions that WOULD contain ast.Attribute nodes appear in lines 806-810 of Configuration.py, but those are inside a class docstring (lines 769-812) and are never executed. No YAML file, CLI argument, or environment variable supplies an expressionStr at runtime."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "26bfafbb23efa47fd74a1aba8ef61b99db52d41a",
+      "predicate_source": "nodeType == \"Assign\"",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "26f1acfe1ff93095519d418855bb9593f2c4f4bb",
+      "predicate_source": "'LibraryLogic' in config and UseEffLike and not buildOnly and not globalParameters[\"CpuOnly\"]",
+      "public_inputs": [
+        {
+          "kind": "global-parameter",
+          "name": "config[\"GlobalParameters\"].get(\"UseEffLike\", globalParameters[\"UseEffLike\"])"
+        },
+        {
+          "kind": "cli",
+          "name": "args.buildOnly"
+        },
+        {
+          "kind": "global-parameter",
+          "name": "{\"GlobalParameters\": base.get(\"GlobalParameters\")}"
+        }
+      ],
+      "derived_symbols": [
+        {
+          "name": "UseEffLike",
+          "derived_from": "config[\"GlobalParameters\"].get(\"UseEffLike\", globalParameters[\"UseEffLike\"])",
+          "category": "global-parameter"
+        },
+        {
+          "name": "buildOnly",
+          "derived_from": "args.buildOnly",
+          "category": "cli"
+        },
+        {
+          "name": "config",
+          "derived_from": "{\"GlobalParameters\": base.get(\"GlobalParameters\")}",
+          "category": "global-parameter"
+        }
+      ],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "2c7170bfd056c780a059b396e0cbb8a938384ecc",
+      "predicate_source": "__name__ == \"__main__\"",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "3c77ffccaeef2b9473df16d6b5d08fdc8abd2b24",
+      "predicate_source": "isinstance(op, str)",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "4914224d6e015f0cc6a041a74683fe38f6eae196",
+      "predicate_source": "not versionIsCompatible(config[\"MinimumRequiredVersion\"])",
+      "public_inputs": [
+        {
+          "name": "config[\"MinimumRequiredVersion\"]",
+          "kind": "yaml",
+          "description": "The MinimumRequiredVersion key in the GlobalParameters section of the benchmark config YAML file. The YAML file path reaches assignGlobalParameters via: CLI arg ConfigFile -> LibraryIO.read(configPaths[0]) -> config['GlobalParameters'] -> assignGlobalParameters(config.get('GlobalParameters', {}), isaInfoMap) at Tensile/Tensile.py:665. In the TensileCreateLibrary/Run.py call path (line 908) arguments comes from parseArguments() (CLI only) and never contains MinimumRequiredVersion, so the outer guard 'if \"MinimumRequiredVersion\" in config' (line 659) always skips line 660 in that path.",
+          "yaml_key_path": "GlobalParameters.MinimumRequiredVersion",
+          "example_value": "5.0.0"
+        },
+        {
+          "name": "__version__",
+          "kind": "global-parameter",
+          "description": "The Tensile package version, hardcoded as the string '5.0.0' in Tensile/__init__.py line 30. Imported into Tensile/Common/Utilities.py at line 39 and used by versionIsCompatible to supply (tMajor, tMinor, tStep). This is a baked-in constant at package install time; it is not injectable via CLI, env, or YAML at runtime.",
+          "source_file": "Tensile/__init__.py",
+          "source_line": 30,
+          "current_value": "5.0.0"
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "5e52e9474f011ad59cd92b98ce1af6cfe93e980b",
+      "predicate_source": "self.ConstraintsKey in self",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "765305e2fbcf1ee08927bffdac198278bded30ee",
+      "predicate_source": "args.platform",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "766aca336236aae2b14b573c47e639e5adb3307d",
+      "predicate_source": "isinstance(rhs, Parameter)",
+      "public_inputs": [
+        {
+          "name": "rhs",
+          "kind": "derived-local",
+          "description": "The right-hand operand passed to __lt__ by the caller of the < operator on a Parameter instance. At the __lt__ level this is a formal parameter; its ultimate source depends entirely on call sites. In the current codebase Parameter instances are constructed programmatically (e.g. ProjectConfig.createValue at line 907) using values that may originate from YAML config files or CLI arguments in the broader Tensile pipeline, but at the level of this method, rhs is a derived-local \u2014 there is no direct env, filesystem, or GPU dependency visible within the slice."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "8226b3bb80ef12780d069187df1f3cf8965ca735",
+      "predicate_source": "nodeType == \"Call\"",
+      "public_inputs": [
+        {
+          "name": "expressionStr",
+          "kind": "derived-local",
+          "description": "The Python expression string passed to ProjectConfig.addConstraint(). In ALL production call sites this is a hard-coded string literal: TensileBenchmarkCluster.py line 283 ('BenchmarkTaskSize > 0'), line 288 ('RunDeployStep or RunBenchmarkStep or RunResultsStep'). The Configuration.py lines 806-810 are inside a docstring and never executed. No call site passes a CLI, YAML, or env-derived string to addConstraint(). The ExpressionEvaluator is also callable directly (tests, other future callers), but no such production path exists in the current codebase.",
+          "production_call_sites": [
+            {
+              "file": "Tensile/TensileBenchmarkCluster.py",
+              "line": 283,
+              "value": "BenchmarkTaskSize > 0",
+              "note": "Contains no Call AST node; this expression is a Compare, so nodeType==\"Call\" is FALSE for this string."
+            },
+            {
+              "file": "Tensile/TensileBenchmarkCluster.py",
+              "line": 288,
+              "value": "RunDeployStep or RunBenchmarkStep or RunResultsStep",
+              "note": "Contains no Call AST node; this expression is a BoolOp, so nodeType==\"Call\" is FALSE for this string."
+            }
+          ],
+          "note": "None of the current production addConstraint() call sites produce an expression string containing a function call (ast.Call node). Therefore the elif nodeType==\"Call\" branch at line 673 is UNREACHABLE in production. It is reachable only in tests or hypothetical future callers that pass a call-expression string."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "8f7c4911b799bc7d021ccf4a43f7d5feeebda093",
+      "predicate_source": "not os.path.exists(restoreLogPath)",
+      "public_inputs": [
+        {
+          "name": "--restore-from-log",
+          "kind": "cli",
+          "argparse_dest": "RestoreLog",
+          "argparse_type": "str",
+          "argparse_default": null,
+          "note": "CLI arg parsed by argparse at Tensile.py:509; value flows to args.RestoreLog -> os.path.abspath(args.RestoreLog) -> Path(...) -> restoreLogPath"
+        },
+        {
+          "name": "os.getcwd()",
+          "kind": "os",
+          "note": "os.path.abspath uses the process CWD to resolve a relative --restore-from-log path; if the arg is already absolute, CWD has no effect on the predicate"
+        }
+      ],
+      "derived_symbols": [
+        {
+          "name": "restoreLogPath",
+          "derived_from": "Path(os.path.abspath(args.RestoreLog))",
+          "category": "cli"
+        }
+      ],
+      "external_state": [
+        "filesystem: os.path.exists probes whether the resolved path names an existing filesystem entry (file or directory)"
+      ],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "aa18a787b08bf05166d8f981c6cefe39f0e5a016",
+      "predicate_source": "runningTuning",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "b87e16eec6cac88fae0c65b8009dd7c5c5e4536c",
+      "predicate_source": "isinstance(rhs, Parameter)",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "c63babfc10d38c09385da1dacf9fbb9c2c64c067",
+      "predicate_source": "args.RestoreLog",
+      "public_inputs": [
+        {
+          "name": "RestoreLog",
+          "kind": "cli",
+          "cli_flag": "--restore-from-log",
+          "argparse_dest": "RestoreLog",
+          "argparse_type": "str",
+          "argparse_default": null,
+          "derived_from": "argParser.parse_args(userArgs) where userArgs is the argv list passed to Tensile(userArgs)"
+        }
+      ],
+      "derived_symbols": [
+        {
+          "name": "args",
+          "derived_from": "argParser.parse_args(userArgs)",
+          "category": "cli"
+        }
+      ],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "cab4f49fe2f435431e9ffccc9c89367a371c595b",
+      "predicate_source": "isinstance(op, str)",
+      "public_inputs": [
+        {
+          "name": "op",
+          "kind": "derived-local",
+          "description": "The op parameter of CallableParameter.createBinaryOp(cls, lhs, rhs, op). In ALL ExpressionEvaluator paths, op is always a str derived from Python AST node class names via type(node.X).__name__ (e.g., 'Add', 'Gt', 'And', 'min'). The constraint expression strings that feed the AST are hard-coded in TensileBenchmarkCluster.py (lines 283, 288); no CLI flag, YAML key, or env variable supplies the operator name. The non-str branch (callable) is only reachable when createBinaryOp is called directly with a lambda, which occurs only in test code or direct API usage."
+        }
+      ],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "slice-agent"
+    },
+    {
+      "branch_id": "d8f43265b665a4b721072cb052d2fbd64d526645",
+      "predicate_source": "altFormat and len(configPaths) > 2",
+      "public_inputs": [
+        {
+          "kind": "cli",
+          "name": "args.AlternateFormat"
+        },
+        {
+          "kind": "cli",
+          "name": "args.ConfigFile"
+        }
+      ],
+      "derived_symbols": [
+        {
+          "name": "altFormat",
+          "derived_from": "args.AlternateFormat",
+          "category": "cli"
+        },
+        {
+          "name": "configPaths",
+          "derived_from": "args.ConfigFile",
+          "category": "cli"
+        }
+      ],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "f6f7dc557d11e74207703507849f2e84fc1ef107",
+      "predicate_source": "\"MinimumRequiredVersion\" in config",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    },
+    {
+      "branch_id": "f8b5af6a1a52ab6cc03341058e19039cdae910dc",
+      "predicate_source": "isinstance(lhs, Parameter)",
+      "public_inputs": [],
+      "derived_symbols": [],
+      "external_state": [],
+      "edge_source": "census-defuse"
+    }
+  ],
+  "note": "edges with edge_source=census-defuse were reconstructed deterministically from the extractor's intra-function def-use because the Slice agent did not persist a fragment for that branch."
+}

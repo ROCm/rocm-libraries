@@ -1,0 +1,8 @@
+{
+  "branch_id": "4914224d6e015f0cc6a041a74683fe38f6eae196",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Re-executed all claimed examples against the REAL versionIsCompatible (Tensile/Common/Utilities.py:148) with baked-in __version__='5.0.0' (Tensile/__init__.py:30, confirmed via import). Predicate = not versionIsCompatible(config['MinimumRequiredVersion']) at GlobalParameters.py:660 (verified source text + line-659 'if MinimumRequiredVersion in config' reachability gate). true_examples: 4.0.0->True(major mismatch), 5.0.1->True(qStep>tStep), 5.1.0->True(qMinor>tMinor); false_example: 5.0.0->False(exact match, branch skipped). All 4 reproduced exactly (output captured via file; heredoc stdout was swallowed by this exec wrapper). Cross-checked claimed pure_helper vs real fn over full single-digit (qMajor,qMinor,qStep in 0..2) x version 5.0.0 domain: 0 mismatches. Classification 'fully-static' upheld: pure function of YAML value + hardcoded version string, neither runtime-injectable. Latent bug note accurate: source compares qMinor==tMinor as STRINGS (5.10.0 still->incompatible via int compare path), harmless on seeded single-digit domain, out of claim scope. No counter-model found; SAT confirmed.",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Verify/4914224d6e015f0cc6a041a74683fe38f6eae196.json"
+}

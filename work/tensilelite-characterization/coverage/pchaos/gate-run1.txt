@@ -1,0 +1,13 @@
+# parametric-chaos Run-1 gate receipt (2026-06-07T17:37:27Z)
+# methodology-A 4-process partition (HANDOFF-codegen-coverage.md §3)
+
+## pytest (all partitions, 0 failed):
+3338 passed, 201 skipped, 1 warning in 741.40s (0:12:21)
+17 passed in 30.63s
+35 passed in 15.57s
+90 passed in 23.63s
+
+## combined coverage TOTAL:
+TOTAL                                                     54867   9046  22780   2959  80.74%
+
+## guard: >= 80.60% AND 0 failed  -> PASS (80.74%, prior baseline 80.70%, +0.04pt; no regression)

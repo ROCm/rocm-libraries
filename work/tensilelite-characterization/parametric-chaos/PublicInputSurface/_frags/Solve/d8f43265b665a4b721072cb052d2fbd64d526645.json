@@ -1,0 +1,82 @@
+{
+  "branch_id": "d8f43265b665a4b721072cb052d2fbd64d526645",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Solve/d8f43265b665a4b721072cb052d2fbd64d526645.json",
+  "source_location": {
+    "file": "Tensile/Tensile.py",
+    "line": 526,
+    "enclosing_function": "Tensile",
+    "raw_source": "if altFormat and len(configPaths) > 2:"
+  },
+  "predicate": "altFormat and len(configPaths) > 2",
+  "domains": {
+    "altFormat": {"type": "bool", "values": [false, true]},
+    "configPaths": {"type": "int", "min": 0, "max": 3, "semantics": "len(args.ConfigFile)"}
+  },
+  "encoding": {
+    "solver": "z3",
+    "op_surface": ["boolean-and", "integer-compare(>)"],
+    "altFormat": "Bool('altFormat')",
+    "configPaths": "Int('configPaths') with 0 <= configPaths <= 3 (seeded bound)",
+    "predicate_smt": "And(altFormat, configPaths > 2)",
+    "notes": "Pure two-variable boolean/integer expression, no runtime/external state. ExpressionEvaluator op-surface fully covered by And + integer (>) compare."
+  },
+  "solver": "z3",
+  "solver_status": "sat-bounded",
+  "classification": "fully-static",
+  "true_examples": [
+    {"altFormat": true, "configPaths": 3, "source": "z3 model", "note": "unique TRUE point in the seeded domain [0,3]; predicate True iff altFormat AND configPaths>2"}
+  ],
+  "false_examples": [
+    {"altFormat": true, "configPaths": 0, "source": "z3 model", "note": "altFormat True but configPaths not > 2 -> short-circuits to False on the comparison"},
+    {"altFormat": false, "configPaths": 3, "source": "enumeration", "note": "configPaths>2 but altFormat False -> short-circuits to False on the conjunction"}
+  ],
+  "full_domain_enumeration": [
+    {"altFormat": false, "configPaths": 0, "result": false},
+    {"altFormat": false, "configPaths": 1, "result": false},
+    {"altFormat": false, "configPaths": 2, "result": false},
+    {"altFormat": false, "configPaths": 3, "result": false},
+    {"altFormat": true, "configPaths": 0, "result": false},
+    {"altFormat": true, "configPaths": 1, "result": false},
+    {"altFormat": true, "configPaths": 2, "result": false},
+    {"altFormat": true, "configPaths": 3, "result": true}
+  ],
+  "pure_helper": "def alt_format_too_many_configs(alt_format: bool, n_config_files: int) -> bool:\n    \"\"\"Mirror of Tensile/Tensile.py:526 predicate `altFormat and len(configPaths) > 2`.\n\n    Returns True when the alternate-format branch's printExit fires\n    (alt format selected AND more than 2 config files supplied).\n    \"\"\"\n    return alt_format and n_config_files > 2",
+  "crosshair": {
+    "ran": true,
+    "version": "0.0.106",
+    "contract": "post: __return__ == (alt_format and n_config_files > 2)",
+    "result": "no counterexample found (exit 0)",
+    "negative_control": "contract `post: __return__ == False` produced counterexample alt_format_too_many_configs(True, 3) -> True, confirming CrossHair actually explores the bool x int space",
+    "caveat": "CrossHair: absence of a counterexample is NOT a proof of total correctness; it is bounded symbolic exploration. The z3 enumeration over the full seeded domain is the authoritative completeness witness here."
+  },
+  "public_inputs": [
+    {
+      "name": "AlternateFormat",
+      "bound_to": "altFormat",
+      "kind": "cli",
+      "cli_flag": "--alternate-format",
+      "argparse_dest": "AlternateFormat",
+      "argparse_action": "store_true",
+      "argparse_default": false,
+      "derived_from": "argParser.parse_args(userArgs).AlternateFormat (Tensile.py:500)"
+    },
+    {
+      "name": "ConfigFile",
+      "bound_to": "configPaths (via len)",
+      "kind": "cli",
+      "cli_flag": "ConfigFile (positional)",
+      "argparse_dest": "ConfigFile",
+      "argparse_type": "os.path.realpath",
+      "argparse_nargs": "+",
+      "derived_from": "len(argParser.parse_args(userArgs).ConfigFile) (Tensile.py:494, 517)"
+    }
+  ],
+  "external_state": [],
+  "notes": [
+    "Predicate is a pure 2-variable boolean/integer expression over CLI-derived values; no isinstance, no nodeType dispatch, no os/filesystem/gpu probe -> classification=fully-static.",
+    "solver_status=sat-bounded: both witnesses are SAT, and configPaths was bounded to the seeded integer range [0,3] (a len() so naturally >=0).",
+    "Real-runtime caveat (does NOT change the predicate truth table, only which domain points are reachable): ConfigFile uses nargs='+', so argparse guarantees len(configPaths) >= 1. The seed allows configPaths=0 but argv can never produce it. The TRUE-witness (altFormat=True, configPaths=3) and reachable FALSE-witnesses (altFormat=False configPaths=3, or altFormat=True configPaths=1) are all argv-realizable.",
+    "Short-circuit: Python and evaluates len(configPaths)>2 only when altFormat is truthy; the truth table above already reflects the short-circuit (no observable difference for these total inputs).",
+    "Branch body fires printExit('Only 1 or 2 config_files are accepted for the alternate config format...') when the predicate is True."
+  ]
+}

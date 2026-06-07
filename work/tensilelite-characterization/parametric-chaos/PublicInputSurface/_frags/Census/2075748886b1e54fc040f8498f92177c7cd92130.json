@@ -1,0 +1,16 @@
+{
+  "id": "2075748886b1e54fc040f8498f92177c7cd92130",
+  "file": "Tensile/Configuration.py",
+  "function": "evaluate",
+  "branch_kind": "elif",
+  "location": {
+    "line": 730,
+    "col": 8
+  },
+  "predicate_source": "nodeType == \"Attribute\"",
+  "referenced_symbols": [
+    "nodeType"
+  ],
+  "derived_symbols": [],
+  "rank": 11
+}

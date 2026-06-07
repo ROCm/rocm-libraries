@@ -1,0 +1,53 @@
+{
+  "branch_id": "8226b3bb80ef12780d069187df1f3cf8965ca735",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Solve/8226b3bb80ef12780d069187df1f3cf8965ca735.json",
+  "source_location": {
+    "file": "Tensile/Configuration.py",
+    "line": 673,
+    "enclosing_function": "evaluate",
+    "enclosing_class": "ExpressionEvaluator"
+  },
+  "predicate": {
+    "raw_source": "elif nodeType == \"Call\":",
+    "op": "eq",
+    "left": "nodeType",
+    "right": "\"Call\"",
+    "semantics": "nodeType = type(node).__name__ for the AST node currently visited by the recursive ExpressionEvaluator. The branch is taken iff that node is a Python ast.Call (function-call syntax such as foo(a, b) or abs(x))."
+  },
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "runtime-dependent",
+  "encoding": {
+    "approach": "Harvested op-surface at this dispatch is a single equality compare over an enum string (nodeType). The seeded domain restricts nodeType to {Call, Compare}. Encoded nodeType as a Z3 EnumSort over those two values and the predicate as (nodeType == Call). Z3 returned sat for both the predicate and its negation within the seeded enum: branch is neither tautology nor contradiction over the harvested surface.",
+    "z3_true_model": "[nodeType = Call]",
+    "z3_false_model": "[nodeType = Compare]",
+    "domain_note": "nodeType is not itself a CLI/YAML/int/bool public input. It is derived at runtime via type(node).__name__ from ast.parse(expressionStr). The genuine free variable upstream is expressionStr (a hard-coded literal in all production call sites). The Z3 model is sat over the harvested enum surface, but the real determinant is a parsed-tree node type, so classification stays runtime-dependent."
+  },
+  "true_examples": [
+    {
+      "by": "value",
+      "nodeType": "Call",
+      "expressionStr": "abs(x)",
+      "derivation": "ast.parse('abs(x)', mode='exec').body[0].value is an ast.Call -> type(node).__name__ == 'Call' -> predicate True.",
+      "verified": "Confirmed in-container: ast top-value nodeType == 'Call'. ExpressionEvaluator().evaluate(ast.parse('abs(x)'), {'x': -7}) actually enters the Call branch (reaches line 688 createUnaryOp) before asserting on the unmapped 'abs' operator -- proving the line-673 dispatch is taken.",
+      "solver_proven_over_enum": true
+    }
+  ],
+  "false_examples": [
+    {
+      "by": "value",
+      "nodeType": "Compare",
+      "expressionStr": "BenchmarkTaskSize > 0",
+      "derivation": "ast.parse('BenchmarkTaskSize > 0', mode='exec').body[0].value is an ast.Compare -> type(node).__name__ == 'Compare' != 'Call' -> predicate False (Compare branch at line 657 taken instead).",
+      "verified": "Confirmed in-container: walk node types {Compare, Constant, Expr, Gt, Load, Module, Name}, no Call node. This is one of the two real production addConstraint() call-site strings (TensileBenchmarkCluster.py:283).",
+      "solver_proven_over_enum": true
+    }
+  ],
+  "pure_helper": "def is_call_branch(nodeType: str) -> bool:\n    \"\"\"\n    Pure mirror of Configuration.py:673  elif nodeType == \"Call\":\n    nodeType is type(node).__name__ for the visited AST node.\n\n    pre: nodeType in (\"Call\", \"Compare\")\n    post: __return__ == (nodeType == \"Call\")\n    \"\"\"\n    return nodeType == \"Call\"",
+  "pure_helper_note": "CrossHair 0.0.106 'check --per_condition_timeout=20' found NO counterexample to the post-condition (exit 0, no output) over the seeded enum precondition. Per task guidance: absence of a CrossHair counterexample is NOT a proof of correctness, only that none was found within the search budget. The helper isolates the decidable equality; it deliberately does NOT model the runtime-dependent ast.parse + type().__name__ derivation that produces nodeType.",
+  "reachability": {
+    "production": "DEAD in production: no current addConstraint() call site passes a string containing a function-call sub-expression. Both production strings parse to Compare/BoolOp, never Call.",
+    "tests": "Reachable in unit tests by passing a call-expression string (e.g. abs(x), len(a)). Verified the dispatch is entered."
+  },
+  "notes": "Branch predicate is a runtime AST-node-type dispatch (type(node).__name__ == 'Call'). Not a function of any CLI/YAML/int/bool public input directly; nodeType is derived at runtime from parsing expressionStr. Over the harvested enum op-surface {Call, Compare} the decision is a clean equality and Z3 returned sat for both the True witness (nodeType=Call, expr 'abs(x)') and the False witness (nodeType=Compare, expr 'BenchmarkTaskSize > 0'). Both witnesses are additionally empirically grounded by running ast.parse and the real ExpressionEvaluator in-container. Classification = runtime-dependent because the true determinant is a live parsed-tree node type; solver_status = sat reflects the genuine Z3 result over the harvested enum surface, with value-grounded witnesses supplied so downstream can pin behavior."
+}

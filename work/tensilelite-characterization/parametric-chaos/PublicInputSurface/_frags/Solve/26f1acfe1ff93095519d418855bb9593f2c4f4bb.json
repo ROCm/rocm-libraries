@@ -1,0 +1,35 @@
+{
+  "branch_id": "26f1acfe1ff93095519d418855bb9593f2c4f4bb",
+  "file": "Tensile/Tensile.py",
+  "location": {"line": 603, "col": 4},
+  "predicate_source": "'LibraryLogic' in config and UseEffLike and not buildOnly and not globalParameters[\"CpuOnly\"]",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "fully-static",
+  "domains": {
+    "LibraryLogic_in_config": {"type": "bool", "values": [false, true]},
+    "UseEffLike": {"type": "bool", "values": [false, true]},
+    "buildOnly": {"type": "bool", "values": [false, true]},
+    "globalParameters[CpuOnly]": {"type": "bool", "values": [false, true]}
+  },
+  "encoding": "Four Bool() atoms; pred = And(LibraryLogic_in_config, UseEffLike, Not(buildOnly), Not(globalParameters[CpuOnly])). Pure 4-ary boolean conjunction with two negated conjuncts. Mirrors ExpressionEvaluator boolean op-surface (and / not). The membership test 'LibraryLogic' in config is reduced to a boolean atom LibraryLogic_in_config (presence of the key); UseEffLike, buildOnly, globalParameters[CpuOnly] read as booleans per the Domain seed.",
+  "true_examples": [
+    {"LibraryLogic_in_config": true, "UseEffLike": true, "buildOnly": false, "globalParameters[CpuOnly]": false}
+  ],
+  "false_examples": [
+    {"LibraryLogic_in_config": false, "UseEffLike": false, "buildOnly": false, "globalParameters[CpuOnly]": false},
+    {"LibraryLogic_in_config": true, "UseEffLike": true, "buildOnly": true, "globalParameters[CpuOnly]": false},
+    {"LibraryLogic_in_config": true, "UseEffLike": true, "buildOnly": false, "globalParameters[CpuOnly]": true},
+    {"LibraryLogic_in_config": true, "UseEffLike": false, "buildOnly": false, "globalParameters[CpuOnly]": false}
+  ],
+  "z3_output": {
+    "true_check": "sat",
+    "true_model": {"LibraryLogic_in_config": true, "UseEffLike": true, "buildOnly": false, "globalParameters[CpuOnly]": false},
+    "false_check": "sat",
+    "false_model": {"LibraryLogic_in_config": false, "UseEffLike": false, "buildOnly": false, "globalParameters[CpuOnly]": false},
+    "exhaustive_enumeration": {"num_true_assignments": 1, "num_false_assignments": 15, "total": 16}
+  },
+  "pure_helper": "def liblogic_freq_branch(library_logic_in_config: bool, use_eff_like: bool, build_only: bool, cpu_only: bool) -> bool:\n    \"\"\"Mirrors Tensile.py:603 guard: enter GPU-frequency configuration block.\n\n    post: __return__ == (library_logic_in_config and use_eff_like and not build_only and not cpu_only)\n    post: (not __return__) or (library_logic_in_config and use_eff_like)\n    \"\"\"\n    return library_logic_in_config and use_eff_like and not build_only and not cpu_only",
+  "notes": "Pure 4-ary boolean conjunction; both branches solver-proven sat by z3 (TRUE: all four hold with the two NOT-conjuncts false; FALSE: e.g. all-false). Exhaustive 2^4 enumeration confirms a single TRUE assignment (the AND requires every conjunct) and 15 FALSE assignments; the four false_examples each negate exactly one conjunct (the four minimal failure modes). No isinstance / nodeType / os / filesystem / gpu probes in the predicate itself, so fully-static for solver purposes. CrossHair 0.0.106 ran on extracted pure helper liblogic_freq_branch with two postconditions (exact equivalence; TRUE => (LibraryLogic and UseEffLike)) and reported no counterexample (exit 0); absence of a CrossHair counterexample is NOT a proof. Steerability caveat: atoms are public-input-derived but not all freely CLI-steerable. UseEffLike is force-set False on RHEL8 (Tensile.py:600 UseEffLike = False if isRhel8() else UseEffLike), so on a RHEL8 host the TRUE branch is unreachable regardless of YAML/CLI. buildOnly from args.buildOnly (CLI); CpuOnly from globalParameters; UseEffLike from config['GlobalParameters'].get('UseEffLike', default); 'LibraryLogic' from presence of that top-level config key. The TRUE-branch body (get_gpu_max_frequency etc.) performs live GPU/rocm-smi probes, but those are downstream of this predicate, not part of it.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Solve/26f1acfe1ff93095519d418855bb9593f2c4f4bb.json"
+}

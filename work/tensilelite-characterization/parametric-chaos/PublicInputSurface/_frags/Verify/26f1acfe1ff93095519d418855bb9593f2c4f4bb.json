@@ -1,0 +1,8 @@
+{
+  "branch_id": "26f1acfe1ff93095519d418855bb9593f2c4f4bb",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Extracted the real predicate at Tensile/Tensile.py:603 (LibraryLogic in config and UseEffLike and not buildOnly and not globalParameters[CpuOnly]); verbatim match to the claim. Reconstructed the exact expression in-container (docker exec tl-char python) using a dict for config, real in membership, and globalParameters[CpuOnly] indexing -- not a paraphrase. Re-executed all claimed examples: the 1 true_example (T,T,F,F)->True; all 4 false_examples ((F,F,F,F),(T,T,T,F),(T,T,F,T),(T,F,F,F))->False. Each false_example negates exactly one conjunct. Exhaustive 2^4: exactly 1 TRUE, 15 FALSE, matching pure conjunction (lib AND eff AND NOT bo AND NOT cpu). fully-static confirmed: no isinstance/nodeType/os/fs/gpu probes in the predicate (probes are in the TRUE-branch body, downstream). Every claimed witness reproduced; nothing fabricated. Caveat (not part of this guard truth table): Tensile.py:600 forces UseEffLike=False on RHEL8, making the TRUE branch unreachable on a RHEL8 host -- an input reachability constraint, not a change to this guard logic.",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Verify/26f1acfe1ff93095519d418855bb9593f2c4f4bb.json"
+}

@@ -1,0 +1,18 @@
+{
+  "branch_id": "3c77ffccaeef2b9473df16d6b5d08fdc8abd2b24",
+  "predicate": "isinstance(op, str)",
+  "location": "Tensile/Configuration.py:579 (CallableParameter.createUnaryOp)",
+  "confirmed": true,
+  "status": "UNKNOWN",
+  "downgraded_to": "unknown",
+  "method": "Independently re-established against the REAL code. (1) Located the predicate: line 579 is exactly `if isinstance(op, str):` inside CallableParameter.createUnaryOp (the claim pure_helper/notes correctly name the line/branch, but the enclosing class is CallableParameter, not Solution). FuncMap keys = {Not, Invert, USub, UAdd, None}. (2) Re-executed all claimed examples in-container via the real predicate isinstance(op,str): TRUE Not -> True, TRUE USub -> True, FALSE <lambda val:-val> -> False. All three reproduce exactly as claimed. (3) Reified both branches against the real function: createUnaryOp(5,Not) and createUnaryOp(5,USub) succeed (str-branch, op asserted in FuncMap); createUnaryOp(5,<lambda>) succeeds (else-branch, name=CustomUnaryOp). Both branches concretely reachable by value. (4) Classification: predicate is a runtime type test on a live Python object (op is either a FuncMap key NAME str or a callable). A numeric/boolean SMT solver cannot decide a live object Python type; claimed solver_status=unknown / classification=runtime-dependent is accurate. Per checker rules, runtime-dependent/unknown is NOT upgraded to SAT even though witnesses are exhibited; status stays UNKNOWN. confirmed=true because every claimed witness is faithful, but result strength is not upgraded.",
+  "true_examples_reproduced": [
+    {"op": "Not", "isinstance_op_str": true, "branch": "if", "reified": true},
+    {"op": "USub", "isinstance_op_str": true, "branch": "if", "reified": true}
+  ],
+  "false_examples_reproduced": [
+    {"op": "<lambda val: -val>", "isinstance_op_str": false, "branch": "else", "reified": true}
+  ],
+  "notes": "z3 cannot prove a Python-runtime isinstance fact; the solver only confirmed branch reachability by VALUE, which is exactly what runtime-dependent means. Witnesses verified against the real container runtime and against the real createUnaryOp on both branches. The CrossHair wrapper result is a tautological mirror of isinstance and adds no stronger property. Status UNKNOWN per HARD checker rule for runtime-dependent predicates.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Verify/3c77ffccaeef2b9473df16d6b5d08fdc8abd2b24.json"
+}

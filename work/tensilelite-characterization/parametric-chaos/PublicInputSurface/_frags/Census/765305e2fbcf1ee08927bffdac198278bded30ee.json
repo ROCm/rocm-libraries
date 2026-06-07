@@ -1,0 +1,16 @@
+{
+  "id": "765305e2fbcf1ee08927bffdac198278bded30ee",
+  "file": "Tensile/Tensile.py",
+  "function": "argUpdatedGlobalParameters",
+  "branch_kind": "if",
+  "location": {
+    "line": 239,
+    "col": 4
+  },
+  "predicate_source": "args.platform",
+  "referenced_symbols": [
+    "args"
+  ],
+  "derived_symbols": [],
+  "rank": 16
+}

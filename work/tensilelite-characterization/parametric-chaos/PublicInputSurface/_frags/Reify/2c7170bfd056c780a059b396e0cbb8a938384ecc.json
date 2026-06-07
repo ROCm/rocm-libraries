@@ -1,0 +1,18 @@
+{
+  "branch_id": "2c7170bfd056c780a059b396e0cbb8a938384ecc",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Tensile_L25_char.py"
+  ],
+  "passed": true,
+  "tests": [
+    "test_module_guard_false_import_succeeds",
+    "test_module_guard_false_name_is_not_main",
+    "test_module_guard_true_direct_exec_exits_one",
+    "test_module_guard_true_direct_exec_prints_deprecation"
+  ],
+  "run_cmd": "pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Tensile_L25_char.py",
+  "result": "4 passed in 0.74s",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Reify/2c7170bfd056c780a059b396e0cbb8a938384ecc.json",
+  "notes": "Predicate: __name__ == \"__main__\" (Tensile/Tensile.py:25). Module-guard: TRUE fires only when the file is run directly (exit(1) + deprecation print); FALSE is the normal import path. Two FALSE-branch tests pin import-time behavior (M.__name__==\"Tensile.Tensile\", M.__name__!=\"__main__\"). Two TRUE-branch tests run the file via subprocess.run([sys.executable, tensile_py]) and assert exit code==1 and redirect notice in stdout. All 4 pass deterministically in tl-char (CPU-only, no GPU probe, no coverage flag)."
+}

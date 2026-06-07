@@ -1,0 +1,13 @@
+{
+  "branch_id": "5e52e9474f011ad59cd92b98ce1af6cfe93e980b",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Domain/5e52e9474f011ad59cd92b98ce1af6cfe93e980b.json",
+  "domains": {
+    "self._Constraints_key_present": {
+      "type": "bool",
+      "values": [
+        false,
+        true
+      ]
+    }
+  }
+}

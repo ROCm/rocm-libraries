@@ -1,0 +1,16 @@
+{
+  "id": "8226b3bb80ef12780d069187df1f3cf8965ca735",
+  "file": "Tensile/Configuration.py",
+  "function": "evaluate",
+  "branch_kind": "elif",
+  "location": {
+    "line": 673,
+    "col": 8
+  },
+  "predicate_source": "nodeType == \"Call\"",
+  "referenced_symbols": [
+    "nodeType"
+  ],
+  "derived_symbols": [],
+  "rank": 2
+}

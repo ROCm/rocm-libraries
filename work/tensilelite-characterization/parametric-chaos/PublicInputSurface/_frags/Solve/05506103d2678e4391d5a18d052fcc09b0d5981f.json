@@ -1,0 +1,92 @@
+{
+  "branch_id": "05506103d2678e4391d5a18d052fcc09b0d5981f",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "runtime-dependent",
+  "source_location": {
+    "file": "Tensile/Configuration.py",
+    "line": 630,
+    "enclosing_function": "ExpressionEvaluator.evaluate",
+    "enclosing_class": "ExpressionEvaluator",
+    "branch_kind": "if"
+  },
+  "predicate_source": "if nodeType == \"Module\":",
+  "encoding": {
+    "vars": {
+      "nodeType": {
+        "z3_sort": "EnumSort('NodeType', ['Module','Expr'])",
+        "origin": "derived-local: nodeType = type(node).__name__ for the AST node passed to evaluate(); NOT a free public input. Value is supplied by runtime AST traversal position, seeded enum domain {Module, Expr}.",
+        "note": "The seeded enum abstracts the runtime class name of the visited node. Z3 treats it as a free enum const, which is why both witnesses are sat; the real value is fixed by where in the parsed tree the recursion currently is."
+      }
+    },
+    "z3_predicate": "nodeType == Module",
+    "op_surface": ["compare:==", "function:type(.).__name__"],
+    "notes": "Encoded nodeType as a 2-value Z3 EnumSort matching the seeded domain {Module, Expr}. The predicate is a single string equality. expressionStr (seeded {'a == 1','a + b'}) does NOT appear in the predicate and does not control its truth value: every valid expression string parses to a root ast.Module, so the top-level call is always nodeType=='Module' regardless of expressionStr."
+  },
+  "true_examples": [
+    {
+      "nodeType": "Module",
+      "z3_proven": true,
+      "by_value": {
+        "expressionStr": "a == 1",
+        "node": "ast.parse('a == 1', mode='exec')  (the root node)",
+        "type(node).__name__": "Module",
+        "runtime_confirmed": true
+      },
+      "note": "Top-level call ExpressionEvaluator.evaluate(tree, ctx) where tree is the ast.Module root. Holds identically for expressionStr='a + b' (root is always Module)."
+    }
+  ],
+  "false_examples": [
+    {
+      "nodeType": "Expr",
+      "z3_proven": true,
+      "by_value": {
+        "expressionStr": "a == 1",
+        "node": "ast.parse('a == 1', mode='exec').body[0]  (first recursion target)",
+        "type(node).__name__": "Expr",
+        "runtime_confirmed": true
+      },
+      "note": "First recursive call evaluate(node.body[0], ...) visits the ast.Expr child -> branch not taken (falls through to the 'Expr' elif at line 634)."
+    },
+    {
+      "nodeType": "Compare",
+      "z3_proven": false,
+      "by_value": {
+        "expressionStr": "a == 1",
+        "node": "ast.parse('a == 1', mode='exec').body[0].value",
+        "type(node).__name__": "Compare",
+        "runtime_confirmed": true
+      },
+      "note": "Deeper node ('a == 1' -> Compare; 'a + b' -> BinOp). Outside the seeded enum {Module,Expr} but representative of the real false-by-value space; runtime-confirmed, not z3-proven over the 2-value enum."
+    }
+  ],
+  "grid_enumeration": {
+    "domain": "nodeType in {Module, Expr} (seeded enum, 2 cells)",
+    "true_cells": [["Module"]],
+    "false_cells": [["Expr"]],
+    "runtime_extension": "Real AST traversal also produces Compare, BinOp, BoolOp, UnaryOp, Call, Name, Constant, etc. as nodeType; all are false for this predicate. Only the single root visit is ever True."
+  },
+  "pure_helper": "def is_module_node(nodeType: str) -> bool:\n    \"\"\"Mirror of Configuration.py:630 dispatch.\n    nodeType = type(node).__name__ for an AST node visited by\n    ExpressionEvaluator.evaluate. Returns True iff the node is the root\n    ast.Module (the branch taken at line 630). Pure over the string\n    nodeType; the real value is supplied by runtime AST traversal, so a\n    True/False result here does not characterize any PUBLIC input -- it\n    characterizes WHERE in the parsed tree the recursion currently is.\n\n    pre: nodeType in ('Module', 'Expr')\n    post: __return__ == (nodeType == 'Module')\n    \"\"\"\n    return nodeType == \"Module\"",
+  "crosshair": {
+    "ran": true,
+    "result": "no counterexample",
+    "contracts_checked": [
+      "pre: nodeType in ('Module', 'Expr')",
+      "post: __return__ == (nodeType == 'Module')"
+    ],
+    "caveat": "Absence of a counterexample from CrossHair is NOT a proof of correctness; it is bounded symbolic exploration over the seeded string enum. The first (no-contract) run reported 'no checkable functions' because the bare helper has no postcondition to refute."
+  },
+  "verification": {
+    "runtime_repro": true,
+    "method": "Ran ast.parse(expressionStr, mode='exec') in-container for both seeded expressionStr values and read type(node).__name__ at root, body[0], and body[0].value.",
+    "results": {
+      "a == 1": {"root": "Module", "child(body[0])": "Expr", "grandchild": "Compare"},
+      "a + b": {"root": "Module", "child(body[0])": "Expr", "grandchild": "BinOp"}
+    },
+    "z3_model_true": "[nodeType = Module]  (sat)",
+    "z3_model_false": "[nodeType = Expr]   (sat)",
+    "consistency": "Z3 enum witnesses match runtime: Module reachable only at the root visit (True); Expr reachable at first recursion (False). Both seeded expressionStr values give the identical node-type sequence, confirming expressionStr is not load-bearing for this predicate."
+  },
+  "classification_rationale": "runtime-dependent. The predicate compares type(node).__name__ against the literal 'Module' -- a nodeType dispatch over a parsed AST tree (exactly the step-3 category: isinstance/nodeType dispatch over a parsed tree). nodeType is a derived-local, not a public input: its value is fixed by the recursion's position in the ast tree, not by any solvable function of CLI/YAML/int/bool inputs. The seeded public input expressionStr does not appear in the predicate and cannot flip it -- ast.parse(any_valid_expr, mode='exec') always yields a root ast.Module, so the top-level call is unconditionally True and the recursive calls are unconditionally False. Z3 produces both witnesses (sat) only because nodeType is modeled as a free enum const; this is an abstraction of runtime state, so solver_status=sat is reported but classification stays runtime-dependent (the truth value is governed by traversal position, not by a static input function). Note: at the sole top-level entry the branch is a structural tautology (always taken once per evaluated expression).",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Solve/05506103d2678e4391d5a18d052fcc09b0d5981f.json"
+}

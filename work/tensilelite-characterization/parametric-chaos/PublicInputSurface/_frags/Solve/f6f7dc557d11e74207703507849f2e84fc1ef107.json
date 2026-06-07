@@ -1,0 +1,69 @@
+{
+  "branch_id": "f6f7dc557d11e74207703507849f2e84fc1ef107",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "fully-static",
+  "source_location": {
+    "file": "Tensile/Common/GlobalParameters.py",
+    "line": 659,
+    "enclosing_function": "assignGlobalParameters",
+    "branch_kind": "if"
+  },
+  "predicate_source": "\"MinimumRequiredVersion\" in config",
+  "encoding": {
+    "vars": {
+      "MinimumRequiredVersion_in_config": {
+        "z3_sort": "Bool",
+        "meaning": "result of the dict-membership test 'MinimumRequiredVersion' in config",
+        "origin": "config is the parsed top-level YAML dict passed to assignGlobalParameters(config, isaInfoMap)"
+      },
+      "config_MinimumRequiredVersion": {
+        "z3_sort": "EnumSort(MinReqVal, [__absent__, 5.0.0, 4.99.0, 6.0.0])",
+        "meaning": "the VALUE config[\"MinimumRequiredVersion\"] when present; sentinel __absent__ models the key being missing",
+        "origin": "seeded domain"
+      }
+    },
+    "invariant": "MinimumRequiredVersion_in_config == (config_MinimumRequiredVersion != __absent__)  -- ties the membership flag to the value enum so the two seeded symbols stay consistent",
+    "z3_predicate": "MinimumRequiredVersion_in_config",
+    "op_surface": ["membership:in (dict key test, encoded as the Bool membership flag)", "compare:!= (invariant tying value enum to flag)"],
+    "notes": "The branch predicate is pure dict-key membership; it depends ONLY on whether the key exists, NOT on its value. The value enum participates only through the consistency invariant. The value matters inside the branch BODY (versionIsCompatible(config[\"MinimumRequiredVersion\"])), which is a different branch (line 660) and not this predicate."
+  },
+  "true_examples": [
+    {"MinimumRequiredVersion_in_config": true, "config_MinimumRequiredVersion": "6.0.0", "config": {"MinimumRequiredVersion": "6.0.0"}, "z3_proven": true, "python_confirmed": true},
+    {"MinimumRequiredVersion_in_config": true, "config_MinimumRequiredVersion": "5.0.0", "config": {"MinimumRequiredVersion": "5.0.0"}, "z3_proven": true, "python_confirmed": true},
+    {"MinimumRequiredVersion_in_config": true, "config_MinimumRequiredVersion": "4.99.0", "config": {"MinimumRequiredVersion": "4.99.0"}, "z3_proven": true, "python_confirmed": true}
+  ],
+  "false_examples": [
+    {"MinimumRequiredVersion_in_config": false, "config_MinimumRequiredVersion": "__absent__", "config": {}, "z3_proven": true, "python_confirmed": true},
+    {"MinimumRequiredVersion_in_config": false, "config_MinimumRequiredVersion": "__absent__", "config": {"OtherKey": "x"}, "z3_proven": true, "python_confirmed": true}
+  ],
+  "z3_output": {
+    "true_check": "sat",
+    "true_model": {"MinimumRequiredVersion_in_config": true, "config_MinimumRequiredVersion": "6.0.0"},
+    "false_check": "sat",
+    "false_model": {"MinimumRequiredVersion_in_config": false, "config_MinimumRequiredVersion": "__absent__"},
+    "grid_enumeration": {
+      "admissible_true_cells": [["present=True", "5.0.0"], ["present=True", "4.99.0"], ["present=True", "6.0.0"]],
+      "admissible_false_cells": [["present=False", "__absent__"]],
+      "inadmissible_cells": "the 4 cells where present and (value==__absent__) disagree are ruled out by the consistency invariant"
+    },
+    "z3_version": "4.16.0"
+  },
+  "pure_helper": "def min_required_version_present(config: dict) -> bool:\n    \"\"\"Mirror of GlobalParameters.py:659 predicate.\n    True iff the config dict contains the 'MinimumRequiredVersion' key.\n    The branch body validates the value via versionIsCompatible; the\n    predicate itself is pure key-membership and ignores the value.\n    \"\"\"\n    return \"MinimumRequiredVersion\" in config",
+  "crosshair": {
+    "ran": true,
+    "version": "0.0.106",
+    "result": "no counterexample (exit 0)",
+    "helper_checked": "def min_required_version_present(keys: List[str]) -> bool: return \"MinimumRequiredVersion\" in keys",
+    "contract_checked": "post: __return__ == (\"MinimumRequiredVersion\" in keys)  (keys models config.keys())",
+    "caveat": "Absence of a CrossHair counterexample is NOT a proof of correctness; it is bounded symbolic exploration. The dict was modeled as a List[str] of keys because CrossHair reasons more directly over a list membership than over an arbitrary symbolic dict; the membership semantics are identical for the predicate."
+  },
+  "verification": {
+    "python_repro": true,
+    "method": "Evaluated the pure helper on each seeded value (and an extra-key-only config) with real Python dict semantics; results matched Z3 exactly.",
+    "true_witness_check": "config={'MinimumRequiredVersion':'6.0.0'} -> pred=True; also '5.0.0' and '4.99.0' -> True",
+    "false_witness_check": "config={} -> pred=False; config={'OtherKey':'x'} -> pred=False"
+  },
+  "classification_rationale": "Predicate is a pure Python dict-key membership test over `config`, the parsed top-level YAML dict argument to assignGlobalParameters. No isinstance on live objects, no AST nodeType dispatch, no os/filesystem/gpu probe participates. The taken/not-taken decision is fully determined by whether the YAML supplied the 'MinimumRequiredVersion' key -- a public (YAML-file) input. Hence fully-static. solver_status is sat (not sat-bounded): the membership domain is a finite Bool and the seeded value enum is finite; no integer range was bounded. Caveat for downstream: `config` is YAML-derived, so this branch is steerable purely by public input (include vs omit the key). The branch VALUE (used at line 660) does not affect THIS predicate.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Solve/f6f7dc557d11e74207703507849f2e84fc1ef107.json"
+}

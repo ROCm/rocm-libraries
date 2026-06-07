@@ -1,0 +1,17 @@
+{
+  "id": "4914224d6e015f0cc6a041a74683fe38f6eae196",
+  "file": "Tensile/Common/GlobalParameters.py",
+  "function": "assignGlobalParameters",
+  "branch_kind": "if",
+  "location": {
+    "line": 660,
+    "col": 8
+  },
+  "predicate_source": "not versionIsCompatible(config[\"MinimumRequiredVersion\"])",
+  "referenced_symbols": [
+    "config",
+    "versionIsCompatible"
+  ],
+  "derived_symbols": [],
+  "rank": 8
+}

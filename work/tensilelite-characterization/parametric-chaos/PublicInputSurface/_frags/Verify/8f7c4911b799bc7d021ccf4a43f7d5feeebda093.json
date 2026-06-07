@@ -1,0 +1,15 @@
+{
+  "branch_id": "8f7c4911b799bc7d021ccf4a43f7d5feeebda093",
+  "location": "Tensile/Tensile.py:536",
+  "predicate": "not os.path.exists(restoreLogPath)",
+  "confirmed": false,
+  "status": "UNKNOWN",
+  "downgraded_to": null,
+  "method": "Independent re-check in-container (tl-char). Read real code Tensile.py:533-537: guard if args.RestoreLog:; restoreLogPath = Path(os.path.abspath(args.RestoreLog)); if not os.path.exists(restoreLogPath): printExit(...). Re-executed BOTH claimed witnesses against the REAL predicate using the real Path(os.path.abspath(...)) wrapping: (TRUE) absent path /tmp/restore_nonexistent_abc123.log -> os.path.exists=False -> predicate=True (TRUE branch -> printExit). (FALSE) created file -> os.path.exists=True -> predicate=False (FALSE branch -> restore_prob_sol_map). Both reproduce exactly. HOWEVER classification is runtime-dependent: branch outcome is decided by live filesystem state, not by any static cli/yaml/int/bool public-input VALUE (the path string is public input, but exists() is an I/O oracle). The solver sat over a free Bool abstraction is trivially satisfiable both ways and is NOT proof of a static-input-determined branch. Per checker rules, runtime-dependent stays confirmed=false / status=UNKNOWN; weaker claim not upgraded.",
+  "claimed_solver_status": "unknown",
+  "claimed_classification": "runtime-dependent",
+  "reproduced_true_example": {"restoreLogPath": "/tmp/restore_nonexistent_abc123.log", "os.path.exists": false, "predicate_value": true, "reproduced": true},
+  "reproduced_false_example": {"restoreLogPath": "/tmp/restore_existing_check.log", "os.path.exists": true, "predicate_value": false, "reproduced": true},
+  "notes": "Code matches claim verbatim. Cosmetic discrepancy: restoreLogPath is a pathlib.Path not a str as the pure_helper signature implies; os.path.exists accepts both so semantics identical and witnesses hold. Agreeing with solve frag status=unknown/runtime-dependent. confirmed=false (runtime-dependent), status=UNKNOWN, no downgrade needed since the claim was already UNKNOWN.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Verify/8f7c4911b799bc7d021ccf4a43f7d5feeebda093.json"
+}

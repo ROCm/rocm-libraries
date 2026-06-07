@@ -1,0 +1,23 @@
+{
+  "branch_id": "aa18a787b08bf05166d8f981c6cefe39f0e5a016",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Reify/aa18a787b08bf05166d8f981c6cefe39f0e5a016.json",
+  "reified": true,
+  "test_paths": [
+    "projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Tensile_L409_char.py"
+  ],
+  "test_count": 6,
+  "passed": true,
+  "pytest_invocation": "pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Tensile_L409_char.py",
+  "pytest_result": "6 passed in 0.63s",
+  "source_location": {
+    "file": "Tensile/Tensile.py",
+    "line": 409,
+    "enclosing_function": "restore_prob_sol_map",
+    "node_kind": "if"
+  },
+  "predicate": "runningTuning",
+  "test_strategy": "pure-helper + integration via restore_prob_sol_map with tmp logfiles",
+  "true_witness": {"runningTuning": true, "logfile_has_sentinel": true},
+  "false_witness": {"runningTuning": false, "logfile_has_sentinel": false},
+  "notes": "6 tests: 4 pure-helper (predicate assignment mirror at line 405) + 2 integration (restore_prob_sol_map called with real tmp logfiles). FALSE branch: no sentinel line, runningTuning stays False, if block skipped, returns {}. TRUE branch: sentinel present, runningTuning set True, block entered, clientExit terminates, returns {}. All tests pass 0 failed."
+}

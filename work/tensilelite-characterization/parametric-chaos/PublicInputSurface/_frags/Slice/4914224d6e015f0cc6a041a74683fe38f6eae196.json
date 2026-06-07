@@ -1,0 +1,64 @@
+{
+  "branch_id": "4914224d6e015f0cc6a041a74683fe38f6eae196",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Slice/4914224d6e015f0cc6a041a74683fe38f6eae196.json",
+  "source_location": {
+    "file": "Tensile/Common/GlobalParameters.py",
+    "line": 660,
+    "enclosing_function": "assignGlobalParameters"
+  },
+  "predicate_normalized": {
+    "op": "not",
+    "operand": {
+      "op": "call",
+      "func": "versionIsCompatible",
+      "args": [
+        {
+          "op": "subscript",
+          "obj": "config",
+          "key": "MinimumRequiredVersion"
+        }
+      ]
+    },
+    "semantics": "true when the YAML-supplied MinimumRequiredVersion string is NOT compatible with the baked-in Tensile __version__; versionIsCompatible returns False when qMajor != tMajor, or (qMinor,qStep) > (tMinor,tStep) lexicographically as integers",
+    "raw_source": "if not versionIsCompatible(config[\"MinimumRequiredVersion\"]):"
+  },
+  "public_inputs": [
+    {
+      "name": "config[\"MinimumRequiredVersion\"]",
+      "kind": "yaml",
+      "description": "The MinimumRequiredVersion key in the GlobalParameters section of the benchmark config YAML file. The YAML file path reaches assignGlobalParameters via: CLI arg ConfigFile -> LibraryIO.read(configPaths[0]) -> config['GlobalParameters'] -> assignGlobalParameters(config.get('GlobalParameters', {}), isaInfoMap) at Tensile/Tensile.py:665. In the TensileCreateLibrary/Run.py call path (line 908) arguments comes from parseArguments() (CLI only) and never contains MinimumRequiredVersion, so the outer guard 'if \"MinimumRequiredVersion\" in config' (line 659) always skips line 660 in that path.",
+      "yaml_key_path": "GlobalParameters.MinimumRequiredVersion",
+      "example_value": "5.0.0"
+    },
+    {
+      "name": "__version__",
+      "kind": "global-parameter",
+      "description": "The Tensile package version, hardcoded as the string '5.0.0' in Tensile/__init__.py line 30. Imported into Tensile/Common/Utilities.py at line 39 and used by versionIsCompatible to supply (tMajor, tMinor, tStep). This is a baked-in constant at package install time; it is not injectable via CLI, env, or YAML at runtime.",
+      "source_file": "Tensile/__init__.py",
+      "source_line": 30,
+      "current_value": "5.0.0"
+    }
+  ],
+  "derived_symbols": [
+    {
+      "name": "config",
+      "derived_from": "assignGlobalParameters parameter; in primary path = config.get('GlobalParameters', {}) from the YAML-loaded dict at Tensile/Tensile.py:665"
+    },
+    {
+      "name": "config[\"MinimumRequiredVersion\"]",
+      "derived_from": "config"
+    },
+    {
+      "name": "versionIsCompatible",
+      "derived_from": "imported from Tensile.Common.Utilities; uses __version__ (global-parameter) and queryVersionString (= config['MinimumRequiredVersion'])"
+    }
+  ],
+  "external_state": [],
+  "notes": [
+    "The outer guard at line 659 ('if \"MinimumRequiredVersion\" in config:') means line 660 is only reachable when the key is present in the config dict. When config is empty ({}) or lacks the key, the predicate is never evaluated.",
+    "versionIsCompatible (Tensile/Common/Utilities.py:148) splits both the query string and __version__ on '.' and compares major/minor/step as integers. It returns False (and the branch fires -> printExit) when: major differs, OR minor is greater, OR minor equals and step is greater.",
+    "__version__ is not injectable at runtime; it is the literal string '5.0.0' written at Tensile/__init__.py:30.",
+    "No os.environ keys, filesystem probes, or hardware probes influence this predicate evaluation. The predicate is a pure function of: (a) the YAML-file content and (b) the baked-in package version.",
+    "In the TensileCreateLibrary/Run.py call path (line 908), 'arguments' is built from parseArguments() (argparse over CLI) and does not include MinimumRequiredVersion, so the outer guard at line 659 always short-circuits and line 660 is never reached via that path."
+  ]
+}

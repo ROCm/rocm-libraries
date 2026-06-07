@@ -1,0 +1,66 @@
+{
+  "branch_id": "2075748886b1e54fc040f8498f92177c7cd92130",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Solve/2075748886b1e54fc040f8498f92177c7cd92130.json",
+  "source_location": {
+    "file": "Tensile/Configuration.py",
+    "line": 730,
+    "enclosing_function": "ExpressionEvaluator.evaluate",
+    "raw_source": "elif nodeType == \"Attribute\":"
+  },
+  "predicate": "nodeType == \"Attribute\"",
+  "domains": {
+    "nodeType": {"type": "enum", "values": ["Attribute", "Name"]},
+    "expressionStr": {"type": "str", "values": ["Program.Network.PORT >= MaxPort", "BenchmarkTaskSize > 0"]}
+  },
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "runtime-dependent",
+  "encoding": {
+    "model": "nodeType encoded as a Z3 EnumSort('NodeType', ['Attribute','Name']); predicate = (nodeType == Attribute). The op-surface needed here is a single equality over an enum domain (compare op), within the harvested boolean/compare boundary. No arith/bit/unary/conditional operators appear in this branch's guard.",
+    "z3_true_model": "[nodeType = Attribute]  (Solver().add(nodeType==Attribute) -> sat)",
+    "z3_false_model": "[nodeType = Name]  (Solver().add(Not(nodeType==Attribute)) -> sat)",
+    "why_runtime_dependent": "nodeType is not a directly-supplied public input. It is computed at Configuration.py:627 as type(node).__name__, where node is a live ast.AST node produced by ast.parse(expressionStr, mode='exec') and visited during recursive descent of ExpressionEvaluator.evaluate(). The branch fires only when the current node in the AST walk is an ast.Attribute instance, which happens iff expressionStr contains dotted attribute access (e.g. 'obj.attr'). This is step-3 dispatch over a parsed tree, so the true derivation is runtime-dependent; the enum-domain Z3 model is solver-proven only under the seeded-enum assumption that nodeType ranges over {Attribute, Name}."
+  },
+  "true_examples": [
+    {
+      "by": "z3-model",
+      "nodeType": "Attribute",
+      "note": "Solver-proven over the seeded enum domain: Solver().add(nodeType == Attribute) returns sat with model [nodeType = Attribute]."
+    },
+    {
+      "by": "value-AST",
+      "expressionStr": "Program.Network.PORT >= MaxPort",
+      "nodeType_at_attribute_node": "Attribute",
+      "note": "Empirically confirmed in-container: ast.parse('Program.Network.PORT >= MaxPort', mode='exec') yields node types {Module, Expr, Compare, GtE, Attribute, Name, Load}. When evaluate() descends to the 'Program.Network.PORT' subtree, type(node).__name__ == 'Attribute', so the line-730 branch is taken. This is the only seeded expressionStr that reaches the branch."
+    },
+    {
+      "by": "crosshair-refutation",
+      "node_type": "Attribute",
+      "note": "CrossHair refuted a deliberately-false post-condition (never_attribute asserting __return__ == False): error 'false when calling never_attribute(Attribute) (which returns True)'. Independent concrete TRUE witness."
+    }
+  ],
+  "false_examples": [
+    {
+      "by": "z3-model",
+      "nodeType": "Name",
+      "note": "Solver-proven over the seeded enum domain: Solver().add(Not(nodeType == Attribute)) returns sat with model [nodeType = Name]."
+    },
+    {
+      "by": "value-AST",
+      "expressionStr": "BenchmarkTaskSize > 0",
+      "nodeType_visited": ["Module", "Expr", "Compare", "Name", "Constant", "Gt"],
+      "note": "Empirically confirmed in-container: ast.parse('BenchmarkTaskSize > 0', mode='exec') yields node types {Module, Expr, Compare, Gt, Name, Constant, Load}. No Attribute node is ever produced, so for every node visited during evaluate() the line-730 guard is False. This is the production-representative case (TensileBenchmarkCluster.py:283 passes exactly this string)."
+    }
+  ],
+  "pure_helper": "def attribute_branch(node_type: str) -> bool:\n    \"\"\"Mirror of Configuration.py:730 dispatch (ExpressionEvaluator.evaluate).\n    Returns True iff the current AST node's type name is 'Attribute',\n    i.e. the line-730 branch is taken. node_type == type(node).__name__.\n    \"\"\"\n    return node_type == \"Attribute\"",
+  "crosshair": {
+    "ran": true,
+    "result": "The valid helper (attribute_branch with post: __return__ == (node_type == 'Attribute')) passed with no counterexample. A deliberately-false twin (never_attribute, post: __return__ == False) was REFUTED with the concrete input node_type='Attribute' (returns True), giving an independent TRUE witness. crosshair diffbehavior against a constant-false twin found NO difference within 14/60 iterations -> CrossHair did not stumble onto the specific 'Attribute' string literal via blind string search. CAVEAT (per task): absence of a CrossHair counterexample is NOT a proof; authoritative witnesses are the Z3 enum-domain models and the empirical AST parses above."
+  },
+  "notes": [
+    "Z3 was actually executed in-container (tl-char): TRUE -> sat [nodeType=Attribute], FALSE -> sat [nodeType=Name]. Both witnesses are real solver output, not hand-waved.",
+    "The branch guard itself is a single enum equality (solver-trivial). The runtime-dependent classification is due to the PROVENANCE of nodeType: type(node).__name__ over a live parsed ast.AST node, reached only by recursive AST descent -- not a direct cli/yaml/int/bool public input.",
+    "Reachability from EXTERNAL public input is effectively dead in production: the two live addConstraint() call sites (TensileBenchmarkCluster.py:283 'BenchmarkTaskSize > 0', :288 'RunDeployStep or RunBenchmarkStep or RunResultsStep') use Name-only expressions whose ASTs contain no Attribute node. The dotted expressions that WOULD reach line 730 (Configuration.py:806-810) live inside the ProjectConfig class docstring and are never executed. The branch is structurally reachable (the characterization suite exercises it by passing dotted expressions directly to addConstraint) but not reachable from any YAML/CLI/env public input.",
+    "solver_status is 'sat' (both polarities) over the seeded enum domain; classification is 'runtime-dependent' because the real input is a parsed AST tree, matching task step 3 (nodeType dispatch over a parsed tree)."
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "branch_id": "2c7170bfd056c780a059b396e0cbb8a938384ecc",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Domain/2c7170bfd056c780a059b396e0cbb8a938384ecc.json",
+  "domains": {
+    "__name__": {
+      "type": "enum",
+      "values": ["__main__", "Tensile.Tensile"]
+    }
+  }
+}

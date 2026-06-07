@@ -1,0 +1,57 @@
+{
+  "branch_id": "2075748886b1e54fc040f8498f92177c7cd92130",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Slice/2075748886b1e54fc040f8498f92177c7cd92130.json",
+  "source_location": {
+    "file": "Tensile/Configuration.py",
+    "line": 730,
+    "enclosing_function": "evaluate"
+  },
+  "predicate_normalized": {
+    "op": "eq",
+    "lhs": {
+      "op": "call",
+      "func": "type(node).__name__",
+      "note": "Python built-in: returns the __name__ of the runtime class of `node`"
+    },
+    "rhs": {
+      "op": "literal",
+      "value": "Attribute"
+    },
+    "semantics": "true when the ast.AST node passed to evaluate() is an instance of ast.Attribute; i.e. the constraint expression string contains a dotted attribute access (e.g. obj.attr)",
+    "raw_source": "elif nodeType == \"Attribute\":"
+  },
+  "public_inputs": [
+    {
+      "name": "expressionStr",
+      "kind": "derived-local",
+      "description": "The constraint expression string passed to ProjectConfig.addConstraint(). All production call sites supply hard-coded string literals: TensileBenchmarkCluster.py:283 passes 'BenchmarkTaskSize > 0' and line 288 passes 'RunDeployStep or RunBenchmarkStep or RunResultsStep'. Neither of those strings contains dotted attribute access, so the 'Attribute' branch (line 730) is unreachable in production execution. The only expressions that WOULD contain ast.Attribute nodes appear in lines 806-810 of Configuration.py, but those are inside a class docstring (lines 769-812) and are never executed. No YAML file, CLI argument, or environment variable supplies an expressionStr at runtime."
+    }
+  ],
+  "derived_symbols": [
+    {
+      "name": "nodeType",
+      "derived_from": "type(node).__name__ at Configuration.py:627; Python built-in applied to the function parameter `node`"
+    },
+    {
+      "name": "node",
+      "derived_from": "parameter of evaluate(self, node, namesContext); originates from ExpressionEvaluator().evaluate(tree.value, self) at Configuration.py:932, where tree.value is the ast.Module produced by ast.parse(expressionStr, mode='exec') stored in the constraints dict; sub-nodes are passed recursively as evaluate() descends the AST"
+    },
+    {
+      "name": "tree.value",
+      "derived_from": "Parameter.value attribute (the stored ast.Module); set via addConstraint -> createValue(expressionStr, ast.parse(expressionStr, mode='exec')) at Configuration.py:925"
+    },
+    {
+      "name": "ast.parse(expressionStr)",
+      "derived_from": "Python stdlib ast.parse called on the expressionStr literal; the structure of the resulting AST (and therefore whether any Attribute nodes appear) is fully determined by the string itself"
+    }
+  ],
+  "external_state": [],
+  "notes": [
+    "nodeType = type(node).__name__ (line 627) is computed in every call to evaluate(). The predicate at line 730 fires only when the current node in the AST walk is an ast.Attribute instance.",
+    "ast.Attribute nodes appear only when the constraint expression contains dotted attribute access (e.g., 'Program.Network.PORT >= MaxPort'). No such expression is passed to addConstraint() in any reachable production code path.",
+    "The three addConstraint() calls that DO use dotted expressions (Configuration.py:806-810) are inside the ProjectConfig class docstring (triple-quoted string, lines 769-812) and are never executed.",
+    "The two live production call sites (TensileBenchmarkCluster.py:283,288) use simple Name-only expressions ('BenchmarkTaskSize > 0' and 'RunDeployStep or RunBenchmarkStep or RunResultsStep'). Their ASTs contain only Compare/BoolOp/Name nodes, so the Attribute branch (line 730) is never reached in those paths.",
+    "No os.environ keys, filesystem probes, or GPU probes influence nodeType. The predicate is a pure function of the hard-coded expressionStr literals embedded in source code.",
+    "The Attribute branch IS exercised in the characterization test suite (test_configuration_char.py) by passing dotted expressions directly to addConstraint(), verifying the branch is structurally reachable but not reachable from any external public input."
+  ]
+}

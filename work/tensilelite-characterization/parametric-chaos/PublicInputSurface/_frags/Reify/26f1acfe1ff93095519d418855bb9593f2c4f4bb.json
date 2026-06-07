@@ -1,0 +1,21 @@
+{
+  "branch_id": "26f1acfe1ff93095519d418855bb9593f2c4f4bb",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Tensile_L603_char.py"
+  ],
+  "passed": true,
+  "tests": [
+    "test_l603_true_all_conjuncts_hold",
+    "test_l603_false_missing_library_logic_key",
+    "test_l603_false_build_only_set",
+    "test_l603_false_cpu_only_set",
+    "test_l603_false_use_eff_like_false",
+    "test_l603_real_predicate_dict_membership_true",
+    "test_l603_real_predicate_dict_membership_key_absent"
+  ],
+  "run_cmd": "pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Tensile_L603_char.py",
+  "result": "7 passed in 0.23s",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Reify/26f1acfe1ff93095519d418855bb9593f2c4f4bb.json",
+  "notes": "Predicate: LibraryLogic in config and UseEffLike and not buildOnly and not globalParameters[CpuOnly] (Tensile/Tensile.py:603). Pure 4-ary boolean conjunction; exhaustive 2^4 = 1 TRUE / 15 FALSE. pure helper liblogic_freq_branch mirrors predicate verbatim. 5 pure-helper tests cover the 1 TRUE witness plus 4 minimal-failure-mode FALSE witnesses (one per conjunct negated). 2 real-predicate tests reconstruct the expression using actual Python dicts (dict membership + globalParameters indexing) for the TRUE and key-absent FALSE cases. All 7 pass deterministically in tl-char (CPU-only, no GPU probe, no coverage flag). Caveat: Tensile.py:600 forces UseEffLike=False on RHEL8, making the TRUE branch unreachable on RHEL8 -- input-reachability constraint only, not part of this guard truth table."
+}

@@ -1,0 +1,23 @@
+{
+  "branch_id": "f6f7dc557d11e74207703507849f2e84fc1ef107",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_GlobalParameters_L659_char.py"
+  ],
+  "passed": true,
+  "tests": [
+    "test_key_present_version_6_0_0",
+    "test_key_present_version_5_0_0",
+    "test_key_present_version_4_99_0",
+    "test_key_present_alongside_other_keys",
+    "test_key_absent_empty_config",
+    "test_key_absent_other_key_only",
+    "test_key_absent_multiple_unrelated_keys",
+    "test_predicate_ignores_value_content",
+    "test_similar_key_name_does_not_trigger"
+  ],
+  "run_cmd": "pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_GlobalParameters_L659_char.py",
+  "result": "9 passed in 0.22s",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Reify/f6f7dc557d11e74207703507849f2e84fc1ef107.json",
+  "notes": "Predicate: \"MinimumRequiredVersion\" in config (Tensile/Common/GlobalParameters.py:659). Fully-static pure dict-key membership test inside assignGlobalParameters(config, isaInfoMap). TRUE branch: 4 tests cover all 3 solve-fragment true_examples (6.0.0, 5.0.0, 4.99.0) plus key-alongside-other-keys. FALSE branch: 3 tests cover both solve-fragment false_examples (empty dict, OtherKey-only) plus multi-key config. Invariant tests: value-content ignored (5 version strings all True) and near-miss key names (lowercase, truncated) stay False. Pure helper min_required_version_present() mirrors the predicate directly. All 9 pass deterministically in tl-char (CPU-only, no GPU probe, no coverage flag)."
+}

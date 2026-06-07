@@ -1,0 +1,22 @@
+{
+  "branch_id": "c63babfc10d38c09385da1dacf9fbb9c2c64c067",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Tensile_L534_char.py"
+  ],
+  "passed": true,
+  "tests": [
+    "TestRestoreLogEnabledHelper::test_true_nonempty_path",
+    "TestRestoreLogEnabledHelper::test_true_any_nonempty_string",
+    "TestRestoreLogEnabledHelper::test_true_whitespace_only",
+    "TestRestoreLogEnabledHelper::test_false_none",
+    "TestRestoreLogEnabledHelper::test_false_empty_string",
+    "TestRestoreLogArgparse::test_absent_flag_gives_none",
+    "TestRestoreLogArgparse::test_present_nonempty_gives_truthy",
+    "TestRestoreLogArgparse::test_present_empty_gives_falsy"
+  ],
+  "run_cmd": "pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Tensile_L534_char.py",
+  "result": "8 passed in 0.25s",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Reify/c63babfc10d38c09385da1dacf9fbb9c2c64c067.json",
+  "notes": "Predicate: args.RestoreLog (Tensile/Tensile.py:534). The argparse dest RestoreLog is type=str, default=None (no default set). Python truthiness: True iff the value is a non-None, non-empty string. Two test classes: (1) TestRestoreLogEnabledHelper -- a pure in-module mirror function restore_log_enabled() asserting TRUE for nonempty path/char/whitespace-only, FALSE for None and empty string; (2) TestRestoreLogArgparse -- reconstructs the exact argparse fragment and verifies that absent flag => None (falsy), nonempty flag value => truthy, empty flag value => falsy. All 8 pass deterministically in tl-char (CPU-only, no coverage flag)."
+}

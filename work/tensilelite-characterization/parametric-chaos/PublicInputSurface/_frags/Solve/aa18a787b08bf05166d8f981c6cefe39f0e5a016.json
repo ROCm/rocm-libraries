@@ -1,0 +1,53 @@
+{
+  "branch_id": "aa18a787b08bf05166d8f981c6cefe39f0e5a016",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "fully-static",
+  "source_location": {
+    "file": "Tensile/Tensile.py",
+    "line": 409,
+    "col": 16,
+    "enclosing_function": "restore_prob_sol_map",
+    "branch_kind": "if"
+  },
+  "predicate_source": "runningTuning",
+  "encoding": {
+    "vars": {
+      "runningTuning": {"z3_sort": "Bool", "origin": "local bool, initialized False at Tensile.py:388; mutated only by 'runningTuning = line.startswith(startHint)' at line 405 (a boolean assignment) while parsing the tuning logfile"}
+    },
+    "z3_predicate": "runningTuning",
+    "op_surface": ["boolean:identity"],
+    "notes": "The branch predicate is a single boolean variable read. Its VALUE is data-dependent on logfile content (line.startswith(startHint)), but the predicate as an expression over the seeded boolean domain is a trivial identity and fully solver-decidable. No isinstance/nodeType/os probe participates in the predicate itself."
+  },
+  "true_examples": [
+    {"runningTuning": true, "z3_proven": true}
+  ],
+  "false_examples": [
+    {"runningTuning": false, "z3_proven": true}
+  ],
+  "grid_enumeration": {
+    "domain": "runningTuning in {false, true} (2 cells)",
+    "true_cells": [[true]],
+    "false_cells": [[false]]
+  },
+  "pure_helper": "def running_tuning_branch(running_tuning: bool) -> bool:\n    \"\"\"Mirror of Tensile.py:409 if runningTuning:.\n    True iff the parser has entered the tuning-results region of the log\n    (i.e. a line starting with startHint has already been seen).\n    post: __return__ == running_tuning\n    \"\"\"\n    return running_tuning",
+  "crosshair": {
+    "ran": true,
+    "version": "0.0.106",
+    "command": "python3 -m crosshair check --per_condition_timeout=15 _helper_aa18.py",
+    "result": "no counterexample (exit 0)",
+    "contracts_checked": [
+      "post: __return__ == running_tuning"
+    ],
+    "caveat": "Absence of a counterexample from CrossHair is NOT a proof of correctness; it is bounded symbolic exploration over a single bool. For an identity predicate it is conclusive in practice but still not a formal proof."
+  },
+  "verification": {
+    "z3_repro": true,
+    "z3_version": "4.16.0",
+    "method": "Encoded the predicate as a single Z3 Bool. Solved pred (sat, runningTuning=True) and Not(pred) (sat, runningTuning=False); both models match the seeded boolean domain exactly.",
+    "true_witness_check": "runningTuning=True -> pred=True",
+    "false_witness_check": "runningTuning=False -> pred=False"
+  },
+  "classification_rationale": "Predicate is a pure boolean read of a local variable that is only ever assigned boolean values (init False at line 388; reassigned via line.startswith(...) at line 405). No isinstance on live objects, no nodeType dispatch over a parsed tree, no os/filesystem/gpu probe participates in the predicate itself. The branch BODY iterates over file lines, but that I/O is not part of the predicate. Hence fully-static. solver_status is plain sat (not sat-bounded) because the domain is the complete boolean lattice {false,true} with no integer bounding.",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Solve/aa18a787b08bf05166d8f981c6cefe39f0e5a016.json"
+}

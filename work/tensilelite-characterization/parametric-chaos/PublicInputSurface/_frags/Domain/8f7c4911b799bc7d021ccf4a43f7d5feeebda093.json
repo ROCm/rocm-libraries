@@ -1,0 +1,21 @@
+{
+  "branch_id": "8f7c4911b799bc7d021ccf4a43f7d5feeebda093",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Domain/8f7c4911b799bc7d021ccf4a43f7d5feeebda093.json",
+  "domains": {
+    "restoreLogPath": {
+      "type": "str",
+      "values": [
+        "/tmp/restore_existing.log",
+        "/tmp/restore_nonexistent_abc123.log"
+      ]
+    },
+    "filesystem:exists(restoreLogPath)": {
+      "type": "bool",
+      "values": [
+        true,
+        false
+      ]
+    }
+  },
+  "notes": "The predicate not os.path.exists(restoreLogPath) has one program symbol (restoreLogPath, a Path derived from --restore-from-log CLI arg) and one external-state axis (whether the path exists on disk). Guard at line 534 ensures restoreLogPath is only reachable when args.RestoreLog is truthy. Two str values cover both filesystem branches."
+}

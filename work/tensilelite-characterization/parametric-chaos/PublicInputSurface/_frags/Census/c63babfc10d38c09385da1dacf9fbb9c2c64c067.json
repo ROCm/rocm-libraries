@@ -1,0 +1,22 @@
+{
+  "id": "c63babfc10d38c09385da1dacf9fbb9c2c64c067",
+  "file": "Tensile/Tensile.py",
+  "function": "Tensile",
+  "branch_kind": "if",
+  "location": {
+    "line": 534,
+    "col": 4
+  },
+  "predicate_source": "args.RestoreLog",
+  "referenced_symbols": [
+    "args"
+  ],
+  "derived_symbols": [
+    {
+      "name": "args",
+      "derived_from": "argParser.parse_args(userArgs)",
+      "category": "cli"
+    }
+  ],
+  "rank": 5
+}

@@ -1,0 +1,65 @@
+{
+  "branch_id": "c63babfc10d38c09385da1dacf9fbb9c2c64c067",
+  "solver": "z3",
+  "solver_status": "sat",
+  "classification": "fully-static",
+  "source_location": {
+    "file": "Tensile/Tensile.py",
+    "line": 534,
+    "enclosing_function": "Tensile",
+    "branch_kind": "if"
+  },
+  "predicate_source": "if args.RestoreLog:",
+  "encoding": {
+    "vars": {
+      "RestoreLog_is_none": {"z3_sort": "Bool", "origin": "args.RestoreLog is None (CLI --restore-from-log, type=str, default=None, absent flag => None)"},
+      "RestoreLog_len": {"z3_sort": "Int", "meaning": "len(args.RestoreLog) when not None", "bound": "RestoreLog_len >= 0"}
+    },
+    "z3_predicate": "And(Not(RestoreLog_is_none), RestoreLog_len > 0)",
+    "z3_string_theory_predicate": "And(present, Length(String(RestoreLog)) > 0)",
+    "op_surface": ["unary:not", "boolean:and", "compare:>", "truthiness:str"],
+    "notes": "Python truthiness of a str: True iff the value is not None and not the empty string. Modeled both with an int-length abstraction and directly with Z3 string theory; both agree."
+  },
+  "true_examples": [
+    {"RestoreLog": "/path/to/restore.log", "argv": ["--restore-from-log", "/path/to/restore.log"], "z3_proven": true, "argparse_confirmed": true}
+  ],
+  "false_examples": [
+    {"RestoreLog": null, "argv": [], "reason": "flag absent => None (falsy)", "z3_proven": true, "argparse_confirmed": true},
+    {"RestoreLog": "", "argv": ["--restore-from-log", ""], "reason": "empty string is falsy", "z3_proven": true, "argparse_confirmed": true}
+  ],
+  "seeded_domain": {
+    "RestoreLog": [null, "/path/to/restore.log"],
+    "true_cells": ["/path/to/restore.log"],
+    "false_cells": [null],
+    "extra_false_outside_seed": [""]
+  },
+  "z3_models": {
+    "true": {"RestoreLog_is_none": false, "RestoreLog_len": 1},
+    "false": {"RestoreLog_is_none": true, "RestoreLog_len": 1},
+    "str_true": {"present": true, "RestoreLog": "A"},
+    "str_false": {"present": false}
+  },
+  "pure_helper": "from typing import Optional\n\n\ndef restore_log_enabled(restore_log: Optional[str]) -> bool:\n    \"\"\"Mirror of Tensile/Tensile.py:534  `if args.RestoreLog:`.\n\n    RestoreLog is an argparse str dest with default None. The branch is taken\n    iff the value is truthy: a non-None, non-empty string.\n\n    post: __return__ == (restore_log is not None and len(restore_log) > 0)\n    \"\"\"\n    return bool(restore_log)",
+  "crosshair": {
+    "ran": true,
+    "version": "0.0.106",
+    "command": "crosshair check --per_condition_timeout=15 _helper_c63.py",
+    "result": "no counterexample (exit 0)",
+    "contracts_checked": [
+      "post: __return__ == (restore_log is not None and len(restore_log) > 0)"
+    ],
+    "caveat": "Absence of a counterexample from CrossHair is NOT a proof; it is bounded symbolic exploration over Optional[str]."
+  },
+  "verification": {
+    "argparse_repro": true,
+    "method": "Reconstructed the --restore-from-log argument (dest=RestoreLog, type=str, default=None) and parsed each witness argv, then evaluated bool(args.RestoreLog).",
+    "results": [
+      "argv=[] -> RestoreLog=None -> pred=False",
+      "argv=[--restore-from-log, /path/to/restore.log] -> RestoreLog=/path/to/restore.log -> pred=True",
+      "argv=[--restore-from-log, ] -> RestoreLog= -> pred=False"
+    ],
+    "matches_z3": true
+  },
+  "classification_rationale": "The predicate is a pure Python truthiness test on a single CLI-derived string input (argparse dest RestoreLog, type=str, default=None). No isinstance on live objects, no nodeType dispatch, no os/filesystem/gpu probe participates in the PREDICATE. The branch BODY (lines 535-540) does call os.path.abspath/os.path.exists and restore_prob_sol_map, but that filesystem dependence is downstream of the branch, not in the condition. Hence fully-static. solver_status=sat: both the True and False cases are concrete SAT models (no integer bounding was needed; len>0 vs the None/empty cases fully partition the domain).",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Solve/c63babfc10d38c09385da1dacf9fbb9c2c64c067.json"
+}

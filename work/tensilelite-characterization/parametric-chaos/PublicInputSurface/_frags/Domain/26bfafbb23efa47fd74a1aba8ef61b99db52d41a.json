@@ -1,0 +1,15 @@
+{
+  "branch_id": "26bfafbb23efa47fd74a1aba8ef61b99db52d41a",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Domain/26bfafbb23efa47fd74a1aba8ef61b99db52d41a.json",
+  "domains": {
+    "nodeType": {
+      "type": "enum",
+      "values": [
+        "Assign",
+        "Call",
+        "Name",
+        "Constant"
+      ]
+    }
+  }
+}

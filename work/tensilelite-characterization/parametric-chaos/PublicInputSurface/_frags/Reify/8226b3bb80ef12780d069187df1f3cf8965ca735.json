@@ -1,0 +1,32 @@
+{
+  "branch_id": "8226b3bb80ef12780d069187df1f3cf8965ca735",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Reify/8226b3bb80ef12780d069187df1f3cf8965ca735.json",
+  "kind": "reify",
+  "reified": true,
+  "test_paths": [
+    "projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Configuration_L673_char.py"
+  ],
+  "passed": true,
+  "source_file": "Tensile/Configuration.py",
+  "source_line": 673,
+  "predicate": "nodeType == \"Call\"",
+  "true_witness": {
+    "expression": "abs(x)",
+    "inner_node_type": "Call",
+    "context": {
+      "x": 2
+    },
+    "outcome": "AssertionError: Missing operation in funcMap: abs"
+  },
+  "false_witness": {
+    "expression": "BenchmarkTaskSize > 0",
+    "inner_node_type": "Compare",
+    "context": {
+      "BenchmarkTaskSize": 256
+    },
+    "outcome": "True (never reaches L673)"
+  },
+  "test_count": 12,
+  "pytest_command": "pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Configuration_L673_char.py",
+  "pytest_result": "12 passed in 0.23s"
+}

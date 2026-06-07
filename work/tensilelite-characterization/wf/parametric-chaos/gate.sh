@@ -24,5 +24,6 @@ done
 echo "== Combine + report =="
 docker exec -e COVERAGE_FILE=$PROJ/.coverage.g_combined -w $PROJ $CON \
   coverage combine --keep $PROJ/.coverage.g_main $PROJ/.coverage.g_cpu $PROJ/.coverage.g_client $PROJ/.coverage.g_tcl
-docker exec -e COVERAGE_FILE=$PROJ/.coverage.g_combined -w $PROJ $CON coverage report | tail -1
+# grep '^TOTAL' (NOT tail -1: coverage prints "N empty files skipped." as its real last line)
+docker exec -e COVERAGE_FILE=$PROJ/.coverage.g_combined -w $PROJ $CON coverage report | grep -E "^TOTAL"
 echo "Part A pytest exit: $A  (expect 0 failed; TOTAL >= 80.60% is the no-regression guard)"

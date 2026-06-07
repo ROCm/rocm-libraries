@@ -1,0 +1,39 @@
+{
+  "branch_id": "2075748886b1e54fc040f8498f92177c7cd92130",
+  "phase": "Reify",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Reify/2075748886b1e54fc040f8498f92177c7cd92130.json",
+  "test_file": "Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Configuration_L730_char.py",
+  "test_basename": "test_pchaos_Configuration_L730_char.py",
+  "testdir": "/work/projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/PublicInputSurface",
+  "source_location": {
+    "file": "Tensile/Configuration.py",
+    "line": 730,
+    "enclosing_function": "ExpressionEvaluator.evaluate",
+    "raw_source": "elif nodeType == \"Attribute\":"
+  },
+  "predicate": "nodeType == \"Attribute\"",
+  "pytestmark": "pytest.mark.unit",
+  "cpu_only": true,
+  "test_count": 11,
+  "test_classes": [
+    "TestAttributeBranchPredicate",
+    "TestAttributeNodePresenceInAST",
+    "TestExpressionEvaluatorAttributeBranch"
+  ],
+  "polarities_covered": [
+    "true",
+    "false"
+  ],
+  "run_cmd": "docker exec -w /work/projects/hipblaslt/tensilelite tl-char pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Configuration_L730_char.py",
+  "passed": true,
+  "pass_count": 11,
+  "fail_count": 0,
+  "reified": true,
+  "notes": [
+    "Pure-helper tests (5): pin the attribute_branch predicate directly over enum domain {Attribute, Name, Module, empty, lowercase}.",
+    "Value-AST tests (3): pin which expressionStr values yield Attribute nodes (dotted vs Name-only vs BoolOp).",
+    "Integration tests (3): exercise ExpressionEvaluator.evaluate() end-to-end with nested-dict context; TRUE polarity (dotted expr, 100>=50 -> True), FALSE comparison polarity (dotted expr, 30>=50 -> False), FALSE branch polarity (Name-only expr).",
+    "ExpressionEvaluator.evaluate() returns plain bool (not CallableParameter) for these expressions; the assertions handle both callables and plain bools via short-circuit.",
+    "Branch is structurally reachable from test code but dead from external YAML/CLI public input (see Solve frag notes)."
+  ]
+}

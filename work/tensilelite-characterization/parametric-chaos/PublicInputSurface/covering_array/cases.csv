@@ -1,0 +1,18 @@
+case_id,nodeType,expressionStr,Parameter,LibraryLogic_in_config,MinimumRequiredVersion_in_config,RestoreLog,UseEffLike,__name__,altFormat,args.platform,buildOnly,configPaths
+0,"""Module""","""a == 1""","""Tensile.Configuration.Parameter""",false,false,null,false,"""__main__""",false,null,false,0
+1,"""Module""","""a + b""","""<class Tensile.Configuration.Parameter>""",true,true,"""/path/to/restore.log""",true,"""Tensile.Tensile""",true,0,true,1
+2,"""Module""","""Program.Network.PORT >= MaxPort""","""Tensile.Configuration.Parameter""",true,false,"""/path/to/restore.log""",false,"""Tensile.Tensile""",false,1,true,3
+3,"""Module""","""BenchmarkTaskSize > 0""","""<class Tensile.Configuration.Parameter>""",false,true,null,false,"""__main__""",true,null,false,0
+4,"""Expr""","""a == 1""","""<class Tensile.Configuration.Parameter>""",false,false,null,true,"""__main__""",false,0,false,3
+5,"""Expr""","""a + b""","""Tensile.Configuration.Parameter""",true,true,null,false,"""__main__""",false,null,true,0
+6,"""Expr""","""Program.Network.PORT >= MaxPort""","""Tensile.Configuration.Parameter""",false,false,null,true,"""__main__""",true,null,false,1
+7,"""Expr""","""BenchmarkTaskSize > 0""","""Tensile.Configuration.Parameter""",false,false,"""/path/to/restore.log""",true,"""Tensile.Tensile""",false,1,false,1
+8,"""Attribute""","""a == 1""","""<class Tensile.Configuration.Parameter>""",true,true,"""/path/to/restore.log""",true,"""__main__""",true,1,false,0
+9,"""Attribute""","""a + b""","""Tensile.Configuration.Parameter""",false,false,null,false,"""Tensile.Tensile""",false,null,true,3
+10,"""Attribute""","""Program.Network.PORT >= MaxPort""","""Tensile.Configuration.Parameter""",false,true,null,false,"""Tensile.Tensile""",false,0,false,0
+11,"""Attribute""","""BenchmarkTaskSize > 0""","""Tensile.Configuration.Parameter""",true,false,null,false,"""__main__""",false,0,true,1
+12,"""Name""","""a == 1""","""Tensile.Configuration.Parameter""",false,false,null,false,"""Tensile.Tensile""",false,null,true,1
+13,"""Name""","""a + b""","""<class Tensile.Configuration.Parameter>""",true,true,null,true,"""__main__""",true,1,false,0
+14,"""Name""","""Program.Network.PORT >= MaxPort""","""<class Tensile.Configuration.Parameter>""",false,true,"""/path/to/restore.log""",false,"""__main__""",true,0,false,3
+15,"""Name""","""BenchmarkTaskSize > 0""","""Tensile.Configuration.Parameter""",false,false,null,false,"""__main__""",false,null,false,3
+16,"""Module""","""a == 1""","""Tensile.Configuration.Parameter""",false,false,"""/path/to/restore.log""",false,"""__main__""",false,null,false,0

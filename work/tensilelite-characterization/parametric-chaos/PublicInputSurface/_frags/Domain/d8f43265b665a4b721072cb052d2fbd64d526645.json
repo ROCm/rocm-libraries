@@ -1,0 +1,18 @@
+{
+  "branch_id": "d8f43265b665a4b721072cb052d2fbd64d526645",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Domain/d8f43265b665a4b721072cb052d2fbd64d526645.json",
+  "domains": {
+    "altFormat": {
+      "type": "bool",
+      "values": [
+        false,
+        true
+      ]
+    },
+    "configPaths": {
+      "type": "int",
+      "min": 0,
+      "max": 3
+    }
+  }
+}

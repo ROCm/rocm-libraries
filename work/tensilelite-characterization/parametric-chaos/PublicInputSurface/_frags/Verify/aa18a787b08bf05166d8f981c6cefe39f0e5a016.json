@@ -1,0 +1,15 @@
+{
+  "branch_id": "aa18a787b08bf05166d8f981c6cefe39f0e5a016",
+  "location": "Tensile/Tensile.py:409",
+  "predicate": "runningTuning",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Re-read real source Tensile/Tensile.py:380-425. Line 409 = `if runningTuning:` inside restore_prob_sol_map (def @380). Predicate is bare boolean local runningTuning (init False @388; only reassigned via boolean runningTuning = line.startswith(startHint) @405; bare reads @404,409). Re-executed both witnesses in-container (tl-char, z3 4.16.0): pred=z3.Bool('runningTuning'); pred -> sat [runningTuning=True] reproduces true_example; Not(pred) -> sat [runningTuning=False] reproduces false_example. Independent python eval over complete boolean domain confirms branch taken iff True. solver_status=sat (full {false,true} domain, not sat-bounded). Classification fully-static confirmed: pure boolean read, no isinstance/nodeType/os/gpu probe in predicate (branch BODY I/O not part of predicate). Slice input frag confirmed ABSENT on disk (only Census/Domain/Solve present) as claim noted; predicate trivially extractable from source so verification sufficient.",
+  "downgraded_to": null,
+  "true_examples": [{"runningTuning": true, "branch_taken": true, "reproduced": true}],
+  "false_examples": [{"runningTuning": false, "branch_taken": false, "reproduced": true}],
+  "solver": "z3",
+  "solver_version": "4.16.0",
+  "classification": "fully-static",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Verify/aa18a787b08bf05166d8f981c6cefe39f0e5a016.json"
+}

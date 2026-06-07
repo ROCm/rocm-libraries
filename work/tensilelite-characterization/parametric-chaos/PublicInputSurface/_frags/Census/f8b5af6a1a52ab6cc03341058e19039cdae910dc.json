@@ -1,0 +1,18 @@
+{
+  "id": "f8b5af6a1a52ab6cc03341058e19039cdae910dc",
+  "file": "Tensile/Configuration.py",
+  "function": "__rlt__",
+  "branch_kind": "guard-return",
+  "location": {
+    "line": 224,
+    "col": 8
+  },
+  "predicate_source": "isinstance(lhs, Parameter)",
+  "referenced_symbols": [
+    "Parameter",
+    "isinstance",
+    "lhs"
+  ],
+  "derived_symbols": [],
+  "rank": 18
+}

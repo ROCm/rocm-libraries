@@ -1,0 +1,57 @@
+{
+  "branch_id": "766aca336236aae2b14b573c47e639e5adb3307d",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Slice/766aca336236aae2b14b573c47e639e5adb3307d.json",
+  "source_location": {
+    "file": "Tensile/Configuration.py",
+    "line": 218,
+    "enclosing_function": "Parameter.__lt__",
+    "enclosing_class": "Parameter"
+  },
+  "predicate_normalized": {
+    "op": "isinstance",
+    "args": [
+      {
+        "kind": "derived-local",
+        "name": "rhs",
+        "expr": "rhs",
+        "note": "Formal parameter of __lt__(self, rhs); supplied by the caller of the < operator on a Parameter instance."
+      },
+      {
+        "kind": "derived-local",
+        "name": "Parameter",
+        "expr": "Parameter",
+        "note": "Module-level class defined at Configuration.py:172. Fully static; no external dependency."
+      }
+    ],
+    "semantics": "Returns True when the right-hand operand of a < comparison on a Parameter instance is itself a Parameter (or a subclass such as CallableParameter). When True the comparison delegates to self.value < rhs.value; when False it delegates to self.value < rhs.",
+    "raw_source": "if isinstance(rhs, Parameter):"
+  },
+  "public_inputs": [
+    {
+      "name": "rhs",
+      "kind": "derived-local",
+      "description": "The right-hand operand passed to __lt__ by the caller of the < operator on a Parameter instance. At the __lt__ level this is a formal parameter; its ultimate source depends entirely on call sites. In the current codebase Parameter instances are constructed programmatically (e.g. ProjectConfig.createValue at line 907) using values that may originate from YAML config files or CLI arguments in the broader Tensile pipeline, but at the level of this method, rhs is a derived-local — there is no direct env, filesystem, or GPU dependency visible within the slice."
+    }
+  ],
+  "derived_symbols": [
+    {
+      "name": "rhs",
+      "derived_from": "Formal parameter of Parameter.__lt__(self, rhs). Supplied at the call site (< operator). May be a Parameter instance (any subclass including CallableParameter) or a plain Python value (int, float, bool, str, etc.)."
+    },
+    {
+      "name": "Parameter",
+      "derived_from": "Class defined at Configuration.py:172 inheriting from ReadWriteTransformDict. Module-level static binding. isinstance() also returns True for instances of CallableParameter (line 461) which inherits from Parameter."
+    },
+    {
+      "name": "isinstance",
+      "derived_from": "Python built-in function. Fully static. Not a public input."
+    }
+  ],
+  "external_state": [],
+  "notes": [
+    "Configuration.py only imports 'deepcopy' from 'copy' and 'ast' at module level. No os.environ, filesystem, or GPU reads occur at module or class level.",
+    "The predicate isinstance(rhs, Parameter) is True for both Parameter instances and CallableParameter instances (since CallableParameter inherits from Parameter at line 461). This means the guard covers the subclass case without any additional check.",
+    "The extractor seed def-use was empty ([]) because rhs is a formal parameter with no prior assignment in the function body; it flows in purely from the caller.",
+    "No external_state entries are warranted: the predicate depends solely on the runtime type of the caller-supplied rhs argument and the statically-defined Parameter class."
+  ]
+}

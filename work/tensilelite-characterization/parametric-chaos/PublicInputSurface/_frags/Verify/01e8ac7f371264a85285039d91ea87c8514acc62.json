@@ -1,0 +1,16 @@
+{
+  "branch_id": "01e8ac7f371264a85285039d91ea87c8514acc62",
+  "location": "Tensile/Tensile.py:529",
+  "predicate": "not altFormat and len(configPaths) != 1",
+  "confirmed": true,
+  "status": "SAT",
+  "method": "Read the real predicate at Tensile/Tensile.py:529 (elif not altFormat and len(configPaths) != 1) and the real argparse defs (ConfigFile nargs='+', AlternateFormat dest store_true default False). Reconstructed the real argparse subset in-container (docker exec tl-char python3) and re-evaluated the exact predicate expression on each claimed witness. TRUE [altFormat=False,n=2] -> True; FALSE [altFormat=False,n=1] -> False; FALSE [altFormat=True,n=1] -> False. All matched claims, with n and altFormat parsed exactly as claimed. Full 6-cell grid (alt in {F,T} x n in {1,2,3}) reproduced the claimed true cells {(False,2),(False,3)} and false cells exactly. argparse nargs='+' confirms n>=1 lower bound. Classification fully-static confirmed: pure bool/int expression, no isinstance/nodeType/os/fs/gpu probe.",
+  "downgraded_to": null,
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Verify/01e8ac7f371264a85285039d91ea87c8514acc62.json",
+  "examples_reproduced": {
+    "true": [{"altFormat": false, "n": 2, "pred": true}],
+    "false": [{"altFormat": false, "n": 1, "pred": false}, {"altFormat": true, "n": 1, "pred": false}]
+  },
+  "grid_ok": true,
+  "notes": "sat-bounded claim upheld (not upgraded to unbounded). n bounded to [1,3] in re-check; structure generalizes for any n>=1 since predicate is just n!=1 conjoined with not altFormat. No counter-evidence found."
+}

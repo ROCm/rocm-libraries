@@ -1,0 +1,20 @@
+{
+  "branch_id": "8226b3bb80ef12780d069187df1f3cf8965ca735",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Domain/8226b3bb80ef12780d069187df1f3cf8965ca735.json",
+  "domains": {
+    "nodeType": {
+      "type": "enum",
+      "values": [
+        "Call",
+        "Compare"
+      ]
+    },
+    "expressionStr": {
+      "type": "str",
+      "values": [
+        "abs(x)",
+        "BenchmarkTaskSize > 0"
+      ]
+    }
+  }
+}

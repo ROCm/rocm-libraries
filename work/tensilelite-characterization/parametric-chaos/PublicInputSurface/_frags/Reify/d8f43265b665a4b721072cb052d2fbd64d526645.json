@@ -1,0 +1,33 @@
+{
+  "branch_id": "d8f43265b665a4b721072cb052d2fbd64d526645",
+  "reified": true,
+  "test_paths": [
+    "Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Tensile_L526_char.py"
+  ],
+  "passed": true,
+  "tests": [
+    "test_pure_helper_true_witness",
+    "test_pure_helper_false_alt_format_false",
+    "test_pure_helper_false_too_few_configs",
+    "test_pure_helper_false_boundary_exactly_two",
+    "test_pure_helper_full_domain_enumeration",
+    "test_real_entry_l526_true_branch_triggers_system_exit",
+    "test_real_entry_l526_false_two_configs_passes_guard",
+    "test_real_entry_l529_true_branch_triggers_system_exit",
+    "test_real_entry_l529_false_one_config_passes_guard"
+  ],
+  "run_cmd": "pytest -p no:cacheprovider -m unit -q Tensile/Tests/unit/characterization/PublicInputSurface/test_pchaos_Tensile_L526_char.py",
+  "result": "9 passed in 0.67s",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Reify/d8f43265b665a4b721072cb052d2fbd64d526645.json",
+  "canonical_case": "Tensile.py:526 and Tensile.py:529 -- both guards reified per Run-1 contract",
+  "predicate_l526": "altFormat and len(configPaths) > 2",
+  "predicate_l529": "not altFormat and len(configPaths) != 1",
+  "pure_helper": "alt_format_rejected(alt_format, n_config_files) -> bool",
+  "true_witness_l526": {"altFormat": true, "configPaths": 3},
+  "false_witnesses_l526": [
+    {"altFormat": false, "configPaths": 3},
+    {"altFormat": true, "configPaths": 1},
+    {"altFormat": true, "configPaths": 2}
+  ],
+  "notes": "Canonical case (L526/L529): wrote two test groups. (1) Pure-helper group: defines alt_format_rejected() mirroring the L526 predicate; asserts TRUE witness (True,3)->True, three FALSE witnesses, and full domain enumeration over the seeded [False,True] x [0,3] space (8 cells, unique TRUE at (True,3)). (2) Real-entry group: calls M.Tensile(userArgs) with tmp output path; four tests cover TRUE/FALSE of both L526 and L529 guards; pytest.raises(SystemExit) used for TRUE cases; FALSE cases assert the corresponding guard message does NOT appear even if a deeper exception fires. All 9 tests pass deterministically in tl-char (CPU-only, no GPU probe, no coverage flag). File written via docker exec (dir is root-owned)."
+}

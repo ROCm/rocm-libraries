@@ -1,0 +1,21 @@
+{
+  "branch_id": "f8b5af6a1a52ab6cc03341058e19039cdae910dc",
+  "file": "Tensile/Configuration.py",
+  "function": "__rlt__",
+  "location": {"line": 224, "col": 8},
+  "predicate_source": "isinstance(lhs, Parameter)",
+  "claimed_solver_status": "unknown",
+  "claimed_classification": "runtime-dependent",
+  "confirmed": true,
+  "status": "UNKNOWN",
+  "downgraded_to": null,
+  "method": "Read Tensile/Configuration.py:216-226 in-container: line 224 is the guard `if isinstance(lhs, Parameter):` inside Parameter.__rlt__ (TRUE-branch returns lhs.value<self.value; FALSE-branch returns lhs<self.value). Re-ran the claim independently in tl-char (cwd=PROJ via `python -c`, since `python /tmp/x.py` puts /tmp on sys.path[0] and cannot import Tensile). Live isinstance probe against the REAL Parameter class reproduced all 4 witnesses exactly: isinstance(Parameter(name=x,initialValue=1),Parameter)=True; isinstance(42,Parameter)=False; isinstance(3.14,Parameter)=False; isinstance(\"hello\",Parameter)=False. Exercised the REAL __rlt__ both ways: FALSE-branch via `42 < p` (int.__lt__->NotImplemented -> p.__rlt__(42) -> isinstance(42,Parameter)=False -> 42<p.value=False); TRUE-branch via `p.__rlt__(q)` with q a Parameter -> isinstance(q,Parameter)=True -> q.value<p.value=True (0<1). Re-ran the committed z3 script _solve_f8b5.py in-container: TRUE_CHECK sat SEL v_param ; FALSE_CHECK sat SEL v_42 -- matches the claimed z3_output. As the claim itself states, z3 is only sat-bounded because the per-element type tags are PINNED from the live runtime probe; the solver does not and cannot prove object class membership from first principles. Predicate truth is fixed by the runtime type of the live left operand, not by any public CLI/yaml/scalar input -> runtime-dependent. Claim is already at the weakest status (unknown/runtime-dependent) and does not overclaim; behavior was independently exhibited so confirmed=true with status UNKNOWN. No downgrade needed (already UNKNOWN). pure_helper:null is correct -- a bare isinstance type-test has no relational postcondition for CrossHair and CrossHair cannot synthesize live class instances.",
+  "reproduced_true_examples": [{"lhs": "Parameter(name=x, initialValue=1)", "isinstance_result": true}],
+  "reproduced_false_examples": [
+    {"lhs": "42", "isinstance_result": false},
+    {"lhs": "3.14", "isinstance_result": false},
+    {"lhs": "hello", "isinstance_result": false}
+  ],
+  "z3_reproduced": {"true_check": "sat", "true_model": "v_param", "false_check": "sat", "false_model": "v_42"},
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Verify/f8b5af6a1a52ab6cc03341058e19039cdae910dc.json"
+}

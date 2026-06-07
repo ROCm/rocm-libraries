@@ -1,0 +1,18 @@
+{
+  "branch_id": "05506103d2678e4391d5a18d052fcc09b0d5981f",
+  "location": "Tensile/Configuration.py:630",
+  "predicate": "nodeType == \"Module\"",
+  "confirmed": true,
+  "status": "SAT",
+  "downgraded_to": null,
+  "method": "Re-read real predicate at Configuration.py:630 (ExpressionEvaluator.evaluate): nodeType = type(node).__name__; line 630 = if nodeType == Module. Re-executed claimed witnesses in-container against real ast traversal: ast.parse(a == 1, exec) root -> Module (TRUE branch taken); body[0] -> Expr (FALSE, not taken); body[0].value -> Compare; a + b value -> BinOp. Verified structural-tautology: roots of [a == 1, a + b, x > 5 and y < 3, f(1,2), -a] are all Module. Confirmed via real ExpressionEvaluator().evaluate(ast.parse(a == 1, exec), {a:1}) -> True: top-level call exercises Module branch (line 630 taken), recursion into Expr child does not. Both witnesses (Module=TRUE, Expr=FALSE) runtime-confirmed and reproduce exactly. solver_status=sat reflects the Z3 enum abstraction (nodeType as free const over {Module,Expr}); classification=runtime-dependent is correct because truth value is governed by AST traversal position, not by a static function of public input expressionStr (absent from predicate). No over-claim; not downgraded.",
+  "true_examples_reproduced": [
+    {"input": "ast.parse(a == 1, exec) root", "nodeType": "Module", "predicate_value": true, "matches_claim": true}
+  ],
+  "false_examples_reproduced": [
+    {"input": "ast.parse(a == 1, exec).body[0]", "nodeType": "Expr", "predicate_value": false, "matches_claim": true},
+    {"input": "ast.parse(a == 1, exec).body[0].value", "nodeType": "Compare", "predicate_value": false, "matches_claim": true},
+    {"input": "ast.parse(a + b, exec).body[0].value", "nodeType": "BinOp", "predicate_value": false, "matches_claim": true}
+  ],
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Verify/05506103d2678e4391d5a18d052fcc09b0d5981f.json"
+}

@@ -1,0 +1,62 @@
+{
+  "branch_id": "3c77ffccaeef2b9473df16d6b5d08fdc8abd2b24",
+  "solver": "z3",
+  "solver_status": "unknown",
+  "classification": "runtime-dependent",
+  "source_location": {
+    "file": "Tensile/Configuration.py",
+    "line": 579,
+    "col": 8,
+    "enclosing_function": "createUnaryOp",
+    "branch_kind": "if"
+  },
+  "predicate_source": "isinstance(op, str)",
+  "encoding": {
+    "vars": {
+      "op": {
+        "z3_sort": "EnumSort Op {Not, USub, Lambda}",
+        "origin": "createUnaryOp(cls, rhs, op): op is either a FuncMap key NAME (str) or a callable. Seeded enum domain {Not, USub, <lambda>}.",
+        "is_str_members": ["Not", "USub"],
+        "non_str_members": ["Lambda (<lambda>, a function object)"]
+      }
+    },
+    "z3_predicate": "Or(op == Not, op == USub)",
+    "op_surface": ["unary:isinstance(type-test)"],
+    "notes": "isinstance(op, str) is a runtime type test on a live object. Modeled over the seeded enum by partitioning members into str-typed (Not, USub) and the non-str callable (<lambda>). The type predicate is abstracted as set-membership in the str partition; z3 confirms both partitions are non-empty, i.e. both the if-branch (op is a name string) and the else-branch (op is a function) are reachable. z3 cannot itself decide a live object type, hence solver_status=unknown for the underlying predicate."
+  },
+  "z3_run": {
+    "true_check": "sat",
+    "true_model": "op = Not",
+    "false_check": "sat",
+    "false_model": "op = Lambda",
+    "note": "z3 4.16.0; both directions sat over the str/non-str partition of the seeded enum."
+  },
+  "true_examples": [
+    {"op": "Not", "op_kind": "str (FuncMap key name)", "isinstance_op_str": true, "z3_proven": "partition-only", "runtime_confirmed": true},
+    {"op": "USub", "op_kind": "str (FuncMap key name)", "isinstance_op_str": true, "z3_proven": "partition-only", "runtime_confirmed": true}
+  ],
+  "false_examples": [
+    {"op": "<lambda val: -val>", "op_kind": "callable (function object)", "isinstance_op_str": false, "z3_proven": "partition-only", "runtime_confirmed": true}
+  ],
+  "grid_enumeration": {
+    "domain": "op in {Not, USub, <lambda>} (3 cells)",
+    "true_cells": ["Not", "USub"],
+    "false_cells": ["<lambda>"]
+  },
+  "pure_helper": "def op_is_str(op) -> bool:\n    \"\"\"Mirror of createUnaryOp branch at Configuration.py:579 (isinstance(op, str)).\n    True  -> op is a FuncMap key NAME (str); the str-branch resolves func = FuncMap[op].\n    False -> op is assumed to be a callable; name = CustomUnaryOp, func = op.\n    \"\"\"\n    return isinstance(op, str)",
+  "crosshair": {
+    "ran": true,
+    "version": "0.0.106",
+    "result": "no counterexample",
+    "contracts_checked": ["post: (__return__ == True) == isinstance(op, str)  over op: Union[str, Callable]"],
+    "caveat": "Absence of a counterexample from CrossHair is NOT a proof; here the helper is a tautological wrapper of isinstance, so the contract is trivially satisfied. It confirms the helper faithfully mirrors the branch, nothing stronger."
+  },
+  "verification": {
+    "runtime_repro": true,
+    "method": "Evaluated isinstance(op, str) in the container python on each witness VALUE.",
+    "true_witness_check": "isinstance(\"Not\", str)=True; isinstance(\"USub\", str)=True",
+    "false_witness_check": "isinstance(lambda val:-val, str)=False (the lambda has __name__==<lambda>, callable==True)"
+  },
+  "classification_rationale": "The predicate isinstance(op, str) is a runtime type test on a live object passed to createUnaryOp. The discriminator is the actual Python type of op (str FuncMap-key name vs a function object), which a numeric/boolean SMT solver cannot decide on its own. z3 can only confirm, over the seeded enum partitioned into str vs non-str members, that BOTH branches are reachable (true_check=sat op=Not, false_check=sat op=Lambda). Therefore classification=runtime-dependent and solver_status=unknown, with representative true/false witnesses given by VALUE and confirmed against the real Python runtime so downstream can pin behavior. A reified test would call createUnaryOp with op=\"Not\"/\"USub\" (str-branch: asserts in FuncMap, name==op) and op=<a lambda> (else-branch: name==CustomUnaryOp).",
+  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Solve/3c77ffccaeef2b9473df16d6b5d08fdc8abd2b24.json"
+}
