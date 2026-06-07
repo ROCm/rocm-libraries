@@ -8299,7 +8299,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     ####################################
     # num sgprs: initial kernel state
-    self.sgprPool = RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=True, printRP=False)
+    self.sgprPool = RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False)
     numSgprAddressD = self.states.rpga # til end
     numSgprAddressC = self.states.rpga # til end
     numSgprAddressA = self.states.rpga # til read offsets
