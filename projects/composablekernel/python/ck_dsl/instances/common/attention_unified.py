@@ -11,7 +11,7 @@ until every required primitive and correctness/perf path is present.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from ...core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType, Type, Value
 from ...helpers.compile import compile_kernel
@@ -20,12 +20,10 @@ from ...runtime.launcher import (
     LaunchConfig,
     LaunchSummary,
     PipelineLauncher,
-    StreamConfig,
     WorkspaceSpec,
     WorkspacePool,
     _resolved_fence,
-    launch_kernel,
-    make_kernel,
+    no_fence,
     wait_stream_and_release,
 )
 
@@ -273,6 +271,23 @@ def _tiled_3d_impl(arch: str):
     supports_tiled_3d)``. See :func:`_tiled_2d_impl` for why this import is
     lazy and arch-keyed.
     """
+    if arch == "gfx942":
+        from ..gfx942.attention_tiled_3d import (
+            UnifiedAttention3DTiledSpec,
+            UnifiedAttentionReduceTiledSpec,
+            build_unified_attention_3d_tiled,
+            build_unified_attention_reduce_tiled,
+            supports_tiled_3d,
+        )
+
+        return (
+            UnifiedAttention3DTiledSpec,
+            UnifiedAttentionReduceTiledSpec,
+            build_unified_attention_3d_tiled,
+            build_unified_attention_reduce_tiled,
+            supports_tiled_3d,
+        )
+
     from ..gfx950.attention_tiled_3d import (
         UnifiedAttention3DTiledSpec,
         UnifiedAttentionReduceTiledSpec,
@@ -334,6 +349,13 @@ def supports_native_unified_attention_tiled(
     """Return whether the optimized tiled MFMA path can run this problem."""
     arch = _resolve_attention_arch()
     _, _, supports_tiled_2d = _tiled_2d_impl(arch)
+    gfx942_flash = _enable_gfx942_fp16_flash(problem)
+    gfx942_wide = _gfx942_flash_wide_setting() if gfx942_flash else 0
+    num_warps = (
+        _select_gfx942_flash_num_warps(problem)
+        if gfx942_flash
+        else _select_2d_num_warps(problem)
+    )
     return supports_tiled_2d(
         head_size=problem.head_size,
         block_size=problem.block_size,
@@ -343,11 +365,15 @@ def supports_native_unified_attention_tiled(
         use_qq_bias=problem.use_qq_bias,
         use_fp8=problem.use_fp8,
         q_dtype=problem.q_dtype,
-        num_warps=_select_2d_num_warps(problem),
+        num_warps=num_warps,
         block_m_per_warp=_select_2d_block_m_per_warp(problem),
         kv_storage_dtype=_kv_storage_dtype(problem),
         tile_size=_select_2d_tile_size(problem),
         arch=arch,
+        use_mfma_32x32x8=gfx942_flash,
+        use_transposed_qk_32x32=gfx942_flash,
+        use_k_single_buffer=gfx942_flash and gfx942_wide == 0,
+        use_conflict_free_v_store=gfx942_flash and gfx942_wide in (2, 4),
     )
 
 
@@ -428,6 +454,11 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # bf16_sw_n16_q1000_k1050 best T=64/mw16/hipcc at ~257us; T=32
     # variants were >=258us and often incorrect under hipcc).
     if problem.use_fp8 and problem.sliding_window > 0 and problem.max_seqlen_q > 256:
+        return problem.block_size
+    # gfx942 D64 oracle: use a single KV block per tile. The generic
+    # ``2*block_size`` choice over-allocates LDS on MI300X when paired with the
+    # gfx942 D64 mw=32 path, while the direct gfx942 harness validates T=64.
+    if _resolve_attention_arch() == "gfx942" and problem.head_size == 64:
         return problem.block_size
     # gfx942 D128 fp16 L4 (shipped): the level-4 fitter fixes T=64 on every
     # D128 fp16 shape (K single-buffer BLOCK_M<=tile + 64 KB LDS cap). Mirror it
@@ -528,6 +559,10 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     # grid / cache key / spec stay coherent with the built L4 kernel.
     if _enable_gfx942_l4(problem):
         return 1
+    # gfx942 D64 oracle: paired with ``T=block_size`` and mw=32, four waves fit
+    # in the MI300X 64 KB LDS budget and match the direct gfx942 harness.
+    if _resolve_attention_arch() == "gfx942" and problem.head_size == 64:
+        return 4
     if _enable_combo_2d(problem):
         # bf16 sliding-window is prelude-bound -> nw2 (lighter prelude). But
         # fp8 SW is dequant-bound, not prelude-bound, so it wants nw4 to
@@ -689,7 +724,11 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         bool(problem.softcap > 0),
         bool(problem.use_alibi),
         bool(problem.use_qq_bias),
-        _select_2d_num_warps(problem),
+        (
+            _select_gfx942_flash_num_warps(problem)
+            if _enable_gfx942_fp16_flash(problem)
+            else _select_2d_num_warps(problem)
+        ),
         _kv_storage_dtype(problem),
         _select_2d_tile_size(problem),
         _select_2d_waves_per_eu(problem),
@@ -700,10 +739,13 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_register_pv(problem),
         _enable_i64_kv_addr(problem),
         _select_2d_compile_backend(problem),
-        # gfx942 D128 fp16 L4 (transposed-x8 + K single-buffer). These knobs are
-        # not derivable from the geometry tuple alone, so fold the gate into the
-        # key to keep it 1:1 with the built kernel.
-        _enable_gfx942_l4(problem),
+        _enable_gfx942_fp16_flash(problem),
+        _gfx942_flash_wide_setting() if _enable_gfx942_fp16_flash(problem) else None,
+        _gfx942_flash_kv_cache_policy(problem) if _enable_gfx942_fp16_flash(problem) else None,
+        _enable_gfx942_flash_q_direct(problem),
+        _enable_gfx942_flash_mask_limit(problem),
+        _enable_gfx942_flash_k_sliced_ring(problem),
+        _enable_gfx942_flash_k_sliced_ldsseq(problem),
     )
 
 
@@ -874,29 +916,17 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
     return True
 
 
-def _enable_gfx942_l4(problem: UnifiedAttentionProblem) -> bool:
-    """Gate the shipped gfx942 D128 fp16 "L4" attention kernel.
+def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
+    """Gate the gfx942 fp16 transposed-x8 attention family.
 
-    L4 = transposed-x8 (``use_mfma_32x32x8`` + ``use_transposed_qk_32x32``) plus
-    the K single-buffer occupancy lever (``use_k_single_buffer``). It is the
-    validated, shipped gfx942 D128 fp16 SDPA-fwd kernel: measured +18-33% over
-    the narrow 16x16x16 baseline (up to 178.9 TF, ~62% of flash), correct, and
-    gfx950 byte-identical (gfx950 never enters this branch).
-
-    Scope is strict so every other path is unchanged: ``use_mfma_32x32x8`` is
-    fp16-only (gfx942 has no bf16 32x32x8 atom), so bf16 D128 falls through to
-    the generic selection; all D64 keeps its own oracle config; the no-sw /
-    no-sinks / no-fp8 guards mirror the C++/provider ship
-    (``compile_service.py`` default-fires the identical level-4 spec) and the
-    spec dataclass's L4 post-init constraints.
-
-    The conflict-free-V lever (``use_conflict_free_v``, FLASH_PIPELINE level
-    3/5) is WIP / not shipped (a parallel track is fixing it); this gate never
-    enables it.
+    The baseline L4 geometry is transposed-x8 + K single-buffer (WG=64). The
+    production provider defaults D128 to wide4 (WG=256). D64 uses the same
+    gfx942-legal 32x32x8 atom plus cfvst stack; measured on MI300X it improves
+    S2048 D64 from ~142 TFLOPS to ~199 TFLOPS with identical correctness.
     """
     return (
         _resolve_attention_arch() == "gfx942"
-        and problem.head_size == 128
+        and problem.head_size in (64, 128)
         and problem.dtype == "fp16"
         and not problem.use_fp8
         and problem.sliding_window == 0
@@ -905,6 +935,69 @@ def _enable_gfx942_l4(problem: UnifiedAttentionProblem) -> bool:
         and not problem.use_alibi
         and not problem.use_qq_bias
     )
+
+
+def _enable_gfx942_d128_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
+    """D128 subset used by the legacy L4 geometry helpers."""
+    return _enable_gfx942_fp16_flash(problem) and problem.head_size == 128
+
+
+def _gfx942_flash_wide_setting() -> int:
+    env = __import__("os").environ.get("HIPDNN_GFX942_FLASH_WIDE", "").strip().lower()
+    if env in ("0", "off", "disable", "disabled", "no", "false"):
+        return 0
+    if env in ("2", "4"):
+        return int(env)
+    return 4
+
+
+def _select_gfx942_flash_num_warps(problem: UnifiedAttentionProblem) -> int:
+    wide = _gfx942_flash_wide_setting()
+    return wide if wide in (2, 4) else 1
+
+
+def _gfx942_flash_kv_cache_policy(problem: UnifiedAttentionProblem) -> str:
+    return "all"
+
+
+def _enable_gfx942_flash_q_direct(problem: UnifiedAttentionProblem) -> bool:
+    return _enable_gfx942_fp16_flash(problem) and problem.head_size == 64
+
+
+def _enable_gfx942_flash_mask_limit(problem: UnifiedAttentionProblem) -> bool:
+    if not _enable_gfx942_fp16_flash(problem):
+        return False
+    env = __import__("os").environ.get("HIPDNN_GFX942_FLASH_MLIM", "").strip().lower()
+    if env in ("0", "off", "disable", "disabled", "no", "false"):
+        return False
+    if env in ("1", "on", "enable", "enabled", "yes", "true", "all"):
+        return True
+    if env in ("d64", "64"):
+        return problem.head_size == 64
+    if env in ("d128", "128"):
+        return problem.head_size == 128
+    # Default: D64 is a measured win; D128 regressed in the current hot loop, so
+    # keep it selectable but not default until the deeper pipeline changes land.
+    return problem.head_size == 64
+
+
+def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool:
+    if not (_enable_gfx942_fp16_flash(problem) and problem.head_size == 128):
+        return False
+    env = __import__("os").environ.get("HIPDNN_GFX942_K_SLICED_RING", "").strip().lower()
+    return env in ("1", "on", "enable", "enabled", "yes", "true")
+
+
+def _enable_gfx942_flash_k_sliced_ldsseq(problem: UnifiedAttentionProblem) -> bool:
+    if not _enable_gfx942_flash_k_sliced_ring(problem):
+        return False
+    env = __import__("os").environ.get("HIPDNN_GFX942_K_LDSSEQ", "").strip().lower()
+    return env in ("1", "on", "enable", "enabled", "yes", "true", "ck")
+
+
+def _enable_gfx942_l4(problem: UnifiedAttentionProblem) -> bool:
+    """Compatibility alias: true for the gfx942 D128 fp16 flash/L4 family."""
+    return _enable_gfx942_d128_fp16_flash(problem)
 
 
 def _enable_transposed_half_local_pv(problem: UnifiedAttentionProblem) -> bool:
@@ -1036,18 +1129,11 @@ def _tiled_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ):
     UnifiedAttention2DTiledSpec, _, _ = _tiled_2d_impl(_resolve_attention_arch())
-    # gfx942 D128 fp16 ships the L4 kernel (transposed-x8 + K single-buffer).
-    # The level-4 fitter collapses to ONE geometry on every D128 fp16 shape
-    # (block_size / GQA-independent): the K single-buffer BLOCK_M<=tile gate plus
-    # the 64 KB LDS cap force num_warps=1, block_m_per_warp=32 (BLOCK_M=32),
-    # tile_size=64. This mirrors compile_service.py's shipped default and the C++
-    # SdpaCandidateSelector geometry so the DSL standalone path builds the
-    # identical L4 kernel. cfv (use_conflict_free_v) is WIP / never selected.
-    if _enable_gfx942_l4(problem):
-        # Geometry comes from the same _select_2d_* helpers the grid + cache key
-        # read (num_warps=1, block_m_per_warp=32, tile_size=64 on this shape) so
-        # all three stay coherent; the L4 knobs (mfma_32x32x8 + transposed-x8 +
-        # K single-buffer) are not in the generic build, so set them here.
+    if _enable_gfx942_fp16_flash(problem):
+        wide = _gfx942_flash_wide_setting()
+        num_warps = wide if wide in (2, 4) else 1
+        use_cfvst = wide in (2, 4)
+        use_mask_limit = _enable_gfx942_flash_mask_limit(problem)
         return UnifiedAttention2DTiledSpec(
             head_size=problem.head_size,
             block_size=problem.block_size,
@@ -1060,14 +1146,23 @@ def _tiled_spec_from_problem(
             use_alibi=problem.use_alibi,
             use_qq_bias=problem.use_qq_bias,
             num_seqs=problem.num_seqs,
-            num_warps=_select_2d_num_warps(problem),
+            num_warps=num_warps,
             waves_per_eu=_select_2d_waves_per_eu(problem),
             kv_storage_dtype=_kv_storage_dtype(problem),
             tile_size=_select_2d_tile_size(problem),
             block_m_per_warp=_select_2d_block_m_per_warp(problem),
             use_mfma_32x32x8=True,
             use_transposed_qk_32x32=True,
-            use_k_single_buffer=True,
+            use_transposed_scalar_state=use_mask_limit,
+            use_transposed_invariant_hoist=use_mask_limit,
+            use_transposed_mask_once=use_mask_limit,
+            use_transposed_mask_limit=use_mask_limit,
+            use_conflict_free_v_store=use_cfvst,
+            use_k_single_buffer=not use_cfvst,
+            use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
+            use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
+            use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
+            kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
             use_i64_kv_addr=_enable_i64_kv_addr(problem),
         )
     combo = _enable_combo_2d(problem)
@@ -1201,13 +1296,48 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
 def _num_segments(problem: UnifiedAttentionProblem) -> int:
     """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
     attn_cfg, _ = problem.select_3d()
-    return attn_cfg.NUM_SEGMENTS_PER_SEQ
+    segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
+    # AITER's Triton path scales decode splits with the full MI300X CU count
+    # (typically 128 segments here). The gfx942 CK-DSL segment+reduce kernels
+    # are not the same implementation; after host-overhead cleanup, 128-way
+    # split regresses these q=1/kv=2048 shapes while 64 segments is stable.
+    if (
+        _resolve_attention_arch() == "gfx942"
+        and problem.max_seqlen_q == 1
+        and problem.max_seqlen_k <= 2048
+        and problem.sliding_window == 0
+    ):
+        if problem.head_size == 64:
+            return min(segments, 32)
+        if problem.head_size == 128:
+            return min(segments, 16)
+        return min(segments, 64)
+    return segments
+
+
+def _gfx942_3d_tile_size_override(problem: UnifiedAttentionProblem) -> Optional[int]:
+    arch = _resolve_attention_arch()
+    if not (arch == "gfx942" and problem.head_size >= 128 and problem.block_size >= 32):
+        return None
+    return problem.block_size // 2
+
+
+def _select_3d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
+    return problem.waves_per_eu
+
+
+def _enable_gfx942_3d_invariant_hoist(problem: UnifiedAttentionProblem) -> bool:
+    if _resolve_attention_arch() != "gfx942":
+        return False
+    env = __import__("os").environ.get("HIPDNN_GFX942_3D_HOIST", "").strip().lower()
+    return env in ("1", "on", "enable", "enabled", "yes", "true")
 
 
 def _tiled_3d_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ):
     UnifiedAttention3DTiledSpec, *_ = _tiled_3d_impl(_resolve_attention_arch())
+    tile_size_override = _gfx942_3d_tile_size_override(problem)
     return UnifiedAttention3DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
@@ -1221,8 +1351,10 @@ def _tiled_3d_spec_from_problem(
         use_alibi=problem.use_alibi,
         use_qq_bias=problem.use_qq_bias,
         num_seqs=problem.num_seqs,
-        waves_per_eu=problem.waves_per_eu,
+        waves_per_eu=_select_3d_waves_per_eu(problem),
         kv_storage_dtype=_kv_storage_dtype(problem),
+        tile_size_override=tile_size_override,
+        use_invariant_hoist=_enable_gfx942_3d_invariant_hoist(problem),
     )
 
 
@@ -1241,6 +1373,9 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         bool(problem.use_alibi),
         bool(problem.use_qq_bias),
         _num_segments(problem),
+        _gfx942_3d_tile_size_override(problem),
+        _select_3d_waves_per_eu(problem),
+        _enable_gfx942_3d_invariant_hoist(problem),
         _kv_storage_dtype(problem),
     )
 
@@ -1400,6 +1535,7 @@ def _run_3d_tiled(
     stream: int = 0,
     k_scale: float = 1.0,
     v_scale: float = 1.0,
+    use_graph: bool = True,
 ):
     """Launch the tiled 3D segment + reduce kernels.
 
@@ -1413,6 +1549,99 @@ def _run_3d_tiled(
     """
     num_segments = _num_segments(problem)
     cache_key = _tiled_3d_cache_key(problem)
+    if use_graph and _enable_3d_graph_replay(problem) and not _torch_stream_capturing():
+        graph_key = (
+            cache_key,
+            int(problem.total_q),
+            int(stream),
+            id(q),
+            id(k),
+            id(v),
+            id(out),
+            id(cu_seqlens_q),
+            id(seqused_k),
+            id(block_table),
+            id(sinks) if sinks is not None else 0,
+            id(alibi_slopes) if alibi_slopes is not None else 0,
+            id(qq_bias) if qq_bias is not None else 0,
+            float(softmax_scale),
+            float(k_scale),
+            float(v_scale),
+            float(softcap),
+            int(bt_stride),
+            int(qq_bias_stride_0),
+        )
+        graph = _3D_GRAPHS.get(graph_key)
+        if graph is None:
+            import torch
+
+            # Build/load launchers and allocate workspace outside capture.
+            _run_3d_tiled(
+                problem=problem,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                cu_seqlens_q=cu_seqlens_q,
+                seqused_k=seqused_k,
+                softmax_scale=softmax_scale,
+                block_table=block_table,
+                softcap=softcap,
+                sinks=sinks,
+                bt_stride=bt_stride,
+                warmup=warmup,
+                attempts=attempts,
+                alibi_slopes=alibi_slopes,
+                qq_bias=qq_bias,
+                qq_bias_stride_0=qq_bias_stride_0,
+                stream=stream,
+                k_scale=k_scale,
+                v_scale=v_scale,
+                use_graph=False,
+            )
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                with no_fence():
+                    _run_3d_tiled(
+                        problem=problem,
+                        q=q,
+                        k=k,
+                        v=v,
+                        out=out,
+                        cu_seqlens_q=cu_seqlens_q,
+                        seqused_k=seqused_k,
+                        softmax_scale=softmax_scale,
+                        block_table=block_table,
+                        softcap=softcap,
+                        sinks=sinks,
+                        bt_stride=bt_stride,
+                        warmup=warmup,
+                        attempts=attempts,
+                        alibi_slopes=alibi_slopes,
+                        qq_bias=qq_bias,
+                        qq_bias_stride_0=qq_bias_stride_0,
+                        stream=stream,
+                        k_scale=k_scale,
+                        v_scale=v_scale,
+                        use_graph=False,
+                    )
+            _3D_GRAPHS[graph_key] = graph
+            _3D_GRAPH_REFS[graph_key] = (
+                q,
+                k,
+                v,
+                out,
+                cu_seqlens_q,
+                seqused_k,
+                block_table,
+                sinks,
+                alibi_slopes,
+                qq_bias,
+            )
+        graph.replay()
+        if _resolved_fence(True):
+            wait_stream_and_release(int(stream))
+        return LaunchSummary(launches=2)
 
     # Lazily build (and cache) the PipelineLauncher + WorkspacePool for
     # this problem shape. This single object owns: the compiled HSACO
@@ -1422,95 +1651,139 @@ def _run_3d_tiled(
     # ``ck_dsl/runtime/launcher.py`` are removed by construction; the
     # only remaining per-call cost is packing args and issuing two
     # ``hipModuleLaunchKernel`` calls on the caller's stream.
-    pipeline, pool = _get_3d_pipeline(problem, cache_key, num_segments)
-    workspace = pool.prepare(
-        _attention_3d_workspace_specs(problem, num_segments, q.device)
+    prepared = _get_3d_pipeline(problem, cache_key, num_segments)
+    segm_output, segm_max, segm_expsum = prepared.workspace(
+        problem, num_segments, q.device
     )
-    segm_output = workspace["segm_output"]
-    segm_max = workspace["segm_max"]
-    segm_expsum = workspace["segm_expsum"]
 
-    block_q = (
-        16 // problem.num_queries_per_kv if problem.num_queries_per_kv <= 16 else 1
+    bound_key = (
+        cache_key,
+        int(problem.total_q),
+        str(q.device),
+        id(q),
+        id(k),
+        id(v),
+        id(cu_seqlens_q),
+        id(seqused_k),
+        id(block_table),
+        id(sinks) if sinks is not None else 0,
+        id(alibi_slopes) if alibi_slopes is not None else 0,
+        id(qq_bias) if qq_bias is not None else 0,
+        float(softmax_scale),
+        float(k_scale),
+        float(v_scale),
+        float(softcap),
+        int(problem.num_seqs),
+        int(bt_stride),
+        int(qq_bias_stride_0),
     )
-    total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
-
-    seg_vals = {
-        "segm_output_ptr": segm_output,
-        "segm_max_ptr": segm_max,
-        "segm_expsum_ptr": segm_expsum,
-        "query_ptr": q,
-        "key_cache_ptr": k,
-        "value_cache_ptr": v,
-        "sink_ptr": sinks,
-        "block_tables_ptr": block_table,
-        "seq_lens_ptr": seqused_k,
-        "alibi_slopes_ptr": alibi_slopes if alibi_slopes is not None else 0,
-        "qq_bias_ptr": qq_bias if qq_bias is not None else 0,
-        "query_start_len_ptr": cu_seqlens_q,
-        "scale": float(softmax_scale),
-        "k_scale": float(k_scale),
-        "v_scale": float(v_scale),
-        "softcap": float(softcap),
-        "num_seqs": int(problem.num_seqs),
-        "block_table_stride": int(bt_stride),
-        "qq_bias_stride_0": int(qq_bias_stride_0),
-    }
-    red_vals = {
-        "output_ptr": out,
-        "segm_output_ptr": segm_output,
-        "segm_max_ptr": segm_max,
-        "segm_expsum_ptr": segm_expsum,
-        "seq_lens_ptr": seqused_k,
-    }
-    seg_grid = (
-        int(total_num_q_blocks),
-        int(problem.num_kv_heads),
-        int(num_segments),
+    cached_values = _3D_BOUND_VALUES.get(bound_key)
+    if cached_values is None:
+        seg_vals = {
+            "segm_output_ptr": segm_output,
+            "segm_max_ptr": segm_max,
+            "segm_expsum_ptr": segm_expsum,
+            "query_ptr": q,
+            "key_cache_ptr": k,
+            "value_cache_ptr": v,
+            "sink_ptr": sinks,
+            "block_tables_ptr": block_table,
+            "seq_lens_ptr": seqused_k,
+            "alibi_slopes_ptr": alibi_slopes if alibi_slopes is not None else 0,
+            "qq_bias_ptr": qq_bias if qq_bias is not None else 0,
+            "query_start_len_ptr": cu_seqlens_q,
+            "scale": float(softmax_scale),
+            "k_scale": float(k_scale),
+            "v_scale": float(v_scale),
+            "softcap": float(softcap),
+            "num_seqs": int(problem.num_seqs),
+            "block_table_stride": int(bt_stride),
+            "qq_bias_stride_0": int(qq_bias_stride_0),
+        }
+        red_vals = {
+            "output_ptr": out,
+            "segm_output_ptr": segm_output,
+            "segm_max_ptr": segm_max,
+            "segm_expsum_ptr": segm_expsum,
+            "seq_lens_ptr": seqused_k,
+        }
+        _3D_BOUND_VALUES[bound_key] = (seg_vals, red_vals)
+    else:
+        seg_vals, red_vals = cached_values
+        # Output is commonly a fresh tensor per request; workspace and inputs are
+        # fixed by the bound key.
+        red_vals["output_ptr"] = out
+    return prepared.pipeline(
+        (seg_vals, red_vals),
+        (prepared.seg_config, prepared.red_config),
+        stream=int(stream),
     )
-    seg_block = (64, 1, 1)
-    red_grid = (int(problem.total_q), int(problem.num_query_heads), 1)
-    red_block = (64, 1, 1)
-
-    # M1: drive the segment + reduce chain through the CK-Tile-style
-    # primitive instead of ``PipelineLauncher.__call__``. ``pipeline``
-    # is still the cache anchor (one ``KernelLauncher`` per stage,
-    # built once and held over the problem's lifetime); we just
-    # extract its stages here and bake one closure per stage with
-    # :func:`make_kernel`. ``launch_kernel`` then submits both
-    # closures on ``stream`` in declaration order under
-    # :func:`no_fence`. Same-stream FIFO ordering still guarantees
-    # the reduce kernel observes the segment kernel's writes.
-    seg_launcher, red_launcher = pipeline.stages
-    launch_kernel(
-        StreamConfig(stream_id=int(stream)),
-        make_kernel(seg_launcher, seg_vals, seg_grid, seg_block),
-        make_kernel(red_launcher, red_vals, red_grid, red_block),
-    )
-    # Preserve :class:`PipelineLauncher`'s implicit last-stage fence
-    # semantic when not under an outer :func:`no_fence` context. The
-    # closures produced by :func:`make_kernel` are always
-    # ``fence=False``, and :func:`launch_kernel` itself does not
-    # implicitly sync on the non-timing path -- so without this
-    # explicit drain, callers that read the output tensor on the
-    # host immediately after :func:`run_unified_attention_torch`
-    # returns would race the reduce kernel. ``_resolved_fence(True)``
-    # returns False inside :func:`time_launches`'s :func:`no_fence`
-    # body (so the timing loop's outer event-sync remains the only
-    # sync point) and True everywhere else.
-    if _resolved_fence(True):
-        wait_stream_and_release(int(stream))
-    return LaunchSummary(launches=2)
 
 
-# Per-cache-key (pipeline, workspace_pool) pairs. Built lazily at first
-# dispatch for a given problem shape; reused across every subsequent
-# dispatch and every timing-loop iteration. This is the same shape as
-# CK Tile's `fmha_bwd_launcher` (one object per problem instance, owns
-# kernels + workspace, survives every launch).
-_3D_PIPELINES: Dict[Tuple, Tuple[PipelineLauncher, WorkspacePool]] = {}
+@dataclass
+class _Attention3DPrepared:
+    pipeline: PipelineLauncher
+    pool: WorkspacePool
+    seg_config: LaunchConfig
+    red_config: LaunchConfig
+    workspace_specs: Dict[Any, Tuple[WorkspaceSpec, WorkspaceSpec, WorkspaceSpec]]
+    workspace_tensors: Dict[Any, Tuple[Any, Any, Any]]
+    seg_values: Dict[str, Any]
+    red_values: Dict[str, Any]
+
+    def workspace(self, problem: UnifiedAttentionProblem, num_segments: int, device):
+        key = device
+        if key not in self.workspace_tensors:
+            specs = self.workspace_specs.get(key)
+            if specs is None:
+                specs = _attention_3d_workspace_specs(problem, num_segments, device)
+                self.workspace_specs[key] = specs
+            segm_output = self.pool.get_spec(specs[0])
+            segm_max = self.pool.get_spec(specs[1])
+            segm_expsum = self.pool.get_spec(specs[2])
+            self.workspace_tensors[key] = (segm_output, segm_max, segm_expsum)
+        return self.workspace_tensors[key]
+
+
+@dataclass(frozen=True)
+class _Attention2DLaunchMeta:
+    grid: Tuple[int, int, int]
+    block: Tuple[int, int, int]
+
+
+# Per-cache-key prepared 3D launch state. Built lazily at first dispatch for a
+# given problem shape; reused across every subsequent dispatch and timing-loop
+# iteration. This is the same shape as CK Tile's `fmha_bwd_launcher` (one object
+# per problem instance, owns kernels + workspace, survives every launch).
+_3D_PIPELINES: Dict[Tuple, _Attention3DPrepared] = {}
+_3D_BOUND_VALUES: Dict[Tuple, Tuple[Dict[str, Any], Dict[str, Any]]] = {}
+_3D_GRAPHS: Dict[Tuple, Any] = {}
+_3D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
 _2D_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
+_2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
+
+
+def _enable_3d_graph_replay(problem: UnifiedAttentionProblem) -> bool:
+    if _resolve_attention_arch() != "gfx942":
+        return False
+    if problem.max_seqlen_q != 1:
+        return False
+    if problem.use_sinks or problem.use_alibi or problem.use_qq_bias:
+        return False
+    if problem.softcap > 0 or problem.sliding_window > 0 or problem.use_fp8:
+        return False
+    env = __import__("os").environ.get("HIPDNN_GFX942_3D_GRAPH", "").strip().lower()
+    return env not in ("0", "off", "disable", "disabled", "no", "false")
+
+
+def _torch_stream_capturing() -> bool:
+    try:
+        import torch
+
+        return bool(torch.cuda.is_current_stream_capturing())
+    except Exception:
+        return False
 
 
 def _attention_3d_workspace_specs(
@@ -1578,9 +1851,10 @@ def _get_3d_pipeline(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
     num_segments: int,
-) -> Tuple[PipelineLauncher, WorkspacePool]:
-    if cache_key in _3D_PIPELINES:
-        return _3D_PIPELINES[cache_key]
+) -> _Attention3DPrepared:
+    prepared_key = cache_key + ("total_q", int(problem.total_q))
+    if prepared_key in _3D_PIPELINES:
+        return _3D_PIPELINES[prepared_key]
     if cache_key not in _ATTN_3D_TILED_CACHE:
         arch = _resolve_attention_arch()
         (
@@ -1597,6 +1871,7 @@ def _get_3d_pipeline(
             num_kv_heads=problem.num_kv_heads,
             dtype=problem.dtype,
             num_segments=num_segments,
+            waves_per_eu=_select_3d_waves_per_eu(problem),
         )
         seg_art = compile_kernel(
             build_unified_attention_3d_tiled(seg_spec, arch=arch),
@@ -1629,8 +1904,28 @@ def _get_3d_pipeline(
     )
     pipeline = PipelineLauncher([seg_launcher, red_launcher])
     pool = WorkspacePool()
-    _3D_PIPELINES[cache_key] = (pipeline, pool)
-    return pipeline, pool
+    block_q = (
+        16 // problem.num_queries_per_kv if problem.num_queries_per_kv <= 16 else 1
+    )
+    total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
+    prepared = _Attention3DPrepared(
+        pipeline=pipeline,
+        pool=pool,
+        seg_config=LaunchConfig(
+            grid=(int(total_num_q_blocks), int(problem.num_kv_heads), int(num_segments)),
+            block=(64, 1, 1),
+        ),
+        red_config=LaunchConfig(
+            grid=(int(problem.total_q), int(problem.num_query_heads), 1),
+            block=(64, 1, 1),
+        ),
+        workspace_specs={},
+        workspace_tensors={},
+        seg_values={},
+        red_values={},
+    )
+    _3D_PIPELINES[prepared_key] = prepared
+    return prepared
 
 
 def _select_2d_compile_backend(problem: UnifiedAttentionProblem) -> str:
@@ -1658,6 +1953,12 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem) -> str:
     # hipcc's heavier scheduler measurably wins. FP8 stays on LLVM
     # until the HIP path is exercised on the dequant-loader kernels.
     if problem.use_fp8:
+        return "llvm"
+    # gfx942 kernels are validated through LLVM-direct. The HIP debug backend has
+    # emitted code objects that hipModuleLoadData rejects for both cfvst D128 and
+    # narrow D64 MI300X kernels, so keep gfx942 on the proven direct path unless
+    # the caller explicitly overrides ``compile_backend``.
+    if _resolve_attention_arch() == "gfx942":
         return "llvm"
     # MHA (num_queries_per_kv == 1) head_size-64 prefill REGRESSES under
     # hipcc: the perf_attn2d sweep (B2 H8 d64 fp16, gfx950) measured the
@@ -1713,6 +2014,34 @@ def _get_2d_launcher(
     )
     _2D_LAUNCHERS[cache_key] = launcher
     return launcher
+
+
+def _get_2d_launch_meta(
+    problem: UnifiedAttentionProblem,
+    cache_key: Tuple,
+) -> _Attention2DLaunchMeta:
+    meta_key = cache_key + ("total_q", int(problem.total_q))
+    if meta_key in _2D_LAUNCH_META:
+        return _2D_LAUNCH_META[meta_key]
+    num_warps = (
+        _select_gfx942_flash_num_warps(problem)
+        if _enable_gfx942_fp16_flash(problem)
+        else _select_2d_num_warps(problem)
+    )
+    block_m_per_warp = _select_2d_block_m_per_warp(problem)
+    block_m = num_warps * block_m_per_warp
+    block_q = (
+        block_m // problem.num_queries_per_kv
+        if problem.num_queries_per_kv <= block_m
+        else 1
+    )
+    total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
+    meta = _Attention2DLaunchMeta(
+        grid=(int(problem.num_kv_heads), int(total_num_q_blocks), 1),
+        block=(int(64 * num_warps), 1, 1),
+    )
+    _2D_LAUNCH_META[meta_key] = meta
+    return meta
 
 
 def _get_scalar_launcher(
@@ -1878,27 +2207,15 @@ def run_unified_attention_torch(
                 v_scale=v_scale,
                 out_scale=out_scale,
             )
-            # The dispatcher must compute the grid using the same BLOCK_Q
-            # the kernel uses (which depends on `block_m`); a mismatch
-            # would launch the wrong number of CTAs and the kernel's
-            # q_block_local_idx -> qb_start_pos math would touch the
-            # wrong query positions. Compute directly from the selectors
-            # (avoiding the full spec construction on the hot path).
-            num_warps = _select_2d_num_warps(problem)
-            block_m_per_warp = _select_2d_block_m_per_warp(problem)
-            block_m = num_warps * block_m_per_warp
-            block_q = (
-                block_m // problem.num_queries_per_kv
-                if problem.num_queries_per_kv <= block_m
-                else 1
-            )
-            total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
-            threads_per_block = 64 * num_warps
+            # The dispatcher must launch with the same BLOCK_Q/threads the
+            # kernel was built for. Cache that fixed metadata per kernel key so
+            # repeated same-shape calls avoid selector math on the hot path.
+            meta = _get_2d_launch_meta(problem, key)
             return launcher(
                 vals,
                 config=LaunchConfig(
-                    grid=(int(problem.num_kv_heads), int(total_num_q_blocks), 1),
-                    block=(threads_per_block, 1, 1),
+                    grid=meta.grid,
+                    block=meta.block,
                     stream=int(stream),
                 ),
             )

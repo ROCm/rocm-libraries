@@ -82,7 +82,7 @@ class Shape:
     kv_heads: int  # Hkv
     batch: int  # B
     causal: bool
-    group: str  # "correctness" | "perf"
+    group: str  # "correctness" | "perf" | "decode"
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -125,7 +125,7 @@ def select_shapes(shapes: List[Shape], selectors: Optional[List[str]]) -> List[S
     for sel in selectors:
         if sel == "all":
             picked = shapes
-        elif sel in ("correctness", "perf"):
+        elif sel in ("correctness", "perf", "decode"):
             picked = [s for s in shapes if s.group == sel]
         else:
             picked = [s for s in shapes if s.name == sel]
@@ -270,6 +270,74 @@ def _flash_wide_setting() -> int:
     return 4  # shipped default
 
 
+def _cfv_store_enabled() -> bool:
+    """Opt into the experimental gfx942 store-path conflict-free V feed."""
+    env = os.environ.get("HIPDNN_GFX942_CFV_STORE", "").strip().lower()
+    return env in ("1", "on", "enable", "enabled", "yes", "true")
+
+
+def _cfv_store_split_enabled() -> bool:
+    env = os.environ.get("HIPDNN_GFX942_CFV_STORE_SPLIT", "1").strip().lower()
+    return env not in ("0", "off", "disable", "disabled", "no", "false")
+
+
+def _cfv_ck_vlds_enabled() -> bool:
+    env = os.environ.get("HIPDNN_GFX942_CFV_CK_VLDS", "1").strip().lower()
+    return env not in ("0", "off", "disable", "disabled", "no", "false")
+
+
+def _cfv_enabled() -> bool:
+    """Opt into the legacy gather-fill conflict-free V diagnostic path."""
+    env = os.environ.get("HIPDNN_GFX942_CFV", "").strip().lower()
+    return env in ("1", "on", "enable", "enabled", "yes", "true")
+
+
+def _k_sliced_ring_enabled() -> bool:
+    """Opt into the experimental sliced K ring for the cfvst path."""
+    env = os.environ.get("HIPDNN_GFX942_K_SLICED_RING", "").strip().lower()
+    return env in ("1", "on", "enable", "enabled", "yes", "true")
+
+
+def _k_sliced_ldsseq_enabled() -> bool:
+    """Opt into the CK Tile LdsSeq sliced K variant."""
+    env = os.environ.get("HIPDNN_GFX942_K_LDSSEQ", "").strip().lower()
+    return env in ("1", "on", "enable", "enabled", "yes", "true", "ck")
+
+
+def _waves_per_eu_setting():
+    env = os.environ.get("HIPDNN_GFX942_WAVES_PER_EU", "").strip()
+    return int(env) if env else None
+
+
+def _num_warps_setting(default: int) -> int:
+    env = os.environ.get("HIPDNN_GFX942_NUM_WARPS", "").strip()
+    return int(env) if env else default
+
+
+def _iglp_enabled() -> bool:
+    env = os.environ.get("HIPDNN_GFX942_IGLP", "").strip().lower()
+    return env in ("1", "on", "enable", "enabled", "yes", "true", "iglp1")
+
+
+def _kv_cache_policy() -> str:
+    return os.environ.get("HIPDNN_GFX942_KV_CACHE_POLICY", "stream").strip().lower()
+
+
+def _q_direct_enabled() -> bool:
+    env = os.environ.get("HIPDNN_GFX942_Q_DIRECT", "").strip().lower()
+    return env in ("1", "on", "enable", "enabled", "yes", "true")
+
+
+def _global_load_lds_k_enabled() -> bool:
+    env = os.environ.get("HIPDNN_GFX942_GLOBAL_LOAD_LDS_K", "").strip().lower()
+    return env in ("1", "on", "enable", "enabled", "yes", "true")
+
+
+def _q_major_grid_enabled() -> bool:
+    env = os.environ.get("HIPDNN_GFX942_Q_MAJOR_GRID", "").strip().lower()
+    return env in ("1", "on", "enable", "enabled", "yes", "true")
+
+
 def _is_flash_wide_eligible(s: Shape) -> bool:
     """The gfx942 flash-regime (32x32x8) path is D128 fp16 only."""
     return s.head_size == 128 and s.dtype == "fp16"
@@ -314,34 +382,80 @@ def _build_spec(s: Shape):
     )
 
     wide = _flash_wide_setting()
+    wpe = _waves_per_eu_setting()
+    iglp = _iglp_enabled()
+    kvcp = _kv_cache_policy()
+    qdir = _q_direct_enabled()
+    gldlds = _global_load_lds_k_enabled()
+    qgrid = _q_major_grid_enabled()
     if _is_flash_wide_eligible(s) and wide in (2, 4):
         # Flash-regime wide tile: 32x32x8 transposed-x8 (register-P^T). With
         # BLOCK_M = num_warps*32 > T=64 (wide4), K is double-buffered; for wide2
         # BLOCK_M=64 <= T so K single-buffering applies.
-        num_warps = wide
+        num_warps = _num_warps_setting(wide)
         config = f"wide{wide}"
+        cfvst = _cfv_store_enabled()
+        cfv = _cfv_enabled()
+        ksring = _k_sliced_ring_enabled()
+        ksldsseq = _k_sliced_ldsseq_enabled()
+        cfvst_split = _cfv_store_split_enabled()
+        cfvst_ck_vlds = _cfv_ck_vlds_enabled()
         spec = UnifiedAttention2DTiledSpec(
             **base,
             num_warps=num_warps,
+            waves_per_eu=wpe,
             block_m_per_warp=32,
             use_mfma_32x32x8=True,
             use_transposed_qk_32x32=True,
             use_k_single_buffer=(num_warps * 32 <= BLOCK_SIZE),
+            use_conflict_free_v=cfv,
+            use_conflict_free_v_store=cfvst,
+            use_conflict_free_v_store_split=cfvst_split,
+            use_conflict_free_v_ck_vlds=cfvst_ck_vlds,
+            use_k_sliced_ring=ksring,
+            use_k_sliced_ldsseq=ksldsseq,
+            use_iglp_opt=iglp,
+            use_q_direct_global=qdir,
+            kv_cache_policy=kvcp,
+            use_global_load_lds_k=gldlds,
+            use_q_major_grid=qgrid,
         )
-        return spec, config
+        if cfv:
+            return spec, f"{config}_cfv"
+        if ksldsseq:
+            return spec, f"{config}_cfvst_ksldsseq"
+        if ksring:
+            return spec, f"{config}_cfvst_ksring"
+        return spec, f"{config}_cfvst" if cfvst else config
 
     if _is_flash_wide_eligible(s):
         # HIPDNN_GFX942_FLASH_WIDE=0 -> L4: transposed-x8 + K single-buffer at
         # WG=64 (num_warps=1, BLOCK_M=32 <= T=64).
+        cfvst = _cfv_store_enabled()
+        cfv = _cfv_enabled()
+        cfvst_split = _cfv_store_split_enabled()
+        cfvst_ck_vlds = _cfv_ck_vlds_enabled()
         spec = UnifiedAttention2DTiledSpec(
             **base,
             num_warps=1,
+            waves_per_eu=wpe,
             block_m_per_warp=32,
             use_mfma_32x32x8=True,
             use_transposed_qk_32x32=True,
             use_k_single_buffer=True,
+            use_conflict_free_v=cfv,
+            use_conflict_free_v_store=cfvst,
+            use_conflict_free_v_store_split=cfvst_split,
+            use_conflict_free_v_ck_vlds=cfvst_ck_vlds,
+            use_iglp_opt=iglp,
+            use_q_direct_global=qdir,
+            kv_cache_policy=kvcp,
+            use_global_load_lds_k=gldlds,
+            use_q_major_grid=qgrid,
         )
-        return spec, "L4"
+        if cfv:
+            return spec, "L4_cfv"
+        return spec, "L4_cfvst" if cfvst else "L4"
 
     # Narrow 16x16x16 default path. D64 ships mw=32 + 1x tile; num_warps keys
     # on block_size (bs>=64 -> nw4). D128 bf16 stays nw2 narrow.
@@ -461,8 +575,13 @@ def _run_ck_dsl(s: Shape, data, launcher, spec, *, warmup: int, attempts: int):
     )
     block_q = spec.block_q
     total_num_q_blocks = q.shape[0] // block_q + s.batch
+    grid = (
+        (int(total_num_q_blocks), int(s.kv_heads), 1)
+        if getattr(spec, "use_q_major_grid", False)
+        else (int(s.kv_heads), int(total_num_q_blocks), 1)
+    )
     cfg = LaunchConfig(
-        grid=(int(s.kv_heads), int(total_num_q_blocks), 1),
+        grid=grid,
         block=(64 * spec.num_warps, 1, 1),
         stream=hip_stream,
     )
@@ -487,6 +606,39 @@ def compare(reference, out) -> dict:
     return {
         "max_abs": float(abs_diff.max().item()),
         "mean_abs": float(abs_diff.mean().item()),
+    }
+
+
+def mismatch_summary(reference, out, tol: float, limit: int) -> dict:
+    """Return compact diagnostics for a failing correctness comparison."""
+    import torch
+
+    a = reference.float()
+    b = out.float()
+    abs_diff = (a - b).abs()
+    bad = abs_diff > tol
+    sign_mismatch = (torch.signbit(a) != torch.signbit(b)) & bad
+    n_bad = int(bad.sum().item())
+    n_sign = int(sign_mismatch.sum().item())
+    worst_vals, worst_flat = torch.topk(abs_diff.flatten(), k=min(limit, abs_diff.numel()))
+    samples = []
+    for rank, flat in enumerate(worst_flat.cpu().tolist()):
+        idx = list(torch.unravel_index(torch.tensor(flat), abs_diff.shape))
+        idx_int = [int(x.item()) for x in idx]
+        samples.append(
+            {
+                "rank": rank,
+                "index": idx_int,
+                "ref": float(a.flatten()[flat].item()),
+                "out": float(b.flatten()[flat].item()),
+                "abs": float(worst_vals[rank].item()),
+            }
+        )
+    return {
+        "bad": n_bad,
+        "total": int(abs_diff.numel()),
+        "sign_mismatch": n_sign,
+        "samples": samples,
     }
 
 
@@ -516,6 +668,12 @@ def main() -> int:
         help="abs tolerance override (default 2e-2 fp16 / 4e-2 bf16)",
     )
     parser.add_argument("--report", type=Path, default=None)
+    parser.add_argument(
+        "--debug-mismatch",
+        type=int,
+        default=0,
+        help="on failure, print this many worst mismatch samples",
+    )
     args = parser.parse_args()
 
     import torch
@@ -530,6 +688,28 @@ def main() -> int:
         f"HIPDNN_GFX942_FLASH_WIDE -> {wide} "
         f"({'wide' + str(wide) if wide else 'L4 (WG=64)'} for D128 fp16)"
     )
+    if _cfv_store_enabled():
+        print("HIPDNN_GFX942_CFV_STORE -> enabled (experimental cfvst)")
+    if _cfv_enabled():
+        print("HIPDNN_GFX942_CFV -> enabled (legacy cfv diagnostic)")
+    if _k_sliced_ring_enabled():
+        print("HIPDNN_GFX942_K_SLICED_RING -> enabled (experimental ksring)")
+    if _k_sliced_ldsseq_enabled():
+        print("HIPDNN_GFX942_K_LDSSEQ -> enabled (CK Tile LdsSeq)")
+    if _waves_per_eu_setting() is not None:
+        print(f"HIPDNN_GFX942_WAVES_PER_EU -> {_waves_per_eu_setting()}")
+    if os.environ.get("HIPDNN_GFX942_NUM_WARPS", "").strip():
+        print(f"HIPDNN_GFX942_NUM_WARPS -> {os.environ['HIPDNN_GFX942_NUM_WARPS']}")
+    if _iglp_enabled():
+        print("HIPDNN_GFX942_IGLP -> enabled (iglp1)")
+    if _kv_cache_policy() != "stream":
+        print(f"HIPDNN_GFX942_KV_CACHE_POLICY -> {_kv_cache_policy()}")
+    if _q_direct_enabled():
+        print("HIPDNN_GFX942_Q_DIRECT -> enabled")
+    if _global_load_lds_k_enabled():
+        print("HIPDNN_GFX942_GLOBAL_LOAD_LDS_K -> enabled")
+    if _q_major_grid_enabled():
+        print("HIPDNN_GFX942_Q_MAJOR_GRID -> enabled")
 
     shapes = select_shapes(load_shapes(), args.scenario)
     if not shapes:
@@ -583,6 +763,19 @@ def main() -> int:
         tag = "PASS" if ok else "FAIL"
         if not ok:
             n_fail += 1
+            if args.debug_mismatch > 0:
+                dbg = mismatch_summary(ref, out, tol, args.debug_mismatch)
+                print(
+                    f"  mismatch: bad={dbg['bad']}/{dbg['total']} "
+                    f"sign_mismatch={dbg['sign_mismatch']}"
+                )
+                for sample in dbg["samples"]:
+                    print(
+                        "    "
+                        f"rank={sample['rank']} idx={sample['index']} "
+                        f"ref={sample['ref']:+.6e} out={sample['out']:+.6e} "
+                        f"abs={sample['abs']:.3e}"
+                    )
         us = ms * 1e3
         tf = attention_tflops(s, ms)
         print(

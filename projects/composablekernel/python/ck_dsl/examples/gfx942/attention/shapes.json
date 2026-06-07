@@ -42,6 +42,10 @@
     "perf": [
       {"name": "Fp16_Prefill_GQA_S2048_D128", "dtype": "fp16", "seqlen_q": 2048, "seqlen_k": 2048, "head_size": 128, "heads": 32, "kv_heads": 8, "batch": 1, "causal": true},
       {"name": "Fp16_Prefill_GQA_S2048_D64",  "dtype": "fp16", "seqlen_q": 2048, "seqlen_k": 2048, "head_size": 64,  "heads": 32, "kv_heads": 8, "batch": 1, "causal": true}
+    ],
+    "decode": [
+      {"name": "Fp16_Decode_GQA_S2048_D128", "dtype": "fp16", "seqlen_q": 1, "seqlen_k": 2048, "head_size": 128, "heads": 32, "kv_heads": 8, "batch": 1, "causal": true},
+      {"name": "Fp16_Decode_GQA_S2048_D64",  "dtype": "fp16", "seqlen_q": 1, "seqlen_k": 2048, "head_size": 64,  "heads": 32, "kv_heads": 8, "batch": 1, "causal": true}
     ]
   }
 }
