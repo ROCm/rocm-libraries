@@ -1,0 +1,68 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# asmaddr2: bf16 BBS TN with StoreRemapVectorWidth=4 (SRVW), UseBias=1.
+#
+# Target: AsmAddressCalculation.py remaining arms (64-bit / edge / multi-batch):
+#   - 135-137 : emitAddressCoordIncrement coordOffset0 > 64 (VW=1, wtIdex=3->96)
+#   - 168, 178: getRowPtr/getAddrVgpr Bias branch
+#   - 289-309 : emitScaleToBpe optSingleColVgpr Bias branch (tc == 'Bias')
+#   - 439-451 : emitScaleToBpe else-branch Bias path
+#   - 841     : incrementToNextRow numRows > 1 (rowInc=32 via optSrdIncForRow)
+#
+# Mechanism: SRVW=4 sets optSrdIncForRow=1, causing incrementToNextRow to be
+# called for each row transition. With VectorWidthA=VectorWidthB=1 and
+# SourceSwap=0, coordOffset0 for d0=3 reaches 3*32=96 > 64 (the "large
+# coordOffset0" branch). Bias enabled triggers the 'Bias' branch in
+# getRowPtr/getAddrVgpr/emitScaleToBpe. UseBias: 1 restricts PackedC1IndicesX
+# to 1 (single free index), satisfying optSrdIncForRow requirements.
+#
+# 1 emitted kernel (well under <=8 budget).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBias: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # BBS (bf16 in / bf16 out / f32 compute) TN, Bias + StoreRemap.
+  # SRVW=4 enables optSrdIncForRow, driving incrementToNextRow with numRows > 1.
+  # VW_A=VW_B=1 ensures coordOffset0 > 64 for the third d0 tile.
+  # SourceSwap=0 is required by StoreRemapVectorWidth > 0.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 4, 4, 2, 2]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - StoreRemapVectorWidth: [4]
+        - DepthU: [16]
+        - GlobalSplitU: [1]
+        - SourceSwap: [0]
+        - PrefetchGlobalRead: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['b']

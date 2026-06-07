@@ -1,0 +1,80 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P4 designed sparse-DTVSM config for gfx942 codegen characterization.
+#
+# Goal: exercise graMetadataTileAssignment (KWA ~3048-3105) and
+# computeMetaDataSrd (KWA ~4102-4192) which are gated by:
+#   kernel["DirectToVgprSparseMetadata"]  -- true arm of graMetadataTileAssignment
+#   kernel["ProblemType"]["Sparse"] and kernel["DirectToVgprSparseMetadata"]
+#                                         -- computeMetaDataSrd call path
+#
+# This config uses structured-sparse A (Sparse=1) with gfx942 SMFMA instruction
+# [16, 16, 32, 1] (valid SMFMA HH shape), DirectToVgprSparseMetadata=1, and
+# a single small fork permutation to stay within the 8-kernel budget.
+#
+# gfx942 supports SMFMA for Sparse=1 on HH with MatrixInstruction [16,16,32,1].
+# DirectToVgprSparseMetadata=1 routes metadata through VGPRs instead of LDS,
+# enabling the graMetadataTileAssignment + computeMetaDataSrd arms.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HHS (f16 in / f16 out / f32 compute) NN, Sparse=1 (2:4 sparse A)
+  # DirectToVgprSparseMetadata=1 exercises:
+  #   graMetadataTileAssignment (KWA 3048-3105)
+  #   computeMetaDataSrd        (KWA 4102-4192)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # SMFMA [16,16,32,1] is a valid gfx942 sparse half-half shape.
+        # MIWaveTile [2,2] gives MIWaveTile[0]=2 > 1 so the graMetadataTileAssignment
+        # inner loop (graIdx in range(1, MIWaveTile[0])) executes.
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  1, 1,  2, 2]
+          - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - DirectToVgprSparseMetadata: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - ExpandPointerSwap: [0]
+        - StaggerU: [0]
+        - WorkGroupMapping: [8]
+        - 1LDSBuffer: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

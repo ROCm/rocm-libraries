@@ -300,7 +300,8 @@ Stage 2 — coverage expansion:
 - [x] **P4 round 1 (done, 2026-06-06)** cheap standalone/library-mgmt modules. Dynamic workflow `wf_f333c274-b78` (8 Haiku authors) → driver-run **deterministic methodology-A gate** (Part A bulk `-n4` + Part B `cpu_only_switch` isolated + `coverage combine` — avoids a pre-existing `problemTypeToEnum` xdist flake; see `coverage/p4/RANKING-AND-METHODOLOGY.md`). **68.85% → 69.21%** (+0.36 pts, 15723→15492 miss), 6 tests kept (verify_stinky/mergeLogic/benchclient/updatelib/gensummations/retunelib), 2 dropped as 0-marginal (BenchmarkProblems/LibraryLogic). Full `-m unit` 2620 passed / 0 failed / 201 skipped. Receipt `coverage/p4/master-baseline-R1.txt`.
 - [x] **P4 round 2 (done, 2026-06-06)** codegen emit widening. Dynamic workflow `wf_ee11a589-d3b` (12 Sonnet designers, ForkParameters sweeps) → driver deterministic gate. **69.21% → 72.53%** (+3.32 pts, 15492→13470 miss, 2022 lines). 11 tests kept (per-target miss: WorkGroupMapping 364→32, GlobalWriteBatch 787→518, KWA 3987→3558, KW 1879→1664, StreamK 883→685, Subtile 313→155, ShiftVector 293→188, MAC/Activation/LRA/AsmStoreState + gsu/solution/kwconv add 62 via KWA/KW per leave-3-out). 1 dropped (localread, <cutoff). Fixed in-flight: 4 agents committed golden tests without seeding `.ambr` (seeded via `--snapshot-update`). Full `-m unit` 2631 passed / 0 failed / 201 skipped. Receipt `coverage/p4/master-baseline-R2.txt`.
 - [x] **P4 round 3 (done, 2026-06-06)** deeper codegen + client/run path (switch). Dynamic workflow `wf_85433c15-e08` (14 Sonnet designers, all kept/stable) → driver deterministic gate (4-process: bulk `-n4` + cpu_only + ClientPath + TensileCreateLibraryRun isolated + combine). **72.53% → 75.35%** (+2.82 pts, 13470→11899 miss, 1571 lines). Standouts: LibraryLogic 535→142, LraTileAssignment 279→46, GlobalWriteBatch 518→362, StreamK 685→548, KWA 3558→3383, KW 1664→1555, TensileCreateLibrary/Run 275→197, ClientWriter 221→158. Full `-m unit` 2836 passed / 0 failed / 201 skipped. Receipt `coverage/p4/master-baseline-R3.txt`.
-- [ ] **P4** expansion rounds 4..n (repeat until >=80% or no further gain). **NEXT = round 4** (remaining KWA 3383 / KW 1555 / Solution 1292 / LocalRead 497 / StreamK 548 / GlobalWriteBatch 362 / Activation 279 depth; gap to 80% ~4.65 pts ≈ ~2550 lines). Diminishing returns watch: round deltas +0.36 → +3.32 → +2.82.
+- [x] **P4 round 4 (done, 2026-06-06)** advanced codegen feature families. Dynamic workflow `wf_18699cf0-69e` (14 Sonnet designers) → driver 4-process gate. **75.35% → 76.68%** (+1.33 pts, 11899→11168 miss, 731 lines). 12 kept; standouts: KWA 3383→2974 (sparse `DirectToVgprSparseMetadata` + multi-index summation + XCC cluster-remap + int8 + fp8-MX scale), KernelWriterReduction 47→0, Activation 279→207, KernelWriterBetaOnly 49→29. Dropped `usee` (kept=false) + `streamk3` (coverage non-deterministic under `concurrency=multiprocessing`). Full `-m unit` 2928 passed / 0 failed / 201 skipped. Receipt `coverage/p4/master-baseline-R4.txt`.
+- [ ] **P4** expansion rounds 5..n (optional). Round deltas +0.36 → +3.32 → +2.82 → **+1.33** (diminishing). Gap to 80% **~3.32 pts** ≈ ~1820 lines, concentrated in the hardest code: KWA 2974 / KW 1472 / Solution 1253 (=5699 miss). **NEXT = round 5 (final codegen depth) then P5 gate/ceiling decision.**
 - [ ] **P5** whole-project gate: >=80% or documented ceiling; `golden-governance.md`; `recommendations.md`.
 - [ ] **P6** mutation validation; survivors → P4 backlog; tree clean.
 
@@ -374,6 +375,16 @@ Stage 2 — coverage expansion:
   seed YAMLs relocated under `_codegen/data/test_data/_designed/**` so `findConfigs` (which skips
   `test_data` paths) stops auto-running them through the GPU `Tensile.Tensile()` path — no
   `config_helpers.py` change. Full `-m unit` **2528 passed / 201 skipped / 0 failed**. Commit `ec7524bd1be`.
+- 2026-06-06 — **P4 round 4 — 75.35% → 76.68% (+1.33 pts, 12 candidates), `coverage/p4/master-baseline-R4.txt`.**
+  Advanced codegen feature families via dynamic workflow `wf_18699cf0-69e` (14 Sonnet designers). 731
+  lines (11899→11168 miss). KWA 3383→2974 driven by previously-untouched features: structured sparsity
+  (`DirectToVgprSparseMetadata` → computeMetaDataSrd/graMetadataTileAssignment), multi-index summation
+  (NumIndicesSummation>1), WorkGroupMappingXCC cluster-remap (gfx1250 ClusterDim), int8 GEMM, fp8/MX
+  block-scale (gfx950). Also KernelWriterReduction 47→0, Activation 279→207, BetaOnly 49→29, Solution
+  1292→1253. Dropped `usee` (design kept=false) and `streamk3` (test passes but its coverage is
+  non-deterministic under coverage's `concurrency=multiprocessing` subprocess capture — a measurement
+  artifact, not a test bug). Diminishing returns now clear (round deltas +0.36/+3.32/+2.82/+1.33).
+  4-process gate. 2928 passed / 0 failed / 201 skipped.
 - 2026-06-06 — **P4 round 3 — 72.53% → 75.35% (+2.82 pts, 14 candidates / 15 test files), `coverage/p4/master-baseline-R3.txt`.**
   Deeper codegen + client/run path (switch-enabled) via dynamic workflow `wf_85433c15-e08` (14 Sonnet
   designers, all kept + two-run-stable; agents seeded their own `.ambr` this round). 1571 lines

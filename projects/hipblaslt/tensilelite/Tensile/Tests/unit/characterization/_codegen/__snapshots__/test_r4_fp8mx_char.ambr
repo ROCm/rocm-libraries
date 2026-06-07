@@ -1,0 +1,21 @@
+# serializer version: 1
+# name: test_r4_fp8mx_gfx950_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgc9g2NGW_wy1nAdPK3LMmERZ6c9dBkaEDZ87eCDjKnvg=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArglG8u4j6oJtxzIv0AS31LpadDFKWemkCD9GRvuSO3Pn0=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgvosvAiiBfTww5FkKHqJXUq5BtTHa6NLMijHygVY4uEc=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgxo9z5BH3Gt1I5_85Amy35dc5r-OGNbsfu_MRBUqH98Y=',
+      'err': 0,
+    }),
+  ])
+# ---
