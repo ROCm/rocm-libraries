@@ -29,8 +29,7 @@ If you take only one thing from this runbook, take this loop:
 ```
 
 Do not batch several levers unless you are explicitly doing a coarse
-search and plan to isolate the winner afterward. If stuck and no clear winning change with simple levers, extend to multiple levers in smart combinations and use judgement and do not give up and revert losses easily. **If correctness
-fails, do not report speed as a win.**
+search and plan to isolate the winner afterward. If stuck and no clear winning change with simple levers is evident, extend to multiple levers in smart combinations and use judgement. Whenever possible, turn a lever into a knob to be tuned with heuristics, because several failures might combine to a big win. **If correctness fails, do not report speed as a win, make sure it is fixed.**
 
 ## How to read this document
 

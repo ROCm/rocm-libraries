@@ -636,8 +636,16 @@ class UnifiedAttention2DTiledSpec:
                 and self.use_conflict_free_v_store
             ):
                 raise ValueError("use_k_sliced_ring requires the transposed-x8 cfvst path")
-            if self.dtype != "fp16" or self.head_size != 128 or self.tile_size_eff not in (64, 128):
-                raise ValueError("use_k_sliced_ring v1 is restricted to fp16 D128 T in {64,128}")
+            if (
+                self.dtype != "fp16"
+                or self.head_size not in (64, 128)
+                or self.head_size % 32 != 0
+                or self.tile_size_eff not in (64, 128)
+            ):
+                raise ValueError(
+                    "use_k_sliced_ring requires fp16, head_size in {64,128} "
+                    "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}"
+                )
         if self.use_k_sliced_ldsseq and not self.use_k_sliced_ring:
             raise ValueError("use_k_sliced_ldsseq requires use_k_sliced_ring")
         if self.use_q_direct_global:

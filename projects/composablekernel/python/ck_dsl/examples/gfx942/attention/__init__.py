@@ -8,6 +8,8 @@ wide (flash-regime) tiled attention kernel in
 harness it has **no** Triton/AITER dependency: the oracle is a fp32 torch
 reference, so the example runs on any box with torch + a gfx942 GPU.
 
-Ships the canonical shapes we validate (``shapes.json``) and the measured
-perf baselines to compare against (``expected_perf.csv``); see ``README.md``.
+Ships the canonical shapes we validate (``shapes.json``) and the definitive
+correctness + perf check (``final_shapes_check.py``); see ``README.md``. The
+exhaustive sweep / probe / regression harnesses that found & gated the levers
+are archived under ``~/attention-archive/``.
 """
