@@ -994,10 +994,16 @@ validParameters = { # we need to make sure this matches develop
     # 0  : disable CMS even if supported
     # 1  : enable  CMS, is set to 0 if not supported
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
+    # 0  : Generate original Store blocks: NonEdgeN, ThenN, and Then1 for StoreVectorWidth N
+    # 1  : Generate adaptive Store blocks: NonEdgeN, ThenN, ThenN/2, ..., Then1 and select by runtime problem size
     "AdaptiveGemm": [0, 1],
     # 0  : disable
     # 1  : merge MB and MBSK assembly code and select best GW path in runtime
     "AdaptiveGemmGSUA": [0, 1],
+    # 0  : NonTemporalA and NonTemporalB use fixed values from kernel parameters
+    # 1  : NonTemporalA and NonTemporalB are determined at runtime based on problem size and stride alignment
+    #      Adaptive selection applies to the main loop only; prefetch (prolog) and tail loop still use the fixed NonTemporalA/B
+    "AdaptiveGemmNTAB": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
     "ExtraLatencyForLR":          list(range(0,17,2)) + list(range(-80,0,10)),

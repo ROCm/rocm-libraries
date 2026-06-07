@@ -12,8 +12,10 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "HipKernelUtils.hpp"
 #include "LayernormApplicabilityChecks.hpp"
+#include "core/Utils.hpp"
+
+using namespace hip_kernel_provider::core::utils;
 
 namespace hip_kernel_provider::layernorm
 {
@@ -84,7 +86,7 @@ void LayernormValidator::validateNormalizedDim(const std::vector<int64_t>& ioTen
             "one stat tensor.");
     }
 
-    const auto& ioAttr = hip_kernel_utils::findTensorAttributes(_tensorMap, ioTensorIds[0]);
+    const auto& ioAttr = findTensorAttributes(_tensorMap, ioTensorIds[0]);
     const std::vector<int64_t> ioDims(ioAttr.dims()->begin(), ioAttr.dims()->end());
 
     const size_t affineNormalizedDimMin
@@ -222,14 +224,13 @@ void LayernormValidator::checkTensorShapesSupported(const std::vector<int64_t>& 
             "At least one IO tensor must be provided for layernorm.");
     }
 
-    const auto& ioTensorAttr = hip_kernel_utils::findTensorAttributes(_tensorMap, ioTensorIds[0]);
+    const auto& ioTensorAttr = findTensorAttributes(_tensorMap, ioTensorIds[0]);
     const std::vector<int64_t> ioDims(ioTensorAttr.dims()->begin(), ioTensorAttr.dims()->end());
 
     validateConsistentShapes(
         ioTensorIds, ioDims, "All IO tensors for layernorm must have the same shape.");
 
-    const auto& affineTensorAttr
-        = hip_kernel_utils::findTensorAttributes(_tensorMap, affineTensorIds[0]);
+    const auto& affineTensorAttr = findTensorAttributes(_tensorMap, affineTensorIds[0]);
     const std::vector<int64_t> affineDims(affineTensorAttr.dims()->begin(),
                                           affineTensorAttr.dims()->end());
     validateConsistentShapes(
@@ -237,8 +238,7 @@ void LayernormValidator::checkTensorShapesSupported(const std::vector<int64_t>& 
 
     if(!statTensorIds.empty())
     {
-        const auto& statTensorAttr
-            = hip_kernel_utils::findTensorAttributes(_tensorMap, statTensorIds[0]);
+        const auto& statTensorAttr = findTensorAttributes(_tensorMap, statTensorIds[0]);
         const std::vector<int64_t> statDims(statTensorAttr.dims()->begin(),
                                             statTensorAttr.dims()->end());
         validateConsistentShapes(statTensorIds,

@@ -194,14 +194,14 @@ std::pair<flatbuffers::FlatBufferBuilder, BatchnormFwdTrainingPlan>
 TEST(TestBatchnormFwdTrainingPlan, ExecuteWithoutCompileThrows)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdTrainingPlan, GetWorkspaceSizeReturnsZero)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
@@ -210,7 +210,7 @@ TEST(TestBatchnormFwdTrainingPlan, IsMoveConstructible)
     auto [fbb, plan] = createPlanFromGraph();
 
     const BatchnormFwdTrainingPlan moved(std::move(plan));
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 
