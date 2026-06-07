@@ -277,9 +277,10 @@ class TestTensileUpdateLibrary:
         from Tensile.TensileUpdateLibrary import TensileUpdateLibrary
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create test logic files
-            logic_file1 = os.path.join(tmpdir, "logic_gfx908.yaml")
-            logic_file2 = os.path.join(tmpdir, "logic_gfx90a.yaml")
+            # Create test logic files using architecture names from architectureMap
+            # Implementation searches for values (arcturus, aldebaran), not keys (gfx908, gfx90a)
+            logic_file1 = os.path.join(tmpdir, "logic_arcturus.yaml")
+            logic_file2 = os.path.join(tmpdir, "logic_aldebaran.yaml")
             other_file = os.path.join(tmpdir, "other.txt")
 
             for f in [logic_file1, logic_file2, other_file]:
@@ -298,11 +299,11 @@ class TestTensileUpdateLibrary:
             call_args = mock_parallel.call_args
             files_iter = list(call_args[0][1])
 
-            # Verify correct files were found (should find the gfx files, not other.txt)
+            # Verify correct files were found (architecture names, not gfx IDs)
             file_paths = [f[0] for f in files_iter]
-            assert len(file_paths) >= 2  # At least the two logic files
-            assert any("gfx908" in f for f in file_paths)
-            assert any("gfx90a" in f for f in file_paths)
+            assert len(file_paths) == 2  # Exactly the two architecture logic files
+            assert any("arcturus" in f for f in file_paths)
+            assert any("aldebaran" in f for f in file_paths)
             assert not any("other.txt" in f for f in file_paths)
 
     @patch('Tensile.TensileUpdateLibrary.ParallelMap')
@@ -337,6 +338,7 @@ class TestTensileUpdateLibrary:
             assert os.path.exists(output_dir)
             assert os.path.isdir(output_dir)
 
+    @patch('Tensile.TensileUpdateLibrary.globalParameters', {})
     @patch('Tensile.TensileUpdateLibrary.ParallelMap')
     @patch('Tensile.TensileUpdateLibrary.argUpdatedGlobalParameters')
     @patch('Tensile.TensileUpdateLibrary.assignGlobalParameters')

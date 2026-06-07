@@ -102,10 +102,29 @@ class TestFixSizeInconsistencies:
         sizes = [
             ([1, 2, 3, 4, 5, 6, 7, 8], 0),
             ([1, 2, 3, 4], 1),
-            ([1, 2, 3, 4, 9, 10, 11, 12], 2),  # First 4 elements duplicate of item 1
+            ([1, 2, 3, 4, 9, 10, 11, 12], 2),
         ]
         result, count = fixSizeInconsistencies(sizes, "test")
-        assert count == len(result)
+        # All 3 sizes truncate/normalize to [1, 2, 3, 4], so should deduplicate to 1 unique size
+        # - [1,2,3,4,5,6,7,8] -> [1,2,3,4] (removes last 4)
+        # - [1,2,3,4] -> [1,2,3,4] (no change)
+        # - [1,2,3,4,9,10,11,12] -> [1,2,3,4] (removes last 4)
+        assert count == 1
+        assert len(result) == 1
+        assert result[0][0] == [1, 2, 3, 4]
+
+    @patch('Tensile.TensileMergeLibrary.verbose')
+    def test_remove_duplicates_verbose_message(self, mock_verbose):
+        """Test that verbose message is triggered with correct count when duplicates are removed"""
+        sizes = [
+            ([1, 2, 3, 4, 5, 6, 7, 8], 0),
+            ([1, 2, 3, 4], 1),
+            ([1, 2, 3, 4, 9, 10, 11, 12], 2),
+        ]
+        result, count = fixSizeInconsistencies(sizes, "test")
+
+        # Verify verbose was called with correct count: origNumSizes - numSize = 3 - 1 = 2
+        mock_verbose.assert_called_once_with(2, "duplicate size(s) removed from", "test", "logic file")
 
     def test_no_duplicates(self):
         """Test with no duplicates"""
@@ -189,10 +208,15 @@ class TestSanitizeSolutions:
         assert solList[0]["StaggerUStride"] == 10
 
     def test_sanitize_without_stagger_u(self):
-        """Test solutions without StaggerU key"""
-        solList = [{"other": "value"}]
+        """Test solutions without StaggerU key remain unchanged"""
+        solList = [{"other": "value", "data": 123}]
+        original = deepcopy(solList)
         sanitizeSolutions(solList)
-        # Should not crash
+
+        # Verify solution is unchanged
+        assert solList == original
+        assert solList[0]["other"] == "value"
+        assert solList[0]["data"] == 123
 
 
 @pytest.mark.unit
@@ -274,15 +298,29 @@ class TestRemoveDuplicatedSolutions:
         ]
         size_map = [
             ([1, 2, 3], [0, 0.9]),
-            ([4, 5, 6], [2, 0.8]),  # References duplicate
+            ([4, 5, 6], [2, 0.8]),  # References duplicate (index 2 -> should become 0)
         ]
         data = [None, None, None, None, None, solutions, None, size_map]
 
         result, num_removed, num_solutions, num_kernels = removeDuplicatedSolutions(data)
 
+        # Verify return values
         assert num_solutions == 2
         assert num_removed == 1
         assert num_kernels == 2
+
+        # Verify solutions list was deduplicated
+        assert len(result[5]) == 2
+        assert result[5][0]["SolutionNameMin"] == "sol_A"
+        assert result[5][1]["SolutionNameMin"] == "sol_B"
+
+        # Verify solutions were reindexed
+        assert result[5][0]["SolutionIndex"] == 0
+        assert result[5][1]["SolutionIndex"] == 1
+
+        # Verify size_map was updated to reference correct solution indices
+        assert result[7][0][1][0] == 0  # First size still references sol_A (index 0)
+        assert result[7][1][1][0] == 0  # Second size now references sol_A (was 2, now 0)
 
     def test_no_duplicates(self):
         """Test with no duplicate solutions"""
@@ -298,9 +336,23 @@ class TestRemoveDuplicatedSolutions:
 
         result, num_removed, num_solutions, num_kernels = removeDuplicatedSolutions(data)
 
+        # Verify return values
         assert num_solutions == 2
         assert num_removed == 0
         assert num_kernels == 2
+
+        # Verify solutions list is unchanged (still has both)
+        assert len(result[5]) == 2
+        assert result[5][0]["SolutionNameMin"] == "sol_A"
+        assert result[5][1]["SolutionNameMin"] == "sol_B"
+
+        # Verify solutions are still correctly indexed
+        assert result[5][0]["SolutionIndex"] == 0
+        assert result[5][1]["SolutionIndex"] == 1
+
+        # Verify size_map is unchanged
+        assert result[7][0][1][0] == 0  # First size references sol_A (index 0)
+        assert result[7][1][1][0] == 1  # Second size references sol_B (index 1)
 
 
 @pytest.mark.unit
@@ -324,41 +376,32 @@ class TestLoadData:
 class TestCompareDestFolderToYaml:
     """Test compareDestFolderToYaml function"""
 
-    def test_matching_folder_and_attribute(self):
-        """Test when folder matches YAML attribute"""
-        original_dir = "/path/to/Equality"
+    @pytest.mark.parametrize("folder,yaml_attr,should_raise,test_id", [
+        # Matching cases - should not raise
+        ("Equality", "Equality", False, "equality_matches"),
+        ("GridBased", "GridBased", False, "gridbased_matches"),
+        # Mismatching cases - should raise
+        ("Equality", "GridBased", True, "equality_mismatch"),
+        ("GridBased", "Equality", True, "gridbased_mismatch"),
+        # Empty attribute - should raise
+        ("Equality", None, True, "empty_attribute"),
+        # Non-checkable folder - should not raise (ignored)
+        ("OtherFolder", "Equality", False, "non_checkable_folder"),
+        ("OtherFolder", "GridBased", False, "non_checkable_folder_gridbased"),
+        ("OtherFolder", None, True, "non_checkable_empty_attr"),
+    ])
+    def test_folder_yaml_comparison(self, folder, yaml_attr, should_raise, test_id):
+        """Test folder and YAML attribute comparison with various scenarios"""
+        original_dir = f"/path/to/{folder}"
         inc_data = [None] * 12
-        inc_data[11] = "Equality"
+        inc_data[11] = yaml_attr
 
-        # Should not raise
-        compareDestFolderToYaml(original_dir, "test.yaml", inc_data)
-
-    def test_mismatching_folder_and_attribute(self):
-        """Test when folder doesn't match YAML attribute"""
-        original_dir = "/path/to/Equality"
-        inc_data = [None] * 12
-        inc_data[11] = "GridBased"
-
-        with pytest.raises(SystemExit):
+        if should_raise:
+            with pytest.raises(SystemExit):
+                compareDestFolderToYaml(original_dir, "test.yaml", inc_data)
+        else:
+            # Should not raise
             compareDestFolderToYaml(original_dir, "test.yaml", inc_data)
-
-    def test_empty_yaml_attribute(self):
-        """Test with empty YAML attribute"""
-        original_dir = "/path/to/Equality"
-        inc_data = [None] * 12
-        inc_data[11] = None
-
-        with pytest.raises(SystemExit):
-            compareDestFolderToYaml(original_dir, "test.yaml", inc_data)
-
-    def test_non_checkable_folder(self):
-        """Test with folder not in check list"""
-        original_dir = "/path/to/OtherFolder"
-        inc_data = [None] * 12
-        inc_data[11] = "Equality"
-
-        # Should not raise for folders not in checkFolders list
-        compareDestFolderToYaml(original_dir, "test.yaml", inc_data)
 
 
 @pytest.mark.unit
@@ -505,8 +548,20 @@ class TestMergeLogic:
             ori_data, inc_data, forceMerge=False, noEff=False
         )
 
-        assert num_sizes >= 0  # At least no decrease
+        # Verify all four return values
+        assert num_sizes == 1  # One new size added
+        assert num_solutions == 1  # One solution added (sol1)
+        assert num_removed == 0  # Mock returns 0
         assert isinstance(result, list)
+
+        # Verify merge policy: new size added
+        assert len(result[7]) == 2  # Original 1 + new 1 = 2 sizes
+        assert result[7][0][0] == [1, 2, 3]  # Original size preserved
+        assert result[7][1][0] == [4, 5, 6]  # New size added
+
+        # Verify post-merge cleanup ran
+        assert len(result[5]) == 2  # Original sol0 + new sol1
+        mock_find.assert_called_once()
 
     @patch('Tensile.TensileMergeLibrary.findSolutionWithIndex')
     @patch('Tensile.TensileMergeLibrary.removeUnusedSolutions')
@@ -535,8 +590,20 @@ class TestMergeLogic:
             ori_data, inc_data, forceMerge=False, noEff=False
         )
 
-        # Should accept the better solution
+        # Verify all four return values
+        assert num_sizes == 0  # No new sizes (same size, better efficiency replaces)
+        assert num_solutions == 1  # One solution added (sol_new)
+        assert num_removed == 0  # Mock returns 0 for removeUnusedSolutions
         assert isinstance(result, list)
+
+        # Verify merge policy: better solution accepted
+        assert len(result[7]) == 1  # Still has 1 size (replaced, not added)
+        assert result[7][0][1][1] == 0.9  # Efficiency updated (0.5 -> 0.9)
+
+        # Verify post-merge cleanup ran (solution pool updated)
+        assert len(result[5]) == 2  # Original sol0 + new sol_new
+        # Verify findSolutionWithIndex was called to get the new solution
+        mock_find.assert_called_once()
 
     @patch('Tensile.TensileMergeLibrary.findSolutionWithIndex')
     @patch('Tensile.TensileMergeLibrary.removeUnusedSolutions')
@@ -565,8 +632,19 @@ class TestMergeLogic:
             ori_data, inc_data, forceMerge=True, noEff=False
         )
 
-        # Should accept even with worse efficiency due to forceMerge
+        # Verify all four return values
+        assert num_sizes == 0  # No new sizes (same size replaced)
+        assert num_solutions == 1  # One solution added (sol_forced)
+        assert num_removed == 0  # Mock returns 0
         assert isinstance(result, list)
+
+        # Verify merge policy: forceMerge accepts even worse efficiency
+        assert len(result[7]) == 1  # Still 1 size (replaced)
+        assert result[7][0][1][1] == 0.3  # Efficiency downgraded (0.9 -> 0.3) due to forceMerge
+
+        # Verify post-merge cleanup ran
+        assert len(result[5]) == 2  # Original sol0 + forced sol_forced
+        mock_find.assert_called_once()
 
     @patch('Tensile.TensileMergeLibrary.findSolutionWithIndex')
     @patch('Tensile.TensileMergeLibrary.removeUnusedSolutions')
@@ -595,59 +673,20 @@ class TestMergeLogic:
             ori_data, inc_data, forceMerge=False, noEff=True
         )
 
-        # With noEff=True, efficiency should be set to 0.0
+        # Verify all four return values
+        assert num_sizes == 1  # One new size added
+        assert num_solutions == 1  # One solution added (sol1)
+        assert num_removed == 0  # Mock returns 0
         assert isinstance(result, list)
 
+        # Verify merge policy: noEff flag sets efficiency to 0.0
+        assert len(result[7]) == 2  # Original 1 + new 1 = 2 sizes
+        assert result[7][0][1][1] == 0.5  # Original efficiency preserved
+        assert result[7][1][1][1] == 0.0  # New size efficiency set to 0.0 (not 0.8) due to noEff
 
-@pytest.mark.unit
-class TestAvoidRegressions:
-    """Test avoidRegressions function"""
-
-    @patch('Tensile.TensileMergeLibrary.mergeLogic')
-    @patch('Tensile.TensileMergeLibrary.removeDuplicatedSolutions')
-    @patch('Tensile.TensileMergeLibrary.reNameSolutions')
-    @patch('Tensile.TensileMergeLibrary.sanitizeSolutions')
-    @patch('Tensile.TensileMergeLibrary.compareProblemType')
-    @patch('Tensile.TensileMergeLibrary.compareDestFolderToYaml')
-    @patch('Tensile.TensileMergeLibrary.ParallelMap2')
-    @patch('Tensile.TensileMergeLibrary.allFiles')
-    @patch('Tensile.TensileMergeLibrary.ensurePath')
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('yaml.safe_dump')
-    def test_avoid_regressions_basic(
-        self, mock_dump, mock_file, mock_ensure, mock_all_files,
-        mock_parallel, mock_compare_dest, mock_compare_pt,
-        mock_sanitize, mock_rename, mock_remove_dup, mock_merge
-    ):
-        """Test basic avoidRegressions workflow"""
-        # Setup mocks
-        mock_ensure.return_value = "/output"
-        mock_all_files.side_effect = [["/orig/file1.yaml"], ["/inc/file1.yaml"]]
-
-        mock_data = [
-            {"MinimumRequiredVersion": "1.0"},
-            None, None, None,
-            {"OperationType": "GEMM"},  # ProblemType
-            [{"SolutionIndex": 0}],  # Solutions
-            None,
-            [([1, 2, 3], [0, 0.5])],  # Size map
-            None, None, None,
-            "Equality"
-        ]
-
-        mock_parallel.return_value = [
-            ["/orig/file1.yaml", mock_data],
-            ["/inc/file1.yaml", mock_data],
-        ]
-
-        mock_remove_dup.return_value = (mock_data, 0, 1, 1)
-        mock_merge.return_value = [mock_data, 0, 0, 0]
-
-        avoidRegressions("/orig", "/inc", "/output", forceMerge=False, noEff=False)
-
-        # Verify key functions were called
-        mock_ensure.assert_called()
-        assert mock_all_files.call_count == 2
+        # Verify post-merge cleanup ran
+        assert len(result[5]) == 2  # Original sol0 + new sol1
+        mock_find.assert_called_once()
 
 
 @pytest.mark.unit

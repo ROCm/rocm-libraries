@@ -80,6 +80,7 @@ class TestWorkingPathFunctions:
         assert len(workingDirectoryStack) == 0
 
     @patch('Tensile.TensileRetuneLibrary.workingDirectoryStack', [])
+    @patch('Tensile.TensileRetuneLibrary.globalParameters', {"WorkingPath": "/initial/path"})
     def test_set_working_path(self):
         """setWorkingPath should save current path and set new one"""
         from Tensile.TensileRetuneLibrary import setWorkingPath, globalParameters, workingDirectoryStack
@@ -185,17 +186,24 @@ class TestParseCurrentLibrary:
 
         mock_problem_type = Mock()
 
-        # Create mock solutions with controlled equality
-        mock_sol1 = MagicMock()
-        mock_sol2 = MagicMock()
-        mock_sol3 = MagicMock()
+        # Create dict solutions (not mocks) with controlled equality
+        # Use custom class to control __eq__ behavior
+        class TestSolution(dict):
+            def __init__(self, data, eq_id):
+                super().__init__(data)
+                self.eq_id = eq_id
 
-        # sol1 and sol2 are duplicates
-        mock_sol1.__eq__ = lambda self, other: other is mock_sol2
-        mock_sol2.__eq__ = lambda self, other: other is mock_sol1
-        mock_sol3.__eq__ = lambda self, other: False
+            def __eq__(self, other):
+                if isinstance(other, TestSolution):
+                    return self.eq_id == other.eq_id
+                return False
 
-        mock_parse.return_value = (None, None, mock_problem_type, [mock_sol1, mock_sol2, mock_sol3], [], None, None)
+        # sol1 and sol2 are duplicates (eq_id=1), sol3 is unique (eq_id=2)
+        sol1 = TestSolution({"Name": "Sol1"}, eq_id=1)
+        sol2 = TestSolution({"Name": "Sol2"}, eq_id=1)
+        sol3 = TestSolution({"Name": "Sol3"}, eq_id=2)
+
+        mock_parse.return_value = (None, None, mock_problem_type, [sol1, sol2, sol3], [], None, None)
         mock_problem_sizes.return_value = Mock()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -205,7 +213,7 @@ class TestParseCurrentLibrary:
 
             result = parseCurrentLibrary(lib_file, None)
 
-            # Should have 2 unique solutions
+            # Should have 2 unique solutions (sol1 and sol3; sol2 was duplicate of sol1)
             assert len(result[1]) == 2
 
             # Verify solutions were reindexed
@@ -217,6 +225,8 @@ class TestParseCurrentLibrary:
 class TestRunBenchmarking:
     """Test runBenchmarking function"""
 
+    @patch('Tensile.TensileRetuneLibrary.shutil.copy')
+    @patch('Tensile.TensileRetuneLibrary.ensurePath')
     @patch('Tensile.TensileRetuneLibrary.ClientWriter.runClient')
     @patch('Tensile.TensileRetuneLibrary.LibraryIO.writeSolutions')
     @patch('Tensile.TensileRetuneLibrary.BenchmarkProblems.writeBenchmarkFiles')
@@ -226,16 +236,17 @@ class TestRunBenchmarking:
     @patch('Tensile.TensileRetuneLibrary.globalParameters', {"WorkingPath": "/work"})
     def test_runs_benchmarking_creates_correct_structure(
         self, mock_push, mock_pop, mock_get_client,
-        mock_write_bench, mock_write_sol, mock_run_client
+        mock_write_bench, mock_write_sol, mock_run_client, mock_ensure, mock_copy
     ):
         """runBenchmarking should create directory structure and run benchmarks"""
         from Tensile.TensileRetuneLibrary import runBenchmarking
 
-        mock_solutions = [{"ISA": (9, 0, 6), "Name": "Sol1"}]
-        mock_problem_sizes = Mock()
-        mock_run_client.return_value = 0
-
         with tempfile.TemporaryDirectory() as tmpdir:
+            mock_ensure.return_value = tmpdir
+            mock_solutions = [{"ISA": (9, 0, 6), "Name": "Sol1"}]
+            mock_problem_sizes = Mock()
+            mock_run_client.return_value = 0
+
             runBenchmarking(mock_solutions, mock_problem_sizes, tmpdir, False, "g++", "gcc", "as", "bundler")
 
             # Verify benchmark files were written
@@ -255,12 +266,14 @@ class TestRunBenchmarking:
     @patch('Tensile.TensileRetuneLibrary.LibraryIO.writeSolutions')
     @patch('Tensile.TensileRetuneLibrary.BenchmarkProblems.writeBenchmarkFiles')
     @patch('Tensile.TensileRetuneLibrary.ClientWriter.getClientExecutablePath')
+    @patch('Tensile.TensileRetuneLibrary.shutil.copy')
+    @patch('Tensile.TensileRetuneLibrary.ensurePath')
     @patch('Tensile.TensileRetuneLibrary.popWorkingPath')
     @patch('Tensile.TensileRetuneLibrary.pushWorkingPath')
     @patch('Tensile.TensileRetuneLibrary.globalParameters', {"WorkingPath": "/work"})
     def test_sets_update_file_when_update_true(
         self, mock_push, mock_pop, mock_get_client,
-        mock_write_bench, mock_write_sol, mock_run_client
+        mock_write_bench, mock_write_sol, mock_run_client, mock_ensure, mock_copy
     ):
         """runBenchmarking should set LibraryUpdateFile when update=True"""
         from Tensile.TensileRetuneLibrary import runBenchmarking, globalParameters
@@ -270,6 +283,7 @@ class TestRunBenchmarking:
         mock_run_client.return_value = 0
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            mock_ensure.return_value = tmpdir
             runBenchmarking(mock_solutions, mock_problem_sizes, tmpdir, True, "g++", "gcc", "as", "bundler")
 
             # Verify LibraryUpdateFile was set
@@ -277,6 +291,8 @@ class TestRunBenchmarking:
             assert globalParameters["LibraryUpdateFile"] is not None
             assert "update.yaml" in globalParameters["LibraryUpdateFile"]
 
+    @patch('Tensile.TensileRetuneLibrary.shutil.copy')
+    @patch('Tensile.TensileRetuneLibrary.ensurePath')
     @patch('Tensile.TensileRetuneLibrary.ClientWriter.runClient')
     @patch('Tensile.TensileRetuneLibrary.LibraryIO.writeSolutions')
     @patch('Tensile.TensileRetuneLibrary.BenchmarkProblems.writeBenchmarkFiles')
@@ -286,7 +302,7 @@ class TestRunBenchmarking:
     @patch('Tensile.TensileRetuneLibrary.globalParameters', {"WorkingPath": "/work"})
     def test_converts_isa_to_list(
         self, mock_push, mock_pop, mock_get_client,
-        mock_write_bench, mock_write_sol, mock_run_client
+        mock_write_bench, mock_write_sol, mock_run_client, mock_ensure, mock_copy
     ):
         """runBenchmarking should convert ISA tuples to lists"""
         from Tensile.TensileRetuneLibrary import runBenchmarking
@@ -299,11 +315,14 @@ class TestRunBenchmarking:
         mock_run_client.return_value = 0
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            mock_ensure.return_value = tmpdir
             runBenchmarking(mock_solutions, mock_problem_sizes, tmpdir, False, "g++", "gcc", "as", "bundler")
 
             # Verify ISAs were converted to lists
+            # LibraryIO.writeSolutions(libraryFile, problemSizes, "", solutions)
+            # So solutions is the 4th arg (index 3)
             write_sol_call_args = mock_write_sol.call_args[0]
-            solutions_arg = write_sol_call_args[2]
+            solutions_arg = write_sol_call_args[3]
 
             assert all(isinstance(sol["ISA"], list) for sol in solutions_arg)
             assert solutions_arg[0]["ISA"] == [9, 0, 6]
