@@ -355,7 +355,7 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
     hipblasOperation_t opB = matmul_descr->op_B;
 
     auto matmul_swizzle_status
-        = validateMatmulSwizzleArgs(matmul_descr, matA, matB, a_type, b_type, swizzleA, swizzleB);
+        = validateMatmulSwizzleArgs(matmul_descr, matA, matB, matA->type, matB->type, swizzleA, swizzleB);
 
     if(matmul_swizzle_status != rocblaslt_status_continue)
         return matmul_swizzle_status;
