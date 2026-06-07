@@ -2,12 +2,11 @@
 
 ## Slice scope vs. campaign total
 
-- **131 total survivors** across the project at slice start.
-- This slice triaged and resolved survivors in two areas: `Tensile.TensileLogic.*` validators and `Tensile.Common.Utilities`.
-- **111 mutants KILLED** by new/strengthened tests (all reverts clean, base rc 0 / mutant rc 1).
-- **3 lines pragma'd** (`# pragma: no mutate`) covering 10 intentionally-unhelpful logging mutants.
+- **131 survivors in slice-1** (all in the 5 slice-1 files: `Tensile.TensileLogic.*` validators + `Tensile.Common.Utilities`). This is the only slice run so far.
+- **118 mutants KILLED** by new/strengthened tests (all reverts clean, base rc 0 / mutant rc 1; certified by a fresh mutmut re-run).
+- **3 lines pragma'd** (`# pragma: no mutate`) covering 9 intentionally-unhelpful logging mutants.
 - **4 mutants ruled genuinely equivalent** (no test can kill them; see below).
-- The remaining survivors toward the 131 total are **outside this slice** (modules not yet processed) — see next-slice notes.
+- 118 + 9 + 4 = 131; survivors 131 → 4. Other modules are *future slices* (not part of these 131) — see next-slice notes.
 
 ## Functions with remaining (un-killed) survivors
 
@@ -41,7 +40,7 @@ Patterns 1–3 are mechanical and good `do_not_mutate` candidates. Pattern 4 is 
 
 ## Intentionally-unhelpful (pragma) pattern
 
-The 10 pragma'd mutants all share one shape: **error/diagnostic strings and stdout writes that carry no behavioral contract** (return value and persisted state identical). Two sub-shapes:
+The 9 pragma'd mutants all share one shape: **error/diagnostic strings and stdout writes that carry no behavioral contract** (return value and persisted state identical). Two sub-shapes:
 - `print(...)` -> `print(None)`
 - format-literal vandalism (`XX...XX` wrap, case-flip) on a log line.
 
