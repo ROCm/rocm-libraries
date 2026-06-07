@@ -305,7 +305,7 @@ Stage 2 — coverage expansion:
 - [x] **P4 round 6 (done, 2026-06-06)** closing push (arch-breadth + Solution/Activation/Subtile/ClientWriter/LibraryLogic). Dynamic workflow `wf_e0c1b177-1ee` → driver 4-process gate. **78.18% → 78.78%** (+0.60 pts, 10443→10144 miss, 299 lines). **Key finding: arch-breadth largely FAILED** (6 rich per-arch configs added only ~11 whole-project lines — the arch-specific asm-cap arms were already covered by existing `test_emit_<arch>` + prior rounds). Real contributors: Subtile/GREmit −86, LibraryLogic −66, ClientWriter −52 (new `ClientConfigIni` suite, 53 tests), Solution −44, Activation −23. 11 kept; dropped rich_gfx950 (design-reject), gwb2 + asmstore2 (verifier stable=false AND 0 named-target marginal — confirmed 0 whole-project: re-gate identical 78.78%). 3183 passed / 0 failed. Receipt `coverage/p4/master-baseline-R6.txt`.
 - [x] **P4 round 7 (done, 2026-06-06) — ≥80% TARGET MET.** Final expansion via dynamic workflow `wf_99f528fd-716` (10 Sonnet designers, relaxed pass/fail verify so coverage-jitter tests that genuinely add lines aren't wrongly dropped). **78.78% → 80.70%** (+1.92 pts, 10144→9064 miss, 1080 lines). StreamK 547→232 (the fixup arms WERE emit-reachable — earlier "needs device grid" was wrong), Solution 1121→823, TensileCreateLibrary/Run 197→49, Subtile/LogicalScheduler 151→55, GSU 238→192, LocalRead 489→449, BenchmarkProblems 111→80, AsmAddressCalculation 163→143, KWA 2767→2718. 3326 passed / 0 failed / 201 skipped. Receipt `coverage/p4/master-baseline-R7.txt`.
 - [ ] **P5** whole-project gate (≥80% ACHIEVED at 80.70%) + golden-governance.md + recommendations.md. **NEXT.**
-- [ ] **P5** whole-project gate: >=80% or documented ceiling; `golden-governance.md`; `recommendations.md`.
+- [x] **P5 (done, 2026-06-06) — ≥80% GATE CERTIFIED.** Final combined methodology-A gate = **80.70%** (line-only 83.48%), `coverage/p5/master-baseline-final.txt`. `golden-governance.md` (key by arch+compiler; stable-arch digest change = regression; evolving-arch keep N generations) and `recommendations.md` (outcome, what worked / didn't, honest remaining-gap classification, upstream-fix candidates) written. ≥80% met, so no CEILING-FINDINGS required; the hard residue is documented in recommendations.md.
 - [ ] **P6** mutation validation; survivors → P4 backlog; tree clean.
 
 ---
@@ -378,6 +378,9 @@ Stage 2 — coverage expansion:
   seed YAMLs relocated under `_codegen/data/test_data/_designed/**` so `findConfigs` (which skips
   `test_data` paths) stops auto-running them through the GPU `Tensile.Tensile()` path — no
   `config_helpers.py` change. Full `-m unit` **2528 passed / 201 skipped / 0 failed**. Commit `ec7524bd1be`.
+- 2026-06-06 — **P5 done — ≥80% gate CERTIFIED at 80.70%** (line-only 83.48%), `coverage/p5/master-baseline-final.txt`.
+  `golden-governance.md` + `recommendations.md` written (outcome, reuse patterns, honest remaining-gap
+  classification + upstream-fix candidates). No CEILING-FINDINGS needed (target met). NEXT = P6 mutation.
 - 2026-06-06 — **P4 round 7 — 78.78% → 80.70% (+1.92 pts, 10 candidates) — ≥80% GATE MET. `coverage/p4/master-baseline-R7.txt`.**
   Final expansion via dynamic workflow `wf_99f528fd-716`. 1080 lines (10144→9064 miss). KEY METHOD FIX:
   relaxed the two-run verify to pass/fail stability only (the strict "identical coverage both runs" rule
