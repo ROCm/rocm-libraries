@@ -457,8 +457,10 @@ class GpuGemmRunner:
         C_shape = (M, N) if lc == "r" else (N, M)
 
         if dtype == "bf16":
-            A_h = _fp32_to_bf16_u16(np.ascontiguousarray(A_lay))
-            B_h = _fp32_to_bf16_u16(np.ascontiguousarray(B_lay))
+            # _fp32_to_bf16_u16 already forces a contiguous float32 buffer, so
+            # an outer ascontiguousarray here would only add a redundant copy.
+            A_h = _fp32_to_bf16_u16(A_lay)
+            B_h = _fp32_to_bf16_u16(B_lay)
             C_h = np.zeros(C_shape, dtype=np.uint16)
         else:  # fp16 (default)
             A_h = np.ascontiguousarray(A_lay, dtype=np.float16)
