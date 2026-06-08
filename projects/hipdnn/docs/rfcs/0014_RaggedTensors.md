@@ -9,7 +9,6 @@
    - 2.1 [What is a ragged tensor](#21-what-is-a-ragged-tensor)
    - 2.2 [hipDNN gap](#22-hipdnn-gap)
    - 2.3 [Configurations targeted in this iteration](#23-configurations-targeted-in-this-iteration)
-   - 2.4 [Constraint: `seq_lens` is not on `TensorAttributes`](#24-constraint-seq_lens-is-not-on-tensorattributes)
 3. [Existing Infrastructure](#existing-infrastructure)
    - 3.1 [Frontend: `TensorAttributes`](#31-frontend-tensorattributes)
    - 3.2 [Flatbuffer: `tensor_attributes.fbs`](#32-flatbuffer-tensor_attributesfbs)
@@ -22,11 +21,13 @@
    - 4.3 [Flatbuffer schema additions](#43-flatbuffer-schema-additions)
    - 4.4 [Backend wiring](#44-backend-wiring)
    - 4.5 [Data SDK: shared elements](#45-data-sdk-shared-elements)
-   - 4.6 [Data SDK: `IrregularTensor<T>` (owning storage)](#46-data-sdk-irregulartensort-owning-storage)
-   - 4.7 [Data SDK: `RaggedView<T, IndexT>` (non-owning ragged view)](#47-data-sdk-raggedviewt-indext-non-owning-ragged-view)
+   - 4.6 [Data SDK: `RaggedTensor<T>` (owning, ragged-aware)](#46-data-sdk-raggedtensort-owning-ragged-aware)
+     - 4.6.1 [User-side construction pattern](#461-user-side-construction-pattern)
+   - 4.7 [Data SDK: `ShallowRaggedTensor<T>` (non-owning peer)](#47-data-sdk-shallowraggedtensort-non-owning-peer)
    - 4.8 [Tiered API: which type each role uses](#48-tiered-api-which-type-each-role-uses)
    - 4.9 [Wiring sources of truth](#49-wiring-sources-of-truth)
-   - 4.10 [Plan-layer view construction and CPU reference impact](#410-plan-layer-view-construction-and-cpu-reference-impact)
+   - 4.10 [Plan-layer construction and CPU reference impact](#410-plan-layer-construction-and-cpu-reference-impact)
+     - 4.10.1 [Reuse at the executor virtual-tensor pass](#4101-reuse-at-the-executor-virtual-tensor-pass)
    - 4.11 [Test-harness integration](#411-test-harness-integration)
 5. [Known limitations](#known-limitations)
 6. [Alternatives considered](#alternatives-considered)
@@ -37,35 +38,47 @@
 ## Summary
 
 A ragged tensor is logically `[B, X, …]` where the per-batch extent
-`X` varies. Physical memory is a single contiguous buffer indexed by
-a `ragged_offset[B+1]` aux tensor; an optional `seq_lens[B]` aux
-tensor distinguishes valid rows from per-batch trailing padding.
+`X` varies. Physical memory is a single contiguous buffer indexed
+by a `ragged_offset[B+1]` aux tensor: batch `b` occupies the
+contiguous range `[ragged_offset[b], ragged_offset[b+1])`.
 
 This RFC adds end-to-end ragged-tensor support:
 
-1. **Frontend (`TensorAttributes`)** gains
-   `set_ragged_offset` / `get_ragged_offset` and `set_alignment` /
-   `get_alignment`.
+1. **Frontend (`TensorAttributes`)** gains `set_ragged_offset` /
+   `get_ragged_offset` and `set_alignment` / `get_alignment`.
 2. **Flatbuffer schema** gains defaulted `ragged_offset_tensor_uid`
    and `alignment` fields (wire-compatible per RFC 0005).
 3. **Backend** propagates the new fields through existing
    get/set-attribute paths; no new C-API entry points; variant pack
    unchanged.
-4. **Data SDK** adds `IrregularTensor<T>` (owning storage decoupled
-   from `prod(dims)`) and `RaggedView<T, IndexT>` (non-owning ragged
-   wrapper). Storage and ragged semantics are kept separate.
-5. **Plan layer** assembles a `RaggedView` per execute from
-   `TensorAttributes` (`ragged_offset`) and node-level op attributes
-   (`seq_lens`), then passes it to the CPU reference as
-   `TensorBase<T>&` — reference signatures are unchanged.
+4. **Data SDK** adds a single owning type `RaggedTensor<T>`
+   (memory + `ragged_offset` aux ref) and its non-owning peer
+   `ShallowRaggedTensor<T>`. Both expose ragged-aware
+   iteration over `ragged_offset` ranges. The `ragged_offset`
+   aux is held type-erased as `std::shared_ptr<ITensor>` and read
+   through a runtime element-size branch (int32 or int64) that
+   widens to `int64_t` at the read site, so neither ragged-tensor
+   type carries an `IndexT` template parameter.
+5. **Plan layer** wraps the variant-pack pointer in a
+   `ShallowRaggedTensor` per execute and passes it to the CPU
+   reference as `TensorBase<T>&` — reference signatures gain only
+   `seq_lens` as a separate input where applicable.
 6. **Integration-test harness** accepts a *pre-supplied input
-   bundle* — a single `unordered_map<int64_t, unique_ptr<ITensor>>`
-   keyed by UID — so aux tensors carry deliberate, structurally
-   valid values shared between the GPU and CPU paths via each
-   `ITensor`'s built-in host/device `MigratableMemory`.
+   bundle* — `unordered_map<int64_t, shared_ptr<ITensor>>` keyed
+   by UID — so the structurally-constrained `ragged_offset` aux
+   can carry deliberate values shared between the GPU and CPU
+   paths via each `ITensor`'s built-in host/device
+   `MigratableMemory`.
 
-The immediate consumer is SDPA on AITER FMHA kernels (packed batches
-addressed by `ragged_offset`, optional per-batch valid lengths).
+`seq_lens` is intentionally **not** part of the ragged-tensor
+abstraction. It is a tensor in the graph that ops reference
+through their own node-level attribute APIs (e.g.
+`SdpaAttributes::set_seq_len_q`); CPU references and kernels look
+it up from the variant pack like any other input. The case for
+this decoupling is given in
+[§6.2](#62-keeping-seq_lens-in-the-ragged-tensor-sdk-abstraction).
+
+The immediate consumer is SDPA on AITER FMHA kernels.
 
 ---
 
@@ -73,62 +86,86 @@ addressed by `ragged_offset`, optional per-batch valid lengths).
 
 ### 2.1 What is a ragged tensor
 
-A logically `[B, X, …]` tensor where `X` (typically the sequence
-dimension) varies per batch. Batch `b` occupies the contiguous range
-`[ragged_offset[b], ragged_offset[b+1])` of the physical buffer.
-Optionally, `seq_lens[B]` carries the valid sequence length per
-batch when each batch's reserved region may exceed its real valid
-extent (e.g. for kernel alignment requirements).
+A tensor with a physical memory layout of `[B, X, …]` (referred to here as the primary tensor) where `X` (typically the sequence
+dimension) varies per batch. Batch `b` occupies the contiguous
+range `[ragged_offset[b], ragged_offset[b+1])` of the physical
+buffer.
+
+Some ops additionally need to distinguish *valid* sequence
+positions within each batch's range from *trailing padding*
+positions kept for alignment. That information is carried by a
+separate `seq_lens[B]` tensor referenced through the op's
+node-level attributes (e.g. `SdpaAttributes::set_seq_len_q`). Each
+entry in `seq_lens` specifies the number of valid elements in that batch. `seq_lens` is independent
+of the ragged-tensor abstraction: it can be used in isolation, or with the `ragged_offset`
+(and the `ragged_offset` similarily functions with or without it).
+Ops that care about per-batch valid lengths read `seq_lens` from the variant pack directly.
+
+Both `ragged_offset` and `seq_lens` aux tensors may be referenced
+by more than one primary in the same graph — SDPA, for example,
+typically shares a single `seq_lens_kv` across the K and V
+primaries and may share a `ragged_offset_kv` between them as well.
+The design supports this naturally: each primary's
+`TensorAttributes` references the aux by UID; the runtime holds
+one `ITensor` per UID; multiple `RaggedTensor<T>`s share the same
+`ragged_offset` aux via `shared_ptr<ITensor>`.
+
+This RFC does not introduce anything to address the way `seq_lens` are
+handled, but discussion of their role in the process is included for context.
 
 ### 2.2 hipDNN gap
 
-hipDNN's tensor model assumes physical element count equals
-`prod(dims)`. There is no way to express:
+hipDNN's tensor model in both the frontend (`TensorAttributes`)
+and the data SDK (`Tensor.hpp`) currently assumes a tensor's
+physical element count equals `prod(dims)`. There is no way to
+express:
 
-- A primary tensor whose physical buffer is not `prod(dims)`.
-- A reference from one tensor (primary) to another (aux).
-- Iteration that walks only valid positions of a ragged primary.
+- A primary tensor whose physical buffer is not `prod(dims)`
+  elements long.
+- A reference from one tensor (primary) to another (the aux
+  `ragged_offset`).
+- Iteration that walks per-batch ranges rather than a single dense
+  `prod(dims)` walk.
 
 Separately, the integration-test harness initializes inputs by
-random fill, which is meaningless for ragged-aux tensors: a random
-`ragged_offset` will almost never be monotonically non-decreasing
-with `ragged_offset[0] == 0`; a random `seq_lens` routinely exceeds
-the per-batch reserved extent. The harness needs a way to consume
-deliberate values for these tensors.
+random fill. Random values are meaningless for `ragged_offset`: it
+must be monotonically non-decreasing with `ragged_offset[0] == 0`
+and its last element must agree with the primary's physical
+buffer size. The harness needs a way to consume deliberate values
+for this aux tensor.
 
 ### 2.3 Configurations targeted in this iteration
 
-Two configurations, both used by AITER FMHA:
+Both AITER FMHA configurations are uniformly representable. The
+physical buffer is always exactly `ragged_offset[B]` elements
+(modulo per-batch alignment, see
+[§4.2](#42-frontend-tensorattributes-additions)):
 
-- **Packed with `ragged_offset` only.** Physical buffer is exactly
-  `ragged_offset[B]` elements; each batch contributes
-  `ragged_offset[b+1] - ragged_offset[b]` rows; no internal padding.
-- **Packed with `ragged_offset` + `seq_lens`.** Physical buffer is
-  the sum of per-batch reserved regions (possibly aligned up); each
-  batch's first `seq_lens[b]` rows are valid; trailing rows are
-  padding.
+- **Packed only.** Each batch contributes
+  `ragged_offset[b+1] - ragged_offset[b]` rows of valid data; no
+  internal padding.
+- **Packed with per-batch trailing padding.** Each batch's range
+  still goes from `ragged_offset[b]` to `ragged_offset[b+1]`, but
+  only the first `seq_lens[b]` rows within that range are valid;
+  the remaining
+  `ragged_offset[b+1] - ragged_offset[b] - seq_lens[b]` rows are
+  padding kept for alignment.
 
-A "padded, seq-lens-only" mode (no `ragged_offset`) is intentionally
-deferred; see [§7.3](#73-padded-mode-seq-lens-only-no-ragged_offset).
+  Whether the trailing rows are padding is an op-level concern.
+  The ragged tensor itself iterates the full per-batch range; the
+  op's CPU reference or kernel queries `seq_lens` from the variant
+  pack to decide what to do with positions `>= seq_lens[b]`.
 
-### 2.4 Constraint: `seq_lens` is not on `TensorAttributes`
-
-For cuDNN frontend-API compatibility, **`TensorAttributes` gains
-`set_ragged_offset(...)` only — not `set_seq_len(...)`**. The
-`seq_lens` tensor is referenced from *node-level* op attributes
-(e.g. `SdpaAttributes::set_seq_len_q`). In SDPA a single `seq_lens_q`
-is shared across the Q primary and a single `seq_lens_kv` across the
-K and V primaries, so there is no 1:1 binding between a primary
-`TensorAttributes` and a `seq_lens` tensor.
-
-Consequences:
-
-- Code that walks the graph one `TensorAttributes` at a time can
-  discover a tensor's `ragged_offset` but not its `seq_lens`.
-- The plan layer (which already has node attributes) is the natural
-  place to attach `seq_lens` to a ragged view.
-- The test-harness bundle layer holds dense storage only;
-  ragged-aware views are assembled at the plan layer.
+A "padded, seq-lens-only" mode — in which the physical buffer is
+exactly `prod(dims) = B * S_max * …` elements, every batch has
+the same padded extent, and only `seq_lens` distinguishes valid
+from padded entries — needs no new SDK type at all. The primary
+in that mode has consistent strides and a non-ragged tensor
+shape, so an ordinary `Tensor<T>` / `TensorBase<T>` represents it
+correctly; the op's CPU reference looks up `seq_lens` from the
+variant pack the same way the ragged case does. The mode is
+therefore in scope by construction; this RFC's new SDK types only
+become necessary when `physicalElementCount ≠ prod(dims)`.
 
 ---
 
@@ -137,55 +174,61 @@ Consequences:
 ### 3.1 Frontend: `TensorAttributes`
 
 `hipdnn_frontend::graph::Tensor_attributes` declares per-tensor
-metadata (dims, strides, dtype, UID, virtual flag, alignment, …)
-with chainable setters/getters. No concept of per-tensor references
-to other tensors exists today.
+metadata used to build the operation graph (dims, strides, dtype,
+UID, virtual flag, alignment, …) with chainable setters/getters.
+There is currently no concept of a per-tensor reference to another
+tensor in the same graph.
 
 ### 3.2 Flatbuffer: `tensor_attributes.fbs`
 
-Persistent representation of `TensorAttributes` for graph
-serialization (and Compiled-Plan Serialization). Schema evolution
-rules (RFC 0005) require appending optional defaulted fields.
+`tensor_attributes.fbs` carries the persistent representation of
+`TensorAttributes` used for graph serialization (and Compiled-Plan
+Serialization). Schema evolution rules (RFC 0005) require
+appending optional defaulted fields rather than reordering or
+repurposing existing fields.
 
 ### 3.3 Backend: tensor descriptor and variant pack
 
-Backend tensor descriptor mirrors `TensorAttributes` and is built
-during graph lowering. The variant pack carries `UID → void*`
-device-buffer bindings at execute time. Neither layer currently
-carries ragged-specific information.
+The backend tensor descriptor mirrors `TensorAttributes` and is
+constructed from the frontend representation during graph
+lowering. The variant pack at execute time carries
+`UID → void*` device-buffer bindings. Neither layer currently
+carries any ragged-specific information.
 
 ### 3.4 Data SDK: `ITensor` / `TensorBase<T>` / `Tensor<T>` / `ShallowTensor<T>`
 
-Runtime tensor hierarchy in `hipdnn_data_sdk::utilities`:
+`hipdnn_data_sdk::utilities` defines the runtime tensor hierarchy:
 
 - **`ITensor`** — type-erased base: `dims()`, `strides()`,
-  `elementSpace()`, `elementCount()`, `isPacked()`, `rawHostData()`,
-  iteration via `LinearIndex` / `CompositeIndex` strategies.
+  `elementSpace()`, `elementCount()`, `isPacked()`,
+  `rawHostData()`, iteration via `LinearIndex` / `CompositeIndex`
+  strategies.
 - **`TensorBase<T>`** — adds typed addressing
-  (`getHostValue`/`setHostValue`).
+  (`getHostValue` / `setHostValue`).
 - **`Tensor<T>`** — owning dense tensor backed by
   `MigratableMemory<T, HostAlloc, DeviceAlloc>`. Asserts
   `_packed = (elementCount == elementSpace)`.
-- **`PinnedTensor<T>`** — `Tensor<T>` with `PinnedHostAllocator<T>`.
+- **`PinnedTensor<T>`** — `Tensor<T>` with
+  `PinnedHostAllocator<T>`.
 - **`ShallowTensor<T>`** — non-owning wrapper over a borrowed
   `void*` plus dims/strides; dense iteration over `prod(dims)`.
 
-`ITensorIterator` is implemented via a `std::variant` over the known
-index strategies.
+`ITensorIterator` is implemented via a `std::variant` over the
+known index strategies.
 
 ### 3.5 Test harness: `GraphTensorBundle` and `CpuReferenceGraphExecutor`
 
-`GraphTensorBundle` holds
-`unordered_map<int64_t, unique_ptr<ITensor>>` keyed by UID. The
-harness walks `TensorAttributes` and calls
+`GraphTensorBundle` holds the runtime tensors keyed by UID. The
+integration-test harness walks `TensorAttributes` and calls
 `createTensorFromAttribute(attr)` to allocate each entry. Two
-bundles (GPU plan, CPU reference) are created with identical random
-seeds; outputs are compared element-by-element by `verifyGraph`.
+bundles (GPU plan, CPU reference) are created with identical
+random seeds; outputs are compared element-by-element by
+`verifyGraph`.
 
-`CpuReferenceGraphExecutor` walks the graph topologically, allocates
-virtual intermediates as ordinary `Tensor<T>`, and dispatches each
-node through its `<Op>Plan::execute(variantPack)`, which calls into
-the CPU reference (e.g.
+`CpuReferenceGraphExecutor` walks the graph in topological order,
+allocates virtual intermediates, and dispatches each node through
+its `<Op>Plan::execute(variantPack)` which in turn calls into the
+corresponding CPU reference (e.g.
 `CpuFpReferenceSdpa::forward(q, k, v, …)` typed as
 `TensorBase<T>&`).
 
@@ -198,45 +241,54 @@ the CPU reference (e.g.
 1. **Frontend / flatbuffer / backend** propagate
    `ragged_offset_tensor_uid` and `alignment` per tensor.
    Declarative only; no new C-API entry points.
-2. **Data SDK** introduces `IrregularTensor<T>` (owning storage with
-   `physicalElementCount ≠ prod(dims)`) and `RaggedView<T, IndexT>`
-   (non-owning ragged wrapper).
-3. **`ITensor`** gains a polymorphic index-strategy hook for ragged
-   iteration; `TensorBase` gains optional `validSeqLen(b)`.
-4. **Plan layer** builds a `RaggedView` per execute from
-   `TensorAttributes` (`ragged_offset`) + node-level op attributes
-   (`seq_lens`) and passes it to the CPU reference unchanged.
-5. **Test harness** accepts a pre-supplied input bundle so aux
-   tensors carry deliberate values rather than meaningless random
-   fill.
+2. **Data SDK** introduces a single new owning type
+   `RaggedTensor<T>` and its non-owning peer
+   `ShallowRaggedTensor<T>`. Both expose ragged-aware
+   iteration over `ragged_offset` ranges. The `ragged_offset`
+   aux is held type-erased as `std::shared_ptr<ITensor>` (no
+   `IndexT` template parameter — see
+   [§4.5](#45-data-sdk-shared-elements) item 1). `seq_lens` is
+   not part of either type.
+3. **`ITensor`** gains a polymorphic index-strategy hook so ragged
+   iteration can supply a `RaggedCompositeIndex`.
+4. **Plan layer** wraps the variant-pack pointer in a
+   `ShallowRaggedTensor` per execute and passes it as
+   `TensorBase<T>&`. CPU references and kernels that need
+   `seq_lens` look it up from the variant pack themselves.
+5. **Test harness** accepts a pre-supplied input bundle so the
+   structurally-constrained `ragged_offset` aux carries
+   deliberate values rather than meaningless random fill. The
+   bundle stores tensors as `shared_ptr<ITensor>` to allow the
+   same aux to be threaded into a ragged primary's constructor.
 
 ### 4.2 Frontend: `TensorAttributes` additions
 
-Chainable setters/getters for the new fields:
+Chainable setters/getters for the two new fields:
 
 ```cpp
 auto set_ragged_offset(std::shared_ptr<Tensor_attributes> const& value)
     -> Tensor_attributes&;
 auto get_ragged_offset() const -> std::shared_ptr<Tensor_attributes>;
 
-auto set_alignment(int64_t alignmentInElements) -> Tensor_attributes&;
+auto set_alignment(int64_t alignmentInBytes) -> Tensor_attributes&;
 auto get_alignment() const -> int64_t;   // default 1
 ```
 
-`set_alignment` declares a per-batch alignment of the physical
-buffer, in elements. The default `1` (no alignment) matches AITER
-FMHA's needs.
+`set_alignment` declares a trailing-alignment requirement of the
+physical buffer, in bytes. The default `1` (no alignment)
+matches AITER FMHA's needs. `alignment` affects only how much
+storage is allocated — not how many elements the tensor reports or
+iterates over (see [§4.5](#45-data-sdk-shared-elements)).
 
 **Frontend validation** (in `validate()`):
 
-- The `ragged_offset` aux exists in the graph (by UID), has rank 1,
-  and its first dim equals `B + 1` where `B` is the primary's first
-  dim.
+- The `ragged_offset` aux exists in the graph (by UID), has rank
+  1, and its first dim equals `B + 1` where `B` is the primary's
+  first dim.
 - `get_alignment() >= 1`.
 
-Per-batch valid-length validation against `seq_lens` is per-op
-validation (e.g. `SdpaAttributes::validate()`), per
-[§2.4](#24-constraint-seq_lens-is-not-on-tensorattributes).
+`seq_lens` validation, where an op cares, lives on that op's
+node-level `validate()`.
 
 **Reported `dims()`.** The primary's `dims()[1]` remains the max
 padded sequence length (`S_max`), matching overridable-shape
@@ -245,7 +297,8 @@ runtime.
 
 ### 4.3 Flatbuffer schema additions
 
-`tensor_attributes.fbs` gains two appended defaulted fields:
+`tensor_attributes.fbs` gains two appended optional defaulted
+fields:
 
 ```
 ragged_offset_tensor_uid: long = null;
@@ -253,221 +306,524 @@ alignment:                long = 1;
 ```
 
 Wire-compatible per RFC 0005. No `seq_lens_tensor_uid` is added
-here — the per-op attribute tables (e.g. `SdpaAttributes`) already
-carry `seq_len_q_tensor_uid` / `seq_len_kv_tensor_uid` per
-[§2.4](#24-constraint-seq_lens-is-not-on-tensorattributes).
+here: ops that consume `seq_lens` reference it through their own
+per-op attribute tables (e.g. `SdpaAttributes` already carries
+`seq_len_q_tensor_uid` / `seq_len_kv_tensor_uid`).
 
 ### 4.4 Backend wiring
 
-Backend tensor descriptor gains optional `ragged_offset_tensor_uid`
-and `alignment` (default 1), exposed through existing
-get/set-attribute paths under new enum values in the hipDNN
-extension range. No new `hipdnnBackend*` entry points. Variant pack
-representation is unchanged: every tensor (ragged primary or aux)
-still binds `UID → void*`.
+Backend tensor descriptor mirrors the frontend additions: optional
+`ragged_offset_tensor_uid` and `alignment` (default 1), exposed
+through existing get/set-attribute paths under new enum values in
+the hipDNN extension range. No new `hipdnnBackend*` entry points,
+and the variant pack representation is unchanged: at execute time
+the variant pack carries `UID → void*` for every tensor in the
+graph, including ragged primaries, their `ragged_offset`, and any
+`seq_lens` an op references.
 
 ### 4.5 Data SDK: shared elements
 
-1. **Aux tensors are `std::shared_ptr<TensorBase<IndexT>>`**, with
-   `IndexT` templated (`int32_t` default, `int64_t` allowed).
-2. **Auxiliaries are constructor-only / immutable** on the view.
-3. **`dims()[1]` is required to be `S_max`** (the max padded
-   sequence length) for the underlying ragged storage. This is a
-   convention the user / graph must uphold so the reported geometry
-   matches kernel and overridable-shape expectations; the SDK types
-   do not derive or verify it. `elementSpace()` equals the physical
-   buffer size and is decoupled from `prod(dims)`.
-4. **Polymorphic index-strategy hook on `ITensor`**:
-   `virtual std::unique_ptr<ITensorIndex> makeIndex(bool isEnd) const`
-   so ragged iteration can supply a `RaggedCompositeIndex` walking
-   only valid elements. The existing `LinearIndex` / `CompositeIndex`
-   strategies become implementations of this interface; non-ragged
-   behaviour is unchanged.
-5. **Optional `virtual int64_t validSeqLen(int64_t b) const` on
-   `TensorBase`** (default `dims()[1]`) so CPU references can bound
-   inner loops without `dynamic_cast`.
+These apply to both `RaggedTensor<T>` and
+`ShallowRaggedTensor<T>`:
 
-### 4.6 Data SDK: `IrregularTensor<T>` (owning storage)
+1. **The `ragged_offset` aux is held type-erased as
+   `std::shared_ptr<ITensor>`** — neither ragged-tensor type
+   carries an `IndexT` template parameter. Both `int32_t` and
+   `int64_t` element types are permitted; the actual element type
+   is discovered at runtime from the aux's `elementSize()` (and
+   widened to `int64_t` at the read site). A typical inline read
+   helper looks like:
 
-Memory-owning buffer whose physical element count is independent of
-`prod(dims)`. Used as underlying storage for ragged views and as the
-natural type for graph intermediates that don't need iteration.
+   ```cpp
+   int64_t readOffset(size_t b) const {
+       void* p = _raggedOffset->hostDataOffsetFromIndex(
+           static_cast<int64_t>(b));
+       switch (_raggedOffset->elementSize()) {
+           case 4:  return *static_cast<const int32_t*>(p);
+           case 8:  return *static_cast<const int64_t*>(p);
+           default: throw std::runtime_error(
+               "ragged_offset element size must be 4 or 8 bytes");
+       }
+   }
+   ```
+
+   The widen-to-`int64_t` cost is negligible relative to the per-
+   element work the CPU reference does, and the structural
+   invariants in item 5 (rank 1, packed, length `B + 1`) plus the
+   element-size check in item 5 below bound the surface where
+   type-erasure could go wrong to this one helper. See
+   [§6.3](#63-templating-the-ragged-tensor-types-on-indext) for
+   why this is preferred over a templated `IndexT` parameter.
+2. **`dims()[1]` is required to be `S_max`** (the max padded
+   sequence length). This is a convention the user / graph must
+   uphold so the reported geometry matches kernel and
+   overridable-shape expectations; the SDK types do not derive or
+   verify it.
+3. **Variant index-strategy hook on `ITensor`**: introduce
+   `virtual IndexType makeIndex(bool isEnd) const`.
+   The `isEnd` parameter selects the begin vs end iterator
+   position, mirroring the existing `LinearIndex` /
+   `CompositeIndex` constructor pattern. A new `RaggedCompositeIndex`
+   is added to the `IndexType` variant that walks each batch's full
+   `[ragged_offset[b], ragged_offset[b+1])` range in turn.
+4. **Iteration walks `ragged_offset` ranges, not `seq_lens`-bounded
+   ranges.** Each batch's full per-batch range is iterated as
+   part of that batch. Padding never leaks into the wrong batch's
+   range, so indexing is always semantically correct (every
+   visited element belongs to the right batch and to the tensor's
+   owned memory); it only over-reports by visiting padded
+   positions for ops that could in principle skip them. Ops that
+   must skip padding query `seq_lens` directly from the variant
+   pack.
+5. **Constructor-time structural validation** (enforced by both
+   types):
+   - `raggedOffset != nullptr`.
+   - `raggedOffset->elementCount() == paddedDims[0] + 1`
+     (i.e. `B + 1`).
+   - `raggedOffset` has rank 1.
+   - `raggedOffset->elementSize() == 4 || raggedOffset->elementSize() == 8`
+     (int32 or int64 element type — checked once at construction
+     so the type-erased `readOffset` helper from item 1 only ever
+     encounters supported sizes).
+6. **Two element-count concepts.** The types distinguish:
+   - **`elementSpace()` = `physicalElementCount`**, the size of
+     the allocated buffer including any trailing pad introduced by
+     `alignment`. This is what the bundle / allocator asks for.
+   - **`elementCount()` = `ragged_offset[B]`**, the number of
+     addressable elements across all batches' per-batch ranges
+     (which is what the iterator visits). The trailing
+     alignment-pad region between `ragged_offset[B]` and
+     `align_up(ragged_offset[B], alignment)` belongs to no batch
+     and is never iterated. **`elementCount()` does not account
+     for `seq_lens` limits** — it reports every position the
+     iterator visits, including per-batch padding tails.
+7. **`isPacked()` returns `false`** for both new types. This is
+   consistent with the existing `Tensor<T>` convention
+   `_packed = (elementCount == elementSpace)` — for these types,
+   `elementCount()` (sum of per-batch ranges) generally differs
+   from `elementSpace()` (`physicalElementCount` including any
+   trailing alignment pad). However, a `RaggedTensor` with
+   `alignment = 1` is "packed" in the colloquial sense (no
+   internal gaps within each batch's range). The current
+   `isPacked()` predicate conflates two distinct properties —
+   "elementCount equals elementSpace" vs "buffer is `prod(dims)`
+   elements with regular strides". A follow-up could split these
+   apart, e.g. by introducing a separate predicate like
+   `hasRegularDims()` (see [§7](#future-work)).
+
+### 4.6 Data SDK: `RaggedTensor<T>` (owning, ragged-aware)
+
+A memory-owning ragged tensor whose physical element count is
+independent of `prod(dims)` and which holds a `shared_ptr` to its
+`ragged_offset` aux. Used as the runtime type for ragged primaries
+in the bundle, as the type for ragged graph intermediates, and as
+the user-facing type for samples.
 
 ```cpp
 template <typename T,
           typename HostAlloc   = HostAllocator<T>,
           typename DeviceAlloc = DeviceAllocator<T>>
-class IrregularTensor : public TensorBase<T>
+class RaggedTensor : public TensorBase<T>
 {
 public:
-    IrregularTensor(std::vector<int64_t> paddedDims,
-                    std::vector<int64_t> strides,
-                    size_t               physicalElementCount);
+    RaggedTensor(std::vector<int64_t>     paddedDims,
+                 std::vector<int64_t>     strides,
+                 size_t                   physicalElementCount,
+                 std::shared_ptr<ITensor> raggedOffset);
 
-    // dims()         -> paddedDims                    (dims()[1] == S_max)
-    // strides()      -> strides
-    // elementSpace() -> physicalElementCount
-    // elementCount() -> physicalElementCount          (NOT prod(dims))
-    // isPacked()     -> false
+    // ITensor / TensorBase<T> overrides:
+    //   dims()         -> paddedDims                    (dims()[1] == S_max)
+    //   strides()      -> strides
+    //   elementSpace() -> physicalElementCount           (allocation size)
+    //   elementCount() -> ragged_offset[B]               (iterated elements)
+    //   isPacked()     -> false
+    //   begin/end      -> RaggedCompositeIndex via makeIndex()
+    //                      (walks each batch's ragged_offset range)
     //
     // Direct addressing (rawHostData / rawDeviceData) is supported.
-    // Iteration walks the physical buffer linearly.
+
+    const ITensor* raggedOffset() const;
 
 private:
     MigratableMemory<T, HostAlloc, DeviceAlloc> _memory;
     std::vector<int64_t>                        _paddedDims;
     std::vector<int64_t>                        _strides;
     size_t                                      _physicalElementCount;
+    std::shared_ptr<ITensor>                    _raggedOffset;   // non-null
+
+    // Type-erased read helper from §4.5 item 1; reads
+    // ragged_offset[b] from _raggedOffset and widens to int64_t.
+    int64_t readOffset(size_t b) const;
 };
 ```
+
+Structural validation at construction is shared with
+`ShallowRaggedTensor` and listed in
+[§4.5](#45-data-sdk-shared-elements). Crucially, the aux's
+element type (int32 vs int64) is *not* a template parameter — it
+is discovered at construction time and validated against the
+permitted set (4 or 8 bytes), and individual reads dispatch
+through `readOffset` (see [§4.5](#45-data-sdk-shared-elements)
+item 1).
 
 Pinned host memory is available via
-`IrregularTensor<T, PinnedHostAllocator<T>, …>` — same pattern as
-`PinnedTensor<T>`.
+`RaggedTensor<T, PinnedHostAllocator<T>, …>` — same pattern
+`PinnedTensor<T>` uses for `Tensor<T>`.
 
-**Iteration policy: linear over the physical buffer.** Ragged-aware
-iteration is the job of `RaggedView<T>`. Linear iteration on the
-storage type is required by the test harness's `randomizeTensor`
-and validation call sites, which have only a `TensorAttributes` and
-therefore cannot look up `seq_lens` (per
-[§2.4](#24-constraint-seq_lens-is-not-on-tensorattributes)) to
-construct a `RaggedView`. A linear walk is correct for both call
-sites (see [§4.11](#411-test-harness-integration)); the alternative
-of throwing is recorded in
-[§6.3](#63-throwing-iterators-on-irregulartensort).
+**Immutability.** The `_raggedOffset` `shared_ptr` member is fixed
+at construction and never reseated; the type exposes no setter for
+it. The primary's T-typed buffer remains mutable as usual via
+`rawHostData` / `rawDeviceData` / `MigratableMemory`.
 
-### 4.7 Data SDK: `RaggedView<T, IndexT>` (non-owning ragged view)
+**Ragged-aware multi-dim addressing.** `RaggedTensor<T>`
+overrides `getHostValue` / `setHostValue` from `TensorBase<T>` so
+that a multi-dim index `{b, sq, …}` translates to a physical
+offset using `readOffset(b)` (i.e. `ragged_offset[b]` widened to
+`int64_t`) as the per-batch base — i.e.
+`physical_offset = readOffset(b) + sq * stride_1 + …`. (The
+inherited implementation uses only the padded strides, which
+would index into `b * stride_0 + …` regardless of where batch
+`b`'s range actually starts in the physical buffer.) Callers may
+index into batch `b` with `sq` ranging up to that batch's per-batch
+extent (`readOffset(b+1) - readOffset(b)`); indices outside
+that range are out-of-bounds for that batch and behavior is
+unspecified.
 
-Non-owning wrapper that turns any `TensorBase<T>`-derived underlying
-storage into a fully iterable ragged tensor.
+#### 4.6.1 User-side construction pattern
+
+Samples (Flow 1 — see `RaggedTensorsTensorFlows.md` §1.2) build
+ragged tensors by hand in three steps. There is no
+`RaggedTensor::RaggedTensor(const TensorAttributes&)` convenience
+constructor in this iteration — `physicalElementCount` and the
+aux runtime tensor are required ctor inputs and neither is
+derivable from a single `TensorAttributes`.
 
 ```cpp
-template <typename T, typename IndexT = int32_t>
-class RaggedView : public TensorBase<T>
+// 1. Allocate the aux as an ordinary Tensor<IndexType> (either
+//    int32_t or int64_t — the SDK accepts both per §4.5 item 1),
+//    held by shared_ptr so it can be threaded into the ragged
+//    primary's ctor and shared across multiple ragged primaries.
+auto qRaggedOffset =
+    std::make_shared<utilities::Tensor<int32_t>>(/*dims=*/{B + 1});
+qRaggedOffset->fillFromHost(myOffsetsHost);   // user-supplied values
+
+// 2. Compute the physical element count. The user knows
+//    ragged_offset[B] (they just wrote it) and the alignment
+//    declared on the primary's TensorAttributes.
+const auto qPhysicalCount =
+    align_up(static_cast<size_t>(myOffsetsHost.back()),
+             static_cast<size_t>(qAttr->get_alignment()));
+
+// 3. Allocate the ragged primary. The aux is passed as
+//    shared_ptr<ITensor>; the ragged tensor type-erases its
+//    element type at construction (§4.5 item 1).
+auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
+    qAttr->get_dim(),
+    qAttr->get_stride(),
+    qPhysicalCount,
+    qRaggedOffset);     // implicit upcast Tensor<int32_t> -> ITensor
+
+// 4. Wire into variantPack as today — one entry per primary, one
+//    entry per aux. Nothing about variantPack assembly changes
+//    relative to non-ragged tensors.
+variantPack[qAttr      ->get_uid()] = qTensor      ->rawDeviceData();
+variantPack[qRaggedAttr->get_uid()] = qRaggedOffset->rawDeviceData();
+```
+
+For non-ragged tensors in the same sample, the user continues to
+construct an ordinary `Tensor<T>(attr->get_dim(), attr->get_stride())`
+as today — no aux, no `physicalElementCount`, no `shared_ptr`
+required.
+
+### 4.7 Data SDK: `ShallowRaggedTensor<T>` (non-owning peer)
+
+A non-owning peer to `RaggedTensor<T>`, used by the plan layer at
+execute time when only a `void*` from the variant pack is
+available.
+
+```cpp
+template <typename T>
+class ShallowRaggedTensor : public TensorBase<T>
 {
 public:
-    // Shape/strides/physicalElementCount come authoritatively from the
-    // underlying — not passed in — eliminating "view disagrees with
-    // underlying" bugs by construction.
+    ShallowRaggedTensor(
+        void*                    data,
+        std::vector<int64_t>     paddedDims,
+        std::vector<int64_t>     strides,
+        size_t                   physicalElementCount,
+        std::shared_ptr<ITensor> raggedOffset);
+
+    // Same overrides as RaggedTensor:
+    //   dims()/strides() as provided
+    //   elementSpace() -> physicalElementCount  (allocation size)
+    //   elementCount() -> ragged_offset[B]      (iterated elements)
+    //   isPacked()     -> false
+    //   begin/end      -> RaggedCompositeIndex via makeIndex()
     //
-    // Underlying is shared_ptr<TensorBase<T>> so the view can wrap
-    // either an owning IrregularTensor<T> (bundle / user case) or a
-    // non-owning ShallowTensor<T> over a variant-pack void* (plan
-    // case). Widening from IrregularTensor<T> to TensorBase<T>
-    // accommodates both without a third tensor type.
-    RaggedView(std::shared_ptr<TensorBase<T>>      underlying,
-               std::shared_ptr<TensorBase<IndexT>> raggedOffset,        // required
-               std::shared_ptr<TensorBase<IndexT>> seqLens = nullptr);  // optional
+    // rawHostData() / rawDeviceData() return the borrowed pointer.
 
-    // dims()/strides()/elementSpace()/memory() forward to _underlying.
-    // elementCount() -> sum-of-seqLens if _seqLens,
-    //                   else _underlying->elementSpace()
-    // isPacked()     -> false
-    // begin/end      -> RaggedCompositeIndex via makeIndex()
-    //                   (walks only valid elements)
-
-    bool hasRaggedOffset() const;              // always true
-    bool hasSeqLens()      const;
-    const TensorBase<IndexT>* raggedOffset() const;
-    const TensorBase<IndexT>* seqLens()      const;
-    int64_t validSeqLen(int64_t b) const;      // dims()[1] if no seqLens
-
-private:
-    std::shared_ptr<TensorBase<T>>      _underlying;
-    std::shared_ptr<TensorBase<IndexT>> _raggedOffset;   // non-null
-    std::shared_ptr<TensorBase<IndexT>> _seqLens;        // nullable
+    const ITensor* raggedOffset() const;
 };
 ```
 
-**Ctor-time structural validation:**
+`ShallowRaggedTensor` performs the same constructor-time
+structural validation listed in
+[§4.5](#45-data-sdk-shared-elements), including the int32/int64
+element-size check on the aux. It shares its
+`RaggedCompositeIndex` implementation and its type-erased
+`readOffset` helper with `RaggedTensor`; only memory ownership
+differs.
 
-- `_underlying != nullptr`, `_raggedOffset != nullptr`.
-- `_raggedOffset->elementCount() == B + 1` where
-  `B = _underlying->dims()[0]`.
-- If `_seqLens != nullptr`: `_seqLens->elementCount() == B`.
-- `_raggedOffset` and `_seqLens` (if present) have rank 1.
+Unlike `RaggedTensor`, `ShallowRaggedTensor` does not carry an
+allocator template parameter — pinned-vs-pageable is determined
+by the caller-supplied buffer being wrapped, not by the wrapper.
 
 ### 4.8 Tiered API: which type each role uses
 
 | Role | Type | Iteration |
 |---|---|---|
-| Owning storage for a ragged primary (bundle / executor intermediate) | `IrregularTensor<T>` | Linear over physical buffer |
-| Ragged I/O at the CPU reference plan layer | `RaggedView<T, IndexT>` over `ShallowTensor<T>` of variant-pack pointer | Full ragged |
-| Ragged tensor a user iterates directly | `RaggedView<T, IndexT>` over the owning `IrregularTensor<T>` | Full ragged |
-| Aux tensors (`ragged_offset`, `seq_lens`) | Plain `Tensor<IndexT>` via `shared_ptr` | Dense |
-| Graph intermediates no one walks | `IrregularTensor<T>` directly | Linear |
+| Owning storage for a ragged primary (bundle / executor intermediate) | `RaggedTensor<T>` | Per-batch over `ragged_offset` ranges |
+| Ragged I/O at the CPU reference plan layer | `ShallowRaggedTensor<T>` over variant-pack `void*` | Per-batch over `ragged_offset` ranges |
+| Ragged tensor a user iterates directly (samples) | `RaggedTensor<T>` | Per-batch over `ragged_offset` ranges |
+| Aux tensor (`ragged_offset`) | Plain `Tensor<int32_t>` or `Tensor<int64_t>`, held as `shared_ptr<ITensor>` | Dense |
+| `seq_lens` (op input, not part of the ragged abstraction) | Plain `Tensor<int32_t>` or `Tensor<int64_t>` | Dense |
 | Non-ragged tensors | Plain `Tensor<T>` | Dense |
 
 ### 4.9 Wiring sources of truth
 
-- **Graph (`TensorAttributes`)** — `ragged_offset` (pointer to aux
-  attrs) and `alignment`.
-- **Node-level op attributes** (e.g. `SdpaAttributes`) — `seq_lens`
-  UIDs via existing `set_seq_len_q` / `set_seq_len_kv` accessors;
-  matching `seq_len_*_tensor_uid` fields in the per-op attribute
-  flatbuffer tables.
-- **Runtime tensorMap (`UID → ITensor`)** — only dense buffers:
-  `IrregularTensor<T>` per ragged primary, `Tensor<IndexT>` per
-  aux, `Tensor<T>` per non-ragged. **No ragged-view objects.**
-- **Plan layer** — constructs the view at the call site at execute
-  time, reading `ragged_offset` from the primary's
-  `TensorAttributes` and `seq_lens` from the node's op attribute.
+- **Graph (`TensorAttributes`)** carries `ragged_offset` (pointer
+  to the aux tensor's attributes) and `alignment`.
+- **Node-level op attributes** (e.g. `SdpaAttributes`) carry
+  `seq_lens` UIDs via existing accessors; these are referenced
+  like any other tensor input — the SDK ragged types know
+  nothing about them.
+- **Runtime tensorMap (`UID → ITensor`)** carries:
+  `RaggedTensor<T>` per ragged primary; ordinary
+  `Tensor<int32_t>` or `Tensor<int64_t>` per `ragged_offset` aux
+  and per `seq_lens` (the integer type is whatever the test /
+  user supplied — the SDK does not constrain it beyond
+  int32-or-int64); ordinary `Tensor<T>` per non-ragged tensor.
+- **Plan layer (executor)**: when executing an op whose graph
+  declares a given input/output as ragged, the plan wraps the
+  variant-pack pointer in a `ShallowRaggedTensor<T>` whose
+  `ragged_offset` ref is obtained from the variant pack by the
+  UID stored in `TensorAttributes::ragged_offset_tensor_uid()`.
+  The aux is passed as `shared_ptr<ITensor>` (its element type is
+  discovered at construction by the type-erased helper from
+  [§4.5](#45-data-sdk-shared-elements) item 1). `seq_lens`, if
+  the op consumes it, is fetched as a separate input from the
+  variant pack the same way any other input would be — typically
+  as a `TensorBase<int32_t>&` or `TensorBase<int64_t>&` depending
+  on what the op's per-node attribute declares.
 
-### 4.10 Plan-layer view construction and CPU reference impact
+**Ragged intermediates and aux connectivity.** Every
+`ragged_offset` aux — whether referenced by a graph input,
+output, or virtual intermediate — must be present in the
+pre-supplied input bundle (see
+[§4.11.1](#4111-pre-supplied-input-bundle)). The graph layer is
+responsible for declaring this connectivity by giving each
+ragged tensor's `TensorAttributes` an explicit
+`ragged_offset_tensor_uid`. Ragged intermediates therefore reuse
+the same `ragged_offset` aux as some other tensor in the graph;
+the executor never synthesizes a new aux for an intermediate. A
+hypothetical op that *computes* a new `ragged_offset` is out of
+scope for this RFC.
 
-The physical element count needed for the underlying
-`ShallowTensor<T>` is computed at execute time from the current
-variant-pack `ragged_offset` (see
-[§4.11.2](#4112-bundle-allocation) for the formula). Computing it
-per execute — rather than caching at plan-build time — avoids
-pinning `ragged_offset` values to the lifetime of the compiled
-plan:
+### 4.10 Plan-layer construction and CPU reference impact
+
+The plan's `params` struct caches each ragged tensor's UID and
+that of its `ragged_offset` aux UID. At execute time the plan
+resolves both via the variant pack:
+
+The aux is wrapped via a small dispatched factory shared with the
+executor's virtual-tensor pass (see
+[§4.10.1](#4101-reuse-at-the-executor-virtual-tensor-pass)):
 
 ```cpp
-auto qRaggedOffsetView = std::make_shared<ShallowTensor<IndexT>>(/* ... */);
+// makeShallowITensor(dataType, ptr, dims, strides) -> shared_ptr<ITensor>
+//
+//   Runtime-dispatched factory. Returns a non-owning
+//   ShallowTensor<T> wrapped as shared_ptr<ITensor>, with T
+//   selected by `dataType`. This factory is the only site at
+//   which the aux's element type appears statically; everywhere
+//   else the aux flows as shared_ptr<ITensor> per §4.5 item 1.
+//   For ragged_offset and seq_lens the supported element types
+//   are int32_t and int64_t.
+```
 
+```cpp
+// Resolve ragged_offset aux from the variant pack first — its
+// host values are needed to size the underlying view.
+//
+// The aux's element type (int32 or int64) is cached in
+// _params at plan-build time from the flatbuffer aux's
+// data_type field; makeShallowITensor returns a
+// ShallowTensor<int32_t> or ShallowTensor<int64_t> wrapped as
+// shared_ptr<ITensor> based on that tag. The ragged-tensor
+// types treat it type-erased from here on out (§4.5 item 1).
+std::shared_ptr<ITensor> qRaggedOffset = makeShallowITensor(
+    _params.qTensor.raggedOffsetDataType,
+    variantPack.at(_params.qTensor.raggedOffsetUid),
+    /* aux dims/strides: [B + 1], packed */);
+
+// computePhysicalElementCount performs a host-side read of
+// qRaggedOffset (via the same type-erased element-size branch
+// used everywhere else) to obtain ragged_offset[B], then
+// applies the trailing-alignment requirement.
 const auto qPhysicalElementCount =
-    computePhysicalElementCount(*qRaggedOffsetView,
+    computePhysicalElementCount(*qRaggedOffset,
                                 _params.qTensor.alignment);
 
-auto qUnderlying = std::make_shared<ShallowTensor<QType>>(
+auto qView = std::make_shared<ShallowRaggedTensor<QType>>(
     variantPack.at(_params.qTensor.uid),
     _params.qTensor.dims,
     _params.qTensor.strides,
-    qPhysicalElementCount);
+    qPhysicalElementCount,
+    qRaggedOffset);
 
-auto qSeqLens = _params.seqLenQTensor.has_value()
-    ? std::make_shared<ShallowTensor<IndexT>>(/* ... */)
+// If the op consumes seq_lens, fetch it as an ordinary input.
+// seq_lens has its own data_type cached in _params; the same
+// makeShallowITensor factory is used (it is not specific to
+// ragged_offset). The CPU reference takes the result as
+// TensorBase<int32_t>& or TensorBase<int64_t>& depending on
+// what the op declared.
+auto seqLenQ = _params.seqLenQTensor.has_value()
+    ? makeShallowITensor(_params.seqLenQTensor->dataType,
+                         variantPack.at(_params.seqLenQTensor->uid),
+                         _params.seqLenQTensor->dims,
+                         _params.seqLenQTensor->strides)
     : nullptr;
 
-auto qView = std::make_shared<RaggedView<QType, IndexT>>(
-    qUnderlying, qRaggedOffsetView, qSeqLens);
-
-// pass *qView as TensorBase<QType>& into CpuFpReferenceSdpa::forward
+// CPU reference signature changes only by accepting seq_lens as
+// an ordinary extra parameter (where it isn't already), since
+// it's no longer attached to the ragged primary:
+cpuFpReferenceSdpa.forward(*qView, /* ..., */
+                           seqLenQ.get(),
+                           /* ... */);
 ```
 
-CPU reference signatures are **unchanged**. Body changes are limited
-to per-batch sequence-length bounding via `q.validSeqLen(b)`, with
-an early-out for `(b, sq)` pairs where `sq >= q.validSeqLen(b)`.
-The parallel decomposition continues to use `S_max` so the scheduler
-need not know about ragged-ness.
+Note that neither `qView` nor any helper above is templated on
+the aux's index type — `ShallowRaggedTensor<QType>` has a single
+template parameter (the primary's data type), and the aux flows
+through as `shared_ptr<ITensor>`. `makeShallowITensor` does a
+small runtime switch on the data-type tag cached in `_params` and
+returns an `ITensor`-typed result; per-op plan templates do not
+need an `IndexT` parameter (see
+[§6.3](#63-templating-the-ragged-tensor-types-on-indext)).
+
+Computing `physicalElementCount` per execute (rather than caching
+it at plan-build time) avoids pinning `ragged_offset` values to
+the lifetime of the compiled plan: each execute is free to use
+different `ragged_offset` contents.
+
+**CPU reference body.** The ragged primary's iterator walks each
+batch's full per-batch range. When the reference also takes a
+`seq_lens`, the body queries `seq_lens[b]` directly to decide
+whether to skip indices `>= seq_lens[b]` within batch `b` — the
+same pattern as any other op input that bounds the work shape.
+The reference does **not** need any new `validSeqLen(b)`-style API
+on the ragged primary itself.
+
+#### 4.10.1 Reuse at the executor virtual-tensor pass
+
+The CPU executor's existing virtual-tensor pass (Flow 2 stage
+2.7 in `RaggedTensorsTensorFlows.md`) walks `tensorMap` from the
+deserialized flatbuffer graph, allocates one `ITensor` per
+virtual attribute that is not already in the variant pack, and
+patches `rawHostData()` of the new allocation back into the
+variant pack. For ragged virtual intermediates this needs the
+same per-execute aux-resolution dance as the plan layer, since
+the aux is in the variant pack as a `void*` and the aux's
+geometry (dims, `data_type`) lives in `tensorMap`.
+
+To keep the executor's loop body single-shaped (no per-attribute
+ragged branching at the call site) and to share the dispatch
+logic with the plan layer, the flatbuffer-side factory grows a
+second overload:
+
+```cpp
+// hipdnn_test_sdk::detail
+
+// Existing, unchanged: single-dispatch on attribute.data_type();
+// allocates Tensor<T>(dims, strides). Used by callers that do
+// not need ragged support.
+std::unique_ptr<ITensor> createTensorFromAttribute(
+    const flatbuffers_sdk::data_objects::TensorAttributes& attribute);
+
+// New: handles both ragged and non-ragged attributes uniformly.
+// The variantPack/tensorMap arguments are only consulted when
+// attribute.ragged_offset_tensor_uid() is set.
+std::unique_ptr<ITensor> createTensorFromAttribute(
+    const flatbuffers_sdk::data_objects::TensorAttributes& attribute,
+    const std::unordered_map<int64_t, void*>&              variantPack,
+    const TensorMap&                                       tensorMap);
+```
+
+The new overload's contract:
+
+- **If `attribute.ragged_offset_tensor_uid()` is unset** —
+  defers to the existing single-arg overload. Non-ragged
+  attributes pay no overhead and the executor's loop body sees
+  no behavioural change for them.
+- **If `attribute.ragged_offset_tensor_uid()` is set** —
+  1. Looks up the aux UID in `tensorMap` (for dims and
+     `data_type`).
+  2. Looks up the aux UID in `variantPack` (for `void*`).
+  3. Wraps the aux pointer with `makeShallowITensor(auxDataType,
+     auxPtr, auxDims, auxStrides)` to obtain a non-owning
+     `shared_ptr<ITensor>` over the aux.
+  4. Reads `ragged_offset[B]` via the type-erased `readOffset`
+     helper from [§4.5](#45-data-sdk-shared-elements) item 1,
+     then computes
+     `physicalElementCount = align_up(ragged_offset[B],
+     attribute.alignment())`.
+  5. Single-dispatches on the primary's `attribute.data_type()`
+     and allocates
+     `make_unique<RaggedTensor<T>>(dims, strides,
+     physicalElementCount, auxSharedPtr)`.
+  6. Returns `unique_ptr<ITensor>`.
+
+`populateVariantPackWithMissingVirtualTensors` switches to
+calling this new overload for every virtual attribute. Because
+non-ragged attributes fall through to existing behaviour, the
+loop body's shape does not change:
+
+```cpp
+for (const auto& [id, attr] : tensorMap)
+{
+    if (attr->virtual_() && updatedVariantPack.find(id) == updatedVariantPack.end())
+    {
+        auto tensor = detail::createTensorFromAttribute(
+            *attr, updatedVariantPack, tensorMap);
+        tensor->fillWithSentinelValue();
+        virtualTensors.push_back(std::move(tensor));
+        updatedVariantPack[id] = virtualTensors.back()->rawHostData();
+    }
+}
+```
+
+The executor never synthesizes a fresh `ragged_offset` for an
+intermediate — the aux comes from the pre-supplied bundle via
+the variant pack ([§4.9](#49-wiring-sources-of-truth) and
+[§4.11.1](#4111-pre-supplied-input-bundle)). A virtual ragged
+intermediate's `TensorAttributes` must therefore declare an
+existing aux UID that was already threaded through by the
+harness; the strict requirement check in §4.11.1 ensures this is
+the case.
 
 ### 4.11 Test-harness integration
 
-Most of the harness flow is unaffected beyond the type substitutions
-above. Four stages warrant discussion.
-
 #### 4.11.1 Pre-supplied input bundle
 
-Aux tensors (`ragged_offset`, `seq_lens`) cannot be meaningfully
-randomized: their values must be structurally consistent
-(`ragged_offset` monotonic with `ragged_offset[0] == 0`;
-`seq_lens[b]` within the per-batch reserved extent). The harness
-therefore accepts a pre-supplied input bundle at setup:
+`ragged_offset` cannot be meaningfully randomized: its values
+must be structurally consistent (monotonic,
+`ragged_offset[0] == 0`, last element equal to the sized physical
+buffer). The harness therefore accepts a pre-supplied input
+bundle at setup:
 
 ```cpp
 using PreSuppliedInputs =
-    std::unordered_map<int64_t, std::unique_ptr<ITensor>>;
+    std::unordered_map<int64_t, std::shared_ptr<ITensor>>;
 
 class IntegrationGraphVerificationHarness {
 public:
@@ -477,53 +833,73 @@ public:
 };
 ```
 
-Each pre-supplied entry is an owning `Tensor<T>` (or
-`Tensor<IndexT>`) populated with deliberately chosen host-side
-values. Only one map is needed: each `ITensor` owns both a host and
-a device buffer via `MigratableMemory`, so the same tensor serves
-both execution paths — the GPU path reads `rawDeviceData()` (with
-migration before kernel launch) and the CPU path reads
-`rawHostData()` directly. The harness owns the map; the per-path
-`GraphTensorBundle`s continue to own the *non*-pre-supplied tensors.
+The value type is `shared_ptr<ITensor>` (not `unique_ptr`) so the
+same aux entry can be threaded into a ragged primary's
+constructor (see [§4.11.2](#4112-bundle-allocation)). Sharing
+also lets the same `ITensor` serve both execution paths via its
+built-in host/device `MigratableMemory`.
 
-The harness's UID lookup becomes a pre-supplied-first fallthrough:
-pre-supplied bundle, then the relevant `GraphTensorBundle`. When
-the per-`TensorAttributes` allocation pass visits a UID present in
-the pre-supplied bundle, it skips both allocation and randomization
-for that UID in either `GraphTensorBundle`.
+The harness retains ownership of the pre-supplied bundle and the
+per-path `GraphTensorBundle`s continue to own the
+non-pre-supplied tensors. The harness's UID lookup is a
+pre-supplied-first fallthrough: if a UID is present in the
+pre-supplied bundle, both `GraphTensorBundle`s see the same
+`ITensor` via shared ownership, and randomization is skipped for
+that UID.
 
-**Strict requirement check.** Before the walk, the harness verifies
-that every aux UID required by the graph is in the pre-supplied
-bundle — every `ragged_offset` referenced by a `TensorAttributes`
-and every `seq_lens` referenced by a node-level op attribute.
-Missing aux UIDs fail setup with a clear error rather than silently
-random-initializing a structurally invalid aux tensor.
+**Strict requirement check.** Before allocation, the harness
+verifies that every `ragged_offset` UID referenced by a
+`TensorAttributes` is present in the pre-supplied bundle.
+Missing `ragged_offset` UIDs fail setup with a clear error
+rather than silently random-initializing a structurally invalid
+aux.
 
-**Variant-pack construction.** UIDs resolved from the pre-supplied
-bundle contribute the *same* `void*` to both bundles' variant packs
-(via the same `ITensor`), automatically guaranteeing byte-equal
+A "random-then-fix-up" alternative — random-fill `ragged_offset`
+and then sort / clamp the values into a structurally valid layout
+— was considered and rejected. It loses test determinism in a
+non-obvious way (small seed-handling or fixup-heuristic changes
+silently shift every test's per-batch lengths), encodes implicit
+policy choices ("how much padding per batch?", "is
+`seq_lens[b] == 0` allowed?") invisible to the test author, and
+saves no real work: the author still has to reason about which
+distribution they want, so an explicit pre-supplied value is
+strictly clearer at the same cognitive cost.
+
+`seq_lens` is **not** strict-checked: it's an ordinary input
+tensor from the harness's point of view. Test authors who want
+deterministic `seq_lens` values for ops that consume them can put
+them in the pre-supplied bundle as ordinary entries; the harness
+treats them like any other override.
+
+**Variant-pack construction.** UIDs resolved from the
+pre-supplied bundle contribute the same `void*` to both bundles'
+variant packs (via the same `ITensor`), guaranteeing byte-equal
 input values across the GPU and CPU paths.
 
-**General override semantics.** The pre-supplied bundle is not
-restricted to aux UIDs: a test author may supply non-aux inputs to
-pin them to fixed values (useful for reproducing a failing case or
-for golden-value testing). The strict check rejects only *missing*
-aux entries; *extra* non-aux entries are accepted.
-
-The mechanism is harness-layer only — the SDK types, plan layer,
-CPU references, and variant pack are unaffected.
-
-#### 4.11.2 Bundle allocation in `createTensorFromAttribute`
+#### 4.11.2 Bundle allocation
 
 For each `TensorAttributes`:
 
-- If the UID is in the pre-supplied bundle: skip.
+- If the UID is in the pre-supplied bundle: skip (already
+  resolved).
 - Else if `attr.has_ragged_offset() == false`: allocate
   `Tensor<T>` sized by `prod(dims)` as today.
-- Else: look up the `ragged_offset` UID in the pre-supplied bundle
-  (the strict check guarantees presence), read its host values,
-  compute the physical element count, and allocate
-  `make_unique<IrregularTensor<T>>(dims, strides, physicalElementCount)`.
+- Else: look up the `ragged_offset` UID in the pre-supplied
+  bundle to obtain its `shared_ptr<ITensor>` — the strict check
+  in [§4.11.1](#4111-pre-supplied-input-bundle) guarantees its
+  presence — read its host values (via the same type-erased
+  element-size branch documented in
+  [§4.5](#45-data-sdk-shared-elements) item 1), compute the
+  physical element count, and allocate
+  `make_shared<RaggedTensor<T>>(dims, strides,
+  physicalElementCount, raggedOffsetSharedPtr)`. The factory
+  does not need to know the aux's element type statically — it
+  is single-dispatched on the primary's `T` only.
+
+A single-pass walk suffices because every `ragged_offset` aux a
+primary could reference is, by the strict check, already held by
+the pre-supplied bundle before allocation begins. No auxiliary
+pre-pass over `TensorAttributes` is needed.
 
 The physical element count is:
 
@@ -531,328 +907,377 @@ The physical element count is:
 physicalElementCount = align_up(ragged_offset[B], attr.get_alignment())
 ```
 
-That is, `ragged_offset` already encodes any per-batch reserved
-extents (per [§2.3](#23-configurations-targeted-in-this-iteration));
-`alignment` only rounds the total buffer size up to satisfy a
-trailing-alignment requirement. For `alignment = 1` this reduces to
-`ragged_offset[B]` (packed valid size). The plan layer re-evaluates
-this expression at execute time against the current variant-pack
-`ragged_offset` (see
-[§4.10](#410-plan-layer-view-construction-and-cpu-reference-impact))
-rather than caching the value at plan-build time.
+For `alignment = 1` this reduces to `ragged_offset[B]` (packed
+valid size). Larger alignment values round the total buffer size
+up to satisfy a trailing-alignment requirement. The plan layer
+re-evaluates this expression at execute time against the current
+variant-pack `ragged_offset` (per
+[§4.10](#410-plan-layer-construction-and-cpu-reference-impact)).
+Note that `elementCount()` on the resulting `RaggedTensor` is
+still `ragged_offset[B]` — alignment expands the allocation, not
+the element space (see
+[§4.5](#45-data-sdk-shared-elements) item 6).
 
-No structural change to `GraphTensorBundle`: storage stays
-`unordered_map<int64_t, unique_ptr<ITensor>>`. Because the view is
-not built here, the bundle does not need to know `seq_lens` to
-allocate the primary.
+#### 4.11.3 Bundle init pass
 
-#### 4.11.3 Input randomization at bundle init
+The init pass walks every UID in the (per-path) bundle once and
+applies the following rule:
 
-UIDs in the pre-supplied bundle are skipped. For non-pre-supplied
-ragged primaries, `bundle.randomizeTensor(uid)` walks the underlying
-`IrregularTensor<T>` linearly — filling more elements than strictly
-valid (per-batch padding tails are randomized too). This is
-harmless: neither GPU kernels nor CPU references read padding
-positions, and identical seeds keep padding values byte-equal
-between the two paths. This is the principal reason
-`IrregularTensor`'s iterators walk the physical buffer rather than
-throwing (see [§6.3](#63-throwing-iterators-on-irregulartensort)).
+- **UID is in the pre-supplied bundle:** skip. The pre-supplied
+  `ITensor` already carries deliberate values (see
+  [§4.11.1](#4111-pre-supplied-input-bundle)); both paths see
+  the same `ITensor` via shared ownership.
+- **UID is a ragged output:** fill the entire physical buffer
+  (both bundles) with the per-dtype sentinel value rather than
+  randomizing. The rationale and the validator change that
+  consumes this are in
+  [§4.11.4](#4114-output-validation-in-verifygraph).
+- **UID is a ragged primary input** (non-pre-supplied):
+  `bundle.randomizeTensor(uid)` walks the `RaggedTensor<T>`
+  per-batch over its `ragged_offset` ranges, filling every
+  position in every batch's range (including any trailing
+  per-batch padding tails). Filling more positions than strictly
+  necessary is harmless — neither GPU kernels nor CPU references
+  read padding positions, and identical seeds keep padding
+  values byte-equal between the two paths.
+- **UID is a non-ragged tensor:** randomize linearly as today.
+
+The same one-pass loop in `initializeBundle` handles all four
+cases; the only new logic is the "is this UID a ragged output?"
+branch that picks `fillWithSentinelValue()` over
+`randomizeTensor()`. Whether a UID corresponds to an output is
+already tracked by the harness in `outputTensorIds` (see Flow 2
+stage 2.2 in `RaggedTensorsTensorFlows.md`).
 
 #### 4.11.4 Output validation in `verifyGraph`
 
-The CPU reference writes only valid sequence positions of an output,
-leaving padding at its randomize-time value. The GPU kernel has no
-contractual guarantee about output padding — AITER FMHA forward in
-particular may leave it alone, zero it out, or write garbage. A
-naive full-buffer compare therefore fails for reasons unrelated to
+The CPU reference writes only valid sequence positions of an
+output (those `< seq_lens[b]`); the GPU kernel makes no
+contractual guarantees about output padding. A naive full-buffer
+compare therefore fails on padding for reasons unrelated to
 algorithmic correctness.
 
-**Sentinel-skip.** At harness init, fill each ragged output's
-physical buffer (both bundles) with a sentinel the CPU reference
-cannot legitimately produce (NaN for floats; a magic number for
-ints) instead of randomizing. After execution the validator
-iterates the full physical buffer; positions where the CPU side is
-bit-equal to the sentinel are skipped (the reference didn't write
-there, so it's padding). Other positions use the existing tolerance
-check. This needs one validator overload
-(`allCloseSkipSentinel(cpu, gpu, sentinel, tolerance)`) and a small
-init-time branch — no node-attribute walk, no per-output
-`RaggedView` construction.
+**Recommended approach: sentinel-skip.** Both bundles' ragged
+outputs are seeded with a sentinel value at init time (see
+[§4.11.3](#4113-bundle-init-pass)) rather than randomized. The
+sentinel must be a value the CPU reference cannot legitimately
+produce (NaN for floats; a magic number for ints). After
+execution the validator iterates the full physical buffer;
+positions where the CPU side is bit-equal to the sentinel are
+skipped (the reference didn't write there); other positions use
+the existing tolerance check. This needs one validator overload
+(`allCloseSkipSentinel(cpu, gpu, sentinel, tolerance)`) plus
+the init-time branch already described in §4.11.3.
 
-An alternative seq_lens-aware approach was considered but rejected;
-see [§6.6](#66-seq_lens-aware-output-validation).
+Sentinel-skip is the only validation mechanism in this design.
+Because `seq_lens` is not attached to the ragged primary, there
+is no SDK-level "wrap with `seq_lens` for ragged-aware compare"
+fallback to fall back to.
+
+Even if it is not possible to have a fully avoidable sentinel value,
+a random sentinel should have a very low likelihood of showing up in
+the output (though this would increase with very large tensors). The
+consequence of the CPU reference generating this is also small, as it
+would only skip over validating this one value.
 
 ---
 
 ## Known limitations
 
-1. **Packed-only.** Only the two AITER-driven configurations are in
-   scope. A "padded, seq-lens-only" mode is not supported by
-   `RaggedView`'s structural validation; see
-   [§7.3](#73-padded-mode-seq-lens-only-no-ragged_offset).
-2. **`seq_lens` is not per-tensor.** Per
-   [§2.4](#24-constraint-seq_lens-is-not-on-tensorattributes), code
-   that walks the graph one `TensorAttributes` at a time can
-   identify ragged primaries and their `ragged_offset` but not their
-   `seq_lens`.
-3. **`IrregularTensor<T>`'s `getHostValue` / `setHostValue` are
-   semantically inert.** They are inherited from `TensorBase<T>` but
-   have no meaningful per-batch addressing on a ragged primary
-   (per-batch addressing requires the `ragged_offset` math living in
-   `RaggedView`). As an interim measure they are overridden to throw
-   `std::logic_error` directing the caller at `RaggedView<T>`; the
-   long-term fix is the hierarchy refactor in
-   [§7.1](#71-typedtensort-intermediate-in-the-tensor-hierarchy),
-   which removes these methods from `IrregularTensor`'s interface
-   entirely.
-4. **Sentinel-skip validation requires per-CPU-reference
-   guarantees.** The sentinel must be unproducible by the reference
-   under test. NaN is safe for floats by default, but edge cases
-   (e.g. SDPA with `seq_lens_q[b] == 0` producing NaN from a fully
-   masked row) may require a non-NaN magic-number sentinel.
-   Low-precision floats (bf16, fp16, fp8) have a smaller sentinel
-   space and harder unproducibility guarantees.
-5. **`elementCount()` semantics differ between the two new types.**
-   `RaggedView` (without `seq_lens`) returns
-   `_underlying->elementSpace()`; `IrregularTensor` returns
-   `physicalElementCount`. Callers must be aware of the
-   "valid elements" vs "physical buffer" distinction.
-6. **Test authors must construct aux tensors by hand.** Every
-   integration test of a ragged-consuming op must build deliberate
-   `ragged_offset` (and optionally `seq_lens`) tensors and supply
-   them via the pre-supplied input bundle. No harness-level helper
-   for "a plausible random ragged layout" is in this RFC; that
-   would require a generator with its own structural-validity rules
-   and is deferred.
+1. **`GraphTensorBundle` stores entries as `shared_ptr<ITensor>`,
+   not `unique_ptr<ITensor>`.** Required so a `ragged_offset` aux
+   can be threaded into a `RaggedTensor`'s ctor as a shared
+   reference.
+2. **Iteration visits every position in each batch's
+   `[ragged_offset[b], ragged_offset[b+1])` range.** The
+   iterator has no reference to `seq_lens` and does not skip the
+   per-batch padding tails. Ops that need to skip padding query
+   `seq_lens` directly from the variant pack.
+3. **Sentinel-skip validation requires per-CPU-reference
+   guarantees.** The sentinel must be unproducible by the
+   reference under test. NaN is safe for floats by default, but
+   edge cases (e.g. SDPA with `seq_lens_q[b] == 0` producing NaN
+   from a fully masked row) may require a non-NaN magic-number
+   sentinel. Low-precision floats (bf16, fp16, fp8) have a
+   smaller sentinel space and harder unproducibility guarantees.
+4. **Test authors must construct `ragged_offset` tensors by
+   hand.** Every integration test of a ragged-consuming op must
+   build a deliberate `ragged_offset` (and, when the op consumes
+   `seq_lens`, supply `seq_lens` too) and put it in the
+   pre-supplied input bundle. No harness-level helper for "a
+   plausible random ragged layout" is in this RFC.
+5. **`isPacked()` is overloaded.** It returns `false` for these
+   types because `elementCount() != elementSpace()` when
+   `alignment > 1`, but a packed-with-`alignment=1` `RaggedTensor`
+   is colloquially "packed". See
+   [§4.5](#45-data-sdk-shared-elements) item 7 and
+   [§7](#future-work) for a possible `hasRegularDims()` split.
+6. **`ragged_offset` element-type checking is runtime, not
+   static.** The aux is held as `shared_ptr<ITensor>` and the
+   int32-vs-int64 distinction is resolved by a small element-size
+   switch inside the `readOffset` helper
+   ([§4.5](#45-data-sdk-shared-elements) item 1). Element types
+   other than int32 and int64 are rejected at construction time.
+   The trade — runtime-checked aux type for no `IndexT` template
+   parameter on `RaggedTensor` / `ShallowRaggedTensor` / per-op
+   plan templates / test-SDK factories — is discussed in
+   [§6.3](#63-templating-the-ragged-tensor-types-on-indext).
 
 ---
 
 ## Alternatives considered
 
-### 6.1 Self-owning `RaggedTensor<T, IndexT>` subclass
+### 6.1 `IrregularTensor<T>` + `RaggedView<T, IndexT>` split
 
-An alternate shape: a `RaggedTensor<T, IndexT> : TensorBase<T>` that
-owns both its physical buffer and its aux refs, constructed with all
-of these passed at once. The user / bundle would hold a single
-owning value instead of an `(IrregularTensor, RaggedView)` pair.
+An alternative shape introduces two SDK types instead of one:
 
-This is not actually a one-type design: the plan layer at execute
-time has only a `void*` from the variant pack — there is no owning
-`RaggedTensor` to hand to the reference, and `ShallowTensor<T>` is
-dense-only. A non-owning peer `ShallowRaggedTensor<T, IndexT>` would
-be required, bringing the total new types to two — the same as the
-recommended design's `IrregularTensor` + `RaggedView`. The
-alternative of widening every CPU reference's signature to take aux
-pointers + dims separately was rejected because it forces every
-reference to take ragged-specific parameters regardless of whether
-the op is ragged.
+- **`IrregularTensor<T>`** — owning storage with
+  `physicalElementCount ≠ prod(dims)`, no aux refs.
+- **`RaggedView<T, IndexT>`** — non-owning ragged-aware wrapper
+  that takes the underlying storage by `shared_ptr` plus
+  `ragged_offset` (and optionally `seq_lens`) at construction,
+  providing the ragged iteration.
 
-**Pros relative to recommended.**
+The plan layer assembles a view at execute time from the
+variant-pack pointer (wrapped in a `ShallowTensor<T>`-style
+underlying) and the resolved aux refs. The CPU reference receives
+a `TensorBase<T>&` referring to the view.
 
-- Single owning object at the user-facing (samples) layer.
-- Pinned host memory expressible via the same template parameters
-  pattern as `PinnedTensor<T>`.
+**Why this might be appealing.** The split keeps "I have a buffer
+that is not `prod(dims)` elements" (a storage concern) separate
+from "I want ragged-aware iteration with `seq_lens` bounding"
+(a presentation concern). In particular, if `seq_lens` were
+attached to the view, the bundle could store entries as
+`unique_ptr<ITensor>` without ever needing to thread aux refs
+into a primary's constructor — the view would attach the aux
+indirectly at the plan layer.
 
-**Cons relative to recommended.**
+**Why this RFC does not take it.** Once `seq_lens` is excluded
+from the SDK abstraction (per
+[§6.2](#62-keeping-seq_lens-in-the-ragged-tensor-sdk-abstraction)),
+the only aux the SDK still cares about is `ragged_offset`, which
+must be available at primary-allocation time to size the buffer.
+The bundle therefore still has to thread `ragged_offset` into a
+primary's ctor — exactly the `shared_ptr` shift that the split
+design was trying to avoid. The split's main advantage
+disappears, and what remains is pure cost:
 
-- Same new-type count (`RaggedTensor` + `ShallowRaggedTensor`).
-- **Bundle-side ctor-time aux dependency.** Allocating the primary
-  via this ctor requires threading the aux `shared_ptr` in at
-  construction, which forces `GraphTensorBundle` to shift
-  `unique_ptr → shared_ptr` (or expose an aliasing `share()`) and
-  constrains visit order. The recommended design avoids this — the
-  bundle simply reads the pre-supplied `ragged_offset`'s host values
-  to size each `IrregularTensor<T>`.
-- **Awkward fit for intermediates no one iterates.** Allocating
-  these as "no-aux `RaggedTensor`" is semantically odd; introducing
-  a separate type ad hoc pushes the type count higher.
-- **Output validation requires new infrastructure on the class.**
-  Attaching `seq_lens` post-construction (for seq_lens-aware
-  compare) needs either a second ctor, a mutator (violating
-  immutability), or a wider `allClose` signature. Not needed in the
-  recommended design — `RaggedView` already accepts `seq_lens` at
-  construction. (This cost vanishes for both designs under
-  sentinel-skip.)
-- **Aux relationship is declared twice** (on the graph and on the
-  runtime ctor), requiring a reconciler in any flow that surfaces
-  both declarations.
+- **Two new SDK types instead of one** (`IrregularTensor<T>` +
+  `RaggedView<T, IndexT>`, plus a `ShallowTensor<T>` underlying
+  pattern at the plan layer that the single-type design folds
+  into `ShallowRaggedTensor<T>` directly).
+- **A storage type that derives from `TensorBase<T>` but whose
+  `getHostValue` / `setHostValue` have no meaningful semantics on
+  the ragged primary's physical buffer** — those methods would
+  need to either throw or address into "raw physical positions",
+  motivating a further hierarchy refactor (introducing a
+  `TypedTensor<T>` between `ITensor` and `TensorBase<T>`) just to
+  clean up.
+- **Two distinct `elementCount()` contracts** (one for the
+  storage type, one for the view) that callers have to keep
+  straight.
 
-The deciding factor in favour of the recommended split is the
-bundle / intermediate allocation simplicity, which holds
-unconditionally. The single-object user-facing ergonomic can be
-partly recovered by a runtime-side helper (see
-[§7.2](#72-runtime-side-tensorbundle-helper)).
+The single-type design (`RaggedTensor<T>` +
+`ShallowRaggedTensor<T>`) avoids all three of these costs while
+incurring the same `shared_ptr`-typed bundle storage either way.
 
-### 6.2 Wrapper class around an existing dense `Tensor<T>`
+### 6.2 Keeping `seq_lens` in the ragged-tensor SDK abstraction
 
-An earlier sketch proposed wrapping an existing dense `Tensor<T>`
-and overriding indexing/iterators with the aux data. Rejected
-because `Tensor<T>` asserts `_packed = (elementCount == elementSpace)`
-and is sized by `prod(dims)`. Either way:
+A variant of this design has the ragged primary's type hold a
+`shared_ptr` to `seq_lens` alongside `ragged_offset`, provide a
+`validSeqLen(b)` API, and iterate only the valid prefix of each
+batch's range.
 
-- Allocate `prod(dims) = B * S_max * …` (much larger than what
-  kernels want), or
-- Bypass the dense allocation entirely (in which case the wrapper
-  is constructing the storage and `Tensor<T>` adds nothing).
+**The case for keeping it:**
 
-`IrregularTensor<T>` is the minimal storage type supporting
-`physicalElementCount ≠ prod(dims)`; the wrapper-over-`Tensor<T>`
-approach re-derives that type under a different name.
+- Ragged iteration is "fully ragged-aware" — callers using
+  `begin()/end()` on the primary automatically skip per-batch
+  padding without having to look up `seq_lens` separately.
+- CPU reference bodies don't need to take `seq_lens` as a
+  separate parameter; they call `primary.validSeqLen(b)` and an
+  early-out-on-`sq >= validSeqLen(b)` check is all that's needed.
 
-### 6.3 Throwing iterators on `IrregularTensor<T>`
+**The case against (taken by this design):**
 
-The discarded variant had `IrregularTensor<T>`'s iterators throw to
-force every iteration site to first wrap the storage in a
-`RaggedView<T>`. Rejected once the `seq_lens`-on-node-attributes
-constraint became firm: the harness's `randomizeTensor` and
-validation sites cannot look up `seq_lens` from a
-`TensorAttributes` alone, so they cannot construct the required
-`RaggedView`. Forcing them to walk node-level op attributes purely
-to enable iteration is unnecessary — a linear walk over the
-physical buffer is correct for both sites (see
-[§4.11.3](#4113-input-randomization-at-bundle-init) and
-[§4.11.4](#4114-output-validation-in-verifygraph)).
+- **`seq_lens` is never used during input fill or output
+  validation.** Randomization walks the physical buffer
+  regardless (padding values are harmless because nobody reads
+  them). Sentinel-skip validation doesn't consult `seq_lens`
+  either. The only consumer is the CPU reference body — a single,
+  narrow site.
+- **CPU references already look up arbitrary inputs from the
+  variant pack.** Querying a `seq_lens` tensor that's just
+  another input is no more awkward than querying any other input.
+  There is no concrete ergonomic gain from a `validSeqLen(b)` API
+  over `seqLens.getHostValue({b})`.
+- **Indexing is always semantically correct without `seq_lens`.**
+  Walking each batch's full `ragged_offset` range only ever
+  visits positions that belong to the right batch and to the
+  tensor's owned memory. The cost of carrying `seq_lens` in the
+  SDK is paid in every layer (frontend bundle setup, view ctor
+  signatures, pre-supplied bundle strict checks,
+  alternatives-section analysis) to buy what amounts to a
+  per-batch loop bound in one CPU reference function body.
+- **Associations between `seq_lens` and primaries is determined by the nodes by context**
+  Unlike the `ragged_offset` which is directly specified in the
+  `TensorAttributes`, the association between `seq_lens` and a primary
+  is determined by the intended use of arguments for the node. This would
+  require a per node mapping that associates primaries with their intended
+  sequence length parameters, and walking each of the nodes to find that mapping.
+- **`seq_lens` does not bind 1:1 to a primary.** There is nothing
+  that structurally guarantees that a single primary cannot have two
+  diferent `seq_lens` associated with it in two different operations
+  in the graph. Even if we took the previous approach of walking the nodes
+  to find their associations, this mapping is ill formed.
+- **Significant complexity savings.** Dropping `seq_lens` from
+  the SDK removes the storage-vs-view split, the
+  post-construction-attach-seq_lens problem, the `validSeqLen`
+  virtual on `TensorBase`, a seq_lens-aware output-validation
+  fallback, and the strict-requirement check on `seq_lens` UIDs
+  in the pre-supplied bundle.
 
-### 6.4 Adding `seq_lens` to `TensorAttributes`
+The deciding factor is the cost/benefit ratio: a tiny amount of
+work shifted into per-op CPU references in exchange for a much
+simpler SDK and harness.
 
-A symmetry-oriented design putting `set_seq_len(...)` alongside
-`set_ragged_offset(...)`. Rejected for two reasons:
+### 6.3 Templating the ragged-tensor types on `IndexT`
 
-- **cuDNN frontend-API compatibility.** Existing cuDNN frontend
-  consumers configure `seq_lens` on op-level attributes; mirroring
-  it onto `TensorAttributes` would create two ways to express the
-  same thing.
-- **Many-to-one binding.** A single `seq_lens_q` is shared across
-  the Q primary and a single `seq_lens_kv` across K and V. Putting
-  `seq_lens` on `TensorAttributes` either duplicates the
-  `shared_ptr` across multiple tensors or invents a per-op binding
-  rule the node-level location expresses naturally.
+An earlier draft of this RFC parameterized both ragged-tensor
+types on the aux element type — `RaggedTensor<T, IndexT>` and
+`ShallowRaggedTensor<T, IndexT>` (defaulting to `int32_t`,
+permitting `int64_t`). The aux was then held as
+`std::shared_ptr<TensorBase<IndexT>>`, with reads going through
+ordinary typed access.
 
-### 6.5 Random initialization of aux tensors with structural fixup
+This is statically type-safe on the aux, but it requires `IndexT`
+to be known at every construction site:
 
-An earlier formulation had aux tensors randomly initialized then
-"fixed up" — sort `ragged_offset` for monotonicity, clamp
-`seq_lens[b]` to the per-batch extent, etc. — so setup needed no
-extra arguments from the test author. Rejected for three reasons:
+- **`createTensorFromAttribute`** (test-SDK and flatbuffer-side)
+  becomes a double-dispatch factory keyed on
+  `(primary_data_type, aux_data_type)`. The aux's `data_type`
+  must be discovered by a side lookup of the aux's own
+  `TensorAttributes` (by UID) in the same graph, in addition to
+  the primary's.
+- **Per-op plan templates** (e.g.
+  `SdpaFwdPlan<QType, KType, VType, OType>`) gain `IndexT` as an
+  additional parameter, multiplying the plan-builder selection
+  matrix in `buildPlanForNode`.
+- **Every test-SDK helper that touches a ragged tensor** gains
+  the same parameter.
+- **`SdpaFwdParams`** (and the analogous per-op `params` struct)
+  has to cache an `IndexT` tag at plan-build time so per-execute
+  construction can pick the right specialization.
 
-- **Loss of test determinism in a non-obvious way.** Small changes
-  to seed handling or to the fixup heuristic silently change every
-  test's per-batch sequence lengths, which can mask or surface bugs
-  unrelated to the change.
-- **Fixup heuristics encode implicit policy** — how much padding
-  per batch, what fraction of `S_max` `seq_lens[b]` should average,
-  whether degenerate cases like `seq_lens[b] == 0` are allowed.
-  These are real decisions invisible to the test author.
-- **No actual saving of work.** The author still has to reason
-  about which sequence-length distribution to exercise; explicit
-  aux values just make that reasoning visible at the test site.
+The alternative this RFC takes — holding the aux as
+`shared_ptr<ITensor>` and reading through a runtime element-size
+branch widening to `int64_t` (see
+[§4.5](#45-data-sdk-shared-elements) item 1) — costs a single
+runtime branch per offset read. The branch widens an `int32_t`
+or `int64_t` aux element up to `int64_t`; on any modern CPU this
+is essentially free relative to the per-element work the CPU
+reference performs, and the structural invariants on the aux
+(rank 1, packed, B+1 long, int32 or int64) bound the surface
+where type-erasure could go wrong to one small helper. In
+return:
 
-A future helper generating plausible random ragged layouts on top
-of the pre-supplied bundle interface is reasonable (Known
-limitation #6); the harness should not silently apply one without
-the author asking.
+- `RaggedTensor<T>` and `ShallowRaggedTensor<T>` have a single
+  template parameter (the primary's data type only).
+- `createTensorFromAttribute` stays single-dispatched on the
+  primary's `T`.
+- Per-op plan templates do not grow an extra parameter; the
+  plan-builder matrix stays at its existing size.
+- The CPU reference signature is unchanged — it still takes
+  `TensorBase<T>&` for the primary, and the aux is hidden inside
+  the ragged tensor's `getHostValue` / `setHostValue` overrides.
+- The single sourced cost is the runtime element-size branch
+  inside `readOffset`, paid on each offset read by the CPU
+  reference.
 
-### 6.6 seq_lens-aware output validation
-
-An alternative to the sentinel-skip output-validation approach
-([§4.11.4](#4114-output-validation-in-verifygraph)) is to have the
-harness walk node-level op attributes to find each ragged output's
-`seq_lens` UID, look up the corresponding aux in the pre-supplied
-bundle (or in the per-bundle `GraphTensorBundle`), and construct a
-`RaggedView` over each output's `IrregularTensor` with `seq_lens`
-attached. The validator would then iterate only the valid elements
-via the ragged-aware iterator.
-
-Rejected for two reasons:
-
-- **Node-attribute walk at the validation site.** The bundle layer
-  only sees `TensorAttributes`; discovering each output's
-  `seq_lens` requires plumbing node-level attribute information
-  into a layer that does not otherwise need it.
-- **Per-output `RaggedView` construction at validation.** The
-  validator must construct a (transient) `RaggedView` for each
-  ragged output, mirroring work the plan layer already does at
-  execute time — duplicated machinery purely for compare.
-
-Sentinel-skip avoids both of these and needs only one validator
-overload and an init-time fill. The seq_lens-aware wrap remains a
-viable fallback if a future op turns out to have a CPU reference
-that can naturally produce any reasonable sentinel value, in which
-case `RaggedView` already accepts `seq_lens` at construction so the
-machinery exists.
+This is the right trade for the in-scope use cases:
+correctness-oriented CPU references are not perf-critical paths,
+and the type-erasure stays well-contained. See
+[§7.4](#74-revisit-typed-indext-propagation-if-needed) for the
+escape hatch should a future code path force the static-type
+question.
 
 ---
 
 ## Future work
 
-### 7.1 `TypedTensor<T>` intermediate in the tensor hierarchy
+### 7.1 Unify `RaggedTensor` and `ShallowRaggedTensor` as one templated class
 
-`IrregularTensor<T>` currently derives from `TensorBase<T>`, which
-carries the `getHostValue` / `setHostValue` multi-dim addressing
-API. Those methods have no meaningful semantics on a ragged
-primary's physical buffer (the strides describe padded geometry;
-per-batch addressing requires the `ragged_offset` math living in
-`RaggedView`). The type system does not currently enforce this.
+The two types share their `RaggedCompositeIndex` implementation,
+their constructor-time structural validation, and (after the
+`seq_lens` decoupling) their entire surface. Only memory
+ownership differs. They could plausibly be expressed as one class
+template parameterized by the memory carrier (owning
+`MigratableMemory<T, …>` vs borrowed `void*`). The split kept here
+is the conservative choice that mirrors the existing
+`Tensor<T>` / `ShallowTensor<T>` split; unifying them is a
+mechanical refactor left as follow-up.
 
-A cleaner end state introduces `TypedTensor<T>` between `ITensor`
-and `TensorBase<T>`:
+Depending on the work involved, it may make sense for this
+to be included in the initial implementation.
 
-```
-ITensor                              // type-erased
-   ↑
-TypedTensor<T>                       // typed rawHostData() -> T*,
-   ↑                                 // memory() -> MigratableMemory<T>&,
-   |                                 // typed fill / sentinel ops
-   +-- IrregularTensor<T>            // owning, no multi-dim indexing
-   |
-   +-- TensorBase<T>                 // adds getHostValue / setHostValue
-          ↑
-          +-- Tensor<T>, RaggedView<T>, ShallowTensor<T>, …
-```
+### 7.2 Split `isPacked()` into orthogonal predicates
 
-`RaggedView`'s underlying re-types as
-`shared_ptr<TypedTensor<T>>` — accepting both the owning
-`IrregularTensor<T>` and the non-owning `ShallowTensor<T>` at a
-narrower interface that drops the meaningless multi-dim API.
-Nothing changes for callers of `TensorBase<T>`. Worth doing on its
-own merits rather than as part of the ragged-tensors patch.
+The existing `isPacked()` predicate conflates "elementCount
+equals elementSpace" with "buffer is `prod(dims)` elements with
+regular strides" (see
+[§4.5](#45-data-sdk-shared-elements) item 7). A follow-up could
+introduce a separate `hasRegularDims()` (or similarly-named)
+predicate to let callers distinguish "I can treat this as a flat
+`prod(dims)`-sized dense buffer" from "iteration visits every
+allocated element". `RaggedTensor` / `ShallowRaggedTensor` would
+report `hasRegularDims() == false` always, and `isPacked()` would
+mean strictly `elementCount() == elementSpace()`.
 
-### 7.2 Runtime-side `TensorBundle` helper
+### 7.3 Improve CPU validation sentinel value handling
 
-A `UID → owning_runtime_tensor` factory on the user side that for
-non-ragged attrs builds a `Tensor<T>`, and for ragged attrs handles
-the pattern of constructing `ragged_offset`, allocating an
-`IrregularTensor<T>` sized from `(ragged_offset, alignment)`, and
-optionally resolving a `RaggedView` against node attributes. This
-collapses the user's API to one call per `TensorAttributes` and
-hides the two-object cost of this design.
+Document the sentinel choice and the "the reference cannot
+produce this value" guarantee in each CPU reference header. NaN
+is the default safe choice for floats, but watch for edge cases —
+e.g. SDPA forward with `seq_lens_q[b] == 0` can produce NaN
+naturally (`log(0)` from a fully masked row), in which case a
+non-NaN magic-number sentinel is required. For low-precision
+floating-point types (bf16, fp16, fp8) the sentinel space is
+smaller and "unproducible by reference" is harder to guarantee. A
+future RFC could codify the sentinel-per-dtype-per-op table.
 
-A companion harness-side helper could generate plausible random
-ragged layouts and emit them as pre-supplied input bundles
-(reducing boilerplate for conformance tests where the specific
-layout doesn't matter as long as it is well-formed).
+Additionally, there are ways to reduce the chance of a naturally
+produced output matching a sentinel value being overlooked. For
+instance, it is necessary that there is a block of sentinel values
+at the end of each row. If a sentinel value appears between valid values
+in the same row, it must be genuine output. This greatly reduces the
+likelihood of real output being overlooked.
 
-### 7.3 Padded mode (seq-lens only, no `ragged_offset`)
+There may also be a solution that does not rely on sentinel values
+identified in the future, which could replace this strategy.
 
-A "padded, seq-lens-only" mode (physical buffer is
-`prod(dims) = B * S_max * …`, only `seq_lens` distinguishes valid
-from padded) is straightforward to add later because
-`RaggedView`'s underlying is already `shared_ptr<TensorBase<T>>` —
-pass a `Tensor<T>` underlying with a null `ragged_offset` and relax
-the structural validation. Non-breaking against the API above.
+### 7.4 Revisit typed-`IndexT` propagation if needed
 
-### 7.4 Sentinel selection per CPU reference
+The current design type-erases the `ragged_offset` aux as
+`shared_ptr<ITensor>` and reads through a runtime element-size
+branch (see
+[§4.5](#45-data-sdk-shared-elements) item 1 and
+[§6.3](#63-templating-the-ragged-tensor-types-on-indext)). The
+SDK therefore never knows the aux's element type statically.
 
-Document the sentinel choice and "the reference cannot produce this
-value" guarantee in each CPU reference header. NaN is the safe
-default for floats, but SDPA forward with `seq_lens_q[b] == 0` can
-produce NaN naturally (`log(0)` from a fully masked row), requiring
-a non-NaN magic-number sentinel. Low-precision floats (bf16, fp16,
-fp8) have a smaller sentinel space and harder unproducibility
-guarantees. A future RFC could codify a sentinel-per-dtype-per-op
-table.
+If a future code path emerges where the aux's element type *must*
+be known statically — for example, a templated SDK-level helper
+that hands the aux directly to a GPU function specialized on the
+index type, rather than passing it through the variant pack to
+the kernel as a `void*` — the type-erased path can be replaced
+with either:
 
+- A `std::variant<shared_ptr<TensorBase<int32_t>>,
+  shared_ptr<TensorBase<int64_t>>>`-typed aux handle (visit-on-use,
+  static dispatch at each site), or
+- Full `IndexT` propagation through `RaggedTensor`,
+  `ShallowRaggedTensor`, the per-op plan templates, and the
+  test-SDK factories (as analyzed in §6.3).
 
-### Discussion
-
-A significant factor in opting for the non-owning `RaggedTensorView` over the owning `RaggedTensor` is the fact that the connection between the optional `seq_lens` tensor and the ragged tensor is difficult to ascertain. However, it should be noted that in the context of the the `IntegrationGraphVerificationHarness`, we are _not_ considering the `seq_lens` tensor until we reach the stage of executing the Sdpa node. If we decide that it is okay to iterate over the padded elements, and have the `RaggedTensor` only consider the `ragged_offset` (ignoring the `seq_lens`), we lose the ability to distinguish in isolation which elements are padded, but the tensor can still always guarantee that an index maps to the correct spot in memory. With this change, the design would become simpler, and `RaggedTensor` would likely become the top choice.
+Neither change is needed for the in-scope use cases, where the
+aux is only read inside the CPU reference's `getHostValue` /
+`setHostValue` path and where GPU kernels consume the aux as an
+opaque `void*` from the variant pack.
