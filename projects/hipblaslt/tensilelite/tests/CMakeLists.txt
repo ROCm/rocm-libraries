@@ -317,10 +317,10 @@ if(NOT WIN32)
         foreach(TRANS NN TN NT TT)
             get_trans_flags(${TRANS} TFLAGS)
             add_cpu_gemm_test(${PATH}_f4_MX32_${TRANS}
-                ARGS ${F4_SIZES_32} ${TFLAGS} --type f4 --mxBlock 32 --validate ${PATH_FLAGS}
+                ARGS ${F4_SIZES_32} ${TFLAGS} --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
             )
             add_cpu_gemm_test(${PATH}_f4_MX32_K192_${TRANS}
-                ARGS ${F4_SIZES_64} ${TFLAGS} --type f4 --mxBlock 32 --validate ${PATH_FLAGS}
+                ARGS ${F4_SIZES_64} ${TFLAGS} --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
             )
         endforeach()
 
@@ -331,32 +331,32 @@ if(NOT WIN32)
 
         # F4 + MX + epilogue features
         add_cpu_gemm_test(${PATH}_f4_MX32_Bias
-            ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --validate --bias ${PATH_FLAGS}
+            ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --bias ${PATH_FLAGS}
         )
         add_cpu_gemm_test(${PATH}_f4_MX32_Relu
-            ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --validate --activation relu ${PATH_FLAGS}
+            ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --activation relu ${PATH_FLAGS}
         )
         add_cpu_gemm_test(${PATH}_f4_MX32_ScaleAlphaVec
-            ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --validate --scaleAlphaVec ${PATH_FLAGS}
+            ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --scaleAlphaVec ${PATH_FLAGS}
         )
         add_cpu_gemm_test(${PATH}_f4_MX32_AllFeatures
-            ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+            ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
         )
         add_cpu_gemm_test(${PATH}_f4_MX32_Beta
-            ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --beta 1.0 --validate ${PATH_FLAGS}
+            ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --beta 1.0 --validate ${PATH_FLAGS}
         )
 
         # F4 + MX + ScaleAB
         foreach(MODE Scalar Vector)
             add_cpu_gemm_test(${PATH}_f4_MX32_ScaleAB_${MODE}
-                ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+                ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --useScaleAB ${MODE} ${PATH_FLAGS}
             )
         endforeach()
     endforeach()
 
     # Fast-path-only: mxBlock=16 (tests non-hardcoded mxBlock; 16 % BLOCK_K=8 == 0)
     add_cpu_gemm_test(fast_f4_MX16_NN
-        ARGS ${F4_SIZES_32} --type f4 --mxBlock 16 --validate --tryFastPath
+        ARGS ${F4_SIZES_32} --type f4 --mxBlockA 16 --mxBlockB 16 --validate --tryFastPath
     )
 
     # Batched mxfp4 (batchCount > 1) — exercises strideBatchMxsa/strideBatchMxsb
@@ -370,7 +370,7 @@ if(NOT WIN32)
         foreach(TRANS NN TT)
             get_trans_flags(${TRANS} TFLAGS)
             add_cpu_gemm_test(${PATH}_f4_MX32_Batched_${TRANS}
-                ARGS ${F4_SIZES_32} ${TFLAGS} --type f4 --mxBlock 32 --validate --batchCount 2 ${PATH_FLAGS}
+                ARGS ${F4_SIZES_32} ${TFLAGS} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --batchCount 2 ${PATH_FLAGS}
             )
         endforeach()
     endforeach()
@@ -394,13 +394,6 @@ if(NOT WIN32)
     )
     set_tests_properties("CPUGemm.slow_f4_MX_A32_B64_Rejected" PROPERTIES WILL_FAIL TRUE)
 
-    # Negative test: --mxBlock combined with --mxBlockA must be rejected.
-    add_test(
-        NAME "CPUGemm.f4_MX_Conflict_Rejected"
-        COMMAND cpu-gemm-driver ${F4_SIZES_32} --type f4 --mxBlock 32 --mxBlockA 32 --validate
-    )
-    set_tests_properties("CPUGemm.f4_MX_Conflict_Rejected" PROPERTIES WILL_FAIL TRUE)
-
     # Negative test: one-sided MX (only A or only B) must be rejected.
     add_test(
         NAME "CPUGemm.f4_MX_OneSided_Rejected"
@@ -417,16 +410,16 @@ if(NOT WIN32)
             set(PATH_FLAGS "")
         endif()
         add_cpu_gemm_test(${PATH}_f4_MX32_K_eq_mxBlock
-            ARGS -M 16 -N 16 -K 32 --type f4 --mxBlock 32 --validate ${PATH_FLAGS}
+            ARGS -M 16 -N 16 -K 32 --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
         )
         add_cpu_gemm_test(${PATH}_f4_MX32_M1
-            ARGS -M 1 -N 147 -K 160 --type f4 --mxBlock 32 --validate ${PATH_FLAGS}
+            ARGS -M 1 -N 147 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
         )
         add_cpu_gemm_test(${PATH}_f4_MX32_N1
-            ARGS -M 133 -N 1 -K 160 --type f4 --mxBlock 32 --validate ${PATH_FLAGS}
+            ARGS -M 133 -N 1 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
         )
         add_cpu_gemm_test(${PATH}_f4_MX32_Alpha0
-            ARGS ${F4_SIZES_32} --type f4 --mxBlock 32 --alpha 0 --validate ${PATH_FLAGS}
+            ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --alpha 0 --validate ${PATH_FLAGS}
         )
     endforeach()
 
@@ -438,27 +431,27 @@ if(NOT WIN32)
     # Negative tests: invalid K/mxBlock combos should fail with clear error
     add_test(
         NAME "CPUGemm.slow_f4_MX32_BadK_Unaligned"
-        COMMAND cpu-gemm-driver -M 16 -N 16 -K 33 --type f4 --mxBlock 32 --validate
+        COMMAND cpu-gemm-driver -M 16 -N 16 -K 33 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
     )
     set_tests_properties("CPUGemm.slow_f4_MX32_BadK_Unaligned" PROPERTIES WILL_FAIL TRUE)
 
     add_test(
         NAME "CPUGemm.slow_f4_MX32_BadK_TooSmall"
-        COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --type f4 --mxBlock 32 --validate
+        COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
     )
     set_tests_properties("CPUGemm.slow_f4_MX32_BadK_TooSmall" PROPERTIES WILL_FAIL TRUE)
 
     # Negative test: non-power-of-2 mxBlock should be rejected
     add_test(
         NAME "CPUGemm.slow_f4_MX6_BadPow2"
-        COMMAND cpu-gemm-driver -M 4 -N 4 -K 12 --type f4 --mxBlock 6 --validate
+        COMMAND cpu-gemm-driver -M 4 -N 4 -K 12 --type f4 --mxBlockA 6 --mxBlockB 6 --validate
     )
     set_tests_properties("CPUGemm.slow_f4_MX6_BadPow2" PROPERTIES WILL_FAIL TRUE)
 
     # Negative test: mxBlock with non-FP4 types should be rejected
     add_test(
         NAME "CPUGemm.slow_f32_MX32_Rejected"
-        COMMAND cpu-gemm-driver -M 16 -N 16 -K 32 --type f32 --mxBlock 32 --validate
+        COMMAND cpu-gemm-driver -M 16 -N 16 -K 32 --type f32 --mxBlockA 32 --mxBlockB 32 --validate
     )
     set_tests_properties("CPUGemm.slow_f32_MX32_Rejected" PROPERTIES WILL_FAIL TRUE)
 endif()

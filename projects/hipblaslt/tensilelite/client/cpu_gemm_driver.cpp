@@ -140,9 +140,9 @@ namespace
     // scaleA is always indexed by row (M), scaleB always by col (N).
     // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).
     //
-    // When mxBlock > 0 and mxScaleA/mxScaleB are non-null, the K-reduction is
-    // block-structured: accumulate mxBlock products, then scale by the MX
-    // scale factors before adding to the running sum.
+    // When mxBlockA/B > 0 and mxScaleA/mxScaleB are non-null, the K-reduction
+    // is block-structured: accumulate min(mxBlockA, mxBlockB) products, then
+    // scale by the MX scale factors before adding to the running sum.
 
     // Quantize a value through `Narrow`, then return as float. This mirrors
     // what the GPU MFMA path does when storage is wider than the MAC input
@@ -476,7 +476,7 @@ int runGemm(size_t         m,
     // do and the bug being tested for can't be reproduced. We give an operand
     // such values when its storage type is wider than its computeInput type.
     //
-    // For FP4 with mxBlock>0 (mxfp4), inputs are drawn from the discrete
+    // For FP4 with mxBlockA/B>0 (mxfp4), inputs are drawn from the discrete
     // E2M1-representable value set so the MX-scale logic is exercised.
     size_t                                seed = 42;
     std::mt19937                          gen(seed);
@@ -623,8 +623,8 @@ int runGemm(size_t         m,
             // Use unpadded MX scale tensors so the columnMajorGemm reference
             // indexing matches: mxsa = {m, k/mxBlockA} with m as leading
             // stride (and analogous for B). Default padScaleTensor=true would
-            // round M up to next 32 and K/mxBlock up to next 8, breaking the
-            // index math below.
+            // round M up to next 32 and K/mxBlockA/B up to next 8, breaking
+            // the index math below.
             contraction.setMXScaleA(rocisa::DataType::E8, mxBlockA, /*saStride=*/{}, /*padScaleTensor=*/false);
             contraction.setMXScaleB(rocisa::DataType::E8, mxBlockB, /*sbStride=*/{}, /*padScaleTensor=*/false);
 
@@ -845,9 +845,8 @@ int main(int argc, char* argv[])
         "scaleAlphaVec", po::value<bool>()->default_value(false), "Enable per-row alpha scaling")(
         "factorDim", po::value<int>()->default_value(0), "ScaleAlphaVec dimension: 0=row(M), 1=col(N)")(
         "useScaleAB", po::value<std::string>()->default_value("none"), "ScaleAB mode (none, Scalar, Vector)")(
-        "mxBlock", po::value<int>()->default_value(0), "MX block size for FP4 (0=no MX, must be power of 2). Shortcut: sets both A and B sides.")(
-        "mxBlockA", po::value<int>()->default_value(0), "MX block size for the A side (overrides --mxBlock for A)")(
-        "mxBlockB", po::value<int>()->default_value(0), "MX block size for the B side (overrides --mxBlock for B)")(
+        "mxBlockA", po::value<int>()->default_value(0), "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
+        "mxBlockB", po::value<int>()->default_value(0), "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
         "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)");
 
     po::variables_map vm;
@@ -919,25 +918,10 @@ int main(int argc, char* argv[])
     bool        useScaleAlphaVec = vm["scaleAlphaVec"].as<bool>();
     int         factorDim        = vm["factorDim"].as<int>();
     std::string useScaleAB       = vm["useScaleAB"].as<std::string>();
-    int         mxBlock          = vm["mxBlock"].as<int>();
     int         mxBlockA         = vm["mxBlockA"].as<int>();
     int         mxBlockB         = vm["mxBlockB"].as<int>();
     size_t      batchCount       = vm["batchCount"].as<size_t>();
 
-    // --mxBlock is a "set both sides" shortcut; --mxBlockA/--mxBlockB are
-    // per-side overrides. It's an error to mix the shortcut with either
-    // per-side flag.
-    if(mxBlock > 0 && (mxBlockA > 0 || mxBlockB > 0))
-    {
-        std::cerr << "Error: --mxBlock cannot be combined with --mxBlockA or --mxBlockB"
-                  << std::endl;
-        return 1;
-    }
-    if(mxBlock > 0)
-    {
-        mxBlockA = mxBlock;
-        mxBlockB = mxBlock;
-    }
     if(mxBlockA < 0 || mxBlockB < 0)
     {
         std::cerr << "Error: mxBlockA/mxBlockB must be non-negative" << std::endl;
@@ -953,15 +937,9 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    if(mxBlock < 0)
-    {
-        std::cerr << "Error: mxBlock (" << mxBlock << ") must be non-negative" << std::endl;
-        return 1;
-    }
-
     if((mxBlockA > 0 || mxBlockB > 0) && typeStr != "f4")
     {
-        std::cerr << "Error: mxBlock/mxBlockA/mxBlockB is only supported for type f4, not "
+        std::cerr << "Error: mxBlockA/mxBlockB is only supported for type f4, not "
                   << typeStr << std::endl;
         return 1;
     }
