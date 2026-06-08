@@ -155,7 +155,11 @@ public:
     }
 
     // Hand-assembles an HDGP container. An empty planBytes vector produces a
-    // graph-only container (no plan_blob).
+    // graph-only container (no plan_blob). Deliberately does NOT go through the
+    // production buildGraphAndPlanContainer() writer (and so does not force-align
+    // the embedded blobs): this feeds read-path/extraction tests that must stay
+    // independent of the writer. Alignment is asserted separately against real
+    // C-API output, not against this helper.
     static std::vector<uint8_t> makeContainer(const std::vector<uint8_t>& graphBytes,
                                               const std::vector<uint8_t>& planBytes)
     {
