@@ -45,6 +45,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - StaggerU: [0]
         - ScheduleIterAlg: [3]
+        - DisableSTWaitCnt: [1]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - ClusterLocalRead: [1]
@@ -103,6 +104,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - StaggerU: [0]
         - ScheduleIterAlg: [3]
+        - DisableSTWaitCnt: [1]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - ClusterLocalRead: [1]
@@ -161,6 +163,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - StaggerU: [0]
         - ScheduleIterAlg: [3]
+        - DisableSTWaitCnt: [1]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - ClusterLocalRead: [1]
@@ -219,6 +222,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - StaggerU: [0]
         - ScheduleIterAlg: [3]
+        - DisableSTWaitCnt: [1]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - ClusterLocalRead: [1]
@@ -272,6 +276,7 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - LocalReadVectorWidth: [32]
         - ScheduleIterAlg: [3]
+        - DisableSTWaitCnt: [1]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - VectorWidthA: [2]
@@ -333,6 +338,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [0]
         - StaggerU: [0]
         - ScheduleIterAlg: [1] ########SIA2 and SIA3 only support MatrixInstruction
+        - DisableSTWaitCnt: [1]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]

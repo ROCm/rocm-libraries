@@ -432,6 +432,7 @@ defaultBenchmarkCommonParameters = [
     {"ScheduleGlobalRead": [1]},
     {"ScheduleLocalWrite": [1]},
     {"ScheduleIterAlg": [3]},
+    {"DisableSTWaitCnt": [0]},
     {"GlobalReadPerMfma": [1]},
     {"LocalWritePerMfma": [-1]},
     {"InterleaveAlpha": [0]},
