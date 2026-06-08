@@ -125,7 +125,7 @@ def measure_occupancy_hip(
 
     if not HIP_AVAILABLE:
         warnings.warn(
-            "--occupancy-from-hip: hip-python not installed; skipping HIP occupancy pass. "
+            "HIP occupancy check: hip-python not installed; skipping. "
             "Install with: pip install hip-python",
             stacklevel=2,
         )
@@ -137,13 +137,13 @@ def measure_occupancy_hip(
         _hip_check(err)
         if int(count) == 0:
             warnings.warn(
-                "--occupancy-from-hip: no GPU device found; skipping HIP occupancy pass.",
+                "HIP occupancy check: no GPU device found; skipping.",
                 stacklevel=2,
             )
             return list(kernelInfo)
     except RuntimeError as e:
         warnings.warn(
-            f"--occupancy-from-hip: HIP initialisation failed ({e}); skipping pass.",
+            f"HIP occupancy check: HIP initialisation failed ({e}); skipping.",
             stacklevel=2,
         )
         return list(kernelInfo)
@@ -157,7 +157,7 @@ def measure_occupancy_hip(
     for co_raw_path, kernel_list in co_map.items():
         if not os.path.exists(co_raw_path):
             warnings.warn(
-                f"--occupancy-from-hip: {co_raw_path} not found; "
+                f"HIP occupancy check: {co_raw_path} not found; "
                 f"skipping {len(kernel_list)} kernel(s) in this co.",
                 stacklevel=2,
             )
@@ -169,7 +169,7 @@ def measure_occupancy_hip(
             module = _hip_check(_hip.hipModuleLoad(co_raw_path.encode()))
         except RuntimeError as e:
             warnings.warn(
-                f"--occupancy-from-hip: failed to load {co_raw_path}: {e}; "
+                f"HIP occupancy check: failed to load {co_raw_path}: {e}; "
                 f"skipping {len(kernel_list)} kernel(s).",
                 stacklevel=2,
             )
@@ -203,7 +203,7 @@ def measure_occupancy_hip(
                         )
                 except RuntimeError as e:
                     warnings.warn(
-                        f"--occupancy-from-hip: query failed for {kernel_func_name}: {e}",
+                        f"HIP occupancy check: query failed for {kernel_func_name}: {e}",
                         stacklevel=2,
                     )
                     failed += 1
