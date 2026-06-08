@@ -641,6 +641,22 @@ def _attention_problem_matrix():
         max_seqlen_k=2048,
         use_sinks=True,
     )
+    # combo cohort by GQA-8 *ratio* but NOT the 64/8 absolute head count, e.g.
+    # a tensor-parallel-sharded GQA-8 model (16/2). _enable_combo_2d fires on
+    # the ratio; the gfx950 use_fast_paged_kv_desc validator wants absolute
+    # 64/8, so this shape used to crash the gfx950 selected-2D path until the
+    # spec builder gated the fast descriptor to 64/8.
+    add(
+        "long_prefill_combo_bf16_tp_sharded_16x2",
+        head_size=64,
+        block_size=32,
+        dtype="bf16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=16,
+        num_kv_heads=2,
+        max_seqlen_k=2048,
+    )
     # plain default long prefill (single-seq and multi-batch), fp16/bf16.
     add(
         "long_prefill_default_fp16_d128_n1",

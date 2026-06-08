@@ -1295,8 +1295,19 @@ def _tiled_spec_from_problem(
         use_mfma32_skip_legacy_qreg=combo,
         # The fast paged-KV descriptor is specialised for bf16 / T=64 /
         # num_warps=4, which only the bf16 no-SW combo geometry uses (SW
-        # combo is nw2 / T=32; fp8 combo uses the sync-dequant loader).
-        use_fast_paged_kv_desc=combo_no_sw and not problem.use_fp8,
+        # combo is nw2 / T=32; fp8 combo uses the sync-dequant loader). The
+        # gfx950 spec restricts it further to the exact 64-query / 8-kv head
+        # cohort it was built for; `_enable_combo_2d` only checks the GQA-8
+        # *ratio*, so a tensor-parallel-sharded GQA-8 model (e.g. 16/2) would
+        # otherwise enable it and trip the spec validator. Match the validator's
+        # absolute head-count restriction so non-64/8 GQA-8 combo shapes keep
+        # the rest of the combo stack without the fast descriptor.
+        use_fast_paged_kv_desc=(
+            combo_no_sw
+            and not problem.use_fp8
+            and problem.num_query_heads == 64
+            and problem.num_kv_heads == 8
+        ),
         use_register_pv=_enable_register_pv(problem),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),

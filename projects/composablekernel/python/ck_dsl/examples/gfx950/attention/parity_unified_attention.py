@@ -344,6 +344,31 @@ def default_scenarios() -> List[Scenario]:
             use_qq_bias=True,
             qq_bias_stride_0=256,
         ),
+        # bf16 transposed "combo" 2D cohort (HD64/BS32/GQA-8, long prefill,
+        # multi-batch). The canonical 64/8 head split exercises the full combo
+        # stack incl. the fast paged-KV descriptor.
+        Scenario(
+            name="combo_bf16_d64_b32_gqa8_64x8",
+            seq_lens=[(512, 1024), (512, 1024)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=32,
+            dtype=torch.bfloat16,
+        ),
+        # Same combo cohort by GQA-8 ratio but a tensor-parallel-sharded head
+        # split (16/2). Exercises the combo stack WITHOUT the 64/8-only fast
+        # paged-KV descriptor -- the path the use_fast_paged_kv_desc gating fix
+        # routes these shapes onto (would crash before that fix).
+        Scenario(
+            name="combo_bf16_d64_b32_gqa8_16x2",
+            seq_lens=[(512, 1024), (512, 1024)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=64,
+            block_size=32,
+            dtype=torch.bfloat16,
+        ),
     ]
 
 
