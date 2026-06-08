@@ -23,10 +23,10 @@
 #include <utility>
 #endif
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile::core::arch::mma {
 
 /**---------------------------------------------------
@@ -390,11 +390,6 @@ CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
 }
 
 } // namespace ck_tile::core::arch::mma
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
-
-// Include the implementations
-#include "wmma/wmma.hpp" // should be included before the below headers
-
-#include "mfma/mfma.hpp"
-#include "scale/scale.hpp"
-#include "sparse/sparse.hpp"
+#endif

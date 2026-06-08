@@ -254,6 +254,9 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
     set_tests_properties(${TARGET} PROPERTIES LABELS "${ALL_LABELS}")
+    if(DEFINED TEST_ENVIRONMENT)
+        set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+    endif()
 endfunction() # _add_test_target_internal
 
 # ~~~

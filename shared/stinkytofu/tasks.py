@@ -12,6 +12,20 @@ from invoke import task
 ROOT_PATH = Path(__file__).resolve().parent
 BUILD_DIR = ROOT_PATH / "build"
 
+# Fail early if invoke is running under a different Python than the active
+# venv.  This happens when invoke is installed system-wide (/usr/bin/invoke)
+# but a venv is active — sys.executable will be the system Python, so cmake
+# gets the wrong -DPython_EXECUTABLE and venv packages like pytest won't be
+# found.
+_venv = os.environ.get("VIRTUAL_ENV")
+if _venv and not sys.executable.startswith(_venv):
+    raise SystemExit(
+        f"ERROR: invoke is running under {sys.executable} but VIRTUAL_ENV "
+        f"is set to {_venv}.\n"
+        f"Install invoke in the venv:  pip install invoke\n"
+        f"Then re-run:  invoke build"
+    )
+
 
 def _detect_rocm() -> Path:
     """Detect ROCm installation path.

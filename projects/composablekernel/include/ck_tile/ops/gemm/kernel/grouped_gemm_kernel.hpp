@@ -14,10 +14,10 @@
 
 #include <hip/hip_runtime.h>
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile {
 
 /// @brief The Grouped GEMM kernel host arguments.
@@ -200,7 +200,7 @@ struct GroupedGemmKernel
         HIP_CHECK_ERROR(
             hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel, kBlockSize, 0));
         // TODO: the below is a temporary fix which is due to kernel metadata
-        // .workgroup_processor_mode isn’t used correctly in clr for gfx1250. Will removed when clr
+        // .workgroup_processor_mode isn't used correctly in clr for gfx1250. Will removed when clr
         // and compiler team fix this.
         occupancy           = occupancy > 0 ? occupancy : 1;
         const int grid_size = get_available_compute_units(s) * occupancy;
@@ -583,4 +583,6 @@ struct GroupedGemmKernel
 
 } // namespace ck_tile
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

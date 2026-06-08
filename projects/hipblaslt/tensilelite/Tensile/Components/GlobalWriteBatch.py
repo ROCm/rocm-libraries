@@ -190,7 +190,7 @@ class GlobalWriteBatchWriter:
        (self.parentWriter.states.useBias != DataDirection.NONE or \
         self.kernel["ProblemType"].get("UseScaleAlphaVec", 0)):
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
-      module.add(SBarrier("sync waves before subtile paired stores"))
+      module.add(SBarrier(comment="sync waves before subtile paired stores"))
     self._epilog(module)
     return module
 
@@ -371,9 +371,10 @@ class GlobalWriteBatchWriter:
     # for the top-left corner this thread will write.  These are not changed
     # across all the store loop iters.
     if self.debugConfig["ConservativeWaitCnt"] & 0x10:
-      module.add(SBarrier("debug"))
+      module.add(SBarrier(comment="debug"))
       module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
-      module.add(SBarrier("debug"))
+      module.add(SBarrier(comment="debug"))
+
     if not self.edge and self.debugConfig["ForceEdgeStores"] >= 2:
       module.add(self.parentWriter.getBomb()) # should not get here
     if self.edge and self.debugConfig["AssertNoEdge"]:
@@ -521,13 +522,13 @@ class GlobalWriteBatchWriter:
             # Group bias load with C input to
             if isSingleKernel and (not self.isLocalBarrierInit):
               loadInputCode.add(SWaitCnt(dscnt=0, comment="Wait for LDS write"))
-              loadInputCode.add(SBarrier("LDS write barrier"))
+              loadInputCode.add(SBarrier(comment="LDS write barrier"))
               self.isLocalBarrierInit = True
             loadInputCode.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, gwvw, comment=comment))
           else:
             if isSingleKernel and (not self.isLocalBarrierInit):
               module.add(SWaitCnt(dscnt=0, comment="Wait for LDS write"))
-              module.add(SBarrier("LDS write barrier"))
+              module.add(SBarrier(comment="LDS write barrier"))
               self.isLocalBarrierInit = True
             module.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, gwvw, comment=comment))
           loadedDataVec[dataVec] = ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw / 16)
@@ -1549,9 +1550,9 @@ class GlobalWriteBatchWriter:
       module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -> exec"))
 
     if self.parentWriter.db["ConservativeWaitCnt"] & 0x40:
-      module.add(SBarrier("debug"))
+      module.add(SBarrier(comment="debug"))
       module.add(SWaitCnt(vscnt=0, comment="ConservativeWaitCnt"))
-      module.add(SBarrier("debug"))
+      module.add(SBarrier(comment="debug"))
 
   def _emitSubtilePackedPermute(self, vPack: int, vPermAddr: int, addrWhilePermuting=None) -> Module:
     """Shuffle four packed dwords across wave halves for a subtile dwordx4 store.
