@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2020 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -71,6 +71,11 @@ else()
   if( USE_HIPRAND )
     target_link_libraries( hipfft-bench PRIVATE hip::hiprand )
   endif()
+
+  # Always include amdgcnspirv target so the clients work on an architecture
+  # that the runtime supports but was not specified a build time
+  target_compile_options( hipfft-bench PRIVATE --offload-arch=amdgcnspirv )
+  target_link_options( hipfft-bench PRIVATE --offload-arch=amdgcnspirv )
 endif()
 
 target_link_libraries( hipfft-bench PRIVATE hip::hipfft )

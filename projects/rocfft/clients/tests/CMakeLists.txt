@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -377,6 +377,10 @@ set_target_properties(rtc_helper_crash
                       RUNTIME_OUTPUT_DIRECTORY 
                       ${TESTS_OUT_DIR})
 
+# Always include amdgcnspirv target so the clients work on an architecture
+# that the runtime supports but was not specified a build time
+target_compile_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
+target_link_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
 
 rocm_install(TARGETS rocfft-test rtc_helper_crash COMPONENT tests)
 
@@ -496,6 +500,10 @@ if( ROCFFT_MPI_ENABLE )
                           ${TESTS_OUT_DIR})
     rocm_install(TARGETS ${worker} COMPONENT tests)
 
+    # Always include amdgcnspirv target so the clients work on an architecture
+    # that the runtime supports but was not specified a build time
+    target_compile_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
+    target_link_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
   endforeach()
 
   # link normal MPI worker against rocFFT

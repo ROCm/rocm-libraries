@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -80,6 +80,11 @@ foreach( bench ${bench_list})
     bench.h )
 
   target_compile_options( ${bench} PRIVATE ${WARNING_FLAGS} -Wno-cpp )
+
+  # Always include amdgcnspirv target so the clients work on an architecture
+  # that the runtime supports but was not specified a build time
+  target_compile_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
+  target_link_options( ${bench} PRIVATE --offload-arch=amdgcnspirv )
 
   # NB: hip-clang includes omp.h, so we need to specify the location
   # of ROCM_CLANG_ROOT at cmake config time if we are using clang++.

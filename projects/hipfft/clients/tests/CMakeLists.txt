@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -216,9 +216,11 @@ foreach( target ${TEST_TARGETS} )
       hip::host
       hip::device
     )
-    foreach( gpu_target ${GPU_TARGETS} )
-      target_compile_options( ${target} PRIVATE --offload-arch=${gpu_target} )
-    endforeach()
+
+    # Always include amdgcnspirv target so the clients work on an architecture
+    # that the runtime supports but was not specified a build time
+    target_compile_options( ${target} PRIVATE --offload-arch=amdgcnspirv )
+    target_link_options( ${target} PRIVATE --offload-arch=amdgcnspirv )
 
   else()
     target_compile_definitions( ${target} PRIVATE __HIP_PLATFORM_NVIDIA__)
