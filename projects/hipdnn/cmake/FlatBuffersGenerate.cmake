@@ -20,7 +20,7 @@ set(_HIPDNN_FLATBUFFERS_GENERATE_DIR "${CMAKE_CURRENT_LIST_DIR}")
 #       OUTPUT_NAMESPACE  hipdnn_flatbuffers_sdk   # optional, defaults to hipdnn_flatbuffers_sdk
 #   )
 
-
+# Resolve the flatc compiler command and build dependency for header generation.
 function(_hipdnn_resolve_flatc_command OUT_COMMAND OUT_DEPENDENCY)
     foreach(_candidate_var
             IN ITEMS
@@ -139,7 +139,11 @@ function(hipdnn_generate_flatbuffer_headers)
         list(APPEND _generated_headers "${_generated_header}")
     endforeach()
 
-    add_custom_target(${_gen_target_name} DEPENDS ${_generated_headers})
+    add_custom_target(
+        ${_gen_target_name}
+        DEPENDS ${_generated_headers}
+        COMMENT "Generating ${ARG_OUTPUT_NAMESPACE} FlatBuffers headers"
+    )
     set_property(TARGET ${_gen_target_name} PROPERTY GENERATED_INCLUDES_DIR ${_output_dir})
 
     add_dependencies(${ARG_TARGET} ${_gen_target_name})
