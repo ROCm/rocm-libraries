@@ -160,7 +160,7 @@ namespace TensileLite
         // StreamKSettings::dynPersistentTileMode at solve time. Values:
         //   0 = OFF  (SK3 static work-assignment),
         //   1 = ON   (SK4 dynamic per-XCD work-queue),
-        //   2 = AUTO (delegate to origami::streamk::select_hybrid_mode).
+        //   2 = AUTO (default; delegate to origami::streamk::select_hybrid_mode).
         // Ignored when the chosen solution is not a StreamK=5 hybrid kernel.
         void setDynPersistentTileMode(int dynPersistentTileMode)
         {
@@ -193,7 +193,7 @@ namespace TensileLite
         int              m_factorDim      = 0;
         ActivationType   m_activationType = ActivationType::None;
         bool             m_fallbackStatus = false; // default value
-        int              m_dynPersistentTileMode = 0; // SK5 hybrid mode tri-state
+        int              m_dynPersistentTileMode = 2; // SK5 hybrid mode tri-state (AUTO default)
         int              m_smCountTarget = 0;
     };
 

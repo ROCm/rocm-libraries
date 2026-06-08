@@ -214,9 +214,9 @@ struct _rocblaslt_matmul_desc
 
     // Opt-in to the dynamic persistent tile scheduler (work-stealing StreamK).
     // Exposed via the _EXT attribute namespace (no equivalent in the base C API).
-    // 0 (default) = library default scheduler; non-zero = request dynamic
-    // persistent tile path.
-    int32_t dyn_persistent_tile_ext = 0;
+    // Tri-state: 0 = OFF (force SK3 static), 1 = ON (force SK4 dynamic),
+    // 2 = AUTO (default; heuristic picks per launch).
+    int32_t dyn_persistent_tile_ext = 2;
 
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).

@@ -502,10 +502,10 @@ TEST(aux_handle_test, get_sm_count_target_rejects_null_handle)
     ASSERT_EQ(hipblasLtGetSmCountTarget(nullptr, &value), HIPBLAS_STATUS_NOT_INITIALIZED);
 }
 
-TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_mode_default_is_off)
+TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_mode_default_is_auto)
 {
     hipblaslt_ext::GemmPreference pref;
-    ASSERT_EQ(pref.getDynPersistentTileMode(), HIPBLASLT_DYN_PERSISTENT_TILE_OFF);
+    ASSERT_EQ(pref.getDynPersistentTileMode(), HIPBLASLT_DYN_PERSISTENT_TILE_AUTO);
 }
 
 TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_mode_round_trip)

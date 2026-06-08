@@ -44,7 +44,7 @@ namespace hipblaslt_ext
     {
     public:
         size_t                           workspace_bytes          = 0;
-        hipblasLtDynPersistentTileMode_t dyn_persistent_tile_mode = HIPBLASLT_DYN_PERSISTENT_TILE_OFF;
+        hipblasLtDynPersistentTileMode_t dyn_persistent_tile_mode = HIPBLASLT_DYN_PERSISTENT_TILE_AUTO;
     };
 
     GemmPreference::GemmPreference()
@@ -88,7 +88,7 @@ namespace hipblaslt_ext
             pimpl->dyn_persistent_tile_mode = mode;
             break;
         default:
-            pimpl->dyn_persistent_tile_mode = HIPBLASLT_DYN_PERSISTENT_TILE_OFF;
+            pimpl->dyn_persistent_tile_mode = HIPBLASLT_DYN_PERSISTENT_TILE_AUTO;
             break;
         }
     }

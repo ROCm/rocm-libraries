@@ -203,12 +203,12 @@ namespace TensileLite
         // hipblasLtDynPersistentTileMode_t:
         //   0 = OFF  (SK3 static path),
         //   1 = ON   (SK4 dynamic per-XCD work-queue),
-        //   2 = AUTO (origami::streamk::select_hybrid_mode picks per launch).
+        //   2 = AUTO (default; origami::streamk::select_hybrid_mode picks per launch).
         // Sourced from HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT;
         // overridden at solve time by TENSILE_STREAMK5_FORCE_MODE
         // (-1 = respect request; 0 = force static; 1 = force dynamic).
         // Ignored when the selected solution has sizeMapping.streamK != 5.
-        int                  dynPersistentTileMode = 0;
+        int                  dynPersistentTileMode = 2;
         // Effective sm_count_target hint forwarded from the host (0 =
         // "use all CUs the device exposes"). Consumed by the AUTO heuristic.
         int                  smCountTarget = 0;

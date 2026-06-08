@@ -269,8 +269,8 @@ class TestStreamK5HybridAutoMode:
     def test_streamk_settings_uses_int_mode(self):
         src = _read(_CONTRACTION_SOLUTION_HPP)
         assert re.search(
-            r'dynPersistentTileMode\s*=\s*0', src), \
-            "StreamKSettings::dynPersistentTileMode default 0 not found"
+            r'dynPersistentTileMode\s*=\s*2', src), \
+            "StreamKSettings::dynPersistentTileMode default 2 (AUTO) not found"
         assert "smCountTarget" in src
 
     def test_contraction_solve_dispatches_auto_via_origami(self):

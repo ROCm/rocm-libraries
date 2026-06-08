@@ -209,9 +209,9 @@ typedef enum {
  *  rejected by the setter with ``HIPBLAS_STATUS_INVALID_VALUE``.
  */
 typedef enum {
-  HIPBLASLT_DYN_PERSISTENT_TILE_OFF  = 0, /**< Use the library default scheduler (SK3 static path on StreamK=5 kernels). */
-  HIPBLASLT_DYN_PERSISTENT_TILE_ON   = 1, /**< Always request the dynamic persistent tile path (SK4 dynamic per-XCD work-queue on StreamK=5 kernels). */
-  HIPBLASLT_DYN_PERSISTENT_TILE_AUTO = 2, /**< Let hipBLASLt's heuristic pick between SK3 and SK4 per launch based on tile/CU geometry. */
+  HIPBLASLT_DYN_PERSISTENT_TILE_OFF  = 0, /**< Force the SK3 static work-assignment sub-path on StreamK=5 kernels. */
+  HIPBLASLT_DYN_PERSISTENT_TILE_ON   = 1, /**< Always request the SK4 dynamic per-XCD work-queue sub-path on StreamK=5 kernels. */
+  HIPBLASLT_DYN_PERSISTENT_TILE_AUTO = 2, /**< Let hipBLASLt's heuristic pick between SK3 and SK4 per launch based on tile/CU geometry. This is the default for StreamK=5 when the attribute is unset. */
 } hipblasLtDynPersistentTileMode_t;
 
 /*! \ingroup types_module
@@ -242,7 +242,7 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,           /**<Compute input B types. Defines the data type used for the input B of a matrix multiply. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,              /**<First extra argument for the activation function. Data type: ``float``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,              /**<Second extra argument for the activation function. Data type: ``float``. */
-  HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT = 104,      /**<Opt in to the hipBLASLt dynamic persistent tile scheduler (work-stealing StreamK). Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtDynPersistentTileMode_t``: ``0`` (``OFF``, default) uses the library default scheduler; ``1`` (``ON``) always requests the dynamic persistent tile path when the selected kernel supports it; ``2`` (``AUTO``) lets the library's heuristic pick between static and dynamic per launch. Values outside ``{0, 1, 2}`` are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
+  HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT = 104,      /**<Opt in to the hipBLASLt dynamic persistent tile scheduler (work-stealing StreamK). Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtDynPersistentTileMode_t``: ``0`` (``OFF``) forces the SK3 static sub-path; ``1`` (``ON``) always requests the SK4 dynamic sub-path when the selected kernel supports it; ``2`` (``AUTO``, default) lets the library's heuristic pick between static and dynamic per launch. Values outside ``{0, 1, 2}`` are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 

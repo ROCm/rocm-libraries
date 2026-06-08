@@ -88,9 +88,9 @@ namespace hipblaslt_ext
          *  ``hipblasLt`` C API. The ``mode`` argument is one of
          *  ``hipblasLtDynPersistentTileMode_t``:
          *
-         *    - ``HIPBLASLT_DYN_PERSISTENT_TILE_OFF`` (default) — library default scheduler.
-         *    - ``HIPBLASLT_DYN_PERSISTENT_TILE_ON``  — always request the dynamic persistent tile path when the chosen kernel supports it.
-         *    - ``HIPBLASLT_DYN_PERSISTENT_TILE_AUTO`` — delegate to the library heuristic per launch.
+         *    - ``HIPBLASLT_DYN_PERSISTENT_TILE_OFF`` — force the SK3 static sub-path.
+         *    - ``HIPBLASLT_DYN_PERSISTENT_TILE_ON``  — always request the SK4 dynamic sub-path when the chosen kernel supports it.
+         *    - ``HIPBLASLT_DYN_PERSISTENT_TILE_AUTO`` (default) — delegate to the library heuristic per launch.
          *
          *  This replaces the previous bool ``setDynPersistentTileEnabled`` /
          *  ``getDynPersistentTileEnabled`` API (the bool surface could not
@@ -115,7 +115,7 @@ namespace hipblaslt_ext
         /*! \ingroup library_module
          *  \brief Return the dynamic-persistent-tile mode set via
          *  ``setDynPersistentTileMode``. Defaults to
-         *  ``HIPBLASLT_DYN_PERSISTENT_TILE_OFF``.
+         *  ``HIPBLASLT_DYN_PERSISTENT_TILE_AUTO``.
          */
         HIPBLASLT_EXPORT hipblasLtDynPersistentTileMode_t getDynPersistentTileMode() const;
 
@@ -593,7 +593,7 @@ namespace hipblaslt_ext
         std::shared_ptr<void> m_data;
 
         size_t  m_workspace_bytes        = 0;
-        int32_t m_dyn_persistent_tile_mode = 0;
+        int32_t m_dyn_persistent_tile_mode = HIPBLASLT_DYN_PERSISTENT_TILE_AUTO;
     };
 
     /*! \ingroup types_module

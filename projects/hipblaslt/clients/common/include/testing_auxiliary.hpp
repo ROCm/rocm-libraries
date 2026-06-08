@@ -1222,7 +1222,7 @@ void testing_aux_matmul_dyn_persistent_tile_ext(const Arguments& arg)
     hipblasLtMatmulDesc_t matmul      = nullptr;
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul, arg.compute_type, arg.scale_type));
 
-    // Default is disabled (0).
+    // Default is AUTO (2).
     int32_t value_r = -1;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
                                                           HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
@@ -1230,9 +1230,9 @@ void testing_aux_matmul_dyn_persistent_tile_ext(const Arguments& arg)
                                                           sizeof(value_r),
                                                           &sizeWritten),
                           HIPBLAS_STATUS_SUCCESS);
-    ASSERT_TRUE(value_r == 0);
+    ASSERT_TRUE(value_r == 2);
 
-    // Enable then disable.
+    // ON then OFF round-trip.
     int32_t enable = 1;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
                                                           HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,

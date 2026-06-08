@@ -21,12 +21,12 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   is co-running on the device or when a persistent grid should be sized
   for a known CU budget. (This is a hint, not a CU reservation.)
 * `HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT` extension attribute
-  (`int32_t`, default `0`) now accepts the tri-state values from the
+  (`int32_t`, default `2`) now accepts the tri-state values from the
   new `hipblasLtDynPersistentTileMode_t` enum:
-  `HIPBLASLT_DYN_PERSISTENT_TILE_OFF` (0, library default),
+  `HIPBLASLT_DYN_PERSISTENT_TILE_OFF` (0, force the SK3 static sub-path),
   `HIPBLASLT_DYN_PERSISTENT_TILE_ON` (1, request the dynamic persistent
-  tile path), and `HIPBLASLT_DYN_PERSISTENT_TILE_AUTO` (2, delegate to a
-  calibrated origami heuristic per launch). Values outside `{0,1,2}` are
+  tile path), and `HIPBLASLT_DYN_PERSISTENT_TILE_AUTO` (2, library default;
+  delegate to a calibrated origami heuristic per launch). Values outside `{0,1,2}` are
   rejected with `HIPBLAS_STATUS_INVALID_VALUE` (previously any non-zero
   value was silently clamped to 1). The matching C++ ext API on
   `hipblaslt_ext::GemmPreference` is renamed from
