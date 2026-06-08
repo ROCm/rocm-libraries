@@ -55,6 +55,27 @@ _common_excludes: &common_excludes
   # TODO(#2824): Re-enable test once flaky issue is resolved.
   - "checkin_lapack/POTRF_FORTRAN.batched__float_complex/9"
 
+# This has to be updated in sync with list "common_excludes" above.
+_ffm_excludes: &ffm_excludes
+  - "*DISABLED*"
+  - "*known_bug*"
+  - "*HEEVD*float_complex*"
+  - "*HEEVJ*float_complex*"
+  - "*HEGVD*float_complex*"
+  - "*HEGVJ*float_complex*"
+  - "*HEEVDX*float_complex*"
+  - "*SYTRF*float_complex*"
+  - "*HEEVD*double_complex*"
+  - "*HEEVJ*double_complex*"
+  - "*HEGVD*double_complex*"
+  - "*HEGVJ*double_complex*"
+  - "*HEEVDX*double_complex*"
+  - "*SYTRF*double_complex*"
+  # TODO(#2824): Re-enable test once flaky issue is resolved.
+  - "checkin_lapack/POTRF_FORTRAN.batched__float_complex/9"
+  - "*batched*"
+  - "*strided_batched*"
+
 test_categories:
   ffm-quick:
     description: "FFM NPI simulation tests for PR pipelines (target: < 2 hours on FFM runner)"
@@ -63,10 +84,7 @@ test_categories:
       - "checkin*GETRF*"
       - "checkin*POTRF*"
       - "checkin*GEQRF*"
-    exclude:
-      - "*common_excludes"
-      - "*batched*"
-      - "*strided_batched*"
+    exclude: *ffm_excludes
     labels:
       - "ffm-quick"
 
@@ -77,10 +95,7 @@ test_categories:
       - "checkin*GETRF*"
       - "checkin*POTRF*"
       - "checkin*GEQRF*"
-    exclude:
-      - "*common_excludes"
-      - "*batched*"
-      - "*strided_batched*"
+    exclude: *ffm_excludes
     labels:
       - "ffm-full"
 
