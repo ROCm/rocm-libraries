@@ -333,7 +333,7 @@ jobs:
         
         cat <<EOF | sed 's/$/\r/' > email.txt
         From: ${MAIL_FROM}
-        To: charboyd@amd.com,dmcintos@amd.com,kelvilui@amd.com,marsavic@amd.com
+        To: asavic@amd.com,charboyd@amd.com,dmcintos@amd.com,kelvilui@amd.com,marsavic@amd.com
         Subject: =?UTF-8?B?4pyFIENJIEJ1aWxkIFN1Y2Nlc3NmdWw=?= - hipThreads [${BRANCH}]
         MIME-Version: 1.0
         Content-Type: text/plain; charset=UTF-8
@@ -354,6 +354,7 @@ jobs:
         curl --connect-timeout 10 --max-time 30 \
           --url "smtp://${SMTP_SERVER}:25" \
           --mail-from "${MAIL_FROM}" \
+          --mail-rcpt "asavic@amd.com" \
           --mail-rcpt "charboyd@amd.com" \
           --mail-rcpt "dmcintos@amd.com" \
           --mail-rcpt "kelvilui@amd.com" \
@@ -377,7 +378,7 @@ jobs:
         
         cat <<EOF | sed 's/$/\r/' > email.txt
         From: ${MAIL_FROM}
-        To: charboyd@amd.com,dmcintos@amd.com,kelvilui@amd.com,marsavic@amd.com
+        To: asavic@amd.com,charboyd@amd.com,dmcintos@amd.com,kelvilui@amd.com,marsavic@amd.com
         Subject: =?UTF-8?B?4p2MIENJIEJ1aWxkIEZhaWxlZA==?= - hipThreads [${BRANCH}]
         MIME-Version: 1.0
         Content-Type: text/plain; charset=UTF-8
@@ -398,6 +399,7 @@ jobs:
         curl --connect-timeout 10 --max-time 30 \
           --url "smtp://${SMTP_SERVER}:25" \
           --mail-from "${MAIL_FROM}" \
+          --mail-rcpt "asavic@amd.com" \
           --mail-rcpt "charboyd@amd.com" \
           --mail-rcpt "dmcintos@amd.com" \
           --mail-rcpt "kelvilui@amd.com" \
