@@ -28,6 +28,7 @@ import os
 import sys
 import time
 import re
+import csv
 
 from inspect import currentframe, getframeinfo
 from copy import deepcopy
@@ -35,6 +36,7 @@ from enum import Enum
 from math import log
 from pathlib import Path
 from typing import Sequence, Tuple, Optional
+from tabulate import tabulate
 
 from Tensile import __version__
 
@@ -223,6 +225,76 @@ class SpinnyThing:
     def finish(self):
         sys.stdout.write("\b*\n")
         sys.stdout.flush()
+
+class CSVHandler:
+    def __init__(self, csv_paths: str|list[str]) -> None:
+        if not isinstance(csv_paths, list):
+            csv_paths = [csv_paths]
+
+        for path in csv_paths:
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"No such filepath: {path}")
+
+        self.fieldnames, self.cleaned_data = CSVHandler._read(csv_paths)
+
+    @staticmethod
+    def _cleanup_reader_dups(reader: csv.DictReader[str]) -> list[dict]:
+        return [
+            row
+            for row in [{k: v for k, v in row.items() if k != v} for row in reader]
+            if len(row.items()) != 0
+        ]
+
+
+    @staticmethod
+    def _read(infiles) -> tuple[Sequence[str]|None, list[dict]]:
+        fieldnames = None
+        cleaned_rows = []
+        for infile in infiles:
+            with open(infile, "r", encoding="utf-8", newline='') as infile:
+                reader = csv.DictReader(infile)
+                reader_fields = reader.fieldnames
+
+                if fieldnames is None:
+                    fieldnames = reader_fields
+                if fieldnames != reader_fields:
+                    raise ValueError(f"Found CSV files with incompatible header: {infile}")
+
+                cleaned_rows += CSVHandler._cleanup_reader_dups(reader)
+
+        for row in cleaned_rows:
+            print(row, end='\n')
+        return (fieldnames, cleaned_rows)
+
+    def _check_nonempty_csvs(self) -> bool:
+        if self.fieldnames is None or len(self.fieldnames) == 0 \
+                or all(len(row.items()) == 0 for row in self.cleaned_data):
+            return False
+
+        return True
+
+    def tabulate(self, outfile: Path|str|None = None):
+        if not self._check_nonempty_csvs():
+            return
+
+        error_table = tabulate(self.cleaned_data, headers="keys")
+
+        if outfile is not None:
+            with open(outfile, "w") as out:
+                out.write(error_table)
+        else:
+            sys.stdout.write(error_table)
+            sys.stdout.flush()
+
+
+    def write_cleaned_csv(self, csv_path: Path|str) -> None:
+        if not self._check_nonempty_csvs():
+            return
+
+        with open(csv_path, "w", encoding="utf-8") as outfile:
+            writer = csv.DictWriter(outfile, fieldnames=self.fieldnames)
+            writer.writerows(self.cleaned_data)
+
 
 
 def iterate_progress(obj, *args, **kwargs):
