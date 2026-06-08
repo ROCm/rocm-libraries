@@ -121,8 +121,8 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
     int32_t* d_vbn     = reinterpret_cast<int32_t*>(workspace + ws.base.vbn_off);
     // Q/K quant buffer (1 byte/elem for both int8 and fp8). Typed as cfg::QDataType for the
     // attention kernel; the preprocess/qkquant kernels take a void/int8 handle and reinterpret.
-    cfg::QDataType* d_q_int8 = reinterpret_cast<cfg::QDataType*>(workspace + ws.q_int8_off);
-    cfg::QDataType* d_k_int8 = reinterpret_cast<cfg::QDataType*>(workspace + ws.k_int8_off);
+    cfg::QDataType* d_q_quant = reinterpret_cast<cfg::QDataType*>(workspace + ws.q_quant_off);
+    cfg::QDataType* d_k_quant = reinterpret_cast<cfg::QDataType*>(workspace + ws.k_quant_off);
     float*   d_q_scale = reinterpret_cast<float*>(workspace + ws.q_scale_off);
     float*   d_k_scale = reinterpret_cast<float*>(workspace + ws.k_scale_off);
 
@@ -142,7 +142,7 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
     pp_kargs.k.seq_stride       = a.stride_k;
     pp_kargs.k.simthreshold     = 0.0f;
     pp_kargs.k.km_ptr           = nullptr;
-    pp_kargs.k.int8_out         = reinterpret_cast<int8_t*>(d_k_int8);
+    pp_kargs.k.quant_out        = reinterpret_cast<int8_t*>(d_k_quant);
     pp_kargs.k.scale_out        = d_k_scale;
     pp_kargs.k.tokens_per_scale = a.block_scale_size_k;
     pp_kargs.k.num_block_scale  = static_cast<ck_tile::index_t>(ws.num_block_scale_k);
@@ -161,7 +161,7 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
     pp_kargs.q.seq_stride       = a.stride_q;
     pp_kargs.q.simthreshold     = 0.0f;
     pp_kargs.q.km_ptr           = nullptr;
-    pp_kargs.q.int8_out         = reinterpret_cast<int8_t*>(d_q_int8);
+    pp_kargs.q.quant_out        = reinterpret_cast<int8_t*>(d_q_quant);
     pp_kargs.q.scale_out        = d_q_scale;
     pp_kargs.q.tokens_per_scale = a.block_scale_size_q;
     pp_kargs.q.num_block_scale  = static_cast<ck_tile::index_t>(ws.num_block_scale_q);
@@ -237,7 +237,7 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
     // launched (and only meaningful) when kIsPerTensor.
     ck_tile::SpargeQKQuantKargs qq_kargs{};
     qq_kargs.x_ptr     = a.q_ptr;
-    qq_kargs.int8_ptr  = d_q_int8;
+    qq_kargs.quant_ptr = d_q_quant;
     qq_kargs.scale_ptr = d_q_scale;
     qq_kargs.batch     = a.batch;
     qq_kargs.nhead     = a.nhead_q;
@@ -249,7 +249,7 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
 
     ck_tile::SpargeQKQuantKargs kq_kargs{};
     kq_kargs.x_ptr     = a.k_ptr;
-    kq_kargs.int8_ptr  = d_k_int8;
+    kq_kargs.quant_ptr = d_k_quant;
     kq_kargs.scale_ptr = d_k_scale;
     kq_kargs.batch     = a.batch;
     kq_kargs.nhead     = a.nhead_k;
@@ -261,27 +261,27 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
 
     if constexpr(kIsGroup)
     {
-        // packed int8 Q/K [1, H, total_tokens, D]: token stride D, head stride total*D.
-        qq_kargs.batch_stride_int8 = 0;
-        qq_kargs.nhead_stride_int8 = a.total_q_tokens * a.hdim_q;
-        qq_kargs.stride_int8       = a.hdim_q;
+        // packed quant Q/K [1, H, total_tokens, D]: token stride D, head stride total*D.
+        qq_kargs.batch_stride_quant = 0;
+        qq_kargs.nhead_stride_quant = a.total_q_tokens * a.hdim_q;
+        qq_kargs.stride_quant       = a.hdim_q;
         qq_kargs.seqstart_ptr      = static_cast<const int32_t*>(a.seqstart_q_ptr);
         qq_kargs.seqlen_ptr        = static_cast<const int32_t*>(a.seqlen_q_ptr);
-        kq_kargs.batch_stride_int8 = 0;
-        kq_kargs.nhead_stride_int8 = a.total_k_tokens * a.hdim_q;
-        kq_kargs.stride_int8       = a.hdim_q;
+        kq_kargs.batch_stride_quant = 0;
+        kq_kargs.nhead_stride_quant = a.total_k_tokens * a.hdim_q;
+        kq_kargs.stride_quant       = a.hdim_q;
         kq_kargs.seqstart_ptr      = static_cast<const int32_t*>(a.seqstart_k_ptr);
         kq_kargs.seqlen_ptr        = static_cast<const int32_t*>(a.seqlen_k_ptr);
     }
     else
     {
-        // int8 Q/K [batch, H, S, D], token stride D.
-        qq_kargs.batch_stride_int8 = a.nhead_q * a.seqlen_q * a.hdim_q;
-        qq_kargs.nhead_stride_int8 = a.seqlen_q * a.hdim_q;
-        qq_kargs.stride_int8       = a.hdim_q;
-        kq_kargs.batch_stride_int8 = a.nhead_k * a.seqlen_k * a.hdim_q;
-        kq_kargs.nhead_stride_int8 = a.seqlen_k * a.hdim_q;
-        kq_kargs.stride_int8       = a.hdim_q;
+        // quant Q/K [batch, H, S, D], token stride D.
+        qq_kargs.batch_stride_quant = a.nhead_q * a.seqlen_q * a.hdim_q;
+        qq_kargs.nhead_stride_quant = a.seqlen_q * a.hdim_q;
+        qq_kargs.stride_quant       = a.hdim_q;
+        kq_kargs.batch_stride_quant = a.nhead_k * a.seqlen_k * a.hdim_q;
+        kq_kargs.nhead_stride_quant = a.seqlen_k * a.hdim_q;
+        kq_kargs.stride_quant       = a.hdim_q;
     }
     auto qq_callable = ck_tile::make_kernel<qkquant_kernel::kBlockPerCu>(
         qkquant_kernel{}, qkquant_kernel::GridSize(qq_kargs), qkquant_kernel::BlockSize(),
@@ -293,13 +293,13 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
     // ---- 3. Quantized sage attention ----
     if constexpr(kIsGroup)
     {
-        // int8 Q/K packed token-major [Hq, total_q_tokens, D]: per-token stride = hdim,
+        // quant Q/K packed token-major [Hq, total_q_tokens, D]: per-token stride = hdim,
         // nhead stride = total_tokens*hdim. descale q/k packed by block (nhead stride unused
         // by the kernel's group path; it reads the packed scale-block start directly).
-        const ck_tile::index_t i8_stride_q = a.hdim_q;
-        const ck_tile::index_t i8_stride_k = a.hdim_q;
-        const ck_tile::index_t i8_nhead_stride_q = a.total_q_tokens * a.hdim_q;
-        const ck_tile::index_t i8_nhead_stride_k = a.total_k_tokens * a.hdim_q;
+        const ck_tile::index_t quant_stride_q = a.hdim_q;
+        const ck_tile::index_t quant_stride_k = a.hdim_q;
+        const ck_tile::index_t quant_nhead_stride_q = a.total_q_tokens * a.hdim_q;
+        const ck_tile::index_t quant_nhead_stride_k = a.total_k_tokens * a.hdim_q;
 
         // PERTENSOR: per-(b,h) scalar scale (nhead stride 1, batch stride = nhead). Other modes
         // use the block-packed scheme (nhead/batch strides 0; group reads packed scale-block start).
@@ -307,11 +307,11 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
         const ck_tile::index_t pt_nhead_stride_k_descale = kIsPerTensor ? 1 : 0;
 
         auto attn_kargs = sage_kernel::MakeKargsGroup(
-            d_q_int8, d_k_int8, a.v_ptr, a.o_ptr, d_lut, d_vbn,
+            d_q_quant, d_k_quant, a.v_ptr, a.o_ptr, d_lut, d_vbn,
             d_q_scale, d_k_scale, a.v_descale_ptr,
             a.hdim_q, a.hdim_v, a.nhead_q, a.nhead_q / a.nhead_k, a.scale_s,
-            i8_stride_q, i8_stride_k, a.stride_v, a.stride_o,
-            i8_nhead_stride_q, i8_nhead_stride_k, a.nhead_stride_v, a.nhead_stride_o,
+            quant_stride_q, quant_stride_k, a.stride_v, a.stride_o,
+            quant_nhead_stride_q, quant_nhead_stride_k, a.nhead_stride_v, a.nhead_stride_o,
             /*nhead_stride_q_descale*/ pt_nhead_stride_q_descale,
             /*nhead_stride_k_descale*/ pt_nhead_stride_k_descale,
             /*nhead_stride_v_descale*/ a.nhead_stride_v_descale,
@@ -349,12 +349,12 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
         // descale layout: [batch, nhead, num_block_scale]; v_descale per-channel.
         const ck_tile::index_t nbs_q = static_cast<ck_tile::index_t>(ws.num_block_scale_q);
         const ck_tile::index_t nbs_k = static_cast<ck_tile::index_t>(ws.num_block_scale_k);
-        const ck_tile::index_t i8_stride_q = a.hdim_q;
-        const ck_tile::index_t i8_stride_k = a.hdim_q;
-        const ck_tile::index_t i8_nhead_stride_q = a.seqlen_q * a.hdim_q;
-        const ck_tile::index_t i8_nhead_stride_k = a.seqlen_k * a.hdim_q;
-        const ck_tile::index_t i8_batch_stride_q = a.nhead_q * a.seqlen_q * a.hdim_q;
-        const ck_tile::index_t i8_batch_stride_k = a.nhead_k * a.seqlen_k * a.hdim_q;
+        const ck_tile::index_t quant_stride_q = a.hdim_q;
+        const ck_tile::index_t quant_stride_k = a.hdim_q;
+        const ck_tile::index_t quant_nhead_stride_q = a.seqlen_q * a.hdim_q;
+        const ck_tile::index_t quant_nhead_stride_k = a.seqlen_k * a.hdim_q;
+        const ck_tile::index_t quant_batch_stride_q = a.nhead_q * a.seqlen_q * a.hdim_q;
+        const ck_tile::index_t quant_batch_stride_k = a.nhead_k * a.seqlen_k * a.hdim_q;
 
         // PERTENSOR: per-(b,h) scalar scale layout [batch, nhead, 1] (nhead stride 1, batch
         // stride = nhead). Other modes use [batch, nhead, num_block_scale].
@@ -364,13 +364,13 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
         const ck_tile::index_t bsk  = kIsPerTensor ? a.nhead_k : a.nhead_k * nbs_k;
 
         auto attn_kargs = sage_kernel::MakeKargs(
-            d_q_int8, d_k_int8, a.v_ptr, a.o_ptr, d_lut, d_vbn,
+            d_q_quant, d_k_quant, a.v_ptr, a.o_ptr, d_lut, d_vbn,
             d_q_scale, d_k_scale, a.v_descale_ptr,
             a.seqlen_q, a.seqlen_k, a.hdim_q, a.hdim_v,
             a.nhead_q, a.nhead_q / a.nhead_k, a.scale_s,
-            i8_stride_q, i8_stride_k, a.stride_v, a.stride_o,
-            i8_nhead_stride_q, i8_nhead_stride_k, a.nhead_stride_v, a.nhead_stride_o,
-            i8_batch_stride_q, i8_batch_stride_k, a.batch_stride_v, a.batch_stride_o,
+            quant_stride_q, quant_stride_k, a.stride_v, a.stride_o,
+            quant_nhead_stride_q, quant_nhead_stride_k, a.nhead_stride_v, a.nhead_stride_o,
+            quant_batch_stride_q, quant_batch_stride_k, a.batch_stride_v, a.batch_stride_o,
             /*nhead_stride_q_descale*/ nhsq, /*nhead_stride_k_descale*/ nhsk,
             /*nhead_stride_v_descale*/ a.nhead_stride_v_descale,
             /*batch_stride_q_descale*/ bsq,

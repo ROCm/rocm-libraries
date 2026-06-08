@@ -338,7 +338,12 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
             async_load_fence();
             __builtin_amdgcn_s_barrier();
 
-            int block_idx = kv_block_idx_ptr[i_total_loops + 1];
+            // Guard the read: on the last iteration block_idx is unused, but
+            // kv_block_idx_ptr[i_total_loops + 1] would index one past the per-row LUT
+            // (kv_blocks == num_k_blocks under dense selection) -- an OOB read on the final
+            // (b,h,q) row. Skip the load when no next iteration follows.
+            int block_idx =
+                (i_total_loops + 1 < num_total_loop) ? kv_block_idx_ptr[i_total_loops + 1] : 0;
             auto v_buf    = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
             const auto bias_tile = [&]() {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)

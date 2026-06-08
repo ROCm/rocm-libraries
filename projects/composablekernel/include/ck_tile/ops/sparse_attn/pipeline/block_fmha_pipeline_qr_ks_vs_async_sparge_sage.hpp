@@ -433,7 +433,14 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                 __builtin_amdgcn_sched_barrier(0);
 
             // WG-uniform LUT delta; readfirstlane pins to SGPR for scalar tile-window math.
-            int block_idx = __builtin_amdgcn_readfirstlane(kv_block_idx_ptr[i_total_loops + 1]);
+            // Guard the read: on the last iteration block_idx is unused, but
+            // kv_block_idx_ptr[i_total_loops + 1] would index one past the per-row LUT
+            // (kv_blocks == num_k_blocks under dense selection) -- an OOB read on the final
+            // (b,h,q) row. Skip the load when no next iteration follows.
+            int block_idx =
+                (i_total_loops + 1 < num_total_loop)
+                    ? __builtin_amdgcn_readfirstlane(kv_block_idx_ptr[i_total_loops + 1])
+                    : 0;
 
             async_load_fence();
             __builtin_amdgcn_s_barrier();

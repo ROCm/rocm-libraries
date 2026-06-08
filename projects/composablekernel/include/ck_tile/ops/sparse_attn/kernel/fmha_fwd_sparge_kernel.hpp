@@ -54,11 +54,11 @@ struct SpargePreprocessOneSideKargs
     const int32_t* seqstart_block_ptr  = nullptr;
     index_t        total_blocks        = 0;
 
-    // Quantization outputs (sparge_sage). When int8_out != nullptr the preprocess pipeline
-    // additionally produces per-warp row-wise INT8 quant of this side. Layout matches the raw
-    // input (token-major, hdim stride 1, same batch/head/seq strides via int8_* below); scale_out
+    // Quantization outputs (sparge_sage). When quant_out != nullptr the preprocess pipeline
+    // additionally produces per-warp row-wise quant of this side. Layout matches the raw
+    // input (token-major, hdim stride 1, same batch/head/seq strides via quant_* below); scale_out
     // is [batch, nhead, num_block_scale] with num_block_scale = ceil(seqlen / tokens_per_scale).
-    int8_t*  int8_out         = nullptr;
+    int8_t*  quant_out        = nullptr;
     float*   scale_out        = nullptr;
     index_t  tokens_per_scale = 0;       // PERWARP: Q=32, K=64
     index_t  num_block_scale  = 0;       // ceil(seqlen / tokens_per_scale) (batch mode)
@@ -230,16 +230,16 @@ struct FmhaFwdSpargePreprocessOneSideKernel
         if constexpr(kDoQuant)
         {
             const index_t tps = kargs.tokens_per_scale;
-            pp.int8_out        = nullptr;
+            pp.quant_out       = nullptr;
             pp.scale_out       = nullptr;
             pp.tokens_per_scale = tps;
-            pp.int8_stride_seq  = kargs.seq_stride;
-            if(kargs.int8_out != nullptr && tps > 0)
+            pp.quant_stride_seq = kargs.seq_stride;
+            if(kargs.quant_out != nullptr && tps > 0)
             {
-                // int8 origin = (batch, head) seq start; the pipeline re-applies the
+                // quant origin = (batch, head) seq start; the pipeline re-applies the
                 // block_id * block_size window internally (matching the raw slice's mean path
                 // which also pre-slices only to batch/head and windows on block_id).
-                pp.int8_out = reinterpret_cast<QuantType*>(kargs.int8_out) + batch_offset +
+                pp.quant_out = reinterpret_cast<QuantType*>(kargs.quant_out) + batch_offset +
                               static_cast<long_index_t>(head_id) * kargs.head_stride;
                 const index_t scales_per_block = kargs.block_size / tps;
                 if constexpr(kIsGroupMode)
@@ -371,7 +371,7 @@ struct FmhaFwdSpargePreprocessFusedKernel
 struct SpargeQKQuantKargs
 {
     const void* x_ptr;     // bf16 X (Q or K)
-    void*       int8_ptr;  // int8 X output
+    void*       quant_ptr; // quant X output
     float*      scale_ptr; // [batch, nhead] one scale per (batch, head)
 
     index_t batch;
@@ -383,9 +383,9 @@ struct SpargeQKQuantKargs
     index_t nhead_stride_x;
     index_t stride_x;       // token stride
 
-    index_t batch_stride_int8; // int8 X strides
-    index_t nhead_stride_int8;
-    index_t stride_int8;
+    index_t batch_stride_quant; // quant X strides
+    index_t nhead_stride_quant;
+    index_t stride_quant;
 
     // Group / varlen mode (batch leaves all nullptr).
     const int32_t* seqstart_ptr = nullptr; // [batch+1] token cumsum
@@ -425,14 +425,14 @@ struct FmhaFwdSpargeQKQuantKernel
         const index_t head_id  = static_cast<index_t>(blockIdx.x);
         const index_t batch_id = static_cast<index_t>(blockIdx.y);
 
-        long_index_t x_batch_off, int8_batch_off;
+        long_index_t x_batch_off, quant_batch_off;
         index_t      seqlen_actual;
         if constexpr(kIsGroupMode)
         {
             const long_index_t start =
                 static_cast<long_index_t>(kargs.seqstart_ptr[batch_id]);
-            x_batch_off    = start * kargs.stride_x;    // packed token offset (bf16)
-            int8_batch_off = start * kargs.stride_int8; // packed token offset (int8)
+            x_batch_off     = start * kargs.stride_x;     // packed token offset (bf16)
+            quant_batch_off = start * kargs.stride_quant; // packed token offset (quant)
             seqlen_actual  = __builtin_amdgcn_readfirstlane(
                 kargs.seqlen_ptr != nullptr
                     ? kargs.seqlen_ptr[batch_id]
@@ -440,17 +440,17 @@ struct FmhaFwdSpargeQKQuantKernel
         }
         else
         {
-            x_batch_off    = static_cast<long_index_t>(batch_id) * kargs.batch_stride_x;
-            int8_batch_off = static_cast<long_index_t>(batch_id) * kargs.batch_stride_int8;
-            seqlen_actual  = kargs.seqlen;
+            x_batch_off     = static_cast<long_index_t>(batch_id) * kargs.batch_stride_x;
+            quant_batch_off = static_cast<long_index_t>(batch_id) * kargs.batch_stride_quant;
+            seqlen_actual   = kargs.seqlen;
         }
 
         const auto* slice =
             reinterpret_cast<const InputType*>(kargs.x_ptr) + x_batch_off +
             static_cast<long_index_t>(head_id) * kargs.nhead_stride_x;
-        auto* int8_out =
-            reinterpret_cast<QuantType*>(kargs.int8_ptr) + int8_batch_off +
-            static_cast<long_index_t>(head_id) * kargs.nhead_stride_int8;
+        auto* quant_out =
+            reinterpret_cast<QuantType*>(kargs.quant_ptr) + quant_batch_off +
+            static_cast<long_index_t>(head_id) * kargs.nhead_stride_quant;
 
         // One global scale per (batch, head); packed [batch, nhead] for both batch and group.
         float* scale_out =
@@ -460,10 +460,10 @@ struct FmhaFwdSpargeQKQuantKernel
         typename Pipeline::Params pp;
         pp.seqlen          = seqlen_actual;
         pp.hdim            = kargs.hdim;
-        pp.stride_seq      = kargs.stride_x;
-        pp.int8_stride_seq = kargs.stride_int8;
+        pp.stride_seq       = kargs.stride_x;
+        pp.quant_stride_seq = kargs.stride_quant;
 
-        Pipeline{}(slice, int8_out, scale_out, pp, smem_raw);
+        Pipeline{}(slice, quant_out, scale_out, pp, smem_raw);
     }
 };
 

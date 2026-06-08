@@ -880,13 +880,13 @@ struct fmha_sparge_sage_fwd_args
     ck_tile::index_t total_k_tokens  = 0;
 };
 
-// sparge_sage workspace adds INT8 Q/K + per-warp scales after the sparge region:
-// [k_means | q_means | k_sim | q_sim | lut | vbn | q_int8 | k_int8 | q_scale | k_scale].
+// sparge_sage workspace adds quant Q/K + per-warp scales after the sparge region:
+// [k_means | q_means | k_sim | q_sim | lut | vbn | q_quant | k_quant | q_scale | k_scale].
 struct sparge_sage_workspace_layout
 {
     sparge_workspace_layout base;     // k_means .. vbn (sim disabled here; offsets reused)
-    std::size_t q_int8_off,  q_int8_bytes;
-    std::size_t k_int8_off,  k_int8_bytes;
+    std::size_t q_quant_off,  q_quant_bytes;
+    std::size_t k_quant_off,  k_quant_bytes;
     std::size_t q_scale_off, q_scale_bytes;
     std::size_t k_scale_off, k_scale_bytes;
     std::size_t num_block_scale_q, num_block_scale_k; // per (batch, head) row count
@@ -924,8 +924,8 @@ compute_sparge_sage_workspace_layout(const fmha_sparge_sage_fwd_args& a)
     L.num_block_scale_k =
         (Sk + static_cast<std::size_t>(a.block_scale_size_k) - 1) / a.block_scale_size_k;
 
-    L.q_int8_off  = off; L.q_int8_bytes  = B * Hq * Sq * D * sizeof(int8_t); off += L.q_int8_bytes;
-    L.k_int8_off  = off; L.k_int8_bytes  = B * Hk * Sk * D * sizeof(int8_t); off += L.k_int8_bytes;
+    L.q_quant_off = off; L.q_quant_bytes = B * Hq * Sq * D * sizeof(int8_t); off += L.q_quant_bytes;
+    L.k_quant_off = off; L.k_quant_bytes = B * Hk * Sk * D * sizeof(int8_t); off += L.k_quant_bytes;
     L.q_scale_off = off; L.q_scale_bytes = B * Hq * L.num_block_scale_q * sizeof(float);
     off += L.q_scale_bytes;
     L.k_scale_off = off; L.k_scale_bytes = B * Hk * L.num_block_scale_k * sizeof(float);
@@ -936,8 +936,8 @@ compute_sparge_sage_workspace_layout(const fmha_sparge_sage_fwd_args& a)
 
 // Group-mode sparge_sage workspace. The base (means/LUT/VBN) reuses the sparge group layout;
 // the quant region packs:
-//   q_int8 : [Hq, total_q_tokens, D] int8   (mirrors packed [1,Hq,total_q,D] input)
-//   k_int8 : [Hk, total_k_tokens, D] int8
+//   q_quant : [Hq, total_q_tokens, D] quant (mirrors packed [1,Hq,total_q,D] input)
+//   k_quant : [Hk, total_k_tokens, D] quant
 //   q_scale: [Hq, total_q_blocks * (block_size/block_scale_size_q)] float  (block-packed)
 //   k_scale: [Hk, total_k_blocks * (block_size/block_scale_size_k)] float
 // q/k_scale are packed batch-outer/head-mid by block (matching means/LUT), so the attention
@@ -972,8 +972,8 @@ compute_sparge_sage_workspace_layout_group(const fmha_sparge_sage_fwd_args& a)
     L.num_block_scale_q = spb_q; // unused in group attention path (block-packed); kept for parity
     L.num_block_scale_k = spb_k;
 
-    L.q_int8_off  = off; L.q_int8_bytes  = Hq * Tqt * D * sizeof(int8_t); off += L.q_int8_bytes;
-    L.k_int8_off  = off; L.k_int8_bytes  = Hk * Tkt * D * sizeof(int8_t); off += L.k_int8_bytes;
+    L.q_quant_off = off; L.q_quant_bytes = Hq * Tqt * D * sizeof(int8_t); off += L.q_quant_bytes;
+    L.k_quant_off = off; L.k_quant_bytes = Hk * Tkt * D * sizeof(int8_t); off += L.k_quant_bytes;
     L.q_scale_off = off; L.q_scale_bytes = Hq * Tqb * spb_q * sizeof(float); off += L.q_scale_bytes;
     L.k_scale_off = off; L.k_scale_bytes = Hk * Tkb * spb_k * sizeof(float); off += L.k_scale_bytes;
     L.total_bytes = off;

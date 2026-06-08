@@ -154,12 +154,17 @@ block_scan_inclusive_sum_smem(float* buf, float* aux, index_t tid)
 // quant divisor: int8 uses 127, fp8 uses fp8_t max (SageAttention fp8bf16 Q/K path).
 // Use a literal for fp8 -- numeric<fp8_t>::max() routes through bit_cast<fp8_t>, which is not a
 // constant expression here (and would make this a __host__ value, illegal in device code).
-// OCP E4M3 (CK_TILE_USE_OCP_FP8) max = 448.
+// Must match the host reference (numeric<fp8_t>::max()): OCP E4M3 max = 448, FNUZ E4M3 max = 240.
+// Branch on CK_TILE_USE_OCP_FP8 so device and reference agree under both fp8 build configs.
 template <typename QuantType>
 CK_TILE_HOST_DEVICE constexpr float sparge_quant_absmax_divisor()
 {
     if constexpr(std::is_same_v<QuantType, fp8_t>)
+#if defined(CK_TILE_USE_OCP_FP8)
         return 448.0f;
+#else
+        return 240.0f;
+#endif
     else
         return 127.0f;
 }
@@ -245,13 +250,13 @@ struct BlockSpargePreprocessPipeline
         float simthreshold;
         const float* km_ptr;    // [hdim] K-mean; nullptr disables (Q always nullptr)
 
-        // Quantization (QScale != NO_SCALE). Per-warp row-wise INT8 quant fused into the
+        // Quantization (QScale != NO_SCALE). Per-warp row-wise quant fused into the
         // [token, hidden] tile pass: scale[token-group] = absmax(group tokens x full hidden)/127,
-        // int8 = round(val / scale). NO_SCALE leaves these unused (zero-overhead path).
-        QuantType* int8_out;       // [block_size, hdim] quant out (token-major, hdim stride 1)
+        // quant = round(val / scale). NO_SCALE leaves these unused (zero-overhead path).
+        QuantType* quant_out;      // [block_size, hdim] quant out (token-major, hdim stride 1)
         float*  scale_out;         // [block_size / tokens_per_scale] scales for this block
         index_t tokens_per_scale;  // PERWARP: Q=32, K=64 (kBlockScaleSize)
-        index_t int8_stride_seq;   // token stride of int8_out in elements
+        index_t quant_stride_seq;  // token stride of quant_out in elements
     };
 
     // Shared input-block staging: load the [token, hidden] block from global ONCE into LDS (as
@@ -378,18 +383,18 @@ struct BlockSpargePreprocessPipeline
         block_sync_lds();
 
         // sweep tile -> quant = round(val / scale[token-group]). OOB tokens skipped.
-        const auto int8_view = make_naive_tensor_view<address_space_enum::global>(
-            params.int8_out,
+        const auto quant_view = make_naive_tensor_view<address_space_enum::global>(
+            params.quant_out,
             make_tuple(params.seqlen, kHdim),
-            make_tuple(params.int8_stride_seq, 1),
+            make_tuple(params.quant_stride_seq, 1),
             number<1>{},
             number<1>{});
-        const auto int8_padded = pad_tensor_view(
-            int8_view,
+        const auto quant_padded = pad_tensor_view(
+            quant_view,
             make_tuple(number<kBlock>{}, number<kHdim>{}),
             sequence<1, 0>{});
-        auto int8_window = make_tile_window(
-            int8_padded,
+        auto quant_window = make_tile_window(
+            quant_padded,
             make_tuple(number<kBlock>{}, number<kHdim>{}),
             {s_start, 0},
             MakeXBlockTileDistribution());
@@ -413,7 +418,7 @@ struct BlockSpargePreprocessPipeline
             }
             out_tile(idx) = q8;
         });
-        store_tile(int8_window, out_tile);
+        store_tile(quant_window, out_tile);
     }
 
     CK_TILE_DEVICE void operator()(
@@ -712,7 +717,7 @@ struct BlockSpargeQKQuantPipeline
         index_t seqlen;
         index_t hdim;
         index_t stride_seq;      // token stride in elements of the bf16 input
-        index_t int8_stride_seq; // token stride in elements of the int8 output
+        index_t quant_stride_seq; // token stride in elements of the quant output
     };
 
     // LDS: per-channel absmax[hdim] | block reduce scratch (max over channels at the end).
@@ -730,11 +735,11 @@ struct BlockSpargeQKQuantPipeline
     }
 
     // slice         : bf16 X for this (batch, head) = [seqlen, hdim]
-    // int8_out      : quantized X output (QuantType: INT8 or FP8) for this (batch, head) = [seqlen,
-    //                 hdim]. Name kept as int8_out for historical reasons; it carries QuantType.
+    // quant_out     : quantized X output (QuantType: INT8 or FP8) for this (batch, head) =
+    //                 [seqlen, hdim].
     // scale_out     : single float global scale for this (batch, head)
     CK_TILE_DEVICE void operator()(const InputType* slice,
-                                   QuantType*        int8_out,
+                                   QuantType*        quant_out,
                                    float*            scale_out,
                                    const Params&     params,
                                    void*             smem) const
@@ -828,9 +833,9 @@ struct BlockSpargeQKQuantPipeline
             sequence<1, 0>{}); // pad token axis (M); hidden (N) exact 128
 
         const auto naive_out = make_naive_tensor_view<address_space_enum::global>(
-            int8_out,
+            quant_out,
             make_tuple(params.seqlen, kHdim),
-            make_tuple(params.int8_stride_seq, 1),
+            make_tuple(params.quant_stride_seq, 1),
             number<1>{},
             number<1>{});
         const auto padded_out = pad_tensor_view(

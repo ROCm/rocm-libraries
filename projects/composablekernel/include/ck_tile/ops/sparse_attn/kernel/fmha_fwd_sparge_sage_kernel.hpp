@@ -137,8 +137,8 @@ struct FmhaFwdSpargeSageKernel
         // Group / varlen mode (batch leaves all nullptr / 0). seqstart_*_ptr give per-batch
         // token starts; seqstart_q_block_ptr / lut_batch_offset_ptr give the batch-outer/head-mid
         // packed offsets for VBN/LUT; q/k descale use the same block-packed scheme (block_id *
-        // scales_per_block). int8 Q/K and descale carry packed totals via nhead strides set by
-        // the host (i8_nhead_stride = total_tokens * hdim; descale nhead_stride = total_*_scale).
+        // scales_per_block). quant Q/K and descale carry packed totals via nhead strides set by
+        // the host (quant_nhead_stride = total_tokens * hdim; descale nhead_stride = total_*_scale).
         const int32_t* seqstart_q_ptr       = nullptr;
         const int32_t* seqstart_k_ptr       = nullptr;
         const int32_t* seqlen_q_ptr         = nullptr;
