@@ -189,11 +189,16 @@ class KernelWriterAssembly(KernelWriter):
         _isa = kernel.get("ISA", [9, 0, 8])
         if _isa[0] == 9:
           # Use live rocisa caps so custom-kernel occupancy matches the codegen path.
+          # For custom kernels, setRocIsa() is called (not setKernel()), so
+          # self.states.regCaps/archCaps are not initialized — query the singleton directly.
+          _ti = rocIsa.getInstance()
+          _regCaps = _ti.getRegCaps()
+          _archCaps = _ti.getArchCaps()
           _rocisa_caps = (
-              self.states.regCaps["MaxVgpr"] * (2 if self.states.archCaps.get("ArchAccUnifiedRegs") else 1),
-              self.states.regCaps["PhysicalMaxSgpr"],
-              self.states.archCaps["DeviceLDS"],
-              self.states.archCaps["MaxWavesPerSimd"],
+              _regCaps["MaxVgpr"] * (2 if _archCaps.get("ArchAccUnifiedRegs") else 1),
+              _regCaps["PhysicalMaxSgpr"],
+              _archCaps["DeviceLDS"],
+              _archCaps["MaxWavesPerSimd"],
           )
           occ = compute_occupancy_from_asm_source(kernel, code, arch_caps=_rocisa_caps)
           if occ is not None:
