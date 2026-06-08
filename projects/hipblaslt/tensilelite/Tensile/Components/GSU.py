@@ -1129,6 +1129,7 @@ class GSUOn(GSU):
             module.add(SMovB64(dst=sgpr(tmpSgprBuffer, 2), src=sgpr("SrdSync", 2)))
             module.add(SMovB32(dst=sgpr(tmpSgprBuffer+2), src="BufferOOB"))
             module.add(SMovB32(dst=sgpr(tmpSgprBuffer+3), src="Srd127_96"))
+            module.add(writer.shiftSrdByIdx(tmpSgprBuffer))
             # Use tmpVgpr (=0) for both src data and vaddr offset
             module.add(BufferStoreB32(src=vgpr(tmpVgpr.idx), vaddr=vgpr(tmpVgpr.idx), saddr=sgpr(tmpSgprBuffer, 4), soffset=0, \
                                       mubuf=MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV), \

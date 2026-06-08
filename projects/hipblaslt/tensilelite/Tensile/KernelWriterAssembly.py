@@ -13406,15 +13406,21 @@ class KernelWriterAssembly(KernelWriter):
 
   ##############################################################################
   def shiftSrd(self, tc) -> Module:
+    return self._shiftSrdImpl(sgprLo=sgpr("Srd%s+1"%tc), sgprHi=sgpr("Srd%s+2"%tc))
+
+  def shiftSrdByIdx(self, srdIdx) -> Module:
+    return self._shiftSrdImpl(sgprLo=sgpr(srdIdx+1), sgprHi=sgpr(srdIdx+2))
+
+  def _shiftSrdImpl(self, sgprLo, sgprHi) -> Module:
     module = Module("shiftSrd")
     if self.states.version[:2] == (12, 5):
       with self.allocTmpSgpr(1, tag="shiftSrd_tmpSgprRes") as stmpRes:
         module.addComment("Shift num records for gfx125x")
-        module.add(SAndB32(sgpr(stmpRes.idx), sgpr("Srd%s+2"%tc), 0x7F))
+        module.add(SAndB32(sgpr(stmpRes.idx), sgprHi, 0x7F))
         module.add(SLShiftLeftB32(sgpr(stmpRes.idx), 25, sgpr(stmpRes.idx)))
-        module.add(SAndB32(sgpr("Srd%s+1"%tc), sgpr("Srd%s+1"%tc), 0x1FFFFFF))
-        module.add(SOrB32(sgpr("Srd%s+1"%tc), sgpr("Srd%s+1"%tc), sgpr(stmpRes.idx)))
-        module.add(SLShiftRightB32(sgpr("Srd%s+2"%tc), 7, sgpr("Srd%s+2"%tc)))
+        module.add(SAndB32(sgprLo, sgprLo, 0x1FFFFFF))
+        module.add(SOrB32(sgprLo, sgprLo, sgpr(stmpRes.idx)))
+        module.add(SLShiftRightB32(sgprHi, 7, sgprHi))
     return module
  
   def allocPostLoopSrd(self, ch: str, kernel):   
