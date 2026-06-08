@@ -768,292 +768,241 @@ block_reduce_max_i32(int32_t warp_max, int32_t* __restrict__ s_wmax)
 }
 
 /* =========================================================================
- * GPU kernels — accu mode Part 1: preliminary extraction
+ * GPU kernels — accu mode Part 1: preliminary extraction (A and B fused)
+ *
+ * oz2_accu_prelim_AB_kernel processes both A rows and B columns in a single
+ * dispatch.  Grid = dim3(m + n, 1), Block = dim3(256, 1).
+ *   blockIdx.x <  m_blocks → A row processing   (row = blockIdx.x)
+ *   blockIdx.x >= m_blocks → B column processing (col = blockIdx.x - m_blocks)
+ *
+ * The branch is scalar-uniform (all threads in a block share blockIdx.x),
+ * so there is zero warp divergence and zero EXEC-mask overhead.
+ * Combining both dispatches into one reduces kernel-launch overhead by one
+ * and gives the GPU scheduler m+n independent blocks simultaneously, which
+ * improves utilisation for small problem sizes.
  * ========================================================================= */
-
-/**
- * oz2_accu_prelim_A_kernel
- * Grid: (m, 1), Block: (256, 1)
- * 256 threads = 4 wavefronts on MI300 (warpSize=64), doubling occupancy vs 128.
- */
 __global__ static void
-oz2_accu_prelim_A_kernel(const double* __restrict__ A,
-                         int64_t m, int64_t k, int64_t lda, bool transA,
-                         int8_t*   __restrict__ A8i_high, size_t lda8i,
-                         int16_t*  __restrict__ sftA,
-                         uint32_t* __restrict__ nan_flag)
+oz2_accu_prelim_AB_kernel(const double* __restrict__ A,
+                          int64_t m, int64_t k, int64_t lda, bool transA,
+                          int8_t*   __restrict__ A8i_high, size_t lda8i,
+                          int16_t*  __restrict__ sftA,
+                          const double* __restrict__ B,
+                          int64_t n, int64_t ldb, bool transB,
+                          int8_t*   __restrict__ B8i_high, size_t ldb8i,
+                          int16_t*  __restrict__ sftB,
+                          uint32_t* __restrict__ nan_flag,
+                          unsigned m_blocks)
 {
-    const int64_t row = static_cast<int64_t>(blockIdx.x);
-    if(row >= m) return;
-
-    double local_max = 0.0;
-    for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
-        double val = transA ? A[row * lda + j] : A[j * lda + row];
-        if(!isfinite(val))
-            (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
-        double av = fabs(val);
-        if(av > local_max) local_max = av;
-    }
-    local_max = warp_reduce_max_abs_d(local_max);
-
-    /* s_wmax sized for up to 512 threads and warpSize ≥ 32 (= 16 warps max) */
-    __shared__ double s_wmax[8];
-    local_max = block_reduce_max_d(local_max, s_wmax);
-
+    /* Shared memory is reused by both branches (only one executes per block). */
+    __shared__ double  s_wmax[8];
     __shared__ int16_t s_sft;
-    if(threadIdx.x == 0) {
-        if(local_max < 1e-300) local_max = 1.0;
-        /* Use 6 bits (maxUFP<INT8>=6 in GEMMul8): sft = 6 - floor(log2(amax)).
-         * Negative sft values are valid and necessary for large amax (phi=2,4
-         * distributions): they scale the amax element into [33,64] as INT8
-         * while smaller elements get 0 or 1.  GEMMul8 never clamps sft to 0.
-         * Clamping sft to 0 would overflow INT8 for amax > 127 and corrupt the
-         * preliminary GEMM, causing wrong shift refinement for all elements. */
-        int sft = 6 - static_cast<int>(floor(log2(local_max)));
-        s_sft     = static_cast<int16_t>(sft);
-        sftA[row] = s_sft;
-    }
-    __syncthreads();
-    const int16_t sft = s_sft;
 
-    for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
-        double val    = transA ? A[row * lda + j] : A[j * lda + row];
-        /* Ceiling extraction (GEMMul8 uses trunc_scalbn_8i = ceil of |val|*2^sft).
-         * ceil gives an upper bound so the prelim GEMM result bounds the true inner
-         * product, making the sft refinement conservative and more accurate. */
-        double scaled = ceil(ldexp(fabs(val), static_cast<int>(sft)));
-        A8i_high[static_cast<size_t>(j) + static_cast<size_t>(row) * lda8i] =
-            static_cast<int8_t>(static_cast<int32_t>(scaled));
-    }
-}
+    if(blockIdx.x < m_blocks) {
+        /* ── A row processing ──────────────────────────────────────────── */
+        const int64_t row = static_cast<int64_t>(blockIdx.x);
+        /* Guard is redundant (m_blocks == m) but kept for safety. */
 
-/**
- * oz2_accu_prelim_B_kernel
- * Grid: (n, 1), Block: (256, 1)
- * 256 threads = 4 wavefronts on MI300 (warpSize=64), doubling occupancy vs 128.
- */
-__global__ static void
-oz2_accu_prelim_B_kernel(const double* __restrict__ B,
-                         int64_t k, int64_t n, int64_t ldb, bool transB,
-                         int8_t*   __restrict__ B8i_high, size_t ldb8i,
-                         int16_t*  __restrict__ sftB,
-                         uint32_t* __restrict__ nan_flag)
-{
-    const int64_t col = static_cast<int64_t>(blockIdx.x);
-    if(col >= n) return;
+        double local_max = 0.0;
+        for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
+            double val = transA ? A[row * lda + j] : A[j * lda + row];
+            if(!isfinite(val))
+                (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
+            double av = fabs(val);
+            if(av > local_max) local_max = av;
+        }
+        local_max = warp_reduce_max_abs_d(local_max);
+        local_max = block_reduce_max_d(local_max, s_wmax);
 
-    double local_max = 0.0;
-    for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
-        double val = transB ? B[col + j * ldb] : B[j + col * ldb];
-        if(!isfinite(val))
-            (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
-        double av = fabs(val);
-        if(av > local_max) local_max = av;
-    }
-    local_max = warp_reduce_max_abs_d(local_max);
+        if(threadIdx.x == 0) {
+            if(local_max < 1e-300) local_max = 1.0;
+            /* sft = 6 - floor(log2(amax)): scales amax to ≤64 as INT8.
+             * Negative sft is valid for large amax — see GEMMul8 maxUFP<INT8>=6. */
+            int sft   = 6 - static_cast<int>(floor(log2(local_max)));
+            s_sft     = static_cast<int16_t>(sft);
+            sftA[row] = s_sft;
+        }
+        __syncthreads();
+        const int16_t sft = s_sft;
 
-    /* s_wmax sized for up to 512 threads and warpSize ≥ 32 (= 16 warps max) */
-    __shared__ double s_wmax[8];
-    local_max = block_reduce_max_d(local_max, s_wmax);
+        for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
+            double val    = transA ? A[row * lda + j] : A[j * lda + row];
+            double scaled = ceil(ldexp(fabs(val), static_cast<int>(sft)));
+            A8i_high[static_cast<size_t>(j) + static_cast<size_t>(row) * lda8i] =
+                static_cast<int8_t>(static_cast<int32_t>(scaled));
+        }
 
-    __shared__ int16_t s_sft;
-    if(threadIdx.x == 0) {
-        if(local_max < 1e-300) local_max = 1.0;
-        /* 6-bit ceiling extraction, matching GEMMul8 (maxUFP<INT8>=6).
-         * Negative sft is valid for large amax — see oz2_accu_prelim_A_kernel. */
-        int sft = 6 - static_cast<int>(floor(log2(local_max)));
-        s_sft     = static_cast<int16_t>(sft);
-        sftB[col] = s_sft;
-    }
-    __syncthreads();
-    const int16_t sft = s_sft;
+    } else {
+        /* ── B column processing ───────────────────────────────────────── */
+        const int64_t col = static_cast<int64_t>(blockIdx.x - m_blocks);
 
-    for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
-        double val    = transB ? B[col + j * ldb] : B[j + col * ldb];
-        /* Ceiling extraction matching GEMMul8's trunc_scalbn_8i. */
-        double scaled = ceil(ldexp(fabs(val), static_cast<int>(sft)));
-        B8i_high[static_cast<size_t>(j) + static_cast<size_t>(col) * ldb8i] =
-            static_cast<int8_t>(static_cast<int32_t>(scaled));
+        double local_max = 0.0;
+        for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
+            double val = transB ? B[col + j * ldb] : B[j + col * ldb];
+            if(!isfinite(val))
+                (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
+            double av = fabs(val);
+            if(av > local_max) local_max = av;
+        }
+        local_max = warp_reduce_max_abs_d(local_max);
+        local_max = block_reduce_max_d(local_max, s_wmax);
+
+        if(threadIdx.x == 0) {
+            if(local_max < 1e-300) local_max = 1.0;
+            int sft   = 6 - static_cast<int>(floor(log2(local_max)));
+            s_sft     = static_cast<int16_t>(sft);
+            sftB[col] = s_sft;
+        }
+        __syncthreads();
+        const int16_t sft = s_sft;
+
+        for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
+            double val    = transB ? B[col + j * ldb] : B[j + col * ldb];
+            double scaled = ceil(ldexp(fabs(val), static_cast<int>(sft)));
+            B8i_high[static_cast<size_t>(j) + static_cast<size_t>(col) * ldb8i] =
+                static_cast<int8_t>(static_cast<int32_t>(scaled));
+        }
     }
 }
 
 /* =========================================================================
  * GPU kernels — accu mode Part 1: shift refinement from preliminary GEMM
+ *               (A rows and B columns fused into a single dispatch)
+ *
+ * oz2_accu_refine_sftAB_kernel processes both row-wise and column-wise
+ * max reductions in one kernel.  Grid = dim3(m + n, 1), Block = dim3(256, 1).
+ *   blockIdx.x <  m_blocks → row-max  → update sftA  (row = blockIdx.x)
+ *   blockIdx.x >= m_blocks → col-max  → update sftB  (col = blockIdx.x - m_blocks)
+ *
+ * The branch is scalar-uniform: zero divergence, zero masking overhead.
  * ========================================================================= */
-
-/**
- * oz2_accu_refine_sftA_kernel
- * Grid: (m, 1), Block: (256, 1)
- * 256 threads = 4 wavefronts on MI300 (warpSize=64), doubling occupancy vs 128.
- */
 __global__ static void
-oz2_accu_refine_sftA_kernel(const int32_t* __restrict__ C32i,
-                             int64_t m, int64_t n, size_t ldc32i,
-                             int16_t* __restrict__ sftA,
-                             float log2P)
+oz2_accu_refine_sftAB_kernel(const int32_t* __restrict__ C32i,
+                              int64_t m, int64_t n, size_t ldc32i,
+                              int16_t* __restrict__ sftA,
+                              int16_t* __restrict__ sftB,
+                              float log2P,
+                              unsigned m_blocks)
 {
-    const int64_t row = static_cast<int64_t>(blockIdx.x);
-    if(row >= m) return;
-
-    int32_t local_max = 0;
-    for(int64_t j = threadIdx.x; j < n; j += blockDim.x) {
-        int32_t v  = C32i[static_cast<size_t>(row) + static_cast<size_t>(j) * ldc32i];
-        int32_t av = v < 0 ? -v : v;
-        if(av > local_max) local_max = av;
-    }
-    local_max = warp_reduce_max_abs_i32(local_max);
-
-    /* s_wmax sized for up to 512 threads and warpSize ≥ 32 (= 16 warps max) */
     __shared__ int32_t s_wmax[8];
-    local_max = block_reduce_max_i32(local_max, s_wmax);
 
-    if(threadIdx.x == 0) {
-        if(local_max < 1) local_max = 1;
-        float refinement = floorf(-0.5f * log2f(static_cast<float>(local_max)) + log2P);
-        sftA[row] += static_cast<int16_t>(refinement);
-    }
-}
+    if(blockIdx.x < m_blocks) {
+        /* ── sftA: per-row max over columns ────────────────────────────── */
+        const int64_t row = static_cast<int64_t>(blockIdx.x);
 
-/**
- * oz2_accu_refine_sftB_kernel
- * Grid: (n, 1), Block: (256, 1)
- * 256 threads = 4 wavefronts on MI300 (warpSize=64), doubling occupancy vs 128.
- */
-__global__ static void
-oz2_accu_refine_sftB_kernel(const int32_t* __restrict__ C32i,
-                             int64_t m, int64_t n, size_t ldc32i,
-                             int16_t* __restrict__ sftB,
-                             float log2P)
-{
-    const int64_t col = static_cast<int64_t>(blockIdx.x);
-    if(col >= n) return;
+        int32_t local_max = 0;
+        for(int64_t j = threadIdx.x; j < n; j += blockDim.x) {
+            int32_t v  = C32i[static_cast<size_t>(row) + static_cast<size_t>(j) * ldc32i];
+            int32_t av = v < 0 ? -v : v;
+            if(av > local_max) local_max = av;
+        }
+        local_max = warp_reduce_max_abs_i32(local_max);
+        local_max = block_reduce_max_i32(local_max, s_wmax);
 
-    int32_t local_max = 0;
-    for(int64_t i = threadIdx.x; i < m; i += blockDim.x) {
-        int32_t v  = C32i[static_cast<size_t>(i) + static_cast<size_t>(col) * ldc32i];
-        int32_t av = v < 0 ? -v : v;
-        if(av > local_max) local_max = av;
-    }
-    local_max = warp_reduce_max_abs_i32(local_max);
+        if(threadIdx.x == 0) {
+            if(local_max < 1) local_max = 1;
+            float refinement = floorf(-0.5f * log2f(static_cast<float>(local_max)) + log2P);
+            sftA[row] += static_cast<int16_t>(refinement);
+        }
 
-    /* s_wmax sized for up to 512 threads and warpSize ≥ 32 (= 16 warps max) */
-    __shared__ int32_t s_wmax[8];
-    local_max = block_reduce_max_i32(local_max, s_wmax);
+    } else {
+        /* ── sftB: per-column max over rows ────────────────────────────── */
+        const int64_t col = static_cast<int64_t>(blockIdx.x - m_blocks);
 
-    if(threadIdx.x == 0) {
-        if(local_max < 1) local_max = 1;
-        float refinement = floorf(-0.5f * log2f(static_cast<float>(local_max)) + log2P);
-        sftB[col] += static_cast<int16_t>(refinement);
+        int32_t local_max = 0;
+        for(int64_t i = threadIdx.x; i < m; i += blockDim.x) {
+            int32_t v  = C32i[static_cast<size_t>(i) + static_cast<size_t>(col) * ldc32i];
+            int32_t av = v < 0 ? -v : v;
+            if(av > local_max) local_max = av;
+        }
+        local_max = warp_reduce_max_abs_i32(local_max);
+        local_max = block_reduce_max_i32(local_max, s_wmax);
+
+        if(threadIdx.x == 0) {
+            if(local_max < 1) local_max = 1;
+            float refinement = floorf(-0.5f * log2f(static_cast<float>(local_max)) + log2P);
+            sftB[col] += static_cast<int16_t>(refinement);
+        }
     }
 }
 
 /* =========================================================================
- * GPU kernels — Part 1f: full multi-modulus scaling with per-row/col shifts
+ * GPU kernels — Part 1f: full multi-modulus scaling (A and B fused)
+ *
+ * oz2_scaleAB_kernel processes both A rows and B columns in a single dispatch.
+ * Grid = dim3(ceil(k/64), ceil(m/4) + ceil(n/4)), Block = dim3(64, 4).
+ *   blockIdx.y <  m_y_blocks → A scaling: i = blockIdx.y*4 + threadIdx.y
+ *   blockIdx.y >= m_y_blocks → B scaling: l = (blockIdx.y - m_y_blocks)*4 + threadIdx.y
+ *
+ * threadIdx.x covers the k-index (fast) in both branches → A8i and B8i writes
+ * remain coalesced (64 consecutive k-elements per wavefront).
+ * The branch on blockIdx.y is scalar-uniform: zero warp divergence.
  * ========================================================================= */
-
-/**
- * oz2_scaleA_kernel
- * Grid: ((k+63)/64, (m+3)/4), Block: (64,4)
- * threadIdx.x covers k (j-index, fast) and threadIdx.y covers m (i-index, slow).
- * This makes A8i writes coalesced: all 64 threads in a wavefront share the same
- * row i and write to 64 consecutive k elements (one 64-byte cache line).
- * A input reads are also coalesced for transA=T (the common inner-GEMM case).
- *
- * Processes moduli [t_start, t_start+t_count) and writes to A8i[0..t_count-1].
- * A8i is reused across chunks so only chunk_size slices of storage are needed.
- */
 __global__ static void
-oz2_scaleA_kernel(const double* __restrict__ A,
-                  int64_t m, int64_t k, int64_t lda, bool transA,
-                  int8_t*  __restrict__       A8i,
-                  size_t                      lda8i,
-                  size_t                      cola8i,
-                  const int16_t* __restrict__ sftA,
-                  unsigned                    t_start,
-                  unsigned                    t_count,
-                  bool                        do_pass3)
+oz2_scaleAB_kernel(const double* __restrict__ A,
+                   int64_t m, int64_t lda, bool transA,
+                   int8_t*  __restrict__       A8i,
+                   size_t                      lda8i,
+                   size_t                      cola8i,
+                   const int16_t* __restrict__ sftA,
+                   const double* __restrict__ B,
+                   int64_t n, int64_t ldb, bool transB,
+                   int8_t*  __restrict__       B8i,
+                   size_t                      ldb8i,
+                   const int16_t* __restrict__ sftB,
+                   int64_t k,
+                   unsigned t_start, unsigned t_count, bool do_pass3,
+                   unsigned m_y_blocks)
 {
     const int64_t j = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; /* k-index */
-    const int64_t i = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y; /* m-index */
-    if(i >= m || j >= k) return;
 
-    const double val  = transA ? A[i * lda + j] : A[j * lda + i];
-    const int16_t sft = sftA[i];
-    const double ival = trunc(ldexp(val, static_cast<int>(sft)));
+    if(blockIdx.y < m_y_blocks) {
+        /* ── A scaling ─────────────────────────────────────────────────── */
+        const int64_t i = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+        if(i >= m || j >= k) return;
 
-    const size_t stride = lda8i * cola8i;
-    const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(i) * lda8i;
+        const double val  = transA ? A[i * lda + j] : A[j * lda + i];
+        const int16_t sft = sftA[i];
+        const double ival = trunc(ldexp(val, static_cast<int>(sft)));
 
-    for(unsigned t_local = 0; t_local < t_count; ++t_local) {
-        const unsigned t = t_start + t_local;
-        /* Pass 1 – double-precision FMA: r ≈ ival mod m_t, exact for t=0 (m=256),
-         *          possibly off by ±m_t for t≥1 when sft_final ≥ ~53.          */
-        const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
-        /* Pass 2 – float-precision refinement (GEMMul8 ITER=2):
-         *          corrects any off-by-m_t error from pass 1.                  */
-        const float   rf  = static_cast<float>(r);
-        float rf2 = fmaf(rintf(rf * cInvModF[t]),
-                         static_cast<float>(cNegMod[t]), rf);
-        /* Pass 3 – second float correction (GEMMul8 ITER=3, needed for s≥19):
-         *          for large sft values the scaled integer ival can exceed 2^60,
-         *          making pass-2 residuals too large for float to correct in one
-         *          step.  do_pass3 is warp-uniform so this branch is free.     */
-        if(do_pass3) {
-            rf2 = fmaf(rintf(rf2 * cInvModF[t]),
-                       static_cast<float>(cNegMod[t]), rf2);
+        const size_t stride = lda8i * cola8i;
+        const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(i) * lda8i;
+
+        for(unsigned t_local = 0; t_local < t_count; ++t_local) {
+            const unsigned t = t_start + t_local;
+            const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
+            const float   rf  = static_cast<float>(r);
+            float rf2 = fmaf(rintf(rf * cInvModF[t]),
+                             static_cast<float>(cNegMod[t]), rf);
+            if(do_pass3)
+                rf2 = fmaf(rintf(rf2 * cInvModF[t]),
+                           static_cast<float>(cNegMod[t]), rf2);
+            A8i[t_local * stride + offset] = static_cast<int8_t>(static_cast<int32_t>(rf2));
         }
-        /* Write to local slice index t_local (A8i is reused per chunk). */
-        A8i[t_local * stride + offset] = static_cast<int8_t>(static_cast<int32_t>(rf2));
-    }
-}
 
-/**
- * oz2_scaleB_kernel
- * Grid: ((k+63)/64, (n+3)/4), Block: (64,4)
- * threadIdx.x covers k (j-index, fast) and threadIdx.y covers n (l-index, slow).
- * This makes B8i writes coalesced: all 64 threads in a wavefront share the same
- * column l and write to 64 consecutive k elements (one 64-byte cache line).
- * B input reads are also coalesced for transB=N (the common inner-GEMM case).
- *
- * Processes moduli [t_start, t_start+t_count) and writes to B8i[0..t_count-1].
- * B8i is reused across chunks so only chunk_size slices of storage are needed.
- */
-__global__ static void
-oz2_scaleB_kernel(const double* __restrict__ B,
-                  int64_t k, int64_t n, int64_t ldb, bool transB,
-                  int8_t*  __restrict__       B8i,
-                  size_t                      ldb8i,
-                  const int16_t* __restrict__ sftB,
-                  unsigned                    t_start,
-                  unsigned                    t_count,
-                  bool                        do_pass3)
-{
-    const int64_t j = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; /* k-index */
-    const int64_t l = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y; /* n-index */
-    if(j >= k || l >= n) return;
+    } else {
+        /* ── B scaling ─────────────────────────────────────────────────── */
+        const int64_t l = static_cast<int64_t>(blockIdx.y - m_y_blocks) * blockDim.y
+                        + threadIdx.y;
+        if(l >= n || j >= k) return;
 
-    const double val  = transB ? B[j * ldb + l] : B[l * ldb + j];
-    const int16_t sft = sftB[l];
-    const double ival = trunc(ldexp(val, static_cast<int>(sft)));
+        const double val  = transB ? B[j * ldb + l] : B[l * ldb + j];
+        const int16_t sft = sftB[l];
+        const double ival = trunc(ldexp(val, static_cast<int>(sft)));
 
-    const size_t stride = ldb8i * static_cast<size_t>(n);
-    const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(l) * ldb8i;
+        const size_t stride = ldb8i * static_cast<size_t>(n);
+        const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(l) * ldb8i;
 
-    for(unsigned t_local = 0; t_local < t_count; ++t_local) {
-        const unsigned t = t_start + t_local;
-        /* Pass 1 – double-precision FMA (same logic as oz2_scaleA_kernel). */
-        const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
-        /* Pass 2 – float-precision refinement. */
-        const float   rf  = static_cast<float>(r);
-        float rf2 = fmaf(rintf(rf * cInvModF[t]),
-                         static_cast<float>(cNegMod[t]), rf);
-        /* Pass 3 – second float correction for s≥19 (see oz2_scaleA_kernel). */
-        if(do_pass3) {
-            rf2 = fmaf(rintf(rf2 * cInvModF[t]),
-                       static_cast<float>(cNegMod[t]), rf2);
+        for(unsigned t_local = 0; t_local < t_count; ++t_local) {
+            const unsigned t = t_start + t_local;
+            const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
+            const float   rf  = static_cast<float>(r);
+            float rf2 = fmaf(rintf(rf * cInvModF[t]),
+                             static_cast<float>(cNegMod[t]), rf);
+            if(do_pass3)
+                rf2 = fmaf(rintf(rf2 * cInvModF[t]),
+                           static_cast<float>(cNegMod[t]), rf2);
+            B8i[t_local * stride + offset] = static_cast<int8_t>(static_cast<int32_t>(rf2));
         }
-        /* Write to local slice index t_local (B8i is reused per chunk). */
-        B8i[t_local * stride + offset] = static_cast<int8_t>(static_cast<int32_t>(rf2));
     }
 }
 
@@ -1434,13 +1383,13 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     const int32_t one_i  = 1;
     const int32_t zero_i = 0;
 
+    const unsigned m_blks = static_cast<unsigned>(m);
     _pstart();
-    hipLaunchKernelGGL(oz2_accu_prelim_A_kernel,
-                       dim3(static_cast<unsigned>(m)), dim3(256), 0, stream,
-                       A, m, k, lda, tA, A8i_high, lda8i, sftA, nan_flag);
-    hipLaunchKernelGGL(oz2_accu_prelim_B_kernel,
-                       dim3(static_cast<unsigned>(n)), dim3(256), 0, stream,
-                       B, k, n, ldb, tB, B8i_high, ldb8i, sftB, nan_flag);
+    hipLaunchKernelGGL(oz2_accu_prelim_AB_kernel,
+                       dim3(m_blks + static_cast<unsigned>(n)), dim3(256), 0, stream,
+                       A, m, k, lda, tA, A8i_high, lda8i, sftA,
+                       B, n, ldb, tB, B8i_high, ldb8i, sftB,
+                       nan_flag, m_blks);
     _pstop(_t_prelim);
 
     /* Inf/NaN check: use setting if not sentinel, else env var */
@@ -1473,42 +1422,31 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
 
     const float accu_log2P = h_accu_log2P_all[num_moduli - 2];
     _pstart();
-    hipLaunchKernelGGL(oz2_accu_refine_sftA_kernel,
-                       dim3(static_cast<unsigned>(m)), dim3(256), 0, stream,
-                       C32i, m, n, ldc32i, sftA, accu_log2P);
-    hipLaunchKernelGGL(oz2_accu_refine_sftB_kernel,
-                       dim3(static_cast<unsigned>(n)), dim3(256), 0, stream,
-                       C32i, m, n, ldc32i, sftB, accu_log2P);
+    hipLaunchKernelGGL(oz2_accu_refine_sftAB_kernel,
+                       dim3(m_blks + static_cast<unsigned>(n)), dim3(256), 0, stream,
+                       C32i, m, n, ldc32i, sftA, sftB, accu_log2P, m_blks);
     _pstop(_t_refine);
 
     /* Parts 1f + 2a-d: two-level loop — scale chunks (outer) × GEMM chunks (inner).
      *
      * Outer loop (scale chunks of size scale_chunk_size):
-     *   oz2_scaleA/B_kernel reads A and B ONCE and writes scale_chunk_size INT8
+     *   oz2_scaleAB_kernel reads A and B ONCE and writes scale_chunk_size INT8
      *   slices into A8i[0..actual_scale-1] / B8i[0..actual_scale-1].
      *
      * Inner loop (GEMM chunks of size chunk_size within one scale chunk):
      *   A strided-batch INT8 GEMM over chunk_size slices (A8i_gemm / B8i_gemm
      *   point into the pre-computed scale buffer at offset gemm_local).
-     *   One oz2_chunk_accum_kernel folds the results into Zhi/Zlo.
      *
-     * A and B are re-read ceil(num_moduli / scale_chunk_size) times instead of
-     * ceil(num_moduli / chunk_size) times.  For small/medium matrices
-     * scale_chunk_size == num_moduli, so A and B are read exactly once.
-     *
-     * Scale kernel block (64,4): threadIdx.x covers k (fast) → coalesced
-     * A8i/B8i writes.  Grid x → k-index, grid y → m-index (A) or n-index (B).
-     * This setup is constant across both loop levels.                        */
-    /* Scale kernel: block(64,4), threadIdx.x=k-index (fast) for all transpose
-     * orientations.  A8i/B8i writes are always coalesced.  For transA=N the
-     * FP64 reads from A have stride=lda (non-coalesced), but keeping INT8
-     * writes coalesced is the bandwidth-optimal trade-off at these sizes.
-     * High occupancy (no shared memory) hides the remaining HBM read latency. */
+     * Scale kernel: Block (64,4), threadIdx.x=k-index (fast) for both A and B.
+     * A8i/B8i writes are always coalesced.  For transA=N the FP64 reads from A
+     * have stride=lda (non-coalesced), but keeping INT8 writes coalesced is the
+     * bandwidth-optimal trade-off.  The A and B branches are fused into a single
+     * kernel dispatch using a combined y-dimension grid.                      */
     const dim3 blk_scale(64u, 4u);
-    const dim3 gA_scale(static_cast<unsigned>((k + 63) / 64),
-                        static_cast<unsigned>((m +  3) /  4));
-    const dim3 gB_scale(static_cast<unsigned>((k + 63) / 64),
-                        static_cast<unsigned>((n +  3) /  4));
+    const unsigned m_y_blks = static_cast<unsigned>((m + 3) / 4);
+    const unsigned n_y_blks = static_cast<unsigned>((n + 3) / 4);
+    const dim3 gAB_scale(static_cast<unsigned>((k + 63) / 64),
+                         m_y_blks + n_y_blks);
 
     const bool do_pass3 = (num_moduli >= 19u);
 
@@ -1575,12 +1513,10 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
          * When scale_chunk_size == num_moduli A and B are read once in total;
          * otherwise ceil(num_moduli / scale_chunk_size) reads of each.      */
         _pstart();
-        hipLaunchKernelGGL(oz2_scaleA_kernel, gA_scale, blk_scale, 0, stream,
-                           A, m, k, lda, tA, A8i, lda8i, cola8i, sftA,
-                           scale_start, actual_scale, do_pass3);
-        hipLaunchKernelGGL(oz2_scaleB_kernel, gB_scale, blk_scale, 0, stream,
-                           B, k, n, ldb, tB, B8i, ldb8i, sftB,
-                           scale_start, actual_scale, do_pass3);
+        hipLaunchKernelGGL(oz2_scaleAB_kernel, gAB_scale, blk_scale, 0, stream,
+                           A, m, lda, tA, A8i, lda8i, cola8i, sftA,
+                           B, n, ldb, tB, B8i, ldb8i, sftB,
+                           k, scale_start, actual_scale, do_pass3, m_y_blks);
         _pstop(_t_scale);
 
         /* Parts 2c-d: GEMM + accumulate for each GEMM chunk within this
