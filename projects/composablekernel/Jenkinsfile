@@ -1552,6 +1552,31 @@ pipeline {
                         cleanWs()
                     }
                 }
+                stage('Dispatcher Codegen Unit Tests') {
+                    agent{ label rocmnode("nogpu") }
+                    environment{
+                        setup_args = "NO_CK_BUILD"
+                        execute_cmd = """cd ../dispatcher/tests && \
+                                python3 -m unittest \
+                                test_autocorrect \
+                                test_codegen_common \
+                                test_depthwise_tile_math \
+                                test_dispatcher_common \
+                                test_fmha_codegen \
+                                test_fmha_parity \
+                                test_fmha_rules \
+                                test_grouped_conv_codegen \
+                                test_grouped_conv_utils \
+                                test_rules_coverage \
+                                test_tile_math \
+                                -v 2>&1"""
+                    }
+                    steps{
+                        deleteDir()
+                        buildHipClangJobAndReboot(setup_args:setup_args, setup_cmd: "", build_cmd: "", execute_cmd: execute_cmd)
+                        cleanWs()
+                    }
+                }
             }
         }
          stage("Run Downstream Tests")
