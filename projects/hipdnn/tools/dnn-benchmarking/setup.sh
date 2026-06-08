@@ -224,11 +224,6 @@ for root in roots:
                 and child.joinpath("lib/cmake/hip/hip-config.cmake").is_file()
             ):
                 continue
-            if not (
-                child.joinpath("lib/llvm/bin/clang").is_file()
-                and child.joinpath("lib/llvm/bin/clang++").is_file()
-            ):
-                continue
         else:
             print(f"ERROR: unknown ROCm wheel prefix kind: {kind}", file=sys.stderr)
             sys.exit(2)
@@ -382,23 +377,7 @@ detect_gpu_arch() {
     echo ""
 }
 
-torch_is_importable() {
-    python - <<'PY' >/dev/null 2>&1
-import torch  # noqa: F401
-PY
-}
-
-torch_is_rocm_wheel() {
-    python - <<'PY' >/dev/null 2>&1
-import sys
-try:
-    import torch
-except Exception:
-    sys.exit(1)
-sys.exit(0 if getattr(torch.version, "hip", None) else 1)
-PY
-}
-torch_mode_status() {
+get_torch_mode() {
     python - <<'PY'
 try:
     import torch
@@ -412,7 +391,7 @@ PY
 require_torch_mode() {
     local expected="$1"
     local status
-    status=$(torch_mode_status)
+    status=$(get_torch_mode)
     if [ "$status" != "$expected" ]; then
         echo "ERROR: --torch-mode $expected requested, but $VENV_DIR contains torch mode '$status'." >&2
         echo "Use a clean workspace or remove the existing virtual environment before changing torch modes." >&2
@@ -420,11 +399,8 @@ require_torch_mode() {
     fi
 }
 
-validate_installed_torch_mode() {
-    case "$TORCH_MODE" in
-        cpu) require_torch_mode cpu ;;
-        rocm) require_torch_mode rocm ;;
-    esac
+torch_mode_is() {
+    [ "$(get_torch_mode)" = "$1" ]
 }
 
 
@@ -447,7 +423,7 @@ install_torch() {
             return
             ;;
         existing)
-            if ! torch_is_importable; then
+            if torch_mode_is missing; then
                 echo "ERROR: --torch-mode existing requires torch to already be installed in $VENV_DIR." >&2
                 echo "Use --torch-mode rocm or --torch-mode cpu to install torch automatically." >&2
                 exit 1
@@ -457,14 +433,14 @@ install_torch() {
             ;;
         cpu)
             local index_url="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
-            if torch_is_importable; then
+            if ! torch_mode_is missing; then
                 require_torch_mode cpu
                 echo "Using existing CPU-only PyTorch in $VENV_DIR."
                 return
             fi
             echo "Installing CPU-only PyTorch from $index_url"
             pip install torch --index-url "$index_url"
-            validate_installed_torch_mode
+            require_torch_mode cpu
             ;;
         rocm)
             local index_url="$TORCH_INDEX_URL"
@@ -486,14 +462,14 @@ install_torch() {
                 echo "Detected GPU: $gpu_arch"
             fi
             RESOLVED_TORCH_INDEX_URL="$index_url"
-            if torch_is_importable; then
+            if torch_mode_is rocm; then
                 require_torch_mode rocm
                 echo "Using existing ROCm PyTorch in $VENV_DIR."
                 return
             fi
             echo "Installing ROCm PyTorch from $index_url"
             pip install --pre torch --index-url "$index_url"
-            validate_installed_torch_mode
+            require_torch_mode rocm
             ;;
     esac
 }
@@ -509,7 +485,7 @@ select_binding_prefix() {
             require_rocm_wheel_libraries_prefix
             ;;
         existing)
-            if torch_is_rocm_wheel; then
+            if torch_mode_is rocm; then
                 require_rocm_wheel_libraries_prefix
                 return
             fi
@@ -532,7 +508,7 @@ select_provider_toolchain_prefix() {
             ensure_rocm_wheel_devel_prefix "$RESOLVED_TORCH_INDEX_URL"
             ;;
         existing)
-            if torch_is_rocm_wheel; then
+            if torch_mode_is rocm; then
                 ensure_rocm_wheel_devel_prefix ""
                 return
             fi
@@ -544,54 +520,6 @@ select_provider_toolchain_prefix() {
     esac
 }
 
-maybe_install_amdsmi() {
-    local prefix="$1"
-    local amdsmi_dir="$prefix/share/amd_smi"
-    if ! python -c "import amdsmi" >/dev/null 2>&1; then
-        if [ -f "$amdsmi_dir/setup.py" ] || [ -f "$amdsmi_dir/pyproject.toml" ]; then
-            echo "Installing amdsmi Python bindings from $amdsmi_dir..."
-            if ! pip install "$amdsmi_dir"; then
-                echo "Warning: amdsmi install failed; GPU SMI snapshot will be disabled." >&2
-            fi
-        else
-            echo "Warning: amdsmi not found at $amdsmi_dir; GPU SMI snapshot will be disabled." >&2
-        fi
-    fi
-}
-
-cmake_is_new_enough() {
-    python - <<'PY'
-import re
-import subprocess
-import sys
-
-try:
-    proc = subprocess.run(
-        ["cmake", "--version"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-except FileNotFoundError:
-    sys.exit(1)
-
-match = re.search(r"cmake version (\d+)\.(\d+)\.(\d+)", proc.stdout)
-if not match:
-    sys.exit(1)
-
-version = tuple(int(part) for part in match.groups())
-sys.exit(0 if version >= (3, 25, 2) else 1)
-PY
-}
-
-ensure_cmake() {
-    if cmake_is_new_enough; then
-        return
-    fi
-
-    echo "Installing CMake >= 3.25.2 into the virtual environment..."
-    pip install "cmake>=3.25.2"
-}
 
 build_hipdnn() {
     local install_prefix="$1"
@@ -743,7 +671,6 @@ echo "Torch mode: $TORCH_MODE"
 # intentionally omits torch so pip never replaces the selected torch wheel.
 install_torch
 pip install -e "$SCRIPT_DIR"
-ensure_cmake
 
 # 3. Select the hipDNN/ROCm prefix used by Python bindings and provider builds.
 BINDING_PREFIX=$(select_binding_prefix)
@@ -759,7 +686,7 @@ if [ "$FORCE_BUILD" -eq 1 ]; then
     build_hipdnn "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
     BUILT_HIPDNN=1
 elif ! prefix_has_hipdnn "$BINDING_PREFIX"; then
-    if [ "$TORCH_MODE" = "rocm" ] || { [ "$TORCH_MODE" = "existing" ] && torch_is_rocm_wheel; }; then
+    if [ "$TORCH_MODE" = "rocm" ] || { [ "$TORCH_MODE" = "existing" ] && torch_mode_is rocm; }; then
         build_hipdnn "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
         BUILT_HIPDNN=1
     else
@@ -772,12 +699,8 @@ elif ! prefix_has_hipdnn "$BINDING_PREFIX"; then
     fi
 fi
 
-# 4. Install amdsmi Python bindings if present in the selected ROCm install.
-# amdsmi is not on PyPI — it ships under <prefix>/share/amd_smi/. The always-on
-# GPU snapshot in metrics/gpu_smi.py degrades gracefully if amdsmi is absent.
-maybe_install_amdsmi "$BINDING_PREFIX"
 
-# 5. Build/install provider plugins if the selected prefix does not already
+# 4. Build/install provider plugins if the selected prefix does not already
 # contain the specific plugin artifacts. This keeps the ROCm torch wheel flow
 # self-contained: torch supplies ROCm libraries, setup.sh adds local hipDNN and
 # provider artifacts when needed.
@@ -825,15 +748,6 @@ ROCM_PATH="$PROVIDER_TOOLCHAIN_PREFIX" \
     CMAKE_PREFIX_PATH="$PY_BINDING_CMAKE_PREFIX_PATH" \
     pip install -e "$HIPDNN_ROOT/python"
 
-# 7. Patch the ROCm PyTorch wheel's bundled libhipdnn_backend.so when the user
-# explicitly rebuilt hipDNN elsewhere. In normal ROCm torch mode BINDING_PREFIX
-# is the wheel package itself, so source and destination are identical/no-op.
-WHEEL_BACKEND=$(find "$VENV_DIR" -path '*/_rocm_sdk_libraries_*/lib/libhipdnn_backend.so' 2>/dev/null | head -1)
-SOURCE_BACKEND="$BINDING_PREFIX/lib/libhipdnn_backend.so"
-if [ -n "$WHEEL_BACKEND" ] && [ -f "$SOURCE_BACKEND" ] && [ "$WHEEL_BACKEND" != "$SOURCE_BACKEND" ]; then
-    echo "Patching PyTorch wheel's bundled libhipdnn_backend.so..."
-    cp "$SOURCE_BACKEND" "$WHEEL_BACKEND"
-fi
 
 echo ""
 echo "Setup complete. Activate the virtual environment with:"
