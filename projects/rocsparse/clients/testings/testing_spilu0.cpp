@@ -458,9 +458,9 @@ void host_bsrilu0(rocsparse_direction       dir,
 
                 if(boost_enable)
                 {
-                    diag = (boost_tol[0] >= std::abs(diag))
-                               ? host_assign_ilu0_boost_value(diag, boost_val[0])
-                               : diag;
+                    diag                             = (boost_tol[0] >= std::abs(diag))
+                                                           ? host_assign_ilu0_boost_value(diag, boost_val[0])
+                                                           : diag;
                     bsr_val[BSR_IND(j, bi, bi, dir)] = diag;
                 }
                 else
