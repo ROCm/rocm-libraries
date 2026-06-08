@@ -46,6 +46,9 @@ def run_pytorch_benchmark(
         reporter.print_pytorch_header(config, graph_name, device)
 
         try:
+            # PyTorch backend must be gated by PyTorch itself: CPU-only torch
+            # cannot execute these GPU benchmarks even if ROCm management tools
+            # can see a device.
             import torch
 
             if not torch.cuda.is_available():
