@@ -20,19 +20,19 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-"""Unit tests for the GPU-less ``--cpu-only`` switch (P0.5 prerequisite).
+"""Unit tests for the GPU-less ``--mock-gpu`` switch (P0.5 prerequisite).
 
 This file accumulates the T1-T12 rigor-gate suite from GPU-MOCK-PR.md. This commit
 covers the flag-plumbing tier:
 
 * T1 ``test_flag_default_off`` - the CLI flag parses correctly (absent->False,
-  present->True), the internal ``globalParameters["CpuOnly"]`` plumbing key resets to
+  present->True), the internal ``globalParameters["MockGpu"]`` plumbing key resets to
   ``False`` via ``restoreDefaultGlobalParameters()``, and the flag is NOT exposed on the
   documented ``--global-parameters`` surface.
 * T2 ``test_arg_validation`` - pins the behavior commit-2 establishes at the
-  common-arguments parser layer: ``--cpu-only`` parses without requiring an arch at parse
-  time (no premature SystemExit), yielding ``cpuOnly=True`` with ``gpuTargets`` still
-  ``None``. The ``--cpu-only`` *requires an arch* contract is enforced/pinned in the ISA
+  common-arguments parser layer: ``--mock-gpu`` parses without requiring an arch at parse
+  time (no premature SystemExit), yielding ``mockGpu=True`` with ``gpuTargets`` still
+  ``None``. The ``--mock-gpu`` *requires an arch* contract is enforced/pinned in the ISA
   commit (its own test), not here.
 
 GPU-less safety: every test monkeypatches ``builtins.input`` to raise so any accidental
@@ -58,7 +58,7 @@ def _no_stdin(monkeypatch):
     """Fail loudly on any unattended stdin read instead of hanging on a GPU-less host."""
 
     def _boom(*args, **kwargs):
-        raise AssertionError("builtins.input() called on the --cpu-only path")
+        raise AssertionError("builtins.input() called on the --mock-gpu path")
 
     monkeypatch.setattr("builtins.input", _boom)
 
@@ -74,44 +74,44 @@ def test_flag_default_off(monkeypatch):
     """T1: flag absent->False, present->True; internal plumbing key resets to False;
     flag is not on the --global-parameters surface."""
     args = _parse([])
-    assert args.cpuOnly is False
+    assert args.mockGpu is False
 
-    args = _parse(["--cpu-only"])
-    assert args.cpuOnly is True
+    args = _parse(["--mock-gpu"])
+    assert args.mockGpu is True
 
-    assert defaultGlobalParameters["CpuOnly"] is False
-    globalParameters["CpuOnly"] = True
+    assert defaultGlobalParameters["MockGpu"] is False
+    globalParameters["MockGpu"] = True
     restoreDefaultGlobalParameters()
     try:
-        assert globalParameters["CpuOnly"] is False
+        assert globalParameters["MockGpu"] is False
     finally:
         restoreDefaultGlobalParameters()
 
     argParser = argparse.ArgumentParser()
     Tensile.addCommonArguments(argParser)
     help_text = argParser.format_help()
-    assert "--cpu-only" in help_text
+    assert "--mock-gpu" in help_text
     gp_action = next(
         a for a in argParser._actions if "--global-parameters" in a.option_strings
     )
-    assert "CpuOnly" not in (gp_action.help or "")
-    assert "cpuOnly" not in (gp_action.help or "")
+    assert "MockGpu" not in (gp_action.help or "")
+    assert "mockGpu" not in (gp_action.help or "")
 
 
 def test_arg_validation():
-    """T2: --cpu-only without an arch parses cleanly at the common-arguments layer
-    (no premature SystemExit), yielding cpuOnly=True and gpuTargets unset.
+    """T2: --mock-gpu without an arch parses cleanly at the common-arguments layer
+    (no premature SystemExit), yielding mockGpu=True and gpuTargets unset.
 
-    The --cpu-only-requires-arch contract is enforced and pinned in the ISA commit; this
+    The --mock-gpu-requires-arch contract is enforced and pinned in the ISA commit; this
     test pins only what flag plumbing (commit 2) establishes: the flag is orthogonal to
     --gpu-targets at parse time.
     """
-    args = _parse(["--cpu-only"])
-    assert args.cpuOnly is True
+    args = _parse(["--mock-gpu"])
+    assert args.mockGpu is True
     assert not hasattr(args, "gpuTargets")
 
     args = _parse(["--device", "0"])
-    assert args.cpuOnly is False
+    assert args.mockGpu is False
 
 
 import Tensile.Common.Architectures as Arch
@@ -126,26 +126,26 @@ _ARCH_ISA = {
 
 @pytest.fixture
 def _restore_gp():
-    """Snapshot/restore the CpuOnly plumbing keys so a flipped flag never leaks."""
-    saved = (globalParameters.get("CpuOnly"), globalParameters.get("CpuOnlyArch"))
+    """Snapshot/restore the MockGpu plumbing keys so a flipped flag never leaks."""
+    saved = (globalParameters.get("MockGpu"), globalParameters.get("MockGpuArch"))
     try:
         yield
     finally:
-        globalParameters["CpuOnly"], globalParameters["CpuOnlyArch"] = saved
+        globalParameters["MockGpu"], globalParameters["MockGpuArch"] = saved
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx90a"])
 def test_isa_belt_spoof(monkeypatch, _restore_gp, arch):
-    """T3: with CpuOnly on, the direct ISA-detection path returns the exact per-arch
-    IsaVersion without shelling out (Architectures.run raises if called); with CpuOnly
+    """T3: with MockGpu on, the direct ISA-detection path returns the exact per-arch
+    IsaVersion without shelling out (Architectures.run raises if called); with MockGpu
     off, the real parse path is taken (spoof branch not entered)."""
     expected = _ARCH_ISA[arch]
 
-    globalParameters["CpuOnly"] = True
-    globalParameters["CpuOnlyArch"] = arch
+    globalParameters["MockGpu"] = True
+    globalParameters["MockGpuArch"] = arch
 
     def _no_shell(*a, **k):
-        raise AssertionError("Architectures.run() shelled out under CpuOnly")
+        raise AssertionError("Architectures.run() shelled out under MockGpu")
 
     monkeypatch.setattr(Arch, "run", _no_shell)
 
@@ -153,7 +153,7 @@ def test_isa_belt_spoof(monkeypatch, _restore_gp, arch):
     assert isinstance(result, IsaVersion)
     assert result == expected
 
-    globalParameters["CpuOnly"] = False
+    globalParameters["MockGpu"] = False
 
     class _FakeProc:
         returncode = 0
@@ -173,7 +173,7 @@ def test_isa_belt_spoof(monkeypatch, _restore_gp, arch):
 
 
 def test_isa_primary_path(monkeypatch, _restore_gp):
-    """T4: the primary --cpu-only --gpu-targets path builds isaList directly from the
+    """T4: the primary --mock-gpu --gpu-targets path builds isaList directly from the
     target arch and never calls detectGlobalCurrentISA."""
 
     def _no_detect(*a, **k):
@@ -181,8 +181,8 @@ def test_isa_primary_path(monkeypatch, _restore_gp):
 
     monkeypatch.setattr(Arch, "detectGlobalCurrentISA", _no_detect)
 
-    args = _parse(["--cpu-only", "--device", "0"])
-    assert args.cpuOnly is True
+    args = _parse(["--mock-gpu", "--device", "0"])
+    assert args.mockGpu is True
 
     gpuTargets = "gfx942"
     enumerator = None if gpuTargets else object()
@@ -204,9 +204,9 @@ def _run_freq_block(device_id=0):
 
     The gating predicate mirrors Tensile.py:601 verbatim:
         'LibraryLogic' in config and UseEffLike and not buildOnly
-        and not globalParameters["CpuOnly"]
+        and not globalParameters["MockGpu"]
     The 'LibraryLogic'/UseEffLike/buildOnly preconditions are held True/True/False so
-    the test isolates the CpuOnly term: the body must run iff CpuOnly is off. The body
+    the test isolates the MockGpu term: the body must run iff MockGpu is off. The body
     calls the real module-level seam functions (spied by the test) in the same order as
     the source, so a spy on Tensile.get_gpu_max_frequency et al. observes the real calls.
     """
@@ -217,7 +217,7 @@ def _run_freq_block(device_id=0):
         "LibraryLogic" in config
         and UseEffLike
         and not buildOnly
-        and not globalParameters["CpuOnly"]
+        and not globalParameters["MockGpu"]
     ):
         max_frequency = Tensile.get_gpu_max_frequency(device_id)
         if not max_frequency or max_frequency <= 0:
@@ -231,34 +231,34 @@ def _run_freq_block(device_id=0):
 
 
 def test_frequency_probe_skipped(monkeypatch, _restore_gp):
-    """T5: with CpuOnly on, none of the three GPU clock-frequency probes
+    """T5: with MockGpu on, none of the three GPU clock-frequency probes
     (get_gpu_max_frequency / get_gpu_max_frequency_smi / get_user_max_frequency) are
-    reached; with CpuOnly off, the real branch runs and get_gpu_max_frequency IS called.
+    reached; with MockGpu off, the real branch runs and get_gpu_max_frequency IS called.
     """
     calls = {"hip": 0, "smi": 0, "user": 0}
 
     def _hip(*a, **k):
         calls["hip"] += 1
-        raise AssertionError("get_gpu_max_frequency called under CpuOnly")
+        raise AssertionError("get_gpu_max_frequency called under MockGpu")
 
     def _smi(*a, **k):
         calls["smi"] += 1
-        raise AssertionError("get_gpu_max_frequency_smi called under CpuOnly")
+        raise AssertionError("get_gpu_max_frequency_smi called under MockGpu")
 
     def _user(*a, **k):
         calls["user"] += 1
-        raise AssertionError("get_user_max_frequency called under CpuOnly")
+        raise AssertionError("get_user_max_frequency called under MockGpu")
 
     monkeypatch.setattr(Tensile, "get_gpu_max_frequency", _hip)
     monkeypatch.setattr(Tensile, "get_gpu_max_frequency_smi", _smi)
     monkeypatch.setattr(Tensile, "get_user_max_frequency", _user)
 
-    globalParameters["CpuOnly"] = True
+    globalParameters["MockGpu"] = True
     ran = _run_freq_block()
     assert ran is False
     assert calls == {"hip": 0, "smi": 0, "user": 0}
 
-    globalParameters["CpuOnly"] = False
+    globalParameters["MockGpu"] = False
     seen = {"hip": 0}
 
     def _hip_ok(device_id):
@@ -292,21 +292,21 @@ class _ProblemSizesStub:
 
 
 def test_no_side_effects(monkeypatch, _restore_gp, tmp_path):
-    """T6: on the --cpu-only runClient path, the device boundary is never touched:
+    """T6: on the --mock-gpu runClient path, the device boundary is never touched:
     no subprocess.Popen launch, no getClientExecutablePath, no subprocess.run
     (pip/hip install), and builtins.input is never read. runClient returns 0."""
-    globalParameters["CpuOnly"] = True
+    globalParameters["MockGpu"] = True
 
     def _no_popen(*a, **k):
-        raise AssertionError("subprocess.Popen launched the client under CpuOnly")
+        raise AssertionError("subprocess.Popen launched the client under MockGpu")
 
     def _no_run(*a, **k):
         raise AssertionError(
-            "subprocess.run shelled out (pip/hip install) under CpuOnly"
+            "subprocess.run shelled out (pip/hip install) under MockGpu"
         )
 
     def _no_exe(*a, **k):
-        raise AssertionError("getClientExecutablePath called under CpuOnly")
+        raise AssertionError("getClientExecutablePath called under MockGpu")
 
     monkeypatch.setattr(subprocess, "Popen", _no_popen)
     monkeypatch.setattr(subprocess, "run", _no_run)
@@ -346,7 +346,7 @@ def test_synthetic_csv_schema(tmp_path, arch, monkeypatch):
     """
     from Tensile.LibraryLogic import LogicAnalyzer
 
-    GFLOPS = BenchmarkProblems._CPU_ONLY_SYNTHETIC_GFLOPS
+    GFLOPS = BenchmarkProblems._MOCK_GPU_SYNTHETIC_GFLOPS
     resultsFileName = str(tmp_path / "results.csv")
     problemSizes = _ProblemSizesStub(_SEED_SIZES)
     numSolutions = 1
@@ -404,13 +404,13 @@ def test_determinism(tmp_path):
     assert Path(f1).read_bytes() == Path(f2).read_bytes()
 
 
-_E2E_CONFIG = Path(__file__).parent / "test_data" / "cpu_only.yaml"
+_E2E_CONFIG = Path(__file__).parent / "test_data" / "mock_gpu.yaml"
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx90a"])
-def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, arch):
+def test_mock_gpu_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, arch):
     """T9: drive the full benchmark flow GPU-less via
-    Tensile.Tensile([cfg, out, "--cpu-only", "--gpu-targets", arch, *tensile_args]).
+    Tensile.Tensile([cfg, out, "--mock-gpu", "--gpu-targets", arch, *tensile_args]).
 
     Mirrors test_keep_build_tmp.py, but exercises the BENCHMARK path (no --build-only):
     codegen -> cross-compile -> stubbed client launch -> deterministic synthetic results
@@ -423,7 +423,7 @@ def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, a
     (LibraryIO.py:686), which probes rocminfo unless the documented ``CU`` env-var
     escape hatch is set. We set CU here (the code's own GPU-less escape) rather than
     touch out-of-scope LibraryIO source. This is a separate device probe from the three
-    seams the --cpu-only switch owns (ISA detect / frequency probe / client launch).
+    seams the --mock-gpu switch owns (ISA detect / frequency probe / client launch).
     """
     monkeypatch.setenv("CU", "304")
 
@@ -431,7 +431,7 @@ def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, a
     args = [
         str(_E2E_CONFIG),
         str(output_dir),
-        "--cpu-only",
+        "--mock-gpu",
         "--gpu-targets",
         arch,
         *tensile_args,
@@ -490,7 +490,7 @@ def _make_problem_type():
 
 
 def test_off_path_text_golden(tmp_path, monkeypatch, _restore_gp):
-    """T10: with CpuOnly OFF, writeRunScript() and writeClientConfigIni() produce text
+    """T10: with MockGpu OFF, writeRunScript() and writeClientConfigIni() produce text
     byte-identical to the goldens captured from develop in commit 1. These functions are
     CPU-only (no device/freq/detect), so the golden is capturable and reproducible
     GPU-less. This is the literal 'byte-identical when off' proof for the touched output.
@@ -502,7 +502,7 @@ def test_off_path_text_golden(tmp_path, monkeypatch, _restore_gp):
     from Tensile.SolutionStructs.Problem import ProblemSizesMockDummy
 
     restoreDefaultGlobalParameters()
-    globalParameters["CpuOnly"] = False
+    globalParameters["MockGpu"] = False
 
     monkeypatch.setattr(
         ClientWriter, "getClientExecutablePath", lambda: "/TENSILE_CLIENT_EXE"
@@ -523,7 +523,7 @@ def test_off_path_text_golden(tmp_path, monkeypatch, _restore_gp):
         configPaths=list(config_paths),
     )
     produced_sh = Path(run_script).read_text()
-    golden_sh = (_TEST_DATA / "cpu_only_runscript.golden.sh").read_text()
+    golden_sh = (_TEST_DATA / "mock_gpu_runscript.golden.sh").read_text()
     assert (
         produced_sh == golden_sh
     ), "writeRunScript output drifted from the develop golden"
@@ -551,19 +551,19 @@ def test_off_path_text_golden(tmp_path, monkeypatch, _restore_gp):
         libraryFile="/LIB/gfx942/TensileLibrary.dat",
     )
     produced_ini = params_path.read_text().replace(str(source_dir), "/SRC")
-    golden_ini = (_TEST_DATA / "cpu_only_clientconfig.golden.ini").read_text()
+    golden_ini = (_TEST_DATA / "mock_gpu_clientconfig.golden.ini").read_text()
     assert (
         produced_ini == golden_ini
     ), "writeClientConfigIni output drifted from the develop golden"
 
 
 def test_off_path_real_branches(monkeypatch, _restore_gp):
-    """T11: with CpuOnly OFF, the new switch code is inert -- the REAL device-bound
+    """T11: with MockGpu OFF, the new switch code is inert -- the REAL device-bound
     branches are taken at each of the three seams (ISA detection, frequency probe, client
     launch). Proves the gates added by this PR fall through to the original code paths
     when the switch is off.
     """
-    globalParameters["CpuOnly"] = False
+    globalParameters["MockGpu"] = False
 
     class _FakeProc:
         returncode = 0
@@ -577,7 +577,7 @@ def test_off_path_real_branches(monkeypatch, _restore_gp):
 
     monkeypatch.setattr(Arch, "run", _fake_run)
     isa = Arch.detectGlobalCurrentISA(0, "amdgpu-arch")
-    assert isa_calls["n"] == 1, "CpuOnly OFF must reach the real ISA shell-out path"
+    assert isa_calls["n"] == 1, "MockGpu OFF must reach the real ISA shell-out path"
     assert isa == IsaVersion(9, 4, 2)
 
     freq_calls = {"hip": 0}
@@ -588,10 +588,10 @@ def test_off_path_real_branches(monkeypatch, _restore_gp):
 
     monkeypatch.setattr(Tensile, "get_gpu_max_frequency", _hip_ok)
     ran = _run_freq_block()
-    assert ran is True, "CpuOnly OFF must enter the real frequency-probe block"
+    assert ran is True, "MockGpu OFF must enter the real frequency-probe block"
     assert (
         freq_calls["hip"] == 1
-    ), "CpuOnly OFF must call the real get_gpu_max_frequency"
+    ), "MockGpu OFF must call the real get_gpu_max_frequency"
 
     reached = {"writeRunScript": 0}
 
@@ -617,4 +617,4 @@ def test_off_path_real_branches(monkeypatch, _restore_gp):
         )
     assert (
         reached["writeRunScript"] == 1
-    ), "CpuOnly OFF must fall through the runClient stub to the real launch path"
+    ), "MockGpu OFF must fall through the runClient stub to the real launch path"

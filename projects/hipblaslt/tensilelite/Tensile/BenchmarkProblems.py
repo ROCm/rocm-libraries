@@ -70,12 +70,12 @@ _CACHE_FIELDS = {
     "CustomKernelWildcard": "customKernelWildcard",
 }
 
-_CPU_ONLY_SYNTHETIC_GFLOPS = 1000.0
+_MOCK_GPU_SYNTHETIC_GFLOPS = 1000.0
 
 
 def _writeSyntheticResultsCSV(resultsFileName, problemSizes, gfxName, numSolutions):
     """Write a deterministic synthetic results CSV in the schema LibraryLogic.addFromCSV
-    consumes, for the GPU-less --cpu-only path.
+    consumes, for the GPU-less --mock-gpu path.
 
     The real client writes one CSV row per benchmarked problem size; column 0 is the perf
     unit header ("GFlops"), the next ``numIndices`` columns are the problem-size indices,
@@ -83,7 +83,7 @@ def _writeSyntheticResultsCSV(resultsFileName, problemSizes, gfxName, numSolutio
     that layout (data-stub style of ProblemSizesMock in SolutionStructs/Problem.py): the
     first data-row column repeats the gfx arch name (matching the captured real-CSV
     fixtures), the size columns come straight from ``problemSizes.problems[*].sizes``, and
-    every solution cell is the fixed ``_CPU_ONLY_SYNTHETIC_GFLOPS`` so the file is
+    every solution cell is the fixed ``_MOCK_GPU_SYNTHETIC_GFLOPS`` so the file is
     deterministic / byte-identical across runs.
     """
     problems = list(problemSizes.problems)
@@ -98,7 +98,7 @@ def _writeSyntheticResultsCSV(resultsFileName, problemSizes, gfxName, numSolutio
     for problem in problems:
         row = [gfxName]
         row += [str(int(s)) for s in problem.sizes]
-        row += [repr(_CPU_ONLY_SYNTHETIC_GFLOPS)] * numSolutions
+        row += [repr(_MOCK_GPU_SYNTHETIC_GFLOPS)] * numSolutions
         lines.append(",".join(row))
 
     with open(resultsFileName, "w", newline="") as f:
@@ -683,7 +683,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                 configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
             returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
 
-            if globalParameters["CpuOnly"]:
+            if globalParameters["MockGpu"]:
                 numSolutions = len(solutions) if solutions else 1
                 _writeSyntheticResultsCSV(resultsFileName, benchmarkStep.problemSizes,
                                           gfxName, numSolutions)

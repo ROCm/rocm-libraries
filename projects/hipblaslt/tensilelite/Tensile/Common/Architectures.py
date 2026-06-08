@@ -242,10 +242,10 @@ def _detectGlobalCurrentISA(detectionTool, deviceId: int):
     Returns returncode if detection failure
     """
     from .GlobalParameters import globalParameters
-    if globalParameters.get("CpuOnly"):
-        isa = gfxToIsa(globalParameters.get("CpuOnlyArch", "gfx942"))
+    if globalParameters.get("MockGpu"):
+        isa = gfxToIsa(globalParameters.get("MockGpuArch", "gfx942"))
         if isa is not None:
-            print(f"# CpuOnly: spoofing GPU {deviceId} ISA as " + isaToGfx(isa))
+            print(f"# MockGpu: spoofing GPU {deviceId} ISA as " + isaToGfx(isa))
             return isa
     process = run([detectionTool], stdout=PIPE)
     archList = []

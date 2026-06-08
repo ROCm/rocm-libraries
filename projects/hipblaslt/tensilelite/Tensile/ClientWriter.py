@@ -252,8 +252,8 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
     if numGpus > 1 and forBenchmark:
       return runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientExecutablePath)
 
-    if globalParameters["CpuOnly"]:
-      print1("# CpuOnly: skipping device-bound client launch; returning returncode 0.")
+    if globalParameters["MockGpu"]:
+      print1("# MockGpu: skipping device-bound client launch; returning returncode 0.")
       return 0
 
     # Original single-GPU path

@@ -362,9 +362,9 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
-globalParameters["CpuOnly"] = False
+globalParameters["MockGpu"] = False
 
-globalParameters["CpuOnlyArch"] = "gfx942"
+globalParameters["MockGpuArch"] = "gfx942"
 
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
