@@ -1,0 +1,10 @@
+[CONV_HEURISTIC] HandleCreate
+[CONV_HEURISTIC] PolicyDescriptorCreate
+[CONV_HEURISTIC] HandleSetDeviceProperties size=80
+[CONV_HEURISTIC] PolicySetEngineIds count=1
+[CONV_HEURISTIC]   candidate engine_id[0] = -3
+[CONV_HEURISTIC] PolicySetSerializedGraph size=656
+[CONV_HEURISTIC] regime=GEMM_CONV N=4 C=4 H=4 W=4 K=4 filterC=4 R=1 S=1 stride=1x1 pad=0x0 dtype=FLOAT
+[CONV_HEURISTIC] PolicyDescriptorDestroy
+[CONV_HEURISTIC] HandleDestroy
+=== conv engine ID probe complete ===
