@@ -11,6 +11,7 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/core/utility/bit_cast.hpp"
 #include "ck_tile/host/host_tensor.hpp"
+#include "ck_tile/ops/fmha/block/block_masking.hpp"
 
 namespace ck_tile {
 
@@ -50,10 +51,18 @@ void reference_blocked_attention(
 
     const index_t qk_head_ratio = (nhead_k > 0) ? (nhead_q / nhead_k) : index_t{1};
 
-    const index_t causal_delta = (causal_type == 2) ? (seqlen_k - seqlen_q) : index_t{0};
-
-    const bool has_left_bound  = (window_left >= 0);
-    const bool has_right_bound = (window_right >= 0);
+    // Use the same masking semantics as the device-side FMHA. The kernel builds its
+    // mask via make_generic_attention_mask_from_lr_window(window_left, window_right,
+    // seqlen_q, seqlen_k, is_top_left) and masks a (row=sq, col=sk) pixel whenever
+    // IsOutOfBound(sq, sk) returns true. We mirror that here exactly so the host
+    // reference and the device kernel share one masking definition.
+    //   causal_type: 0 = no mask, 1 = top-left, 2 = bottom-right.
+    const bool has_mask    = (causal_type != 0) || (window_left >= 0) || (window_right >= 0);
+    const bool is_top_left = (causal_type != 2); // bottom-right only for causal_type==2
+    // Only meaningful when has_mask; built identically to the device kernel.
+    const auto mask =
+        make_generic_attention_mask_from_lr_window<SimplifiedGenericAttentionMask<true>>(
+            window_left, window_right, seqlen_q, seqlen_k, is_top_left);
 
     const bool has_soft_cap = (logits_soft_cap > AccT{0});
     const bool has_bias     = (bias != nullptr);
@@ -105,18 +114,9 @@ void reference_blocked_attention(
 
                         for(index_t sk = k_start; sk < k_end; ++sk)
                         {
-                            bool masked = false;
-                            if(has_right_bound &&
-                               sk > sq + causal_delta + static_cast<index_t>(window_right))
-                            {
-                                masked = true;
-                            }
-                            if(has_left_bound &&
-                               sk < sq + causal_delta - static_cast<index_t>(window_left))
-                            {
-                                masked = true;
-                            }
-                            if(masked)
+                            // Same masking definition as the device FMHA kernel:
+                            // IsOutOfBound(row=sq, col=sk) == true -> mask to -inf.
+                            if(has_mask && mask.IsOutOfBound(sq, sk))
                             {
                                 scores.push_back(-std::numeric_limits<AccT>::infinity());
                                 continue;
