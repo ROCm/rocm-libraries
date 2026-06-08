@@ -17,6 +17,7 @@ Organized by pass:
 import pytest
 from Tensile.Components.Subtile.Kernel import (
     TileInfo, AB_B8, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
+    initVgprTilesToZero,
 )
 from Tensile.Components.Subtile.LogicalScheduler import (
     LogicalScheduler,
@@ -55,6 +56,8 @@ def _mock_dtype(num_bytes=2):
     # Treat the default 2-byte mock as BF16 (only consumer is the Subtile tail
     # mask path, which dispatches on isBFloat16); 0.5-byte (fp4) returns False.
     mock.isBFloat16.return_value = (num_bytes == 2)
+    # 0.5-byte mocks model FP4; needed by the accumulator VGPR-first gating.
+    mock.isFloat4.return_value = (num_bytes == 0.5)
     return mock
 
 
@@ -2073,6 +2076,28 @@ class TestGetNumVgpr:
 
         assert vgpr_1x1 >= vgpr_1x2
         assert vgpr_1x2 >= vgpr_1x4
+
+
+def test_large_fp4_accumulators_spill_to_agpr_with_vgpr_headroom():
+    kernel = create_kernel(320, 192, fp4=True)
+    writer, _, _, _, _, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+    vgpr_tiles = [tile for tile in dTileInfo.vgprTiles if tile.regList.is_vgpr]
+    agpr_tiles = [tile for tile in dTileInfo.vgprTiles if not tile.regList.is_vgpr]
+
+    assert vgpr_tiles
+    assert agpr_tiles
+    assert writer.vgprPool.size() < writer.states.regCaps["MaxVgpr"]
+
+
+def test_mixed_fp4_d_init_zeros_vgpr_and_agpr_accumulators():
+    kernel = create_kernel(320, 192, fp4=True)
+    writer, _, _, _, _, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+    asm = str(initVgprTilesToZero(writer, kernel, dTileInfo))
+
+    assert "v_mfma_i32_32x32x16_i8 v[" in asm
+    assert "v_mfma_i32_32x32x16_i8 acc[" in asm
 
 
 # ══════════════════════════════════════════════════════════════

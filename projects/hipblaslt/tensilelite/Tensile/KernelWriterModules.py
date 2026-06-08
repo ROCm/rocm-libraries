@@ -212,7 +212,7 @@ def accVgprImagNumOffset(kernel):
 # MapAcctoArch
 # function to map MFMA Acc  Registers to Arch VGPR register
 ##############################################################################
-def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, spilledVgprBase=None):
+def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, spilledVgprBase=None, accRegMap=None):
   acc2arch, _ = accToArchMapper(kernel)
 
   complexMultiplier = 2 if kernel["ProblemType"]["DataType"].isComplex() else 1
@@ -224,6 +224,21 @@ def mapAcctoArchRegs(kernel, maxAgpr=256, write=False, spilledVgprBase=None):
         destIdx = (acc2arch[i]*complexMultiplier + cm) * kernel["MIRegPerOut"] + r
         srcIdx = ((i * kernel["MIRegPerOut"] + r) + (cm*accImOffset))
         if not kernel["MIArchVgpr"]:
+          accLocation = accRegMap.get(srcIdx) if accRegMap is not None else None
+          if accLocation is not None:
+            isVgpr, regIdx = accLocation
+            accStr = vgpr(regIdx) if isVgpr else accvgpr(regIdx)
+            if write:
+              copyInst = VMovB32 if isVgpr else VAccvgprWriteB32
+              itemList[destIdx] = copyInst(dst=accStr,
+                                           src=vgpr(Holder(name="ValuC")),
+                                           comment="copy vreg[%u] to MI out reg" % destIdx)
+            else:
+              copyInst = VMovB32 if isVgpr else VAccvgprReadB32
+              itemList[destIdx] = copyInst(dst=vgpr(Holder(name="ValuC")),
+                                           src=accStr,
+                                           comment="copy MI out reg to vreg[%u]" % destIdx)
+            continue
           def gprfunc(idx):
             if idx >= maxAgpr:
               return vgpr(idx-maxAgpr)

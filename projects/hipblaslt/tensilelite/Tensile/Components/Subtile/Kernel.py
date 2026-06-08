@@ -684,8 +684,35 @@ class TileInfo:
     isDTile = isinstance(self.geometry, CDTileGeometry)
     maxAgpr = writer.states.regCaps["PhysicalMaxVgpr"] - writer.states.regCaps["MaxVgpr"] if isDTile else 0
 
+    # MXF4 (FP4 on both operands): prefer VGPR for the accumulator tiles and
+    # only spill to AGPR once the VGPR budget is exhausted. Other MX-scaled
+    # kernels keep the AGPR-first behavior below.
+    maxVgpr = writer.states.regCaps["MaxVgpr"]
+    dataTypeA = kernel["ProblemType"].get("DataTypeA", None)
+    dataTypeB = kernel["ProblemType"].get("DataTypeB", None)
+    preferVgpr = isDTile \
+        and dataTypeA is not None and dataTypeA.isFloat4() \
+        and dataTypeB is not None and dataTypeB.isFloat4()
+
+    # Large FP4 subtile tiles can exceed the VGPR accumulator budget.  Do not
+    # fill VGPRs to the architectural cap before spilling to AGPRs; the subtile
+    # main loop and post-loop store path still need transient VGPRs. PGR=2 uses
+    # additional scheduler temporaries, so reserve more headroom there.
+    if preferVgpr:
+      pgrReserve = 12 if int(kernel.get("PrefetchGlobalRead", 0)) == 2 else 0
+      vgprReserve = numDword * (int(self.localMMATileGrid[0]) + int(self.localMMATileGrid[1]) + 8 + pgrReserve)
+      vgprAccLimit = max(0, maxVgpr - vgprReserve)
+    else:
+      vgprAccLimit = maxVgpr
+
     for i in range(numMMATiles):
-      if isDTile and writer.agprPool.size() < maxAgpr:
+      if preferVgpr and writer.vgprPool.size() + numDword <= vgprAccLimit:
+        pool = writer.vgprPool
+        regType = RegisterType.Vgpr
+      elif preferVgpr and writer.agprPool.size() + numDword <= maxAgpr:
+        pool = writer.agprPool
+        regType = RegisterType.Accvgpr
+      elif isDTile and writer.agprPool.size() + numDword <= maxAgpr:
         pool = writer.agprPool
         regType = RegisterType.Accvgpr
       else:

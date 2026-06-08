@@ -8131,25 +8131,28 @@ class KernelWriterAssembly(KernelWriter):
       #instCycles = kernel["MatrixInstM"] // 2 # 32x32 is 64 cycles, 16x16 is 32 cycles, 4x4 is 8 cycles
       #module.add(SNop(waitState=instCycles))
       module.addComment1("Mapping of Acc register -> C Vgpr register")
-      # For subtile kernels with mixed agpr/vgpr accumulators the spilled
-      # D-tile values live in arch vgprs allocated from the pool (not at
-      # ValuC+N). Determine their base vgpr so mapAcctoArchRegs can address
-      # them correctly.
+      # Subtile D-tile accumulators may use VGPRs before AGPRs, so map each
+      # logical MFMA accumulator register to its actual pool/index.
       spilledVgprBase = None
+      accRegMap = None
       if kernel.get("UseSubtileImpl"):
-        # For subtile kernels, D-tile accumulators that overflow the accvgpr
-        # pool are placed in arch vgprs allocated from the vgpr pool.
-        # mapAcctoArchRegs needs to know the base address of those vgprs so it
-        # can emit correct moves instead of referencing "ValuC+N" (which points
-        # to the wrong location in the subtile allocation scheme).
+        accRegMap = {}
+        accIdx = 0
         for vtile in self.states.d.tileInfo.vgprTiles:
-          if vtile.regList.is_vgpr:
+          isVgpr = vtile.regList.is_vgpr
+          if isVgpr and spilledVgprBase is None:
             spilledVgprBase = vtile.regList.indices[0]
-            break
-      self.codes.accVgprRead = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=False, spilledVgprBase=spilledVgprBase)
+          for regIdx in vtile.regList.indices:
+            accRegMap[accIdx] = (isVgpr, regIdx)
+            accIdx += 1
+      self.codes.accVgprRead = mapAcctoArchRegs(
+          kernel, self.states.maxLimitAgprs, write=False,
+          spilledVgprBase=spilledVgprBase, accRegMap=accRegMap)
       if (kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0) or \
          ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
-        self.codes.accVgprWrite = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=True, spilledVgprBase=spilledVgprBase)  # same spilledVgprBase
+        self.codes.accVgprWrite = mapAcctoArchRegs(
+            kernel, self.states.maxLimitAgprs, write=True,
+            spilledVgprBase=spilledVgprBase, accRegMap=accRegMap)
       if kernel["MIArchVgpr"]:
         module.addComment1("Multiply MI out register with Alpha -> C Vgpr register")
         self.codes.mulAlphaMultipleBuffer = moveMIoutToArch(kernel, self.states.startVgprAlphaTmp)
