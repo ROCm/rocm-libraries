@@ -10,9 +10,8 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-find_package(Python 3.9
-    REQUIRED COMPONENTS Interpreter Development.Module
-    OPTIONAL_COMPONENTS Development.SABIModule)
+find_package(Python 3.12
+    REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 
 if(DEFINED SKBUILD)
     if(DEFINED ENV{ROCM_PATH})
