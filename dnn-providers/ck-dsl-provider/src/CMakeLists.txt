@@ -12,7 +12,9 @@ add_library(
     CkDslHandle.cpp
     CkDslPluginPublic.cpp
     adapters/conv_implicit_gemm/ConvImplicitGemmAdapter.cpp
+    adapters/conv_implicit_gemm/ConvImplicitGemmCandidateSelector.cpp
     adapters/conv_implicit_gemm/ConvImplicitGemmPayload.cpp
+    adapters/conv_implicit_gemm/ConvImplicitGemmScorer.cpp
     adapters/sdpa/SdpaAdapter.cpp
     adapters/sdpa/SdpaCandidateSelector.cpp
     adapters/sdpa/SdpaScorer.cpp

@@ -133,6 +133,12 @@ TEST(TestConvImplicitGemmAdapter, BuildSpecForExampleShape) {
     EXPECT_EQ(spec.problem.dH, 1);
     EXPECT_EQ(spec.problem.dW, 1);
 
+    // Tensor dtype, surfaced from the validated X/W/Y attributes.
+    // The adapter only accepts HALF today; this pins the enum->string
+    // mapping so a future widening must update the test alongside
+    // dtypeToSpecString.
+    EXPECT_EQ(spec.dtype, "fp16");
+
     // Derived geometry (cross-check the helpers match the example
     // shape's expected output dims).
     EXPECT_EQ(spec.problem.Ho(), 56);

@@ -18,7 +18,10 @@
 #include <utility>
 
 #include "../../adapters/conv_implicit_gemm/ConvImplicitGemmAdapter.hpp"
+#include "../../adapters/conv_implicit_gemm/ConvImplicitGemmCandidateSelector.hpp"
 #include "../../adapters/conv_implicit_gemm/ConvImplicitGemmPayload.hpp"
+#include "../../adapters/conv_implicit_gemm/ConvImplicitGemmPerfKnobs.hpp"
+#include "../../adapters/conv_implicit_gemm/ConvImplicitGemmScorer.hpp"
 #include "../../adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
 #include "../../graph/GraphSignature.hpp"
 #include "../../python/CompileServiceBridge.hpp"
@@ -195,6 +198,102 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
     }
     const std::string arch = *detectedArch;
 
+    // --- Scorer-driven perf-knob selection ---------------------------
+    // Run BEFORE computeForSpec and the loader: both read spec, and the
+    // chosen knobs are folded into the cache key. Mutating spec here
+    // keeps the key and the loader's payload in lock-step.
+    //
+    // The adapter today validates fp16-only (DSL build_implicit_gemm_conv
+    // emits f16 atoms/loads/stores end-to-end), and the only trained
+    // model is bf16/gfx950. The two never overlap on this branch, so
+    // selectPerfKnobs short-circuits to the analytic fallback for every
+    // graph that reaches here. Wiring it anyway pins the spec into the
+    // trained-table envelope (vs. the bare dataclass defaults) and means
+    // the scoring path is in place the moment dtype widening lands.
+    const ConvSelectionProblem selProblem = buildSelectionProblem(spec, spec.dtype);
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(selProblem);
+    if (candidates.empty()) {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "ConvImplicitGemmPlanBuilder::buildPlan: no buildable implicit-GEMM kernel "
+            "configuration for this problem (N=" +
+                std::to_string(spec.problem.N) + ", C=" + std::to_string(spec.problem.C) +
+                ", K=" + std::to_string(spec.problem.K) + "); the applicability gate should "
+                "have rejected it earlier");
+    }
+
+    // Process-wide scorer: the conv LightGBM model is ~46 MB; loading it
+    // once and reusing it across every buildPlan call matches the SDPA
+    // path. C++11 guarantees thread-safe static init; predict() is const.
+    // CONFIRM LightGBM booster-predict re-entrancy before any
+    // multi-threaded plan-finding (Phase 4) or guard with a mutex.
+    static const ConvImplicitGemmScorer kScorer;
+
+    // Rank all candidates (best -> worst) so we can fall through to the
+    // next-best combo when the DSL's is_valid_spec rejects the top pick
+    // after the overlay is applied. The applicability gate ran against
+    // the spec with dataclass defaults; once we overlay a different knob
+    // set the DSL may have additional constraints (tile divisibility,
+    // pipeline arch restrictions) that supportsImplicitGemm does not
+    // duplicate. selectPerfKnobs is equivalent to ranked.front(); the
+    // loop below preserves its result for the common case where the top
+    // pick is accepted.
+    const std::vector<ConvImplicitGemmPerfKnobs> ranked =
+        rankPerfKnobs(selProblem, candidates, kScorer, arch);
+
+    // Overlay candidate knobs onto the spec, returning the modified spec.
+    // The DSL has no `knobs` sub-struct on ImplicitGemmConvSpec, so the
+    // perf axes map directly onto top-level spec fields (this matches
+    // the Python dataclass shape one-for-one).
+    auto overlay = [](ConvImplicitGemmSpec s, const ConvImplicitGemmPerfKnobs& k) {
+        s.tile_m = k.tile_m;
+        s.tile_n = k.tile_n;
+        s.tile_k = k.tile_k;
+        s.warp_m = k.warp_m;
+        s.warp_n = k.warp_n;
+        s.warp_tile_m = k.warp_tile_m;
+        s.warp_tile_n = k.warp_tile_n;
+        s.warp_tile_k = k.warp_tile_k;
+        s.pipeline = k.pipeline;
+        s.wave_size = k.wave_size;
+        return s;
+    };
+
+    // Walk the ranked list, accepting the first combo the DSL validates
+    // post-overlay. Acquire the GIL once for the whole loop; the bridge
+    // is reentrant on acquire but skipping the redundant acquire/release
+    // per candidate keeps the loop cheap on the common (accept-first)
+    // path.
+    ConvImplicitGemmSpec acceptedSpec = spec;
+    bool found = false;
+    {
+        py::gil_scoped_acquire gil;
+        for (const ConvImplicitGemmPerfKnobs& cand : ranked) {
+            ConvImplicitGemmSpec trial = overlay(spec, cand);
+            py::dict payload = convImplicitGemmSpecToPayload(trial);
+            std::pair<bool, std::string> verdict = _bridge.isApplicable(opKind(), payload, arch);
+            if (verdict.first) {
+                acceptedSpec = std::move(trial);
+                found = true;
+                break;
+            }
+            HIPDNN_PLUGIN_LOG_INFO(
+                "ConvImplicitGemmPlanBuilder::buildPlan: DSL rejected ranked candidate (tile="
+                << cand.tile_m << "," << cand.tile_n << "," << cand.tile_k << " pipeline="
+                << cand.pipeline << "): " << verdict.second << " -- trying next-ranked combo");
+        }
+    }
+    if (!found) {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "ConvImplicitGemmPlanBuilder::buildPlan: every ranked candidate (" +
+                std::to_string(ranked.size()) +
+                ") was rejected by the DSL is_valid_spec gate after the overlay; "
+                "the upstream applicability gate accepted the bare-defaults spec but "
+                "no enumerated combo survives validation");
+    }
+    spec = std::move(acceptedSpec);
+
     SignatureHash key = GraphSignature::computeForSpec(opKind(), spec, arch);
 
     auto loader = [spec, arch, this]() -> KernelArtifact {
@@ -207,22 +306,26 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
 
     // Buffer-rsrc byte sizes for the kernel's free OOB-clamping args
     // (A_bytes / B_bytes / D_bytes). Computed from the spec's
-    // ConvProblem geometry rather than re-walking the tensor map:
-    //   X (NHWC fp16): N * Hi * Wi * C * 2
-    //   W (KRSC fp16): K * R  * S  * C * 2
-    //   Y (NHWK fp16): N * Ho * Wo * K * 2
-    // The kernel's signature is i32 for these; the example shape
-    // produces values well under 2^31 (~3.2 MB for X/Y, ~73 KB for W).
-    // Only FP16 is supported today, so the byte multiplier is fixed;
-    // when the adapter starts surfacing a dtype this will become a
-    // dtype-aware lookup.
-    constexpr std::int64_t kFp16BytesPerElement = 2;
+    // ConvProblem geometry rather than re-walking the tensor map. The
+    // kernel signature is i32 for these; the example shape produces
+    // values well under 2^31 (~3.2 MB for X/Y, ~73 KB for W).
+    auto bytesPerElement = [](const std::string& dtype) -> std::int64_t {
+        if (dtype == "fp16") {
+            return 2;
+        }
+        // The adapter is the gate -- if we got here with an unknown
+        // dtype the adapter's accepted-set widened without updating
+        // this byte-size table.
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "ConvImplicitGemmPlanBuilder: unknown spec dtype '" + dtype +
+                "' has no byte-size entry; extend bytesPerElement when the adapter widens");
+    };
+    const std::int64_t bpe = bytesPerElement(spec.dtype);
     const auto& p = spec.problem;
-    std::int64_t xBytes64 =
-        static_cast<std::int64_t>(p.N) * p.Hi * p.Wi * p.C * kFp16BytesPerElement;
-    std::int64_t wBytes64 = static_cast<std::int64_t>(p.K) * p.R * p.S * p.C * kFp16BytesPerElement;
-    std::int64_t yBytes64 =
-        static_cast<std::int64_t>(p.N) * p.Ho() * p.Wo() * p.K * kFp16BytesPerElement;
+    std::int64_t xBytes64 = static_cast<std::int64_t>(p.N) * p.Hi * p.Wi * p.C * bpe;
+    std::int64_t wBytes64 = static_cast<std::int64_t>(p.K) * p.R * p.S * p.C * bpe;
+    std::int64_t yBytes64 = static_cast<std::int64_t>(p.N) * p.Ho() * p.Wo() * p.K * bpe;
     if (xBytes64 > std::numeric_limits<std::int32_t>::max() ||
         wBytes64 > std::numeric_limits<std::int32_t>::max() ||
         yBytes64 > std::numeric_limits<std::int32_t>::max()) {

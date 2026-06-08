@@ -16,7 +16,9 @@ add_executable(
     CompileServiceBridgeTest.cpp
     EmbeddedInterpreterTest.cpp
     ConvImplicitGemmAdapterTest.cpp
+    ConvImplicitGemmCandidateSelectorTest.cpp
     ConvImplicitGemmPlanBuilderTest.cpp
+    ConvImplicitGemmScorerTest.cpp
     SdpaAdapterTest.cpp
     SdpaCandidateSelectorTest.cpp
     SdpaMarshallingTest.cpp

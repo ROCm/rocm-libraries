@@ -1,0 +1,191 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "ConvImplicitGemmPerfKnobs.hpp"
+#include "ConvImplicitGemmScorer.hpp"
+#include "ConvImplicitGemmSpec.hpp"
+
+namespace ck_dsl_provider {
+
+/// Problem-shape inputs the candidate enumerator and scoring mapping
+/// need. Mirrors ``ConvProblem`` (the 13 shape fields the adapter
+/// extracts) plus the dtype string and group count, which the feature
+/// engine needs but the ck_dsl conv-fwd path treats as fixed (G=1).
+///
+/// ``dtype`` follows the model's spelling ("bf16" -- the only dtype the
+/// gfx950 conv model was trained on). fp16 / fp32 callers fall back to
+/// the analytic policy because no oracle exists for those.
+///
+/// The fields here are NOT a separate copy of ``ConvProblem`` --
+/// ``buildSelectionProblem`` derives this struct from a ``ConvProblem``
+/// and a dtype string so the adapter need only fill in the spec it
+/// already builds.
+///
+/// **2D-only by design.** No depth (D, Z, Do, stride_d, pad_d) fields
+/// appear here because the ck_dsl conv-fwd path is 2D-only today. The
+/// LightGBM scorer's feature extractor (``extractConvFeatures``) PINS
+/// the 3D feature slots to their 2D values; growing this struct with
+/// depth fields without updating the extractor would silently feed the
+/// booster 2D values for what is now a 3D problem. If 3D conv lands,
+/// flip ``kConvSelectionDim`` in the .cpp and add the depth fields
+/// here in the same change.
+struct ConvSelectionProblem {
+    // --- 2D conv shape (group dim folded in via G) -------------------
+    std::int32_t N{0};
+    std::int32_t C{0};   // channels per ConvProblem (== input C)
+    std::int32_t K{0};   // output channels
+    std::int32_t G{1};   // group count; ck_dsl conv-fwd is ungrouped today
+    std::int32_t Hi{0};
+    std::int32_t Wi{0};
+    std::int32_t R{0};   // filter H (feature engine's "Y")
+    std::int32_t S{0};   // filter W (feature engine's "X")
+
+    std::int32_t sH{1};
+    std::int32_t sW{1};
+    std::int32_t pH{0};
+    std::int32_t pW{0};
+    std::int32_t dH{1};
+    std::int32_t dW{1};
+
+    std::string dtype{"bf16"};  // "bf16" -- only dtype with conv oracle data
+
+    /// Derived output height (mirror of ConvProblem::Ho).
+    [[nodiscard]] std::int32_t Ho() const {
+        const std::int32_t effY = (R - 1) * dH + 1;
+        return (Hi + 2 * pH - effY) / sH + 1;
+    }
+
+    /// Derived output width (mirror of ConvProblem::Wo).
+    [[nodiscard]] std::int32_t Wo() const {
+        const std::int32_t effX = (S - 1) * dW + 1;
+        return (Wi + 2 * pW - effX) / sW + 1;
+    }
+};
+
+/// Convenience: build a ``ConvSelectionProblem`` from the spec the
+/// adapter has already constructed. Pulls the 13 shape fields off
+/// ``spec.problem`` and the dtype off the caller.
+[[nodiscard]] ConvSelectionProblem buildSelectionProblem(const ConvImplicitGemmSpec& spec,
+                                                         const std::string& dtype);
+
+/// Result of ``supportsImplicitGemm``: a verdict plus a structured
+/// reason (empty when supported).
+struct ConvSupportsResult {
+    bool supported{false};
+    std::string reason;
+};
+
+/// Validity gate for a (problem, knobs) pair against the ck_dsl
+/// implicit-GEMM kernel and the trained-data envelope.
+///
+/// Mirrors the ck_dsl ``is_valid_spec`` predicate (the Python bridge
+/// the plan builder calls today) for the structural constraints, plus a
+/// trained-table membership check: ``(tile_m, tile_n, tile_k)`` must be
+/// one of the ten triples in ``TILE_TO_WAVE`` / ``TILE_TO_WARP``, and
+/// (warp_m, warp_n) + (warp_tile_m, warp_tile_n, warp_tile_k) must
+/// match that triple's table entry. Pipelines outside
+/// ``VARIANT_PIPELINES["forward"]`` are rejected. ``compv4`` additionally
+/// requires the tile triple to be in ``COMPV4_COMPATIBLE_TILES``.
+///
+/// Used by ``enumerateCandidates`` to keep the emitted set buildable; a
+/// post-enum re-validation can use the same predicate as a guard.
+[[nodiscard]] ConvSupportsResult supportsImplicitGemm(const ConvSelectionProblem& problem,
+                                                      const ConvImplicitGemmPerfKnobs& knobs);
+
+/// Enumerate kernel-knob combos for the problem, pre-filtered by
+/// ``supportsImplicitGemm``. Only buildable combos are returned.
+///
+/// The enumeration walks the 10 trained tile triples (TILE_TO_WAVE keys)
+/// and the 8 forward pipelines (VARIANT_PIPELINES["forward"]) for a max
+/// of 80 raw candidates, drops the compv4 tiles that aren't in
+/// COMPV4_COMPATIBLE_TILES, and pins the wave grid + MFMA atom from the
+/// TILE_TO_WAVE / TILE_TO_WARP tables. Phase 2 will add the wave_mode /
+/// has_dsb / has_si dimensions (10 * 30 = 300 candidates per the
+/// PIPELINE_VARIANTS table) once ck_dsl exposes those spec fields.
+///
+/// The enumeration order is deterministic (tiles in TILE_TO_WAVE
+/// insertion order, then pipelines in VARIANT_PIPELINES["forward"]
+/// order), which fixes the tie-break order used by ``selectArgmax``.
+[[nodiscard]] std::vector<ConvImplicitGemmPerfKnobs> enumerateCandidates(
+    const ConvSelectionProblem& problem);
+
+/// Argmax selection over a set of candidate knob combos using an
+/// injected score callable. The callable receives the candidate's
+/// ``ConvImplicitGemmPerfKnobs`` and returns a scalar score (higher is
+/// better). The highest-scoring combo is returned.
+///
+/// Deterministic tie-break: on an EXACT score tie, the candidate with
+/// the larger MFMA atom (``warp_tile_m * warp_tile_n``) wins. The model
+/// has no atom feature beyond what is captured in the existing tile /
+/// pipeline features, so two configurations that differ ONLY in the
+/// atom can predict identical TFLOPS. The 32x32x16 atom is the
+/// oracle-best on the bulk of the training distribution, so we break
+/// the tie toward it. Any remaining tie falls to enumeration order.
+///
+/// ``candidates`` must be non-empty (the caller guarantees at least one
+/// buildable combo, or falls back to the analytic pick).
+[[nodiscard]] ConvImplicitGemmPerfKnobs selectArgmax(
+    const ConvSelectionProblem& problem,
+    const std::vector<ConvImplicitGemmPerfKnobs>& candidates,
+    const std::function<double(const ConvImplicitGemmPerfKnobs&)>& score);
+
+/// Analytic fallback pick over the SAME enumerated+filtered combo set.
+/// Approximates the production rule-of-thumb the CK conv codegen uses
+/// when no measurement is available: prefer the 64x64x64 tile (the
+/// universally-buildable middle of the table) and the ``mem`` pipeline
+/// (the codegen default that dominates the training set). This is the
+/// MODEL-LOAD-FAILURE fallback -- it is NOT a trivial first-fit; it
+/// scores each candidate by distance to the analytic target and returns
+/// the best. ``candidates`` must be non-empty.
+[[nodiscard]] ConvImplicitGemmPerfKnobs selectAnalyticFallback(
+    const ConvSelectionProblem& problem,
+    const std::vector<ConvImplicitGemmPerfKnobs>& candidates);
+
+/// Top-level knob selection for the plan builder. Picks the best combo
+/// from ``candidates`` (which the caller enumerated for ``problem``):
+///
+///   * when the scorer's model loaded AND dtype == "bf16" AND arch is
+///     ``gfx950`` -> ML argmax over the candidates, scoring each by
+///     ``scorer.predict(problem, cand)``;
+///   * otherwise (model failed to load OR dtype is fp16/fp32 -- no
+///     oracle -- OR arch is not the trained gfx950 target) -> the
+///     analytic fallback (NOT a trivial first-fit).
+///
+/// The arch gate matters because the scorer's hardware features are
+/// gfx950-baked (256 CUs, 32 XCDs, 64 KB LDS, ...); predicting TFLOPS
+/// for a gfx942/gfx1151 problem under those features yields a number
+/// the booster was never trained to produce. The analytic fallback is
+/// arch-neutral, so it covers the off-target arches without claiming
+/// oracle authority.
+///
+/// HIP-free: ``ConvImplicitGemmScorer`` wraps LightGBM through a plain
+/// C-API declaration, so this header stays plain CXX. ``candidates``
+/// must be non-empty (the caller hard-errors on an empty enumeration).
+[[nodiscard]] ConvImplicitGemmPerfKnobs selectPerfKnobs(
+    const ConvSelectionProblem& problem,
+    const std::vector<ConvImplicitGemmPerfKnobs>& candidates,
+    const ConvImplicitGemmScorer& scorer, std::string_view arch);
+
+/// Rank all candidates from best to worst under the same scoring rule as
+/// ``selectPerfKnobs`` (ML when the scorer is loaded, dtype == "bf16",
+/// and arch == "gfx950"; analytic-closeness otherwise). Tie-break
+/// matches ``selectArgmax``: equal scores resolve toward the larger MFMA
+/// atom; remaining ties fall to enumeration order. ``selectPerfKnobs``
+/// is equivalent to ``rankPerfKnobs(...).front()`` -- use this overload
+/// when the caller needs to walk the ranking (e.g. the plan builder
+/// falling through to the next-best combo when the DSL rejects the top
+/// pick after the overlay is applied).
+[[nodiscard]] std::vector<ConvImplicitGemmPerfKnobs> rankPerfKnobs(
+    const ConvSelectionProblem& problem,
+    const std::vector<ConvImplicitGemmPerfKnobs>& candidates,
+    const ConvImplicitGemmScorer& scorer, std::string_view arch);
+
+}  // namespace ck_dsl_provider

@@ -177,3 +177,52 @@ function(ck_dsl_provider_resolve_fmha_fwd_model)
     message(STATUS
         "CK DSL provider FMHA-forward model: ${_resolvedModelPath}")
 endfunction()
+
+# Resolve the absolute path of the in-tree LightGBM model the
+# implicit-GEMM conv-forward scorer loads
+# (projects/composablekernel/dispatcher/heuristics/models/
+#  grouped_conv_forward_2d3d_suffix_bf16_gfx950/model_tflops.lgbm). The
+# model is bf16/gfx950 only -- the scorer's caller short-circuits to the
+# analytic fallback for any other dtype/arch.
+#
+# Same walk-up search as the other resolvers. The conv models ship
+# gzipped in-tree; this resolver expects the decompressed .lgbm to exist
+# (the scorer prints a "decompress first" hint if it does not load).
+#
+# Output (set in caller's scope):
+#   CK_DSL_GROUPED_CONV_FWD_MODEL_PATH  absolute path to model_tflops.lgbm
+function(ck_dsl_provider_resolve_grouped_conv_fwd_model)
+    set(_searchDir "${_ckDslProviderPathsCmakeDir}/..")
+    get_filename_component(_searchDir "${_searchDir}" ABSOLUTE)
+
+    set(_modelRelPath
+        "projects/composablekernel/dispatcher/heuristics/models/grouped_conv_forward_2d3d_suffix_bf16_gfx950/model_tflops.lgbm")
+    set(_resolvedModelPath "")
+
+    while(NOT _resolvedModelPath AND NOT _searchDir STREQUAL "/")
+        if(EXISTS "${_searchDir}/${_modelRelPath}")
+            set(_resolvedModelPath "${_searchDir}/${_modelRelPath}")
+            break()
+        endif()
+        get_filename_component(_parent "${_searchDir}" DIRECTORY)
+        if(_parent STREQUAL _searchDir)
+            break()
+        endif()
+        set(_searchDir "${_parent}")
+    endwhile()
+
+    if(NOT _resolvedModelPath OR NOT EXISTS "${_resolvedModelPath}")
+        message(FATAL_ERROR
+            "CK DSL provider: failed to locate the grouped-conv-forward "
+            "gfx950 bf16 LightGBM model. Walked up from "
+            "${CMAKE_CURRENT_LIST_DIR}/.. looking for ${_modelRelPath}. "
+            "The model ships gzipped in-tree; decompress with "
+            "`gunzip ${_modelRelPath}.gz`. Set "
+            "CK_DSL_GROUPED_CONV_FWD_MODEL_PATH explicitly to override the search.")
+    endif()
+
+    set(CK_DSL_GROUPED_CONV_FWD_MODEL_PATH "${_resolvedModelPath}" PARENT_SCOPE)
+
+    message(STATUS
+        "CK DSL provider grouped-conv-forward model: ${_resolvedModelPath}")
+endfunction()

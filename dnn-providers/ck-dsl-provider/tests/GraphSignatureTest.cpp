@@ -147,6 +147,7 @@ TEST(TestGraphSignature, ChangesWithEachCodegenKnob) {
             {"chiplet_num_xcds", [](ConvImplicitGemmSpec& s) { s.chiplet_num_xcds += 1; }},
             {"chiplet_chunk_size", [](ConvImplicitGemmSpec& s) { s.chiplet_chunk_size += 1; }},
             {"waves_per_eu", [](ConvImplicitGemmSpec& s) { s.waves_per_eu = 4; }},
+            {"dtype", [](ConvImplicitGemmSpec& s) { s.dtype = "bf16"; }},
         };
 
     for (const auto& [name, mutate] : mutators) {

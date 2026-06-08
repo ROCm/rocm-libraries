@@ -56,6 +56,23 @@ void checkDtypeFp16(const TensorAttributes& t, const char* role) {
     }
 }
 
+/// Map a validated tensor data_type to the spec's dtype string. The
+/// caller has already gated on the accepted set via checkDtype*; this
+/// translates the enum into the kernel-naming convention the scorer's
+/// selection problem and (eventually) the DSL payload share. Add cases
+/// here when the adapter widens to bf16/fp32.
+std::string dtypeToSpecString(DataType d) {
+    switch (d) {
+        case DataType::HALF:
+            return "fp16";
+        default:
+            // The capability gate runs before this -- reaching default
+            // means a contract was broken (the gate accepted a dtype the
+            // mapper doesn't know about).
+            throwBadParam("unexpected tensor data_type leaked past the capability gate");
+    }
+}
+
 void check4dDims(const TensorAttributes& t, const char* role) {
     if (t.dims() == nullptr || t.dims()->size() != 4) {
         std::ostringstream oss;
@@ -155,6 +172,8 @@ ConvImplicitGemmSpec ConvImplicitGemmAdapter::buildSpec(const ConvolutionFwdAttr
     }
 
     ConvImplicitGemmSpec spec{};
+    // checkDtypeFp16 already enforced X/W/Y all == HALF; pull from X.
+    spec.dtype = dtypeToSpecString(X.data_type());
     spec.problem.N = N;
     spec.problem.Hi = Hi;
     spec.problem.Wi = Wi;

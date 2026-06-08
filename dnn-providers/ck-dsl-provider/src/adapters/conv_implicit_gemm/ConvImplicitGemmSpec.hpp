@@ -88,6 +88,21 @@ struct ConvProblem {
 struct ConvImplicitGemmSpec {
     ConvProblem problem;
 
+    /// Tensor element type, set by the adapter from the graph's X/W/Y
+    /// tensors (the adapter enforces all three match). Today the
+    /// underlying ``build_implicit_gemm_conv`` is hard-coded f16
+    /// end-to-end so the adapter only accepts "fp16", but the field is
+    /// carried on the spec for: (a) cache-key partitioning when the DSL
+    /// grows bf16/fp32 support, (b) dtype-aware byte-size math in the
+    /// plan builder, and (c) feeding the scorer's selection problem with
+    /// the honest spec dtype rather than a hard-coded constant.
+    ///
+    /// **NOT emitted in the payload** sent to the Python compile path:
+    /// ``ImplicitGemmConvSpec`` (the dataclass) has no dtype field today;
+    /// adding it to the payload would raise a TypeError. ``payload.cpp``
+    /// deliberately omits this. Revisit when the DSL widens.
+    std::string dtype{"fp16"};
+
     std::string name{"ck_dsl_conv_igemm"};
 
     // Block tile (mirrors the dataclass defaults).

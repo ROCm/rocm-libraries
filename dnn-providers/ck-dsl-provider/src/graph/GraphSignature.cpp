@@ -140,6 +140,14 @@ SignatureHash GraphSignature::computeForSpec(std::string_view opKind,
     h = fnv1aI32(h, spec.chiplet_chunk_size);
     h = fnv1aFold(h, 0x00);
     h = fnv1aOptI32(h, spec.waves_per_eu);
+    h = fnv1aFold(h, 0x00);
+
+    // dtype appended at the bottom (append-only ordering preserves
+    // pre-dtype keys for unchanged-shape entries). Today the adapter is
+    // fp16-only so this folds a constant string into the hash; the slot
+    // is here so a later widening doesn't have to bump the version
+    // string to invalidate.
+    h = fnv1aString(h, spec.dtype);
 
     return static_cast<SignatureHash>(h);
 }

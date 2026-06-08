@@ -32,6 +32,18 @@ inline constexpr std::string_view kCkDslProviderPythonPackagePath =
 inline constexpr std::string_view kCkDslFmhaFwdModelPath =
     "@CK_DSL_FMHA_FWD_MODEL_PATH@";
 
+// Absolute path of the in-tree LightGBM model the implicit-GEMM
+// conv-forward scorer (ConvImplicitGemmScorer) loads, resolved at
+// configure time
+// (projects/composablekernel/dispatcher/heuristics/models/
+//  grouped_conv_forward_2d3d_suffix_bf16_gfx950/model_tflops.lgbm).
+//
+// bf16/gfx950 only -- the only dtype/arch with conv oracle data. The
+// scorer's caller (selectPerfKnobs) bails to the analytic fallback for
+// any other dtype.
+inline constexpr std::string_view kCkDslGroupedConvFwdModelPath =
+    "@CK_DSL_GROUPED_CONV_FWD_MODEL_PATH@";
+
 }  // namespace ck_dsl_provider
 
 #endif  // CK_DSL_PROVIDER_PATHS_H
