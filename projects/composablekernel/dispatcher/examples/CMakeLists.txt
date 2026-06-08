@@ -595,14 +595,70 @@ if(hip_FOUND)
 endif()
 add_dependencies(dispatcher_fmha_lib generate_fmha_fallback_kernels)
 
+# =============================================================================
+# HSTU Python Library (ported ck_tile example kernels)
+# =============================================================================
+
+set(HSTU_EXAMPLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../example/ck_tile/53_hstu_attention")
+file(GLOB HSTU_INSTANCE_SRCS "${HSTU_EXAMPLE_DIR}/instances/*.cpp")
+
+add_library(hstu_example_kernels STATIC
+    ${HSTU_EXAMPLE_DIR}/hstu_attention_no_group_forward_fp16.cpp
+    ${HSTU_EXAMPLE_DIR}/hstu_attention_no_group_forward_bf16.cpp
+    ${HSTU_INSTANCE_SRCS}
+)
+set_target_properties(hstu_example_kernels PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(hstu_example_kernels PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${HSTU_EXAMPLE_DIR}
+)
+set_property(TARGET hstu_example_kernels PROPERTY HIP_ARCHITECTURES ${GPU_TARGET})
+target_compile_options(hstu_example_kernels PRIVATE
+    -Wno-undefined-func-template
+    -Wno-float-equal
+    -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3
+    -DHSTU_COMPILE_NO_SPLITKV=1
+)
+# Note: BUILD_HSTU_FOR_GFX95_ONLY enables trload pipelines; keep off for dispatcher
+# until validated on target ROCm (trload can fail on some clang builds).
+if(hip_FOUND)
+    target_link_libraries(hstu_example_kernels PUBLIC hip::device hip::host)
+endif()
+
+add_library(dispatcher_hstu_lib SHARED
+    ${CMAKE_CURRENT_SOURCE_DIR}/../bindings/ctypes/hstu_ctypes_lib.cpp
+)
+target_link_libraries(dispatcher_hstu_lib PRIVATE hstu_example_kernels)
+target_include_directories(dispatcher_hstu_lib PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../..
+    ${HSTU_EXAMPLE_DIR}
+)
+set_property(TARGET dispatcher_hstu_lib PROPERTY HIP_ARCHITECTURES ${GPU_TARGET})
+target_compile_options(dispatcher_hstu_lib PRIVATE
+    -DGFX_ARCH="${GPU_TARGET}"
+    -Wno-undefined-func-template
+    -Wno-float-equal
+)
+if(hip_FOUND)
+    target_link_libraries(dispatcher_hstu_lib PRIVATE hip::device hip::host)
+endif()
+
 message(STATUS "GEMM examples configured - kernels will be generated during 'make'")
 message(STATUS "Grouped Conv examples configured - kernels will be generated during 'make'")
 message(STATUS "FMHA examples configured - kernels will be generated during 'make'")
 
 # Convenience target to build all Python ctypes libraries
 add_custom_target(python_libs
-    DEPENDS dispatcher_gemm_lib dispatcher_conv_lib dispatcher_fmha_lib
-    COMMENT "Building Python ctypes libraries (GEMM + Conv + FMHA)"
+    DEPENDS dispatcher_gemm_lib dispatcher_conv_lib dispatcher_fmha_lib dispatcher_hstu_lib
+    COMMENT "Building Python ctypes libraries (GEMM + Conv + FMHA + HSTU)"
+)
+
+# HSTU-only (does not depend on FMHA fallback codegen; use when FMHA python build fails)
+add_custom_target(hstu_python_libs
+    DEPENDS dispatcher_hstu_lib
+    COMMENT "Building HSTU Python ctypes library only"
 )
 
 # =============================================================================

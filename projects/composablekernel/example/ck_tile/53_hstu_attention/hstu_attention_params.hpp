@@ -1,0 +1,156 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
+
+#pragma once
+
+#include <ck_tile/core.hpp>
+
+struct HstuAttentionNoGroupFwdParams
+{
+    // for self-attention (is_cross_attention = false), we requires
+    // 1) either seqlen_kv == 0 or seqlen_kv == seqlen_q
+    // 2) either seq_kv_offsets_ptr == nullptr, or seq_kv_offsets_ptr == seq_q_offsets_ptr
+    bool is_cross_attention;
+
+    bool is_jagged;
+
+    ck_tile::index_t num_batch;
+    ck_tile::index_t seqlen_q;      // batched mode only
+    ck_tile::index_t seqlen_kv;     // batched mode only
+    const void* seq_q_offsets_ptr;  // jagged mode only
+    const void* seq_kv_offsets_ptr; // jagged mode only
+    ck_tile::index_t max_seqlen_q;  // jagged mode only
+
+    const void* q_ptr;
+    const void* k_ptr;
+    const void* v_ptr;
+    const void* bias_ptr;
+    void* o_ptr;
+
+    ck_tile::index_t hdim_qk;
+    ck_tile::index_t hdim_v;
+    ck_tile::index_t num_head;
+    float scale_s;    // scaling factor exerted on the immediate Q@K result
+    float attn_scale; // scaling factor exerted on the SiLU result
+
+    ck_tile::index_t seq_stride_q;
+    ck_tile::index_t seq_stride_k;
+    ck_tile::index_t seq_stride_v;
+    ck_tile::index_t seq_stride_bias;
+    ck_tile::index_t seq_stride_o;
+
+    ck_tile::index_t nhead_stride_q;
+    ck_tile::index_t nhead_stride_k;
+    ck_tile::index_t nhead_stride_v;
+    ck_tile::index_t nhead_stride_bias;
+    ck_tile::index_t nhead_stride_o;
+
+    // batched mode only parameters
+    ck_tile::index_t batch_stride_q;
+    ck_tile::index_t batch_stride_k;
+    ck_tile::index_t batch_stride_v;
+    ck_tile::index_t batch_stride_bias;
+    ck_tile::index_t batch_stride_o;
+
+    const void* num_targets_ptr;
+
+    bool use_causal;
+    // parameters used by Non-Group HSTU
+    ck_tile::index_t window_size;
+    ck_tile::index_t contextual_seqlen;
+    ck_tile::index_t min_full_attn_seqlen;
+
+    bool use_softmax;
+
+    float p_drop;
+    uint64_t philox_seed;
+    uint64_t philox_offset;
+
+    // this need not be set by the API users, we only use it for passing num_splits between splitkv
+    // and combine kernel
+    int num_splits;
+    // pointer of device memory allocated before calling fwd_splitkv kernel and released after
+    // calling combine kernel
+    void* o_acc_ptr;
+    void* lse_acc_ptr;
+    // sweep-axis override for the split-KV path: when > 0 the splitkv dispatcher
+    // forces this split count instead of get_suggested_num_splits(...). 0 (the
+    // default) keeps the legacy auto behavior so existing callers are unaffected.
+    // Appended at the end of the struct so existing field offsets (and the
+    // prebuilt dispatcher static lib's ABI) stay unchanged.
+    int force_num_splits = 0;
+};
+
+struct HstuAttentionGroupFwdParams
+{
+    // for self-attention (is_cross_attention = false), we requires
+    // 1) either seq_kv_offsets_ptr == nullptr, or seq_kv_offsets_ptr == seq_q_offsets_ptr
+    bool is_cross_attention;
+
+    ck_tile::index_t num_group;
+    ck_tile::index_t num_batch;
+    const void* seq_q_offsets_ptr;
+    const void* seq_kv_offsets_ptr;
+    ck_tile::index_t max_seqlen_q; // the maximum of all the groups' max_seqlen_q
+
+    const void* q_ptr;
+    const void* k_ptr;
+    const void* v_ptr;
+    const void* bias_ptr;
+    void* o_ptr;
+
+    ck_tile::index_t hdim_qk;
+    ck_tile::index_t hdim_v;
+    ck_tile::index_t num_head;
+    float scale_s; // scaling factor exerted on the immediate Q@K result
+
+    ck_tile::index_t seq_stride_q;
+    ck_tile::index_t seq_stride_k;
+    ck_tile::index_t seq_stride_v;
+    ck_tile::index_t seq_stride_bias;
+    ck_tile::index_t seq_stride_o;
+
+    ck_tile::index_t nhead_stride_q;
+    ck_tile::index_t nhead_stride_k;
+    ck_tile::index_t nhead_stride_v;
+    ck_tile::index_t nhead_stride_bias;
+    ck_tile::index_t nhead_stride_o;
+
+    // batched mode only parameters
+    ck_tile::index_t batch_stride_q;
+    ck_tile::index_t batch_stride_k;
+    ck_tile::index_t batch_stride_v;
+    ck_tile::index_t batch_stride_bias;
+    ck_tile::index_t batch_stride_o;
+
+    const void* num_targets_ptr;
+
+    bool use_causal;
+
+    // parameters used by Group HSTU
+    const void* group_attn_scale_ptr;
+    const void* group_max_seqlen_q_ptr; // use for setting attn_scales
+    const void* group_window_size_ptr;
+    const void* group_contextual_seqlen_ptr;
+    const void* group_min_full_attn_seqlen_ptr;
+
+    bool use_softmax;
+
+    float p_drop;
+    uint64_t philox_seed;
+    uint64_t philox_offset;
+
+    // this need not be set by the API users, it only use it for passing num_splits between splitkv
+    // and combine kernel
+    int num_splits;
+    // pointer of device memory allocated before calling fwd_splitkv kernel and released after
+    // calling combine kernel
+    void* o_acc_ptr;
+    void* lse_acc_ptr;
+    // sweep-axis override for the split-KV path: when > 0 the splitkv dispatcher
+    // forces this split count instead of get_suggested_num_splits(...). 0 (the
+    // default) keeps the legacy auto behavior so existing callers are unaffected.
+    // Appended at the end of the struct so existing field offsets (and the
+    // prebuilt dispatcher static lib's ABI) stay unchanged.
+    int force_num_splits = 0;
+};

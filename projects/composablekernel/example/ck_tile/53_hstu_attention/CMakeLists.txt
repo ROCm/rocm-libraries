@@ -1,0 +1,31 @@
+set(EXAMPLE_HSTU_ATTENTION "tile_example_hstu_attention")
+# not using add_example_executable() to add this target, since we don't want this to have
+# to be included in "make all/install/check"
+message("adding example ${EXAMPLE_HSTU_ATTENTION}")
+file(GLOB INSTANCE_SRCS instances/*.cpp)
+set(INTERFACES_SRCS hstu_attention_no_group_forward_bf16.cpp hstu_attention_no_group_forward_fp16.cpp)
+add_executable(${EXAMPLE_HSTU_ATTENTION} EXCLUDE_FROM_ALL example_hstu_attention_fwd.cpp)
+target_include_directories(${EXAMPLE_HSTU_ATTENTION} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_sources(${EXAMPLE_HSTU_ATTENTION} PRIVATE ${INTERFACES_SRCS}  ${INSTANCE_SRCS})
+
+set(EXAMPLE_HSTU_ATTENTION_COMPILE_OPTIONS)
+
+list(APPEND EXAMPLE_HSTU_ATTENTION_COMPILE_OPTIONS -Wno-undefined-func-template -Wno-float-equal -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3)
+
+if (DEFINED ENV{ASSUME_HIGHLY_VARIED_SEQLEN})
+    list(APPEND EXAMPLE_HSTU_ATTENTION_COMPILE_OPTIONS -DHSTU_SCHED_BATCH_AS_FIRST_GRID_DIM=0)
+endif()
+
+if(GPU_TARGETS MATCHES "gfx95" AND NOT GPU_TARGETS MATCHES "gfx94" AND NOT GPU_TARGETS MATCHES "gfx90")
+    ## disable slp-vectorize improve pipelines performance on gfx950
+    list(APPEND EXAMPLE_HSTU_ATTENTION_COMPILE_OPTIONS -DBUILD_HSTU_FOR_GFX95_ONLY -fno-slp-vectorize)
+endif()
+
+target_compile_options(${EXAMPLE_HSTU_ATTENTION} PRIVATE ${EXAMPLE_HSTU_ATTENTION_COMPILE_OPTIONS})
+
+# TODO: we have to turn off this global prop, otherwise the progress bar generated
+# by cmake will print too many files, execvp: /bin/sh: Argument list too long
+# however, this property may affect global
+# TODO: consider codegen a makefile by us
+set_property(GLOBAL PROPERTY RULE_MESSAGES OFF)
+

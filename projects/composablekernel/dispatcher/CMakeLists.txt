@@ -23,6 +23,8 @@ add_library(ck_tile_dispatcher
     src/dispatcher.cpp
     src/fmha_registry.cpp
     src/fmha_dispatcher.cpp
+    src/hstu_registry.cpp
+    src/hstu_dispatcher.cpp
 )
 
 # Enable PIC for Python bindings
@@ -45,7 +47,7 @@ target_include_directories(ck_tile_dispatcher
 
 # CK project root -- needed only for FMHA generated wrappers that include
 # "example/ck_tile/01_fmha/fmha_fwd.hpp". PRIVATE to avoid exposing the
-# entire project tree to downstream consumers.
+# entire project tree to downstream consumers (FMHA/HSTU example headers).
 target_include_directories(ck_tile_dispatcher
     PRIVATE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
