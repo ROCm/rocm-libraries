@@ -174,9 +174,11 @@ class CFGBuilderPassImpl : public Pass {
             if (terminator) {
                 StinkyInstruction* termInst = cast<StinkyInstruction>(terminator);
                 if (isBranch(*termInst)) {
-                    // assert for branches with no statically-known target labels
+                    // Some valid indirect branches (for example bare s_setpc_b64 /
+                    // s_swappc_b64 without LabelData) do not have statically-known
+                    // targets. In that case getBranchTargets() returns an empty set
+                    // and we simply do not create any branch edges.
                     const auto targets = getBranchTargets(*termInst);
-                    assert(!targets.empty() && "branch should have statically-known target labels");
                     for (const std::string& targetLabel : targets) {
                         auto targetIt = labelMap.find(targetLabel);
                         if (targetIt != labelMap.end()) func.addEdge(&bb, targetIt->second);
