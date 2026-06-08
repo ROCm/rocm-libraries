@@ -797,11 +797,10 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverSgeqrfBatched(hipsolverHandle_t hand
                                                           int               n,
                                                           float*            A[],
                                                           int               lda,
-                                                          float*            tau,
-                                                          int               strideTau,
+                                                          float*            tau[],
                                                           float*            work,
                                                           int               lwork,
-                                                          int*              devInfo,
+                                                          int*              hInfo,
                                                           int               batch_count);
 
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDgeqrfBatched(hipsolverHandle_t handle,
@@ -809,11 +808,10 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDgeqrfBatched(hipsolverHandle_t hand
                                                           int               n,
                                                           double*           A[],
                                                           int               lda,
-                                                          double*           tau,
-                                                          int               strideTau,
+                                                          double*           tau[],
                                                           double*           work,
                                                           int               lwork,
-                                                          int*              devInfo,
+                                                          int*              hInfo,
                                                           int               batch_count);
 
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCgeqrfBatched(hipsolverHandle_t handle,
@@ -821,11 +819,10 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverCgeqrfBatched(hipsolverHandle_t hand
                                                           int               n,
                                                           hipFloatComplex*  A[],
                                                           int               lda,
-                                                          hipFloatComplex*  tau,
-                                                          int               strideTau,
+                                                          hipFloatComplex*  tau[],
                                                           hipFloatComplex*  work,
                                                           int               lwork,
-                                                          int*              devInfo,
+                                                          int*              hInfo,
                                                           int               batch_count);
 
 HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgeqrfBatched(hipsolverHandle_t handle,
@@ -833,11 +830,10 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverZgeqrfBatched(hipsolverHandle_t hand
                                                           int               n,
                                                           hipDoubleComplex* A[],
                                                           int               lda,
-                                                          hipDoubleComplex* tau,
-                                                          int               strideTau,
+                                                          hipDoubleComplex* tau[],
                                                           hipDoubleComplex* work,
                                                           int               lwork,
-                                                          int*              devInfo,
+                                                          int*              hInfo,
                                                           int               batch_count);
 
 // gesv
