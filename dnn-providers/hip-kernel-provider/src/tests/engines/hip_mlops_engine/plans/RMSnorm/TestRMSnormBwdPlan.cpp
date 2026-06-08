@@ -200,7 +200,7 @@ std::pair<std::unique_ptr<MockKernelCompiler>, std::unique_ptr<std::vector<std::
 TEST(TestRMSnormBwdPlan, GetWorkspaceSizeReturnsZero)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
@@ -209,7 +209,7 @@ TEST(TestRMSnormBwdPlan, IsMoveConstructible)
     auto [fbb, plan] = createPlanFromGraph();
 
     const RMSnormBwdPlan moved(std::move(plan));
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 

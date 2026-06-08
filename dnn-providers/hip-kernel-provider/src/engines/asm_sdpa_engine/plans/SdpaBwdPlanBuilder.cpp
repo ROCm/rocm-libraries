@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "plans/SdpaBwdPlanBuilder.hpp"
-#include "HipKernelUtils.hpp"
 #include "asm/AsmKernelPath.hpp"
+#include "core/Utils.hpp"
 #include "plans/SdpaBwdPlan.hpp"
 
 #include <cmath>
@@ -20,8 +20,7 @@ namespace asm_sdpa_engine
 static constexpr const char* K_ACC_TYPE_KNOB_NAME = "sdpa.bwd.accumulator_type";
 
 bool SdpaBwdPlanBuilder::isApplicable(
-    const HipKernelHandle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -149,9 +148,9 @@ bool SdpaBwdPlanBuilder::isApplicable(
 }
 
 size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
-    const HipKernelHandle& /* handle */,
+    const Handle& /* handle */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const HipKernelSettings& executionSettings) const
+    const Settings& executionSettings) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -172,10 +171,10 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
 }
 
 void SdpaBwdPlanBuilder::initializeExecutionSettings(
-    const HipKernelHandle& /* handle */,
+    const Handle& /* handle */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    HipKernelSettings& executionSettings) const
+    Settings& executionSettings) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -211,10 +210,10 @@ void SdpaBwdPlanBuilder::initializeExecutionSettings(
 }
 
 void SdpaBwdPlanBuilder::buildPlan(
-    const HipKernelHandle& /* handle */,
+    const Handle& /* handle */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
-    HipKernelContext& executionContext) const
+    Context& executionContext) const
 {
     // -------------------------------------------------------------------------
     // 1. Determine accumulator type and load kernel modules
@@ -428,8 +427,7 @@ void SdpaBwdPlanBuilder::buildPlan(
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(
-    const HipKernelHandle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
