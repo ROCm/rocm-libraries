@@ -97,7 +97,7 @@ def get_configs(
     Trims down the "full" config set using the rules defined in ``_select_test_configs``.
     """
 
-    from grouped_config_rules_full import get_configs as get_full_configs
+    from .grouped_config_rules_full import get_configs as get_full_configs
 
     all_configs = get_full_configs(arch, variants, ndims, datatypes)
     test_configs = _select_test_configs(all_configs)

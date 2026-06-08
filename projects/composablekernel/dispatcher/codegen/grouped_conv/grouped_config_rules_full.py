@@ -15,15 +15,15 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Union
 
 # ---------------------------------------------------------------------------
-# Path setup — allow importing tile_math from same directory
+# Path setup — allow importing arch_specs_generated from the codegen directory
 # ---------------------------------------------------------------------------
-_CODEGEN_DIR = Path(__file__).parent.resolve()
+_CODEGEN_DIR = Path(__file__).resolve().parent.parent
 if str(_CODEGEN_DIR) not in sys.path:
     sys.path.insert(0, str(_CODEGEN_DIR))
 
 from arch_specs_generated import WARP_TILE_SUPPORTED_COMBINATIONS
 
-from tile_math import (
+from .tile_math import (
     get_valid_vec_sizes as _tm_get_valid_vec_sizes,
     get_valid_wave_warp_pairs as _tm_get_valid_wave_warp_pairs,
 )
@@ -1429,7 +1429,7 @@ def get_depthwise_configs():
     Returns:
         List of tile_math.DepthwiseConfig objects.
     """
-    from tile_math import DepthwiseConfig, is_valid_depthwise_config
+    from .tile_math import DepthwiseConfig, is_valid_depthwise_config
 
     configs = []
     for params in DEPTHWISE_PARAMS:

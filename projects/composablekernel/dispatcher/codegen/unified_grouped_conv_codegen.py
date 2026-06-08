@@ -46,7 +46,7 @@ except ImportError:
 # Shared per-config validation helpers used by GroupedConvKernelConfig below.
 # The full set of rule helpers (tiles, waves, vecs, pipelines, ...) is consumed
 # inside each rule set's get_configs() entry point, not here.
-from grouped_config_rules_full import (
+from grouped_conv.grouped_config_rules_full import (
     check_vectors,
     is_valid_pipeline_for_variant,
     is_streamk_valid_for_variant,
@@ -312,7 +312,7 @@ class GroupedConvKernelConfig:
     def is_valid_for_arch(self, arch: Optional[str] = None) -> bool:
         """Check if configuration is valid for target architecture.
 
-        Uses shared validation rules from grouped_config_rules.py.
+        Uses shared validation rules from grouped_config_rules_default.py.
         """
         target_arch = arch if arch is not None else self.arch
 
@@ -1768,12 +1768,12 @@ using {launcher_alias} = {kernel_name}_Launcher;
 # lives in the codegen. Builder-derived sets (profiler/tests) and subset sets
 # (tiny) reuse a shared module's entry points rather than thin wrapper modules.
 _RULE_SET_MODULES = {
-    "default":    ("grouped_config_rules",            "get_configs"),
-    "full":       ("grouped_config_rules_full",       "get_configs"),
-    "full-tests": ("grouped_config_rules_full_tests", "get_configs"),
-    "profiler":   ("grouped_config_rules_builder",    "get_configs_profiler"),
-    "tests":      ("grouped_config_rules_builder",    "get_configs_tests"),
-    "tiny":       ("grouped_config_rules_full_tests", "get_tiny_configs"),
+    "default":    ("grouped_conv.grouped_config_rules_default",    "get_configs"),
+    "full":       ("grouped_conv.grouped_config_rules_full",       "get_configs"),
+    "full-tests": ("grouped_conv.grouped_config_rules_full_tests", "get_configs"),
+    "profiler":   ("grouped_conv.grouped_config_rules_builder",    "get_configs_profiler"),
+    "tests":      ("grouped_conv.grouped_config_rules_builder",    "get_configs_tests"),
+    "tiny":       ("grouped_conv.grouped_config_rules_full_tests", "get_tiny_configs"),
 }
 
 

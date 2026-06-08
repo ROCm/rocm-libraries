@@ -22,7 +22,7 @@ from typing import List, Optional, Set, Tuple
 # ---------------------------------------------------------------------------
 # Path setup — allow running from any directory
 # ---------------------------------------------------------------------------
-_CODEGEN_DIR = Path(__file__).parent.resolve()
+_CODEGEN_DIR = Path(__file__).resolve().parent.parent
 if str(_CODEGEN_DIR) not in sys.path:
     sys.path.insert(0, str(_CODEGEN_DIR))
 

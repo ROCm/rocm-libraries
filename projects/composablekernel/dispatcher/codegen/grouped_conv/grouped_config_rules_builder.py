@@ -33,7 +33,7 @@ from typing import List
 # Path setup — allow importing sibling codegen modules and the CK Builder's
 # authoritative .conf parser (generate_instances.py).
 # ---------------------------------------------------------------------------
-_CODEGEN_DIR = Path(__file__).parent.resolve()
+_CODEGEN_DIR = Path(__file__).resolve().parent.parent
 if str(_CODEGEN_DIR) not in sys.path:
     sys.path.insert(0, str(_CODEGEN_DIR))
 

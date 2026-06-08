@@ -23,7 +23,7 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 DISPATCHER_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
-from tile_math import (  # noqa: E402
+from grouped_conv.tile_math import (  # noqa: E402
     DepthwiseConfig,
     is_valid_depthwise_config,
     get_valid_depthwise_configs,
@@ -67,7 +67,7 @@ DEPTHWISE_TEST_CONFIGS = [
     (32, 32, 5, 1, 1, 2, 2, 4, 4, 4, 8, 8),
 ]
 
-# Tile/filter/stride space matching grouped_config_rules.py
+# Tile/filter/stride space matching grouped_config_rules_default.py
 TILE_SIZES = [(8, 8), (14, 28), (16, 16), (28, 28), (32, 32)]
 FILTER_SIZES = [3, 5]
 STRIDES = [(1, 1), (2, 2)]

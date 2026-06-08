@@ -12,7 +12,7 @@ _DISPATCHER_CODEGEN = _THIS_DIR.parents[1] / "dispatcher" / "codegen"
 if str(_DISPATCHER_CODEGEN) not in sys.path:
     sys.path.insert(0, str(_DISPATCHER_CODEGEN))
 
-from grouped_config_rules import (
+from grouped_conv.grouped_config_rules_default import (
     check_vectors as _shared_check_vectors,
     check_warp_coverage,
     check_bwd_data_vec_coverage,
@@ -140,7 +140,7 @@ def get_k_mfma(dtype, m_per_xdl, n_per_xdl):
 def check_vectors(a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector):
     """Reject odd vector sizes (except 1).
 
-    Delegates to the shared rule in grouped_config_rules.py.
+    Delegates to the shared rule in grouped_config_rules_default.py.
     """
     return _shared_check_vectors(a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector)
 

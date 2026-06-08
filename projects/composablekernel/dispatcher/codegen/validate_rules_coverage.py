@@ -39,7 +39,7 @@ from unified_grouped_conv_codegen import (
     StreamKReductionStrategy,
     get_default_configs,
 )
-from grouped_config_rules_builder import get_configs as get_builder_configs
+from grouped_conv.grouped_config_rules_builder import get_configs as get_builder_configs
 
 # ---------------------------------------------------------------------------
 # Reference (CK Builder) loading

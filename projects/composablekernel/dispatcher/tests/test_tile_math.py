@@ -28,7 +28,7 @@ DISPATCHER_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
 from arch_specs_generated import WARP_SUPPORTED_COMBINATIONS, ELEMENT_SIZE_MAP  # noqa: E402
-from tile_math import (                                                           # noqa: E402
+from grouped_conv.tile_math import (                                              # noqa: E402
     get_valid_wave_warp_pairs,
     get_valid_vec_sizes,
     get_vec_sizes_for_wave_warp,
