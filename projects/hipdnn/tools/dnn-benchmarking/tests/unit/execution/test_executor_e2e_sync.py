@@ -64,6 +64,16 @@ class TrackingSynchronizer:
         self.calls.append("sync")
 
 
+class FakeHandle:
+    """Minimal handle stub with a configurable HIP stream."""
+
+    def __init__(self, stream: int) -> None:
+        self.stream = stream
+
+    def get_stream(self) -> int:
+        return self.stream
+
+
 def _make_executor(timing_backend: str) -> executor_module.Executor:
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=0, benchmark_iters=1)
     executor = executor_module.Executor("{}", config, timing_backend=timing_backend)
@@ -143,17 +153,53 @@ def test_benchmark_synchronizes_each_measured_iteration(monkeypatch) -> None:
     assert len(result.e2e_timings) == 3
 
 
-def test_gpu_timer_start_stop_sync_inside_timed_region(monkeypatch) -> None:
-    """Ensure GPU timer start/stop/synchronize are invoked within Timer.
+def test_benchmark_uses_handle_stream_for_timing_and_sync(monkeypatch) -> None:
+    """hipDNN timing and fallback synchronization use the handle stream."""
+    timer_streams: list[int] = []
+    sync_streams: list[int] = []
 
-    start(), stop(), and synchronize() must be called inside the Timer so that
-    E2E timing covers the full GPU work interval. elapsed_ms() is called outside
-    since it only reads back the recorded duration.
+    monkeypatch.setattr(
+        executor_module,
+        "create_gpu_timer",
+        lambda backend, stream=0: timer_streams.append(stream) or DummyHipTimer(),
+    )
+    monkeypatch.setattr(
+        executor_module,
+        "create_stream_synchronizer",
+        lambda stream=0: sync_streams.append(stream)
+        or TrackingSynchronizer([], stream),
+    )
+
+    timed_executor = _make_executor("hip")
+    timed_result = timed_executor.benchmark(handle=FakeHandle(123), variant_pack={})
+
+    fallback_executor = _make_executor("none")
+    fallback_executor.benchmark(handle=FakeHandle(456), variant_pack={})
+
+    assert timer_streams == [123]
+    assert sync_streams == [456]
+    assert timed_result.kernel_timings == [1.0]
+
+
+def test_handle_stream_change_after_prepare_raises() -> None:
+    """Reject hipDNN handle stream drift so warmup and benchmark use one stream."""
+    executor = _make_executor("none")
+    executor._execution_stream = 123
+
+    with pytest.raises(executor_module.ExecutionError, match="stream changed"):
+        executor.benchmark(handle=FakeHandle(456), variant_pack={})
+
+
+def test_gpu_timer_start_stop_elapsed_inside_timed_region(monkeypatch) -> None:
+    """Ensure GPU timer start/stop/elapsed are invoked within Timer.
+
+    elapsed_ms() synchronizes the stop event, so it must be called inside the
+    Timer context for E2E timing to cover the full GPU work interval.
     """
     in_timer = {"value": False}
     start_called_in_timer = {"value": False}
     stop_called_in_timer = {"value": False}
-    sync_called_in_timer = {"value": False}
+    sync_called = {"value": False}
     elapsed_called_in_timer = {"value": False}
 
     class FakeTimer:
@@ -182,7 +228,7 @@ def test_gpu_timer_start_stop_sync_inside_timed_region(monkeypatch) -> None:
             stop_called_in_timer["value"] = in_timer["value"]
 
         def synchronize(self) -> None:
-            sync_called_in_timer["value"] = in_timer["value"]
+            sync_called["value"] = True
 
         def elapsed_ms(self) -> float:
             elapsed_called_in_timer["value"] = in_timer["value"]
@@ -198,12 +244,11 @@ def test_gpu_timer_start_stop_sync_inside_timed_region(monkeypatch) -> None:
     executor = _make_executor("hip")
     result = executor.benchmark(handle=None, variant_pack={})
 
-    # start(), stop(), and synchronize() should be called inside the timer context
+    # start(), stop(), and elapsed_ms() should be called inside the timer context.
     assert start_called_in_timer["value"] is True
     assert stop_called_in_timer["value"] is True
-    assert sync_called_in_timer["value"] is True
-    # elapsed_ms() should be called outside the timer context
-    assert elapsed_called_in_timer["value"] is False
+    assert elapsed_called_in_timer["value"] is True
+    assert sync_called["value"] is False
     assert result.kernel_timings is not None
     assert result.metadata is not None
     assert result.metadata.timing_backend == "hip"
@@ -213,15 +258,16 @@ def test_e2e_timing_at_least_as_long_as_kernel(monkeypatch) -> None:
     """Ensure E2E timing >= kernel timing for every iteration.
 
     With correct timer ordering, the wall-clock Timer wraps gpu_timer
-    start/stop and synchronization, so E2E must always be >= kernel.
-    We simulate sync overhead in synchronize() so that the real Timer measures
+    start/stop and elapsed_ms(). elapsed_ms() synchronizes the stop event, so
+    E2E must always be >= kernel.
+    We simulate sync overhead in elapsed_ms() so that the real Timer measures
     more wall-clock time than the fixed kernel duration.
     """
     KERNEL_MS = 0.5
     SYNC_DELAY_S = 0.01  # 10ms simulated sync overhead
 
     class SlowSyncGpuTimer(GpuTimerInterface):
-        """GPU timer where synchronize() has measurable latency."""
+        """GPU timer where elapsed_ms() has measurable synchronization latency."""
 
         @property
         def backend_name(self) -> str:
@@ -234,9 +280,10 @@ def test_e2e_timing_at_least_as_long_as_kernel(monkeypatch) -> None:
             pass
 
         def synchronize(self) -> None:
-            time.sleep(SYNC_DELAY_S)
+            pass
 
         def elapsed_ms(self) -> float:
+            time.sleep(SYNC_DELAY_S)
             return KERNEL_MS
 
     monkeypatch.setattr(

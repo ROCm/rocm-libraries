@@ -12,7 +12,7 @@ from ..common import torch_support
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from . import pytorch_ops
-from .timing import HipGpuTimer, Timer, _is_torch_available, create_device_synchronizer
+from .timing import HipGpuTimer, Timer, _is_torch_available, create_stream_synchronizer
 
 
 class PyTorchExecutionError(Exception):
@@ -57,7 +57,8 @@ class PyTorchCudaExecutor:
         self._device = torch.device(device)
         self._init_time_ms: float = 0.0
         self._prepared = False
-        self._device_synchronizer: Optional[Any] = None
+        self._stream: Optional[Any] = None
+        self._stream_synchronizer: Optional[Any] = None
 
     def prepare(self) -> None:
         """Validate graph and prepare for execution.
@@ -74,11 +75,14 @@ class PyTorchCudaExecutor:
                     f"Supported: {list(pytorch_ops.get_supported_operations())}"
                 )
 
-            # Warm up CUDA/ROCm context if needed, then create a direct HIP
-            # synchronizer for timing instead of using torch.cuda.synchronize().
+            # Pin all PyTorch graph execution to one stream, then synchronize
+            # that stream through HIP events instead of using torch.cuda APIs.
             torch.cuda.init()
+            self._stream = torch.cuda.default_stream(self._device)
             try:
-                self._device_synchronizer = create_device_synchronizer()
+                self._stream_synchronizer = create_stream_synchronizer(
+                    self._timing_stream()
+                )
             except RuntimeError as e:
                 raise PyTorchExecutionError(str(e)) from e
             self._prepared = True
@@ -97,9 +101,11 @@ class PyTorchCudaExecutor:
         if not self._prepared:
             raise PyTorchExecutionError("Executor not prepared. Call prepare() first.")
 
-        for _ in range(self._config.warmup_iters):
-            self._execute_graph(tensors)
-            self._synchronize_device()
+        with torch.cuda.stream(self._get_stream()):
+            for _ in range(self._config.warmup_iters):
+                self._execute_graph(tensors)
+        if self._config.warmup_iters > 0:
+            self._synchronize_stream()
 
     def execute_once(self, tensors: Dict[int, torch.Tensor]) -> None:
         """Execute the graph once and synchronize.
@@ -110,8 +116,9 @@ class PyTorchCudaExecutor:
         if not self._prepared:
             raise PyTorchExecutionError("Executor not prepared. Call prepare() first.")
 
-        self._execute_graph(tensors)
-        self._synchronize_device()
+        with torch.cuda.stream(self._get_stream()):
+            self._execute_graph(tensors)
+        self._synchronize_stream()
 
     def benchmark(
         self,
@@ -144,12 +151,13 @@ class PyTorchCudaExecutor:
 
         for _ in range(self._config.benchmark_iters):
             with Timer() as t:
-                gpu_timer.start()
-                self._execute_graph(tensors)
-                gpu_timer.stop()
-                self._synchronize_device()
+                with torch.cuda.stream(self._get_stream()):
+                    gpu_timer.start()
+                    self._execute_graph(tensors)
+                    gpu_timer.stop()
+                    kernel_ms = gpu_timer.elapsed_ms()
 
-            kernel_timings.append(gpu_timer.elapsed_ms())
+            kernel_timings.append(kernel_ms)
             e2e_timings.append(t.elapsed_ms)
 
         # Build metadata
@@ -169,18 +177,26 @@ class PyTorchCudaExecutor:
             metadata=metadata,
         )
 
-    def _synchronize_device(self) -> None:
-        """Synchronize the current HIP device through hipdnn_frontend bindings."""
+    def _get_stream(self) -> Any:
+        """Return the PyTorch stream used by all graph execution."""
+        if self._stream is None:
+            raise PyTorchExecutionError("Executor not prepared. Call prepare() first.")
+        return self._stream
+
+    def _synchronize_stream(self) -> None:
+        """Synchronize the PyTorch graph stream through hipdnn_frontend bindings."""
         try:
-            if self._device_synchronizer is None:
-                self._device_synchronizer = create_device_synchronizer()
-            self._device_synchronizer.synchronize()
+            if self._stream_synchronizer is None:
+                self._stream_synchronizer = create_stream_synchronizer(
+                    self._timing_stream()
+                )
+            self._stream_synchronizer.synchronize()
         except RuntimeError as e:
             raise PyTorchExecutionError(str(e)) from e
 
     def _timing_stream(self) -> int:
-        """Return PyTorch's default CUDA/HIP stream pointer for HIP events."""
-        return int(torch.cuda.default_stream(self._device).cuda_stream)
+        """Return the PyTorch graph stream pointer for HIP events."""
+        return int(self._get_stream().cuda_stream)
 
     def _execute_graph(self, tensors: Dict[int, torch.Tensor]) -> None:
         """Execute all graph operations in order.

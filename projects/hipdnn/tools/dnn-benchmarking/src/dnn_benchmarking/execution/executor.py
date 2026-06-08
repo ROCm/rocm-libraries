@@ -89,6 +89,7 @@ class Executor:
         self._graph_json_str = graph_json_str
         self._config = config
         self._timing_backend = timing_backend
+        self._execution_stream: Optional[int] = None
         self._graph: Any = None
         self._workspace: Any = None
         self._workspace_ptr: int = 0
@@ -217,6 +218,7 @@ class Executor:
             ExecutionError: If graph building fails.
         """
         with Timer() as t:
+            self._execution_stream = _get_handle_stream(handle)
             hipdnn = self._build_through_operation_graph(handle, engine_id=engine_id)
 
             result = self._graph.create_execution_plans()
@@ -243,9 +245,20 @@ class Executor:
 
         self._init_time_ms = t.elapsed_ms
 
-    def _get_stream_synchronizer(self, handle: Any) -> Any:
-        """Return a reusable synchronizer for the handle's HIP stream."""
+    def _get_execution_stream(self, handle: Any) -> int:
+        """Return the prepared hipDNN handle stream and reject stream drift."""
         stream = _get_handle_stream(handle)
+        if self._execution_stream is None:
+            self._execution_stream = stream
+        elif stream != self._execution_stream:
+            raise ExecutionError(
+                "hipDNN handle stream changed after prepare: "
+                f"prepared stream {self._execution_stream}, current stream {stream}"
+            )
+        return stream
+
+    def _get_stream_synchronizer(self, stream: int) -> Any:
+        """Return a reusable synchronizer for a HIP stream."""
         synchronizer = self._stream_synchronizers.get(stream)
         if synchronizer is None:
             try:
@@ -262,9 +275,11 @@ class Executor:
         if self._workspace is not None:
             self._workspace.zeros()
 
+        stream = self._get_execution_stream(handle)
         result = self._graph.execute(handle, variant_pack, self._workspace_ptr)
         if result.is_bad():
             raise ExecutionError(f"Graph execution failed: {result.get_message()}")
+        self._get_stream_synchronizer(stream).synchronize()
 
     def warmup(self, handle: Any, variant_pack: Dict[int, int]) -> None:
         """Run warmup iterations (timing discarded).
@@ -279,6 +294,7 @@ class Executor:
         if self._graph is None:
             raise ExecutionError("Graph not prepared. Call prepare() first.")
 
+        stream = self._get_execution_stream(handle)
         for _ in range(self._config.warmup_iters):
             result = self._graph.execute(handle, variant_pack, self._workspace_ptr)
             if result.is_bad():
@@ -288,7 +304,7 @@ class Executor:
         # benchmark() starts the measured loop, otherwise the first timed E2E
         # iteration can include queued warmup kernels.
         if self._config.warmup_iters > 0:
-            self._get_stream_synchronizer(handle).synchronize()
+            self._get_stream_synchronizer(stream).synchronize()
 
     def benchmark(
         self,
@@ -319,7 +335,7 @@ class Executor:
         gpu_timer: Optional[GpuTimerInterface] = None
         timing_backend_name: str = ""
         stream_synchronizer = None
-        stream = _get_handle_stream(handle)
+        stream = self._get_execution_stream(handle)
 
         # Create GPU timer if requested and available.
         if self._timing_backend != "none":
@@ -333,6 +349,7 @@ class Executor:
                 timing_backend_name = gpu_timer.backend_name
 
         for _ in range(self._config.benchmark_iters):
+            kernel_ms: Optional[float] = None
             with Timer() as t:
                 if gpu_timer:
                     gpu_timer.start()
@@ -343,15 +360,15 @@ class Executor:
                     )
                 if gpu_timer:
                     gpu_timer.stop()
-                if gpu_timer:
-                    gpu_timer.synchronize()
+                    kernel_ms = gpu_timer.elapsed_ms()
                 else:
                     if stream_synchronizer is None:
-                        stream_synchronizer = self._get_stream_synchronizer(handle)
+                        stream_synchronizer = self._get_stream_synchronizer(stream)
                     stream_synchronizer.synchronize()
 
-            if gpu_timer:
-                kernel_timings.append(gpu_timer.elapsed_ms())
+            if kernel_ms is not None:
+                assert kernel_timings is not None
+                kernel_timings.append(kernel_ms)
             e2e_timings.append(t.elapsed_ms)
 
         # Build metadata
