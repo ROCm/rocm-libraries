@@ -31,6 +31,59 @@
 // Handle Tests
 // =============================================================================
 
+// =============================================================================
+// rocsparse_handle_create / rocsparse_handle_destroy Tests
+// =============================================================================
+
+TEST(auxiliary_pre_checkin, HandleCreateWithStreamCreateDestroy)
+{
+    hipStream_t      stream;
+    rocsparse_handle handle;
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+    ASSERT_EQ(rocsparse_handle_create(&handle, stream, nullptr), rocsparse_status_success);
+    ASSERT_NE(handle, nullptr);
+    ASSERT_EQ(rocsparse_handle_destroy(handle, nullptr), rocsparse_status_success);
+    ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+}
+
+TEST(auxiliary_pre_checkin, HandleCreateWithStreamNullHandle)
+{
+    hipStream_t stream;
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+    ASSERT_EQ(rocsparse_handle_create(nullptr, stream, nullptr), rocsparse_status_invalid_pointer);
+    ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+}
+
+TEST(auxiliary_pre_checkin, HandleCreateWithStreamDefaultStream)
+{
+    // Passing stream=0 (default stream) should also work
+    rocsparse_handle handle;
+    ASSERT_EQ(rocsparse_handle_create(&handle, 0, nullptr), rocsparse_status_success);
+    ASSERT_NE(handle, nullptr);
+    ASSERT_EQ(rocsparse_handle_destroy(handle, nullptr), rocsparse_status_success);
+}
+
+TEST(auxiliary_pre_checkin, HandleDestroyWithNullHandle)
+{
+    ASSERT_EQ(rocsparse_handle_destroy(nullptr, nullptr), rocsparse_status_invalid_handle);
+}
+
+TEST(auxiliary_pre_checkin, HandleCreateWithStreamSetStream)
+{
+    // Verify that the handle can be re-targeted to a different stream after creation
+    hipStream_t      stream_create, stream_use;
+    rocsparse_handle handle;
+    ASSERT_EQ(hipStreamCreate(&stream_create), hipSuccess);
+    ASSERT_EQ(hipStreamCreate(&stream_use), hipSuccess);
+    ASSERT_EQ(rocsparse_handle_create(&handle, stream_create, nullptr), rocsparse_status_success);
+    // Synchronize creation stream before switching
+    ASSERT_EQ(hipStreamSynchronize(stream_create), hipSuccess);
+    ASSERT_EQ(rocsparse_set_stream(handle, stream_use), rocsparse_status_success);
+    ASSERT_EQ(rocsparse_handle_destroy(handle, nullptr), rocsparse_status_success);
+    ASSERT_EQ(hipStreamDestroy(stream_create), hipSuccess);
+    ASSERT_EQ(hipStreamDestroy(stream_use), hipSuccess);
+}
+
 TEST(auxiliary_pre_checkin, HandleCreateDestroy)
 {
     rocsparse_handle handle;
