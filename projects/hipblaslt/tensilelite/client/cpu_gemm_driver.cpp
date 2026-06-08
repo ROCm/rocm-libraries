@@ -499,18 +499,26 @@ int runGemm(size_t         m,
         std::uniform_int_distribution<> fp4Dist(0, fp4ValueCount - 1);
         auto randomFp4 = [&]() { return fp4Values[fp4Dist(gen)]; };
 
-        for(size_t i = 0; i < storageA; i++)
-        {
-            float v0 = randomFp4();
-            float v1 = (i == storageA - 1 && numA % 2 != 0) ? 0.0f : randomFp4();
-            a[i]     = Float4x2(v0, v1);
-        }
-        for(size_t i = 0; i < storageB; i++)
-        {
-            float v0 = randomFp4();
-            float v1 = (i == storageB - 1 && numB % 2 != 0) ? 0.0f : randomFp4();
-            b[i]     = Float4x2(v0, v1);
-        }
+        // Pack 2 logical FP4 values per byte (Float4x2). When the logical
+        // element count is odd, the second slot of the last byte has no
+        // element behind it — it's padding. We must still initialize that
+        // slot to a valid FP4 value (we use 0), because the fast-path
+        // ShadowBuffer FP4 decoder unconditionally reads both slots of every
+        // byte (the guard is on the *write* back, not the read), and reading
+        // uninitialized memory would be UB.
+        auto initFp4Operand = [&](auto& vec, size_t numLogical) {
+            const size_t storage    = vec.size();
+            const bool   hasOddTail = (numLogical % 2 != 0);
+            for(size_t i = 0; i < storage; ++i)
+            {
+                const bool isPaddingSlot = hasOddTail && (i == storage - 1);
+                float      slot0         = randomFp4();
+                float      slot1         = isPaddingSlot ? 0.0f : randomFp4();
+                vec[i]                   = Float4x2(slot0, slot1);
+            }
+        };
+        initFp4Operand(a, numA);
+        initFp4Operand(b, numB);
     }
     else
 #endif
