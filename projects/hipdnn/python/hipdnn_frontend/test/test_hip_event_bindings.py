@@ -18,16 +18,27 @@ _REQUIRED_API = (
     "hip_stream_synchronize",
     "hip_device_synchronize",
     "hip_get_device_count",
-    "hipEventCreate",
-    "hipEventRecord",
-    "hipEventSynchronize",
-    "hipEventElapsedTime",
 )
 
 
 def test_hip_event_symbols_are_exported() -> None:
     missing = [name for name in _REQUIRED_API if not hasattr(fe, name)]
     assert missing == []
+
+
+def test_hip_event_alias_symbols_are_not_exported() -> None:
+    aliases = (
+        "hipEventCreate",
+        "hipEventDestroy",
+        "hipEventRecord",
+        "hipEventSynchronize",
+        "hipEventElapsedTime",
+        "hipStreamSynchronize",
+        "hipDeviceSynchronize",
+        "hipGetDeviceCount",
+    )
+    exported = [name for name in aliases if hasattr(fe, name)]
+    assert exported == []
 
 
 def test_hip_event_timing_smoke() -> None:
@@ -42,17 +53,3 @@ def test_hip_event_timing_smoke() -> None:
     fe.hip_event_synchronize(stop)
 
     assert fe.hip_event_elapsed_time(start, stop) >= 0.0
-
-
-def test_hip_runtime_api_name_aliases_smoke() -> None:
-    if fe.hipGetDeviceCount() <= 0:
-        pytest.skip("No HIP GPU available")
-
-    start = fe.hipEventCreate()
-    stop = fe.hipEventCreate()
-
-    fe.hipEventRecord(start, 0)
-    fe.hipEventRecord(stop, 0)
-    fe.hipEventSynchronize(stop)
-
-    assert fe.hipEventElapsedTime(start, stop) >= 0.0

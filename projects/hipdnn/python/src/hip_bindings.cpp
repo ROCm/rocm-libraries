@@ -185,30 +185,4 @@ void hipBindings(nb::module_& m)
           nb::call_guard<nb::gil_scoped_release>(),
           "Block until all HIP work on the current device is complete");
     m.def("hip_get_device_count", &getDeviceCount, "Return the number of visible HIP devices");
-
-    // Compatibility aliases matching HIP runtime API names. hipEventCreate returns
-    // a HipEvent object instead of exposing a raw hipEvent_t* out-parameter.
-    m.def("hipEventCreate", []() { return HipEvent(); }, "Create a HIP event");
-    m.def("hipEventDestroy", [](HipEvent& event) { event.destroy(); }, nb::arg("event"));
-    m.def(
-        "hipEventRecord",
-        [](HipEvent& event, uintptr_t stream) { event.record(stream); },
-        nb::arg("event"),
-        nb::arg("stream") = 0);
-    m.def(
-        "hipEventSynchronize",
-        [](const HipEvent& event) { event.synchronize(); },
-        nb::arg("event"),
-        nb::call_guard<nb::gil_scoped_release>());
-    m.def(
-        "hipEventElapsedTime",
-        [](const HipEvent& start, const HipEvent& stop) { return start.elapsedTime(stop); },
-        nb::arg("start_event"),
-        nb::arg("stop_event"));
-    m.def("hipStreamSynchronize",
-          &streamSynchronize,
-          nb::arg("stream") = 0,
-          nb::call_guard<nb::gil_scoped_release>());
-    m.def("hipDeviceSynchronize", &deviceSynchronize, nb::call_guard<nb::gil_scoped_release>());
-    m.def("hipGetDeviceCount", &getDeviceCount);
 }
