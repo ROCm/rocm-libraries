@@ -313,19 +313,25 @@ struct BlockSpargePreprocessPipeline
 
     // ---- Per-warp row-wise INT8 quantization (fused sub-pass) ----
     // Reuses the non-transposed [token (M), hidden (N)] tile orientation (same as sim Pass 1):
-    //   per-token absmax = AbsMax over hidden (N) via BlockReduce2d (raw value, NOT km-centered),
+    //   per-token absmax = AbsMax over hidden (N) via BlockReduce2d,
     //   group token absmax over `tokens_per_scale` consecutive tokens -> scale = absmax/127,
     //   sweep tile -> int8 = round(val / scale). scale_out holds kBlock/tokens_per_scale scales.
+    // smooth_k (K side only): when km_ptr != nullptr the centered value (val - km[channel]) feeds
+    // BOTH the absmax and the quant, exactly like official SpargeAttn (subtract per-channel K-mean
+    // before computing the block scale and quantizing). km[c] is read from the WG-staged s_km LDS
+    // (indexed by hidden channel c = the N axis). Q side passes km_ptr == nullptr (no centering).
     // s_absmax is a [kBlock] LDS scratch (one slot per token-within-block).
     CK_TILE_DEVICE void quantize_block(InputType*        p_stage,
                                        const Params&     params,
                                        index_t           count,
                                        index_t           s_start,
                                        float*            s_absmax,
+                                       const float*      s_km,
                                        void*             s_reduce) const
     {
-        const index_t tid = get_thread_id();
-        const index_t tps = params.tokens_per_scale;
+        const index_t tid     = get_thread_id();
+        const index_t tps     = params.tokens_per_scale;
+        const bool    has_km  = (params.km_ptr != nullptr);
 
         // Read the block from the shared LDS staging buffer ([token (M), hidden (N)]) instead of
         // re-loading global. Block extent is exactly [kBlock, kHdim] (no token padding needed).
@@ -344,10 +350,19 @@ struct BlockSpargePreprocessPipeline
         auto q_tile = load_tile(q_window);
 
         // per-token absmax over hidden (N); OOB tokens (>= count) reduce to 0, harmless.
+        // smooth_k: center by per-channel km[c] (c = hidden channel, the N axis) before absmax.
         auto abs_tile = make_static_distributed_tensor<ComputeDataType>(
             decltype(q_tile)::get_tile_distribution());
         sweep_tile(q_tile, [&](auto idx) {
-            abs_tile(idx) = type_convert<ComputeDataType>(q_tile[idx]);
+            float v = type_convert<ComputeDataType>(q_tile[idx]);
+            if(has_km)
+            {
+                const auto tile_idx = get_x_indices_from_distributed_indices(
+                    q_tile.get_tile_distribution(), idx);
+                const index_t c = tile_idx.at(number<1>{}); // hidden channel (N)
+                v -= s_km[c];
+            }
+            abs_tile(idx) = v;
         });
         auto amax_tile =
             reduce(abs_tile, absmax_func.GetIdentityValue<ComputeDataType>(), absmax_func);
@@ -408,8 +423,11 @@ struct BlockSpargePreprocessPipeline
             QuantType q8    = QuantType{0};
             if(t < count)
             {
+                const index_t c = tile_idx.at(number<1>{}); // hidden channel (N)
                 const float sc  = params.scale_out[t / tps];
-                const float v   = type_convert<ComputeDataType>(q_tile[idx]);
+                float v         = type_convert<ComputeDataType>(q_tile[idx]);
+                if(has_km)
+                    v -= s_km[c];
                 const float r   = (sc > 0.0f) ? (v / sc) : 0.0f;
                 if constexpr(std::is_same_v<QuantType, fp8_t>)
                     q8 = type_convert<fp8_t>(r);
@@ -488,8 +506,17 @@ struct BlockSpargePreprocessPipeline
             block_sync_lds();
         }
 
-        // INT8 quant sub-pass (independent of mean/sim; reads raw values). Its absmax
-        // scratch sits past the cross-warp reduce region.
+        // km_ptr is WG-uniform; stage it in LDS so the tile sweeps (quant + mean/sim) can index it
+        // by hidden channel without re-reading global memory per element. Staged BEFORE the quant
+        // sub-pass so smooth_k centering (K side) can read it; Q side leaves km_ptr nullptr -> 0.
+        const bool has_km = (params.km_ptr != nullptr);
+        for(index_t d = tid; d < kHdim; d += kBlockSize)
+            s_km[d] = has_km ? params.km_ptr[d] : 0.0f;
+        block_sync_lds();
+
+        // INT8/FP8 quant sub-pass. smooth_k: center K by per-channel km (s_km) before absmax/quant
+        // (Q side km_ptr == nullptr -> no centering). Its absmax scratch sits past the cross-warp
+        // reduce region.
         if constexpr(kDoQuant)
         {
             using x_block_tile =
@@ -502,16 +529,9 @@ struct BlockSpargePreprocessPipeline
                 static_cast<index_t>(sizeof(float));
             float* s_absmax =
                 reinterpret_cast<float*>(s_reduce) + reduce_floats;
-            quantize_block(s_stage, params, count, s_start, s_absmax, s_reduce);
+            quantize_block(s_stage, params, count, s_start, s_absmax, s_km, s_reduce);
             block_sync_lds();
         }
-
-        // km_ptr is WG-uniform; stage it in LDS so the tile sweep can index it by hidden
-        // channel (the M axis) without re-reading global memory per element.
-        const bool has_km = (params.km_ptr != nullptr);
-        for(index_t d = tid; d < kHdim; d += kBlockSize)
-            s_km[d] = has_km ? params.km_ptr[d] : 0.0f;
-        block_sync_lds();
 
         // Transposed token view of the staged block in LDS -> tile axes [hdim (M), token (N)].
         // (Same data the global transposed view used to read; OOB tokens were already zeroed at
@@ -718,9 +738,11 @@ struct BlockSpargeQKQuantPipeline
         index_t hdim;
         index_t stride_seq;      // token stride in elements of the bf16 input
         index_t quant_stride_seq; // token stride in elements of the quant output
+        const float* km_ptr;     // [hdim] per-channel K-mean (smooth_k); nullptr disables (Q side).
     };
 
-    // LDS: per-channel absmax[hdim] | block reduce scratch (max over channels at the end).
+    // LDS: per-channel absmax[hdim] | block reduce scratch (max over channels at the end) |
+    //      (smooth_k) per-channel km[hdim].
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize(index_t /*hdim*/)
     {
         using x_block_tile =
@@ -730,8 +752,9 @@ struct BlockSpargeQKQuantPipeline
             decltype(BlockReduce2d<ReduceProblem>::template MakeYBlockTile<x_block_tile>());
         constexpr index_t reduce_bytes =
             BlockReduce2dCrossWarpSync<ReduceProblem>::template GetSmemSize<y_block_tile>();
-        // Need kHdim floats for per-channel absmax plus block-reduce scratch (kBlockSize floats).
-        return static_cast<index_t>((kHdim + kBlockSize) * sizeof(float)) + reduce_bytes;
+        // Need kHdim floats for per-channel absmax, block-reduce scratch (kBlockSize floats),
+        // plus kHdim floats for the staged per-channel km (smooth_k).
+        return static_cast<index_t>((2 * kHdim + kBlockSize) * sizeof(float)) + reduce_bytes;
     }
 
     // slice         : bf16 X for this (batch, head) = [seqlen, hdim]
@@ -749,10 +772,16 @@ struct BlockSpargeQKQuantPipeline
 
         float* s_absmax = reinterpret_cast<float*>(smem);            // [kHdim] per-channel
         float* s_scr    = s_absmax + kHdim;                          // [kBlockSize] reduce scratch
-        void*  s_reduce = reinterpret_cast<void*>(s_scr + kBlockSize);
+        float* s_km     = s_scr + kBlockSize;                        // [kHdim] staged km (smooth_k)
+        void*  s_reduce = reinterpret_cast<void*>(s_km + kHdim);
 
+        // smooth_k (K side): stage per-channel km in LDS; Q side passes km_ptr == nullptr -> 0.
+        const bool has_km = (params.km_ptr != nullptr);
         for(index_t d = tid; d < kHdim; d += kBlockSize)
+        {
             s_absmax[d] = 0.0f;
+            s_km[d]     = has_km ? params.km_ptr[d] : 0.0f;
+        }
         block_sync_lds();
 
         auto reduce       = BlockReduce2d<ReduceProblem>{};
@@ -788,10 +817,19 @@ struct BlockSpargeQKQuantPipeline
                 MakeXBlockTileDistribution());
             auto x_tile = load_tile(x_window);
 
+            // smooth_k: center K by per-channel km[m] (m = hidden channel = the M axis) before absmax.
             auto abs_tile = make_static_distributed_tensor<ComputeDataType>(
                 decltype(x_tile)::get_tile_distribution());
             sweep_tile(x_tile, [&](auto idx) {
-                abs_tile(idx) = type_convert<ComputeDataType>(x_tile[idx]);
+                float v = type_convert<ComputeDataType>(x_tile[idx]);
+                if(has_km)
+                {
+                    const auto tile_idx = get_x_indices_from_distributed_indices(
+                        x_tile.get_tile_distribution(), idx);
+                    const index_t m = tile_idx.at(number<0>{}); // hidden channel (M)
+                    v -= s_km[m];
+                }
+                abs_tile(idx) = v;
             });
             auto amax_tile =
                 reduce(abs_tile, absmax_func.GetIdentityValue<ComputeDataType>(), absmax_func);
@@ -860,7 +898,15 @@ struct BlockSpargeQKQuantPipeline
             auto out_tile = make_static_distributed_tensor<QuantType>(
                 decltype(in_tile)::get_tile_distribution());
             sweep_tile(in_tile, [&](auto idx) {
-                const float v = type_convert<ComputeDataType>(in_tile[idx]);
+                // smooth_k: center K by per-channel km[c] (c = hidden channel = the N axis).
+                float v = type_convert<ComputeDataType>(in_tile[idx]);
+                if(has_km)
+                {
+                    const auto tile_idx = get_x_indices_from_distributed_indices(
+                        in_tile.get_tile_distribution(), idx);
+                    const index_t c = tile_idx.at(number<1>{}); // hidden channel (N)
+                    v -= s_km[c];
+                }
                 const float r = (scale > 0.0f) ? (v / scale) : 0.0f;
                 if constexpr(std::is_same_v<QuantType, fp8_t>)
                     out_tile(idx) = type_convert<fp8_t>(r);

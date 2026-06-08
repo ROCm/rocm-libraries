@@ -141,7 +141,8 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
     pp_kargs.k.head_stride      = a.nhead_stride_k;
     pp_kargs.k.seq_stride       = a.stride_k;
     pp_kargs.k.simthreshold     = 0.0f;
-    pp_kargs.k.km_ptr           = nullptr;
+    // smooth_k: center K by its per-channel global mean before quant (official SpargeAttn).
+    pp_kargs.k.km_ptr           = reinterpret_cast<const float*>(a.km_ptr);
     pp_kargs.k.quant_out        = reinterpret_cast<int8_t*>(d_k_quant);
     pp_kargs.k.scale_out        = d_k_scale;
     pp_kargs.k.tokens_per_scale = a.block_scale_size_k;
@@ -258,6 +259,8 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
     kq_kargs.batch_stride_x = a.batch_stride_k;
     kq_kargs.nhead_stride_x = a.nhead_stride_k;
     kq_kargs.stride_x       = a.stride_k;
+    // smooth_k: center K by its per-channel global mean before quant (official SpargeAttn).
+    kq_kargs.km_ptr         = reinterpret_cast<const float*>(a.km_ptr);
 
     if constexpr(kIsGroup)
     {

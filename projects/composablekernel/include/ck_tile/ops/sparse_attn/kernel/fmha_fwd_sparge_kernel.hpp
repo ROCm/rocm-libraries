@@ -17,8 +17,15 @@
 #include <variant>
 
 // SpargeAttention pipeline: preprocess (K/Q means + sims) -> mask prediction -> attention.
-// hp.smooth_k is intentionally a no-op: softmax max-subtract absorbs the
-// constant -dot(q_means, km) shift, so the correction step is unnecessary.
+// smooth_k semantics:
+//   * Non-quant sparge: smooth_k is a no-op for selection. Subtracting km from the K block means
+//     shifts every q@k_mean score within a (b, hq, q_block) by the constant -dot(q_mean, km),
+//     which softmax max-subtract removes -> the selected blocks are unchanged. So km_ptr stays
+//     nullptr on the non-quant path.
+//   * Quant sparge_sage: smooth_k centers K by its per-channel global mean (km) BEFORE int8/fp8
+//     quantization (official SpargeAttn), shrinking K's quant error. The attention pipeline is
+//     NOT changed: the implied -q@km^T correction is a per-row constant that softmax absorbs, so
+//     no dequant-time fixup is needed. Q is never centered (km_ptr nullptr on the Q side).
 
 namespace ck_tile {
 
@@ -387,6 +394,9 @@ struct SpargeQKQuantKargs
     index_t nhead_stride_quant;
     index_t stride_quant;
 
+    // smooth_k (K side only): per-channel K-mean km[B, nhead, hdim]; nullptr disables (Q side).
+    const float* km_ptr = nullptr;
+
     // Group / varlen mode (batch leaves all nullptr).
     const int32_t* seqstart_ptr = nullptr; // [batch+1] token cumsum
     const int32_t* seqlen_ptr   = nullptr; // [batch] (nullptr -> diff of seqstart)
@@ -462,6 +472,12 @@ struct FmhaFwdSpargeQKQuantKernel
         pp.hdim            = kargs.hdim;
         pp.stride_seq       = kargs.stride_x;
         pp.quant_stride_seq = kargs.stride_quant;
+        // smooth_k: per-channel km for this (batch, head); km layout [batch, nhead, hdim].
+        pp.km_ptr = kargs.km_ptr
+            ? kargs.km_ptr +
+                  (static_cast<long_index_t>(batch_id) * kargs.nhead + head_id) *
+                      static_cast<long_index_t>(kargs.hdim)
+            : nullptr;
 
         Pipeline{}(slice, quant_out, scale_out, pp, smem_raw);
     }

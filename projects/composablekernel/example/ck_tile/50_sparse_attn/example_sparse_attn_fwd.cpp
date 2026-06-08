@@ -75,7 +75,9 @@ auto create_args(int argc, char* argv[])
                 "  a / 2          : alibi rank=0 (1*h slope, requires causal mask)\n"
                 "  a:1 / 2:1      : alibi rank=1 (b*h slope)\n"
                 "(jenga / vsa / sparge group ignore this flag)")
-        .insert("smooth_k", "1", "sparge: K smoothing in preprocess pool/sim. 0 disables.")
+        .insert("smooth_k", "1", "K smoothing (center K by per-channel mean): sparge preprocess "
+                                 "pool/sim and sparge_sage K-quant. 0 disables. Matches official "
+                                 "SpargeAttn smooth_k (default on).")
         .insert("print_sparsity", "0",
                 "sparge: 1 = read back actual sparsity; needed for accurate TFlops/GB/s")
         .insert("block_size", "128", "block size for sparse attention (BLKQ=BLKK)")

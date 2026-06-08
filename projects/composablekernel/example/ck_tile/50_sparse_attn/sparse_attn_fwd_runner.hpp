@@ -1680,7 +1680,7 @@ sparse_attn_result sparse_attn_fwd_run(
             hp.cdfthreshd   = scalar_cdf;
             hp.topk         = scalar_topk;
             hp.simthreshold = 0.0f;
-            hp.smooth_k     = false;
+            hp.smooth_k     = smooth_k; // sparge_sage: gates K-quant smooth_k (km centering)
 
             // ---- Host-quantize V to FP8 with per-channel (hdim_v) descale (sageattn-style) ----
             // Inputs are i_perm = [B, Hk, Sk, Dv]. scale[b,hk,dv] = absmax_over_seq / fp8_max.
@@ -1773,6 +1773,16 @@ sparse_attn_result sparse_attn_fwd_run(
                     (qscale == "perthread") ? 16 : (qscale == "blockscale") ? 128 : 64;
                 ck_tile::HostTensor<T> q_deq({batch, nhead, seqlen_q, hdim_q});
                 ck_tile::HostTensor<T> k_deq({batch, nhead_k, seqlen_k, hdim_q});
+                // smooth_k: per-channel global K-mean, centered out of K before quant (K only;
+                // Q is never centered). Same fp32 element order as the device host-km, so the
+                // faithful-dequant check stays tight. The implied -q@km^T correction is a per-row
+                // constant absorbed by softmax, so the attention math is unchanged.
+                // smooth_k gated: a zero km (disabled) makes the reference subtract 0 (no
+                // centering), bit-identical to the device's km_ptr == nullptr path.
+                ck_tile::HostTensor<float> k_km({batch, nhead_k, hdim_q});
+                if(smooth_k)
+                    k_km = ck_tile::compute_global_k_mean(
+                        k_ref, batch, nhead_k, seqlen_k, hdim_q);
                 if(qs_pertensor)
                 {
                     // PERTENSOR: one global scale per (b,h) over all tokens x hidden.
@@ -1785,7 +1795,7 @@ sparse_attn_result sparse_attn_fwd_run(
                         ck_tile::reference_sparge_global_quant_fp8<T>(
                             q_ref, batch, nhead, seqlen_q, hdim_q, q_qf, q_sc);
                         ck_tile::reference_sparge_global_quant_fp8<T>(
-                            k_ref, batch, nhead_k, seqlen_k, hdim_q, k_qf, k_sc);
+                            k_ref, batch, nhead_k, seqlen_k, hdim_q, k_qf, k_sc, &k_km);
                         for(ck_tile::index_t b = 0; b < batch; ++b)
                             for(ck_tile::index_t h = 0; h < nhead; ++h)
                                 for(ck_tile::index_t s = 0; s < seqlen_q; ++s)
@@ -1806,7 +1816,7 @@ sparse_attn_result sparse_attn_fwd_run(
                         ck_tile::reference_sparge_global_quant<T>(
                             q_ref, batch, nhead, seqlen_q, hdim_q, q_i8, q_sc);
                         ck_tile::reference_sparge_global_quant<T>(
-                            k_ref, batch, nhead_k, seqlen_k, hdim_q, k_i8, k_sc);
+                            k_ref, batch, nhead_k, seqlen_k, hdim_q, k_i8, k_sc, &k_km);
                         for(ck_tile::index_t b = 0; b < batch; ++b)
                             for(ck_tile::index_t h = 0; h < nhead; ++h)
                                 for(ck_tile::index_t s = 0; s < seqlen_q; ++s)
@@ -1838,7 +1848,8 @@ sparse_attn_result sparse_attn_fwd_run(
                         ck_tile::reference_sparge_rowwise_quant_fp8<T>(
                             q_ref, batch, nhead, seqlen_q, hdim_q, block_size, gran_q, q_qf, q_sc);
                         ck_tile::reference_sparge_rowwise_quant_fp8<T>(
-                            k_ref, batch, nhead_k, seqlen_k, hdim_q, block_size, gran_k, k_qf, k_sc);
+                            k_ref, batch, nhead_k, seqlen_k, hdim_q, block_size, gran_k, k_qf, k_sc,
+                            &k_km);
                         for(ck_tile::index_t b = 0; b < batch; ++b)
                             for(ck_tile::index_t h = 0; h < nhead; ++h)
                                 for(ck_tile::index_t s = 0; s < seqlen_q; ++s)
@@ -1869,7 +1880,8 @@ sparse_attn_result sparse_attn_fwd_run(
                         ck_tile::reference_sparge_rowwise_quant<T>(
                             q_ref, batch, nhead, seqlen_q, hdim_q, block_size, gran_q, q_i8, q_sc);
                         ck_tile::reference_sparge_rowwise_quant<T>(
-                            k_ref, batch, nhead_k, seqlen_k, hdim_q, block_size, gran_k, k_i8, k_sc);
+                            k_ref, batch, nhead_k, seqlen_k, hdim_q, block_size, gran_k, k_i8, k_sc,
+                            &k_km);
                         for(ck_tile::index_t b = 0; b < batch; ++b)
                             for(ck_tile::index_t h = 0; h < nhead; ++h)
                                 for(ck_tile::index_t s = 0; s < seqlen_q; ++s)
@@ -2158,7 +2170,7 @@ sparse_attn_result sparse_attn_fwd_run(
             hp.cdfthreshd   = scalar_cdf;
             hp.topk         = scalar_topk;
             hp.simthreshold = 0.0f;
-            hp.smooth_k     = false;
+            hp.smooth_k     = smooth_k; // sparge_sage: gates K-quant smooth_k (km centering)
 
             // Per-batch lengths (same scaffolding as the sparge/vsa group branches).
             const int32_t sq_min = std::max(int32_t{block_size}, seqlen_q / 2);
@@ -2293,6 +2305,15 @@ sparse_attn_result sparse_attn_fwd_run(
                     // one global scale per sequence/head (the group packed-quant scope per (seq,h)).
                     ck_tile::HostTensor<T> q_deq({1, nhead, sq, hdim_q});
                     ck_tile::HostTensor<T> k_deq({1, nhead_k, sk, hdim_q});
+                    // smooth_k: per-channel global K-mean for this sub-batch over its own seqlen sk
+                    // (K only; Q never centered). Matches the device per-batch km; correction
+                    // absorbed by softmax so the attention math is unchanged.
+                    // smooth_k gated: zero km (disabled) -> reference subtracts 0 (no centering),
+                    // bit-identical to the device's km_ptr == nullptr path.
+                    ck_tile::HostTensor<float> k_km_b({1, nhead_k, hdim_q});
+                    if(smooth_k)
+                        k_km_b = ck_tile::compute_global_k_mean(
+                            k_ref_b, 1, nhead_k, sk, hdim_q);
                     if(qs_pertensor)
                     {
                         ck_tile::HostTensor<float> q_sc({1, nhead});
@@ -2304,7 +2325,7 @@ sparse_attn_result sparse_attn_fwd_run(
                             ck_tile::reference_sparge_global_quant_fp8<T>(
                                 q_ref_b, 1, nhead, sq, hdim_q, q_qf, q_sc);
                             ck_tile::reference_sparge_global_quant_fp8<T>(
-                                k_ref_b, 1, nhead_k, sk, hdim_q, k_qf, k_sc);
+                                k_ref_b, 1, nhead_k, sk, hdim_q, k_qf, k_sc, &k_km_b);
                             for(ck_tile::index_t h = 0; h < nhead; ++h)
                                 for(int32_t s = 0; s < sq; ++s)
                                     for(ck_tile::index_t d = 0; d < hdim_q; ++d)
@@ -2323,7 +2344,7 @@ sparse_attn_result sparse_attn_fwd_run(
                             ck_tile::reference_sparge_global_quant<T>(
                                 q_ref_b, 1, nhead, sq, hdim_q, q_i8, q_sc);
                             ck_tile::reference_sparge_global_quant<T>(
-                                k_ref_b, 1, nhead_k, sk, hdim_q, k_i8, k_sc);
+                                k_ref_b, 1, nhead_k, sk, hdim_q, k_i8, k_sc, &k_km_b);
                             for(ck_tile::index_t h = 0; h < nhead; ++h)
                                 for(int32_t s = 0; s < sq; ++s)
                                     for(ck_tile::index_t d = 0; d < hdim_q; ++d)
@@ -2351,7 +2372,8 @@ sparse_attn_result sparse_attn_fwd_run(
                             ck_tile::reference_sparge_rowwise_quant_fp8<T>(
                                 q_ref_b, 1, nhead, sq, hdim_q, block_size, gran_q, q_qf, q_sc);
                             ck_tile::reference_sparge_rowwise_quant_fp8<T>(
-                                k_ref_b, 1, nhead_k, sk, hdim_q, block_size, gran_k, k_qf, k_sc);
+                                k_ref_b, 1, nhead_k, sk, hdim_q, block_size, gran_k, k_qf, k_sc,
+                                &k_km_b);
                             for(ck_tile::index_t h = 0; h < nhead; ++h)
                                 for(int32_t s = 0; s < sq; ++s)
                                 {
@@ -2380,7 +2402,8 @@ sparse_attn_result sparse_attn_fwd_run(
                             ck_tile::reference_sparge_rowwise_quant<T>(
                                 q_ref_b, 1, nhead, sq, hdim_q, block_size, gran_q, q_i8, q_sc);
                             ck_tile::reference_sparge_rowwise_quant<T>(
-                                k_ref_b, 1, nhead_k, sk, hdim_q, block_size, gran_k, k_i8, k_sc);
+                                k_ref_b, 1, nhead_k, sk, hdim_q, block_size, gran_k, k_i8, k_sc,
+                                &k_km_b);
                             for(ck_tile::index_t h = 0; h < nhead; ++h)
                                 for(int32_t s = 0; s < sq; ++s)
                                 {

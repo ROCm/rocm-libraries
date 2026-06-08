@@ -804,6 +804,49 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         args.total_k_tokens       = total_k_tokens;
     }
 
+    // ---- smooth_k (gated by hp.smooth_k, matches official SpargeAttn's smooth_k switch) ----
+    // When enabled, host-compute the per-channel global K-mean km = k.mean(dim=-2) per
+    // (batch, head_k, channel) over the (per-batch) seqlen, fed to BOTH the device K quant and the
+    // reference quant so faithful-dequant validation stays tight. Q is never centered. km uses fp32
+    // accumulation and the SAME element order as the host reference's compute_global_k_mean.
+    // When disabled, km_ptr stays nullptr -> device and reference both quantize raw K (consistent).
+    ck_tile::DeviceMem km_buf; // unallocated unless smooth_k is on
+    if(hp.smooth_k)
+    {
+        std::vector<float> km_host(static_cast<size_t>(batch) * nhead_k * hdim_q, 0.0f);
+        const auto* k_data = TK.data();
+        for(int b = 0; b < batch; ++b)
+        {
+            const int sk = is_group_mode ? seqlen_ks[b] : seqlen_k;
+            const int64_t b_tok_off =
+                is_group_mode ? static_cast<int64_t>(seqstart_k[b]) : 0;
+            const int64_t b_base =
+                is_group_mode ? (b_tok_off * st.stride_k)
+                              : (static_cast<int64_t>(b) * st.batch_stride_k);
+            for(int h = 0; h < nhead_k; ++h)
+                for(int d = 0; d < hdim_q; ++d)
+                {
+                    float sum = 0.0f;
+                    for(int s = 0; s < sk; ++s)
+                    {
+                        const int64_t off = b_base +
+                            static_cast<int64_t>(h) * st.nhead_stride_k +
+                            static_cast<int64_t>(s) * st.stride_k + d;
+                        sum += ck_tile::type_convert<float>(k_data[off]);
+                    }
+                    km_host[(static_cast<size_t>(b) * nhead_k + h) * hdim_q + d] =
+                        sum / static_cast<float>(sk);
+                }
+        }
+        km_buf.Realloc(km_host.size() * sizeof(float));
+        km_buf.ToDevice(km_host.data());
+        args.km_ptr = km_buf.GetDeviceBuffer();
+    }
+    else
+    {
+        args.km_ptr = nullptr;
+    }
+
     const auto ws = is_group_mode ? compute_sparge_sage_workspace_layout_group(args)
                                   : compute_sparge_sage_workspace_layout(args);
     ck_tile::DeviceMem workspace(ws.total_bytes);

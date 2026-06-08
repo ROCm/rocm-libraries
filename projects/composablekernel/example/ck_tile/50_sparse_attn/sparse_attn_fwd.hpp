@@ -854,6 +854,11 @@ struct fmha_sparge_sage_fwd_args
 
     void* workspace_ptr = nullptr;
 
+    // smooth_k: per-channel global K-mean km[batch, nhead_k, hdim] (fp32), host-computed and
+    // uploaded. When non-null the K quant (fused preprocess + PERTENSOR QKQuant) centers K by km
+    // before quantizing (official SpargeAttn). nullptr disables (Q is never centered).
+    const void* km_ptr = nullptr;
+
     // Bias buffer. ALIBI: slope array (rank-1 [nhead] => stride_bias=0; rank-2 => stride_bias=nhead).
     // ELEMENTWISE: dense [.., Sq, Sk]; stride_bias = Sk row stride, nhead/batch strides select plane.
     const void*      bias_ptr          = nullptr;

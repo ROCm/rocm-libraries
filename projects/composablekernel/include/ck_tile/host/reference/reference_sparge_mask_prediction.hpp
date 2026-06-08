@@ -114,9 +114,11 @@ compute_global_k_mean(const HostTensor<T>& k_bhsd,
 
 // Scalar reference for the per-warp row-wise INT8 quantization fused into preprocess.
 // Mirrors BlockSpargePreprocessPipeline::quantize_block bit-for-bit:
-//   per-token absmax over the full hidden dim (raw values, NOT km-centered),
+//   (smooth_k, K side) center val by per-channel km[c] before absmax + quant,
+//   per-token absmax over the full hidden dim,
 //   group absmax over `tokens_per_scale` consecutive tokens, scale = absmax / 127,
 //   int8 = type_convert<int8_t>(saturates<int8_t>{}(val / scale)).
+// km (nullable): per-channel K-mean [batch, nhead, hdim]. Pass nullptr for Q (no centering).
 // Inputs are [batch, nhead, seqlen, hdim]. Outputs:
 //   q_int8 [batch, nhead, seqlen, hdim], q_scale [batch, nhead, num_block_scale]
 //   with num_block_scale = num_blocks * (block_size / tokens_per_scale), grouped per
@@ -131,11 +133,15 @@ void reference_sparge_rowwise_quant(const HostTensor<T>& data_bhsd,
                                     index_t              block_size,
                                     index_t              tokens_per_scale,
                                     HostTensor<int8_t>&  int8_out,   // [B,H,S,D]
-                                    HostTensor<float>&   scale_out)  // [B,H,num_block_scale]
+                                    HostTensor<float>&   scale_out,  // [B,H,num_block_scale]
+                                    const HostTensor<float>* km = nullptr) // [B,H,D] or nullptr
 {
     const index_t num_blocks      = (seqlen + block_size - 1) / block_size;
     const index_t scales_per_blk  = block_size / tokens_per_scale;
     const index_t num_block_scale = num_blocks * scales_per_blk;
+    auto kmv = [&](index_t b, index_t h, index_t d) {
+        return km ? (*km)(b, h, d) : 0.0f;
+    };
 
     for(index_t b = 0; b < batch; ++b)
         for(index_t h = 0; h < nhead; ++h)
@@ -155,7 +161,7 @@ void reference_sparge_rowwise_quant(const HostTensor<T>& data_bhsd,
                             continue;
                         for(index_t d = 0; d < hdim; ++d)
                         {
-                            float v = type_convert<float>(data_bhsd(b, h, s, d));
+                            float v = type_convert<float>(data_bhsd(b, h, s, d)) - kmv(b, h, d);
                             amax    = std::max(amax, std::abs(v));
                         }
                     }
@@ -171,7 +177,7 @@ void reference_sparge_rowwise_quant(const HostTensor<T>& data_bhsd,
                             continue;
                         for(index_t d = 0; d < hdim; ++d)
                         {
-                            float v = type_convert<float>(data_bhsd(b, h, s, d));
+                            float v = type_convert<float>(data_bhsd(b, h, s, d)) - kmv(b, h, d);
                             float r = (scale > 0.0f) ? (v / scale) : 0.0f;
                             int8_out(b, h, s, d) =
                                 type_convert<int8_t>(saturates<int8_t>{}(r));
@@ -194,12 +200,16 @@ void reference_sparge_rowwise_quant_fp8(const HostTensor<T>& data_bhsd,
                                         index_t              block_size,
                                         index_t              tokens_per_scale,
                                         HostTensor<float>&   fp8_as_float, // [B,H,S,D] float(fp8)
-                                        HostTensor<float>&   scale_out)    // [B,H,num_block_scale]
+                                        HostTensor<float>&   scale_out,    // [B,H,num_block_scale]
+                                        const HostTensor<float>* km = nullptr) // [B,H,D] or nullptr
 {
     const index_t num_blocks      = (seqlen + block_size - 1) / block_size;
     const index_t scales_per_blk  = block_size / tokens_per_scale;
     const index_t num_block_scale = num_blocks * scales_per_blk;
     const float   fp8_max         = type_convert<float>(numeric<fp8_t>::max());
+    auto kmv = [&](index_t b, index_t h, index_t d) {
+        return km ? (*km)(b, h, d) : 0.0f;
+    };
 
     for(index_t b = 0; b < batch; ++b)
         for(index_t h = 0; h < nhead; ++h)
@@ -218,7 +228,7 @@ void reference_sparge_rowwise_quant_fp8(const HostTensor<T>& data_bhsd,
                             continue;
                         for(index_t d = 0; d < hdim; ++d)
                         {
-                            float v = type_convert<float>(data_bhsd(b, h, s, d));
+                            float v = type_convert<float>(data_bhsd(b, h, s, d)) - kmv(b, h, d);
                             amax    = std::max(amax, std::abs(v));
                         }
                     }
@@ -234,7 +244,7 @@ void reference_sparge_rowwise_quant_fp8(const HostTensor<T>& data_bhsd,
                             continue;
                         for(index_t d = 0; d < hdim; ++d)
                         {
-                            float v = type_convert<float>(data_bhsd(b, h, s, d));
+                            float v = type_convert<float>(data_bhsd(b, h, s, d)) - kmv(b, h, d);
                             float r = (scale > 0.0f) ? (v / scale) : 0.0f;
                             fp8_t q = type_convert<fp8_t>(r);
                             fp8_as_float(b, h, s, d) = type_convert<float>(q);
@@ -254,21 +264,26 @@ void reference_sparge_global_quant(const HostTensor<T>& data_bhsd,
                                    index_t              seqlen,
                                    index_t              hdim,
                                    HostTensor<int8_t>&  int8_out,  // [B,H,S,D]
-                                   HostTensor<float>&   scale_out) // [B,H] (one scale per b,h)
+                                   HostTensor<float>&   scale_out, // [B,H] (one scale per b,h)
+                                   const HostTensor<float>* km = nullptr) // [B,H,D] or nullptr
 {
+    auto kmv = [&](index_t b, index_t h, index_t d) {
+        return km ? (*km)(b, h, d) : 0.0f;
+    };
     for(index_t b = 0; b < batch; ++b)
         for(index_t h = 0; h < nhead; ++h)
         {
             float amax = 0.0f;
             for(index_t s = 0; s < seqlen; ++s)
                 for(index_t d = 0; d < hdim; ++d)
-                    amax = std::max(amax, std::abs(type_convert<float>(data_bhsd(b, h, s, d))));
+                    amax = std::max(amax,
+                        std::abs(type_convert<float>(data_bhsd(b, h, s, d)) - kmv(b, h, d)));
             const float scale = (amax > 0.0f) ? (amax / 127.0f) : 1.0f;
             scale_out.mData[static_cast<size_t>(b * nhead + h)] = scale;
             for(index_t s = 0; s < seqlen; ++s)
                 for(index_t d = 0; d < hdim; ++d)
                 {
-                    float v = type_convert<float>(data_bhsd(b, h, s, d));
+                    float v = type_convert<float>(data_bhsd(b, h, s, d)) - kmv(b, h, d);
                     int8_out(b, h, s, d) =
                         type_convert<int8_t>(saturates<int8_t>{}(v / scale));
                 }
@@ -283,22 +298,27 @@ void reference_sparge_global_quant_fp8(const HostTensor<T>& data_bhsd,
                                        index_t              seqlen,
                                        index_t              hdim,
                                        HostTensor<float>&   fp8_as_float, // [B,H,S,D] float(fp8)
-                                       HostTensor<float>&   scale_out)    // [B,H]
+                                       HostTensor<float>&   scale_out,    // [B,H]
+                                       const HostTensor<float>* km = nullptr) // [B,H,D] or nullptr
 {
     const float fp8_max = type_convert<float>(numeric<fp8_t>::max());
+    auto kmv = [&](index_t b, index_t h, index_t d) {
+        return km ? (*km)(b, h, d) : 0.0f;
+    };
     for(index_t b = 0; b < batch; ++b)
         for(index_t h = 0; h < nhead; ++h)
         {
             float amax = 0.0f;
             for(index_t s = 0; s < seqlen; ++s)
                 for(index_t d = 0; d < hdim; ++d)
-                    amax = std::max(amax, std::abs(type_convert<float>(data_bhsd(b, h, s, d))));
+                    amax = std::max(amax,
+                        std::abs(type_convert<float>(data_bhsd(b, h, s, d)) - kmv(b, h, d)));
             const float scale = (amax > 0.0f) ? (amax / fp8_max) : 1.0f;
             scale_out.mData[static_cast<size_t>(b * nhead + h)] = scale;
             for(index_t s = 0; s < seqlen; ++s)
                 for(index_t d = 0; d < hdim; ++d)
                 {
-                    float v = type_convert<float>(data_bhsd(b, h, s, d));
+                    float v = type_convert<float>(data_bhsd(b, h, s, d)) - kmv(b, h, d);
                     fp8_t q = type_convert<fp8_t>(v / scale);
                     fp8_as_float(b, h, s, d) = type_convert<float>(q);
                 }

@@ -148,7 +148,9 @@ At the C++ API level, `ck_tile::sparge_hyperparam_args` still exposes both `cdft
 `-simthreshold` enables Q/K-block self-similarity fix-up. Q blocks below the threshold attend to all causally-valid K blocks; K blocks below the threshold are force-included. The scalar doubles as a global switch — when `<= 0` the sim arrays are not allocated and any per-head pointer is silently ignored (with stderr warning).
 
 ### sparge — K smoothing
-Matches upstream SpargeAttn's `smooth_k=True`: subtract the per-`(batch, kv_head)` K mean before pool/sim. Attention K is untouched. Default on; adds one K-mean launch.
+The `-smooth_k` flag controls the non-quant sparge selection path: it is a no-op for block selection (subtracting the per-`(batch, kv_head)` K mean shifts every q@k_mean score within a row by a constant that softmax max-subtract removes), so `km_ptr` stays null there.
+
+For **sparge_sage** (quantized), smooth_k is always on and aligns with upstream SpargeAttn's `smooth_k=True`: the per-`(batch, kv_head, channel)` global K mean (`km = k.mean` over seqlen) is subtracted from K **before** INT8/FP8 quantization (`round((k - km)/scale)`), reducing K's quantization error. Q is never centered. The attention pipeline is unchanged: the implied `-q@km^T` is a per-row constant absorbed by softmax. `km` is host-computed once and fed to both the device quant kernels and the reference, keeping faithful-dequant validation tight.
 
 ### sparge — P·V skip threshold (Stage 2)
 `-pvthreshd` matches upstream SpargeAttn `pv_threshold` (positive log2-units). Per-iteration P·V is dropped when `(block_local_max - block_global_max) < -pvthreshd` in log2 space. Paper-typical range `[1, 5]`; `0` disables Stage 2.
