@@ -2274,6 +2274,11 @@ def build_dataflow_graph(four_part_capture):
     # naturally — the producer's body_label and consumer's body_label may
     # differ on the resulting DataflowEdge.
 
+    # nodes_per_body contains ALL nodes (including SWait/SBarrier) in body
+    # order; _collect_barrier_edges needs SWait and SBarrier nodes to detect
+    # the wait+barrier patterns. sorted_nodes excludes those, so we must keep
+    # the per-body extend walk here (same as the all_nodes_in_order PROPERTY
+    # which also cannot use self.nodes — see §2F in the implementation plan).
     all_nodes_in_order = []
     for label in _BODY_BUILD_ORDER:
         all_nodes_in_order.extend(nodes_per_body[label])
@@ -2561,60 +2566,39 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
     # explicit profile (e.g. `_DEFAULT_CDNA4_ARCH_PROFILE`).
     profile = ArchProfile.from_carrier(graph)
 
-    # Producer must always be strictly before consumer in stream order. The
-    # SchedulePosition `__lt__` compares (loop_index, stream_index)
-    # so this single check covers same-body and cross-body cases uniformly.
-    if not (producer.position < consumer.position):
+    # Producer must always be strictly before consumer in stream order.
+    # unrolled_position is a strictly monotone int across all bodies, so
+    # this single comparison covers same-body and cross-body cases.
+    if producer.unrolled_position >= consumer.unrolled_position:
         return 0
 
-    # Build the list of bodies to traverse, starting from the producer's
-    # body and continuing forward through `_BODY_BUILD_ORDER` until (and
-    # including) the consumer's body. The simulator state —
-    # `current_issue`, `mfma_free_at`, `last_mfma_class`,
-    # `last_mfma_issue` — is preserved across body boundaries because the
-    # captured bodies issue back-to-back in hardware execution order.
-    # There is no extra "body boundary" stall injected; every
-    # per-instruction cost is already accounted for as we walk each body's
-    # instructions, so the cross-body gap is just the sum of intervening
-    # instruction issue costs.
-    p_body_idx = None
-    c_body_idx = None
-    for i, label in enumerate(_BODY_BUILD_ORDER):
-        if label == producer.body_label:
-            p_body_idx = i
-        if label == consumer.body_label:
-            c_body_idx = i
-    if p_body_idx is None or c_body_idx is None or p_body_idx > c_body_idx:
-        return 0
-
-    p_ti = getattr(producer, "tagged_inst", None)
-    c_ti = getattr(consumer, "tagged_inst", None)
-    # Fallback slot keys for the by-slot lookup below: SchedulePosition no
-    # longer carries (vmfma_index, sub_index) after the 5v4u collapse, so
-    # source the kernel-writer slot tuple directly from the node's own
-    # `tagged_inst.slot`. The `(mfma_index, sequence)` pair is the same
-    # tuple we used pre-collapse — only its provenance changes.
-    def _slot_key(node):
-        ti = getattr(node, "tagged_inst", None)
-        if ti is None or getattr(ti, "slot", None) is None:
-            return None
-        return (ti.slot.mfma_index, ti.slot.sequence)
-    p_key = _slot_key(producer)
-    c_key = _slot_key(consumer)
-
-    # Walk bodies in execution order. Simulator state persists across
-    # boundaries (single source of truth for cycle gaps regardless of
-    # body membership).
+    # Single-pass global walk over body instruction lists in _BODY_BUILD_ORDER.
+    # A running global_pos counter increments once per TaggedInstruction,
+    # matching the unrolled_position stamping in build_dataflow_graph Phase 1
+    # (unrolled_pos = record.unrolled_start + local_idx, where the records
+    # also walk bodies in _BODY_BUILD_ORDER order). Producer and consumer are
+    # located when global_pos matches their unrolled_position — no identity
+    # search (ti is p_ti) or slot-key fallback needed.
+    #
+    # Simulator state (current_issue, mfma_free_at, last_mfma_class,
+    # last_mfma_issue) is active only from the producer's instruction onward.
+    # Instructions before the producer are counted (global_pos increments) but
+    # do not contribute to the timing simulation — matching the old behaviour
+    # where the walk started at p_body_idx (the producer's body). This ensures
+    # MFMA contention from bodies before the producer's body does not bleed
+    # into same-body or near-body edge timing.
+    # For genuine cross-body edges (producer in ML_PREV, consumer in ML), the
+    # simulator naturally carries state across the boundary because the walk
+    # is continuous and starts at the producer's instruction.
+    global_pos = 0
     mfma_free_at = 0
     current_issue = 0
     last_mfma_class = None
     last_mfma_issue = -1
     p_issue_start = None
     c_issue_start = None
-    found_producer = False
 
-    for body_i in range(p_body_idx, c_body_idx + 1):
-        label = _BODY_BUILD_ORDER[body_i]
+    for label in _BODY_BUILD_ORDER:
         body = captures.get(label)
         if body is None:
             continue
@@ -2622,79 +2606,50 @@ def cumulative_issue_cycles(graph: DataflowGraph, producer: GraphNode, consumer:
         if not instructions:
             continue
 
-        # In producer's body: locate producer and start the walk at it.
-        # In subsequent bodies: walk from the start. Consumer may live in
-        # any body from producer's onward.
-        start_idx = 0
-        if not found_producer:
-            for i, ti in enumerate(instructions):
-                if ti is p_ti or (
-                        p_ti is None
-                        and getattr(ti, "slot", None) is not None
-                        and (getattr(ti.slot, "mfma_index", None),
-                             getattr(ti.slot, "sequence", None)) == p_key):
-                    start_idx = i
-                    found_producer = True
+        for ti in instructions:
+            at_producer = (global_pos == producer.unrolled_position)
+            at_consumer = (global_pos == consumer.unrolled_position)
+
+            # Only run the issue-cycle simulator from the producer's position
+            # onward. Instructions before the producer increment global_pos
+            # (for position matching) but do not affect timing state.
+            if p_issue_start is not None or at_producer:
+                wrapped = getattr(ti, "wrapped", None)
+                inst = getattr(wrapped, "rocisa_inst", None) if wrapped is not None else None
+                is_mfma = inst is not None and _category(inst) is InstructionCategory.MFMA
+                if is_mfma:
+                    current_issue = max(current_issue, mfma_free_at)
+                    current_mfma_class = profile.mfma_finish_cycles_for(inst)
+                    if last_mfma_class is not None and current_mfma_class != last_mfma_class:
+                        gap = current_issue - last_mfma_issue
+                        # Threshold is producer-class-keyed; thresholds come from
+                        # the resolved arch profile. Discrimination uses the
+                        # profile's own 4x4 finish-cycle value so per-arch
+                        # overrides don't decouple discriminator from threshold.
+                        threshold = (
+                            profile.mfma_type_switch_threshold_from_4x4
+                            if last_mfma_class == profile.mfma_4x4_finish_cycles
+                            else profile.mfma_type_switch_threshold_from_standard
+                        )
+                        if gap < threshold:
+                            current_issue += 1
+                    mfma_free_at = current_issue + 1 + current_mfma_class
+                    last_mfma_issue = current_issue
+                    last_mfma_class = current_mfma_class
+
+                if at_producer:
+                    p_issue_start = current_issue
+                if at_consumer:
+                    c_issue_start = current_issue
                     break
-            if not found_producer:
-                # Producer not in this body — defensive; should not happen.
-                return 0
+                # Per-instruction issue cost. Skip lookup for SWait/SBarrier/SNop
+                # whose rocisa instances are not graph nodes — read their cost
+                # directly from `_min_issue_quad_cycles_for`. For graph-tracked
+                # nodes the cost is identical (default base 1) so either path is
+                # cycle-exact.
+                current_issue += profile.min_issue_quad_cycles_for(inst)
 
-        # End_idx: where (if at all) the consumer lives in this body.
-        end_idx = len(instructions) - 1
-        consumer_idx_in_body = None
-        if label == consumer.body_label:
-            for i in range(start_idx, len(instructions)):
-                ti = instructions[i]
-                if ti is c_ti or (
-                        c_ti is None
-                        and getattr(ti, "slot", None) is not None
-                        and (getattr(ti.slot, "mfma_index", None),
-                             getattr(ti.slot, "sequence", None)) == c_key):
-                    consumer_idx_in_body = i
-                    end_idx = i
-                    break
-            if consumer_idx_in_body is None:
-                # Consumer expected in this body but not found.
-                return 0
-
-        # Walk start_idx..end_idx with the canonical issue-time simulator.
-        for i in range(start_idx, end_idx + 1):
-            ti = instructions[i]
-            wrapped = getattr(ti, "wrapped", None)
-            inst = getattr(wrapped, "rocisa_inst", None) if wrapped is not None else None
-            is_mfma = inst is not None and _category(inst) is InstructionCategory.MFMA
-            if is_mfma:
-                current_issue = max(current_issue, mfma_free_at)
-                current_mfma_class = profile.mfma_finish_cycles_for(inst)
-                if last_mfma_class is not None and current_mfma_class != last_mfma_class:
-                    gap = current_issue - last_mfma_issue
-                    # Threshold is producer-class-keyed; thresholds come from
-                    # the resolved arch profile. Discrimination uses the
-                    # profile's own 4x4 finish-cycle value so per-arch
-                    # overrides don't decouple discriminator from threshold.
-                    threshold = (
-                        profile.mfma_type_switch_threshold_from_4x4
-                        if last_mfma_class == profile.mfma_4x4_finish_cycles
-                        else profile.mfma_type_switch_threshold_from_standard
-                    )
-                    if gap < threshold:
-                        current_issue += 1
-                mfma_free_at = current_issue + 1 + current_mfma_class
-                last_mfma_issue = current_issue
-                last_mfma_class = current_mfma_class
-
-            if p_issue_start is None and i == start_idx and label == producer.body_label:
-                p_issue_start = current_issue
-            if consumer_idx_in_body is not None and i == consumer_idx_in_body:
-                c_issue_start = current_issue
-                break
-            # Per-instruction issue cost. Skip lookup for SWait/SBarrier/SNop
-            # whose rocisa instances are not graph nodes — read their cost
-            # directly from `_min_issue_quad_cycles_for`. For graph-tracked
-            # nodes the cost is identical (default base 1) so either path is
-            # cycle-exact.
-            current_issue += profile.min_issue_quad_cycles_for(inst)
+            global_pos += 1
 
         if c_issue_start is not None:
             break
@@ -4271,16 +4226,15 @@ def diagnose_missing_edge(
                 ))
 
     if not failures:
-        # Cross-body edges where waits exist that DO drain the producer:
-        # this is a loop-carried dataflow handoff — the captured stream
-        # has the producer at body N's end, the consumer at body N+1's
-        # start, and the SWaitCnt that bridges them drains the producer's
-        # counter. The edge is "missing" from subj only because the
-        # symbolic register name is reused across iterations and the
-        # subj graph paired this consumer with a different (closer)
-        # producer. No real classifier bug; suppress.
-        if (p_node.body_label != c_node.body_label
-                and waits and subj_graph.any_drains(waits, p_node)):
+        # Edges where waits exist that DO drain the producer: this is a
+        # loop-carried dataflow handoff (the SWaitCnt bridges producer and
+        # consumer across the body boundary). The edge is "missing" from subj
+        # only because the symbolic register name is reused and the subj graph
+        # paired this consumer with a different (closer) producer. Suppress
+        # regardless of body relationship — the body_label guard was redundant
+        # under Resolution 1 (ML iter copies have distinct body_labels, so
+        # cross-iter ML edges already satisfied body_label != body_label).
+        if waits and subj_graph.any_drains(waits, p_node):
             return []
 
         # Couldn't classify — capture pipeline bug or classifier bug.

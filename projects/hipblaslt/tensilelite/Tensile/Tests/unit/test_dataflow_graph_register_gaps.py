@@ -3571,3 +3571,141 @@ class TestNodeLabelAfterCoverageFix:
             f"cms_node_label should return primary='SSETPRIO[0]' for the only "
             f"SSetPrior in capture; got {label.primary!r}"
         )
+
+
+# =============================================================================
+# C3g — cross-iter ML cycle count via unrolled_position
+# =============================================================================
+# `cumulative_issue_cycles` walks the unified instruction stream ordered by
+# `unrolled_position` (a globally monotone int stamped in Phase 1 of
+# `build_dataflow_graph`). Cross-iter edges — producer in BODY_LABEL_ML_PREV
+# (iter_index=0) and consumer in BODY_LABEL_ML (iter_index=1) — must be
+# counted using the global unrolled_position, NOT per-body or per-iter
+# indices. This test pins that contract.
+
+
+def test_cross_iter_ml_cycle_count():
+    """Producer DSLoadB128 in BODY_LABEL_ML_PREV (iter_index=0) writes
+    v8..v11; consumer standard MFMA in BODY_LABEL_ML (iter_index=1) reads
+    v8..v9 as its `a` source. `cumulative_issue_cycles` must walk using
+    `unrolled_position` and yield the correct cross-iter gap.
+
+    Fixture unrolled stream (PRO absent):
+      pos=0: ML_PREV LR  (producer, iter_index=0)
+      pos=1: ML     MFMA (consumer, iter_index=1)
+      pos=2: NGL    MFMA filler
+      pos=3: NLL    MFMA filler
+
+    cumulative_issue_cycles walk from pos=0 to pos=1:
+      producer (LR at pos=0): p_issue_start=0; not an MFMA, so
+        current_issue += min_issue_quad_cycles_for(DSLoadB128) = 1.
+        current_issue = 1.
+      consumer (MFMA at pos=1): is_mfma=True, so
+        current_issue = max(1, mfma_free_at=0) = 1; c_issue_start=1. Break.
+      gap = c_issue_start - p_issue_start - 1 = 1 - 0 - 1 = 0.
+
+    The key invariant under test: `cumulative_issue_cycles` locates both
+    nodes via their `unrolled_position` (global monotone integers stamped
+    across the entire unrolled timeline), not via per-body or per-iter
+    loop_index comparisons. A regression that searched by body_label or
+    iter_index only would fail to locate the producer in ML_PREV or the
+    consumer in ML, returning the fallback 0 for a different reason —
+    covered by the assertion that the RAW edge EXISTS and that the
+    iter_index values are correct.
+    """
+    ml_prev_cap = make_capture(BODY_LABEL_ML_PREV, [
+        # Producer: LR writes v8..v11 (a_src_count=4 so that the MFMA
+        # reading v8..v9 triggers a RAW overlap on the LR output range).
+        make_lr(dst_vgpr_start=8, dst_vgpr_count=4, lds_offset=64,
+                slot=0, category="LRA0"),
+    ])
+    ml_cap = make_capture(BODY_LABEL_ML, [
+        # Consumer: standard MFMA reading v8..v9 as its `a` source.
+        # c_dst at v100 (no overlap with producer); a_src at v8 (RAW).
+        make_mfma(c_dst_start=100, a_src_start=8, b_src_start=32,
+                  slot=0, sequence=0, a_src_count=2),
+    ])
+    ngl_filler = make_capture(BODY_LABEL_NGL, [make_mfma(
+        c_dst_start=220, a_src_start=224, b_src_start=228, slot=0)])
+    nll_filler = make_capture(BODY_LABEL_NLL, [make_mfma(
+        c_dst_start=240, a_src_start=244, b_src_start=248, slot=0)])
+    four = FourPartCapture(
+        main_loop={0: ml_cap},
+        main_loop_prev={0: ml_prev_cap},
+        n_gl={0: ngl_filler},
+        n_ll={0: nll_filler},
+        num_mfma=1, num_codepaths=1, source="cms",
+        arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
+    )
+    g = build_dataflow_graph(four)
+
+    # Locate the cross-iter LR (ML_PREV) -> MFMA (ML) RAW edge.
+    cross_iter = [
+        e for e in g.edges
+        if getattr(e.producer, "body_label", None) == BODY_LABEL_ML_PREV
+        and getattr(e.consumer, "body_label", None) == BODY_LABEL_ML
+        and getattr(e.producer, "category", None) == "LRA0"
+        and getattr(e.consumer, "category", None) == "MFMA"
+    ]
+    edge_summary = [
+        (getattr(e.producer, "body_label", "?"),
+         getattr(e.producer, "category", "?"),
+         getattr(e.consumer, "body_label", "?"),
+         getattr(e.consumer, "category", "?"))
+        for e in g.edges
+    ]
+    assert cross_iter, (
+        "Expected a cross-iter LR(ML_PREV)->MFMA(ML) RAW edge on v8..v9. "
+        f"No such edge found. Edges in graph: {edge_summary}"
+    )
+    edge = cross_iter[0]
+    producer = edge.producer
+    consumer = edge.consumer
+
+    # Verify iter_index assignments from C3g: ML_PREV body = iter_index=0,
+    # ML body = iter_index=1. This is what the unrolled timeline stamps.
+    assert producer.iter_index == 0, (
+        f"Producer in BODY_LABEL_ML_PREV must have iter_index=0 "
+        f"(the iter-0 copy in the unrolled stream). Got iter_index="
+        f"{producer.iter_index}."
+    )
+    assert consumer.iter_index == 1, (
+        f"Consumer in BODY_LABEL_ML must have iter_index=1 "
+        f"(the iter-1 copy in the unrolled stream). Got iter_index="
+        f"{consumer.iter_index}."
+    )
+
+    # Verify the unrolled_position ordering: producer must come strictly
+    # before consumer in the global timeline. This is the core invariant
+    # that `cumulative_issue_cycles` relies on — it short-circuits to 0
+    # when producer.unrolled_position >= consumer.unrolled_position.
+    assert producer.unrolled_position < consumer.unrolled_position, (
+        f"Producer (ML_PREV, iter=0) must have a lower unrolled_position "
+        f"than consumer (ML, iter=1). Got producer.unrolled_position="
+        f"{producer.unrolled_position}, consumer.unrolled_position="
+        f"{consumer.unrolled_position}. If these are equal or inverted, "
+        f"the unrolled timeline was not stamped in execution order."
+    )
+
+    # Core assertion: `cumulative_issue_cycles` returns the correct
+    # cross-iter gap. Arithmetic:
+    #   producer (LR, pos=0): p_issue_start=0; LR issue cost = 1 ->
+    #     current_issue = 1.
+    #   consumer (MFMA, pos=1): max(1, mfma_free_at=0) = 1; c_issue_start=1.
+    #   gap = 1 - 0 - 1 = 0.
+    # A per-body (non-unrolled) walk would fail to find one or both nodes
+    # in the "wrong" body and fall back to returning 0 for the wrong reason
+    # — the iter_index and unrolled_position assertions above distinguish
+    # the two failure modes.
+    gap = cumulative_issue_cycles(g, producer, consumer)
+    assert gap == 0, (
+        f"Cross-iter LR(ML_PREV)->MFMA(ML) cycle gap: producer at "
+        f"unrolled_pos={producer.unrolled_position} (iter_index="
+        f"{producer.iter_index}), consumer at unrolled_pos="
+        f"{consumer.unrolled_position} (iter_index={consumer.iter_index}). "
+        f"cumulative_issue_cycles walk: LR issues at 0 (cost=1), MFMA "
+        f"issues at max(1, mfma_free_at=0)=1; gap = 1-0-1 = 0. "
+        f"Got gap={gap}. If gap==0 for the wrong reason (fallback), the "
+        f"iter_index and unrolled_position assertions above would have "
+        f"failed first."
+    )
