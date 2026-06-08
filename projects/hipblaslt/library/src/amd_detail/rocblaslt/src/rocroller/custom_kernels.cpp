@@ -129,7 +129,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {32, 256, 256};
             cache.addKernel(
@@ -139,7 +139,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_32x256", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {32, 384, 256};
             cache.addKernel(
@@ -149,7 +149,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {32, 512, 256};
             cache.addKernel(
@@ -159,7 +159,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_32x512", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {32, 640, 256};
             cache.addKernel(
@@ -169,7 +169,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_32x640", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {32, 768, 256};
             cache.addKernel(
@@ -179,7 +179,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_32x768", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {32, 896, 256};
             cache.addKernel(
@@ -189,7 +189,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_32x896", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {32, 1024, 256};
             cache.addKernel(
@@ -199,7 +199,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_32x1024", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             // 64xN kernels
             params.workgroupTile    = {64, 128, 256};
@@ -210,7 +210,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_64x128", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {64, 256, 256};
             cache.addKernel(
@@ -220,7 +220,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_64x256", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
 
             params.workgroupTile    = {64, 384, 256};
@@ -231,7 +231,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_64x384", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {64, 512, 256};
             cache.addKernel(
@@ -241,7 +241,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_64x512", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {64, 640, 256};
             cache.addKernel(
@@ -251,7 +251,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_64x640", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {64, 768, 256};
             cache.addKernel(
@@ -261,7 +261,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_64x768", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {64, 896, 256};
             cache.addKernel(
@@ -271,7 +271,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_64x896", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {64, 1024, 256};
             cache.addKernel(
@@ -281,7 +281,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_64x1024", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             // 96xN kernels
             params.workgroupTile    = {96, 128, 256};
@@ -292,7 +292,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_96x128", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {96, 256, 256};
             cache.addKernel(
@@ -302,7 +302,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_96x256", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {96, 384, 256};
             cache.addKernel(
@@ -312,7 +312,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_96x384", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {96, 512, 256};
             cache.addKernel(
@@ -322,7 +322,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_96x512", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {96, 640, 256};
             cache.addKernel(
@@ -332,7 +332,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_96x640", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             // 128xN kernels
             params.workgroupTile    = {128, 128, 256};
@@ -343,7 +343,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_128x128", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));            
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));            
 
             /*params.workgroupTile    = {128, 256, 256};
             cache.addKernel(
@@ -353,7 +353,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_128x256", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));*/
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));*/
 
             params.workgroupTile    = {128, 384, 256};
             cache.addKernel(
@@ -363,7 +363,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_128x384", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {128, 512, 256};
             cache.addKernel(
@@ -373,7 +373,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_128x512", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             // 160xN kernels
             params.workgroupTile    = {160, 128, 256};
@@ -384,7 +384,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_160x128", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {160, 256, 256};
             cache.addKernel(
@@ -394,7 +394,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_160x256", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {160, 384, 256};
             cache.addKernel(
@@ -404,7 +404,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_160x384", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             // 192xN kernels
             params.workgroupTile    = {192, 128, 256};
@@ -415,7 +415,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_192x128", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {192, 256, 256};
             cache.addKernel(
@@ -425,7 +425,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_192x256", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             // 224xN kernels
             params.workgroupTile    = {224, 128, 256};
@@ -436,7 +436,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_224x128", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {224, 256, 256};
             cache.addKernel(
@@ -446,7 +446,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_224x256", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             // 256xN kernels
             params.workgroupTile    = {256, 128, 256};
@@ -457,7 +457,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_256x128", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             params.workgroupTile    = {256, 256, 256};
             cache.addKernel(
@@ -467,7 +467,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getKernelName("f4gemm_bf16_per1x32Fp4_BpreShuffle_256x256", nonTemporalA, nonTemporalB),
                     mxfp4Kernel,
                     params.workgroupTile,
-                    getCoPath() / "rr_custom_kernels.co"));
+                    getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
 
             // No B pre-shuffle variant (only for non-ntA)
             if (!nonTemporalA && !nonTemporalB)
@@ -481,7 +481,7 @@ void preloadCustomKernels(SolutionCache& cache)
                         "f4gemm_bf16_per1x32Fp4_noBpreShuffle_256x256",
                         mxfp4Kernel,
                         params.workgroupTile,
-                        getCoPath() / "rr_custom_kernels.co"));
+                        getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
                 mxfp4Kernel.swizzleA = true; // Reset for next iteration
             }
 
@@ -503,7 +503,7 @@ void preloadCustomKernels(SolutionCache& cache)
                                            params.workgroupTile,
                                            {128, 2, 1},
                                            wave192Condition,
-                                           getCoPath() / "rr_custom_kernels.co"));
+                                           getCoPath() / "gfx950" / "rr_custom_kernels_gfx950.co"));
             }
         }
     }

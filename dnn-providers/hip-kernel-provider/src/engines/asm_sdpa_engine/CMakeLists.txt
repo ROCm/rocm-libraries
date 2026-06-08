@@ -11,6 +11,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(ASM_CODEGEN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/codegen.py")
 set(ASM_CODEGEN_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(ASM_FMHA_FWD_CONFIG_HEADER "${ASM_CODEGEN_OUTPUT_DIR}/asm_fmha_v3_fwd_configs.hpp")
+set(ASM_FMHA_BWD_CONFIG_HEADER "${ASM_CODEGEN_OUTPUT_DIR}/asm_fmha_v3_bwd_configs.hpp")
 
 # Define supported GPU architectures (used for both glob patterns and AITER_GPU_ARCHS)
 set(ASM_SDPA_GPU_ARCHS gfx942 gfx950)
@@ -27,7 +28,7 @@ endforeach()
 # Create the output directory
 file(MAKE_DIRECTORY ${ASM_CODEGEN_OUTPUT_DIR})
 
-# Custom command to generate ASM kernel config headers
+# Custom command to generate ASM kernel config headers (forward path)
 add_custom_command(
     OUTPUT ${ASM_FMHA_FWD_CONFIG_HEADER}
     COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=${ASM_SDPA_GPU_ARCHS}" --
@@ -36,13 +37,26 @@ add_custom_command(
             -o ${ASM_CODEGEN_OUTPUT_DIR}
     DEPENDS ${ASM_CODEGEN_SCRIPT} ${ASM_KERNEL_CSV_FILES}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels
-    COMMENT "Generating ASM kernel configuration headers for ${ASM_SDPA_GPU_ARCHS}"
+    COMMENT "Generating ASM fwd kernel configuration header for ${ASM_SDPA_GPU_ARCHS}"
+    VERBATIM
+)
+
+# Custom command to generate ASM kernel config headers (backward path)
+add_custom_command(
+    OUTPUT ${ASM_FMHA_BWD_CONFIG_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=${ASM_SDPA_GPU_ARCHS}" --
+            ${Python3_EXECUTABLE} ${ASM_CODEGEN_SCRIPT}
+            -m fmha_v3_bwd
+            -o ${ASM_CODEGEN_OUTPUT_DIR}
+    DEPENDS ${ASM_CODEGEN_SCRIPT} ${ASM_KERNEL_CSV_FILES}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels
+    COMMENT "Generating ASM bwd kernel configuration header for ${ASM_SDPA_GPU_ARCHS}"
     VERBATIM
 )
 
 # Create a custom target for the generated headers
 add_custom_target(asm_kernel_codegen
-    DEPENDS ${ASM_FMHA_FWD_CONFIG_HEADER}
+    DEPENDS ${ASM_FMHA_FWD_CONFIG_HEADER} ${ASM_FMHA_BWD_CONFIG_HEADER}
     COMMENT "Generating headers for asm sdpa kernels..."
 )
 
