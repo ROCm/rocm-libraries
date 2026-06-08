@@ -128,6 +128,5 @@ __all__ = [
     "hip_event_synchronize",
     "hip_event_elapsed_time",
     "hip_stream_synchronize",
-    "hip_device_synchronize",
     "hip_get_device_count",
 ]

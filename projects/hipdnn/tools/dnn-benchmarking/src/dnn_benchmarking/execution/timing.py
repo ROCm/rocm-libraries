@@ -200,17 +200,6 @@ class HipStreamSynchronizer:
         self._hipdnn.hip_event_synchronize(self._event)
 
 
-class HipDeviceSynchronizer:
-    """Direct HIP device-wide synchronizer."""
-
-    def __init__(self) -> None:
-        self._hipdnn = _require_hip_runtime()
-
-    def synchronize(self) -> None:
-        """Block until all work on the current HIP device is complete."""
-        self._hipdnn.hip_device_synchronize()
-
-
 def create_gpu_timer(
     backend: Optional[Literal["hip", "auto"]] = "auto",
     stream: int = 0,
@@ -244,11 +233,6 @@ def create_gpu_timer(
 def create_stream_synchronizer(stream: int = 0) -> HipStreamSynchronizer:
     """Create a reusable synchronizer for one HIP stream."""
     return HipStreamSynchronizer(stream)
-
-
-def create_device_synchronizer() -> HipDeviceSynchronizer:
-    """Create a direct HIP device-wide synchronizer."""
-    return HipDeviceSynchronizer()
 
 
 # Backward compatibility alias.

@@ -124,11 +124,6 @@ void streamSynchronize(uintptr_t stream)
     throwOnHipError(hipStreamSynchronize(toHipStream(stream)), "hipStreamSynchronize");
 }
 
-void deviceSynchronize()
-{
-    throwOnHipError(hipDeviceSynchronize(), "hipDeviceSynchronize");
-}
-
 } // namespace
 
 void hipBindings(nb::module_& m)
@@ -180,9 +175,5 @@ void hipBindings(nb::module_& m)
           nb::arg("stream") = 0,
           nb::call_guard<nb::gil_scoped_release>(),
           "Block until a HIP stream pointer encoded as an integer is idle");
-    m.def("hip_device_synchronize",
-          &deviceSynchronize,
-          nb::call_guard<nb::gil_scoped_release>(),
-          "Block until all HIP work on the current device is complete");
     m.def("hip_get_device_count", &getDeviceCount, "Return the number of visible HIP devices");
 }
