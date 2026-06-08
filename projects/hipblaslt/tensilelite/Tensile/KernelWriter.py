@@ -38,7 +38,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   MFMAInstruction, MXMFMAInstruction, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
   SMFMAInstruction, SNop, SEndpgm, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, SLShiftRightB32, TensorLoadToLds, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, \
-  Instruction
+  SCMovB64
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum
 
@@ -133,6 +133,7 @@ class ABMatrixInfo(MatrixInfo):
   gNLCPerpStride: int            = -1
   gRDtlSwizzlePerpBlockSize: int    = -1
   gRDtlSwizzleParaBlockSize: int    = -1
+  startVgprGL2PrefetchAddr: int = -1
 
 # States
 @dataclass
@@ -451,6 +452,8 @@ class CodeModules:
   globalReadMXSB: Optional[Module]            = None
   globalReadMetadata: Optional[Module]         = None
   globalReadIncrements: Optional[Module]      = None
+  gl2Prefetch: Optional[Module]               = None
+  gl2PrefetchIncrement: Optional[Module]      = None
   ## MFMA
   unrollLoopHeader: Optional[Module]                                  = None
   perIterGlobalRead: Optional[List[Module]]                           = None
@@ -2601,6 +2604,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.localReadAddresses(kernel, tensorParametersA, tensorParametersB, tPM))
         module.add(self.localWriteAddresses(kernel, tensorParametersA, tensorParametersB, tPM))
 
+    if kernel["PrefetchGL2"]:
+      module.add(self.gl2PrefetchCalcAddr(kernel, tensorParametersA, tensorParametersB))
+
     tdmA: bool = kernel["enableTDMA"]
     tdmB: bool = kernel["enableTDMB"]
     tdmMetadata: bool = kernel["enableTDMMetadata"]
@@ -3764,6 +3770,24 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.codes.globalReadIncrements = self.globalReadIncrementAB(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, 0)
     globalReadIncACode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementA")
     globalReadIncBCode  = self.codes.globalReadIncrements.findNamedItem("globalReadIncrementB")
+
+    self.codes.gl2PrefetchIncrement = Module()
+    self.codes.gl2Prefetch = Module()
+    if kernel["PrefetchGL2"]:
+      loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
+      self.codes.gl2PrefetchIncrement = Module()
+      self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], \
+        comment="counterL<=PGR+GL2"))
+      self.codes.gl2PrefetchIncrement.add(SCMovB64(sgpr("GL2PrefetchIncA", 2), 0))
+      self.codes.gl2PrefetchIncrement.add(SCMovB64(sgpr("GL2PrefetchIncB", 2), 0))
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.codes.gl2PrefetchIncrement.add(SCMovB64(sgpr("GL2PrefetchIncMXSA", 2), 0))
+      if kernel["ProblemType"]["MXBlockB"]:
+        self.codes.gl2PrefetchIncrement.add(SCMovB64(sgpr("GL2PrefetchIncMXSB", 2), 0))
+      self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
+      self.codes.gl2Prefetch = Module()
+      self.codes.gl2Prefetch.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
+      
 
     if not kernel["NoLdsWriteCode"]:
       self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA)
@@ -5168,6 +5192,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(packCodeB[pi])
 
       module.add(self.closeSumAtLeastUnroll(kernel, tensorParametersA, tensorParametersB, prefetch=True, isOptNLL=False, isNGLL=False))
+
+    if kernel["PrefetchGL2"]:
+      skipGL2Label = Label("Skip_GL2", "")
+      loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
+      module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]), \
+        comment="counterL<=PGR"))
+      module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
+      module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
+      if kernel["PrefetchGL2"] == 2:
+        module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]+1), comment="counterL<=PGR+1"))
+        module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
+        module.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
+        module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
+      module.add(skipGL2Label)
 
     loopCopies = 3 if kernel["HalfPLR"] else 2 if expand else 1
     isDTV = (kernel["DirectToVgprA"] or kernel["DirectToVgprB"])
@@ -7786,6 +7824,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.b.startVgprLocalWriteAddr = vgprIdx
         vgprIdx += self.states.b.numVgprLocalWriteAddr
 
+      # num vgprs: GL2 prefetch addresses
+      if kernel["PrefetchGL2"]:
+        self.gl2PrefetchInit(kernel, tensorParametersA, tensorParametersB)
+
       if kernel["ProblemType"]["MXBlockA"]:
         if not kernel["LocalWriteUseSgprMXSA"]:
           self.states.mxsa.startVgprLocalWriteAddr = vgprIdx
@@ -8286,6 +8328,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
         vgprIdx += 1
         self.states.b.tmpVgprCvtSub = vgprIdx
         vgprIdx += 1
+  
+      if kernel["PrefetchGL2"]:
+        vgprIdx = int((vgprIdx + 1) / 2) * 2
+        self.states.a.startVgprGL2PrefetchAddr = vgprIdx
+        vgprIdx += tensorParametersA["gl2nl"] * self.states.rpga
+        self.states.b.startVgprGL2PrefetchAddr = vgprIdx
+        vgprIdx += tensorParametersB["gl2nl"] * self.states.rpga
+        if kernel["ProblemType"]["MXBlockA"]:
+          self.states.mxsa.startVgprGL2PrefetchAddr = vgprIdx
+          vgprIdx += tensorParametersA["MX"]["gl2nl"] * self.states.rpga
+        if kernel["ProblemType"]["MXBlockB"]:
+          self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
+          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga      
 
       # TODO: Serial is always the first/last register in the pool so the store
       # code doesn't have to deal with fragmentation
@@ -9964,6 +10019,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
+  
+  @abc.abstractmethod
+  def gl2PrefetchInit(self, kernel, tPA, tPB):
+    return ""
+  
+  @abc.abstractmethod
+  def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
+    return ""
+  
+  @abc.abstractmethod
+  def gl2PrefetchIssueLoad(self, kernel, tPA, tPB) -> Module:
+    return ""
+  
+  @abc.abstractmethod
+  def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
+    return ""
+  
 
   def resetTDMDescriptorForTail(self, kernel, tP) -> Module:
     assert False, "Should be overrided"

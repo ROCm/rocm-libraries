@@ -2352,7 +2352,7 @@ class Solution(collections.abc.Mapping):
         break
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
-      
+
     halfPLR: int = state["HalfPLR"]
     state["HalfPLRA"] = bool(halfPLR & 0x01)
     state["HalfPLRB"] = bool(halfPLR & 0x02)
@@ -5023,6 +5023,49 @@ class Solution(collections.abc.Mapping):
       if state["LoopIters"] - (state["PrefetchLocalRead"] * wlrMultiple) < 0 :
         reject(state, printRejectionReason, "with PrefetchLocalRead %u LoopIters %u LocalReadVectorWidthB %u, not enough LoopIters to prefetch %ux%u iterations, " \
           % (state["PrefetchLocalRead"],state["LoopIters"],state["LocalReadVectorWidthB"], state["PrefetchLocalRead"] , wlrMultiple) )
+
+    if state["PrefetchGL2"] > 0:
+      if not isaInfoMap[isa].asmCaps["HasGlobalPrefetch"]:
+        reject(state, printRejectionReason, "ISA %s does not support global prefetch" % isa)
+        return
+      def isPowerOf2(x):
+        return x > 0 and (x & (x - 1)) == 0
+      # Currently we have many power of 2 assumptions for prefetchGL2 address calculation, may remove them in the future
+      # Check # threads are power of 2
+      if not isPowerOf2(state["NumThreads"]):
+        reject(state, printRejectionReason, "PrefetchGL2 requires NumThreads to be power of 2")
+        return
+      # Check ClusterDim is power of 2 and not [1,1]
+      if state["ClusterDim"] == [1, 1]:
+        reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim != [1, 1]")
+        return
+      if not all(isPowerOf2(x) for x in state["ClusterDim"]):
+        reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim components to be power of 2")
+        return
+      # Check DepthU is power of 2
+      if not isPowerOf2(state["DepthU"]):
+        reject(state, printRejectionReason, "PrefetchGL2 requires DepthU to be power of 2")
+        return
+      # Check MT is power of 2
+      if not isPowerOf2(state["MacroTile0"]) or not isPowerOf2(state["MacroTile1"]):
+        reject(state, printRejectionReason, "PrefetchGL2 requires MacroTile to be power of 2")
+        return
+      # Check if DataTypeA or DataTypeB is 6-bit float
+      if state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat():
+        reject(state, printRejectionReason, "PrefetchGL2 does not support 6-bit float")
+        return
+      # TODO: support GSU if needed
+      state["InternalSupportParams"]["SupportUserGSU"] = False
+      if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
+        reject(state, printRejectionReason, "Currently PrefetchGL2 does not support GSU")
+        return
+      if state["StreamK"] != 0:
+        reject(state, printRejectionReason, "PrefetchGL2 does not support Stream-K")
+        return
+      if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
+        reject(state, printRejectionReason, "PrefetchGL2 does not support general batch")
+        return
+      
 
     # # reject conditions with lower performance
     # if state["ScheduleIterAlg"] == 2 and \

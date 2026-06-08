@@ -69,8 +69,9 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
   VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128
 
-from .Component import Component, TensorDataMover
+from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
+from .Components.GL2Prefetch import GL2PrefetchLoad
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .SolutionStructs import isPackedIndex
@@ -897,6 +898,14 @@ class KernelWriterAssembly(KernelWriter):
     for i in range(numDummySgpr):
       module.add(self.defineSgpr("DummySgpr%d"%i, 1))
 
+    if kernel["PrefetchGL2"]:
+      module.add(self.defineSgpr("GL2PrefetchIncA", self.states.rpga, 2))
+      module.add(self.defineSgpr("GL2PrefetchIncB", self.states.rpga, 2))
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.add(self.defineSgpr("GL2PrefetchIncMXSA", self.states.rpga, 2))
+      if kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.defineSgpr("GL2PrefetchIncMXSB", self.states.rpga, 2))
+
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of defined SGPRS (%d) overflowed max SGPRS (%d)." \
                % (self.sgprPool.size(), self.states.regCaps["MaxSgpr"]))
@@ -1468,6 +1477,22 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ProblemType"]["DataType"].isDoubleComplex() and kernel["MIArchVgpr"]:
         module.add(RegSet("v", "vgprAlphaTmp", \
             self.states.startVgprAlphaTmp))
+
+      if kernel["PrefetchGL2"]:
+        for i in range(tPA["gl2nlp"]):
+          for j in range(tPA["gl2nlc"]):
+            module.add(RegSet("v", f"vgprGL2PrefetchAddrA_{i}_{j}", self.states.a.startVgprGL2PrefetchAddr + (i * tPA["gl2nlc"] + j) * self.states.rpga))
+        for i in range(tPB["gl2nlp"]):
+          for j in range(tPB["gl2nlc"]):
+            module.add(RegSet("v", f"vgprGL2PrefetchAddrB_{i}_{j}", self.states.b.startVgprGL2PrefetchAddr + (i * tPB["gl2nlc"] + j) * self.states.rpga)) 
+        if kernel["ProblemType"]["MXBlockA"]:
+          for i in range(tPA["MX"]["gl2nlp"]):
+            for j in range(tPA["MX"]["gl2nlc"]):
+              module.add(RegSet("v", f"vgprGL2PrefetchAddrMXSA_{i}_{j}", self.states.mxsa.startVgprGL2PrefetchAddr + (i * tPA["MX"]["gl2nlc"] + j) * self.states.rpga))
+        if kernel["ProblemType"]["MXBlockB"]:
+          for i in range(tPB["MX"]["gl2nlp"]):
+            for j in range(tPB["MX"]["gl2nlc"]):
+              module.add(RegSet("v", f"vgprGL2PrefetchAddrMXSB_{i}_{j}", self.states.mxsb.startVgprGL2PrefetchAddr + (i * tPB["MX"]["gl2nlc"] + j) * self.states.rpga))
 
       module.add(RegSet("v", "vgprSerial", self.states.startVgprSerial))
 
@@ -18836,6 +18861,53 @@ class KernelWriterAssembly(KernelWriter):
                         "wOffset = wOffset * du // numpComp"))
       mod.add(self.resetTDMDescriptorForTail(kernel, tPB, wOfstSgprId))
       mod.add(tdmResetTailLblEnd)
+    return mod
+  
+  def gl2PrefetchInit(self, kernel, tPA, tPB):
+    comp = GL2PrefetchLoad.find(self)
+    comp.init(self, kernel, tPA)
+    comp.init(self, kernel, tPB)
+    if kernel["ProblemType"]["MXBlockA"]:
+      comp.init(self, kernel, tPA["MX"])
+    if kernel["ProblemType"]["MXBlockB"]:
+      comp.init(self, kernel, tPB["MX"])
+  
+  def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
+    mod = Module("GL2 Prefetch Addresses Calculation")
+    comp = GL2PrefetchLoad.find(self)
+    tpList = [tPA, tPB]
+    if kernel["ProblemType"]["MXBlockA"]:
+      tpList.append(tPA["MX"])
+    if kernel["ProblemType"]["MXBlockB"]:
+      tpList.append(tPB["MX"])
+
+    for tp in tpList:
+      mod.add(comp.setIncrement(self, kernel, tp))
+      mod.add(comp.calculateStartAddr(self, kernel, tp))
+    return mod
+  
+  def gl2PrefetchIssueLoad(self, kernel, tPA, tPB) -> Module:
+    mod = Module("GL2 Prefetch Issue Load")
+    mod.addComment("GL2 Prefetch Issue Load")
+    comp = GL2PrefetchLoad.find(self)
+    mod.add(comp.issueLoad(self, kernel, tPA))
+    mod.add(comp.issueLoad(self, kernel, tPB))
+    if kernel["ProblemType"]["MXBlockA"]:
+      mod.add(comp.issueLoad(self, kernel, tPA["MX"]))
+    if kernel["ProblemType"]["MXBlockB"]:
+      mod.add(comp.issueLoad(self, kernel, tPB["MX"]))
+    return mod
+  
+  def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
+    mod = Module("GL2 Prefetch Increment Address")
+    mod.addComment("GL2 Prefetch Increment Address")
+    comp = GL2PrefetchLoad.find(self)
+    mod.add(comp.incrementAddr(self, kernel, tPA))
+    mod.add(comp.incrementAddr(self, kernel, tPB))
+    if kernel["ProblemType"]["MXBlockA"]:
+      mod.add(comp.incrementAddr(self, kernel, tPA["MX"]))
+    if kernel["ProblemType"]["MXBlockB"]:
+      mod.add(comp.incrementAddr(self, kernel, tPB["MX"]))
     return mod
 
   def getHalfPLRGroups(self, kernel, lc, u):

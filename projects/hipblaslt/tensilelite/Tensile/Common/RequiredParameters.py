@@ -105,6 +105,7 @@ def getRequiredParametersMin() -> set:
         'OptNoLoadLoop',
         'PrefetchGlobalRead',
         'PrefetchLocalRead',
+        'PrefetchGL2',
         'PreloadKernArgs',
         'ScheduleIterAlg',
         'ScheduleGROverBarrier',
