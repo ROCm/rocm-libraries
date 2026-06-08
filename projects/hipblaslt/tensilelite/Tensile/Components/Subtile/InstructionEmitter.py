@@ -103,7 +103,7 @@ class InstructionEmitter:
             'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source),
             'wait_lr':      lambda em, ui: self.emit_wait_lr(),
             'sync':         lambda em, ui: self.emit_sync(),
-            'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source, ui),
+            'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source),
             'gr_inc':       lambda em, ui: self.emit_gr_inc(em.source),
             'skip':         lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
@@ -242,7 +242,7 @@ class InstructionEmitter:
         mod = source.build(self)
         return list(mod.flatitems()) if mod is not None else []
 
-    def emit_lr_inc(self, source, unroll_iter=0):
+    def emit_lr_inc(self, source):
         """Emit localReadLDSBufferSwap for a single tensor."""
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
