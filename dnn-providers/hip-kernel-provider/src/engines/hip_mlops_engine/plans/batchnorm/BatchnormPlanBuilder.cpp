@@ -123,18 +123,13 @@ void batchnormBwdFusionCheckTensors(
             "Batchnorm backward must use the same scale tensor as batchnorm inference");
     }
 
-    const auto& bnInfTensorX
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.x_tensor_uid());
-    const auto& bnInfTensorMean
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.mean_tensor_uid());
+    const auto& bnInfTensorX = findTensorAttributes(tensorMap, bnInfAttr.x_tensor_uid());
+    const auto& bnInfTensorMean = findTensorAttributes(tensorMap, bnInfAttr.mean_tensor_uid());
     const auto& bnInfTensorInvVar
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.inv_variance_tensor_uid());
-    const auto& bnInfTensorScale
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.scale_tensor_uid());
-    const auto& bnInfTensorBias
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.bias_tensor_uid());
-    const auto& bnInfTensorY
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.y_tensor_uid());
+        = findTensorAttributes(tensorMap, bnInfAttr.inv_variance_tensor_uid());
+    const auto& bnInfTensorScale = findTensorAttributes(tensorMap, bnInfAttr.scale_tensor_uid());
+    const auto& bnInfTensorBias = findTensorAttributes(tensorMap, bnInfAttr.bias_tensor_uid());
+    const auto& bnInfTensorY = findTensorAttributes(tensorMap, bnInfAttr.y_tensor_uid());
 
     if(bnInfTensorX.virtual_() || bnInfTensorMean.virtual_() || bnInfTensorInvVar.virtual_()
        || bnInfTensorScale.virtual_() || bnInfTensorBias.virtual_() || !bnInfTensorY.virtual_())
@@ -144,17 +139,15 @@ void batchnormBwdFusionCheckTensors(
             "Batchnorm inference input tensors must be non-virtual, output tensor must be virtual");
     }
 
-    const auto& actTensorIn0
-        = hip_kernel_utils::findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
+    const auto& actTensorIn0 = findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
     if(actTensorIn0.virtual_())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation in_0 (dy gradient) must be non-virtual");
     }
 
-    const auto& actTensorIn1 = hip_kernel_utils::findTensorAttributes(tensorMap, actIn1Uid.value());
-    const auto& actTensorOut
-        = hip_kernel_utils::findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
+    const auto& actTensorIn1 = findTensorAttributes(tensorMap, actIn1Uid.value());
+    const auto& actTensorOut = findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
     if(!actTensorIn1.virtual_() || !actTensorOut.virtual_())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -162,14 +155,10 @@ void batchnormBwdFusionCheckTensors(
             "Activation input from batchnorm must be virtual, output must be virtual");
     }
 
-    const auto& bnBwdTensorDy
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnBwdAttr.dy_tensor_uid());
-    const auto& bnBwdTensorDx
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnBwdAttr.dx_tensor_uid());
-    const auto& bnBwdTensorDscale
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnBwdAttr.dscale_tensor_uid());
-    const auto& bnBwdTensorDbias
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnBwdAttr.dbias_tensor_uid());
+    const auto& bnBwdTensorDy = findTensorAttributes(tensorMap, bnBwdAttr.dy_tensor_uid());
+    const auto& bnBwdTensorDx = findTensorAttributes(tensorMap, bnBwdAttr.dx_tensor_uid());
+    const auto& bnBwdTensorDscale = findTensorAttributes(tensorMap, bnBwdAttr.dscale_tensor_uid());
+    const auto& bnBwdTensorDbias = findTensorAttributes(tensorMap, bnBwdAttr.dbias_tensor_uid());
 
     if(!bnBwdTensorDy.virtual_() || bnBwdTensorDx.virtual_() || bnBwdTensorDscale.virtual_()
        || bnBwdTensorDbias.virtual_())
@@ -216,18 +205,13 @@ void batchnormFwdFusionCheckTensors(
     }
 
     // Check for virtual tensors
-    const auto& bnInfTensorX
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.x_tensor_uid());
-    const auto& bnInfTensorMean
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.mean_tensor_uid());
+    const auto& bnInfTensorX = findTensorAttributes(tensorMap, bnInfAttr.x_tensor_uid());
+    const auto& bnInfTensorMean = findTensorAttributes(tensorMap, bnInfAttr.mean_tensor_uid());
     const auto& bnInfTensorInvVar
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.inv_variance_tensor_uid());
-    const auto& bnInfTensorScale
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.scale_tensor_uid());
-    const auto& bnInfTensorBias
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.bias_tensor_uid());
-    const auto& bnInfTensorY
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.y_tensor_uid());
+        = findTensorAttributes(tensorMap, bnInfAttr.inv_variance_tensor_uid());
+    const auto& bnInfTensorScale = findTensorAttributes(tensorMap, bnInfAttr.scale_tensor_uid());
+    const auto& bnInfTensorBias = findTensorAttributes(tensorMap, bnInfAttr.bias_tensor_uid());
+    const auto& bnInfTensorY = findTensorAttributes(tensorMap, bnInfAttr.y_tensor_uid());
 
     if(bnInfTensorX.virtual_() || bnInfTensorMean.virtual_() || bnInfTensorInvVar.virtual_()
        || bnInfTensorScale.virtual_() || bnInfTensorBias.virtual_() || !bnInfTensorY.virtual_())
@@ -237,10 +221,8 @@ void batchnormFwdFusionCheckTensors(
             "Batchnorm inference input tensors must be non-virtual, output tensor must be virtual");
     }
 
-    const auto& actTensorIn0
-        = hip_kernel_utils::findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
-    const auto& actTensorOut
-        = hip_kernel_utils::findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
+    const auto& actTensorIn0 = findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
+    const auto& actTensorOut = findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
 
     if(!actTensorIn0.virtual_() || actTensorOut.virtual_())
     {
@@ -284,18 +266,13 @@ void batchnormFwdWithVarianceFusionCheckTensors(
     }
 
     // Check for virtual tensors
-    const auto& bnInfTensorX
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.x_tensor_uid());
-    const auto& bnInfTensorMean
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.mean_tensor_uid());
+    const auto& bnInfTensorX = findTensorAttributes(tensorMap, bnInfAttr.x_tensor_uid());
+    const auto& bnInfTensorMean = findTensorAttributes(tensorMap, bnInfAttr.mean_tensor_uid());
     const auto& bnInfTensorVariance
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.variance_tensor_uid());
-    const auto& bnInfTensorScale
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.scale_tensor_uid());
-    const auto& bnInfTensorBias
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.bias_tensor_uid());
-    const auto& bnInfTensorY
-        = hip_kernel_utils::findTensorAttributes(tensorMap, bnInfAttr.y_tensor_uid());
+        = findTensorAttributes(tensorMap, bnInfAttr.variance_tensor_uid());
+    const auto& bnInfTensorScale = findTensorAttributes(tensorMap, bnInfAttr.scale_tensor_uid());
+    const auto& bnInfTensorBias = findTensorAttributes(tensorMap, bnInfAttr.bias_tensor_uid());
+    const auto& bnInfTensorY = findTensorAttributes(tensorMap, bnInfAttr.y_tensor_uid());
 
     if(bnInfTensorX.virtual_() || bnInfTensorMean.virtual_() || bnInfTensorVariance.virtual_()
        || bnInfTensorScale.virtual_() || bnInfTensorBias.virtual_() || !bnInfTensorY.virtual_())
@@ -305,10 +282,8 @@ void batchnormFwdWithVarianceFusionCheckTensors(
             "Batchnorm inference input tensors must be non-virtual, output tensor must be virtual");
     }
 
-    const auto& actTensorIn0
-        = hip_kernel_utils::findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
-    const auto& actTensorOut
-        = hip_kernel_utils::findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
+    const auto& actTensorIn0 = findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
+    const auto& actTensorOut = findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
 
     if(!actTensorIn0.virtual_() || actTensorOut.virtual_())
     {
@@ -347,7 +322,7 @@ BatchnormPlanBuilder::BatchnormPlanBuilder(const IKernelCompiler& kernelCompiler
 }
 
 bool BatchnormPlanBuilder::isApplicable(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     auto anyNodeIsNotF32Compute = [&]() {
@@ -551,9 +526,9 @@ bool BatchnormPlanBuilder::isApplicable(
 }
 
 size_t BatchnormPlanBuilder::getMaxWorkspaceSize(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const HipKernelSettings& executionSettings) const
+    [[maybe_unused]] const Settings& executionSettings) const
 {
     //batchnorm plan builder does not require workspace size
     return 0u;
@@ -563,12 +538,12 @@ namespace
 {
 
 void buildPlanInferenceSingleNode(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
-    HipKernelContext& executionContext)
+    Context& executionContext)
 {
     const auto& attr
         = nodeWrapper
@@ -581,12 +556,12 @@ void buildPlanInferenceSingleNode(
 }
 
 void buildPlanInferenceWithVarianceSingleNode(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
-    HipKernelContext& executionContext)
+    Context& executionContext)
 {
     const auto& attr = nodeWrapper.attributesAs<
         hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
@@ -598,11 +573,11 @@ void buildPlanInferenceWithVarianceSingleNode(
 }
 
 void buildPlanFusedFwdInferenceActivation(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
-    HipKernelContext& executionContext)
+    Context& executionContext)
 {
     const auto& node0 = opGraph.getNodeWrapper(0);
     const auto& node1 = opGraph.getNodeWrapper(1);
@@ -619,11 +594,11 @@ void buildPlanFusedFwdInferenceActivation(
 }
 
 void buildPlanFusedFwdInferenceWithVarianceActivation(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
-    HipKernelContext& executionContext)
+    Context& executionContext)
 {
     const auto& node0 = opGraph.getNodeWrapper(0);
     const auto& node1 = opGraph.getNodeWrapper(1);
@@ -641,12 +616,12 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
 }
 
 void buildPlanFwdTrainingSingleNode(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
-    HipKernelContext& executionContext)
+    Context& executionContext)
 {
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes>();
@@ -658,12 +633,12 @@ void buildPlanFwdTrainingSingleNode(
 }
 
 void buildPlanBwdSingleNode(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
-    HipKernelContext& executionContext)
+    Context& executionContext)
 {
     const auto& attr
         = nodeWrapper
@@ -676,11 +651,11 @@ void buildPlanBwdSingleNode(
 }
 
 void buildPlanFusedBackwardsActivation(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const IKernelCompiler& kernelCompiler,
     const IDevicePropertyProvider& devicePropertyProvider,
-    HipKernelContext& executionContext)
+    Context& executionContext)
 {
     const auto [bnInfAttr, actAttr, bnBwdAttr] = getBatchnormBackwardFusionNodeAttrs(opGraph);
     batchnormBwdFusionCheckTensors(bnInfAttr, actAttr, bnBwdAttr, opGraph.getTensorMap());
@@ -694,20 +669,20 @@ void buildPlanFusedBackwardsActivation(
 } // namespace
 
 void BatchnormPlanBuilder::initializeExecutionSettings(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
-    [[maybe_unused]] HipKernelSettings& executionSettings) const
+    [[maybe_unused]] Settings& executionSettings) const
 {
 }
 
 void BatchnormPlanBuilder::buildPlan(
-    const HipKernelHandle& handle,
+    const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
-    HipKernelContext& executionContext) const
+    Context& executionContext) const
 {
     if(opGraph.nodeCount() == 2)
     {
@@ -793,7 +768,7 @@ void BatchnormPlanBuilder::buildPlan(
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> BatchnormPlanBuilder::getCustomKnobs(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};

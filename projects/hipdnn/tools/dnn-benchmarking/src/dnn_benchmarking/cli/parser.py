@@ -200,25 +200,33 @@ CLI_OPTIONS: tuple[CliOption, ...] = (
         flags=("--rtol",),
         dest="rtol",
         parser_type=float,
-        default=1e-5,
+        default=None,
         metavar="TOL",
         group="Reference Comparison",
-        help="Relative tolerance for output comparison (default: 1e-5)",
+        help=(
+            "Relative tolerance for output comparison (default: dtype-aware; "
+            "if set without --atol, also used as absolute tolerance)"
+        ),
         config_key="rtol",
         config_kind=ConfigKind.SCALAR,
         config_type=float,
+        config_optional=True,
     ),
     CliOption(
         flags=("--atol",),
         dest="atol",
         parser_type=float,
-        default=1e-8,
+        default=None,
         metavar="TOL",
         group="Reference Comparison",
-        help="Absolute tolerance for output comparison (default: 1e-8)",
+        help=(
+            "Absolute tolerance for output comparison (default: dtype-aware; "
+            "if set without --rtol, also used as relative tolerance)"
+        ),
         config_key="atol",
         config_kind=ConfigKind.SCALAR,
         config_type=float,
+        config_optional=True,
     ),
     CliOption(
         flags=("--validate",),
@@ -229,7 +237,9 @@ CLI_OPTIONS: tuple[CliOption, ...] = (
         metavar="PROVIDER",
         group="Reference Validation",
         help="Reference provider for validation (default: none). "
-        "Options: pytorch, cpu_plugin, none",
+        "Options: pytorch, cpu_plugin, none. "
+        "With pytorch, suite output includes a timed reference row when "
+        "PyTorch GPU execution is available.",
         config_key="validate",
         config_kind=ConfigKind.CHOICE,
         config_type=str,
@@ -459,6 +469,7 @@ PyTorch Backend (GPU via PyTorch):
 Reference Validation:
   dnn-benchmark -g ./graph.json --validate pytorch
   dnn-benchmark -g ./graph.json --validate pytorch --rtol 1e-3
+  dnn-benchmark -g ./graph.json --validate pytorch -v  # includes PyTorch timing row when available
 
 Engine Comparison:
   dnn-benchmark -g ./graph.json --engine 1,2,3
