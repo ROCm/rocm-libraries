@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -30,10 +31,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
               << inputType << " [" << layout << "]"
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    int64_t n = 1; // Batch size
-    int64_t c = 16; // Channels
-    int64_t h = 14; // Height
-    int64_t w = 14; // Width
+    const int64_t n = 1; // Batch size
+    const int64_t c = 16; // Channels
+    const int64_t h = 14; // Height
+    const int64_t w = 14; // Width
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
@@ -121,9 +122,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     variantPack[dscale->get_uid()] = dscaleTensor.memory().deviceData();
     variantPack[dbias->get_uid()] = dbiasTensor.memory().deviceData();
 
-    int64_t workspaceSize;
+    int64_t workspaceSize = 0;
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
-    utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+    const utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
 
@@ -147,22 +148,22 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> dbiasRefTensor(dbias->get_dim());
 
         // Build variant pack for CPU execution (using host pointers)
-        std::unordered_map<int64_t, void*> cpuVariantPack;
-        cpuVariantPack[x->get_uid()] = xTensor.memory().hostData();
-        cpuVariantPack[dy->get_uid()] = dyTensor.memory().hostData();
-        cpuVariantPack[scale->get_uid()] = scaleTensor.memory().hostData();
-        cpuVariantPack[bias->get_uid()] = biasTensor.memory().hostData();
-        cpuVariantPack[savedMean->get_uid()] = savedMeanTensor.memory().hostData();
-        cpuVariantPack[savedInvVariance->get_uid()] = savedInvVarTensor.memory().hostData();
-        cpuVariantPack[dx->get_uid()] = dxRefTensor.memory().hostData();
-        cpuVariantPack[dscale->get_uid()] = dscaleRefTensor.memory().hostData();
-        cpuVariantPack[dbias->get_uid()] = dbiasRefTensor.memory().hostData();
+        const std::unordered_map<int64_t, void*> cpuVariantPack{
+            {x->get_uid(), xTensor.memory().hostData()},
+            {dy->get_uid(), dyTensor.memory().hostData()},
+            {scale->get_uid(), scaleTensor.memory().hostData()},
+            {bias->get_uid(), biasTensor.memory().hostData()},
+            {savedMean->get_uid(), savedMeanTensor.memory().hostData()},
+            {savedInvVariance->get_uid(), savedInvVarTensor.memory().hostData()},
+            {dx->get_uid(), dxRefTensor.memory().hostData()},
+            {dscale->get_uid(), dscaleRefTensor.memory().hostData()},
+            {dbias->get_uid(), dbiasRefTensor.memory().hostData()}};
 
         // Execute on CPU using graph executor
         auto [serializedGraph, serErr] = graph->to_binary();
         if(serErr.is_bad())
         {
-            std::cerr << "Failed to serialize graph: " << serErr.get_message() << std::endl;
+            std::cerr << "Failed to serialize graph: " << serErr.get_message() << '\n';
             return false;
         }
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
@@ -180,9 +181,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                                                                                      inputTol);
 
         std::cout << "CPU reference validation:\n";
-        bool dxValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+        const bool dxValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
             std::cout, "dx", dxValidator, dxRefTensor, dxTensor, inputTol, inputTol);
-        bool dscaleValid
+        const bool dscaleValid
             = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
                                                                               "dscale",
                                                                               dscaleDbiasValidator,
@@ -190,7 +191,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                                                                               dscaleTensor,
                                                                               inputTol,
                                                                               inputTol);
-        bool dbiasValid
+        const bool dbiasValid
             = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
                                                                               "dbias",
                                                                               dscaleDbiasValidator,
@@ -228,23 +229,29 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
 int main(int argc, char* argv[])
 {
-    auto config = parseCommandLineArgs(argc, argv);
-
-    auto [handle, handleError] = createHipdnnHandle();
-    HIPDNN_FE_CHECK(handleError);
-
-    bool allPassed = run(SampleRunner{*handle, config});
-
-    if(allPassed)
+    try
     {
-        std::cout << "All fused BN Inference + Activation Backward + BN Backward runs completed "
-                  << "successfully.\n";
-        return 0;
-    }
-    else
-    {
+        auto config = parseCommandLineArgs(argc, argv);
+
+        auto [handle, handleError] = createHipdnnHandle();
+        HIPDNN_FE_CHECK(handleError);
+
+        const bool allPassed = run(SampleRunner{*handle, config});
+
+        if(allPassed)
+        {
+            std::cout
+                << "All fused BN Inference + Activation Backward + BN Backward runs completed "
+                << "successfully.\n";
+            return 0;
+        }
         std::cout << "One or more fused BN Inference + Activation Backward + BN Backward runs "
                   << "failed validation.\n";
+        return 1;
+    }
+    catch(const std::exception& e)
+    {
+        std::fprintf(stderr, "Unhandled exception: %s\n", e.what());
         return 1;
     }
 }

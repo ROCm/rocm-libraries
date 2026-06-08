@@ -97,6 +97,13 @@ struct _rocblaslt_handle
     // pointer mode ; default mode is host
     rocblaslt_pointer_mode pointer_mode = rocblaslt_pointer_mode_host;
 
+    // Handle-level SM-count-target override. Set via hipblasLtSetSmCountTarget
+    // (the analogue of cublasSetSmCountTarget). 0 (default) means "no
+    // override; use all CUs the device exposes". Negative values are rejected
+    // by the setter. A per-matmul descriptor or preference attribute, when
+    // non-zero, takes precedence over this handle-level value.
+    int32_t sm_count_target = 0;
+
 #ifdef HIPBLASLT_USE_ROCROLLER
     void* rocroller_handle = nullptr;
     int   useRocRoller     = -1;
@@ -199,39 +206,54 @@ struct _rocblaslt_matmul_desc
 
     float act0 = 0.f;
     float act1 = 0.f;
+
+    // User-supplied target compute-unit count for kernel selection /
+    // persistent-grid sizing. 0 (default) means "no constraint; use all
+    // CUs the device exposes". Negative values are rejected by the setter.
+    int32_t sm_count_target = 0;
+
+    // Opt-in to the dynamic persistent tile scheduler (work-stealing StreamK).
+    // Exposed via the _EXT attribute namespace (no equivalent in the base C API).
+    // 0 (default) = library default scheduler; non-zero = request dynamic
+    // persistent tile path.
+    int32_t dyn_persistent_tile_ext = 0;
+
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
     int32_t bias_stride = 0;
+
     std::shared_ptr<void> m_data; // Tensile data
 
     void copy(const _rocblaslt_matmul_desc& src)
     {
-        this->op_A                  = src.op_A;
-        this->op_B                  = src.op_B;
-        this->epilogue              = src.epilogue;
-        this->bias                  = src.bias;
-        this->scaleA                = src.scaleA;
-        this->scaleB                = src.scaleB;
-        this->scaleC                = src.scaleC;
-        this->scaleD                = src.scaleD;
-        this->scaleE                = src.scaleE;
-        this->scaleAType            = src.scaleAType;
-        this->scaleBType            = src.scaleBType;
-        this->pointermode           = src.pointermode;
-        this->amaxD                 = src.amaxD;
-        this->bias_type             = src.bias_type;
-        this->e                     = src.e;
-        this->aux_type              = src.aux_type;
-        this->lde                   = src.lde;
-        this->stride_e              = src.stride_e;
-        this->compute_type          = src.compute_type;
-        this->compute_type_original = src.compute_type_original;
-        this->compute_input_typeA   = src.compute_input_typeA;
-        this->compute_input_typeB   = src.compute_input_typeB;
-        this->scale_type            = src.scale_type;
-        this->act0                  = src.act0;
-        this->act1                  = src.act1;
-        this->bias_stride           = src.bias_stride;
+        this->op_A                    = src.op_A;
+        this->op_B                    = src.op_B;
+        this->epilogue                = src.epilogue;
+        this->bias                    = src.bias;
+        this->scaleA                  = src.scaleA;
+        this->scaleB                  = src.scaleB;
+        this->scaleC                  = src.scaleC;
+        this->scaleD                  = src.scaleD;
+        this->scaleE                  = src.scaleE;
+        this->scaleAType              = src.scaleAType;
+        this->scaleBType              = src.scaleBType;
+        this->pointermode             = src.pointermode;
+        this->amaxD                   = src.amaxD;
+        this->bias_type               = src.bias_type;
+        this->e                       = src.e;
+        this->aux_type                = src.aux_type;
+        this->lde                     = src.lde;
+        this->stride_e                = src.stride_e;
+        this->compute_type            = src.compute_type;
+        this->compute_type_original   = src.compute_type_original;
+        this->compute_input_typeA     = src.compute_input_typeA;
+        this->compute_input_typeB     = src.compute_input_typeB;
+        this->scale_type              = src.scale_type;
+        this->act0                    = src.act0;
+        this->act1                    = src.act1;
+        this->sm_count_target         = src.sm_count_target;
+        this->dyn_persistent_tile_ext = src.dyn_persistent_tile_ext;
+        this->bias_stride             = src.bias_stride;
     }
 };
 
@@ -250,6 +272,11 @@ struct _rocblaslt_matmul_preference
     //
     uint32_t search_mode         = 0;
     uint64_t max_workspace_bytes = 0;
+
+    // User-supplied target compute-unit count used as a heuristic-selection
+    // hint. 0 (default) means "no constraint; use all CUs the device exposes".
+    // Negative values are rejected by the setter.
+    int32_t sm_count_target = 0;
 
     int64_t alg_config_id     = 0;
     int64_t alg_max_id        = 0;

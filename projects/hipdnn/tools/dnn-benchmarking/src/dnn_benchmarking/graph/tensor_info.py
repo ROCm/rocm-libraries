@@ -4,8 +4,8 @@
 """Tensor information dataclass."""
 
 import warnings
-from dataclasses import dataclass, field
-from typing import List
+from dataclasses import dataclass
+from typing import Any, List, Optional
 
 # Map data type strings to byte sizes
 DTYPE_SIZES = {
@@ -40,6 +40,7 @@ class TensorInfo:
     data_type: str
     is_virtual: bool
     is_output: bool = False
+    value: Optional[Any] = None
 
     @property
     def element_size(self) -> int:
@@ -63,18 +64,31 @@ class TensorInfo:
         return result
 
     @property
-    def size_bytes(self) -> int:
-        """Get total size in bytes.
+    def is_pass_by_value(self) -> bool:
+        """Whether this tensor carries an embedded scalar value."""
+        return self.value is not None
 
-        Uses strides to compute actual memory footprint when available,
-        since non-contiguous tensors may require more memory than
-        product(dims) * element_size.
-        """
+    @property
+    def storage_elements(self) -> int:
+        """Get the number of storage elements required by dims/strides."""
+        if self.num_elements == 0:
+            return 0
         if self.strides:
-            # Memory footprint = max(dim_i * stride_i) * element_size
-            max_extent = max(d * s for d, s in zip(self.dims, self.strides))
-            return max_extent * self.element_size
-        return self.num_elements * self.element_size
+            if len(self.strides) != len(self.dims):
+                raise ValueError(
+                    f"Tensor {self.uid} has {len(self.dims)} dims but "
+                    f"{len(self.strides)} strides"
+                )
+            return (
+                sum((dim - 1) * stride for dim, stride in zip(self.dims, self.strides))
+                + 1
+            )
+        return self.num_elements
+
+    @property
+    def size_bytes(self) -> int:
+        """Get total storage footprint in bytes."""
+        return self.storage_elements * self.element_size
 
     @classmethod
     def from_json(cls, tensor_json: dict, is_output: bool = False) -> "TensorInfo":
@@ -95,4 +109,5 @@ class TensorInfo:
             data_type=tensor_json.get("data_type", "float"),
             is_virtual=tensor_json.get("virtual", False),
             is_output=is_output,
+            value=tensor_json.get("value"),
         )

@@ -1003,10 +1003,11 @@ endif()
 
 if(hipblaslt_FOUND)
     target_link_libraries( MIOpen PRIVATE roc::hipblaslt )
-    target_include_directories( MIOpen INTERFACE $<BUILD_INTERFACE:${HIPBLAS-COMMON_INCLUDE_DIR}> )
+    target_include_directories( MIOpen SYSTEM INTERFACE
+        $<BUILD_INTERFACE:${HIPBLAS-COMMON_INCLUDE_DIR}> )
 endif()
 
-target_include_directories( MIOpen PRIVATE ${ROCRAND_INCLUDE_DIR} )
+target_include_directories( MIOpen SYSTEM PRIVATE ${ROCRAND_INCLUDE_DIR} )
 
 # For backward compatibility with ROCm 5.3
 # Build with library libMLIRMIOpen

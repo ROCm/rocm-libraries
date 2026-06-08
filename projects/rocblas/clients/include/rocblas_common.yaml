@@ -586,6 +586,7 @@ Arguments:
   - HMM: c_bool
   - graph_test: c_bool
   - repeatability_check: c_bool
+  - alpha_beta_stride: c_bool
   - use_hipblaslt: c_int32
   - cleanup: c_bool
 
@@ -659,6 +660,7 @@ Defaults:
   api: C
   graph_test: false
   repeatability_check: false
+  alpha_beta_stride: false
   norm_check: 0
   unit_check: 1
   res_check: 0
