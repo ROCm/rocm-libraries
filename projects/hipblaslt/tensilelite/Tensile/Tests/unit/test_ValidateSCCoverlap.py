@@ -80,20 +80,31 @@ from graph_native_validation_base import GraphNativeValidationTest
 
 
 def _tag(inst, *, slot_idx: int, sequence: int,
-         category: str = "GRIncA") -> TaggedInstruction:
+         category: str = "GRIncA",
+         source_module_id: str = None) -> TaggedInstruction:
     """Wrap a rocisa instruction at a specific MFMA-slot / sequence position.
 
     ``category`` defaults to ``GRIncA`` because the legacy SCC tests use
     GRIncA/GRIncB/GRA/GRB/LWSA/LWSB tags; the graph-native path is
     category-agnostic for SCC-typed edges so the default is fine for most
     sites.
+
+    ``source_module_id`` must be explicitly set to a distinct non-None string
+    per instruction role (producer / clobber / consumer) so that
+    ``edge_keys()``'s ``(source_module_id, emission_ordinal)`` prefix
+    discriminates producers that write the same byte-key. When
+    ``source_module_id=None``, two instructions with the same canonical render
+    share ``(None, 0)`` and cancel in the edge set-diff even when they are
+    physically distinct.
     """
-    return TaggedInstruction(
+    ti = TaggedInstruction(
         wrapped=WrappedInstruction(inst),
         category=category,
         slot=SlotKey(subiter=0, slot_kind=SLOT_KIND_MFMA,
                      mfma_index=slot_idx, sequence=sequence),
     )
+    ti.source_module_id = source_module_id
+    return ti
 
 
 def _producer_factory(opcode: str):
@@ -185,13 +196,20 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
         clob_make = _clobber_factory(clobber_opcode)
 
         # Default: producer + consumer only.
+        # source_module_id is set per instruction role so the edge_keys()
+        # (source_module_id, emission_ordinal) prefix discriminates producers
+        # that write the same byte footprint (e.g. two SCC-writing opcodes
+        # with the same canonical render both get emission_ordinal=0 from
+        # independent (None, 0) counter buckets without distinct module IDs).
         default_cap = make_capture(BODY_LABEL_ML, [
             _tag(prod_make(), slot_idx=producer_slot,
                  sequence=producer_sequence,
-                 category=producer_category),
+                 category=producer_category,
+                 source_module_id="scc_producer"),
             _tag(cons_make(), slot_idx=consumer_slot,
                  sequence=consumer_sequence,
-                 category=consumer_category),
+                 category=consumer_category,
+                 source_module_id="scc_consumer"),
         ])
 
         # Subject: producer + clobber + consumer. The clobber sits between
@@ -202,13 +220,16 @@ class TestValidateSCCOverlap(GraphNativeValidationTest):
         subj_cap = make_capture(BODY_LABEL_ML, [
             _tag(prod_make(), slot_idx=producer_slot,
                  sequence=producer_sequence,
-                 category=producer_category),
+                 category=producer_category,
+                 source_module_id="scc_producer"),
             _tag(clob_make(), slot_idx=clobber_slot,
                  sequence=clobber_sequence,
-                 category=clobber_category),
+                 category=clobber_category,
+                 source_module_id="scc_clobber"),
             _tag(cons_make(), slot_idx=consumer_slot,
                  sequence=consumer_sequence,
-                 category=consumer_category),
+                 category=consumer_category,
+                 source_module_id="scc_consumer"),
         ])
 
         return (

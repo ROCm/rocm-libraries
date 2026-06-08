@@ -927,24 +927,47 @@ class TestSwapPackGraph(GraphNativeValidationTest):
         subject graph the Pack appears before the Swap, so the Phase-1
         order check fires `OrderInvertedFailure(producer=PackA0(swap),
         consumer=PackA0(pack))`.
+
+        ``source_module_id`` is set per-instruction so ``edge_keys()``'s
+        ``(source_module_id, emission_ordinal)`` prefix distinguishes the
+        Swap producer from the LR producer. Without distinct module IDs both
+        produce ``(None, 0, (('v',8),), ...)`` and the ref Swap->VCvt edge
+        is cancelled by the subject LR->VCvt edge (same byte-key, different
+        producer).
         """
+        # Build individual instructions with distinct source_module_id per role.
+        def _lr_with_id(slot):
+            ti = make_lr(8, 2, lds_offset=64, slot=slot, category="LRA0")
+            ti.source_module_id = "lr_pack"
+            return ti
+
+        def _swap_with_id(slot, sequence=0):
+            ti = _swap_pack(dst_vgpr=8, src_vgpr=16, slot=slot,
+                            sequence=sequence, category="PackA0")
+            ti.source_module_id = "swap_pack"
+            return ti
+
+        def _vcvt_with_id(slot, sequence=0):
+            ti = _pack_vcvt(out_vgpr=40, lr_vgpr=8, slot=slot,
+                            sequence=sequence, category="PackA0")
+            ti.source_module_id = "vcvt_pack"
+            return ti
+
         # Reference: Swap @ slot 2 writes v8, then VCvt Pack @ slot 4 reads v8.
         ref_cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 2, lds_offset=64, slot=0, category="LRA0"),
+            _lr_with_id(slot=0),
             make_swait(slot=1, dscnt=0),
-            _swap_pack(dst_vgpr=8, src_vgpr=16, slot=2, category="PackA0"),
-            _pack_vcvt(out_vgpr=40, lr_vgpr=8, slot=4, sequence=1,
-                       category="PackA0"),
+            _swap_with_id(slot=2),
+            _vcvt_with_id(slot=4, sequence=1),
             make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
                       slot=5, a_src_count=1),
         ])
         # Subject: VCvt Pack @ slot 1 reads v8 BEFORE the Swap @ slot 3.
         subj_cap = make_capture(BODY_LABEL_ML, [
-            make_lr(8, 2, lds_offset=64, slot=0, category="LRA0"),
-            _pack_vcvt(out_vgpr=40, lr_vgpr=8, slot=1, category="PackA0"),
+            _lr_with_id(slot=0),
+            _vcvt_with_id(slot=1),
             make_swait(slot=2, dscnt=0),
-            _swap_pack(dst_vgpr=8, src_vgpr=16, slot=3, sequence=1,
-                       category="PackA0"),
+            _swap_with_id(slot=3, sequence=1),
             make_mfma(c_dst_start=0, a_src_start=40, b_src_start=32,
                       slot=5, a_src_count=1),
         ])

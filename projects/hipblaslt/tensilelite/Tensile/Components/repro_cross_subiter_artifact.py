@@ -460,8 +460,16 @@ def main():
     print()
 
     # Map missing/extra edge keys back to DataflowEdge objects for display.
-    # Per EMISSION_ORDINAL_DESIGN.md §4.2, role positions come from
-    # `_role(node)` (rocisa-derived), matching `DataflowGraph.edge_keys`.
+    # NOTE: `edge_keys()` now returns 8-field tuples (56e3 / Option E):
+    # (source_module_id, emission_ordinal, producer_write_byte_key,
+    #  consumer_read_byte_key, edge_kind, intra_operand_byte_offset,
+    #  src_operand_slot, sink_operand_slot). The set-diff at `missing_keys`
+    # above is agnostic to tuple shape and is correct.
+    #
+    # The `ref_edges_by_key` / `subj_edges_by_key` lookup tables BELOW use
+    # a SEPARATE diagnostic key schema (_role + position + slot + edge_kind +
+    # offset) — NOT the edge_keys() tuple shape — and must NOT be updated to
+    # the 8-field shape (doing so would break the lookup).
     from Tensile.Components.CMSValidator import _role
     ref_edges_by_key = {
         (_role(e.producer), e.producer.position, e.src_operand_slot,

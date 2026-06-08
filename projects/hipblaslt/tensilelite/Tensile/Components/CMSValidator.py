@@ -915,7 +915,7 @@ class GraphNode:
     `estimate_quad_cycles`) have been removed; `cumulative_issue_cycles` is
     the single source of truth.
     """
-    identity: tuple                     # (canonical_render, emission_ordinal) — body-blind by construction (rocm-libraries-hdem Approach A)
+    identity: tuple                     # (canonical_render, source_module_id, emission_ordinal) — body-blind by construction (rocm-libraries-hdem Approach A / rocm-libraries-dfd8 Approach 2)
     position: SchedulePosition
     category: str                       # propagated from TaggedInstruction
     rocisa_inst: object                 # back-reference to the rocisa instruction
@@ -1251,9 +1251,13 @@ class DataflowGraph:
         C3d (rocm-libraries-xxj4) migrated the keying basis from the
         identity-tuple `(producer.identity, consumer.identity, ...)` to
         the byte-key tuple `(producer_write_byte_key, consumer_read_byte_key,
-        ...)`. The full key shape is:
+        ...)`. Option E (rocm-libraries-56e3) prepends the producer's
+        source identity `(source_module_id, emission_ordinal)` to
+        discriminate producers that write the same byte footprint to the
+        same resource. The full 8-field key shape is:
 
-            (producer_write_byte_key, consumer_read_byte_key,
+            (source_module_id, emission_ordinal,
+             producer_write_byte_key, consumer_read_byte_key,
              edge_kind, intra_operand_byte_offset,
              src_operand_slot, sink_operand_slot)
 
@@ -1275,17 +1279,44 @@ class DataflowGraph:
         pipelining false positive (the motivating UsePLRPack case where
         Pack code lands in PRO body under CMS but ML-1 body under default).
 
-        **No identity references remain in the keying tuple**: the
-        `producer.identity` / `consumer.identity` fields on nodes remain
-        available as diagnostic annotations (for `diagnose_missing_edge`
-        Phase 0 lookup — C3f scope) but are NOT used in the matching tuple.
+        **Producer discrimination** (56e3 / Option E): two distinct source
+        instructions that write the same physical bytes to the same resource
+        previously produced the same 6-field key and cancelled each other in
+        the set-diff even if one was the "wrong" producer feeding the
+        consumer. The `(source_module_id, emission_ordinal)` prefix breaks
+        this cancellation: two instructions from different generator modules
+        have different `source_module_id` values; two same-module same-render
+        instructions in the same body have different `emission_ordinal` values
+        (per-`(canonical_render, source_module_id)` counter).
 
-        **Hashability**: `producer_write_byte_key` and
-        `consumer_read_byte_key` are `tuple` objects from
-        `_byte_keys_for_resource` (always returns `tuple`). Each element
-        is `(str, int)`, `(str, str, int)`, or `("mem", str, id, int)` —
-        all hashable. The full 6-tuple is natively set-usable.
+        `canonical_render` is intentionally absent from the key:
+        `source_module_id + emission_ordinal` already identify the source
+        instruction uniquely within a module without encoding the register
+        names in `canonical_render`. Excluding `canonical_render` preserves
+        register-rename-blindness — the T/X naming variation under
+        UsePLRPack lives in `canonical_render`, not in `source_module_id` or
+        `emission_ordinal`, so the 8-tuple remains equal across SHADOW and
+        CMS for the same pipelined pack instruction.
 
+        **Hashability**: `source_module_id` is `str | None`; `emission_ordinal`
+        is `int`. `producer_write_byte_key` and `consumer_read_byte_key` are
+        `tuple` objects from `_byte_keys_for_resource` (always returns
+        `tuple`). Each element is `(str, int)`, `(str, str, int)`, or
+        `("mem", str, id, int)` — all hashable. The full 8-tuple is
+        natively set-usable.
+
+        Access paths for the two new fields:
+        * `e.producer.identity[1]` = `source_module_id` (the generator
+          module name; `None` for synthetic captures and pre-dfd8 code paths).
+        * `e.producer.identity[2]` = `emission_ordinal` (per-`(canonical_render,
+          source_module_id)` slot counter assigned at `finalize` time).
+
+        * `source_module_id` — `str | None`. The generator module name
+          populated by the CMS dispatch (Approach 2 / rocm-libraries-dfd8).
+          `None` for SHADOW captures and synthetic test fixtures that do not
+          populate it.
+        * `emission_ordinal` — `int`. Per-`(canonical_render, source_module_id)`
+          monotonic counter for within-module disambuation.
         * `producer_write_byte_key` — tuple of byte-key pairs, e.g.
           `(('v', 12), ('v', 13))`. Populated on `DataflowEdge` at
           edge-formation time by `_byte_keys_for_resource(overlap,
@@ -1309,7 +1340,8 @@ class DataflowGraph:
         order check in `diagnose_missing_edge` — they drop out of the
         matching path entirely.
         """
-        return {(e.producer_write_byte_key, e.consumer_read_byte_key,
+        return {(e.producer.identity[1], e.producer.identity[2],
+                 e.producer_write_byte_key, e.consumer_read_byte_key,
                  e.edge_kind, e.intra_operand_byte_offset,
                  e.src_operand_slot, e.sink_operand_slot)
                 for e in self.edges}
@@ -3635,20 +3667,18 @@ def compare_graphs(
 ) -> List["Failure"]:
     """Compare two dataflow graphs as edge sets keyed on byte-keys.
 
-    Each edge is keyed by (producer_write_byte_key, consumer_read_byte_key,
-    edge_kind) — a content-addressed basis introduced by C3d (xxj4) that
-    replaces the previous identity-tuple basis
-    (producer.identity, consumer.identity, register, edge_kind). Byte-key
-    matching is register-name-agnostic and body-position-agnostic, eliminating
-    false mismatches from T/X register-naming drift under UsePLRPack.
-
-    Known limitation (rocm-libraries-56e3): when two distinct producers write
-    identical byte sequences to the same resource, byte-key keying cannot
-    discriminate which producer fed the consumer. The validator will not
-    surface a missing edge in that case even if the wrong producer fed the
-    consumer. This is tracked as a producer-discrimination loss; it does not
-    affect correctness of the current corpus but bounds the precision of the
-    byte-key edge layer.
+    Each edge is keyed by an 8-field tuple:
+    (source_module_id, emission_ordinal,
+     producer_write_byte_key, consumer_read_byte_key,
+     edge_kind, intra_operand_byte_offset,
+     src_operand_slot, sink_operand_slot).
+    The byte-key basis was introduced by C3d (xxj4) to replace the previous
+    identity-tuple basis (producer.identity, consumer.identity, register,
+    edge_kind), eliminating false mismatches from T/X register-naming drift
+    under UsePLRPack. Option E (56e3) adds the producer source-identity
+    prefix (source_module_id, emission_ordinal) so that two distinct
+    producers writing the same byte footprint to the same resource produce
+    distinct keys and are not silently cancelled in the set-diff.
 
     Returns a list of Failure objects — one or more per missing edge,
     routed through diagnose_missing_edge.
@@ -3676,7 +3706,8 @@ def compare_graphs(
     # reading a CMS-shaped class_tag string out of `identity[0]`. The
     # historical class_tag slot has been dropped from the identity tuple
     # entirely; under hdem (Approach A, rocm-libraries-hdem) `loop_index`
-    # is also dropped, so identity is now `(canonical_render,
+    # is also dropped and under dfd8 (Approach 2) `source_module_id` is
+    # added, so identity is now `(canonical_render, source_module_id,
     # emission_ordinal)`. Body sensitivity in identity-set coverage is
     # intentionally absent; the residual cross-body extra-emission risk
     # is caught at the edge layer by Approach E (byte-key edge matching).
@@ -3706,11 +3737,9 @@ def compare_graphs(
     # oplb-tf32-6x8-tn, bf16-256x256x64-tn) all pass — xfail markers have
     # been removed.
     #
-    # Residual limitation (rocm-libraries-56e3): when two distinct producers
-    # write the same byte sequence to the same resource, byte-key keying loses
-    # producer-discrimination — the validator cannot detect that the wrong
-    # producer fed the consumer. This does not affect the current corpus but
-    # bounds the precision of byte-key edge matching going forward.
+    # 56e3 (Option E) resolution: producer source identity (source_module_id,
+    # emission_ordinal) was added as the 8-field key prefix, closing the
+    # producer-discrimination gap. See DataflowGraph.edge_keys docstring.
     from collections import Counter
 
     def _data_flow_category_counts(graph):
@@ -3758,9 +3787,10 @@ def compare_graphs(
     missing_keys = ref_keys - subj_keys
 
     # Map missing keys back to reference edge objects for diagnosis.
-    # Same edge-key shape as DataflowGraph.edge_keys() (C3d /
-    # rocm-libraries-xxj4, byte-key basis):
-    # (producer_write_byte_key, consumer_read_byte_key,
+    # Same 8-field edge-key shape as DataflowGraph.edge_keys() (56e3 /
+    # rocm-libraries-56e3, Option E — producer source identity prefix):
+    # (source_module_id, emission_ordinal,
+    #  producer_write_byte_key, consumer_read_byte_key,
     #  edge_kind, intra_operand_byte_offset,
     #  src_operand_slot, sink_operand_slot).
     #
@@ -3770,8 +3800,8 @@ def compare_graphs(
     # `DataflowGraph.edge_keys` docstring for the full rationale.
     #
     # Multiple ref-edges may share the same edge-key tuple (cross-body
-    # pipelining of the same physical bytes collapses both endpoints to
-    # the same byte-key pair, and the edge falls out as a single key).
+    # pipelining of the same physical bytes from the same producer module
+    # at the same counter slot collapses both endpoints to the same tuple).
     # For diagnosis we pick the FIRST such edge as representative — the
     # classifier's downstream reasoning consults the producer/consumer
     # nodes for ordering and the edge_kind / resource for failure
@@ -3779,7 +3809,8 @@ def compare_graphs(
     failures = []
     ref_edges_by_key = {}
     for e in reference.edges:
-        key = (e.producer_write_byte_key, e.consumer_read_byte_key,
+        key = (e.producer.identity[1], e.producer.identity[2],
+               e.producer_write_byte_key, e.consumer_read_byte_key,
                e.edge_kind, e.intra_operand_byte_offset,
                e.src_operand_slot, e.sink_operand_slot)
         ref_edges_by_key.setdefault(key, e)
