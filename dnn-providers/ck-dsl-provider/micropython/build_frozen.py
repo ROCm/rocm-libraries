@@ -118,7 +118,10 @@ s = s.replace(
     '_DATA_FILE = Path("arch_specs.json")  # name only; data is embedded',
 )
 s = s.replace(
-    "    with open(str(_DATA_FILE)) as fh:\n        doc = json.load(fh)\n",
+    "    # Pin UTF-8: the embedded interpreter defaults to the ASCII codec, and\n"
+    "    # arch_specs.json contains non-ASCII bytes.\n"
+    '    with open(str(_DATA_FILE), encoding="utf-8") as fh:\n'
+    "        doc = json.load(fh)\n",
     "    doc = _EMBEDDED_DOC\n",
 )
 s = s.replace("import json\n", "")  # json.load patched out; embed has no json module
