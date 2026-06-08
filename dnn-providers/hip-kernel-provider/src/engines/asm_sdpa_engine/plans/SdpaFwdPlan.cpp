@@ -16,13 +16,13 @@ SdpaFwdPlan::SdpaFwdPlan(HipModuleGuard kernel, SdpaFwdParams params)
 {
 }
 
-size_t SdpaFwdPlan::getWorkspaceSize(const HipKernelHandle& /*handle*/) const
+size_t SdpaFwdPlan::getWorkspaceSize(const Handle& /*handle*/) const
 {
     // Forward-only kernel requires no workspace (uses 64KB LDS internally)
     return 0;
 }
 
-void SdpaFwdPlan::execute(const HipKernelHandle& handle,
+void SdpaFwdPlan::execute(const Handle& handle,
                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                           uint32_t numDeviceBuffers,
                           void* /*workspace*/) const
