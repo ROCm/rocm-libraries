@@ -176,7 +176,10 @@ def generate_genhdr(
             *qstr_sources,
             "dependencies",
             "changed_sources",
-            *qstr_sources,
+            # Intentionally empty: makeqstrdefs.py's preprocess() falls back to
+            # `sources` when `changed_sources` is empty, so listing the sources
+            # again here is pure redundancy -- and on Windows the doubled source
+            # list overruns CreateProcess's 32K command-line limit (WinError 206).
         ]
     )
 
