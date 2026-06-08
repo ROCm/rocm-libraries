@@ -55,7 +55,7 @@ class Pass;
 /// Rule 2 (kernel scope only) -- a single `s_barrier_wait -3` immediately
 /// before the first `tensor_load_to_lds` of the whole kernel.
 ///
-/// Rule 3 (both scopes) -- LoopCounterL-gated signal-only handshake at
+/// Rule 3 -- LoopCounterL-gated signal-only handshake at
 /// the LDS publication point that precedes `label_openLoopL:`. Same
 /// shape as Rule 1 but with the outer gate set to
 /// `s_cmp_le_u32 s[sgprLoopCounterL], pgrValue` (the cbranch skips the
@@ -106,12 +106,8 @@ class Pass;
 /// emitted Rule 3), Rule 3 self-disables. Unlike a TEXTBLOCK anchor,
 /// the label/instruction-based scan survives
 /// `ScopeAdaptor::moveIRToBlock`, so Rule 3 keeps working whenever
-/// the loopWithPrefetch / noLoadLoopBody region adapters run (any
-/// `optLevel != O0` for the scheduling adapter, or any
-/// `ClusterBarrier == true` for the region-scope cluster-barrier
-/// adapter -- see `Gfx1250Backend::buildGfx1250Pipeline`). Both paths
-/// strip the surrounding `Begin / End setupNewTile` TEXTBLOCK comments
-/// while leaving labels and instructions intact.
+/// `Gfx1250Backend::buildGfx1250Pipeline` runs this pass at kernel scope
+/// when `moduleOptions.ClusterBarrier == true`.
 ///
 /// Rule 4 -- cluster wait + LoopCounterL-gated signal after each
 /// workgroup-scope wait that precedes a `tensor_load_to_lds`. For
@@ -173,14 +169,15 @@ class Pass;
 /// Only the first wave (WaveIdx == 0) executes the signal; the other waves
 /// fall through to the label.
 ///
-/// Idempotency: each rule has its own skip check so re-running at region
-/// scope after a kernel-scope run is a no-op.
+/// Idempotency: each rule has its own skip check so re-running the pass is
+/// a no-op when the handshake is already present.
 ///
-/// \p isKernelScope must be true when the pass is added to the kernel-scope
-/// pass manager and false when added to a region-scope pass manager (via
-/// `createKernelToRegionsPassAdaptor`). Rule 2 only fires when this is true
-/// because the "first tensor_load of the whole kernel" anchor is meaningful
-/// only at kernel scope.
+/// \p isKernelScope must be true for the GFX1250 backend pipeline (whole-
+/// kernel insertion). When false, the pass is intended for region-scoped
+/// invocation via `createKernelToRegionsPassAdaptor` (not used by the
+/// backend today). Rule 2 only fires when this is true because the "first
+/// tensor_load of the whole kernel" anchor is meaningful only at kernel
+/// scope.
 ///
 /// \p pgrValue is Tensile's `PrefetchGlobalRead` setting. It controls the
 /// outer LoopCounterL gates of Rules 3 and 4:
