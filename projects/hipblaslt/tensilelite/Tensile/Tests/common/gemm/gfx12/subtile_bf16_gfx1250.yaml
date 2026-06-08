@@ -60,6 +60,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - GlobalSplitU: [1]
+        - PreloadKernArgs: [False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
