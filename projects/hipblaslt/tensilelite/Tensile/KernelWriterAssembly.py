@@ -5631,7 +5631,7 @@ class KernelWriterAssembly(KernelWriter):
       lsuStride   = du // lsu
       numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
       mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
-      isMxSwizzled  = ("MXS" in tc) and mxScaleFormat == "InMemorySwizzle"
+      isMxSwizzled  = ("MXS" in tc) and mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
 
       # generate instruction
       module.add(vectorStaticDivide(wave_id, "Serial", kernel["WavefrontSize"], tmpVgprRes))
