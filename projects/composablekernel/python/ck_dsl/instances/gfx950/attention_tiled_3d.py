@@ -124,6 +124,15 @@ class UnifiedAttention3DTiledSpec:
     # FP8 K/V cache (mirrors UnifiedAttention2DTiledSpec.kv_storage_dtype).
     # See that spec's docstring for the semantics.
     kv_storage_dtype: Optional[str] = None
+    # ``tile_size_override`` / ``use_invariant_hoist`` / ``use_wide_kv_load``
+    # are accepted for signature parity with the shared dispatch spec builder
+    # (``_tiled_3d_spec_from_problem``) and the gfx942 spec. They select gfx942
+    # narrow-atom 3D optimizations; the corresponding ``_gfx942_3d_*`` helpers
+    # return None/False on gfx950, so the gfx950 segment kernel does not key on
+    # them.
+    tile_size_override: Optional[int] = None
+    use_invariant_hoist: bool = False
+    use_wide_kv_load: bool = False
 
     def __post_init__(self):
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
