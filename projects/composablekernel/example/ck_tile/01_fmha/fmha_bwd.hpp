@@ -600,34 +600,40 @@ struct fmha_bwd_launcher
     fmha_bwd_launcher(fmha_bwd_launcher&&)            = delete;
     fmha_bwd_launcher& operator=(fmha_bwd_launcher&&) = delete;
 
-    ~fmha_bwd_launcher() noexcept { schedule_pin_staging_release(); }
+    // Default destructor: prepare_workspace() is synchronous and owns no deferred
+    // stream resources, so there is nothing to release on the stream tail.
 
-    // Stream-async: zero dq_acc, D2H seqstart, host-pack metadata, H2D into device_ws.
-    // `pinned_host_alloc` returns a shared_ptr to a pinned host buffer; its deleter
-    // is invoked on the stream tail after the H2D completes.
-    void prepare_workspace_async( //
+    // Synchronous, one-time workspace setup: (group mode) D2H seqstart, host-pack
+    // the dq_acc split/offset metadata, then H2D it into device_ws. Returns only
+    // after the copies complete, so the staging buffer is freed here with no
+    // stream-tail host node (and no leak).
+    //
+    // This MUST be called OUTSIDE HIP graph capture: it synchronizes the stream.
+    // Capture only the subsequent run(), which re-zeros dq_acc and launches the
+    // kernels and is therefore replay-safe. dq_acc zeroing is intentionally NOT
+    // done here: it must run on every (replayed) backward, so it lives in run().
+    //
+    // CK stays graph-agnostic on purpose: it never calls hipLaunchHostFunc or any
+    // hipGraph*/hipUserObject* API. Replay-safety is the caller's contract
+    // (prepare once outside capture; capture run()).
+    void prepare_workspace(
         void* device_ws_ptr,
         const int* seqstart_q_dev,
         const int* seqstart_k_dev,
         const ck_tile::stream_config& s,
         const std::function<std::shared_ptr<void>(size_t)>& pinned_host_alloc)
     {
-        hipStream_t stream = s.stream_id_;
-
-        // Fast path: no host-side metadata to stage; just zero dq_acc if needed.
+        // No host-side metadata to stage (e.g. QrQtrDor). dq_acc zeroing, if any,
+        // is handled in run().
         if(host_ws_size_ == 0)
-        {
-            if(needs_zero_dq_acc_ && workspace_size > 0)
-                HIP_CHECK_ERROR(hipMemsetAsync(device_ws_ptr, 0, workspace_size, stream));
             return;
-        }
 
         if(!pinned_host_alloc)
             throw std::runtime_error(
-                "fmha_bwd_launcher::prepare_workspace_async: pinned_host_alloc is required");
+                "fmha_bwd_launcher::prepare_workspace: pinned_host_alloc is required");
 
-        // Allocate pinned host staging first: if it throws we haven't issued any
-        // stream work yet, leaving the workspace cleanly un-prepared.
+        hipStream_t stream = s.stream_id_;
+
         // 16-align each section: pin_w stores alignas(16) FmhaBwdGroupPersistentCuState
         // written via x86 SIMD; misaligned destinations fault.
         const size_t seqstart_bytes = traits_.is_group_mode ? sizeof(int) * (traits_.batch + 1) : 0;
@@ -636,12 +642,6 @@ struct fmha_bwd_launcher
         const size_t pin_w_offset = 2 * seqstart_stride;
         const size_t total_bytes  = pin_w_offset + host_ws_size_;
         auto pin_base             = pinned_host_alloc(total_bytes);
-
-        if(needs_zero_dq_acc_ && workspace_size > host_ws_size_)
-            HIP_CHECK_ERROR(hipMemsetAsync(static_cast<char*>(device_ws_ptr) + host_ws_size_,
-                                           0,
-                                           workspace_size - host_ws_size_,
-                                           stream));
 
         char* base                   = static_cast<char*>(pin_base.get());
         int* pin_q                   = reinterpret_cast<int*>(base);
@@ -653,88 +653,37 @@ struct fmha_bwd_launcher
         if(traits_.is_group_mode)
         {
             if(!seqstart_q_dev || !seqstart_k_dev)
-                throw std::runtime_error("fmha_bwd_launcher::prepare_workspace_async: "
+                throw std::runtime_error("fmha_bwd_launcher::prepare_workspace: "
                                          "seqstart_q_dev and seqstart_k_dev are required in "
                                          "group mode");
             HIP_CHECK_ERROR(hipMemcpyAsync(
                 pin_q, seqstart_q_dev, seqstart_bytes, hipMemcpyDeviceToHost, stream));
             HIP_CHECK_ERROR(hipMemcpyAsync(
                 pin_k, seqstart_k_dev, seqstart_bytes, hipMemcpyDeviceToHost, stream));
+            // Seqstart must be on the host before the pack reads it.
+            HIP_CHECK_ERROR(hipStreamSynchronize(stream));
         }
 
-        auto pack_closure = std::make_unique<std::function<void()>>(
-            [=, fn = pack_workspace_host_]() { fn(pin_w, seqstart_q_pinned, seqstart_k_pinned); });
-        // Callback runs on the HIP driver helper thread across a C ABI boundary;
-        // any exception escaping it would call std::terminate.
-        HIP_CHECK_ERROR(hipLaunchHostFunc(
-            stream,
-            [](void* ud) {
-                std::unique_ptr<std::function<void()>> c{static_cast<std::function<void()>*>(ud)};
-                try
-                {
-                    (*c)();
-                }
-                catch(const std::exception& e)
-                {
-                    // The H2D queued after this callback will copy indeterminate
-                    // metadata to device and the kernel will produce wrong results;
-                    // unlikely in practice since pack_workspace_host_ only throws on
-                    // precondition violations.
-                    std::cerr << "fmha_bwd_launcher: pack_workspace_host threw: " << e.what()
-                              << '\n';
-                }
-                catch(...)
-                {
-                    std::cerr << "fmha_bwd_launcher: pack_workspace_host threw unknown\n";
-                }
-            },
-            pack_closure.get()));
-        // Ownership transferred to the callback only after a successful launch.
-        pack_closure.release();
+        // Pure-host metadata pack into the staging buffer.
+        pack_workspace_host_(pin_w, seqstart_q_pinned, seqstart_k_pinned);
 
+        // H2D the packed metadata, then wait so the staging buffer can be freed
+        // safely as it goes out of scope below.
         HIP_CHECK_ERROR(
             hipMemcpyAsync(device_ws_ptr, pin_w, host_ws_size_, hipMemcpyHostToDevice, stream));
-
-        // Release any previous in-flight buffer before taking a new one.
-        schedule_pin_staging_release();
-        pin_staging_    = std::move(pin_base);
-        release_stream_ = stream;
+        HIP_CHECK_ERROR(hipStreamSynchronize(stream));
     }
 
     private:
     fmha_bwd_traits traits_{};
     size_t host_ws_size_    = 0;
     bool needs_zero_dq_acc_ = false;
-    // Pure CPU; safe to invoke from a hipLaunchHostFunc callback.
+    // Pure CPU; invoked synchronously from prepare_workspace() on the calling thread.
     std::function<void(void* host_ws, const int* seqstart_q, const int* seqstart_k)>
         pack_workspace_host_{[](void*, const int*, const int*) {
             std::cerr
                 << "fmha_bwd: no kernel found for given traits, skipping pack_workspace_host\n";
         }};
-    std::shared_ptr<void> pin_staging_;
-    hipStream_t release_stream_ = nullptr;
-
-    // The pin_staging_ deleter MUST NOT call any HIP API: it fires from the
-    // hipLaunchHostFunc callback on the driver helper thread, which holds
-    // runtime locks (would deadlock against main-thread hipFree). PyTorch's
-    // CachingHostAllocator is safe; bare hipHostMalloc users should defer
-    // hipHostFree via ck_tile::pinned_host_releaser.
-    void schedule_pin_staging_release() noexcept
-    {
-        if(!pin_staging_)
-            return;
-        auto* heap_ref       = new std::shared_ptr<void>(std::move(pin_staging_));
-        const hipError_t err = hipLaunchHostFunc(
-            release_stream_,
-            [](void* ud) { delete static_cast<std::shared_ptr<void>*>(ud); },
-            heap_ref);
-        if(err != hipSuccess)
-        {
-            std::cerr << "fmha_bwd_launcher: hipLaunchHostFunc failed: " << hipGetErrorString(err)
-                      << "; releasing eagerly\n";
-            delete heap_ref;
-        }
-    }
 
     template <typename T0 /*dot_do_o_trait*/,
               typename T1 /*dq_dk_dv_trait*/,
@@ -743,7 +692,17 @@ struct fmha_bwd_launcher
     void init(const fmha_bwd_traits& t)
     {
         traits_ = t;
-        run     = [](fmha_bwd_args a, const ck_tile::stream_config& s) {
+        // dq_acc zeroing lives here (not in prepare_workspace) because it must run
+        // on every backward, including every HIP-graph replay of a captured run().
+        // It is a plain hipMemsetAsync node — replay-safe — so capturing run()
+        // needs no graph awareness in CK. `this` is stable: the launcher is never
+        // moved (move ops are deleted) and outlives every run() call.
+        run = [this](fmha_bwd_args a, const ck_tile::stream_config& s) {
+            if(needs_zero_dq_acc_ && workspace_size > host_ws_size_)
+                HIP_CHECK_ERROR(hipMemsetAsync(static_cast<char*>(a.workspace_ptr) + host_ws_size_,
+                                               0,
+                                               workspace_size - host_ws_size_,
+                                               s.stream_id_));
             return fmha_bwd_<T0, T1, T2, Arch>(s, a);
         };
         host_ws_size_         = fmha_bwd_dq_dk_dv_dq_ws_host_size_<T1, Arch>(t.batch);

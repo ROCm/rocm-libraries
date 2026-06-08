@@ -401,7 +401,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
     const size_t ws_size = launcher.workspace_size;
     ck_tile::DeviceMem ws_buf(ws_size);
 
-    // Stage seqstart to device before prepare_workspace_async (which D2Hs it back).
+    // Stage seqstart to device before prepare_workspace (which D2Hs it back).
     seqstart_q.ToDevice(seqstart_q_host.data());
     seqstart_k.ToDevice(seqstart_k_host.data());
 
@@ -419,7 +419,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
 
     ck_tile::gpu_timer prepare_ws_timer;
     prepare_ws_timer.start(stream_config.stream_id_);
-    launcher.prepare_workspace_async(
+    launcher.prepare_workspace(
         ws_buf.GetDeviceBuffer(),
         (mode == mode_enum::group) ? static_cast<const int*>(seqstart_q.GetDeviceBuffer())
                                    : nullptr,
@@ -434,7 +434,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
     v_buf.ToDevice(v_host.data());
     bias_buf.ToDevice(bias_host.data());
     do_buf.ToDevice(do_host.data());
-    // seqstart_q/k were already ToDevice'd above before prepare_workspace_async.
+    // seqstart_q/k were already ToDevice'd above before prepare_workspace.
     if(mode == mode_enum::group)
     {
         std::vector<int32_t> seqlen_q_host(seqlen_qs.begin(), seqlen_qs.end());
@@ -935,7 +935,7 @@ bwd_result fmha_bwd_run(mode_enum mode,
 
         ck_tile::stream_config stream_config_v{nullptr, true, 0, 0, 1};
         // re-initialize workspace for validation run
-        launcher.prepare_workspace_async(
+        launcher.prepare_workspace(
             ws_buf.GetDeviceBuffer(),
             (mode == mode_enum::group) ? static_cast<const int*>(seqstart_q.GetDeviceBuffer())
                                        : nullptr,
