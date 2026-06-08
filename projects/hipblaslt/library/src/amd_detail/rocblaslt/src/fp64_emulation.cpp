@@ -1102,17 +1102,19 @@ oz2_scaleAB_kernel(const double* __restrict__ A,
 /* =========================================================================
  * GPU kernels — Part 2d: chunked CRT accumulation
  *
- * oz2_chunk_accum_kernel processes a batch of `chunk_size` consecutive
- * moduli in a single kernel launch.  For each output element [i,l] it:
- *   1. Reads chunk_size C32i slices from the batch (stored back-to-back).
- *   2. Reduces each slice to its symmetric residue mod m_t (one FMA pass).
- *   3. Accumulates dc * qPi_t into a local double-double — entirely in
- *      registers, with no intermediate global-memory writes.
- *   4. Merges the local double-double into the global Zhi/Zlo.
+ * oz2_chunk_accum_kernel_rt<HAS_LO>: runtime-count fallback, used for
+ * chunk sizes not covered by the template specialisations below.
  *
- * Compared to launching one kernel per modulus (old approach), this reduces
- * the number of Zhi/Zlo read-modify-write round-trips from chunk_size to 1
- * per chunk, and cuts kernel launches from (s+1) to (ceil(s/k)+1).
+ * oz2_chunk_accum_kernel<HAS_LO, CHUNK_SIZE, IS_FIRST_CHUNK>: template
+ * version with CHUNK_SIZE known at compile time, enabling #pragma unroll.
+ * With the loop unrolled the compiler pre-issues all CHUNK_SIZE C32i_batch
+ * loads simultaneously, overlapping their ~100-cycle HBM latencies instead
+ * of serialising them one after the other.  IS_FIRST_CHUNK=true additionally
+ * enables __builtin_nontemporal_store for the Zhi/Zlo writes (write-only
+ * in that path, so bypassing L2 keeps the cache warm for C32i reads).
+ *
+ * oz2_accum_finalize_kernel_rt<HAS_LO> / oz2_accum_finalize_kernel<…>:
+ * same pattern for the fused last-chunk kernel.
  *
  * Template parameter HAS_LO:
  *   true  — s ≥ 8: cQpiLo[t] is non-zero; fuse dc×cQpiLo[t] into a FMA
@@ -1124,7 +1126,7 @@ oz2_scaleAB_kernel(const double* __restrict__ A,
  * ========================================================================= */
 template <bool HAS_LO>
 __global__ static void
-oz2_chunk_accum_kernel(const int32_t* __restrict__ C32i_batch,
+oz2_chunk_accum_kernel_rt(const int32_t* __restrict__ C32i_batch,
                        double*        __restrict__ Zhi,
                        double*        __restrict__ Zlo,
                        int64_t                     m,
@@ -1191,7 +1193,7 @@ oz2_chunk_accum_kernel(const int32_t* __restrict__ C32i_batch,
  * ========================================================================= */
 template <bool HAS_LO>
 __global__ static void
-oz2_accum_finalize_kernel(const int32_t* __restrict__ C32i_batch,
+oz2_accum_finalize_kernel_rt(const int32_t* __restrict__ C32i_batch,
                           const double*  __restrict__ Zhi_in,  /* prev hi; ignored if is_first */
                           const double*  __restrict__ Zlo_in,  /* prev lo; ignored if is_first */
                           const double*  __restrict__ C,
@@ -1243,6 +1245,119 @@ oz2_accum_finalize_kernel(const int32_t* __restrict__ C32i_batch,
     }
 
     /* Phase 3: range reduction + inverse scale — write directly to D. */
+    const double q = rint((Zh + Zl) * cInvP);
+    const double X = fma(cP_lo, q, fma(cP_hi, q, Zh) + Zl);
+
+    const int inv_sft = -(static_cast<int>(sftA[i]) + static_cast<int>(sftB[l]));
+    const size_t c_idx = static_cast<size_t>(i) + static_cast<size_t>(l) * static_cast<size_t>(ldc);
+    const size_t d_idx = static_cast<size_t>(i) + static_cast<size_t>(l) * static_cast<size_t>(ldd);
+    D[d_idx] = alpha * ldexp(X, inv_sft) + beta * C[c_idx];
+}
+
+/* Template versions: CHUNK_SIZE known at compile time enables #pragma unroll,
+ * which lets the compiler pre-issue all CHUNK_SIZE C32i_batch loads
+ * simultaneously, hiding their ~100-cycle HBM latencies instead of stalling
+ * one load at a time.  IS_FIRST_CHUNK eliminates the runtime branch and,
+ * for oz2_chunk_accum_kernel, uses __builtin_nontemporal_store for the
+ * write-only Zhi/Zlo path (bypasses L2, keeps cache warm for C32i reads). */
+template <bool HAS_LO, unsigned CHUNK_SIZE, bool IS_FIRST_CHUNK>
+__global__ static void
+oz2_chunk_accum_kernel(const int32_t* __restrict__ C32i_batch,
+                       double*        __restrict__ Zhi,
+                       double*        __restrict__ Zlo,
+                       int64_t                     m,
+                       int64_t                     n,
+                       size_t                      ldc32i,
+                       unsigned                    chunk_start)
+{
+    const int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int64_t l = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+    if(i >= m || l >= n) return;
+
+    const size_t idx          = static_cast<size_t>(i) + static_cast<size_t>(l) * ldc32i;
+    const size_t slice_stride = ldc32i * static_cast<size_t>(n);
+
+    double local_hi = 0.0;
+    double local_lo = 0.0;
+
+    #pragma unroll
+    for(unsigned t_local = 0; t_local < CHUNK_SIZE; ++t_local) {
+        const unsigned t     = chunk_start + t_local;
+        const double dc_raw  = static_cast<double>(C32i_batch[t_local * slice_stride + idx]);
+        const double dc      = fma(cNegMod[t], rint(dc_raw * cInvMod[t]), dc_raw);
+        const double hi      = dc * cQpiHi[t];
+        const double new_hi  = local_hi + hi;
+        const double err     = hi - (new_hi - local_hi);
+        local_hi = new_hi;
+        if constexpr (HAS_LO)
+            local_lo = fma(dc, cQpiLo[t], local_lo + err);
+        else
+            local_lo += err;
+    }
+
+    if constexpr (IS_FIRST_CHUNK) {
+        __builtin_nontemporal_store(local_hi, Zhi + idx);
+        __builtin_nontemporal_store(local_lo, Zlo + idx);
+    } else {
+        const double old_hi = Zhi[idx];
+        const double s_hi   = old_hi + local_hi;
+        const double err    = local_hi - (s_hi - old_hi);
+        Zhi[idx] = s_hi;
+        Zlo[idx] += err + local_lo;
+    }
+}
+
+template <bool HAS_LO, unsigned CHUNK_SIZE, bool IS_FIRST_CHUNK>
+__global__ static void
+oz2_accum_finalize_kernel(const int32_t* __restrict__ C32i_batch,
+                          const double*  __restrict__ Zhi_in,
+                          const double*  __restrict__ Zlo_in,
+                          const double*  __restrict__ C,
+                          double*        __restrict__ D,
+                          int64_t m, int64_t n, size_t ldc32i,
+                          int64_t ldc, int64_t ldd,
+                          double alpha, double beta,
+                          const int16_t* __restrict__ sftA,
+                          const int16_t* __restrict__ sftB,
+                          unsigned chunk_start)
+{
+    const int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int64_t l = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+    if(i >= m || l >= n) return;
+
+    const size_t idx          = static_cast<size_t>(i) + static_cast<size_t>(l) * ldc32i;
+    const size_t slice_stride = ldc32i * static_cast<size_t>(n);
+
+    double local_hi = 0.0;
+    double local_lo = 0.0;
+
+    #pragma unroll
+    for(unsigned t_local = 0; t_local < CHUNK_SIZE; ++t_local) {
+        const unsigned t     = chunk_start + t_local;
+        const double dc_raw  = static_cast<double>(C32i_batch[t_local * slice_stride + idx]);
+        const double dc      = fma(cNegMod[t], rint(dc_raw * cInvMod[t]), dc_raw);
+        const double hi      = dc * cQpiHi[t];
+        const double new_hi  = local_hi + hi;
+        const double err     = hi - (new_hi - local_hi);
+        local_hi = new_hi;
+        if constexpr (HAS_LO)
+            local_lo = fma(dc, cQpiLo[t], local_lo + err);
+        else
+            local_lo += err;
+    }
+
+    double Zh, Zl;
+    if constexpr (IS_FIRST_CHUNK) {
+        Zh = local_hi;
+        Zl = local_lo;
+    } else {
+        const double old_hi = Zhi_in[idx];
+        const double s_hi   = old_hi + local_hi;
+        const double err    = local_hi - (s_hi - old_hi);
+        Zh = s_hi;
+        Zl = Zlo_in[idx] + err + local_lo;
+    }
+
     const double q = rint((Zh + Zl) * cInvP);
     const double X = fma(cP_lo, q, fma(cP_hi, q, Zh) + Zl);
 
@@ -1652,29 +1767,131 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
              * kernel that writes D directly and skips the Zhi/Zlo global write. */
             const bool is_last  = (global_chunk_start + actual_gemm == num_moduli);
             _pstart();
+            /* Dispatch template kernels with compile-time CHUNK_SIZE and
+             * IS_FIRST_CHUNK: #pragma unroll in the kernel body pre-issues all
+             * CHUNK_SIZE C32i_batch loads simultaneously.
+             * _rt fallbacks handle chunk sizes not in the switch table.      */
+#define OZ2_FARGS C32i_batch, Zhi, Zlo, C, D, m, n, ldc32i, ldc, ldd, *alpha, *beta, sftA, sftB, global_chunk_start
+#define OZ2_AARGS C32i_batch, Zhi, Zlo, m, n, ldc32i, global_chunk_start
+#define OZ2_FINALIZE(HL, CS) \
+            do { if(is_first) hipLaunchKernelGGL((oz2_accum_finalize_kernel<(HL),(CS),true>),  grid_acc, blk_acc, 0, stream, OZ2_FARGS); \
+                 else         hipLaunchKernelGGL((oz2_accum_finalize_kernel<(HL),(CS),false>), grid_acc, blk_acc, 0, stream, OZ2_FARGS); } while(0)
+#define OZ2_ACCUM(HL, CS) \
+            do { if(is_first) hipLaunchKernelGGL((oz2_chunk_accum_kernel<(HL),(CS),true>),  grid_acc, blk_acc, 0, stream, OZ2_AARGS); \
+                 else         hipLaunchKernelGGL((oz2_chunk_accum_kernel<(HL),(CS),false>), grid_acc, blk_acc, 0, stream, OZ2_AARGS); } while(0)
             if(is_last) {
-                if(num_moduli <= 7u)
-                    hipLaunchKernelGGL(oz2_accum_finalize_kernel<false>, grid_acc, blk_acc, 0, stream,
-                                       C32i_batch, Zhi, Zlo, C, D,
-                                       m, n, ldc32i, ldc, ldd,
-                                       *alpha, *beta, sftA, sftB,
-                                       global_chunk_start, actual_gemm, is_first);
-                else
-                    hipLaunchKernelGGL(oz2_accum_finalize_kernel<true>, grid_acc, blk_acc, 0, stream,
-                                       C32i_batch, Zhi, Zlo, C, D,
-                                       m, n, ldc32i, ldc, ldd,
-                                       *alpha, *beta, sftA, sftB,
-                                       global_chunk_start, actual_gemm, is_first);
+                if(num_moduli <= 7u) {
+                    switch(actual_gemm) {
+                        case  1: OZ2_FINALIZE(false,  1); break;
+                        case  2: OZ2_FINALIZE(false,  2); break;
+                        case  3: OZ2_FINALIZE(false,  3); break;
+                        case  4: OZ2_FINALIZE(false,  4); break;
+                        case  5: OZ2_FINALIZE(false,  5); break;
+                        case  6: OZ2_FINALIZE(false,  6); break;
+                        case  7: OZ2_FINALIZE(false,  7); break;
+                        case  8: OZ2_FINALIZE(false,  8); break;
+                        case  9: OZ2_FINALIZE(false,  9); break;
+                        case 10: OZ2_FINALIZE(false, 10); break;
+                        case 11: OZ2_FINALIZE(false, 11); break;
+                        case 12: OZ2_FINALIZE(false, 12); break;
+                        case 13: OZ2_FINALIZE(false, 13); break;
+                        case 14: OZ2_FINALIZE(false, 14); break;
+                        case 15: OZ2_FINALIZE(false, 15); break;
+                        case 16: OZ2_FINALIZE(false, 16); break;
+                        case 17: OZ2_FINALIZE(false, 17); break;
+                        case 18: OZ2_FINALIZE(false, 18); break;
+                        case 19: OZ2_FINALIZE(false, 19); break;
+                        case 20: OZ2_FINALIZE(false, 20); break;
+                        default: hipLaunchKernelGGL((oz2_accum_finalize_kernel_rt<false>), grid_acc, blk_acc, 0, stream,
+                                     C32i_batch, Zhi, Zlo, C, D, m, n, ldc32i, ldc, ldd,
+                                     *alpha, *beta, sftA, sftB, global_chunk_start, actual_gemm, is_first);
+                    }
+                } else {
+                    switch(actual_gemm) {
+                        case  1: OZ2_FINALIZE(true,  1); break;
+                        case  2: OZ2_FINALIZE(true,  2); break;
+                        case  3: OZ2_FINALIZE(true,  3); break;
+                        case  4: OZ2_FINALIZE(true,  4); break;
+                        case  5: OZ2_FINALIZE(true,  5); break;
+                        case  6: OZ2_FINALIZE(true,  6); break;
+                        case  7: OZ2_FINALIZE(true,  7); break;
+                        case  8: OZ2_FINALIZE(true,  8); break;
+                        case  9: OZ2_FINALIZE(true,  9); break;
+                        case 10: OZ2_FINALIZE(true, 10); break;
+                        case 11: OZ2_FINALIZE(true, 11); break;
+                        case 12: OZ2_FINALIZE(true, 12); break;
+                        case 13: OZ2_FINALIZE(true, 13); break;
+                        case 14: OZ2_FINALIZE(true, 14); break;
+                        case 15: OZ2_FINALIZE(true, 15); break;
+                        case 16: OZ2_FINALIZE(true, 16); break;
+                        case 17: OZ2_FINALIZE(true, 17); break;
+                        case 18: OZ2_FINALIZE(true, 18); break;
+                        case 19: OZ2_FINALIZE(true, 19); break;
+                        case 20: OZ2_FINALIZE(true, 20); break;
+                        default: hipLaunchKernelGGL((oz2_accum_finalize_kernel_rt<true>), grid_acc, blk_acc, 0, stream,
+                                     C32i_batch, Zhi, Zlo, C, D, m, n, ldc32i, ldc, ldd,
+                                     *alpha, *beta, sftA, sftB, global_chunk_start, actual_gemm, is_first);
+                    }
+                }
             } else {
-                if(num_moduli <= 7u)
-                    hipLaunchKernelGGL(oz2_chunk_accum_kernel<false>, grid_acc, blk_acc, 0, stream,
-                                       C32i_batch, Zhi, Zlo, m, n, ldc32i,
-                                       global_chunk_start, actual_gemm, is_first);
-                else
-                    hipLaunchKernelGGL(oz2_chunk_accum_kernel<true>, grid_acc, blk_acc, 0, stream,
-                                       C32i_batch, Zhi, Zlo, m, n, ldc32i,
-                                       global_chunk_start, actual_gemm, is_first);
+                if(num_moduli <= 7u) {
+                    switch(actual_gemm) {
+                        case  1: OZ2_ACCUM(false,  1); break;
+                        case  2: OZ2_ACCUM(false,  2); break;
+                        case  3: OZ2_ACCUM(false,  3); break;
+                        case  4: OZ2_ACCUM(false,  4); break;
+                        case  5: OZ2_ACCUM(false,  5); break;
+                        case  6: OZ2_ACCUM(false,  6); break;
+                        case  7: OZ2_ACCUM(false,  7); break;
+                        case  8: OZ2_ACCUM(false,  8); break;
+                        case  9: OZ2_ACCUM(false,  9); break;
+                        case 10: OZ2_ACCUM(false, 10); break;
+                        case 11: OZ2_ACCUM(false, 11); break;
+                        case 12: OZ2_ACCUM(false, 12); break;
+                        case 13: OZ2_ACCUM(false, 13); break;
+                        case 14: OZ2_ACCUM(false, 14); break;
+                        case 15: OZ2_ACCUM(false, 15); break;
+                        case 16: OZ2_ACCUM(false, 16); break;
+                        case 17: OZ2_ACCUM(false, 17); break;
+                        case 18: OZ2_ACCUM(false, 18); break;
+                        case 19: OZ2_ACCUM(false, 19); break;
+                        case 20: OZ2_ACCUM(false, 20); break;
+                        default: hipLaunchKernelGGL((oz2_chunk_accum_kernel_rt<false>), grid_acc, blk_acc, 0, stream,
+                                     C32i_batch, Zhi, Zlo, m, n, ldc32i,
+                                     global_chunk_start, actual_gemm, is_first);
+                    }
+                } else {
+                    switch(actual_gemm) {
+                        case  1: OZ2_ACCUM(true,  1); break;
+                        case  2: OZ2_ACCUM(true,  2); break;
+                        case  3: OZ2_ACCUM(true,  3); break;
+                        case  4: OZ2_ACCUM(true,  4); break;
+                        case  5: OZ2_ACCUM(true,  5); break;
+                        case  6: OZ2_ACCUM(true,  6); break;
+                        case  7: OZ2_ACCUM(true,  7); break;
+                        case  8: OZ2_ACCUM(true,  8); break;
+                        case  9: OZ2_ACCUM(true,  9); break;
+                        case 10: OZ2_ACCUM(true, 10); break;
+                        case 11: OZ2_ACCUM(true, 11); break;
+                        case 12: OZ2_ACCUM(true, 12); break;
+                        case 13: OZ2_ACCUM(true, 13); break;
+                        case 14: OZ2_ACCUM(true, 14); break;
+                        case 15: OZ2_ACCUM(true, 15); break;
+                        case 16: OZ2_ACCUM(true, 16); break;
+                        case 17: OZ2_ACCUM(true, 17); break;
+                        case 18: OZ2_ACCUM(true, 18); break;
+                        case 19: OZ2_ACCUM(true, 19); break;
+                        case 20: OZ2_ACCUM(true, 20); break;
+                        default: hipLaunchKernelGGL((oz2_chunk_accum_kernel_rt<true>), grid_acc, blk_acc, 0, stream,
+                                     C32i_batch, Zhi, Zlo, m, n, ldc32i,
+                                     global_chunk_start, actual_gemm, is_first);
+                    }
+                }
             }
+#undef OZ2_FARGS
+#undef OZ2_AARGS
+#undef OZ2_FINALIZE
+#undef OZ2_ACCUM
             _pstop(_t_accum);
         }
     }
