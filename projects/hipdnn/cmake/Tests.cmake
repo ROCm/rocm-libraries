@@ -92,7 +92,6 @@ endfunction() # _create_test_name_validation_target_internal
 
 enable_testing() # Cmake wont discover or run tests without this line
 
-
 # Internal helper function to create a ctest target
 # ~~~
 # Parameters:
