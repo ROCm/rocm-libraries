@@ -22,6 +22,7 @@ Usage:
     python3 12_te_bridge.py
     python3 12_te_bridge.py --size 1024
     python3 12_te_bridge.py --rtol 2e-2
+    python3 12_te_bridge.py --arch gfx950
 """
 
 import sys
@@ -37,6 +38,7 @@ from gemm_utils import (  # noqa: E402
     GpuGemmRunner,
     setup_multiple_gemm_dispatchers,
 )
+from ctypes_utils import detect_gpu_arch  # noqa: E402
 
 # A single algorithm known to compile and run on gfx942. Only the Signature
 # (dtype + layout) varies per case; the Algorithm is held fixed so the example
@@ -60,7 +62,9 @@ _ALGO = dict(
 )
 
 # (dtype, layout) pairs. Column-major C (e.g. rcc) is rejected at build by the
-# universal GEMM, so every case keeps row-major C.
+# universal GEMM, so every case keeps row-major C -- which leaves exactly four
+# A/B combinations (rcr/rrr/ccr/crr). Both dtypes cover all four so the matrix
+# matches the docstring's claim.
 _CASES = [
     ("fp16", "rcr"),
     ("fp16", "rrr"),
@@ -68,6 +72,8 @@ _CASES = [
     ("fp16", "crr"),
     ("bf16", "rcr"),
     ("bf16", "rrr"),
+    ("bf16", "ccr"),
+    ("bf16", "crr"),
 ]
 
 _LAYOUT_WORD = {"r": "row", "c": "col"}
@@ -83,7 +89,7 @@ def _emulate(x: np.ndarray, dtype: str) -> np.ndarray:
     return x.astype(np.float16).astype(np.float32)
 
 
-def _config(dtype: str, layout: str) -> GemmKernelConfig:
+def _config(dtype: str, layout: str, arch: str) -> GemmKernelConfig:
     la, lb, lc = layout
     return GemmKernelConfig(
         dtype_a=dtype,
@@ -92,6 +98,7 @@ def _config(dtype: str, layout: str) -> GemmKernelConfig:
         layout_a=_LAYOUT_WORD[la],
         layout_b=_LAYOUT_WORD[lb],
         layout_c=_LAYOUT_WORD[lc],
+        gfx_arch=arch,
         **_ALGO,
     )
 
@@ -105,10 +112,15 @@ def main() -> int:
     parser.add_argument(
         "--rtol", type=float, default=2e-2, help="relative tolerance (default 2e-2)"
     )
+    parser.add_argument(
+        "--arch",
+        default=detect_gpu_arch(),
+        help="GPU target arch (default: auto-detected via rocminfo)",
+    )
     args = parser.parse_args()
 
     problem = GemmProblem(M=args.size, N=args.size, K=args.size)
-    configs = [_config(dt, lay) for dt, lay in _CASES]
+    configs = [_config(dt, lay, args.arch) for dt, lay in _CASES]
 
     print(f"Building {len(configs)} bridge kernels (codegen + hipcc)...")
     so_paths = setup_multiple_gemm_dispatchers(configs, verbose=False)
@@ -128,7 +140,10 @@ def main() -> int:
         if not result.success:
             print(f"  {tag:10s} RUN FAILED (status {result.status})")
             continue
-        ref = _emulate(A, dtype) @ _emulate(B, dtype)
+        # Emulate both the input quantization (A,B stored as dtype) and the
+        # output store: the GPU writes C back as dtype_c, so round the fp32
+        # accumulator to dtype too before comparing.
+        ref = _emulate(_emulate(A, dtype) @ _emulate(B, dtype), dtype)
         # Global relative error (normalize by the largest reference magnitude):
         # per-element ratios explode on the near-zero entries that K-length
         # accumulation of zero-mean data produces, so they are not meaningful.
