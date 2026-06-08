@@ -391,6 +391,17 @@ function(install_provider_ctest_files INSTALL_SUBDIR)
         file(APPEND "${INSTALLED_CTEST_FILE}" "${_tiered_staging}")
     endif()
 
+    # Append external integration test entries (cross-provider suite).
+    # These are accumulated by add_external_integration_test_target() calls
+    # that pass INSTALL_SUBDIR matching the value passed here.
+    get_property(_external_staging GLOBAL
+        PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${INSTALL_SUBDIR}"
+    )
+    if(_external_staging)
+        file(APPEND "${INSTALLED_CTEST_FILE}" "\n# External integration test entries (cross-provider suite)\n")
+        file(APPEND "${INSTALLED_CTEST_FILE}" "${_external_staging}")
+    endif()
+
     install(FILES "${INSTALLED_CTEST_FILE}"
             DESTINATION ${CTEST_INSTALL_PATH} RENAME CTestTestfile.cmake
     )
