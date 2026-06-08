@@ -229,7 +229,7 @@ inline std::map<std::string, int>
                                                 "v_wmma_f32_16x16x4_f32 v[0:7], v[8:9], v[8:9], 0",
                                                 isDebug);
 
-    rv["HasAdd_PC_i64"] = false;
+    rv["HasAdd_PC_i64"] = tryAssembler(isaVersion, assemblerPath, "s_add_pc_i64 0x0", isDebug);
 
     rv["HasSWMMAC"] = tryAssembler(isaVersion, 
                                   assemblerPath, 

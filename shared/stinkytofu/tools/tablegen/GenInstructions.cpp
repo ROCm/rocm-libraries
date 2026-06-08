@@ -1346,6 +1346,7 @@ class InstructionCodeGen {
         if (t == "label") return "FieldType::label";
         if (t == "simm16") return "FieldType::simm16";
         if (t == "simm32") return "FieldType::simm32";
+        if (t == "simm64") return "FieldType::simm64";
         if (t == "simm24") return "FieldType::simm24";
         if (t == "simm5") return "FieldType::simm5";
         if (t == "sdst") return "FieldType::sdst";

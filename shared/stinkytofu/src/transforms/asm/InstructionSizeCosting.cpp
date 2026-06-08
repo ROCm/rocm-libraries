@@ -319,6 +319,12 @@ int getLiteralExtraBytesImpl(const StinkyInstruction& inst,
         return 0;
     }
 
+    if (const HwInstDesc* desc = inst.getHwInstDesc()) {
+        for (size_t i = 0; i < desc->operandFields.size(); ++i) {
+            if (desc->getFieldType(i) == FieldType::simm64) return 8;
+        }
+    }
+
     if (const HwInstDesc* desc = inst.getHwInstDesc();
         desc && desc->microcode == MicrocodeFormat::MC_SOPK) {
         if (!inst.getSrcRegs().empty() && inst.getUnifiedOpcode() == GFX::s_setreg_IMM32_b32)

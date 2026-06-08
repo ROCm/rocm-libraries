@@ -63,6 +63,10 @@ DEF_BATCH(.format = MUBUF_STORE,
     BufferStoreD16HiB8Inst, "buffer_store_d16_hi_b8", .logical = "BufferStoreD16HIU8",
     BufferStoreD16HiB16Inst, "buffer_store_d16_hi_b16", .logical = "BufferStoreD16HIB16",
 )
+// Long-range PC-relative branch (gfx1250+): PC = PC + Literal64. The 2 LSBs of the literal are ignored.
+DEF_T(SAddPCI64Inst, "s_add_pc_i64", .format = SOP1, .flags = {Branch},
+    .logical = "SAddPCI64_SIMM",
+    .operand_fields = { {S0, literal, simm64, 64} })
 // Control Flow — Branches (inherit {S, simm16, label, 16} from SOPP_BRANCH)
 DEF_BATCH(.format = SOPP_BRANCH,
     SBranchInst, "s_branch", .logical = "SBranch",

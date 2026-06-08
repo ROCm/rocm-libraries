@@ -203,6 +203,8 @@ enum class FieldType : uint8_t {
     label,
     simm16,
     simm32,
+    /// 64-bit signed immediate (e.g. Literal64 on S_ADD_PC_I64).
+    simm64,
     /// 24-bit signed immediate (e.g. koffset on S_PREFETCH_INST_PC_REL).
     simm24,
     /// 5-bit signed immediate (e.g. klength on S_PREFETCH_INST_PC_REL).

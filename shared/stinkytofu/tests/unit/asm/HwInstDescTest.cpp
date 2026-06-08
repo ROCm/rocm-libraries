@@ -276,6 +276,22 @@ TEST_F(HwInstDescTest, SOPP_SBranch) {
 }
 
 // ---------------------------------------------------------------------------
+// SOP1 with 64-bit literal operand: s_add_pc_i64 (long branch)
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, SOP1_SAddPCI64_Simm64Field) {
+    auto* desc = getDescByMnemonic("s_add_pc_i64");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOP1);
+    EXPECT_TRUE(desc->has(IF_Branch));
+
+    auto fields = desc->operandFields;
+    ASSERT_EQ(fields.size(), 1u);
+    EXPECT_EQ(fields[0].encodeField, EncodeField::literal);
+    EXPECT_EQ(fields[0].fieldType, FieldType::simm64);
+    EXPECT_EQ(fields[0].fieldSizeBits, 64u);
+}
+
+// ---------------------------------------------------------------------------
 // XDL WMMA: v_wmma_f32_16x16x32_f16
 // ---------------------------------------------------------------------------
 TEST_F(HwInstDescTest, WMMA_XDL_F32_16x16x32_F16) {

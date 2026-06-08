@@ -111,7 +111,7 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
     rv["HasWMMA_V3_f64"] = hasAnyMnemonic(m, {"v_wmma_f64_16x16x4_f64", "v_wmma_f64_16x16x8_f64"});
     rv["HasWMMA_f8f6f4"] = hasMnemonic(m, "v_wmma_f32_16x16x128_f8f6f4");
 
-    rv["HasAdd_PC_i64"] = 0;
+    rv["HasAdd_PC_i64"] = hasMnemonic(m, "s_add_pc_i64");
 
     rv["HasSWMMAC"] = hasAnyMnemonic(m, {"v_swmmac_f32_16x16x32_f16", "v_swmmac_f32_16x16x64_f16"});
     rv["HasSWMMAC_gfx1250"] = hasMnemonic(m, "v_swmmac_f32_16x16x64_f16");

@@ -43,6 +43,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"SSwapPCB64", "s_swappc_b64"},
         {"SCBranchExecZ", "s_cbranch_execz"},
         {"SCBranchExecNZ", "s_cbranch_execnz"},
+        {"SAddPCI64_SIMM", "s_add_pc_i64"},
         /* cmp.hpp */
         {"SCmpEQI32", "s_cmp_eq_i32"},
         {"SCmpEQU32", "s_cmp_eq_u32"},
