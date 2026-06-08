@@ -38,7 +38,9 @@ To speed up compile time we instantiate the kernels into separate `.cpp` files s
 ## executable
 `tile_example_sparse_attn_fwd` is the example executable, implemented in `example_sparse_attn_fwd.cpp`. You can type `./bin/tile_example_sparse_attn_fwd -?` to list all the arguments. Below is an example of the output (may subject to change):
 ```
-        -api    sparse attention API: jenga (default) / vsa / sparge
+        -api    sparse attention API: jenga (default) / vsa / sparge / sparge_sage
+     -qscale    sparge_sage quant scale mode: perwarp|blockscale|perthread|pertensor (default:perwarp)
+    -qkdtype    sparge_sage Q/K quant dtype: int8 (i8fp8bf16) | fp8 (fp8bf16); V always fp8 (default:int8)
           -v    0:no validation, 1:validation (default:1)
        -mode    kernel mode. 0:batch, 1:group (jenga + vsa + sparge) (default:0)
           -b    batch size (default:1)
@@ -61,7 +63,8 @@ To speed up compile time we instantiate the kernels into separate `.cpp` files s
                 vsa / sparge: full support. jenga: batch-mode rejects t/b/swa
                 (kernel/CPU-ref divergence — known limitation); group ok.
        -sink    sparge: 1 = always include first K block (default:0)
-   -smooth_k    sparge: 1 = subtract K-mean before pool/sim (default:1)
+   -smooth_k    K smoothing: center K by per-channel mean; gates sparge pool/sim
+                + sparge_sage K-quant. 0 disables (default:1)
 -print_sparsity sparge: 1 = read back actual sparsity; needed for accurate TFlops/GB/s
   -pvthreshd    sparge: P*V skip threshold; >0 enables Stage 2 (default:0.0)
 -perhead_test   sparge: synthesize a per-head hyperparam pattern (default:0)
@@ -86,6 +89,10 @@ To speed up compile time we instantiate the kernels into separate `.cpp` files s
      -warmup    warmup iterations (default:5)
      -repeat    benchmark iterations (default:20)
       -kname    1: print kernel name (default:0)
+    -vlayout    r: row-major (seqlen*hdim), c: col-major (hdim*seqlen) (default:r)
+      -timer    timer type: gpu or cpu (default:gpu)
+       -json    1: append per-run metrics as JSON (default:0)
+   -jsonfile    path to write JSON metrics (default: empty)
 ```
 Example 1: `./bin/tile_example_sparse_attn_fwd -api=jenga -b=1 -h=16 -s=4096 -d=128 -sparsity=0.5` runs jenga with batch=1, nhead=16, sequence length=4096, hdim=128, fp16, 50% sparsity.
 
@@ -148,9 +155,10 @@ At the C++ API level, `ck_tile::sparge_hyperparam_args` still exposes both `cdft
 `-simthreshold` enables Q/K-block self-similarity fix-up. Q blocks below the threshold attend to all causally-valid K blocks; K blocks below the threshold are force-included. The scalar doubles as a global switch — when `<= 0` the sim arrays are not allocated and any per-head pointer is silently ignored (with stderr warning).
 
 ### sparge — K smoothing
-The `-smooth_k` flag controls the non-quant sparge selection path: it is a no-op for block selection (subtracting the per-`(batch, kv_head)` K mean shifts every q@k_mean score within a row by a constant that softmax max-subtract removes), so `km_ptr` stays null there.
+The `-smooth_k` flag (default `1`, matches upstream SpargeAttn `smooth_k=True`; set `-smooth_k=0` to disable) gates K-mean centering in two places:
 
-For **sparge_sage** (quantized), smooth_k is always on and aligns with upstream SpargeAttn's `smooth_k=True`: the per-`(batch, kv_head, channel)` global K mean (`km = k.mean` over seqlen) is subtracted from K **before** INT8/FP8 quantization (`round((k - km)/scale)`), reducing K's quantization error. Q is never centered. The attention pipeline is unchanged: the implied `-q@km^T` is a per-row constant absorbed by softmax. `km` is host-computed once and fed to both the device quant kernels and the reference, keeping faithful-dequant validation tight.
+* **non-quant sparge selection** — a no-op for block selection: subtracting the per-`(batch, kv_head)` K mean shifts every q@k_mean score within a row by a constant that softmax max-subtract removes, so `km_ptr` stays null in the attention.
+* **sparge_sage quantization** — the per-`(batch, kv_head, channel)` global K mean (`km = k.mean` over seqlen) is subtracted from K **before** INT8/FP8 quantization (`round((k - km)/scale)`), reducing K's quantization error. Q is never centered. The attention pipeline is unchanged: the implied `-q@km^T` is a per-row constant absorbed by softmax. `km` is host-computed once and fed to both the device quant kernels and the reference, keeping faithful-dequant validation tight. With `-smooth_k=0`, `km_ptr` is null and both device and reference quantize raw K.
 
 ### sparge — P·V skip threshold (Stage 2)
 `-pvthreshd` matches upstream SpargeAttn `pv_threshold` (positive log2-units). Per-iteration P·V is dropped when `(block_local_max - block_global_max) < -pvthreshd` in log2 space. Paper-typical range `[1, 5]`; `0` disables Stage 2.

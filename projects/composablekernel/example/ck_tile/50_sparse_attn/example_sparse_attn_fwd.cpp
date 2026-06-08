@@ -19,7 +19,7 @@ auto create_args(int argc, char* argv[])
                 "  sparge: SpargeAttention (preprocess + mask prediction + attention)\n"
                 "  sparge_sage: quantized SpargeAttention (INT8 QK, FP8 V; -qscale)")
         .insert("qscale", "perwarp",
-                "sparge_sage quantization scale mode: perwarp|blockscale|perthread")
+                "sparge_sage quantization scale mode: perwarp|blockscale|perthread|pertensor")
         .insert("qkdtype", "int8",
                 "sparge_sage Q/K quant dtype: int8 (i8fp8bf16) | fp8 (fp8bf16). V is always fp8.")
         .insert("v", "1", "0:no validation, 1:validation")
