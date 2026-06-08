@@ -150,21 +150,6 @@ void geql2_geqlf_initData(const rocblas_handle handle,
         else
         {
             rocblas_init<T>(hA, true);
-
-            // scale A to avoid singularities
-            for(rocblas_int b = 0; b < bc; ++b)
-            {
-                for(rocblas_int i = 0; i < m; i++)
-                {
-                    for(rocblas_int j = 0; j < n; j++)
-                    {
-                        if(m - i == n - j)
-                            hA[b][i + j * lda] += 400;
-                        else
-                            hA[b][i + j * lda] -= 4;
-                    }
-                }
-            }
         }
     }
 
@@ -202,8 +187,13 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     rocblas_get_pointer_mode(handle, &old_mode);
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
 
-    std::vector<T> hW(n);
     rocblas_int min_mn = std::min(m, n);
+
+    // Work arrays for cpu_lange, cpu_geqlf, etc.
+    // todo: query for optimal size; currently estimate nb=64.
+    rocblas_int nb = 64;
+    std::vector<T> hW(std::max(m, n)*nb);
+    std::vector<S> hrwork(std::max(m, n));
 
     // input data initialization
     geql2_geqlf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
@@ -216,7 +206,7 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR(dnorm.memcheck());
     host_strided_batch_vector<S> hnorm(1, 1, 1, 1);
 
-    // Compute norm(A) on GPU before geqlf overwrites dA.
+    // Compute norm( A ) on GPU before geqlf overwrites dA.
     std::vector<S> A_norms(bc);
     for(rocblas_int b = 0; b < bc; ++b)
     {
@@ -231,6 +221,7 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     CHECK_ROCBLAS_ERROR(rocsolver_geql2_geqlf(STRIDED, GEQLF, handle, m, n, dA.data(), lda, stA,
                                               dIpiv.data(), stP, bc));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
+    CHECK_HIP_ERROR(hIpiv.transfer_from(dIpiv));
 
     if(verbose >= 2)
     {
@@ -239,46 +230,62 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     }
 
     //--------------------
-    // Check 0: Backward error: norm(A - Q*L) / (m * norm(A)), using 1-norm.
+    // Check 0: Backward error: norm( Q*L - A ) / (m * norm( A )), using 1-norm.
     // Done before cpu_geqlf so hA still holds the original A.
     // Q*L is computed via unmql applied to L extracted from the GPU factored output.
     //
-    // For QL factorization: L is min_mn x n lower triangular, stored in the
+    // For QL factorization: L is min_mn x n lower trapezoid, stored in the
     // last min_mn rows of A (rows m-min_mn .. m-1). The Householder reflectors
     // are stored in the last min_mn columns of A.
     //
     // For each batch element b:
-    //   1. Extract L into hC (m x n): L[i_L][j] for i_L = i-(m-min_mn) >= j, else 0.
+    //   1. Extract L (lower trapezoid) from hARes[b] into hC, zeroing above diagonal n-m.
     //   2. Upload hC to GPU (dC).
-    //   3. Apply unmql: dC = Q * dC (side=left, trans=none, reflectors from last min_mn cols).
-    //   4. Transfer result back, compute norm(hA[b] - Q*L).
+    //   3. Apply unmql: dC = Q * dC.
+    //   4. Transfer result back to host.
+    //   5. Compute norm( Q*L - A ).
+    //
+    // If m > n (example with m = 5, n = 3):
+    //      L = [       ]               V = [ v v v ]
+    //          [       ]                   [ v v v ]
+    //          [ l     ]  } last           [ 1 v v ]
+    //          [ l l   ]  } min_mn         [   1 v ]
+    //          [ l l l ]  } rows           [     1 ]
+    //
+    // If m <= n (typical use case; example with m = 3, n = 5):
+    //      L = [ l l l     ]           V = [     1 v v ]
+    //          [ l l l l   ]               [       1 v ]
+    //          [ l l l l l ]               [         1 ]
+    //                                           {     }
+    //                                      last min_mn cols
 
     // Allocate GPU work buffer for one matrix (m x n), reused per batch element.
     size_t size_C = size_t(lda) * n;
     device_strided_batch_vector<T> dC(size_C, 1, size_C, 1);
     CHECK_HIP_ERROR(dC.memcheck());
 
-    // Work array for cpu_lange (needs size max(m,n)).
-    std::vector<S> hrwork(std::max(m, n));
-
     max_errors[0] = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        // Build L embedded in m x n: nonzero only in last min_mn rows, lower triangle.
-        // Row offset: rows 0..m-min_mn-1 are entirely zero; rows m-min_mn..m-1 hold L.
+        // Copy L: lower trapezoid in last min_mn rows,
+        // on & below diagonal (n-m), zero elsewhere.
         std::vector<T> hC(lda * n);
-        rocblas_int offset = m - min_mn;
         for(rocblas_int j = 0; j < n; ++j)
-            for(rocblas_int i = 0; i < m; ++i)
+        {
+            for(rocblas_int i = std::max( 0, j + m - n ); i < m; ++i)
             {
-                rocblas_int i_L = i - offset;
-                hC[i + j * lda] = (i_L >= 0 && i_L >= j) ? hARes[b][i + j * lda] : T(0);
+                hC[i + j * lda] = hARes[b][i + j * lda];
             }
+        }
 
+        // Upload L to GPU.
         CHECK_HIP_ERROR(hipMemcpy(dC[0], hC.data(), sizeof(T) * lda * n, hipMemcpyHostToDevice));
 
+        if(verbose >= 4)
+            print_matrix( "L", m, n, dC[0], lda );
+
         // Compute Q*L on GPU using unmql (side=left, trans=none).
-        // ormql expects A to point to the last k=min_mn columns of the GEQLF output.
+        // unmql expects A to point to the last k=min_mn columns of the GEQLF output.
         CHECK_ROCBLAS_ERROR(rocsolver_ormxl_unmxl(
             GEQLF, handle,
             rocblas_side_left, rocblas_operation_none,
@@ -287,12 +294,19 @@ void geql2_geqlf_getError(const rocblas_handle handle,
             dIpiv[b],
             dC[0], lda));
 
+        if(verbose >= 4)
+            print_matrix( "Q*L", m, n, dC[0], lda );
+
+        // Transfer Q*L back to host.
         CHECK_HIP_ERROR(hipMemcpy(hC.data(), dC[0], sizeof(T) * lda * n, hipMemcpyDeviceToHost));
 
-        // Compute norm(A - Q*L); hA[b] is still the original A.
+        // Compute norm( Q*L - A ); hA[b] is still the original A.
         for(rocblas_int j = 0; j < n; ++j)
             for(rocblas_int i = 0; i < m; ++i)
-                hC[i + j * lda] = hA[b][i + j * lda] - hC[i + j * lda];
+                hC[i + j * lda] -= hA[b][i + j * lda];
+
+        if(verbose >= 4)
+            print_matrix( "Q*L - A", m, n, hC.data(), lda );
 
         double err = cpu_lange('1', m, n, hC.data(), lda, hrwork.data());
         err /= m;
@@ -302,10 +316,10 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     }
 
     //--------------------
-    // Check 1: Orthogonality: norm(I - Q^H * Q) / m, using 1-norm.
+    // Check 1: Orthogonality: norm( I - Q^H * Q ) / m, using 1-norm.
+    // Q is generated explicitly via ungql from the GPU factored output.
+    // ungql expects A to point to the last k=min_mn columns of the GEQLF output.
     // Q is m x min_mn; Q^H * Q is min_mn x min_mn.
-    // Q is generated explicitly via orgql from the GPU factored output.
-    // orgql expects A to point to the last k=min_mn columns of the GEQLF output.
 
     // GPU work buffer for Q (m x min_mn, leading dim lda).
     size_t size_Q = size_t(lda) * min_mn;
@@ -331,12 +345,15 @@ void geql2_geqlf_getError(const rocblas_handle handle,
         CHECK_HIP_ERROR(hipMemcpy(dQ[0], dA[b] + lda * (n - min_mn),
                                   sizeof(T) * lda * min_mn, hipMemcpyDeviceToDevice));
 
-        // Generate explicit Q (m x min_mn) via orgql.
+        // Generate explicit Q (m x min_mn) via ungql.
         CHECK_ROCBLAS_ERROR(rocsolver_orgxl_ungxl(
             GEQLF, handle,
             m, min_mn, min_mn,
             dQ[0], lda,
             dIpiv[b]));
+
+        if(verbose >= 4)
+            print_matrix( "Q", min_mn, n, dQ[0], lda );
 
         // Set dR = I (min_mn x min_mn).
         CHECK_HIP_ERROR(hipMemcpy(dR[0], hR_id.data(), sizeof(T) * min_mn * min_mn, hipMemcpyHostToDevice));
@@ -345,19 +362,22 @@ void geql2_geqlf_getError(const rocblas_handle handle,
         CHECK_ROCBLAS_ERROR(rocsolver_gemm(
             false, handle,
             rocblas_operation_conjugate_transpose, rocblas_operation_none,
-            min_mn, min_mn, m,
-            &negone, dQ[0], lda,    0,
-                     dQ[0], lda,    0,
-            &one,    dR[0], min_mn, 0,
+            min_mn, min_mn, m, // opts
+            &negone, dQ[0], lda,    0, // Q^H
+                     dQ[0], lda,    0, // Q
+            &one,    dR[0], min_mn, 0, // R
             1));
 
-        // Compute norm(I - Q^H * Q) via rocsolver_lange.
+        if(verbose >= 4)
+            print_matrix( "I - Q^H Q", min_mn, min_mn, dR[0], min_mn );
+
+        // Compute norm( I - Q^H * Q ).
         CHECK_ROCBLAS_ERROR(rocsolver_lange(
             handle, rocsolver_norm_type_one,
             min_mn, min_mn, dR[0], min_mn, dnorm[0]));
         CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
 
-        double err = double(hnorm[0][0]) / m;
+        double err = hnorm[0][0] / m;
         max_errors[1] = rocblas_max_nan(err, max_errors[1]);
     }
 
@@ -366,20 +386,20 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     // Runs last so hA holds the original A for all checks above.
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        GEQLF ? cpu_geqlf(m, n, hA[b], lda, hIpiv[b], hW.data(), n)
+        GEQLF ? cpu_geqlf(m, n, hA[b], lda, hIpiv[b], hW.data(), hW.size())
               : cpu_geql2(m, n, hA[b], lda, hIpiv[b], hW.data());
     }
 
-    if(verbose >= 2)
+    if(verbose >= 3)
     {
         print_matrix("Aref", m, n, hA[0], lda);
         print_matrix("tau_ref", min_mn, 1, hIpiv[0], min_mn);
     }
 
     // forward comparison: ||hA - hARes|| / ||hA|| (GPU vs CPU factored form)
-    // (This does not account for numerical reproducibility issues. Checks 0 and
-    // 1 above are more robust.)
     // using frobenius norm
+    // (This does not account for numerical reproducibility issues.
+    // Checks 0 and 1 above are more robust.)
     max_errors[2] = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
@@ -388,6 +408,17 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     }
 
     rocblas_set_pointer_mode(handle, old_mode);
+
+    S eps = std::numeric_limits<S>::epsilon();
+    bool status = max_errors[0] < 50*eps && max_errors[1] < 50*eps;
+    const char* msg = status ? "ok" : "FAILED";
+    std::cout << std::setprecision(3) << __func__
+              << ": m " << std::setw(3) << m
+              << ", n " << std::setw(3) << n
+              << ", berror "   << std::setw(8) << max_errors[0]
+              << ", ortho "    << std::setw(8) << max_errors[1]
+              << ", diff ref " << std::setw(8) << max_errors[2]
+              << " " << msg << "\n";
 }
 
 template <bool STRIDED, bool GEQLF, typename T, typename Td, typename Ud, typename Th, typename Uh>
@@ -605,12 +636,12 @@ void testing_geql2_geqlf(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using machine_precision as tolerance.
+    // using 50*machine_precision as tolerance (per LAPACK).
     // max_errors is already normalized, e.g., by m.
     if(argus.unit_check)
     {
-        ROCSOLVER_TEST_CHECK(T, max_errors[0], 1);
-        ROCSOLVER_TEST_CHECK(T, max_errors[1], 1);
+        ROCSOLVER_TEST_CHECK(T, max_errors[0], 30);
+        ROCSOLVER_TEST_CHECK(T, max_errors[1], 30);
         // Do not check forward comparison with LAPACK, since it is unreliable.
     }
 

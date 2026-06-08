@@ -150,21 +150,6 @@ void gerq2_gerqf_initData(const rocblas_handle handle,
         else
         {
             rocblas_init<T>(hA, true);
-
-            // scale A to avoid singularities
-            for(rocblas_int b = 0; b < bc; ++b)
-            {
-                for(rocblas_int i = 0; i < m; i++)
-                {
-                    for(rocblas_int j = 0; j < n; j++)
-                    {
-                        if(i == j)
-                            hA[b][i + j * lda] += 400;
-                        else
-                            hA[b][i + j * lda] -= 4;
-                    }
-                }
-            }
         }
     }
 
@@ -194,7 +179,21 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
 {
     using S = decltype(std::real(T{}));
 
+    // todo: fix const-correctness in rocsolver_gemm
+    T one    = T(1);
+    T negone = T(-1);
+
+    rocblas_pointer_mode old_mode;
+    rocblas_get_pointer_mode(handle, &old_mode);
+    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+
     rocblas_int min_mn = std::min(m, n);
+
+    // Work arrays for cpu_lange, cpu_gerqf, etc.
+    // todo: query for optimal size; currently estimate nb=64.
+    rocblas_int nb = 64;
+    std::vector<T> hW(std::max(m, n)*nb);
+    std::vector<S> hrwork(std::max(m, n));
 
     // input data initialization
     gerq2_gerqf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
@@ -202,10 +201,27 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     if(verbose >= 2)
         print_matrix("A", m, n, dA[0], lda);
 
+    // GPU scalar for lange output, shared by all checks below.
+    device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
+    CHECK_HIP_ERROR(dnorm.memcheck());
+    host_strided_batch_vector<S> hnorm(1, 1, 1, 1);
+
+    // Compute norm( A ) on GPU before gerqf overwrites dA.
+    std::vector<S> A_norms(bc);
+    for(rocblas_int b = 0; b < bc; ++b)
+    {
+        CHECK_ROCBLAS_ERROR(rocsolver_lange(
+            handle, rocsolver_norm_type_one,
+            m, n, dA[b], lda, dnorm[0]));
+        CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
+        A_norms[b] = hnorm[0][0];
+    }
+
     // GPU lapack
     CHECK_ROCBLAS_ERROR(rocsolver_gerq2_gerqf(STRIDED, GERQF, handle, m, n, dA.data(), lda, stA,
                                               dIpiv.data(), stP, bc));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
+    CHECK_HIP_ERROR(hIpiv.transfer_from(dIpiv));
 
     if(verbose >= 2)
     {
@@ -214,44 +230,54 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     }
 
     //--------------------
-    // Check 0: Backward error: norm(A - R*Q) / (m * norm(A)), using 1-norm.
+    // Check 0: Backward error: norm( R*Q - A ) / (n * norm( A )), using 1-norm.
     // Done before cpu_gerqf so hA still holds the original A.
     // R*Q is computed via cpu_ormrq_unmrq applied to R extracted from the GPU factored output.
+    // todo: replace with rocsolver_unmrq when available.
     //
-    // For RQ factorization: R is m x min_mn upper triangular, stored in the
+    // For RQ factorization: R is m x min_mn upper trapezoid, stored in the
     // last min_mn columns of A (cols n-min_mn .. n-1). The Householder reflectors
     // are stored in the last min_mn rows of A (rows m-min_mn .. m-1).
     //
     // For each batch element b:
-    //   1. Extract R into hC (m x n): R[i][j_R] for j_R >= i (upper triangular), else 0;
-    //      where j_R = j - (n - min_mn) is the column index within R.
-    //   2. Apply ormrq on CPU: hC = hC * Q (side=right, trans=none).
-    //   3. Compute norm(hA[b] - R*Q).
-
-    // Work array for cpu_ormrq_unmrq and cpu_lange.
-    std::vector<T> hW(std::max(m, n));
-    std::vector<S> hrwork(std::max(m, n));
+    //   1. Extract R (upper trapezoid) from hARse[b] into hC, zeroing below diagonal n-m.
+    //   2. Apply unmrq on CPU: hC = hC * Q.
+    //   3. Compute norm( R*Q - A ).
+    //
+    // If m > n (example with m = 5, n = 3):
+    //      R = [ r r r ]               V = [       ]
+    //          [ r r r ]                   [       ]
+    //          [ r r r ]                   [ 1     ]  } last
+    //          [   r r ]                   [ v 1   ]  } min_mn
+    //          [     r ]                   [ v v 1 ]  } rows
+    //
+    // If m <= n (typical use case; example with m = 3, n = 5):
+    //      R = [     r r r ]           V = [ v v 1     ]
+    //          [       r r ]               [ v v v 1   ]
+    //          [         r ]               [ v v v v 1 ]
+    //               {     }
+    //          last min_mn cols
 
     max_errors[0] = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        // Compute norm(A) from the original hA[b].
-        S A_norm = cpu_lange('1', m, n, hA[b], lda, hrwork.data());
-
-        // Build R embedded in m x n: upper triangular in last min_mn cols, zero elsewhere.
-        // Column offset into R: j_R = j - (n - min_mn); nonzero where j_R >= i.
-        std::vector<T> hC(lda * n);
-        rocblas_int col_offset = n - min_mn;
-        for(rocblas_int j = 0; j < n; ++j)
-            for(rocblas_int i = 0; i < m; ++i)
+        // Copy R: upper trapezoid in last min_mn columns,
+        // on & above diagonal (n-m), zero elsewhere.
+        std::vector<T> hC(lda * n, T(0));
+        for(rocblas_int j = n - min_mn; j < n; ++j)
+        {
+            for(rocblas_int i = 0; i < m && i <= j + m - n; ++i)
             {
-                rocblas_int j_R = j - col_offset;
-                hC[i + j * lda] = (j_R >= 0 && j_R >= i) ? hARes[b][i + j * lda] : T(0);
+                hC[i + j * lda] = hARes[b][i + j * lda];
             }
+        }
 
-        // Compute R*Q on CPU using ormrq (side=right, trans=none).
-        // ormrq expects A to point to the last k=min_mn rows of the GERQF output,
-        // which are rows m-min_mn .. m-1, i.e., hARes[b] + (m - min_mn).
+        if(verbose >= 4)
+            print_matrix( "R", m, n, hC.data(), lda );
+
+        // Compute R*Q on CPU using unmrq.
+        // unmrq expects A to point to the Householder vectors V in the last
+        // min_mn rows of the GERQF output, i.e., hARes[b] + (m - min_mn).
         cpu_ormrq_unmrq(rocblas_side_right, rocblas_operation_none,
                         m, n, min_mn,
                         hARes[b] + (m - min_mn), lda,
@@ -259,27 +285,31 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
                         hC.data(), lda,
                         hW.data(), rocblas_int(hW.size()));
 
-        // Compute norm(A - R*Q); hA[b] is still the original A.
+        if(verbose >= 4)
+            print_matrix( "R*Q", m, n, hC.data(), lda );
+
+        // Compute norm( R*Q - A ); hA[b] is still the original A.
         for(rocblas_int j = 0; j < n; ++j)
             for(rocblas_int i = 0; i < m; ++i)
-                hC[i + j * lda] = hA[b][i + j * lda] - hC[i + j * lda];
+                hC[i + j * lda] -= hA[b][i + j * lda];
+
+        if(verbose >= 4)
+            print_matrix( "R*Q - A", m, n, hC.data(), lda );
 
         double err = cpu_lange('1', m, n, hC.data(), lda, hrwork.data());
-        err /= m;
-        if(A_norm != 0)
-            err /= A_norm;
+        err /= n;
+        if(A_norms[b] != 0)
+            err /= A_norms[b];
         max_errors[0] = rocblas_max_nan(err, max_errors[0]);
     }
 
     //--------------------
-    // Check 1: Orthogonality: norm(I - Q * Q^H) / n, using 1-norm.
-    // Q is min_mn x n; Q * Q^H is min_mn x min_mn.
+    // Check 1: Orthogonality: norm( I - Q * Q^H ) / n, using 1-norm.
     // Q is generated explicitly on CPU via cpu_orgrq_ungrq from hARes.
+    // Q is min_mn x n; Q * Q^H is min_mn x min_mn.
 
     // Work array for cpu_gemm output: min_mn x min_mn.
-    std::vector<T> hQQt(min_mn * min_mn);
-    // Work array sized for orgrq (lwork = n is a safe upper bound).
-    std::vector<T> hWq(n);
+    std::vector<T> hR(min_mn * min_mn);
 
     max_errors[1] = 0;
     for(rocblas_int b = 0; b < bc; ++b)
@@ -292,28 +322,35 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
             for(rocblas_int i = 0; i < min_mn; ++i)
                 hQ[i + j * lda] = hARes[b][(i + row_offset) + j * lda];
 
-        // Generate explicit Q (min_mn x n) via cpu_orgrq_ungrq.
+        if (verbose >= 4)
+            print_matrix( "V", min_mn, n, hQ.data(), lda );
+
+        // Generate explicit Q (min_mn x n) in hQ via ungrq.
         cpu_orgrq_ungrq(min_mn, n, min_mn,
                         hQ.data(), lda,
                         hIpiv[b],
-                        hWq.data(), rocblas_int(hWq.size()));
+                        hW.data(), rocblas_int(hW.size()));
 
-        // Compute I - Q * Q^H.
-        // Initialize hQQt = I (min_mn x min_mn).
-        std::fill(hQQt.begin(), hQQt.end(), T(0));
+        if(verbose >= 4)
+            print_matrix( "Q", min_mn, n, hQ.data(), lda );
+
+        // Set hR = I (min_mn x min_mn).
+        std::fill(hR.begin(), hR.end(), T(0));
         for(rocblas_int i = 0; i < min_mn; ++i)
-            hQQt[i + i * min_mn] = T(1);
+            hR[i + i * min_mn] = T(1);
 
-        // hQQt = I - Q * Q^H  (alpha=-1, beta=1).
-        T one    = T(1);
-        T negone = T(-1);
+        // Compute hR = I - Q * Q^H.
         cpu_gemm(rocblas_operation_none, rocblas_operation_conjugate_transpose,
-                 min_mn, min_mn, n,
-                 &negone, hQ.data(), lda,
-                          hQ.data(), lda,
-                 &one,    hQQt.data(), min_mn);
+                 min_mn, min_mn, n, // opts
+                 negone, hQ.data(), lda, // Q
+                         hQ.data(), lda, // Q^H
+                 one,    hR.data(), min_mn);  // R
 
-        double err = cpu_lange('1', min_mn, min_mn, hQQt.data(), min_mn, hrwork.data());
+        if(verbose >= 4)
+            print_matrix( "I - QQ^H", min_mn, min_mn, hR.data(), lda );
+
+        // Compute norm( I - Q * Q^H ).
+        double err = cpu_lange('1', min_mn, min_mn, hR.data(), min_mn, hrwork.data());
         err /= n;
         max_errors[1] = rocblas_max_nan(err, max_errors[1]);
     }
@@ -321,29 +358,41 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     //--------------------
     // Check 2: Comparison with CPU LAPACK.
     // Runs last so hA holds the original A for all checks above.
-    std::vector<T> hWf(m);
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        GERQF ? cpu_gerqf(m, n, hA[b], lda, hIpiv[b], hWf.data(), m)
-              : cpu_gerq2(m, n, hA[b], lda, hIpiv[b], hWf.data());
+        GERQF ? cpu_gerqf(m, n, hA[b], lda, hIpiv[b], hW.data(), hW.size())
+              : cpu_gerq2(m, n, hA[b], lda, hIpiv[b], hW.data());
     }
 
-    if(verbose >= 2)
+    if(verbose >= 3)
     {
         print_matrix("Aref", m, n, hA[0], lda);
         print_matrix("tau_ref", min_mn, 1, hIpiv[0], min_mn);
     }
 
     // forward comparison: ||hA - hARes|| / ||hA|| (GPU vs CPU factored form)
-    // (This does not account for numerical reproducibility issues. Checks 0 and
-    // 1 above are more robust.)
     // using frobenius norm
+    // (This does not account for numerical reproducibility issues.
+    // Checks 0 and 1 above are more robust.)
     max_errors[2] = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
         double err = norm_error('F', m, n, lda, hA[b], hARes[b]);
         max_errors[2] = rocblas_max_nan(err, max_errors[2]);
     }
+
+    rocblas_set_pointer_mode(handle, old_mode);
+
+    S eps = std::numeric_limits<S>::epsilon();
+    bool status = max_errors[0] < 50*eps && max_errors[1] < 50*eps;
+    const char* msg = status ? "ok" : "FAILED";
+    std::cout << std::setprecision(3) << __func__
+              << ": m " << std::setw(3) << m
+              << ", n " << std::setw(3) << n
+              << ", berror "   << std::setw(8) << max_errors[0]
+              << ", ortho "    << std::setw(8) << max_errors[1]
+              << ", diff ref " << std::setw(8) << max_errors[2]
+              << " " << msg << "\n";
 }
 
 template <bool STRIDED, bool GERQF, typename T, typename Td, typename Ud, typename Th, typename Uh>
@@ -561,10 +610,13 @@ void testing_gerq2_gerqf(Arguments& argus)
     }
 
     // validate results for rocsolver-test
+    // using 50*machine_precision as tolerance (per LAPACK).
+    // max_errors is already normalized, e.g., by n.
     if(argus.unit_check)
     {
-        ROCSOLVER_TEST_CHECK(T, max_errors[0], 1);
-        ROCSOLVER_TEST_CHECK(T, max_errors[1], 1);
+        ROCSOLVER_TEST_CHECK(T, max_errors[0], 30);
+        ROCSOLVER_TEST_CHECK(T, max_errors[1], 30);
+        // Do not check forward comparison with LAPACK, since it is unreliable.
     }
 
     // output results for rocsolver-bench
