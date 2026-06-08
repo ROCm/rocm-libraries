@@ -32,6 +32,10 @@
 //   4. Kernel tuning AI models (sequential prediction of kernel parameters)
 
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+#include <miopen/conv/heuristics/lgbm_pick.hpp>
+#include <miopen/any_solver.hpp>
+#endif
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK || MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <fdeep/fdeep.hpp>
 #include <miopen/filesystem.hpp>
@@ -40,6 +44,7 @@
 #include <any>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_PICK)
 
 // 3D AI heuristics - now declared properly in header
 // No need for local forward declarations since we include the header
@@ -740,6 +745,25 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         if(!cached_result.empty())
             return cached_result;
     }
+
+#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+    // LGBM-based short-circuit: deterministic cross-arch dispatcher trained on
+    // perf-DB data. Preempts the ND TunaNet model whenever it returns a valid
+    // pick that is actually applicable to the current ExecutionContext.
+    if(!env::disabled(MIOPEN_DEBUG_LGBM_PICK))
+    {
+        const auto picked = ai::lgbm::PickSolver(problem, ctx.GetStream());
+        if(picked.IsValid() && picked.GetSolver().IsApplicable(ctx, problem))
+        {
+            MIOPEN_LOG_I2("lgbm picked " << picked.ToString());
+            std::vector<std::any> any_sol;
+            any_sol.emplace_back(picked.Value());
+            StorePredictionCache(problem, device, any_sol);
+            return {picked.Value()};
+        }
+        MIOPEN_LOG_I2("lgbm: no applicable pick, falling through to TunaNet");
+    }
+#endif
 
     // Strategy:
     // 1. Try ND model first (for gfx942/gfx950, supports both 2D and 3D)

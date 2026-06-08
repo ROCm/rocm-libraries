@@ -1,0 +1,34 @@
+{
+    "target": "lgbm_appl",
+    "sources": [{
+            "name": "main",
+            "length": 46
+        }, {
+            "name": "quantize",
+            "length": 1024
+        }, {
+            "name": "tu0",
+            "length": 15754
+        }, {
+            "name": "tu1",
+            "length": 15754
+        }, {
+            "name": "tu2",
+            "length": 15754
+        }, {
+            "name": "tu3",
+            "length": 15754
+        }, {
+            "name": "tu4",
+            "length": 15754
+        }, {
+            "name": "tu5",
+            "length": 15754
+        }, {
+            "name": "tu6",
+            "length": 15754
+        }, {
+            "name": "tu7",
+            "length": 15754
+        }]
+}

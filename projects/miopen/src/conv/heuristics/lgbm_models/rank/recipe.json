@@ -1,0 +1,34 @@
+{
+    "target": "lgbm_rank",
+    "sources": [{
+            "name": "main",
+            "length": 42
+        }, {
+            "name": "quantize",
+            "length": 1040
+        }, {
+            "name": "tu0",
+            "length": 38104
+        }, {
+            "name": "tu1",
+            "length": 38104
+        }, {
+            "name": "tu2",
+            "length": 38104
+        }, {
+            "name": "tu3",
+            "length": 38104
+        }, {
+            "name": "tu4",
+            "length": 38104
+        }, {
+            "name": "tu5",
+            "length": 38104
+        }, {
+            "name": "tu6",
+            "length": 38104
+        }, {
+            "name": "tu7",
+            "length": 38104
+        }]
+}

@@ -322,6 +322,22 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     list(APPEND MIOpen_Source anyramdb.cpp)
 endif()
 
+if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
+    list(APPEND MIOpen_Source
+        conv/heuristics/lgbm_pick.cpp
+        conv/heuristics/lgbm_metadata.cpp
+        conv/heuristics/lgbm_gpu_table.cpp)
+    file(GLOB LGBM_RANK_SRCS conv/heuristics/lgbm_models/rank/*.c)
+    file(GLOB LGBM_APPL_SRCS conv/heuristics/lgbm_models/appl/*.c)
+    list(APPEND MIOpen_Source ${LGBM_RANK_SRCS} ${LGBM_APPL_SRCS})
+    # Generated C: silence machine-generated warnings, rename the exported
+    # predict() so the rank and appl translation units don't collide.
+    set_source_files_properties(${LGBM_RANK_SRCS} PROPERTIES
+        COMPILE_OPTIONS "-w;-Dpredict=lgbm_rank_predict")
+    set_source_files_properties(${LGBM_APPL_SRCS} PROPERTIES
+        COMPILE_OPTIONS "-w;-Dpredict=lgbm_appl_predict")
+endif()
+
 list(APPEND MIOpen_Source tmp_dir.cpp binary_cache.cpp md5.cpp)
 if(MIOPEN_ENABLE_SQLITE)
     list(APPEND MIOpen_Source sqlite_db.cpp)
@@ -949,7 +965,10 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         add_library(nlohmann_json INTERFACE IMPORTED GLOBAL)
         target_link_libraries(nlohmann_json INTERFACE nlohmann_json::nlohmann_json)
     endif()
-    file(GLOB MODEL_FILES CONFIGURE_DEPENDS kernels/*.model)
+    file(GLOB MODEL_FILES CONFIGURE_DEPENDS
+        kernels/*.model
+        kernels/lgbm_model_meta.json
+        kernels/lgbm_per_spec_thresh.json)
     if(NOT ENABLE_ASAN_PACKAGING )
         install(FILES ${MODEL_FILES} DESTINATION ${DATABASE_INSTALL_DIR})
     endif()

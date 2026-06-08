@@ -1,0 +1,29 @@
+{
+  "per_spec_thresh": {
+    "gfx1150": 1.0999999999999996,
+    "gfx1151": 1.1749999999999994,
+    "gfx1201": 1.9749999999999965,
+    "gfx90a-mi210x": 1.0749999999999997,
+    "gfx942-mi300a": 1.0,
+    "gfx942-mi300x": 1.7999999999999972,
+    "gfx942-mi325x": 1.0,
+    "gfx950-mi350x": 1.0749999999999997,
+    "gfx950-mi355x": 1.9749999999999965
+  },
+  "default": 1.7,
+  "cap_used": 0.105,
+  "source": "2026-06-08 compact (medium t1200 + appl t1000)",
+  "appl_prob_thresh": 0.99,
+  "per_spec_appl_thresh": {
+    "gfx1150": 0.95,
+    "gfx1151": 0.95,
+    "gfx1201": 0.95,
+    "gfx90a-mi210x": 0.95,
+    "gfx950-mi350x": 0.95,
+    "gfx950-mi355x": 0.95,
+    "gfx942-mi300x": 0.99,
+    "gfx942-mi300a": 0.999,
+    "gfx942-mi325x": 0.999
+  },
+  "notes": "2026-06-08 COMPACT: medium rank truncated to 1200 trees (33.8MB) + appl truncated to 1000 trees (13.8MB) = 47.6MB total. geomean 1.0035 at 11.6% abstain, wasted_ms ~3,907, invalid 12. Best <50MB config."
+}
