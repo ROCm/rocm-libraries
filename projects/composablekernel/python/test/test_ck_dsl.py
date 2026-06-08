@@ -328,6 +328,427 @@ define amdgpu_kernel void @k() {
 
 
 # ---------------------------------------------------------------------
+# Attention dispatch matrix (shared helper for TestHelpers)
+# ---------------------------------------------------------------------
+
+
+def _attention_problem_matrix():
+    """Curated ``(label, UnifiedAttentionProblem)`` list for the per-arch
+    attention dispatch/spec drift net.
+
+    The matrix is *curated*, not a full cartesian product: it spans dtype
+    (fp16/bf16/fp8), head_size {64,128,256}, block_size {16,32,64},
+    num_queries_per_kv {1,4,8,16}, the four regimes (decode / short prefill /
+    long prefill / long-context decode), num_seqs {1, >=2} and the
+    sliding-window / softcap / alibi / qq_bias / sinks toggles -- arranged so
+    that BOTH the gfx942 fp16-flash branch (fp16 long-prefill D128 & D64, no
+    SW/softcap, num_seqs>=2) and the bf16 transposed "combo" branch
+    (bf16 / HD=64 / BS=32 / num_queries_per_kv=8 / long-prefill / multi-batch)
+    of ``_tiled_spec_from_problem`` are reached, plus the decode path that
+    routes to the 3D split-KV builder.
+
+    Every config keeps ``num_query_heads % num_kv_heads == 0`` and a
+    ``total_q`` / ``max_seqlen_q`` pairing consistent with its regime. The
+    consumers below assert no *signature drift* (no ``TypeError`` from a
+    per-arch impl whose kwargs/fields fell out of sync) -- they deliberately do
+    NOT assert per-shape accept/reject verdicts, which legitimately differ by
+    arch (e.g. HD=256 is unsupported on the gfx942 2D path, the gfx942 flash
+    branch only fires on gfx942).
+    """
+    cfgs = []
+
+    def add(label, **kw):
+        base = dict(
+            total_q=0,
+            num_seqs=1,
+            num_query_heads=8,
+            num_kv_heads=1,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=1,
+            max_seqlen_k=2048,
+            dtype="fp16",
+        )
+        base.update(kw)
+        if base["total_q"] == 0:
+            base["total_q"] = base["num_seqs"] * base["max_seqlen_q"]
+        cfgs.append((label, UnifiedAttentionProblem(**base)))
+
+    # --- decode (max_seqlen_q=1) -> routes to the 3D split-KV builder ---
+    # GQA fan-outs 1/4/8/16, all head sizes, all block sizes, fp16/bf16.
+    for hd in (64, 128, 256):
+        for bs in (16, 32, 64):
+            add(
+                f"decode_fp16_d{hd}_b{bs}",
+                head_size=hd,
+                block_size=bs,
+                dtype="fp16",
+                max_seqlen_q=1,
+                num_seqs=2,
+                num_query_heads=8,
+                num_kv_heads=1,
+                max_seqlen_k=4096,
+            )
+    add(
+        "decode_bf16_d128_mha",
+        head_size=128,
+        dtype="bf16",
+        max_seqlen_q=1,
+        num_seqs=4,
+        num_query_heads=8,
+        num_kv_heads=8,  # MHA: num_queries_per_kv == 1
+        max_seqlen_k=4096,
+    )
+    add(
+        "decode_bf16_d64_gqa4",
+        head_size=64,
+        block_size=16,
+        dtype="bf16",
+        max_seqlen_q=1,
+        num_seqs=3,
+        num_query_heads=16,
+        num_kv_heads=4,  # num_queries_per_kv == 4
+        max_seqlen_k=4096,
+    )
+    add(
+        "decode_fp16_d128_gqa16",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=1,
+        num_seqs=2,
+        num_query_heads=16,
+        num_kv_heads=1,  # num_queries_per_kv == 16
+        max_seqlen_k=4096,
+    )
+    # long-context decode (large KV, still q==1) -> stresses 3D segment count.
+    add(
+        "decode_longctx_fp16_d128",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=1,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=8192,
+    )
+    add(
+        "decode_longctx_bf16_d64",
+        head_size=64,
+        block_size=32,
+        dtype="bf16",
+        max_seqlen_q=1,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=8192,
+    )
+    # decode toggles: sliding window / softcap / sinks.
+    add(
+        "decode_sw_fp16_d128",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=1,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=4096,
+        sliding_window=128,
+    )
+    add(
+        "decode_softcap_fp16_d128",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=1,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=4096,
+        softcap=30.0,
+    )
+    add(
+        "decode_sinks_bf16_d128",
+        head_size=128,
+        dtype="bf16",
+        max_seqlen_q=1,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=4096,
+        use_sinks=True,
+    )
+    # decode fp8 K/V cache (use_fp8 + q_dtype set; routes to 3D).
+    add(
+        "decode_fp8_d128",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=1,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=4096,
+        use_fp8=True,
+        q_dtype="fp8e4m3",
+    )
+    add(
+        "decode_fp8_d64_b32",
+        head_size=64,
+        block_size=32,
+        dtype="bf16",
+        max_seqlen_q=1,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=4096,
+        use_fp8=True,
+        q_dtype="fp8e4m3",
+    )
+    add(
+        "decode_n1_fp16_d128",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=1,
+        num_seqs=1,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+    )
+
+    # --- short prefill (max_seqlen_q ~128) ---
+    for hd in (64, 128):
+        add(
+            f"short_prefill_fp16_d{hd}",
+            head_size=hd,
+            dtype="fp16",
+            max_seqlen_q=128,
+            num_seqs=2,
+            num_query_heads=8,
+            num_kv_heads=1,
+            max_seqlen_k=1024,
+        )
+    add(
+        "short_prefill_bf16_d128_gqa4",
+        head_size=128,
+        dtype="bf16",
+        max_seqlen_q=128,
+        num_seqs=2,
+        num_query_heads=16,
+        num_kv_heads=4,
+        max_seqlen_k=1024,
+    )
+    add(
+        "short_prefill_sw_fp16_d128",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=200,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=1024,
+        sliding_window=128,
+    )
+    add(
+        "short_prefill_bf16_d64_b32_gqa8",
+        head_size=64,
+        block_size=32,
+        dtype="bf16",
+        max_seqlen_q=128,
+        num_seqs=2,
+        num_query_heads=64,
+        num_kv_heads=8,
+        max_seqlen_k=1024,
+    )
+    add(
+        "short_prefill_fp16_d256_b64",
+        head_size=256,
+        block_size=64,
+        dtype="fp16",
+        max_seqlen_q=128,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=1024,
+    )
+    add(
+        "short_prefill_n1_fp16_d128",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=128,
+        num_seqs=1,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=1024,
+    )
+
+    # --- long prefill (max_seqlen_q ~2048) ---
+    # gfx942 fp16 flash branch: D128 (any BS) and D64 (BS=64), no SW/softcap,
+    # num_seqs>=2. (On gfx950 these are the plain wide-K path -- still must
+    # build cleanly via the default branch.)
+    add(
+        "long_prefill_flash_fp16_d128",
+        head_size=128,
+        block_size=16,
+        dtype="fp16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+    )
+    add(
+        "long_prefill_flash_fp16_d128_b32",
+        head_size=128,
+        block_size=32,
+        dtype="fp16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+    )
+    add(
+        "long_prefill_flash_fp16_d64_b64",
+        head_size=64,
+        block_size=64,
+        dtype="fp16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+    )
+    # bf16 transposed "combo" branch cohort: HD=64, BS=32, NQH=64/NKV=8
+    # (num_queries_per_kv=8), long prefill, multi-batch. With/without sinks.
+    add(
+        "long_prefill_combo_bf16",
+        head_size=64,
+        block_size=32,
+        dtype="bf16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=64,
+        num_kv_heads=8,
+        max_seqlen_k=2048,
+    )
+    add(
+        "long_prefill_combo_bf16_sinks",
+        head_size=64,
+        block_size=32,
+        dtype="bf16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=64,
+        num_kv_heads=8,
+        max_seqlen_k=2048,
+        use_sinks=True,
+    )
+    # plain default long prefill (single-seq and multi-batch), fp16/bf16.
+    add(
+        "long_prefill_default_fp16_d128_n1",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=2048,
+        num_seqs=1,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+    )
+    add(
+        "long_prefill_default_bf16_d128_n4",
+        head_size=128,
+        dtype="bf16",
+        max_seqlen_q=2048,
+        num_seqs=4,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+    )
+    add(
+        "long_prefill_default_fp16_d256",
+        head_size=256,
+        dtype="fp16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+    )
+    # long-prefill toggles: sliding window, softcap, alibi, qq_bias.
+    add(
+        "long_prefill_sw_bf16_d128",
+        head_size=128,
+        dtype="bf16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+        sliding_window=128,
+    )
+    add(
+        "long_prefill_softcap_fp16_d128",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+        softcap=30.0,
+    )
+    add(
+        "long_prefill_alibi_fp16_d128",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+        use_alibi=True,
+    )
+    add(
+        "long_prefill_qqbias_fp16_d128",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+        use_qq_bias=True,
+    )
+    # fp8 K/V long prefill (multi-batch) -- exercises the fp8 plumbing on the
+    # prefill side as well as decode.
+    add(
+        "long_prefill_fp8_d128",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+        use_fp8=True,
+        q_dtype="fp8e4m3",
+    )
+    add(
+        "long_prefill_fp8_sw_d128",
+        head_size=128,
+        dtype="fp16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+        use_fp8=True,
+        q_dtype="fp8e4m3",
+        sliding_window=128,
+    )
+
+    return cfgs
+
+
+# ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
 
@@ -1024,6 +1445,344 @@ class TestHelpers(unittest.TestCase):
                 self.assertTrue(
                     ok, msg=f"{arch}: D128 fp16 GQA should be supported, got: {reason}"
                 )
+
+    def test_attention_dispatch_matrix_no_signature_drift_per_arch(self):
+        """Broad per-arch drift net over the curated attention problem matrix.
+
+        For every ``(arch, config)`` pair this drives the production dispatch
+        surface exactly as the runtime selector would -- ``select_path``, the
+        three ``supports_native_*`` gates, and (when a gate accepts) the matching
+        arch spec builder -- and asserts there is no *signature drift*: each gate
+        returns a ``(bool, str)`` tuple and each spec builder returns an instance
+        of the arch's own spec class. This is the single test that would have
+        caught BOTH regressions that motivated this matrix: the gfx950
+        ``supports_tiled_2d`` missing-kwarg ``TypeError`` and the gfx950
+        ``UnifiedAttention3DTiledSpec`` missing-field ``TypeError``.
+
+        Deliberately NOT asserted: per-shape accept/reject verdicts (those
+        legitimately differ by arch, e.g. HD=256 is unsupported on the gfx942 2D
+        path).
+
+        On the **selected** path (``select_path()``), gate-True must imply the
+        matching spec builder constructs WITHOUT raising at all -- that is the
+        production call path, so a ``ValueError`` there is a real crash (this is
+        how the gfx942 combo-on-bf16 bug was caught: the arch-agnostic flag
+        choosers handed the gfx942 2D spec gfx950-only knobs; now arch-gated to
+        gfx950). On the **non-selected** builder we still exercise the call but
+        tolerate a ``ValueError`` (arch-legitimate rejection of a path the
+        runtime would not pick) while still failing on a ``TypeError`` (the
+        signature-drift class).
+        """
+        from unittest import mock
+        import ck_dsl.instances.common.attention_unified as au
+        from ck_dsl.instances import (
+            supports_native_unified_attention,
+            supports_native_unified_attention_tiled,
+            supports_native_unified_attention_3d_tiled,
+        )
+
+        matrix = _attention_problem_matrix()
+        self.assertTrue(matrix, "attention problem matrix is empty")
+        for arch in ("gfx942", "gfx950"):
+            spec_2d_cls = au._tiled_2d_impl(arch)[0]
+            spec_3d_cls = au._tiled_3d_impl(arch)[0]
+            for label, p in matrix:
+                with self.subTest(arch=arch, cfg=label):
+                    with mock.patch.object(
+                        au, "_resolve_attention_arch", return_value=arch
+                    ):
+                        path = p.select_path()
+                        self.assertIn(path, ("2d", "3d"))
+                        for gate in (
+                            supports_native_unified_attention,
+                            supports_native_unified_attention_tiled,
+                            supports_native_unified_attention_3d_tiled,
+                        ):
+                            ok, reason = gate(p)
+                            self.assertIsInstance(ok, bool)
+                            self.assertIsInstance(reason, str)
+                        ok_2d, _ = supports_native_unified_attention_tiled(p)
+                        ok_3d, _ = supports_native_unified_attention_3d_tiled(p)
+                        # Selected production path: gate-True => builder must
+                        # construct the arch spec with NO exception.
+                        if path == "2d" and ok_2d:
+                            spec = au._tiled_spec_from_problem(p)
+                            self.assertIsInstance(spec, spec_2d_cls)
+                        if path == "3d" and ok_3d:
+                            spec3 = au._tiled_3d_spec_from_problem(p)
+                            self.assertIsInstance(spec3, spec_3d_cls)
+                        # Non-selected builder: exercise for cross-path drift.
+                        # Tolerate an arch-legitimate ValueError; a TypeError is
+                        # the missing-kwarg/field signature drift we guard.
+                        if path != "2d" and ok_2d:
+                            try:
+                                spec = au._tiled_spec_from_problem(p)
+                            except ValueError:
+                                pass
+                            else:
+                                self.assertIsInstance(spec, spec_2d_cls)
+                        if path != "3d" and ok_3d:
+                            try:
+                                spec3 = au._tiled_3d_spec_from_problem(p)
+                            except ValueError:
+                                pass
+                            else:
+                                self.assertIsInstance(spec3, spec_3d_cls)
+
+    def test_tiled_3d_dispatch_gate_accepts_kwargs_per_arch(self):
+        """Regression: the shared dispatch entry
+        ``supports_native_unified_attention_3d_tiled`` forwards its kwargs to the
+        per-arch ``supports_tiled_3d`` gate, and the auto selector routes decode
+        (``max_seqlen_q == 1``) to this 3D split-KV path. Every routed arch's
+        gate must accept the forwarded kwargs without raising. This guards the
+        gfx950 3D spec-kwarg regression (the ``UnifiedAttention3DTiledSpec``
+        missing-field break that took out production decode), mirroring the 2D
+        dispatch test one path over.
+        """
+        from unittest import mock
+        import ck_dsl.instances.common.attention_unified as au
+        from ck_dsl.instances import supports_native_unified_attention_3d_tiled
+
+        p = UnifiedAttentionProblem(
+            total_q=4,
+            num_seqs=4,
+            num_query_heads=8,
+            num_kv_heads=1,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=1,  # decode -> routes to the 3D split-KV builder
+            max_seqlen_k=4096,
+            dtype="fp16",
+        )
+        for arch in ("gfx950", "gfx942"):
+            with mock.patch.object(
+                au, "_resolve_attention_arch", return_value=arch
+            ):
+                # Must not raise (the regression was a TypeError on the kwarg).
+                ok, reason = supports_native_unified_attention_3d_tiled(p)
+                self.assertIsInstance(ok, bool)
+                self.assertIsInstance(reason, str)
+                self.assertTrue(
+                    ok,
+                    msg=f"{arch}: D128 fp16 GQA decode should route to a "
+                    f"supported 3D kernel, got: {reason}",
+                )
+
+    def test_tiled_3d_spec_builder_constructs_per_arch(self):
+        """Focused guard on the 3D spec builder that broke: a decode problem must
+        construct the arch's ``UnifiedAttention3DTiledSpec`` (signature parity)
+        on both arches, and the gfx942-only 3D knobs must be inert on gfx950 --
+        ``_gfx942_3d_tile_size_override`` is ``None`` and the two
+        ``_enable_gfx942_3d_*`` toggles are ``False`` -- pinning the
+        ignored-field contract that lets the shared builder pass those kwargs
+        unconditionally.
+        """
+        from unittest import mock
+        import ck_dsl.instances.common.attention_unified as au
+
+        p = UnifiedAttentionProblem(
+            total_q=4,
+            num_seqs=4,
+            num_query_heads=8,
+            num_kv_heads=1,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=1,
+            max_seqlen_k=4096,
+            dtype="fp16",
+        )
+        for arch in ("gfx942", "gfx950"):
+            with mock.patch.object(
+                au, "_resolve_attention_arch", return_value=arch
+            ):
+                spec = au._tiled_3d_spec_from_problem(p)
+                self.assertIsInstance(spec, au._tiled_3d_impl(arch)[0])
+        # The gfx942-only 3D knobs are inert on gfx950 (ignored-field contract).
+        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
+            self.assertIsNone(au._gfx942_3d_tile_size_override(p))
+            self.assertFalse(au._enable_gfx942_3d_invariant_hoist(p))
+            self.assertFalse(au._enable_gfx942_3d_wide_kv_load(p))
+
+    def test_tiled_2d_spec_builder_constructs_per_arch_all_branches(self):
+        """Drive ``_tiled_spec_from_problem`` through its three branches and
+        assert each constructs the arch's 2D spec without signature drift:
+
+        * gfx942 fp16 long-prefill D128 & D64 (no SW/softcap, num_seqs>=2) ->
+          the gfx942 fp16-flash branch (~13 flash flags),
+        * bf16 multi-batch long-prefill HD64/BS32/GQA8 -> the bf16 transposed
+          "combo" branch (gfx950, where the combo flags are valid),
+        * a plain fp16 shape -> the default branch.
+
+        The flash branch only fires on gfx942 and the combo branch only builds
+        cleanly on gfx950; this asserts construction + correct arch spec type for
+        whichever branch fires on the relevant arch, pinning the largest
+        (~25-flag) silent surface.
+        """
+        from unittest import mock
+        import ck_dsl.instances.common.attention_unified as au
+
+        def problem(**kw):
+            base = dict(
+                total_q=0,
+                num_seqs=2,
+                num_query_heads=8,
+                num_kv_heads=1,
+                head_size=128,
+                block_size=16,
+                max_seqlen_q=2048,
+                max_seqlen_k=2048,
+                dtype="fp16",
+            )
+            base.update(kw)
+            if base["total_q"] == 0:
+                base["total_q"] = base["num_seqs"] * base["max_seqlen_q"]
+            return UnifiedAttentionProblem(**base)
+
+        # (label, problem, arches to drive). Flash -> gfx942; combo -> gfx950;
+        # default -> both.
+        cases = [
+            ("flash_d128", problem(head_size=128, block_size=16, dtype="fp16"), ("gfx942",)),
+            ("flash_d64", problem(head_size=64, block_size=64, dtype="fp16"), ("gfx942",)),
+            (
+                "combo_bf16",
+                problem(
+                    head_size=64,
+                    block_size=32,
+                    dtype="bf16",
+                    num_query_heads=64,
+                    num_kv_heads=8,
+                ),
+                ("gfx950",),
+            ),
+            (
+                "default_fp16",
+                problem(head_size=128, dtype="fp16", num_seqs=1),
+                ("gfx942", "gfx950"),
+            ),
+        ]
+        for label, p, arches in cases:
+            for arch in arches:
+                with self.subTest(cfg=label, arch=arch):
+                    with mock.patch.object(
+                        au, "_resolve_attention_arch", return_value=arch
+                    ):
+                        spec = au._tiled_spec_from_problem(p)
+                        self.assertIsInstance(spec, au._tiled_2d_impl(arch)[0])
+
+    def test_tiled_3d_support_gate_rejects_unsupported(self):
+        """Mirror of ``test_tiled_2d_support_gate_rejects_unsupported`` for the
+        per-arch ``supports_tiled_3d`` gate. Both arches share the same
+        accept/reject contract, so the cases are driven for each arch via the
+        ``arch=`` kwarg.
+        """
+        from ck_dsl.instances import supports_tiled_3d
+
+        base = dict(
+            head_size=128,
+            block_size=16,
+            dtype="fp16",
+            num_queries_per_kv=8,
+            use_alibi=False,
+            use_qq_bias=False,
+            use_fp8=False,
+            q_dtype=None,
+        )
+        for arch in ("gfx942", "gfx950"):
+            ok_fp16, _ = supports_tiled_3d(arch=arch, **base)
+            self.assertTrue(ok_fp16, msg=f"{arch}: base fp16 D128 should accept")
+            # head_size {64,128,256}, block_size {16,32,64}, bf16, and every
+            # num_queries_per_kv that divides BLOCK_M=16 are supported.
+            for accept in [
+                dict(head_size=256),
+                dict(head_size=64),
+                dict(block_size=32),
+                dict(block_size=64),
+                dict(dtype="bf16"),
+                dict(num_queries_per_kv=1),
+                dict(num_queries_per_kv=4),
+                dict(num_queries_per_kv=16),
+                dict(use_alibi=True),
+                dict(use_qq_bias=True),
+            ]:
+                kwargs = dict(base)
+                kwargs.update(accept)
+                ok, reason = supports_tiled_3d(arch=arch, **kwargs)
+                self.assertTrue(
+                    ok, msg=f"{arch}: expected accept for {accept}, got: {reason}"
+                )
+            # Bad head_size, bad block_size, fp8-without-kv_storage, and an
+            # unsupported dtype are gated on both arches.
+            for override in [
+                dict(head_size=72),
+                dict(block_size=24),
+                dict(use_fp8=True),
+                dict(dtype="fp8"),
+            ]:
+                kwargs = dict(base)
+                kwargs.update(override)
+                ok, reason = supports_tiled_3d(arch=arch, **kwargs)
+                self.assertFalse(
+                    ok, msg=f"{arch}: expected reject for {override}, got: {reason}"
+                )
+                self.assertTrue(reason)
+
+    def test_unified_attention_3d_tiled_kernel_compiles_gfx942(self):
+        """gfx942 analogue of ``test_unified_attention_3d_tiled_kernel_compiles``
+        (which exercises the default gfx950 arch only). Builds the gfx942 3D
+        split-KV segment kernel and asserts the gfx942-specific narrow primitives
+        it ACTUALLY emits -- the 16x16x16 MFMA atom and the 1-DWORD async
+        global->LDS DMA (``raw.ptr.buffer.load.lds``) -- and that it does NOT emit
+        the gfx950 wide 16x16x32 MFMA. Pure codegen, no GPU.
+        """
+        from unittest import mock
+        import ck_dsl.instances.common.attention_unified as au
+
+        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
+            (
+                UnifiedAttention3DTiledSpec,
+                UnifiedAttentionReduceTiledSpec,
+                build_unified_attention_3d_tiled,
+                build_unified_attention_reduce_tiled,
+                _supports_tiled_3d,
+            ) = au._tiled_3d_impl("gfx942")
+            seg = build_unified_attention_3d_tiled(
+                UnifiedAttention3DTiledSpec(
+                    head_size=128,
+                    block_size=16,
+                    num_query_heads=16,
+                    num_kv_heads=2,
+                    dtype="fp16",
+                    use_sinks=False,
+                    sliding_window=0,
+                    has_softcap=False,
+                    num_segments=128,
+                    num_seqs=4,
+                )
+            )
+            seg_ll = lower_kernel_to_llvm(seg)
+            # The arch-dispatched reduce kernel must also build on gfx942.
+            red = build_unified_attention_reduce_tiled(
+                UnifiedAttentionReduceTiledSpec(
+                    head_size=128,
+                    num_query_heads=16,
+                    num_kv_heads=2,
+                    dtype="fp16",
+                    num_segments=128,
+                )
+            )
+            red_ll = lower_kernel_to_llvm(red)
+        # gfx942 narrow 3D path: 16x16x16 MFMA + 1-DWORD async DMA KV feed.
+        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", seg_ll)
+        self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", seg_ll)
+        # Must NOT use the gfx950 wide-K 16x16x32 MFMA.
+        self.assertNotIn("@llvm.amdgcn.mfma.f32.16x16x32.f16", seg_ll)
+        # Workspace writes for per-segment m / l / acc.
+        self.assertIn("segm_output_ptr", seg_ll)
+        self.assertIn("segm_max_ptr", seg_ll)
+        self.assertIn("segm_expsum_ptr", seg_ll)
+        # Reduce kernel: exp2-weighted segment combine + NaN-safe factor.
+        self.assertIn("@llvm.exp2.f32", red_ll)
+        self.assertIn("fcmp ogt", red_ll)
 
 
 # ---------------------------------------------------------------------
