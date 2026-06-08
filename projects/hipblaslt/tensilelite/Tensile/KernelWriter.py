@@ -6154,15 +6154,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at O0/O3 + region-scope always when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
-                               # PrefetchGlobalRead value used by InsertClusterBarrierPass
-                               # to gate Rule 1 (LoopCounterL <= PGR+1) and Rule 4
-                               # (LoopCounterL <= PGR). Defaults to 1 when unset.
+                               # PrefetchGlobalRead (PGR) passed to InsertClusterBarrierPass.
+                               # Gates Rule 3 (`LCL <= PGR` skip) and Rule 4 (`LCL == PGR+1`
+                               # skip in fresh-gate mode; inherits upstream `LCL == PGR` cmp
+                               # in inherited-SCC mode). Rule 1 uses `LCL == 0`, not PGR.
+                               # Defaults to 1 when unset.
                                "PGR": int(kernel.get("PrefetchGlobalRead", 1)),
-                               # PrefetchLocalRead value used by InsertClusterBarrierPass
-                               # to enable Rule 4's PLR=0 fallback: when no `s_barrier_wait -1`
-                               # is found between `End setupNewTile` and the next label, plant
-                               # the gated signal at the end of the section. Defaults to 1
-                               # (fallback off) when unset.
+                               # PrefetchLocalRead (PLR) passed to InsertClusterBarrierPass.
+                               # When PLR == 0, enables Rule 3 anchor mode (b): if no
+                               # `s_barrier_wait -1` precedes `label_openLoopL:`, synthesize
+                               # a workgroup sync inside the LCL-gated signal block.
+                               # Defaults to 1 (fallback off) when unset.
                                "PLR": int(kernel.get("PrefetchLocalRead", 1)),
                               }
 
