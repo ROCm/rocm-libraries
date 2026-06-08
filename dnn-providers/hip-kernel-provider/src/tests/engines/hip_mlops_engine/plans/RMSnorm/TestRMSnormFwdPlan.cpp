@@ -124,14 +124,14 @@ std::pair<flatbuffers::FlatBufferBuilder, RMSnormFwdPlan>
 TEST(TestRMSnormFwdPlan, ExecuteWithoutCompileThrows)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestRMSnormFwdPlan, GetWorkspaceSizeReturnsZero)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
@@ -140,7 +140,7 @@ TEST(TestRMSnormFwdPlan, IsMoveConstructible)
     auto [fbb, plan] = createPlanFromGraph();
 
     const RMSnormFwdPlan moved(std::move(plan));
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 
