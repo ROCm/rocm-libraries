@@ -88,3 +88,11 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 384]
           - Exact: [96,  96,  1, 384]
           - Exact: [160, 160, 1, 384]
+          # Odd (non-aligned) M and N
+          - Exact: [127, 129, 1, 64]
+          - Exact: [63,  65,  1, 128]
+          - Exact: [255, 257, 1, 128]
+          - Exact: [97,  95,  1, 256]
+          - Exact: [161, 159, 1, 128]
+          - Exact: [33,  127, 1, 128]
+          - Exact: [129, 33,  1, 256]
