@@ -24,9 +24,11 @@
 
 """Build-only test phase for YAML kernel configs.
 
-This module is activated by the ``--build-only`` pytest flag and is excluded
-from collection in all other modes by the ``pytest_ignore_collect`` hook in
-``conftest.py``.
+This module is activated by the ``--build-only`` pytest flag. Two mechanisms
+keep it from running in other modes: the ``pytest_ignore_collect`` hook in
+``conftest.py`` excludes it at collection time, and the test function itself
+calls ``pytest.skip`` if the flag is absent (fallback for pytest versions or
+invocation styles where the hook is not called).
 
 Role in the split-CI workflow::
 
@@ -71,5 +73,7 @@ def test_config_build(tensile_args: list[str], config: str, tmpdir: py.path.loca
     The artifact is written to ``--artifact-dir`` (not ``tmpdir``) so it
     survives after the test and can be uploaded by CI for the run phase.
     """
+    if not pytestconfig.getoption("--build-only"):
+        pytest.skip("requires --build-only")
     output_dir = os.path.join(tmpdir.strpath, artifact_name_for_config(config))
     _build(config, output_dir, pytestconfig.getoption("--artifact-dir"), tensile_args)

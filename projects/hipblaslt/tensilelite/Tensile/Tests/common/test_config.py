@@ -24,9 +24,12 @@
 
 """Combined build-then-run test phase for YAML kernel configs (default mode).
 
-This module runs when neither ``--build-only`` nor ``--use-cache`` is passed
-and is excluded from collection in split-CI mode by the ``pytest_ignore_collect``
-hook in ``conftest.py``.
+This module runs when neither ``--build-only`` nor ``--use-cache`` is passed.
+Two mechanisms keep it from running in split-CI mode: the
+``pytest_ignore_collect`` hook in ``conftest.py`` excludes it at collection
+time, and the test function itself calls ``pytest.skip`` if either flag is
+present (fallback for pytest versions or invocation styles where the hook is
+not called).
 
 This is the single-machine equivalent of the full split-CI workflow. It drives
 the same ``_build`` and ``_run`` helpers that live in ``test_config_build.py``
@@ -95,6 +98,8 @@ def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pyt
     Activated in the default mode (no ``--build-only`` / ``--use-cache`` flags).
     Requires a GPU. See the module docstring for a description of the four steps.
     """
+    if pytestconfig.getoption("--build-only") or pytestconfig.getoption("--use-cache"):
+        pytest.skip("split mode active — use test_config_build or test_config_run")
     artifact_name = artifact_name_for_config(config)
     output_dir = os.path.join(tmpdir.strpath, artifact_name)
     artifact_dir = tmpdir.strpath

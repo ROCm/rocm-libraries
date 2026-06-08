@@ -24,9 +24,11 @@
 
 """Run-only test phase for YAML kernel configs.
 
-This module is activated by the ``--use-cache`` pytest flag and is excluded
-from collection in all other modes by the ``pytest_ignore_collect`` hook in
-``conftest.py``.
+This module is activated by the ``--use-cache`` pytest flag. Two mechanisms
+keep it from running in other modes: the ``pytest_ignore_collect`` hook in
+``conftest.py`` excludes it at collection time, and the test function itself
+calls ``pytest.skip`` if the flag is absent (fallback for pytest versions or
+invocation styles where the hook is not called).
 
 Role in the split-CI workflow::
 
@@ -76,6 +78,8 @@ def test_config_run(tensile_args: list[str], config: str, tmpdir: py.path.local,
     wrote the artifact. The artifact is extracted into ``tmpdir`` so the shared
     artifact directory is not modified by this phase.
     """
+    if not pytestconfig.getoption("--use-cache"):
+        pytest.skip("requires --use-cache")
     artifact_name = artifact_name_for_config(config)
     output_dir = os.path.join(tmpdir.strpath, artifact_name)
     _run(config, output_dir, pytestconfig.getoption("--artifact-dir"), tensile_args)
