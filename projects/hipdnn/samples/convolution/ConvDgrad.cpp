@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -26,40 +27,40 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running convolution backward data graph " << inputType << " [" << layout << "]"
               << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    constexpr int64_t n = 16; // Batch size
+    constexpr int64_t N = 16; // Batch size
 
     // Input (dx dimensions)
-    constexpr int64_t c = 16; // Number of dx channels
-    constexpr int64_t h = 16; // Height
-    constexpr int64_t w = 16; // Width
+    constexpr int64_t C = 16; // Number of dx channels
+    constexpr int64_t H = 16; // Height
+    constexpr int64_t W = 16; // Width
 
     // Filter
-    constexpr int64_t k = 16; // Number of dy channels
-    constexpr int64_t r = 3; // Height
-    constexpr int64_t s = 3; // Width
-    constexpr int64_t u = 1; // Height stride
-    constexpr int64_t v = 1; // Width stride
-    constexpr int64_t padH = 1; // Height padding
-    constexpr int64_t padW = 1; // Width padding
-    constexpr int64_t dilH = 1; // Height dilation
-    constexpr int64_t dilW = 1; // Width dilation
+    constexpr int64_t K = 16; // Number of dy channels
+    constexpr int64_t R = 3; // Height
+    constexpr int64_t S = 3; // Width
+    constexpr int64_t U = 1; // Height stride
+    constexpr int64_t V = 1; // Width stride
+    constexpr int64_t PAD_H = 1; // Height padding
+    constexpr int64_t PAD_W = 1; // Width padding
+    constexpr int64_t DIL_H = 1; // Height dilation
+    constexpr int64_t DIL_W = 1; // Width dilation
 
     // Output (dy dimensions) - computed based on input and conv parameters
-    const int64_t outH = (h + 2 * padH - dilH * (r - 1) - 1) / u + 1;
-    const int64_t outW = (w + 2 * padW - dilW * (s - 1) - 1) / v + 1;
+    const int64_t outH = (H + 2 * PAD_H - DIL_H * (R - 1) - 1) / U + 1;
+    const int64_t outW = (W + 2 * PAD_W - DIL_W * (S - 1) - 1) / V + 1;
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto dyAttr = createTensor({n, k, outH, outW}, inputType, layout);
-    auto wAttr = createTensor({k, c, r, s}, inputType, layout);
+    auto dyAttr = createTensor({N, K, outH, outW}, inputType, layout);
+    auto wAttr = createTensor({K, C, R, S}, inputType, layout);
 
     graph::ConvDgradAttributes convAttributes;
     convAttributes.set_name("conv_backward_data_node");
-    convAttributes.set_pre_padding({padH, padW});
-    convAttributes.set_post_padding({padH, padW});
-    convAttributes.set_stride({u, v});
-    convAttributes.set_dilation({dilH, dilW});
+    convAttributes.set_pre_padding({PAD_H, PAD_W});
+    convAttributes.set_post_padding({PAD_H, PAD_W});
+    convAttributes.set_stride({U, V});
+    convAttributes.set_dilation({DIL_H, DIL_W});
 
     auto dxAttr = graph->conv_dgrad(dyAttr, wAttr, convAttributes);
     dxAttr->set_output(true);
@@ -80,9 +81,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     variantPack[wAttr->get_uid()] = wTensor.memory().deviceData();
     variantPack[dxAttr->get_uid()] = dxTensor.memory().deviceData();
 
-    int64_t workspaceSize;
+    int64_t workspaceSize = 0;
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
-    utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+    const utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
 
@@ -106,24 +107,25 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> dxRefTensor(dxAttr->get_dim(), layout);
 
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::dgrad(
-            dxRefTensor, wTensor, dyTensor, {u, v}, {dilH, dilW}, {padH, padW});
+            dxRefTensor, wTensor, dyTensor, {U, V}, {DIL_H, DIL_W}, {PAD_H, PAD_W});
 
         auto absoluteTolerance = hipdnn_test_sdk::utilities::conv::
             calculateConvDgradTolerance<InputType, InputType, float>(
                 0.0, 1.0, 0.0, 1.0, wAttr->get_dim());
-        constexpr float relativeTolerance = 0.01f;
+        constexpr float RELATIVE_TOLERANCE = 0.01f;
 
         auto dxValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
-            absoluteTolerance, relativeTolerance);
+            absoluteTolerance, RELATIVE_TOLERANCE);
 
         std::cout << "CPU reference validation:\n";
-        bool dxValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(std::cout,
-                                                                                "dx",
-                                                                                dxValidator,
-                                                                                dxRefTensor,
-                                                                                dxTensor,
-                                                                                absoluteTolerance,
-                                                                                relativeTolerance);
+        const bool dxValid
+            = hipdnn_test_sdk::utilities::validateAndReport<InputType>(std::cout,
+                                                                       "dx",
+                                                                       dxValidator,
+                                                                       dxRefTensor,
+                                                                       dxTensor,
+                                                                       absoluteTolerance,
+                                                                       RELATIVE_TOLERANCE);
 
         validationPassed = dxValid;
     }
@@ -134,21 +136,26 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
 int main(int argc, char* argv[])
 {
-    auto config = parseCommandLineArgs(argc, argv);
-
-    auto [handle, handleError] = createHipdnnHandle();
-    HIPDNN_FE_CHECK(handleError);
-
-    bool allPassed = run(SampleRunner{*handle, config});
-
-    if(allPassed)
+    try
     {
-        std::cout << "All convolution backward data runs completed successfully.\n";
-        return 0;
-    }
-    else
-    {
+        auto config = parseCommandLineArgs(argc, argv);
+
+        auto [handle, handleError] = createHipdnnHandle();
+        HIPDNN_FE_CHECK(handleError);
+
+        const bool allPassed = run(SampleRunner{*handle, config});
+
+        if(allPassed)
+        {
+            std::cout << "All convolution backward data runs completed successfully.\n";
+            return 0;
+        }
         std::cout << "One or more convolution backward data runs failed validation.\n";
+        return 1;
+    }
+    catch(const std::exception& e)
+    {
+        std::fprintf(stderr, "Unhandled exception: %s\n", e.what());
         return 1;
     }
 }
