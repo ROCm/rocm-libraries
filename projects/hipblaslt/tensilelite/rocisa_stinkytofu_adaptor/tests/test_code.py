@@ -1500,15 +1500,12 @@ class TestDummyClassesInheritItem(unittest.TestCase):
     / ``isinstance``-based KernelWriter walks see dummies as
     composition nodes during the bring-up phase."""
 
-    def test_macro_is_item(self):
-        self.assertIsInstance(Macro(), Item)
-
-    # NB: ValueIf / ValueElseIf / ValueEndif AND ValueSet / RegSet AND
-    # Label AND StructuredModule used to be dummies and were tested
-    # here. They became real classes (see TestValueConditionals /
-    # TestValueSet* / TestRegSet* / TestLabel* / TestStructuredModule*
-    # below); isinstance-Item coverage is preserved there alongside
-    # the rest of their behavioural tests.
+    # NB: Macro / ValueIf / ValueElseIf / ValueEndif / ValueSet /
+    # RegSet / Label / StructuredModule used to be dummies and were
+    # tested here. They became real classes (see TestMacro* /
+    # TestValueConditionals / TestValueSet* / TestRegSet* / TestLabel*
+    # / TestStructuredModule* below); isinstance-Item coverage is
+    # preserved there alongside the rest of their behavioural tests.
 
     def test_signaturecodemeta_is_item(self):
         self.assertIsInstance(SignatureCodeMeta(), Item)
@@ -1532,15 +1529,17 @@ class TestDummyClassesInheritItem(unittest.TestCase):
 class TestDummyInheritsItemDefaults(unittest.TestCase):
     """Methods inherited from Item (toString / countType / cap-proxies)
     take precedence over the dummy ``__getattr__`` no-op -- otherwise
-    a dummy Macro dropped into a Module tree would silently break
-    prettyPrint / countType passes."""
+    a dummy dropped into a Module tree would silently break
+    prettyPrint / countType passes. Uses ``KernelBody`` as the
+    representative still-dummy stand-in (Macro / Label / etc. have
+    been promoted to real classes)."""
 
     def test_dummy_toString_returns_name_from_item(self):
         # The dummy ``__init__`` calls ``super().__init__()`` with no
         # args, so Item.name defaults to "". ``toString`` therefore
         # returns "" -- NOT the dummy ``__getattr__`` no-op which
         # would have returned None.
-        self.assertEqual(Macro().toString(), "")
+        self.assertEqual(KernelBody().toString(), "")
 
     def test_dummy_str_returns_name_from_item(self):
         # ``str(dummy)`` must NOT return ``<DummyShim ...>`` (that's
@@ -1548,14 +1547,14 @@ class TestDummyInheritsItemDefaults(unittest.TestCase):
         # Item.toString → "" so that ``Module.toString`` (which
         # concatenates ``str(it)``) emits empty rather than the
         # debug-repr.
-        self.assertEqual(str(Macro()), "")
+        self.assertEqual(str(KernelBody()), "")
 
     def test_dummy_countType_is_one_for_itself(self):
-        m = Macro()
+        kb = KernelBody()
         # Inherited from Item.countType: 1 if isinstance match.
-        self.assertEqual(m.countType(Macro), 1)
-        self.assertEqual(m.countType(Item), 1)
-        self.assertEqual(m.countType(Module), 0)
+        self.assertEqual(kb.countType(KernelBody), 1)
+        self.assertEqual(kb.countType(Item), 1)
+        self.assertEqual(kb.countType(Module), 0)
 
 
 class TestModuleCountTypeRecursion(unittest.TestCase):
@@ -1595,11 +1594,12 @@ class TestModuleCountTypeRecursion(unittest.TestCase):
         # visible to ``countType(Item)`` walks (the very reason for
         # ``make_dummy_class(..., base=Item)`` for the still-dummy
         # nodes, and for ``class Label(Item)`` for the real ones).
+        # ``KernelBody`` is the representative still-dummy stand-in.
         m = Module()
         m.add(Label(0, ""))
-        m.add(Macro())
+        m.add(KernelBody())
         m.add(TextBlock("x"))
-        # 1 (Module) + 1 (Label) + 1 (Macro) + 1 (TextBlock) = 4.
+        # 1 (Module) + 1 (Label) + 1 (KernelBody) + 1 (TextBlock) = 4.
         self.assertEqual(m.countType(Item), 4)
 
     def test_countExactType_is_strict_identity(self):
@@ -2984,7 +2984,260 @@ class TestLabelModuleIntegration(_VgprMsbIsolation, unittest.TestCase):
 
 
 # ===========================================================================
-# (end of Label tests)
+# Macro -- ``.macro <name> args ... .endm`` block.
+# ===========================================================================
+#
+# KernelWriter constructs 4 macros (KWA ``GLOBAL_OFFSET_*``, ``MAC_*``,
+# ``MAC_*_OneIUI``; Components/CustomSchedule.py ``MAINLOOP``). Each
+# is filled with CommonInstruction / Module / TextBlock children, then
+# attached to a parent Module via ``module.add(macro)``.
+
+
+class TestMacroConstruction(unittest.TestCase):
+    def test_basic_construction(self):
+        mc = Macro("GLOBAL_OFFSET_A", ["vgprAddr:req", "vgprTmp:req"])
+        self.assertEqual(mc.name, "GLOBAL_OFFSET_A")
+        self.assertEqual(mc.itemList, [])
+        # The internal MacroInstruction (used to render ``.macro NAME args``)
+        # is constructed at __init__ time.
+        from rocisa_stinkytofu_adaptor.instruction import MacroInstruction
+        self.assertIsInstance(mc.macro, MacroInstruction)
+        self.assertEqual(mc.macro.name, "GLOBAL_OFFSET_A")
+        self.assertEqual(mc.macro.args, ["vgprAddr:req", "vgprTmp:req"])
+
+    def test_empty_args(self):
+        # KWA:1774 pattern: ``Macro("MAC_...", [])``.
+        mc = Macro("MAC_4x4_X0", [])
+        self.assertEqual(mc.macro.args, [])
+
+    def test_inherits_Item(self):
+        mc = Macro("X", [])
+        self.assertIsInstance(mc, Item)
+
+    def test_is_NOT_Module_subclass(self):
+        # rocisa::Macro inherits from Item directly, NOT from Module.
+        # KernelWriter type-walks rely on this distinction so e.g.
+        # ``Macro`` doesn't get picked up by ``findIndexByType(Module)``.
+        mc = Macro("X", [])
+        self.assertNotIsInstance(mc, Module)
+
+
+class TestMacroAdd(unittest.TestCase):
+    def test_add_TextBlock(self):
+        mc = Macro("X", [])
+        tb = TextBlock("inst\n")
+        ret = mc.add(tb)
+        self.assertIs(ret, tb)
+        self.assertEqual(mc.itemList, [tb])
+        self.assertIs(tb.parent, mc)
+
+    def test_add_Module(self):
+        mc = Macro("X", [])
+        inner = Module("inner")
+        mc.add(inner)
+        self.assertIs(inner.parent, mc)
+
+    def test_add_ValueIf_ValueElseIf_ValueEndif(self):
+        # Whitelist includes the value-conditional family.
+        mc = Macro("X", [])
+        for it in [ValueIf("1"), ValueElseIf("2"), ValueEndif()]:
+            mc.add(it)
+        self.assertEqual(len(mc.itemList), 3)
+
+    def test_add_Instruction_subclass(self):
+        # CommonInstruction / MacroInstruction subclasses must be
+        # accepted -- this is the common case (KernelWriter feeds
+        # macros V* / S* instructions).
+        from rocisa_stinkytofu_adaptor.instruction import (
+            MacroInstruction, VMovB32,
+        )
+        from rocisa_stinkytofu_adaptor.container import vgpr
+        mc = Macro("X", [])
+        mc.add(VMovB32(vgpr(0), vgpr(1)))
+        mc.add(MacroInstruction("Y", [1]))
+        self.assertEqual(len(mc.itemList), 2)
+
+    def test_add_unknown_type_raises(self):
+        # rocisa throws "unknown item type for Macro.add: ...".
+        mc = Macro("X", [])
+        with self.assertRaises(RuntimeError) as ctx:
+            mc.add("just a string")
+        self.assertIn("unknown item type for Macro.add", str(ctx.exception))
+
+    def test_add_int_raises(self):
+        mc = Macro("X", [])
+        with self.assertRaises(RuntimeError):
+            mc.add(42)
+
+
+class TestMacroAddComment0(unittest.TestCase):
+    """Single-line ``/* ... */\\n``, distinct from Module's 3-line banner."""
+
+    def test_addComment0_single_line(self):
+        mc = Macro("X", [])
+        mc.addComment0("hello")
+        self.assertEqual(len(mc.itemList), 1)
+        tb = mc.itemList[0]
+        self.assertIsInstance(tb, TextBlock)
+        self.assertEqual(tb.text, "/* hello */\n")
+
+    def test_addComment0_NOT_same_as_Module_addComment0(self):
+        # Module's addComment0 produces a 3-line banner; Macro's is
+        # the simple single-liner. Confirm they really diverge.
+        mc = Macro("X", [])
+        mc.addComment0("hi")
+        mod = Module()
+        mod.addComment0("hi")
+        self.assertNotEqual(mc.itemList[0].text, mod.itemList[0].text)
+
+
+class TestMacroSetItems(unittest.TestCase):
+    def test_setItems_replaces_list(self):
+        mc = Macro("X", [])
+        mc.add(TextBlock("a"))
+        new_items = [TextBlock("b"), TextBlock("c")]
+        mc.setItems(new_items)
+        self.assertEqual(mc.itemList, new_items)
+
+    def test_setItems_does_NOT_reparent(self):
+        # rocisa C++ does plain assignment; no type check and no parent
+        # update. Mirror exactly so SetItems is a fast no-frills swap
+        # (callers that care must reparent manually).
+        mc = Macro("X", [])
+        tb = TextBlock("a")
+        mc.setItems([tb])
+        self.assertIsNone(tb.parent)  # NOT reparented
+
+
+class TestMacroToString(unittest.TestCase):
+    """Byte-parity with ``rocisa::Macro::toString``."""
+
+    def test_empty_macro(self):
+        mc = Macro("X", [])
+        self.assertEqual(str(mc), ".macro X\n.endm\n")
+
+    def test_macro_with_args_only(self):
+        mc = Macro("GLOBAL_OFFSET_A", ["vgprAddr:req", "vgprTmp:req"])
+        self.assertEqual(
+            str(mc),
+            ".macro GLOBAL_OFFSET_A vgprAddr:req, vgprTmp:req\n.endm\n",
+        )
+
+    def test_macro_with_text_children_indented(self):
+        # Each child line is prefixed with 4 spaces.
+        mc = Macro("X", [])
+        mc.add(TextBlock("v_add v0, v1, v2\n"))
+        mc.add(TextBlock("v_mul v3, v4, v5\n"))
+        expected = (
+            ".macro X\n"
+            "    v_add v0, v1, v2\n"
+            "    v_mul v3, v4, v5\n"
+            ".endm\n"
+        )
+        self.assertEqual(str(mc), expected)
+
+    def test_s_set_vgpr_msb_quirk_extra_indent(self):
+        # rocisa C++ hack: any child whose toString contains
+        # ``s_set_vgpr_msb`` gets an EXTRA 4-space indent inserted
+        # right after the first newline (so subsequent body lines
+        # stay visually aligned with auto-inserted MSB toggles).
+        mc = Macro("foo", [])
+        mc.add(TextBlock("s_set_vgpr_msb 1\nactual_inst v0, v1\n"))
+        expected = (
+            ".macro foo\n"
+            "    s_set_vgpr_msb 1\n"
+            "    actual_inst v0, v1\n"
+            ".endm\n"
+        )
+        self.assertEqual(str(mc), expected)
+
+    def test_addComment0_renders_inside_macro_body(self):
+        mc = Macro("X", [])
+        mc.addComment0("note")
+        expected = ".macro X\n    /* note */\n.endm\n"
+        self.assertEqual(str(mc), expected)
+
+
+class TestMacroPrettyPrint(unittest.TestCase):
+    def test_prettyPrint_header_and_children(self):
+        mc = Macro("MyMacro", [])
+        mc.add(TextBlock("inst\n"))
+        out = mc.prettyPrint()
+        # Header: `Macro "MyMacro"\n`, then child via `|--` prefix.
+        self.assertIn('Macro "MyMacro"', out)
+        self.assertIn("|--", out)
+
+
+class TestMacroDeepCopy(unittest.TestCase):
+    def test_deepcopy_independent(self):
+        mc = Macro("X", ["a:req"])
+        mc.add(TextBlock("inst\n"))
+        c = copy.deepcopy(mc)
+        # Mutating clone must not affect original.
+        c.add(TextBlock("extra\n"))
+        self.assertEqual(len(mc.itemList), 1)
+        self.assertEqual(len(c.itemList), 2)
+
+    def test_deepcopy_clones_header_macro(self):
+        # The internal ``self.macro`` (a MacroInstruction) must be deep-
+        # cloned -- mutating clone's macro args must not bleed in.
+        mc = Macro("X", [1, 2])
+        c = copy.deepcopy(mc)
+        c.macro.args.append(99)
+        self.assertEqual(mc.macro.args, [1, 2])
+        self.assertEqual(c.macro.args, [1, 2, 99])
+
+    def test_deepcopy_reparents_children(self):
+        # Cloned children's parent must point to the clone, not the
+        # original (matches rocisa C++ parent-fixup).
+        mc = Macro("X", [])
+        mc.add(TextBlock("inst\n"))
+        c = copy.deepcopy(mc)
+        self.assertIs(c.itemList[0].parent, c)
+        self.assertIsNot(c.itemList[0].parent, mc)
+
+    def test_deepcopy_preserves_subclass(self):
+        mc = Macro("X", [])
+        c = copy.deepcopy(mc)
+        self.assertIs(type(c), Macro)
+
+
+class TestMacroPickleRejected(unittest.TestCase):
+    def test_pickle_raises(self):
+        import pickle
+        mc = Macro("X", [])
+        with self.assertRaises(RuntimeError):
+            pickle.dumps(mc)
+
+
+class TestMacroModuleIntegration(unittest.TestCase):
+    """KernelWriter pattern: ``module.add(macro)`` -- the Macro itself
+    is an Item, so a parent Module can carry it like any other child."""
+
+    def test_macro_added_to_module(self):
+        mod = Module("kernel")
+        mc = Macro("GLOBAL_OFFSET_A", ["vgprAddr:req"])
+        mc.add(TextBlock("v_add v0, v1, v2\n"))
+        mod.add(mc)
+        # Module parented the macro; rendering nests the .macro block
+        # inside the module's flat join.
+        self.assertIs(mc.parent, mod)
+        s = str(mod)
+        self.assertIn(".macro GLOBAL_OFFSET_A", s)
+        self.assertIn(".endm", s)
+
+    def test_macro_survives_module_deepcopy(self):
+        # When a parent Module is deepcopied, the nested Macro must
+        # come along (with its own internal header MacroInstruction).
+        mod = Module()
+        mod.add(Macro("X", [1]))
+        c = copy.deepcopy(mod)
+        self.assertIsInstance(c.itemList[0], Macro)
+        self.assertEqual(c.itemList[0].macro.args, [1])
+
+
+# ===========================================================================
+# (end of Macro tests)
 # ===========================================================================
 
 

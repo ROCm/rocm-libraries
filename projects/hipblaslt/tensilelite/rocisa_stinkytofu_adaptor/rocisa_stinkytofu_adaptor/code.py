@@ -95,9 +95,8 @@ What it does (real):
       picklable" message).
 
 Not yet done (dummy):
-    - Container nodes: ``KernelBody``, ``Macro``,
-      ``BitfieldUnion``, ``SignatureCodeMeta``,
-      ``SignatureBase``.
+    - Container nodes: ``KernelBody``, ``BitfieldUnion``,
+      ``SignatureCodeMeta``, ``SignatureBase``.
 
 Future:
     When this shim grows beyond gfx1250, prefer adding sibling free
@@ -123,6 +122,10 @@ from .base import (
     outputNoComment as _outputNoComment,
     setVgprIdx as _set_vgpr_idx,
     setVgprMsb as _set_vgpr_msb,
+)
+from .instruction import (
+    Instruction as _Instruction,
+    MacroInstruction as _MacroInstruction,
 )
 
 _P = "rocisa.code"
@@ -1423,6 +1426,154 @@ class StructuredModule(Module):
 
 
 # ---------------------------------------------------------------------------
+# Macro -- ``.macro <name> args ... .endm`` block.
+# ---------------------------------------------------------------------------
+#
+# Mirror of ``rocisa::Macro``. KernelWriter constructs 4 macros (KWA:
+# ``GLOBAL_OFFSET_*``, ``MAC_*``, ``MAC_*_OneIUI``;
+# Components/CustomSchedule.py: ``MAINLOOP``) and adds CommonInstruction
+# / Module / TextBlock children into each.
+#
+# Notable divergences from generic ``Module``:
+#   * Macro is NOT a subclass of Module -- it holds its own ``itemList``
+#     directly (rocisa C++ does the same). Different add() contract,
+#     different toString format, no addComment1 / addComment2, no
+#     findNamedItem etc.
+#   * ``add()`` rejects unknown item types with RuntimeError -- only
+#     Instruction / Module / TextBlock / ValueIf* are allowed (matches
+#     the rocisa C++ dynamic_cast whitelist).
+#   * ``addComment0`` emits a single-line ``/* ... */\n`` -- distinct
+#     from Module.addComment0's 3-line banner (rocisa C++ explicitly
+#     chose simpler formatting for macro bodies).
+#   * ``toString()`` wraps children with ``.macro <header>`` / ``.endm``
+#     and indents each child line 4 spaces. The ``s_set_vgpr_msb``
+#     line gets a SECOND 4-space indent on the body line right after
+#     the first newline (rocisa C++ hack to keep auto-inserted MSB
+#     toggles visually aligned).
+#
+# Implementation note: the ``.macro NAME arg0, arg1, ...`` header line
+# is rendered by an internal ``MacroInstruction`` (stored on
+# ``self.macro``) -- same trick as rocisa C++.
+
+
+class Macro(Item):
+    """Mirror of ``rocisa::Macro``.
+
+    Layout: ``.macro <name> <args>\\n  <child0>\\n  <child1>\\n.endm\\n``.
+    Children are typed (Instruction / Module / TextBlock / ValueIf*);
+    other item types raise RuntimeError at ``add()`` time.
+    """
+
+    __slots__ = ("itemList", "macro")
+
+    # Whitelist mirrors the rocisa C++ dynamic_cast chain.
+    # ``_Instruction`` covers CommonInstruction / MacroInstruction /
+    # CompositeInstruction subclasses transitively.
+    _ALLOWED_TYPES: tuple = ()  # populated lazily in __init__
+
+    def __init__(self, name: str, args: List[Any]):
+        super().__init__(name=name)
+        self.itemList: List[Any] = []
+        # The header MacroInstruction is what renders ``.macro NAME args``
+        # via its own toString(). We never expose it via items() -- it's
+        # an internal rendering helper, not a child.
+        self.macro = _MacroInstruction(name, args)
+
+    @classmethod
+    def _allowed(cls) -> tuple:
+        # Built once on first call; defers import-order dependencies.
+        if not cls._ALLOWED_TYPES:
+            cls._ALLOWED_TYPES = (
+                _Instruction, Module, TextBlock,
+                ValueIf, ValueEndif, ValueElseIf,
+            )
+        return cls._ALLOWED_TYPES
+
+    def add(self, item: Any) -> Any:
+        if not isinstance(item, self._allowed()):
+            # Match rocisa's exception message verbatim so any string-
+            # matching consumer still works.
+            raise RuntimeError(
+                "unknown item type for Macro.add: " + str(item)
+            )
+        item.parent = self
+        self.itemList.append(item)
+        return item
+
+    def addT(self, cls, *args, **kwargs) -> Any:
+        # rocisa template helper: construct + add.
+        return self.add(cls(*args, **kwargs))
+
+    def addComment0(self, comment: str) -> None:
+        # NB: simpler than Module.addComment0 (single line vs 3-line
+        # banner) -- matches rocisa C++ exactly.
+        self.add(TextBlock("/* " + comment + " */\n"))
+
+    def setItems(self, items: Sequence[Any]) -> None:
+        # rocisa C++ does plain ``itemList = items`` -- no type check,
+        # no reparent. Mirror exactly.
+        self.itemList = list(items)
+
+    def items(self) -> List[Any]:
+        return self.itemList
+
+    def prettyPrint(self, indent: str = "") -> str:
+        out = f'{indent}{type(self).__name__} "{self.name}"\n'
+        for it in self.itemList:
+            pp = getattr(it, "prettyPrint", None)
+            if callable(pp):
+                res = pp(indent + "|--")
+                if isinstance(res, str):
+                    out += res
+                    continue
+            out += f"{indent}|--{type(it).__name__}\n"
+        return out
+
+    def toString(self) -> str:
+        # Layout:
+        #   .macro <header>          (header includes the trailing newline)
+        #       <child0_line0>
+        #       <child0_line1>       (continuation lines NOT re-indented)
+        #       ...
+        #   .endm
+        # When a child's text contains ``s_set_vgpr_msb``, insert an extra
+        # 4-space indent right after the FIRST newline of that child
+        # (rocisa quirk to keep auto-inserted MSB toggles aligned).
+        s = ".macro " + self.macro.toString()
+        for it in self.itemList:
+            tmp = it.toString() if hasattr(it, "toString") else str(it)
+            if "s_set_vgpr_msb" in tmp:
+                pos = tmp.find("\n")
+                if pos != -1:
+                    tmp = tmp[:pos + 1] + "    " + tmp[pos + 1:]
+            s += "    " + tmp
+        s += ".endm\n"
+        return s
+
+    def __str__(self) -> str:
+        return self.toString()
+
+    def __deepcopy__(self, memo):
+        clone = Macro.__new__(Macro)
+        memo[id(self)] = clone
+        # Item-inherited slots first.
+        clone.name = self.name
+        clone.parent = None
+        # Header MacroInstruction is cloned via its own __deepcopy__.
+        clone.macro = _copy.deepcopy(self.macro, memo)
+        clone.itemList = []
+        for it in self.itemList:
+            new_it = _copy.deepcopy(it, memo)
+            new_it.parent = clone
+            clone.itemList.append(new_it)
+        return clone
+
+    def __reduce__(self):
+        # rocisa Macro binding has no pickle support; mirror by raising.
+        raise RuntimeError("Macro is not picklable")
+
+
+# ---------------------------------------------------------------------------
 # Dummy code-composition components (pending real implementation).
 # ---------------------------------------------------------------------------
 #
@@ -1432,11 +1583,11 @@ class StructuredModule(Module):
 #   * ``dummy.toString()`` / ``dummy.prettyPrint()`` /
 #     ``dummy.countType()`` / ``dummy.countExactType()`` resolve to the
 #     real Item methods (not the no-op ``__getattr__`` shim), so a
-#     dummy Macro dropped into a Module tree still produces sensible
+#     dummy dropped into a Module tree still produces sensible
 #     prettyPrint / count output during bring-up.
 #
 # Inheritance map (mirror of code.hpp):
-#   Macro / SignatureCodeMeta / SignatureBase / KernelBody
+#   SignatureCodeMeta / SignatureBase / KernelBody
 #     -- ``: Item`` in C++ ⇒ ``base=Item`` here.
 #   BitfieldUnion -- standalone polymorphic root in C++
 #     (code.hpp:928, NOT a subclass of Item). Kept ``base=object``
@@ -1444,9 +1595,9 @@ class StructuredModule(Module):
 #     is the polymorphic root for the ``SrdUpperValue*`` family.
 #
 # Already real (above this block): TextBlock, Module, ValueIf,
-# ValueElseIf, ValueEndif, ValueSet, RegSet, Label, StructuredModule.
+# ValueElseIf, ValueEndif, ValueSet, RegSet, Label, StructuredModule,
+# Macro.
 
-Macro = make_dummy_class(f"{_P}.Macro", base=Item)
 BitfieldUnion = make_dummy_class(f"{_P}.BitfieldUnion")
 SignatureCodeMeta = make_dummy_class(f"{_P}.SignatureCodeMeta", base=Item)
 SignatureBase = make_dummy_class(f"{_P}.SignatureBase", base=Item)

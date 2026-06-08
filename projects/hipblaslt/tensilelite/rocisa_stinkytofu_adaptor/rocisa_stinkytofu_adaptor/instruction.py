@@ -57,7 +57,10 @@ What it does (real):
 Not yet done (dummy):
     - All other instruction classes (``Buffer*``, ``DS*``, ``Flat*``,
       ``S*``, ``V*``, ``MFMA*`` / ``SMFMA*``, ...).
-    - ``CompositeInstruction``, ``MacroInstruction`` still dummy.
+    - ``CompositeInstruction`` still dummy (no concrete subclass
+      promoted yet). ``MacroInstruction`` is real (KernelWriter emits
+      it 16+ times via ``V_MAGIC_DIV`` / ``GLOBAL_OFFSET_*`` /
+      ``MAINLOOP`` / ``PRND_GENERATOR`` etc.).
     - ``setMsb`` (Instruction member) -- gfx1250 ``s_set_vgpr_msb``
       auto-prepend is intentionally skipped on the rocisa side because
       the stinkytofu left-path runs ``InsertVgprMsbPass`` instead. The
@@ -95,10 +98,13 @@ _P = "rocisa.instruction"
 #
 #   Item -> Instruction -> CommonInstruction (VMovB32, VAddF32, ...)
 #                       -> CompositeInstruction (VMovB64, SLongBranch*, ...)
-#                       -> MacroInstruction
+#                       -> MacroInstruction (V_MAGIC_DIV, MAINLOOP, ...)
 #
-# Only ``Instruction`` and ``CommonInstruction`` are needed for Step 3's
-# VMovB32 vertical slice. KernelWriter exercises:
+# ``Instruction`` / ``CommonInstruction`` / ``MacroInstruction`` are
+# real; ``CompositeInstruction`` is still a dummy until a concrete
+# subclass needs it.
+#
+# KernelWriter exercises:
 #   - ``isinstance(x, Instruction)`` (KernelWriter.py:1105, 1790, Activation.py)
 #   - ``isinstance(x, CommonInstruction) and ... and x.dst.regType == 'm'``
 #     (Components/SubtileBasedInstructionScheduler.py:151)
@@ -106,10 +112,8 @@ _P = "rocisa.instruction"
 #   - ``inst.dst = vgpr(...)`` post-construction rebinding
 #     (Components/GSU.py:1144 etc.)
 #   - ``inst.comment = ...`` post-construction mutation (KernelWriter:3422 etc.)
-#
-# All of which fall out of an `__slots__` ed Python class with the right
-# attribute list. We keep ``CompositeInstruction`` / ``MacroInstruction``
-# as dummies until a concrete subclass needs them.
+#   - ``MacroInstruction(name="V_MAGIC_DIV", args=[...])`` macro-call emit
+#     (KernelWriterAssembly:2784, 3291, 9452 + Components/StreamK).
 
 
 def _format_str(output_inline_asm: bool, inst_str: str, comment: str,
@@ -347,10 +351,79 @@ class CommonInstruction(Instruction):
         return clone
 
 
-# ``Composite`` / ``Macro`` aren't on the Step-3 critical path; keep
-# them as dummies until a real subclass lights them up.
+# ``CompositeInstruction`` is still on the deferred list (no concrete
+# subclass needs it yet). ``MacroInstruction`` is real -- see below.
 CompositeInstruction = make_dummy_class(f"{_P}.CompositeInstruction")
-MacroInstruction = make_dummy_class(f"{_P}.MacroInstruction")
+
+
+class MacroInstruction(Instruction):
+    """Macro-call leaf -- mirror of ``rocisa::MacroInstruction``.
+
+    Emits ``<name> <arg0>, <arg1>, ...`` followed by the standard
+    ``Instruction`` comment formatting. ``args`` is read-write (matches
+    rocisa's ``def_rw`` binding); ``setSrc`` is the indexed-write helper.
+
+    ``getDstParams`` / ``getSrcParams`` raise ``RuntimeError`` by design --
+    macro args have no dst/src split, and rocisa actively throws here so
+    callers crash loudly instead of treating raw args as instruction
+    operands.
+    """
+
+    __slots__ = ("args",)
+
+    def __init__(self, name: str, args: List[Any], comment: str = ""):
+        super().__init__(InstType.INST_MACRO, comment)
+        # C++ shadows Item::name with its own ``name`` field (Item::name
+        # stays ""); Python __slots__ can't shadow, so we overwrite the
+        # inherited slot. KernelWriter never findNamedItems by macro name
+        # so the divergence is unobservable.
+        self.name = name
+        self.args: List[Any] = list(args)
+
+    def setSrc(self, idx: int, arg: Any) -> None:
+        self.args[idx] = arg
+
+    def getParams(self):
+        return self.args
+
+    def getDstParams(self):
+        raise RuntimeError(
+            "MacroInstruction does not have destination parameters"
+        )
+
+    def getSrcParams(self):
+        raise RuntimeError(
+            "MacroInstruction does not have source parameters"
+        )
+
+    def getArgStr(self) -> str:
+        # rocisa: " arg0, arg1, ..." (leading space when non-empty);
+        # empty args -> "".
+        if not self.args:
+            return ""
+        return " " + ", ".join(_input_to_str(a) for a in self.args)
+
+    def toString(self) -> str:
+        return self.formatWithComment(self.name + self.getArgStr())
+
+    def __deepcopy__(self, memo):
+        clone = MacroInstruction.__new__(MacroInstruction)
+        memo[id(self)] = clone
+        Instruction.__init__(clone, self.instType, self.comment)
+        clone.outputInlineAsm = self.outputInlineAsm
+        clone.instStr = self.instStr
+        clone.m_memToken = _deepcopy(self.m_memToken, memo) if self.m_memToken else None
+        clone.name = self.name
+        # Containers deep-clone via their own __deepcopy__; primitives
+        # (int/float/str) round-trip identity-equal, matching C++ visit.
+        clone.args = [_deepcopy(a, memo) for a in self.args]
+        return clone
+
+    def clone(self):
+        # rocisa Instruction::clone() returns a new shared_ptr; we mirror
+        # by deepcopy with a fresh memo so it behaves like a standalone
+        # copy (no memo sharing with outer deepcopy contexts).
+        return _deepcopy(self, {})
 
 
 # ==========================================================================

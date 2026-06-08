@@ -75,6 +75,7 @@ from rocisa_stinkytofu_adaptor.enum import InstType  # noqa: E402
 from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     CommonInstruction,
     Instruction,
+    MacroInstruction,
     VMovB32,
     _to_stinky_register,
 )
@@ -331,6 +332,148 @@ class TestCommonInstructionDeepcopy(unittest.TestCase):
         c = copy.deepcopy(ci)
         self.assertEqual(c.instStr, "v_mov_b32")
         self.assertEqual(c.comment, "orig")
+
+
+# ===========================================================================
+# MacroInstruction -- macro-call leaf (V_MAGIC_DIV / MAINLOOP / etc.).
+# ===========================================================================
+#
+# KernelWriter constructs these directly via
+# ``MacroInstruction(name=..., args=[...], comment=...)``. The emitted
+# text becomes a single ``NAME arg0, arg1, ...`` line, optionally
+# right-padded to col 50 followed by ``// comment``.
+
+
+class TestMacroInstructionFields(unittest.TestCase):
+    def test_default_comment_empty(self):
+        mi = MacroInstruction("MY_MACRO", [1, 2, 3])
+        self.assertEqual(mi.name, "MY_MACRO")
+        self.assertEqual(mi.args, [1, 2, 3])
+        self.assertEqual(mi.comment, "")
+        self.assertEqual(mi.instType, InstType.INST_MACRO)
+
+    def test_args_is_copied(self):
+        # rocisa stores ``args`` by value; mutating the caller's list
+        # afterwards must not bleed in.
+        args = [1, 2]
+        mi = MacroInstruction("X", args)
+        args.append(99)
+        self.assertEqual(len(mi.args), 2)
+
+    def test_args_mutable_post_construction(self):
+        # rocisa binding exposes ``args`` as def_rw.
+        mi = MacroInstruction("X", [1])
+        mi.args.append(2)
+        self.assertEqual(mi.args, [1, 2])
+
+    def test_setSrc_in_place(self):
+        mi = MacroInstruction("X", [1, 2, 3])
+        mi.setSrc(1, 99)
+        self.assertEqual(mi.args, [1, 99, 3])
+
+    def test_inherits_Instruction(self):
+        mi = MacroInstruction("X", [])
+        self.assertIsInstance(mi, Instruction)
+
+
+class TestMacroInstructionParams(unittest.TestCase):
+    def test_getParams_returns_args(self):
+        mi = MacroInstruction("X", [1, "a", 3.0])
+        self.assertEqual(mi.getParams(), [1, "a", 3.0])
+
+    def test_getDstParams_raises(self):
+        # rocisa throws "MacroInstruction does not have destination
+        # parameters". Crashing loudly is the contract.
+        mi = MacroInstruction("X", [1])
+        with self.assertRaises(RuntimeError) as ctx:
+            mi.getDstParams()
+        self.assertIn("destination parameters", str(ctx.exception))
+
+    def test_getSrcParams_raises(self):
+        # rocisa throws "MacroInstruction does not have source
+        # parameters". Same intentional crash policy.
+        mi = MacroInstruction("X", [1])
+        with self.assertRaises(RuntimeError) as ctx:
+            mi.getSrcParams()
+        self.assertIn("source parameters", str(ctx.exception))
+
+
+class TestMacroInstructionToString(unittest.TestCase):
+    """Byte-parity with ``rocisa::MacroInstruction::toString``."""
+
+    def test_empty_args(self):
+        mi = MacroInstruction("BARRIER", [])
+        # Empty args -> no leading space, just "NAME\n".
+        self.assertEqual(str(mi), "BARRIER\n")
+
+    def test_single_int_arg(self):
+        # KWA:16977 pattern: ``MacroInstruction(name="MAINLOOP", args=[0])``.
+        mi = MacroInstruction("MAINLOOP", [0])
+        self.assertEqual(str(mi), "MAINLOOP 0\n")
+
+    def test_multiple_mixed_args(self):
+        mi = MacroInstruction("X", [1, "lit", 2])
+        self.assertEqual(str(mi), "X 1, lit, 2\n")
+
+    def test_register_container_args(self):
+        # KWA:2784 pattern: register operands routed via _input_to_str
+        # which calls ``.toString()``.
+        mi = MacroInstruction("V_MAGIC_DIV", [vgpr(0), sgpr("Foo")])
+        self.assertEqual(str(mi), "V_MAGIC_DIV v0, s[sgprFoo]\n")
+
+    def test_with_comment_padded_to_col_50(self):
+        mi = MacroInstruction("X", [1], comment="hi")
+        head = "X 1"
+        pad = " " * (50 - len(head))
+        self.assertEqual(str(mi), head + pad + " // hi\n")
+
+    def test_name_with_space_emitted_verbatim(self):
+        # Components/StreamK.py:152 pattern: ``MacroInstruction(name=
+        # "s_wait_xcnt 0", args=[])``. Spaces inside name must be
+        # preserved untouched.
+        mi = MacroInstruction("s_wait_xcnt 0", [])
+        self.assertEqual(str(mi), "s_wait_xcnt 0\n")
+
+    def test_getArgStr_format(self):
+        # Helper directly: leading space + comma-join.
+        mi = MacroInstruction("X", [1, 2])
+        self.assertEqual(mi.getArgStr(), " 1, 2")
+        mi2 = MacroInstruction("X", [])
+        self.assertEqual(mi2.getArgStr(), "")
+
+
+class TestMacroInstructionDeepcopy(unittest.TestCase):
+    def test_deepcopy_independent_args_list(self):
+        mi = MacroInstruction("X", [1, 2, 3], comment="c")
+        c = copy.deepcopy(mi)
+        c.args.append(99)
+        self.assertEqual(len(mi.args), 3)
+        self.assertEqual(len(c.args), 4)
+
+    def test_deepcopy_preserves_name_and_comment(self):
+        mi = MacroInstruction("PRND", [1], comment="orig")
+        c = copy.deepcopy(mi)
+        self.assertEqual(c.name, "PRND")
+        self.assertEqual(c.comment, "orig")
+
+    def test_deepcopy_clones_container_args(self):
+        # Container args must be deep-cloned -- mutating the clone's
+        # Container should not bleed into the original.
+        rc = vgpr(0)
+        mi = MacroInstruction("X", [rc])
+        c = copy.deepcopy(mi)
+        c.args[0].setMinus(True)
+        self.assertFalse(mi.args[0].isMinus)
+        self.assertTrue(c.args[0].isMinus)
+
+    def test_clone_method_returns_independent_copy(self):
+        # rocisa Instruction::clone() returns a new shared_ptr; our
+        # ``clone()`` returns a deepcopy with a fresh memo.
+        mi = MacroInstruction("X", [1, 2])
+        c = mi.clone()
+        self.assertIsInstance(c, MacroInstruction)
+        self.assertIsNot(c, mi)
+        self.assertEqual(c.args, mi.args)
 
 
 # ===========================================================================
