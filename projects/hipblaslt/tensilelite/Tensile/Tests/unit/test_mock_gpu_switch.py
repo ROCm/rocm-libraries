@@ -20,25 +20,6 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-"""Unit tests for the GPU-less ``--mock-gpu`` switch (P0.5 prerequisite).
-
-This file accumulates the T1-T12 rigor-gate suite from GPU-MOCK-PR.md. This commit
-covers the flag-plumbing tier:
-
-* T1 ``test_flag_default_off`` - the CLI flag parses correctly (absent->False,
-  present->True), the internal ``globalParameters["MockGpu"]`` plumbing key resets to
-  ``False`` via ``restoreDefaultGlobalParameters()``, and the flag is NOT exposed on the
-  documented ``--global-parameters`` surface.
-* T2 ``test_arg_validation`` - pins the behavior commit-2 establishes at the
-  common-arguments parser layer: ``--mock-gpu`` parses without requiring an arch at parse
-  time (no premature SystemExit), yielding ``mockGpu=True`` with ``gpuTargets`` still
-  ``None``. The ``--mock-gpu`` *requires an arch* contract is enforced/pinned in the ISA
-  commit (its own test), not here.
-
-GPU-less safety: every test monkeypatches ``builtins.input`` to raise so any accidental
-stdin read (e.g. ``get_user_max_frequency``) fails loudly instead of hanging unattended.
-"""
-
 import argparse
 
 import pytest
@@ -283,10 +264,6 @@ _SEED_SIZES = [(128, 128, 1, 512), (256, 256, 1, 1024)]
 
 
 class _ProblemSizesStub:
-    """Minimal stand-in for ProblemSizes carrying just ``.problems`` (the attribute the
-    synthetic-CSV writer reads), in ProblemSizesMock style (SolutionStructs/Problem.py).
-    """
-
     def __init__(self, sizes):
         self.problems = [Problem(sizes=list(s)) for s in sizes]
 
@@ -492,7 +469,7 @@ def _make_problem_type():
 def test_off_path_text_golden(tmp_path, monkeypatch, _restore_gp):
     """T10: with MockGpu OFF, writeRunScript() and writeClientConfigIni() produce text
     byte-identical to the goldens captured from develop in commit 1. These functions are
-    CPU-only (no device/freq/detect), so the golden is capturable and reproducible
+    GPU-less (no device/freq/detect), so the golden is capturable and reproducible
     GPU-less. This is the literal 'byte-identical when off' proof for the touched output.
 
     Variable paths (the per-run tempdir, the client exe) are normalized to the same

@@ -1,14 +1,3 @@
-# End-to-end config for the GPU-less --mock-gpu switch (T9). Trimmed from
-# Tensile/Tests/common/gemm/fp16_tn.yaml: a single Assembly kernel and a single
-# problem size. Deliberately NO `ISA` pinned here -- the target arch is supplied
-# at the command line via `--gpu-targets <arch>` (the primary --mock-gpu path),
-# so the same config drives gfx942/gfx950/gfx90a. `UseEffLike` is left at its
-# default (True): addFromCSV's read_max_freq() reads the MAX_FREQ env var only
-# (no device probe) and falls back gracefully when unset, so this stays GPU-less.
-# A `LibraryLogic` section (empty -> defaultAnalysisParameters) is present so the
-# benchmark path runs through to LibraryLogic.addFromCSV end-to-end. Placed under
-# test_data/ so findConfigs() in test_config.py skips it. Consumed by
-# test_mock_gpu_switch.py::test_mock_gpu_end_to_end.
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   NumElementsToValidate: 0
@@ -19,7 +8,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   -
-    - # ProblemType
+    -
       OperationType: GEMM
       DataType: h
       DestDataType: h
@@ -29,7 +18,7 @@ BenchmarkProblems:
       TransposeB: 0
       UseBeta: True
       Batched: True
-    - # BenchmarkProblemSizeGroup
+    -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -56,10 +45,4 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [256, 256, 1, 256]
 
-# Empty -> defaultAnalysisParameters (no per-arch ArchitectureName pinned, so the
-# same config drives gfx942/gfx950/gfx90a). Triggers LibraryLogic.main ->
-# addFromCSV end-to-end on the synthetic results CSV. No LibraryClient section:
-# the GPU-less proof stops at the library-logic artifact (LibraryClient re-parses
-# logic into device-bound Solutions, which needs a populated isaInfoMap for the
-# arch and is outside this switch's scope).
 LibraryLogic:
