@@ -350,7 +350,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             if (is_apu && test_utils::get_total_system_memory(true) <= test_utils::minimum_memory_required_bytes
                 && size >= (1 << 20))
             {
-                std::cout << "Insufficient APU sytstem memory. Skipping test for size = " << size << std::endl;
+                std::cout << "Insufficient APU system memory. Skipping test for size = " << size << std::endl;
                 GTEST_SKIP();
             }
 
@@ -514,23 +514,20 @@ TEST(RocprimDeviceSortTests, LargeIndices)
     // at least some sizes that fit into device memory.
     using config = rocprim::merge_sort_config<256, 256, 1, 128, 128, 1, (1 << 17)>;
 
-    // On Windows, sizes above 2^34 cause issues that we can't currently catch by examining
-    // the hipMalloc return value or querying available memory. Workaround this for now
-    // by setting a different maximum size for that platform.
-#if defined(_WIN32)
-    const size_t max_pow2 = 34;
-#else
     const size_t max_pow2 = 37;
-#endif
+
     for(size_t size : test_utils::get_large_sizes<max_pow2>(seeds[0]))
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        test_utils::MemCheck memcheck;
 
         const auto input
             = rocprim::make_transform_iterator(rocprim::make_counting_iterator<size_t>(0),
                                                rocprim::identity<key_type>());
 
-        key_type*  d_output;
+        key_type* d_output;
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(size * sizeof(*d_output))
         hipError_t malloc_status = common::hipMallocHelper(&d_output, size * sizeof(*d_output));
         if(malloc_status == hipErrorOutOfMemory)
         {
@@ -560,6 +557,7 @@ TEST(RocprimDeviceSortTests, LargeIndices)
         ASSERT_GT(temp_storage_size_bytes, 0);
 
         // allocate temporary storage
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
         malloc_status = common::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes);
         if(malloc_status == hipErrorOutOfMemory)
         {
@@ -582,6 +580,7 @@ TEST(RocprimDeviceSortTests, LargeIndices)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Copy output to host
+        MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
         std::vector<key_type> output(size);
         HIP_CHECK(hipMemcpy(output.data(),
                             d_output,

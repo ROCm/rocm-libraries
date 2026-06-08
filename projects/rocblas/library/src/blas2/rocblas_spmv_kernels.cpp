@@ -136,20 +136,14 @@ rocblas_spmv_kernel(bool           is_upper,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto beta  = load_scalar(beta_device_host, batch, stride_beta);
         if(!alpha && beta == 1)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         auto AP = cond_load_ptr_batch(alpha, APa, batch, shift_AP, stride_AP);
@@ -158,9 +152,7 @@ rocblas_spmv_kernel(bool           is_upper,
         auto y = load_ptr_batch(ya, batch, shift_y, stride_y);
 
         rocblas_spmv_kernel_calc<DIM_X, DIM_Y>(is_upper, n, alpha, AP, x, incx, beta, y, incy);
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename TScal, typename TConstPtr, typename TPtr>
