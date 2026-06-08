@@ -452,7 +452,7 @@ class MaskKOp(BaseOp):
 class LRIncOp(BaseOp):
     """LDS buffer swap for local reads on a specific tensor."""
     tensor: str = ""
-    uid_swap: bool = False
+    isUnrollSwap: bool = False  # True when swap is at a unrollId boundary; preserved in NLL
 
     def __post_init__(self):
         self.kind = 'lr_inc'
@@ -1865,13 +1865,13 @@ class LogicalScheduler:
                     mt_changed = tensor in last_lr_mt and last_lr_mt[tensor] != mt
                     uid_changed = tensor in last_lr_uid and last_lr_uid[tensor] != lr_uid
                     if mt_changed and uid_changed:
-                        lr.preOps.append(LRIncOp(tensor=tensor, uid_swap=True))
+                        lr.preOps.append(LRIncOp(tensor=tensor, isUnrollSwap=True))
                         lr_inc_tensors.add(tensor)
                     elif mt_changed:
                         lr.preOps.append(LRIncOp(tensor=tensor))
                         lr_inc_tensors.add(tensor)
                     elif uid_changed:
-                        lr.preOps.append(LRIncOp(tensor=tensor, uid_swap=True))
+                        lr.preOps.append(LRIncOp(tensor=tensor, isUnrollSwap=True))
                     last_lr[tensor] = lr
                     last_lr_mt[tensor] = mt
                     last_lr_uid[tensor] = lr_uid
@@ -1918,7 +1918,7 @@ class LogicalScheduler:
                     per_uid_k = self._per_uid_k(tensor)
                     first_uid = lr.tiles.subIterK_start // per_uid_k
                     if first_uid != 0:
-                        lr.preOps.insert(0, LRIncOp(tensor=tensor, uid_swap=True))
+                        lr.preOps.insert(0, LRIncOp(tensor=tensor, isUnrollSwap=True))
 
         self._completed.add(Pass.GR_INC)
 
@@ -2398,7 +2398,7 @@ class LogicalScheduler:
                         # PGR=1: keep gr_inc — it advances SRD + swaps LW for
                         # tail entry (PRELOOP's single GR did neither).
                         removed.add(em.moduleId)
-                    elif em.opType == 'lr_inc' and not src.uid_swap:
+                    elif em.opType == 'lr_inc' and not src.isUnrollSwap:
                         removed.add(em.moduleId)
 
                 # Zero inflight counts on remaining WaitGR.

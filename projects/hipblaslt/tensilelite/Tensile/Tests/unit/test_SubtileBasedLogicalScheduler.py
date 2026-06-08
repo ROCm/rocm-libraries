@@ -2039,7 +2039,7 @@ class TestBuildNLL:
 
     def test_multi_du_nll(self):
         """Multi-DU: NLL strips GRs, gr_inc, iteration-boundary lr_inc,
-        but keeps uid_swap lr_inc (needed to switch LDS read buffer between uids)."""
+        but keeps isUnrollSwap lr_inc (needed to switch LDS read buffer between uids)."""
         cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2)
         sched = LogicalScheduler(cfg)
         sched.build()
@@ -2054,12 +2054,12 @@ class TestBuildNLL:
         assert 'mfma' in all_ops
         assert 'gr' not in all_ops
         assert 'gr_inc' not in all_ops
-        uid_swap_lr_incs = [s for op, s in zip(all_ops, all_sources)
-                            if op == 'lr_inc' and s.uid_swap]
-        non_uid_lr_incs = [s for op, s in zip(all_ops, all_sources)
-                           if op == 'lr_inc' and not s.uid_swap]
-        assert len(uid_swap_lr_incs) > 0, "uid_swap lr_inc must be kept in NLL"
-        assert len(non_uid_lr_incs) == 0, "iteration-boundary lr_inc must be removed in NLL"
+        unroll_swap_lr_incs = [s for op, s in zip(all_ops, all_sources)
+                               if op == 'lr_inc' and s.isUnrollSwap]
+        non_swap_lr_incs = [s for op, s in zip(all_ops, all_sources)
+                            if op == 'lr_inc' and not s.isUnrollSwap]
+        assert len(unroll_swap_lr_incs) > 0, "isUnrollSwap lr_inc must be kept in NLL"
+        assert len(non_swap_lr_incs) == 0, "iteration-boundary lr_inc must be removed in NLL"
 
 
 # ══════════════════════════════════════════════════════════════
