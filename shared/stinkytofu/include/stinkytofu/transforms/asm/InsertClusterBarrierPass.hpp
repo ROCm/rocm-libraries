@@ -114,33 +114,40 @@ class Pass;
 /// every load in a label-/branch-delimited segment we walk backward
 /// to the nearest preceding `s_barrier_wait -1`; triggers are
 /// deduplicated by identity so multiple loads sharing the same anchor
-/// wait yield exactly one handshake. The cluster wait always fires;
-/// only the wave-gated signal is suppressed on the final iter (no
-/// further publication needed). Two emission modes, selected by
-/// `findLiveLoopCounterLCmpUpstream` (equality form only -- the
-/// inherited SCC drives a single-iter skip; see .cpp for details):
+/// wait yield exactly one handshake. Two emission modes, selected by
+/// `findLiveLoopCounterLCmpUpstream`:
 ///
 ///   (a) inherited-SCC mode -- when SIA (typically `ScheduleIterAlg=4`)
 ///       hoists the loop-exit `s_cmp_eq_{u32,i32} LCL, imm` above the
 ///       anchor, the outer cbranch reuses that SCC instead of emitting
 ///       a fresh gate cmp (which would clobber the SCC the downstream
-///       cbranch still needs). A clone of the upstream cmp is inserted
-///       between the inner and outer skip labels to rebuild SCC for
-///       the downstream cbranch.
+///       cbranch still needs). The cluster WAIT is ungated and only the
+///       wave-gated signal is suppressed (single-iter skip); a clone of
+///       the upstream cmp is inserted between the inner and outer skip
+///       labels to rebuild SCC for the downstream cbranch. Left
+///       untouched by "Fix B".
 ///
-///   (b) fresh-gate mode -- when no such upstream cmp is live, emit
-///       `s_cmp_eq_i32 LCL, pgrValue+1` as the outer gate. The previous
-///       emission `s_cmp_le_u32 LCL, pgrValue+1` would clobber SCC in
-///       mode (a)'s scenario, causing wave 0 to diverge from sibling
-///       waves on the boundary iter; mode (a) sidesteps this and mode
-///       (b) is unchanged on the (already dead) SCC path.
+///   (b) fresh-gate mode ("Fix B" drain-drop) -- when no such upstream
+///       cmp is live, the whole cluster handshake is dropped on the
+///       drain iterations where the paired `tensor_load_to_lds` is
+///       disabled (`LCL <= pgrValue`). Because the ping-pong pairing is
+///       offset (each wait consumes the PREVIOUS signal), the WAIT and
+///       SIGNAL are gated with ASYMMETRIC thresholds: skip the WAIT at
+///       `LCL <= pgrValue` and the SIGNAL one stage earlier at
+///       `LCL <= pgrValue+1` (so the trailing leftover signal is dropped
+///       too). This keeps cluster signal/wait balanced for every trip
+///       count, and the `<= pgr` predicate matches Tensile's own
+///       `s_cmp_le_i32 LCL, pgrValue` load-disable cmov.
 ///
-/// Shape (fresh-gate mode shown; inherited-SCC mode drops the gate cmp
-/// and inserts a `<clone of upstream LCL cmp>` line between the two
-/// skip labels):
+/// Shape (fresh-gate / Fix B mode shown; inherited-SCC mode keeps an
+/// ungated leading wait, drops the signal gate cmp, and inserts a
+/// `<clone of upstream LCL cmp>` line between the two skip labels):
 ///
+///     s_cmp_le_i32 s[sgprLoopCounterL], <pgrValue>                  // WAIT gate (drain iter)
+///     s_cbranch_scc1 label_skipCBWait_LCL_<HASH_WAIT>
 ///     s_barrier_wait -3                                            // cluster barrier wait
-///     s_cmp_eq_i32 s[sgprLoopCounterL], <pgrValue+1>                // outer LCL gate (mode b)
+///   label_skipCBWait_LCL_<HASH_WAIT>:
+///     s_cmp_le_i32 s[sgprLoopCounterL], <pgrValue+1>                // SIGNAL gate (one stage earlier)
 ///     s_cbranch_scc1 label_skipCBPreSignal_LCL_<HASH_OUTER>
 ///     s_cmp_eq_u32 s[sgprWaveIdx], 0                                // inner wave gate
 ///     s_cbranch_scc0 label_skipCBPreSignal_<HASH_INNER>
@@ -182,10 +189,13 @@ class Pass;
 /// \p pgrValue is Tensile's `PrefetchGlobalRead` setting. It controls the
 /// outer LoopCounterL gates of Rules 3 and 4:
 ///   - Rule 3 skips the signal when `LoopCounterL <= pgrValue`.
-///   - Rule 4 skips the signal when `LoopCounterL == pgrValue + 1`
-///     (fresh-gate mode via `s_cmp_eq_i32`; inherited-SCC mode reuses an
-///     upstream `LoopCounterL == pgrValue` compare instead).
-/// The default of 1 matches PGR=1 (`<= 1` for Rule 3, `== 2` for Rule 4).
+///   - Rule 4 fresh-gate ("Fix B") mode skips the WAIT when
+///     `LoopCounterL <= pgrValue` and the SIGNAL when
+///     `LoopCounterL <= pgrValue + 1`; inherited-SCC mode keeps an
+///     ungated wait and reuses an upstream `LoopCounterL == imm` compare
+///     for a single-iter signal skip.
+/// The default of 1 matches PGR=1 (`<= 1` for Rule 3; `<= 1` wait / `<= 2`
+/// signal for Rule 4 fresh-gate mode).
 ///
 /// \p plrValue is Tensile's `PrefetchLocalRead` setting. It enables Rule
 /// 3's anchor mode (b): when `plrValue == 0` and the backward scan from
