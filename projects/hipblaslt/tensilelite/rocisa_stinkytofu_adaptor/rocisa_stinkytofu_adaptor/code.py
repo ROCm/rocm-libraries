@@ -94,9 +94,16 @@ What it does (real):
       not picklable")`` (distinct from Module's own "Module is not
       picklable" message).
 
+    - ``SignatureCodeMeta`` / ``SignatureBase`` — kernel descriptor
+      and AMDGPU metadata emitters. ``SignatureBase`` composes an
+      internal kernel-descriptor block, optional description comments,
+      and a ``SignatureCodeMeta`` YAML trailer. ``_SignatureArgument``
+      and ``_SignatureKernelDescriptor`` are module-private helpers
+      (not exported -- mirror rocisa C++ which only binds the two
+      public classes).
+
 Not yet done (dummy):
-    - Container nodes: ``KernelBody``, ``BitfieldUnion``,
-      ``SignatureCodeMeta``, ``SignatureBase``.
+    - Container nodes: ``KernelBody``, ``BitfieldUnion``.
 
 Future:
     When this shim grows beyond gfx1250, prefer adding sibling free
@@ -119,10 +126,12 @@ from typing import Any, Iterable, List, Optional, Sequence
 from ._dummy import make_dummy_class
 from .base import (
     Item,
+    isaToGfx as _isa_to_gfx,
     outputNoComment as _outputNoComment,
     setVgprIdx as _set_vgpr_idx,
     setVgprMsb as _set_vgpr_msb,
 )
+from .enum import SignatureValueKind as _SVK
 from .instruction import (
     Instruction as _Instruction,
     MacroInstruction as _MacroInstruction,
@@ -1574,6 +1583,432 @@ class Macro(Item):
 
 
 # ---------------------------------------------------------------------------
+# Signature helpers (module-private) + public SignatureCodeMeta / SignatureBase
+# ---------------------------------------------------------------------------
+#
+# ``_SignatureArgument`` and ``_SignatureKernelDescriptor`` mirror rocisa
+# C++ internal structs; only ``SignatureCodeMeta`` and ``SignatureBase``
+# are exported (nanobind binds those two, not the helpers).
+
+_VALUE_TYPE_SIZE: dict = {
+    "i8": 1, "i16": 2, "i32": 4, "i64": 8,
+    "u8": 1, "u16": 2, "u32": 4, "u64": 8,
+    "bf16": 2, "f16": 2, "f32": 4, "f32c": 8,
+    "f64": 8, "f64c": 16, "pkf16": 4, "struct": 8,
+}
+
+
+def _sig_block(comment: str) -> str:
+    """Single-line block comment -- mirror of rocisa ``block()``."""
+    return f"/* {comment} */\n"
+
+
+def _sig_block3line(comment: str) -> str:
+    """Multi-line banner comment -- mirror of rocisa ``block3Line()``."""
+    out = "\n/******************************************/\n"
+    for line in comment.splitlines():
+        out += f"/* {line:<38} */\n"
+    out += "/******************************************/\n"
+    return out
+
+
+def _sig_kind_is_global_buffer(kind: Any) -> bool:
+    return int(kind) == int(_SVK.SIG_GLOBALBUFFER)
+
+
+def _sig_kind_is_value(kind: Any) -> bool:
+    return int(kind) == int(_SVK.SIG_VALUE)
+
+
+class _SignatureArgument(Item):
+    """Internal kernarg descriptor leaf -- mirror of ``SignatureArgument``."""
+
+    __slots__ = ("valueKind", "valueType", "offset", "size", "addrSpaceQual")
+
+    def __init__(
+        self,
+        offset: int,
+        name: str,
+        valueKind: Any,
+        valueType: str,
+        addrSpaceQual: str = "",
+    ) -> None:
+        super().__init__(name=name)
+        self.valueKind = valueKind
+        self.valueType = valueType
+        self.offset = int(offset)
+        self.size = self._value_to_size(valueKind, valueType)
+        self.addrSpaceQual = addrSpaceQual
+
+    @staticmethod
+    def _value_to_size(valueKind: Any, valueType: str) -> int:
+        if _sig_kind_is_global_buffer(valueKind):
+            return 8
+        try:
+            return _VALUE_TYPE_SIZE[valueType]
+        except KeyError as exc:
+            raise RuntimeError(f"Unknown value type: {valueType}") from exc
+
+    def _value_kind_to_str(self) -> str:
+        if _sig_kind_is_global_buffer(self.valueKind):
+            return "global_buffer"
+        if _sig_kind_is_value(self.valueKind):
+            return "by_value"
+        raise RuntimeError("Unknown value kind")
+
+    def toString(self) -> str:
+        indent = "        "
+        out = f"{indent[2:]}- .name:            {self.name}\n"
+        out += f"{indent}.size:            {self.size}\n"
+        out += f"{indent}.offset:          {self.offset}\n"
+        out += f"{indent}.value_kind:      {self._value_kind_to_str()}\n"
+        out += f"{indent}.value_type:      {self.valueType}\n"
+        if self.addrSpaceQual:
+            out += f"{indent}.address_space:   {self.addrSpaceQual}\n"
+        return out
+
+    def __str__(self) -> str:
+        return self.toString()
+
+
+class _SignatureKernelDescriptor(Item):
+    """Internal ``.amdhsa_kernel`` header -- mirror of ``SignatureKernelDescriptor``."""
+
+    __slots__ = (
+        "totalVgprs", "totalAgprs", "totalSgprs", "originalTotalVgprs",
+        "accumOffset", "groupSegSize", "sgprWorkGroup", "vgprWorkItem",
+        "enablePreloadKernArgs",
+    )
+
+    def __init__(
+        self,
+        name: str,
+        groupSegSize: int,
+        sgprWorkGroup: Sequence[int],
+        vgprWorkItem: int,
+        totalVgprs: int = 0,
+        totalAgprs: int = 0,
+        totalSgprs: int = 0,
+        preloadKernArgs: bool = False,
+    ) -> None:
+        super().__init__(name=name)
+        self.groupSegSize = int(groupSegSize)
+        self.sgprWorkGroup = tuple(int(x) for x in sgprWorkGroup)
+        self.vgprWorkItem = int(vgprWorkItem)
+        self.totalAgprs = int(totalAgprs)
+        self.totalSgprs = int(totalSgprs)
+        self.originalTotalVgprs = int(totalVgprs)
+        self.enablePreloadKernArgs = bool(preloadKernArgs)
+        self._apply_gpr_layout(int(totalVgprs), int(totalAgprs))
+
+    def _apply_gpr_layout(self, total_vgprs: int, total_agprs: int) -> None:
+        if self.getArchCaps()["ArchAccUnifiedRegs"]:
+            self.accumOffset = ((total_vgprs + 7) // 8) * 8
+            self.totalVgprs = self.accumOffset + total_agprs
+        else:
+            self.accumOffset = -1
+            self.totalVgprs = total_vgprs
+
+    def setGprs(self, totalVgprs: int, totalAgprs: int, totalSgprs: int) -> None:
+        if self.getArchCaps()["ArchAccUnifiedRegs"]:
+            self.accumOffset = ((totalVgprs + 7) // 8) * 8
+            self.totalVgprs = self.accumOffset + totalAgprs
+        else:
+            self.accumOffset = -1
+            self.totalVgprs = max(totalAgprs, totalVgprs)
+        self.originalTotalVgprs = int(totalVgprs)
+        self.totalAgprs = int(totalAgprs)
+        self.totalSgprs = int(totalSgprs)
+
+    def getNextFreeVgpr(self) -> int:
+        return self.totalVgprs
+
+    def getNextFreeSgpr(self) -> int:
+        return self.totalSgprs
+
+    def toString(self) -> str:
+        kd_indent = "  "
+        isa = self.kernel().isa
+        if isa is None:
+            raise RuntimeError("kernel ISA is not set")
+        out = f'.amdgcn_target "amdgcn-amd-amdhsa--{_isa_to_gfx(isa)}"\n'
+        out += ".text\n"
+        out += f".protected {self.name}\n"
+        out += f".globl {self.name}\n"
+        out += ".p2align 8\n"
+        out += f".type {self.name},@function\n"
+        out += ".section .rodata,#alloc\n"
+        out += ".p2align 6\n"
+        out += f".amdhsa_kernel {self.name}\n"
+        out += f"{kd_indent}.amdhsa_user_sgpr_kernarg_segment_ptr 1\n"
+        if self.accumOffset != -1:
+            out += (
+                f"{kd_indent}.amdhsa_accum_offset {self.accumOffset}"
+                " // accvgpr offset\n"
+            )
+        out += (
+            f"{kd_indent}.amdhsa_next_free_vgpr {self.totalVgprs}"
+            " // vgprs\n"
+        )
+        out += (
+            f"{kd_indent}.amdhsa_next_free_sgpr {self.totalSgprs}"
+            " // sgprs\n"
+        )
+        out += (
+            f"{kd_indent}.amdhsa_group_segment_fixed_size {self.groupSegSize}"
+            " // lds bytes\n"
+        )
+        if self.getArchCaps()["HasWave32"]:
+            wavefront = self.kernel().wavefrontSize
+            if wavefront == 32:
+                out += (
+                    f"{kd_indent}.amdhsa_wavefront_size32 1"
+                    " // 32-thread wavefronts\n"
+                )
+            else:
+                out += (
+                    f"{kd_indent}.amdhsa_wavefront_size32 0"
+                    " // 64-thread wavefronts\n"
+                )
+        out += f"{kd_indent}.amdhsa_private_segment_fixed_size 0\n"
+        out += (
+            f"{kd_indent}.amdhsa_system_sgpr_workgroup_id_x "
+            f"{self.sgprWorkGroup[0]}\n"
+        )
+        out += (
+            f"{kd_indent}.amdhsa_system_sgpr_workgroup_id_y "
+            f"{self.sgprWorkGroup[1]}\n"
+        )
+        out += (
+            f"{kd_indent}.amdhsa_system_sgpr_workgroup_id_z "
+            f"{self.sgprWorkGroup[2]}\n"
+        )
+        out += (
+            f"{kd_indent}.amdhsa_system_vgpr_workitem_id "
+            f"{self.vgprWorkItem}\n"
+        )
+        out += f"{kd_indent}.amdhsa_float_denorm_mode_32 3\n"
+        out += f"{kd_indent}.amdhsa_float_denorm_mode_16_64 3\n"
+        if self.enablePreloadKernArgs:
+            num_wg_sgpr = sum(self.sgprWorkGroup)
+            out += (
+                f"{kd_indent}.amdhsa_user_sgpr_count {16 - num_wg_sgpr}\n"
+            )
+            out += (
+                f"{kd_indent}.amdhsa_user_sgpr_kernarg_preload_length "
+                f"{14 - num_wg_sgpr}\n"
+            )
+            out += (
+                f"{kd_indent}.amdhsa_user_sgpr_kernarg_preload_offset 0\n"
+            )
+        out += ".end_amdhsa_kernel\n"
+        out += ".text\n"
+        out += _sig_block(f"Num VGPR   ={self.originalTotalVgprs}")
+        out += _sig_block(f"Num AccVGPR={self.totalAgprs}")
+        out += _sig_block(f"Num SGPR   ={self.totalSgprs}")
+        return out
+
+    def prettyPrint(self, indent: str = "") -> str:
+        return f"{indent}{type(self).__name__} "
+
+    def __str__(self) -> str:
+        return self.toString()
+
+
+class SignatureCodeMeta(Item):
+    """YAML ``.amdgpu_metadata`` trailer -- mirror of ``SignatureCodeMeta``."""
+
+    __slots__ = (
+        "kernArgsVersion", "groupSegSize", "flatWgSize", "codeObjectVersion",
+        "totalVgprs", "totalSgprs", "offset", "argList",
+    )
+
+    def __init__(
+        self,
+        name: str,
+        kernArgsVersion: int,
+        groupSegSize: int,
+        flatWgSize: int,
+        codeObjectVersion: str,
+        totalVgprs: int = 0,
+        totalSgprs: int = 0,
+    ) -> None:
+        super().__init__(name=name)
+        self.kernArgsVersion = int(kernArgsVersion)
+        self.groupSegSize = int(groupSegSize)
+        self.flatWgSize = int(flatWgSize)
+        self.codeObjectVersion = str(codeObjectVersion)
+        self.totalVgprs = int(totalVgprs)
+        self.totalSgprs = int(totalSgprs)
+        self.offset = 0
+        self.argList: List[_SignatureArgument] = []
+
+    def setGprs(self, totalVgprs: int, totalSgprs: int) -> None:
+        self.totalVgprs = int(totalVgprs)
+        self.totalSgprs = int(totalSgprs)
+
+    def addArg(
+        self,
+        name: str,
+        kind: Any,
+        type: str,
+        addrSpaceQual: Optional[str] = None,
+    ) -> None:
+        qual = addrSpaceQual or ""
+        sa = _SignatureArgument(self.offset, name, kind, type, qual)
+        self.argList.append(sa)
+        self.offset += sa.size
+
+    def toString(self) -> str:
+        out = ".amdgpu_metadata\n"
+        out += "---\n"
+        out += "custom.config:\n"
+        out += "  InternalSupportParams:\n"
+        out += f"    KernArgsVersion: {self.kernArgsVersion}\n"
+        out += "amdhsa.version:\n"
+        out += "  - 1\n"
+        if self.codeObjectVersion in ("4", "default"):
+            out += "  - 1\n"
+        elif self.codeObjectVersion == "5":
+            out += "  - 2\n"
+        out += "amdhsa.kernels:\n"
+        out += f"  - .name: {self.name}\n"
+        out += f"    .symbol: '{self.name}.kd'\n"
+        out += "    .language:                   OpenCL C\n"
+        out += "    .language_version:\n"
+        out += "      - 2\n"
+        out += "      - 0\n"
+        out += "    .args:\n"
+        for arg in self.argList:
+            out += arg.toString()
+        out += f"    .group_segment_fixed_size:   {self.groupSegSize}\n"
+        out += "    .kernarg_segment_align:      8\n"
+        kernarg_size = ((self.offset + 7) // 8) * 8
+        out += f"    .kernarg_segment_size:       {kernarg_size}\n"
+        out += f"    .max_flat_workgroup_size:    {self.flatWgSize}\n"
+        out += "    .private_segment_fixed_size: 0\n"
+        out += f"    .sgpr_count:                 {self.totalSgprs}\n"
+        out += "    .sgpr_spill_count:           0\n"
+        out += f"    .vgpr_count:                 {self.totalVgprs}\n"
+        out += "    .vgpr_spill_count:           0\n"
+        out += (
+            f"    .wavefront_size:             {self.kernel().wavefrontSize}\n"
+        )
+        out += "...\n"
+        out += ".end_amdgpu_metadata\n"
+        out += f"{self.name}:\n"
+        return out
+
+    def prettyPrint(self, indent: str = "") -> str:
+        return f"{indent}{type(self).__name__} "
+
+    def __str__(self) -> str:
+        return self.toString()
+
+    def __deepcopy__(self, memo):
+        raise RuntimeError("SignatureCodeMeta is not deepcopyable")
+
+    def __reduce__(self):
+        raise RuntimeError("SignatureCodeMeta is not picklable")
+
+
+class SignatureBase(Item):
+    """Full kernel signature -- mirror of ``SignatureBase``."""
+
+    __slots__ = ("kernelDescriptor", "codeMeta", "descriptionTopic", "descriptionList")
+
+    def __init__(
+        self,
+        kernelName: str,
+        kernArgsVersion: int,
+        codeObjectVersion: str,
+        groupSegmentSize: int,
+        sgprWorkGroup: Sequence[int],
+        vgprWorkItem: int,
+        flatWorkGroupSize: int,
+        totalVgprs: int = 0,
+        totalAgprs: int = 0,
+        totalSgprs: int = 0,
+        preloadKernArgs: bool = False,
+    ) -> None:
+        super().__init__(name=kernelName)
+        self.kernelDescriptor = _SignatureKernelDescriptor(
+            kernelName,
+            groupSegmentSize,
+            sgprWorkGroup,
+            vgprWorkItem,
+            totalVgprs,
+            totalAgprs,
+            totalSgprs,
+            preloadKernArgs,
+        )
+        self.codeMeta = SignatureCodeMeta(
+            kernelName,
+            kernArgsVersion,
+            groupSegmentSize,
+            flatWorkGroupSize,
+            codeObjectVersion,
+            totalVgprs,
+            totalSgprs,
+        )
+        self.descriptionTopic = TextBlock("")
+        self.descriptionList: List[TextBlock] = []
+
+    def setGprs(self, totalVgprs: int, totalAgprs: int, totalSgprs: int) -> None:
+        self.kernelDescriptor.setGprs(totalVgprs, totalAgprs, totalSgprs)
+        self.codeMeta.setGprs(totalVgprs, totalSgprs)
+
+    def addArg(
+        self,
+        name: str,
+        kind: Any,
+        type: str,
+        addrSpaceQual: Optional[str] = None,
+    ) -> None:
+        self.codeMeta.addArg(name, kind, type, addrSpaceQual)
+
+    def addDescriptionTopic(self, text: str) -> None:
+        self.descriptionTopic = TextBlock(_sig_block3line(text))
+
+    def addDescriptionBlock(self, text: str) -> None:
+        self.descriptionList.append(TextBlock(_sig_block(text)))
+
+    def addDescription(self, text: str) -> None:
+        self.descriptionList.append(TextBlock(_slash(text)))
+
+    def getNextFreeVgpr(self) -> int:
+        return self.kernelDescriptor.getNextFreeVgpr()
+
+    def getNextFreeSgpr(self) -> int:
+        return self.kernelDescriptor.getNextFreeSgpr()
+
+    def clearDescription(self) -> None:
+        self.descriptionList.clear()
+
+    def toString(self) -> str:
+        out = self.kernelDescriptor.toString()
+        topic = self.descriptionTopic.toString()
+        if topic:
+            out += topic
+        for block in self.descriptionList:
+            out += block.toString()
+        out += self.codeMeta.toString()
+        return out
+
+    def prettyPrint(self, indent: str = "") -> str:
+        return f"{indent}{type(self).__name__} "
+
+    def __str__(self) -> str:
+        return self.toString()
+
+    def __deepcopy__(self, memo):
+        raise RuntimeError("SignatureBase is not deepcopyable")
+
+    def __reduce__(self):
+        raise RuntimeError("SignatureBase is not picklable")
+
+
+# ---------------------------------------------------------------------------
 # Dummy code-composition components (pending real implementation).
 # ---------------------------------------------------------------------------
 #
@@ -1587,8 +2022,7 @@ class Macro(Item):
 #     prettyPrint / count output during bring-up.
 #
 # Inheritance map (mirror of code.hpp):
-#   SignatureCodeMeta / SignatureBase / KernelBody
-#     -- ``: Item`` in C++ ⇒ ``base=Item`` here.
+#   KernelBody -- ``: Item`` in C++ ⇒ ``base=Item`` here.
 #   BitfieldUnion -- standalone polymorphic root in C++
 #     (code.hpp:928, NOT a subclass of Item). Kept ``base=object``
 #     so ``isinstance(bf, Item)`` correctly stays False; the C++ class
@@ -1596,11 +2030,9 @@ class Macro(Item):
 #
 # Already real (above this block): TextBlock, Module, ValueIf,
 # ValueElseIf, ValueEndif, ValueSet, RegSet, Label, StructuredModule,
-# Macro.
+# Macro, SignatureCodeMeta, SignatureBase.
 
 BitfieldUnion = make_dummy_class(f"{_P}.BitfieldUnion")
-SignatureCodeMeta = make_dummy_class(f"{_P}.SignatureCodeMeta", base=Item)
-SignatureBase = make_dummy_class(f"{_P}.SignatureBase", base=Item)
 KernelBody = make_dummy_class(f"{_P}.KernelBody", base=Item)
 
 

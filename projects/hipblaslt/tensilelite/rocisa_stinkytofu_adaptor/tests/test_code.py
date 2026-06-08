@@ -62,6 +62,7 @@ if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
 from rocisa_stinkytofu_adaptor.base import Item  # noqa: E402
+from rocisa_stinkytofu_adaptor.enum import SignatureValueKind as SVK  # noqa: E402
 from rocisa_stinkytofu_adaptor.code import (  # noqa: E402
     BitfieldUnion,
     KernelBody,
@@ -1506,12 +1507,6 @@ class TestDummyClassesInheritItem(unittest.TestCase):
     # TestValueConditionals / TestValueSet* / TestRegSet* / TestLabel*
     # / TestStructuredModule* below); isinstance-Item coverage is
     # preserved there alongside the rest of their behavioural tests.
-
-    def test_signaturecodemeta_is_item(self):
-        self.assertIsInstance(SignatureCodeMeta(), Item)
-
-    def test_signaturebase_is_item(self):
-        self.assertIsInstance(SignatureBase(), Item)
 
     def test_kernelbody_is_item(self):
         self.assertIsInstance(KernelBody(), Item)
@@ -3238,6 +3233,206 @@ class TestMacroModuleIntegration(unittest.TestCase):
 
 # ===========================================================================
 # (end of Macro tests)
+# ===========================================================================
+
+
+# ===========================================================================
+# SignatureCodeMeta / SignatureBase
+# ===========================================================================
+
+
+class _SignatureKernelSetup(unittest.TestCase):
+    """Pump ISA + wavefront so signature emitters can read kernel()."""
+
+    def setUp(self) -> None:
+        from rocisa_stinkytofu_adaptor import base as _base  # noqa: WPS433
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+
+        rocIsa.getInstance().init((12, 5, 0))
+        _base.setKernel((12, 5, 0), 64)
+
+
+def _make_signature_code_meta() -> SignatureCodeMeta:
+    return SignatureCodeMeta(
+        "k",
+        kernArgsVersion=1,
+        groupSegSize=256,
+        flatWgSize=64,
+        codeObjectVersion="4",
+    )
+
+
+def _make_signature_base(**kwargs) -> SignatureBase:
+    defaults = dict(
+        kernelName="k",
+        kernArgsVersion=1,
+        codeObjectVersion="4",
+        groupSegmentSize=256,
+        sgprWorkGroup=(1, 1, 0),
+        vgprWorkItem=0,
+        flatWorkGroupSize=64,
+    )
+    defaults.update(kwargs)
+    return SignatureBase(**defaults)
+
+
+class TestSignatureCodeMetaConstruction(unittest.TestCase):
+    def test_is_item_subclass(self):
+        meta = _make_signature_code_meta()
+        self.assertIsInstance(meta, Item)
+
+    def test_ctor_fields(self):
+        meta = _make_signature_code_meta()
+        self.assertEqual(meta.name, "k")
+        self.assertEqual(meta.kernArgsVersion, 1)
+        self.assertEqual(meta.groupSegSize, 256)
+        self.assertEqual(meta.flatWgSize, 64)
+        self.assertEqual(meta.codeObjectVersion, "4")
+        self.assertEqual(meta.offset, 0)
+        self.assertEqual(meta.argList, [])
+
+
+class TestSignatureCodeMetaAddArg(_SignatureKernelSetup, unittest.TestCase):
+    def test_add_arg_accumulates_offset(self):
+        meta = _make_signature_code_meta()
+        meta.addArg("alpha", SVK.SIG_VALUE, "f32")
+        meta.addArg("D", SVK.SIG_GLOBALBUFFER, "f32", "generic")
+        self.assertEqual(len(meta.argList), 2)
+        self.assertEqual(meta.argList[0].offset, 0)
+        self.assertEqual(meta.argList[0].size, 4)
+        self.assertEqual(meta.argList[1].offset, 4)
+        self.assertEqual(meta.argList[1].size, 8)
+        self.assertEqual(meta.offset, 12)
+
+    def test_unknown_value_type_raises(self):
+        meta = _make_signature_code_meta()
+        with self.assertRaises(RuntimeError):
+            meta.addArg("x", SVK.SIG_VALUE, "not_a_type")
+
+
+class TestSignatureCodeMetaSetGprs(_SignatureKernelSetup, unittest.TestCase):
+    def test_set_gprs_updates_counts(self):
+        meta = _make_signature_code_meta()
+        meta.setGprs(40, 20)
+        s = meta.toString()
+        self.assertIn(".vgpr_count:                 40", s)
+        self.assertIn(".sgpr_count:                 20", s)
+
+
+class TestSignatureCodeMetaToString(_SignatureKernelSetup, unittest.TestCase):
+    def test_metadata_header_and_kernarg_align(self):
+        meta = _make_signature_code_meta()
+        meta.addArg("numWG", SVK.SIG_VALUE, "u32")
+        s = meta.toString()
+        self.assertTrue(s.startswith(".amdgpu_metadata\n"))
+        self.assertIn("KernArgsVersion: 1", s)
+        self.assertIn("amdhsa.version:\n  - 1\n  - 1\n", s)
+        self.assertIn(".kernarg_segment_size:       8\n", s)
+        self.assertIn(".wavefront_size:             64\n", s)
+        self.assertTrue(s.endswith("k:\n"))
+
+    def test_code_object_version_five(self):
+        meta = SignatureCodeMeta("k", 1, 0, 64, "5")
+        s = meta.toString()
+        self.assertIn("amdhsa.version:\n  - 1\n  - 2\n", s)
+
+
+class TestSignatureCodeMetaCopyRejected(unittest.TestCase):
+    def test_deepcopy_raises(self):
+        meta = _make_signature_code_meta()
+        with self.assertRaises(RuntimeError):
+            copy.deepcopy(meta)
+
+    def test_pickle_raises(self):
+        meta = _make_signature_code_meta()
+        with self.assertRaises(RuntimeError):
+            pickle.dumps(meta)
+
+
+class TestSignatureBaseConstruction(unittest.TestCase):
+    def test_is_item_subclass(self):
+        sig = _make_signature_base()
+        self.assertIsInstance(sig, Item)
+
+    def test_composes_descriptor_and_meta(self):
+        sig = _make_signature_base(kernelName="my_k")
+        self.assertEqual(sig.name, "my_k")
+        self.assertEqual(sig.kernelDescriptor.name, "my_k")
+        self.assertEqual(sig.codeMeta.name, "my_k")
+
+
+class TestSignatureBaseSetGprs(_SignatureKernelSetup, unittest.TestCase):
+    def test_set_gprs_syncs_both_children(self):
+        sig = _make_signature_base()
+        sig.setGprs(32, 4, 16)
+        self.assertEqual(sig.getNextFreeVgpr(), 32)
+        self.assertEqual(sig.getNextFreeSgpr(), 16)
+        s = sig.toString()
+        self.assertIn(".amdhsa_next_free_vgpr 32 // vgprs", s)
+        self.assertIn(".vgpr_count:                 32", s)
+
+
+class TestSignatureBaseAddArg(_SignatureKernelSetup, unittest.TestCase):
+    def test_add_arg_delegates_to_code_meta(self):
+        sig = _make_signature_base()
+        sig.addArg("A", SVK.SIG_GLOBALBUFFER, "f32", "generic")
+        self.assertEqual(len(sig.codeMeta.argList), 1)
+        self.assertIn("- .name:            A", sig.toString())
+
+
+class TestSignatureBaseDescriptions(_SignatureKernelSetup, unittest.TestCase):
+    def test_description_helpers_emit_in_order(self):
+        sig = _make_signature_base()
+        sig.addDescriptionTopic("Optimizations and Config:")
+        sig.addDescriptionBlock("ThreadTile= 8 x 8")
+        s = sig.toString()
+        self.assertIn("/* Optimizations and Config:", s)
+        self.assertIn("/* ThreadTile= 8 x 8 */", s)
+
+        sig.addDescription("tail note")
+        sig.clearDescription()
+        sig.addDescriptionBlock("after clear")
+        s2 = sig.toString()
+        self.assertNotIn("tail note", s2)
+        self.assertNotIn("ThreadTile= 8 x 8", s2)
+        self.assertIn("/* after clear */", s2)
+        self.assertIn("Optimizations and Config:", s2)
+
+
+class TestSignatureBaseToString(_SignatureKernelSetup, unittest.TestCase):
+    def test_smoke_matches_rocisa_test_shape(self):
+        sig = SignatureBase(
+            kernelName="123",
+            kernArgsVersion=1,
+            codeObjectVersion="4",
+            groupSegmentSize=256,
+            sgprWorkGroup=(1, 1, 100),
+            vgprWorkItem=1,
+            flatWorkGroupSize=256,
+            preloadKernArgs=True,
+        )
+        s = str(sig)
+        self.assertIn('.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"', s)
+        self.assertIn(".protected 123", s)
+        self.assertIn(".amdhsa_user_sgpr_kernarg_preload_length", s)
+        self.assertIn(".amdgpu_metadata", s)
+        self.assertIn("123:\n", s)
+
+
+class TestSignatureBaseCopyRejected(unittest.TestCase):
+    def test_deepcopy_raises(self):
+        sig = _make_signature_base()
+        with self.assertRaises(RuntimeError):
+            copy.deepcopy(sig)
+
+    def test_pickle_raises(self):
+        sig = _make_signature_base()
+        with self.assertRaises(RuntimeError):
+            pickle.dumps(sig)
+
+
+# ===========================================================================
+# (end of Signature tests)
 # ===========================================================================
 
 

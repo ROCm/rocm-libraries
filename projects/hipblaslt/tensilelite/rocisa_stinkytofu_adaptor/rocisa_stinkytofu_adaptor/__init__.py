@@ -60,7 +60,6 @@ What it does (real):
       ``functions``, ``asmpass``, ``macro``, ``register``.
 
 Not yet done (dummy):
-    - Free functions: ``isaToGfx``.
     - ``getGlcBitName`` / ``getSlcBitName`` (real; gfx1250 asm caps).
     - Counters: ``count*``, ``find*``, ``getMFMAs``.
     - Interop hooks: ``isSupportedByStinkyTofu``, ``StinkyAsmModule``,
@@ -250,7 +249,7 @@ class rocIsa:
     def _kernel_info(self, info: KernelInfo) -> None:
         _base.setKernelInfo(info)
 
-isaToGfx = make_dummy_func(f"{_P}.isaToGfx")
+isaToGfx = _base.isaToGfx
 
 
 def getGlcBitName() -> str:

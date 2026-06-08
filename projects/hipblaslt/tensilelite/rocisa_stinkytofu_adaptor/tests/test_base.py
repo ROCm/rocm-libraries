@@ -65,6 +65,27 @@ from rocisa_stinkytofu_adaptor.base import DummyItem, Item  # noqa: E402
 
 
 # ===========================================================================
+# isaToGfx
+# ===========================================================================
+
+
+class TestIsaToGfx(unittest.TestCase):
+    def test_tuple_isa_gfx1250(self):
+        self.assertEqual(_base.isaToGfx((12, 5, 0)), "gfx1250")
+
+    def test_tuple_stepping_hex_digit(self):
+        self.assertEqual(_base.isaToGfx((9, 4, 10)), "gfx94a")
+
+    def test_kernel_info_style_object(self):
+        class _Isa:
+            major = 12
+            minor = 5
+            stepping = 0
+
+        self.assertEqual(_base.isaToGfx(_Isa()), "gfx1250")
+
+
+# ===========================================================================
 # Helpers
 # ===========================================================================
 

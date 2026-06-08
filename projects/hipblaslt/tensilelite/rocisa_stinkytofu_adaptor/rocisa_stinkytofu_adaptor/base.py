@@ -430,6 +430,24 @@ def getKernel() -> KernelInfo:
     return _kernel_info
 
 
+def isaToGfx(arch: Any) -> str:
+    """Mirror of ``rocisa::isaToGfx`` / ``getGfxNameTuple`` (helper.hpp).
+
+    Accepts a 3-tuple/list ``(major, minor, stepping)`` or any object
+    with ``major / minor / stepping`` attributes (rocisa ``IsaVersion``).
+    """
+    if hasattr(arch, "major"):
+        major = int(arch.major)
+        minor = int(arch.minor)
+        stepping = int(arch.stepping)
+    else:
+        major = int(arch[0])
+        minor = int(arch[1])
+        stepping = int(arch[2])
+    hex_digit = "0123456789abcdef"[stepping & 0xF]
+    return f"gfx{major}{minor}{hex_digit}"
+
+
 # ---------------------------------------------------------------------------
 # Data-dict accessors (pickled across ParallelMap2 worker boundary).
 # ---------------------------------------------------------------------------
