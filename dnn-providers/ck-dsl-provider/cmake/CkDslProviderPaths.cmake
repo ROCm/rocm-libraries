@@ -75,11 +75,23 @@ function(ck_dsl_provider_resolve_python_paths)
             "${_providerPyDir}/ck_dsl_provider/__init__.py.")
     endif()
 
+    # The bundled python-build-standalone prefix (build-tree absolute).
+    # Provisioned by cmake/CkDslPython.cmake into the CKDSL_PYTHON_PREFIX
+    # cache var before this function runs.
+    if(NOT CKDSL_PYTHON_PREFIX)
+        message(FATAL_ERROR
+            "CK DSL provider: CKDSL_PYTHON_PREFIX is not set. "
+            "ck_dsl_provider_provision_python() must run before "
+            "ck_dsl_provider_resolve_python_paths().")
+    endif()
+
     set(CK_DSL_PYTHON_PACKAGE_PATH "${_resolvedCkDslDir}" PARENT_SCOPE)
     set(CK_DSL_PROVIDER_PYTHON_PACKAGE_PATH "${_providerPyDir}" PARENT_SCOPE)
+    set(CK_DSL_PYTHON_HOME "${CKDSL_PYTHON_PREFIX}" PARENT_SCOPE)
 
     message(STATUS
         "CK DSL provider Python paths: "
         "ck_dsl=${_resolvedCkDslDir}, "
-        "ck_dsl_provider=${_providerPyDir}")
+        "ck_dsl_provider=${_providerPyDir}, "
+        "python_home=${CKDSL_PYTHON_PREFIX}")
 endfunction()

@@ -21,6 +21,15 @@ inline constexpr std::string_view kCkDslPythonPackagePath =
 inline constexpr std::string_view kCkDslProviderPythonPackagePath =
     "@CK_DSL_PROVIDER_PYTHON_PACKAGE_PATH@";
 
+// Absolute path of the bundled python-build-standalone prefix (the dir
+// containing bin/ lib/ include/) provisioned by cmake/CkDslPython.cmake.
+// The embedded interpreter sets PyConfig.home / executable from this so
+// the bundled stdlib loads deterministically, independent of any host
+// Python. This is the build-tree path; an installed plugin resolves the
+// prefix relative to its own .so (see EmbeddedInterpreter).
+inline constexpr std::string_view kCkDslPythonHome =
+    "@CK_DSL_PYTHON_HOME@";
+
 }  // namespace ck_dsl_provider
 
 #endif  // CK_DSL_PROVIDER_PATHS_H

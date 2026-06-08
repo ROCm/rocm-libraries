@@ -7,10 +7,17 @@
 
 #include <string>
 
+#include "ckdsl_provider_paths.h"
 #include "python/EmbeddedInterpreter.hpp"
 
 namespace py = pybind11;
 using ck_dsl_provider::EmbeddedInterpreter;
+
+namespace {
+bool startsWith(const std::string& value, const std::string& prefix) {
+    return value.size() >= prefix.size() && value.compare(0, prefix.size(), prefix) == 0;
+}
+}  // namespace
 
 // All three tests live in one TestSuite so the call_once init runs once
 // across the suite while still letting each TEST verify a separate
@@ -74,4 +81,39 @@ TEST(TestEmbeddedInterpreter, SurvivesGilReentry) {
         auto executable = sys.attr("executable").cast<std::string>();
         EXPECT_FALSE(executable.empty());
     }
+}
+
+// The interpreter must run from the bundled python-build-standalone
+// prefix, not from any host Python. sys.prefix and the stdlib's os.py
+// both resolving under the baked prefix proves PyConfig.home took effect
+// and the host environment did not win (isolated config).
+TEST(TestEmbeddedInterpreter, StdlibResolvesFromBundledPrefix) {
+    EmbeddedInterpreter::ensureInitialized();
+
+    py::gil_scoped_acquire gil;
+    const std::string home{ck_dsl_provider::kCkDslPythonHome};
+    ASSERT_FALSE(home.empty()) << "kCkDslPythonHome must be baked in";
+
+    py::module_ sys = py::module_::import("sys");
+    auto prefix = sys.attr("prefix").cast<std::string>();
+    EXPECT_TRUE(startsWith(prefix, home))
+        << "sys.prefix='" << prefix << "' is not under bundled home '" << home << "'";
+
+    py::module_ os = py::module_::import("os");
+    auto osFile = os.attr("__file__").cast<std::string>();
+    EXPECT_TRUE(startsWith(osFile, home))
+        << "os.__file__='" << osFile << "' is not under bundled home '" << home << "'";
+}
+
+// ctypes -> comgr is the mandatory FFI path the CK DSL compile pipeline
+// drives. _ctypes is statically linked into the bundled libpython, so
+// this confirms it loads and can open libamd_comgr through the embedded
+// interpreter. Host-only: opening the library needs no GPU.
+TEST(TestEmbeddedInterpreter, CtypesLoadsComgr) {
+    EmbeddedInterpreter::ensureInitialized();
+
+    py::gil_scoped_acquire gil;
+    py::module_ ctypes = py::module_::import("ctypes");
+    py::object handle = ctypes.attr("CDLL")("libamd_comgr.so");
+    EXPECT_FALSE(handle.is_none());
 }

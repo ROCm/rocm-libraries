@@ -52,46 +52,35 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 find_package(hip REQUIRED)
 
-# --- Embedded Python (libpython + pybind11) ----------------------------------
-# I-2 wires an embedded CPython interpreter into the plugin .so so that
-# the provider can drive the CK DSL compile pipeline at runtime (plan
-# §3.2, Option E + pybind11). The plumbing below mirrors the working
-# spike at WIP/pybind11_rtld_local_spike/.
-#
-# Pin to system Python so a uv-managed Python in ~/.local does not
-# hijack the discovery (which crashes at runtime with "failed to get
-# the Python codec of the filesystem encoding" because uv's stdlib
-# lives at an interpreter-internal path). See PREP_FINDINGS P-3.
-if(NOT DEFINED Python3_ROOT_DIR)
-    set(Python3_ROOT_DIR "/usr")
-endif()
-if(NOT DEFINED Python3_FIND_STRATEGY)
-    set(Python3_FIND_STRATEGY "LOCATION")
-endif()
+# --- Embedded Python (python-build-standalone + pybind11) --------------------
+# The plugin embeds a self-contained CPython so the provider can drive
+# the CK DSL compile pipeline at runtime with no dependency on the host
+# system Python. The interpreter is provisioned from astral's
+# python-build-standalone (a pinned, relocatable prefix), discovered via
+# find_package below, and bundled beside the plugin at install time.
+# See cmake/CkDslPython.cmake. Provisioning honors -DCKDSL_PYTHON_DIST_DIR
+# for air-gapped / pre-staged builds, else downloads the pinned tarball.
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/CkDslPython.cmake)
+ck_dsl_provider_provision_python()
+
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 message(STATUS "CK DSL provider Python3: ${Python3_EXECUTABLE} (${Python3_VERSION})")
 
-# pybind11: prefer the standard CMake config; if that fails, fall back
-# to asking the pinned interpreter where its cmake dir is (this is the
-# common case for `pip install --user pybind11`, which lands the
-# cmake config under ~/.local/lib/.../pybind11/share/cmake/pybind11).
+# pybind11: prefer an installed CMake config; otherwise fetch a pinned
+# release. pybind11 is header-only for the embed use case and resolves
+# the provisioned interpreter through Python3_ROOT_DIR (set by the
+# provisioning step above), so no host `pip install` is required.
 find_package(pybind11 CONFIG QUIET)
 if(NOT pybind11_FOUND)
-    execute_process(
-        COMMAND ${Python3_EXECUTABLE} -m pybind11 --cmakedir
-        OUTPUT_VARIABLE _pybind11_cmakedir
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _pybind11_probe_result
+    include(FetchContent)
+    set(PYBIND11_FINDPYTHON ON CACHE INTERNAL "")
+    fetchcontent_declare(
+        pybind11 URL https://github.com/pybind/pybind11/archive/refs/tags/v2.13.6.tar.gz
+                     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
-    if(NOT _pybind11_probe_result EQUAL 0)
-        message(FATAL_ERROR
-            "pybind11 not found via find_package and `${Python3_EXECUTABLE} -m pybind11 --cmakedir` failed. "
-            "Install with: ${Python3_EXECUTABLE} -m pip install --user pybind11")
-    endif()
-    set(pybind11_DIR "${_pybind11_cmakedir}" CACHE PATH "pybind11 CMake config dir (auto-detected)" FORCE)
-    find_package(pybind11 CONFIG REQUIRED)
+    fetchcontent_makeavailable(pybind11)
 endif()
-message(STATUS "CK DSL provider pybind11: ${pybind11_INCLUDE_DIR} (${pybind11_VERSION})")
+message(STATUS "CK DSL provider pybind11: ${pybind11_VERSION}")
 
 # hipdnn SDK dependencies - use targets directly if available (superbuild),
 # otherwise find installed packages (true standalone).
