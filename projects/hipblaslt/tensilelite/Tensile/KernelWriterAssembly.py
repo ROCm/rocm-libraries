@@ -78,6 +78,7 @@ from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout
+from .OccupancyMeasure import compute_occupancy_from_asm_source
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
@@ -98,6 +99,7 @@ def _temporalHint(kernel, tc):
 def _nonVolatile(kernel, tc):
   return NonVolatile(kernel.get("NonVolatile%s"%_cacheHintTensor(tc), 0))
 
+import re
 from math import ceil, floor, log, prod
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -176,8 +178,15 @@ class KernelWriterAssembly(KernelWriter):
       self.language = "ASM"
       return (0, "") # should this be an non zero number
 
+    isCustom = isCustomKernelConfig(kernel)
     try:
-      code = self._getCustomKernelSource(kernel, CUSTOM_KERNEL_PATH) if isCustomKernelConfig(kernel) else self._getKernelSource(kernel)
+      if isCustom:
+        code = self._getCustomKernelSource(kernel, CUSTOM_KERNEL_PATH)
+        occ = compute_occupancy_from_asm_source(kernel, code)
+        if occ is not None:
+          kernel["CUOccupancy"] = occ
+      else:
+        code = self._getKernelSource(kernel)
       errcode = 0
     except RuntimeError as e:
       printWarning(f"Failed to generate assembly source code for {kernel}: {e}")
@@ -190,7 +199,7 @@ class KernelWriterAssembly(KernelWriter):
 
   def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False):
     multiplier = int(ceil(max(numThreads, 256) / 256.0)) # example: wg=512 multiplier=2, 1024=4
-    maxOccupancy = self.consts.maxOccupancy//multiplier
+    maxOccupancy = self.states.archCaps["MaxWavesPerSimd"]//multiplier
 
     vgprAllocateAligned = 4    if not doubleVgpr else 8
     totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
@@ -1939,6 +1948,63 @@ class KernelWriterAssembly(KernelWriter):
           self.vgprPool.size(), self.sgprPool.size()))
       mkb.body.add(SEndpgm(comment="overflowed resources"), 0)
       mkb.body.add(ValueIf(value="0"), 1)
+
+  ##############################################################################
+  # updateOccupancyFromScan: rescan instruction body after rocIsaPass and
+  # correct the kernel descriptor + CUOccupancy for ArchAccUnifiedRegs ISAs.
+  ##############################################################################
+  def updateOccupancyFromScan(self, kernel, mkb) -> None:
+    """Rescan the instruction body for actual max VGPR/AGPR register usage after
+    rocIsaPass has run, and update the kernel descriptor's next_free_vgpr plus
+    kernel["CUOccupancy"] if the scanned count is lower than the pool estimate.
+
+    For ArchAccUnifiedRegs ISAs (gfx90a/gfx942/gfx950), rocIsaPass's
+    removeDuplicateAssignment can eliminate high-indexed VGPR copies, reducing
+    the actual register footprint below the pool high-water mark that was used in
+    checkResources.  This makes CUOccupancy reflect the count the assembler will
+    actually emit in .amdhsa_next_free_vgpr rather than the (higher) pool peak.
+    """
+    if not self.states.archCaps.get("ArchAccUnifiedRegs"):
+      return
+
+    body_text = str(mkb.body)
+
+    # Collect all VGPR and AGPR indices referenced in instructions.
+    vgpr_refs: set = set()
+    agpr_refs: set = set()
+
+    vgpr_refs.update(int(m) for m in re.findall(r'\bv(\d+)\b', body_text))
+    agpr_refs.update(int(m) for m in re.findall(r'\ba(\d+)\b', body_text))
+    for start, end in re.findall(r'\bv\[(\d+):(\d+)\]', body_text):
+      vgpr_refs.update(range(int(start), int(end) + 1))
+    for start, end in re.findall(r'\ba\[(\d+):(\d+)\]', body_text):
+      agpr_refs.update(range(int(start), int(end) + 1))
+
+    if not vgpr_refs:
+      return
+
+    # Compute instruction-level register counts (high-water mark of actual usage).
+    scanned_vgprs = max(vgpr_refs) + 1
+    # Acc VGPRs are always fully populated by MFMA; fall back to pool size when
+    # the scan gives more (e.g. if acc refs span the full pool range).
+    scanned_agprs = (max(agpr_refs) + 1) if agpr_refs else self.agprPool.size()
+    scanned_agprs = min(scanned_agprs, self.agprPool.size())
+
+    # Only update when the scan discovers fewer registers than the pool estimate.
+    pool_total    = int(ceil(self.vgprPool.size() / 8.0)) * 8 + self.agprPool.size()
+    scanned_total = int(ceil(scanned_vgprs       / 8.0)) * 8 + scanned_agprs
+
+    if scanned_total >= pool_total:
+      return  # No improvement; leave checkResources result unchanged.
+
+    # Correct the kernel descriptor so .amdhsa_next_free_vgpr matches reality.
+    mkb.setGprs(totalVgprs=scanned_vgprs, totalAgprs=scanned_agprs,
+                totalSgprs=self.sgprPool.size())
+
+    # Recompute occupancy from the corrected (scanned) register counts.
+    kernel["CUOccupancy"] = self.getOccupancy(
+      kernel["NumThreads"], scanned_vgprs, self.sgprPool.size(),
+      self.getLdsSize(kernel), scanned_agprs, self.states.doubleVgpr)
 
   ##############################################################################
   # code phrase for load batched address from array of buffer pointer

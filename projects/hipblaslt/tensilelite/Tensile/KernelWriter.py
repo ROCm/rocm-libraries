@@ -81,8 +81,6 @@ class ConstValues():
   initSgprValue:int = 0x0  # Value to use for Sgpr Init, if enabled
   initVgprValue:int = 0xFFFFFFFF  # Value to use for Vgpr Init, if enabled
 
-  maxOccupancy: int = 10
-
   ldsOOB: int       = 0xF00000
 
 @dataclass
@@ -5948,6 +5946,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     passResult = rocIsaPass(moduleKernelBody, ripo)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
+    # For ArchAccUnifiedRegs ISAs, removeDuplicateAssignment in rocIsaPass can
+    # eliminate high-indexed VGPR copies, reducing actual instruction-level register
+    # usage below the pool high-water mark set in checkResources.  Rescan now to
+    # correct the kernel descriptor and CUOccupancy before the assembly is emitted.
+    self.updateOccupancyFromScan(kernel, moduleKernelBody)
+
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
 
@@ -9031,6 +9035,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def removeGROffsetsVariableSgprsFromPool(self, kernel):
     return ""
+
+  def updateOccupancyFromScan(self, kernel, mkb) -> None:
+    """Override in KernelWriterAssembly to rescan actual register usage after
+    rocIsaPass optimizations and correct kernel["CUOccupancy"] + the kernel
+    descriptor's next_free_vgpr for ArchAccUnifiedRegs ISAs."""
+    pass
 
   ##############################################################################
   # Check Resources

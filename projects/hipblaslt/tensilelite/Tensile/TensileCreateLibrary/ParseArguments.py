@@ -195,8 +195,32 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         default=False,
         help="Disable assembly comments in generated assembly code"
     )
+    argParser.add_argument(
+        "--occupancy-from-elf",
+        dest="OccupancyFromElf",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable the ELF-based occupancy debug pass (opt-in; default: off).  After "
+            "compiling kernels, vgpr_count is read from the AMDHSA msgpack metadata in each "
+            "assembled .o ELF file and CUOccupancy is recomputed using the hardware occupancy "
+            "formula.  No GPU required; overhead is negligible (~microseconds per kernel).  "
+            "Since updateOccupancyFromScan now sets both the .amdhsa_next_free_vgpr directive "
+            "and kernel['CUOccupancy'] from the same scanned register counts before the .s is "
+            "written, the ELF is a faithful readback of what codegen already computed.  This "
+            "pass is therefore a debugging tool (verify the scan result was assembled as "
+            "expected), not a correction pass.  For authoritative hardware measurement use "
+            "--occupancy-from-hip (requires GPU)."
+        ),
+    )
+    argParser.add_argument(
+        "--no-occupancy-from-elf",
+        dest="OccupancyFromElf",
+        action="store_false",
+        help="(Deprecated no-op: ELF pass is now off by default.)",
+    )
 
-    args = argParser.parse_args()
+    args = argParser.parse_args(input)
 
     arguments = {}
     arguments["RuntimeLanguage"] = args.RuntimeLanguage
@@ -225,5 +249,6 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     arguments["OutputPath"] = args.OutputPath
     arguments["Experimental"] = args.Experimental
     arguments["GenSolTable"] = args.GenSolTable
+    arguments["OccupancyFromElf"] = args.OccupancyFromElf
 
     return arguments

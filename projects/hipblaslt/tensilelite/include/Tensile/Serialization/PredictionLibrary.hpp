@@ -31,6 +31,7 @@
 #include <Tensile/PredictionLibrary.hpp>
 
 #include <Tensile/Macros.hpp>
+#include <iostream>
 
 TENSILE_HIDDEN_BEGIN
 
@@ -105,6 +106,15 @@ namespace TensileLite
                                         solution->sizeMapping.matrixInstruction[2])};
                             }
 
+                            if(Debug::Instance().printPropertyEvaluation()
+                               && solution->sizeMapping.CUOccupancy <= 0)
+                            {
+                                std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
+                                          << solution->sizeMapping.CUOccupancy
+                                          << " (<=0) for solution '" << solution->kernelName
+                                          << "'; clamping to 1 in origami config."
+                                          << " Set TENSILE_DB=0x2 to enable this message.\n";
+                            }
                             origami::config_t origami_config = {
                                 .mt = {solution->sizeMapping.macroTile.x,
                                        solution->sizeMapping.macroTile.y,

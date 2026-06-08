@@ -3555,6 +3555,14 @@ namespace TensileLite
                     .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
                     .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
                 };
+                if(Debug::Instance().printPropertyEvaluation() && sizeMapping.CUOccupancy <= 0)
+                {
+                    std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
+                              << sizeMapping.CUOccupancy
+                              << " (<=0) for kernel '" << kernelName
+                              << "'; clamping to 1 for origami grid selection."
+                              << " Set TENSILE_DB=0x2 to enable this message.\n";
+                }
                 origami::config_t origami_config = {
                     .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),
                                                 static_cast<size_t>(sizeMapping.macroTile.y),
