@@ -2763,9 +2763,7 @@ namespace rocsparse
         // negative boost can never swap the pivot sign (preserving inertia).
         const double abs_value = rocsparse::abs(value);
         const double abs_boost = rocsparse::abs(boost_value);
-        return (abs_value > static_cast<double>(0))
-                   ? (static_cast<double>(abs_boost) * (value / abs_value))
-                   : static_cast<double>(abs_boost);
+        return (abs_value > 0.0) ? (abs_boost * (value / abs_value)) : abs_boost;
     }
 
     template <>
@@ -2777,9 +2775,7 @@ namespace rocsparse
         // negative boost can never swap the pivot sign (preserving inertia).
         const float abs_value = rocsparse::abs(value);
         const float abs_boost = rocsparse::abs(boost_value);
-        return (abs_value > static_cast<float>(0))
-                   ? (static_cast<float>(abs_boost) * (value / abs_value))
-                   : static_cast<float>(abs_boost);
+        return (abs_value > 0.f) ? (abs_boost * (value / abs_value)) : abs_boost;
     }
 
     template <>

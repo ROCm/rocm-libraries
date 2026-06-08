@@ -111,6 +111,15 @@ namespace rocsparse_clients
 
 }
 
+template <typename T>
+static inline T host_assign_ilu0_boost_value(const T& value, const T& boost_val)
+{
+    const auto abs_value = std::abs(value);
+    const auto abs_boost = std::abs(boost_val);
+    return (abs_value > 0) ? (static_cast<T>(abs_boost) * (value / abs_value))
+                           : static_cast<T>(abs_boost);
+}
+
 template <typename T, typename I, typename J>
 void host_csrilu0(J                         M,
                   const I*                  csr_row_ptr,
@@ -177,7 +186,9 @@ void host_csrilu0(J                         M,
 
                 if(boost_enable)
                 {
-                    diag_val = (boost_tol[0] >= std::abs(diag_val)) ? boost_val[0] : diag_val;
+                    diag_val        = (boost_tol[0] >= std::abs(diag_val))
+                                          ? host_assign_ilu0_boost_value(diag_val, boost_val[0])
+                                          : diag_val;
                     csr_val[diag_j] = diag_val;
                 }
                 else
@@ -246,7 +257,8 @@ void host_csrilu0(J                         M,
             {
                 if(std::abs(csr_val[diag_pos]) <= boost_tol[0])
                 {
-                    csr_val[diag_pos] = boost_val[0];
+                    csr_val[diag_pos]
+                        = host_assign_ilu0_boost_value(csr_val[diag_pos], boost_val[0]);
                 }
             }
             else
@@ -446,7 +458,9 @@ void host_bsrilu0(rocsparse_direction       dir,
 
                 if(boost_enable)
                 {
-                    diag = (boost_tol[0] >= std::abs(diag)) ? boost_val[0] : diag;
+                    diag = (boost_tol[0] >= std::abs(diag))
+                               ? host_assign_ilu0_boost_value(diag, boost_val[0])
+                               : diag;
                     bsr_val[BSR_IND(j, bi, bi, dir)] = diag;
                 }
                 else
