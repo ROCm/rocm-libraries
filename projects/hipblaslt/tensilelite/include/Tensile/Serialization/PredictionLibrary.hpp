@@ -30,6 +30,7 @@
 
 #include <Tensile/PredictionLibrary.hpp>
 
+#include <Tensile/Debug.hpp>
 #include <Tensile/Macros.hpp>
 #include <iostream>
 

@@ -127,8 +127,8 @@ def test_gfx950_physical_vgpr_pool_is_512():
         (68864,  2),   # case 4 compiled kernel LDS → should give 2
         (65536,  2),   # 64 KB
         # LDS at 80 KB threshold
-        (81920,  2),   # exactly 160/2 KB → still 2
-        (81921,  1),   # just above → rounds down to 81920 in 256-byte granularity → 2? see below
+        (81920,  2),   # exactly 160/2 KB → rounds to 81920 → 163840//81920 = 2
+        (81921,  1),   # just above → rounds up to 82176 (256-byte granularity) → 163840//82176 = 1
         # LDS above 80 KB: only 1 workgroup fits
         (86016,  1),   # case 2 compiled kernel LDS
         (94016,  1),   # case 5 compiled kernel LDS

@@ -45,7 +45,7 @@ def compute_occupancy_from_resources(
     vgpr_occ    = physical_vgpr // max(vgpr_count, 1)
     sgpr_occ    = physical_sgpr // max(sgpr_count, 1) if sgpr_count > 0 else max_waves_per_simd
     lds_occ     = device_lds // max(((lds_bytes + 255) // 256) * 256, 256) if lds_bytes > 0 else max_waves_per_simd
-    multiplier  = int(ceil(num_threads / 256.0))
+    multiplier  = max(int(ceil(num_threads / 256.0)), 1)
     wave_occ    = max_waves_per_simd // multiplier
 
     return max(1, min(vgpr_occ, sgpr_occ, lds_occ, wave_occ, max_waves_per_simd))
@@ -141,10 +141,3 @@ def compute_occupancy_from_asm_source(
         )
     except Exception:
         return None
-
-
-# ── Utility: gfx string from ISA tuple ────────────────────────────────────────
-
-def isa_to_gfx(isa: tuple) -> str:
-    """Convert an ISA tuple to gfx string (e.g. (9,5,0) -> 'gfx950')."""
-    return "gfx" + "".join(str(x) for x in isa)

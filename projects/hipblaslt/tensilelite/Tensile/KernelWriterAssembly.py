@@ -260,6 +260,10 @@ class KernelWriterAssembly(KernelWriter):
 
   @staticmethod
   def getLdsLimitedOccupancy(deviceLdsSize, ldsSize):
+    if ldsSize == 0:
+      # No LDS usage: LDS is not the binding constraint.
+      # Return a large sentinel so other limits (VGPR, wave cap) win in min().
+      return deviceLdsSize // 256
     # As ldsSize gets large, rounding might push us slightly higher than deviceLdsSize.
     # Clamp at deviceLdsSize
     ldsSize = min(ldsSize + 255, deviceLdsSize) & 0xffffff00 # 256-byte granularity
