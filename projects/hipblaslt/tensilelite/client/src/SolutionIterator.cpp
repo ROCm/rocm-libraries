@@ -162,11 +162,6 @@ namespace TensileLite
             return true;
         }
 
-        void SolutionIterator::recordNonFatalError()
-        {
-            m_encounteredNonFatalError = true;
-        }
-
         static std::string formatFormocastInfo(ContractionSolution* const solution,
                                                std::unordered_map<int,origami::Formocast::PredictedPerformance> predPerfs,
                                                int currentSolutionIdx, double currentPrediction, int currentIdx, int lastSolutionIdx)

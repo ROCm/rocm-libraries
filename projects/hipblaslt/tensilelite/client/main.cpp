@@ -347,7 +347,7 @@ namespace TensileLite
                 ("best-solution",            po::value<bool>()->default_value(false), "Best solution benchmark mode")
 
                 ("results-file",             po::value<std::string>()->default_value("results.csv"), "File name to write results.")
-                ("errors-file",             po::value<std::string>()->default_value("errors.csv"), "File name to write errors.")
+                ("errors-file",             po::value<std::string>(), "File name to write errors.")
                 ("log-file",                 po::value<std::string>(),                               "File name for output log.")
                 ("log-file-append",          po::value<bool>()->default_value(false),                "Append to log file.")
                 ("log-level",                po::value<LogLevel>()->default_value(LogLevel::Debug),  "Log level")
@@ -1197,9 +1197,12 @@ int main(int argc, const char* argv[])
             reporters->addReporter(LogReporter::Default(args, logFile, LogLevel::Normal));
         }
 
-        std::string filename = args["errors-file"].as<std::string>();
-        auto logFile = std::make_shared<std::ofstream>(filename.c_str());
-        reporters->addReporter(LogReporter::Default(args, logFile, LogLevel::Terse));
+        if(args.count("errors-file"))
+        {
+            std::string filename = args["errors-file"].as<std::string>();
+            auto        logFile  = std::make_shared<std::ofstream>(filename.c_str());
+            reporters->addReporter(LogReporter::Default(args, logFile, LogLevel::Terse));
+        }
 
         listeners.setReporter(reporters);
     }
