@@ -56,14 +56,17 @@ protected:
 
     // Fix PRNG seed so that input tensor data is identical across runs and machines,
     // ensuring reproducibility of any determinism failure.
-    void SetUp() override { prng::reset_seed(); }
+    void SetUp() override
+    {
+        prng::reset_seed();
+        // Enable Xdlops solvers (disabled by default on some GPUs)
+        putenv(const_cast<char*>("MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_XDLOPS=1"));
+    }
 
     void RunTest()
     {
         const auto& config = GetParam();
-        std::cout << "Testing configuration: " << config << std::endl;
-
-        auto& handle = get_handle();
+        auto& handle       = get_handle();
 
         // Create tensors (NCHW layout, non-grouped)
         std::vector<size_t> input_dims  = {config.N, config.C, config.H, config.W};
@@ -144,17 +147,10 @@ protected:
         problem.SetupFloats(ctx);
 
         const bool applicable = solv.IsApplicable(ctx, problem);
-        std::cerr << "[DEBUG DeterministicTest] solver=" << solv.SolverDbId()
-                  << " GPU=" << handle.GetDeviceName() << " config=" << config
-                  << " deterministic=" << conv_desc.attribute.deterministic.Get()
-                  << " applicable=" << applicable << std::endl;
-
         if(!applicable)
         {
             GTEST_SKIP() << solv.SolverDbId() << " Not Applicable on this GPU/config";
         }
-
-        std::cout << "Using solver: " << solv.SolverDbId() << std::endl;
 
         Workspace wspace{};
         if(solv.MayNeedWorkspace())
@@ -166,8 +162,6 @@ protected:
         auto sol         = solv.GetSolution(ctx, problem, perf_config);
         ASSERT_TRUE(sol.Succeeded());
         ASSERT_TRUE(sol.invoker_factory);
-
-        std::cout << "Performance config: " << perf_config << std::endl;
 
         const auto invoker = handle.PrepareInvoker(*sol.invoker_factory, sol.construction_params);
 
@@ -281,9 +275,6 @@ protected:
                                << first_mismatch << ": reference = " << reference[first_mismatch]
                                << ", current = " << current[first_mismatch];
         }
-
-        std::cout << "All " << NUM_ITERATIONS << " iterations produced bit-exact results"
-                  << std::endl;
     }
 };
 
@@ -293,6 +284,12 @@ template <typename T, Direction CONV_DIR, typename SolverType>
 class GPU_ConvDeterministicRejection : public ::testing::TestWithParam<DeterministicTestConfig>
 {
 protected:
+    void SetUp() override
+    {
+        // Enable Xdlops solvers (disabled by default on some GPUs)
+        putenv(const_cast<char*>("MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_XDLOPS=1"));
+    }
+
     void RunTest()
     {
         const auto& config = GetParam();
@@ -333,8 +330,6 @@ protected:
         }();
         problem_ndet.SetupFloats(ctx);
         const bool applicable_ndet = solv.IsApplicable(ctx, problem_ndet);
-        std::cerr << "[DEBUG RejectionTest] solver=" << solv.SolverDbId() << " config=" << config
-                  << " applicable_without_det=" << applicable_ndet << std::endl;
         if(!applicable_ndet)
             GTEST_SKIP() << solv.SolverDbId() << " Not Applicable on this GPU/config";
 
@@ -353,8 +348,6 @@ protected:
         problem_det.SetupFloats(ctx);
 
         const bool applicable_det = solv.IsApplicable(ctx, problem_det);
-        std::cerr << "[DEBUG RejectionTest] solver=" << solv.SolverDbId()
-                  << " applicable_with_det=" << applicable_det << " expected=false" << std::endl;
         EXPECT_FALSE(applicable_det)
             << solv.SolverDbId() << " must reject non-deterministic shape in deterministic mode";
     }
@@ -476,10 +469,14 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Values(DeterministicTestConfig{
                              1, 64, 64, 14, 14, 1, 1, 0, 0, 1, 1, 1, 1}));
 
+// WrwV4R4Xdlops: N=2, C=192, K=16, H=16, W=16 → gemm_k_block=2 (boundary test)
+// N=2 allows split into 2 blocks, smaller H/W forces split-K
+// This tests the boundary condition: gemm_k_block=2 should be ACCEPTED in deterministic mode
+// (deterministic allows k_block <= 2, rejects k_block > 2)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_ConvDeterministic_WrwV4R4Xdlops_BFP16,
                          testing::Values(DeterministicTestConfig{
-                             1, 192, 16, 28, 28, 1, 1, 0, 0, 1, 1, 1, 1}));
+                             2, 192, 16, 16, 16, 1, 1, 0, 0, 1, 1, 1, 1}));
 
 // Rejection test configs
 // BwdV1R1: stride=1 < threshold=dilation*(y-1)+1=3 → AtomicAdd path → must be rejected
