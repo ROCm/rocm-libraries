@@ -382,7 +382,7 @@ def try_parse_native_instance(instance, instance_id, problem_name):
     return None
 
 
-def parse_fwd_instances(instances, problem_name):
+def parse_fwd_instances(instances, problem_name, verbose=True):
     convs = []
     for instance_id, instance in enumerate(instances):
         if instance.find("#") != -1 or instance.find(";") != -1:
@@ -484,7 +484,7 @@ def parse_fwd_instances(instances, problem_name):
     return convs
 
 
-def parse_bwd_weight_instances(instances, problem_name):
+def parse_bwd_weight_instances(instances, problem_name, verbose=True):
     convs = []
 
     for instance_id, instance in enumerate(instances):
@@ -493,7 +493,8 @@ def parse_bwd_weight_instances(instances, problem_name):
         native = try_parse_native_instance(instance, instance_id, problem_name)
         if native is not None:
             if native.streamk_enabled and get_dtype(problem_name) == "float" and native.pipeline_version.find("ASYNC") != -1:
-                print(f"Skipping instance {instance_id} with streamk, async, float since it's not supported yet.")
+                if verbose:
+                    print(f"Skipping instance {instance_id} with streamk, async, float since it's not supported yet.")
                 continue
             convs.append(native)
             continue
@@ -661,18 +662,20 @@ def parse_bwd_weight_instances(instances, problem_name):
         if not check_vectors(
             a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector
         ):
-            print(
-                f"Skipping instance {instance_id} with irregular load since it's not supported yet."
-            )
+            if verbose:
+                print(
+                    f"Skipping instance {instance_id} with irregular load since it's not supported yet."
+                )
             continue
         if not check_warp_coverage(
             m_per_block, n_per_block, k_per_block,
             a_scalar_per_vector, b_scalar_per_vector,
             variant="bwd_weight",
         ):
-            print(
-                f"Skipping instance {instance_id} with multiple warps per continous tile dim since it's not supported yet."
-            )
+            if verbose:
+                print(
+                    f"Skipping instance {instance_id} with multiple warps per continous tile dim since it's not supported yet."
+                )
             continue
 
         if is_explicit_gemm:
@@ -700,7 +703,7 @@ def parse_bwd_weight_instances(instances, problem_name):
     return convs
 
 
-def parse_bwd_data_instances(instances, problem_name):
+def parse_bwd_data_instances(instances, problem_name, verbose=True):
     convs = []
 
     for instance_id, instance in enumerate(instances):
@@ -800,7 +803,8 @@ def parse_bwd_data_instances(instances, problem_name):
 
         # Skip irregular vector sizes — no HW vector load instructions for odd widths
         if not check_vectors(a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector):
-            print(f"Skipping instance {instance_id} with irregular load since it's not supported yet.")
+            if verbose:
+                print(f"Skipping instance {instance_id} with irregular load since it's not supported yet.")
             continue
 
         # Skip multi-warp: single warp can't cover tile dim when it exceeds warp_size * vec
@@ -809,14 +813,16 @@ def parse_bwd_data_instances(instances, problem_name):
             a_scalar_per_vector, b_scalar_per_vector,
             variant="bwd_data",
         ):
-            print(f"Skipping instance {instance_id} with multiple warps per continous tile dim since it's not supported yet.")
+            if verbose:
+                print(f"Skipping instance {instance_id} with multiple warps per continous tile dim since it's not supported yet.")
             continue
         if not check_bwd_data_vec_coverage(
             m_per_block, n_per_block, k_per_block,
             m_warp, n_warp, k_warp,
             a_scalar_per_vector, b_scalar_per_vector,
         ):
-            print(f"Skipping instance {instance_id} because current scalar per vector exceedes tile size")
+            if verbose:
+                print(f"Skipping instance {instance_id} because current scalar per vector exceedes tile size")
             continue
 
         conv = ConvInstanceTemplateParams(
@@ -962,7 +968,7 @@ DEPTHWISE_CONFIGS = [
 ]
 
 
-def parse_depthwise_config(conf_path: Path) -> list:
+def parse_depthwise_config(conf_path: Path, verbose=True) -> list:
     """Parse a depthwise config file.
 
     Accepts the ``GroupedConvolutionForwardDepthwise<...>`` format.

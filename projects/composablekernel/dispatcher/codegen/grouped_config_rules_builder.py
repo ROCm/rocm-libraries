@@ -160,7 +160,7 @@ def _conv_params_to_dict(p: ConvInstanceTemplateParams) -> dict:
     }
 
 
-def _build_data(input_path, variant, layout, datatype, ndim, specialization) -> dict:
+def _build_data(input_path, variant, layout, datatype, ndim, specialization, verbose=False) -> dict:
     """Parse a single CK Builder .conf file into an in-memory config dict.
 
     Equivalent to the old ``convert_config_file`` but returns the dict directly
@@ -174,13 +174,13 @@ def _build_data(input_path, variant, layout, datatype, ndim, specialization) -> 
     problem_name = f"grouped_convolution_{variant}_tile_{layout}_{datatype}"
 
     if variant == "bwd_weight":
-        raw = parse_bwd_weight_instances(lines, problem_name)
+        raw = parse_bwd_weight_instances(lines, problem_name, verbose=verbose)
     elif variant == "forward" and specialization == Specialization.Default:
-        raw = parse_fwd_instances(lines, problem_name)
+        raw = parse_fwd_instances(lines, problem_name, verbose=verbose)
     elif variant == "forward" and specialization == Specialization.Depthwise:
-        raw = parse_depthwise_config(input_path)
+        raw = parse_depthwise_config(input_path, verbose=verbose)
     elif variant == "bwd_data":
-        raw = parse_bwd_data_instances(lines, problem_name)
+        raw = parse_bwd_data_instances(lines, problem_name, verbose=verbose)
     else:
         raise RuntimeError(
             f"Variant '{variant}' with specialization '{specialization}' is not yet implemented."
@@ -433,6 +433,7 @@ def get_configs(
     ndims: List[int],
     datatypes: List[str],
     subset: str = "profiler",
+    verbose: bool = False,
 ) -> List:
     """Build all configs for a builder-derived rule set by parsing the CK
     Builder ``.conf`` files in memory.
@@ -441,6 +442,11 @@ def get_configs(
     Each requested (variant, ndim, datatype) is filtered against the Builder's
     config list, the matching ``.conf`` file is parsed and converted into
     dispatcher config objects, with no intermediate JSON written.
+
+    ``verbose`` controls whether the underlying CK Builder parsers print their
+    "Skipping instance ..." diagnostics. It defaults to ``False`` so the
+    dispatcher rule set stays quiet; the standalone CK Builder script keeps
+    printing them (its own default is ``True``).
     """
     from unified_grouped_conv_codegen import GroupedConvVariant
 
@@ -480,7 +486,7 @@ def get_configs(
             log.warning(f"Builder config not found: {input_path}")
             continue
 
-        data = _build_data(input_path, variant_name, layout, datatype, ndim, spec)
+        data = _build_data(input_path, variant_name, layout, datatype, ndim, spec, verbose=verbose)
         if data["variant"] == "forward_depthwise":
             configs.extend(_load_depthwise_configs(data, arch))
         else:

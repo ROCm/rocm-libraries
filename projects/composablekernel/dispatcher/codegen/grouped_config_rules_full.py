@@ -126,172 +126,220 @@ _EXCLUDED_WARP_SHAPES: Set[Tuple[int, int]] = {
     (4, 64), (64, 4),
 }
 
-# Finer (tile, wave) -> warp_tile map. 
-# When a (tile, wave) key is present here, it overrides the coarser wave-only map above.
-# The wave-only map crosses a wave's warp set with every
-# tile sharing that wave, whereas this map lists only the warp tiles actually
-# observed for that exact (tile, wave). Keys absent here fall back to the wave map.
+# =============================================================================
+# Wave (block-to-wave split) strategies
+# =============================================================================
+#
+# A macro tile is partitioned among the waves of a thread block along M, N and K. 
+# The split is described by a WaveStrategy that yields the wave *counts*
+# (wave_m, wave_n, wave_k); the per-wave tile is then tile / wave_count.
+#
+# compute_wave_counts() turns a strategy into the (wave_m, wave_n,wave_k) triple, 
+# and compute_wave_tile() derives the per-wave tile size from the
+# macro tile and strategy.
 
-_FWD_TILE_WAVE_TO_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int]]] = {
-    ((16, 16, 64), (1, 1, 1)): [(16, 16)],
-    ((16, 16, 128), (1, 1, 1)): [(16, 16)],
-    ((16, 32, 64), (1, 2, 1)): [(16, 16)],
-    ((16, 64, 64), (1, 2, 1)): [(16, 16)],
-    ((16, 128, 64), (1, 2, 1)): [(16, 16)],
-    ((16, 256, 64), (1, 4, 1)): [(16, 16)],
-    ((32, 16, 64), (2, 1, 1)): [(16, 16)],
-    ((32, 64, 16), (1, 1, 1)): [(32, 32)],
-    ((32, 64, 32), (1, 1, 1)): [(32, 32)],
-    ((32, 64, 64), (1, 2, 1)): [(32, 32)],
-    ((32, 128, 16), (1, 2, 1)): [(32, 32)],
-    ((32, 128, 32), (1, 2, 1)): [(32, 32)],
-    ((32, 128, 64), (1, 2, 1)): [(32, 32)],
-    ((32, 256, 64), (1, 4, 1)): [(32, 32)],
-    ((64, 16, 16), (1, 1, 1)): [(16, 16)],
-    ((64, 16, 64), (2, 1, 1)): [(16, 16)],
-    ((64, 32, 16), (1, 1, 1)): [(32, 32)],
-    ((64, 32, 32), (1, 1, 1)): [(32, 32)],
-    ((64, 32, 64), (2, 1, 1)): [(32, 32)],
-    ((64, 64, 8), (2, 1, 1)): [(32, 32)],
-    ((64, 64, 16), (1, 1, 1)): [(32, 32)],
-    ((64, 64, 32), (1, 1, 1)): [(32, 32)],
-    ((64, 64, 32), (2, 2, 1)): [(16, 16)],
-    ((64, 64, 64), (2, 2, 1)): [(32, 32)],
-    ((64, 128, 16), (1, 2, 1)): [(32, 32)],
-    ((64, 128, 16), (2, 2, 1)): [(32, 32)],
-    ((64, 128, 32), (1, 2, 1)): [(32, 32)],
-    ((64, 128, 32), (2, 2, 1)): [(32, 32)],
-    ((64, 128, 64), (2, 2, 1)): [(32, 32)],
-    ((128, 16, 64), (2, 1, 1)): [(16, 16)],
-    ((128, 32, 16), (2, 1, 1)): [(32, 32)],
-    ((128, 32, 32), (2, 1, 1)): [(32, 32)],
-    ((128, 32, 32), (2, 1, 2)): [(32, 32)],
-    ((128, 32, 64), (2, 1, 1)): [(32, 32)],
-    ((128, 64, 8), (2, 1, 1)): [(32, 32)],
-    ((128, 64, 8), (2, 2, 1)): [(32, 32)],
-    ((128, 64, 16), (2, 1, 1)): [(32, 32)],
-    ((128, 64, 16), (2, 2, 1)): [(32, 32)],
-    ((128, 64, 32), (2, 1, 1)): [(32, 32)],
-    ((128, 64, 32), (2, 2, 1)): [(32, 32)],
-    ((128, 64, 64), (2, 2, 1)): [(32, 32)],
-    ((128, 128, 16), (1, 2, 1)): [(32, 32)],
-    ((128, 128, 16), (2, 2, 1)): [(32, 32)],
-    ((128, 128, 32), (1, 2, 1)): [(32, 32)],
-    ((128, 128, 32), (2, 2, 1)): [(32, 32)],
-    ((128, 128, 64), (2, 2, 1)): [(32, 32)],
-    ((128, 192, 16), (2, 2, 1)): [(32, 32)],
-    ((128, 256, 16), (2, 2, 1)): [(32, 32)],
-    ((128, 256, 32), (2, 2, 1)): [(32, 32)],
-    ((224, 256, 64), (2, 2, 1)): [(16, 16)],
-    ((256, 16, 64), (4, 1, 1)): [(16, 16)],
-    ((256, 32, 64), (4, 1, 1)): [(32, 32)],
-    ((256, 64, 8), (2, 2, 1)): [(32, 32)],
-    ((256, 128, 16), (2, 2, 1)): [(32, 32)],
-    ((256, 128, 32), (2, 2, 1)): [(32, 32)],
-    ((256, 224, 64), (2, 2, 1)): [(16, 16)],
-    ((256, 256, 32), (2, 2, 1)): [(16, 16), (32, 32)],
+
+class WaveStrategy(Enum):
+    """Block-to-wave partitioning strategies for grouped convolution configs.
+
+    Each strategy maps to a (wave_m, wave_n, wave_k) wave-count triple.
+    """
+    SINGLE = "single"        # (1, 1, 1) — one wave covers the whole tile
+    SPLIT_M = "split_m"      # (2, 1, 1) — 2 waves along M
+    SPLIT_N = "split_n"      # (1, 2, 1) — 2 waves along N
+    SPLIT_MN = "split_mn"    # (2, 2, 1) — 2x2 waves along M and N
+    SPLIT_M4 = "split_m4"    # (4, 1, 1) — 4 waves along M
+    SPLIT_N4 = "split_n4"    # (1, 4, 1) — 4 waves along N
+    SPLIT_MK = "split_mk"    # (2, 1, 2) — 2 waves along M and 2 along K
+
+
+_WAVE_STRATEGY_COUNTS: Dict[WaveStrategy, Tuple[int, int, int]] = {
+    WaveStrategy.SINGLE: (1, 1, 1),
+    WaveStrategy.SPLIT_M: (2, 1, 1),
+    WaveStrategy.SPLIT_N: (1, 2, 1),
+    WaveStrategy.SPLIT_MN: (2, 2, 1),
+    WaveStrategy.SPLIT_M4: (4, 1, 1),
+    WaveStrategy.SPLIT_N4: (1, 4, 1),
+    WaveStrategy.SPLIT_MK: (2, 1, 2),
 }
 
-_BWD_DATA_TILE_WAVE_TO_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int]]] = {
-    ((16, 64, 32), (1, 1, 1)): [(16, 16)],
-    ((32, 64, 32), (1, 1, 1)): [(32, 32)],
-    ((32, 128, 32), (1, 2, 1)): [(32, 32)],
-    ((64, 16, 16), (4, 1, 1)): [(16, 16)],
-    ((64, 16, 32), (1, 1, 1)): [(16, 16)],
-    ((64, 16, 32), (4, 1, 1)): [(16, 16)],
-    ((64, 16, 64), (4, 1, 1)): [(16, 16)],
-    ((64, 32, 32), (1, 1, 1)): [(32, 32)],
-    ((64, 64, 32), (1, 1, 1)): [(32, 32)],
-    ((64, 128, 32), (1, 2, 1)): [(32, 32)],
-    ((64, 128, 32), (2, 2, 1)): [(32, 32)],
-    ((128, 32, 16), (4, 1, 1)): [(32, 32)],
-    ((128, 32, 32), (2, 1, 1)): [(32, 32)],
-    ((128, 32, 32), (4, 1, 1)): [(32, 32)],
-    ((128, 32, 64), (4, 1, 1)): [(32, 32)],
-    ((128, 64, 32), (2, 1, 1)): [(32, 32)],
-    ((128, 64, 32), (2, 2, 1)): [(32, 32)],
-    ((128, 128, 32), (1, 2, 1)): [(32, 32)],
-    ((128, 128, 32), (2, 2, 1)): [(32, 32)],
-    ((128, 256, 32), (2, 2, 1)): [(32, 32)],
-    ((256, 128, 32), (2, 2, 1)): [(32, 32)],
+
+def compute_wave_counts(strategy: WaveStrategy) -> Tuple[int, int, int]:
+    """Return the (wave_m, wave_n, wave_k) wave-count triple for a strategy."""
+    return _WAVE_STRATEGY_COUNTS[strategy]
+
+
+def compute_wave_tile(
+    strategy: WaveStrategy, tile_m: int, tile_n: int, tile_k: int,
+) -> Tuple[int, int, int]:
+    """Return the per-wave tile (macro tile / wave counts) for a strategy."""
+    wm, wn, wk = compute_wave_counts(strategy)
+    return (tile_m // wm, tile_n // wn, tile_k // wk)
+
+
+# Curated wave strategies as a shared base table plus small per-variant
+# override tables. Most tiles use the same strategy across the variants that
+# use them (_BASE_TILE_WAVE_STRATEGIES); the handful that genuinely differ are
+# captured in _WAVE_STRATEGY_OVERRIDES. Tiles absent from both fall back to
+# [WaveStrategy.SINGLE] in get_wave_strategies().
+
+_BASE_TILE_WAVE_STRATEGIES: Dict[Tuple[int, int, int], List[WaveStrategy]] = {
+    (16, 16, 32): [WaveStrategy.SINGLE],
+    (16, 16, 64): [WaveStrategy.SINGLE],
+    (16, 16, 128): [WaveStrategy.SINGLE],
+    (16, 32, 64): [WaveStrategy.SPLIT_N],
+    (16, 64, 32): [WaveStrategy.SINGLE],
+    (16, 64, 64): [WaveStrategy.SPLIT_N],
+    (16, 128, 32): [WaveStrategy.SINGLE],
+    (16, 128, 64): [WaveStrategy.SPLIT_N],
+    (16, 256, 32): [WaveStrategy.SINGLE],
+    (16, 256, 64): [WaveStrategy.SPLIT_N4],
+    (32, 16, 64): [WaveStrategy.SPLIT_M],
+    (32, 32, 32): [WaveStrategy.SINGLE],
+    (32, 64, 16): [WaveStrategy.SINGLE],
+    (32, 64, 32): [WaveStrategy.SINGLE],
+    (32, 64, 64): [WaveStrategy.SPLIT_N],
+    (32, 128, 16): [WaveStrategy.SPLIT_N],
+    (32, 128, 32): [WaveStrategy.SPLIT_N],
+    (32, 128, 64): [WaveStrategy.SPLIT_N],
+    (32, 256, 64): [WaveStrategy.SPLIT_N4],
+    (64, 16, 16): [WaveStrategy.SINGLE],
+    (64, 16, 32): [WaveStrategy.SINGLE, WaveStrategy.SPLIT_M4],
+    (64, 16, 64): [WaveStrategy.SPLIT_M],
+    (64, 32, 16): [WaveStrategy.SINGLE],
+    (64, 32, 32): [WaveStrategy.SINGLE],
+    (64, 32, 64): [WaveStrategy.SPLIT_M],
+    (64, 64, 8): [WaveStrategy.SPLIT_M],
+    (64, 64, 16): [WaveStrategy.SINGLE],
+    (64, 64, 32): [WaveStrategy.SINGLE],
+    (64, 64, 64): [WaveStrategy.SPLIT_MN],
+    (64, 128, 16): [WaveStrategy.SPLIT_N, WaveStrategy.SPLIT_MN],
+    (64, 128, 32): [WaveStrategy.SPLIT_N, WaveStrategy.SPLIT_MN],
+    (64, 128, 64): [WaveStrategy.SPLIT_MN],
+    (128, 16, 64): [WaveStrategy.SPLIT_M],
+    (128, 32, 16): [WaveStrategy.SPLIT_M],
+    (128, 32, 32): [WaveStrategy.SPLIT_M, WaveStrategy.SPLIT_MK],
+    (128, 32, 64): [WaveStrategy.SPLIT_M],
+    (128, 64, 8): [WaveStrategy.SPLIT_M, WaveStrategy.SPLIT_MN],
+    (128, 64, 16): [WaveStrategy.SPLIT_M, WaveStrategy.SPLIT_MN],
+    (128, 64, 32): [WaveStrategy.SPLIT_M, WaveStrategy.SPLIT_MN],
+    (128, 64, 64): [WaveStrategy.SPLIT_MN],
+    (128, 128, 16): [WaveStrategy.SPLIT_N, WaveStrategy.SPLIT_MN],
+    (128, 128, 32): [WaveStrategy.SPLIT_N, WaveStrategy.SPLIT_MN],
+    (128, 128, 64): [WaveStrategy.SPLIT_MN],
+    (128, 192, 16): [WaveStrategy.SPLIT_MN],
+    (128, 256, 16): [WaveStrategy.SPLIT_MN],
+    (128, 256, 32): [WaveStrategy.SPLIT_MN],
+    (224, 256, 64): [WaveStrategy.SPLIT_MN],
+    (256, 16, 64): [WaveStrategy.SPLIT_M4],
+    (256, 32, 64): [WaveStrategy.SPLIT_M4],
+    (256, 64, 8): [WaveStrategy.SPLIT_MN],
+    (256, 128, 16): [WaveStrategy.SPLIT_MN],
+    (256, 128, 32): [WaveStrategy.SPLIT_MN],
+    (256, 224, 64): [WaveStrategy.SPLIT_MN],
+    (256, 256, 32): [WaveStrategy.SPLIT_MN],
 }
 
-_BWD_WEIGHT_TILE_WAVE_TO_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int]]] = {
-    ((16, 16, 32), (1, 1, 1)): [(16, 16)],
-    ((16, 16, 64), (1, 1, 1)): [(16, 16)],
-    ((16, 32, 64), (1, 2, 1)): [(16, 16)],
-    ((16, 64, 64), (1, 2, 1)): [(16, 16)],
-    ((16, 128, 32), (1, 1, 1)): [(16, 16)],
-    ((16, 128, 64), (1, 2, 1)): [(16, 16)],
-    ((16, 256, 32), (1, 1, 1)): [(16, 16)],
-    ((16, 256, 64), (1, 4, 1)): [(16, 16)],
-    ((32, 16, 64), (2, 1, 1)): [(16, 16)],
-    ((32, 32, 32), (1, 1, 1)): [(32, 32)],
-    ((32, 64, 16), (1, 1, 1)): [(32, 32)],
-    ((32, 64, 32), (1, 1, 1)): [(32, 32)],
-    ((32, 128, 16), (1, 2, 1)): [(32, 32)],
-    ((32, 128, 32), (1, 1, 1)): [(32, 32)],
-    ((32, 128, 32), (1, 2, 1)): [(32, 32)],
-    ((64, 16, 64), (2, 1, 1)): [(16, 16)],
-    ((64, 32, 16), (1, 1, 1)): [(32, 32)],
-    ((64, 32, 32), (1, 1, 1)): [(32, 32)],
-    ((64, 64, 16), (1, 1, 1)): [(32, 32)],
-    ((64, 64, 32), (1, 1, 1)): [(32, 32)],
-    ((64, 64, 64), (2, 2, 1)): [(16, 16), (32, 32)],
-    ((64, 128, 16), (1, 2, 1)): [(32, 32)],
-    ((64, 128, 16), (2, 2, 1)): [(32, 32)],
-    ((64, 128, 32), (1, 2, 1)): [(32, 32)],
-    ((64, 128, 32), (2, 2, 1)): [(32, 32)],
-    ((64, 128, 64), (2, 2, 1)): [(32, 32)],
-    ((128, 16, 64), (2, 1, 1)): [(16, 16)],
-    ((128, 32, 16), (2, 1, 1)): [(32, 32)],
-    ((128, 32, 32), (1, 1, 1)): [(32, 32)],
-    ((128, 32, 32), (2, 1, 1)): [(32, 32)],
-    ((128, 64, 16), (2, 1, 1)): [(32, 32)],
-    ((128, 64, 16), (2, 2, 1)): [(32, 32)],
-    ((128, 64, 32), (2, 1, 1)): [(32, 32)],
-    ((128, 64, 32), (2, 2, 1)): [(32, 32)],
-    ((128, 128, 16), (1, 2, 1)): [(32, 32)],
-    ((128, 128, 16), (2, 2, 1)): [(32, 32)],
-    ((128, 128, 32), (1, 2, 1)): [(32, 32)],
-    ((128, 128, 32), (2, 2, 1)): [(32, 32)],
-    ((128, 128, 64), (2, 2, 1)): [(32, 32)],
-    ((128, 256, 16), (2, 2, 1)): [(32, 32)],
-    ((128, 256, 32), (2, 2, 1)): [(32, 32)],
-    ((256, 16, 64), (4, 1, 1)): [(16, 16)],
-    ((256, 32, 64), (4, 1, 1)): [(32, 32)],
-    ((256, 128, 16), (2, 2, 1)): [(32, 32)],
-    ((256, 128, 32), (2, 2, 1)): [(32, 32)],
-    ((256, 256, 32), (2, 2, 1)): [(32, 32)],
+# Per-variant deviations from _BASE_TILE_WAVE_STRATEGIES. An entry here
+# fully replaces the base strategy list for that (variant, tile). Only the
+# tiles where a variant genuinely differs appear; bwd_data is the main
+# deviator (it prefers SPLIT_M4 over SPLIT_M for several skinny-N tiles).
+_WAVE_STRATEGY_OVERRIDES: Dict[str, Dict[Tuple[int, int, int], List[WaveStrategy]]] = {
+    "forward": {
+        (64, 64, 32): [WaveStrategy.SINGLE, WaveStrategy.SPLIT_MN],
+    },
+    "bwd_data": {
+        (64, 16, 16): [WaveStrategy.SPLIT_M4],
+        (64, 16, 64): [WaveStrategy.SPLIT_M4],
+        (128, 32, 16): [WaveStrategy.SPLIT_M4],
+        (128, 32, 32): [WaveStrategy.SPLIT_M, WaveStrategy.SPLIT_M4],
+        (128, 32, 64): [WaveStrategy.SPLIT_M4],
+    },
+    "bwd_weight": {
+        (32, 128, 32): [WaveStrategy.SINGLE, WaveStrategy.SPLIT_N],
+        (128, 32, 32): [WaveStrategy.SINGLE, WaveStrategy.SPLIT_M],
+    },
 }
+
+# Borderline (variant, tile, wave) pairs whose warp (m, n) selection deviates
+# from _default_warp_mn(). These are the per-wave-tile == 32x32 cases, where the
+# reference data is not consistent with the size threshold:
+#   - forward (64, 64, 32)/(2,2,1) uses 16x16 despite a 32x32 per-wave tile;
+#   - forward (256, 256, 32)/(2,2,1) and bwd_weight (64, 64, 64)/(2,2,1) use
+#     BOTH 16x16 and 32x32.
+_WARP_MN_EXCEPTIONS: Dict[
+    Tuple[str, Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int]]
+] = {
+    ("forward", (64, 64, 32), (2, 2, 1)): [(16, 16)],
+    ("forward", (256, 256, 32), (2, 2, 1)): [(16, 16), (32, 32)],
+    ("bwd_weight", (64, 64, 64), (2, 2, 1)): [(16, 16), (32, 32)],
+}
+
+
+def _default_warp_mn(tile_m: int, tile_n: int, wave_m: int, wave_n: int) -> Tuple[int, int]:
+    """Return the default warp (m, n) MFMA shape for a (tile, wave).
+
+    A 32x32 warp tile is used when the per-wave tile (tile / wave) is at least
+    32 and a multiple of 32 in both M and N; otherwise a 16x16 warp tile is used.
+    Borderline cases are overridden via _WARP_MN_EXCEPTIONS.
+    """
+    pm, pn = tile_m // wave_m, tile_n // wave_n
+    if pm >= 32 and pn >= 32 and pm % 32 == 0 and pn % 32 == 0:
+        return (32, 32)
+    return (16, 16)
+
+
+def get_warp_mn_candidates(
+    tile_m: int, tile_n: int, tile_k: int,
+    wave_m: int, wave_n: int, wave_k: int,
+    variant: str = "forward",
+) -> List[Tuple[int, int]]:
+    """Return the curated warp (m, n) candidates for a (variant, tile, wave).
+
+    Uses _WARP_MN_EXCEPTIONS when present, otherwise _default_warp_mn().
+    """
+    key = (variant, (tile_m, tile_n, tile_k), (wave_m, wave_n, wave_k))
+    if key in _WARP_MN_EXCEPTIONS:
+        return list(_WARP_MN_EXCEPTIONS[key])
+    return [_default_warp_mn(tile_m, tile_n, wave_m, wave_n)]
+
+
+def get_wave_strategies(
+    tile_m: int, tile_n: int, tile_k: int, variant: str,
+) -> List[WaveStrategy]:
+    """Return the curated WaveStrategy list for a (variant, macro tile).
+
+    A per-variant override (_WAVE_STRATEGY_OVERRIDES) takes precedence over the
+    shared base table (_BASE_TILE_WAVE_STRATEGIES). Tiles absent from both fall
+    back to [WaveStrategy.SINGLE].
+    """
+    tile = (tile_m, tile_n, tile_k)
+    override = _WAVE_STRATEGY_OVERRIDES.get(variant, {}).get(tile)
+    if override is not None:
+        return list(override)
+    entry = _BASE_TILE_WAVE_STRATEGIES.get(tile)
+    if entry is None:
+        logging.warning(
+            "No curated wave strategies for variant=%s tile=(%d,%d,%d); "
+            "falling back to [WaveStrategy.SINGLE]",
+            variant, tile_m, tile_n, tile_k,
+        )
+        return [WaveStrategy.SINGLE]
+    return list(entry)
+
 
 def get_wave_configs(
     tile_m: int, tile_n: int, tile_k: int, variant: str,
 ) -> List[Tuple[int, int, int]]:
-    """Return wave configs for a tile+variant.
+    """Return wave-count configs for a tile+variant.
 
+    Each curated WaveStrategy is turned into its (wave_m, wave_n, wave_k) triple.
     Falls back to generic [(1, 1, 1)] for unknown tiles.
     """
-    table = {
-        "forward": _FWD_TILE_WAVE_TO_WARPS,
-        "bwd_data": _BWD_DATA_TILE_WAVE_TO_WARPS,
-        "bwd_weight": _BWD_WEIGHT_TILE_WAVE_TO_WARPS,
-    }.get(variant, {})
-
-    # The keys are the exact (tile, wave) pairs.
-    # From each mathcing tile key, we can get the wave configs.
-    waves = [key[1] for key in table.keys() if key[0] == (tile_m, tile_n, tile_k)]
-
-    # If no valid tile combinations are found, return the generic [1,1,1] wave config.
-    if len(waves) == 0:
-        logging.warning(
-            "No curated wave configs for variant=%s tile=(%d,%d,%d); "
-            "falling back to [(1,1,1)]",
-            variant, tile_m, tile_n, tile_k,
-        )
-        return [(1, 1, 1)]
-    else:
-        return waves
+    return [
+        compute_wave_counts(strategy)
+        for strategy in get_wave_strategies(tile_m, tile_n, tile_k, variant)
+    ]
 
 
 def get_all_valid_vector_sizes(
@@ -356,8 +404,9 @@ def get_warp_configs_for_tile_and_wave(
 ) -> List[Tuple[int, int]]:
     """Return curated (warp_tile_m, warp_tile_n) shapes for a (variant, wave).
 
-    The curated maps record only (warp_tile_m, warp_tile_n) per (tile, wave);
-    warp_tile_k is no longer stored and is derived later by ``compute_warp_tile_k``.
+    The (warp_tile_m, warp_tile_n) shape is derived by ``get_warp_mn_candidates``
+    (a size-threshold function plus a small exception table); warp_tile_k is
+    derived later by ``compute_warp_tile_k``.
 
     A (warp_tile_m, warp_tile_n) shape is kept only when it:
       - is arch/dtype-supported (WARP_TILE_SUPPORTED_COMBINATIONS[arch][dtype_key]),
@@ -367,16 +416,14 @@ def get_warp_configs_for_tile_and_wave(
     """
     tile = (tile_m, tile_n, tile_k)
     wave = (wave_m, wave_n, wave_k)
-    fine_table = {
-        "forward": _FWD_TILE_WAVE_TO_WARPS,
-        "bwd_data": _BWD_DATA_TILE_WAVE_TO_WARPS,
-        "bwd_weight": _BWD_WEIGHT_TILE_WAVE_TO_WARPS,
-    }.get(variant, {})
+    curated_waves = {
+        compute_wave_counts(strategy)
+        for strategy in get_wave_strategies(tile_m, tile_n, tile_k, variant)
+    }
 
-    if (tile, wave) in fine_table:
-        curated = fine_table[(tile, wave)]
-    else:
+    if wave not in curated_waves:
         raise ValueError(f"No curated warp tiles for variant={variant} tile={tile} wave={wave}")
+    curated = get_warp_mn_candidates(tile_m, tile_n, tile_k, wave_m, wave_n, wave_k, variant)
 
     supported_mn = {
         (wt[0], wt[1])
