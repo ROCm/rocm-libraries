@@ -5,6 +5,7 @@
 
 import json
 from pathlib import Path
+from typing import List
 
 import pytest
 
@@ -16,7 +17,7 @@ from dnn_benchmarking.graph.loader import GraphLoader
 pytestmark = [pytest.mark.gpu, pytest.mark.amd]
 
 
-def _skip_if_no_rocm() -> None:
+def _skip_if_no_rocm(plugin_paths: List[str]) -> None:
     try:
         import torch
     except ImportError:
@@ -31,14 +32,15 @@ def _skip_if_no_rocm() -> None:
     try:
         import hipdnn_frontend as hipdnn
 
+        hipdnn.set_engine_plugin_paths(plugin_paths, hipdnn.PluginLoadingMode.ABSOLUTE)
         hipdnn.Handle()
     except Exception as e:
         pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")
 
 
-def test_hipdnn_gpu_timing_rocm() -> None:
+def test_hipdnn_gpu_timing_rocm(plugin_paths: List[str]) -> None:
     """Validate E2E and kernel timings on AMD ROCm devices using hipDNN."""
-    _skip_if_no_rocm()
+    _skip_if_no_rocm(plugin_paths)
 
     graph_path = Path(__file__).parent.parent.parent / "graphs" / "sample_conv_fwd.json"
     if not graph_path.exists():

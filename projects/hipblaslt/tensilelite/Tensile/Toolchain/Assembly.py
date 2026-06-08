@@ -30,7 +30,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Union, NamedTuple
 
-from Tensile.Common import print2
+from Tensile.Common import ensurePath, print2
 from Tensile.Common.Architectures import isaToGfx
 from ..SolutionStructs import Solution
 
@@ -53,17 +53,19 @@ def buildAssemblyCodeObjectFiles(
       linker: Linker,
       bundler: Bundler,
       kernels: List[Solution],
-      destDir: Union[Path, str],
+      destRoot: Union[Path, str],
       asmDir: Union[Path, str],
       compress: bool=True,
     ):
-    """Builds code object files from assembly files
+    """Builds code object files from assembly files.
 
     Args:
         toolchain: The assembly toolchain object to use for building.
         kernels: A list of the kernel objects to build.
         writer: The KernelWriterAssembly object to use.
-        destDir: The destination directory for the code object files.
+        destRoot: The library/ root directory. Per-arch outputs are written to
+            destRoot/<gfx>/; isaToGfx() yields a bare gfx name already (no target
+            features), so the routing here is the bare gfx.
         asmDir: The directory containing the assembly files.
         compress: Whether to compress the code object files.
     """
@@ -72,6 +74,7 @@ def buildAssemblyCodeObjectFiles(
     extCo = ".co"
     extCoRaw = ".co.raw"
 
+    destRoot = Path(destRoot)
     archKernelMap = collections.defaultdict(list)
     for k in kernels:
       archKernelMap[tuple(k['ISA'])].append(k)
@@ -82,6 +85,7 @@ def buildAssemblyCodeObjectFiles(
         continue
 
       gfx = isaToGfx(arch)
+      destDir = Path(ensurePath(destRoot / gfx))
 
       objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels if 'codeObjectFile' not in k]
       coFileMap = collections.defaultdict(set)

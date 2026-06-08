@@ -415,6 +415,305 @@ TEST(TestCpuFpReferenceSdpaFp64, CausalMask)
     EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), expSq2, 1e-5);
 }
 
+TEST(TestCpuFpReferenceSdpaFp64, BottomRightCausalMaskLargerSkv)
+{
+    // Causal mask (leftBound=-1, rightBound=0) with BottomRight alignment.
+    // Sq=2, Skv=4 → diagonal offset = Skv - Sq = 2.
+    // Unmasked iff skv <= sq + offset + rightBound = sq + 2.
+    // Q=K=0 → all unmasked scores equal → softmax is uniform over the unmasked set.
+    // V = {1, 2, 3, 4} → output is the mean of unmasked V values.
+    //
+    // Expected mask (1=unmasked):
+    //    ___kv____
+    // q | 1 1 1 0   sq=0: skv ∈ [-∞, 2] → {0, 1, 2}    → mean(1,2,3)   = 6/3  = 2.0
+    //   | 1 1 1 1   sq=1: skv ∈ [-∞, 3] → {0, 1, 2, 3} → mean(1,2,3,4) = 10/4 = 2.5
+
+    Tensor<double> q({1, 1, 2, 1});
+    Tensor<double> k({1, 1, 4, 1});
+    Tensor<double> v({1, 1, 4, 1});
+    Tensor<double> o({1, 1, 2, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(2.0, 0, 0, 1, 0);
+    v.setHostValue(3.0, 0, 0, 2, 0);
+    v.setHostValue(4.0, 0, 0, 3, 0);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/-1,
+                                /*rightBound=*/0,
+                                /*topLeftAlignment=*/false);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 6.0 / 3.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 10.0 / 4.0, 1e-5);
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, BottomRightCausalMaskLargerSq)
+{
+    // Causal mask (leftBound=-1, rightBound=0) with BottomRight alignment.
+    // Sq=4, Skv=2 → diagonal offset = Skv - Sq = -2.
+    // Unmasked iff skv <= sq + offset + rightBound = sq - 2.
+    // Q=K=0 → all unmasked scores equal → softmax is uniform over the unmasked set.
+    // V = {1, 2} → output is the mean of unmasked V values.
+    //
+    // Expected mask (1=unmasked):
+    //    _kv__
+    //   | 0 0    sq=0: skv ∈ [-∞, -2] → {}     → fully masked, output = 0
+    // q | 0 0    sq=1: skv ∈ [-∞, -1] → {}     → fully masked, output = 0
+    //   | 1 0    sq=2: skv ∈ [-∞,  0] → {0}    → mean(1)   = 1.0
+    //   | 1 1    sq=3: skv ∈ [-∞,  1] → {0, 1} → mean(1,2) = 1.5
+
+    Tensor<double> q({1, 1, 4, 1});
+    Tensor<double> k({1, 1, 2, 1});
+    Tensor<double> v({1, 1, 2, 1});
+    Tensor<double> o({1, 1, 4, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(2.0, 0, 0, 1, 0);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/-1,
+                                /*rightBound=*/0,
+                                /*topLeftAlignment=*/false);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 0.0, 1e-5); // fully masked
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 0.0, 1e-5); // fully masked
+    EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), 1.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), 1.5, 1e-5);
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, GenericWindowTopLeftSquare)
+{
+    // Generic sliding window with leftBound=1, rightBound=1 (TopLeft alignment).
+    // Square shape Sq=Skv=4. Window is centered at sq, width 3.
+    // Q=K=0 → all unmasked scores equal → softmax is uniform over the window.
+    // V = {1, 2, 3, 4} → output is the mean of unmasked V values.
+    //
+    // Expected mask (1=unmasked):
+    //    ___kv_____
+    // q | 1 1 0 0   sq=0: skv ∈ [-1, 1] → {0, 1}      → mean(1,2)     = 1.5
+    //   | 1 1 1 0   sq=1: skv ∈ [ 0, 2] → {0, 1, 2}   → mean(1,2,3)   = 2.0
+    //   | 0 1 1 1   sq=2: skv ∈ [ 1, 3] → {1, 2, 3}   → mean(2,3,4)   = 3.0
+    //   | 0 0 1 1   sq=3: skv ∈ [ 2, 4] → {2, 3}      → mean(3,4)     = 3.5
+
+    Tensor<double> q({1, 1, 4, 1});
+    Tensor<double> k({1, 1, 4, 1});
+    Tensor<double> v({1, 1, 4, 1});
+    Tensor<double> o({1, 1, 4, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(2.0, 0, 0, 1, 0);
+    v.setHostValue(3.0, 0, 0, 2, 0);
+    v.setHostValue(4.0, 0, 0, 3, 0);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/1,
+                                /*rightBound=*/1,
+                                /*topLeftAlignment=*/true);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), (1.0 + 2.0) / 2.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), (1.0 + 2.0 + 3.0) / 3.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), (2.0 + 3.0 + 4.0) / 3.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), (3.0 + 4.0) / 2.0, 1e-5);
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, GenericWindowAsymmetricTopLeft)
+{
+    // Generic sliding window with leftBound=2, rightBound=1 (TopLeft alignment).
+    // Asymmetric window (wider on the left) with Sq=4, Skv=5.
+    //
+    // Expected mask (1=unmasked):
+    //    _____kv______
+    // q | 1 1 0 0 0    sq=0: skv ∈ [-2, 1] → {0, 1}         → mean(1,2)       = 1.5
+    //   | 1 1 1 0 0    sq=1: skv ∈ [-1, 2] → {0, 1, 2}      → mean(1,2,3)     = 2.0
+    //   | 1 1 1 1 0    sq=2: skv ∈ [ 0, 3] → {0, 1, 2, 3}   → mean(1,2,3,4)   = 2.5
+    //   | 0 1 1 1 1    sq=3: skv ∈ [ 1, 4] → {1, 2, 3, 4}   → mean(2,3,4,5)   = 3.5
+
+    Tensor<double> q({1, 1, 4, 1});
+    Tensor<double> k({1, 1, 5, 1});
+    Tensor<double> v({1, 1, 5, 1});
+    Tensor<double> o({1, 1, 4, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(2.0, 0, 0, 1, 0);
+    v.setHostValue(3.0, 0, 0, 2, 0);
+    v.setHostValue(4.0, 0, 0, 3, 0);
+    v.setHostValue(5.0, 0, 0, 4, 0);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/2,
+                                /*rightBound=*/1,
+                                /*topLeftAlignment=*/true);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), (1.0 + 2.0) / 2.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), (1.0 + 2.0 + 3.0) / 3.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), (1.0 + 2.0 + 3.0 + 4.0) / 4.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), (2.0 + 3.0 + 4.0 + 5.0) / 4.0, 1e-5);
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, GenericWindowAsymmetricBottomRight)
+{
+    // Generic sliding window with leftBound=2, rightBound=1 (BottomRight alignment).
+    // Asymmetric window (wider on the left) with Sq=4, Skv=5.
+    // diagonal offset = Skv - Sq = 1.
+    // Unmasked iff (sq + offset - leftBound) <= skv <= (sq + offset + rightBound)
+    //         iff (sq - 1)                  <= skv <= (sq + 2)
+    //
+    // Expected mask (1=unmasked):
+    //    _____kv______
+    // q | 1 1 1 0 0    sq=0: skv ∈ [-1, 2] → {0, 1, 2}      → mean(1,2,3)     = 2.0
+    //   | 1 1 1 1 0    sq=1: skv ∈ [ 0, 3] → {0, 1, 2, 3}   → mean(1,2,3,4)   = 2.5
+    //   | 0 1 1 1 1    sq=2: skv ∈ [ 1, 4] → {1, 2, 3, 4}   → mean(2,3,4,5)   = 3.5
+    //   | 0 0 1 1 1    sq=3: skv ∈ [ 2, 5] → {2, 3, 4}      → mean(3,4,5)     = 4.0
+
+    Tensor<double> q({1, 1, 4, 1});
+    Tensor<double> k({1, 1, 5, 1});
+    Tensor<double> v({1, 1, 5, 1});
+    Tensor<double> o({1, 1, 4, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(2.0, 0, 0, 1, 0);
+    v.setHostValue(3.0, 0, 0, 2, 0);
+    v.setHostValue(4.0, 0, 0, 3, 0);
+    v.setHostValue(5.0, 0, 0, 4, 0);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/2,
+                                /*rightBound=*/1,
+                                /*topLeftAlignment=*/false);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), (1.0 + 2.0 + 3.0) / 3.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), (1.0 + 2.0 + 3.0 + 4.0) / 4.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), (2.0 + 3.0 + 4.0 + 5.0) / 4.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), (3.0 + 4.0 + 5.0) / 3.0, 1e-5);
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, GenericWindowBottomRightLargerSkv)
+{
+    // Generic sliding window with leftBound=1, rightBound=1, BottomRight alignment.
+    // Sq=2, Skv=4 → diagonal offset = Skv - Sq = 2.
+    // Unmasked iff (sq + offset - leftBound) <= skv <= (sq + offset + rightBound)
+    //         iff (sq + 1)                  <= skv <= (sq + 3)
+    //
+    // Expected mask (1=unmasked):
+    //    ___kv____
+    // q | 0 1 1 1   sq=0: skv ∈ [1, 3] → {1, 2, 3} → mean(2,3,4) = 3.0
+    //   | 0 0 1 1   sq=1: skv ∈ [2, 4] → {2, 3}    → mean(3,4)   = 3.5
+
+    Tensor<double> q({1, 1, 2, 1});
+    Tensor<double> k({1, 1, 4, 1});
+    Tensor<double> v({1, 1, 4, 1});
+    Tensor<double> o({1, 1, 2, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(2.0, 0, 0, 1, 0);
+    v.setHostValue(3.0, 0, 0, 2, 0);
+    v.setHostValue(4.0, 0, 0, 3, 0);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/1,
+                                /*rightBound=*/1,
+                                /*topLeftAlignment=*/false);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), (2.0 + 3.0 + 4.0) / 3.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), (3.0 + 4.0) / 2.0, 1e-5);
+}
+
+TEST(TestCpuFpReferenceSdpaFp64, GenericWindowBottomRightLargerSq)
+{
+    // Generic sliding window with leftBound=1, rightBound=1, BottomRight alignment.
+    // Sq=4, Skv=2 → diagonal offset = Skv - Sq = -2.
+    // Unmasked iff (sq - 2 - 1) <= skv <= (sq - 2 + 1)
+    //         iff (sq - 3)      <= skv <= (sq - 1)
+    //
+    // Expected mask (1=unmasked):
+    //    _kv__
+    //   | 0 0    sq=0: skv ∈ [-3, -1] → {}        → fully masked, output = 0
+    // q | 1 0    sq=1: skv ∈ [-2,  0] → {0}       → mean(1)   = 1.0
+    //   | 1 1    sq=2: skv ∈ [-1,  1] → {0, 1}    → mean(1,2) = 1.5
+    //   | 1 1    sq=3: skv ∈ [ 0,  2] → {0, 1}    → mean(1,2) = 1.5
+
+    Tensor<double> q({1, 1, 4, 1});
+    Tensor<double> k({1, 1, 2, 1});
+    Tensor<double> v({1, 1, 2, 1});
+    Tensor<double> o({1, 1, 4, 1});
+
+    q.fillWithValue(0.0);
+    k.fillWithValue(0.0);
+
+    v.setHostValue(1.0, 0, 0, 0, 0);
+    v.setHostValue(2.0, 0, 0, 1, 0);
+
+    const TensorBase<float>* noMask = nullptr;
+    CpuFpReferenceSdpa::forward(q,
+                                k,
+                                v,
+                                o,
+                                std::nullopt,
+                                noMask,
+                                /*leftBound=*/1,
+                                /*rightBound=*/1,
+                                /*topLeftAlignment=*/false);
+
+    EXPECT_NEAR(o.getHostValue(0, 0, 0, 0), 0.0, 1e-5); // fully masked
+    EXPECT_NEAR(o.getHostValue(0, 0, 1, 0), 1.0, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 2, 0), 1.5, 1e-5);
+    EXPECT_NEAR(o.getHostValue(0, 0, 3, 0), 1.5, 1e-5);
+}
+
 TEST(TestCpuFpReferenceSdpaFp64, CausalMaskFutureTokensHaveNoEffect)
 {
     // Verify the causal property: changing V values at masked (future) kv positions
