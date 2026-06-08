@@ -4,6 +4,8 @@
 
 """Unit tests for analyze_pr_selection.py."""
 
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -92,7 +94,6 @@ class TestIsCodeFile(unittest.TestCase):
 
 class TestLoadCtestTests(unittest.TestCase):
     def test_parses_standard_format(self):
-        import tempfile, os
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
             f.write(CTEST_N_OUTPUT)
             name = f.name
@@ -106,7 +107,6 @@ class TestLoadCtestTests(unittest.TestCase):
         self.assertEqual(len(tests), 4)
 
     def test_empty_file(self):
-        import tempfile, os
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
             f.write("No tests.\n")
             name = f.name
@@ -259,6 +259,14 @@ class TestFetchPr(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 aps.fetch_pr(1)
 
+    def test_fetch_timeout_raises_runtimeerror(self):
+        # A hung/rate-limited gh must surface as RuntimeError, not propagate the
+        # raw TimeoutExpired (which would crash the whole audit).
+        err = subprocess.TimeoutExpired(cmd="gh", timeout=60)
+        with mock.patch("analyze_pr_selection.subprocess.run", side_effect=err):
+            with self.assertRaisesRegex(RuntimeError, "timed out"):
+                aps.fetch_pr(1)
+
 
 class TestMainOffline(unittest.TestCase):
     def _setup(self, tmp):
@@ -300,6 +308,26 @@ class TestMainOffline(unittest.TestCase):
                 "--depmap", str(Path(tmp) / "nope.json"), "--ctest", str(ctest),
             ])
             self.assertEqual(rc, 2)
+
+    def test_all_unmapped_emits_root_mismatch_warning(self):
+        # Every code file absent from the depmap means the depmap root disagrees
+        # with the PR paths; main() must warn loudly instead of silently
+        # reporting 0 selections.
+        with tempfile.TemporaryDirectory() as tmp:
+            depmap, ctest, _ = self._setup(tmp)
+            prf = Path(tmp) / "pr.json"
+            prf.write_text(json.dumps({
+                "number": 200, "title": "wrong-root",
+                "files": ["projects/composablekernel/include/ck/absent.hpp"],
+            }))
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = aps.main([
+                    "--pr-files", str(prf),
+                    "--depmap", str(depmap), "--ctest", str(ctest),
+                ])
+            self.assertEqual(rc, 0)
+            self.assertIn("absent from the depmap", err.getvalue())
 
 
 if __name__ == "__main__":

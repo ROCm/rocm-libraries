@@ -74,6 +74,10 @@ fi
 # Step 2: Generate dependency map (always, for the as-if selection)
 echo ""
 echo "Step 2: Generating dependency map..."
+# Drop any stale depmap first: cmake-parse failures are non-fatal (|| echo below),
+# so a leftover file from a prior run would pass the -f check and silently reuse
+# stale data instead of falling back to full.
+rm -f enhanced_dependency_mapping.json
 python3 "${SCRIPT_DIR}/main.py" cmake-parse \
     compile_commands.json \
     build.ninja \

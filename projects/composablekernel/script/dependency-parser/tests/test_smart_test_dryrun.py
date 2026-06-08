@@ -120,6 +120,13 @@ class TestAlwaysRunDryRun(unittest.TestCase):
         self.assertIn("no regex_chunks", out)
         self.assertIn(r"-R ^(test_py_a)$", out)  # always-run class still fires
 
+    def test_unrecognized_mode_exits_one(self):
+        # A garbage build_mode.env must fail loudly via the default case rather
+        # than silently testing nothing.
+        rc, out = self._run("garbage")
+        self.assertEqual(rc, 1)
+        self.assertIn("unrecognized SMART_BUILD_MODE", out)
+
 
 if __name__ == "__main__":
     unittest.main()

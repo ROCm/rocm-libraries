@@ -107,7 +107,7 @@ if ! bash "${SCRIPT_DIR}/smart_build_ci.sh"; then
     # (not to `tests` or the default `all`), so `tests` alone leaves them unbuilt
     # and the full ctest run in smart_test.sh would mark them "Not Run". This
     # matches what the old `ninja check` built (check's deps = tests + examples).
-    ninja -j${NINJA_JOBS} tests examples
+    ninja -j"${NINJA_JOBS}" tests examples
     process_ninja_trace
     echo ""
     echo "[OK] Smart build complete (full mode - all tests built)"

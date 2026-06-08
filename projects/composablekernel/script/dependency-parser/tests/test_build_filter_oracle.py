@@ -141,7 +141,6 @@ class TestCodegenGlobs(unittest.TestCase):
         return str(p)
 
     def test_load_codegen_globs_flattens(self):
-        import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             globs = bfo.load_codegen_globs(self._inventory(tmp))
         self.assertEqual(
@@ -316,6 +315,14 @@ class TestOracleCli(unittest.TestCase):
             capture_output=True, text=True,
         )
         return proc.returncode, proc.stdout, proc.stderr
+
+    def test_probe_missing_required_arg_exits_two(self):
+        # probe needs --depmap/--ninja/--file/--failed-objects; argparse must
+        # reject an incomplete invocation (exit 2) rather than the subcommand
+        # being silently unregistered.
+        rc, _, stderr = self._run("probe", "--depmap", "x.json")
+        self.assertEqual(rc, 2)
+        self.assertIn("--failed-objects", stderr)
 
     def test_reachability_pass_exit_zero(self):
         depmap = {"file_to_executables": {"a.hpp": ["bin/test_a"]}}

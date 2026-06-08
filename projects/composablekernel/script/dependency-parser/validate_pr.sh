@@ -281,6 +281,8 @@ fi
 
 log_info "Generating fresh dependency map for PR validation..."
 START_TIME=$(date +%s)
+# Drop any stale depmap so a failed regenerate can't masquerade as success below.
+rm -f enhanced_dependency_mapping.json
 python3 ../script/dependency-parser/main.py cmake-parse \
     compile_commands.json \
     build.ninja \
