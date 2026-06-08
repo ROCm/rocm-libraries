@@ -4607,6 +4607,19 @@ class Solution(collections.abc.Mapping):
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
 
+    problemType = state["ProblemType"]
+    hasAuxLdsStaging = problemType["UseBias"] \
+      or problemType["UseScaleAlphaVec"] \
+      or problemType.get("UseScaleAB", "") == "Vector"
+    if state["PrefetchAcrossPersistent"] \
+       and (state["DirectToLdsA"] or state["DirectToLdsB"] or state["DirectToLds"]) \
+       and state["NumLdsBlk"] >= 3 \
+       and hasAuxLdsStaging:
+      reject(state, printRejectionReason,
+             "PrefetchAcrossPersistent with DirectToLds and NumLdsBlk >= 3 is not supported "
+             "with aux LDS staging (Bias/ScaleAlphaVec/ScaleABVec); aux LDS staging can overwrite PAP-primed A/B data")
+      return
+
     # lds buffer size for reduction
     # if User want to control the LDS usage, we may open this para in the future
     ldsNumBytesReduction = state["LocalSplitU"] * state["MacroTile0"] * state["MacroTile1"] * int(state["ProblemType"]["ComputeDataType"].numBytes()) if state["LocalSplitU"] > 1 else 0

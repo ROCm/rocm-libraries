@@ -18307,7 +18307,7 @@ class KernelWriterAssembly(KernelWriter):
 
     return mod
 
-  def initTDMDescriptorWaveSeparatedImpl(self, kernel, tP) -> Module:
+  def initTDMDescriptorWaveSeparatedImpl(self, kernel, tP, waveIdxSgpr: int | str = "WaveIdx") -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
     tlu: int = tP["tlu"]
@@ -18365,7 +18365,7 @@ class KernelWriterAssembly(KernelWriter):
     with self.allocTmpSgpr(2) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
-      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr("WaveIdx"), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
+      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wId * (mt // numComp * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
@@ -18472,7 +18472,7 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SMulI32(sgpr("tdmABGlobalSplitIncs"), sgpr(strideRefName()), round(mt * bpe) // dim1Divisor, comment=f"tdm{tc} Global Split Incs(stride * {mt * bpe // dim1Divisor})"))
     return mod
 
-  def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB) -> Module:
+  def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB, waveIdxSgpr: int | str = "WaveIdx") -> Module:
     #TODO: TDM implement
     mod = Module("TDM Init Wave Separated")
     tcA: str = tPA["tensorChar"]
@@ -18482,13 +18482,13 @@ class KernelWriterAssembly(KernelWriter):
     tdmInitLblEnd = Label(self.labels.getNameInc(f"TDMInit{tcA}{tcB}End"), "")
     mod.add(tdmInitLblA)
 
-    mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+    mod.add(SBitcmp1B32(sgpr(waveIdxSgpr), 0, "Check parity of wId"))
     mod.add(SCBranchSCC1(tdmInitLblB.getLabelName(), "Jump to B if wId is odd"))
 
-    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPA))
+    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPA, waveIdxSgpr))
     mod.add(SBranch(tdmInitLblEnd.getLabelName()))
     mod.add(tdmInitLblB)
-    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPB))
+    mod.add(self.initTDMDescriptorWaveSeparatedImpl(kernel, tPB, waveIdxSgpr))
     mod.add(tdmInitLblEnd)
     return mod
 
@@ -18497,7 +18497,7 @@ class KernelWriterAssembly(KernelWriter):
     tc: str = tP['tensorChar']
     return comp.calculateStartAddr(self, kernel, tP, f"Address{tc}")
 
-  def tdmGlobalOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
+  def tdmGlobalOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping, waveIdxSgpr: int | str = "WaveIdx") -> Module:
     mod = Module("TDM Global Offset Wave Separated")
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tcA: str = tPA["tensorChar"]
@@ -18507,15 +18507,15 @@ class KernelWriterAssembly(KernelWriter):
     tdmGlobalOffsetLblEnd = Label(self.labels.getNameInc(f"TDMGlobalOffset{tcA}{tcB}End"), "")
     mod.add(tdmGlobalOffsetLblA)
 
-    mod.add(SBitcmp1B32(sgpr("WaveIdx"), 0, "Check parity of wId"))
+    mod.add(SBitcmp1B32(sgpr(waveIdxSgpr), 0, "Check parity of wId"))
     mod.add(SCBranchSCC1(tdmGlobalOffsetLblB.getLabelName(), "Jump to B if wId is odd"))
 
     dstGroup0A = f"tdm{tcA}Group0"
     dstGroup0B = f"tdm{tcB}Group0"
-    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPA, f"Address{tcA}", dstGroup0A))
+    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPA, f"Address{tcA}", dstGroup0A, waveIdxSgpr))
     mod.add(SBranch(tdmGlobalOffsetLblEnd.getLabelName()))
     mod.add(tdmGlobalOffsetLblB)
-    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPB, f"Address{tcB}", dstGroup0B))
+    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPB, f"Address{tcB}", dstGroup0B, waveIdxSgpr))
     mod.add(tdmGlobalOffsetLblEnd)
     return mod
 
@@ -18556,10 +18556,21 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # PAP TDM/DTL LDS-bank helpers.
   ##############################################################################
+  def papTdmRecomputeWaveIdx(self, kernel: Mapping, waveIdxSgpr: int | str) -> Module:
+    mod = Module("PAP TDM recompute WaveIdx")
+    with self.allocTmpSgpr(1) as tmpSgprRes:
+      mod.add(VReadfirstlaneB32(sgpr(tmpSgprRes.idx), vgpr("Serial"), "first tId"))
+      mod.add(SLShiftRightB32(sgpr(waveIdxSgpr), ceil(log2(kernel["WavefrontSize"])), sgpr(tmpSgprRes.idx),
+                              "recompute WaveIdx for PAP TDM descriptor refresh"))
+    return mod
+
   def papResetTDMDescriptorForTailWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
     mod = Module("PAP reset TDM descriptor for tail")
-    mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB))
-    mod.add(self.tdmGlobalOffsetWaveSeparated(kernel, tPA, tPB))
+    with self.allocTmpSgpr(1) as waveIdxSgprRes:
+      waveIdxSgpr = waveIdxSgprRes.idx
+      mod.add(self.papTdmRecomputeWaveIdx(kernel, waveIdxSgpr))
+      mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB, waveIdxSgpr))
+      mod.add(self.tdmGlobalOffsetWaveSeparated(kernel, tPA, tPB, waveIdxSgpr))
     mod.add(self.tdmApplyStreamKTailOffsetWaveSeparated(kernel, tPA, tPB))
     mod.add(self.resetTDMDescriptorForTailWaveSeparated(kernel, tPA, tPB))
     if kernel["LdsOffsetA_Blk"] == 0:
@@ -18580,19 +18591,22 @@ class KernelWriterAssembly(KernelWriter):
     mod = Module(f"PAP TDM refresh descriptor ({tcA}/{tcB})")
     ldsAddrSgpr: str = comp.getLdsAddrSgprName(f"tdm{tcA}Group0")
     blkMask: int = kernel["LdsOffsetA_Blk"]
-    if preservePapBank and blkMask != 0:
-      with self.allocTmpSgpr(1) as tmpSgprRes:
-        papBankSgpr = tmpSgprRes.idx
-        mod.add(SAndB32(dst=sgpr(papBankSgpr), src0=sgpr(ldsAddrSgpr), src1=hex(blkMask),
-                comment=f"preserve PAP LDS bank before descriptor refresh ({blkMask:#x})"))
-        mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB))
-        mod.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(papBankSgpr),
-                comment="restore PAP LDS bank after descriptor refresh"))
-    else:
-      mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB))
-    mod.add(self.tdmGlobalOffsetWaveSeparated(kernel, tPA, tPB))
-    if kernel["StreamK"] > 0:
-      mod.add(self.tdmApplyStreamKOffsetWaveSeparated(kernel, tPA, tPB))
+    with self.allocTmpSgpr(1) as waveIdxSgprRes:
+      waveIdxSgpr = waveIdxSgprRes.idx
+      mod.add(self.papTdmRecomputeWaveIdx(kernel, waveIdxSgpr))
+      if preservePapBank and blkMask != 0:
+        with self.allocTmpSgpr(1) as tmpSgprRes:
+          papBankSgpr = tmpSgprRes.idx
+          mod.add(SAndB32(dst=sgpr(papBankSgpr), src0=sgpr(ldsAddrSgpr), src1=hex(blkMask),
+                  comment=f"preserve PAP LDS bank before descriptor refresh ({blkMask:#x})"))
+          mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB, waveIdxSgpr))
+          mod.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(papBankSgpr),
+                  comment="restore PAP LDS bank after descriptor refresh"))
+      else:
+        mod.add(self.initTDMDescriptorWaveSeparated(kernel, tPA, tPB, waveIdxSgpr))
+      mod.add(self.tdmGlobalOffsetWaveSeparated(kernel, tPA, tPB, waveIdxSgpr))
+      if kernel["StreamK"] > 0:
+        mod.add(self.tdmApplyStreamKOffsetWaveSeparated(kernel, tPA, tPB))
     return mod
 
   def papTdmSaveLdsBank(self, kernel: Mapping) -> Module:
