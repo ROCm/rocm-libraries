@@ -16,6 +16,7 @@
 import ctypes
 import os
 import re
+import shutil
 import sys
 import struct
 import subprocess
@@ -314,7 +315,7 @@ def generate_set_directives(sgprs):
     return "\n".join(f".set sgpr{name}, {idx}" for name, idx in sgprs.items())
 
 
-def init_rocisa(target=None):
+def init_rocisa(target=None, wavesize=None):
     """Initialize rocIsa singleton for the detected GPU target.
     Args:
         target: Optional gfx string (e.g. 'gfx950'). When None (default), we
@@ -322,6 +323,8 @@ def init_rocisa(target=None):
                 rocm_agent_enumerator. Passing an explicit target is required
                 only by tests whose assertions are tied to a specific ISA's
                 opcode mnemonics (mfma vs wmma).
+        wavesize: Optional wavefront size for ri.setKernel. Defaults to WAVESIZE
+                (wave64); wave32 targets (e.g. gfx1250) pass 32.
     Always calls ri.init() because other module imports (e.g. KernelWriter)
     may have already initialized the singleton with a different target.
     """
@@ -335,7 +338,7 @@ def init_rocisa(target=None):
     isa = gfxToIsa(gfx_target)
     asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
     ri.init(isa, asmpath)
-    ri.setKernel(isa, WAVESIZE)
+    ri.setKernel(isa, wavesize if wavesize is not None else WAVESIZE)
 
 
 # ---- Kernel assembly generator ----
@@ -543,25 +546,35 @@ def generate_export_epilogue(writer, export_reg, is_sgpr=False):
 
 # ---- Assemble / run ----
 
-def assemble_kernel(asm_source, output_path):
-    """Assemble .s source to .co code object."""
+def assemble_kernel(asm_source, output_path, wavefront_size=64):
+    """Assemble .s source to .co code object.
+
+    Args:
+        wavefront_size: wave size to pass via -mwavefrontsize. 64 (default) for
+            wave64 targets. Pass None to omit the flag entirely and let the
+            target's native default apply (e.g. gfx1250, which is wave32 and
+            whose assembler does not accept -mwavefrontsize32).
+    """
     with tempfile.NamedTemporaryFile(suffix=".s", mode="w", delete=False) as f:
         f.write(asm_source)
         asm_path = f.name
 
     obj_path = asm_path.replace(".s", ".o")
 
+    cmd = [
+        "amdclang++", "-x", "assembler",
+        "--target=amdgcn-amd-amdhsa",
+        f"-mcpu={GFX_TARGET}",
+    ]
+    if wavefront_size is not None:
+        cmd.append(f"-mwavefrontsize{wavefront_size}")
+    cmd += ["-mcode-object-version=5", "-o", obj_path, asm_path]
+
     try:
-        subprocess.check_call([
-            "amdclang++", "-x", "assembler",
-            "--target=amdgcn-amd-amdhsa",
-            f"-mcpu={GFX_TARGET}",
-            "-mwavefrontsize64",
-            "-mcode-object-version=5",
-            "-o", obj_path,
-            asm_path
-        ])
-        os.rename(obj_path, output_path)
+        subprocess.check_call(cmd)
+        # shutil.move (not os.rename) so the temp .o in /tmp can land on a
+        # different filesystem than output_path without Errno 18 (EXDEV).
+        shutil.move(obj_path, output_path)
     finally:
         if os.path.exists(asm_path):
             os.unlink(asm_path)
@@ -569,7 +582,7 @@ def assemble_kernel(asm_source, output_path):
             os.unlink(obj_path)
 
 
-def run_on_gpu(co_path, output_size, inputs=(), scalars=(), lds_size=0, num_threads=None):
+def run_on_gpu(co_path, output_size, inputs=(), scalars=(), lds_size=0, num_threads=None, grid=1):
     """Load code object, launch kernel, read output buffer.
 
     Builds the kernarg struct dynamically: one u64 per input buffer pointer,
@@ -626,9 +639,15 @@ def run_on_gpu(co_path, output_size, inputs=(), scalars=(), lds_size=0, num_thre
         ctypes.c_void_p(0x03),  # HIP_LAUNCH_PARAM_END
     )
 
+    if isinstance(grid, (tuple, list)):
+        gx = grid[0] if len(grid) > 0 else 1
+        gy = grid[1] if len(grid) > 1 else 1
+        gz = grid[2] if len(grid) > 2 else 1
+    else:
+        gx, gy, gz = grid, 1, 1
     hip_check(hip.hipModuleLaunchKernel(
         kernel,
-        1, 1, 1,
+        gx, gy, gz,
         num_threads, 1, 1,
         lds_size,
         None,

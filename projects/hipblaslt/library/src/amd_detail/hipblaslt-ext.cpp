@@ -43,7 +43,8 @@ namespace hipblaslt_ext
     class GemmPreference::GemmPreferenceImpl
     {
     public:
-        size_t workspace_bytes;
+        size_t workspace_bytes         = 0;
+        bool   dyn_persistent_tile_ext = false;
     };
 
     GemmPreference::GemmPreference()
@@ -75,6 +76,16 @@ namespace hipblaslt_ext
     const size_t GemmPreference::getMaxWorkspaceBytes() const
     {
         return pimpl->workspace_bytes;
+    }
+
+    void GemmPreference::setDynPersistentTileEnabled(bool enabled)
+    {
+        pimpl->dyn_persistent_tile_ext = enabled;
+    }
+
+    bool GemmPreference::getDynPersistentTileEnabled() const
+    {
+        return pimpl->dyn_persistent_tile_ext;
     }
 
     class GemmProblemType::GemmProblemTypeImpl
