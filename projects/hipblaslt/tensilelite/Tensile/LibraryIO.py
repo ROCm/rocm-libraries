@@ -514,7 +514,7 @@ def parseLibraryLogicData(
         data = parseLibraryLogicList(data, srcFile)
     elif isinstance(data, dict):
         libraryType = data["LibraryType"]
-        if libraryType == "FreeSize":
+        if libraryType in ("FreeSize", "Prediction"):
             data["Library"] = {}
             data["Library"]["indexOrder"] = None
             data["Library"]["table"] = [0, len(data["Solutions"])]
@@ -679,14 +679,8 @@ def parseLibraryLogicList(data, srcFile="?"):
     else:
         printExit("Library logic file {} is missing required field matching property." \
                 .format(srcFile))
-    if libraryType == "FreeSize":
-        rv["LibraryType"] = "FreeSize"
-        rv["Library"] = {}
-        rv["Library"]["indexOrder"] = None
-        rv["Library"]["table"] = [0, len(data[5])]
-        rv["Library"]["distance"] = None
-    elif libraryType == "Prediction":
-        rv["LibraryType"] = "Prediction"
+    if libraryType in ("FreeSize", "Prediction"):
+        rv["LibraryType"] = libraryType
         rv["Library"] = {}
         rv["Library"]["indexOrder"] = None
         rv["Library"]["table"] = [0, len(data[5])]
@@ -836,7 +830,7 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
             "ScheduleName": schedulePrefix,
             "ArchitectureName": architectureName,
             "DeviceNames": deviceNames,
-            "DefaultSolution": defaultSolution,
+            "DefaultSolution": dict(sorted(defaultSolution.items())),
             "ProblemType": problemTypeState,
             "Solutions": solutionList,
             "IndexOrder": indexOrder,

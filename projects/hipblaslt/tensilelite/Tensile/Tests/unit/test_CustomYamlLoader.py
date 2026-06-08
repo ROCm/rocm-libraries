@@ -27,7 +27,7 @@
 CustomYamlLoader is a thin, dependency-light wrapper around PyYAML's event API
 that performs strict scalar typing and partial reads of Tensile logic/config
 YAML. These tests exercise the real functions against real YAML inputs (no
-mocking) and assert on concrete parsed values.
+mocking) and assert on concrete parsed values, including anchor resolution.
 """
 
 import pytest
@@ -57,8 +57,8 @@ def _parse_scalar(text):
     return parse_scalar(loader)
 
 
-def _write_yaml(tmp_path, text):
-    path = tmp_path / "logic.yaml"
+def _write_yaml(tmp_path, text, name="logic.yaml"):
+    path = tmp_path / name
     path.write_text(text)
     return path
 
@@ -226,3 +226,184 @@ class TestLoadLogicGfxArch:
     def test_map_root_falls_back_to_architecture_name(self, tmp_path):
         text = "ArchitectureName: gfx1100\nOther: 1\n"
         assert load_logic_gfx_arch(_write_yaml(tmp_path, text)) == "gfx1100"
+
+
+class TestValidAnchorResolution:
+    """Anchors and aliases resolve within one document."""
+
+    def test_load_yaml_stream_resolves_mapping_aliases(self, tmp_path):
+        text = (
+            "IndexOrder: &id001 [2, 3, 0, 1]\n"
+            "ExactLogic: &id002\n"
+            "- - [129, 129, 1, 129]\n"
+            "  - [0, 0.0]\n"
+            "Library:\n"
+            "  indexOrder: *id001\n"
+            "  table: *id002\n"
+        )
+        data = load_yaml_stream(_write_yaml(tmp_path, text), DEFAULT_YAML_LOADER)
+
+        assert data["IndexOrder"] == [2, 3, 0, 1]
+        assert data["Library"]["indexOrder"] == [2, 3, 0, 1]
+        assert data["ExactLogic"][0][0] == [129, 129, 1, 129]
+        assert data["Library"]["table"][0][0] == [129, 129, 1, 129]
+        assert data["IndexOrder"] is data["Library"]["indexOrder"]
+        assert data["ExactLogic"] is data["Library"]["table"]
+
+    def test_load_yaml_dict_item_resolves_aliases_in_value(self, tmp_path):
+        text = (
+            "IndexOrder: &id001 [2, 3, 0, 1]\n"
+            "ExactLogic: &id002\n"
+            "- - [129, 129, 1, 129]\n"
+            "  - [0, 0.0]\n"
+            "Library:\n"
+            "  indexOrder: *id001\n"
+            "  table: *id002\n"
+        )
+        path = _write_yaml(tmp_path, text)
+        library = load_yaml_dict_item(path, DEFAULT_YAML_LOADER, "Library")
+        data = load_yaml_stream(path, DEFAULT_YAML_LOADER)
+
+        assert library["table"] == data["ExactLogic"]
+        assert library["indexOrder"] == data["IndexOrder"]
+        assert library["indexOrder"] == [2, 3, 0, 1]
+
+    @pytest.mark.parametrize("index,expected", [
+        (1, "gfx950"),
+        (7, [[10240, 384, 1, 8192], [0, 0.0]]),
+    ])
+    def test_load_yaml_sequence_item_reads_list_root(self, tmp_path, index, expected):
+        text = (
+            "- 0\n"
+            "- gfx950\n"
+            "- 2\n"
+            "- 3\n"
+            "- 4\n"
+            "- 5\n"
+            "- 6\n"
+            "- - - [10240, 384, 1, 8192]\n"
+            "    - [0, 0.0]\n"
+        )
+        item = load_yaml_sequence_item(
+            _write_yaml(tmp_path, text), DEFAULT_YAML_LOADER, index
+        )
+
+        if isinstance(expected, str):
+            assert item == expected
+        else:
+            assert item[0] == expected
+
+
+class TestInvalidAnchorIsolation:
+    """Per-load ``anchors`` dict must not leak across calls."""
+
+    def test_undefined_alias_leaves_table_unresolved(self, tmp_path):
+        text = (
+            "IndexOrder: &id001 [2, 3, 0, 1]\n"
+            "ExactLogic:\n"
+            "- - [1024, 1024, 1, 1024]\n"
+            "  - [0, 0.0]\n"
+            "Library:\n"
+            "  indexOrder: *id001\n"
+            "  table: *id002\n"
+        )
+        data = load_yaml_stream(_write_yaml(tmp_path, text), DEFAULT_YAML_LOADER)
+
+        assert data["IndexOrder"] == [2, 3, 0, 1]
+        assert data["Library"]["indexOrder"] == [2, 3, 0, 1]
+        assert data["ExactLogic"][0][0] == [1024, 1024, 1, 1024]
+        assert data["Library"]["table"] == "id002"
+        assert data["Library"]["table"] is not data["ExactLogic"]
+
+    def test_sequential_loads_do_not_share_anchors(self, tmp_path):
+        anchored_text = (
+            "IndexOrder: &id001 [2, 3, 0, 1]\n"
+            "ExactLogic: &id002\n"
+            "- - [129, 129, 1, 129]\n"
+            "  - [0, 0.0]\n"
+            "Library:\n"
+            "  indexOrder: *id001\n"
+            "  table: *id002\n"
+        )
+        undefined_text = (
+            "IndexOrder: &id001 [2, 3, 0, 1]\n"
+            "ExactLogic:\n"
+            "- - [1024, 1024, 1, 1024]\n"
+            "  - [0, 0.0]\n"
+            "Library:\n"
+            "  indexOrder: *id001\n"
+            "  table: *id002\n"
+        )
+        merge_data = load_yaml_stream(
+            _write_yaml(tmp_path, anchored_text), DEFAULT_YAML_LOADER
+        )
+        undefined_data = load_yaml_stream(
+            _write_yaml(tmp_path, undefined_text, name="undefined.yaml"),
+            DEFAULT_YAML_LOADER,
+        )
+
+        assert merge_data["ExactLogic"] is merge_data["Library"]["table"]
+        assert undefined_data["Library"]["table"] == "id002"
+        assert undefined_data["Library"]["table"] is not merge_data["Library"]["table"]
+
+    def test_dict_item_load_does_not_use_prior_stream_anchors(self, tmp_path):
+        anchored_text = (
+            "IndexOrder: &id001 [2, 3, 0, 1]\n"
+            "ExactLogic: &id002\n"
+            "- - [129, 129, 1, 129]\n"
+            "  - [0, 0.0]\n"
+            "Library:\n"
+            "  indexOrder: *id001\n"
+            "  table: *id002\n"
+        )
+        undefined_text = (
+            "IndexOrder: &id001 [2, 3, 0, 1]\n"
+            "ExactLogic:\n"
+            "- - [1024, 1024, 1, 1024]\n"
+            "  - [0, 0.0]\n"
+            "Library:\n"
+            "  indexOrder: *id001\n"
+            "  table: *id002\n"
+        )
+        merge_table = load_yaml_stream(
+            _write_yaml(tmp_path, anchored_text), DEFAULT_YAML_LOADER
+        )["Library"]["table"]
+        undefined_path = _write_yaml(tmp_path, undefined_text, name="undefined.yaml")
+        library = load_yaml_dict_item(undefined_path, DEFAULT_YAML_LOADER, "Library")
+        exact_logic = load_yaml_stream(undefined_path, DEFAULT_YAML_LOADER)["ExactLogic"]
+
+        assert library["table"] == "id002"
+        assert library["table"] is not merge_table
+        assert library["table"] is not exact_logic
+
+
+class TestInvalidLoadHelpers:
+    """Invalid loads."""
+
+    def test_load_yaml_sequence_item_raises_when_root_not_sequence(self, tmp_path):
+        text = (
+            "IndexOrder: &id001 [2, 3, 0, 1]\n"
+            "ExactLogic: &id002\n"
+            "- - [129, 129, 1, 129]\n"
+            "  - [0, 0.0]\n"
+            "Library:\n"
+            "  indexOrder: *id001\n"
+            "  table: *id002\n"
+        )
+        with pytest.raises(RuntimeError, match="Root of YAML is not a sequence"):
+            load_yaml_sequence_item(_write_yaml(tmp_path, text), DEFAULT_YAML_LOADER, 0)
+
+    def test_load_yaml_dict_item_raises_when_root_not_map(self, tmp_path):
+        text = (
+            "- 0\n"
+            "- gfx950\n"
+            "- 2\n"
+            "- 3\n"
+            "- 4\n"
+            "- 5\n"
+            "- 6\n"
+            "- - - [10240, 384, 1, 8192]\n"
+            "    - [0, 0.0]\n"
+        )
+        with pytest.raises(RuntimeError, match="Root of YAML is not a map"):
+            load_yaml_dict_item(_write_yaml(tmp_path, text), DEFAULT_YAML_LOADER, "ArchitectureName")

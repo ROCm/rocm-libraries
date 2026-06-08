@@ -29,12 +29,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 from Tensile import LibraryIO
-from Tensile.CustomYamlLoader import load_yaml_stream
+from Tensile.CustomYamlLoader import DEFAULT_YAML_LOADER, load_yaml_stream
 import pytest
 from unittest.mock import patch
-import yaml
 
 from Tensile.TensileMergeLibrary import (
+    compareDestFolderToYaml,
     createAccessor,
     findSolutionWithIndex,
     fixSizeInconsistencies,
@@ -240,7 +240,7 @@ def _load_arch_data(arch: str) -> Any:
     with TemporaryDirectory() as tmp_dir:
         yaml_file = Path(tmp_dir) / f"{arch}.yaml"
         yaml_file.write_text(YAML_BY_ARCH[arch])
-        return load_yaml_stream(yaml_file, yaml.CSafeLoader)
+        return load_yaml_stream(yaml_file, DEFAULT_YAML_LOADER)
 
 
 def _append_new_size(data: Any, arch: str) -> None:
@@ -549,6 +549,39 @@ class TestFindSolutionWithIndexWithFixtures:
             assert result1["SolutionNameMin"] == "Sol_gfx1250_1"
 
 
+class TestLibraryDistanceAccessor:
+    """Tests for Equality/GridBased distance vs Matching LibraryType."""
+
+    def test_get_library_distance_dict_uses_library_block(self, gfx1250_data):
+        """Dict-format fixture exposes GridBased under Library.distance."""
+        accessor = createAccessor(gfx1250_data)
+        assert accessor.getLibraryType() == "Matching"
+        assert accessor.getLibraryDistance() == "GridBased"
+
+    def test_get_library_distance_list_uses_index_eleven(self, gfx950_data):
+        """List-format fixture keeps Equality/GridBased at legacy index 11."""
+        accessor = createAccessor(gfx950_data)
+        assert accessor.getLibraryDistance() == "Equality"
+
+    @pytest.mark.parametrize(
+        "dest_dir,expect_exit",
+        [
+            ("/path/to/GridBased", False),
+            ("/path/to/Equality", True),
+        ],
+    )
+    def test_compare_dest_folder_to_yaml_library_distance(
+        self, gfx1250_data, dest_dir: str, expect_exit: bool
+    ) -> None:
+        """compareDestFolderToYaml matches dest folder to Library.distance (GridBased)."""
+        accessor = createAccessor(gfx1250_data)
+        if expect_exit:
+            with pytest.raises(SystemExit):
+                compareDestFolderToYaml(dest_dir, "logic.yaml", accessor)
+        else:
+            compareDestFolderToYaml(dest_dir, "logic.yaml", accessor)
+
+
 class TestCrossFormatOperations:
     """Tests for set/get round-trips on accessor for both formats."""
 
@@ -751,7 +784,7 @@ class TestRoundTrip:
         LibraryIO.writeYAML(str(out_file), data, explicit_start=False, explicit_end=False)
 
         # Step 3: YAML on disk → load_yaml_stream → Python data
-        data2 = load_yaml_stream(out_file, yaml.CSafeLoader)
+        data2 = load_yaml_stream(out_file, DEFAULT_YAML_LOADER)
 
         # Step 4: key structural fields survive the round-trip
         accessor1 = createAccessor(data)

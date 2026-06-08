@@ -121,7 +121,32 @@ class DataAccessor:
         self.set("ProblemType", problemType)
 
     def getLibraryType(self):
-        """Get library type."""
+        """Get library matching category (Matching, FreeSize, or Prediction)."""
+        return self.get("LibraryType")
+
+    def getLibraryDistance(self):
+        """Get library distance mode (Equality or GridBased) for merge folder checks.
+
+        Dict-based logic stores this under ``Library.distance``. Legacy list
+        format stores Equality/GridBased at index 11 (historically ``LibraryType``).
+
+        Returns:
+            str | None: ``"Equality"``, ``"GridBased"``, or None if unset.
+
+        Raises:
+            None.
+        """
+        if self._isDict:
+            library = self.get("Library")
+            if isinstance(library, dict):
+                distance = library.get("distance")
+                if distance:
+                    return distance
+            # Legacy dict files may still use LibraryType for distance.
+            legacy = self.get("LibraryType")
+            if legacy in ("Equality", "GridBased"):
+                return legacy
+            return None
         return self.get("LibraryType")
 
     def hasDefaultSolution(self):
@@ -320,15 +345,27 @@ def removeDuplicatedSolutions(accessor, prefix=""):
 
 from Tensile import LibraryIO
 
-# For dict format files this function can be discarded
-# Move baseName, KernelNameMin, SolutionNameMin to the top of all
-# solutions as well as removing unnecessary null CUCount field
-def reorderSolutionsParams(data):
+def reorderSolutionsParams(data: dict[str, Any]) -> None:
+    """Reorder solution dict keys after list-to-dict conversion.
+
+    Moves ``SolutionIndex``, ``KernelNameMin``, and ``SolutionNameMin`` to the
+    top of each entry in ``data["Solutions"]``. Used when migrating legacy
+    list-format logic to dict format; dict-native files do not need this step.
+
+    Args:
+        data: Dict-format library logic data (mutated in place).
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
     keys = ["SolutionIndex", "KernelNameMin", "SolutionNameMin"]
-    vals = {}
     for sol_idx in range(len(data["Solutions"])):
+        vals = {}
         for key in keys:
-            if key in data["Solutions"][sol_idx].keys():
+            if key in data["Solutions"][sol_idx]:
                 vals[key] = data["Solutions"][sol_idx].pop(key)
         data["Solutions"][sol_idx] = {**vals, **data["Solutions"][sol_idx]}
 
@@ -355,41 +392,44 @@ def convertToDict(data: list | dict, filename: str) -> dict:
 from .CustomYamlLoader import load_yaml_stream
 
 def loadData(filename: str) -> list[Any]:
-    """Load data from file and convert configured architectures to dict format.
-
-    For dict-based architectures whose file is still in legacy list format the
-    converted dict is written back to disk (one-time migration) so subsequent
-    loads skip the conversion step.
+    """Load logic YAML and convert dict-based architectures from list to dict.
 
     Args:
         filename: Path to YAML logic file.
 
     Returns:
-        list: A pair [filename, loaded_or_converted_data].
+        list: ``[filename, data, migrated]`` where *migrated* is True when a
+        legacy list file was converted to dict format (caller should persist).
 
     Raises:
         None.
     """
     data = load_yaml_stream(filename, yaml.CSafeLoader)
+    migrated = False
 
     if isDictBasedArchitecture(data):
+        was_list = isinstance(data, list)
         data = convertToDict(data, filename)
-        if isinstance(data, dict):
-            # Persist the converted format so future loads skip this step.
-            LibraryIO.writeYAML(filename, data, explicit_start=False, explicit_end=False)
+        migrated = was_list and isinstance(data, dict)
 
-    return [filename, data]
+    return [filename, data, migrated]
 
 def compareDestFolderToYaml(originalDir, incFile, accessor):
-    """Unified compare destination folder using DataAccessor."""
+    """Unified compare destination folder to YAML using DataAccessor."""
     checkFolders = ["Equality", "GridBased"]
     destFolder = originalDir.rstrip('/').split('/')[-1]
-    incAttribute = accessor.getLibraryType()
+    incAttribute = accessor.getLibraryDistance()
     if not incAttribute:
-        sys.exit(f"[Error] Empty YAML attribute. Need to set Equality or GridBased in {incFile}.")
+        sys.exit(
+            f"[Error] Empty YAML attribute. Need Library.distance (or legacy "
+            f"LibraryType) set to Equality or GridBased in {incFile}."
+        )
     if destFolder in checkFolders and destFolder != incAttribute:
         restuls = f"\t{incFile} must be {destFolder} tuning"
-        sys.exit(f"[Error] Destination folder(={destFolder}) failed to match YAML attribute(={incAttribute}): \n{restuls}")
+        sys.exit(
+            f"[Error] Destination folder(={destFolder}) failed to match YAML "
+            f"Library.distance(={incAttribute}): \n{restuls}"
+        )
 
 def compareProblemType(oriAccessor, incAccessor):
     """Unified compare problem type using DataAccessor."""
@@ -574,8 +614,11 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
     iters = zip(logicsFiles.keys())
     logicsList = ParallelMap2(loadData, iters, "Loading Logics...", return_as="list")
     logicsDict = {}
-    for i, _ in enumerate(logicsList):
-        logicsDict[logicsList[i][0]] = logicsList[i][1]
+    for filename, data, migrated in logicsList:
+        logicsDict[filename] = data
+        if migrated:
+            LibraryIO.writeYAML(filename, data, explicit_start=False, explicit_end=False)
+            msg("Converted", filename, "to dict format")
 
     for incFile in incrementalFiles:
         basename = os.path.split(incFile)[-1]
