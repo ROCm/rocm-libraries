@@ -102,8 +102,14 @@ What it does (real):
       (not exported -- mirror rocisa C++ which only binds the two
       public classes).
 
+    - ``KernelBody`` — top-level kernel wrapper that stitches a
+      ``SignatureBase`` header and a ``Module`` instruction body into
+      one ``toString()``/``str()`` emission (the shape Tensile's
+      ``KernelWriter`` returns as the final asm string).
+
 Not yet done (dummy):
-    - Container nodes: ``KernelBody``, ``BitfieldUnion``.
+    - ``BitfieldUnion`` (standalone polymorphic root; gfx1250
+      ``SrdUpperValue`` has a separate logicalIR wrapper today).
 
 Future:
     When this shim grows beyond gfx1250, prefer adding sibling free
@@ -2008,6 +2014,73 @@ class SignatureBase(Item):
         raise RuntimeError("SignatureBase is not picklable")
 
 
+class KernelBody(Item):
+    """Top-level kernel wrapper -- mirror of ``rocisa::KernelBody``.
+
+    Holds an optional ``SignatureBase`` (via ``addSignature``) and a
+    ``Module`` body (via ``addBody`` / the rw ``body`` attribute).
+    ``toString()`` emits the ``Begin Kernel`` banner, then signature,
+    then body; missing body raises ``RuntimeError`` (rocisa parity).
+    """
+
+    __slots__ = (
+        "signature", "body", "totalVgprs", "totalAgprs", "totalSgprs",
+    )
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name=name)
+        self.signature: Optional[SignatureBase] = None
+        self.body: Optional[Module] = None
+        self.totalVgprs: int = 0
+        self.totalAgprs: int = 0
+        self.totalSgprs: int = 0
+
+    def addSignature(self, signature: SignatureBase) -> None:
+        self.signature = signature
+
+    def addBody(self, body: Module) -> None:
+        self.body = body
+
+    def setGprs(self, totalVgprs: int, totalAgprs: int, totalSgprs: int) -> None:
+        self.totalVgprs = int(totalVgprs)
+        self.totalAgprs = int(totalAgprs)
+        self.totalSgprs = int(totalSgprs)
+        if self.signature is not None:
+            self.signature.setGprs(totalVgprs, totalAgprs, totalSgprs)
+
+    def getNextFreeVgpr(self) -> int:
+        if self.signature is not None:
+            return self.signature.getNextFreeVgpr()
+        return 0
+
+    def getNextFreeSgpr(self) -> int:
+        if self.signature is not None:
+            return self.signature.getNextFreeSgpr()
+        return 0
+
+    def toString(self) -> str:
+        out = TextBlock(_sig_block3line("Begin Kernel")).toString()
+        if self.signature is not None:
+            out += self.signature.toString()
+        if self.body is not None:
+            out += self.body.toString()
+        else:
+            raise RuntimeError("Kernel body is empty")
+        return out
+
+    def prettyPrint(self, indent: str = "") -> str:
+        return f"{indent}{type(self).__name__} "
+
+    def __str__(self) -> str:
+        return self.toString()
+
+    def __deepcopy__(self, memo):
+        raise RuntimeError("KernelBody is not deepcopyable")
+
+    def __reduce__(self):
+        raise RuntimeError("KernelBody is not picklable")
+
+
 # ---------------------------------------------------------------------------
 # Dummy code-composition components (pending real implementation).
 # ---------------------------------------------------------------------------
@@ -2022,7 +2095,6 @@ class SignatureBase(Item):
 #     prettyPrint / count output during bring-up.
 #
 # Inheritance map (mirror of code.hpp):
-#   KernelBody -- ``: Item`` in C++ ⇒ ``base=Item`` here.
 #   BitfieldUnion -- standalone polymorphic root in C++
 #     (code.hpp:928, NOT a subclass of Item). Kept ``base=object``
 #     so ``isinstance(bf, Item)`` correctly stays False; the C++ class
@@ -2030,10 +2102,9 @@ class SignatureBase(Item):
 #
 # Already real (above this block): TextBlock, Module, ValueIf,
 # ValueElseIf, ValueEndif, ValueSet, RegSet, Label, StructuredModule,
-# Macro, SignatureCodeMeta, SignatureBase.
+# Macro, SignatureCodeMeta, SignatureBase, KernelBody.
 
 BitfieldUnion = make_dummy_class(f"{_P}.BitfieldUnion")
-KernelBody = make_dummy_class(f"{_P}.KernelBody", base=Item)
 
 
 # ---------------------------------------------------------------------------

@@ -1508,9 +1508,6 @@ class TestDummyClassesInheritItem(unittest.TestCase):
     # / TestStructuredModule* below); isinstance-Item coverage is
     # preserved there alongside the rest of their behavioural tests.
 
-    def test_kernelbody_is_item(self):
-        self.assertIsInstance(KernelBody(), Item)
-
     def test_bitfieldunion_is_not_item(self):
         # Intentionally NOT in the Item hierarchy -- mirror of
         # rocisa C++ where ``BitfieldUnion`` (code.hpp:928) is its
@@ -1521,32 +1518,22 @@ class TestDummyClassesInheritItem(unittest.TestCase):
         self.assertNotIsInstance(BitfieldUnion(), Item)
 
 
-class TestDummyInheritsItemDefaults(unittest.TestCase):
-    """Methods inherited from Item (toString / countType / cap-proxies)
-    take precedence over the dummy ``__getattr__`` no-op -- otherwise
-    a dummy dropped into a Module tree would silently break
-    prettyPrint / countType passes. Uses ``KernelBody`` as the
-    representative still-dummy stand-in (Macro / Label / etc. have
-    been promoted to real classes)."""
+class TestKernelBodyItemDefaults(unittest.TestCase):
+    """``KernelBody`` inherits ``Item.countType`` and raises on empty
+    ``toString`` when no body is attached (rocisa parity)."""
 
-    def test_dummy_toString_returns_name_from_item(self):
-        # The dummy ``__init__`` calls ``super().__init__()`` with no
-        # args, so Item.name defaults to "". ``toString`` therefore
-        # returns "" -- NOT the dummy ``__getattr__`` no-op which
-        # would have returned None.
-        self.assertEqual(KernelBody().toString(), "")
+    def test_toString_raises_when_body_missing(self):
+        kb = KernelBody("kb")
+        with self.assertRaises(RuntimeError):
+            kb.toString()
 
-    def test_dummy_str_returns_name_from_item(self):
-        # ``str(dummy)`` must NOT return ``<DummyShim ...>`` (that's
-        # __repr__'s job) -- it must go through Item.__str__ →
-        # Item.toString → "" so that ``Module.toString`` (which
-        # concatenates ``str(it)``) emits empty rather than the
-        # debug-repr.
-        self.assertEqual(str(KernelBody()), "")
+    def test_str_raises_when_body_missing(self):
+        kb = KernelBody("kb")
+        with self.assertRaises(RuntimeError):
+            str(kb)
 
-    def test_dummy_countType_is_one_for_itself(self):
-        kb = KernelBody()
-        # Inherited from Item.countType: 1 if isinstance match.
+    def test_countType_is_one_for_itself(self):
+        kb = KernelBody("kb")
         self.assertEqual(kb.countType(KernelBody), 1)
         self.assertEqual(kb.countType(Item), 1)
         self.assertEqual(kb.countType(Module), 0)
@@ -1589,10 +1576,9 @@ class TestModuleCountTypeRecursion(unittest.TestCase):
         # visible to ``countType(Item)`` walks (the very reason for
         # ``make_dummy_class(..., base=Item)`` for the still-dummy
         # nodes, and for ``class Label(Item)`` for the real ones).
-        # ``KernelBody`` is the representative still-dummy stand-in.
         m = Module()
         m.add(Label(0, ""))
-        m.add(KernelBody())
+        m.add(KernelBody("kb"))
         m.add(TextBlock("x"))
         # 1 (Module) + 1 (Label) + 1 (KernelBody) + 1 (TextBlock) = 4.
         self.assertEqual(m.countType(Item), 4)
@@ -3433,6 +3419,126 @@ class TestSignatureBaseCopyRejected(unittest.TestCase):
 
 # ===========================================================================
 # (end of Signature tests)
+# ===========================================================================
+
+
+# ===========================================================================
+# KernelBody
+# ===========================================================================
+
+
+def _make_kernel_body(**kwargs) -> KernelBody:
+    name = kwargs.pop("name", "kernelBody")
+    return KernelBody(name)
+
+
+class TestKernelBodyConstruction(unittest.TestCase):
+    def test_is_item_subclass(self):
+        kb = _make_kernel_body()
+        self.assertIsInstance(kb, Item)
+
+    def test_ctor_sets_name_and_defaults(self):
+        kb = KernelBody("kernelBody")
+        self.assertEqual(kb.name, "kernelBody")
+        self.assertIsNone(kb.signature)
+        self.assertIsNone(kb.body)
+        self.assertEqual(kb.totalVgprs, 0)
+        self.assertEqual(kb.totalAgprs, 0)
+        self.assertEqual(kb.totalSgprs, 0)
+
+
+class TestKernelBodyAddSignatureAndBody(_SignatureKernelSetup, unittest.TestCase):
+    def test_add_signature_and_body(self):
+        kb = _make_kernel_body()
+        sig = _make_signature_base()
+        body = Module("body")
+        body.add(TextBlock("s_nop 0\n"))
+        kb.addSignature(sig)
+        kb.addBody(body)
+        self.assertIs(kb.signature, sig)
+        self.assertIs(kb.body, body)
+
+    def test_body_rw_attribute(self):
+        kb = _make_kernel_body()
+        body = Module("body")
+        kb.body = body
+        self.assertIs(kb.body, body)
+
+
+class TestKernelBodySetGprs(_SignatureKernelSetup, unittest.TestCase):
+    def test_set_gprs_updates_fields_and_signature(self):
+        kb = _make_kernel_body()
+        kb.addSignature(_make_signature_base())
+        kb.setGprs(48, 4, 20)
+        self.assertEqual(kb.totalVgprs, 48)
+        self.assertEqual(kb.totalAgprs, 4)
+        self.assertEqual(kb.totalSgprs, 20)
+        self.assertEqual(kb.getNextFreeVgpr(), 48)
+        self.assertEqual(kb.getNextFreeSgpr(), 20)
+
+    def test_get_next_free_without_signature_returns_zero(self):
+        kb = _make_kernel_body()
+        self.assertEqual(kb.getNextFreeVgpr(), 0)
+        self.assertEqual(kb.getNextFreeSgpr(), 0)
+
+
+class TestKernelBodyToString(_SignatureKernelSetup, unittest.TestCase):
+    def test_emits_banner_signature_and_body(self):
+        kb = _make_kernel_body()
+        kb.addSignature(_make_signature_base(kernelName="my_k"))
+        body = Module("body")
+        body.add(TextBlock("s_nop 0\n"))
+        kb.addBody(body)
+        s = str(kb)
+        self.assertIn("Begin Kernel", s)
+        self.assertIn('.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"', s)
+        self.assertIn("s_nop 0", s)
+
+    def test_signature_only_still_requires_body(self):
+        kb = _make_kernel_body()
+        kb.addSignature(_make_signature_base())
+        with self.assertRaises(RuntimeError):
+            kb.toString()
+
+
+class TestKernelBodyCheckResourcesPattern(_SignatureKernelSetup, unittest.TestCase):
+    def test_body_add_after_set_gprs(self):
+        """Mirror ``KernelWriterAssembly.checkResources`` overflow patch."""
+        kb = _make_kernel_body()
+        kb.addSignature(_make_signature_base())
+        kb.addBody(Module("body"))
+        kb.setGprs(totalVgprs=32, totalAgprs=0, totalSgprs=16)
+        kb.body.add(TextBlock("/* overflow patch */\n"))
+        s = str(kb)
+        self.assertIn("/* overflow patch */", s)
+        self.assertIn(".amdhsa_next_free_vgpr 32 // vgprs", s)
+
+
+class TestKernelBodyCopyRejected(unittest.TestCase):
+    def test_deepcopy_raises(self):
+        kb = _make_kernel_body()
+        with self.assertRaises(RuntimeError):
+            copy.deepcopy(kb)
+
+    def test_pickle_raises(self):
+        kb = _make_kernel_body()
+        with self.assertRaises(RuntimeError):
+            pickle.dumps(kb)
+
+
+class TestKernelBodyModuleIntegration(_SignatureKernelSetup, unittest.TestCase):
+    def test_kernel_body_counted_in_module_tree(self):
+        outer = Module("outer")
+        kb = _make_kernel_body()
+        kb.addSignature(_make_signature_base())
+        kb.addBody(Module("inner"))
+        outer.add(kb)
+        self.assertEqual(outer.countType(Item), 2)
+        self.assertEqual(outer.countType(KernelBody), 1)
+
+
+# ===========================================================================
+# (end of KernelBody tests)
 # ===========================================================================
 
 
