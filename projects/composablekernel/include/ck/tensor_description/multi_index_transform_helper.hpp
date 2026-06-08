@@ -54,21 +54,11 @@ __host__ __device__ constexpr auto make_embed_transform(const UpLengths& up_leng
 template <typename LowLengths>
 __host__ __device__ constexpr auto make_merge_transform(const LowLengths& low_lengths)
 {
-    // Magic Division is not supported yet for int64_t
-    using IndexType = remove_cvref_t<decltype(low_lengths.At(Number<0>{}))>;
-    if constexpr(std::is_same_v<IndexType, long_index_t> || is_long_number_v<IndexType>)
-    {
-        return make_merge_transform_v1_carry_check(low_lengths);
-    }
-    else
-    {
-
 #if CK_EXPERIMENTAL_MERGE_USE_MAGIC_DIVISION
-        return make_merge_transform_v2_magic_division(low_lengths);
+    return make_merge_transform_v2_magic_division(low_lengths);
 #else
-        return make_merge_transform_v1_carry_check(low_lengths);
+    return make_merge_transform_v1_carry_check(low_lengths);
 #endif
-    }
 }
 
 template <typename LowLengths>
@@ -104,6 +94,7 @@ __host__ __device__ constexpr auto make_unmerge_transform(
     return UnMerge<UpLengths, Use24BitIntegerCalculation>{up_lengths};
 }
 
+template <typename IndexType = index_t>
 __host__ __device__ constexpr auto make_conv_bwd_data_out_transform(index_t N,
                                                                     index_t Ho,
                                                                     index_t Wo,
@@ -136,25 +127,25 @@ __host__ __device__ constexpr auto make_conv_bwd_data_out_transform(index_t N,
     const auto KPadded = math::integer_divide_ceil(KRaw, GemmKPerBlock) * GemmKPerBlock;
     const auto KPad    = KPadded - KRaw;
 
-    return ConvBwdDataImplicitGemmOutTransform{N,
-                                               Ho,
-                                               Wo,
-                                               K,
-                                               XDot,
-                                               HTilde,
-                                               WTilde,
-                                               WTildeSlice,
-                                               HTildeSlice * WTildeSlice,
-                                               IHTildeSliceBegin,
-                                               IWTildeSliceBegin,
-                                               -ConvDilationH / GcdStrideDilationH,
-                                               -ConvDilationW / GcdStrideDilationW,
-                                               XDotSlice * K,
-                                               K0,
-                                               MPadded,
-                                               K1,
-                                               MPad,
-                                               KPad};
+    return ConvBwdDataImplicitGemmOutTransform<IndexType>{N,
+                                                          Ho,
+                                                          Wo,
+                                                          K,
+                                                          XDot,
+                                                          HTilde,
+                                                          WTilde,
+                                                          WTildeSlice,
+                                                          HTildeSlice * WTildeSlice,
+                                                          IHTildeSliceBegin,
+                                                          IWTildeSliceBegin,
+                                                          -ConvDilationH / GcdStrideDilationH,
+                                                          -ConvDilationW / GcdStrideDilationW,
+                                                          XDotSlice * K,
+                                                          K0,
+                                                          MPadded,
+                                                          K1,
+                                                          MPad,
+                                                          KPad};
 }
 
 template <typename LowerIndex>

@@ -1602,9 +1602,18 @@ struct UnMerge
  * convolution backward data operation to the corresponding indices (K0, M, K1) used in the
  * implicit GEMM computation. It encapsulates the necessary parameters and transformation logic
  * required to efficiently perform the index conversion.
+ *
+ * @tparam IndexType  The index type used for upper/lower indices. Must be either
+ *                    index_t (int32_t) or long_index_t (int64_t).
  */
+template <typename IndexType = index_t>
 struct ConvBwdDataImplicitGemmOutTransform
 {
+    static_assert(std::is_same_v<IndexType, index_t> || std::is_same_v<IndexType, long_index_t>,
+                  "IndexType must be index_t or long_index_t");
+
+    static constexpr bool IsLongIndex = std::is_same_v<IndexType, long_index_t>;
+
     static constexpr auto I0 = Number<0>{};
     static constexpr auto I1 = Number<1>{};
     static constexpr auto I2 = Number<2>{};
@@ -1613,42 +1622,42 @@ struct ConvBwdDataImplicitGemmOutTransform
     using LowerIndex = MultiIndex<4>; // N, Ho, Wo, K
     using UpperIndex = MultiIndex<3>; // K0, M, K1
 
-    index_t N_, Ho_, Wo_, K_;
-    index_t XDot_;
-    index_t HTilde_, WTilde_;
-    index_t WTildeSlice_, TildeSlice_;
-    index_t IHTildeSliceBegin_, IWTildeSliceBegin_;
-    index_t HRatio_, WRatio_;
-    index_t XDotSlice_K_;
-    index_t MPad_, KPad_;
-    Tuple<index_t, index_t, index_t> up_lengths_; // K0_, MPadded, K1_;
+    IndexType N_, Ho_, Wo_, K_;
+    IndexType XDot_;
+    IndexType HTilde_, WTilde_;
+    IndexType WTildeSlice_, TildeSlice_;
+    IndexType IHTildeSliceBegin_, IWTildeSliceBegin_;
+    IndexType HRatio_, WRatio_;
+    IndexType XDotSlice_K_;
+    IndexType MPad_, KPad_;
+    Tuple<IndexType, IndexType, IndexType> up_lengths_; // K0_, MPadded, K1_;
 
-    Tuple<index_t, index_t, index_t, index_t>
+    Tuple<IndexType, IndexType, IndexType, IndexType>
         low_lengths_magic_divisor_multiplier_; // XDotSlice_K_, K_, TildeSlice_, WTildeSlice_
-    Tuple<index_t, index_t, index_t, index_t>
+    Tuple<IndexType, IndexType, IndexType, IndexType>
         low_lengths_magic_divisor_shift_; // XDotSlice_K_, K_, TildeSlice_, WTildeSlice_
 
     __host__ __device__ ConvBwdDataImplicitGemmOutTransform() = default;
 
-    __host__ __device__ constexpr ConvBwdDataImplicitGemmOutTransform(index_t N,
-                                                                      index_t Ho,
-                                                                      index_t Wo,
-                                                                      index_t K,
-                                                                      index_t XDot,
-                                                                      index_t HTilde,
-                                                                      index_t WTilde,
-                                                                      index_t WTildeSlice,
-                                                                      index_t HWTildeSlice,
-                                                                      index_t IHTildeSliceBegin,
-                                                                      index_t IWTildeSliceBegin,
-                                                                      index_t HRatio,
-                                                                      index_t WRatio,
-                                                                      index_t XDotSlice_K,
-                                                                      index_t K0,
-                                                                      index_t MPadded,
-                                                                      index_t K1,
-                                                                      index_t MPad,
-                                                                      index_t KPad)
+    __host__ __device__ constexpr ConvBwdDataImplicitGemmOutTransform(IndexType N,
+                                                                      IndexType Ho,
+                                                                      IndexType Wo,
+                                                                      IndexType K,
+                                                                      IndexType XDot,
+                                                                      IndexType HTilde,
+                                                                      IndexType WTilde,
+                                                                      IndexType WTildeSlice,
+                                                                      IndexType HWTildeSlice,
+                                                                      IndexType IHTildeSliceBegin,
+                                                                      IndexType IWTildeSliceBegin,
+                                                                      IndexType HRatio,
+                                                                      IndexType WRatio,
+                                                                      IndexType XDotSlice_K,
+                                                                      IndexType K0,
+                                                                      IndexType MPadded,
+                                                                      IndexType K1,
+                                                                      IndexType MPad,
+                                                                      IndexType KPad)
         : N_{N},
           Ho_{Ho},
           Wo_{Wo},
@@ -1666,11 +1675,10 @@ struct ConvBwdDataImplicitGemmOutTransform
           MPad_{MPad},
           KPad_{KPad},
           up_lengths_{make_tuple(K0, MPadded, K1)},
-          low_lengths_magic_divisor_multiplier_{
-              MagicDivision::CalculateMagicMultiplier(XDotSlice_K_),
-              MagicDivision::CalculateMagicMultiplier(K_),
-              MagicDivision::CalculateMagicMultiplier(TildeSlice_),
-              MagicDivision::CalculateMagicMultiplier(WTildeSlice_)},
+          low_lengths_magic_divisor_multiplier_{CalculateMult(XDotSlice_K_),
+                                                CalculateMult(K_),
+                                                CalculateMult(TildeSlice_),
+                                                CalculateMult(WTildeSlice_)},
           low_lengths_magic_divisor_shift_{MagicDivision::CalculateMagicShift(XDotSlice_K_),
                                            MagicDivision::CalculateMagicShift(K_),
                                            MagicDivision::CalculateMagicShift(TildeSlice_),
@@ -1690,23 +1698,24 @@ struct ConvBwdDataImplicitGemmOutTransform
     template <typename UpIdx>
     __host__ __device__ constexpr auto CalculateLowerIndexN(const UpIdx& idx_up) const
     {
-        index_t NStep{0}, HStep{0}, WStep{0};
+        IndexType NStep{0}, HStep{0}, WStep{0};
+        const IndexType m_id = idx_up[I1];
         // Merge
         // NStep = M_id / TildeSlice_
-        NStep = MagicDivision::DoMagicDivision(idx_up[I1],
+        NStep = MagicDivision::DoMagicDivision(m_id,
                                                this->low_lengths_magic_divisor_multiplier_[I2],
                                                this->low_lengths_magic_divisor_shift_[I2]);
-        HStep = idx_up[I1] - NStep * TildeSlice_;
+        HStep = m_id - NStep * TildeSlice_;
         // HStep = HStep / WTildeSlice_
         HStep = MagicDivision::DoMagicDivision(HStep,
                                                this->low_lengths_magic_divisor_multiplier_[I3],
                                                this->low_lengths_magic_divisor_shift_[I3]);
-        WStep = idx_up[I1] - NStep * TildeSlice_ - HStep * WTildeSlice_;
+        WStep = m_id - NStep * TildeSlice_ - HStep * WTildeSlice_;
         // Slice
         HStep += IHTildeSliceBegin_;
         WStep += IWTildeSliceBegin_;
 
-        return make_tuple(NStep, HStep, WStep, 0);
+        return make_tuple(NStep, HStep, WStep, IndexType{0});
     }
 
     template <typename UpIdx>
@@ -1714,16 +1723,16 @@ struct ConvBwdDataImplicitGemmOutTransform
     {
         // UnMerge
         //  K_idx <- K0_idx * K1 + K1_idx
-        index_t K_idx = idx_up[I0] * up_lengths_[I2] + idx_up[I2];
+        IndexType K_idx = idx_up[I0] * up_lengths_[I2] + idx_up[I2];
         // Merge
         // YStep = K_idx / XDotSlice_K_
-        index_t YStep =
+        IndexType YStep =
             MagicDivision::DoMagicDivision(K_idx,
                                            this->low_lengths_magic_divisor_multiplier_[I0],
                                            this->low_lengths_magic_divisor_shift_[I0]);
-        index_t KStep = K_idx - YStep * XDotSlice_K_;
+        IndexType KStep = K_idx - YStep * XDotSlice_K_;
         // Xstep = KStep / K_
-        index_t XStep =
+        IndexType XStep =
             MagicDivision::DoMagicDivision(KStep,
                                            this->low_lengths_magic_divisor_multiplier_[I1],
                                            this->low_lengths_magic_divisor_shift_[I1]);
@@ -1732,7 +1741,7 @@ struct ConvBwdDataImplicitGemmOutTransform
         YStep *= HRatio_;
         XStep *= WRatio_;
 
-        return make_tuple(0, YStep, XStep, KStep);
+        return make_tuple(IndexType{0}, YStep, XStep, KStep);
     }
 
     template <typename LowIdx, typename UpIdx>
@@ -1787,6 +1796,15 @@ struct ConvBwdDataImplicitGemmOutTransform
         printf("up_lengths_");
         print_multi_index(up_lengths_);
         printf("}");
+    }
+
+    private:
+    __host__ __device__ static constexpr IndexType CalculateMult(index_t divisor)
+    {
+        if constexpr(IsLongIndex)
+            return MagicDivision::CalculateMagicMultiplier64(divisor);
+        else
+            return MagicDivision::CalculateMagicMultiplier(divisor);
     }
 };
 
