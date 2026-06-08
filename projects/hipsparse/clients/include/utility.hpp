@@ -3548,11 +3548,11 @@ inline void host_bsrmm(J                     Mb,
                 for(J t = 0; t < block_dim; t++)
                 {
                     int64_t idx_A = (dir == HIPSPARSE_DIRECTION_ROW)
-                                    ? block_dim * block_dim * s + block_dim * local_row + t
-                                    : block_dim * block_dim * s + block_dim * t + local_row;
+                                        ? block_dim * block_dim * s + block_dim * local_row + t
+                                        : block_dim * block_dim * s + block_dim * t + local_row;
                     int64_t idx_B = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE)
-                                    ? j * ldb + block_dim * (bsr_col_ind_A[s] - base) + t
-                                    : (block_dim * (bsr_col_ind_A[s] - base) + t) * ldb + j;
+                                        ? j * ldb + block_dim * (bsr_col_ind_A[s] - base) + t
+                                        : (block_dim * (bsr_col_ind_A[s] - base) + t) * ldb + j;
 
                     sum = sum + testing_mult(alpha, testing_mult(bsr_val_A[idx_A], B[idx_B]));
                 }
