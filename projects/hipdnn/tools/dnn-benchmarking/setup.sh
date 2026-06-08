@@ -82,24 +82,28 @@ export PYTHONPYCACHEPREFIX="$DNN_BENCH_WORKSPACE/pycache"
 detect_gpu_arch() {
     local arch
     if command -v rocm_agent_enumerator &>/dev/null; then
-        arch=$(rocm_agent_enumerator | grep -m1 'gfx9')
+        arch=$(rocm_agent_enumerator | grep -oE 'gfx[0-9a-f]+' | head -1)
     elif command -v rocminfo &>/dev/null; then
         arch=$(rocminfo | grep -oP 'gfx\d+' | head -1)
     fi
     echo "${arch:-}"
 }
 
+# Map detected GPU to the matching slug under https://rocm.nightlies.amd.com/v2-staging/.
+# Datacenter parts use the "-dcgpu" suffix; the consumer/RDNA bucket is "gfx110X-all".
 GPU_ARCH=$(detect_gpu_arch)
 case "$GPU_ARCH" in
-    gfx90*) INDEX_ARCH="gfx90X" ;;
-    gfx94*) INDEX_ARCH="gfx94X" ;;
+    gfx90*) INDEX_SLUG="gfx90X-dcgpu" ;;
+    gfx94*) INDEX_SLUG="gfx94X-dcgpu" ;;
+    gfx110*) INDEX_SLUG="gfx110X-all" ;;
     *)
         echo "ERROR: Unsupported GPU architecture '${GPU_ARCH:-none}'."
-        echo "Supported: gfx90a (MI200/MI210/MI250), gfx942 (MI300X/MI300A)"
+        echo "Supported: gfx90a (MI200/MI210/MI250), gfx942 (MI300X/MI300A),"
+        echo "           gfx1100/gfx1101/gfx1102 (RDNA3 dGPU, RX 7000 series)"
         exit 1 ;;
 esac
 
-INDEX_URL="https://rocm.nightlies.amd.com/v2-staging/${INDEX_ARCH}-dcgpu/"
+INDEX_URL="https://rocm.nightlies.amd.com/v2-staging/${INDEX_SLUG}/"
 echo "Detected GPU: $GPU_ARCH → installing PyTorch from $INDEX_URL"
 
 # Install ROCm torch first from its dedicated index. Then editable-install the
@@ -138,20 +142,22 @@ if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$HIPDNN_CONFIG" ]; then
     cmake --install "$BUILD_DIR"
 
     if [ ! -d "$MIOPEN_PROVIDER_DIR" ]; then
-        echo "Error: miopen-provider not found at $MIOPEN_PROVIDER_DIR"
-        exit 1
+        echo "Note: miopen-provider not checked out at $MIOPEN_PROVIDER_DIR — skipping."
+        echo "      Use the MIOpen plugin bundled in the ROCm PyTorch wheel:"
+        echo "        --plugin-path \$(python -c 'import _rocm_sdk_libraries_gfx110X_all as r, pathlib; print(pathlib.Path(r.__file__).parent / \"lib/hipdnn_plugins/engines\")')"
+    else
+        echo "Building and installing MIOpen provider..."
+        rm -rf "$MIOPEN_BUILD_DIR"
+        cmake -S "$MIOPEN_PROVIDER_DIR" -B "$MIOPEN_BUILD_DIR" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+            -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
+            -DMIOPENPROVIDER_SKIP_TESTS=ON
+        cmake --build "$MIOPEN_BUILD_DIR"
+        cmake --install "$MIOPEN_BUILD_DIR"
+        echo ""
+        echo "MIOpen plugin installed to: $INSTALL_DIR/lib/hipdnn_plugins/engines/"
     fi
-    echo "Building and installing MIOpen provider..."
-    rm -rf "$MIOPEN_BUILD_DIR"
-    cmake -S "$MIOPEN_PROVIDER_DIR" -B "$MIOPEN_BUILD_DIR" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-        -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
-        -DMIOPENPROVIDER_SKIP_TESTS=ON
-    cmake --build "$MIOPEN_BUILD_DIR"
-    cmake --install "$MIOPEN_BUILD_DIR"
-    echo ""
-    echo "MIOpen plugin installed to: $INSTALL_DIR/lib/hipdnn_plugins/engines/"
 fi
 
 # 5. Install hipdnn Python bindings
