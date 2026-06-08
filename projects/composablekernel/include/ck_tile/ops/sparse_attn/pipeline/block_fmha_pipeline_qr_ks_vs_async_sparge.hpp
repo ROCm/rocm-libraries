@@ -345,6 +345,18 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
         {
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
+            if constexpr(kPerBlockPVSkip)
+            {
+                // Hoisted vote-slot init; published by the pre-gemm_0 s_barrier below.
+                auto* vote_slot   = reinterpret_cast<uint32_t*>(static_cast<char*>(smem_ptr) +
+                                                              GetPerBlockVoteSlotOffset());
+                const int lane_id = threadIdx.x % warpSize;
+                const int warp_id = threadIdx.x / warpSize;
+                if(warp_id == 0 && lane_id == 0)
+                {
+                    *vote_slot = 1u;
+                }
+            }
             if constexpr(k0_loops > 1)
             {
                 static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
@@ -523,49 +535,21 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
             const bool warp_skip = compute_warp_skip();
 
             // Per-block PV-skip — block-wide AND vote over warp_skip.
-            // Protocol:
-            //   1. Wave-0 lane-0 inits an LDS sentinel slot to 1.
-            //   2. Each wave's lane-0 atomicAnd's its warp_skip int into the slot.
-            //   3. block_sync_lds() rendezvous; all lanes read the slot back.
-            // Cost: 1 LDS init + 1 atomicAnd + 1 block_sync_lds + 1 LDS load.
-            // Slot at `smem_ptr + GetPerBlockVoteSlotOffset()` (past policy K+V
-            // budget — see GetSmemSize override). No interaction with LdsSeq
-            // rotation slots.
-            // INVARIANT (per-wave and per-block): V load / V->LDS store /
-            // cp_async pipeline stay UNCONDITIONAL.
+            // Sentinel init is hoisted to top-of-loop (hidden by pre-gemm_0 s_barrier);
+            // here we only atomicAnd + consensus barrier + broadcast.
             bool block_skip = false;
             if constexpr(kPerBlockPVSkip)
             {
-                // Carve a 4-byte uint32 slot at the LDS tail. The cast is safe:
-                // GetSmemSize() bumped the smem_ptr allocation by 4 bytes (see
-                // pipeline override above), so the slot is dedicated to this
-                // pipeline instance and never reused by K/V tiles.
-                auto* vote_slot = reinterpret_cast<uint32_t*>(static_cast<char*>(smem_ptr) +
+                auto* vote_slot   = reinterpret_cast<uint32_t*>(static_cast<char*>(smem_ptr) +
                                                               GetPerBlockVoteSlotOffset());
-
                 const int lane_id = threadIdx.x % warpSize;
-                const int warp_id = threadIdx.x / warpSize;
 
-                // Initialise the sentinel to 1 (skip-everything) before any
-                // wave votes. Only one thread does the init; the subsequent
-                // block_sync_lds() makes it visible to all waves.
-                if(warp_id == 0 && lane_id == 0)
-                {
-                    *vote_slot = 1u;
-                }
-                block_sync_lds();
-
-                // Each wave contributes its warp_skip (already wave-uniform
-                // after the butterfly in compute_warp_skip). Lane 0 of each
-                // wave issues the atomicAnd; other lanes are idle. The atomic
-                // is on LDS (s_or_b32 / ds_and_b32), much cheaper than global.
                 if(lane_id == 0)
                 {
                     atomicAnd(vote_slot, warp_skip ? 1u : 0u);
                 }
                 block_sync_lds();
 
-                // Broadcast the consensus back to every lane.
                 const uint32_t consensus = *vote_slot;
                 block_skip               = (consensus != 0u);
             }
