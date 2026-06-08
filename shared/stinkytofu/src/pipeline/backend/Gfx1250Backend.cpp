@@ -142,33 +142,16 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 
     // -- kernel --
 
-    // Cluster-barrier insertion (kernel scope) — only at the optimization
-    // extremes (O0 / O3) and only when the module opts in. Must precede
-    // InsertVgprMsbPass so the new branches/labels are present when MSB
-    // configuration is materialized.
-    if (moduleOptions.ClusterBarrier &&
-        (optLevel == OptLevel::O0 || optLevel == OptLevel::O3)) {
+    // Cluster-barrier insertion (kernel scope) — runs at every OptLevel when
+    // the module opts in. Must precede InsertVgprMsbPass so the new
+    // branches/labels are present when MSB configuration is materialized.
+    if (moduleOptions.ClusterBarrier) {
         pm.addPass(createInsertClusterBarrierPass(/*isKernelScope=*/true,
                                                   /*pgrValue=*/moduleOptions.PGR,
                                                   /*plrValue=*/moduleOptions.PLR));
     }
 
     pm.addPass(createInsertVgprMsbPass());
-
-    // Cluster-barrier insertion (region scope) — always runs when the module
-    // requests cluster barriers, regardless of OptLevel. Re-runs over the
-    // loopWithPrefetch / noLoadLoopBody regions are a no-op if the kernel-
-    // scope pass already inserted the handshake (idempotency guard inside
-    // the pass).
-    if (moduleOptions.ClusterBarrier) {
-        PassManager regionPM;
-        registerAllAnalyses(regionPM.getAnalysisManager());
-        regionPM.addPass(createInsertClusterBarrierPass(
-            /*isKernelScope=*/false, /*pgrValue=*/moduleOptions.PGR,
-            /*plrValue=*/moduleOptions.PLR));
-        pm.addPass(createKernelToRegionsPassAdaptor(
-            module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(regionPM)));
-    }
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createMemTokenConsistencyCheckPass());
     if (optLevel != OptLevel::O0) {

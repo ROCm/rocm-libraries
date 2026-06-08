@@ -778,25 +778,17 @@ class InsertClusterBarrierPassImpl : public Pass {
             // (e.g. `label_skipPGR2_*`) do not match `label_openLoopL`
             // by exact-name comparison and are walked through.
             //
-            // The label/instruction-based anchor survives
-            // `ScopeAdaptor::moveIRToBlock`, which erases TEXTBLOCK
-            // directives -- so this rule works whenever the
-            // loopWithPrefetch / noLoadLoopBody region adapters run.
-            // In `Gfx1250Backend::buildGfx1250Pipeline` those adapters
-            // are added independently from two paths: (1) at
-            // `optLevel != O0` for the scheduling/wait-cnt passes, and
-            // (2) at `moduleOptions.ClusterBarrier == true` for the
-            // region-scope cluster-barrier rerun. Either path strips
-            // the surrounding `Begin / End setupNewTile` TEXTBLOCK
-            // comments while leaving the `label_openLoopL:` label and
-            // its preceding instructions intact.
-            //
+            // The label/instruction-based anchor does not depend on
+            // TEXTBLOCK directives (and so survives
+            // `ScopeAdaptor::moveIRToBlock`, which erases them), so this
+            // rule keeps working under the single kernel-scope run that
+            // `Gfx1250Backend::buildGfx1250Pipeline` performs when
+            // `moduleOptions.ClusterBarrier == true`.
             // Idempotency:
             //   - Section-level: the backward scan also flags whether a
             //     cluster-scope signal/wait already sits in the
-            //     section. If so (e.g. a prior kernel-scope pass run
-            //     already emitted Rule 3, then the region-scope rerun
-            //     sees the same IR), Rule 3 self-disables.
+            //     section. If so (e.g. a prior pass run already emitted
+            //     Rule 3), Rule 3 self-disables.
             //   - Anchor-level (mode a): skip if the existing workgroup
             //     wait is already followed by a cluster handshake, or
             //     if Rule 4 has already queued the same wait as a

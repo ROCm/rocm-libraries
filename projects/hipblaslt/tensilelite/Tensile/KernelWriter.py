@@ -6152,7 +6152,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # -1 disables SwInstructionPrefetch in Gfx1250Backend; else scratch pool index
                                "SwPrefetchScratchSgpr": int(self.sgprs.get("SwPrefetchScratch", -1)),
                                # Cluster-barrier handshake insertion in Gfx1250Backend
-                               # (kernel-scope at O0/O3 + region-scope always when set).
+                               # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
                                # PrefetchGlobalRead (PGR) passed to InsertClusterBarrierPass.
                                # Gates Rule 3 (`LCL <= PGR` skip) and Rule 4 (`LCL == PGR+1`
