@@ -1151,6 +1151,11 @@ struct UniversalGemmKernel
             MakeBBlockWindows(bs_ptr, kargs, splitk_batch_offset.splitted_k, block_idx_n);
         const auto& ds_block_window = MakeDBlockWindows(ds_ptr, kargs, block_idx_m, block_idx_n);
 
+        if(threadIdx.x == 0) {
+            print(as_block_window[I0].bottom_tensor_view_.get_tensor_descriptor());
+            print(bs_block_window[I0].bottom_tensor_view_.get_tensor_descriptor());
+        }
+
         const index_t num_loop =
             amd_wave_read_first_lane(TilePartitioner::GetLoopNum(splitk_batch_offset.splitted_k));
 

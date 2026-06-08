@@ -25,7 +25,7 @@ if(GPU_TARGETS MATCHES "gfx9|gfx1250")
   add_instance_library(device_grouped_conv_fwd_tile_instances ${GROUPED_CONV_FWD_TILE})
   target_include_directories(device_grouped_conv_fwd_tile_instances PRIVATE
         "${PROJECT_SOURCE_DIR}/experimental/builder/test/utils")
-  target_compile_options(device_grouped_conv_fwd_tile_instances PRIVATE -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=0 -DCK_TILE_EXPERIMENTAL_USE_BUFFER_LOAD_OOB_CHECK_OFFSET_TRICK=1)
+  target_compile_options(device_grouped_conv_fwd_tile_instances PRIVATE -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=0)# -DCK_TILE_EXPERIMENTAL_USE_BUFFER_LOAD_OOB_CHECK_OFFSET_TRICK=1)
 
   file(GLOB_RECURSE GROUPED_CONV_BWD_WEIGHT_TILE "${CMAKE_CURRENT_BINARY_DIR}/backward_weight/*.cpp")
   add_instance_library(device_grouped_conv_bwd_weight_tile_instances ${GROUPED_CONV_BWD_WEIGHT_TILE})

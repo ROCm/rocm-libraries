@@ -129,18 +129,17 @@ struct ConvConfigComputeV3_2 : public ConvConfigBase
 template <typename PrecType>
 struct ConvConfigComputeV3_WMMA : public ConvConfigBase
 {
-    static constexpr ck_tile::index_t M_Tile = 128;
-    static constexpr ck_tile::index_t N_Tile = 128;
-    static constexpr ck_tile::index_t K_Tile = 64 / sizeof(PrecType);
+    static constexpr ck_tile::index_t M_Tile = 16;
+    static constexpr ck_tile::index_t N_Tile = 64;
+    static constexpr ck_tile::index_t K_Tile = 64;
 
-    static constexpr ck_tile::index_t M_Warp = 4;
-    static constexpr ck_tile::index_t N_Warp = 2;
+    static constexpr ck_tile::index_t M_Warp = 1;
+    static constexpr ck_tile::index_t N_Warp = 4;
     static constexpr ck_tile::index_t K_Warp = 1;
 
     static constexpr ck_tile::index_t M_Warp_Tile = 16;
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
-    static constexpr ck_tile::index_t K_Warp_Tile =
-        ck_tile::get_k_warp_tile<PrecType, M_Warp_Tile>();
+    static constexpr ck_tile::index_t K_Warp_Tile = 32;
 
     static constexpr bool DoubleSmemBuffer          = false;
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
@@ -289,6 +288,8 @@ struct ConvConfigComputeTDMV1 : public ConvConfigBase
 
     static constexpr bool DoubleSmemBuffer          = true;
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_TDM_V1;
+
+    //static constexpr int kBlockPerCu = 2;
 };
 
 template <typename PrecType>
@@ -306,8 +307,10 @@ struct ConvConfigComputeTDMV2 : public ConvConfigBase
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
     static constexpr ck_tile::index_t K_Warp_Tile = 32;
 
-    static constexpr bool DoubleSmemBuffer          = false;
+    static constexpr bool DoubleSmemBuffer          = true;
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_TDM_V2;
+
+    //static constexpr int kBlockPerCu = 2;
 };
 
 template <typename InDataType, typename WeiDataType = InDataType, typename OutDataType = InDataType>

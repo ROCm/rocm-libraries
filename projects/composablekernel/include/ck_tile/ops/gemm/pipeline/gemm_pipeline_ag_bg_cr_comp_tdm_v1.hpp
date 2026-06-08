@@ -343,6 +343,29 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
 
             BLdsTile b_block_tile[2];
 
+            if(threadIdx.x == 0) {
+                // a_copy_lds_windows[I0{}].template print_tile_window_range<ADataType>(0, 16, 0, 64, "A");
+
+                
+                
+                index_t a_copy_lds_windows_m = a_lds_gemm_windows[I0{}].bottom_tensor_view_.get_tensor_descriptor().get_length(I0{});
+                index_t a_copy_lds_windows_k = a_lds_gemm_windows[I0{}].bottom_tensor_view_.get_tensor_descriptor().get_length(I1{});
+
+                index_t a_copy_dram_windows_m = a_copy_dram_window.bottom_tensor_view_.get_tensor_descriptor().get_length(I0{});
+                index_t a_copy_dram_windows_k = a_copy_dram_window.bottom_tensor_view_.get_tensor_descriptor().get_length(I1{});
+
+                printf("M: %d, K:%d\n M: %d, K:%d\n\n", a_copy_lds_windows_m, a_copy_lds_windows_k, a_copy_dram_windows_m, a_copy_dram_windows_k);
+
+                const ADataType* ptr = a_copy_dram_window.bottom_tensor_view_.get_buffer_view().p_data_;
+                auto desc = a_copy_dram_window.bottom_tensor_view_.get_tensor_descriptor();
+
+                for(int i=0; i<a_copy_dram_windows_m; ++i) {
+                    for(int j=0; j<a_copy_dram_windows_k; ++j) {
+                        printf("A_dram[%d][%d] = %f  offset:%d\n", i, j, static_cast<float>(ptr[desc.calculate_offset(make_tuple(i, j))]), desc.calculate_offset(make_tuple(i, j)));
+                    }
+                }
+            }
+
             // read A(0), B(0) from DRAM to LDS window(0)
             // and advance the DRAM windows
             Base::GlobalPrefetchTDM(tdm_config_a,
@@ -353,6 +376,31 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
                                     b_copy_lds_windows[I0{}],
                                     b_copy_dram_window,
                                     b_dram_tile_window_step);
+
+            s_wait_tensorcnt_barrier<2>();
+            block_sync_lds();
+            if(threadIdx.x == 0) {
+                // a_copy_lds_windows[I0{}].template print_tile_window_range<ADataType>(0, 16, 0, 64, "A");
+
+                
+                
+                index_t a_copy_lds_windows_m = a_lds_gemm_windows[I0{}].bottom_tensor_view_.get_tensor_descriptor().get_length(I0{});
+                index_t a_copy_lds_windows_k = a_lds_gemm_windows[I0{}].bottom_tensor_view_.get_tensor_descriptor().get_length(I1{});
+
+                index_t a_copy_dram_windows_m = a_copy_dram_window.bottom_tensor_view_.get_tensor_descriptor().get_length(I0{});
+                index_t a_copy_dram_windows_k = a_copy_dram_window.bottom_tensor_view_.get_tensor_descriptor().get_length(I1{});
+
+                printf("M: %d, K:%d\n M: %d, K:%d\n\n", a_copy_lds_windows_m, a_copy_lds_windows_k, a_copy_dram_windows_m, a_copy_dram_windows_k);
+
+                const ADataType* ptr = a_lds_gemm_windows[I0{}].bottom_tensor_view_.get_buffer_view().p_data_;
+                auto desc = a_lds_gemm_windows[I0{}].bottom_tensor_view_.get_tensor_descriptor();
+
+                for(int i=0; i<16; ++i) {
+                    for(int j=0; j<64; ++j) {
+                        printf("A_lds[%d][%d] = %f  offset:%d\n", i, j, static_cast<float>(ptr[desc.calculate_offset(make_tuple(i, j))]), desc.calculate_offset(make_tuple(i, j)));
+                    }
+                }
+            }
 
             // initialize block gemm
             auto block_gemm = BlockGemm();
@@ -1085,6 +1133,10 @@ struct GemmPipelineAgBgCrCompTDMV1 : public BaseGemmPipelineAgBgCrCompTDM<Proble
             tdm_config_a.pad_enable              = IsAPadding;
             tdm_config_a.pad_config.pad_amount   = APaddingAmount;
             tdm_config_a.pad_config.pad_interval = APaddingInterval;
+
+            if(threadIdx.x == 0) {
+                printf("tdm config a pad: %d, %d, %d\n", IsAPadding.value, APaddingAmount.value, APaddingInterval.value);
+            }
 
             constexpr auto LdsPaddingConfigB =
                 Policy::template GetLdsPaddingConfig<Problem, false>();

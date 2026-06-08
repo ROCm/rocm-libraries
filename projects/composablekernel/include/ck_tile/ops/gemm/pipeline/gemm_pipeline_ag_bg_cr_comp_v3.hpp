@@ -577,6 +577,26 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
             store_a_to_lds(elementwise_As_res);
             store_b_to_lds(elementwise_Bs_res);
 
+            block_sync_lds();
+            if(threadIdx.x == 0) {
+                // a_copy_lds_windows[I0{}].template print_tile_window_range<ADataType>(0, 16, 0, 64, "A");
+
+            
+                index_t a_copy_lds_windows_m = a_lds_store_window.bottom_tensor_view_.get_tensor_descriptor().get_length(I0{});
+                index_t a_copy_lds_windows_k = a_lds_store_window.bottom_tensor_view_.get_tensor_descriptor().get_length(I1{});
+
+                printf("M: %d, K:%d\n", a_copy_lds_windows_m, a_copy_lds_windows_k);
+
+                const ADataType* ptr = b_lds_store_window.bottom_tensor_view_.get_buffer_view().p_data_;
+                auto desc = b_lds_store_window.bottom_tensor_view_.get_tensor_descriptor();
+
+                for(int i=0; i<16; ++i) {
+                    for(int j=0; j<64; ++j) {
+                        printf("A_lds[%d][%d] = %f  offset:%d\n", i, j, static_cast<float>(ptr[desc.calculate_offset(make_tuple(i, j))]), desc.calculate_offset(make_tuple(i, j)));
+                    }
+                }
+            }
+
             // global read 1
 
             elementwise_As_res = load_tile_with_elementwise(a_copy_dram_window, a_element_func);

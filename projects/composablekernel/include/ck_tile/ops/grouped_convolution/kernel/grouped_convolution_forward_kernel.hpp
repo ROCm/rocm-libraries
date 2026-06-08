@@ -760,6 +760,7 @@ struct GroupedConvolutionForwardKernel
 
     CK_TILE_HOST static auto BlockSize()
     {
+        std::cout << "is_w32 " << is_wave32() << " kblocks " << kBlockSize;
         return is_wave32() ? dim3(kBlockSize / 2) : dim3(kBlockSize);
     }
 
@@ -1280,6 +1281,12 @@ struct GroupedConvolutionForwardKernel
         const auto& ds_block_window = MakeDBlockWindows(ds_ptr, c_desc, block_idx_m, block_idx_n);
 
         const index_t num_loop = amd_wave_read_first_lane(TilePartitioner::GetLoopNum(gemm_k));
+
+        if(threadIdx.x == 0) {
+            print(a_block_window.bottom_tensor_view_.get_tensor_descriptor());
+            print(b_block_window.bottom_tensor_view_.get_tensor_descriptor());
+            printf("gemm_k: %d\n", gemm_k);
+        }
 
         // Run GEMM cooperatively by whole workgroup.
         const auto& c_block_tile =

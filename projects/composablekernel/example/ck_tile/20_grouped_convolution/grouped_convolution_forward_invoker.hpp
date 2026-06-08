@@ -36,7 +36,7 @@ struct GroupedConvolutionForwardInvoker
                               ConvConfig::N_Warp_Tile,
                               ConvConfig::K_Warp_Tile>>;
 
-        constexpr auto ConvSpec     = ck_tile::ConvolutionSpecialization::Default;
+        constexpr auto ConvSpec     = ck_tile::ConvolutionSpecialization::Filter1x1Stride1Pad0;
         using GroupedConvTraitsType = ck_tile::GroupedConvTraits<NDimSpatial,
                                                                  ConvSpec,
                                                                  InLayout,
