@@ -185,8 +185,10 @@ class Pass;
 /// \p pgrValue is Tensile's `PrefetchGlobalRead` setting. It controls the
 /// outer LoopCounterL gates of Rules 3 and 4:
 ///   - Rule 3 skips the signal when `LoopCounterL <= pgrValue`.
-///   - Rule 4 skips the signal when `LoopCounterL <= pgrValue + 1`.
-/// The default of 1 matches PGR=1 (`<= 1` for Rule 3, `<= 2` for Rule 4).
+///   - Rule 4 skips the signal when `LoopCounterL == pgrValue + 1`
+///     (fresh-gate mode via `s_cmp_eq_i32`; inherited-SCC mode reuses an
+///     upstream `LoopCounterL == pgrValue` compare instead).
+/// The default of 1 matches PGR=1 (`<= 1` for Rule 3, `== 2` for Rule 4).
 ///
 /// \p plrValue is Tensile's `PrefetchLocalRead` setting. It enables Rule
 /// 3's anchor mode (b): when `plrValue == 0` and the backward scan from
