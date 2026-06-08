@@ -1165,16 +1165,85 @@ oz2_finalize_kernel(const double* __restrict__ Zhi,
 
     const double Zh = Zhi[z_idx];
     const double Zl = Zlo[z_idx];
-    /* Use the double-double (Zh, Zl) for q estimation, then apply the
-     * GEMMul8-style nested FMA for range reduction:
-     *   X = fma(P_lo, q, fma(P_hi, q, Zh) + Zl)
-     * This avoids catastrophic cancellation in fma(P_hi, q, Zh) and
-     * preserves the Zl contribution, giving a more accurate result
-     * than the collapsed form  Z + cP_hi*q + cP_lo*q. */
     const double q  = rint((Zh + Zl) * cInvP);
     const double X  = fma(cP_lo, q, fma(cP_hi, q, Zh) + Zl);
 
     const int inv_sft = -(static_cast<int>(sftA[i]) + static_cast<int>(sftB[l]));
+    D[d_idx] = alpha * ldexp(X, inv_sft) + beta * C[c_idx];
+}
+
+/* =========================================================================
+ * GPU kernels — fused last-chunk CRT accumulation + finalize
+ *
+ * oz2_accum_finalize_kernel is dispatched for the LAST GEMM chunk only.
+ * It combines oz2_chunk_accum_kernel and oz2_finalize_kernel into a single
+ * pass, eliminating the intermediate Zhi/Zlo global write (from the regular
+ * accum) and the subsequent read by the separate finalize kernel.
+ *
+ * When is_first_chunk is also true (single chunk = most common case),
+ * Zhi_in/Zlo_in are never read and the C32i slices flow directly to D
+ * without any Zhi/Zlo traffic.
+ * ========================================================================= */
+template <bool HAS_LO>
+__global__ static void
+oz2_accum_finalize_kernel(const int32_t* __restrict__ C32i_batch,
+                          const double*  __restrict__ Zhi_in,  /* prev hi; ignored if is_first */
+                          const double*  __restrict__ Zlo_in,  /* prev lo; ignored if is_first */
+                          const double*  __restrict__ C,
+                          double*        __restrict__ D,
+                          int64_t m, int64_t n, size_t ldc32i,
+                          int64_t ldc, int64_t ldd,
+                          double alpha, double beta,
+                          const int16_t* __restrict__ sftA,
+                          const int16_t* __restrict__ sftB,
+                          unsigned chunk_start, unsigned chunk_size,
+                          bool is_first_chunk)
+{
+    const int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int64_t l = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+    if(i >= m || l >= n) return;
+
+    const size_t idx          = static_cast<size_t>(i) + static_cast<size_t>(l) * ldc32i;
+    const size_t slice_stride = ldc32i * static_cast<size_t>(n);
+
+    /* Phase 1: accumulate this chunk's C32i slices in registers. */
+    double local_hi = 0.0;
+    double local_lo = 0.0;
+
+    for(unsigned t_local = 0; t_local < chunk_size; ++t_local) {
+        const unsigned t     = chunk_start + t_local;
+        const double dc_raw  = static_cast<double>(C32i_batch[t_local * slice_stride + idx]);
+        const double dc      = fma(cNegMod[t], rint(dc_raw * cInvMod[t]), dc_raw);
+        const double hi      = dc * cQpiHi[t];
+        const double new_hi  = local_hi + hi;
+        const double err     = hi - (new_hi - local_hi);
+        local_hi = new_hi;
+        if constexpr (HAS_LO)
+            local_lo = fma(dc, cQpiLo[t], local_lo + err);
+        else
+            local_lo += err;
+    }
+
+    /* Phase 2: merge with previous Zhi/Zlo if this is not the first chunk. */
+    double Zh, Zl;
+    if(is_first_chunk) {
+        Zh = local_hi;
+        Zl = local_lo;
+    } else {
+        const double old_hi = Zhi_in[idx];
+        const double s_hi   = old_hi + local_hi;
+        const double err    = local_hi - (s_hi - old_hi);
+        Zh = s_hi;
+        Zl = Zlo_in[idx] + err + local_lo;
+    }
+
+    /* Phase 3: range reduction + inverse scale — write directly to D. */
+    const double q = rint((Zh + Zl) * cInvP);
+    const double X = fma(cP_lo, q, fma(cP_hi, q, Zh) + Zl);
+
+    const int inv_sft = -(static_cast<int>(sftA[i]) + static_cast<int>(sftB[l]));
+    const size_t c_idx = static_cast<size_t>(i) + static_cast<size_t>(l) * static_cast<size_t>(ldc);
+    const size_t d_idx = static_cast<size_t>(i) + static_cast<size_t>(l) * static_cast<size_t>(ldd);
     D[d_idx] = alpha * ldexp(X, inv_sft) + beta * C[c_idx];
 }
 
@@ -1548,15 +1617,33 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
 
             const unsigned global_chunk_start = scale_start + gemm_local;
             const bool is_first = (global_chunk_start == 0);
+            /* Detect the final chunk: when true, dispatch the fused accum+finalize
+             * kernel that writes D directly and skips the Zhi/Zlo global write. */
+            const bool is_last  = (global_chunk_start + actual_gemm == num_moduli);
             _pstart();
-            if(num_moduli <= 7u)
-                hipLaunchKernelGGL(oz2_chunk_accum_kernel<false>, grid_acc, blk_acc, 0, stream,
-                                   C32i_batch, Zhi, Zlo, m, n, ldc32i,
-                                   global_chunk_start, actual_gemm, is_first);
-            else
-                hipLaunchKernelGGL(oz2_chunk_accum_kernel<true>, grid_acc, blk_acc, 0, stream,
-                                   C32i_batch, Zhi, Zlo, m, n, ldc32i,
-                                   global_chunk_start, actual_gemm, is_first);
+            if(is_last) {
+                if(num_moduli <= 7u)
+                    hipLaunchKernelGGL(oz2_accum_finalize_kernel<false>, grid_acc, blk_acc, 0, stream,
+                                       C32i_batch, Zhi, Zlo, C, D,
+                                       m, n, ldc32i, ldc, ldd,
+                                       *alpha, *beta, sftA, sftB,
+                                       global_chunk_start, actual_gemm, is_first);
+                else
+                    hipLaunchKernelGGL(oz2_accum_finalize_kernel<true>, grid_acc, blk_acc, 0, stream,
+                                       C32i_batch, Zhi, Zlo, C, D,
+                                       m, n, ldc32i, ldc, ldd,
+                                       *alpha, *beta, sftA, sftB,
+                                       global_chunk_start, actual_gemm, is_first);
+            } else {
+                if(num_moduli <= 7u)
+                    hipLaunchKernelGGL(oz2_chunk_accum_kernel<false>, grid_acc, blk_acc, 0, stream,
+                                       C32i_batch, Zhi, Zlo, m, n, ldc32i,
+                                       global_chunk_start, actual_gemm, is_first);
+                else
+                    hipLaunchKernelGGL(oz2_chunk_accum_kernel<true>, grid_acc, blk_acc, 0, stream,
+                                       C32i_batch, Zhi, Zlo, m, n, ldc32i,
+                                       global_chunk_start, actual_gemm, is_first);
+            }
             _pstop(_t_accum);
         }
     }
@@ -1565,11 +1652,9 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     hipblasLtMatrixLayoutDestroy(layoutB_b);
     hipblasLtMatrixLayoutDestroy(layoutA_b);
 
-    _pstart();
-    hipLaunchKernelGGL(oz2_finalize_kernel, grid_acc, blk_acc, 0, stream,
-                       Zhi, Zlo, C, D, m, n, ldc32i, ldc, ldd,
-                       *alpha, *beta, sftA, sftB);
-    _pstop(_t_finalize);
+    /* oz2_finalize_kernel is no longer called: the last GEMM chunk is handled
+     * by oz2_accum_finalize_kernel which writes D directly.
+     * _t_finalize remains 0 (the finalization cost is now included in _t_accum). */
 
     hipblasLtMatmulDescDestroy(matmulDesc);
     hipblasLtMatrixLayoutDestroy(layoutCD);
