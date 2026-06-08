@@ -439,6 +439,7 @@ defaultBenchmarkCommonParameters = [
     {"UnrollLoopSwapGlobalReadOrder": [0]},
     {"PrefetchGlobalRead": [1]},
     {"PrefetchLocalRead": [1]},
+    {"PrefetchGL2": [0]},
     {"ClusterLocalRead": [1]},
     {"SuppressNoLoadLoop": [False]},
     {"ExpandPointerSwap": [True]},
@@ -548,6 +549,7 @@ defaultBenchmarkCommonParameters = [
     {"SFCWGM": [[[1,1],[1,1]]]},
     {"AdaptiveGemm": [0]},
     {"AdaptiveGemmGSUA": [0]},
+    {"AdaptiveGemmNTAB": [0]},
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},
@@ -575,7 +577,8 @@ defaultBenchmarkCommonParameters = [
     # TDM-multicast data. Requires ClusterDim != [1, 1] and TDMInst != 0;
     # False: standard per-WG barriers, no inter-WG synchronization.
     {"ClusterBarrier": [ False ]},
-    {"HalfPLR": [0]}
+    {"HalfPLR": [0]},
+    {"TDMIterateMode": [0]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter

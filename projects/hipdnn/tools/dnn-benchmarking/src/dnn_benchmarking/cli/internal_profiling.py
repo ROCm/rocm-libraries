@@ -10,8 +10,8 @@ profiler expects a fresh process tree and a clean address space — that
 is how kernel-trace / PMC counters scope what they record.
 
 Short-circuits relative to the full CLI:
-  * No ``gpu_check`` — the parent already verified GPU availability.
-  * No engine discovery — the parent passed the exact engine ID.
+  * No backend startup checks — the parent already constructed the
+    hipDNN handle and passed the exact engine ID.
   * No Reporter console output — the profiler scrapes stderr and writes
     its own files; chatty stdout only confuses log capture.
   * No always-on metrics, no JSON output.
@@ -24,6 +24,7 @@ from pathlib import Path
 
 from ..common.exceptions import GraphLoadError
 from ..config.benchmark_config import MetricsConfig, SuiteConfig
+from ..execution.buffer_manager import generate_input_data
 from ..execution.suite_runner import run_single_provider_engine, set_plugin_path
 from ..graph.loader import GraphLoader
 
@@ -109,7 +110,9 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
             provider="profiling-inner",
             engine_id=engine_id,
             plugin_path=plugin_path,
-            ref_provider=None,
+            reference_outputs=None,
+            reference_error=None,
+            input_data=generate_input_data(tensor_infos, args.seed),
             validation_requested=False,
             graph_json=graph_json,
         )

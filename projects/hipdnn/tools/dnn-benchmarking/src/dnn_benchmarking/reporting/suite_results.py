@@ -100,6 +100,9 @@ class ProviderEngineResult:
         provider: Provider name.
         engine_id: Engine ID used.
         status: One of 'success', 'error', 'skipped'.
+        role: ``engine`` for hipDNN engine rows, ``reference`` for timed
+            validation-provider rows that are shown for comparison but are not
+            counted as pass/fail engine combinations.
         cpu_build_time_ms: CPU graph-build time.
         gpu_kernel_stats: GPU kernel timing statistics.
         e2e_stats: End-to-end wall-clock timing statistics.
@@ -147,10 +150,12 @@ class ProviderEngineResult:
     """
 
     _VALID_STATUSES = {"success", "error", "skipped"}
+    _VALID_ROLES = {"engine", "reference"}
 
     provider: str
     engine_id: int
     status: Literal["success", "error", "skipped"]
+    role: Literal["engine", "reference"] = "engine"
     plugin_path: Optional[str] = None
     cpu_build_time_ms: Optional[float] = None
     gpu_kernel_stats: Optional[BenchmarkStats] = None
@@ -179,6 +184,10 @@ class ProviderEngineResult:
                 f"Invalid status '{self.status}'. "
                 f"Must be one of: {self._VALID_STATUSES}"
             )
+        if self.role not in self._VALID_ROLES:
+            raise ValueError(
+                f"Invalid role '{self.role}'. " f"Must be one of: {self._VALID_ROLES}"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization.
@@ -196,6 +205,8 @@ class ProviderEngineResult:
             "engine_id": self.engine_id,
             "status": self.status,
         }
+        if self.role != "engine":
+            d["role"] = self.role
         if self.plugin_path is not None:
             d["plugin_path"] = self.plugin_path
         # extra_metrics is exclusively populated by the opt-in
@@ -299,21 +310,22 @@ class GraphResult:
         Returns:
             StatusCounts with the four bucket counts.
         """
+        engine_results = [r for r in self.results if r.role == "engine"]
         passed = sum(
             1
-            for r in self.results
+            for r in engine_results
             if r.status == "success"
             and (r.correctness is None or r.correctness.tolerance_match is not False)
         )
         failed = sum(
             1
-            for r in self.results
+            for r in engine_results
             if r.status == "success"
             and r.correctness is not None
             and r.correctness.tolerance_match is False
         )
-        skipped = sum(1 for r in self.results if r.status == "skipped")
-        errored = sum(1 for r in self.results if r.status == "error")
+        skipped = sum(1 for r in engine_results if r.status == "skipped")
+        errored = sum(1 for r in engine_results if r.status == "error")
         return StatusCounts(
             passed=passed, failed=failed, skipped=skipped, errored=errored
         )

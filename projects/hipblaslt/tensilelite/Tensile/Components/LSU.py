@@ -496,7 +496,7 @@ class LSUOn(LSU):
             if kernel["GlobalSplitU"] != 0:
                 gsuLabel = Label(label=writer.labels.getNameInc("GSU"), comment="")
                 with writer.allocTmpSgpr(1) as tmpSgprGSU:
-                    module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                    module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                     module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
                 module.add(SCBranchSCC0(labelName=gsuLabel.getLabelName(), comment="branch if GSU != 1"))
             if kernel["ProblemType"]["UseE"]:
