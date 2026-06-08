@@ -46,6 +46,9 @@ class CounterPass : public Pass {
         return "CounterPass";
     }
     PreservedAnalyses run(Function& func, PassContext& ctx, AnalysisManager& AM) override {
+        (void)func;
+        (void)ctx;
+        (void)AM;
         ++counter_;
         return PreservedAnalyses::all();
     }

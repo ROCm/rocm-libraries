@@ -88,13 +88,13 @@ class STINKYTOFU_EXPORT PassBuilder {
     /// Create a pass by name.  Returns nullptr if the name is not registered.
     static std::unique_ptr<Pass> createPassByName(const std::string& name, StinkyAsmModule& module);
 
-    /// Load all plugin shared libraries from the given directory.
-    /// Each .so must export `extern "C" void registerPlugin()`.
+    /// Load all plugin shared libraries (.so/.dll) from the given directory.
+    /// Each plugin must export `extern "C" void registerPlugin()`.
     /// Loaded plugins call registerNamedPassFactory() during their
     /// registerPlugin() to make their passes available by name.
     static void loadPluginsFromDirectory(const std::string& dirPath);
 
-    /// Load a single plugin shared library.
+    /// Load a single plugin shared library (.so on Linux, .dll on Windows).
     static bool loadPlugin(const std::string& path);
 
     /// Explicitly close all loaded plugin handles.

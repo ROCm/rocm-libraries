@@ -63,19 +63,24 @@ def _make_stinky_module(name="test_kernel"):
     return rocisa.toStinkyTofuModule(mod, _ISA, name, sig, opts)
 
 
-class TestExtensionPointConstants:
-    def test_constants_exist(self):
-        assert hasattr(rocisa, "EP_BeforeRegionPasses")
-        assert hasattr(rocisa, "EP_InnerRegionBegin")
-        assert hasattr(rocisa, "EP_InnerRegionEnd")
-        assert hasattr(rocisa, "EP_AfterRegionPasses")
+class TestExtensionPointEnum:
+    def test_enum_exists(self):
+        assert hasattr(rocisa, "PipelineExtensionPoint")
 
-    def test_constants_are_distinct(self):
+    def test_values_exist(self):
+        EP = rocisa.PipelineExtensionPoint
+        assert hasattr(EP, "BeforeRegionPasses")
+        assert hasattr(EP, "InnerRegionBegin")
+        assert hasattr(EP, "InnerRegionEnd")
+        assert hasattr(EP, "AfterRegionPasses")
+
+    def test_values_are_distinct(self):
+        EP = rocisa.PipelineExtensionPoint
         eps = {
-            rocisa.EP_BeforeRegionPasses,
-            rocisa.EP_InnerRegionBegin,
-            rocisa.EP_InnerRegionEnd,
-            rocisa.EP_AfterRegionPasses,
+            EP.BeforeRegionPasses,
+            EP.InnerRegionBegin,
+            EP.InnerRegionEnd,
+            EP.AfterRegionPasses,
         }
         assert len(eps) == 4
 
@@ -119,7 +124,7 @@ class TestPluginData:
 class TestRegisterPassAtExtensionPoint:
     def test_register_unknown_pass_does_not_crash_until_run(self):
         st = _make_stinky_module()
-        st.registerPassAtExtensionPoint(rocisa.EP_InnerRegionEnd, "UnknownPass")
+        st.registerPassAtExtensionPoint(rocisa.PipelineExtensionPoint.InnerRegionEnd, "UnknownPass")
 
     def test_pipeline_runs_with_no_plugins(self):
         st = _make_stinky_module()
@@ -150,7 +155,7 @@ class TestHelloWorldPassIntegration:
         st = _make_stinky_module()
         st.setPluginDataStr("greeting", "Hello from rocisa test!")
         st.registerPassAtExtensionPoint(
-            rocisa.EP_AfterRegionPasses, "HelloWorldPass"
+            rocisa.PipelineExtensionPoint.AfterRegionPasses, "HelloWorldPass"
         )
         st.runOptimizationPipeline()
         assert st.getPluginDataI64("pass_executed") == 1
@@ -159,7 +164,7 @@ class TestHelloWorldPassIntegration:
     def test_hello_world_pass_default_greeting(self):
         st = _make_stinky_module()
         st.registerPassAtExtensionPoint(
-            rocisa.EP_AfterRegionPasses, "HelloWorldPass"
+            rocisa.PipelineExtensionPoint.AfterRegionPasses, "HelloWorldPass"
         )
         st.runOptimizationPipeline()
         assert st.getPluginDataI64("pass_executed") == 1

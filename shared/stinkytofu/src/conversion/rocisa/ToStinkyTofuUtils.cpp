@@ -1101,16 +1101,17 @@ std::array<int, 3> convertArch(nb::object arch_obj) {
 ///
 /// \param m The nanobind module to add bindings to
 void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
-    // Pipeline extension point constants (mirrors PipelineExtensionPoint enum)
-    m.attr("EP_BeforeRegionPasses") = static_cast<int>(PipelineExtensionPoint::BeforeRegionPasses);
-    m.attr("EP_InnerRegionBegin") = static_cast<int>(PipelineExtensionPoint::InnerRegionBegin);
-    m.attr("EP_InnerRegionEnd") = static_cast<int>(PipelineExtensionPoint::InnerRegionEnd);
-    m.attr("EP_AfterRegionPasses") = static_cast<int>(PipelineExtensionPoint::AfterRegionPasses);
+    // Pipeline extension point enum
+    nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")
+        .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
+        .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
+        .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
+        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
 
     m.def("loadPlugin", &PassBuilder::loadPlugin, nb::arg("path"),
-          "Load a plugin shared library (.so) that exports registerPlugin()");
+          "Load a plugin shared library (.so/.dll) that exports registerPlugin()");
     m.def("loadPluginsFromDirectory", &PassBuilder::loadPluginsFromDirectory, nb::arg("dirPath"),
-          "Load all plugin .so files from a directory");
+          "Load all plugin shared libraries (.so/.dll) from a directory");
 
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu
     m.def(
@@ -1186,10 +1187,9 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return module_->getPluginDataStr(key, defaultVal);
         }
 
-        void registerPassAtExtensionPoint(int ep, const std::string& passName) {
+        void registerPassAtExtensionPoint(PipelineExtensionPoint ep, const std::string& passName) {
             module_->getPassBuilder().registerAtExtensionPoint(
-                static_cast<PipelineExtensionPoint>(ep),
-                [passName](PassManager& PM, StinkyAsmModule& module) {
+                ep, [passName](PassManager& PM, StinkyAsmModule& module) {
                     auto pass = PassBuilder::createPassByName(passName, module);
                     if (pass) PM.addPass(std::move(pass));
                 });

@@ -75,13 +75,17 @@ void PassBuilder::registerNamedPassFactory(const std::string& name, PassFactory 
 
 std::unique_ptr<Pass> PassBuilder::createPassByName(const std::string& name,
                                                     StinkyAsmModule& module) {
-    auto& reg = getFactoryRegistry();
-    std::lock_guard<std::mutex> lock(reg.mu);
-    auto it = reg.factories.find(name);
-    if (it == reg.factories.end()) {
-        return nullptr;
+    PassFactory factory;
+    {
+        auto& reg = getFactoryRegistry();
+        std::lock_guard<std::mutex> lock(reg.mu);
+        auto it = reg.factories.find(name);
+        if (it == reg.factories.end()) {
+            return nullptr;
+        }
+        factory = it->second;
     }
-    return it->second(module);
+    return factory(module);
 }
 
 bool PassBuilder::loadPlugin(const std::string& path) {
@@ -105,7 +109,8 @@ bool PassBuilder::loadPlugin(const std::string& path) {
     // Promote the already-loaded libstinkytofu to RTLD_GLOBAL so the plugin
     // resolves stinkytofu symbols from the host's copy, not a second one.
     // RTLD_NOLOAD prevents loading a new copy — it only changes visibility.
-    dlopen(STINKYTOFU_SONAME, RTLD_NOW | RTLD_NOLOAD | RTLD_GLOBAL);
+    // dlclose the returned handle to avoid leaking a reference count.
+    if (void* self = dlopen(STINKYTOFU_SONAME, RTLD_NOW | RTLD_NOLOAD | RTLD_GLOBAL)) dlclose(self);
 
     void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!handle) {
@@ -145,17 +150,20 @@ void PassBuilder::loadPluginsFromDirectory(const std::string& dirPath) {
 }
 
 void PassBuilder::unloadPlugins() {
-    auto& reg = getFactoryRegistry();
-    std::lock_guard<std::mutex> lock(reg.mu);
-    reg.factories.clear();
-    for (auto* handle : reg.loadedPlugins) {
+    std::vector<void*> handles;
+    {
+        auto& reg = getFactoryRegistry();
+        std::lock_guard<std::mutex> lock(reg.mu);
+        reg.factories.clear();
+        handles.swap(reg.loadedPlugins);
+    }
+    for (auto* handle : handles) {
 #ifdef _WIN32
         FreeLibrary(reinterpret_cast<HMODULE>(handle));
 #else
         dlclose(handle);
 #endif
     }
-    reg.loadedPlugins.clear();
 }
 
 }  // namespace stinkytofu

@@ -4,25 +4,26 @@ import pytest
 import stinkytofu
 
 
-class TestExtensionPointConstants:
-    def test_constants_exist(self):
-        assert hasattr(stinkytofu, "EP_BeforeRegionPasses")
-        assert hasattr(stinkytofu, "EP_InnerRegionBegin")
-        assert hasattr(stinkytofu, "EP_InnerRegionEnd")
-        assert hasattr(stinkytofu, "EP_AfterRegionPasses")
+class TestExtensionPointEnum:
+    def test_enum_exists(self):
+        assert hasattr(stinkytofu, "PipelineExtensionPoint")
 
-    def test_constants_are_distinct(self):
+    def test_values_exist(self):
+        EP = stinkytofu.PipelineExtensionPoint
+        assert hasattr(EP, "BeforeRegionPasses")
+        assert hasattr(EP, "InnerRegionBegin")
+        assert hasattr(EP, "InnerRegionEnd")
+        assert hasattr(EP, "AfterRegionPasses")
+
+    def test_values_are_distinct(self):
+        EP = stinkytofu.PipelineExtensionPoint
         eps = {
-            stinkytofu.EP_BeforeRegionPasses,
-            stinkytofu.EP_InnerRegionBegin,
-            stinkytofu.EP_InnerRegionEnd,
-            stinkytofu.EP_AfterRegionPasses,
+            EP.BeforeRegionPasses,
+            EP.InnerRegionBegin,
+            EP.InnerRegionEnd,
+            EP.AfterRegionPasses,
         }
         assert len(eps) == 4
-
-    def test_constants_are_ints(self):
-        assert isinstance(stinkytofu.EP_BeforeRegionPasses, int)
-        assert isinstance(stinkytofu.EP_InnerRegionEnd, int)
 
 
 class TestPluginDataOnStinkyAsmModule:

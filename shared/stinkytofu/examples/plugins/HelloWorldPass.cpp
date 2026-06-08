@@ -23,6 +23,9 @@ class HelloWorldPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& ctx, AnalysisManager& AM) override {
+        (void)func;
+        (void)ctx;
+        (void)AM;
         std::string greeting = module_.getPluginDataStr("greeting", "Hello from plugin!");
         module_.setPluginDataStr("greeting_result", "executed: " + greeting);
         module_.setPluginDataI64("pass_executed", 1);

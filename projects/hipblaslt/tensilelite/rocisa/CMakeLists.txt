@@ -208,7 +208,8 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
 
     # Example plugin — target created by stinkytofu's add_subdirectory(examples/plugins).
     # Include it in the wheel build and set RPATH so it finds libstinkytofu.so at runtime.
-    if(TARGET stinkytofu-plugin-helloworld)
+    # Only installable for shared builds (MODULE target); static builds use OBJECT libs.
+    if(TARGET stinkytofu-plugin-helloworld AND BUILD_SHARED_LIBS)
         set_target_properties(stinkytofu-plugin-helloworld PROPERTIES
             EXCLUDE_FROM_ALL FALSE
             INSTALL_RPATH "$ORIGIN/.."

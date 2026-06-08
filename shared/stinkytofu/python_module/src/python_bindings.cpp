@@ -86,10 +86,9 @@ NB_MODULE(_stinkytofu, m) {
              nb::arg("defaultVal") = "", "Get a string plugin data value")
         .def(
             "registerPassAtExtensionPoint",
-            [](StinkyAsmModule& self, int ep, const std::string& passName) {
+            [](StinkyAsmModule& self, PipelineExtensionPoint ep, const std::string& passName) {
                 self.getPassBuilder().registerAtExtensionPoint(
-                    static_cast<PipelineExtensionPoint>(ep),
-                    [passName](PassManager& PM, StinkyAsmModule& module) {
+                    ep, [passName](PassManager& PM, StinkyAsmModule& module) {
                         auto pass = PassBuilder::createPassByName(passName, module);
                         if (pass) PM.addPass(std::move(pass));
                     });
@@ -97,11 +96,12 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("extensionPoint"), nb::arg("passName"),
             "Register a named C++ pass at a pipeline extension point");
 
-    // Pipeline extension point constants
-    m.attr("EP_BeforeRegionPasses") = static_cast<int>(PipelineExtensionPoint::BeforeRegionPasses);
-    m.attr("EP_InnerRegionBegin") = static_cast<int>(PipelineExtensionPoint::InnerRegionBegin);
-    m.attr("EP_InnerRegionEnd") = static_cast<int>(PipelineExtensionPoint::InnerRegionEnd);
-    m.attr("EP_AfterRegionPasses") = static_cast<int>(PipelineExtensionPoint::AfterRegionPasses);
+    // Pipeline extension point enum
+    nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")
+        .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
+        .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
+        .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
+        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
 
     // ========================================================================
     // Register Types
