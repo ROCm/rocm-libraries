@@ -182,7 +182,16 @@ class KernelWriterAssembly(KernelWriter):
     try:
       if isCustom:
         code = self._getCustomKernelSource(kernel, CUSTOM_KERNEL_PATH)
-        occ = compute_occupancy_from_asm_source(kernel, code)
+        # Pass rocisa-sourced caps so the custom-kernel occupancy formula uses
+        # the same hardware constants as the codegen path, eliminating any drift
+        # between OccupancyMeasure._arch_caps_for_kernel (static table) and rocisa.
+        _rocisa_caps = (
+            self.states.regCaps["MaxVgpr"] * (2 if self.states.archCaps.get("ArchAccUnifiedRegs") else 1),
+            self.states.regCaps["PhysicalMaxSgpr"],
+            self.states.archCaps["DeviceLDS"],
+            self.states.archCaps["MaxWavesPerSimd"],
+        )
+        occ = compute_occupancy_from_asm_source(kernel, code, arch_caps=_rocisa_caps)
         if occ is not None:
           kernel["CUOccupancy"] = occ
       else:

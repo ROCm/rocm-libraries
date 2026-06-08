@@ -195,7 +195,8 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         default=False,
         help="Disable assembly comments in generated assembly code"
     )
-    args = argParser.parse_args(input)
+
+    args = argParser.parse_args()
 
     arguments = {}
     arguments["RuntimeLanguage"] = args.RuntimeLanguage

@@ -1047,8 +1047,6 @@ def run():
     stop_wsk = timer()
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")
 
-    splitGSU = False  # TCL pipeline always uses splitGSU=False
-
     archs = [ # is this really different than the other archs above?
         isaToGfx(arch)
         for arch in targetIsas
@@ -1059,6 +1057,7 @@ def run():
     # libraryDir(outputPath, archName).
     for base in _baseArchs(archs):
         ensurePath(libraryDir(outputPath, base))
+    splitGSU = False
 
     start_pki = timer()
     passPostKernelInfoToLibrary(kernelInfo, uniqueKernels, masterLibraries, splitGSU)

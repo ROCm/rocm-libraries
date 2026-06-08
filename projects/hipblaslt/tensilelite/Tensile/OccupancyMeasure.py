@@ -52,7 +52,31 @@ checkResources / updateOccupancyFromScan.  compute_occupancy_from_asm_source()
 parses the hand-written .s directives (.amdhsa_next_free_vgpr /
 .amdhsa_next_free_sgpr / .amdhsa_group_segment_fixed_size) and calls
 compute_occupancy_from_resources() to set CUOccupancy at build time.
-Called from KernelWriterAssembly.getSourceFileString() for custom kernels.
+Called from KernelWriterAssembly.getSourceFileString() for custom kernels,
+which passes the already-initialized rocisa caps via the arch_caps argument
+so that the custom-kernel path uses the same hardware constants as the
+codegen path.  The static _arch_caps_for_kernel() table serves as a fallback
+when rocisa state is unavailable (standalone / test use).
+
+FORMULA RELATIONSHIP
+--------------------
+compute_occupancy_from_resources() and KernelWriterAssembly.getOccupancy()
+compute the same final occupancy value FOR THE PRIMARY CASE:
+  numThreads=256 (multiplier=1), doubleVgpr=True (ArchAccUnifiedRegs ISAs).
+Both reduce to:  max(1, min(phys_vgpr // combined, 8, sgpr_occ, lds_occ))
+where combined = ceil(vgprs/8)*8 + accvgprs.
+
+They differ for numThreads > 256 (multiplier > 1) in how VGPR occupancy is
+combined with the wave-count cap:
+  - getOccupancy/getVgprOccupancy:   phys_vgpr // (combined * multiplier)
+    then caps at maxWaves // multiplier  (bundles multiplier into VGPR calc).
+  - compute_occupancy_from_resources: phys_vgpr // combined
+    independently capped by maxWaves // multiplier  (separates the two limits).
+For the standard Tensile MFMA workgroups (numThreads = 256, multiplier = 1)
+the two expressions are algebraically identical.  getOccupancy is the
+authoritative formula for the codegen path; compute_occupancy_from_resources
+is authoritative for the custom-kernel and build-time path where vgpr_count
+equals .amdhsa_next_free_vgpr (an already-aligned, per-wave count).
 """
 
 from math import ceil
@@ -112,8 +136,23 @@ def compute_occupancy_from_resources(
 def _arch_caps_for_kernel(kernel) -> Tuple[int, int, int, int]:
     """Return (physical_vgpr, physical_sgpr, device_lds, max_waves_per_simd) for a kernel.
 
-    Derived from the kernel's ISA tuple using the same logic as rocisa::getArchCaps.
-    We avoid importing rocisa here to keep this module lightweight.
+    Derived from the kernel's ISA tuple.  The values here mirror the constants
+    in rocisa/src/hardware_caps.hpp (rocisa::getArchCaps / rocisa::getRegCaps).
+    They must stay in sync:
+      physical_vgpr    = regCaps["MaxVgpr"] * (2 if ArchAccUnifiedRegs else 1)
+                       = regCaps["PhysicalMaxVgpr"]
+      physical_sgpr    = regCaps["PhysicalMaxSgpr"]
+      device_lds       = archCaps["DeviceLDS"]
+      max_waves_per_simd = archCaps["MaxWavesPerSimd"]
+
+    When called from KernelWriterAssembly the caller SHOULD pass arch_caps
+    directly to compute_occupancy_from_asm_source() instead of relying on this
+    function, so that rocisa is the single source of truth at runtime.  This
+    function is retained as a lightweight fallback for standalone / test use
+    where rocisa is not available or not yet initialized for the target ISA.
+
+    If a new ISA is added to rocisa/hardware_caps.hpp, this table must be updated
+    as well to stay consistent.
     """
     isa = tuple(kernel.get("ISA", (9, 0, 8)))
 
@@ -140,10 +179,14 @@ def _arch_caps_for_kernel(kernel) -> Tuple[int, int, int, int]:
     return physical_vgpr, physical_sgpr, device_lds, max_waves_per_simd
 
 
-def compute_occupancy_from_asm_source(kernel, asm_source: str) -> Optional[int]:
+def compute_occupancy_from_asm_source(
+    kernel,
+    asm_source: str,
+    arch_caps: Optional[Tuple[int, int, int, int]] = None,
+) -> Optional[int]:
     """Parse .amdhsa_* directives from a hand-written custom kernel .s and return CUOccupancy.
 
-    Used by :func:`KernelWriterAssembly._getCustomKernelSource` to compute occupancy at
+    Used by :func:`KernelWriterAssembly.getSourceFileString` to compute occupancy at
     build (codegen) time for custom kernels that bypass the normal ``checkResources`` path.
 
     For ArchAccUnifiedRegs ISAs (gfx90a/gfx942/gfx950) ``.amdhsa_next_free_vgpr`` is the
@@ -158,6 +201,15 @@ def compute_occupancy_from_asm_source(kernel, asm_source: str) -> Optional[int]:
     Args:
         kernel:     Kernel dict; must contain ``"ISA"`` (list/tuple) and ``"NumThreads"``.
         asm_source: Full text of the .s file (may contain multiple kernel blocks).
+        arch_caps:  Optional pre-initialized hardware caps tuple
+                    ``(physical_vgpr, physical_sgpr, device_lds, max_waves_per_simd)``
+                    sourced from ``rocisa.getRegCaps()`` / ``rocisa.getArchCaps()``.
+                    When provided this is used instead of the static
+                    :func:`_arch_caps_for_kernel` lookup, making rocisa the single
+                    source of truth for hardware constants.  The caller
+                    (``KernelWriterAssembly.getSourceFileString``) always supplies this;
+                    it is ``None`` only in standalone / test use where rocisa state is
+                    unavailable.
 
     Returns:
         Computed CUOccupancy (``>= 1``) or ``None`` if any required directive is missing
@@ -177,7 +229,10 @@ def compute_occupancy_from_asm_source(kernel, asm_source: str) -> Optional[int]:
         return None
 
     num_threads = kernel.get('NumThreads', 256)
-    phy_vgpr, phy_sgpr, device_lds, max_waves = _arch_caps_for_kernel(kernel)
+    if arch_caps is not None:
+        phy_vgpr, phy_sgpr, device_lds, max_waves = arch_caps
+    else:
+        phy_vgpr, phy_sgpr, device_lds, max_waves = _arch_caps_for_kernel(kernel)
 
     try:
         return compute_occupancy_from_resources(

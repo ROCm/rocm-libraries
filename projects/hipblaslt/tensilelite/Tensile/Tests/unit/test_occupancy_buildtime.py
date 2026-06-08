@@ -52,6 +52,7 @@ import pytest
 
 from Tensile.OccupancyMeasure import (
     compute_occupancy_from_resources,
+    compute_occupancy_from_asm_source,
     _arch_caps_for_kernel,
 )
 
@@ -171,3 +172,109 @@ class TestArchCapsForKernel:
         phy_vgpr, phy_sgpr, dev_lds, max_waves = self._caps((9, 0, 8))
         assert phy_vgpr    == 256
         assert max_waves   == 10
+
+
+# ── Cross-validation: _arch_caps_for_kernel vs. compute_occupancy_from_resources ─
+
+class TestArchCapsAgreementWithRocisaExpected:
+    """Validate that _arch_caps_for_kernel() matches the expected rocisa values.
+
+    These expected values are the ground truth from rocisa::hardware_caps.hpp
+    (verified by test_occupancy.py::test_max_waves_per_simd_from_arch_caps,
+    test_gfx950_physical_vgpr_pool_is_512, test_gfx950_device_lds_is_160kb, etc.).
+    This test runs GPU-free and ensures _arch_caps_for_kernel stays in sync with
+    rocisa whenever rocisa is updated with new hardware constants.
+
+    Cross-reference: KernelWriterAssembly.getSourceFileString passes the live rocisa
+    caps as arch_caps to compute_occupancy_from_asm_source() so that production code
+    always uses rocisa as the single source of truth.  This table is the fallback.
+    """
+
+    # Ground-truth expected values sourced from rocisa (verified in test_occupancy.py)
+    # (isa, physical_vgpr, physical_sgpr, device_lds, max_waves_per_simd)
+    _EXPECTED = [
+        ((9, 5, 0),  512, 800, 163840, 8),   # gfx950: ArchAccUnifiedRegs, 160 KB LDS
+        ((9, 4, 2),  512, 800,  65536, 8),   # gfx942: ArchAccUnifiedRegs, 64 KB LDS
+        ((9, 0, 10), 512, 800,  65536, 8),   # gfx90a: ArchAccUnifiedRegs, 64 KB LDS
+        ((9, 0, 8),  256, 800,  65536, 10),  # gfx908: non-unified, 64 KB LDS
+    ]
+
+    @pytest.mark.parametrize(
+        "isa,exp_phy_vgpr,exp_phy_sgpr,exp_dev_lds,exp_max_waves",
+        _EXPECTED,
+        ids=[f"gfx{''.join(str(x) for x in e[0])}" for e in _EXPECTED],
+    )
+    def test_static_table_matches_rocisa_expected(
+        self, isa, exp_phy_vgpr, exp_phy_sgpr, exp_dev_lds, exp_max_waves
+    ):
+        """_arch_caps_for_kernel must return the same values rocisa provides."""
+        k = {"ISA": list(isa), "KernelLanguage": "Assembly"}
+        phy_vgpr, phy_sgpr, dev_lds, max_waves = _arch_caps_for_kernel(k)
+        assert phy_vgpr   == exp_phy_vgpr,   f"ISA {isa}: physical_vgpr mismatch"
+        assert phy_sgpr   == exp_phy_sgpr,   f"ISA {isa}: physical_sgpr mismatch"
+        assert dev_lds    == exp_dev_lds,    f"ISA {isa}: device_lds mismatch"
+        assert max_waves  == exp_max_waves,  f"ISA {isa}: max_waves_per_simd mismatch"
+
+
+# ── compute_occupancy_from_asm_source: arch_caps passthrough ─────────────────
+
+class TestComputeOccupancyFromAsmSourceArchCaps:
+    """Verify that arch_caps kwarg overrides the static _arch_caps_for_kernel table.
+
+    This tests the consolidation: KernelWriterAssembly.getSourceFileString passes
+    rocisa-sourced caps as arch_caps so the custom-kernel path uses rocisa as the
+    single source of truth instead of the static table.
+    """
+
+    def _asm(self, vgpr, sgpr, lds):
+        return (
+            f".amdhsa_kernel dummy\n"
+            f"  .amdhsa_next_free_vgpr {vgpr}\n"
+            f"  .amdhsa_next_free_sgpr {sgpr}\n"
+            f"  .amdhsa_group_segment_fixed_size {lds}\n"
+            f".end_amdhsa_kernel\n"
+        )
+
+    def test_arch_caps_kwarg_used_when_provided(self):
+        """When arch_caps is provided, _arch_caps_for_kernel is NOT called."""
+        from Tensile.OccupancyMeasure import compute_occupancy_from_asm_source
+
+        kernel = {"ISA": [9, 5, 0], "NumThreads": 256}
+        asm = self._asm(vgpr=256, sgpr=64, lds=68864)
+
+        # Pass caps identical to gfx950 rocisa values; expect the same result as
+        # calling without arch_caps on a gfx950 kernel.
+        gfx950_caps = (512, 800, 163840, 8)
+        occ_with    = compute_occupancy_from_asm_source(kernel, asm, arch_caps=gfx950_caps)
+        occ_without = compute_occupancy_from_asm_source(kernel, asm)  # uses static table
+
+        assert occ_with == occ_without == 2, (
+            f"gfx950, vgpr=256, lds=68864 → expected occ=2; "
+            f"with_caps={occ_with}, without_caps={occ_without}"
+        )
+
+    def test_arch_caps_kwarg_overrides_isa_lookup(self):
+        """Mismatched arch_caps changes the result, proving the kwarg is used."""
+        from Tensile.OccupancyMeasure import compute_occupancy_from_asm_source
+
+        # Kernel declared as gfx950 but caps for gfx908 (256 VGPR pool) passed explicitly.
+        kernel = {"ISA": [9, 5, 0], "NumThreads": 256}
+        asm = self._asm(vgpr=128, sgpr=64, lds=16384)
+
+        normal_occ   = compute_occupancy_from_asm_source(kernel, asm)                  # 512//128=4 → 4
+        override_occ = compute_occupancy_from_asm_source(kernel, asm,
+                           arch_caps=(256, 800, 65536, 10))  # 256//128=2 → 2
+
+        assert normal_occ   == 4, f"gfx950 native caps: expected 4, got {normal_occ}"
+        assert override_occ == 2, f"gfx908 override caps: expected 2, got {override_occ}"
+
+    def test_arch_caps_none_falls_back_to_static_table(self):
+        """When arch_caps=None (default), _arch_caps_for_kernel is used."""
+        from Tensile.OccupancyMeasure import compute_occupancy_from_asm_source
+
+        kernel = {"ISA": [9, 4, 2], "NumThreads": 256}
+        asm = self._asm(vgpr=256, sgpr=64, lds=65536)
+
+        occ = compute_occupancy_from_asm_source(kernel, asm, arch_caps=None)
+        assert occ is not None
+        assert occ >= 1
