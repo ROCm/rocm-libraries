@@ -261,7 +261,7 @@ protected:
     static void SetUpTestSuite()
     {
         ws_ = std::make_unique<rocm_ck::test::SplitGemmWorkspace>(
-            256, 128, 1024, 256);
+            4096, 4096, 4096, 256);
     }
 
     static void TearDownTestSuite() { ws_.reset(); }
@@ -370,4 +370,6 @@ INSTANTIATE_TEST_SUITE_P(
     Phase2,
     SplitGemmTest,
     ::testing::Values(
-        SplitGemmConfig{256, 128, 1024, 256, "k1024_4tile"}));
+        SplitGemmConfig{256, 128, 1024, 256, "k1024_4tile"},
+        SplitGemmConfig{2048, 2048, 2048, 256, "k2048_8tile"},
+        SplitGemmConfig{4096, 4096, 4096, 256, "k4096_16tile"}));
