@@ -262,8 +262,6 @@ class CSVHandler:
 
                 cleaned_rows += CSVHandler._cleanup_reader_dups(reader)
 
-        for row in cleaned_rows:
-            print(row, end='\n')
         return (fieldnames, cleaned_rows)
 
     def _check_nonempty_csvs(self) -> bool:
@@ -293,6 +291,7 @@ class CSVHandler:
 
         with open(csv_path, "w", encoding="utf-8") as outfile:
             writer = csv.DictWriter(outfile, fieldnames=self.fieldnames)
+            writer.writeheader()
             writer.writerows(self.cleaned_data)
 
 

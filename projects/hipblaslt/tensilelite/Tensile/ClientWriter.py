@@ -562,7 +562,7 @@ def pruneModeName(mode):
     if mode == 5: return 'Prune0X0X'
     if mode == 6: return 'Prune00XX'
 
-def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, probSolMap={}):
+def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, errorsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, probSolMap={}):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
     # libraryFile must point at the per-base TensileLibrary{,.yaml,.dat}; the
@@ -581,6 +581,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
                 param("code-object", os.path.join(sourceDir,coFile))
 
         param('results-file', resultsFileName)
+        param('errors-file', errorsFileName)
         param('performance-metric', globalParameters["PerformanceMetric"])
         param('problem-identifier', problemType.operationIdentifier)
         param('compute-input-type-A', problemType.computeInputTypeA.toName())
@@ -763,8 +764,10 @@ def writeClientConfig(
     else:
       resultsFileName = os.path.join(stepBaseDir, "../Data", stepName+".csv")
 
+    errorsFileName = os.path.join(stepBaseDir, "build", "errors.csv")
+
     newSolution = next(iter(newLibrary.solutions.values()))
-    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile, probSolMap)
+    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, errorsFileName, filename, deviceId, gfxName, libraryFile, probSolMap)
 
     return filename
 

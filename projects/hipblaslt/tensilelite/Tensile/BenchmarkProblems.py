@@ -511,6 +511,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             errorsFileBaseFinal = errorsFileBase
 
         resultsFileName = resultsFileBase + ".csv"
+        errorsFileName = os.path.join(errorsFileBase, "errors.csv")
         solutionsFileName = resultsFileBase + ".yaml"
 
         # check if a solution cache exists and if it matches our solution parameters
@@ -634,7 +635,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             writeClientConfigIni(True, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
                                  benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                  benchmarkStep.icacheFlushArgs, conProblemType,
-                                 sourcePath, codeObjectFiles, resultsFileName,
+                                 sourcePath, codeObjectFiles, resultsFileName, errorsFileName,
                                  outFile, deviceId, gfxName, libraryFile=cachedLibraryFile,
                                  probSolMap=probSolMap)
 
@@ -679,6 +680,7 @@ def main(
     cCompiler: str,
     outputPath: Path,
     buildTmpPath: Path,
+    errorSummaryCSVPath: Path,
     debugConfig: DebugConfig,
     deviceId: int,
     gfxName: str,

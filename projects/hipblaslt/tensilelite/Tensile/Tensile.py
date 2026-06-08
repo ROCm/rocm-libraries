@@ -69,6 +69,7 @@ TENSILE_CLIENT_PATH = TENSILE_SCRIPT_DIR.parent / TENSILE_CLIENT_PATH
 def executeStepsInConfig(
         config: dict,
         outputPath: Path,
+        errorSummaryCSVPath: Path,
         asmToolchain: AssemblyToolchain,
         srcToolchain: SourceToolchain,
         isaInfoMap: Dict[str, IsaInfo],
@@ -113,6 +114,7 @@ def executeStepsInConfig(
                 cCompiler,
                 outputPath,
                 buildTmpPath,
+                errorSummaryCSVPath,
                 debugConfig,
                 deviceId,
                 gfxName,
@@ -224,6 +226,7 @@ def addCommonArguments(argParser):
         help="MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
     argParser.add_argument("--rocm-agent-enumerator", default=None, action="store", dest="rocm_agent_enumerator")
     argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters, default=[])
+    argParser.add_argument("--error-summary-filepath", type=str, default="error_summary.csv", help="File to write Tensile failed kernel summary")
 
 
 def argUpdatedGlobalParameters(args):
@@ -507,6 +510,7 @@ def Tensile(userArgs):
     argParser.add_argument("--gpu-targets", dest="gpuTargets", default=None,
             help="Semicolon-separated GPU targets (e.g. gfx942). "
                  "Overrides ISA auto-detection and YAML config ISA.")
+    argParser.add_argument("--error-file", type=str, help="Errorfile path to write tensilelite-client errors")
 
     addCommonArguments(argParser)
     args = argParser.parse_args(userArgs)
@@ -664,7 +668,8 @@ def Tensile(userArgs):
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
-    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly)
+    errorSummaryCSVPath = Path(args.error_summary_filepath)
+    executeStepsInConfig(config, outputPath, errorSummaryCSVPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)
