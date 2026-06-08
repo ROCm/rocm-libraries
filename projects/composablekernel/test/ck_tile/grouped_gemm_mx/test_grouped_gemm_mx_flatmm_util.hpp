@@ -102,40 +102,6 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
 
     static constexpr ck_tile::index_t NumDTensor = 0;
 
-    template <typename InitType>
-    static void fill_tensor(ck_tile::HostTensor<InitType>& tensor, bool is_a, int init_method)
-    {
-        if(init_method == 0)
-        {
-            if(is_a)
-                ck_tile::FillUniformDistribution<>{0.0f, 1.0f}(tensor);
-            else
-                ck_tile::FillUniformDistribution<>{-.5f, .5f}(tensor);
-        }
-        else if(init_method == 1)
-        {
-            if(is_a)
-                ck_tile::FillUniformDistribution<>{2.f, 2.f}(tensor);
-            else
-                ck_tile::FillUniformDistribution<>{0.5f, 0.5f}(tensor);
-        }
-    }
-
-    static void fill_scale(ck_tile::HostTensor<ScaleType>& tensor, bool is_a, int init_method)
-    {
-        if(init_method == 0)
-        {
-            ck_tile::FillUniformDistribution<>{-2.f, 2.f}(tensor);
-        }
-        else if(init_method == 1)
-        {
-            if(is_a)
-                ck_tile::FillUniformDistribution<>{0.5f, 0.5f}(tensor);
-            else
-                ck_tile::FillUniformDistribution<>{2.f, 2.f}(tensor);
-        }
-    }
-
     static auto copy_proxy_to_real(auto& dst, const auto& src)
     {
         using DstType = std::remove_cvref_t<decltype(*dst.data())>;
@@ -255,10 +221,26 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
             ck_tile::HostTensor<BInitType> b_init(ck_tile::host_tensor_descriptor(
                 K, N, stride_B, ck_tile::bool_constant<b_row_major>{}));
 
-            fill_tensor(a_init, true, init_method);
-            fill_tensor(b_init, false, init_method);
-            fill_scale(scale_a, true, init_method);
-            fill_scale(scale_b, false, init_method);
+            if(init_method == 0)
+            {
+                // Random tensor and scale values
+                ck_tile::FillUniformDistribution<>{0.0f, 1.0f}(a_init);
+                ck_tile::FillUniformDistribution<>{-2.f, 2.f}(scale_a);
+                ck_tile::FillUniformDistribution<>{-.5f, .5f}(b_init);
+                ck_tile::FillUniformDistribution<>{-2.f, 2.f}(scale_b);
+            }
+            else if(init_method == 1)
+            {
+                // Constant tensor and scale values
+                ck_tile::FillUniformDistribution<>{2.f, 2.f}(a_init);
+                ck_tile::FillUniformDistribution<>{0.5f, 0.5f}(scale_a);
+                ck_tile::FillUniformDistribution<>{0.5f, 0.5f}(b_init);
+                ck_tile::FillUniformDistribution<>{2.f, 2.f}(scale_b);
+            }
+            else
+            {
+                FAIL() << "Unexpected init_method: " << init_method;
+            }
 
             copy_proxy_to_real(a_host, a_init);
             copy_proxy_to_real(b_origin_host, b_init);

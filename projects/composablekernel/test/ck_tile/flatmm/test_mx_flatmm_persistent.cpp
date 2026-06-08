@@ -113,40 +113,6 @@ constexpr int ScaleGranularityK = 32;
 using ScaleA = ck_tile::FlatmmScalePointer<ScaleGranularityM, ScaleGranularityK, ScaleType>;
 using ScaleB = ck_tile::FlatmmScalePointer<ScaleGranularityN, ScaleGranularityK, ScaleType>;
 
-template <typename Tensor>
-void fill_tensor(Tensor& tensor, bool is_a, int init_method)
-{
-    if(init_method == 0)
-    {
-        if(is_a)
-            ck_tile::FillUniformDistribution<>{0.0f, 1.0f}(tensor);
-        else
-            ck_tile::FillUniformDistribution<>{-0.5f, 0.5f}(tensor);
-    }
-    else if(init_method == 1)
-    {
-        if(is_a)
-            ck_tile::FillUniformDistribution<>{2.f, 2.f}(tensor);
-        else
-            ck_tile::FillUniformDistribution<>{0.5f, 0.5f}(tensor);
-    }
-}
-
-void fill_scale(ck_tile::HostTensor<ScaleType>& tensor, bool is_a, int init_method)
-{
-    if(init_method == 0)
-    {
-        ck_tile::FillUniformDistribution<>{-2.f, 2.f}(tensor);
-    }
-    else if(init_method == 1)
-    {
-        if(is_a)
-            ck_tile::FillUniformDistribution<>{0.5f, 0.5f}(tensor);
-        else
-            ck_tile::FillUniformDistribution<>{2.f, 2.f}(tensor);
-    }
-}
-
 void run_persistent_test(ck_tile::index_t M,
                          ck_tile::index_t N,
                          ck_tile::index_t K,
@@ -193,10 +159,26 @@ void run_persistent_test(ck_tile::index_t M,
                                         scale_stride_B,
                                         ck_tile::bool_constant<b_row_major>{}));
 
-    fill_tensor(a_host, /*is_a=*/true, init_method);
-    fill_tensor(b_origin_host, /*is_a=*/false, init_method);
-    fill_scale(scale_a, /*is_a=*/true, init_method);
-    fill_scale(scale_b, /*is_a=*/false, init_method);
+    if(init_method == 0)
+    {
+        // Random tensor and scale values
+        ck_tile::FillUniformDistribution<>{0.0f, 1.0f}(a_host);
+        ck_tile::FillUniformDistribution<>{-2.f, 2.f}(scale_a);
+        ck_tile::FillUniformDistribution<>{-.5f, .5f}(b_origin_host);
+        ck_tile::FillUniformDistribution<>{-2.f, 2.f}(scale_b);
+    }
+    else if(init_method == 1)
+    {
+        // Constant tensor and scale values
+        ck_tile::FillUniformDistribution<>{2.f, 2.f}(a_host);
+        ck_tile::FillUniformDistribution<>{0.5f, 0.5f}(scale_a);
+        ck_tile::FillUniformDistribution<>{0.5f, 0.5f}(b_origin_host);
+        ck_tile::FillUniformDistribution<>{2.f, 2.f}(scale_b);
+    }
+    else
+    {
+        FAIL() << "Unexpected init_method: " << init_method;
+    }
 
     // --- Pre-shuffle B and scales ---
     auto b_shuffled       = preShuffleWeight<MXFlatmmArchTraits::GetNLane()>(b_origin_host);
