@@ -148,13 +148,19 @@ class WaitDataflow {
     void setRawNeedsWait(CounterKind c, RawWaitPredicate pred);
 
     /// Materialise the conservative per-consumer wait plan from the
-    /// converged dataflow state. Optimizers run after this and may rewrite
-    /// the plan in place.
+    /// converged dataflow state. Run WaitPlanOptimizer(s) on the result,
+    /// then finalizePlan() before emit.
     WaitInsertionPlan materializePlan() const;
 
     const DataflowResult& getResult() const {
         return result;
     }
+
+    /// Replay blocks using the post-optimizer plan: apply tail drains to
+    /// entry state, trim with final wait values, add missing anchors, and
+    /// drop redundant waits. Must run after solve() and optimizers; uses
+    /// getResult().entryState.
+    void finalizePlan(WaitInsertionPlan& plan) const;
 
     /// Iteration cap. Public so tests can override.
     void setIterationCap(unsigned cap) {

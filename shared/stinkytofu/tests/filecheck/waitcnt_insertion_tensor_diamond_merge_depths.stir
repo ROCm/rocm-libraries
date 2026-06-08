@@ -21,10 +21,15 @@
 #                       v     v
 #                      ^merge
 #                   s_barrier [11]
+#                   s_barrier [12]
 #
 # Per-path tensor FIFO at the merge anchor (drain token [11]):
 #   via ^p_shallow: [t11]                 -> shallow (1 in flight) -> tlcnt=0
 #   via ^p_deep:    [t11], [t12], [t12]   -> deep    (3 in flight) -> tlcnt=2
+#
+# Per-path tensor FIFO at the second barrier (drain token [12]):
+#   via ^p_shallow: (empty after first barrier) -> unconstrained
+#   via ^p_deep:    [t12], [t12]          -> tlcnt=0
 #
 # A single merge anchor wait sized for the deeper predecessor (^p_deep,
 # tlcnt=2) is a no-op on ^p_shallow, so the shared t11 dep would not drain
@@ -59,11 +64,13 @@
 # CHECK: s_wait_tensorcnt{{.*}}tlcnt = 0
 #
 # ^merge: relaxed wait sized for ^p_deep's depth, emitted before the barrier
-# that conflicts with the shared dep on token 11.
+# that conflicts with the shared dep on token 11; then a full drain before
+# the barrier on the disjoint token 12.
 # CHECK: ^merge
 # CHECK: s_wait_tensorcnt{{.*}}tlcnt = 2
 # CHECK-NEXT: s_barrier{{.*}}tokens = [11]
-# CHECK-NOT: s_wait_tensorcnt
+# CHECK-NEXT: s_wait_tensorcnt{{.*}}tlcnt = 0
+# CHECK-NEXT: s_barrier{{.*}}tokens = [12]
 
 st.func @waitcnt_insertion_tensor_diamond_merge_depths() {
 ^entry:
@@ -79,4 +86,5 @@ st.func @waitcnt_insertion_tensor_diamond_merge_depths() {
   Successors: ^merge
 ^merge:
   "st.s_barrier"() { mod.memtoken = { tokens = [11] } }
+  "st.s_barrier"() { mod.memtoken = { tokens = [12] } }
 }

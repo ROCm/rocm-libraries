@@ -35,8 +35,10 @@
 //      via forward dataflow with per-pred queues.
 //   3. ShallowPredPromotion (and any other WaitPlanOptimizer) may relax
 //      anchor waits by recording predecessor tail drains.
-//   4. emitWaits() materialises the plan as s_wait_* IR nodes.
-//   5. removePHIs() strips the PHI pseudo-instructions.
+//   4. finalizePlan() replays blocks against the final plan (all counters)
+//      with tail-drain-aware entry state so later anchors stay correct.
+//   5. emitWaits() materialises the plan as s_wait_* IR nodes.
+//   6. removePHIs() strips the PHI pseudo-instructions.
 
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
@@ -98,6 +100,8 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         ShallowPredPromotion shallowPred;
         std::vector<WaitPlanOptimizer*> optimizers = {&shallowPred};
         for (auto* opt : optimizers) opt->rewrite(plan, df.getResult(), func);
+
+        df.finalizePlan(plan);
 
         emitWaits(func, passCtx, arch, plan);
         removePHIs(passCtx, rpo);

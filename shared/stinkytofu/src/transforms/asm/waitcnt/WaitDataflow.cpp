@@ -360,6 +360,262 @@ const char* counterName(CounterKind c) {
     }
 }
 
+int getCounterField(const WaitCountSpec& spec, CounterKind c) {
+    switch (c) {
+        case CK_DS:
+            return spec.dsCount;
+        case CK_Buffer:
+            return spec.bufferCount;
+        case CK_Tensor:
+            return spec.tensorCount;
+        default:
+            return WaitCountSpec::kUnused;
+    }
+}
+
+void setCounterField(WaitCountSpec& spec, CounterKind c, int w) {
+    switch (c) {
+        case CK_DS:
+            spec.dsCount = w;
+            break;
+        case CK_Buffer:
+            spec.bufferCount = w;
+            break;
+        case CK_Tensor:
+            spec.tensorCount = w;
+            break;
+        default:
+            break;
+    }
+}
+
+// Trim only the per-pred queues tagged with `pred` on counter `c`.
+void trimPredQueues(std::vector<PerPredQueue>& qs, BasicBlock* pred, int keep) {
+    for (auto& q : qs) {
+        if (q.pred != pred) continue;
+        if (keep <= 0) {
+            q.ops.clear();
+        } else if (static_cast<int>(q.ops.size()) > keep) {
+            q.ops.erase(q.ops.begin(), q.ops.end() - keep);
+        }
+    }
+}
+
+const WaitCountSpec* findTailDrainSpec(const WaitInsertionPlan& plan, BasicBlock* predBB) {
+    for (const TailDrain& td : plan.tailDrains) {
+        if (td.predBB == predBB && td.spec.isValid()) return &td.spec;
+    }
+    return nullptr;
+}
+
+DataflowState adjustedEntry(BasicBlock& bb, const WaitInsertionPlan& plan,
+                            const DataflowState& rawEntry) {
+    DataflowState state = rawEntry;
+    for (BasicBlock* pred : bb.getPredecessors()) {
+        const WaitCountSpec* td = findTailDrainSpec(plan, pred);
+        if (td == nullptr) continue;
+        for (int c = 0; c < CK_Count; ++c) {
+            int w = getCounterField(*td, static_cast<CounterKind>(c));
+            if (w == WaitCountSpec::kUnused) continue;
+            trimPredQueues(state.queues[c], pred, w);
+        }
+    }
+    return state;
+}
+
+bool isWaitAnchorCandidate(const StinkyInstruction& inst,
+                           const std::array<WaitDataflow::RawWaitPredicate, CK_Count>& preds) {
+    for (int c = 0; c < CK_Count; ++c) {
+        if (preds[c](inst)) return true;
+    }
+    return false;
+}
+
+bool blockNeedsFinalize(BasicBlock& bb, const WaitInsertionPlan& plan,
+                        const std::array<WaitDataflow::RawWaitPredicate, CK_Count>& preds) {
+    int candidates = 0;
+    for (IRBase& ir : bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (isPhi(*inst)) continue;
+        if (plan.anchorWaits.find(inst) != plan.anchorWaits.end()) return true;
+        if (isWaitAnchorCandidate(*inst, preds)) ++candidates;
+    }
+    return candidates >= 2;
+}
+
+WaitCountSpec mergePlanAndComputed(const WaitInsertionPlan& plan, StinkyInstruction* inst,
+                                   const int computed[CK_Count], CounterEmitState emit[CK_Count]) {
+    WaitCountSpec applySpec;
+    auto pit = plan.anchorWaits.find(inst);
+    const bool inPlan = pit != plan.anchorWaits.end();
+
+    for (int ci = 0; ci < CK_Count; ++ci) {
+        CounterKind c = static_cast<CounterKind>(ci);
+        int planned = inPlan ? getCounterField(pit->second, c) : WaitCountSpec::kUnused;
+        int w = WaitCountSpec::kUnused;
+
+        if (planned != WaitCountSpec::kUnused) {
+            if (!emit[c].needsNewWait(planned)) continue;
+            w = planned;
+        } else if (computed[ci] != WaitCountSpec::kUnused && emit[c].needsNewWait(computed[ci])) {
+            w = computed[ci];
+        }
+
+        if (w == WaitCountSpec::kUnused) continue;
+
+        setCounterField(applySpec, c, w);
+        emit[c].recordEmittedWait(w);
+    }
+    return applySpec;
+}
+
+int phiCurrentQueueWait(StinkyInstruction* phi, CounterKind c, const DataflowState& state,
+                        std::unordered_set<StinkyInstruction*>& seen);
+
+// Compute per-counter required waits for `inst` against the live `state`.
+void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
+                          const std::array<WaitDataflow::RawWaitPredicate, CK_Count>& rawNeedsWait,
+                          int required[CK_Count]) {
+    // Required wait per counter. -1 = no constraint yet.
+    for (int c = 0; c < CK_Count; ++c) required[c] = WaitCountSpec::kUnused;
+
+    // Tighten required[c] = min(required[c], w). The min across deps on
+    // the same counter is what's safe: it drains the closest-to-tail
+    // dep, which is the most permissive wait that still satisfies it.
+    auto tightenRequired = [&](CounterKind c, int w) {
+        if (w < 0) return;
+        if (required[c] == WaitCountSpec::kUnused || w < required[c]) required[c] = w;
+    };
+
+    // For each src dep on counter `c` that appears in some per-pred
+    // queue, contribute its (countFrom - 1) wait via tightenRequired.
+    // The final required[c] is min over all (dep, pred) hits because
+    // the emitted wait must drain on every constrained path.
+    for (StinkyInstruction* src : inst->getSources()) {
+        if (src == nullptr) continue;
+
+        if (isPhi(*src)) {
+            for (int c = 0; c < CK_Count; ++c) {
+                if (!rawNeedsWait[c](*inst)) continue;
+                std::unordered_set<StinkyInstruction*> seen;
+                int w = phiCurrentQueueWait(src, static_cast<CounterKind>(c), state, seen);
+                tightenRequired(static_cast<CounterKind>(c), w);
+            }
+            continue;
+        }
+
+        CounterKind c = classifyMemOp(*src);
+        if (c == CK_Count) continue;
+        // No same-pipeline filter here: an SSA RAW edge (e.g. ds_store
+        // consuming ds_load's vreg output) needs the wait even though
+        // both live on the same hardware FIFO. Same-pipeline only
+        // skips ANTI-deps; see scanDsAntiDeps below.
+
+        // Per-counter emit constraint (e.g. tlcnt only drains at a
+        // barrier). Overridable via WaitDataflow::setRawNeedsWait();
+        // defaults come from defaultCounterPolicy().
+        if (!rawNeedsWait[c](*inst)) continue;
+
+        for (const auto& q : state.queues[c]) {
+            int n = q.countFrom(src);
+            if (n > 0) tightenRequired(c, n - 1);
+        }
+    }
+
+    auto anyOpInFlight = [&](CounterKind c) {
+        for (const auto& q : state.queues[c]) {
+            if (!q.ops.empty()) return true;
+        }
+        return false;
+    };
+
+    // WAR-on-LDS / barrier ordering: the SSA def-use chain captures
+    // RAW (consumer's src == producer) but NOT anti-dependencies. An
+    // LDS writer must wait for prior LDS readers on the same token,
+    // and a barrier must wait for any prior DS op on a matching
+    // token. Scan per-pred DS queues for token overlap and treat each
+    // hit as an extra DS dep that flows through tightenRequired.
+    //
+    // Same-pipeline pairs (ds_write writer vs ds_read reader) are
+    // skipped: the DS FIFO orders them in hardware.
+    //
+    // Conservative fallbacks live below: if either side lacks
+    // MemTokenData we cannot prove disjointness and force wait 0.
+    auto scanDsAntiDeps = [&](const StinkyInstruction& anchor, const std::vector<int>& anchorTokens,
+                              bool barrierMode) {
+        for (const auto& q : state.queues[CK_DS]) {
+            const int qsize = static_cast<int>(q.ops.size());
+            for (int idx = 0; idx < qsize; ++idx) {
+                StinkyInstruction* op = q.ops[idx];
+                if (op == inst) continue;
+                // Barrier guards every DS op on a matching token; LDS
+                // writer guards only readers/atomics.
+                if (!barrierMode && !isDSRead(*op) && !isDSAtomic(*op)) continue;
+                if (isOnSamePipeline(anchor, *op)) continue;
+                auto* opTokens = op->getModifier<MemTokenData>();
+                bool overlap =
+                    (opTokens == nullptr) || hasTokenOverlap(opTokens->tokens, anchorTokens);
+                if (!overlap) continue;
+                tightenRequired(CK_DS, qsize - idx - 1);
+            }
+        }
+    };
+
+    if (isLdsWriterAnchor(*inst)) {
+        const auto* tk = inst->getModifier<MemTokenData>();
+        if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/false);
+    }
+    if (isBarrier(*inst)) {
+        const auto* tk = inst->getModifier<MemTokenData>();
+        if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/true);
+    }
+
+    // Tensor-side conservative scan: any tensor_load_to_lds in flight
+    // that lacks MemTokenData cannot be proven disjoint from a tensor
+    // anchor, so treat it as an extra dep. Tagged overlaps are already
+    // covered by the SSA UD chain through LDS<token> pseudo-regs.
+    if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() != nullptr) {
+        for (const auto& q : state.queues[CK_Tensor]) {
+            const int qsize = static_cast<int>(q.ops.size());
+            for (int idx = 0; idx < qsize; ++idx) {
+                StinkyInstruction* op = q.ops[idx];
+                if (op == inst) continue;
+                if (op->getModifier<MemTokenData>() == nullptr) {
+                    tightenRequired(CK_Tensor, qsize - idx - 1);
+                }
+            }
+        }
+    }
+
+    // Conservative MemTokenData fallbacks. An untagged anchor or
+    // untagged producer means we cannot prove disjointness, so we
+    // force the matching counter to 0.
+    if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
+        anyOpInFlight(CK_Tensor)) {
+        required[CK_Tensor] = 0;
+    }
+    if (isLdsWriterAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
+        anyOpInFlight(CK_DS) && !isDSWrite(*inst)) {
+        required[CK_DS] = 0;
+    }
+    if (isBarrier(*inst) && anyOpInFlight(CK_DS)) {
+        bool needs = inst->getModifier<MemTokenData>() == nullptr;
+        if (!needs) {
+            for (const auto& q : state.queues[CK_DS]) {
+                for (StinkyInstruction* op : q.ops) {
+                    if (op->getModifier<MemTokenData>() == nullptr) {
+                        needs = true;
+                        break;
+                    }
+                }
+                if (needs) break;
+            }
+        }
+        if (needs) required[CK_DS] = 0;
+    }
+}
+
 // Tightest wait for counter `c` from a (possibly nested) PHI consumer source.
 // Recurses through the PHI inputs to the leaf memops and scans the LIVE per-pred
 // queues for each leaf via countFrom() (countFrom == 1 => tail => wait 0). We
@@ -402,144 +658,8 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
         if (inst == nullptr) continue;
         if (isPhi(*inst)) continue;  // PhiSummary already computed in merge
 
-        // Required wait per counter. -1 = no constraint yet.
-        int required[CK_Count] = {WaitCountSpec::kUnused, WaitCountSpec::kUnused,
-                                  WaitCountSpec::kUnused};
-
-        // Tighten required[c] = min(required[c], w). The min across deps on
-        // the same counter is what's safe: it drains the closest-to-tail
-        // dep, which is the most permissive wait that still satisfies it.
-        auto tightenRequired = [&](CounterKind c, int w) {
-            if (w < 0) return;
-            if (required[c] == WaitCountSpec::kUnused || w < required[c]) required[c] = w;
-        };
-
-        // For each src dep on counter `c` that appears in some per-pred
-        // queue, contribute its (countFrom - 1) wait via tightenRequired.
-        // The final required[c] is min over all (dep, pred) hits because
-        // the emitted wait must drain on every constrained path.
-        for (StinkyInstruction* src : inst->getSources()) {
-            if (src == nullptr) continue;
-
-            if (isPhi(*src)) {
-                for (int c = 0; c < CK_Count; ++c) {
-                    if (!rawNeedsWait[c](*inst)) continue;
-                    std::unordered_set<StinkyInstruction*> seen;
-                    int w = phiCurrentQueueWait(src, static_cast<CounterKind>(c), state, seen);
-                    tightenRequired(static_cast<CounterKind>(c), w);
-                }
-                continue;
-            }
-
-            CounterKind c = classifyMemOp(*src);
-            if (c == CK_Count) continue;
-            // No same-pipeline filter here: an SSA RAW edge (e.g. ds_store
-            // consuming ds_load's vreg output) needs the wait even though
-            // both live on the same hardware FIFO. Same-pipeline only
-            // skips ANTI-deps; see scanDsAntiDeps below.
-
-            // Per-counter emit constraint (e.g. tlcnt only drains at a
-            // barrier). Overridable via WaitDataflow::setRawNeedsWait();
-            // defaults come from defaultCounterPolicy().
-            if (!rawNeedsWait[c](*inst)) continue;
-
-            for (const auto& q : state.queues[c]) {
-                int n = q.countFrom(src);
-                if (n > 0) tightenRequired(c, n - 1);
-            }
-        }
-
-        auto anyOpInFlight = [&](CounterKind c) {
-            for (const auto& q : state.queues[c]) {
-                if (!q.ops.empty()) return true;
-            }
-            return false;
-        };
-
-        // WAR-on-LDS / barrier ordering: the SSA def-use chain captures
-        // RAW (consumer's src == producer) but NOT anti-dependencies. An
-        // LDS writer must wait for prior LDS readers on the same token,
-        // and a barrier must wait for any prior DS op on a matching
-        // token. Scan per-pred DS queues for token overlap and treat each
-        // hit as an extra DS dep that flows through tightenRequired.
-        //
-        // Same-pipeline pairs (ds_write writer vs ds_read reader) are
-        // skipped: the DS FIFO orders them in hardware.
-        //
-        // Conservative fallbacks live below: if either side lacks
-        // MemTokenData we cannot prove disjointness and force wait 0.
-        auto scanDsAntiDeps = [&](const StinkyInstruction& anchor,
-                                  const std::vector<int>& anchorTokens, bool barrierMode) {
-            for (const auto& q : state.queues[CK_DS]) {
-                const int qsize = static_cast<int>(q.ops.size());
-                for (int idx = 0; idx < qsize; ++idx) {
-                    StinkyInstruction* op = q.ops[idx];
-                    if (op == inst) continue;
-                    // Barrier guards every DS op on a matching token; LDS
-                    // writer guards only readers/atomics.
-                    if (!barrierMode && !isDSRead(*op) && !isDSAtomic(*op)) continue;
-                    if (isOnSamePipeline(anchor, *op)) continue;
-                    auto* opTokens = op->getModifier<MemTokenData>();
-                    bool overlap =
-                        (opTokens == nullptr) || hasTokenOverlap(opTokens->tokens, anchorTokens);
-                    if (!overlap) continue;
-                    tightenRequired(CK_DS, qsize - idx - 1);
-                }
-            }
-        };
-
-        if (isLdsWriterAnchor(*inst)) {
-            const auto* tk = inst->getModifier<MemTokenData>();
-            if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/false);
-        }
-        if (isBarrier(*inst)) {
-            const auto* tk = inst->getModifier<MemTokenData>();
-            if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/true);
-        }
-
-        // Tensor-side conservative scan: any tensor_load_to_lds in flight
-        // that lacks MemTokenData cannot be proven disjoint from a tensor
-        // anchor, so treat it as an extra dep. Tagged overlaps are already
-        // covered by the SSA UD chain through LDS<token> pseudo-regs.
-        if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() != nullptr) {
-            for (const auto& q : state.queues[CK_Tensor]) {
-                const int qsize = static_cast<int>(q.ops.size());
-                for (int idx = 0; idx < qsize; ++idx) {
-                    StinkyInstruction* op = q.ops[idx];
-                    if (op == inst) continue;
-                    if (op->getModifier<MemTokenData>() == nullptr) {
-                        tightenRequired(CK_Tensor, qsize - idx - 1);
-                    }
-                }
-            }
-        }
-
-        // Conservative MemTokenData fallbacks. An untagged anchor or
-        // untagged producer means we cannot prove disjointness, so we
-        // force the matching counter to 0.
-        if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
-            anyOpInFlight(CK_Tensor)) {
-            required[CK_Tensor] = 0;
-        }
-        if (isLdsWriterAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
-            anyOpInFlight(CK_DS) && !isDSWrite(*inst)) {
-            required[CK_DS] = 0;
-        }
-        if (isBarrier(*inst) && anyOpInFlight(CK_DS)) {
-            bool needs = inst->getModifier<MemTokenData>() == nullptr;
-            if (!needs) {
-                for (const auto& q : state.queues[CK_DS]) {
-                    for (StinkyInstruction* op : q.ops) {
-                        if (op->getModifier<MemTokenData>() == nullptr) {
-                            needs = true;
-                            break;
-                        }
-                    }
-                    if (needs) break;
-                }
-            }
-            if (needs) required[CK_DS] = 0;
-        }
+        int required[CK_Count];
+        computeRequiredWaits(inst, state, rawNeedsWait, required);
 
         // Decide what to emit (apply redundancy elision) and trim per-pred
         // queues accordingly.
@@ -668,6 +788,52 @@ bool WaitDataflow::solve() {
     std::cerr << "[WaitDataflow] iteration cap " << iterationCap
               << " hit; falling back to s_wait_* 0 at every anchor.\n";
     return false;
+}
+
+void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
+    // The conservative solver trims queues with pre-optimizer wait values.
+    // After WaitPlanOptimizer(s) relax anchors or add tail drains, replay
+    // affected blocks with the final plan so later anchors on any counter
+    // see the correct residual FIFO and redundant waits are dropped.
+    for (BasicBlock* bb : rpo) {
+        if (!blockNeedsFinalize(*bb, plan, rawNeedsWait)) continue;
+
+        auto entryIt = result.entryState.find(bb);
+        if (entryIt == result.entryState.end()) continue;
+
+        DataflowState state = adjustedEntry(*bb, plan, entryIt->second);
+        CounterEmitState emit[CK_Count];
+
+        for (IRBase& ir : *bb) {
+            auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst == nullptr) continue;
+            if (isPhi(*inst)) continue;
+
+            int computed[CK_Count];
+            computeRequiredWaits(inst, state, rawNeedsWait, computed);
+
+            const bool inPlan = plan.anchorWaits.find(inst) != plan.anchorWaits.end();
+            WaitCountSpec applySpec = mergePlanAndComputed(plan, inst, computed, emit);
+
+            for (int c = 0; c < CK_Count; ++c) {
+                int w = getCounterField(applySpec, static_cast<CounterKind>(c));
+                if (w == WaitCountSpec::kUnused) continue;
+                trimQueues(state.queues[c], w);
+            }
+
+            if (applySpec.isValid()) {
+                plan.anchorWaits[inst] = applySpec;
+            } else if (inPlan) {
+                plan.anchorWaits.erase(inst);
+            }
+
+            CounterKind self = classifyMemOp(*inst);
+            if (self != CK_Count) {
+                appendToAllPaths(state.queues[self], inst);
+                emit[self].recordNewOp();
+            }
+        }
+    }
 }
 
 WaitInsertionPlan WaitDataflow::materializePlan() const {
