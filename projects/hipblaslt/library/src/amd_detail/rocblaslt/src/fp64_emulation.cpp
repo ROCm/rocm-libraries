@@ -647,7 +647,8 @@ size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_
            + szC32i * sizeof(double) * 2                                   /* Zhi + Zlo  */
            + cola8i * sizeof(int16_t)                                      /* sftA       */
            + padn   * sizeof(int16_t)                                      /* sftB       */
-           + sizeof(uint32_t);                                             /* nan_flag   */
+           + sizeof(uint32_t)                                              /* nan_flag   */
+           + cola8i * sizeof(int32_t);                                     /* row_max    */
 }
 
 /**
@@ -866,62 +867,91 @@ oz2_accu_prelim_AB_kernel(const double* __restrict__ A,
 
 /* =========================================================================
  * GPU kernels — accu mode Part 1: shift refinement from preliminary GEMM
- *               (A rows and B columns fused into a single dispatch)
  *
- * oz2_accu_refine_sftAB_kernel processes both row-wise and column-wise
- * max reductions in one kernel.  Grid = dim3(m + n, 1), Block = dim3(256, 1).
- *   blockIdx.x <  m_blocks → row-max  → update sftA  (row = blockIdx.x)
- *   blockIdx.x >= m_blocks → col-max  → update sftB  (col = blockIdx.x - m_blocks)
+ * sftA refinement uses two passes to combine high occupancy with coalesced
+ * access to the column-major C32i array:
  *
- * The branch is scalar-uniform: zero divergence, zero masking overhead.
+ * oz2_refine_sftA_partial_kernel — pass 1 (partial per-row max):
+ *   Block = dim3(64), Grid = dim3(ceil(m/64), ceil(n/64)).
+ *   Thread tx in each wavefront handles row = blockIdx.x*64 + tx.
+ *   For each of the 64 columns covered by blockIdx.y, the wavefront reads
+ *   64 consecutive rows of the same column → 256-byte coalesced burst.
+ *   Result written to row_max[row] via atomicMax (workspace-resident buffer).
+ *
+ * oz2_refine_sftA_apply_kernel — pass 2 (apply refinement):
+ *   Block = dim3(64), Grid = dim3(ceil(m/64)).
+ *   Reads row_max[row], computes sftA[row] update, zeroes row_max[row].
+ *
+ * oz2_refine_sftB_kernel — per-column max of C32i → update sftB.
+ *   Block = dim3(256), Grid = dim3(n).  One block per column; the column
+ *   elements C32i[i + col*ldc32i] for i=0..m-1 are contiguous → coalesced.
  * ========================================================================= */
 __global__ static void
-oz2_accu_refine_sftAB_kernel(const int32_t* __restrict__ C32i,
-                              int64_t m, int64_t n, size_t ldc32i,
+oz2_refine_sftA_partial_kernel(const int32_t* __restrict__ C32i,
+                                int64_t m, int64_t n, size_t ldc32i,
+                                int32_t* __restrict__ row_max)
+{
+    /* One thread per row (tx dimension), one column-tile per block (y dim). */
+    const int64_t row      = static_cast<int64_t>(blockIdx.x) * 64
+                           + static_cast<int64_t>(threadIdx.x);
+    const int64_t col_base = static_cast<int64_t>(blockIdx.y) * 64;
+    if(row >= m) return;
+
+    int32_t local_max = 0;
+
+    /* Iterate over ≤64 columns for this tile.  For each column, the 64
+     * threads in the wavefront access 64 consecutive rows → COALESCED.     */
+    const int64_t col_end = (col_base + 64 < n) ? col_base + 64 : n;
+    for(int64_t col = col_base; col < col_end; ++col) {
+        int32_t v  = C32i[static_cast<size_t>(row) + static_cast<size_t>(col) * ldc32i];
+        int32_t av = v < 0 ? -v : v;
+        if(av > local_max) local_max = av;
+    }
+
+    /* Write partial per-row max to the temporary buffer. */
+    if(local_max > 0)
+        atomicMax(row_max + static_cast<size_t>(row), local_max);
+}
+
+__global__ static void
+oz2_refine_sftA_apply_kernel(const int32_t* __restrict__ row_max,
                               int16_t* __restrict__ sftA,
-                              int16_t* __restrict__ sftB,
-                              float log2P,
-                              unsigned m_blocks)
+                              int64_t m, float log2P)
+{
+    const int64_t row = static_cast<int64_t>(blockIdx.x) * 64
+                      + static_cast<int64_t>(threadIdx.x);
+    if(row >= m) return;
+
+    int32_t max_val = row_max[row];
+    if(max_val < 1) max_val = 1;
+    float refinement = floorf(-0.5f * log2f(static_cast<float>(max_val)) + log2P);
+    sftA[row] += static_cast<int16_t>(refinement);
+}
+
+__global__ static void
+oz2_refine_sftB_kernel(const int32_t* __restrict__ C32i,
+                       int64_t m, int64_t n, size_t ldc32i,
+                       int16_t* __restrict__ sftB,
+                       float log2P)
 {
     __shared__ int32_t s_wmax[8];
 
-    if(blockIdx.x < m_blocks) {
-        /* ── sftA: per-row max over columns ────────────────────────────── */
-        const int64_t row = static_cast<int64_t>(blockIdx.x);
+    const int64_t col = static_cast<int64_t>(blockIdx.x);
+    if(col >= n) return;
 
-        int32_t local_max = 0;
-        for(int64_t j = threadIdx.x; j < n; j += blockDim.x) {
-            int32_t v  = C32i[static_cast<size_t>(row) + static_cast<size_t>(j) * ldc32i];
-            int32_t av = v < 0 ? -v : v;
-            if(av > local_max) local_max = av;
-        }
-        local_max = warp_reduce_max_abs_i32(local_max);
-        local_max = block_reduce_max_i32(local_max, s_wmax);
+    int32_t local_max = 0;
+    for(int64_t i = threadIdx.x; i < m; i += blockDim.x) {
+        int32_t v  = C32i[static_cast<size_t>(i) + static_cast<size_t>(col) * ldc32i];
+        int32_t av = v < 0 ? -v : v;
+        if(av > local_max) local_max = av;
+    }
+    local_max = warp_reduce_max_abs_i32(local_max);
+    local_max = block_reduce_max_i32(local_max, s_wmax);
 
-        if(threadIdx.x == 0) {
-            if(local_max < 1) local_max = 1;
-            float refinement = floorf(-0.5f * log2f(static_cast<float>(local_max)) + log2P);
-            sftA[row] += static_cast<int16_t>(refinement);
-        }
-
-    } else {
-        /* ── sftB: per-column max over rows ────────────────────────────── */
-        const int64_t col = static_cast<int64_t>(blockIdx.x - m_blocks);
-
-        int32_t local_max = 0;
-        for(int64_t i = threadIdx.x; i < m; i += blockDim.x) {
-            int32_t v  = C32i[static_cast<size_t>(i) + static_cast<size_t>(col) * ldc32i];
-            int32_t av = v < 0 ? -v : v;
-            if(av > local_max) local_max = av;
-        }
-        local_max = warp_reduce_max_abs_i32(local_max);
-        local_max = block_reduce_max_i32(local_max, s_wmax);
-
-        if(threadIdx.x == 0) {
-            if(local_max < 1) local_max = 1;
-            float refinement = floorf(-0.5f * log2f(static_cast<float>(local_max)) + log2P);
-            sftB[col] += static_cast<int16_t>(refinement);
-        }
+    if(threadIdx.x == 0) {
+        if(local_max < 1) local_max = 1;
+        float refinement = floorf(-0.5f * log2f(static_cast<float>(local_max)) + log2P);
+        sftB[col] += static_cast<int16_t>(refinement);
     }
 }
 
@@ -1471,6 +1501,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
      *   sftA       [cola8i]                        INT16 per-row shifts for A
      *   sftB       [padn]                          INT16 per-col shifts for B
      *   nan_flag   [1]                             UINT32 Inf/NaN detection
+     *   row_max    [cola8i]                        INT32  partial per-row max (sftA refine)
      * ------------------------------------------------------------------ */
     const size_t szA8i    = scale_chunk_size * lda8i * cola8i;
     const size_t szB8i    = scale_chunk_size * ldb8i * static_cast<size_t>(n);
@@ -1480,6 +1511,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     const size_t szSftA   = cola8i;
     const size_t szSftB   = padn;
     const size_t szNanFlag = 1;
+    const size_t szRowMax  = cola8i;  /* partial per-row max for sftA refinement */
 
     const size_t wsBytes =
           szA8i             * sizeof(int8_t)
@@ -1489,7 +1521,8 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         + szZlo             * sizeof(double)
         + szSftA            * sizeof(int16_t)
         + szSftB            * sizeof(int16_t)
-        + szNanFlag         * sizeof(uint32_t);
+        + szNanFlag         * sizeof(uint32_t)
+        + szRowMax          * sizeof(int32_t);    /* row_max    */
 
     /* Use caller-provided workspace if large enough; otherwise allocate. */
     bool   ws_owned = false;
@@ -1510,6 +1543,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     int16_t*  const sftA       = reinterpret_cast<int16_t*>(Zlo + szZlo);
     int16_t*  const sftB       = sftA + szSftA;
     uint32_t* const nan_flag   = reinterpret_cast<uint32_t*>(sftB + szSftB);
+    int32_t*  const row_max    = reinterpret_cast<int32_t*>(nan_flag + szNanFlag);
     /* First C32i slice (used by preliminary GEMM and shift refinement) */
     int32_t*  const C32i       = C32i_batch;
 
@@ -1593,9 +1627,24 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
 
     const float accu_log2P = h_accu_log2P_all[num_moduli - 2];
     _pstart();
-    hipLaunchKernelGGL(oz2_accu_refine_sftAB_kernel,
-                       dim3(m_blks + static_cast<unsigned>(n)), dim3(256), 0, stream,
-                       C32i, m, n, ldc32i, sftA, sftB, accu_log2P, m_blks);
+    /* sftA refinement — two-pass coalesced approach:
+     *   Pass 1: tile C32i into 64-row × 64-column blocks; each wavefront reads
+     *   64 consecutive rows per column (coalesced), accumulates per-row maxima
+     *   into row_max via atomicMax (workspace-resident, no extra allocation).
+     *   Pass 2: computes sftA[row] update from row_max.                     */
+    const unsigned sftA_m_blks = static_cast<unsigned>((m + 63) / 64);
+    const unsigned sftA_n_blks = static_cast<unsigned>((n + 63) / 64);
+    (void)hipMemsetAsync(row_max, 0, szRowMax * sizeof(int32_t), stream);
+    hipLaunchKernelGGL(oz2_refine_sftA_partial_kernel,
+                       dim3(sftA_m_blks, sftA_n_blks), dim3(64), 0, stream,
+                       C32i, m, n, ldc32i, row_max);
+    hipLaunchKernelGGL(oz2_refine_sftA_apply_kernel,
+                       dim3(sftA_m_blks), dim3(64), 0, stream,
+                       row_max, sftA, m, accu_log2P);
+    /* sftB refinement — one block per column, coalesced (unchanged). */
+    hipLaunchKernelGGL(oz2_refine_sftB_kernel,
+                       dim3(static_cast<unsigned>(n)), dim3(256), 0, stream,
+                       C32i, m, n, ldc32i, sftB, accu_log2P);
     _pstop(_t_refine);
 
     /* Parts 1f + 2a-d: two-level loop — scale chunks (outer) × GEMM chunks (inner).
