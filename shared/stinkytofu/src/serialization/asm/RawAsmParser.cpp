@@ -828,6 +828,8 @@ bool parseModifiers(IRLexer& lexer, ParsedInstruction& inst, const HwInstDesc* h
 
     } else if (modKey == "mod.global") {
         if (fields.contains("offset")) modFields["offset"] = fields["offset"];
+        if (fields.contains("th")) modFields["th"] = fields["th"];
+        if (fields.contains("scope")) modFields["scope"] = fields["scope"];
 
     } else if (modKey == "mod.smem") {
         if (fields.contains("offset")) modFields["offset"] = fields["offset"];

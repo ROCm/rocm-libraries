@@ -309,7 +309,9 @@ inline std::map<std::string, int>
     rv["v_mov_b64"] = tryAssembler(isaVersion, assemblerPath, "v_mov_b64 v[0:1], v[2:3]", isDebug);
     rv["s_sub_u64"]
         = tryAssembler(isaVersion, assemblerPath, "s_sub_u64 s[0:1], s[0:1], s[2:3]", isDebug);
-
+    rv["s_add_u64"]
+        = tryAssembler(isaVersion, assemblerPath, "s_add_u64 s[0:1], s[0:1], s[2:3]", isDebug);
+    rv["v_add_nc_u64"] = tryAssembler(isaVersion, assemblerPath, "v_add_nc_u64 v[0:1], v[2:3], v[4:5]", isDebug);
     rv["HasBF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_f32_bf16 v0, v1", isDebug);
 
     rv["HasPkF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_pk_f16_f32 v0, v1, v2", isDebug);
@@ -464,6 +466,7 @@ inline std::map<std::string, int>
 
     rv["SeparateVscnt"]
         = tryAssembler(isaVersion, assemblerPath, "s_waitcnt_vscnt null 0", isDebug);
+    rv["HasGlobalPrefetch"] = tryAssembler(isaVersion, assemblerPath, "global_prefetch_b8 v[0:1], off scope:SCOPE_SE th:TH_LOAD_NT", isDebug);
 
     rv["SeparateLGKMcnt"] = tryAssembler(isaVersion, assemblerPath, "s_wait_dscnt 0", isDebug)
                             && tryAssembler(isaVersion, assemblerPath, "s_wait_kmcnt 0", isDebug);
@@ -585,6 +588,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
     rv["PhysicalMaxSgpr"]   = 800;
     rv["maxLDSConstOffset"] = 65536;
+    rv["GlobalPrefetchSize"] = 256;
 
     if(isaVersion[0] == 10)
         rv["PhysicalMaxVgprCU"] = 1024 * 32;

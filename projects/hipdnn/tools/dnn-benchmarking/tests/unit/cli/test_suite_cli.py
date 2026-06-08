@@ -130,10 +130,9 @@ class TestMainRouting:
             paths.append(str(p))
         return paths
 
-    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
-    @patch.object(MAIN_MODULE, "run_suite_cli")
+    @patch("dnn_benchmarking.cli.main.run_suite_cli")
     def test_multi_file_glob_routes_to_orchestrator(
-        self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
+        self, mock_orchestrate: MagicMock
     ) -> None:
         """Multi-file glob routes to the unified orchestrator."""
         mock_orchestrate.return_value = 0
@@ -157,10 +156,9 @@ class TestMainRouting:
             assert len(graph_paths) == 3
             assert result == 0
 
-    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
-    @patch.object(MAIN_MODULE, "run_suite_cli")
+    @patch("dnn_benchmarking.cli.main.run_suite_cli")
     def test_single_file_also_routes_to_orchestrator(
-        self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
+        self, mock_orchestrate: MagicMock
     ) -> None:
         """Single file routes through the unified orchestrator (no separate run_benchmark)."""
         mock_orchestrate.return_value = 0
@@ -183,10 +181,9 @@ class TestMainRouting:
             assert len(graph_paths) == 1
             assert result == 0
 
-    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_verbose_flag_propagates_to_suite_config(
-        self, mock_benchmark: MagicMock, mock_gpu: MagicMock
+        self, mock_benchmark: MagicMock
     ) -> None:
         """-v sets SuiteConfig.verbose=True when routing through the orchestrator."""
         mock_benchmark.return_value = 0
@@ -202,10 +199,9 @@ class TestMainRouting:
         suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.verbose is True
 
-    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_engine_list_propagates_to_suite_config(
-        self, mock_benchmark: MagicMock, mock_gpu: MagicMock
+        self, mock_benchmark: MagicMock
     ) -> None:
         """--engine 1,2 lands in SuiteConfig.engine_filter as [1, 2]."""
         mock_benchmark.return_value = 0
@@ -224,10 +220,9 @@ class TestMainRouting:
         suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.engine_filter == [1, 2]
 
-    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_plugin_paths_propagate_to_suite_config(
-        self, mock_benchmark: MagicMock, mock_gpu: MagicMock
+        self, mock_benchmark: MagicMock
     ) -> None:
         mock_benchmark.return_value = 0
 
@@ -254,10 +249,9 @@ class TestMainRouting:
         assert suite_config.engine_filter == [2, 1]
         assert suite_config.plugin_paths == [Path("/plugins/b"), Path("/plugins/a")]
 
-    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_same_engine_plugin_paths_propagate_as_ordered_selections(
-        self, mock_benchmark: MagicMock, mock_gpu: MagicMock
+        self, mock_benchmark: MagicMock
     ) -> None:
         mock_benchmark.return_value = 0
 
@@ -310,14 +304,12 @@ class TestMainRouting:
         reporter.print_error.assert_called_once()
         assert "entry count" in reporter.print_error.call_args[0][0]
 
-    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
-    @patch.object(MAIN_MODULE, "run_pytorch_cli")
-    @patch.object(MAIN_MODULE, "run_suite_cli")
+    @patch("dnn_benchmarking.cli.main.run_pytorch_cli")
+    @patch("dnn_benchmarking.cli.main.run_suite_cli")
     def test_pytorch_backend_single_file_uses_pytorch_path(
         self,
         mock_orchestrate: MagicMock,
         mock_run_pytorch: MagicMock,
-        mock_gpu: MagicMock,
     ) -> None:
         """--backend pytorch on single file goes to run_pytorch_cli, not unified."""
         mock_run_pytorch.return_value = 0
@@ -337,8 +329,7 @@ class TestMainRouting:
             mock_orchestrate.assert_not_called()
             assert result == 0
 
-    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
-    def test_pytorch_backend_multi_file_rejected(self, mock_gpu: MagicMock) -> None:
+    def test_pytorch_backend_multi_file_rejected(self) -> None:
         """--backend pytorch with a glob exits 1 (suite not supported)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             self._create_graph_files(Path(tmpdir), 3)
@@ -354,10 +345,9 @@ class TestMainRouting:
 
             assert result == 1
 
-    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
-    @patch.object(MAIN_MODULE, "run_suite_cli")
+    @patch("dnn_benchmarking.cli.main.run_suite_cli")
     def test_recursive_glob_matches_nested_directories(
-        self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
+        self, mock_orchestrate: MagicMock
     ) -> None:
         """`**` glob with recursive=True matches graphs in nested directories."""
         mock_orchestrate.return_value = 0
@@ -760,10 +750,7 @@ class TestBackendEngineRouting:
         p.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
         return p
 
-    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
-    def test_engine_list_with_pytorch_backend_rejected(
-        self, mock_gpu: MagicMock
-    ) -> None:
+    def test_engine_list_with_pytorch_backend_rejected(self) -> None:
         from dnn_benchmarking.cli.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -783,10 +770,9 @@ class TestBackendEngineRouting:
                 result = main()
         assert result == 1
 
-    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.pytorch_runner_cli.run_pytorch_benchmark")
     def test_single_engine_with_pytorch_backend_accepted(
-        self, mock_run_pytorch: MagicMock, mock_gpu: MagicMock
+        self, mock_run_pytorch: MagicMock
     ) -> None:
         """A single --engine ID is fine with --backend pytorch."""
         mock_run_pytorch.return_value = 0
@@ -973,26 +959,6 @@ class TestValidationStartupGate:
 
         assert result == 0
         mock_run.assert_called_once()
-
-
-class TestNoGpuDetected:
-    """main() returns 1 when no GPU is detected (check is centralized in main)."""
-
-    @patch.object(MAIN_MODULE, "_resolve_graphs")
-    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=False)
-    def test_main_returns_one_when_no_gpu(
-        self, mock_gpu: MagicMock, mock_resolve: MagicMock
-    ) -> None:
-        from dnn_benchmarking.cli.main import main
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            graph = Path(tmpdir) / "g.json"
-            graph.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
-            with patch("sys.argv", ["dnn-benchmark", "--graph", str(graph)]):
-                result = main()
-
-        assert result == 1
-        mock_resolve.assert_not_called()
 
 
 class TestProfilingFlagParsing:

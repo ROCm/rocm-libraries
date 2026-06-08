@@ -120,7 +120,7 @@ TEST_P(GPU_BNInferSmall2D_FP64, DISABLED_BnV1SmallInferfp64_2D) {}
 TEST_P(GPU_BNInferLarge2D_FP64, DISABLED_BnV2LargeInferfp64_2D) {}
 
 // fp16
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_BNCKInferLarge2D_FP16,
                          testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -131,7 +131,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          TestNameGenerator<BN2DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Full,
     GPU_BNOCLInferLarge2D_FP16,
     testing::Combine(testing::ValuesIn(Network2DLarge<BN2DTestCase>()),
                      testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -141,7 +141,7 @@ INSTANTIATE_TEST_SUITE_P(
     TestNameGenerator<BN2DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Full,
     GPU_BNOCLInferLarge3D_FP16,
     testing::Combine(testing::ValuesIn(Network3DBN<BN3DTestCase>()),
                      testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
@@ -150,7 +150,7 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::ValuesIn({miopenActivationPASTHRU})),
     TestNameGenerator<BN3DTestCase>());
 // bfp16
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_BNCKInferLarge2D_BFP16,
                          testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -161,7 +161,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          TestNameGenerator<BN2DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Full,
     GPU_BNOCLInferLarge2D_BFP16,
     testing::Combine(testing::ValuesIn(Network2DLarge<BN2DTestCase>()),
                      testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -171,7 +171,7 @@ INSTANTIATE_TEST_SUITE_P(
     TestNameGenerator<BN2DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Full,
     GPU_BNOCLInferLarge3D_BFP16,
     testing::Combine(testing::ValuesIn(Network3DBN<BN3DTestCase>()),
                      testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
@@ -183,7 +183,7 @@ INSTANTIATE_TEST_SUITE_P(
 // fp32
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_BNInferSmall2D_FP32,
-                         testing::Combine(testing::ValuesIn(Network2DLarge<BN2DTestCase>()),
+                         testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
                                           testing::ValuesIn({miopenBNSpatial,
                                                              miopenBNPerActivation}),
@@ -191,9 +191,9 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN2DTestCase>());
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_BNInferLarge2D_FP32,
-                         testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
+                         testing::Combine(testing::ValuesIn(Network2DLarge<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
                                           testing::ValuesIn({miopenBNSpatial,
                                                              miopenBNPerActivation}),
@@ -221,7 +221,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN2DTestCase>());
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_BNInferLarge2D_FP64,
                          testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),

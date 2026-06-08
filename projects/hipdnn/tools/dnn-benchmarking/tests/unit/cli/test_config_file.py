@@ -322,7 +322,9 @@ def test_sample_configs_parse_and_reference_existing_graphs() -> None:
     assert basic_args.plugin_path == [Path("/opt/rocm/lib/hipdnn_plugins/engines")]
 
 
-def test_invalid_config_backend_errors_before_gpu_check(tmp_path: Path, capsys) -> None:
+def test_invalid_config_backend_errors_before_graph_resolution(
+    tmp_path: Path, capsys
+) -> None:
     config = _write_config(
         tmp_path / "bench.toml",
         """
@@ -334,14 +336,14 @@ backend = "pytoch"
     main_module = importlib.import_module("dnn_benchmarking.cli.main")
 
     with (
-        patch.object(main_module, "gpu_is_available") as mock_gpu,
+        patch.object(main_module, "_resolve_graphs") as mock_resolve,
         patch("sys.argv", ["dnn-benchmark", "--config", str(config)]),
         pytest.raises(SystemExit) as exc,
     ):
         main_module.main()
 
     assert exc.value.code == 2
-    mock_gpu.assert_not_called()
+    mock_resolve.assert_not_called()
     assert "Config field 'backend' must be one of" in capsys.readouterr().err
 
 
@@ -370,10 +372,7 @@ id = 1
 
     main_module = importlib.import_module("dnn_benchmarking.cli.main")
 
-    with (
-        patch.object(main_module, "gpu_is_available", return_value=True),
-        patch("sys.argv", ["dnn-benchmark", "--config", str(config)]),
-    ):
+    with patch("sys.argv", ["dnn-benchmark", "--config", str(config)]):
         rc = main_module.main()
 
     assert rc == 0
@@ -387,7 +386,6 @@ def test_missing_graph_without_config_errors(capsys) -> None:
     main_module = importlib.import_module("dnn_benchmarking.cli.main")
 
     with (
-        patch.object(main_module, "gpu_is_available", return_value=True),
         patch("sys.argv", ["dnn-benchmark"]),
         pytest.raises(SystemExit) as exc,
     ):
