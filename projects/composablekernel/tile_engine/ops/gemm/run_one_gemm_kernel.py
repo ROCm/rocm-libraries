@@ -37,8 +37,10 @@ def _run_one(idx, so_path, prob_dict, kernel_name):
         problem = GemmProblem.from_dict(prob_dict)
 
         np.random.seed(42)
-        A = (np.random.randn(problem.M, problem.K) * 0.1).astype(np.float16)
-        B = (np.random.randn(problem.K, problem.N) * 0.1).astype(np.float16)
+        # Generate fp32 source; the runner encodes to the kernel's real dtype
+        # (fp16 or bf16) based on the compiled kernel name.
+        A = (np.random.randn(problem.M, problem.K) * 0.1).astype(np.float32)
+        B = (np.random.randn(problem.K, problem.N) * 0.1).astype(np.float32)
 
         # CRITICAL: load the library ONLY inside this subprocess.
         runner = GpuGemmRunner(lib_path=so_path)

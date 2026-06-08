@@ -377,6 +377,30 @@ class GemmDispatcherLib:
 # ============================================================================
 
 
+def _fp32_to_bf16_u16(x: np.ndarray) -> np.ndarray:
+    """Encode fp32 -> bfloat16 bit pattern in a uint16 array (round-to-nearest-even).
+
+    numpy has no native bf16, but the C ABI only cares about the 2-byte memory
+    layout (sizeof(bf16_t) == 2 == sizeof(uint16)). Truncating the low 16 bits of
+    the fp32 representation with round-to-nearest-even matches ck_tile's bf16.
+    """
+    u32 = np.ascontiguousarray(x, dtype=np.float32).view(np.uint32)
+    # round-to-nearest-even: add (lsb-of-kept-bits + 0x7FFF) before truncating
+    rounding = ((u32 >> 16) & 1) + np.uint32(0x7FFF)
+    return ((u32 + rounding) >> 16).astype(np.uint16)
+
+
+def _bf16_u16_to_fp32(u16: np.ndarray) -> np.ndarray:
+    """Decode a uint16 bf16 bit pattern back to fp32 (low 16 mantissa bits zero)."""
+    return (u16.astype(np.uint32) << 16).view(np.float32)
+
+
+def _dtype_from_kernel_name(name: str) -> str:
+    """Extract the dtype token from a kernel name like ``gemm_<dtype>_<layout>_...``."""
+    parts = name.split("_")
+    return parts[1] if len(parts) > 1 else "fp16"
+
+
 class GpuGemmRunner:
     """High-level runner: construct from a .so path, call run(A, B, problem).
 
@@ -402,16 +426,30 @@ class GpuGemmRunner:
         M, N, K = problem.M, problem.N, problem.K
 
         # A is row-major MxK; B is supplied KxN and stored column-major (the
-        # 'c' in rcr), matching how the kernel expects its operands.
-        A_h = np.ascontiguousarray(A, dtype=np.float16)
-        B_h = np.ascontiguousarray(B.T, dtype=np.float16)
-        C_h = np.zeros((M, N), dtype=np.float16)
+        # 'c' in rcr), matching how the kernel expects its operands. The element
+        # dtype is dictated by the compiled kernel (encoded in its name); the C
+        # ABI sizes its buffers from sizeof(ADataType), so the host buffers must
+        # match it byte-for-byte.
+        dtype = _dtype_from_kernel_name(self._kernel_name)
+        if dtype == "bf16":
+            A_h = _fp32_to_bf16_u16(A)
+            B_h = _fp32_to_bf16_u16(np.ascontiguousarray(B.T))
+            C_h = np.zeros((M, N), dtype=np.uint16)
+        else:  # fp16 (default)
+            A_h = np.ascontiguousarray(A, dtype=np.float16)
+            B_h = np.ascontiguousarray(B.T, dtype=np.float16)
+            C_h = np.zeros((M, N), dtype=np.float16)
 
         status, time_ms = self.lib.run(A_h, B_h, C_h, M, N, K)
 
+        if dtype == "bf16":
+            C_out = _bf16_u16_to_fp32(C_h)
+        else:
+            C_out = C_h
+
         tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0
         return GemmResult(
-            output=C_h,
+            output=C_out,
             time_ms=time_ms,
             status=status,
             tflops=tflops,
