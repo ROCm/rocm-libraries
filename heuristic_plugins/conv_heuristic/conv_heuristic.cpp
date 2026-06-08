@@ -362,6 +362,14 @@ HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
     auto* policy = reinterpret_cast<ConvPolicy*>(desc);
     policy->engine_ids.assign(ids, ids + count);
     log(("PolicySetEngineIds count=" + std::to_string(count)).c_str());
+    for(size_t i = 0; i < policy->engine_ids.size(); ++i)
+    {
+        std::fprintf(stderr,
+                     "[CONV_HEURISTIC]   candidate engine_id[%zu] = %lld\n",
+                     i,
+                     static_cast<long long>(policy->engine_ids[i]));
+    }
+    std::fflush(stderr);
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
@@ -440,6 +448,15 @@ HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
     const auto n = std::min(*inout_count, policy->engine_ids.size());
     std::memcpy(out_ids, policy->engine_ids.data(), n * sizeof(int64_t));
     *inout_count = n;
+    std::fprintf(stderr, "[CONV_HEURISTIC] PolicyGetSortedEngineIds returning %zu ids\n", n);
+    for(size_t i = 0; i < n; ++i)
+    {
+        std::fprintf(stderr,
+                     "[CONV_HEURISTIC]   sorted engine_id[%zu] = %lld\n",
+                     i,
+                     static_cast<long long>(out_ids[i]));
+    }
+    std::fflush(stderr);
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
