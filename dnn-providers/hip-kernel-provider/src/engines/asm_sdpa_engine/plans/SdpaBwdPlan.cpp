@@ -10,6 +10,7 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -44,7 +45,10 @@ struct MhaBwdArgs
     void* dq_ptr; // output dQ (BF16)
     void* dk_ptr; // output dK (BF16)
     void* dv_ptr; // output dV (BF16)
-    void* dq_acc_ptr; // workspace: FP32 dQ accumulator [B, H_q, S_q, D_qk]
+    void* dq_acc_ptr; // workspace: FP32 dQ accumulator (a32 only; nullptr for a16)
+
+    // Accumulator type — determines 2-kernel (a16) vs 3-kernel (a32) path
+    asm_sdpa_engine::AccumulatorType accType;
 
     // Dimensions
     unsigned int seqlen_q;
@@ -158,7 +162,7 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args buildDqdkdvArgs(const MhaBwdArgs& a, unsig
 
     // A32: write dQ to FP32 dq_acc workspace (DQ_CONVERT casts it to BF16 afterward).
     // A16: write dQ directly to the output BF16 buffer.
-    dqdkdv.ptr_dq = (a.dq_acc_ptr != nullptr) ? a.dq_acc_ptr : a.dq_ptr;
+    dqdkdv.ptr_dq = (a.accType == asm_sdpa_engine::AccumulatorType::A32) ? a.dq_acc_ptr : a.dq_ptr;
     dqdkdv.ptr_dk = a.dk_ptr;
     dqdkdv.ptr_dv = a.dv_ptr;
 
@@ -224,8 +228,9 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args buildDqdkdvArgs(const MhaBwdArgs& a, unsig
     dqdkdv.ptr_qseq_padded = nullptr;
     dqdkdv.ptr_kseq_padded = nullptr;
 
-    // a32 accumulator: max_seqlen_dq = seqlen_q (AITER: v3_atomic_fp32 path)
-    dqdkdv.max_seqlen_dq = a.seqlen_q;
+    // a32: max_seqlen_dq = seqlen_q (AITER: v3_atomic_fp32 path)
+    // a16: max_seqlen_dq = 0 (AITER convention: a16 path, no dq_convert)
+    dqdkdv.max_seqlen_dq = (a.accType == asm_sdpa_engine::AccumulatorType::A32) ? a.seqlen_q : 0;
 
     // No window mask for POC
     dqdkdv.mask_x = -1;
@@ -235,11 +240,12 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args buildDqdkdvArgs(const MhaBwdArgs& a, unsig
 }
 
 // AITER reference: mha_bwd.cu::run_fmha_bwd_convert_dq() (commit 9522048)
+// Only called for a32 accumulator kernels.
 asm_sdpa_engine::fmha_bwd_post_kernel_args buildPostArgs(const MhaBwdArgs& a)
 {
     asm_sdpa_engine::fmha_bwd_post_kernel_args post{};
 
-    // a32 accumulator: dq_acc is FP32 (4 bytes per element)
+    // dq_acc is FP32 (4 bytes per element)
     post.ptr_dq_acc = a.dq_acc_ptr;
     post.ptr_dq = a.dq_ptr;
     post.Hs_dq_acc = static_cast<uint32_t>(a.nhead_stride_dq_acc) * K_FP32_SIZE;
@@ -284,6 +290,7 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     a.dk_ptr = dkPtr;
     a.dv_ptr = dvPtr;
     a.dq_acc_ptr = dqAccPtr;
+    a.accType = p.accumulatorType;
 
     // Dimensions
     a.seqlen_q = p.seqLenQ;
@@ -345,6 +352,27 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     a.batch_stride_dq_acc
         = static_cast<int64_t>(p.numHeadsQ) * p.seqLenQ * p.headDimQk; // H_q * S_q * D_qk
 
+    // The kernel args structs use uint32_t for byte strides.  Verify that
+    // stride_in_elements * K_FP32_SIZE fits before we silently truncate
+    // in buildPostArgs().  Overflow would cause the DQ_CONVERT kernel to
+    // read/write the wrong memory addresses.
+    // Only relevant for a32 (a16 has no dq_acc buffer or DQ_CONVERT kernel).
+    // TODO: Move this validation to frontend graph validation or operator creation
+    // so oversized tensors are rejected before plan building.
+    if(a.accType == asm_sdpa_engine::AccumulatorType::A32)
+    {
+        constexpr auto K_U32_MAX = static_cast<int64_t>(std::numeric_limits<uint32_t>::max());
+        if(a.nhead_stride_dq_acc * K_FP32_SIZE > K_U32_MAX
+           || a.batch_stride_dq_acc * K_FP32_SIZE > K_U32_MAX)
+        {
+            HIPDNN_PLUGIN_LOG_ERROR("dq_acc byte strides overflow uint32_t "
+                                    "(nhead_stride="
+                                    << a.nhead_stride_dq_acc * K_FP32_SIZE
+                                    << ", batch_stride=" << a.batch_stride_dq_acc * K_FP32_SIZE
+                                    << ", max=" << K_U32_MAX << ")");
+        }
+    }
+
     return a;
 }
 
@@ -354,7 +382,7 @@ namespace asm_sdpa_engine
 {
 
 // =============================================================================
-// Constructor
+// Constructors
 // =============================================================================
 
 SdpaBwdPlan::SdpaBwdPlan(HipModuleGuard odoKernel,
@@ -368,26 +396,34 @@ SdpaBwdPlan::SdpaBwdPlan(HipModuleGuard odoKernel,
 {
 }
 
+SdpaBwdPlan::SdpaBwdPlan(HipModuleGuard odoKernel,
+                         HipModuleGuard dqdkdvKernel,
+                         SdpaBwdParams params)
+    : _odoKernel(std::move(odoKernel))
+    , _dqdkdvKernel(std::move(dqdkdvKernel))
+    , _postKernel(std::nullopt)
+    , _params(params)
+{
+}
+
 // =============================================================================
 // getWorkspaceSize
 // =============================================================================
 
-size_t SdpaBwdPlan::getWorkspaceSize(const HipKernelHandle& /*handle*/) const
+size_t SdpaBwdPlan::getWorkspaceSize(const Handle& /*handle*/) const
 {
-    size_t size = sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
-    if(_params.useA32)
-    {
-        size += sdpaBwdDqAccBufferSize(
-            _params.batchSize, _params.numHeadsQ, _params.seqLenQ, _params.headDimQk);
-    }
-    return size;
+    return sdpaBwdWorkspaceSize(_params.batchSize,
+                                _params.numHeadsQ,
+                                _params.seqLenQ,
+                                _params.headDimQk,
+                                _params.accumulatorType);
 }
 
 // =============================================================================
 // execute — 3-kernel orchestration
 // =============================================================================
 
-void SdpaBwdPlan::execute(const HipKernelHandle& handle,
+void SdpaBwdPlan::execute(const Handle& handle,
                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                           uint32_t numDeviceBuffers,
                           void* workspace) const
@@ -425,8 +461,10 @@ void SdpaBwdPlan::execute(const HipKernelHandle& handle,
     // A32: dq_acc follows D buffer (DQDKDV accumulates FP32 dQ there, then DQ_CONVERT casts).
     // A16: DQDKDV writes dQ directly to the output buffer; dq_acc is not allocated.
     auto* dBufPtr = workspace;
+    // A32: dq_acc buffer follows D buffer in workspace.
+    // A16: no dq_acc buffer (nullptr) — DQDKDV writes dQ directly to user output.
     void* dqAccPtr = nullptr;
-    if(_params.useA32)
+    if(_params.accumulatorType == AccumulatorType::A32)
     {
         dqAccPtr = static_cast<char*>(workspace)
                    + sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
@@ -437,11 +475,10 @@ void SdpaBwdPlan::execute(const HipKernelHandle& handle,
     const MhaBwdArgs mhaArgs = buildMhaBwdArgs(
         _params, qPtr, kPtr, vPtr, oPtr, doPtr, lsePtr, dqPtr, dkPtr, dvPtr, dBufPtr, dqAccPtr);
 
-    // 6. Launch 3 kernels on the same stream.
-    // All three kernels have data dependencies (ODO produces D, DQDKDV
-    // consumes D and produces dq_acc, DQ_CONVERT consumes dq_acc) so they
-    // must execute sequentially.  Launching on the same stream guarantees
-    // this ordering without explicit synchronization barriers.
+    // 6. Launch kernels on the same stream.
+    // a32: 3 kernels — ODO → DQDKDV → DQ_CONVERT (sequential dependencies)
+    // a16: 2 kernels — ODO → DQDKDV (dQ written directly in BF16)
+    // Launching on the same stream guarantees ordering without explicit barriers.
     auto stream = handle.getStream();
 
     // 6a. Build args and launch kernel 1: ODO
@@ -475,7 +512,7 @@ void SdpaBwdPlan::execute(const HipKernelHandle& handle,
     // prior workspace lease would silently corrupt dQ. AITER allocates dq_accum
     // via torch::zeros (aiter/csrc/py_itfs_cu/asm_mha_bwd.cu:137 at commit 9522048).
     // A16 writes dQ directly — no accumulator buffer needed, skip the memset.
-    if(_params.useA32)
+    if(_params.accumulatorType == AccumulatorType::A32)
     {
         const size_t dqAccBytes = sdpaBwdDqAccBufferSize(
             _params.batchSize, _params.numHeadsQ, _params.seqLenQ, _params.headDimQk);
@@ -508,9 +545,7 @@ void SdpaBwdPlan::execute(const HipKernelHandle& handle,
 
     // 6c. DQ_CONVERT (FP32 → BF16) — A32 path only.
     // A16 wrote dQ directly to the output BF16 buffer in step 6b; no cast needed.
-    // TODO(ALMIOPEN-1825): remove this guard and the dq_acc allocation once A16 is enabled
-    // in computeDispatchTuples and verified correct.
-    if(_params.useA32)
+    if(_params.accumulatorType == AccumulatorType::A32)
     {
         auto postArgs = buildPostArgs(mhaArgs);
 

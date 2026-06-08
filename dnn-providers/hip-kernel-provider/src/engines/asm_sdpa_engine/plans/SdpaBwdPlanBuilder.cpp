@@ -2,9 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include "plans/SdpaBwdPlanBuilder.hpp"
-#include "HipKernelUtils.hpp"
 #include "asm/AsmKernelPath.hpp"
 #include "asm_fmha_v3_bwd_configs.hpp"
+#include "core/Utils.hpp"
 #include "plans/SdpaBwdPlan.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
@@ -293,12 +293,13 @@ bool wouldBwdByteStridesFitUint32(
 // accumulator/padding — every row in those CSVs has
 //   mask=0, atomic32=0, pssk=0, pddv=0
 // and odo additionally always uses the bf16_cvt=3 sentinel. The dqdkdv
-// (main backward) kernel carries the full dispatch axes; it is currently
-// pinned to atomic32=A32, pssk=1, pddv=1 because the registry rows for
-// pssk=1, pddv=0 do not exist in batch mode and the unpadded
-// (pssk=0, pddv=0) row uses a different kernarg layout than the engine
-// builds today. TODO: lift the pin once the engine emits the unpadded
-// kernarg layout for shapes where seqLenKv % tsKv == 0.
+// (main backward) kernel carries the full dispatch axes; its atomic32 column
+// follows the resolved accumulator type (A32 → 3-kernel FP32-accumulator path,
+// A16 → 2-kernel BF16 path), while pssk=1, pddv=1 are pinned because the
+// registry rows for pssk=1, pddv=0 do not exist in batch mode and the unpadded
+// (pssk=0, pddv=0) row uses a different kernarg layout than the engine builds
+// today. TODO: lift the padding pin once the engine emits the unpadded kernarg
+// layout for shapes where seqLenKv % tsKv == 0.
 //
 // The `verified` flag records whether the resolved (dtype, hdim) kernels have a
 // CPU backward reference that has been calibrated against the in-tree kernels.
@@ -308,20 +309,24 @@ bool wouldBwdByteStridesFitUint32(
 BwdDispatchTuples computeDispatchTuples(const std::string& dataType,
                                         int hdimQ,
                                         MaskType maskType,
-                                        int bf16CvtValue)
+                                        int bf16CvtValue,
+                                        AccumulatorMode accMode)
 {
     const bool verified = (dataType == "bf16" || dataType == "fp16") && hdimQ == 128;
 
     BwdDispatchTuples tuples{};
     tuples.odo = {0, 0, 0, 0, BF16_CVT_FP16_SENTINEL, verified};
-    tuples.dqdkdv = {static_cast<int>(maskType),
-                     static_cast<int>(AccumulatorMode::A32),
-                     1,
-                     1,
-                     bf16CvtValue,
-                     verified};
+    tuples.dqdkdv
+        = {static_cast<int>(maskType), static_cast<int>(accMode), 1, 1, bf16CvtValue, verified};
     tuples.dqConvert = {0, 0, 0, 0, bf16CvtValue, verified};
     return tuples;
+}
+
+// Bridge the public AccumulatorType knob enum to the CSV-local AccumulatorMode
+// used for the `atomic32` dispatch column.
+AccumulatorMode toAccumulatorMode(AccumulatorType accType)
+{
+    return (accType == AccumulatorType::A32) ? AccumulatorMode::A32 : AccumulatorMode::A16;
 }
 
 // One-time dispatch logging. Each (dtype, hdim, mask) combination logs exactly
@@ -439,9 +444,11 @@ std::string lookupKernelNameKey(PipelineStage stage,
 
 } // namespace bwd_dispatch
 
+// Engine knob identifier for accumulator precision (a32 vs a16)
+static constexpr const char* K_ACC_TYPE_KNOB_NAME = "sdpa.bwd.accumulator_type";
+
 bool SdpaBwdPlanBuilder::isApplicable(
-    const HipKernelHandle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -619,7 +626,11 @@ bool SdpaBwdPlanBuilder::isApplicable(
 
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(attrs));
-    auto dispatchTuples = computeDispatchTuples(dataTypeId, headDimQk, maskType, bf16CvtValue);
+    // Applicability validates the default (A32) accumulator path: it is the
+    // default knob value and the most demanding (dq_acc + DQ_CONVERT). The user
+    // may still select A16 via the knob at buildPlan time.
+    auto dispatchTuples = computeDispatchTuples(
+        dataTypeId, headDimQk, maskType, bf16CvtValue, AccumulatorMode::A32);
 
     auto checkRegistry = [&](const char* registryName,
                              bwd_dispatch::PipelineStage stage,
@@ -701,9 +712,9 @@ bool SdpaBwdPlanBuilder::isApplicable(
 }
 
 size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
-    const HipKernelHandle& /* handle */,
+    const Handle& /* handle */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-    const HipKernelSettings& /* executionSettings */) const
+    const Settings& executionSettings) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -717,25 +728,66 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     auto seqLenQ = static_cast<size_t>(qTensor->dims()->Get(2));
     auto headDim = static_cast<size_t>(qTensor->dims()->Get(3));
 
-    return sdpaBwdDBufferSize(batch, headsQ, seqLenQ)
-           + sdpaBwdDqAccBufferSize(batch, headsQ, seqLenQ, headDim);
+    const AccumulatorType accType
+        = executionSettings.accumulatorType.value_or(AccumulatorType::A32);
+
+    return sdpaBwdWorkspaceSize(batch, headsQ, seqLenQ, headDim, accType);
 }
 
 void SdpaBwdPlanBuilder::initializeExecutionSettings(
-    const HipKernelHandle& /* handle */,
+    const Handle& /* handle */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
-    HipKernelSettings& /* executionSettings */) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    Settings& executionSettings) const
 {
-    HIPDNN_PLUGIN_LOG_ERROR("SdpaBwdPlanBuilder::initializeExecutionSettings not implemented");
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    if(!engineConfig.isValid() || !engineConfig.hasKnobSetting(K_ACC_TYPE_KNOB_NAME))
+    {
+        return; // No user preference — default (nullopt → A32) applies
+    }
+
+    const auto& knobSetting = engineConfig.getKnobSettingByName(K_ACC_TYPE_KNOB_NAME);
+
+    if(knobSetting.valueType() != KnobValue::StringValue)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "accumulator_type knob value must be a string");
+    }
+
+    const auto& value = knobSetting.valueAs<StringValue>().value()->str();
+
+    if(value == "a32")
+    {
+        executionSettings.accumulatorType = AccumulatorType::A32;
+    }
+    else if(value == "a16")
+    {
+        executionSettings.accumulatorType = AccumulatorType::A16;
+    }
+    else
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                                                       "Invalid accumulator_type: '" + value
+                                                           + "'. Must be 'a32' or 'a16'");
+    }
 }
 
 void SdpaBwdPlanBuilder::buildPlan(
-    const HipKernelHandle& handle,
+    const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
-    HipKernelContext& executionContext) const
+    Context& executionContext) const
 {
+    // -------------------------------------------------------------------------
+    // 0. Resolve accumulator type from the user knob / execution settings.
+    // This is the single source of truth for a32 (3-kernel) vs a16 (2-kernel)
+    // selection; it drives CSV row selection, DQ_CONVERT loading, the dq_acc
+    // workspace, and params below. Defaults to A32 when the knob is unset.
+    // -------------------------------------------------------------------------
+    const AccumulatorType accType
+        = executionContext.executionSettings().accumulatorType.value_or(AccumulatorType::A32);
+
     auto deviceStringOpt
         = tryGetDeviceString(handle.getStream(), "Failed to query device properties with error: ");
     if(!deviceStringOpt)
@@ -882,8 +934,14 @@ void SdpaBwdPlanBuilder::buildPlan(
     auto batchMode = getBatchMode(sdpaAttrs);
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(sdpaAttrs));
-    auto dispatchTuples
-        = computeDispatchTuples(dataTypeId, static_cast<int>(headDimQk), maskType, bf16CvtValue);
+    // The resolved accumulator type (from the user knob, defaulting to A32) is
+    // authoritative: it selects the a32 vs a16 dqdkdv CSV row and gates whether
+    // the DQ_CONVERT stage is resolved and loaded below.
+    auto dispatchTuples = computeDispatchTuples(dataTypeId,
+                                                static_cast<int>(headDimQk),
+                                                maskType,
+                                                bf16CvtValue,
+                                                toAccumulatorMode(accType));
 
     // Surface, exactly once per (dtype, hdim, mask) over the program lifetime,
     // whether the kernel about to be dispatched has a calibrated CPU reference.
@@ -954,13 +1012,12 @@ void SdpaBwdPlanBuilder::buildPlan(
                                                   static_cast<int>(batchMode),
                                                   dqdtuple.bf16Cvt));
 
-    // Determine accumulator mode from the resolved dispatch tuple. isApplicable
-    // currently hard-codes A32, so `useA32` is always true today. When A16 is
-    // enabled (TODO: ALMIOPEN-1825 — flip AccumulatorMode in computeDispatchTuples and
-    // verify correctness), this branch will resolve dq_convert conditionally,
-    // skip the dq_acc allocation, and route DQDKDV's dQ output directly to the
-    // output BF16 buffer.
-    const bool useA32 = (dispatchTuples.dqdkdv.atomic32 == static_cast<int>(AccumulatorMode::A32));
+    // The DQ_CONVERT stage (FP32 dq_acc → BF16 cast) is only part of the A32
+    // 3-kernel path. For A16 the DQDKDV kernel writes dQ directly in BF16, so
+    // dq_convert is not resolved, the dq_acc workspace is skipped, and the plan
+    // is built with a nullopt post-kernel. The resolved tuple's atomic32 column
+    // already mirrors accType (see computeDispatchTuples above).
+    const bool useA32 = (accType == AccumulatorType::A32);
 
     std::optional<ResolvedKernel> dqConvertResolved;
     if(useA32)
@@ -1035,7 +1092,6 @@ void SdpaBwdPlanBuilder::buildPlan(
     {
         params.dqConvertTiles = dqConvertResolved->tiles;
     }
-    params.useA32 = useA32;
 
     params.qUid = qUid;
     params.kUid = kUid;
@@ -1082,16 +1138,43 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.statsStrideHead = statsStrideHead;
     params.statsStrideBatch = statsStrideBatch;
     params.attnScale = attnScale;
+    params.accumulatorType = accType;
 
+    // postKernel is nullopt for the A16 path; the optional-taking ctor handles
+    // both paths uniformly.
     executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
         std::move(*odoKernel), std::move(*dqdkdvKernel), std::move(postKernel), params));
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(
-    const HipKernelHandle& /* handle */,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */) const
+    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    return {};
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    if(!isApplicable(handle, opGraph))
+    {
+        return {};
+    }
+
+    std::vector<KnobT> knobs;
+
+    KnobT accKnob;
+    accKnob.knob_id = K_ACC_TYPE_KNOB_NAME;
+    accKnob.description
+        = "Accumulator precision for backward dQ gradient: a32 (FP32, 3-kernel) or a16 (BF16, "
+          "2-kernel)";
+
+    StringValueT defaultValue;
+    defaultValue.value = "a32";
+    accKnob.default_value.Set(defaultValue);
+
+    StringConstraintT constraint;
+    constraint.valid_values.emplace_back("a32");
+    constraint.valid_values.emplace_back("a16");
+    accKnob.constraint.Set(constraint);
+
+    knobs.push_back(std::move(accKnob));
+    return knobs;
 }
 
 } // namespace asm_sdpa_engine

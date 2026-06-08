@@ -8,6 +8,18 @@
 namespace asm_sdpa_engine
 {
 
+/// Accumulator precision for the backward DQDKDV kernel.
+///
+/// - A32: dQ is accumulated in FP32 into a workspace buffer (dq_acc), then a
+///   separate DQ_CONVERT kernel converts FP32 → BF16. Requires 3 kernels.
+/// - A16: dQ is written directly in BF16 by the DQDKDV kernel. No dq_acc
+///   workspace buffer, no DQ_CONVERT kernel. Requires 2 kernels.
+enum class AccumulatorType : uint8_t
+{
+    A32, // FP32 accumulator — 3-kernel path (ODO → DQDKDV → DQ_CONVERT)
+    A16 // BF16 accumulator — 2-kernel path (ODO → DQDKDV)
+};
+
 /**
  * @brief Parameters for SDPA backward kernel execution.
  *
@@ -104,13 +116,10 @@ struct SdpaBwdParams
     };
     KernelTiles odoTiles{}; // from cfg_fmha_bwd_odo
     KernelTiles dqdkdvTiles{}; // from cfg_fmha_bwd_dqdkdv
-    KernelTiles dqConvertTiles{}; // from cfg_fmha_bwd_dq_convert; unused when !useA32
+    KernelTiles dqConvertTiles{}; // from cfg_fmha_bwd_dq_convert; unused when A16
 
-    // True when the resolved DQDKDV row has atomic32==1 (A32 FP32-accumulator path).
-    // When false (A16), dQ is written directly by DQDKDV and the dq_acc workspace
-    // allocation and DQ_CONVERT launch are both skipped.
-    // TODO(ALMIOPEN-1825): flip gate in computeDispatchTuples once A16 correctness is verified.
-    bool useA32{true};
+    // Accumulator type (a32 = 3-kernel path, a16 = 2-kernel path)
+    AccumulatorType accumulatorType = AccumulatorType::A32;
 };
 
 } // namespace asm_sdpa_engine
