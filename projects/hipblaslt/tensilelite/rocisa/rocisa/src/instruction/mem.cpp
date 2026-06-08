@@ -1655,4 +1655,18 @@ void mem_inst(nb::module_ m_mem)
         .def("__deepcopy__", [](const rocisa::TensorLoadToLds& self, nb::dict&) {
             return new rocisa::TensorLoadToLds(self);
         });
+
+    nb::class_<rocisa::GlobalPrefetchB8, rocisa::Instruction>(m_mem, "GlobalPrefetchB8")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      std::optional<rocisa::GLOBALModifiers>,
+                      const std::string&>(),
+             nb::arg("v_addr"),
+             nb::arg("s_addr").none(),
+             nb::arg("gm")      = std::nullopt,
+             nb::arg("comment") = "")
+        .def("getParams", &rocisa::GlobalPrefetchB8::getParams)
+        .def("__str__", &rocisa::GlobalPrefetchB8::toString)
+        .def("__deepcopy__",
+             [](const rocisa::GlobalPrefetchB8& self, nb::dict&) { return new rocisa::GlobalPrefetchB8(self); });
 }

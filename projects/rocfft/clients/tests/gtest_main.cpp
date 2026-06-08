@@ -37,6 +37,7 @@
 #include <list>
 
 #include "../../shared/CLI11.hpp"
+#include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
 #include "../../shared/device_properties.h"
 #include "../../shared/environment.h"
@@ -84,8 +85,6 @@ int ngpus{};
 
 // Allow skipping tests if there is a runtime error
 bool skip_runtime_fails;
-// But count the number of failures
-int n_hip_failures = 0;
 
 // Pointer to a bitwise repro-db file
 std::unique_ptr<fft_hash_db> repro_db;
@@ -810,7 +809,7 @@ int main(int argc, char* argv[])
     std::cout << "single precision max l2 epsilon:     " << max_l2_eps_single << "\n";
     std::cout << "double precision max l-inf epsilon: " << max_linf_eps_double << "\n";
     std::cout << "double precision max l2 epsilon:     " << max_l2_eps_double << "\n";
-    std::cout << "Number of runtime issues: " << n_hip_failures << "\n";
+    std::cout << "Number of runtime issues: " << hip_runtime_error::get_count() << "\n";
     std::cout << "Number of successful tests: "
               << ::testing::UnitTest::GetInstance()->successful_test_count() << "\n";
     std::cout << "Number of skipped tests: "
