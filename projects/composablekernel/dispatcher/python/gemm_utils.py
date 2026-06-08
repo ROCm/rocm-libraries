@@ -594,6 +594,11 @@ def setup_multiple_gemm_dispatchers(
                 "gpu_target": c.gfx_arch,
                 "tile_config_json": c.to_codegen_json(),
                 "hpp_glob_pattern": f"{c.name}.hpp",
+                # Honor the config's variant so non-standard kernels are codegen'd
+                # as themselves; the kernel name (and thus hpp_glob_pattern) already
+                # carries the variant suffix, so a missing/standard value here would
+                # produce a header whose name never matches the requested pattern.
+                "variant": c.variant,
             }
         )
 
