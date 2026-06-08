@@ -604,6 +604,11 @@ class Solution(collections.abc.Mapping):
       state["_ScheduleIterAlg"] = state["ScheduleIterAlg"]
       state["_StinkyTofuOptLevel"] = 0
 
+    if state.get("DisableSTWaitCnt", 0) and state["_StinkyTofuOptLevel"] > 0:
+      reject(state, printRejectionReason,
+             "DisableSTWaitCnt is only supported at StinkyTofu OptLevel 0 (SIA != 4)")
+      return
+
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
       reject(state, printRejectionReason, "General Batched GEMM only support Batched Problem")
 
