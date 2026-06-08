@@ -681,6 +681,8 @@ class Solution(collections.abc.Mapping):
       state["NumThreads"] = state["SubGroup0"] * state["SubGroup1"] * state["LocalSplitU"] * state["NumWaveSplitK"]
       if (state["NumThreads"] % state['WavefrontSize']) != 0:
         reject(state, printRejectionReason, f"size of WorkGroup {state['NumThreads']} should be multiple of WavefrontSize {state['WavefrontSize']}")
+  
+    state["NumWaves"] = state["NumThreads"] // state['WavefrontSize']
 
     # macro tile sizes
     if "SubGroup0" in state and "ThreadTile0" in state:
@@ -2320,9 +2322,8 @@ class Solution(collections.abc.Mapping):
     # numComp = numWaves//2 to be a power of two; equivalently, numWaves
     # itself must be a power of two (>= 2).
     if state["enableTDMA"] and state["enableTDMB"]:
-      numWaves = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
-      if numWaves > 1 and (numWaves & (numWaves - 1)) != 0:
-        reject(state, printRejectionReason, f"Wave-separated TDM requires prod(MIWaveGroup)={numWaves} to be a power of two")
+      if state["NumWaves"] > 1 and (state["NumWaves"] & (state["NumWaves"] - 1)) != 0:
+        reject(state, printRejectionReason, f"Wave-separated TDM requires NumWaves to be a power of two")
         return
 
     # DepthU == -1?
