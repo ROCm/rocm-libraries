@@ -164,9 +164,6 @@ if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
   set( WARNING_FLAGS ${NVCC_WARNING_FLAGS} )
 
 else()
-  # Always build amdgcnspirv for when clients run on future or past targets
-  # that are not explicitly supported
-  list(APPEND GPU_TARGETS amdgcnspirv)
   # Check support for the GPU target(s)
   rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   if( BUILD_WITH_COMPILER STREQUAL "HIP-CLANG" )
