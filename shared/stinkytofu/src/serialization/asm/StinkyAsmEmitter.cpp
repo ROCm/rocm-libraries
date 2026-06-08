@@ -759,6 +759,16 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
         }
     }
 #undef EMIT_TRAILING_MODIFIER
+
+    // Assembler requires th:TH_ATOMIC_RETURN on return-form atomics.
+    if (isGlobalMemAtomic(inst)) {
+        for (const auto& d : inst.getDestRegs()) {
+            if (!isPseudoReg(d) && !isImplicitDest(d, inst)) {
+                os << " th:TH_ATOMIC_RETURN";
+                break;
+            }
+        }
+    }
 }
 
 static void emitCycleComment(std::ostream& os, const StinkyInstruction& inst, int currentColumn,

@@ -1997,6 +1997,12 @@ namespace rocisa
             return std::make_shared<FlatAtomicDecU32>(*this);
         }
 
+        // Expose dst (atomic return value) to def-use chain consumers.
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
         std::string getArgStr() const override
         {
             std::string kStr = dst ? dst->toString() + ", " : "";
