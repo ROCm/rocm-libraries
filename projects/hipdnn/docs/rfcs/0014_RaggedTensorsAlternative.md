@@ -496,9 +496,7 @@ ragged tensors by hand in three steps. There is no
 `RaggedTensor::RaggedTensor(const TensorAttributes&)` convenience
 constructor in this iteration — `physicalElementCount` and the
 aux runtime tensor are required ctor inputs and neither is
-derivable from a single `TensorAttributes`. See
-[§7.1](#71-runtime-side-tensorbundle-helper) for the planned
-helper that collapses this to one call per `TensorAttributes`.
+derivable from a single `TensorAttributes`.
 
 ```cpp
 // 1. Allocate the aux as an ordinary Tensor<IndexType> (either
@@ -976,6 +974,12 @@ Because `seq_lens` is not attached to the ragged primary, there
 is no SDK-level "wrap with `seq_lens` for ragged-aware compare"
 fallback to fall back to.
 
+Even if it is not possible to have a fully avoidable sentinel value,
+a random sentinel should have a very low likelihood of showing up in
+the output (though this would increase with very large tensors). The
+consequence of the CPU reference generating this is also small, as it
+would only skip over validating this one value.
+
 ---
 
 ## Known limitations
@@ -1192,7 +1196,7 @@ return:
 This is the right trade for the in-scope use cases:
 correctness-oriented CPU references are not perf-critical paths,
 and the type-erasure stays well-contained. See
-[§7.5](#75-revisit-typed-indext-propagation-if-needed) for the
+[§7.4](#74-revisit-typed-indext-propagation-if-needed) for the
 escape hatch should a future code path force the static-type
 question.
 
@@ -1200,21 +1204,7 @@ question.
 
 ## Future work
 
-### 7.1 Runtime-side `TensorBundle` helper
-
-A `UID → owning_runtime_tensor` helper on the user side, with a
-factory that for non-ragged attrs builds a `Tensor<T>` and for
-ragged attrs handles the pattern of constructing `ragged_offset`
-from user-supplied values and then constructing a
-`RaggedTensor<T>` sized from `(ragged_offset, alignment)`.
-Collapses the user's API to one call per `TensorAttributes`.
-
-A companion helper on the harness side could generate plausible
-random ragged layouts and emit them as pre-supplied input bundles
-(reducing boilerplate for conformance tests where the specific
-ragged layout doesn't matter as long as it is well-formed).
-
-### 7.2 Unify `RaggedTensor` and `ShallowRaggedTensor` as one templated class
+### 7.1 Unify `RaggedTensor` and `ShallowRaggedTensor` as one templated class
 
 The two types share their `RaggedCompositeIndex` implementation,
 their constructor-time structural validation, and (after the
@@ -1226,7 +1216,10 @@ is the conservative choice that mirrors the existing
 `Tensor<T>` / `ShallowTensor<T>` split; unifying them is a
 mechanical refactor left as follow-up.
 
-### 7.3 Split `isPacked()` into orthogonal predicates
+Depending on the work involved, it may make sense for this
+to be included in the initial implementation.
+
+### 7.2 Split `isPacked()` into orthogonal predicates
 
 The existing `isPacked()` predicate conflates "elementCount
 equals elementSpace" with "buffer is `prod(dims)` elements with
@@ -1239,7 +1232,7 @@ allocated element". `RaggedTensor` / `ShallowRaggedTensor` would
 report `hasRegularDims() == false` always, and `isPacked()` would
 mean strictly `elementCount() == elementSpace()`.
 
-### 7.4 Sentinel selection per CPU reference
+### 7.3 Improve CPU validation sentinel value handling
 
 Document the sentinel choice and the "the reference cannot
 produce this value" guarantee in each CPU reference header. NaN
@@ -1251,7 +1244,17 @@ floating-point types (bf16, fp16, fp8) the sentinel space is
 smaller and "unproducible by reference" is harder to guarantee. A
 future RFC could codify the sentinel-per-dtype-per-op table.
 
-### 7.5 Revisit typed-`IndexT` propagation if needed
+Additionally, there are ways to reduce the chance of a naturally
+produced output matching a sentinel value being overlooked. For
+instance, it is necessary that there is a block of sentinel values
+at the end of each row. If a sentinel value appears between valid values
+in the same row, it must be genuine output. This greatly reduces the
+likelihood of real output being overlooked.
+
+There may also be a solution that does not rely on sentinel values
+identified in the future, which could replace this strategy.
+
+### 7.4 Revisit typed-`IndexT` propagation if needed
 
 The current design type-erases the `ragged_offset` aux as
 `shared_ptr<ITensor>` and reads through a runtime element-size
