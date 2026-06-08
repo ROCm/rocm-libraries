@@ -24,6 +24,7 @@ __global__ void
         tile_gemm_mfma_kernel(const float* __restrict__ A,
                               const float* __restrict__ B,
                               float* __restrict__ partial,
+                              float* __restrict__ err_out,
                               ck_tile::index_t M,
                               ck_tile::index_t N,
                               ck_tile::index_t K_full,
@@ -109,18 +110,32 @@ __global__ void
         block_sync_lds();
     }
 
-    AccumPolicy::finalize(c_block, err_block);
-
-    // Store result to partial output — C[M, N] row-major
     const auto c_global = make_naive_tensor_view<address_space_enum::global>(
         partial, make_tuple(M, N), make_tuple(N, 1), number<kKPack>{}, number<1>{});
-
     auto c_window = make_tile_window(
         c_global, make_tuple(number<kMfmaBlockM>{}, number<kMfmaBlockN>{}), {iM, iN});
 
-    const auto c_out = tile_elementwise_in(
-        [](const auto& acc) { return ck_tile::type_convert<float>(acc); }, c_block);
-    store_tile(c_window, c_out);
+    if(err_out)
+    {
+        const auto c_out = tile_elementwise_in(
+            [](const auto& acc) { return ck_tile::type_convert<float>(acc); }, c_block);
+        store_tile(c_window, c_out);
+
+        const auto err_global = make_naive_tensor_view<address_space_enum::global>(
+            err_out, make_tuple(M, N), make_tuple(N, 1), number<kKPack>{}, number<1>{});
+        auto err_window = make_tile_window(
+            err_global, make_tuple(number<kMfmaBlockM>{}, number<kMfmaBlockN>{}), {iM, iN});
+        const auto e_out = tile_elementwise_in(
+            [](const auto& acc) { return ck_tile::type_convert<float>(acc); }, err_block);
+        store_tile(err_window, e_out);
+    }
+    else
+    {
+        AccumPolicy::finalize(c_block, err_block);
+        const auto c_out = tile_elementwise_in(
+            [](const auto& acc) { return ck_tile::type_convert<float>(acc); }, c_block);
+        store_tile(c_window, c_out);
+    }
 }
 
 // =========================================================================
@@ -135,6 +150,7 @@ __global__ void
         tile_gemm_mfma_k4_kernel(const float* __restrict__ A,
                                  const float* __restrict__ B,
                                  float* __restrict__ partial,
+                                 float* __restrict__ err_out,
                                  ck_tile::index_t M,
                                  ck_tile::index_t N,
                                  ck_tile::index_t K_full,
@@ -215,17 +231,32 @@ __global__ void
         block_sync_lds();
     }
 
-    AccumPolicy::finalize(c_block, err_block);
-
     const auto c_global = make_naive_tensor_view<address_space_enum::global>(
         partial, make_tuple(M, N), make_tuple(N, 1), number<kKPack>{}, number<1>{});
-
     auto c_window = make_tile_window(
         c_global, make_tuple(number<kMfmaBlockM>{}, number<kMfmaBlockN>{}), {iM, iN});
 
-    const auto c_out = tile_elementwise_in(
-        [](const auto& acc) { return ck_tile::type_convert<float>(acc); }, c_block);
-    store_tile(c_window, c_out);
+    if(err_out)
+    {
+        const auto c_out = tile_elementwise_in(
+            [](const auto& acc) { return ck_tile::type_convert<float>(acc); }, c_block);
+        store_tile(c_window, c_out);
+
+        const auto err_global = make_naive_tensor_view<address_space_enum::global>(
+            err_out, make_tuple(M, N), make_tuple(N, 1), number<kKPack>{}, number<1>{});
+        auto err_window = make_tile_window(
+            err_global, make_tuple(number<kMfmaBlockM>{}, number<kMfmaBlockN>{}), {iM, iN});
+        const auto e_out = tile_elementwise_in(
+            [](const auto& acc) { return ck_tile::type_convert<float>(acc); }, err_block);
+        store_tile(err_window, e_out);
+    }
+    else
+    {
+        AccumPolicy::finalize(c_block, err_block);
+        const auto c_out = tile_elementwise_in(
+            [](const auto& acc) { return ck_tile::type_convert<float>(acc); }, c_block);
+        store_tile(c_window, c_out);
+    }
 }
 
 template <typename AccumPolicy>
@@ -237,14 +268,15 @@ static void launch_mfma_tile_gemm_k4_impl(const float* A,
                                            int K_full,
                                            int k_offset,
                                            int K_tile,
-                                           hipStream_t stream)
+                                           hipStream_t stream,
+                                           float* err_out)
 {
     int num_tile_m = M / kMfmaBlockM;
     int num_tile_n = N / kMfmaBlockN;
     int grid       = num_tile_m * num_tile_n;
 
     tile_gemm_mfma_k4_kernel<AccumPolicy><<<grid, kMfmaBlockSize, 0, stream>>>(
-        A, B, partial, M, N, K_full, k_offset, K_tile, num_tile_n);
+        A, B, partial, err_out, M, N, K_full, k_offset, K_tile, num_tile_n);
     HIP_CHECK_ERROR(hipGetLastError());
 }
 
@@ -261,14 +293,15 @@ static void launch_mfma_tile_gemm_impl(const float* A,
                                        int K_full,
                                        int k_offset,
                                        int K_tile,
-                                       hipStream_t stream)
+                                       hipStream_t stream,
+                                       float* err_out)
 {
     int num_tile_m = M / kMfmaBlockM;
     int num_tile_n = N / kMfmaBlockN;
     int grid       = num_tile_m * num_tile_n;
 
     tile_gemm_mfma_kernel<AccumPolicy><<<grid, kMfmaBlockSize, 0, stream>>>(
-        A, B, partial, M, N, K_full, k_offset, K_tile, num_tile_n);
+        A, B, partial, err_out, M, N, K_full, k_offset, K_tile, num_tile_n);
     HIP_CHECK_ERROR(hipGetLastError());
 }
 
@@ -281,21 +314,22 @@ void launch_mfma_tile_gemm(const float* A,
                            int k_offset,
                            int K_tile,
                            hipStream_t stream,
-                           AccumKLoopPolicy accum_policy)
+                           AccumKLoopPolicy accum_policy,
+                           float* err_out)
 {
     switch(accum_policy)
     {
     case AccumKLoopPolicy::TwoSum:
         launch_mfma_tile_gemm_impl<AccumTwoSum>(
-            A, B, partial, M, N, K_full, k_offset, K_tile, stream);
+            A, B, partial, M, N, K_full, k_offset, K_tile, stream, err_out);
         break;
     case AccumKLoopPolicy::Kahan:
         launch_mfma_tile_gemm_impl<AccumKahan>(
-            A, B, partial, M, N, K_full, k_offset, K_tile, stream);
+            A, B, partial, M, N, K_full, k_offset, K_tile, stream, err_out);
         break;
     case AccumKLoopPolicy::Naive:
         launch_mfma_tile_gemm_impl<AccumNaive>(
-            A, B, partial, M, N, K_full, k_offset, K_tile, stream);
+            A, B, partial, M, N, K_full, k_offset, K_tile, stream, err_out);
         break;
     case AccumKLoopPolicy::NaiveK4:
     case AccumKLoopPolicy::TwoSumK4:
@@ -314,21 +348,22 @@ void launch_mfma_tile_gemm_k4(const float* A,
                               int k_offset,
                               int K_tile,
                               hipStream_t stream,
-                              AccumKLoopPolicy accum_policy)
+                              AccumKLoopPolicy accum_policy,
+                              float* err_out)
 {
     switch(accum_policy)
     {
     case AccumKLoopPolicy::TwoSumK4:
         launch_mfma_tile_gemm_k4_impl<AccumTwoSum>(
-            A, B, partial, M, N, K_full, k_offset, K_tile, stream);
+            A, B, partial, M, N, K_full, k_offset, K_tile, stream, err_out);
         break;
     case AccumKLoopPolicy::KahanK4:
         launch_mfma_tile_gemm_k4_impl<AccumKahan>(
-            A, B, partial, M, N, K_full, k_offset, K_tile, stream);
+            A, B, partial, M, N, K_full, k_offset, K_tile, stream, err_out);
         break;
     case AccumKLoopPolicy::NaiveK4:
         launch_mfma_tile_gemm_k4_impl<AccumNaive>(
-            A, B, partial, M, N, K_full, k_offset, K_tile, stream);
+            A, B, partial, M, N, K_full, k_offset, K_tile, stream, err_out);
         break;
     case AccumKLoopPolicy::Naive:
     case AccumKLoopPolicy::TwoSum:

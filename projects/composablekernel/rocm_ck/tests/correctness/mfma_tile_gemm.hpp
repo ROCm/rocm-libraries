@@ -29,7 +29,8 @@ void launch_mfma_tile_gemm(const float* A,
                            int k_offset,
                            int K_tile,
                            hipStream_t stream,
-                           AccumKLoopPolicy accum_policy = AccumKLoopPolicy::Naive);
+                           AccumKLoopPolicy accum_policy = AccumKLoopPolicy::Naive,
+                           float* err_out = nullptr);
 
 void launch_mfma_tile_gemm_veltkamp_k4(const float* A,
                                        const float* B,
@@ -51,7 +52,8 @@ void launch_mfma_tile_gemm_k4(const float* A,
                               int k_offset,
                               int K_tile,
                               hipStream_t stream,
-                              AccumKLoopPolicy accum_policy = AccumKLoopPolicy::NaiveK4);
+                              AccumKLoopPolicy accum_policy = AccumKLoopPolicy::NaiveK4,
+                              float* err_out = nullptr);
 
 bool can_use_mfma(int M, int N, int K_tile);
 
