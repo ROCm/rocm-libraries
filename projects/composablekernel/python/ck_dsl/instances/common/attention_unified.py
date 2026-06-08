@@ -912,7 +912,15 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
     The validated ``_enable_combo_2d`` family is a superset that DOES wire
     sinks (and sliding window) through the transposed softmax, so it
     short-circuits to True here.
+
+    The transposed/wide-K stack (``use_mfma_32x32`` + the gfx950 transpose
+    reads) is gfx950-only: the gfx942 spec validator rejects ``use_mfma_32x32``
+    and its dependents outright (on gfx942 this heuristic firing always built
+    an invalid spec). Gate the whole thing to gfx950 so gfx942 (and any other
+    arch) stays on its narrow 16x16x16 / flash path.
     """
+    if _resolve_attention_arch() != "gfx950":
+        return False
     if _enable_combo_2d(problem):
         return True
     if problem.dtype != "bf16":
@@ -1156,7 +1164,13 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
     via ``select_path``). The half-local-PV transpose regresses on the
     very-high-num-seq sliding-window tail (per-CTA work shrinks below the
     transpose's fixed overhead), so we hand those back to the plain path.
+
+    gfx950-only: the combo stack is built on the gfx950 wide-K 32x32 MFMA +
+    transpose reads, which the gfx942 spec validator rejects. Gate to gfx950
+    so gfx942 (and any other arch) never builds the combo spec.
     """
+    if _resolve_attention_arch() != "gfx950":
+        return False
     if problem.dtype != "bf16":
         return False
     # FP8 KV is supported via the *sync-dequant* loader, which writes bf16
