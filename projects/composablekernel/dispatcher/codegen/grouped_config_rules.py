@@ -10,8 +10,6 @@ This is the original, hand-curated heuristic rule set (small deterministic
 per-tile wave/warp/vector maps + hardcoded pipelines). It is preserved here
 verbatim and selected via ``get_default_configs(rule_set="default")``.
 
-The JSON-derived, per-(variant, ndim, datatype) rule set lives in
-``grouped_config_rules_profiler.py`` and is the "full" rule set (the default).
 """
 
 from typing import Dict, List, Tuple

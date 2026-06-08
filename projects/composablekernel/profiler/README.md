@@ -308,11 +308,12 @@ flag `-D DISPATCHER_RULE_SET=<rule-set>` at the configuration step. The followin
 
 | Rule set | Description |
 |---|---|
-| `tests` (default) | A smaller, stratified ~20% subset of the `profiler` rule set, for faster builds. |
-| `profiler` | The full rule set (all per-(variant, ndim, datatype) instances), derived from old CK configurations |
-| `tiny` | A minimal subset of the `tests` rule set (at least 10 configs, with every feature category represented for both 2D and 3D), for quick development/iteration builds. |
+| `profiler` (default) | The CK Builder profiler instance set, generated in memory directly from the `.conf` configurations in `experimental/grouped_convolution_tile_instances/configs` (no JSON conversion, nothing committed). This is the exact reference instance set. |
+| `tests` | The CK Builder tests instance set, generated in memory from the `tests` subset of the `.conf` configurations. |
+| `full` | The full rule-derived set (all per-(variant, ndim, datatype) instances), generated from the curated rule tables. |
+| `full-tests` | A smaller, stratified ~20% subset of the `full` rule set, for faster builds. |
+| `tiny` | A minimal subset of the `full-tests` rule set (at least 10 configs, with every feature category represented for both 2D and 3D), for quick development/iteration builds. |
 | `default` | The original heuristic rules (datatype-agnostic). |
-| `json` | Configs loaded directly from the reference JSON files, useful for reproducing the exact reference instance set. |
 
 For example, to generate the full `profiler` set of kernels:
 ```bash

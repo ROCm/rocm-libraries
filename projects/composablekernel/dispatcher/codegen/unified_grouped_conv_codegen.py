@@ -46,7 +46,7 @@ except ImportError:
 # Shared per-config validation helpers used by GroupedConvKernelConfig below.
 # The full set of rule helpers (tiles, waves, vecs, pipelines, ...) is consumed
 # inside each rule set's get_configs() entry point, not here.
-from grouped_config_rules_profiler import (
+from grouped_config_rules_full import (
     check_vectors,
     is_valid_pipeline_for_variant,
     is_streamk_valid_for_variant,
@@ -1762,15 +1762,18 @@ using {launcher_alias} = {kernel_name}_Launcher;
 """
 
 
-# Each rule set exposes a uniform get_configs(arch, variants, ndims, datatypes)
-# entry point; get_default_configs simply selects one by name so no
-# rule-set-specific logic lives in the codegen.
+# Each rule set maps to a (module, entry-point) pair with the uniform
+# get_configs(arch, variants, ndims, datatypes) signature; get_default_configs
+# imports the module and calls the named function, so no rule-set-specific logic
+# lives in the codegen. Builder-derived sets (profiler/tests) and subset sets
+# (tiny) reuse a shared module's entry points rather than thin wrapper modules.
 _RULE_SET_MODULES = {
-    "default": "grouped_config_rules",
-    "profiler": "grouped_config_rules_profiler",
-    "tests": "grouped_config_rules_testing",
-    "tiny": "grouped_config_rules_tiny",
-    "json": "grouped_config_rules_json",
+    "default":    ("grouped_config_rules",            "get_configs"),
+    "full":       ("grouped_config_rules_full",       "get_configs"),
+    "full-tests": ("grouped_config_rules_full_tests", "get_configs"),
+    "profiler":   ("grouped_config_rules_builder",    "get_configs_profiler"),
+    "tests":      ("grouped_config_rules_builder",    "get_configs_tests"),
+    "tiny":       ("grouped_config_rules_full_tests", "get_tiny_configs"),
 }
 
 
@@ -1790,11 +1793,12 @@ def get_default_configs(
         variants: Conv variants to generate. Defaults to [FORWARD].
         ndims: Spatial dimensions to generate (2 or 3). Defaults to [2].
         datatypes: Data type strings (e.g., ["fp16", "bf16", "fp32"]).
-        rule_set: "profiler" (full JSON-derived per-(variant,ndim,datatype)
-                  rules, the default), "tests" (~20% stratified subset of
-                  profiler), "tiny" (minimal >=10-config subset of tests with
-                  every variant represented), or "default" (original heuristic
-                  rules).
+        rule_set: "profiler"/"tests" (CK Builder profiler/tests instance sets
+                  generated in memory from the .conf configs, the build sets),
+                  "full" (full rule-derived per-(variant,ndim,datatype) set),
+                  "full-tests" (~20% stratified subset of "full"), "tiny"
+                  (minimal >=10-config subset of "full-tests"), or "default"
+                  (original heuristic rules).
     """
     if variants is None:
         variants = [GroupedConvVariant.FORWARD]
@@ -1803,14 +1807,16 @@ def get_default_configs(
     if datatypes is None:
         datatypes = ["fp16"]
 
-    module_name = _RULE_SET_MODULES.get(rule_set)
-    if module_name is None:
+    entry = _RULE_SET_MODULES.get(rule_set)
+    if entry is None:
         raise ValueError(
             f"Unknown rule_set: {rule_set!r} "
             f"(expected one of {sorted(_RULE_SET_MODULES)})"
         )
+    module_name, func_name = entry
     rules_module = importlib.import_module(module_name)
-    return rules_module.get_configs(arch, variants, ndims, datatypes)
+    get_configs = getattr(rules_module, func_name)
+    return get_configs(arch, variants, ndims, datatypes)
 
 
 def get_arch_filter():
@@ -2306,7 +2312,7 @@ def main():
         "-r",
         type=str,
         default="default",
-        choices=["default", "profiler", "tests", "tiny", "json"],
+        choices=["default", "full", "full-tests", "profiler", "tests", "tiny"],
         help="Rule-set used in the instance generation",
     )
 

@@ -90,16 +90,16 @@ def get_configs(
     ndims: List[int],
     datatypes: List[str]
   ) -> List:
-    """Build all available configs for the "test" rule set.
+    """Build all available configs for the "full-tests" rule set.
 
     Unified rule-set entry point used by
-    ``unified_grouped_conv_codegen.get_default_configs``. 
-    Trims down the profiler config set using the rules defined in ``_select_test_configs``.
+    ``unified_grouped_conv_codegen.get_default_configs``.
+    Trims down the "full" config set using the rules defined in ``_select_test_configs``.
     """
 
-    from grouped_config_rules_profiler import get_configs as get_profiler_configs
+    from grouped_config_rules_full import get_configs as get_full_configs
 
-    all_configs = get_profiler_configs(arch, variants, ndims, datatypes)
+    all_configs = get_full_configs(arch, variants, ndims, datatypes)
     test_configs = _select_test_configs(all_configs)
     return test_configs
 
@@ -152,10 +152,10 @@ def get_tiny_configs(
     ndims: List[int],
     datatypes: List[str],
 ) -> List:
-    """Build the "tiny" rule set: a minimal subset of the "tests" rule set.
+    """Build the "tiny" rule set: a minimal subset of the "full-tests" rule set.
 
     Returns at least 10 configs (or all available, if fewer), with every feature
-    category represented (same category mechanism as the "tests" rule set, but
+    category represented (same category mechanism as the "full-tests" rule set, but
     maximally trimmed). Intended for fast development/iteration builds.
     """
     test_configs = get_configs(arch, variants, ndims, datatypes)

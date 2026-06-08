@@ -14,7 +14,7 @@
 # ---- Configuration (inherits from parent scope) ----
 
 set(DISPATCHER_DIR "${PROJECT_SOURCE_DIR}/dispatcher")
-set(DISPATCHER_RULE_SET "profiler" CACHE STRING "Dispatcher rule set: profiler, tests, or default")
+set(DISPATCHER_RULE_SET "tests" CACHE STRING "Dispatcher rule set: profiler, tests, full, full-tests, tiny, or default")
 
 # Extract first GPU target for codegen
 string(REPLACE ";" " " _GPU_TARGETS_SPACE "${GPU_TARGETS}")

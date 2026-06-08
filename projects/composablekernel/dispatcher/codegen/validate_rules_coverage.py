@@ -4,18 +4,20 @@
 # SPDX-License-Identifier: MIT
 
 """
-Validation script: compare rule-generated configs against JSON profiler configs.
+Validation script: compare rule-generated configs against the CK Builder
+reference instance set (generated in memory from the ``.conf`` configs).
 
 Usage:
-    python validate_rules_coverage.py [--config-set {tests,profiler}] [--extract] [--arch ARCH]
+    python validate_rules_coverage.py [--rule-set ...] [--extract] [--arch ARCH]
 
 Modes:
-    Default: Load JSON configs + generate from rules, report coverage gaps.
-    --extract: Dump all unique tile/warp/vec 9-tuples from JSON in Python format.
+    Default: Generate the builder reference set + the chosen rule set, report
+             coverage gaps.
+    --extract: Dump all unique tile/warp/vec 9-tuples from the reference set in
+               Python format.
 """
 
 import argparse
-import json
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -26,7 +28,6 @@ from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-CONFIGS_DIR = SCRIPT_DIR / "configs" / "grouped_conv"
 
 sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -38,112 +39,42 @@ from unified_grouped_conv_codegen import (
     StreamKReductionStrategy,
     get_default_configs,
 )
+from grouped_config_rules_builder import get_configs as get_builder_configs
 
 # ---------------------------------------------------------------------------
-# JSON loading helpers
+# Reference (CK Builder) loading
 # ---------------------------------------------------------------------------
-
-_VARIANT_DIRS = {
-    "forward": "forward",
-    "bwd_data": "backward_data",
-    "bwd_weight": "backward_weight",
-}
-
-_DTYPE_MAP = {
-    "bf16": "bf16",
-    "fp16": "fp16",
-    "fp32": "fp32",
-}
-
-_LAYOUT_FILES = {
-    2: ["nhwgc"],   # 2D
-    3: ["ndhwgc"],  # 3D
-}
-
-
-def load_json_instances(config_set: str = "profiler") -> List[Dict[str, Any]]:
-    """Load all instances from JSON config files.
-
-    Returns a flat list of dicts, each with keys matching the JSON instance fields
-    plus added 'variant', 'datatype', 'layout', 'ndim_spatial'.
-    """
-    instances = []
-    for variant_key, variant_dir in _VARIANT_DIRS.items():
-        dir_path = CONFIGS_DIR / variant_dir / config_set
-        if not dir_path.is_dir():
-            continue
-        for json_file in sorted(dir_path.glob("*.json")):
-            stem = json_file.stem  # e.g., "nhwgc_bf16"
-            try:
-                data = json.loads(json_file.read_text())
-            except (json.JSONDecodeError, OSError) as e:
-                print(f"  WARNING: could not load {json_file}: {e}", file=sys.stderr)
-                continue
-
-            file_insts = data.get("instances", [])
-            ndim = data.get("ndim_spatial", 2)
-            layout = data.get("layout", stem.split("_")[0])
-            dtype = data.get("datatype", stem.split("_")[-1] if "_" in stem else "bf16")
-
-            for inst in file_insts:
-                if not isinstance(inst, dict):
-                    continue
-                # Skip malformed instances with missing/zero tile dimensions
-                if not inst.get("tile_m") or not inst.get("tile_n") or not inst.get("tile_k"):
-                    continue
-                enriched = dict(inst)
-                enriched.setdefault("variant", variant_key)
-                enriched.setdefault("datatype", dtype)
-                enriched.setdefault("layout", layout)
-                enriched.setdefault("ndim_spatial", ndim)
-                instances.append(enriched)
-
-    return instances
-
-
-# ---------------------------------------------------------------------------
-# Canonical key generation
-# ---------------------------------------------------------------------------
-
-def _inst_to_key(inst: Dict[str, Any]) -> FrozenSet:
-    """Convert a JSON instance dict to a frozenset-based canonical key."""
-    sk_enabled = inst.get("streamk_enabled", False)
-    sk_strategy = inst.get("streamk_reduction_strategy") or ""
-    sk_persistent = inst.get("streamk_persistent", False)
-
-    return frozenset({
-        ("variant",             inst.get("variant", "")),
-        ("ndim_spatial",        int(inst.get("ndim_spatial", 2))),
-        ("tile_m",              int(inst.get("tile_m", 0))),
-        ("tile_n",              int(inst.get("tile_n", 0))),
-        ("tile_k",              int(inst.get("tile_k", 0))),
-        ("warp_m",              int(inst.get("warp_m", 0))),
-        ("warp_n",              int(inst.get("warp_n", 0))),
-        ("warp_k",              int(inst.get("warp_k", 1))),
-        ("warp_tile_m",         int(inst.get("warp_tile_m", 0))),
-        ("warp_tile_n",         int(inst.get("warp_tile_n", 0))),
-        ("warp_tile_k",         int(inst.get("warp_tile_k", 0))),
-        ("pipeline",            inst.get("pipeline", "")),
-        ("scheduler",           inst.get("scheduler", "")),
-        ("vec_a",               int(inst.get("vector_size_a", inst.get("vec_a", 4)))),
-        ("vec_b",               int(inst.get("vector_size_b", inst.get("vec_b", 8)))),
-        ("vec_c",               int(inst.get("vector_size_c", inst.get("vec_c", 8)))),
-        ("double_smem_buffer",  bool(inst.get("double_smem_buffer", False))),
-        ("two_stage",           bool(inst.get("two_stage", False))),
-        ("explicit_gemm",       bool(inst.get("explicit_gemm", False))),
-        ("split_image",         bool(inst.get("split_image", False))),
-        ("num_groups_to_merge", int(inst.get("num_groups_to_merge", 1))),
-        ("specialization",      inst.get("specialization", "default") or "default"),
-        ("streamk_enabled",     bool(sk_enabled)),
-        ("streamk_persistent",  bool(sk_persistent) if sk_enabled else False),
-    })
-
 
 _VARIANT_ENUM = {
     "forward":    GroupedConvVariant.FORWARD,
     "bwd_data":   GroupedConvVariant.BACKWARD_DATA,
     "bwd_weight": GroupedConvVariant.BACKWARD_WEIGHT,
 }
+
+
+def load_reference_configs(
+    subset: str,
+    arch: str,
+    variants: List,
+) -> List[GroupedConvKernelConfig]:
+    """Generate the CK Builder reference GEMM configs in memory.
+
+    ``subset`` is the builder ``.conf`` subset ("profiler" or "tests"). Depthwise
+    configs are filtered out (validated separately via test_depthwise_tile_math.py).
+    """
+    cfgs = get_builder_configs(
+        arch=arch,
+        variants=variants,
+        ndims=[2, 3],
+        datatypes=["fp16", "bf16", "fp32"],
+        subset=subset,
+    )
+    return [c for c in cfgs if isinstance(c, GroupedConvKernelConfig)]
+
+
+# ---------------------------------------------------------------------------
+# Canonical key generation
+# ---------------------------------------------------------------------------
 
 _VARIANT_STR = {v: k for k, v in _VARIANT_ENUM.items()}
 
@@ -191,21 +122,21 @@ def _key_to_dict(key: FrozenSet) -> Dict:
 # ---------------------------------------------------------------------------
 
 def analyze_coverage(
-    json_instances: List[Dict],
+    reference_configs: List[GroupedConvKernelConfig],
     generated_configs: List[GroupedConvKernelConfig],
 ) -> Dict:
-    """Compare JSON instances against generated configs.
+    """Compare the reference set against generated configs.
 
     Returns dict with:
-      - 'json_keys': set of canonical keys from JSON
+      - 'json_keys': set of canonical keys from the reference set
       - 'gen_keys': set of canonical keys from generated configs
-      - 'covered': JSON keys that appear in generated
-      - 'missing': JSON keys absent from generated
-      - 'extra': generated keys not in any JSON file
+      - 'covered': reference keys that appear in generated
+      - 'missing': reference keys absent from generated
+      - 'extra': generated keys not in the reference set
     """
     json_keys: Set[FrozenSet] = set()
-    for inst in json_instances:
-        json_keys.add(_inst_to_key(inst))
+    for cfg in reference_configs:
+        json_keys.add(_config_to_key(cfg))
 
     gen_keys: Set[FrozenSet] = set()
     for cfg in generated_configs:
@@ -228,11 +159,12 @@ def analyze_coverage(
 # Extract mode
 # ---------------------------------------------------------------------------
 
-def extract_tile_data(json_instances: List[Dict]) -> None:
-    """Print unique tile 9-tuples from JSON instances in Python format."""
+def extract_tile_data(reference_configs: List[GroupedConvKernelConfig]) -> None:
+    """Print unique tile 9-tuples from the reference configs in Python format."""
     by_variant: Dict[str, Set[Tuple]] = defaultdict(set)
 
-    for inst in json_instances:
+    for cfg in reference_configs:
+        inst = _key_to_dict(_config_to_key(cfg))
         variant = inst.get("variant", "unknown")
         try:
             tup = (
@@ -322,14 +254,14 @@ def main():
     )
     parser.add_argument(
         "--rule-set",
-        choices=["profiler", "tests", "default", "tiny", "json"],
-        default="profiler",
-        help="Which rule set to generate configs from (default: profiler).",
+        choices=["profiler", "tests", "full", "full-tests", "default", "tiny"],
+        default="full",
+        help="Which rule set to generate configs from (default: full).",
     )
     parser.add_argument(
         "--extract",
         action="store_true",
-        help="Extract and print unique tile 9-tuples from JSON files in Python format.",
+        help="Extract and print unique tile 9-tuples from the reference set in Python format.",
     )
     parser.add_argument(
         "--arch",
@@ -352,28 +284,23 @@ def main():
     )
     args = parser.parse_args()
 
-    print(f"Loading JSON configs from: {CONFIGS_DIR}")
-    print(f"Rule set: {args.rule_set})")
+    print(f"Rule set: {args.rule_set}")
 
-    json_config_set = "profiler" if args.rule_set == "default" else args.rule_set
-    if json_config_set == "tiny":
-        json_config_set = "tests"
-    if json_config_set == "json":
-        json_config_set = "profiler" 
+    # The reference (ground truth) is the CK Builder instance set, generated in
+    # memory. "tests"-class rule sets validate against the builder "tests" subset;
+    # everything else validates against the builder "profiler" subset.
+    reference_subset = "tests" if args.rule_set in ("tests", "full-tests", "tiny") else "profiler"
+    print(f"Reference: CK Builder '{reference_subset}' subset (generated in memory)")
 
-    json_instances = load_json_instances(json_config_set)
-    print(f"Loaded {len(json_instances)} JSON instances total.")
+    selected_variants = [_VARIANT_ENUM[v] for v in args.variants]
+
+    reference_configs = load_reference_configs(reference_subset, args.arch, selected_variants)
+    print(f"Loaded {len(reference_configs)} reference instances for variants: {args.variants}")
 
     if args.extract:
-        print("\n=== EXTRACT MODE: Unique tile data from JSON configs ===\n")
-        extract_tile_data(json_instances)
+        print("\n=== EXTRACT MODE: Unique tile data from reference set ===\n")
+        extract_tile_data(reference_configs)
         return
-
-    # Filter to requested variants
-    selected_variants = [_VARIANT_ENUM[v] for v in args.variants]
-    variant_strs = set(args.variants)
-    json_instances = [i for i in json_instances if i.get("variant") in variant_strs]
-    print(f"Filtered to {len(json_instances)} instances for variants: {args.variants}")
 
     # Generate from rules (both 2D and 3D to cover all JSON files)
     print(f"\nGenerating configs from rules (arch={args.arch}, datatypes=[fp16, bf16, fp32], ndims=[2,3])...")
@@ -392,7 +319,7 @@ def main():
 
     # Analyze coverage
     print("\nAnalyzing coverage...")
-    result = analyze_coverage(json_instances, generated)
+    result = analyze_coverage(reference_configs, generated)
 
     n_json = len(result["json_keys"])
     n_covered = len(result["covered"])
@@ -404,11 +331,11 @@ def main():
     print("\n" + "=" * 70)
     print("COVERAGE REPORT")
     print("=" * 70)
-    print(f"JSON instances (unique keys):  {n_json}")
+    print(f"Reference instances (unique):  {n_json}")
     print(f"Generated configs (unique):    {len(result['gen_keys'])}")
     print(f"Covered by rules:              {n_covered} ({coverage_pct:.1f}%)")
     print(f"Missing from rules:            {n_missing}")
-    print(f"Extra in rules (not in JSON):  {n_extra}")
+    print(f"Extra in rules (not in ref):   {n_extra}")
 
     if result["missing"]:
         limit = args.show_missing if args.show_missing > 0 else len(result["missing"])
@@ -431,9 +358,9 @@ def main():
     print("=" * 70)
 
     if n_missing == 0:
-        print("\n✓ Rules fully cover all JSON instances!")
+        print("\n✓ Rules fully cover all reference instances!")
     else:
-        print(f"\n✗ {n_missing} JSON instances are not covered by rules.")
+        print(f"\n✗ {n_missing} reference instances are not covered by rules.")
         sys.exit(1)
 
 

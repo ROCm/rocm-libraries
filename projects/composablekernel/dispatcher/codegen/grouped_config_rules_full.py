@@ -117,11 +117,13 @@ def get_tiles(variant: str, ndim: int, dtype: str) -> List[Tuple[int, int, int]]
     return list(_TILES_PER_VARIANT.get(variant, {}).get((ndim, dtype), []))
 
 
-# Warp shapes excluded from code generation.
-# These are possible shapes, but old CK doesn't 
+# Warp (m, n) shapes excluded from code generation.
+# These are possible shapes, but old CK doesn't
 # use them. However, they can potentially be useful.
-_EXCLUDED_WARP_SHAPES: Set[Tuple[int, int, int]] = {
-    (16, 16, 32), (4, 64, 16), (64, 4, 16),
+# (4, 64) / (64, 4) are asymmetric MFMA shapes that only ever appear as
+# hand-written native instances; warp_tile_k is no longer part of the key.
+_EXCLUDED_WARP_SHAPES: Set[Tuple[int, int]] = {
+    (4, 64), (64, 4),
 }
 
 # Finer (tile, wave) -> warp_tile map. 
@@ -130,137 +132,137 @@ _EXCLUDED_WARP_SHAPES: Set[Tuple[int, int, int]] = {
 # tile sharing that wave, whereas this map lists only the warp tiles actually
 # observed for that exact (tile, wave). Keys absent here fall back to the wave map.
 
-_FWD_TILE_WAVE_TO_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int, int]]] = {
-    ((16, 16, 64), (1, 1, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((16, 16, 128), (1, 1, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((16, 32, 64), (1, 2, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((16, 64, 64), (1, 2, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((16, 128, 64), (1, 2, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((16, 256, 64), (1, 4, 1)): [(16, 16, 16)],
-    ((32, 16, 64), (2, 1, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((32, 64, 16), (1, 1, 1)): [(32, 32, 4)],
-    ((32, 64, 32), (1, 1, 1)): [(32, 32, 8)],
-    ((32, 64, 64), (1, 2, 1)): [(32, 32, 8)],
-    ((32, 128, 16), (1, 2, 1)): [(32, 32, 4)],
-    ((32, 128, 32), (1, 2, 1)): [(32, 32, 8)],
-    ((32, 128, 64), (1, 2, 1)): [(32, 32, 8)],
-    ((32, 256, 64), (1, 4, 1)): [(32, 32, 8)],
-    ((64, 16, 16), (1, 1, 1)): [(16, 16, 4), (16, 16, 16)],
-    ((64, 16, 64), (2, 1, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((64, 32, 16), (1, 1, 1)): [(32, 32, 4)],
-    ((64, 32, 32), (1, 1, 1)): [(32, 32, 8)],
-    ((64, 32, 64), (2, 1, 1)): [(32, 32, 8)],
-    ((64, 64, 8), (2, 1, 1)): [(32, 32, 8)],
-    ((64, 64, 16), (1, 1, 1)): [(32, 32, 4)],
-    ((64, 64, 32), (1, 1, 1)): [(32, 32, 8)],
-    ((64, 64, 32), (2, 2, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((64, 64, 64), (2, 2, 1)): [(32, 32, 8)],
-    ((64, 128, 16), (1, 2, 1)): [(32, 32, 4)],
-    ((64, 128, 16), (2, 2, 1)): [(32, 32, 4)],
-    ((64, 128, 32), (1, 2, 1)): [(32, 32, 8)],
-    ((64, 128, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((64, 128, 64), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 16, 64), (2, 1, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((128, 32, 16), (2, 1, 1)): [(32, 32, 4)],
-    ((128, 32, 32), (2, 1, 1)): [(32, 32, 8)],
-    ((128, 32, 32), (2, 1, 2)): [(32, 32, 8)],
-    ((128, 32, 64), (2, 1, 1)): [(32, 32, 8)],
-    ((128, 64, 8), (2, 1, 1)): [(32, 32, 8)],
-    ((128, 64, 8), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 64, 16), (2, 1, 1)): [(32, 32, 4)],
-    ((128, 64, 16), (2, 2, 1)): [(32, 32, 4), (32, 32, 8)],
-    ((128, 64, 32), (2, 1, 1)): [(32, 32, 8)],
-    ((128, 64, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 64, 64), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 128, 16), (1, 2, 1)): [(32, 32, 4)],
-    ((128, 128, 16), (2, 2, 1)): [(32, 32, 4)],
-    ((128, 128, 32), (1, 2, 1)): [(32, 32, 8)],
-    ((128, 128, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 128, 64), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 192, 16), (2, 2, 1)): [(32, 32, 4)],
-    ((128, 256, 16), (2, 2, 1)): [(32, 32, 4)],
-    ((128, 256, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((224, 256, 64), (2, 2, 1)): [(16, 16, 16)],
-    ((256, 16, 64), (4, 1, 1)): [(16, 16, 16)],
-    ((256, 32, 64), (4, 1, 1)): [(32, 32, 8)],
-    ((256, 64, 8), (2, 2, 1)): [(32, 32, 8)],
-    ((256, 128, 16), (2, 2, 1)): [(32, 32, 4)],
-    ((256, 128, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((256, 224, 64), (2, 2, 1)): [(16, 16, 16)],
-    ((256, 256, 32), (2, 2, 1)): [(16, 16, 16), (32, 32, 8)],
+_FWD_TILE_WAVE_TO_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int]]] = {
+    ((16, 16, 64), (1, 1, 1)): [(16, 16)],
+    ((16, 16, 128), (1, 1, 1)): [(16, 16)],
+    ((16, 32, 64), (1, 2, 1)): [(16, 16)],
+    ((16, 64, 64), (1, 2, 1)): [(16, 16)],
+    ((16, 128, 64), (1, 2, 1)): [(16, 16)],
+    ((16, 256, 64), (1, 4, 1)): [(16, 16)],
+    ((32, 16, 64), (2, 1, 1)): [(16, 16)],
+    ((32, 64, 16), (1, 1, 1)): [(32, 32)],
+    ((32, 64, 32), (1, 1, 1)): [(32, 32)],
+    ((32, 64, 64), (1, 2, 1)): [(32, 32)],
+    ((32, 128, 16), (1, 2, 1)): [(32, 32)],
+    ((32, 128, 32), (1, 2, 1)): [(32, 32)],
+    ((32, 128, 64), (1, 2, 1)): [(32, 32)],
+    ((32, 256, 64), (1, 4, 1)): [(32, 32)],
+    ((64, 16, 16), (1, 1, 1)): [(16, 16)],
+    ((64, 16, 64), (2, 1, 1)): [(16, 16)],
+    ((64, 32, 16), (1, 1, 1)): [(32, 32)],
+    ((64, 32, 32), (1, 1, 1)): [(32, 32)],
+    ((64, 32, 64), (2, 1, 1)): [(32, 32)],
+    ((64, 64, 8), (2, 1, 1)): [(32, 32)],
+    ((64, 64, 16), (1, 1, 1)): [(32, 32)],
+    ((64, 64, 32), (1, 1, 1)): [(32, 32)],
+    ((64, 64, 32), (2, 2, 1)): [(16, 16)],
+    ((64, 64, 64), (2, 2, 1)): [(32, 32)],
+    ((64, 128, 16), (1, 2, 1)): [(32, 32)],
+    ((64, 128, 16), (2, 2, 1)): [(32, 32)],
+    ((64, 128, 32), (1, 2, 1)): [(32, 32)],
+    ((64, 128, 32), (2, 2, 1)): [(32, 32)],
+    ((64, 128, 64), (2, 2, 1)): [(32, 32)],
+    ((128, 16, 64), (2, 1, 1)): [(16, 16)],
+    ((128, 32, 16), (2, 1, 1)): [(32, 32)],
+    ((128, 32, 32), (2, 1, 1)): [(32, 32)],
+    ((128, 32, 32), (2, 1, 2)): [(32, 32)],
+    ((128, 32, 64), (2, 1, 1)): [(32, 32)],
+    ((128, 64, 8), (2, 1, 1)): [(32, 32)],
+    ((128, 64, 8), (2, 2, 1)): [(32, 32)],
+    ((128, 64, 16), (2, 1, 1)): [(32, 32)],
+    ((128, 64, 16), (2, 2, 1)): [(32, 32)],
+    ((128, 64, 32), (2, 1, 1)): [(32, 32)],
+    ((128, 64, 32), (2, 2, 1)): [(32, 32)],
+    ((128, 64, 64), (2, 2, 1)): [(32, 32)],
+    ((128, 128, 16), (1, 2, 1)): [(32, 32)],
+    ((128, 128, 16), (2, 2, 1)): [(32, 32)],
+    ((128, 128, 32), (1, 2, 1)): [(32, 32)],
+    ((128, 128, 32), (2, 2, 1)): [(32, 32)],
+    ((128, 128, 64), (2, 2, 1)): [(32, 32)],
+    ((128, 192, 16), (2, 2, 1)): [(32, 32)],
+    ((128, 256, 16), (2, 2, 1)): [(32, 32)],
+    ((128, 256, 32), (2, 2, 1)): [(32, 32)],
+    ((224, 256, 64), (2, 2, 1)): [(16, 16)],
+    ((256, 16, 64), (4, 1, 1)): [(16, 16)],
+    ((256, 32, 64), (4, 1, 1)): [(32, 32)],
+    ((256, 64, 8), (2, 2, 1)): [(32, 32)],
+    ((256, 128, 16), (2, 2, 1)): [(32, 32)],
+    ((256, 128, 32), (2, 2, 1)): [(32, 32)],
+    ((256, 224, 64), (2, 2, 1)): [(16, 16)],
+    ((256, 256, 32), (2, 2, 1)): [(16, 16), (32, 32)],
 }
 
-_BWD_DATA_TILE_WAVE_TO_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int, int]]] = {
-    ((16, 64, 32), (1, 1, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((32, 64, 32), (1, 1, 1)): [(32, 32, 8)],
-    ((32, 128, 32), (1, 2, 1)): [(32, 32, 8)],
-    ((64, 16, 16), (4, 1, 1)): [(16, 16, 4), (16, 16, 16)],
-    ((64, 16, 32), (1, 1, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((64, 16, 32), (4, 1, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((64, 16, 64), (4, 1, 1)): [(16, 16, 16)],
-    ((64, 32, 32), (1, 1, 1)): [(32, 32, 8)],
-    ((64, 64, 32), (1, 1, 1)): [(32, 32, 8)],
-    ((64, 128, 32), (1, 2, 1)): [(32, 32, 8)],
-    ((64, 128, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 32, 16), (4, 1, 1)): [(32, 32, 4), (32, 32, 8)],
-    ((128, 32, 32), (2, 1, 1)): [(32, 32, 8)],
-    ((128, 32, 32), (4, 1, 1)): [(32, 32, 8)],
-    ((128, 32, 64), (4, 1, 1)): [(32, 32, 16)],
-    ((128, 64, 32), (2, 1, 1)): [(32, 32, 8)],
-    ((128, 64, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 128, 32), (1, 2, 1)): [(32, 32, 8)],
-    ((128, 128, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 256, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((256, 128, 32), (2, 2, 1)): [(32, 32, 8)],
+_BWD_DATA_TILE_WAVE_TO_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int]]] = {
+    ((16, 64, 32), (1, 1, 1)): [(16, 16)],
+    ((32, 64, 32), (1, 1, 1)): [(32, 32)],
+    ((32, 128, 32), (1, 2, 1)): [(32, 32)],
+    ((64, 16, 16), (4, 1, 1)): [(16, 16)],
+    ((64, 16, 32), (1, 1, 1)): [(16, 16)],
+    ((64, 16, 32), (4, 1, 1)): [(16, 16)],
+    ((64, 16, 64), (4, 1, 1)): [(16, 16)],
+    ((64, 32, 32), (1, 1, 1)): [(32, 32)],
+    ((64, 64, 32), (1, 1, 1)): [(32, 32)],
+    ((64, 128, 32), (1, 2, 1)): [(32, 32)],
+    ((64, 128, 32), (2, 2, 1)): [(32, 32)],
+    ((128, 32, 16), (4, 1, 1)): [(32, 32)],
+    ((128, 32, 32), (2, 1, 1)): [(32, 32)],
+    ((128, 32, 32), (4, 1, 1)): [(32, 32)],
+    ((128, 32, 64), (4, 1, 1)): [(32, 32)],
+    ((128, 64, 32), (2, 1, 1)): [(32, 32)],
+    ((128, 64, 32), (2, 2, 1)): [(32, 32)],
+    ((128, 128, 32), (1, 2, 1)): [(32, 32)],
+    ((128, 128, 32), (2, 2, 1)): [(32, 32)],
+    ((128, 256, 32), (2, 2, 1)): [(32, 32)],
+    ((256, 128, 32), (2, 2, 1)): [(32, 32)],
 }
 
-_BWD_WEIGHT_TILE_WAVE_TO_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int, int]]] = {
-    ((16, 16, 32), (1, 1, 1)): [(16, 16, 8), (16, 16, 16)],
-    ((16, 16, 64), (1, 1, 1)): [(16, 16, 16)],
-    ((16, 32, 64), (1, 2, 1)): [(16, 16, 16)],
-    ((16, 64, 64), (1, 2, 1)): [(16, 16, 16)],
-    ((16, 128, 32), (1, 1, 1)): [(16, 16, 16)],
-    ((16, 128, 64), (1, 2, 1)): [(16, 16, 16)],
-    ((16, 256, 32), (1, 1, 1)): [(16, 16, 16)],
-    ((16, 256, 64), (1, 4, 1)): [(16, 16, 16)],
-    ((32, 16, 64), (2, 1, 1)): [(16, 16, 16)],
-    ((32, 32, 32), (1, 1, 1)): [(32, 32, 8)],
-    ((32, 64, 16), (1, 1, 1)): [(32, 32, 4)],
-    ((32, 64, 32), (1, 1, 1)): [(32, 32, 8)],
-    ((32, 128, 16), (1, 2, 1)): [(32, 32, 4)],
-    ((32, 128, 32), (1, 1, 1)): [(32, 32, 8)],
-    ((32, 128, 32), (1, 2, 1)): [(32, 32, 8)],
-    ((64, 16, 64), (2, 1, 1)): [(16, 16, 16)],
-    ((64, 32, 16), (1, 1, 1)): [(32, 32, 4)],
-    ((64, 32, 32), (1, 1, 1)): [(32, 32, 8)],
-    ((64, 64, 16), (1, 1, 1)): [(32, 32, 4)],
-    ((64, 64, 32), (1, 1, 1)): [(32, 32, 8)],
-    ((64, 64, 64), (2, 2, 1)): [(16, 16, 16), (32, 32, 8)],
-    ((64, 128, 16), (1, 2, 1)): [(32, 32, 4)],
-    ((64, 128, 16), (2, 2, 1)): [(32, 32, 4)],
-    ((64, 128, 32), (1, 2, 1)): [(32, 32, 8)],
-    ((64, 128, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((64, 128, 64), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 16, 64), (2, 1, 1)): [(16, 16, 16)],
-    ((128, 32, 16), (2, 1, 1)): [(32, 32, 4)],
-    ((128, 32, 32), (1, 1, 1)): [(32, 32, 8)],
-    ((128, 32, 32), (2, 1, 1)): [(32, 32, 8)],
-    ((128, 64, 16), (2, 1, 1)): [(32, 32, 4)],
-    ((128, 64, 16), (2, 2, 1)): [(32, 32, 4)],
-    ((128, 64, 32), (2, 1, 1)): [(32, 32, 8)],
-    ((128, 64, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 128, 16), (1, 2, 1)): [(32, 32, 4)],
-    ((128, 128, 16), (2, 2, 1)): [(32, 32, 4)],
-    ((128, 128, 32), (1, 2, 1)): [(32, 32, 8)],
-    ((128, 128, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 128, 64), (2, 2, 1)): [(32, 32, 8)],
-    ((128, 256, 16), (2, 2, 1)): [(32, 32, 4)],
-    ((128, 256, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((256, 16, 64), (4, 1, 1)): [(16, 16, 16)],
-    ((256, 32, 64), (4, 1, 1)): [(32, 32, 8)],
-    ((256, 128, 16), (2, 2, 1)): [(32, 32, 4)],
-    ((256, 128, 32), (2, 2, 1)): [(32, 32, 8)],
-    ((256, 256, 32), (2, 2, 1)): [(32, 32, 8)],
+_BWD_WEIGHT_TILE_WAVE_TO_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int]]] = {
+    ((16, 16, 32), (1, 1, 1)): [(16, 16)],
+    ((16, 16, 64), (1, 1, 1)): [(16, 16)],
+    ((16, 32, 64), (1, 2, 1)): [(16, 16)],
+    ((16, 64, 64), (1, 2, 1)): [(16, 16)],
+    ((16, 128, 32), (1, 1, 1)): [(16, 16)],
+    ((16, 128, 64), (1, 2, 1)): [(16, 16)],
+    ((16, 256, 32), (1, 1, 1)): [(16, 16)],
+    ((16, 256, 64), (1, 4, 1)): [(16, 16)],
+    ((32, 16, 64), (2, 1, 1)): [(16, 16)],
+    ((32, 32, 32), (1, 1, 1)): [(32, 32)],
+    ((32, 64, 16), (1, 1, 1)): [(32, 32)],
+    ((32, 64, 32), (1, 1, 1)): [(32, 32)],
+    ((32, 128, 16), (1, 2, 1)): [(32, 32)],
+    ((32, 128, 32), (1, 1, 1)): [(32, 32)],
+    ((32, 128, 32), (1, 2, 1)): [(32, 32)],
+    ((64, 16, 64), (2, 1, 1)): [(16, 16)],
+    ((64, 32, 16), (1, 1, 1)): [(32, 32)],
+    ((64, 32, 32), (1, 1, 1)): [(32, 32)],
+    ((64, 64, 16), (1, 1, 1)): [(32, 32)],
+    ((64, 64, 32), (1, 1, 1)): [(32, 32)],
+    ((64, 64, 64), (2, 2, 1)): [(16, 16), (32, 32)],
+    ((64, 128, 16), (1, 2, 1)): [(32, 32)],
+    ((64, 128, 16), (2, 2, 1)): [(32, 32)],
+    ((64, 128, 32), (1, 2, 1)): [(32, 32)],
+    ((64, 128, 32), (2, 2, 1)): [(32, 32)],
+    ((64, 128, 64), (2, 2, 1)): [(32, 32)],
+    ((128, 16, 64), (2, 1, 1)): [(16, 16)],
+    ((128, 32, 16), (2, 1, 1)): [(32, 32)],
+    ((128, 32, 32), (1, 1, 1)): [(32, 32)],
+    ((128, 32, 32), (2, 1, 1)): [(32, 32)],
+    ((128, 64, 16), (2, 1, 1)): [(32, 32)],
+    ((128, 64, 16), (2, 2, 1)): [(32, 32)],
+    ((128, 64, 32), (2, 1, 1)): [(32, 32)],
+    ((128, 64, 32), (2, 2, 1)): [(32, 32)],
+    ((128, 128, 16), (1, 2, 1)): [(32, 32)],
+    ((128, 128, 16), (2, 2, 1)): [(32, 32)],
+    ((128, 128, 32), (1, 2, 1)): [(32, 32)],
+    ((128, 128, 32), (2, 2, 1)): [(32, 32)],
+    ((128, 128, 64), (2, 2, 1)): [(32, 32)],
+    ((128, 256, 16), (2, 2, 1)): [(32, 32)],
+    ((128, 256, 32), (2, 2, 1)): [(32, 32)],
+    ((256, 16, 64), (4, 1, 1)): [(16, 16)],
+    ((256, 32, 64), (4, 1, 1)): [(32, 32)],
+    ((256, 128, 16), (2, 2, 1)): [(32, 32)],
+    ((256, 128, 32), (2, 2, 1)): [(32, 32)],
+    ((256, 256, 32), (2, 2, 1)): [(32, 32)],
 }
 
 def get_wave_configs(
@@ -311,17 +313,56 @@ def get_all_valid_vector_sizes(
     ))
 
 
+def get_k_mfma(dtype_key: str, m_per_xdl: int) -> int:
+    """Return the MFMA K dimension for a square warp tile (m_per_xdl == n_per_xdl).
+
+    Single authority mirroring generate_instances.get_k_mfma (the CK Builder).
+    Arch-independent (reflects the current CDNA4 MFMA shapes):
+      - half (fp16/bf16): 32x32 -> 16, 16x16 -> 32
+      - float (fp32):     32x32 -> 2,  16x16 -> 4
+    """
+    if dtype_key.startswith("fp32"):
+        return 2 if m_per_xdl == 32 else 4
+    return 16 if m_per_xdl == 32 else 32
+
+
+def compute_warp_tile_k(
+    dtype_key: str, warp_tile_m: int, tile_k: int, streamk: bool = False,
+) -> int:
+    """Derive warp_tile_k (the MFMA K) for a config.
+
+    Mirrors the CK Builder formula (generate_instances.py)
+        k_per_xdl = min(max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl)), k_per_block)
+    where k1 is the per-instance AK1. For half precision get_k_mfma dominates k1,
+    so warp_tile_k = min(get_k_mfma, tile_k). For fp32, k1 dominates; the reference
+    instances use k1 = 4 when tile_k <= 16 else 8.
+
+    Hand-written StreamK *native* instances bypass get_k_mfma and carry the legacy
+    (gfx942) warp_tile_k verbatim: half 32x32 -> 8, 16x16 -> 16, clamped to tile_k
+    (fp32 native instances clamp to tile_k // 4 instead).
+    """
+    if streamk:
+        legacy_half_k = 8 if warp_tile_m == 32 else 16
+        cap = tile_k // 4 if dtype_key.startswith("fp32") else tile_k
+        return min(legacy_half_k, cap)
+    k1 = 4 if tile_k <= 16 else 8
+    return min(max(k1, get_k_mfma(dtype_key, warp_tile_m)), tile_k)
+
+
 def get_warp_configs_for_tile_and_wave(
     tile_m: int, tile_n: int, tile_k: int,
     wave_m: int, wave_n: int, wave_k: int,
     dtype_key: str, arch: str = "gfx942", variant: str = "forward",
-) -> List[Tuple[int, int, int]]:
-    """Return curated warp_tile shapes for a (variant, wave), filtered for this tile.
+) -> List[Tuple[int, int]]:
+    """Return curated (warp_tile_m, warp_tile_n) shapes for a (variant, wave).
 
-    The result is then kept only for shapes that:
-      - are arch/dtype-supported (WARP_TILE_SUPPORTED_COMBINATIONS[arch][dtype_key]),
-      - are not in _EXCLUDED_WARP_SHAPES,
-      - divide the macro tile: tile_m % (wave_m*warp_tile_m) == 0 and
+    The curated maps record only (warp_tile_m, warp_tile_n) per (tile, wave);
+    warp_tile_k is no longer stored and is derived later by ``compute_warp_tile_k``.
+
+    A (warp_tile_m, warp_tile_n) shape is kept only when it:
+      - is arch/dtype-supported (WARP_TILE_SUPPORTED_COMBINATIONS[arch][dtype_key]),
+      - is not in _EXCLUDED_WARP_SHAPES,
+      - divides the macro tile: tile_m % (wave_m*warp_tile_m) == 0 and
         tile_n % (wave_n*warp_tile_n) == 0.
     """
     tile = (tile_m, tile_n, tile_k)
@@ -336,49 +377,62 @@ def get_warp_configs_for_tile_and_wave(
         curated = fine_table[(tile, wave)]
     else:
         raise ValueError(f"No curated warp tiles for variant={variant} tile={tile} wave={wave}")
-    
-    supported = {
-        (wt[0], wt[1], wt[2])
+
+    supported_mn = {
+        (wt[0], wt[1])
         for wt in WARP_TILE_SUPPORTED_COMBINATIONS.get(arch, {}).get(dtype_key, [])
     }
 
-    return [
-        wt for wt in curated
-        if wt not in _EXCLUDED_WARP_SHAPES
-        and wt in supported
-        and tile_m % (wave_m * wt[0]) == 0
-        and tile_n % (wave_n * wt[1]) == 0
-    ]
+    result: List[Tuple[int, int]] = []
+    seen: Set[Tuple[int, int]] = set()
+    for wt in curated:
+        mn = (wt[0], wt[1])
+        if mn in _EXCLUDED_WARP_SHAPES:
+            continue
+        if mn not in supported_mn:
+            continue
+        if tile_m % (wave_m * mn[0]) != 0 or tile_n % (wave_n * mn[1]) != 0:
+            continue
+        if mn not in seen:
+            seen.add(mn)
+            result.append(mn)
+    return result
 
 
 def get_wave_warp_pairs(
     tile_m: int, tile_n: int, tile_k: int,
     variant: str, dtype_key: str, arch: str = "gfx942",
-) -> List[Tuple[Tuple[int, int, int], Tuple[int, int, int]]]:
-    """Return (wave, warp_tile) pairs: curated waves x curated warp_tiles.
+) -> List[Tuple[Tuple[int, int, int], Tuple[int, int]]]:
+    """Return (wave, warp_tile_mn) pairs: curated waves x curated warp (m, n) shapes.
 
     Combines curated wave configs with the curated per-variant wave->warp map
     (both from profiler JSON), filtered by arch/dtype support and divisibility.
+    warp_tile_k is not part of the pair; it is derived later via
+    ``compute_warp_tile_k``.
 
-    The curated pairs are gated against _tm_get_valid_wave_warp_pairs (imported from tile_math.py) 
-    and any curated pair rejected is dropped with a warning.
+    The curated pairs are gated against _tm_get_valid_wave_warp_pairs (imported from
+    tile_math.py) on the (wave, warp_m, warp_n) granularity, and any curated pair
+    rejected is dropped with a warning.
     """
-    tm_pairs = set(_tm_get_valid_wave_warp_pairs(
-        tile_m, tile_n, tile_k, dtype_key, arch,
-    ))
+    tm_pairs_mn = {
+        (wave, (wt[0], wt[1]))
+        for (wave, wt) in _tm_get_valid_wave_warp_pairs(
+            tile_m, tile_n, tile_k, dtype_key, arch,
+        )
+    }
     result = []
     for wave in get_wave_configs(tile_m, tile_n, tile_k, variant):
-        for wt in get_warp_configs_for_tile_and_wave(
+        for mn in get_warp_configs_for_tile_and_wave(
             tile_m, tile_n, tile_k, *wave, dtype_key, arch, variant,
         ):
-            if (wave, wt) not in tm_pairs:
+            if (wave, mn) not in tm_pairs_mn:
                 logging.warning(
                     "Dropping curated wave/warp pair %s rejected by tile_math: "
                     "tile=(%d,%d,%d) variant=%s dtype_key=%s",
-                    (wave, wt), tile_m, tile_n, tile_k, variant, dtype_key,
+                    (wave, mn), tile_m, tile_n, tile_k, variant, dtype_key,
                 )
                 continue
-            result.append((wave, wt))
+            result.append((wave, mn))
     return result
 
 
@@ -413,7 +467,7 @@ class VecStrategy(Enum):
     MAX_A_HALF_BC = "max_a_half_bc"              # (max, max/2, max/2) — fp32 (4,2,2)
     MAX_AB_MIN_C = "max_ab_min_c"                # (max, max, 1) — half (8,8,1)
     MIN_AB_QUARTER_C = "min_ab_quarter_c"        # (1, 1, max/4) — half (1,1,2)
-    MIN_A_MAX_B_HALF_C = "min_a_max_b_half_c"    # (1, max, max/2) — half (1,8,4), fp32 (1,4,2)
+    MIN_A_MAX_B_HALF_C = "min_a_max_b_half_c"    # (1, max, max/2) — half (1,8,4), fp32 (1,4,2) - TODO: Is this valid?
     HALF_A_MAX_BC = "half_a_max_bc"              # (max/2, max, max) — fp32 (2,4,4)
     HALF_A_MIN_BC = "half_a_min_bc"              # (max/2, 1, 1) — fp32 (2,1,1)
 
@@ -1437,7 +1491,13 @@ def get_configs(
             vec_set.add(triple)
         vec_list = sorted(vec_set)
 
-        for (wave_m, wave_n, wave_k), (warp_tile_m, warp_tile_n, warp_tile_k) in pairs:
+        for (wave_m, wave_n, wave_k), (warp_tile_m, warp_tile_n) in pairs:
+            # Derive warp_tile_k (the MFMA K) for the non-streamk case; this is
+            # the value used both for the vec gate and for non-streamk configs.
+            # StreamK configs re-derive it per-config below.
+            warp_tile_k = compute_warp_tile_k(
+                dtype_key, warp_tile_m, tile_k, streamk=False,
+            )
             # tile_math gate: a candidate vec triple survives only if it is valid
             # for this (tile, wave, warp) under this dtype_key.
             tm_valid = get_all_valid_vector_sizes(
@@ -1490,6 +1550,14 @@ def get_configs(
                         if not trait.is_valid():
                             continue
 
+                        # Derive warp_tile_k for this config. Hand-written StreamK
+                        # native instances bypass get_k_mfma and carry the legacy
+                        # warp_tile_k, handled inside compute_warp_tile_k.
+                        eff_warp_tile_k = compute_warp_tile_k(
+                            dtype_key, warp_tile_m, tile_k,
+                            streamk=sk_cfg.streamk_enabled,
+                        )
+
                         tile_cfg = TileConfig(
                             tile_m=tile_m,
                             tile_n=tile_n,
@@ -1499,7 +1567,7 @@ def get_configs(
                             warp_k=wave_k,
                             warp_tile_m=warp_tile_m,
                             warp_tile_n=warp_tile_n,
-                            warp_tile_k=warp_tile_k,
+                            warp_tile_k=eff_warp_tile_k,
                         )
 
                         if not tile_cfg.is_valid():
@@ -1519,60 +1587,63 @@ def get_configs(
                         _add_config(config)
 
     for variant in variants:
+        # FORWARD_DEPTHWISE has no GEMM tile loop; its configs are emitted by the
+        # depthwise block below (tied to FORWARD). Skip the GEMM loop for it.
         variant_str = {
             GroupedConvVariant.FORWARD: "forward",
             GroupedConvVariant.BACKWARD_DATA: "bwd_data",
             GroupedConvVariant.BACKWARD_WEIGHT: "bwd_weight",
-        }[variant]
+        }.get(variant)
 
-        features = VARIANT_FEATURES.get(variant_str, [])
+        if variant_str is not None:
+            features = VARIANT_FEATURES.get(variant_str, [])
 
-        for ndim in ndims:
-            for datatype in datatypes:
-                dtype_key = DTYPE_TO_DTYPE_KEY.get(datatype)
-                if dtype_key is None:
-                    continue
-                dclass = "float" if datatype == "fp32" else "half"
-
-                # Tiles for this exact (variant, ndim, dtype).
-                base_tiles = get_tiles(variant_str, ndim, datatype)
-
-                # --- Base configs (no feature flags) ---
-                for tile_m, tile_n, tile_k in base_tiles:
-                    tile_pipelines = get_pipelines_for_tile(
-                        tile_m, tile_n, tile_k, variant_str, dclass
-                    )
-                    tile_specs = get_specs_for_tile(tile_m, tile_n, tile_k, variant_str)
-                    _emit_configs_for_tile(
-                        tile_m, tile_n, tile_k,
-                        tile_pipelines, tile_specs,
-                        variant, ndim,
-                        datatype, dclass, dtype_key,
-                        feat=None,
-                    )
-
-                # --- Feature-flag configs ---
-                for feat in features:
-                    if feat.dtype_classes is not None and dclass not in feat.dtype_classes:
+            for ndim in ndims:
+                for datatype in datatypes:
+                    dtype_key = DTYPE_TO_DTYPE_KEY.get(datatype)
+                    if dtype_key is None:
                         continue
-                    if feat.ndims is not None and ndim not in feat.ndims:
-                        continue
-                    feat_tiles = feat.tile_override if feat.tile_override is not None else base_tiles
-                    for tile_m, tile_n, tile_k in feat_tiles:
-                        if feat.pipeline_override is not None:
-                            feat_pipes = feat.pipeline_override
-                        else:
-                            feat_pipes = get_pipelines_for_tile(
-                                tile_m, tile_n, tile_k, variant_str, dclass
-                            )
+                    dclass = "float" if datatype == "fp32" else "half"
+
+                    # Tiles for this exact (variant, ndim, dtype).
+                    base_tiles = get_tiles(variant_str, ndim, datatype)
+
+                    # --- Base configs (no feature flags) ---
+                    for tile_m, tile_n, tile_k in base_tiles:
+                        tile_pipelines = get_pipelines_for_tile(
+                            tile_m, tile_n, tile_k, variant_str, dclass
+                        )
                         tile_specs = get_specs_for_tile(tile_m, tile_n, tile_k, variant_str)
                         _emit_configs_for_tile(
                             tile_m, tile_n, tile_k,
-                            feat_pipes, tile_specs,
+                            tile_pipelines, tile_specs,
                             variant, ndim,
                             datatype, dclass, dtype_key,
-                            feat=feat,
+                            feat=None,
                         )
+
+                    # --- Feature-flag configs ---
+                    for feat in features:
+                        if feat.dtype_classes is not None and dclass not in feat.dtype_classes:
+                            continue
+                        if feat.ndims is not None and ndim not in feat.ndims:
+                            continue
+                        feat_tiles = feat.tile_override if feat.tile_override is not None else base_tiles
+                        for tile_m, tile_n, tile_k in feat_tiles:
+                            if feat.pipeline_override is not None:
+                                feat_pipes = feat.pipeline_override
+                            else:
+                                feat_pipes = get_pipelines_for_tile(
+                                    tile_m, tile_n, tile_k, variant_str, dclass
+                                )
+                            tile_specs = get_specs_for_tile(tile_m, tile_n, tile_k, variant_str)
+                            _emit_configs_for_tile(
+                                tile_m, tile_n, tile_k,
+                                feat_pipes, tile_specs,
+                                variant, ndim,
+                                datatype, dclass, dtype_key,
+                                feat=feat,
+                            )
 
         # --- Depthwise configs (forward only, 2D only) ---
         if variant == GroupedConvVariant.FORWARD and 2 in ndims:
