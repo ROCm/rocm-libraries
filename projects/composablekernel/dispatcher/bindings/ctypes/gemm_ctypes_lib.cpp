@@ -103,6 +103,13 @@ int dispatcher_initialize()
     key.algorithm.preshuffle      = (GEMM_KEY_PRESHUFFLE != 0);
     key.algorithm.transpose_c     = (GEMM_KEY_TRANSPOSE_C != 0);
     key.algorithm.num_wave_groups = GEMM_KEY_NUM_WAVE_GROUPS;
+    // pad_m/n/k participate in both the key's hash/equality and the kernel
+    // name, so they must be derived from the codegen macros too -- otherwise a
+    // kernel built with padding disabled would register under a key claiming
+    // pad=true and disagree with its own name.
+    key.algorithm.pad_m           = (GEMM_KEY_PAD_M != 0);
+    key.algorithm.pad_n           = (GEMM_KEY_PAD_N != 0);
+    key.algorithm.pad_k           = (GEMM_KEY_PAD_K != 0);
     key.gfx_arch                  = GFX_ARCH;
 #else
     // Fallback default for headers generated before GEMM_KEY_* macros existed
