@@ -20,9 +20,8 @@
 #include <hipdnn_backend/version.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/SerializedGraphContainer.hpp>
 #include <hipdnn_plugin_sdk/FunctionNameMacro.hpp>
-
-#include <flatbuffers/flatbuffers.h>
 
 #include <cstring>
 #include <vector>
@@ -415,29 +414,21 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetSerializedBinaryGraphAndPla
             executionPlanDesc->serializeBackendPlan(planSize, &planSize, planBytes.data());
         }
 
-        flatbuffers::FlatBufferBuilder builder;
-        auto graphVec
-            = builder.CreateVector(static_cast<const uint8_t*>(graphData.ptr), graphData.size);
-        flatbuffers::Offset<flatbuffers::Vector<uint8_t>> planVec = 0;
-        if(!planBytes.empty())
-        {
-            planVec = builder.CreateVector(planBytes);
-        }
-        auto root = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedGraphAndPlan(
-            builder, graphVec, planVec);
-        hipdnn_flatbuffers_sdk::data_objects::FinishSerializedGraphAndPlanBuffer(builder, root);
+        const auto container
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::buildGraphAndPlanContainer(
+                graphData.ptr, graphData.size, planBytes.data(), planBytes.size());
 
-        *blobByteSize = builder.GetSize();
+        *blobByteSize = container.size();
 
         if(serializedBlob != nullptr)
         {
             THROW_IF_LT(requestedByteSize,
-                        builder.GetSize(),
+                        container.size(),
                         HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT,
                         "Requested buffer size (" + std::to_string(requestedByteSize)
                             + ") is smaller than the serialized graph-and-plan size ("
-                            + std::to_string(builder.GetSize()) + ")");
-            std::memcpy(serializedBlob, builder.GetBufferPointer(), builder.GetSize());
+                            + std::to_string(container.size()) + ")");
+            std::memcpy(serializedBlob, container.data(), container.size());
         }
 
         LOG_API_SUCCESS(apiName, "blobByteSize={}", *blobByteSize);

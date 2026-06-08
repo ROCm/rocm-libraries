@@ -96,7 +96,9 @@ inline ::flatbuffers::Offset<SerializedGraphAndPlan> CreateSerializedGraphAndPla
     ::flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<uint8_t> *graph_blob = nullptr,
     const std::vector<uint8_t> *plan_blob = nullptr) {
+  if (graph_blob) { _fbb.ForceVectorAlignment(graph_blob->size(), sizeof(uint8_t), 8); }
   auto graph_blob__ = graph_blob ? _fbb.CreateVector<uint8_t>(*graph_blob) : 0;
+  if (plan_blob) { _fbb.ForceVectorAlignment(plan_blob->size(), sizeof(uint8_t), 8); }
   auto plan_blob__ = plan_blob ? _fbb.CreateVector<uint8_t>(*plan_blob) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateSerializedGraphAndPlan(
       _fbb,
@@ -139,7 +141,9 @@ inline ::flatbuffers::Offset<SerializedGraphAndPlan> CreateSerializedGraphAndPla
   (void)_rehasher;
   (void)_o;
   struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const SerializedGraphAndPlanT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  _fbb.ForceVectorAlignment(_o->graph_blob.size(), sizeof(uint8_t), 8);
   auto _graph_blob = _o->graph_blob.size() ? _fbb.CreateVector(_o->graph_blob) : 0;
+  _fbb.ForceVectorAlignment(_o->plan_blob.size(), sizeof(uint8_t), 8);
   auto _plan_blob = _o->plan_blob.size() ? _fbb.CreateVector(_o->plan_blob) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateSerializedGraphAndPlan(
       _fbb,

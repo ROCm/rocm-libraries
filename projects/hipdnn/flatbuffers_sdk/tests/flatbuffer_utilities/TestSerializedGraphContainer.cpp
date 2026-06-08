@@ -18,15 +18,19 @@ namespace
 {
 
 // Wraps an inner graph buffer (and optional plan bytes) into an "HDGP"
-// SerializedGraphAndPlan container, returning the released buffer.
+// SerializedGraphAndPlan container via the production write helper, returning the
+// released buffer. Using buildGraphAndPlanContainer (not CreateVector directly)
+// keeps these tests on the same force-aligned path the backend ships.
 flatbuffers::DetachedBuffer buildContainer(const std::vector<uint8_t>* graphBytes,
                                            const std::vector<uint8_t>* planBytes)
 {
-    flatbuffers::FlatBufferBuilder builder;
-    auto container = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedGraphAndPlanDirect(
-        builder, graphBytes, planBytes);
-    hipdnn_flatbuffers_sdk::data_objects::FinishSerializedGraphAndPlanBuffer(builder, container);
-    return builder.Release();
+    const uint8_t* graphData
+        = (graphBytes != nullptr && !graphBytes->empty()) ? graphBytes->data() : nullptr;
+    const size_t graphSize = (graphBytes != nullptr) ? graphBytes->size() : 0;
+    const uint8_t* planData
+        = (planBytes != nullptr && !planBytes->empty()) ? planBytes->data() : nullptr;
+    const size_t planSize = (planBytes != nullptr) ? planBytes->size() : 0;
+    return buildGraphAndPlanContainer(graphData, graphSize, planData, planSize);
 }
 
 std::vector<uint8_t> toVector(const uint8_t* data, size_t size)
@@ -311,4 +315,29 @@ TEST(TestSerializedGraphContainer, EightByteBoundary)
                  std::invalid_argument);
     EXPECT_THROW(extractGraphBlob(withIdentifier.data(), withIdentifier.size()),
                  std::invalid_argument);
+}
+
+TEST(TestSerializedGraphContainer, InnerBlobsAreEightByteAligned)
+{
+    // Regression guard for the alignment fix: the embedded graph and plan blobs
+    // are parsed in place as FlatBuffers roots that carry int64 fields, so their
+    // peeled base addresses must be 8-byte aligned. A plain [ubyte] vector is
+    // only 4-byte aligned; buildGraphAndPlanContainer force-aligns both to 8.
+    flatbuffers::FlatBufferBuilder graphBuilder
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    auto innerGraph = graphBuilder.Release();
+    const auto graphBytes = toVector(innerGraph.data(), innerGraph.size());
+    const std::vector<uint8_t> planBytes = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
+
+    // Graph + plan container: both peeled blobs must be 8-aligned.
+    auto bothContainer = buildContainer(&graphBytes, &planBytes);
+    const auto graphView = extractGraphBlob(bothContainer.data(), bothContainer.size());
+    const auto planView = extractPlanBlob(bothContainer.data(), bothContainer.size());
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(graphView.data) % 8, 0u);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(planView.data) % 8, 0u);
+
+    // Graph-only container: the graph blob must still be 8-aligned.
+    auto graphOnly = buildContainer(&graphBytes, nullptr);
+    const auto graphOnlyView = extractGraphBlob(graphOnly.data(), graphOnly.size());
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(graphOnlyView.data) % 8, 0u);
 }

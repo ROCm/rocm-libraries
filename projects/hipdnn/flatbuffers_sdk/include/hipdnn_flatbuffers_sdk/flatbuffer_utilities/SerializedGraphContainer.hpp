@@ -38,6 +38,50 @@ struct SerializedBlobView
     size_t size = 0;
 };
 
+// Builds an "HDGP" SerializedGraphAndPlan container that frames an
+// already-serialized graph blob and an optional already-serialized plan blob.
+// This is the single write-side home for the container format and the mirror of
+// the extract* read helpers below.
+//
+// Both embedded blobs are force-aligned to 8 bytes. graph_blob and plan_blob are
+// themselves self-contained FlatBuffers buffers (the inner Graph, and the
+// SerializedExecutionPlan wrapper) whose roots carry int64 fields and are parsed
+// IN PLACE on deserialize (GetRoot<Graph> / GetSerializedExecutionPlan over the
+// peeled view). A plain [ubyte] vector is only 4-byte aligned, so without this
+// the int64 reads off the peeled offset would be misaligned-access UB (silent on
+// x86, a trap under -fsanitize=alignment and on strict-alignment ISAs). We build
+// the vectors here and pass their offsets to the low-level
+// CreateSerializedGraphAndPlan(), which receives already-built vectors and so
+// cannot apply the schema's force_align (only the generated *Direct/object-API
+// builders do, and we do not use them); the alignment must therefore be forced
+// explicitly, immediately before each CreateVector. (The opaque provider payload
+// nested inside the plan is copied to a fresh heap buffer before hand-off, so it
+// needs no container-level alignment.)
+//
+// graphData must be non-null with graphSize > 0 (graph_blob is mandatory).
+// planData may be null / planSize 0 for a graph-only container.
+inline flatbuffers::DetachedBuffer buildGraphAndPlanContainer(const void* graphData,
+                                                              size_t graphSize,
+                                                              const void* planData,
+                                                              size_t planSize)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    builder.ForceVectorAlignment(graphSize, sizeof(uint8_t), 8);
+    auto graphVec = builder.CreateVector(static_cast<const uint8_t*>(graphData), graphSize);
+
+    flatbuffers::Offset<flatbuffers::Vector<uint8_t>> planVec = 0;
+    if(planData != nullptr && planSize > 0)
+    {
+        builder.ForceVectorAlignment(planSize, sizeof(uint8_t), 8);
+        planVec = builder.CreateVector(static_cast<const uint8_t*>(planData), planSize);
+    }
+
+    auto root = data_objects::CreateSerializedGraphAndPlan(builder, graphVec, planVec);
+    data_objects::FinishSerializedGraphAndPlanBuffer(builder, root);
+    return builder.Release();
+}
+
 // Returns true when @p buffer is large enough to hold a container header and
 // carries the "HDGP" file identifier. Does not run the full verifier; pair with
 // verifyGraphAndPlanContainer() before reading fields. Never throws.

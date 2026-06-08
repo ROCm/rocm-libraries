@@ -19,6 +19,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/execution_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/SerializedGraphContainer.hpp>
 
 #include <array>
 #include <cstdint>
@@ -313,6 +314,17 @@ TEST_F(TestGraphAndPlanSerializationApi, ComboSerializeProducesContainerWithGrap
     EXPECT_GT(container->graph_blob()->size(), 0u);
     ASSERT_NE(container->plan_blob(), nullptr);
     EXPECT_GT(container->plan_blob()->size(), 0u);
+
+    // The embedded graph/plan are parsed in place as FlatBuffers roots with int64
+    // fields, so the C-API container must place them on 8-byte-aligned offsets.
+    {
+        const auto graphView = hipdnn_flatbuffers_sdk::flatbuffer_utilities::extractGraphBlob(
+            blob.data(), blob.size());
+        const auto planView = hipdnn_flatbuffers_sdk::flatbuffer_utilities::extractPlanBlob(
+            blob.data(), blob.size());
+        EXPECT_EQ(reinterpret_cast<uintptr_t>(graphView.data) % 8, 0u);
+        EXPECT_EQ(reinterpret_cast<uintptr_t>(planView.data) % 8, 0u);
+    }
 }
 
 TEST_F(TestGraphAndPlanSerializationApi, ComboSerializeGraphOnlyWhenPlanDescIsNull)
