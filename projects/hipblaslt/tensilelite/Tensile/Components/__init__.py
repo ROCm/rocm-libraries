@@ -51,4 +51,5 @@ __all__ = [
     "PersistentLoop",
     "LSU",
     "TensorDataMover",
+    "GL2Prefetch",
     ]

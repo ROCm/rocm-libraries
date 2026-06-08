@@ -2,9 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include "plans/SdpaFwdPlanBuilder.hpp"
-#include "HipKernelUtils.hpp"
 #include "asm/AsmKernelPath.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
+#include "core/Utils.hpp"
 #include "plans/SdpaFwdPlan.hpp"
 
 #include <cmath>
@@ -169,8 +169,7 @@ static std::string getKernelCoPath(std::string coName, const std::string& archId
 }
 
 bool SdpaFwdPlanBuilder::isApplicable(
-    const HipKernelHandle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -279,9 +278,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
 }
 
 size_t SdpaFwdPlanBuilder::getMaxWorkspaceSize(
-    const HipKernelHandle& /* handle */,
+    const Handle& /* handle */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
-    const HipKernelSettings& /* executionSettings */) const
+    const Settings& /* executionSettings */) const
 {
     // Forward-only kernel uses 64KB LDS internally, no external workspace needed
     // LSE (when present) is an optional output tensor, not workspace
@@ -289,19 +288,19 @@ size_t SdpaFwdPlanBuilder::getMaxWorkspaceSize(
 }
 
 void SdpaFwdPlanBuilder::initializeExecutionSettings(
-    const HipKernelHandle& /* handle */,
+    const Handle& /* handle */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
-    HipKernelSettings& /* executionSettings */) const
+    Settings& /* executionSettings */) const
 {
     HIPDNN_PLUGIN_LOG_ERROR("SdpaFwdPlanBuilder::initializeExecutionContext not implemented");
 }
 
 void SdpaFwdPlanBuilder::buildPlan(
-    const HipKernelHandle& handle,
+    const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /* engineConfig */,
-    HipKernelContext& executionContext) const
+    Context& executionContext) const
 {
 
     // Get device properties
@@ -451,7 +450,7 @@ void SdpaFwdPlanBuilder::buildPlan(
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaFwdPlanBuilder::getCustomKnobs(
-    const HipKernelHandle& /* handle */,
+    const Handle& /* handle */,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /* opGraph */) const
 {
     return {};

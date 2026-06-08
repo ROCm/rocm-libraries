@@ -222,6 +222,22 @@ inline std::ostream& operator<<(std::ostream& os, const CacheScopeModifiers& mod
     return os;
 }
 
+inline std::ostream& operator<<(std::ostream& os, const GLOBALModifiers& mod) {
+    if (mod.offset != 0) {
+        os << " offset:" << mod.offset;
+    }
+    // Temporal hint / cache scope for global_prefetch_b8 (gl2-prefetch). Match
+    // rocisa GLOBALModifiers::toString(): emit only non-default fields, temporal
+    // hint first then scope (e.g. " th:TH_LOAD_NT scope:SCOPE_SE").
+    if (hasTemporalHint(mod.th)) {
+        os << " th:" << toString(mod.th);
+    }
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(mod.scope);
+    }
+    return os;
+}
+
 inline std::ostream& operator<<(std::ostream& os, const SMEMModifiers& smemMod) {
     if (smemMod.offset != 0) {
         os << " offset:" << smemMod.offset;
@@ -732,6 +748,7 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
             EMIT_TRAILING_MODIFIER(FLAT, FLAT);
             EMIT_TRAILING_MODIFIER(MUBUF, MUBUF);
             EMIT_TRAILING_MODIFIER(CACHE_SCOPE, CacheScope);
+            EMIT_TRAILING_MODIFIER(GLOBAL, GLOBAL);
             EMIT_TRAILING_MODIFIER(SMEM, SMEM);
             EMIT_TRAILING_MODIFIER(SDWA, SDWA);
             EMIT_TRAILING_MODIFIER(DPP, DPP);

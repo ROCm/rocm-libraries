@@ -89,6 +89,8 @@ struct ArchDef {
     int maxVGPR = 256;
     int maxSGPR = 102;
     int maxAGPR = 0;
+    int totalVgprPerSimd = 0;
+    int vgprAllocGranule = 0;
     int defaultCycle = 4;
     int defaultLatency = 4;
     std::vector<HwRegEntry> hwRegs;
@@ -459,6 +461,8 @@ class DefTParser {
                     parseFieldInt(block, ".maxVGPR", arch_.maxVGPR);
                     parseFieldInt(block, ".maxSGPR", arch_.maxSGPR);
                     parseFieldInt(block, ".maxAGPR", arch_.maxAGPR);
+                    parseFieldInt(block, ".totalVgprPerSimd", arch_.totalVgprPerSimd);
+                    parseFieldInt(block, ".vgprAllocGranule", arch_.vgprAllocGranule);
                     parseFieldInt(block, ".defaultCycle", arch_.defaultCycle);
                     parseFieldInt(block, ".defaultLatency", arch_.defaultLatency);
                 }
@@ -1795,7 +1799,9 @@ static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath) {
         << "{\n"
         << "    " << arch.name << "ArchInfo()\n"
         << "        : ArchInfo(" << arch.major << ", " << arch.minor << ", " << arch.stepping
-        << ", " << arch.wavefront << " /* waveFrontSize */)\n"
+        << ", " << arch.wavefront << " /* waveFrontSize */" << ", " << arch.totalVgprPerSimd
+        << " /* totalVgprPerSimd */" << ", " << arch.vgprAllocGranule
+        << " /* vgprAllocGranule */)\n"
         << "    {\n"
         << "    }\n\n"
         << "    IsaOpcode getIsaOpcode(UnifiedOpcode unifiedOpcode) const override\n"
