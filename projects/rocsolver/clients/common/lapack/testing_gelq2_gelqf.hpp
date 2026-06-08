@@ -357,14 +357,6 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
     }
 
     rocblas_set_pointer_mode(handle, old_mode);
-
-    S eps = std::numeric_limits<S>::epsilon();
-    bool status = max_errors[0] < 50 * eps && max_errors[1] < 50 * eps;
-    const char* msg = status ? "ok" : "FAILED";
-    std::cout << std::setprecision(3) << __func__ << ": m " << std::setw(3) << m << ", n "
-              << std::setw(3) << n << ", berror " << std::setw(8) << max_errors[0] << ", ortho "
-              << std::setw(8) << max_errors[1] << ", diff ref " << std::setw(8) << max_errors[2]
-              << " " << msg << "\n";
 }
 
 template <bool STRIDED, bool GELQF, typename T, typename Td, typename Ud, typename Th, typename Uh>
@@ -585,7 +577,7 @@ void testing_gelq2_gelqf(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using 50*machine_precision as tolerance (per LAPACK).
+    // using 30*machine_precision as tolerance (per LAPACK).
     // max_errors is already normalized, e.g., by n.
     if(argus.unit_check)
     {

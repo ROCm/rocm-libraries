@@ -561,7 +561,7 @@ void testing_gerq2_gerqf(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using 50*machine_precision as tolerance (per LAPACK).
+    // using 30*machine_precision as tolerance (per LAPACK).
     // max_errors is already normalized, e.g., by n.
     if(argus.unit_check)
     {
