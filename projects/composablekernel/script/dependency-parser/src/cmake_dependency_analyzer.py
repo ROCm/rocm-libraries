@@ -388,7 +388,7 @@ class ScanDepsExtractor:
         # clang-scan-deps derives its own resource dir, which for HIP TUs misses
         # __clang_hip_runtime_wrapper.h. Inject the compiler's resource dir into
         # a patched copy of the compilation database so scans succeed.
-        db = json.load(open(compile_commands_path))
+        db = list(commands)
         rd = self.resource_dir or self.detect_resource_dir(db)
         db_path = compile_commands_path
         tmp_path = None

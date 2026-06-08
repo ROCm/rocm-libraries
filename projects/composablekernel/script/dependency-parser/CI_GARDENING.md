@@ -199,7 +199,7 @@ git diff --name-only origin/develop HEAD -- projects/composablekernel
 
 **Step 2:** Check if those files are in the depmap:
 ```bash
-jq 'keys | length' enhanced_dependency_mapping.json   # total files tracked
+jq '.file_to_executables | keys | length' enhanced_dependency_mapping.json   # total files tracked
 jq '."file_to_executables"."include/ck/my_header.hpp"' enhanced_dependency_mapping.json
 ```
 

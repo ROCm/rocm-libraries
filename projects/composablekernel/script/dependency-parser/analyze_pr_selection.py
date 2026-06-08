@@ -197,7 +197,11 @@ def fetch_pr(number, repo=None):
     if repo:
         cmd += ["-R", repo]
     try:
-        out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+        out = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60).stdout
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"gh timed out fetching PR #{number} after 60 s"
+        ) from e
     except FileNotFoundError as e:
         raise RuntimeError(
             "gh CLI required to fetch PRs - install gh or use --pr-files"
@@ -299,7 +303,14 @@ def main(argv=None):
 
     with open(args.depmap) as f:
         depmap = json.load(f)
-    f2e = depmap["file_to_executables"]
+    f2e = depmap.get("file_to_executables")
+    if f2e is None:
+        print(
+            f"Error: {args.depmap} missing 'file_to_executables' key. "
+            "Regenerate with: main.py cmake-parse ...",
+            file=sys.stderr,
+        )
+        return 2
     strip_prefix = depmap_strip_prefix(depmap)
     ctest_tests = load_ctest_tests(args.ctest)
 
