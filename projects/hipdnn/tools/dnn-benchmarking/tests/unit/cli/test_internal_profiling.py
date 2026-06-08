@@ -3,8 +3,8 @@
 
 """Tests for the hidden --internal-profiling-run sub-mode.
 
-The sub-mode must short-circuit gpu_check, skip Reporter output, and
-delegate to suite_runner._run_single_provider_engine for the named
+The sub-mode must skip Reporter output and delegate to
+suite_runner.run_single_provider_engine for the named
 (graph, engine). These tests focus on the wiring (parser flags,
 quiet reporter, error paths) rather than running an actual workload.
 """
@@ -65,7 +65,7 @@ class TestRunInternalProfilingErrorPaths:
 
 class TestRunInternalProfilingSuccessPath:
     """Positive-path coverage. Mocks hipdnn_frontend + GraphLoader +
-    _run_single_provider_engine so the test stays hermetic on a CI box
+    run_single_provider_engine so the test stays hermetic on a CI box
     with no ROCm or GPU. Verifies the wiring the profiler relies on:
     MetricsConfig(tier='off'), plugin_path forwarding, single-engine
     filter, and that a success result returns rc=0."""
@@ -85,7 +85,7 @@ class TestRunInternalProfilingSuccessPath:
     def _patch_stack(self, monkeypatch, captured):
         """Wire up the three external dependencies as MagicMocks.
 
-        Records the SuiteConfig that _run_single_provider_engine is
+        Records the SuiteConfig that run_single_provider_engine is
         called with so the test can assert on tier / engine_filter /
         plugin_path forwarding.
         """
@@ -94,6 +94,7 @@ class TestRunInternalProfilingSuccessPath:
 
         fake_hipdnn = MagicMock()
         fake_hipdnn.Handle.return_value = MagicMock()
+        fake_hipdnn.PluginLoadingMode.ABSOLUTE = "absolute"
         monkeypatch.setitem(_sys.modules, "hipdnn_frontend", fake_hipdnn)
         captured["hipdnn"] = fake_hipdnn
 
@@ -109,7 +110,7 @@ class TestRunInternalProfilingSuccessPath:
             result.status = "success"
             return result
 
-        monkeypatch.setattr(internal_profiling, "_run_single_provider_engine", fake_run)
+        monkeypatch.setattr(internal_profiling, "run_single_provider_engine", fake_run)
 
     def test_success_builds_tier_off_suite_config_and_returns_zero(
         self, tmp_path, monkeypatch
@@ -139,17 +140,32 @@ class TestRunInternalProfilingSuccessPath:
         self._patch_stack(monkeypatch, captured)
         plugin = tmp_path / "plugin.so"
         rc = internal_profiling.run_internal_profiling(
-            self._success_args(tmp_path, plugin_path=plugin)
+            self._success_args(tmp_path, plugin_path=[plugin])
         )
         assert rc == 0
         # Two forwarding paths must both fire: set_engine_plugin_paths
         # for the active hipdnn registry, and SuiteConfig.plugin_path
-        # for any inner code that reads from config.
+        # for any inner code that reads from config. An explicit CLI
+        # plugin path must replace default plugin loading, not add to it.
         captured["hipdnn"].set_engine_plugin_paths.assert_called_once_with(
-            [str(plugin)]
+            [str(plugin)], "absolute"
         )
         cfg: SuiteConfig = captured["run_kwargs"]["config"]
         assert cfg.plugin_path == plugin
+
+    def test_multiple_plugin_paths_return_error(self, tmp_path, monkeypatch, capsys):
+        captured: dict = {}
+        self._patch_stack(monkeypatch, captured)
+
+        rc = internal_profiling.run_internal_profiling(
+            self._success_args(
+                tmp_path,
+                plugin_path=[tmp_path / "plugin-a", tmp_path / "plugin-b"],
+            )
+        )
+
+        assert rc == 1
+        assert "expected exactly one --plugin-path" in capsys.readouterr().err
 
     def test_non_success_status_returns_one(self, tmp_path, monkeypatch, capsys):
         from unittest.mock import MagicMock
@@ -165,7 +181,7 @@ class TestRunInternalProfilingSuccessPath:
         # in place — we only need to swap the runner.
         monkeypatch.setattr(
             internal_profiling,
-            "_run_single_provider_engine",
+            "run_single_provider_engine",
             lambda **kw: bad_result,
         )
 
@@ -182,7 +198,7 @@ class TestRunInternalProfilingSuccessPath:
         def raising(**kw):
             raise RuntimeError("kernel exploded")
 
-        monkeypatch.setattr(internal_profiling, "_run_single_provider_engine", raising)
+        monkeypatch.setattr(internal_profiling, "run_single_provider_engine", raising)
 
         rc = internal_profiling.run_internal_profiling(self._success_args(tmp_path))
         assert rc == 1

@@ -283,7 +283,7 @@ std::string RMSNormBackwardOperationDescriptor::toString() const
            + (_data.dbias_tensor_uid ? std::to_string(*_data.dbias_tensor_uid) : "nullopt");
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

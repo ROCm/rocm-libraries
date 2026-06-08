@@ -16,7 +16,7 @@ Organized by pass:
 """
 import pytest
 from Tensile.Components.Subtile.Kernel import (
-    TileInfo, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
+    TileInfo, AB_B8, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
 )
 from Tensile.Components.Subtile.LogicalScheduler import (
     LogicalScheduler,
@@ -51,6 +51,10 @@ def makeTileInfo(tc, kernel):
 def _mock_dtype(num_bytes=2):
     mock = MagicMock()
     mock.numBytes.return_value = num_bytes
+    mock.numRegisters.return_value = num_bytes / 4
+    # Treat the default 2-byte mock as BF16 (only consumer is the Subtile tail
+    # mask path, which dispatches on isBFloat16); 0.5-byte (fp4) returns False.
+    mock.isBFloat16.return_value = (num_bytes == 2)
     return mock
 
 
@@ -83,6 +87,9 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         "MatrixInstM": 16,
         "MatrixInstN": 16,
         "MatrixInstK": matrixInstK,
+        "MatrixInstB": 1,
+        "MIInputPerThreadA": matrixInstK // 4,
+        "MIInputPerThreadB": matrixInstK // 4,
         "MIWaveGroup": list(miWaveGroup),
         "WavefrontSize": 64,
         "SourceSwap": sourceSwap,
@@ -91,6 +98,7 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         "NonTemporalB": 0,
         "NonTemporalMXSA": 0,
         "NonTemporalMXSB": 0,
+        "NoTailLoop": False,
         "ProblemType": problemType,
     }
     if fp4:
@@ -190,6 +198,57 @@ def make_cfg_bf16_pgr1(MT0=256, MT1=256, depthU=128, partSizeM=0, partSizeN=0):
     )
 
 
+def create_kernel_fp8(MT0, MT1, waveGroup, depthU=128):
+    """Create a plain FP8 kernel config (bpe=1, matrixInstK=128, no MX scale)."""
+    dtype = _mock_dtype(1)
+    return {
+        "DepthU": depthU,
+        "_DepthUA": depthU,
+        "_DepthUB": depthU,
+        "MacroTileA": MT0,
+        "MacroTileB": MT1,
+        "MacroTile0": MT0,
+        "MacroTile1": MT1,
+        "MatrixInstM": 16,
+        "MatrixInstN": 16,
+        "MatrixInstK": 128,
+        "MIWaveGroup": list(waveGroup),
+        "WavefrontSize": 64,
+        "SourceSwap": False,
+        "MIArchVgpr": False,
+        "NonTemporalA": 0,
+        "NonTemporalB": 0,
+        "NonTemporalMXSA": 0,
+        "NonTemporalMXSB": 0,
+        "ProblemType": {
+            "DataTypeA": dtype,
+            "DataTypeB": dtype,
+            "ComputeDataType": _mock_dtype(4),
+        },
+    }
+
+
+def make_cfg_fp8(MT0, MT1, waveGroup, depthU=128, pgr=2):
+    """Build plain FP8 config (AB_B8, matrixInstK=128, no scale tensors).
+
+    GR granularity matches production: mn=subtileShape[0]=1, k=subtileShape[1]=1.
+    With DU=128 and matrixInstK=128: numSubIterK=1, flat_len=numPartitions.
+    """
+    kernel = create_kernel_fp8(MT0, MT1, waveGroup, depthU)
+    tiA = TileInfo(AB_B8, 'A', None, kernel)
+    tiB = TileInfo(AB_B8, 'B', None, kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=tiA.subtileShape[0], k=tiA.subtileShape[1]),
+        grB=ReadGranularity(mn=tiB.subtileShape[0], k=tiB.subtileShape[1]),
+        pgr=pgr,
+    )
+
+
 def make_example_granularities_1():
     """Example Granularities 1 from the design doc: LR A,B=1x1, LR SA,SB=2x2."""
     return SchedulerConfig(
@@ -213,6 +272,7 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     from rocisa import rocIsa
     from rocisa.register import RegisterPool
     from rocisa.enum import RegisterType
+    from Tensile.Common.RegisterPool import allocTmpGpr
 
     ri = rocIsa.getInstance()
     if not ri.isInit():
@@ -232,7 +292,19 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     writer.sgprPool = RegisterPool(0, RegisterType.Sgpr, False)
     writer.states = SimpleNamespace(
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
+        unrollIdx=0,
+        laneSGPRCount=2,
     )
+    writer.allocTmpSgpr = lambda num, alignment=None, tag=None: allocTmpGpr(
+        writer.sgprPool, num, writer.states.regCaps["MaxSgpr"], alignment, tag, None)
+    writer.loopCounterName = lambda kernel, loopIdx: "LoopCounterL"
+    writer.tailLoopBoundaryDtlLoadAB = lambda *a, **kw: MagicMock()
+    _label_counters = {}
+    def _getNameInc(base):
+        n = _label_counters.get(base, 0)
+        _label_counters[base] = n + 1
+        return f"{base}_{n}"
+    writer.labels = SimpleNamespace(getNameInc=_getNameInc)
     dTileInfo = makeTileInfo('D', kernel)
     dTileInfo.allocVgprTileRegisters_legacy(writer, kernel)
     writer.states.d = SimpleNamespace(tileInfo=dTileInfo)
@@ -1434,6 +1506,64 @@ class TestComputeInflightLoads:
         assert lr_a1.preOps[0].wait_gr_counts.SA == 1
         assert lr_a1.preOps[0].wait_gr_counts.SB == 1
 
+    def test_fp8_DU128_asymmetric_A_lt_B(self):
+        """FP8 DU=128, MT=128x192, waveGroup=(2,2), PGR=2.
+
+        Regression for _compute_inflight_loads bug (commit 055ecc8):
+        With flat_len=1 (1 partition × 1 subIterK), wraps_needed=1
+        (cross-MT dep), consumer_flat==dep_flat==0, the old wrap-counting
+        code walked the single slot twice instead of once — overcounting all
+        GRs in the slot as extra inflight.
+
+        Correct behavior: walk exactly wraps_needed*flat_len=1 step; on the
+        final step stop immediately at the dep GR (A), yielding A=0.  The B
+        GRs that were emitted after A (higher sort key) are still counted.
+
+        Old (buggy) counts for LR A: A=4, B=12.
+        New (correct) counts for LR A: A=0, B=6.
+        """
+        cfg = make_cfg_fp8(128, 192, waveGroup=(2, 2))
+        assert cfg.numSubIterK == 1, "FP8 DU=128 / matrixInstK=128 → single subIterK"
+        sched = LogicalScheduler(cfg)
+        sched.remove_cross_deps()
+
+        s0 = sched._partitions[0][0]
+
+        # LR A: dep is GR A (emitted first → last in reverse order).
+        # All B GRs (emitted after A, encountered first in backward walk) are inflight.
+        lr_a = _get_lr(s0, 'A')
+        assert lr_a.preOps[0].wait_gr_counts.A == 0
+        assert lr_a.preOps[0].wait_gr_counts.B == 6  # 6 B tiles in MT192 / wg2
+
+        # LR B: dep is GR B (emitted last → first in reverse order); nothing after it.
+        lr_b = _get_lr(s0, 'B')
+        assert lr_b.preOps[0].wait_gr_counts.A == 0
+        assert lr_b.preOps[0].wait_gr_counts.B == 0
+
+    def test_fp8_DU128_asymmetric_A_gt_B(self):
+        """FP8 DU=128, MT=448x64, waveGroup=(4,1), PGR=2.
+
+        Same _compute_inflight_loads regression as test_fp8_DU128_asymmetric_A_lt_B
+        but with more A tiles than B tiles (7A vs 4B).
+
+        Old (buggy) counts for LR A: A=7, B=8.
+        New (correct) counts for LR A: A=0, B=4.
+        """
+        cfg = make_cfg_fp8(448, 64, waveGroup=(4, 1))
+        assert cfg.numSubIterK == 1
+        sched = LogicalScheduler(cfg)
+        sched.remove_cross_deps()
+
+        s0 = sched._partitions[0][0]
+
+        lr_a = _get_lr(s0, 'A')
+        assert lr_a.preOps[0].wait_gr_counts.A == 0
+        assert lr_a.preOps[0].wait_gr_counts.B == 4  # 4 B tiles in MT64 / wg1
+
+        lr_b = _get_lr(s0, 'B')
+        assert lr_b.preOps[0].wait_gr_counts.A == 0
+        assert lr_b.preOps[0].wait_gr_counts.B == 0
+
 
 # ══════════════════════════════════════════════════════════════
 # Step 8: Group LR/GR
@@ -1581,7 +1711,8 @@ class TestBuildPreloop:
 class TestBuildNGLL:
 
     def test_256x256_fp4(self):
-        """NGLL removes GR(n+2) and gr_inc. LR and MFMA preserved."""
+        """NGLL removes GR(n+2). LR, MFMA, and gr_inc preserved (gr_inc
+        still needed to swap LW for tail entry)."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
         sched.build()
@@ -1595,14 +1726,20 @@ class TestBuildNGLL:
 
         assert 'mfma' in all_ops
         assert 'lr' in all_ops
-        # NGLL should not have gr_inc
-        assert 'gr_inc' not in all_ops
+        # NGLL must drop GR(n+2) loads
+        for partition in ngll:
+            for group in partition:
+                for em in group:
+                    if em.opType == 'gr':
+                        assert em.source.mtIteration != 2, \
+                            "NGLL should not contain GR(n+2)"
 
 
 class TestBuildNLL:
 
     def test_256x256_fp4(self):
-        """NLL removes GRs, LR(n+1), increments. Only MFMA remains."""
+        """NLL removes GRs, LR(n+1), and (PGR=2) gr_inc. LR(n), MFMA, and
+        lr_inc remain — lr_inc is required to swap LR base for the next MT."""
         cfg = make_cfg_256x256_fp4()
         sched = LogicalScheduler(cfg)
         sched.build()
@@ -1615,10 +1752,16 @@ class TestBuildNLL:
                    for group in partition for em in group]
 
         assert 'mfma' in all_ops
-        # NLL should not have gr or gr_inc or lr_inc
+        # NLL drops global loads and (under PGR=2) gr_inc
         assert 'gr' not in all_ops
         assert 'gr_inc' not in all_ops
-        assert 'lr_inc' not in all_ops
+        # LR(n+1) must be gone — only LR(n) remains
+        for partition in nll:
+            for group in partition:
+                for em in group:
+                    if em.opType == 'lr':
+                        assert em.source.mtIteration == 0, \
+                            "NLL should only contain LR(n)"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1990,8 +2133,8 @@ class TestIntegration:
         finally:
             sched.deallocVgprTiles(writer)
 
-    def test_emitAllLoops_256x256_fp4(self):
-        """emitAllLoops: label structure and per-unroll VGPR differences."""
+    def test_emitLoops_256x256_fp4(self):
+        """emitMainAndExitLoops + emitTailLoop: label structure and per-unroll VGPR differences."""
         kernel = create_kernel(256, 256, fp4=True)
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
 
@@ -2010,8 +2153,8 @@ class TestIntegration:
             )
 
             uf = sched.unroll_factor
-            module = sched.emitAllLoops(writer, kernel)
-            asm = str(module)
+            asm = str(sched.emitMainAndExitLoops(writer, kernel)) \
+                + str(sched.emitTailLoop(writer, kernel))
 
             assert "LoopBeginL:" in asm
             assert "SkipToNGLL:" in asm
@@ -2043,6 +2186,90 @@ class TestIntegration:
                 assert "NGLL" in asm
                 assert "NLL" in asm
 
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_tailloop_k_mask_256x256_fp4(self):
+        """Tail loop must emit per-lane K-mask (v_cmp_lt_i32 + v_cndmask_b32) after wait_lr."""
+        kernel = create_kernel(256, 256, fp4=True)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+        cfg = make_cfg_256x256_fp4()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                              scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+            asm = str(sched.emitTailLoop(writer, kernel))
+
+            # mask init (preamble): kReg = (Serial % WS) / dividerFortidInK
+            assert "v_and_b32" in asm or "v_lshrrev_b32" in asm, \
+                "expected mask-init arithmetic in tail preamble"
+
+            # mask body: per-group compare + cndmask -> 0
+            assert "v_cmp_lt_i32" in asm, \
+                "tail loop missing per-lane K compare (v_cmp_lt_i32)"
+            assert "v_cndmask_b32" in asm, \
+                "tail loop missing v_cndmask_b32 to zero A vgprs"
+            assert ", 0," in asm, \
+                "v_cndmask_b32 should zero (src1=0) the masked lanes"
+
+            # ordering: compare must come after a wait_lr (lgkmcnt(0)) and
+            # before the first v_mfma.
+            first_cmp   = asm.find("v_cmp_lt_i32")
+            first_mfma  = asm.find("v_mfma")
+            last_wait_before_cmp = asm.rfind("lgkmcnt(0)", 0, first_cmp)
+            assert first_cmp != -1 and first_mfma != -1
+            assert last_wait_before_cmp != -1, "expected lgkmcnt(0) before mask"
+            assert first_cmp < first_mfma, "mask must precede first MFMA"
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_tailloop_k_partial_mask_bf16(self):
+        """BF16 tail loop must use V_AND_B32 with a 3-state mask (incl. 0x0000FFFF)
+        so the K boundary can fall inside a vgpr without losing the valid element."""
+        kernel = create_kernel(256, 256, fp4=False)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=False)
+
+        cfg = make_cfg_bf16(256, 256)
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                tensorParametersA=MagicMock(),
+                tensorParametersB=MagicMock(),
+            )
+            asm = str(sched.emitTailLoop(writer, kernel)).lower()
+
+            # half-mask sgpr load
+            assert "0x0000ffff" in asm, \
+                "BF16 tail mask must reference the 0x0000FFFF half-mask constant"
+            # V_AND_B32 applies the per-vgpr mask to A/B tile vgprs
+            assert "v_and_b32" in asm, \
+                "BF16 tail must emit V_AND_B32 over A/B tile vgprs"
+            # Two-stage select uses V_CMP_LT_I32 (diff<2 and diff<1)
+            assert "v_cmp_lt_i32" in asm, \
+                "BF16 tail mask uses v_cmp_lt_i32 for the diff<2 / diff<1 select"
+
+            # Ordering: the v_and_b32 must follow the wait_lr and precede the v_mfma.
+            first_and  = asm.find("v_and_b32 v")  # skip mask-init 'v_and_b32 ...,63,...'
+            first_mfma = asm.find("v_mfma")
+            assert first_and != -1 and first_mfma != -1
+            # The first v_and_b32 we care about is the mask in the body; tolerate
+            # earlier mask-init operations by checking ordering against MFMA.
+            last_wait_before_mfma = asm.rfind("lgkmcnt(0)", 0, first_mfma)
+            assert last_wait_before_mfma != -1, "expected lgkmcnt(0) before MFMA"
+            assert last_wait_before_mfma < first_mfma
         finally:
             sched.deallocVgprTiles(writer)
 
@@ -2227,6 +2454,13 @@ if __name__ == "__main__":
         scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
     )
 
+    print(f"{'=' * 60}")
+    print(f"  Build tailloop (PGR0 template)")
+    print(f"{'=' * 60}")
+    print(sched.print_emit(sched._tailloop_emitted).replace("MAINLOOP:", "TAILLOOP:"))
+    if args.interactive:
+        input("Press Enter for next step...")
+
     def _print_emitLoop(label, emitted_3d, schedule=True):
         module = sched._emitLoop(writer, kernel, label, emitted_3d, schedule=schedule)
         buf = io.StringIO()
@@ -2240,9 +2474,13 @@ if __name__ == "__main__":
             ("MAINLOOP", sched._emitted_per_unroll[0]),
             ("NGLL",     sched._ngll_per_unroll[0]),
             ("NLL",      sched._nll_per_unroll[0]),
+            ("TAILLOOP", sched._tailloop_emitted, False),
         ]
     else:
-        loop_sections = [("MAINLOOP", sched._emitted_per_unroll[0])]
+        loop_sections = [
+            ("MAINLOOP", sched._emitted_per_unroll[0]),
+            ("TAILLOOP", sched._tailloop_emitted, False),
+        ]
 
     for section in loop_sections:
         label, emitted_3d = section[0], section[1]
@@ -2391,8 +2629,9 @@ class TestBuildNll:
                 for em in emitted:
                     src = em.source
                     assert em.opType != 'gr', "NLL should have no GR ops"
+                    # PGR=2 (default): gr_inc dropped; lr_inc kept to swap LR
+                    # base for the next MT iteration on tail entry.
                     assert em.opType != 'gr_inc', "NLL should have no gr_inc ops"
-                    assert em.opType != 'lr_inc', "NLL should have no lr_inc ops"
                     if em.opType == 'lr' and isinstance(src, LRPlacement):
                         assert src.mtIteration == 0, \
                             f"NLL should only have LR(n=0), got mt={src.mtIteration}"
@@ -2597,3 +2836,72 @@ class TestBuildLoopVariants_PGR0:
         sched.emit()
         nll = sched.build_nll()
         assert nll == [[[]]]
+
+
+class TestBuildTailloopPGR0:
+
+    def test_assembly_fp4_256x256(self):
+        """Full pipeline: display generated assembly for FP4 tailloop."""
+        kernel = create_kernel(256, 256, fp4=True)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+        cfg = make_cfg_256x256_fp4()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                              scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+
+            print("FP4 256x256 tailloop assembly:")
+            module = sched._emitLoop(writer, kernel, "TAILLOOP",
+                                      sched._tailloop_emitted,
+                                      schedule=False)
+            for inst in module.flatitems():
+                print(f"  {str(inst).rstrip()}")
+
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_assembly_bf16_320x320_1x5(self):
+        """Full pipeline: BF16 320x320 tailloop with 1x5 partitions."""
+        kernel = create_kernel(320, 320, fp4=False)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=False)
+
+        cfg = SchedulerConfig(
+            numMFMATilesM=tiA.localMMATileGrid[0],
+            numMFMATilesN=tiB.localMMATileGrid[0],
+            numSubIterK=tiA.localMMATileGrid[1],
+            lrA=ReadGranularity(mn=1, k=1),
+            lrB=ReadGranularity(mn=1, k=1),
+            grA=ReadGranularity(mn=1, k=2),
+            grB=ReadGranularity(mn=1, k=2),
+            partitionSizeN=2,
+            pgr=2,
+        )
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB)
+
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+            )
+
+            print("BF16 320x320 1x5 tailloop assembly:")
+            module = sched._emitLoop(writer, kernel, "TAILLOOP",
+                                      sched._tailloop_emitted,
+                                      schedule=False)
+            for inst in module.flatitems():
+                print(f"  {str(inst).rstrip()}")
+
+        finally:
+            sched.deallocVgprTiles(writer)

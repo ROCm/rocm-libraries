@@ -25,6 +25,8 @@ Documentation for rocSPARSE is available at
 * Fix off-by-one heap-buffer-overflow in temporary buffer allocation for `rocsparse_csrsort`, `rocsparse_check_matrix_csr`, and `rocsparse_check_matrix_gebsr` (and their delegating routines `rocsparse_cscsort`, `rocsparse_coosort`, `rocsparse_check_matrix_csc`, and `rocsparse_check_matrix_gebsc`) where the `shift_offsets_kernel` temp buffer was sized for `m` elements instead of `m+1`.
 * Fixed incorrect usage of `rocsparse_conj` in `bsric0` for complex matrices
 * Fix GPU memory fault in singular-pivot detection (`markers2position`) for `rocsparse_[s|d|c|z]csrsv`, `rocsparse_[s|d|c|z]csric0`, `rocsparse_[s|d|c|z]csrilu0`, `rocsparse_[s|d|c|z]bsric0`, and `rocsparse_[s|d|c|z]bsrilu0` when the compute routine is executed inside a HIP graph capture region. The numeric singular-pivot buffers are now allocated during the analysis phase instead of the captured compute phase, so they are no longer graph-owned memory that becomes invalid once the captured graph is torn down and read by the corresponding `zero_pivot`/`singular_pivot` routines.
+* Fix double-free and use-after-free in `rocsparse_copy_mat_info` for `csritsv` info, where the owned `ptr_end` device buffer was copied shallowly and the pivot/position metadata was copied using the destination's (invalid) index type instead of the source's.
+* Fix the `--memstat` build, where tracked allocation call sites passing typed `T**` pointers (for example `csrmv` `wg_flags` and the HYB index buffers) failed to compile against the `void**` allocation entry points.
 
 ### Removed
 * The deprecated C++14 support, which is no longer supported by the rocPRIM dependency.
