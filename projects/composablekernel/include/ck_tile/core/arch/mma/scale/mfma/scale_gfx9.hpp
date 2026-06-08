@@ -16,13 +16,6 @@
 
 namespace ck_tile::core::arch::mma {
 
-// TODO: There seem to be some places requesting fp8/bf8 MFMA scale warpgemms with AttrNumAccess =
-// 1, even though they require AttrNumAccess >= 2 to function properly. However, the latter is only
-// true if non-trivial scale values are used and furthermore it's possible that WarpGemms gotten
-// this way are not actually used for MMA operations but just for some internal parameters.
-// Therefore, for now we will allow AttrNumAccessAB = 1 for these warpgemms, but this behavior needs
-// to be checked at some point. Marked these spots with "TODO AttrNumAccess".
-
 /**
  * @struct amdgcn_mma
  * @brief Specialization of amdgcn_mma for Scale MFMA on GFX950 targets
@@ -38,7 +31,7 @@ namespace ck_tile::core::arch::mma {
 template <typename CtrlFlags, typename CompilerTarget>
 // clang-format off
 struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
-: amdgcn_mma_base<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, 64u, 32, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE> // TODO AttrNumAccess
+: amdgcn_mma_base<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, 64u, 32, 2, 1, 2, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>
 //               | A B C DataTypes    | MNK + WaveSize     |AParams  |BPar |CPar |
 // clang-format on
 {
@@ -77,7 +70,7 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarge
 template <typename CtrlFlags, typename CompilerTarget>
 // clang-format off
 struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, CtrlFlags, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
-: amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, 64u, 32, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE> // TODO AttrNumAccess
+: amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, 64u, 32, 2, 1, 2, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>
 //               | A B C DataTypes    | MNK + WaveSize     |AParams  |BPar |CPar |
 // clang-format on
 {
@@ -236,7 +229,7 @@ struct amdgcn_mma<pk_bf6x16_t, pk_bf6x16_t, fp32_t, 16u, 16u, 128u, CtrlFlags, C
 template <typename CtrlFlags, typename CompilerTarget>
 // clang-format off
 struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 32u, 32u, 64u, CtrlFlags, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
-: amdgcn_mma_base<fp8_t, fp8_t, fp32_t, 32u, 32u, 64u, 64u, 32, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE> // TODO AttrNumAccess
+: amdgcn_mma_base<fp8_t, fp8_t, fp32_t, 32u, 32u, 64u, 64u, 32, 2, 1, 2, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>
 //               | A B C DataTypes    | MNK + WaveSize    |AParams  |BPar |CPar  |
 // clang-format on
 {
@@ -275,7 +268,7 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 32u, 32u, 64u, CtrlFlags, CompilerTarget
 template <typename CtrlFlags, typename CompilerTarget>
 // clang-format off
 struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 32u, 32u, 64u, CtrlFlags, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
-: amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 32u, 32u, 64u, 64u, 32, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE> // TODO AttrNumAccess
+: amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 32u, 32u, 64u, 64u, 32, 2, 1, 2, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>
 //               | A B C DataTypes    | MNK + WaveSize    |AParams  |BPar |CPar  |
 // clang-format on
 {

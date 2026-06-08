@@ -72,6 +72,9 @@ concept ScaleMfmaDataTypeToFlag = requires(DataTypeToFlag dataTypeToFlag) {
 } // namespace scale::detail
 
 // No real flags for now, scale and opsel are handled in higher level and passed down directly.
+// OPSEL is now passed as a template arg to exec(), see mma_pipeline.hpp
+// We will soon get rid of these flags entirely in favor of variadic template packs passed down to
+// the intrinsics directly, see WarpGemmParamsParser<>.
 struct DefaultScaleMfmaCtrlFlags
 {
 };

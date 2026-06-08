@@ -174,18 +174,21 @@ struct ScalePipelineKernel
     operator()(const void* a_per_lane, const void* b_per_lane, void* c_per_lane) const
     {
         using CompilerTarget = decltype(get_compiler_target());
-        using Pipeline       = ScaleMmaPipeline<AType,
-                                                BType,
-                                                CType,
-                                                WaveTileM,
-                                                WaveTileN,
-                                                WaveTileK,
-                                                MmaAccumPolicy::ROW_MAJOR,
-                                                false, // CTranspose
-                                                1,     // SwizzleFactor
-                                                1,     // AttrNumAccessAV
-                                                1,     // AttrNumAccessBV
-                                                CompilerTarget>;
+
+        // AttrNumAccess 2 is only *necessary* for MFMA fp8/bf8 intrinsics, but should still work
+        // for the others.
+        using Pipeline = ScaleMmaPipeline<AType,
+                                          BType,
+                                          CType,
+                                          WaveTileM,
+                                          WaveTileN,
+                                          WaveTileK,
+                                          MmaAccumPolicy::ROW_MAJOR,
+                                          false, // CTranspose
+                                          1,     // SwizzleFactor
+                                          2,     // AttrNumAccessAV
+                                          2,     // AttrNumAccessBV
+                                          CompilerTarget>;
 
         using ATensor = typename Pipeline::AWarpTensor;
         using BTensor = typename Pipeline::BWarpTensor;
@@ -233,6 +236,8 @@ struct ScalePipelineFactory
     template <typename Target>
     struct Create
     {
+        // AttrNumAccess 2 is only *necessary* for MFMA fp8/bf8 intrinsics, but should still work
+        // for the others.
         using type = ScaleMmaPipeline<AType,
                                       BType,
                                       CType,
@@ -242,8 +247,8 @@ struct ScalePipelineFactory
                                       MmaAccumPolicy::ROW_MAJOR,
                                       false, // CTranspose
                                       1,     // SwizzleFactor
-                                      1,     // AttrNumAccessAV
-                                      1,     // AttrNumAccessBV
+                                      2,     // AttrNumAccessAV
+                                      2,     // AttrNumAccessBV
                                       Target>;
     };
 };
@@ -362,8 +367,8 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 //                                                 AccumPolicy,
 //                                                 false, // CTranspose
 //                                                 1,     // SwizzleFactor
-//                                                 1,     // AttrNumAccessAV
-//                                                 1,     // AttrNumAccessBV
+//                                                 2,     // AttrNumAccessAV
+//                                                 2,     // AttrNumAccessBV
 //                                                 CompilerTarget>;
 
 //         using ATensor = typename Pipeline::AWarpTensor;
@@ -424,8 +429,8 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 //                                       AccumPolicy,
 //                                       false, // CTranspose
 //                                       1,     // SwizzleFactor
-//                                       1,     // AttrNumAccessAV
-//                                       1,     // AttrNumAccessBV
+//                                       2,     // AttrNumAccessAV
+//                                       2,     // AttrNumAccessBV
 //                                       Target>;
 //     };
 // };

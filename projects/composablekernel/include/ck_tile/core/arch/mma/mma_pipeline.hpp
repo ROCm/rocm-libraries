@@ -3,8 +3,6 @@
 #pragma once
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
-#include "ck_tile/core/numeric/e5m3.hpp"
-#include "ck_tile/core/numeric/e4m3.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
 
 #include "amdgcn_mma.hpp"

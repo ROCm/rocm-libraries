@@ -10,21 +10,10 @@
 #include "ck_tile/core/arch/mma/scale/scale_mma_pipeline.hpp"
 #include "ck_tile/core/arch/mma/mma_wavewise.hpp"
 
-// When USE_NEW_UNIFIED_FRAMEWORK is 1, we replace all WarpGemms with MmaPipelines from the new
-// unified framework. This means WarpGemmDispatcher will use the UnificationDispatcher instead of
-// the regular Dispatcher. Furthermore, named WarpGemms like WarpGemmMfmaF32F32F32M16N16K4 will also
-// get rerouted to the UnificationDispatcher. The latter is necessary because some pipelines bypass
-// the WarpGemmDispatcher in favor of directly using named WarpGemms.
-#ifndef USE_NEW_UNIFIED_FRAMEWORK
-#define USE_NEW_UNIFIED_FRAMEWORK 0
-#endif
-
 #if USE_NEW_UNIFIED_FRAMEWORK
 namespace ck_tile {
 namespace impl {
 namespace warp_gemm_dispatcher {
-
-static constexpr auto ESingle = WGAttrNumAccessEnum::Single;
 
 using namespace ck_tile::core::arch;
 using namespace mma;
@@ -144,7 +133,7 @@ template <typename AType,
           bool TransposeC,
           bool SwizzleA                      = false,
           bool UseStructuredSparsity         = false,
-          WGAttrNumAccessEnum AttrNumAccessA = ESingle,
+          WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
           bool IsScale16                     = false>
 struct UnificationDispatcher

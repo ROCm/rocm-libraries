@@ -607,3 +607,10 @@ TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_16x16x128_Real)
     HIP_CHECK_ERROR(hipFree(d_c));
     HIP_CHECK_ERROR(hipFree(d_out));
 }
+
+// Placeholder for temp removed 112x112x128 test which included MN composition. Implementation was
+// the same as MmaSelector_F16_F16_F32_16x16x128_Real but with different waveTile sizes.
+TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_112x112x128_Real)
+{
+    GTEST_SKIP() << "M/N composition temporarily disabled, see PR 7407";
+}

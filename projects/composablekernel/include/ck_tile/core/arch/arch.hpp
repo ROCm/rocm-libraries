@@ -41,6 +41,15 @@
 #define CK_TILE_LGKMCNT(cnt) \
     ([]() { static_assert(!((cnt) >> 4), "LGKM only has 4 bits"); }(), ((cnt) << 8))
 
+// When USE_NEW_UNIFIED_FRAMEWORK is 1, we replace all WarpGemms with MmaPipelines from the new
+// unified framework. This means WarpGemmDispatcher will use the UnificationDispatcher instead of
+// the regular Dispatcher. Furthermore, named WarpGemms like WarpGemmMfmaF32F32F32M16N16K4 will also
+// get rerouted to the UnificationDispatcher. The latter is necessary because some pipelines bypass
+// the WarpGemmDispatcher in favor of directly using named WarpGemms.
+#ifndef USE_NEW_UNIFIED_FRAMEWORK
+#define USE_NEW_UNIFIED_FRAMEWORK 0
+#endif
+
 namespace ck_tile {
 
 template <typename, bool>
@@ -402,6 +411,8 @@ constexpr auto get_compiler_target()
  * will always pick the *first* cmakelists target arch, so there will be issues when compiling for
  * multiple target architectures.
  */
+// Note: The trivial template and always_false_v are necessary to avoid triggering the first static
+// assert. Without this trick the static assert would be triggered regardless of the value of "id".
 template <typename = void>
 static constexpr auto getCMakeCompilerTarget()
 {
@@ -442,13 +453,17 @@ static constexpr auto getCMakeCompilerTarget()
     }
     else
     {
+#if USE_NEW_UNIFIED_FRAMEWORK // Avoid hard errors for third parties including arch.hpp
         static_assert(always_false_v<decltype(id)>,
                       "CK_CMAKE_GPU_TARGET_IDS[0] is HOST or UNKNOWN!\n");
-        return amdgcn_target<>{};
+#endif
+        return amdgcn_target<>{}; // By default, return HOST target.
     }
 #else
-    static_assert(0, "The CK_CMAKE_GPU_TARGET_IDS macro was not made available!\n");
-    return amdgcn_target<>{};
+#if USE_NEW_UNIFIED_FRAMEWORK
+    static_assert(false, "The CK_CMAKE_GPU_TARGET_IDS macro was not made available!\n");
+#endif
+    return amdgcn_target<>{}; // By default, return HOST target.
 #endif
 }
 

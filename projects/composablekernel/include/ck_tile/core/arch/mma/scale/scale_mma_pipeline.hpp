@@ -120,14 +120,20 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
         };
     };
 
+    // Unsupported MmaOps with nonTrivial AttrNumAccess lead to issues in calculator.
+    static constexpr index_t AttrNumAccessAV_support =
+        MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessAV : 1;
+    static constexpr index_t AttrNumAccessBV_support =
+        MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessBV : 1;
+
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
     // A layout. No Swizzle support yet.
     using EncCalc           = TileDistrEncCalc<MmaOp,
                                                CTranspose,
                                                SwizzleFactor,
                                                FragsK,
-                                               AttrNumAccessAV,
-                                               AttrNumAccessBV>;
+                                               AttrNumAccessAV_support,
+                                               AttrNumAccessBV_support>;
     using AWarpDstrEncoding = typename EncCalc::AWarpDstrEncoding;
     using BWarpDstrEncoding = typename EncCalc::BWarpDstrEncoding;
     using CWarpDstrEncoding = typename EncCalc::CWarpDstrEncoding;

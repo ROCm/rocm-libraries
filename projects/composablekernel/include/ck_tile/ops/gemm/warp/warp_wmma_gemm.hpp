@@ -18,7 +18,6 @@ namespace ck_tile {
 // redefine them in terms of the new unification dispatcher. Only did so for named WarpGemms that
 // are already (or seem likely to be) used directly.
 #if USE_NEW_UNIFIED_FRAMEWORK
-using namespace impl::warp_gemm_dispatcher;
 // None of the named WMMA warpgemms are used directly so nothing defined yet.
 #else
 
