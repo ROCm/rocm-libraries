@@ -1,0 +1,32 @@
+{
+  "tool": "atheris",
+  "available": true,
+  "version": "python3.12 built-in libfuzzer (atheris importable, no __version__ attr)",
+  "smoke_ran": true,
+  "real_input": "alt_format_rejected(alt_format=True, n_config_files=10) -> True (witness from fuzz run #63)",
+  "output_path": "work/tensilelite-characterization/parametric-chaos/_tooling/atheris/receipt.json",
+  "crosscheck": {
+    "kind": "atheris_witness_reproduces",
+    "fallback_ref": "Hypothesis",
+    "passed": true,
+    "detail": "Witness (True, 10)->True reproduced directly against plain helper. Boundary points confirmed: (True,3)->True, (True,2)->False, (False,10)->False. All crosschecks passed."
+  },
+  "receipt_path": "work/tensilelite-characterization/parametric-chaos/_tooling/atheris/receipt.json",
+  "harness_path": "work/tensilelite-characterization/parametric-chaos/_tooling/atheris/fuzz_helper.py",
+  "witness_path": "work/tensilelite-characterization/parametric-chaos/_tooling/atheris/witness.json",
+  "run_summary": {
+    "branch_id": "d8f43265b665a4b721072cb052d2fbd64d526645",
+    "predicate_source": "altFormat and len(configPaths) > 2",
+    "pure_helper_source": "canonical (no _frags/Solve pure_helper file found; using task-prompt inline helper)",
+    "container": "tl-pchaos-tools",
+    "args": "-max_total_time=30 -runs=200000",
+    "actual_runs": 200000,
+    "wall_seconds": 1,
+    "coverage_edges": 101,
+    "witness_found_at_run": 63,
+    "witness": {"alt_format": true, "n_config_files": 10, "result": true},
+    "invariant_checked": "result==True implies (alt_format==True AND n_config_files>2)",
+    "assertions_fired": 0,
+    "exit_code": 0
+  }
+}

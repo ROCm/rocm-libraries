@@ -1,0 +1,16 @@
+{
+  "branch_id": "d8f43265b665a4b721072cb052d2fbd64d526645",
+  "file": "Tensile/Tensile.py",
+  "function": "Tensile",
+  "line": 526,
+  "predicate_source": "altFormat and len(configPaths) > 2",
+  "codeql_symbol_set": [
+    "altFormat",
+    "argParser",
+    "args",
+    "configPaths",
+    "len",
+    "userArgs"
+  ],
+  "method": "seed-line Name reads (incl builtins) UNION transitive backward def-use closure (SSA + Assign-RHS + phi)"
+}

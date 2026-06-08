@@ -1,0 +1,15 @@
+{
+  "tool": "pict",
+  "available": true,
+  "version": "unknown (pict binary at /usr/local/bin/pict, no --version flag)",
+  "smoke_ran": true,
+  "real_input": "/work/work/tensilelite-characterization/parametric-chaos/PublicInputSurface/covering_array/model.json",
+  "output_path": "/work/work/tensilelite-characterization/parametric-chaos/_tooling/pict/cases.tsv",
+  "crosscheck": {
+    "kind": "pict_superset_of_stdlib_pairs",
+    "fallback_ref": "/work/work/tensilelite-characterization/parametric-chaos/PublicInputSurface/covering_array/cases.csv",
+    "passed": true,
+    "detail": "PICT superset check: stdlib_pairs=409, pict_pairs=409, missing=0, stdlib_rows=17, pict_rows=19"
+  },
+  "receipt_path": "/work/work/tensilelite-characterization/parametric-chaos/_tooling/pict/receipt.json"
+}

@@ -1,0 +1,50 @@
+{
+  "schema": "PREFLIGHT_TOOLS_SCHEMA",
+  "generated_at": "2026-06-07T00:00:00Z",
+  "container": "tl-pchaos-tools",
+  "tools": {
+    "codeql": {
+      "available": true,
+      "version": "2.25.6",
+      "version_line": "CodeQL command-line toolchain release 2.25.6.",
+      "check_command": "codeql --version",
+      "exit_code": 0,
+      "raw_stdout": "CodeQL command-line toolchain release 2.25.6.\nCopyright (C) 2019-2026 GitHub, Inc.\nUnpacked in: /opt/codeql\n   Analysis results depend critically on separately distributed query and\n   extractor modules. To list modules that are visible to the toolchain,\n   use 'codeql resolve packs' and 'codeql resolve languages'.",
+      "raw_stderr": "",
+      "resolve_packs_head": "Searching directories specified by `--additional-packs`. All directories have equal priority.\n  Searching in:\n    No packs were found at this location.\nSearching directories specified by `--search-path`. Directories are searched in order.\nSearching the root of the CodeQL distribution.\n  Searching in:\n      /opt/codeql\n    The following packs were found:\n      legacy-upgrades@0.0.0: (query) /opt/codeql/legacy-upgrades/qlpack.yml\nSearching the parent directory of the CodeQL distribution.",
+      "notes": "Binary at /opt/codeql. Only legacy-upgrades pack present; no language extractors installed. Scoped DB creates must target a small Python subset."
+    },
+    "pict": {
+      "available": true,
+      "version": "present",
+      "version_line": "present",
+      "check_command": "pict /usr/local/bin/pict",
+      "exit_code": 4,
+      "raw_stdout": "",
+      "raw_stderr": "Input Error: Parameter ELF should have at least one value defined",
+      "plain_invocation_stdout": "Pairwise Independent Combinatorial Testing\n\nUsage: pict model [options]\n\nOptions:\n /o:N|max         - Order of combinations (default: 2)\n /d:C             - Separator for values  (default: ,)\n /a:C             - Separator for aliases (default: |)\n /n:C             - Negative value prefix (default: ~)\n /e:file          - File with seeding rows\n /r[:N]           - Randomize generation, N - seed\n /f[:text|json]   - Output format (default: text)\n /c               - Case-sensitive model evaluation\n /s               - Show model statistics",
+      "plain_invocation_exit_code": 0,
+      "notes": "Binary at /usr/local/bin/pict. No --version flag; binary does not embed a version string. The prescribed check-command (pict /usr/local/bin/pict) exits 4 with usage error 'Parameter ELF should have at least one value defined' — this confirms the binary runs and responds to input. Plain invocation (pict with no args) exits 0 and prints usage. Version recorded as 'present' per task spec fallback."
+    },
+    "atheris": {
+      "available": true,
+      "version": "3.0.0",
+      "version_line": "present",
+      "check_command": "python3 -c \"import atheris; print(getattr(atheris, '__version__', 'present'))\"",
+      "exit_code": 0,
+      "raw_stdout": "present",
+      "raw_stderr": "",
+      "pip_version": "3.0.0",
+      "pip_command": "pip show atheris",
+      "pip_raw": "Name: atheris\nVersion: 3.0.0",
+      "install_path": "/opt/python/cp312-cp312/lib/python3.12/site-packages/atheris/__init__.py",
+      "notes": "atheris.__version__ is not set (getattr fallback returns 'present'); pip show atheris confirms Version: 3.0.0. Binary instrumentation fuzzer available for coverage-guided chaos."
+    }
+  },
+  "summary": {
+    "all_available": true,
+    "available_count": 3,
+    "unavailable_count": 0,
+    "tools_list": ["codeql", "pict", "atheris"]
+  }
+}

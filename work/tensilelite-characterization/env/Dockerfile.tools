@@ -1,0 +1,80 @@
+# Deferred deeper-layer analysis tools for the parametric-chaos pipeline.
+# Image: tl-pchaos-tools  (see PLAN-DEFERRED-TOOLS-DOCKER.md)
+#
+# These are source/solver/domain analyzers -- NONE need rocisa, ROCm, or a GPU:
+#   PICT    -- combinatorial covering arrays (n-wise + constraint exclusion)
+#   CodeQL  -- interprocedural backward Python slicing (build-mode=none)
+#   Atheris -- coverage-guided fuzzing of extracted pure helpers (best-effort)
+# Keeping them OFF the multi-GB ROCm tl-char image keeps this layer small,
+# rebuildable, and decoupled from the rocisa build dance. The phases that DO
+# need the real Tensile modules stay in tl-char; only the tool-gated sub-steps
+# run here (workflow routes them via args.toolsContainer).
+#
+# ---------------------------------------------------------------------------
+# DEVIATION FROM PLAN (recorded honestly): the plan recommends FROM ubuntu:24.04
+# "because it builds anywhere". On THIS host docker.io is unauthorized (HEAD
+# manifests -> 401), so ubuntu:24.04 cannot be pulled, while ghcr.io IS
+# reachable. We therefore base on TheRock's manylinux base -- AlmaLinux 8.10,
+# already local, and ROCm-free because we do NOT COPY artifacts/ (unlike the
+# tl-char Dockerfile). The plan explicitly lists `almalinux:8` as an acceptable
+# alternative and notes the OS match with tl-char keeps CodeQL query/abi
+# expectations consistent. Same classic-frontend rule as env/Dockerfile: no
+# `# syntax=` directive, so no docker.io frontend pull is attempted.
+#
+# Build context needs NO ./artifacts/ -- this image is ROCm-free, builds
+# anywhere ghcr.io + github.com + pypi.org are reachable.
+# ---------------------------------------------------------------------------
+FROM ghcr.io/rocm/therock_build_manylinux_x86_64:main
+
+LABEL org.opencontainers.image.source="https://github.com/ROCm/TheRock"
+LABEL tl.pchaos.tools="pict,codeql,atheris"
+LABEL tl.pchaos.base="manylinux-almalinux8.10 (ROCm-free, no artifacts COPY)"
+
+# bash so `source <scl enable>` works inside RUN (default sh has no `source`).
+SHELL ["/bin/bash", "-c"]
+
+# Put the manylinux cp312 python + therock cmake on the NON-login PATH (the
+# workflow drives everything via plain `docker exec`, not a login shell).
+ENV PATH=/opt/python/cp312-cp312/bin:/usr/local/therock-tools/bin:$PATH
+ENV PIP_NO_CACHE_DIR=1
+
+# clang/LLVM (libFuzzer runtime) for Atheris; git/curl/unzip/cmake/gcc-toolset
+# are already on the manylinux base.
+RUN dnf install -y --setopt=install_weak_deps=False clang llvm llvm-toolset compiler-rt \
+ && dnf clean all
+
+# --- mandatory pchaos solver/verify pip layer (mirror tl-char so solve/verify
+#     cross-checks can run here too) ---
+RUN pip3 install --no-cache-dir z3-solver crosshair-tool hypothesis pysmt
+
+# --- PICT (Microsoft, MIT) -- smallest tool, proves the image pattern ---
+# Pin to a commit for reproducibility. gcc-toolset-13 + cmake are on the base.
+ARG PICT_REF=a096eaf237abcc50fdc48b0dc2d468622083a33d
+RUN git clone https://github.com/microsoft/pict /tmp/pict \
+ && git -C /tmp/pict checkout ${PICT_REF} \
+ && source /opt/rh/gcc-toolset-13/enable \
+ && cmake -S /tmp/pict -B /tmp/pict/build -DCMAKE_BUILD_TYPE=Release \
+ && cmake --build /tmp/pict/build --parallel \
+ && install /tmp/pict/build/cli/pict /usr/local/bin/pict \
+ && rm -rf /tmp/pict \
+ && pict /usr/local/bin/pict >/dev/null 2>&1 || true
+
+# --- CodeQL CLI + Python query/library pack (public release; pinned) ---
+ARG CODEQL_VERSION=2.25.6
+RUN curl -fsSL -o /tmp/codeql.zip \
+      https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-linux64.zip \
+ && unzip -q /tmp/codeql.zip -d /opt && rm /tmp/codeql.zip
+ENV PATH=/opt/codeql:$PATH
+# Cache the standard Python libraries/queries so Slice queries run offline.
+RUN codeql pack download codeql/python-all codeql/python-queries
+
+# --- Atheris (Google, Apache-2.0); clang present. TOLERANT: the 3.12 build is
+#     the one real risk. If it fails, preflight keeps atheris unavailable and
+#     Validate falls back to Hypothesis, exactly as today. ---
+RUN source /opt/rh/gcc-toolset-13/enable 2>/dev/null; \
+    CC=clang CXX=clang++ LIBFUZZER_LIB="$(clang -print-file-name=libclang_rt.fuzzer-x86_64.a 2>/dev/null)" \
+      pip3 install --no-cache-dir atheris \
+ && python3 -c "import atheris; print('atheris OK')" \
+ || echo "ATHERIS_BUILD_FAILED: leaving atheris unavailable (fallback=Hypothesis)"
+
+WORKDIR /work

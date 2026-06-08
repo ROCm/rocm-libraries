@@ -1,0 +1,38 @@
+{
+  "schema": "ASSEMBLE_SCHEMA",
+  "generated_for_surface": "PublicInputSurface",
+  "container": "tl-pchaos-tools",
+  "tools": [
+    {
+      "tool": "pict",
+      "available": true,
+      "version": "unknown (binary at /usr/local/bin/pict, no --version flag; recorded as 'present')",
+      "smoke_ran": true,
+      "crosscheck_kind": "pict_superset_of_stdlib_pairs",
+      "crosscheck_passed": true,
+      "receipt_path": "work/tensilelite-characterization/parametric-chaos/_tooling/pict/receipt.json",
+      "crosscheck_detail": "PICT generated 19 rows covering 409 2-way pairs (stdlib covering_array: 17 rows, 409 pairs). PICT is a strict superset: 0 stdlib pairs missed. Real input: PublicInputSurface/covering_array/model.json. Output: _tooling/pict/cases.tsv."
+    },
+    {
+      "tool": "codeql",
+      "available": true,
+      "version": "2.25.6",
+      "smoke_ran": true,
+      "crosscheck_kind": "codeql_superset_of_ast_defuse",
+      "crosscheck_passed": true,
+      "receipt_path": "work/tensilelite-characterization/parametric-chaos/_tooling/codeql/receipt.json",
+      "crosscheck_detail": "CodeQL backward def-use slice on Tensile/Tensile.py:526 (predicate: altFormat and len(configPaths) > 2). CodeQL symbol set {altFormat, argParser, args, configPaths, len, userArgs} is a strict superset of stdlib oracle {altFormat, configPaths, len}. All 3 oracle symbols resolved; 3 interprocedural extras found (args, argParser, userArgs). No oracle symbol missed. DB create took 4.1s on 2-file subset."
+    },
+    {
+      "tool": "atheris",
+      "available": true,
+      "version": "3.0.0 (pip show); atheris.__version__ not set",
+      "smoke_ran": true,
+      "crosscheck_kind": "atheris_witness_reproduces",
+      "crosscheck_passed": true,
+      "receipt_path": "work/tensilelite-characterization/parametric-chaos/_tooling/atheris/receipt.json",
+      "crosscheck_detail": "Atheris fuzz run (-max_total_time=30 -runs=200000) found witness (alt_format=True, n_config_files=10) -> True at run #63. Witness reproduced directly. Boundary points confirmed: (True,3)->True, (True,2)->False, (False,10)->False. Fallback oracle: Hypothesis property-based testing. Atheris coverage-guided result agrees with and extends Hypothesis reach."
+    }
+  ],
+  "notes": "REAL-OUTPUT-VERIFIED tools: pict (smoke against real domain model, crosscheck on actual pair coverage count), codeql (DB created from real Tensile source files, QL query evaluated, symbol set crosschecked against ast oracle), atheris (fuzz run executed in-container with real branch predicate, witness reproduced). ACCEPTED-UNAVAILABLE: none; all three tools reported available=true in preflight and all three smokes passed. FALLBACK STATUS: the stdlib fallbacks (itertools-based covering_array.py for pict, ast-based branch_census for codeql, Hypothesis for atheris) remain the oracle/floor throughout. The real tools must SUPERSET the stdlib output; all three crosschecks confirm this. The stdlib fallbacks are never replaced -- they remain the authoritative baseline against which real-tool output is validated. CODEQL NOTE: the codeql/python-all (7.1.2) and codeql/python-queries (1.8.4) packs ARE baked into the image at build time (under /root/.codeql/packages), so Slice queries run offline. The DB create smoke was scoped to a 2-file Python subset (Tensile.py + Configuration.py) to stay well within the 180s time bound."
+}

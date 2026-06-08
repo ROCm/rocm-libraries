@@ -35,10 +35,20 @@ const files = args?.files ?? [
 const maxUnits = args?.maxUnits ?? 20
 // Constraint-harvest scan targets (modules with their own AST-constraint machinery).
 const scan = args?.scan ?? ['Tensile/Configuration.py', 'Tensile/TensileBenchmarkCluster.py']
+// Deferred deeper-layer tools (CodeQL/PICT/Atheris) live in a SEPARATE, ROCm-free
+// image. Default = tl-char (today's behavior: tools absent -> stdlib fallbacks only,
+// every tool-gated step is a no-op). Point this at tl-pchaos-tools (see
+// env/Dockerfile.tools + PLAN-DEFERRED-TOOLS-DOCKER.md) to upgrade Slice/Combinatorial
+// with real, cross-checked tool output. The stdlib helpers stay the SOURCE OF TRUTH;
+// the real tool must SUPERSET/agree with them (never silently replace).
+const TOOLS_CON = args?.toolsContainer ?? 'tl-char'
 
 const SHARED = [
   'ENVIRONMENT (paths are INSIDE container tl-char unless prefixed "host:"):',
   '  CON=tl-char ; PROJ=' + PROJ + ' (cwd for every docker exec: pass -w $PROJ)',
+  '  TOOLS_CON=' + TOOLS_CON + ' (deferred-tools image for CodeQL/PICT/Atheris ONLY; also mounts /work.',
+  '    If TOOLS_CON==tl-char the optional tools are absent -> use the documented stdlib fallback. The',
+  '    stdlib helper output is ALWAYS the source of truth; a real tool must SUPERSET/agree, never replace.)',
   '  WF=' + WF + '  (the committed helper scripts: branch_extractor.py, harvest_constraints.py, covering_array.py)',
   '  OUT=' + OUT + '  (deliverable root) ; FRAGS=' + FRAGS + '  (per-phase fragments)',
   '  TESTDIR=' + TESTDIR + '  (reified add-only tests live here)',
@@ -241,7 +251,11 @@ const pre = await agent(
   '  - output dir writable: create ' + OUT + '/_frags/{Census,Slice,Domain,Solve,Verify,Reify} (mkdir -p).\n' +
   '  - git baseline captured: host `git -C /home/davdixon/projects/rocm-libraries/.claude/worktrees/tensilelite-coverage status --porcelain`\n' +
   '    -> store the line count in a check detail (this is the pre-write baseline).\n' +
-  'OPTIONAL tools (classify available/unavailable, never fail on these): codeql, acts (java -jar), pict, daikon, atheris.\n\n' +
+  'OPTIONAL tools (classify available/unavailable in TOOLS_CON=' + TOOLS_CON + ', never fail on these):\n' +
+  '  codeql (`docker exec ' + TOOLS_CON + ' codeql --version`), pict (`docker exec ' + TOOLS_CON + ' pict` runs),\n' +
+  '  atheris (`docker exec ' + TOOLS_CON + ' python3 -c "import atheris"`), acts, daikon. available=true ONLY if\n' +
+  '  the command actually succeeds. Put the version/first-line in the optional_tools detail where you can.\n' +
+  '  (When TOOLS_CON==tl-char these report unavailable and the pipeline uses stdlib fallbacks — unchanged.)\n\n' +
   'preflight.json shape: {ok, checks:[{name,passed,detail}], optional_tools:[{tool,available}], git_baseline_lines:N}.\n' +
   'Return PREFLIGHT_SCHEMA with preflight_path=' + HOUT + '/preflight.json.\n\n' + SHARED,
   { phase: 'Preflight', schema: PREFLIGHT_SCHEMA, model: 'sonnet' })
@@ -295,6 +309,11 @@ const results = await pipeline(census.units,
     'Tag every public input with a source-category: cli | yaml | env | global-parameter | filesystem | os |\n' +
     'gpu-probe | interactive | derived-local. Use the extractor def-use seed as a starting point; refine it.\n' +
     'List any external_state the predicate truly depends on (os.environ keys, filesystem probes, hw probes).\n\n' +
+    'TOOL UPGRADE (optional; ONLY if CodeQL is available in TOOLS_CON=' + TOOLS_CON + '): additionally run an\n' +
+    'interprocedural backward slice in CodeQL (database create --build-mode=none over the source, def-use query)\n' +
+    'and MERGE any extra public-input symbols it resolves that the ast def-use missed. CROSS-CHECK: the CodeQL\n' +
+    'slice MUST be a superset of the ast def-use seed; if CodeQL drops a symbol the seed found, KEEP the seed\n' +
+    'symbol and note the discrepancy. The ast def-use remains the floor. If CodeQL is absent, skip this silently.\n\n' +
     'Write the HYPEREDGE record to host ' + HOUT + '/_frags/Slice/' + u.id + '.json and return HYPEREDGE_SCHEMA\n' +
     '(frag_path=' + HOUT + '/_frags/Slice/' + u.id + '.json). predicate_normalized: the normalized predicate AST\n' +
     '(reuse the extractor census record if convenient).\n\n' + SHARED,
@@ -391,7 +410,14 @@ const combo = await agent(
   '  docker exec -w $PROJ tl-char python ' + WF + '/covering_array.py \\\n' +
   '    --fragdir ' + FRAGS + '/Domain --outdir ' + OUT + ' --max-params 12\n' +
   '-> writes ' + OUT + '/covering_array/model.json and ' + OUT + '/covering_array/cases.csv ; prints a JSON\n' +
-  'summary. Verify both files are non-empty. Return COMBO_SCHEMA from the printed summary.\n\n' + SHARED,
+  'summary. Verify both files are non-empty.\n\n' +
+  'TOOL UPGRADE (optional; ONLY if PICT is available in TOOLS_CON=' + TOOLS_CON + '): also emit a PICT model from\n' +
+  'covering_array/model.json (one "Param: v1, v2, ..." line per parameter; carry harvested constraints as PICT\n' +
+  'sub-model/constraint lines if present), run `pict model.pict`, and write the result alongside as\n' +
+  'covering_array/cases_pict.tsv. CROSS-CHECK: assert the PICT cases cover EVERY 2-way pair the stdlib cases.csv\n' +
+  'covers (PICT ⊇ stdlib pairs); if any stdlib pair is missing, that is a regression — report it and keep the\n' +
+  'stdlib cases.csv as authoritative. The stdlib pairwise output remains the source of truth. Skip if PICT absent.\n\n' +
+  'Return COMBO_SCHEMA from the printed summary.\n\n' + SHARED,
   { phase: 'Combinatorial', schema: COMBO_SCHEMA, model: 'sonnet' })
 log('Combinatorial: ' + combo.parameters + ' params, ' + combo.cases + ' pairwise cases.')
 
