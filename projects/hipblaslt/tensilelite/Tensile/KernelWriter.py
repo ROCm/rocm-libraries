@@ -5946,10 +5946,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     passResult = rocIsaPass(moduleKernelBody, ripo)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
-    # For ArchAccUnifiedRegs ISAs, removeDuplicateAssignment in rocIsaPass can
-    # eliminate high-indexed VGPR copies, reducing actual instruction-level register
-    # usage below the pool high-water mark set in checkResources.  Rescan now to
-    # correct the kernel descriptor and CUOccupancy before the assembly is emitted.
+    # Post-rocIsaPass: rescan actual register usage and update kernel descriptor
+    # + CUOccupancy for ArchAccUnifiedRegs ISAs where removeDuplicateAssignment
+    # may have reduced the instruction-level VGPR count below the pool estimate.
     self.updateOccupancyFromScan(kernel, moduleKernelBody)
 
     # Initialize stModule as None (will be set for supported architectures)

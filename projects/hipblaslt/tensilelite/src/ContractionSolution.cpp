@@ -3560,8 +3560,7 @@ namespace TensileLite
                     std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
                               << sizeMapping.CUOccupancy
                               << " (<=0) for kernel '" << kernelName
-                              << "'; clamping to 1 for origami grid selection."
-                              << " Set TENSILE_DB=0x2 to enable this message.\n";
+                              << "'; clamping to 1 for origami grid selection.\n";
                 }
                 origami::config_t origami_config = {
                     .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),

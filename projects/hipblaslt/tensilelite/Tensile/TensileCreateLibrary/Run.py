@@ -231,7 +231,7 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     if cuocc <= 0 and getVerbosity() >= 2:
         print2(
             f"[codegen] CUOccupancy={cuocc} (<=0) after codegen for kernel {asmFilename}; "
-            f"runtime will clamp to 1.  Enable PrintLevel>=2 to see this message."
+            f"runtime will clamp to 1."
         )
     return KernelCodeGenResult(
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \

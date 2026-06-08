@@ -1,71 +1,10 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
 """
 Unit tests for gfx950 (and related) occupancy calculations in TensileLite.
 
-Background
-----------
-Two separate occupancy bugs were identified on gfx950 (AMD Instinct MI355X):
-
-Bug 1 – MaxWavesPerSimd hardcoded to 10
-   Before the fix, ConstValues.maxOccupancy was always 10, matching gfx908.
-   On gfx90a/gfx942/gfx950 (ArchAccUnifiedRegs) the true hardware cap is 8 waves
-   per SIMD. Kernels with very few VGPRs (occ > 8 in VGPR terms) got an inflated
-   CUOccupancy up to 10, causing StreamK to over-subscribe SIMDs.
-   Fix: hardware_caps.hpp sets rv["MaxWavesPerSimd"] = ArchAccUnifiedRegs ? 8 : 10;
-        KernelWriterAssembly.py reads self.states.archCaps["MaxWavesPerSimd"].
-
-Bug 2 – VGPR-pool over-estimation → CUOccupancy under-reported for large-tile kernels
-   Tensile's code-gen VGPR pool tracks peak live registers (regular + acc separately),
-   then combines them as ceil(vgprs/8)*8 + accvgprs. For large MFMA tiles (e.g.,
-   MIWT10_6 = 60 tiles × 4 acc VGPRs = 240 accvgprs), the combined total typically
-   exceeds 256, giving CUOccupancy=1. However, the AMDGPU compiler achieves 256
-   physical VGPRs (2 waves/SIMD) by overlapping register lifetimes that Tensile does
-   not model. This means the stored CUOccupancy can be 1 when the hardware can
-   actually sustain 2 workgroups/CU.
-
-   For the 6 BF16 GEMM cases below, empirical HIP runtime occupancy measurements
-   via hipModuleOccupancyMaxActiveBlocksPerMultiprocessor on gfx950 show:
-     Case 1 (M:36912 N:62832 K:4448)  → kernel idx 13685, HIP=1 block/CU, Tensile=1 (match, LDS-limited)
-     Case 2 (M:16 N:128 K:941728)     → kernel idx 13809, HIP=1 block/CU, Tensile=1 (match, LDS-limited)
-     Case 3 (M:540528 N:7600 K:1008)  → kernel idx 13685 (same kernel as case 1)
-     Case 4 (M:592 N:8000 K:540688)   → kernel idx 13842, HIP=2 block/CU, Tensile=1 (MISMATCH, VGPR over-est.)
-     Case 5 (M:80 N:80 K:322768)      → kernel idx 13830, HIP=1 block/CU, Tensile=1 (match, LDS-limited)
-     Case 6 (M:2464 N:3600 K:738624)  → kernel idx 13703, HIP=1 block/CU, Tensile=1 (match, LDS-limited)
-
-   kernel metadata (from hipFuncGetAttribute on installed gfx950 library):
-     idx 13685 (MT256x256x64, WG32_8_1): numRegs=249, staticLDS=133120 B → LDS-lim @ occ=1
-     idx 13809 (MT16x64x512,  WG16_4_4): numRegs=256, staticLDS=86016  B → LDS-lim @ occ=1
-     idx 13842 (MT320x192x64, WG32_8_1): numRegs=256, staticLDS=68864  B → VGPR-lim @ occ=2 (HIP) vs 1 (Tensile)
-     idx 13830 (MT64x80x64,   WG32_4_1): numRegs=256, staticLDS=94016  B → LDS-lim @ occ=1
-     idx 13703 (MT192x192x64, WG64_4_1): numRegs=256, staticLDS=149760 B → LDS-lim @ occ=1
-
-   Root cause for case 4: MIWT10_6 allocates 60×4=240 accVGPRs at code-gen time;
-   combined with ~64 regular VGPRs → pool ≈ 304. The compiler reduces to 256 by
-   overlapping register lifetimes. Tensile does not model lifetime overlap, so it
-   computes occupancy from the (pessimistic) pool total.
+Covers MaxWavesPerSimd cap enforcement and post-rocIsaPass VGPR-scan corrections
+for ArchAccUnifiedRegs ISAs (gfx90a/gfx942/gfx950).
 """
 
 import os
@@ -303,22 +242,8 @@ class TestGetOccupancyGfx950:
 # Six user-provided BF16 GEMM cases – oracle from HIP runtime
 # ---------------------------------------------------------------------------
 
-# Reference values measured with hipModuleOccupancyMaxActiveBlocksPerMultiprocessor
-# on gfx950 (AMD Instinct MI355X, hipblaslt v100202) for the installed
-# TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Ailk_Bljk_*_gfx950.co.
-# These reflect the *true* hardware occupancy of the compiled kernels.
-#
-#  Case  |  M       N       K   | sol_idx | numRegs | staticLDS B | HIP blk/CU | Tensile CUOcc
-#  ------+-----------------------+---------+---------+-------------+------------+---------------
-#  1/3   | 36912   62832   4448 |  13685  |   249   |   133120    |     1      |     1  (OK)
-#  2     |    16     128  941728|  13809  |   256   |    86016    |     1      |     1  (OK)
-#  4     |   592    8000  540688|  13842  |   256   |    68864    |     2      |     1  (MISMATCH)
-#  5     |    80      80  322768|  13830  |   256   |    94016    |     1      |     1  (OK)
-#  6     |  2464    3600  738624|  13703  |   256   |   149760    |     1      |     1  (OK)
-#
-# Column "Tensile CUOcc" = sizeMapping["CUOccupancy"] from msgpack, built with
-# the old maxOccupancy=10 code.  The "MISMATCH" in case 4 is caused by VGPR
-# pool over-estimation, as described in Bug 2 above.
+# Oracle from hipModuleOccupancyMaxActiveBlocksPerMultiprocessor on gfx950.
+# Case 4 (numRegs=256, LDS=68864) is VGPR-limited at occ=2; others are LDS-limited.
 
 _GFX950_KERNEL_ORACLE = [
     # (description,       numRegs, staticLDS, numThreads, hip_blocks_per_cu)
@@ -335,14 +260,11 @@ _GFX950_KERNEL_ORACLE = [
                          ids=[x[0] for x in _GFX950_KERNEL_ORACLE])
 def test_lds_limited_occupancy_matches_hip_oracle(desc, numRegs, staticLDS,
                                                    numThreads, hip_occ):
-    """For LDS-dominated kernels Tensile getLdsLimitedOccupancy must agree with HIP.
+    """getLdsLimitedOccupancy with compiled-kernel LDS values must agree with HIP.
 
-    Uses the actual compiled-kernel LDS values (staticLDS) as measured by
-    hipFuncGetAttribute.  Where the kernel is LDS-limited (staticLDS > 81920 B),
-    the LDS formula alone must reproduce the HIP result.
-    For case 4 (staticLDS=68864 < 81920, VGPR-limited in the compiled kernel)
-    the LDS formula alone gives 2 – matching HIP – but Tensile's code-gen VGPR
-    over-estimate causes the stored CUOccupancy to be 1 (see Bug 2 above).
+    For LDS-limited kernels (staticLDS > device_lds/2) the formula alone reproduces
+    the HIP result.  For case 4 (staticLDS=68864, VGPR-limited) the LDS formula gives
+    2 — matching HIP — but the code-gen VGPR pool over-estimate produces stored occ=1.
     """
     device_lds = 163840  # gfx950 160 KB
     lds_occ = KernelWriterAssembly.getLdsLimitedOccupancy(device_lds, staticLDS)
@@ -365,17 +287,7 @@ def test_lds_limited_occupancy_matches_hip_oracle(desc, numRegs, staticLDS,
                          ids=[x[0] for x in _GFX950_KERNEL_ORACLE])
 def test_getoccupancy_with_compiled_register_counts(desc, numRegs, staticLDS,
                                                      numThreads, hip_occ):
-    """getOccupancy must reproduce the HIP oracle when given compiled register counts.
-
-    This test uses the actual numRegs reported by hipFuncGetAttribute and treats
-    the unified VGPR count as: accvgprs = numRegs - min(numRegs, 16) [a conservative
-    split where ≥ 240 acc is expected for large MFMA tiles], and verifies that the
-    resulting Tensile occupancy matches HIP.
-
-    For the specific compiled kernels above, numRegs ∈ {249, 256}.  On gfx950 with
-    doubleVgpr=True, the occupancy limit is 512 // numRegs (since the combined pool
-    equals numRegs).  The SGPR and LDS constraints must not make the result worse.
-    """
+    """getOccupancy with compiled numRegs (from hipFuncGetAttribute) must match HIP oracle."""
     kw = _make_writer(_init_rocisa((9, 5, 0)))
 
     # All VGPR seen as pure accvgprs in the combined pool, 0 regular vgprs.
@@ -481,16 +393,10 @@ class _MockMkb:
 class TestUpdateOccupancyFromScan:
     """Validate the post-rocIsaPass assembly scan that corrects CUOccupancy.
 
-    updateOccupancyFromScan() is called after rocIsaPass in kernelBody()
-    (ArchAccUnifiedRegs ISAs only).  When removeDuplicateAssignment eliminates
-    high-indexed VGPR copies, the actual instruction-level VGPR count can be
-    lower than the pool high-water mark used in checkResources.  The scan
-    detects this and corrects both the kernel descriptor and CUOccupancy.
-
-    This is the finalization point: after this call, kernel["CUOccupancy"] and
-    .amdhsa_next_free_vgpr in the .s are in sync.  The ELF pass (reading back
-    the assembled .o) is therefore a redundant confirmation rather than a
-    correction and is now opt-in only.
+    updateOccupancyFromScan() runs after rocIsaPass (ArchAccUnifiedRegs only).
+    When removeDuplicateAssignment eliminates high-indexed VGPR copies, the
+    instruction-level count can fall below the checkResources pool estimate.
+    The scan detects this and corrects both the kernel descriptor and CUOccupancy.
     """
 
     @pytest.fixture(autouse=True)

@@ -112,8 +112,7 @@ namespace TensileLite
                                 std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
                                           << solution->sizeMapping.CUOccupancy
                                           << " (<=0) for solution '" << solution->kernelName
-                                          << "'; clamping to 1 in origami config."
-                                          << " Set TENSILE_DB=0x2 to enable this message.\n";
+                                          << "'; clamping to 1 in origami config.\n";
                             }
                             origami::config_t origami_config = {
                                 .mt = {solution->sizeMapping.macroTile.x,

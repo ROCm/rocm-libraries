@@ -1,62 +1,12 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
 """
 Integration tests: Tensile CUOccupancy vs HIP hardware ground truth.
 
-These tests validate that getOccupancy() / getVgprOccupancy() in
-KernelWriterAssembly produce results consistent with what the hardware
-actually supports, as reported by hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.
-
-Motivating regression (fix/gfx950-tensile-occupancy):
-  Before the fix, getVgprOccupancy() used hardcoded maxOccupancy=10 for all
-  architectures.  On gfx950 (ArchAccUnifiedRegs, MaxWavesPerSimd=8) a low-VGPR
-  kernel therefore returned CUOccupancy=10, while the hardware limit is 8.
-  This test assembles a real kernel, loads it via HIP, queries
-  hipModuleOccupancyMaxActiveBlocksPerMultiprocessor, and asserts the result
-  matches Tensile's prediction after the fix.
-
-Unit-conversion reference (gfx9 / 64-wide wavefront):
-  - Tensile CUOccupancy  = max active waves per SIMD unit
-  - HIP occupancy result = max active blocks (workgroups) per CU
-  - Relationship:
-        total_waves_per_cu = CUOccupancy × num_simds
-        waves_per_block    = num_threads / wave_size
-        hip_blocks_per_cu  = total_waves_per_cu / waves_per_block
-
-  For num_threads=256, wave_size=64, num_simds=4 (gfx9):
-        hip_blocks_per_cu = CUOccupancy × 4 × 64 / 256 = CUOccupancy  (1:1)
-
-How to run:
-  # From tensilelite/ dir (requires hip-python and a GPU):
-  tox -e unit -- Tensile/Tests/unit/test_occupancy_hip.py -v -s
-
-  # Or directly with pytest after `invoke rocisa`:
-  pytest Tensile/Tests/unit/test_occupancy_hip.py -v -s
-
-  # On a gfx950 machine:
-  TENSILE_GPU_TARGET=gfx950 pytest Tensile/Tests/unit/test_occupancy_hip.py -v -s
+Assembles minimal kernels, loads them via HIP, and asserts that
+getOccupancy() / getVgprOccupancy() match
+hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.
+Requires hip-python and a GPU (skip otherwise).
 """
 
 import os
@@ -285,27 +235,11 @@ def _query_hip_occupancy(co_path: str, num_threads: int) -> int:
 
 def tensile_occ_to_hip_blocks(cu_occupancy: int, num_threads: int,
                                wave_size: int = 64, num_simds: int = 4) -> int:
+    """Return expected HIP blocks-per-CU given Tensile's CUOccupancy.
+
+    For gfx9 (4 SIMDs × 64-wide wavefront), Tensile's CUOccupancy equals
+    hipModuleOccupancyMaxActiveBlocksPerMultiprocessor (1:1 relationship).
     """
-    Return the expected HIP blocks-per-CU given Tensile's CUOccupancy.
-
-    Tensile's CUOccupancy *is* the max concurrent blocks per CU.  The Tensile
-    formula in getVgprOccupancy() already accounts for the thread-count scaling:
-
-        multiplier = ceil(num_threads / 256)
-        maxOccupancy = MaxWavesPerSimd // multiplier
-
-    This gives the same result as the hardware model:
-
-        blocks_per_CU = floor( MaxWavesPerSimd × num_simds / (num_threads/wave_size) )
-                      = floor( MaxWavesPerSimd × (num_simds × wave_size) / num_threads )
-
-    Since num_simds=4 and wave_size=64: num_simds × wave_size = 256 = the
-    denominator in Tensile's multiplier.  The two formulas are identical.
-
-    The relationship is therefore 1:1 regardless of num_threads:
-        hipModuleOccupancyMaxActiveBlocksPerMultiprocessor == CUOccupancy
-    """
-    # 1:1 relationship — the argument names are retained for documentation.
     _ = (num_threads, wave_size, num_simds)
     return cu_occupancy
 
@@ -313,22 +247,8 @@ def tensile_occ_to_hip_blocks(cu_occupancy: int, num_threads: int,
 # ── Test parametrization ────────────────────────────────────────────────────────
 #
 # Each entry: (required_gfx, num_vgprs, lds_bytes, num_threads, label)
-#
-# VGPRs are chosen to be multiples of 8 so that Tensile's 8-dword alignment
-# (for ArchAccUnifiedRegs) and HIP's 4-dword hardware granule both agree on
-# the effective VGPR count, giving a clean 1:1 comparison.
-#
-# LDS notes:
-#   - lds_bytes is baked into the kernel descriptor as group_segment_fixed_size.
-#   - hipModuleOccupancyMaxActiveBlocksPerMultiprocessor is always called with
-#     dynSharedMemPerBlk=0 (no extra dynamic LDS beyond what's in the descriptor).
-#   - Tensile's getLdsLimitedOccupancy crashes on ldsSize=0 (integer divide-by-
-#     zero after the 256-byte granularity rounding); we use 256 as the minimum
-#     to represent "no LDS constraint" (163840//256=640, effectively unlimited).
-#
-# The gfx950 low-VGPR case is the primary regression: the old code returned
-# CUOccupancy=10 (hardcoded), while the hardware limit is MaxWavesPerSimd=8.
-# With the fix, Tensile returns 8 and HIP confirms 8.
+# VGPRs are multiples of 8 so Tensile's 8-dword alignment and HIP's 4-dword granule agree.
+# _MIN_LDS=256 avoids getLdsLimitedOccupancy divide-by-zero (represents no LDS constraint).
 
 _MIN_LDS = 256   # minimum LDS allocation granule; getLdsLimitedOccupancy crashes on 0
 
@@ -389,21 +309,7 @@ OCCUPANCY_CASES = [
 def test_hip_occupancy_matches_tensile(
     required_gfx, num_vgprs, lds_bytes, num_threads, description, tmp_path
 ):
-    """
-    HIP ground-truth check: Tensile CUOccupancy must agree with hardware.
-
-    Steps:
-      1. Compute Tensile's predicted CUOccupancy via getOccupancy().
-      2. Assemble a minimal kernel with the exact VGPR/LDS/SGPR allocation.
-      3. Load the code object and call
-         hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.
-      4. Assert equality (1:1 relationship).
-
-    Tensile's CUOccupancy is directly the max concurrent blocks per CU.
-    getVgprOccupancy() uses multiplier=ceil(num_threads/256) which bakes the
-    block-size scaling in, giving the same result as HIP's hardware query.
-    The relationship is 1:1 for all num_threads values.
-    """
+    """HIP ground-truth: assemble a minimal kernel, query HIP, assert equality with Tensile."""
     if GFX_TARGET != required_gfx:
         pytest.skip(
             f"Test requires {required_gfx}, detected {GFX_TARGET}"

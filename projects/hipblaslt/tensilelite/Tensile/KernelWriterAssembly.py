@@ -182,9 +182,7 @@ class KernelWriterAssembly(KernelWriter):
     try:
       if isCustom:
         code = self._getCustomKernelSource(kernel, CUSTOM_KERNEL_PATH)
-        # Pass rocisa-sourced caps so the custom-kernel occupancy formula uses
-        # the same hardware constants as the codegen path, eliminating any drift
-        # between OccupancyMeasure._arch_caps_for_kernel (static table) and rocisa.
+        # Use live rocisa caps so custom-kernel occupancy matches the codegen path.
         _rocisa_caps = (
             self.states.regCaps["MaxVgpr"] * (2 if self.states.archCaps.get("ArchAccUnifiedRegs") else 1),
             self.states.regCaps["PhysicalMaxSgpr"],
@@ -1959,26 +1957,22 @@ class KernelWriterAssembly(KernelWriter):
       mkb.body.add(ValueIf(value="0"), 1)
 
   ##############################################################################
-  # updateOccupancyFromScan: rescan instruction body after rocIsaPass and
-  # correct the kernel descriptor + CUOccupancy for ArchAccUnifiedRegs ISAs.
+  # updateOccupancyFromScan
   ##############################################################################
   def updateOccupancyFromScan(self, kernel, mkb) -> None:
-    """Rescan the instruction body for actual max VGPR/AGPR register usage after
-    rocIsaPass has run, and update the kernel descriptor's next_free_vgpr plus
-    kernel["CUOccupancy"] if the scanned count is lower than the pool estimate.
+    """Rescan instruction body for actual VGPR/AGPR usage after rocIsaPass.
 
-    For ArchAccUnifiedRegs ISAs (gfx90a/gfx942/gfx950), rocIsaPass's
-    removeDuplicateAssignment can eliminate high-indexed VGPR copies, reducing
-    the actual register footprint below the pool high-water mark that was used in
-    checkResources.  This makes CUOccupancy reflect the count the assembler will
-    actually emit in .amdhsa_next_free_vgpr rather than the (higher) pool peak.
+    rocIsaPass removeDuplicateAssignment can eliminate high-indexed VGPR copies,
+    reducing the instruction-level register count below the pool high-water mark
+    from checkResources.  When a lower count is found, update the kernel descriptor
+    and kernel["CUOccupancy"] so .amdhsa_next_free_vgpr reflects actual usage.
+    Only runs on ArchAccUnifiedRegs ISAs (gfx90a/gfx942/gfx950).
     """
     if not self.states.archCaps.get("ArchAccUnifiedRegs"):
       return
 
     body_text = str(mkb.body)
 
-    # Collect all VGPR and AGPR indices referenced in instructions.
     vgpr_refs: set = set()
     agpr_refs: set = set()
 
@@ -1992,25 +1986,20 @@ class KernelWriterAssembly(KernelWriter):
     if not vgpr_refs:
       return
 
-    # Compute instruction-level register counts (high-water mark of actual usage).
     scanned_vgprs = max(vgpr_refs) + 1
-    # Acc VGPRs are always fully populated by MFMA; fall back to pool size when
-    # the scan gives more (e.g. if acc refs span the full pool range).
+    # Acc VGPRs are always fully populated by MFMA; cap at pool size.
     scanned_agprs = (max(agpr_refs) + 1) if agpr_refs else self.agprPool.size()
     scanned_agprs = min(scanned_agprs, self.agprPool.size())
 
-    # Only update when the scan discovers fewer registers than the pool estimate.
     pool_total    = int(ceil(self.vgprPool.size() / 8.0)) * 8 + self.agprPool.size()
     scanned_total = int(ceil(scanned_vgprs       / 8.0)) * 8 + scanned_agprs
 
     if scanned_total >= pool_total:
-      return  # No improvement; leave checkResources result unchanged.
+      return
 
-    # Correct the kernel descriptor so .amdhsa_next_free_vgpr matches reality.
     mkb.setGprs(totalVgprs=scanned_vgprs, totalAgprs=scanned_agprs,
                 totalSgprs=self.sgprPool.size())
 
-    # Recompute occupancy from the corrected (scanned) register counts.
     kernel["CUOccupancy"] = self.getOccupancy(
       kernel["NumThreads"], scanned_vgprs, self.sgprPool.size(),
       self.getLdsSize(kernel), scanned_agprs, self.states.doubleVgpr)

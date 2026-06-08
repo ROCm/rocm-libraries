@@ -1,51 +1,12 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
 """
-CUOccupancy measurement: unit tests for OccupancyMeasure.py (formula + arch caps).
+GPU-free unit tests for OccupancyMeasure.py: occupancy formula and arch-caps table.
 
-Tests the occupancy formula and architecture-caps helpers that underpin both
-the codegen-time scan (updateOccupancyFromScan) and the custom-kernel ASM
-parser (compute_occupancy_from_asm_source):
-
-  - TestComputeOccupancyFromResources: validates compute_occupancy_from_resources()
-    against the six BF16 GEMM oracle cases and boundary conditions.
-  - TestArchCapsForKernel: validates _arch_caps_for_kernel() ISA-to-caps mapping.
-
-HIP cross-validation (loading .co.raw and calling
-hipModuleOccupancyMaxActiveBlocksPerMultiprocessor) lives in test_occupancy_hip.py.
-
-MT320x192x64 reconciliation (the motivating mismatch):
-  Before updateOccupancyFromScan: pool ≈ 264 → occ=1 (WRONG)
-  After updateOccupancyFromScan:  vgpr_count=256 in .s → occ=2  (CORRECT)
-  HIP measurement:                loads the .co with vgpr_count=256 → occ=2  (CORRECT)
-  All three agree: CUOccupancy=2.
-
-How to run:
-  # From tensilelite/ dir:
-  tox -e unit -- Tensile/Tests/unit/test_occupancy_buildtime.py -v -s
-  pytest Tensile/Tests/unit/test_occupancy_buildtime.py -v -s
+Tests compute_occupancy_from_resources() and _arch_caps_for_kernel() used by
+both the codegen-time scan (updateOccupancyFromScan) and the custom-kernel ASM
+parser (compute_occupancy_from_asm_source).
+HIP cross-validation lives in test_occupancy_hip.py.
 """
 
 import pytest
@@ -177,20 +138,11 @@ class TestArchCapsForKernel:
 # ── Cross-validation: _arch_caps_for_kernel vs. compute_occupancy_from_resources ─
 
 class TestArchCapsAgreementWithRocisaExpected:
-    """Validate that _arch_caps_for_kernel() matches the expected rocisa values.
+    """Validate that _arch_caps_for_kernel() matches rocisa::hardware_caps.hpp values.
 
-    These expected values are the ground truth from rocisa::hardware_caps.hpp
-    (verified by test_occupancy.py::test_max_waves_per_simd_from_arch_caps,
-    test_gfx950_physical_vgpr_pool_is_512, test_gfx950_device_lds_is_160kb, etc.).
-    This test runs GPU-free and ensures _arch_caps_for_kernel stays in sync with
-    rocisa whenever rocisa is updated with new hardware constants.
-
-    Cross-reference: KernelWriterAssembly.getSourceFileString passes the live rocisa
-    caps as arch_caps to compute_occupancy_from_asm_source() so that production code
-    always uses rocisa as the single source of truth.  This table is the fallback.
+    Runs GPU-free and guards against drift when new hardware constants are added.
     """
 
-    # Ground-truth expected values sourced from rocisa (verified in test_occupancy.py)
     # (isa, physical_vgpr, physical_sgpr, device_lds, max_waves_per_simd)
     _EXPECTED = [
         ((9, 5, 0),  512, 800, 163840, 8),   # gfx950: ArchAccUnifiedRegs, 160 KB LDS
@@ -219,11 +171,10 @@ class TestArchCapsAgreementWithRocisaExpected:
 # ── compute_occupancy_from_asm_source: arch_caps passthrough ─────────────────
 
 class TestComputeOccupancyFromAsmSourceArchCaps:
-    """Verify that arch_caps kwarg overrides the static _arch_caps_for_kernel table.
+    """Verify that the arch_caps kwarg overrides the static _arch_caps_for_kernel table.
 
-    This tests the consolidation: KernelWriterAssembly.getSourceFileString passes
-    rocisa-sourced caps as arch_caps so the custom-kernel path uses rocisa as the
-    single source of truth instead of the static table.
+    KernelWriterAssembly.getSourceFileString passes live rocisa caps as arch_caps
+    so the custom-kernel path always uses rocisa as the single source of truth.
     """
 
     def _asm(self, vgpr, sgpr, lds):

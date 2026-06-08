@@ -1,48 +1,11 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
 """
 HIP-based occupancy measurement helpers for occupancy unit tests.
 
-This module is TEST-ONLY. It provides the HIP runtime query path that was
-previously in Tensile/OccupancyMeasure.py (production).  Production code
-must not import from here.
-
-Exports
--------
-HIP_AVAILABLE : bool
-    True when hip-python is installed and importable.
-_hip : module or None
-    The hip.hip module when available, else None.
-_hip_check(result)
-    Raise RuntimeError on a non-zero HIP error code.
-query_hip_occupancy(co_path, kernel_func_name, num_threads) -> int
-    Load *co_path* and return max active blocks per CU for *kernel_func_name*.
-_kernels_to_co_map(uniqueKernels, assemblyTmpPath) -> dict
-    Return a co_path → [(idx, kernel)] map for a list of unique kernels.
-measure_occupancy_hip(uniqueKernels, kernelInfo, assemblyTmpPath, splitGSU) -> list
-    Overwrite cuoccupancy in kernelInfo using HIP hardware queries.
+TEST-ONLY — production code must not import from here.
+Exports: HIP_AVAILABLE, _hip, _hip_check, query_hip_occupancy,
+         _kernels_to_co_map, measure_occupancy_hip.
 """
 
 import collections

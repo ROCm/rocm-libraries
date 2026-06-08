@@ -1,64 +1,11 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
 """
-Unit tests for Change 1: CUOccupancy computation from custom kernel .s files at build time.
+Unit tests for CUOccupancy computation from custom kernel .s files at build time.
 
-Change 1 summary
-----------------
-Custom kernels bypass the normal codegen path and therefore skip the
-``checkResources`` / ``updateOccupancyFromScan`` that sets ``kernel["CUOccupancy"]``.
-Before this fix, ``kernel["CUOccupancy"]`` stayed at its default of ``-1``.
-
-The fix adds ``compute_occupancy_from_asm_source`` in ``OccupancyMeasure.py``, which
-parses ``.amdhsa_next_free_vgpr``, ``.amdhsa_next_free_sgpr``, and
-``.amdhsa_group_segment_fixed_size`` from the custom ``.s`` source text, then calls
-the existing ``compute_occupancy_from_resources`` formula using hardware constants
-derived via ``_arch_caps_for_kernel`` (ISA-table lookup, no GPU needed).
-
-``getSourceFileString`` in ``KernelWriterAssembly.py`` calls this function for custom
-kernels and stores the result in ``kernel["CUOccupancy"]`` before returning.
-
-Change 2 (debug warning) tests
---------------------------------
-Also verifies that the ``print2``-gated Python warning in ``processKernelSource``
-fires when CUOccupancy is ≤ 0 and verbosity ≥ 2, and stays silent otherwise.
-
-Test structure
---------------
-* ``TestComputeOccupancyFromAsmSource`` — unit-tests the parser/formula against
-  synthetic .s snippets with known register counts.
-* ``TestComputeOccupancyRealCustomKernels`` — reads actual files from
-  ``Tensile/CustomKernels/`` and asserts computed CUOccupancy against expected
-  values derived from the hardware formula.  Skipped if the directory is absent.
-* ``TestPythonDebugWarning`` — verifies the print2-gated warning behaviour.
-
-How to run
-----------
-  # From tensilelite/ dir:
-  tox -e unit -- Tensile/Tests/unit/test_custom_kernel_occupancy.py -v -s
-  pytest Tensile/Tests/unit/test_custom_kernel_occupancy.py -v -s
+Custom kernels bypass checkResources/updateOccupancyFromScan; the fix adds
+compute_occupancy_from_asm_source which parses .amdhsa_ directives directly.
+Also tests the print2-gated CUOccupancy<=0 warning in processKernelSource.
 """
 
 import io
@@ -338,23 +285,13 @@ class TestComputeOccupancyRealCustomKernels:
 # ---------------------------------------------------------------------------
 
 class TestPythonDebugWarning:
-    """Verify that the debug warning for CUOccupancy<=0 fires iff verbosity>=2.
+    """Verify the print2-gated CUOccupancy<=0 warning in processKernelSource (Run.py).
 
-    The warning logic in ``processKernelSource`` (Run.py) is:
-
-        if cuocc <= 0 and getVerbosity() >= 2:
-            print2(f"[codegen] CUOccupancy={cuocc} ...")
-
-    We test this logic directly without importing Tensile.Common (which would pull in
-    rocisa).  The tests replicate the exact conditional and print call.
+    Tests replicate the conditional directly without importing Tensile.Common.
     """
 
     def _run_warning_check(self, cuocc_value, verbosity):
-        """Simulate the processKernelSource warning logic without requiring rocisa.
-
-        Directly replicates the conditional (cuocc <= 0 and verbosity >= 2) and
-        the print call, mirroring what is in Run.py processKernelSource.
-        """
+        """Replicate the processKernelSource warning conditional and capture output."""
         captured = io.StringIO()
         old_stdout = sys.stdout
         sys.stdout = captured
@@ -362,7 +299,7 @@ class TestPythonDebugWarning:
             if cuocc_value <= 0 and verbosity >= 2:
                 print(
                     f"[codegen] CUOccupancy={cuocc_value} (<=0) after codegen for kernel test_kernel; "
-                    f"runtime will clamp to 1.  Enable PrintLevel>=2 to see this message."
+                    f"runtime will clamp to 1."
                 )
         finally:
             sys.stdout = old_stdout
