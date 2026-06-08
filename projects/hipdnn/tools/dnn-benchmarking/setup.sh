@@ -29,6 +29,7 @@ ROCM_PREFIX="${DNN_BENCH_ROCM_PREFIX:-}"
 GPU_ARCH_OVERRIDE="${DNN_BENCH_GPU_ARCH:-}"
 TORCH_INDEX_URL="${DNN_BENCH_TORCH_INDEX_URL:-}"
 RESOLVED_TORCH_INDEX_URL=""
+INSTALLED_TORCH_MODE="missing"
 
 usage() {
     echo "Usage: $0 [options]"
@@ -334,22 +335,6 @@ ensure_rocm_wheel_devel_prefix() {
     exit 1
 }
 
-detect_gpu_arch_from_kfd() {
-    local props key value
-    for props in /sys/class/kfd/kfd/topology/nodes/*/properties; do
-        [ -r "$props" ] || continue
-        while read -r key value _; do
-            [ "$key" = "gfx_target_version" ] || continue
-            case "${value:-0}" in
-                90010) echo "gfx90a"; return 0 ;;
-                90402) echo "gfx942"; return 0 ;;
-                90500) echo "gfx950"; return 0 ;;
-            esac
-        done < "$props"
-    done
-    return 1
-}
-
 detect_gpu_arch() {
     local arch
     if [ -n "$GPU_ARCH_OVERRIDE" ]; then
@@ -370,10 +355,6 @@ detect_gpu_arch() {
             return
         fi
     fi
-    if arch=$(detect_gpu_arch_from_kfd); then
-        echo "$arch"
-        return
-    fi
     echo ""
 }
 
@@ -391,16 +372,12 @@ PY
 require_torch_mode() {
     local expected="$1"
     local status
-    status=$(get_torch_mode)
+    status="${INSTALLED_TORCH_MODE:-$(get_torch_mode)}"
     if [ "$status" != "$expected" ]; then
         echo "ERROR: --torch-mode $expected requested, but $VENV_DIR contains torch mode '$status'." >&2
         echo "Use a clean workspace or remove the existing virtual environment before changing torch modes." >&2
         exit 1
     fi
-}
-
-torch_mode_is() {
-    [ "$(get_torch_mode)" = "$1" ]
 }
 
 
@@ -423,7 +400,7 @@ install_torch() {
             return
             ;;
         existing)
-            if torch_mode_is missing; then
+            if [ "$INSTALLED_TORCH_MODE" = "missing" ]; then
                 echo "ERROR: --torch-mode existing requires torch to already be installed in $VENV_DIR." >&2
                 echo "Use --torch-mode rocm or --torch-mode cpu to install torch automatically." >&2
                 exit 1
@@ -433,13 +410,14 @@ install_torch() {
             ;;
         cpu)
             local index_url="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
-            if ! torch_mode_is missing; then
+            if [ "$INSTALLED_TORCH_MODE" != "missing" ]; then
                 require_torch_mode cpu
                 echo "Using existing CPU-only PyTorch in $VENV_DIR."
                 return
             fi
             echo "Installing CPU-only PyTorch from $index_url"
             pip install torch --index-url "$index_url"
+            INSTALLED_TORCH_MODE=$(get_torch_mode)
             require_torch_mode cpu
             ;;
         rocm)
@@ -462,13 +440,14 @@ install_torch() {
                 echo "Detected GPU: $gpu_arch"
             fi
             RESOLVED_TORCH_INDEX_URL="$index_url"
-            if torch_mode_is rocm; then
+            if [ "$INSTALLED_TORCH_MODE" != "missing" ]; then
                 require_torch_mode rocm
                 echo "Using existing ROCm PyTorch in $VENV_DIR."
                 return
             fi
             echo "Installing ROCm PyTorch from $index_url"
             pip install --pre torch --index-url "$index_url"
+            INSTALLED_TORCH_MODE=$(get_torch_mode)
             require_torch_mode rocm
             ;;
     esac
@@ -485,7 +464,7 @@ select_binding_prefix() {
             require_rocm_wheel_libraries_prefix
             ;;
         existing)
-            if torch_mode_is rocm; then
+            if [ "$INSTALLED_TORCH_MODE" = "rocm" ]; then
                 require_rocm_wheel_libraries_prefix
                 return
             fi
@@ -508,7 +487,7 @@ select_provider_toolchain_prefix() {
             ensure_rocm_wheel_devel_prefix "$RESOLVED_TORCH_INDEX_URL"
             ;;
         existing)
-            if torch_mode_is rocm; then
+            if [ "$INSTALLED_TORCH_MODE" = "rocm" ]; then
                 ensure_rocm_wheel_devel_prefix ""
                 return
             fi
@@ -541,7 +520,6 @@ build_hipdnn() {
         -DCMAKE_PROGRAM_PATH="$cmake_program_path" \
         -DROCM_PATH="$toolchain_prefix" \
         -DHIPDNN_SKIP_TESTS=ON \
-        -DHIPDNN_SKIP_JSON_LIB=ON \
         -DHIPDNN_ENABLE_SDPA=ON \
         -DENABLE_CLANG_FORMAT=OFF \
         -DENABLE_CLANG_TIDY=OFF
@@ -658,6 +636,7 @@ ACTIVATE_LOCAL="$VENV_DIR/bin/activate.local"
     printf 'export PYTHONPYCACHEPREFIX=%q\n' "$DNN_BENCH_WORKSPACE/pycache"
     printf 'export DNN_BENCH_WORKSPACE=%q\n' "$DNN_BENCH_WORKSPACE"
 } > "$ACTIVATE_LOCAL"
+INSTALLED_TORCH_MODE=$(get_torch_mode)
 if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
     # shellcheck disable=SC2016
     echo 'source "$(dirname "${BASH_SOURCE[0]}")/activate.local" 2>/dev/null || true' \
@@ -686,7 +665,7 @@ if [ "$FORCE_BUILD" -eq 1 ]; then
     build_hipdnn "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
     BUILT_HIPDNN=1
 elif ! prefix_has_hipdnn "$BINDING_PREFIX"; then
-    if [ "$TORCH_MODE" = "rocm" ] || { [ "$TORCH_MODE" = "existing" ] && torch_mode_is rocm; }; then
+    if [ "$TORCH_MODE" = "rocm" ] || { [ "$TORCH_MODE" = "existing" ] && [ "$INSTALLED_TORCH_MODE" = "rocm" ]; }; then
         build_hipdnn "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
         BUILT_HIPDNN=1
     else
