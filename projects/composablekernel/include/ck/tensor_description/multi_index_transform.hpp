@@ -1849,7 +1849,7 @@ struct ConvBwdDataImplicitGemmOutTransform
     }
 
     private:
-    __host__ __device__ static constexpr IndexType CalculateMult(index_t divisor)
+    __host__ __device__ static constexpr IndexType CalculateMult(IndexType divisor)
     {
         if constexpr(IsLongIndex)
             return MagicDivision::CalculateMagicMultiplier64(divisor);
