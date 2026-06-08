@@ -15634,7 +15634,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(addrCalc.incrementToNextRow(kernel, tc, ss, tmpS01, bpeType=bpeType))
 
     if dataType.isHalf():
-      hi16 = 0 if self.states.HHH_WMMA else (vc0 % 2)
+      hi16 = 0 if (self.states.HHH_WMMA or tc == 'Gate') else (vc0 % 2)
       module.add(self.chooseGlobalRead(useBuffer, bps, data, \
           addr0, addr1, soffset=soffset, offset=globalOffset, \
           glc=isGlc, slc=isSlc, nt=isNT, lds=False, hi16=hi16, \
