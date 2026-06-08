@@ -660,6 +660,10 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                 // bias must follow K's delta jump; otherwise non-contiguous LUT blocks misalign bias.
                 if constexpr(BiasEnum != BlockAttentionBiasEnum::NO_BIAS)
                     move_tile_window(bias_dram_window, {0, kN0 * block_idx});
+                // v_dram_window already advanced by the +kK1 pre-loop prefetch move (~line 500)
+                // plus the per-k1-loop moves inside this iteration, so it now sits at the
+                // current block's end; the (block_idx-1) delta tops it up to the next
+                // LUT-selected block's start (block_idx is the absolute block delta).
                 move_tile_window(v_dram_window, {0, kN0 * (block_idx - 1)});
                 move_tile_window(k_dram_block_window, {kN0 * block_idx, 0});
                 k_dram_window.set_window_origin(k_dram_block_window.get_window_origin());

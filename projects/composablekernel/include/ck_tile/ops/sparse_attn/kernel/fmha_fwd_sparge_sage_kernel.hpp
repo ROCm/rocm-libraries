@@ -358,6 +358,12 @@ struct FmhaFwdSpargeSageKernel
 
     CK_TILE_DEVICE static constexpr auto GetTileIndex(const Kargs& kargs)
     {
+        // The masked M-tile reversal below (gridDim.y - 1 - i_tile_m) and the V
+        // per-channel descale in the pipeline both assume a single N1 tile spans
+        // the whole hdim_v (num_tile_n1 == 1). Sage requires hdim_v <= kN1.
+        static_assert(SagePipeline::kN1 >= SagePipeline::kQKHeaddim,
+                      "sage masked M-tile reversal assumes a single N1 tile "
+                      "(hdim_v <= kN1)");
         const index_t num_tile_n1 = integer_divide_ceil(kargs.hdim_v, SagePipeline::kN1);
         const index_t i_block     = blockIdx.y;
         const index_t i_nhead     = blockIdx.x;

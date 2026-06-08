@@ -342,8 +342,11 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
             // kv_block_idx_ptr[i_total_loops + 1] would index one past the per-row LUT
             // (kv_blocks == num_k_blocks under dense selection) -- an OOB read on the final
             // (b,h,q) row. Skip the load when no next iteration follows.
+            // WG-uniform LUT delta; readfirstlane pins to SGPR for scalar tile-window math.
             int block_idx =
-                (i_total_loops + 1 < num_total_loop) ? kv_block_idx_ptr[i_total_loops + 1] : 0;
+                (i_total_loops + 1 < num_total_loop)
+                    ? __builtin_amdgcn_readfirstlane(kv_block_idx_ptr[i_total_loops + 1])
+                    : 0;
             auto v_buf    = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
             const auto bias_tile = [&]() {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)

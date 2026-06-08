@@ -904,6 +904,12 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             }
             block_sync_lds();
 
+            // channel_idx below uses tile_idx.at(1) without an i_n1 tile offset, so
+            // the V per-channel descale assumes a single N1 tile spans hdim_v
+            // (num_tile_n1 == 1, i.e. hdim_v <= kN1).
+            static_assert(kN1 >= kQKHeaddim,
+                          "sage V per-channel descale assumes a single N1 tile "
+                          "(hdim_v <= kN1)");
             constexpr auto o_tmp_spans = decltype(o_acc)::get_distributed_spans();
             sweep_tile_span(o_tmp_spans[number<0>{}], [&](auto idx0) {
                 sweep_tile_span(o_tmp_spans[number<1>{}], [&](auto idx1) {

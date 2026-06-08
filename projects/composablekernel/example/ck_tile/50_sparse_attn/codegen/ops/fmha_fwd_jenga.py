@@ -675,8 +675,6 @@ class KernelComponentFactory:
                 get_mask_map(mask_impl).keys(),
                 bias_modes,
             ):
-                if hdim == 256 and hdim_v == 256:
-                    continue
                 if bias == "alibi" and mask in ("no", "s_no"):
                     continue
                 if logits == "t" and bias != "no":

@@ -209,6 +209,49 @@ float jenga_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         }
     }
 
+    // block_relation_onehot LDS staging cap: the jenga kernel stages exactly
+    // kBlockSize*4 bools (each of the kBlockSize threads loads 4 via
+    // amd_direct_load_global_to_lds<bool,4>; see fmha_fwd_jenga_kernel.hpp
+    // GetSmemSize() and pipeline :253-260). All generated jenga tiles use
+    // bm0=bn0=128 with gemm0 block-warps={4,1,1} (codegen filters bm0!=128 /
+    // bn0!=128), so kBlockSize = 4 warps * 64 = 256 -> cap = 256*4 = 1024
+    // K-blocks. The K-block size equals bn0 = 128 tokens. Above this the onehot
+    // load reads/uses uninitialized LDS and silently drops blocks -> reject.
+    {
+        constexpr int kJengaBlockTokens = 128; // bn0
+        constexpr int kMaxKBlocks       = 256 * 4; // kBlockSize(=256) * 4
+        if(is_group_mode)
+        {
+            for(size_t b = 0; b + 1 < seqstart_k_host.size(); ++b)
+            {
+                const int seqlen_k_b   = seqstart_k_host[b + 1] - seqstart_k_host[b];
+                const int num_k_blocks = (seqlen_k_b + kJengaBlockTokens - 1) / kJengaBlockTokens;
+                if(num_k_blocks > kMaxKBlocks)
+                {
+                    std::cerr << tag << " error: seqlen_k[" << b << "]=" << seqlen_k_b
+                              << " (=" << num_k_blocks << " K-blocks @ block_size="
+                              << kJengaBlockTokens << ") exceeds onehot LDS cap kBlockSize*4="
+                              << kMaxKBlocks << " (max " << kMaxKBlocks * kJengaBlockTokens
+                              << " tokens per seq).\n";
+                    return -1.0f;
+                }
+            }
+        }
+        else
+        {
+            const int num_k_blocks = (seqlen_k + kJengaBlockTokens - 1) / kJengaBlockTokens;
+            if(num_k_blocks > kMaxKBlocks)
+            {
+                std::cerr << tag << " error: seqlen_k=" << seqlen_k
+                          << " (=" << num_k_blocks << " K-blocks @ block_size="
+                          << kJengaBlockTokens << ") exceeds onehot LDS cap kBlockSize*4="
+                          << kMaxKBlocks << " (max " << kMaxKBlocks * kJengaBlockTokens
+                          << " tokens).\n";
+                return -1.0f;
+            }
+        }
+    }
+
     const float scale_s = (scale_s_user != 0.0f)
                               ? scale_s_user
                               : 1.0f / ck_tile::sqrt(static_cast<float>(hdim_q));

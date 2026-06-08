@@ -563,6 +563,22 @@ struct FmhaFwdVSAKernel
                     make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
                     sequence<kPadHeadDimV, kPadSeqLenK_>{});
             }
+            else
+            {
+                // ColMajor V: laid out as [hdim_v, seqlen_k] already (matches jenga kernel).
+                const auto v_dram_naive = make_naive_tensor_view<address_space_enum::global>(
+                    v_ptr,
+                    make_tuple(kargs.hdim_v, seqlen_k_actual),
+                    make_tuple(kargs.stride_v, 1),
+                    number<FmhaPipeline::kAlignmentV>{},
+                    number<1>{});
+
+                constexpr bool kPadHeadDimV_ = kUseAsyncCopy ? kPadHeadDimV : false;
+                return pad_tensor_view(
+                    v_dram_naive,
+                    make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
+                    sequence<kPadHeadDimV_, kPadSeqLenK>{});
+            }
         }();
 
         auto q_dram_window = make_tile_window(
