@@ -314,7 +314,7 @@ solver::Id Pick(const conv::ProblemDescription& problem, int spec_id_code)
     // per candidate.
     std::array<LgbmEntry, kNumFeatures> row{};
     FillProblemFeatures(row.data(), problem, meta);
-    FillGpuFeatures(row.data() + kIdxCuCount, gpu);
+    FillGpuFeatures(row.data(), gpu);
 
     // Score each candidate with the rank model. Higher raw score = predicted
     // faster (objective is lambdarank).
