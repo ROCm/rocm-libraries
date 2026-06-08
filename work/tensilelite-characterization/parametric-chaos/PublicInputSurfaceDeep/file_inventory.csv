@@ -1,5 +1,0 @@
-file,loc,branch_sites,if,elif,while,ifexp,assert,comprehension-if,guard-return,guard-raise
-Tensile/Toolchain/Validators.py,273,22,8,0,0,7,0,0,4,3
-Tensile/ClientWriter.py,805,119,85,2,0,9,3,2,13,5
-Tensile/BenchmarkProblems.py,789,54,35,7,0,9,0,0,3,0
-Tensile/LibraryIO.py,808,82,49,3,1,4,0,2,22,1

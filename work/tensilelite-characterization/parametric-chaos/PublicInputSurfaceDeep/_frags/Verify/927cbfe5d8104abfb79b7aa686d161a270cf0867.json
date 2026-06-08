@@ -1,8 +1,0 @@
-{
-  "branch_id": "927cbfe5d8104abfb79b7aa686d161a270cf0867",
-  "confirmed": false,
-  "status": "UNKNOWN",
-  "downgraded_to": "unknown",
-  "method": "Re-read ClientWriter.py:787 in-container: predicate is exactly `if not os.path.exists(metaDataFilePath):` (else-branch of `if problemTypeDict`). Re-executed both claimed examples against the REAL os.path.exists in tl-char: TRUE example /tmp/lib_absent/library/gfx90a/metadata.yaml left absent -> not os.path.exists==True (printExit branch taken, matches claim); FALSE example /tmp/lib_present/library/gfx90a/metadata.yaml created -> not os.path.exists==False (proceeds to LibraryIO.read, matches claim). Both reproduced exactly on disk. Also confirmed input-controllability: metaDataFilePath = libraryDir(libraryRootPath, archs or [])/'metadata.yaml'; libraryDir (Tensile/TensileCreateLibrary/Run.py:87) is a pure caller-driven path join (single arch -> <root>/library/<arch>/), so a caller controls the branch. DOWNGRADED to UNKNOWN per checker rules: classification is runtime-dependent. The claimed z3 'sat for both polarities' is over an abstracted boolean atom `exists`, NOT the real os.path.exists stat() call, which has no static structure and is not solver-decidable. The examples are valid on-disk demonstrations of both branches but are runtime filesystem states, not a solver proof; a runtime-dependent claim cannot be confirmed as SAT. The solver did not decide the real predicate.",
-  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Verify/927cbfe5d8104abfb79b7aa686d161a270cf0867.json"
-}

@@ -1,8 +1,0 @@
-{
-  "branch_id": "b87e16eec6cac88fae0c65b8009dd7c5c5e4536c",
-  "confirmed": false,
-  "status": "UNKNOWN",
-  "method": "Re-read real predicate: Tensile/Configuration.py:229-233 Parameter.__le__, line 230 guard is `if isinstance(rhs, Parameter):` -> matches claim exactly. Runtime-confirmed both witnesses in-container (tl-char) against the real Tensile.Configuration.Parameter (ctor sig (self,name,initialValue,defaultValue=None,description='') matches): isinstance(Parameter(name='x',initialValue=1),Parameter)==True (claimed true_example), isinstance(1,Parameter)==False (claimed false_example). Both __le__ branches reachable: Parameter(2)<=Parameter(1)==False (Parameter branch), Parameter(2)<=1==False and Parameter(2)<=5==True (else branch). However the claimed solver_status is 'unknown'/runtime-dependent: isinstance is an irreducible runtime type probe with no decomposition over the cli/yaml/int/bool input surface; the claim's z3 encoding is a hand-seeded EnumSort+type-tag MIRROR, not a proof. Per checker rules a runtime-dependent/unknown claim is NOT confirmed=true and cannot be upgraded to SAT. The witnesses reproduce exactly as claimed, but the solver result is not independently provable, so verdict stays UNKNOWN (no upgrade). Note: docker-exec python heredoc silently swallowed stdout/file writes in this env; switched to python -c which executed correctly (exit 0).",
-  "downgraded_to": "unknown",
-  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Verify/b87e16eec6cac88fae0c65b8009dd7c5c5e4536c.json"
-}

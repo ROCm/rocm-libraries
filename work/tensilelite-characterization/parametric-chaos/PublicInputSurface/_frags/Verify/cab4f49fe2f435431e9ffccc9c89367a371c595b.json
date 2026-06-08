@@ -1,8 +1,0 @@
-{
-  "branch_id": "cab4f49fe2f435431e9ffccc9c89367a371c595b",
-  "confirmed": true,
-  "status": "SAT",
-  "method": "Read ACTUAL code: Configuration.py:534 is exactly `if isinstance(op, str):` inside CallableParameter.createBinaryOp (verified via awk NR==534). Re-executed BOTH claimed witnesses in-container (tl-char, PYTHONPATH=PROJ) against the real predicate AND the real createBinaryOp. TRUE: op='Add' -> isinstance(op,str)==True and createBinaryOp(1,2,'Add').name=='Add' (FuncMap-lookup branch). FALSE: op=(lambda lhs,rhs:lhs+rhs) -> isinstance(op,str)==False, __name__=='<lambda>', and createBinaryOp(1,2,lambda).name=='CustomBinaryOp' (else branch). Both branches exhibited end-to-end; all asserts passed (EXIT=0). Classification runtime-dependent is correct: a live-object type test, not scalar arithmetic; the branch is decided solely by the Python type of op, no injectable CLI/YAML/env input. The z3 sat result is a faithful TypeTag enumeration and both witnesses reproduce at real runtime, so a runtime-dependent claim is confirmed by actually exhibiting the behavior. CrossHair caveat in solver notes (no checkable functions on the extracted helper) is honestly reported and not relied upon. Confirmed SAT.",
-  "downgraded_to": null,
-  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Verify/cab4f49fe2f435431e9ffccc9c89367a371c595b.json"
-}

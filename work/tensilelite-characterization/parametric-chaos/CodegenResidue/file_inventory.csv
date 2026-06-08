@@ -1,4 +1,0 @@
-file,loc,branch_sites,if,elif,while,ifexp,assert,comprehension-if,guard-return,guard-raise
-Tensile/SolutionStructs/Solution.py,5230,1180,961,70,13,75,15,1,43,2
-Tensile/KernelWriter.py,9900,1858,1430,99,36,238,33,1,13,8
-Tensile/KernelWriterAssembly.py,18789,3028,1950,353,11,494,87,6,123,4

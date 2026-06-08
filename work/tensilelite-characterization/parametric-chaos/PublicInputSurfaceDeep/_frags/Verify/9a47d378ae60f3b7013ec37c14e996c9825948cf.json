@@ -1,8 +1,0 @@
-{
-  "branch_id": "9a47d378ae60f3b7013ec37c14e996c9825948cf",
-  "confirmed": true,
-  "status": "SAT",
-  "method": "Independently re-established the claim against real code. Read Validators.py:236; predicate is Path(file).is_absolute() and surrounding code branches on os.name==nt, confirming dual-platform intent. Re-executed all claimed witnesses against the ACTUAL predicate in-container (tl-char, os.name==posix): TRUE /opt/rocm/bin/amdclang++ -> True; FALSE C:/Program Files/AMD/ROCm/5.7/bin/clang++.exe -> False, amdclang++ -> False, ./amdclang++ -> False. All 4 reproduce exactly as claimed. Cross-flavour check confirms the Windows drive-letter value flips (PurePosixPath=False vs PureWindowsPath=True), validating solver-backed-under-assumptions (os.name dependency) rather than fully-static. Pure helper is_absolute_posix agrees with Path.is_absolute() on all 4 seeded values. Both polarities have real witnesses => satisfiable.",
-  "downgraded_to": null,
-  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Verify/9a47d378ae60f3b7013ec37c14e996c9825948cf.json"
-}

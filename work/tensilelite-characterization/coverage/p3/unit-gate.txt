@@ -1,6 +1,0 @@
-    warnings.warn(
-
--- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
---------------------------- snapshot report summary ----------------------------
-728 snapshots passed.
-2543 passed, 201 skipped, 350 deselected, 10 warnings in 221.51s (0:03:41)

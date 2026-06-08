@@ -1,8 +1,0 @@
-{
-  "branch_id": "aa1d28b3a0100f8f5ed22327c7a3d75e3d537e37",
-  "confirmed": true,
-  "status": "SAT",
-  "method": "Re-read actual code in-container: KernelWriter.py:884 is exactly `if kernel[\"HalfPLR\"]:` -- a direct dict read with Python truthiness, no transformation between read and branch. ValidParameters.py:1048 confirms HalfPLR domain [0,1,2,3]. Re-executed claimed examples against actual predicate semantics bool(kernel[\"HalfPLR\"]) over the full validated domain: HalfPLR=0->False, 1->True, 2->True, 3->True. All three true_examples ({1},{2},{3}) and the false_example ({0}) reproduce exactly; pure helper half_plr_enabled mirrors them. Domain bounded but exhaustively enumerated, so SAT is exact. fully-static corroborated. Confirm SAT.",
-  "downgraded_to": null,
-  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/aa1d28b3a0100f8f5ed22327c7a3d75e3d537e37.json"
-}

@@ -1,8 +1,0 @@
-{
-  "branch_id": "c03b6953169e51d676e1f454d11aef7debf7110a",
-  "confirmed": true,
-  "status": "SAT",
-  "method": "Re-read REAL code Tensile/Toolchain/Validators.py:97 -> predicate is exactly `if os.environ.get(\"ROCM_PATH\"):` (str|None truthiness; body splits ROCM_PATH on os.pathsep, appends Path(p)/bin and Path(p)/lib/llvm/bin). Re-executed all 4 claimed witnesses in tl-char by mutating os.environ and calling bool(os.environ.get(ROCM_PATH)): /opt/rocm->True, A->True, absent->None->False, ->False; each os.environ.get() returned the claimed value (ALL_OK True). Verified pure_helper rocm_path_branch_taken == (v is not None and len(v)>0) on samples. Independently re-ran z3: TRUE side And(present,Length(val)>0)=sat, FALSE side Or(Not(present),And(present,Length(val)==0))=sat. Both polarities satisfiable; sat re-established, no upgrade. classification runtime-dependent is accurate (branch fixed by OS env at launch, both sides reachable by set/unset/empty of ROCM_PATH), not upgraded.",
-  "downgraded_to": null,
-  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Verify/c03b6953169e51d676e1f454d11aef7debf7110a.json"
-}

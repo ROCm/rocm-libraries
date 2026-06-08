@@ -1,8 +1,0 @@
-{
-  "branch_id": "4480256b782f32e867dd3bf96665dc8ae5b6a883",
-  "confirmed": true,
-  "status": "SAT",
-  "method": "Re-established against REAL code. (1) KernelWriterAssembly.py:7089 is 'if tailLoop:' (Tail Loop section); tailLoop at 7081 = 'loopIdx < 0' -- matches claim. (2) NoTailLoop derivation at SolutionStructs/Solution.py:3845-3847 = 'state[NoTailLoop] = (AssertSummationElementMultiple % DepthU == 0)'; KernelWriter.py:5352 gates tail section with 'if not kernel[NoTailLoop]' -- matches claim exactly. (3) Re-ran witnesses in-container (tl-char): TRUE (loopIdx=-1,ASEM=12,DepthU=8) -> tailLoop=True, NoTailLoop=(12%8==0)=False so reachable; FALSE (loopIdx=0,ASEM=8,DepthU=8) -> tailLoop=False, NoTailLoop=(8%8==0)=True. Both reproduce as claimed (DIRECT_EVAL_OK=True). (4) Independent z3 4.16.0 re-derivation: loopIdx<0 sat (model loopIdx=-1), loopIdx>=0 sat (model loopIdx=0) -- both polarities sat, matching claimed solver_status=sat and exact witness values. Pure integer lt comparison; no os/fs/GPU gate. Confirmed at SAT under the stated assumptions (loopIdx call-site convention + NoTailLoop reachability gate); not upgraded.",
-  "downgraded_to": null,
-  "frag_path": "work/tensilelite-characterization/parametric-chaos/CodegenResidue/_frags/Verify/4480256b782f32e867dd3bf96665dc8ae5b6a883.json"
-}

@@ -1,8 +1,0 @@
-{
-  "branch_id": "2c7170bfd056c780a059b396e0cbb8a938384ecc",
-  "confirmed": true,
-  "status": "SAT",
-  "method": "Read Tensile/Tensile.py:25 in-container (tl-char): predicate is exactly `if __name__ == \"__main__\":` (bare string-equality module guard). Re-executed the actual compare(==) op-surface against both claimed examples in-container: TRUE example __name__=\"__main__\" -> True; FALSE example __name__=\"Tensile.Tensile\" -> False. Both reproduce exactly, so both branches reachable => SAT. Classification fully-static holds: bare string equality on __name__, no isinstance/nodeType/os/fs/gpu probes. Confirmed the claim honest downstream caveat: __name__ is fixed by the interpreter at load time and is NOT steerable by CLI/YAML public input (sat reflects logical reachability under the seeded 2-value domain, not public-input steerability). No upgrade made.",
-  "downgraded_to": null,
-  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurface/_frags/Verify/2c7170bfd056c780a059b396e0cbb8a938384ecc.json"
-}

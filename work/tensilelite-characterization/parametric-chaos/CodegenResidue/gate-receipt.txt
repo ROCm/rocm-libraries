@@ -1,9 +1,0 @@
-TOTAL                                                     54546  44086  22664   1021  16.04%
-17 passed in 30.22s
-TOTAL                                                 54382  48244  22616     62   8.40%
-35 passed in 15.48s
-TOTAL                                                 54382  47475  22616    141   9.76%
-90 passed in 22.84s
-TOTAL                                                     54867   9041  22780   2956  80.76%
-Part A pytest exit: 0  (expect 0 failed; TOTAL >= 80.60% is the no-regression guard)
---- methodology-A gate (driver): combined TOTAL 80.76%% >= 80.60%% guard, Part A exit 0, 3664 passed / 201 skipped / 0 failed ---

@@ -1,3 +1,0 @@
-mutant_id	file	apply_method	test_node	expect_clean_rc	expect_mutant_rc_nonzero	revert_assert
-Tensile.Common.Utilities.x_ceilDivide__mutmut_10	Tensile/Common/Utilities.py	mutmut_apply	Tensile/Tests/unit/characterization/CommonUtilities/test_common_utilities_char.py::test_ceil_divide_negative_and_zero	0	true	true
-Tensile.Common.Utilities.x_ceilDivide__mutmut_1	Tensile/Common/Utilities.py	mutmut_apply	Tensile/Tests/unit/characterization/CommonUtilities/test_common_utilities_char.py::test_ceil_divide_negative_and_zero	0	true	true

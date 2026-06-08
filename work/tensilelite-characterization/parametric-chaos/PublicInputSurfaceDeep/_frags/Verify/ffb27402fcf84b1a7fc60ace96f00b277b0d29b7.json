@@ -1,8 +1,0 @@
-{
-  "branch_id": "ffb27402fcf84b1a7fc60ace96f00b277b0d29b7",
-  "confirmed": true,
-  "status": "SAT",
-  "method": "Re-read actual predicate at Tensile/Toolchain/Validators.py:195 (supportedDeviceEnumerator): `if os.name == \"nt\":` -> hipinfo/hipInfo branch (line 196); else -> rocm_agent_enumerator/amdgpu-arch branch (line 197). Confirmed verbatim. Re-executed both claimed witnesses in-container (tl-char): TRUE os_name=nt => (nt==nt)==True; FALSE os_name=posix => (posix==nt)==False. Both reproduce exactly. Domain {posix,nt} exhaustive; both members decided sat. Also exercised the REAL function supportedDeviceEnumerator: on the actual host (os.name==posix, verified) the false branch is live -- (rocm_agent_enumerator)=>True, (hipinfo)=>False, matching POSIX-branch semantics. Forcing V.os.name=nt drove control into the Windows branch (line 196 reached, proving the TRUE predicate selects hipinfo) before a downstream KeyError(PATHEXT) in _windowsWithExtensions -- strictly past the predicate under test, does not affect its evaluation. Classification runtime-dependent upheld: os.name is a CPython interpreter probe of the host kernel, not reachable from any Tensile CLI arg/YAML/env public input; on the posix char-test host only the false branch is naturally reachable. solver_status sat corroborated -- single static string compare exhaustively decided over its two domain values. No downgrade.",
-  "downgraded_to": null,
-  "frag_path": "work/tensilelite-characterization/parametric-chaos/PublicInputSurfaceDeep/_frags/Verify/ffb27402fcf84b1a7fc60ace96f00b277b0d29b7.json"
-}

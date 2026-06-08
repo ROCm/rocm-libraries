@@ -1,5 +1,0 @@
-file,loc,branch_sites,if,elif,while,ifexp,assert,comprehension-if,guard-return,guard-raise
-Tensile/Tensile.py,721,66,49,5,1,5,3,0,1,2
-Tensile/Configuration.py,941,104,22,13,0,15,8,3,41,2
-Tensile/Common/GlobalParameters.py,783,21,20,0,0,1,0,0,0,0
-Tensile/CustomYamlLoader.py,155,30,4,2,4,0,9,0,9,2
