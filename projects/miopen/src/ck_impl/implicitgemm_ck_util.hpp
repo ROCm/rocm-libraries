@@ -937,7 +937,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         internal::MakeTaggedTransposeInstances<CKArgsType>(
             result, ctx, problem, ck_args, input1_op, input2_op, output_op, _ck_buff_des);
 
-    result.invoker_factory = [kernel_id_           = &kernel_id,
+    result.invoker_factory = [kernel_id_           = kernel_id,
                               split_k_             = split_k,
                               ck_args_             = std::move(ck_args),
                               sh_conv_ptr_         = std::shared_ptr{std::move(*ptr_iter)},
@@ -947,7 +947,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                               output_init_tr_inst_ = std::move(_output_init_tr_inst),
                               ck_buff_des_ =
                                   _ck_buff_des](const std::vector<Kernel>& kernels) mutable {
-        return [kernel_id2 = kernel_id_,
+        return [kernel_id2 = std::move(kernel_id_),
                 split_k2   = split_k_,
                 kernels,
                 ck_args2             = std::move(ck_args_),
@@ -1035,7 +1035,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                 // Kernel logging for CK kernels
                 if(IsLoggingKernel())
                 {
-                    AddKernelToJsonAccumulator(*kernel_id2, elapsed, false);
+                    AddKernelToJsonAccumulator(kernel_id2, elapsed, false);
                 }
                 handle.ResetKernelTime();
                 handle.AccumKernelTime(elapsed);
