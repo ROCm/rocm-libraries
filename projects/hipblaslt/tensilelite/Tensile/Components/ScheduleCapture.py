@@ -114,6 +114,10 @@ class UnexplainedMissingEdgeError(Exception):
     """diagnose_missing_edge couldn't classify a missing edge — classifier or pipeline bug."""
 
 
+class UnexplainedExtraEdgeError(Exception):
+    """diagnose_extra_edge couldn't classify an extra edge — classifier or pipeline bug."""
+
+
 class CaptureCategoryMissingError(Exception):
     """A leaf reached the SHADOW capture walk with no idMap entry AND no
     registered class-name in ``InstructionCategory._CLASS_NAME_TO_CATEGORY``.

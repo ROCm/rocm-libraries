@@ -54,6 +54,7 @@ from Tensile.Components.ScheduleCapture import (
     CaptureEmptyBodyError,
     CaptureUnknownInstructionError,
     UnexplainedMissingEdgeError,
+    UnexplainedExtraEdgeError,
     MemoryRegion,
     SLOT_KIND_MFMA,
     SLOT_KIND_PRE_LOOP,
@@ -3521,7 +3522,50 @@ class OverriddenInputFailure(Failure):
 
 
 # ----------------------------------------------------------------------------
-# 8. VopdPairFormationFailure — RDNA3.5 §7.6 R-4..R-7 hard-rule violation.
+# 8b. EdgeRoutedDifferentlyFailure — symmetric counterpart to OverriddenInputFailure.
+#     Emitted by `diagnose_extra_edge` (compare_graphs, subj − ref direction).
+#     The subject graph has an edge whose consumer reads from a DIFFERENT producer
+#     than the reference graph paired the consumer with. Structurally equivalent
+#     to a clobber/displacement: CMS inserted or moved an intervening writer
+#     between reference's producer and the consumer, so the consumer is now
+#     reading from a different source than the default schedule intended.
+#
+#     `ref_producer` may be None when ref has writers for the byte_keys but none
+#     of them appear before the consumer's unrolled position (ref's consumer would
+#     have no closest-prior writer in that case, which itself indicates a routing
+#     divergence).
+#
+#     Emitted exclusively by diagnose_extra_edge (rocm-libraries-67us, C3e).
+# ----------------------------------------------------------------------------
+@dataclass
+class EdgeRoutedDifferentlyFailure(Failure):
+    subj_producer: FailureNodeLabel = None
+    subj_consumer: FailureNodeLabel = None
+    ref_producer: Optional[FailureNodeLabel] = None  # None if ref has no prior writer
+    byte_keys: tuple = ()
+    # Per-byte routing: bk -> (ref_writer_identity, subj_writer_identity). Verbose; complete.
+    byte_key_routing: dict = field(default_factory=dict)
+
+    def _format_canonical(self) -> str:
+        ref_part = (
+            f"reference routes through {self.ref_producer.primary} "
+            f"{self.ref_producer.position}"
+            if self.ref_producer is not None
+            else "reference has no prior writer at this consumer position"
+        )
+        return (
+            f"Subject's consumer {self.subj_consumer.primary} "
+            f"{self.subj_consumer.position} reads from subject's producer "
+            f"{self.subj_producer.primary} {self.subj_producer.position} "
+            f"at byte_keys {self.byte_keys}, but {ref_part}"
+            f"{self._iter_suffix()}. The subject schedule inserted or moved "
+            f"an intervening writer between the reference's producer and the "
+            f"consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)"
+        )
+
+
+# ----------------------------------------------------------------------------
+# 8c (renumbered). VopdPairFormationFailure — RDNA3.5 §7.6 R-4..R-7 hard-rule violation.
 #    Emitted exclusively by `validate_vopd_pair_formation`. Each instance
 #    identifies one rule and one VOPD pair. Per ISA §7.6: "These are hard
 #    rules — the instruction does not function if these rules are broken."
@@ -3650,15 +3694,23 @@ def cms_node_label(
 
 
 # =============================================================================
-# Cross-graph comparison: compare_graphs + diagnose_missing_edge
+# Cross-graph comparison: compare_graphs + diagnose_missing_edge + diagnose_extra_edge
 # =============================================================================
 # compare_graphs takes the default-side (reference) and CMS-side (subject)
-# DataflowGraphs and emits Failure objects for every reference edge missing
-# from the subject graph, routed through diagnose_missing_edge.
+# DataflowGraphs and processes BOTH directions of the symmetric edge-set diff:
 #
-# diagnose_missing_edge classifies a single missing edge into one of:
-#   OrderInvertedFailure, MissingWaitFailure, WaitInsufficientFailure,
-#   MissingBarrierFailure, OverriddenInputFailure, TimingTooCloseFailure.
+#   ref − subj (missing edges): routed through diagnose_missing_edge.
+#     diagnose_missing_edge classifies a single missing edge into one of:
+#       OrderInvertedFailure, MissingWaitFailure, WaitInsufficientFailure,
+#       MissingBarrierFailure, OverriddenInputFailure, TimingTooCloseFailure.
+#
+#   subj − ref (extra edges): routed through diagnose_extra_edge.
+#     diagnose_extra_edge (rocm-libraries-67us, C3e) classifies a single extra
+#     edge into one of:
+#       CaptureConsistencyError (raise) — §3 same-instruction-set contract violated.
+#       EdgeRoutedDifferentlyFailure — ref routes the consumer's byte_keys through a
+#         different producer than subj does.
+#       UnexplainedExtraEdgeError (raise) — validator bug; edge should have canceled.
 
 
 def compare_graphs(
@@ -3680,8 +3732,9 @@ def compare_graphs(
     producers writing the same byte footprint to the same resource produce
     distinct keys and are not silently cancelled in the set-diff.
 
-    Returns a list of Failure objects — one or more per missing edge,
-    routed through diagnose_missing_edge.
+    Returns a list of Failure objects — one or more per missing or extra edge,
+    routed through diagnose_missing_edge (ref − subj direction) and
+    diagnose_extra_edge (subj − ref direction, rocm-libraries-67us C3e).
 
     Raises CaptureConsistencyError BEFORE comparison if the two graphs'
     DATA-FLOW node identity sets differ — a capture-pipeline bug, not a
@@ -3692,6 +3745,9 @@ def compare_graphs(
     validator bug, not a soft observability event. There is no
     silent-Failure path — production observes the raise the same way
     tests do.
+
+    Unclassified extra edges raise UnexplainedExtraEdgeError
+    unconditionally (via diagnose_extra_edge): same no-silent-ignore contract.
     """
     # Identity-coverage check at entry, restricted to DATA-FLOW nodes
     # (LR/LW/GR/MFMA). CMS legitimately adds/removes scheduling control
@@ -3817,6 +3873,35 @@ def compare_graphs(
     for key in missing_keys:
         ref_edge = ref_edges_by_key[key]
         failures.extend(diagnose_missing_edge(ref_edge, subject))
+
+    # --- symmetric: extra keys (subj has, ref does not) ---
+    # rocm-libraries-67us (C3e): process the subj − ref direction, which the
+    # pre-C3e code ignored. For each extra subj edge, diagnose_extra_edge
+    # classifies into one of three terminal outcomes:
+    #   - CaptureConsistencyError (raise): ref has no writer for one of subj's
+    #     byte_keys — §3 same-instruction-set contract violated.
+    #   - EdgeRoutedDifferentlyFailure (appended): ref's closest-prior writer
+    #     for the byte_keys differs in identity from subj's producer — CMS
+    #     routed the consumer to a different source than the default schedule.
+    #   - UnexplainedExtraEdgeError (raise): all ref closest-prior writers
+    #     match subj's producer identity — the edge should have canceled in
+    #     set-diff; this is a validator bug.
+    #
+    # After C3d (xxj4) byte-key edge_keys, the 16 NGL extras on BPG#11 cancel
+    # in set-diff; extra_keys is empty on all current production fixtures.
+    # diagnose_extra_edge exists for future correctness defense.
+    extra_keys = subj_keys - ref_keys
+    subj_edges_by_key = {}
+    for e in subject.edges:
+        key = (e.producer.identity[1], e.producer.identity[2],
+               e.producer_write_byte_key, e.consumer_read_byte_key,
+               e.edge_kind, e.intra_operand_byte_offset,
+               e.src_operand_slot, e.sink_operand_slot)
+        subj_edges_by_key.setdefault(key, e)
+    for key in extra_keys:
+        subj_edge = subj_edges_by_key[key]
+        failures.extend(diagnose_extra_edge(subj_edge, subject, reference))
+
     return failures
 
 
@@ -4110,6 +4195,151 @@ def diagnose_missing_edge(
             f"bug that bypassed earlier sanity checks."
         )
     return failures
+
+
+def diagnose_extra_edge(
+    subj_edge: "DataflowEdge",
+    subj_graph: "DataflowGraph",
+    ref_graph: "DataflowGraph",
+) -> List["Failure"]:
+    """Classify a CMS-extra edge (present in subj, absent from ref under byte-key edge_keys).
+
+    Implements Option C (hybrid byte-key-driven classifier) from
+    Q4_SPURIOUS_EDGE_CLASSIFIER_DESIGN.md. Three terminal outcomes:
+
+      - CaptureConsistencyError (raised): ref has no writer for one of subj's
+        byte_keys in `subj_edge.producer_write_byte_key`. Violates the
+        same-instruction-set contract (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3);
+        this is a capture-pipeline bug, not a CMS schedule defect.
+
+      - EdgeRoutedDifferentlyFailure (returned in list): ref has writers for
+        all of subj's byte_keys, but ref's closest-prior writer (strictly
+        before the consumer's unrolled_position) differs in identity from
+        subj's producer. CMS routed the consumer's read to a different
+        producer than the default schedule did — structurally a
+        clobber/displacement. Symmetric counterpart of OverriddenInputFailure.
+
+      - UnexplainedExtraEdgeError (raised): ref's closest-prior writer for
+        every byte_key has the same identity as subj's producer — the edge
+        SHOULD have canceled in set-diff but did not. This is a validator bug
+        (byte-key reverse index and edge_keys are inconsistent); file a
+        validator bead, not a CMS bead.
+
+    The closest-prior writer lookup uses the consumer's REFERENCE-SIDE
+    unrolled_position (resolved by identity from ref_graph.nodes), not the
+    subj consumer's position. This matters when the subject schedule dramatically
+    reorders the consumer relative to ref (e.g., a swap-pack reorder test):
+    the subj consumer's position may be before intervening ref writers, making
+    the lookup see a stale writer that doesn't reflect what ref's walk
+    actually recorded. Using the ref-side position ensures the query answers
+    "what was ref's latest writer for these byte_keys at the moment ref's
+    consumer appeared in ref's stream" — the semantically correct question.
+    (Risk 3 from C3e_67us_IMPL_PLAN.md §9; fix applied in rocm-libraries-67us.)
+
+    Introduced by rocm-libraries-67us (C3e).
+    """
+    cons = subj_edge.consumer
+    subj_prod = subj_edge.producer
+    subj_prod_identity = subj_prod.identity
+
+    # Resolve the consumer's position in ref (not in subj) for the closest-prior
+    # writer lookup. This is critical when the subject schedule dramatically
+    # reorders instructions: the subj consumer's unrolled_position may be much
+    # earlier or later than the ref consumer's, causing the closest-prior ref
+    # writer search to see different writers (Risk 3 from C3e_67us_IMPL_PLAN.md §9).
+    # Using the ref consumer's position ensures we ask "what did ref's walk record
+    # as the latest writer at the point where ref's consumer IS in ref's stream"
+    # rather than "at the point where subj's consumer happens to be in subj's
+    # stream, which may be at a completely different position in ref."
+    #
+    # If the consumer identity is absent from ref (capture-pipeline bug), fall
+    # back to the subj consumer's position — the Phase 0 gate for producer
+    # byte_keys will catch the inconsistency on the next line.
+    ref_cons_node = next(
+        (n for n in ref_graph.nodes if n.identity == cons.identity), None
+    )
+    cons_pos = (ref_cons_node.unrolled_position if ref_cons_node is not None
+                else cons.unrolled_position)
+
+    # Phase 0 — capture-consistency gating.
+    # Every byte_key in subj's producer write footprint must have at least one
+    # writer in ref; otherwise the §3 same-instruction-set contract is violated.
+    bks = subj_edge.producer_write_byte_key  # tuple of byte_keys
+    missing_bks = [bk for bk in bks if not ref_graph.byte_key_writers.get(bk)]
+    if missing_bks:
+        raise CaptureConsistencyError(
+            f"diagnose_extra_edge: subj emits an edge with producer writes at "
+            f"byte_keys {missing_bks} that have NO writer anywhere in ref. "
+            f"Violates the same-instruction-set contract "
+            f"(DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3). Capture-pipeline bug."
+        )
+
+    # Phase 1 — closest-prior-writer comparison per byte_key.
+    # For every byte_key in the footprint, identify ref's most-recent writer
+    # whose unrolled_position is strictly less than the consumer's ref-side
+    # position (the writer ref's walk would record for that byte at the moment
+    # ref's consumer is processed in ref's stream).
+    ref_closest_priors: dict = {}  # bk -> (ref_writer_node_or_None, pos_or_None)
+    for bk in bks:
+        writers = ref_graph.byte_key_writers[bk]  # list of (node, pos)
+        priors = [(w, p) for (w, p) in writers if p < cons_pos]
+        if not priors:
+            # ref has writers for this byte_key, but all are AFTER the consumer.
+            # ref's consumer would also have no closest-prior writer — yet subj
+            # does have a prior writer (it formed an edge). Treat as routing-differs
+            # with ref_writer=None (fall through to Phase 1 verdict below).
+            ref_closest_priors[bk] = (None, None)
+            continue
+        ref_closest_priors[bk] = max(priors, key=lambda np: np[1])
+
+    # Identity comparison: does ref's closest-prior writer match subj's producer
+    # for every byte_key?
+    ref_writer_identities = {
+        bk: (w.identity if w is not None else None)
+        for bk, (w, _p) in ref_closest_priors.items()
+    }
+    all_match = all(
+        ident == subj_prod_identity
+        for ident in ref_writer_identities.values()
+    )
+
+    if all_match:
+        # Ref's closest-prior writer is the SAME identity as subj's producer for
+        # every byte_key. Under iter-blind identity + byte-key edge_keys the edge
+        # SHOULD have canceled in set-diff. That it didn't means the byte-key
+        # reverse index and edge_keys disagree — a validator bug, not a CMS defect.
+        raise UnexplainedExtraEdgeError(
+            f"diagnose_extra_edge: ref's closest-prior writer matches subj's "
+            f"producer identity for every byte_key in {bks}; this edge should "
+            f"have canceled in set-diff. byte-key reverse index and edge_keys "
+            f"are inconsistent. subj_prod_identity={subj_prod_identity}."
+        )
+
+    # Phase 1 verdict: ref's closest-prior writer for at least one byte_key
+    # differs from subj's producer identity (or ref has no closest-prior writer
+    # for that byte_key while subj does). CMS routed the consumer's read to a
+    # different producer than SHADOW did.
+    #
+    # Pick a representative ref writer for the failure message: the writer at
+    # the first byte_key whose identity differs from subj's producer. Diagnostic
+    # only; the per-byte detail is conveyed via byte_key_routing.
+    ref_repr_bk = next(bk for bk in bks if ref_writer_identities[bk] != subj_prod_identity)
+    ref_repr_writer, _ref_repr_pos = ref_closest_priors[ref_repr_bk]
+
+    return [EdgeRoutedDifferentlyFailure(
+        subj_producer=cms_node_label(subj_prod, subj_graph.body_for(subj_prod)),
+        subj_consumer=cms_node_label(cons, subj_graph.body_for(cons)),
+        ref_producer=(
+            cms_node_label(ref_repr_writer, ref_graph.body_for(ref_repr_writer))
+            if ref_repr_writer is not None else None
+        ),
+        byte_keys=bks,
+        iter_delta=subj_prod.iter_delta_to(cons),
+        byte_key_routing={
+            bk: (ref_writer_identities[bk], subj_prod_identity)
+            for bk in bks
+        },
+    )]
 
 
 # =============================================================================
