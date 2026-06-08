@@ -17,6 +17,9 @@ Documentation for rocSPARSE is available at
 * Significant performance improvement for `rocsparse_Xgtsv_no_pivot_strided_batch`.
 * Significant performance improvement for `rocsparse_Xgtsv_no_pivot`.
 
+### Deprecations
+* Deprecated the `rocsparse_indextype_u16` index type. It is unsupported and will be removed in a future release. Users should use `rocsparse_indextype_i32` or `rocsparse_indextype_i64` going forward.
+
 ### Resolved issues
 * Fixed incorrect usage of `__syncthreads` in `bsrmm`, `csrmm` (row_split), and `csritilu0x`
 * Fixed incorrect usage of `__syncthreads` in `csx2dense`, `dense2csx`, `prune_dense2csr`, `csrcolor`, and `csrmm` (nnz_split)
