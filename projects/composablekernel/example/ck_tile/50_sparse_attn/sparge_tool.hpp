@@ -244,7 +244,8 @@ ck_tile::HostTensor<uint8_t> build_block_map_meansim(const ck_tile::HostTensor<T
 
                 auto mean = detail::pooled_mean_block(K, p.i_perm, b, hk, s0, s1, D);
                 for(int d = 0; d < D; ++d)
-                    pooled_k[idx_pk(b, hk, kb, d)] = mean[d];
+                    pooled_k[idx_pk(b, hk, kb, d)] =
+                        ck_tile::type_convert<float>(ck_tile::type_convert<T>(mean[d]));
 
                 sim_k[idx_sk(b, hk, kb)] =
                     detail::sim_block_flag(K, p.i_perm, b, hk, s0, s1, D, p.simthreshd1) ? 1 : 0;
