@@ -100,6 +100,9 @@ def run_suite_benchmark(
     )
 
     reporter.print_hipdnn_init_start()
+    # hipDNN handle creation is the authoritative GPU/runtime check for this
+    # backend. Apply plugin paths before constructing the handle; do not depend
+    # on optional telemetry tools such as rocm-smi or amdsmi.
     try:
         import hipdnn_frontend as hipdnn
 

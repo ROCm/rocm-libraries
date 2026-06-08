@@ -4,12 +4,12 @@
 # OBJECT library with all implementation
 add_library(
     hip_kernel_provider_impl OBJECT
-    HipKernelHandle.cpp
-    HipKernelContainer.cpp
-    HipKernelPluginPublic.cpp
-    HipKernelUtils.cpp
-    hip/HipKernel.cpp
-    hip/HipProgram.cpp
+    core/Handle.cpp
+    core/Container.cpp
+    core/PluginPublic.cpp
+    core/Utils.cpp
+    compilation/Kernel.cpp
+    compilation/Program.cpp
 )
 
 add_subdirectory(engines)
