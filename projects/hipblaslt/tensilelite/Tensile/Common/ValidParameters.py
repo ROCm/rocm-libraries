@@ -886,8 +886,10 @@ validParameters = { # we need to make sure this matches develop
     # is added (readOffset aware of the pad and adjusts offset value based on this parameter value).
     # Only support LdsBlockSizePerPad >= unrollDepth * BPE
     # 0 means disable LdsBlockSizePerPad; -1 means auto-derive from problem geometry.
-    # This is a derived byte size, not a discrete choice, so it is not validated here (-1 skips the
-    # value check). Constraints are enforced in Solution.calcLdsBlockSizePerPad / checkLdsBlockSizePerPadForTDM.
+    # This is a derived, config-dependent byte size, not a discrete choice, so it is not validated here
+    # (-1 skips the value check). Solution derivation does some checking (TDM padding in
+    # checkLdsBlockSizePerPadForTDM, pad-consistency in calcLdsBlockSizePerPad), but coverage is partial:
+    # an explicit out-of-range value can pass derivation and miscompute at runtime.
     "LdsBlockSizePerPadA": -1,
     "LdsBlockSizePerPadMXSA": -1,
     "LdsBlockSizePerPadB": -1,
