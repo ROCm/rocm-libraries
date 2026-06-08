@@ -252,6 +252,24 @@ class TestMainRouting:
         assert suite_config.plugin_paths == [Path("/plugins/b"), Path("/plugins/a")]
 
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
+    def test_dnn_plugin_dir_env_used_when_plugin_path_absent(
+        self, mock_benchmark: MagicMock
+    ) -> None:
+        mock_benchmark.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._create_graph_files(Path(tmpdir), 1)
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch.dict(os.environ, {"DNN_PLUGIN_DIR": "/plugins/env"}):
+                with patch("sys.argv", ["dnn-benchmark", "--graph", paths[0]]):
+                    main()
+
+        suite_config = mock_benchmark.call_args.kwargs["config"]
+        assert suite_config.plugin_paths == [Path("/plugins/env")]
+
+    @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_same_engine_plugin_paths_propagate_as_ordered_selections(
         self, mock_benchmark: MagicMock
     ) -> None:

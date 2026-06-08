@@ -62,10 +62,10 @@ usage() {
     echo "  --force-build        Build hipDNN and provider plugins from source,"
     echo "                       overwriting artifacts under the selected ROCm prefix."
     echo "  -y                   Skip confirmation prompts."
-    echo ""
-    echo "  The installed plugins will be at:"
+    echo "  The installed plugins will be exported as DNN_PLUGIN_DIR:"
     echo "    <selected-prefix>/lib/hipdnn_plugins/engines/"
-    echo "  Pass that path to --plugin-path when benchmarking."
+    echo "  The selected prefix lib directory is prepended to LD_LIBRARY_PATH"
+    echo "  by the venv activation script."
 }
 
 require_arg() {
@@ -90,6 +90,28 @@ if sys.version_info < required:
         "Run setup with a Python 3.12+ environment."
     )
 PY
+}
+
+prepend_ld_library_path() {
+    local lib_dir="$1"
+    case ":${LD_LIBRARY_PATH:-}:" in
+        *":$lib_dir:"*) ;;
+        *) export LD_LIBRARY_PATH="$lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
+    esac
+}
+
+write_activation_local() {
+    local plugin_dir="$1"
+    local lib_dir="$2"
+    {
+        printf 'export PYTHONPYCACHEPREFIX=%q\n' "$DNN_BENCH_WORKSPACE/pycache"
+        printf 'export DNN_BENCH_WORKSPACE=%q\n' "$DNN_BENCH_WORKSPACE"
+        printf 'export DNN_PLUGIN_DIR=%q\n' "$plugin_dir"
+        printf 'case ":%s:" in\n' '${LD_LIBRARY_PATH:-}'
+        printf '    *:%s:*) ;;\n' "$lib_dir"
+        printf '    *) export LD_LIBRARY_PATH=%q${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} ;;\n' "$lib_dir"
+        printf 'esac\n'
+    } > "$ACTIVATE_LOCAL"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -704,12 +726,10 @@ source "$VENV_DIR/bin/activate"
 # activate script so it's set before the interpreter starts (setting it in
 # Python code is too late for that process's own imports).
 ACTIVATE_LOCAL="$VENV_DIR/bin/activate.local"
-if [ ! -f "$ACTIVATE_LOCAL" ] || ! grep -q PYTHONPYCACHEPREFIX "$ACTIVATE_LOCAL"; then
-    {
-        echo "export PYTHONPYCACHEPREFIX=$DNN_BENCH_WORKSPACE/pycache"
-        echo "export DNN_BENCH_WORKSPACE=$DNN_BENCH_WORKSPACE"
-    } >> "$ACTIVATE_LOCAL"
-fi
+{
+    printf 'export PYTHONPYCACHEPREFIX=%q\n' "$DNN_BENCH_WORKSPACE/pycache"
+    printf 'export DNN_BENCH_WORKSPACE=%q\n' "$DNN_BENCH_WORKSPACE"
+} > "$ACTIVATE_LOCAL"
 if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
     # shellcheck disable=SC2016
     echo 'source "$(dirname "${BASH_SOURCE[0]}")/activate.local" 2>/dev/null || true' \
@@ -785,6 +805,11 @@ fi
 
 echo ""
 echo "hipDNN plugins installed to: $PLUGIN_DIR/"
+DNN_PLUGIN_DIR="$PLUGIN_DIR"
+export DNN_PLUGIN_DIR
+prepend_ld_library_path "$BINDING_PREFIX/lib"
+write_activation_local "$DNN_PLUGIN_DIR" "$BINDING_PREFIX/lib"
+
 
 # 6. Install hipDNN Python bindings.
 # Wipe any stale cmake build cache (can reference deleted pip temp envs).
@@ -815,5 +840,9 @@ echo "Setup complete. Activate the virtual environment with:"
 echo "  source $VENV_DIR/bin/activate"
 echo ""
 echo "Run benchmarks with:"
-echo "  python -m dnn_benchmarking --graph <graph.json> \\"
-echo "    --plugin-path $BINDING_PREFIX/lib/hipdnn_plugins/engines"
+echo "  python -m dnn_benchmarking --graph <graph.json>"
+echo ""
+echo "The activation script sets:"
+echo "  DNN_PLUGIN_DIR=$DNN_PLUGIN_DIR"
+echo "  LD_LIBRARY_PATH=$BINDING_PREFIX/lib:\${LD_LIBRARY_PATH}"
+echo "Pass --plugin-path explicitly only when overriding the setup-installed plugins."

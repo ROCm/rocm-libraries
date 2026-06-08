@@ -4,6 +4,7 @@
 """Suite benchmark CLI runner."""
 
 import argparse
+import os
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -18,6 +19,13 @@ from ..reporting.suite_results import (
     SuiteResult,
 )
 from ..validation.reference_provider import ReferenceProviderRegistry
+
+
+def _plugin_paths_from_environment() -> Optional[List[Path]]:
+    plugin_dir = os.environ.get("DNN_PLUGIN_DIR")
+    if not plugin_dir:
+        return None
+    return [Path(plugin_dir)]
 
 
 def _error_graph_result(graph_path: Path, error_message: str) -> GraphResult:
@@ -187,7 +195,7 @@ def run_suite_cli(
                 "source requested (--pmc, --emit-trace, --perf, "
                 "--roofline); the directory will not be written to"
             )
-        plugin_paths = args.plugin_path
+        plugin_paths = args.plugin_path or _plugin_paths_from_environment()
         config = SuiteConfig(
             warmup_iters=args.warmup,
             benchmark_iters=args.iters,

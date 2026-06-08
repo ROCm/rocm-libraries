@@ -255,7 +255,8 @@ CLI_OPTIONS: tuple[CliOption, ...] = (
         help=(
             "Directory containing hipDNN engine plugin .so files, or a "
             "comma-separated list matching --engine order. A single path is "
-            "shared by all selected engines."
+            "shared by all selected engines. If omitted, DNN_PLUGIN_DIR is "
+            "used when set by setup.sh."
         ),
         config_key="plugin_path",
         config_kind=ConfigKind.PATH_OR_PATH_LIST,
