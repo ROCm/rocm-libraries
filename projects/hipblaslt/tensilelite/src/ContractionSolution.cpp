@@ -819,13 +819,12 @@ namespace TensileLite
                 {
                     if(sk.reduction == origami::reduction_t::parallel)
                     {
-                        std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
-                                  << "setting GSU to 1." << std::endl;
-                        gsu = 1;
-                    }
+                        if(gsu > 1) {
+                            std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, current GSU value: " << gsu
+                                      << ", setting GSU to 1." << std::endl;
+                            gsu = 1;
+                        }
 
-                    if(sk.reduction == origami::reduction_t::parallel)
-                    {
                         uint32_t skSplit
                             = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
                         uint32_t skItersPerWG = itersPerTile / skSplit;
