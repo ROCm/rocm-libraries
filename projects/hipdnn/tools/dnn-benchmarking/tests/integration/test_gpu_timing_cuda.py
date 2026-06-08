@@ -73,4 +73,4 @@ def test_pytorch_gpu_timing_rocm() -> None:
 
     assert result.metadata is not None
     assert result.metadata.execution_backend == "pytorch"
-    assert result.metadata.gpu_backend == "hip"
+    assert result.metadata.timing_backend == "hip"

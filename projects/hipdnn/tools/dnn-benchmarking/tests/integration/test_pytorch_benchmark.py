@@ -205,7 +205,7 @@ class TestPyTorchCudaExecutor:
             assert len(result.kernel_timings) == 5
             assert result.metadata is not None
             assert result.metadata.execution_backend == "pytorch"
-            assert result.metadata.gpu_backend == "hip"
+            assert result.metadata.timing_backend == "hip"
             assert result.metadata.graph_name == "test_conv"
 
     def test_full_benchmark_matmul(self, sample_matmul_graph):
@@ -342,7 +342,7 @@ class TestPyTorchCudaExecutor:
             assert "kernel_timings" in data
             assert "metadata" in data
             assert data["metadata"]["execution_backend"] == "pytorch"
-            assert data["metadata"]["gpu_backend"] == "hip"
+            assert data["metadata"]["timing_backend"] == "hip"
 
     def test_not_prepared_raises(self, sample_conv_graph):
         """Test that running without prepare raises error."""

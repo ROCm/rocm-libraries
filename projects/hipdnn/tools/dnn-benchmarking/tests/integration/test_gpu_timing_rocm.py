@@ -51,7 +51,7 @@ def test_hipdnn_gpu_timing_rocm(plugin_paths: List[str]) -> None:
     import hipdnn_frontend as hipdnn
 
     handle = hipdnn.Handle()
-    executor = Executor(graph_json_str, config, gpu_backend="hip")
+    executor = Executor(graph_json_str, config, timing_backend="hip")
     executor.prepare(handle)
 
     with BufferManager(tensor_infos) as buffer_manager:
@@ -75,4 +75,4 @@ def test_hipdnn_gpu_timing_rocm(plugin_paths: List[str]) -> None:
         assert e2e_ms + tolerance_ms >= kernel_ms
 
     assert result.metadata is not None
-    assert result.metadata.gpu_backend == "hip"
+    assert result.metadata.timing_backend == "hip"

@@ -74,21 +74,21 @@ class Executor:
         self,
         graph_json_str: str,
         config: BenchmarkConfig,
-        gpu_backend: Optional[Literal["hip", "auto", "none"]] = "auto",
+        timing_backend: Optional[Literal["hip", "auto", "none"]] = "auto",
     ) -> None:
         """Initialize executor with graph JSON and configuration.
 
         Args:
             graph_json_str: The graph as a JSON string.
             config: Benchmark configuration.
-            gpu_backend: GPU timer backend to use:
+            timing_backend: GPU timer backend to use:
                 - "hip": Force direct HIP event timing
                 - "auto": Auto-detect direct HIP timing
                 - "none": Disable GPU kernel timing, use synchronized E2E timing
         """
         self._graph_json_str = graph_json_str
         self._config = config
-        self._gpu_backend = gpu_backend
+        self._timing_backend = timing_backend
         self._graph: Any = None
         self._workspace: Any = None
         self._workspace_ptr: int = 0
@@ -317,20 +317,20 @@ class Executor:
         e2e_timings: List[float] = []
         kernel_timings: Optional[List[float]] = None
         gpu_timer: Optional[GpuTimerInterface] = None
-        backend_name: str = ""
+        timing_backend_name: str = ""
         stream_synchronizer = None
         stream = _get_handle_stream(handle)
 
         # Create GPU timer if requested and available.
-        if self._gpu_backend != "none":
+        if self._timing_backend != "none":
             try:
-                requested_backend = "hip" if self._gpu_backend == "hip" else "auto"
+                requested_backend = "hip" if self._timing_backend == "hip" else "auto"
                 gpu_timer = create_gpu_timer(requested_backend, stream=stream)
             except RuntimeError as e:
                 raise ExecutionError(str(e)) from e
             if gpu_timer is not None:
                 kernel_timings = []
-                backend_name = gpu_timer.backend_name
+                timing_backend_name = gpu_timer.backend_name
 
         for _ in range(self._config.benchmark_iters):
             with Timer() as t:
@@ -361,7 +361,7 @@ class Executor:
             warmup_iters=self._config.warmup_iters,
             benchmark_iters=self._config.benchmark_iters,
             engine_id=self._config.engine_id,
-            gpu_backend=backend_name,
+            timing_backend=timing_backend_name,
             execution_backend="hipdnn",
         )
 

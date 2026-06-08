@@ -64,9 +64,9 @@ class TrackingSynchronizer:
         self.calls.append("sync")
 
 
-def _make_executor(gpu_backend: str) -> executor_module.Executor:
+def _make_executor(timing_backend: str) -> executor_module.Executor:
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=0, benchmark_iters=1)
-    executor = executor_module.Executor("{}", config, gpu_backend=gpu_backend)
+    executor = executor_module.Executor("{}", config, timing_backend=timing_backend)
     executor._graph = DummyGraph()
     executor._workspace_ptr = 0
     return executor
@@ -90,7 +90,7 @@ def test_warmup_synchronizes_once_after_untimed_iterations(monkeypatch) -> None:
     )
 
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=3, benchmark_iters=1)
-    executor = executor_module.Executor("{}", config, gpu_backend="none")
+    executor = executor_module.Executor("{}", config, timing_backend="none")
     executor._graph = TrackingGraph()
     executor._workspace_ptr = 0
 
@@ -133,7 +133,7 @@ def test_benchmark_synchronizes_each_measured_iteration(monkeypatch) -> None:
     )
 
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=0, benchmark_iters=3)
-    executor = executor_module.Executor("{}", config, gpu_backend="none")
+    executor = executor_module.Executor("{}", config, timing_backend="none")
     executor._graph = TrackingGraph()
     executor._workspace_ptr = 0
 
@@ -206,7 +206,7 @@ def test_gpu_timer_start_stop_sync_inside_timed_region(monkeypatch) -> None:
     assert elapsed_called_in_timer["value"] is False
     assert result.kernel_timings is not None
     assert result.metadata is not None
-    assert result.metadata.gpu_backend == "hip"
+    assert result.metadata.timing_backend == "hip"
 
 
 def test_e2e_timing_at_least_as_long_as_kernel(monkeypatch) -> None:
@@ -246,7 +246,7 @@ def test_e2e_timing_at_least_as_long_as_kernel(monkeypatch) -> None:
     )
 
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=0, benchmark_iters=5)
-    executor = executor_module.Executor("{}", config, gpu_backend="hip")
+    executor = executor_module.Executor("{}", config, timing_backend="hip")
     executor._graph = DummyGraph()
     executor._workspace_ptr = 0
 

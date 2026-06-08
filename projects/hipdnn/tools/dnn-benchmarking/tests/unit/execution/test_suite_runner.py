@@ -62,7 +62,7 @@ def _make_config(**overrides):
         "warmup_iters": 2,
         "benchmark_iters": 3,
         "seed": 42,
-        "gpu_backend": "none",
+        "timing_backend": "none",
     }
     defaults.update(overrides)
     return SuiteConfig(**defaults)
@@ -439,7 +439,7 @@ class TestSuiteConfigValidation:
         assert config.rtol is None
         assert config.atol is None
         assert config.tolerance_override is None
-        assert config.gpu_backend == "auto"
+        assert config.timing_backend == "auto"
         assert config.reference_provider == "none"
 
     def test_negative_warmup_raises(self):
@@ -471,20 +471,20 @@ class TestSuiteConfigValidation:
         config = SuiteConfig(verbose=True)
         assert config.verbose is True
 
-    def test_invalid_gpu_backend_raises(self):
-        with pytest.raises(ValueError, match="gpu_backend"):
-            SuiteConfig(gpu_backend="bogus")
+    def test_invalid_timing_backend_raises(self):
+        with pytest.raises(ValueError, match="timing_backend"):
+            SuiteConfig(timing_backend="bogus")
 
     def test_invalid_reference_provider_raises(self):
         with pytest.raises(ValueError, match="reference_provider"):
             SuiteConfig(reference_provider="not_a_real_provider")
 
-    def test_default_gpu_backend_and_reference_provider_accepted(self):
+    def test_default_timing_backend_and_reference_provider_accepted(self):
         config = SuiteConfig()
-        assert config.gpu_backend == "auto"
+        assert config.timing_backend == "auto"
         assert config.reference_provider == "none"
         for backend in ("hip", "auto", "none"):
-            SuiteConfig(gpu_backend=backend)
+            SuiteConfig(timing_backend=backend)
         for provider in ("none", "pytorch"):
             SuiteConfig(reference_provider=provider)
 

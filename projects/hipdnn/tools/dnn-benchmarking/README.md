@@ -75,7 +75,7 @@ bash setup.sh --torch-mode cpu --rocm-prefix /opt/rocm
 source /workspace/.venv/bin/activate
 ```
 
-CPU-only torch never enables the PyTorch GPU backend; GPU execution paths still
+CPU-only torch never enables the PyTorch execution backend; GPU execution paths still
 require a ROCm-enabled torch build and a visible GPU. Timing still comes from
 the HIP APIs bound through `hipdnn_frontend`, not from torch.
 

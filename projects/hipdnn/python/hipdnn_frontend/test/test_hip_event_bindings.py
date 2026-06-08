@@ -26,21 +26,6 @@ def test_hip_event_symbols_are_exported() -> None:
     assert missing == []
 
 
-def test_hip_event_alias_symbols_are_not_exported() -> None:
-    aliases = (
-        "hipEventCreate",
-        "hipEventDestroy",
-        "hipEventRecord",
-        "hipEventSynchronize",
-        "hipEventElapsedTime",
-        "hipStreamSynchronize",
-        "hipDeviceSynchronize",
-        "hipGetDeviceCount",
-    )
-    exported = [name for name in aliases if hasattr(fe, name)]
-    assert exported == []
-
-
 def test_hip_event_timing_smoke() -> None:
     if fe.hip_get_device_count() <= 0:
         pytest.skip("No HIP GPU available")

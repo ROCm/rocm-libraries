@@ -159,7 +159,7 @@ class PyTorchCudaExecutor:
             warmup_iters=self._config.warmup_iters,
             benchmark_iters=self._config.benchmark_iters,
             engine_id=self._config.engine_id,
-            gpu_backend="hip",
+            timing_backend="hip",
             execution_backend="pytorch",
         )
 
