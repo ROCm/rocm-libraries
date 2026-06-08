@@ -26,6 +26,10 @@ def compute_occupancy_from_resources(
 ) -> int:
     """Compute CUOccupancy from kernel resource counts (no GPU needed).
 
+    Mirrors getVgprOccupancy in KernelWriterAssembly.py exactly:
+    the workgroup multiplier scales the aligned VGPR footprint (not just the
+    wave cap), so >256-thread kernels correctly yield lower VGPR occupancy.
+
     For ArchAccUnifiedRegs ISAs the unified physical_vgpr pool (512 on gfx950)
     is divided by vgpr_count (=.amdhsa_next_free_vgpr).
 
@@ -42,18 +46,23 @@ def compute_occupancy_from_resources(
     Returns:
         Max active workgroups per CU (Tensile's CUOccupancy).
     """
-    vgpr_occ    = physical_vgpr // max(vgpr_count, 1)
-    sgpr_occ    = physical_sgpr // max(sgpr_count, 1) if sgpr_count > 0 else max_waves_per_simd
-    lds_occ     = device_lds // max(((lds_bytes + 255) // 256) * 256, 256) if lds_bytes > 0 else max_waves_per_simd
-    multiplier  = max(int(ceil(num_threads / 256.0)), 1)
-    wave_occ    = max_waves_per_simd // multiplier
+    # Workgroup multiplier: ceil(max(numThreads, 256) / 256) — matches getVgprOccupancy.
+    # For >256-thread blocks each SIMD slot holds multiplier waves, so the aligned
+    # VGPR footprint per slot scales up by the same factor (Fix #1).
+    multiplier    = max(int(ceil(num_threads / 256.0)), 1)
+    max_occ       = max_waves_per_simd // multiplier
+    vgpr_align    = 4   # AMDGPU VGPR allocation granularity (dwords)
+    vgprs_aligned = int(ceil(max(vgpr_count, 1) / vgpr_align)) * vgpr_align * multiplier
+    vgpr_occ      = physical_vgpr // vgprs_aligned
+    sgpr_occ      = physical_sgpr // max(sgpr_count, 1) if sgpr_count > 0 else max_waves_per_simd
+    lds_occ       = device_lds // max(((lds_bytes + 255) // 256) * 256, 256) if lds_bytes > 0 else max_waves_per_simd
 
-    return max(1, min(vgpr_occ, sgpr_occ, lds_occ, wave_occ, max_waves_per_simd))
+    return max(1, min(vgpr_occ, sgpr_occ, lds_occ, max_occ))
 
 
 # ── Build-time helpers ────────────────────────────────────────────────────────
 
-def _arch_caps_for_kernel(kernel) -> Tuple[int, int, int, int]:
+def _arch_caps_for_kernel(kernel) -> Optional[Tuple[int, int, int, int]]:
     """Return (physical_vgpr, physical_sgpr, device_lds, max_waves_per_simd) for a kernel.
 
     Derived from the kernel's ISA tuple; mirrors rocisa/hardware_caps.hpp constants.
@@ -61,28 +70,38 @@ def _arch_caps_for_kernel(kernel) -> Tuple[int, int, int, int]:
     compute_occupancy_from_asm_source() at runtime; this table is a fallback for
     standalone/test use where rocisa is not yet initialized for the target ISA.
     Must be kept in sync when new ISAs are added to rocisa/hardware_caps.hpp.
+
+    Returns None for ISAs not explicitly listed (Fix #4) — callers must treat
+    None as "cannot compute → skip CUOccupancy override" to avoid emitting
+    incorrect caps for unsupported architectures.
     """
     isa = tuple(kernel.get("ISA", (9, 0, 8)))
 
     # ArchAccUnifiedRegs: gfx90a (9,0,10), gfx942 (9,4,2), gfx950 (9,5,0)
-    arch_acc_unified = isa in {(9, 0, 10), (9, 4, 2), (9, 5, 0)}
-
-    if arch_acc_unified:
-        physical_vgpr    = 512
+    # physical_vgpr = MaxVgpr(256) * 2 = 512 (matches getSourceFileString cap passthrough)
+    if isa in {(9, 0, 10), (9, 4, 2), (9, 5, 0)}:
+        physical_vgpr      = 512
         max_waves_per_simd = 8
-    else:
-        physical_vgpr    = 256
+        # DeviceLDS per hardware_caps.hpp: gfx950 = 160 KB; gfx90a/gfx942 = 64 KB
+        device_lds = 163840 if isa == (9, 5, 0) else 65536
+    elif isa[0] == 9:
+        # Other gfx9 (e.g. gfx908/gfx906): non-unified, 64 KB LDS, 10 waves
+        physical_vgpr      = 256
         max_waves_per_simd = 10
-
-    physical_sgpr = 800   # gfx9 family
-
-    # DeviceLDS: gfx950 has 160 KB; others have 64 KB
-    if isa == (9, 5, 0):
-        device_lds = 163840  # 160 * 1024
-    elif isa in {(9, 0, 10), (9, 4, 2)}:
-        device_lds = 65536   # 64 KB (gfx90a/gfx942)
+        device_lds         = 65536
+    elif isa == (12, 5, 0):
+        # gfx1250: MaxVgpr=1024, ArchAccUnifiedRegs=False, DeviceLDS=320 KB
+        # (hardware_caps.hpp: MaxVgpr=1024, deviceLDS=327680, MaxWavesPerSimd=10)
+        physical_vgpr      = 1024
+        max_waves_per_simd = 10
+        device_lds         = 327680  # 320 * 1024
     else:
-        device_lds = 65536   # gfx908 and others
+        # Unknown or unsupported ISA: return None rather than silently emitting
+        # garbage caps.  The occupancy formula is gfx9/wave64-specific; callers
+        # should skip the CUOccupancy override for unrecognised architectures.
+        return None
+
+    physical_sgpr = 800   # gfx9 family and gfx1250 (hardware_caps.hpp PhysicalMaxSgpr)
 
     return physical_vgpr, physical_sgpr, device_lds, max_waves_per_simd
 
@@ -126,7 +145,11 @@ def compute_occupancy_from_asm_source(
     if arch_caps is not None:
         phy_vgpr, phy_sgpr, device_lds, max_waves = arch_caps
     else:
-        phy_vgpr, phy_sgpr, device_lds, max_waves = _arch_caps_for_kernel(kernel)
+        _caps = _arch_caps_for_kernel(kernel)
+        if _caps is None:
+            # Unsupported ISA: skip rather than emit wrong occupancy.
+            return None
+        phy_vgpr, phy_sgpr, device_lds, max_waves = _caps
 
     try:
         return compute_occupancy_from_resources(

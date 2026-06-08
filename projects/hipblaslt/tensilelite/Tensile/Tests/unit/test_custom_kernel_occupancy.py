@@ -284,6 +284,63 @@ class TestComputeOccupancyRealCustomKernels:
 # TestPythonDebugWarning — Change 2a: print2-gated warning in processKernelSource
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# TestNonGfx9OccupancyNotComputed — Fix #2 / Fix #4 interaction
+# ---------------------------------------------------------------------------
+
+class TestNonGfx9OccupancyNotComputed:
+    """Fix #2 + Fix #4: Non-gfx9 ISAs must not yield a CUOccupancy override.
+
+    compute_occupancy_from_asm_source returns None for non-gfx9 ISAs because
+    _arch_caps_for_kernel returns None (the formula is gfx9/wave64-specific).
+    Callers use ``if occ is not None: kernel["CUOccupancy"] = occ``; returning
+    None ensures CUOccupancy stays at its default (-1) for non-gfx9 custom kernels.
+    """
+
+    def _asm(self, vgpr=64, sgpr=32, lds=16384):
+        return _make_asm(next_free_vgpr=vgpr, next_free_sgpr=sgpr, group_seg_size=lds)
+
+    def test_gfx1100_returns_none(self):
+        """gfx1100 (wave32, gfx11): compute_occupancy_from_asm_source returns None."""
+        result = compute_occupancy_from_asm_source(_kernel((11, 0, 0)), self._asm())
+        assert result is None, f"gfx1100 must return None (unsupported arch), got {result}"
+
+    def test_gfx1201_returns_none(self):
+        """gfx1201 (wave32, gfx12 non-gfx1250): returns None."""
+        result = compute_occupancy_from_asm_source(_kernel((12, 0, 1)), self._asm())
+        assert result is None, f"gfx1201 must return None, got {result}"
+
+    def test_gfx1030_returns_none(self):
+        """gfx1030 (wave32, gfx10): returns None."""
+        result = compute_occupancy_from_asm_source(_kernel((10, 3, 0)), self._asm())
+        assert result is None, f"gfx1030 must return None, got {result}"
+
+    def test_gfx950_gfx9_returns_valid_occ(self):
+        """gfx950 (gfx9): compute_occupancy_from_asm_source returns a valid occupancy."""
+        asm = _make_asm(256, 64, 32768)
+        result = compute_occupancy_from_asm_source(_kernel((9, 5, 0)), asm)
+        assert result is not None and result >= 1, \
+            f"gfx950 (gfx9) must return occ >= 1, got {result}"
+
+    def test_gfx908_gfx9_returns_valid_occ(self):
+        """gfx908 (gfx9, non-unified): compute_occupancy_from_asm_source returns valid."""
+        asm = _make_asm(64, 32, 16384)
+        result = compute_occupancy_from_asm_source(_kernel((9, 0, 8)), asm)
+        assert result is not None and result >= 1, \
+            f"gfx908 (gfx9) must return occ >= 1, got {result}"
+
+    def test_cuoccupancy_not_set_for_non_gfx9(self):
+        """Simulated caller: CUOccupancy stays -1 when compute returns None (non-gfx9)."""
+        kernel = _kernel((11, 0, 0))
+        kernel["CUOccupancy"] = -1
+        asm = _make_asm(64, 32, 16384)
+        occ = compute_occupancy_from_asm_source(kernel, asm)
+        if occ is not None:
+            kernel["CUOccupancy"] = occ   # what getSourceFileString does
+        assert kernel["CUOccupancy"] == -1, \
+            f"CUOccupancy must stay -1 for non-gfx9; got {kernel['CUOccupancy']}"
+
+
 class TestPythonDebugWarning:
     """Verify the print2-gated CUOccupancy<=0 warning in processKernelSource (Run.py).
 

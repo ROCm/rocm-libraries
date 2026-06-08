@@ -182,16 +182,22 @@ class KernelWriterAssembly(KernelWriter):
     try:
       if isCustom:
         code = self._getCustomKernelSource(kernel, CUSTOM_KERNEL_PATH)
-        # Use live rocisa caps so custom-kernel occupancy matches the codegen path.
-        _rocisa_caps = (
-            self.states.regCaps["MaxVgpr"] * (2 if self.states.archCaps.get("ArchAccUnifiedRegs") else 1),
-            self.states.regCaps["PhysicalMaxSgpr"],
-            self.states.archCaps["DeviceLDS"],
-            self.states.archCaps["MaxWavesPerSimd"],
-        )
-        occ = compute_occupancy_from_asm_source(kernel, code, arch_caps=_rocisa_caps)
-        if occ is not None:
-          kernel["CUOccupancy"] = occ
+        # The occupancy formula in compute_occupancy_from_resources is
+        # gfx9/wave64-specific; only override CUOccupancy for gfx9 custom
+        # kernels.  Non-gfx9 (gfx10/11/12, wave32) custom kernels leave
+        # CUOccupancy at its default (-1) rather than emit a wrong value (Fix #2).
+        _isa = kernel.get("ISA", [9, 0, 8])
+        if _isa[0] == 9:
+          # Use live rocisa caps so custom-kernel occupancy matches the codegen path.
+          _rocisa_caps = (
+              self.states.regCaps["MaxVgpr"] * (2 if self.states.archCaps.get("ArchAccUnifiedRegs") else 1),
+              self.states.regCaps["PhysicalMaxSgpr"],
+              self.states.archCaps["DeviceLDS"],
+              self.states.archCaps["MaxWavesPerSimd"],
+          )
+          occ = compute_occupancy_from_asm_source(kernel, code, arch_caps=_rocisa_caps)
+          if occ is not None:
+            kernel["CUOccupancy"] = occ
       else:
         code = self._getKernelSource(kernel)
       errcode = 0
@@ -1976,6 +1982,13 @@ class KernelWriterAssembly(KernelWriter):
       return
 
     body_text = str(mkb.body)
+
+    # Guard: if any symbolic vgpr/agpr tokens survive rocIsaPass (e.g. vgprValuA,
+    # agprAccum) the numeric scan under-counts actual register usage and would
+    # wrongly raise occupancy.  Only proceed when the body is confirmed fully
+    # lowered to numeric v[N]/a[N] form (Fix #3).
+    if re.search(r'\bvgpr[A-Za-z_]', body_text) or re.search(r'\bagpr[A-Za-z_]', body_text):
+      return
 
     vgpr_refs: set = set()
     agpr_refs: set = set()
