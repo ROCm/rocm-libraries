@@ -159,6 +159,30 @@ hipsolver<type>geqrf()
    :outline:
 .. doxygenfunction:: hipsolverSgeqrf
 
+.. _geqrfBatched_bufferSize:
+
+hipsolver<type>geqrfBatched_bufferSize()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverZgeqrfBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverCgeqrfBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverDgeqrfBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverSgeqrfBatched_bufferSize
+
+.. _geqrfBatched:
+
+hipsolver<type>geqrfBatched()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverZgeqrfBatched
+   :outline:
+.. doxygenfunction:: hipsolverCgeqrfBatched
+   :outline:
+.. doxygenfunction:: hipsolverDgeqrfBatched
+   :outline:
+.. doxygenfunction:: hipsolverSgeqrfBatched
+
 
 
 .. _reductions:

@@ -66,6 +66,8 @@ LAPACK main functions
 
     :ref:`hipsolverXgeqrf_bufferSize <geqrf_bufferSize>`, x, x, x, x
     :ref:`hipsolverXgeqrf <geqrf>`, x, x, x, x
+    :ref:`hipsolverXgeqrfBatched_bufferSize <geqrfBatched_bufferSize>`, x, x, x, x
+    :ref:`hipsolverXgeqrfBatched <geqrfBatched>`, x, x, x, x
 
 .. csv-table:: Problem and matrix reductions
     :header: "Function", "single", "double", "single complex", "double complex"
