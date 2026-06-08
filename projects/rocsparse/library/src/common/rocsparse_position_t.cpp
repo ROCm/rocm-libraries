@@ -111,8 +111,13 @@ rocsparse_status rocsparse::position_t::copy_position_async(const position_t* th
     if(that->m_position != nullptr)
     {
         // m position for csrsv, csrsm, csrilu0, csric0
+        //
+        // Use the source's index type: a freshly-created destination has an invalid
+        // (default) index type, so reading this->m_position_indextype here would create
+        // the position buffer with an invalid index type and corrupt any later use.
+        //
         const size_t J_size = rocsparse::indextype_sizeof(that->m_position_indextype);
-        this->create_position_async(that->m_batch_count, this->m_position_indextype, stream);
+        this->create_position_async(that->m_batch_count, that->m_position_indextype, stream);
         RETURN_IF_HIP_ERROR(hipMemcpyAsync(this->m_position,
                                            that->m_position,
                                            J_size * this->m_batch_count,

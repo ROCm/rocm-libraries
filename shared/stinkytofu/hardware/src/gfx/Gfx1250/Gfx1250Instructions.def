@@ -401,14 +401,21 @@ DEF_T(SSleepInst, "s_sleep", .format = SOPP, .flags = {HasSideEffect}, .logical 
 DEF_T(SClauseInst, "s_clause", .format = SOPP, .flags = {HasSideEffect}, .logical = "SClause",
     .operand_fields = { {S0, simm16, simm16, 16} })
 
-// Global memory fences — used by the StreamK partial-tile handshake on
+// Global memory fences (ENC_VGLOBAL) — used by the StreamK partial-tile handshake on
 // gfx1250 where L2 is partitioned across CUs/XCDs and SMEM is not
-// coherent with the VMEM flag store. They have no register operands;
-// the only encoded modifier is the cache scope (typically SCOPE_DEV),
-// carried through stinkytofu as a MUBUFModifiers with scope set and all
-// other flags clear so the emitter only prints " scope:SCOPE_DEV".
-DEF_T(GlobalWbInst, "global_wb", .format = SOPP, .flags = {HasSideEffect}, .logical = "GlobalWb")
-DEF_T(GlobalInvInst, "global_inv", .format = SOPP, .flags = {HasSideEffect}, .logical = "GlobalInv")
+// coherent with the VMEM flag store. Source has no explicit register operands;
+// the only modifier is cache scope (typically SCOPE_DEV), carried as
+// CacheScopeModifiers so the emitter prints " scope:SCOPE_DEV".
+DEF_T(GlobalWbInst, "global_wb", .format = VGLOBAL, .flags = {HasSideEffect}, .logical = "GlobalWb")
+DEF_T(GlobalInvInst, "global_inv", .format = VGLOBAL, .flags = {HasSideEffect}, .logical = "GlobalInv")
+
+// Global data prefetch - used by gfx1250 PrefetchGL2 to prefetch data from global memory
+// to L2 cache; no destination register. Not marked HasSideEffect: it is only a cache hint,
+// so reordering it affects performance but not correctness.
+// Support null saddr + 64-bit vaddr or 64-bit saddr + 32-bit vaddr.
+// temporal hint / cache scope (e.g."th:TH_LOAD_NT scope:SCOPE_SE") are carried as GLOBALModifiers.
+DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .logical = "GlobalPrefetchB8",
+    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
 
 // Scalar ALU — SOPK
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SSetRegIMM32B32",
@@ -567,6 +574,8 @@ DEF_BATCH(.format = VOP2_COMMUTATIVE,
     VAddF64Inst, "v_add_f64", .logical = "VAddF64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     VAddNcU32Inst, "v_add_nc_u32", .logical = "VAddU32",
+    VAddNcU64Inst, "v_add_nc_u64", .logical = {"VAddNCU64", "_VAddNCU64"},
+        .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     VAndB32Inst, "v_and_b32", .logical = "VAndB32",
 )
 

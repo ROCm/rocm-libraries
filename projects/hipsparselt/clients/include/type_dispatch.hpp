@@ -44,6 +44,12 @@ constexpr auto hipsparselt_type2datatype()
     if(std::is_same<T, hipsparselt_fp8_e5m2>{})
         return HIP_R_8F_E5M2;
 #endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+    if(std::is_same<T, hipsparselt_fp8_e4m3_fnuz>{})
+        return HIP_R_8F_E4M3_FNUZ;
+    if(std::is_same<T, hipsparselt_fp8_e5m2_fnuz>{})
+        return HIP_R_8F_E5M2_FNUZ;
+#endif
     return HIP_R_16F; // testing purposes we default to f32 ex
 }
 
@@ -146,6 +152,20 @@ auto hipsparselt_spmm_dispatch(const Arguments& arg)
         {
             return TEST<hipsparselt_fp8_e5m2, float, float, float>{}(arg);
         }
+#endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_FNUZ
+        else if(Ti == HIP_R_8F_E4M3_FNUZ && To == HIP_R_32F && Tc == HIPSPARSELT_COMPUTE_32F
+                && TBias == HIP_R_32F)
+        {
+            return TEST<hipsparselt_fp8_e4m3_fnuz, float, float, float>{}(arg);
+        }
+        else if(Ti == HIP_R_8F_E5M2_FNUZ && To == HIP_R_32F && Tc == HIPSPARSELT_COMPUTE_32F
+                && TBias == HIP_R_32F)
+        {
+            return TEST<hipsparselt_fp8_e5m2_fnuz, float, float, float>{}(arg);
+        }
+#endif
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
 #ifdef __HIP_PLATFORM_NVIDIA__
         else if(Ti == HIP_R_8F_E4M3 && To == HIP_R_16F && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_16F)
