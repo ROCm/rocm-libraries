@@ -2306,8 +2306,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                     &sm,
                     sizeof(sm)));
             }
-            int32_t dyn = hipblaslt_bench_options::dyn_persistent_tile_enabled() ? 1 : 0;
-            if(dyn != 0)
+            int32_t dyn = hipblaslt_bench_options::dyn_persistent_tile_mode();
+            if(dyn >= 0)
             {
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[0][i],
@@ -3767,8 +3767,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         &sm,
                         sizeof(sm)));
                 }
-                int32_t dyn = hipblaslt_bench_options::dyn_persistent_tile_enabled() ? 1 : 0;
-                if(dyn != 0)
+                int32_t dyn = hipblaslt_bench_options::dyn_persistent_tile_mode();
+                if(dyn >= 0)
                 {
                     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                         matmul[b][i],
