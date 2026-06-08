@@ -509,6 +509,14 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "amdgcn.permlane32.swap": (
         "declare { i32, i32 } @llvm.amdgcn.permlane32.swap(i32, i32, i1, i1)"
     ),
+    # gfx11 ``v_permlanex16_b32`` — swap each lane with its ``lane ^ 16``
+    # partner within a 32-lane group via a permute network (NOT the LDS
+    # unit). One VALU op; this is the cheap cross-half vehicle CK's gfx11
+    # FMHA pipelines use for the WMMA C->A transpose. Args:
+    # (old, src, sel_lo, sel_hi, fi, bound_ctrl).
+    "amdgcn.permlanex16": (
+        "declare i32 @llvm.amdgcn.permlanex16(i32, i32, i32, i32, i1, i1)"
+    ),
     # gfx950 ``v_mfma_f32_32x32x16_bf16`` — wider MFMA shape (32x32
     # output × 16-K) than the 16x16x32 we use elsewhere. Same FLOPs
     # per cycle (1024 cycles per inst either way at the per-CTA level)
@@ -2515,6 +2523,33 @@ class _Lowerer:
             f"i32 {self._operand(sel)})"
         )
 
+    def _op_tile_permlanex16(self, op: Op) -> None:
+        """``v_permlanex16_b32`` swap with the ``lane ^ 16`` partner.
+
+        Selectors ``0x76543210``/``0xfedcba98`` request source lane ``L ^ 16``
+        for every destination lane; ``bound_ctrl=true`` writes every lane so
+        the ``old`` operand is a don't-care (we reuse ``src``). Full warps are
+        active so ``fi=false`` suffices for both halves to see each other.
+        """
+        (v,) = op.operands
+        self._need("amdgcn.permlanex16")
+        src = self._operand(v)
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.permlanex16("
+            f"i32 {src}, i32 {src}, i32 1985229328, i32 -19088744, "
+            f"i1 false, i1 true)"
+        )
+
+    def _op_tile_byte_perm(self, op: Op) -> None:
+        """``v_perm_b32`` byte shuffle via ``llvm.amdgcn.perm``."""
+        a, b = op.operands
+        sel = int(op.attrs["sel"]) & 0xFFFFFFFF
+        self._need("amdgcn.perm")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.perm("
+            f"i32 {self._operand(a)}, i32 {self._operand(b)}, i32 {sel})"
+        )
+
     def _op_tile_ds_read_tr16_b64(self, op: Op) -> None:
         """`ds_read_b64_tr_b16` -- gfx950 transpose-read of a 16x16 fp16 tile.
 
@@ -3340,13 +3375,22 @@ class _Lowerer:
 
     def _op_vector_smax(self, op: Op) -> None:
         a, b = op.operands
-        cmp = self._fresh("vsmax.cmp")
+        # Prefer the ``llvm.smax.v<N>i<W>`` intrinsic over icmp+select: the
+        # AMDGPU backend reliably lowers the i16 vector form to packed
+        # ``v_pk_max_i16`` (2 lanes/op), whereas the cmp+vselect form is left
+        # as scalar v_cmp/v_cndmask. Register the decl dynamically so the
+        # call-site stays element/width-agnostic.
+        vec_ty = a.type
+        count = vec_ty.count  # type: ignore[attr-defined]
+        elem_ty = vec_ty.elem  # type: ignore[attr-defined]
+        width = elem_ty.name[1:]  # "i16" -> "16"
+        intrin = f"llvm.smax.v{count}i{width}"
+        vec_llvm = _llvm_type(vec_ty)
+        self._decls[intrin] = f"declare {vec_llvm} @{intrin}({vec_llvm}, {vec_llvm})"
+        self._need(intrin)
         self._current().emit(
-            f"  {cmp} = icmp sgt {_llvm_type(a.type)} {self._operand(a)}, {self._operand(b)}"
-        )
-        self._current().emit(
-            f"  {op.result.name} = select <{op.result.type.count} x i1> {cmp}, "
-            f"{_llvm_type(a.type)} {self._operand(a)}, {_llvm_type(b.type)} {self._operand(b)}"
+            f"  {op.result.name} = call {vec_llvm} @{intrin}("
+            f"{vec_llvm} {self._operand(a)}, {vec_llvm} {self._operand(b)})"
         )
 
     def _op_vector_smin(self, op: Op) -> None:
@@ -3364,6 +3408,13 @@ class _Lowerer:
         (v,) = op.operands
         self._current().emit(
             f"  {op.result.name} = trunc {_llvm_type(v.type)} {self._operand(v)} "
+            f"to {_llvm_type(op.result.type)}"
+        )
+
+    def _op_vector_sext(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = sext {_llvm_type(v.type)} {self._operand(v)} "
             f"to {_llvm_type(op.result.type)}"
         )
 
