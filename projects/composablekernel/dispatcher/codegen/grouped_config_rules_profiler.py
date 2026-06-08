@@ -4,20 +4,12 @@
 # SPDX-License-Identifier: MIT
 
 """
-"full" rule set for Grouped Convolution Tile Configurations.
-
-This is the JSON-derived, per-(variant, ndim, datatype) rule set and is the
-default selected via ``get_default_configs(rule_set="full")``. It defines all
-valid tile configurations for grouped convolution kernels; codegen imports from
-here to ensure consistency.
-
-The original hand-curated heuristic rule set lives in ``grouped_config_rules.py``
-and is selected via ``get_default_configs(rule_set="default")``.
+Full rule set for Grouped Convolution Tile Configurations.
 """
 
 import logging
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Union
@@ -48,16 +40,11 @@ DTYPE_TO_DTYPE_KEY: Dict[str, str] = {
 # =============================================================================
 # Tile Lists
 # =============================================================================
-
-# =============================================================================
+#
 # ndim + concrete-dtype keyed tile tables
-# =============================================================================
-# Tiles diverge by both ndim (3D is a subset of 2D) and concrete dtype (bf16 and fp16 are not equal on some
-# forward tiles; half data types vs. fp32 are nearly disjoint). Keyed by (ndim, dtype) where
-# dtype is the concrete "fp16"/"bf16"/"fp32" string. Used by the per-dtype
-# generation path so we only emit each tile for the dtypes that actually use it.
-# Derived from configs/grouped_conv/{variant}/profiler/{nhwgc|ndhwgc}_{dtype}.json
-# (ngchw/depthwise skipped).
+# 
+# Tiles diverge by both ndim (3D is a subset of 2D) and concrete dtype. 
+# Keyed by (ndim, dtype) where dtype is the concrete "fp16"/"bf16"/"fp32" string. 
 
 _FWD_TILES: Dict[Tuple[int, str], List[Tuple[int, int, int]]] = {
     (2, 'bf16'): [(16, 16, 64), (16, 16, 128), (16, 32, 64), (16, 64, 64), (16, 128, 64), (16, 256, 64), (32, 16, 64), (32, 64, 32), (32, 64, 64), (32, 128, 32), (32, 128, 64), (32, 256, 64), (64, 16, 16), (64, 16, 64), (64, 32, 32), (64, 32, 64), (64, 64, 8), (64, 64, 32), (64, 64, 64), (64, 128, 32), (64, 128, 64), (128, 16, 64), (128, 32, 32), (128, 32, 64), (128, 64, 8), (128, 64, 16), (128, 64, 32), (128, 64, 64), (128, 128, 32), (128, 128, 64), (128, 256, 32), (224, 256, 64), (256, 16, 64), (256, 32, 64), (256, 64, 8), (256, 128, 32), (256, 224, 64), (256, 256, 32)],
@@ -130,126 +117,6 @@ def get_tiles(variant: str, ndim: int, dtype: str) -> List[Tuple[int, int, int]]
     return list(_TILES_PER_VARIANT.get(variant, {}).get((ndim, dtype), []))
 
 
-# =============================================================================
-# Mapping from tile to wave configs to restrict the number of configurations.
-# =============================================================================
-# Per-variant mapping: tile → list of curated wave configs.
-# Given a (tile, wave) pair, valid warp_tile shapes are derived mathematically
-# from WARP_TILE_SUPPORTED_COMBINATIONS + divisibility rules.
-# The selection of the wave configs is based on the wave configurations from
-# the old CK grouped convolution instances.
-
-_FWD_TILE_TO_WAVES: Dict[Tuple[int, int, int], List[Tuple[int, int, int]]] = {
-    (16, 16, 64): [(1, 1, 1)],
-    (16, 16, 128): [(1, 1, 1)],
-    (16, 32, 64): [(1, 2, 1)],
-    (16, 64, 64): [(1, 2, 1)],
-    (16, 128, 64): [(1, 2, 1)],
-    (16, 256, 64): [(1, 4, 1)],
-    (32, 16, 64): [(2, 1, 1)],
-    (32, 64, 16): [(1, 1, 1)],
-    (32, 64, 32): [(1, 1, 1)],
-    (32, 64, 64): [(1, 2, 1)],
-    (32, 128, 16): [(1, 2, 1)],
-    (32, 128, 32): [(1, 2, 1)],
-    (32, 128, 64): [(1, 2, 1)],
-    (32, 256, 64): [(1, 4, 1)],
-    (64, 16, 16): [(1, 1, 1)],
-    (64, 16, 64): [(2, 1, 1)],
-    (64, 32, 16): [(1, 1, 1)],
-    (64, 32, 32): [(1, 1, 1)],
-    (64, 32, 64): [(2, 1, 1)],
-    (64, 64, 8): [(2, 1, 1)],
-    (64, 64, 16): [(1, 1, 1)],
-    (64, 64, 32): [(1, 1, 1), (2, 2, 1)],
-    (64, 64, 64): [(2, 2, 1)],
-    (64, 128, 16): [(1, 2, 1), (2, 2, 1)],
-    (64, 128, 32): [(1, 2, 1), (2, 2, 1)],
-    (64, 128, 64): [(2, 2, 1)],
-    (128, 16, 64): [(2, 1, 1)],
-    (128, 32, 16): [(2, 1, 1)],
-    (128, 32, 32): [(2, 1, 1), (2, 1, 2)],
-    (128, 32, 64): [(2, 1, 1)],
-    (128, 64, 8): [(2, 1, 1), (2, 2, 1)],
-    (128, 64, 16): [(2, 1, 1), (2, 2, 1)],
-    (128, 64, 32): [(2, 1, 1), (2, 2, 1)],
-    (128, 64, 64): [(2, 2, 1)],
-    (128, 128, 16): [(1, 2, 1), (2, 2, 1)],
-    (128, 128, 32): [(1, 2, 1), (2, 2, 1)],
-    (128, 128, 64): [(2, 2, 1)],
-    (128, 192, 16): [(2, 2, 1)],
-    (128, 256, 16): [(2, 2, 1)],
-    (128, 256, 32): [(2, 2, 1)],
-    (224, 256, 64): [(2, 2, 1)],
-    (256, 16, 64): [(4, 1, 1)],
-    (256, 32, 64): [(4, 1, 1)],
-    (256, 64, 8): [(2, 2, 1)],
-    (256, 128, 16): [(2, 2, 1)],
-    (256, 128, 32): [(2, 2, 1)],
-    (256, 224, 64): [(2, 2, 1)],
-    (256, 256, 32): [(2, 2, 1)],
-}
-
-_BWD_DATA_TILE_TO_WAVES: Dict[Tuple[int, int, int], List[Tuple[int, int, int]]] = {
-    (16, 64, 32): [(1, 1, 1)],
-    (32, 64, 32): [(1, 1, 1)],
-    (32, 128, 32): [(1, 2, 1)],
-    (64, 16, 16): [(4, 1, 1)],
-    (64, 16, 32): [(1, 1, 1), (4, 1, 1)],
-    (64, 16, 64): [(4, 1, 1)],
-    (64, 32, 32): [(1, 1, 1)],
-    (64, 64, 32): [(1, 1, 1)],
-    (64, 128, 32): [(1, 2, 1), (2, 2, 1)],
-    (128, 32, 16): [(4, 1, 1)],
-    (128, 32, 32): [(2, 1, 1), (4, 1, 1)],
-    (128, 32, 64): [(4, 1, 1)],
-    (128, 64, 32): [(2, 1, 1), (2, 2, 1)],
-    (128, 128, 32): [(1, 2, 1), (2, 2, 1)],
-    (128, 256, 32): [(2, 2, 1)],
-    (256, 128, 32): [(2, 2, 1)],
-}
-
-_BWD_WEIGHT_TILE_TO_WAVES: Dict[Tuple[int, int, int], List[Tuple[int, int, int]]] = {
-    (16, 16, 32): [(1, 1, 1)],
-    (16, 16, 64): [(1, 1, 1)],
-    (16, 32, 64): [(1, 2, 1)],
-    (16, 64, 64): [(1, 2, 1)],
-    (16, 128, 32): [(1, 1, 1)],
-    (16, 128, 64): [(1, 2, 1)],
-    (16, 256, 32): [(1, 1, 1)],
-    (16, 256, 64): [(1, 4, 1)],
-    (32, 16, 64): [(2, 1, 1)],
-    (32, 32, 32): [(1, 1, 1)],
-    (32, 64, 16): [(1, 1, 1)],
-    (32, 64, 32): [(1, 1, 1)],
-    (32, 128, 16): [(1, 2, 1)],
-    (32, 128, 32): [(1, 1, 1), (1, 2, 1)],
-    (64, 16, 64): [(2, 1, 1)],
-    (64, 32, 16): [(1, 1, 1)],
-    (64, 32, 32): [(1, 1, 1)],
-    (64, 64, 16): [(1, 1, 1)],
-    (64, 64, 32): [(1, 1, 1)],
-    (64, 64, 64): [(2, 2, 1)],
-    (64, 128, 16): [(1, 2, 1), (2, 2, 1)],
-    (64, 128, 32): [(1, 2, 1), (2, 2, 1)],
-    (64, 128, 64): [(2, 2, 1)],
-    (128, 16, 64): [(2, 1, 1)],
-    (128, 32, 16): [(2, 1, 1)],
-    (128, 32, 32): [(1, 1, 1), (2, 1, 1)],
-    (128, 64, 16): [(2, 1, 1), (2, 2, 1)],
-    (128, 64, 32): [(2, 1, 1), (2, 2, 1)],
-    (128, 128, 16): [(1, 2, 1), (2, 2, 1)],
-    (128, 128, 32): [(1, 2, 1), (2, 2, 1)],
-    (128, 128, 64): [(2, 2, 1)],
-    (128, 256, 16): [(2, 2, 1)],
-    (128, 256, 32): [(2, 2, 1)],
-    (256, 16, 64): [(4, 1, 1)],
-    (256, 32, 64): [(4, 1, 1)],
-    (256, 128, 16): [(2, 2, 1)],
-    (256, 128, 32): [(2, 2, 1)],
-    (256, 256, 32): [(2, 2, 1)],
-}
-
 # Warp shapes excluded from code generation.
 # These are possible shapes, but old CK doesn't 
 # use them. However, they can potentially be useful.
@@ -257,60 +124,7 @@ _EXCLUDED_WARP_SHAPES: Set[Tuple[int, int, int]] = {
     (16, 16, 32), (4, 64, 16), (64, 4, 16),
 }
 
-
-def get_wave_configs(
-    tile_m: int, tile_n: int, tile_k: int, variant: str,
-) -> List[Tuple[int, int, int]]:
-    """Return wave configs for a tile+variant.
-
-    Falls back to generic [(1, 1, 1)] for unknown tiles.
-    """
-    table = {
-        "forward": _FWD_TILE_TO_WAVES,
-        "bwd_data": _BWD_DATA_TILE_TO_WAVES,
-        "bwd_weight": _BWD_WEIGHT_TILE_TO_WAVES,
-    }.get(variant, {})
-    return table.get((tile_m, tile_n, tile_k), [(1, 1, 1)])
-
-
-# =============================================================================
-# Wave config to warp config mappings
-# =============================================================================
-# Per-variant mapping: wave → list of warp_tile.
-# The curated list is still
-# filtered by divisibility and intersected with the arch/dtype-supported combos,
-# so per-dtype warp_tile_k correctness is preserved. 
-# Waves not in the map fall back to [] (no warp tiles).
-
-_FWD_WAVE_TO_WARPS: Dict[Tuple[int, int, int], List[Tuple[int, int, int]]] = {
-    (1, 1, 1): [(16, 16, 4), (16, 16, 8), (16, 16, 16), (32, 32, 4), (32, 32, 8)],
-    (1, 2, 1): [(16, 16, 8), (16, 16, 16), (32, 32, 4), (32, 32, 8)],
-    (1, 4, 1): [(16, 16, 16), (32, 32, 8)],
-    (2, 1, 1): [(16, 16, 8), (16, 16, 16), (32, 32, 4), (32, 32, 8)],
-    (2, 1, 2): [(32, 32, 8)],
-    (2, 2, 1): [(16, 16, 8), (16, 16, 16), (32, 32, 4), (32, 32, 8)],
-    (4, 1, 1): [(16, 16, 16), (32, 32, 8)],
-}
-
-_BWD_DATA_WAVE_TO_WARPS: Dict[Tuple[int, int, int], List[Tuple[int, int, int]]] = {
-    (1, 1, 1): [(16, 16, 8), (16, 16, 16), (32, 32, 8)],
-    (1, 2, 1): [(32, 32, 8)],
-    (2, 1, 1): [(32, 32, 8)],
-    (2, 2, 1): [(32, 32, 8)],
-    (4, 1, 1): [(16, 16, 4), (16, 16, 8), (16, 16, 16), (32, 32, 4), (32, 32, 8), (32, 32, 16)],
-}
-
-_BWD_WEIGHT_WAVE_TO_WARPS: Dict[Tuple[int, int, int], List[Tuple[int, int, int]]] = {
-    (1, 1, 1): [(16, 16, 8), (16, 16, 16), (32, 32, 4), (32, 32, 8)],
-    (1, 2, 1): [(16, 16, 16), (32, 32, 4), (32, 32, 8)],
-    (1, 4, 1): [(16, 16, 16)],
-    (2, 1, 1): [(16, 16, 16), (32, 32, 4), (32, 32, 8)],
-    (2, 2, 1): [(16, 16, 16), (32, 32, 4), (32, 32, 8)],
-    (4, 1, 1): [(16, 16, 16), (32, 32, 8)],
-}
-
-
-# Finer (tile, wave) → warp_tile map. 
+# Finer (tile, wave) -> warp_tile map. 
 # When a (tile, wave) key is present here, it overrides the coarser wave-only map above.
 # The wave-only map crosses a wave's warp set with every
 # tile sharing that wave, whereas this map lists only the warp tiles actually
@@ -449,6 +263,34 @@ _BWD_WEIGHT_TILE_WAVE_TO_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int,
     ((256, 256, 32), (2, 2, 1)): [(32, 32, 8)],
 }
 
+def get_wave_configs(
+    tile_m: int, tile_n: int, tile_k: int, variant: str,
+) -> List[Tuple[int, int, int]]:
+    """Return wave configs for a tile+variant.
+
+    Falls back to generic [(1, 1, 1)] for unknown tiles.
+    """
+    table = {
+        "forward": _FWD_TILE_WAVE_TO_WARPS,
+        "bwd_data": _BWD_DATA_TILE_WAVE_TO_WARPS,
+        "bwd_weight": _BWD_WEIGHT_TILE_WAVE_TO_WARPS,
+    }.get(variant, {})
+
+    # The keys are the exact (tile, wave) pairs.
+    # From each mathcing tile key, we can get the wave configs.
+    waves = [key[1] for key in table.keys() if key[0] == (tile_m, tile_n, tile_k)]
+
+    # If no valid tile combinations are found, return the generic [1,1,1] wave config.
+    if len(waves) == 0:
+        logging.warning(
+            "No curated wave configs for variant=%s tile=(%d,%d,%d); "
+            "falling back to [(1,1,1)]",
+            variant, tile_m, tile_n, tile_k,
+        )
+        return [(1, 1, 1)]
+    else:
+        return waves
+
 
 def get_all_valid_vector_sizes(
     tile_m: int, tile_n: int, tile_k: int,
@@ -476,9 +318,7 @@ def get_warp_configs_for_tile_and_wave(
 ) -> List[Tuple[int, int, int]]:
     """Return curated warp_tile shapes for a (variant, wave), filtered for this tile.
 
-    Prefers the finer (tile, wave) → warp map when that exact key is present;
-    otherwise falls back to the coarser wave-only map. The result is then kept
-    only for shapes that:
+    The result is then kept only for shapes that:
       - are arch/dtype-supported (WARP_TILE_SUPPORTED_COMBINATIONS[arch][dtype_key]),
       - are not in _EXCLUDED_WARP_SHAPES,
       - divide the macro tile: tile_m % (wave_m*warp_tile_m) == 0 and
@@ -491,18 +331,17 @@ def get_warp_configs_for_tile_and_wave(
         "bwd_data": _BWD_DATA_TILE_WAVE_TO_WARPS,
         "bwd_weight": _BWD_WEIGHT_TILE_WAVE_TO_WARPS,
     }.get(variant, {})
+
     if (tile, wave) in fine_table:
         curated = fine_table[(tile, wave)]
     else:
-        curated = {
-            "forward": _FWD_WAVE_TO_WARPS,
-            "bwd_data": _BWD_DATA_WAVE_TO_WARPS,
-            "bwd_weight": _BWD_WEIGHT_WAVE_TO_WARPS,
-        }.get(variant, {}).get(wave, [])
+        raise ValueError(f"No curated warp tiles for variant={variant} tile={tile} wave={wave}")
+    
     supported = {
         (wt[0], wt[1], wt[2])
         for wt in WARP_TILE_SUPPORTED_COMBINATIONS.get(arch, {}).get(dtype_key, [])
     }
+
     return [
         wt for wt in curated
         if wt not in _EXCLUDED_WARP_SHAPES
@@ -518,7 +357,7 @@ def get_wave_warp_pairs(
 ) -> List[Tuple[Tuple[int, int, int], Tuple[int, int, int]]]:
     """Return (wave, warp_tile) pairs: curated waves x curated warp_tiles.
 
-    Combines curated wave configs with the curated per-variant wave→warp map
+    Combines curated wave configs with the curated per-variant wave->warp map
     (both from profiler JSON), filtered by arch/dtype support and divisibility.
 
     The curated pairs are gated against _tm_get_valid_wave_warp_pairs (imported from tile_math.py) 
@@ -548,13 +387,11 @@ def get_wave_warp_pairs(
 # =============================================================================
 #
 # Convolution GEMM tensors vectorize along different logical dimensions:
-#   Forward:    vec_a,vec_b → C (channels), vec_c → K (output channels)
-#   BWD data:   vec_a → K, vec_b,vec_c → C
-#   BWD weight: vec_a → K, vec_b,vec_c → C
+#   Forward:    vec_a, vec_b -> C (channels), vec_c -> K (output channels)
+#   BWD data:   vec_a -> K, vec_b, vec_c -> C
+#   BWD weight: vec_a -> K, vec_b, vec_c -> C
 #
-# This creates asymmetric vec patterns in profiler configs (e.g. (8,8,4) for
-# forward where C supports vec=8 but K only supports vec=4). Each strategy
-# produces one (vec_a, vec_b, vec_c) triple from the dtype-determined max.
+# Each strategy produces one (vec_a, vec_b, vec_c) triple from the dtype-determined max.
 
 
 class VecStrategy(Enum):
@@ -645,14 +482,12 @@ def compute_vector_size(
 
 
 # =============================================================================
-# Per-Tile VecStrategy Tables (extracted from JSON profiler configs)
+# Per-Tile VecStrategy Tables
 # =============================================================================
-# Per-variant mapping: tile → {dtype_class → list[VecStrategy]}.
-# Tables are dtype-class-keyed (Step 7): each strategy's triple is only emitted
-# for the dtype class it was observed with in JSON, so no cross-dtype "bleed"
-# (e.g. emitting half (8,8,8) for a tile that only used fp32 (4,4,4)).
+# Per-variant mapping: tile -> {dtype_class -> list[VecStrategy]}.
 # Derived per (variant, tile, dtype_class) via greedy set-cover over VecStrategy.
 # Tiles not in the table fall back to [GENERIC] (dtype-independent).
+#
 
 _FWD_TILE_STRATEGIES: Dict[Tuple[int, int, int], Dict[str, List[VecStrategy]]] = {
     (16, 16, 64): {"half": [VecStrategy.MAX_AB_HALF_C], "float": [VecStrategy.UNIFORM_MAX]},
@@ -797,9 +632,9 @@ def get_vec_strategies(
 
 
 # =============================================================================
-# Explicit Per-Tile Vec Overrides (long tail — don't fit any strategy family)
+# Explicit Per-Tile Vec Overrides (don't fit any strategy family)
 # =============================================================================
-# A small set of (variant, tile) → extra vec triples used by the JSON profiler
+# A small set of (variant, tile) -> extra vec triples used by the JSON profiler
 # configs that no VecStrategy formula produces. These are added on top of the
 # strategy-derived vecs (superset semantics). Includes bwd_data's vec_a=16
 # (A vectorizes along K, beyond the dtype-class max) and a handful of
@@ -848,7 +683,7 @@ def get_extra_vec_triples(
 ) -> List[Tuple[int, int, int]]:
     """Return explicit per-tile vec triples not produced by any VecStrategy.
 
-    Dtype-class-keyed (Step 7). If ``dtype_class`` is given, return only that
+    Dtype-class-keyed. If ``dtype_class`` is given, return only that
     dtype's extra triples; if None, return the union across dtype classes.
     Empty for tiles whose vecs are fully covered by strategies.
     """
@@ -875,13 +710,11 @@ _COMPV4_SET: Set[Tuple[int, int, int]] = set(COMPV4_COMPATIBLE_TILES)
 
 
 # =============================================================================
-# Curated per-tile (pipeline, scheduler) map (extracted from JSON profiler configs)
+# Curated per-tile (pipeline, scheduler) map
 # =============================================================================
-# Per-variant mapping: tile → list of (pipeline, scheduler) pairs observed in JSON.
+# Per-variant mapping: tile -> list of (pipeline, scheduler).
 # Preferred over the rule-based computation below; tiles absent here fall back to
-# the shape-based rules. This bounds pipeline/scheduler over-generation (the
-# rules emit every pipeline permissible for a shape, whereas JSON benchmarked
-# only a specific subset per tile).
+# the shape-based rules.
 
 _FWD_TILE_PIPELINES: Dict[Tuple[int, int, int], List[Tuple[str, str]]] = {
     (16, 16, 64): [('compv1', 'interwave'), ('compv1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')],
@@ -1584,6 +1417,7 @@ def get_configs(
         """Emit all valid configs for a single tile shape + pipeline list, for
         one concrete datatype. Wave/warp pairs and vec triples are selected for
         this dtype only; each emitted config is tagged with ``datatype``."""
+        
         var_str = {
             GroupedConvVariant.FORWARD: "forward",
             GroupedConvVariant.BACKWARD_DATA: "bwd_data",
