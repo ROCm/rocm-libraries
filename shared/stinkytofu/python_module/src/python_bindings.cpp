@@ -716,26 +716,35 @@ NB_MODULE(_stinkytofu, m) {
         "The intrinsic will be expanded during optimization by IntrinsicExpansionPass.");
 
     // ========================================================================
-    // SRD Upper Value Accessors (rocisa.code.SrdUpperValue replacement)
+    // SRD Upper Value (rocisa.code.SrdUpperValue replacement)
     // ========================================================================
     // Mirrors rocisa::SrdUpperValue (rocisa/src/code.cpp:56-82). Tensile
     // calls SrdUpperValue(IsaVersion) -> BitfieldUnion and immediately
     // reads .desc() / .getValue() to embed the SRD upper 32 bits as a
     // packed literal in the kernel signature (KernelWriterAssembly.py:1497).
     //
-    // We bind two primitive-typed free functions (declared in
-    // StinkySignature.hpp next to SrdUpperValue125X) instead of exporting
-    // the polymorphic ``BitfieldUnion`` base across DSO boundaries; the
-    // small wrapper class in ``rocisa_stinkytofu_adaptor.code``
-    // (``_Gfx1250SrdUpper``) presents the rocisa-shaped
-    // ``.getValue() / .desc() / .toString()`` API to KernelWriter.
-    // gfx1250-only today; other gfx generations stay in C++ via
-    // ``createSrdUpperValue`` and are intentionally not exposed via Python.
-    m.def("getSrdUpperValue125X", &getSrdUpperValue125X,
-          "Packed 32-bit SRD upper literal for gfx1250 (uses "
-          "SrdUpperValue125X::staticInit()).");
-    m.def("getSrdUpperDesc125X", &getSrdUpperDesc125X,
-          "Per-field human-readable description of the gfx1250 SRD upper literal.");
+    // ISA dispatch lives in createSrdUpperValue(); Python receives a thin
+    // BitfieldUnion handle with the rocisa-shaped surface API.
+    nb::class_<BitfieldUnion>(m, "BitfieldUnion")
+        .def("__str__", &BitfieldUnion::toString)
+        .def("getValue", &BitfieldUnion::getValue)
+        .def("toString", &BitfieldUnion::toString)
+        .def("desc", &BitfieldUnion::desc);
+
+    m.def(
+        "SrdUpperValue",
+        [](nb::object isa) {
+            std::array<int, 3> version{};
+            if(nb::isinstance<nb::tuple>(isa) || nb::isinstance<nb::list>(isa)) {
+                version = {nb::cast<int>(isa[0]), nb::cast<int>(isa[1]), nb::cast<int>(isa[2])};
+            } else {
+                version = nb::cast<std::array<int, 3>>(isa);
+            }
+            return createSrdUpperValue(version);
+        },
+        nb::arg("isa"),
+        "Create the SRD upper-32-bit literal for the given ISA "
+        "(major, minor, stepping) tuple or 3-element array.");
 
     // ========================================================================
     // Architecture support query

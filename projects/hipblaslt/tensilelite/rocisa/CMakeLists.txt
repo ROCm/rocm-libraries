@@ -138,8 +138,8 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
                 set(BUILD_SHARED_LIBS ON)
                 set(STINKYTOFU_ENABLE_WERROR ON)
                 
-                # From your branch (5018ae2bb1): Force the stinkytofu Python binding ON before we descend.
-                # Required because the rocisa->stinkytofu adapter needs the _stinkytofu.so nanobind module.
+                # Force StinkyTofu Python bindings ON because the rocisa->stinkytofu 
+                # adapter relies on the _stinkytofu.so nanobind module.
                 set(STINKYTOFU_BUILD_PYTHON ON CACHE BOOL
                     "Build StinkyTofu Python bindings (required by ROCISA_BACKEND=stinkytofu adapter)"
                     FORCE)
