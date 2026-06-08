@@ -362,6 +362,29 @@ class TestVerboseReporter:
         # The legacy literal must not appear anywhere in suite-mode verbose output.
         assert "(MIOpen)" not in out
 
+    def test_verbose_reference_row_uses_reference_header(self) -> None:
+        """Timed validation-provider rows must not render as hipDNN engines."""
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        gr = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[
+                _make_pe_success(engine_id=0, provider="pytorch", correctness=None)
+            ],
+        )
+        gr.results[0].role = "reference"
+
+        reporter.print_verbose_graph_result(
+            gr, SuiteConfig(reference_provider="pytorch")
+        )
+        out = output.getvalue()
+
+        assert "Validation Reference Benchmark: g" in out
+        assert "Provider:   pytorch" in out
+        assert "Engine ID:" not in out
+        assert "Reference: timing baseline (no correctness comparison)" in out
+
     def test_verbose_profiling_renders_when_always_on_metrics_absent(self) -> None:
         """``--metrics-tier off --pmc basic`` leaves every always-on metric
         field unset but still populates ``extra_metrics``. The profiling
@@ -488,3 +511,32 @@ class TestPrintHeader:
         out = output.getvalue()
         assert "Engine ID:  42 (HIPBLASLT_ENGINE)" in out
         assert "(MIOpen)" not in out
+
+    def test_reference_row_status_renders_reference(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        graph = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[
+                ProviderEngineResult(
+                    provider="pytorch",
+                    engine_id=0,
+                    status="success",
+                    role="reference",
+                    e2e_stats=BenchmarkStats(
+                        mean_ms=2.0,
+                        median_ms=2.0,
+                        std_ms=0.0,
+                        min_ms=2.0,
+                        max_ms=2.0,
+                        p95_ms=2.0,
+                        p99_ms=2.0,
+                    ),
+                )
+            ],
+        )
+
+        reporter.print_graph_result_table(graph)
+
+        assert "reference" in output.getvalue()

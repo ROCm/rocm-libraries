@@ -9,8 +9,8 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "GraphTest.hpp"
-#include "HipKernelHandle.hpp"
-#include "HipKernelSettings.hpp"
+#include "core/Handle.hpp"
+#include "core/Settings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaKernelUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
@@ -24,7 +24,7 @@ class TestSdpaBwdPlanBuilder : public ::testing::Test
 {
 protected:
     SdpaBwdPlanBuilder _planBuilder;
-    HipKernelHandle _handle;
+    Handle _handle;
 };
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaBwdGraph)
@@ -118,7 +118,7 @@ TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeSmallUnaligned)
     auto builder = createSdpaBwdGraph({1, 3, 255, 128});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
-    const HipKernelSettings settings;
+    const Settings settings;
     const size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
 
     // D buffer: 1*3*255*4 = 3060, aligned to 64 → 3072  (exercises alignment rounding)
@@ -132,7 +132,7 @@ TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeMedium)
     auto builder = createSdpaBwdGraph({2, 8, 512, 128});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
-    const HipKernelSettings settings;
+    const Settings settings;
     const size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
 
     // D buffer: 2*8*512*4 = 32768, aligned to 64 → 32768
@@ -146,7 +146,7 @@ TEST_F(TestSdpaBwdPlanBuilder, BackwardWorkspaceSizeLarge)
     auto builder = createSdpaBwdGraph({4, 16, 1024, 128});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
-    const HipKernelSettings settings;
+    const Settings settings;
     const size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
 
     // D buffer: 4*16*1024*4 = 262144, aligned to 64 → 262144
@@ -263,13 +263,13 @@ TEST_F(TestSdpaBwdPlanBuilder, GetCustomKnobsReturnsAccumulatorKnob)
 
 TEST_F(TestSdpaBwdPlanBuilder, WorkspaceSizeDefaultSettingsIsA32)
 {
-    // Default HipKernelSettings (nullopt) should produce same result as explicit A32
+    // Default Settings (nullopt) should produce same result as explicit A32
     auto graphBuilder = createSdpaBwdGraph({2, 8, 512, 128});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
-    const HipKernelSettings defaultSettings;
-    HipKernelSettings a32Settings;
+    const Settings defaultSettings;
+    Settings a32Settings;
     a32Settings.accumulatorType = AccumulatorType::A32;
 
     EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, defaultSettings),
