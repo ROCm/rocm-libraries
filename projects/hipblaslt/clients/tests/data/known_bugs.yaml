@@ -11,3 +11,18 @@
 Known bugs:
   # ROCM-1545: TF32 matmul with INF inputs returns NaN on gfx950 (MI355)
   - { name: matmul_tf32_inf_ROCM1545, function: matmul, initialization: inf, known_bug_platforms: "gfx950, gfx1250" }
+
+  # AIHPBLAS-3806: 32-bit / size_t overflow coverage for large-size kernels.
+  #
+  # As the size_t overflow sweep (matmul_size_t_* in matmul_gtest.yaml) is run on
+  # each platform, any kernel that cannot yet handle a >2^31 element-index /
+  # byte-offset should be registered here (scoped via known_bug_platforms) so the
+  # coverage gap is tracked rather than silently failing CI. Remove the entry once
+  # the underlying kernel is fixed.
+  #
+  # NOTE: matmul_size_t_output_overflow_bf16_ROCM25793 is deliberately NOT listed
+  # here -- it is the FAIL-pre-fix / PASS-post-fix gate for ROCM-25793 and must
+  # remain an active (non-skipped) test.
+  #
+  # Template (uncomment and scope once a failing kernel/platform is confirmed):
+  # - { name: matmul_size_t_index_overflow, function: matmul, known_bug_platforms: "gfx942" }

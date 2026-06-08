@@ -2843,6 +2843,93 @@ Tests:
   beta: 0.0
   gpu_arch: '9(0a|42)'
 
+###############################################################################
+# 32-bit / size_t overflow coverage (AIHPBLAS-3806).
+#
+# These cases catch the class of >2^31 element-index / byte-offset overflows in
+# the TensileLite addressing path (defect ROCM-25793: a 32-bit row-stride
+# byte-offset overflow in the global-write path). They are modeled after
+# rocBLAS's gemm_size_t tests: M/N/K stay moderate while a leading dimension or
+# batch stride is inflated so the output (or input) offset crosses 2^31. Full
+# unit_check is used so both memory faults AND silent corruption are caught.
+#
+# Memory note: these allocate several GiB. On GPUs without enough memory the
+# harness reports the allocation failure as a skip (CHECK_DEVICE_ALLOCATION),
+# so the cases are safe to keep enabled; they only run for real on large-memory
+# parts. Gated to the gfx9 data-center arches where the defect manifests.
+###############################################################################
+
+# Systematic element-index / byte-offset overflow sweep (f32), rotating the
+# oversized leading dimension across A, B and the output C/D.
+- name: matmul_size_t_index_overflow
+  category: stress
+  function:
+    matmul: *single_precision
+  matrix_size: *size_t_index_overflow
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: 4.0
+  unit_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Same sweep in f16 and bf16 (the ROCM-25793 input precision is bf16). bf16/f16
+# accumulation tolerance is handled by the harness near-check; K is moderate.
+- name: matmul_size_t_index_overflow_hpa
+  category: stress
+  function:
+    matmul:
+      - *hpa_half_precision
+      - *hpa_bf16_precision
+  matrix_size: *size_t_index_overflow
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: 4.0
+  unit_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# First concrete ROCM-25793 instance: bf16, transA=N / transB=T, with bias and
+# a scaleAlpha vector (the Cijk_Ailk_Bjlk_BBS_BH_Bias_HA_S_SAV kernel family),
+# driven onto an oversized output leading dimension so the output buffer index
+# crosses 2^31. This case must FAIL on a pre-fix build and PASS post-fix, so it
+# is intentionally NOT registered in known_bugs.yaml. rand_int initialization
+# keeps the result exactly representable so unit_check is reliable.
+- name: matmul_size_t_output_overflow_bf16_ROCM25793
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size: *size_t_output_overflow
+  transA: N
+  transB: T
+  alpha: 1.0
+  beta: 0.0
+  bias_vector: 1
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  initialization: rand_int
+  unit_check: 1
+  gpu_arch: '9(42|50)'
+
+# Strided-batched output: inflate stride_c/stride_d so stride * bpe crosses 2^31
+# for the per-batch base offset, while the per-batch compute stays at 64x64x64.
+# For bf16 (bpe = 2), stride = 1073741824 (2^30) -> 2^31 bytes for batch index 1.
+- name: matmul_size_t_batch_stride_overflow
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64,
+        stride_a: 4096, stride_b: 4096, stride_c: 1073741824, stride_d: 1073741824 }
+  batch_count: 2
+  transA: N
+  transB: T
+  alpha: 1.0
+  beta: 0.0
+  initialization: rand_int
+  unit_check: 1
+  gpu_arch: '9(0a|42|50)'
+
 
 - name: matmul_96_complex
   category: pre_checkin
