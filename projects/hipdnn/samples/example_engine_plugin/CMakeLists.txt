@@ -48,9 +48,10 @@ option(EXAMPLEPROVIDER_BUILD_SAMPLE "Build sample application (requires hipdnn_f
 # then configure with -DEXAMPLEPROVIDER_ENABLE_CLANG_TIDY=ON.
 option(EXAMPLEPROVIDER_ENABLE_CLANG_TIDY "Enable clang-tidy checks during compilation" OFF)
 if(EXAMPLEPROVIDER_ENABLE_CLANG_TIDY AND NOT DEFINED CMAKE_CXX_CLANG_TIDY)
-    find_program(CLANG_TIDY_EXE NAMES clang-tidy-20 clang-tidy)
+    find_program(CLANG_TIDY_EXE NAMES clang-tidy)
     if(CLANG_TIDY_EXE)
         set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+        message(STATUS "Found clang-tidy: ${CMAKE_CXX_CLANG_TIDY}")
     else()
         message(FATAL_ERROR "EXAMPLEPROVIDER_ENABLE_CLANG_TIDY is ON but clang-tidy was not found")
     endif()

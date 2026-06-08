@@ -180,6 +180,37 @@ public:
             handle, numPluginPaths, pluginPaths, maxStringLen);
     }
 
+    // RFC 0007 Section 16: Heuristic policy enumeration
+    hipdnnStatus_t getHeuristicPolicyCount(hipdnnHandle_t handle, size_t* numPolicies) override
+    {
+        return hipdnnGetHeuristicPolicyCount_ext(handle, numPolicies);
+    }
+
+    hipdnnStatus_t getHeuristicPolicyInfo(hipdnnHandle_t handle,
+                                          size_t policyIndex,
+                                          int64_t* policyId,
+                                          char* policyName,
+                                          size_t* policyNameLen,
+                                          char* pluginName,
+                                          size_t* pluginNameLen,
+                                          char* pluginVersion,
+                                          size_t* pluginVersionLen,
+                                          char* apiVersion,
+                                          size_t* apiVersionLen) override
+    {
+        return hipdnnGetHeuristicPolicyInfo_ext(handle,
+                                                policyIndex,
+                                                policyId,
+                                                policyName,
+                                                policyNameLen,
+                                                pluginName,
+                                                pluginNameLen,
+                                                pluginVersion,
+                                                pluginVersionLen,
+                                                apiVersion,
+                                                apiVersionLen);
+    }
+
 private:
     hipdnn_data_sdk::utilities::Version _version;
 };
