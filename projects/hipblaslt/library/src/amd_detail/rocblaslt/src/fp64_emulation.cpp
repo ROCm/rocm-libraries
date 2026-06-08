@@ -928,7 +928,23 @@ oz2_accu_refine_sftAB_kernel(const int32_t* __restrict__ C32i,
 /* =========================================================================
  * GPU kernels — Part 1f: full multi-modulus scaling (A and B fused)
  *
- * oz2_scaleAB_kernel processes both A rows and B columns in a single dispatch.
+ * oz2_scaleAB_kernel_rt: runtime-count fallback used when do_pass3=true
+ * (num_moduli >= 19) or for any other partial-chunk case not covered by the
+ * template specialisations below.
+ *
+ * oz2_scaleAB_kernel<T_COUNT, DO_PASS3>: compile-time template version.
+ * With T_COUNT known at compile time the compiler fully unrolls the inner
+ * moduli loop.  All T_COUNT iterations are mutually independent (each
+ * depends only on ival, not on any prior iteration), so the unrolled code
+ * exposes instruction-level parallelism across all T_COUNT FP64 computation
+ * chains simultaneously, hiding their individual ~5-10 cycle latencies.
+ *
+ * Both variants use __builtin_nontemporal_store for INT8 writes to A8i and
+ * B8i.  These buffers are write-only during scaling and together occupy
+ * ~8 GiB (2 × num_moduli × m × k bytes), far exceeding L2 capacity.
+ * Streaming stores bypass the L2, eliminating read-for-ownership traffic and
+ * keeping the cache warm for the FP64 reads of A and B.
+ *
  * Grid = dim3(ceil(k/64), ceil(m/4) + ceil(n/4)), Block = dim3(64, 4).
  *   blockIdx.y <  m_y_blocks → A scaling: i = blockIdx.y*4 + threadIdx.y
  *   blockIdx.y >= m_y_blocks → B scaling: l = (blockIdx.y - m_y_blocks)*4 + threadIdx.y
@@ -938,20 +954,20 @@ oz2_accu_refine_sftAB_kernel(const int32_t* __restrict__ C32i,
  * The branch on blockIdx.y is scalar-uniform: zero warp divergence.
  * ========================================================================= */
 __global__ static void
-oz2_scaleAB_kernel(const double* __restrict__ A,
-                   int64_t m, int64_t lda, bool transA,
-                   int8_t*  __restrict__       A8i,
-                   size_t                      lda8i,
-                   size_t                      cola8i,
-                   const int16_t* __restrict__ sftA,
-                   const double* __restrict__ B,
-                   int64_t n, int64_t ldb, bool transB,
-                   int8_t*  __restrict__       B8i,
-                   size_t                      ldb8i,
-                   const int16_t* __restrict__ sftB,
-                   int64_t k,
-                   unsigned t_start, unsigned t_count, bool do_pass3,
-                   unsigned m_y_blocks)
+oz2_scaleAB_kernel_rt(const double* __restrict__ A,
+                      int64_t m, int64_t lda, bool transA,
+                      int8_t*  __restrict__       A8i,
+                      size_t                      lda8i,
+                      size_t                      cola8i,
+                      const int16_t* __restrict__ sftA,
+                      const double* __restrict__ B,
+                      int64_t n, int64_t ldb, bool transB,
+                      int8_t*  __restrict__       B8i,
+                      size_t                      ldb8i,
+                      const int16_t* __restrict__ sftB,
+                      int64_t k,
+                      unsigned t_start, unsigned t_count, bool do_pass3,
+                      unsigned m_y_blocks)
 {
     const int64_t j = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; /* k-index */
 
@@ -976,7 +992,8 @@ oz2_scaleAB_kernel(const double* __restrict__ A,
             if(do_pass3)
                 rf2 = fmaf(rintf(rf2 * cInvModF[t]),
                            static_cast<float>(cNegMod[t]), rf2);
-            A8i[t_local * stride + offset] = static_cast<int8_t>(static_cast<int32_t>(rf2));
+            __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
+                                        A8i + t_local * stride + offset);
         }
 
     } else {
@@ -998,10 +1015,86 @@ oz2_scaleAB_kernel(const double* __restrict__ A,
             const float   rf  = static_cast<float>(r);
             float rf2 = fmaf(rintf(rf * cInvModF[t]),
                              static_cast<float>(cNegMod[t]), rf);
-            if(do_pass3)
                 rf2 = fmaf(rintf(rf2 * cInvModF[t]),
                            static_cast<float>(cNegMod[t]), rf2);
-            B8i[t_local * stride + offset] = static_cast<int8_t>(static_cast<int32_t>(rf2));
+            __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
+                                        B8i + t_local * stride + offset);
+        }
+    }
+}
+
+/* Template version: T_COUNT moduli are all mutually independent → the compiler
+ * can issue all T_COUNT FP64 chains in parallel after full loop unrolling.
+ * DO_PASS3 controls the optional third FP32 refinement pass (only needed
+ * when num_moduli >= 19; evaluated at compile time via if constexpr).      */
+template <unsigned T_COUNT, bool DO_PASS3>
+__global__ static void
+oz2_scaleAB_kernel(const double* __restrict__ A,
+                   int64_t m, int64_t lda, bool transA,
+                   int8_t*  __restrict__       A8i,
+                   size_t                      lda8i,
+                   size_t                      cola8i,
+                   const int16_t* __restrict__ sftA,
+                   const double* __restrict__ B,
+                   int64_t n, int64_t ldb, bool transB,
+                   int8_t*  __restrict__       B8i,
+                   size_t                      ldb8i,
+                   const int16_t* __restrict__ sftB,
+                   int64_t k,
+                   unsigned t_start, unsigned m_y_blocks)
+{
+    const int64_t j = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; /* k-index */
+
+    if(blockIdx.y < m_y_blocks) {
+        /* ── A scaling ─────────────────────────────────────────────────── */
+        const int64_t i = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+        if(i >= m || j >= k) return;
+
+        const double val  = transA ? A[i * lda + j] : A[j * lda + i];
+        const int16_t sft = sftA[i];
+        const double ival = trunc(ldexp(val, static_cast<int>(sft)));
+
+        const size_t stride = lda8i * cola8i;
+        const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(i) * lda8i;
+
+        #pragma unroll
+        for(unsigned t_local = 0; t_local < T_COUNT; ++t_local) {
+            const unsigned t = t_start + t_local;
+            const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
+            const float   rf  = static_cast<float>(r);
+            float rf2 = fmaf(rintf(rf * cInvModF[t]),
+                             static_cast<float>(cNegMod[t]), rf);
+            if constexpr (DO_PASS3)
+                rf2 = fmaf(rintf(rf2 * cInvModF[t]),
+                           static_cast<float>(cNegMod[t]), rf2);
+            __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
+                                        A8i + t_local * stride + offset);
+        }
+
+    } else {
+        /* ── B scaling ─────────────────────────────────────────────────── */
+        const int64_t l = static_cast<int64_t>(blockIdx.y - m_y_blocks) * blockDim.y
+                        + threadIdx.y;
+        if(l >= n || j >= k) return;
+
+        const double val  = transB ? B[j * ldb + l] : B[l * ldb + j];
+        const int16_t sft = sftB[l];
+        const double ival = trunc(ldexp(val, static_cast<int>(sft)));
+
+        const size_t stride = ldb8i * static_cast<size_t>(n);
+        const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(l) * ldb8i;
+
+        #pragma unroll
+        for(unsigned t_local = 0; t_local < T_COUNT; ++t_local) {
+            const unsigned t = t_start + t_local;
+            const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
+            const float   rf  = static_cast<float>(r);
+            float rf2 = fmaf(rintf(rf * cInvModF[t]),
+                             static_cast<float>(cNegMod[t]), rf);
+                rf2 = fmaf(rintf(rf2 * cInvModF[t]),
+                           static_cast<float>(cNegMod[t]), rf2);
+            __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
+                                        B8i + t_local * stride + offset);
         }
     }
 }
@@ -1086,48 +1179,11 @@ oz2_chunk_accum_kernel(const int32_t* __restrict__ C32i_batch,
 }
 
 /* =========================================================================
- * GPU kernels — Parts 3+4: finalize with per-element inverse scale
- * ========================================================================= */
-
-__global__ static void
-oz2_finalize_kernel(const double* __restrict__ Zhi,
-                    const double* __restrict__ Zlo,
-                    const double* __restrict__ C,
-                    double*       __restrict__ D,
-                    int64_t                    m,
-                    int64_t                    n,
-                    size_t                     ldc32i,
-                    int64_t                    ldc,
-                    int64_t                    ldd,
-                    double                     alpha,
-                    double                     beta,
-                    const int16_t* __restrict__ sftA,
-                    const int16_t* __restrict__ sftB)
-{
-    const int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    const int64_t l = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
-    if(i >= m || l >= n) return;
-
-    const size_t z_idx = static_cast<size_t>(i) + static_cast<size_t>(l) * ldc32i;
-    const size_t c_idx = static_cast<size_t>(i) + static_cast<size_t>(l) * static_cast<size_t>(ldc);
-    const size_t d_idx = static_cast<size_t>(i) + static_cast<size_t>(l) * static_cast<size_t>(ldd);
-
-    const double Zh = Zhi[z_idx];
-    const double Zl = Zlo[z_idx];
-    const double q  = rint((Zh + Zl) * cInvP);
-    const double X  = fma(cP_lo, q, fma(cP_hi, q, Zh) + Zl);
-
-    const int inv_sft = -(static_cast<int>(sftA[i]) + static_cast<int>(sftB[l]));
-    D[d_idx] = alpha * ldexp(X, inv_sft) + beta * C[c_idx];
-}
-
-/* =========================================================================
- * GPU kernels — fused last-chunk CRT accumulation + finalize
+ * GPU kernels — Parts 3+4: fused last-chunk CRT accumulation + finalize
  *
  * oz2_accum_finalize_kernel is dispatched for the LAST GEMM chunk only.
- * It combines oz2_chunk_accum_kernel and oz2_finalize_kernel into a single
- * pass, eliminating the intermediate Zhi/Zlo global write (from the regular
- * accum) and the subsequent read by the separate finalize kernel.
+ * It fuses the CRT accumulation and the per-element inverse-scale step into
+ * a single pass, eliminating an intermediate Zhi/Zlo global write+read.
  *
  * When is_first_chunk is also true (single chunk = most common case),
  * Zhi_in/Zlo_in are never read and the C32i slices flow directly to D
@@ -1513,10 +1569,49 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
          * When scale_chunk_size == num_moduli A and B are read once in total;
          * otherwise ceil(num_moduli / scale_chunk_size) reads of each.      */
         _pstart();
-        hipLaunchKernelGGL(oz2_scaleAB_kernel, gAB_scale, blk_scale, 0, stream,
-                           A, m, lda, tA, A8i, lda8i, cola8i, sftA,
-                           B, n, ldb, tB, B8i, ldb8i, sftB,
-                           k, scale_start, actual_scale, do_pass3, m_y_blks);
+        /* Dispatch oz2_scaleAB_kernel<T_COUNT, false>: with T_COUNT fixed at
+         * compile time, #pragma unroll fully unrolls the inner moduli loop and
+         * the compiler can issue all T_COUNT independent FP64 chains in parallel.
+         * The runtime fallback (oz2_scaleAB_kernel_rt) handles the rare
+         * do_pass3=true case (num_moduli >= 19).                             */
+#define OZ2_SCALE_LAUNCH(TC) \
+        hipLaunchKernelGGL((oz2_scaleAB_kernel<(TC), false>), gAB_scale, blk_scale, 0, stream, \
+                           A, m, lda, tA, A8i, lda8i, cola8i, sftA, \
+                           B, n, ldb, tB, B8i, ldb8i, sftB, k, scale_start, m_y_blks)
+        if(!do_pass3) {
+            switch(actual_scale) {
+                case  1: OZ2_SCALE_LAUNCH( 1); break;
+                case  2: OZ2_SCALE_LAUNCH( 2); break;
+                case  3: OZ2_SCALE_LAUNCH( 3); break;
+                case  4: OZ2_SCALE_LAUNCH( 4); break;
+                case  5: OZ2_SCALE_LAUNCH( 5); break;
+                case  6: OZ2_SCALE_LAUNCH( 6); break;
+                case  7: OZ2_SCALE_LAUNCH( 7); break;
+                case  8: OZ2_SCALE_LAUNCH( 8); break;
+                case  9: OZ2_SCALE_LAUNCH( 9); break;
+                case 10: OZ2_SCALE_LAUNCH(10); break;
+                case 11: OZ2_SCALE_LAUNCH(11); break;
+                case 12: OZ2_SCALE_LAUNCH(12); break;
+                case 13: OZ2_SCALE_LAUNCH(13); break;
+                case 14: OZ2_SCALE_LAUNCH(14); break;
+                case 15: OZ2_SCALE_LAUNCH(15); break;
+                case 16: OZ2_SCALE_LAUNCH(16); break;
+                case 17: OZ2_SCALE_LAUNCH(17); break;
+                case 18: OZ2_SCALE_LAUNCH(18); break;
+                default:
+                    hipLaunchKernelGGL(oz2_scaleAB_kernel_rt, gAB_scale, blk_scale, 0, stream,
+                                       A, m, lda, tA, A8i, lda8i, cola8i, sftA,
+                                       B, n, ldb, tB, B8i, ldb8i, sftB,
+                                       k, scale_start, actual_scale, false, m_y_blks);
+            }
+        } else {
+            /* num_moduli >= 19 (do_pass3=true): use runtime fallback kernel. */
+            hipLaunchKernelGGL(oz2_scaleAB_kernel_rt, gAB_scale, blk_scale, 0, stream,
+                               A, m, lda, tA, A8i, lda8i, cola8i, sftA,
+                               B, n, ldb, tB, B8i, ldb8i, sftB,
+                               k, scale_start, actual_scale, true, m_y_blks);
+        }
+#undef OZ2_SCALE_LAUNCH
         _pstop(_t_scale);
 
         /* Parts 2c-d: GEMM + accumulate for each GEMM chunk within this
@@ -1588,9 +1683,8 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     hipblasLtMatrixLayoutDestroy(layoutB_b);
     hipblasLtMatrixLayoutDestroy(layoutA_b);
 
-    /* oz2_finalize_kernel is no longer called: the last GEMM chunk is handled
-     * by oz2_accum_finalize_kernel which writes D directly.
-     * _t_finalize remains 0 (the finalization cost is now included in _t_accum). */
+    /* The last GEMM chunk is handled by oz2_accum_finalize_kernel which writes
+     * D directly; _t_finalize remains 0 (cost is included in _t_accum).    */
 
     hipblasLtMatmulDescDestroy(matmulDesc);
     hipblasLtMatrixLayoutDestroy(layoutCD);
