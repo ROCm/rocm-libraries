@@ -261,12 +261,13 @@ def buildTheRockDockerImage(Map conf=[:])
 
     def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151;gfx1201" // multiarch builds
 
-    // Read the TheRock hash pinned in the workflow file.
+    // Read the TheRock hash from the ci-env action (single source of truth).
     def theRockHash = sh(
         script: """
-            grep -A 5 'repository: "ROCm/TheRock"' ${env.WORKSPACE}/.github/workflows/therock-ci-linux.yml \
-            | grep '^ *ref:' \
-            | awk '{print \$2}'
+            grep -A 2 'therock-ref:' ${env.WORKSPACE}/.github/actions/ci-env/action.yml \
+            | grep 'value:' \
+            | awk '{print \$2}' \
+            | tr -d '"'
         """.stripIndent(),
         returnStdout: true
     ).trim()
@@ -415,7 +416,7 @@ def getDockerImage(Map conf=[:])
     def gpu_arch
     if (gpu_family == "ci")
     {
-        gpu_arch = "gfx908;gfx90a;gfx942;gfx1101;gfx1151" // Builds docker image with subset of architectures that CI is run on.
+        gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151" // Builds docker image with subset of architectures that CI is run on.
     }
     else if (gpu_family == "gfx90X")
     {
