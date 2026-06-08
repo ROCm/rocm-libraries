@@ -33,7 +33,6 @@ import pytest
 
 from Tensile.Components.ScheduleCapture import (
     BODY_LABEL_ML,
-    SchedulePosition,
 )
 from Tensile.Components.CMSValidator import (
     MissingBarrierFailure,
@@ -320,8 +319,8 @@ class TestLiftedHelpers(GraphNativeValidationTest):
         f = OrderInvertedFailure(
             producer=_label("LRA0", -1),
             consumer=_label("PackA0", 2),
-            default_producer_position=SchedulePosition(1, -1),
-            default_consumer_position=SchedulePosition(1, 2),
+            default_producer_position=-1,
+            default_consumer_position=2,
         )
         self.assert_order_inverted(
             f, producer_name="LRA0", producer_idx=-1,
@@ -335,8 +334,8 @@ class TestLiftedHelpers(GraphNativeValidationTest):
         f = OrderInvertedFailure(
             producer=_label("GRA", 0),
             consumer=_label("LRA1", 6),
-            default_producer_position=SchedulePosition(1, 0),
-            default_consumer_position=SchedulePosition(1, 6),
+            default_producer_position=0,
+            default_consumer_position=6,
         )
         self.assert_order_inverted(
             f, producer_name="GRA", producer_idx=0,
@@ -347,8 +346,8 @@ class TestLiftedHelpers(GraphNativeValidationTest):
         f = OrderInvertedFailure(
             producer=_label("LRA0", 0),
             consumer=_label("MFMA", 4),
-            default_producer_position=SchedulePosition(1, 0),
-            default_consumer_position=SchedulePosition(1, 4),
+            default_producer_position=0,
+            default_consumer_position=4,
         )
         with pytest.raises(AssertionError, match="producer category"):
             self.assert_order_inverted(

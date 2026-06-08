@@ -221,15 +221,17 @@ def test_real_kernel_anchor_gr_ordering_residual_shape(
 
     msg = str(excinfo.value)
 
-    # Pin: the edge-layer Phase-0 bypass message — the count-based gate
-    # passes and the edge layer hits a missing endpoint identity.
-    assert "identity-coverage check at compare_graphs entry was bypassed" in msg, (
-        f"Expected the diagnose_missing_edge Phase-0 'bypass' message "
-        f"(edge-layer T/X register-naming divergence after the new "
-        f"count-based gate passes); full message:\n{msg}"
+    # Pin: the edge-layer Phase-0 byte-key message — the count-based gate
+    # passes and the edge layer hits a ref producer byte_key absent from subj
+    # (T/X register-naming divergence produces different physical byte indices).
+    # C3f: Phase 0 now uses byte-key reverse-index lookup instead of identity.
+    assert "NO writer anywhere in subj" in msg, (
+        f"Expected the diagnose_missing_edge Phase-0 byte-key message "
+        f"(ref producer byte_keys absent from subj after T/X register-naming "
+        f"divergence); full message:\n{msg}"
     )
     assert "p_id=" in msg and "c_id=" in msg, (
-        f"Expected both p_id= and c_id= in the bypass message; "
+        f"Expected both p_id= and c_id= in the Phase-0 message; "
         f"full message:\n{msg}"
     )
 

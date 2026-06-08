@@ -224,19 +224,19 @@ def test_real_kernel_anchor_lr_naming_divergence_shape(
 
     msg = str(excinfo.value)
 
-    # Pin: the new failure shape is the edge-layer Phase-0 bypass message
-    # from diagnose_missing_edge — surfaces a missing node-identity in the
-    # subject graph after the count-based gate passes.
-    assert "identity-coverage check at compare_graphs entry was bypassed" in msg, (
-        f"Expected the diagnose_missing_edge Phase-0 'bypass' message "
-        f"(edge-layer T/X register-naming divergence after the new "
-        f"count-based gate passes); full message:\n{msg}"
+    # Pin: the edge-layer Phase-0 byte-key message from diagnose_missing_edge
+    # — C3f: Phase 0 now uses byte-key reverse-index; ref producer byte_keys
+    # absent from subj (T/X register-naming divergence produces different
+    # physical byte indices in the two captures).
+    assert "NO writer anywhere in subj" in msg, (
+        f"Expected the diagnose_missing_edge Phase-0 byte-key message "
+        f"(ref producer byte_keys absent from subj after T/X register-naming "
+        f"divergence); full message:\n{msg}"
     )
 
-    # Pin: the bypassed-identity message names a producer and a consumer
-    # identity (both endpoints of the missing edge are reported).
+    # Pin: the byte-key message includes p_id and c_id for diagnostics.
     assert "p_id=" in msg and "c_id=" in msg, (
-        f"Expected both p_id= and c_id= in the bypass message "
+        f"Expected both p_id= and c_id= in the Phase-0 message "
         f"(missing-edge endpoint identities); full message:\n{msg}"
     )
 
@@ -705,17 +705,17 @@ class TestOplbRegisterNamingMinimal:
 
         msg = str(excinfo.value)
 
-        # Pin: edge-layer bypass raise (Phase 0 of diagnose_missing_edge).
-        assert "identity-coverage check at compare_graphs entry was bypassed" in msg, (
-            f"Expected the edge-layer bypass message after the count-based "
-            f"gate passes; full message:\n{msg}"
-        )
-        # The endpoint identities are rendered into the message; one of them
-        # will be a ds_read_b128 (LR) render — the T/X divergence is in LR.
-        assert "ds_read_b128" in msg, (
-            f"Expected 'ds_read_b128' in the bypass message endpoint identity "
-            f"(the LR side is the source of the T/X register-naming "
-            f"divergence);\n{msg}"
+        # Pin: edge-layer Phase-0 raise from diagnose_missing_edge.
+        # C3f: Phase 0 checks consumer identity first (absent → consumer-absent
+        # CaptureConsistencyError) and then byte-key reverse-index for the
+        # producer (missing byte_key → producer-absent CaptureConsistencyError).
+        # T/X register-naming divergence may surface as either:
+        #   (a) consumer identity absent from subj, OR
+        #   (b) ref producer byte_keys absent from subj.
+        # The common marker is "diagnose_missing_edge" which is present in both.
+        assert "diagnose_missing_edge" in msg, (
+            f"Expected a diagnose_missing_edge Phase-0 error message after the "
+            f"count-based gate passes; full message:\n{msg}"
         )
         # The count-based gate did NOT itself fire: counts (4 LR + 1 Pack on
         # each side) match by construction.

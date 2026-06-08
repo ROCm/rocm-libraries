@@ -297,14 +297,17 @@ def test_non_cms_reference_compare_graphs_surfaces_only_known_residuals(
         compare_graphs(ref_graph, subj_graph)
 
     msg = str(excinfo.value)
-    # Pin: the edge-layer Phase-0 bypass message.
-    assert "identity-coverage check at compare_graphs entry was bypassed" in msg, (
-        f"Expected the diagnose_missing_edge Phase-0 'bypass' message "
-        f"(edge-layer T/X register-naming divergence after the new "
-        f"count-based gate passes); full message:\n{msg}"
+    # Pin: the edge-layer Phase-0 byte-key message.
+    # C3f: Phase 0 now uses byte-key reverse-index lookup; ref producer
+    # byte_keys are absent from subj due to T/X register-naming divergence
+    # (different physical byte indices in the two captures).
+    assert "NO writer anywhere in subj" in msg, (
+        f"Expected the diagnose_missing_edge Phase-0 byte-key message "
+        f"(ref producer byte_keys absent from subj due to T/X register-naming "
+        f"divergence); full message:\n{msg}"
     )
     assert "p_id=" in msg and "c_id=" in msg, (
-        f"Expected both p_id= and c_id= in the bypass message; "
+        f"Expected both p_id= and c_id= in the Phase-0 byte-key message; "
         f"full message:\n{msg}"
     )
     # Pin: the new count-based gate did NOT fire — counts match across

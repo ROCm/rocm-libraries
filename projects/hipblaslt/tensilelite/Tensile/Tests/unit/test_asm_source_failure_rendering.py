@@ -55,7 +55,6 @@ from Tensile.Components.CMSValidator import (
     WaitInsufficientFailure,
     _PositionStr,
 )
-from Tensile.Components.ScheduleCapture import SchedulePosition
 
 
 def _asm_label(rendered_inst: str, asm_line: int) -> FailureNodeLabel:
@@ -103,8 +102,8 @@ def test_order_inverted_failure_renders_asm_native():
     failure = OrderInvertedFailure(
         producer=_asm_label("buffer_load_dword v[34], s[16:19], 0 offen offset:128", 17),
         consumer=_asm_label("v_mfma_f32_16x16x16f16 a[0:3], v[4:5], v[8:9], a[0:3]", 92),
-        default_producer_position=SchedulePosition(loop_index=1, stream_index=0),
-        default_consumer_position=SchedulePosition(loop_index=1, stream_index=5),
+        default_producer_position=0,
+        default_consumer_position=5,
     )
     msg = failure.format()
     assert "buffer_load_dword v[34], s[16:19], 0 offen offset:128 @ asm_line=17" in msg

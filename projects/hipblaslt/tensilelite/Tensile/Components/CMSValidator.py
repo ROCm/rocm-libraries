@@ -3311,8 +3311,8 @@ class ValidationError(Exception):
 class OrderInvertedFailure(Failure):
     producer: FailureNodeLabel = None
     consumer: FailureNodeLabel = None
-    default_producer_position: Optional[SchedulePosition] = None  # default-side, for diagnostics
-    default_consumer_position: Optional[SchedulePosition] = None  # default-side, for diagnostics
+    default_producer_position: Optional[int] = None  # default-side unrolled position, for diagnostics
+    default_consumer_position: Optional[int] = None  # default-side unrolled position, for diagnostics
 
     def _format_canonical(self) -> str:
         return (
@@ -3912,8 +3912,12 @@ def diagnose_missing_edge(
     """Classify why a reference edge is absent from the CMS subject graph.
 
     See plan §"Comparison and diagnosis" for the phased classifier:
-      Phase 0: identity lookup (gating — missing nodes raise).
-      Phase 1: OrderInvertedFailure (same-body only — gating for Phase 2).
+      Phase 0: byte-key-based consumer (identity) + producer (byte-key reverse-
+               index) lookup. Missing consumer identity raises CaptureConsistency-
+               Error. Missing producer byte_key in subj raises CaptureConsistency-
+               Error. Producer absent before consumer (all writers after consumer)
+               sets p_node=None for Phase 1.
+      Phase 1: OrderInvertedFailure (unrolled-position comparison, no body gate).
       Phase 2: MissingWaitFailure / WaitInsufficientFailure (mutually
                exclusive); plus MissingBarrierFailure when a wait covers
                but no barrier sits in the post-wait window (LDS-reuse
@@ -3929,19 +3933,61 @@ def diagnose_missing_edge(
     matches the validator's no-silent-ignore contract: the validator
     either knows or admits it doesn't know, by raising.
     """
-    p_id = ref_edge.producer.identity
+    # Phase 0 — byte-key-based producer + consumer lookup.
+    #
+    # Consumer: resolved by identity (consumer must be a DATA-FLOW node
+    # present in both captures — its absence is a capture-pipeline bug).
     c_id = ref_edge.consumer.identity
-    p_node = next((n for n in reversed(subj_graph.nodes) if n.identity == p_id), None)
-    c_node = next((n for n in reversed(subj_graph.nodes) if n.identity == c_id), None)
-
-    # Phase 0 — gating. Missing nodes: raise (not assert; survive python -O).
-    if p_node is None or c_node is None:
+    c_node = next((n for n in subj_graph.nodes if n.identity == c_id), None)
+    if c_node is None:
         raise CaptureConsistencyError(
-            f"diagnose_missing_edge invoked with missing node — "
-            f"identity-coverage check at compare_graphs entry was bypassed. "
-            f"p_id={p_id} (found={p_node is not None}), "
-            f"c_id={c_id} (found={c_node is not None})."
+            f"diagnose_missing_edge: consumer identity {c_id!r} is absent from "
+            f"subj_graph — the data-flow node present in ref has no counterpart "
+            f"in subj. Capture-pipeline bug (same-instruction-set contract violated)."
         )
+
+    # Producer: resolved via byte-key reverse-index.
+    # For each byte-key in the ref producer's write footprint, find subj's
+    # most-recent writer strictly before the consumer's unrolled position.
+    # This mirrors diagnose_extra_edge's closest-prior-writer logic (C3e),
+    # but applied to the subj graph: "what does subj say should be the
+    # producer for this byte_key at this consumer position?"
+    p_id = ref_edge.producer.identity
+    bks = ref_edge.producer_write_byte_key
+    cons_unrolled = c_node.unrolled_position
+
+    # Check: ref's producer byte-key must have at least one writer in subj.
+    # If subj has no writer at all for a byte-key the ref producer writes,
+    # the same-instruction-set contract is violated (symmetric to
+    # diagnose_extra_edge Phase 0). Capture-pipeline bug.
+    missing_in_subj = [bk for bk in bks if not subj_graph.byte_key_writers.get(bk)]
+    if missing_in_subj:
+        raise CaptureConsistencyError(
+            f"diagnose_missing_edge: ref edge's producer (p_id={p_id!r}) writes "
+            f"byte_keys {missing_in_subj!r} that have NO writer anywhere in subj. "
+            f"Violates the same-instruction-set contract. Capture-pipeline bug. "
+            f"c_id={c_id!r}."
+        )
+
+    # Find the closest-prior writer in subj for each byte-key, strictly before
+    # the consumer's unrolled position. This is the writer subj's walk would
+    # have paired with the consumer for that byte-key — the "effective producer"
+    # from subj's perspective at the time the consumer appeared in subj's stream.
+    p_node = None
+    for bk in bks:
+        writers = subj_graph.byte_key_writers[bk]  # List[(GraphNode, unrolled_pos)]
+        priors = [(w, pos) for (w, pos) in writers if pos < cons_unrolled]
+        if priors:
+            candidate, _ = max(priors, key=lambda wp: wp[1])
+            if p_node is None:
+                p_node = candidate
+            # If multiple byte-keys give different candidates, use the first
+            # (diagnostic-only; all candidates write the same byte footprint
+            # from the same logical instruction).
+
+    # p_node is None if all writers for every byte-key are AFTER the consumer:
+    # the edge is "genuinely absent" — subj never produced the byte before the
+    # consumer's position. Phase 1 handles this as OrderInvertedFailure.
 
     # Legitimate-reorder branch (rocm-libraries-wx9.3 memo §6.1, updated
     # under rocm-libraries-hdem Approach E). Under hdem A+E the edge-key
@@ -3977,24 +4023,50 @@ def diagnose_missing_edge(
                 and e.sink_operand_slot == sink_slot):
             return []
 
-    # Phase 1 — gating: order check, default schedule as canonical reference.
+    # Phase 1 — order check over unrolled positions, no body gate.
     # The default schedule IS the canonical order. If default emitted the
     # producer before the consumer and subject emitted them in the opposite
-    # relative order, the subject reordered a real dataflow dependency past
-    # its producer. Cross-body edges are skipped (different stream-position
-    # spaces — can't compare directly).
+    # relative order (or subj has no prior writer for the producer's byte-key
+    # at all), the subject violates a real dataflow dependency.
+    # Using unrolled_position (int, strictly monotone across all bodies)
+    # removes the body_label same-body gate: cross-body inversions are
+    # detected naturally (C3f, rocm-libraries-i190).
     ref_p = ref_edge.producer
     ref_c = ref_edge.consumer
-    if p_node.body_label == c_node.body_label:
-        default_p_before_c = ref_p.position < ref_c.position
-        subj_p_before_c = p_node.position < c_node.position
+    default_p_before_c = ref_p.unrolled_position < ref_c.unrolled_position
+
+    if p_node is None:
+        # No prior writer in subj before the consumer — the consumer fires
+        # with no available producer at or before its position. If default
+        # has p before c (the normal case), this IS an ordering inversion:
+        # the producer is absent from the pre-consumer window in subj.
+        # Synthesize the failure label from the ref-side producer since
+        # no subj-side p_node is available. FailureNodeLabel is constructed
+        # directly (no body_capture available for the ref side here).
+        if default_p_before_c:
+            return [OrderInvertedFailure(
+                producer=FailureNodeLabel(
+                    primary=ref_p.name or ref_p.category,
+                    position=_PositionStr(f"@ idx={ref_p.tagged_inst.slot.mfma_index}"),
+                    category=ref_p.category,
+                    body_label=ref_p.body_label,
+                ),
+                consumer=cms_node_label(c_node, subj_graph.body_for(c_node)),
+                iter_delta=ref_edge.producer.iter_delta_to(ref_edge.consumer),
+                default_producer_position=ref_p.unrolled_position,
+                default_consumer_position=ref_c.unrolled_position,
+            )]
+        # default_p_before_c=False with p_node=None: kind_rank-induced edge
+        # where subj also has no prior writer. Fall through to Phase 2.
+    else:
+        subj_p_before_c = p_node.unrolled_position < c_node.unrolled_position
         if default_p_before_c and not subj_p_before_c:
             return [OrderInvertedFailure(
                 producer=cms_node_label(p_node, subj_graph.body_for(p_node)),
                 consumer=cms_node_label(c_node, subj_graph.body_for(c_node)),
                 iter_delta=p_node.iter_delta_to(c_node),
-                default_producer_position=ref_p.position,
-                default_consumer_position=ref_c.position,
+                default_producer_position=ref_p.unrolled_position,
+                default_consumer_position=ref_c.unrolled_position,
             )]
         if default_p_before_c and subj_p_before_c:
             # Order preserved — fall through to wait/barrier coverage checks.
@@ -4003,6 +4075,13 @@ def diagnose_missing_edge(
         # edge from default's resolver). Don't flag — subj's order can't be
         # judged against an artifactual default ordering. Falls through to
         # Phase 2 wait coverage if applicable.
+
+    # Phase 1 post-condition: if p_node is still None here, default_p_before_c
+    # was False (kind_rank-induced edge, fell through). Use the ref-side producer
+    # as the proxy for Phase 2's counter and label derivation — same category,
+    # same-instruction-set contract guarantees the counter is correct.
+    if p_node is None:
+        p_node = ref_edge.producer  # ref-side GraphNode proxy for Phase 2
 
     # SCC-typed missing edge: if the reference edge's resource is the SCC
     # sentinel and Phase-1's order check passed, the most likely cause is
@@ -4036,10 +4115,31 @@ def diagnose_missing_edge(
                 intervening_writer = e.producer
                 break
         if intervening_writer is not None:
+            # The producer field must identify the REF-SIDE original producer
+            # (the instruction whose SCC value the consumer was supposed to
+            # read), not p_node — which is the subj's closest-prior writer
+            # for the SCC byte key (i.e. the clobber itself). Look up the
+            # original producer in subj by identity so cms_node_label can
+            # supply the body_capture context.
+            orig_producer_node = next(
+                (n for n in subj_graph.nodes if n.identity == p_id), None
+            )
+            if orig_producer_node is None:
+                # Same-instruction-set contract: the original producer must
+                # exist in subj (it's present in both captures). Absence is
+                # a capture-pipeline bug.
+                raise CaptureConsistencyError(
+                    f"diagnose_missing_edge SCC branch: original producer "
+                    f"(p_id={p_id!r}) is absent from subj_graph. "
+                    f"Violates same-instruction-set contract."
+                )
             return [OverriddenInputFailure(
-                producer=cms_node_label(p_node, subj_graph.body_for(p_node)),
+                producer=cms_node_label(
+                    orig_producer_node,
+                    subj_graph.body_for(orig_producer_node),
+                ),
                 consumer=cms_node_label(c_node, subj_graph.body_for(c_node)),
-                iter_delta=p_node.iter_delta_to(c_node),
+                iter_delta=orig_producer_node.iter_delta_to(c_node),
                 resource="SCC",
                 intervening_writer=cms_node_label(
                     intervening_writer,

@@ -156,8 +156,9 @@ from Tensile.Components.ScheduleCapture import (
     WrappedInstruction,
 )
 from Tensile.Components.CMSValidator import (
-    OrderInvertedFailure,
+    EdgeRoutedDifferentlyFailure,
     MissingWaitFailure,
+    OrderInvertedFailure,
     OverriddenInputFailure,
 )
 
@@ -973,12 +974,17 @@ class TestSwapPackGraph(GraphNativeValidationTest):
         ])
         failures = self.compare(self.wrap_single_body(ref_cap),
                                 self.wrap_single_body(subj_cap))
-        # The reorder destroys the Swap -> CVT-Pack edge — Phase-1 sees
-        # Pack(consumer) before Swap(producer) in subj.
-        f = self.assert_failures_contain(failures, cls=OrderInvertedFailure)
-        # Both the producer and consumer are PackA0-category nodes; the
-        # producer is the swap (writes v8) and the consumer is the VCvt
-        # (reads v8) — but the legacy test pinned the categories alone,
-        # not the rocisa class, so we mirror that.
-        assert f.producer.category == "PackA0"
-        assert f.consumer.category == "PackA0"
+        # C3f (rocm-libraries-i190): the reorder destroys the Swap -> CVT-Pack
+        # edge. Under the byte-key Phase 0, diagnose_missing_edge finds LRA0 as
+        # the effective producer for v8 before the consumer's position in subj
+        # (LRA0 wrote v8 at slot 0, CVT-Pack reads v8 at slot 1). Since
+        # LRA0-before-CVT-Pack is order-preserved in subj, Phase 1 falls through
+        # without emitting OrderInvertedFailure.
+        #
+        # diagnose_extra_edge then classifies the subj-extra LRA0 -> CVT-Pack edge
+        # as EdgeRoutedDifferentlyFailure (ref had Swap as the producer for v8, not
+        # LRA0). This is the correct classification: the consumer's read was routed
+        # to a different producer than the default schedule used.
+        f = self.assert_failures_contain(failures, cls=EdgeRoutedDifferentlyFailure)
+        # The subj producer is LRA0 (the effective prior writer for v8 in subj).
+        assert f.subj_consumer.category == "PackA0"
