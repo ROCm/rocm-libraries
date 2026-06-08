@@ -817,7 +817,7 @@ namespace TensileLite
                 }
                 else if(sizeMapping.streamK >= 2) // Two-tile SK
                 {
-                    if(sk.reduction == origami::reduction_t::parallel)
+		            if(gsu > 1)
                     {
                         std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
                                   << "setting GSU to 1." << std::endl;
