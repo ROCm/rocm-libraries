@@ -520,6 +520,43 @@ using ADataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using BDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using CDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.tm.get_output_dtype(self.datatype)]};
 using AccDataType = float;
+
+// KernelKey field descriptors for the force-included kernel.
+// The ctypes library builds the registry KernelKey from these so the
+// registered entry reflects this kernel's real traits (not a hard-coded
+// fp16/rcr default). Enum-valued fields are emitted as the exact strings
+// consumed by string_to_dtype/layout/pipeline/scheduler/epilogue in
+// kernel_key.hpp; shape/flag fields are emitted as numeric/0-1 literals.
+#define GEMM_KEY_DTYPE_A "{self.datatype}"
+#define GEMM_KEY_DTYPE_B "{self.datatype}"
+#define GEMM_KEY_DTYPE_C "{output_dtype}"
+#define GEMM_KEY_DTYPE_ACC "fp32"
+#define GEMM_KEY_LAYOUT_A "{self.layout[0]}"
+#define GEMM_KEY_LAYOUT_B "{self.layout[1]}"
+#define GEMM_KEY_LAYOUT_C "{self.layout[2]}"
+#define GEMM_KEY_PIPELINE "{tr.pipeline}"
+#define GEMM_KEY_SCHEDULER "{tr.scheduler}"
+#define GEMM_KEY_EPILOGUE "{tr.epilogue}"
+#define GEMM_KEY_TILE_M {t.tile_m}
+#define GEMM_KEY_TILE_N {t.tile_n}
+#define GEMM_KEY_TILE_K {t.tile_k}
+#define GEMM_KEY_WAVE_M {t.warp_m}
+#define GEMM_KEY_WAVE_N {t.warp_n}
+#define GEMM_KEY_WAVE_K {t.warp_k}
+#define GEMM_KEY_WARP_TILE_M {t.warp_tile_m}
+#define GEMM_KEY_WARP_TILE_N {t.warp_tile_n}
+#define GEMM_KEY_WARP_TILE_K {t.warp_tile_k}
+#define GEMM_KEY_BLOCK_SIZE {config.block_size}
+#define GEMM_KEY_NUM_WAVE_GROUPS {config.num_wave_groups}
+#define GEMM_KEY_PAD_M {int(tr.pad_m)}
+#define GEMM_KEY_PAD_N {int(tr.pad_n)}
+#define GEMM_KEY_PAD_K {int(tr.pad_k)}
+#define GEMM_KEY_PERSISTENT {int(tr.persistent)}
+#define GEMM_KEY_DOUBLE_BUFFER {int(tr.pipeline == "compv4" or tr.pipeline == "preshufflev2")}
+#define GEMM_KEY_PRESHUFFLE {int(config.preshuffle)}
+#define GEMM_KEY_TRANSPOSE_C 0
+#define GEMM_KEY_GROUPED 0
+#define GEMM_KEY_SPLIT_K 1
 #endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 """
 

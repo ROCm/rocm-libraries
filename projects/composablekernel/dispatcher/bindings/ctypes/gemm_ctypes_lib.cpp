@@ -65,8 +65,49 @@ int dispatcher_initialize()
         return 0; // Already initialized
     }
 
-    // Create kernel key from the force-included kernel header
+    // Create kernel key from the force-included kernel header.
+    //
+    // The GEMM_KEY_* macros are emitted by the codegen into the force-included
+    // header (see unified_gemm_codegen.py, CK_TILE_SINGLE_KERNEL_INCLUDE block).
+    // Building the key from them makes the registry entry truthful: it reflects
+    // THIS kernel's real dtypes/layouts/tile/traits instead of a hard-coded
+    // fp16/rcr/128x128x32 default. Enum fields use the string_to_* helpers from
+    // kernel_key.hpp, whose accepted strings match the codegen's emitted values
+    // byte-for-byte.
     KernelKey key;
+#ifdef GEMM_KEY_DTYPE_A
+    key.signature.dtype_a             = string_to_dtype(GEMM_KEY_DTYPE_A);
+    key.signature.dtype_b             = string_to_dtype(GEMM_KEY_DTYPE_B);
+    key.signature.dtype_c             = string_to_dtype(GEMM_KEY_DTYPE_C);
+    key.signature.dtype_acc           = string_to_dtype(GEMM_KEY_DTYPE_ACC);
+    key.signature.layout_a            = string_to_layout(GEMM_KEY_LAYOUT_A);
+    key.signature.layout_b            = string_to_layout(GEMM_KEY_LAYOUT_B);
+    key.signature.layout_c            = string_to_layout(GEMM_KEY_LAYOUT_C);
+    key.signature.transpose_a         = false;
+    key.signature.transpose_b         = false;
+    key.signature.grouped             = (GEMM_KEY_GROUPED != 0);
+    key.signature.split_k             = GEMM_KEY_SPLIT_K;
+    key.signature.elementwise_op      = "PassThrough";
+    key.signature.num_d_tensors       = 0;
+    key.signature.structured_sparsity = false;
+
+    key.algorithm.tile_shape      = {GEMM_KEY_TILE_M, GEMM_KEY_TILE_N, GEMM_KEY_TILE_K};
+    key.algorithm.wave_shape      = {GEMM_KEY_WAVE_M, GEMM_KEY_WAVE_N, GEMM_KEY_WAVE_K};
+    key.algorithm.warp_tile_shape = {GEMM_KEY_WARP_TILE_M, GEMM_KEY_WARP_TILE_N, GEMM_KEY_WARP_TILE_K};
+    key.algorithm.pipeline        = string_to_pipeline(GEMM_KEY_PIPELINE);
+    key.algorithm.scheduler       = string_to_scheduler(GEMM_KEY_SCHEDULER);
+    key.algorithm.epilogue        = string_to_epilogue(GEMM_KEY_EPILOGUE);
+    key.algorithm.block_size      = GEMM_KEY_BLOCK_SIZE;
+    key.algorithm.double_buffer   = (GEMM_KEY_DOUBLE_BUFFER != 0);
+    key.algorithm.persistent      = (GEMM_KEY_PERSISTENT != 0);
+    key.algorithm.preshuffle      = (GEMM_KEY_PRESHUFFLE != 0);
+    key.algorithm.transpose_c     = (GEMM_KEY_TRANSPOSE_C != 0);
+    key.algorithm.num_wave_groups = GEMM_KEY_NUM_WAVE_GROUPS;
+    key.gfx_arch                  = GFX_ARCH;
+#else
+    // Fallback default for headers generated before GEMM_KEY_* macros existed
+    // (fp16 / rcr / compv4-cshuffle-intrawave, 128x128x32). The macro path
+    // above is the source of truth for any freshly generated kernel.
     key.signature.dtype_a             = DataType::FP16;
     key.signature.dtype_b             = DataType::FP16;
     key.signature.dtype_c             = DataType::FP16;
@@ -95,6 +136,7 @@ int dispatcher_initialize()
     key.algorithm.transpose_c     = false;
     key.algorithm.num_wave_groups = 1;
     key.gfx_arch                  = GFX_ARCH;
+#endif // GEMM_KEY_DTYPE_A
 
     // Register kernel using types from force-included header
     auto kernel =
