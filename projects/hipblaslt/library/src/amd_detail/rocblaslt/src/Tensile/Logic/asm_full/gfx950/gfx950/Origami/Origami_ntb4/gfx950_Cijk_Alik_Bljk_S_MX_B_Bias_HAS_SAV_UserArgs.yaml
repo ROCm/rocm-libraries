@@ -257,7 +257,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 4
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -494,7 +494,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -718,7 +718,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -942,7 +942,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -1166,7 +1166,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 8
@@ -1390,7 +1390,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -1614,7 +1614,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -1838,7 +1838,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -2062,7 +2062,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -2286,7 +2286,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -2510,7 +2510,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -2743,7 +2743,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -2988,7 +2988,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -3224,7 +3224,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -3448,7 +3448,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -3672,7 +3672,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -3911,7 +3911,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -4149,7 +4149,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -4373,7 +4373,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -4612,7 +4612,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -4850,7 +4850,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -5074,7 +5074,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 8
@@ -5298,7 +5298,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -5522,7 +5522,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -5755,7 +5755,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -5991,7 +5991,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -6215,7 +6215,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -6454,7 +6454,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -6707,7 +6707,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -6960,7 +6960,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -7213,7 +7213,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -7466,7 +7466,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -7719,7 +7719,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -7972,7 +7972,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -8210,7 +8210,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -8434,7 +8434,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -8673,7 +8673,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -8926,7 +8926,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -9164,7 +9164,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -9388,7 +9388,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -9612,7 +9612,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 16
@@ -9836,7 +9836,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -10060,7 +10060,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -10284,7 +10284,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 8
@@ -10523,7 +10523,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -10776,7 +10776,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -11014,7 +11014,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -11253,7 +11253,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -11506,7 +11506,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -11744,7 +11744,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -11968,7 +11968,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -12192,7 +12192,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -12416,7 +12416,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -12655,7 +12655,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -12893,7 +12893,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -13132,7 +13132,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -13379,7 +13379,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -13615,7 +13615,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -13839,7 +13839,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -14063,7 +14063,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -14296,7 +14296,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -14532,7 +14532,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -14756,7 +14756,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -14995,7 +14995,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -15248,7 +15248,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -15501,7 +15501,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -15754,7 +15754,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -15992,7 +15992,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -16231,7 +16231,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -16469,7 +16469,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -16709,7 +16709,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -16947,7 +16947,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -17171,7 +17171,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -17395,7 +17395,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -17619,7 +17619,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -17854,7 +17854,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -18091,7 +18091,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -18324,7 +18324,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -18560,7 +18560,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 4
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 8
@@ -18784,7 +18784,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 16
@@ -19008,7 +19008,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 8
@@ -19247,7 +19247,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -19500,7 +19500,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -19753,7 +19753,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -20006,7 +20006,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -20259,7 +20259,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -20496,7 +20496,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 2
@@ -20732,7 +20732,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -20984,7 +20984,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -21237,7 +21237,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -21490,7 +21490,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -21743,7 +21743,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -21996,7 +21996,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -22249,7 +22249,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -22502,7 +22502,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -22755,7 +22755,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -23008,7 +23008,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -23261,7 +23261,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -23514,7 +23514,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -23767,7 +23767,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -24020,7 +24020,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -24273,7 +24273,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 1
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -24526,7 +24526,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -24779,7 +24779,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -25032,7 +25032,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -25285,7 +25285,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -25538,7 +25538,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -25791,7 +25791,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -26044,7 +26044,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -26297,7 +26297,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -26550,7 +26550,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -26803,7 +26803,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -27056,7 +27056,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -27309,7 +27309,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -27562,7 +27562,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 1
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -27815,7 +27815,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -28068,7 +28068,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -28321,7 +28321,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -28574,7 +28574,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -28827,7 +28827,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -29080,7 +29080,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -29333,7 +29333,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -29586,7 +29586,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -29839,7 +29839,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -30092,7 +30092,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -30345,7 +30345,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -30598,7 +30598,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -30851,7 +30851,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -31104,7 +31104,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -31357,7 +31357,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -31610,7 +31610,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -31863,7 +31863,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -32116,7 +32116,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -32369,7 +32369,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -32622,7 +32622,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -32875,7 +32875,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -33128,7 +33128,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -33381,7 +33381,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -33634,7 +33634,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -33887,7 +33887,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 1
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -34140,7 +34140,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -34393,7 +34393,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -34646,7 +34646,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -34899,7 +34899,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -35152,7 +35152,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 2
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -35405,7 +35405,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -35658,7 +35658,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -35911,7 +35911,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -36164,7 +36164,7 @@
     StoreSwapAddr: true
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
