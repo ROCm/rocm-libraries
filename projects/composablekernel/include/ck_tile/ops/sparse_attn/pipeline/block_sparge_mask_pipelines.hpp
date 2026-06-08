@@ -85,32 +85,44 @@ block_reduce_min_i32(int32_t val, int32_t* scratch, index_t tid)
 // primitive (only BlockReduce2d, which collapses an axis). So the runtime cross-lane
 // exchange has to go through LDS + block_sync_lds / wave_barrier, as below.
 // __builtin_amdgcn_wave_barrier has no ck_tile wrapper, so it is retained verbatim.
-template <index_t N>
+// kStride = number of threads in the block (kBlockSize). When N <= kStride every
+// element is owned by a distinct thread (one-thread-per-element, the original fast
+// path). When N > kStride each thread strides over multiple elements (e = tid, tid +
+// kStride, ...), which lets the sort capacity exceed kBlockSize. In the strided case a
+// thread's two elements i and (i ^ j) may both be ITS OWN, and warp-local neighbors no
+// longer map to consecutive elements, so the wave_barrier fast path is unsafe -- use a
+// CTA-wide block_sync_lds between every stage when N > kStride.
+template <index_t N, index_t kStride>
 CK_TILE_DEVICE void
 bitonic_sort_desc_smem(float* keys, int32_t* vals, index_t tid)
 {
     static_assert((N & (N - 1)) == 0 && N > 0, "N must be power of two");
+    static_assert((kStride & (kStride - 1)) == 0 && kStride > 0,
+                  "kStride must be power of two");
 
-    const index_t wsz = static_cast<index_t>(get_warp_size());
+    constexpr bool strided = (N > kStride);
+    const index_t wsz      = static_cast<index_t>(get_warp_size());
 
     for(index_t k = 2; k <= N; k <<= 1)
     {
         for(index_t j = k >> 1; j > 0; j >>= 1)
         {
-            const index_t i   = tid;
-            const index_t ixj = i ^ j;
-            if(i < N && ixj < N && ixj > i)
+            for(index_t i = tid; i < N; i += kStride)
             {
-                const bool flip = ((i & k) == 0)
-                                      ? (keys[i] < keys[ixj])
-                                      : (keys[i] > keys[ixj]);
-                if(flip)
+                const index_t ixj = i ^ j;
+                if(ixj < N && ixj > i)
                 {
-                    float kt   = keys[i]; keys[i] = keys[ixj]; keys[ixj] = kt;
-                    int32_t vt = vals[i]; vals[i] = vals[ixj]; vals[ixj] = vt;
+                    const bool flip = ((i & k) == 0)
+                                          ? (keys[i] < keys[ixj])
+                                          : (keys[i] > keys[ixj]);
+                    if(flip)
+                    {
+                        float kt   = keys[i]; keys[i] = keys[ixj]; keys[ixj] = kt;
+                        int32_t vt = vals[i]; vals[i] = vals[ixj]; vals[ixj] = vt;
+                    }
                 }
             }
-            if(j >= wsz)
+            if(strided || j >= wsz)
                 block_sync_lds();
             else
                 __builtin_amdgcn_wave_barrier();
@@ -126,22 +138,28 @@ bitonic_sort_desc_smem(float* keys, int32_t* vals, index_t tid)
 // thread's own registers (no runtime cross-thread read), and there is no tile-level
 // inclusive-scan primitive (BlockReduce2d only collapses an axis, it cannot emit a
 // per-position prefix). The runtime neighbor read therefore stays an LDS round-trip.
-template <index_t N>
+// kStride = block thread count. Threads stride over [0, N) so N may exceed kStride.
+template <index_t N, index_t kStride>
 CK_TILE_DEVICE void
 block_scan_inclusive_sum_smem(float* buf, float* aux, index_t tid)
 {
-    if(tid < N) aux[tid] = buf[tid];
+    for(index_t e = tid; e < N; e += kStride) aux[e] = buf[e];
     block_sync_lds();
 
     for(index_t d = 1; d < N; d <<= 1)
     {
-        float v   = (tid < N) ? aux[tid] : 0.0f;
-        float add = (tid >= d && tid < N) ? aux[tid - d] : 0.0f;
+        // Read-then-write across the whole array with a fence between, so a strided
+        // thread never reads a slot another stride of the same iteration has updated.
+        for(index_t e = tid; e < N; e += kStride)
+        {
+            float add  = (e >= d) ? aux[e - d] : 0.0f;
+            buf[e]     = aux[e] + add; // stash new value in buf (scratch this pass)
+        }
         block_sync_lds();
-        if(tid < N) aux[tid] = v + add;
+        for(index_t e = tid; e < N; e += kStride) aux[e] = buf[e];
         block_sync_lds();
     }
-    if(tid < N) buf[tid] = aux[tid];
+    for(index_t e = tid; e < N; e += kStride) buf[e] = aux[e];
     block_sync_lds();
 }
 
@@ -920,9 +938,12 @@ struct BlockSpargeQKQuantPipeline
 
 // Per Q-block: scores + softmax + sort-based selection -> delta-encoded LUT.
 // kMaxKBlocksPow2_ caps the K-block sort capacity (must be a power of two). With
-// BLKK=128 the default 256 covers seqlen_k up to 32k. It is a template parameter so
-// callers can codegen smaller variants; the bitonic sort uses one thread per element,
-// hence the static_assert(kBlockSize >= kMaxKBlocksPow2) below.
+// BLKK=128: 256 covers seqlen_k up to 32k, 512 -> 64k, 1024 -> 128k. It is a template
+// parameter so callers can codegen multiple variants and dispatch by seqlen at runtime;
+// the bitonic sort / scan / selection loops stride over the array (e = tid; e < N;
+// e += kBlockSize), so kMaxKBlocksPow2 may exceed kBlockSize. The only requirement is
+// that kMaxKBlocksPow2 be a multiple of kBlockSize when it exceeds it, so every element
+// is covered by the strided loops with no remainder gymnastics.
 template <index_t kMaxKBlocksPow2_ = 256, index_t kBlockSize_ = 256>
 struct BlockSpargeMaskPredictionPipeline
 {
@@ -930,8 +951,9 @@ struct BlockSpargeMaskPredictionPipeline
     static constexpr index_t kMaxKBlocksPow2 = kMaxKBlocksPow2_;
     static_assert((kMaxKBlocksPow2 & (kMaxKBlocksPow2 - 1)) == 0 && kMaxKBlocksPow2 > 0,
                   "kMaxKBlocksPow2 must be a power of two");
-    static_assert(kBlockSize >= kMaxKBlocksPow2,
-                  "bitonic sort uses one thread per element: need kBlockSize >= kMaxKBlocksPow2");
+    static_assert(kMaxKBlocksPow2 <= kBlockSize || (kMaxKBlocksPow2 % kBlockSize) == 0,
+                  "when kMaxKBlocksPow2 > kBlockSize it must be a multiple of kBlockSize "
+                  "so the strided sort/scan/select loops cover every element");
     // Cross-warp scratch: kBlockSize / min_warp_size = 256/32 = 8; round up for safety.
     static constexpr index_t kReduceScratchSlots = (kBlockSize + 31) / 32;
     // OOB sentinel: finite (not -INF) so softmax max-subtract avoids inf-inf=NaN.
@@ -1279,13 +1301,13 @@ struct BlockSpargeMaskPredictionPipeline
         auto do_select = [&](auto N_const) {
             constexpr index_t N_pow2 = decltype(N_const)::value;
 
-            if(tid < N_pow2)
+            for(index_t e = tid; e < N_pow2; e += kBlockSize)
             {
-                const bool valid = tid < num_k_blocks;
-                float p          = valid ? scores_smem[tid] : -1.0f;
+                const bool valid = e < num_k_blocks;
+                float p          = valid ? scores_smem[e] : -1.0f;
                 if(!(p == p)) p = -1.0f;
-                sort_keys_smem[tid] = p;
-                sort_vals_smem[tid] = valid ? static_cast<int32_t>(tid) : int32_t{-1};
+                sort_keys_smem[e] = p;
+                sort_vals_smem[e] = valid ? static_cast<int32_t>(e) : int32_t{-1};
             }
             block_sync_lds();
 
@@ -1322,10 +1344,10 @@ struct BlockSpargeMaskPredictionPipeline
                 }
             }
 
-            bitonic_sort_desc_smem<N_pow2>(sort_keys_smem, sort_vals_smem, tid);
+            bitonic_sort_desc_smem<N_pow2, kBlockSize>(sort_keys_smem, sort_vals_smem, tid);
             // Cumsum scan only needed for the CDF threshold path.
             if(!topk_mode)
-                block_scan_inclusive_sum_smem<N_pow2>(sort_keys_smem, aux_smem, tid);
+                block_scan_inclusive_sum_smem<N_pow2, kBlockSize>(sort_keys_smem, aux_smem, tid);
 
             if(topk_mode)
             {
@@ -1337,10 +1359,14 @@ struct BlockSpargeMaskPredictionPipeline
                 // official CDF: num_to_select = searchsorted(cdf, thr, right=True) = #{cdf
                 // <= thr}, i.e. the first index whose inclusive prefix exceeds the threshold
                 // (the block that crosses the threshold is NOT selected). Clamped to >= 1.
+                // Strided: each thread takes the min over the elements it owns first.
                 int32_t cand = num_k_blocks;
-                if(tid < static_cast<index_t>(num_k_blocks) &&
-                   sort_keys_smem[tid] > head_cdfthreshd)
-                    cand = static_cast<int32_t>(tid);
+                for(index_t e = tid; e < static_cast<index_t>(num_k_blocks); e += kBlockSize)
+                    if(sort_keys_smem[e] > head_cdfthreshd)
+                    {
+                        cand = static_cast<int32_t>(e);
+                        break; // sorted desc -> first crossing this thread sees is its min
+                    }
                 int32_t reduced = block_reduce_min_i32<kBlockSize>(cand, scratch_i32, tid);
                 if(tid == 0)
                 {
@@ -1352,9 +1378,11 @@ struct BlockSpargeMaskPredictionPipeline
                 n_target = n_target_smem[0];
             }
 
-            if(tid < N_pow2 && static_cast<int32_t>(tid) < n_target)
+            for(index_t e = tid;
+                e < N_pow2 && static_cast<int32_t>(e) < n_target;
+                e += kBlockSize)
             {
-                int32_t orig = sort_vals_smem[tid];
+                int32_t orig = sort_vals_smem[e];
                 if(orig >= 0)
                 {
                     const bool causal_ok = !causal_type ||
@@ -1378,13 +1406,13 @@ struct BlockSpargeMaskPredictionPipeline
                 k_sim +
                 static_cast<long_index_t>(b) * nhead_k * num_k_blocks +
                 static_cast<long_index_t>(kv_head) * num_k_blocks;
-            if(tid < num_k_blocks)
+            for(index_t k = tid; k < num_k_blocks; k += kBlockSize)
             {
                 const bool causal_ok = !causal_type ||
-                    (tid >= causal_min_k && tid <= causal_max_k);
-                if(k_sim_row[tid] <= head_simthreshold && causal_ok &&
-                   scores_smem[tid] != kScoreSelected)
-                    scores_smem[tid] = kScoreSelected;
+                    (k >= causal_min_k && k <= causal_max_k);
+                if(k_sim_row[k] <= head_simthreshold && causal_ok &&
+                   scores_smem[k] != kScoreSelected)
+                    scores_smem[k] = kScoreSelected;
             }
             block_sync_lds();
         }
@@ -1402,9 +1430,9 @@ struct BlockSpargeMaskPredictionPipeline
             {
                 const index_t lo = causal_type ? causal_min_k : index_t{0};
                 const index_t hi = causal_type ? causal_max_k : (num_k_blocks - 1);
-                if(tid >= lo && tid <= hi && tid < num_k_blocks &&
-                   scores_smem[tid] != kScoreSelected)
-                    scores_smem[tid] = kScoreSelected;
+                for(index_t k = tid; k < num_k_blocks; k += kBlockSize)
+                    if(k >= lo && k <= hi && scores_smem[k] != kScoreSelected)
+                        scores_smem[k] = kScoreSelected;
             }
             block_sync_lds();
         }
@@ -1416,12 +1444,13 @@ struct BlockSpargeMaskPredictionPipeline
         block_sync_lds();
 
         // LUT build: flag -> scan -> compact -> delta
-        if(tid < kMaxKBlocksPow2)
-            sort_keys_smem[tid] = (tid < num_k_blocks &&
-                                   scores_smem[tid] == kScoreSelected) ? 1.0f : 0.0f;
+        for(index_t e = tid; e < kMaxKBlocksPow2; e += kBlockSize)
+            sort_keys_smem[e] = (e < num_k_blocks &&
+                                 scores_smem[e] == kScoreSelected) ? 1.0f : 0.0f;
         block_sync_lds();
 
-        block_scan_inclusive_sum_smem<kMaxKBlocksPow2>(sort_keys_smem, aux_smem, tid);
+        block_scan_inclusive_sum_smem<kMaxKBlocksPow2, kBlockSize>(
+            sort_keys_smem, aux_smem, tid);
 
         const index_t n_after_scan = (num_k_blocks > 0)
             ? static_cast<index_t>(sort_keys_smem[num_k_blocks - 1]) : 0;
@@ -1444,18 +1473,19 @@ struct BlockSpargeMaskPredictionPipeline
             return;
         }
 
-        if(tid < num_k_blocks && scores_smem[tid] == kScoreSelected)
-        {
-            int pos = static_cast<int>(sort_keys_smem[tid]) - 1;
-            sort_vals_smem[pos] = static_cast<int32_t>(tid);
-        }
+        for(index_t k = tid; k < num_k_blocks; k += kBlockSize)
+            if(scores_smem[k] == kScoreSelected)
+            {
+                int pos = static_cast<int>(sort_keys_smem[k]) - 1;
+                sort_vals_smem[pos] = static_cast<int32_t>(k);
+            }
         block_sync_lds();
 
-        if(tid < n_after_scan)
+        for(index_t e = tid; e < n_after_scan; e += kBlockSize)
         {
-            int curr = sort_vals_smem[tid];
-            int prev = (tid == 0) ? 0 : sort_vals_smem[tid - 1];
-            lut_row[tid] = curr - prev;
+            int curr = sort_vals_smem[e];
+            int prev = (e == 0) ? 0 : sort_vals_smem[e - 1];
+            lut_row[e] = curr - prev;
         }
         if(tid == 0) *vbn_ptr = static_cast<int32_t>(n_after_scan);
     }

@@ -85,7 +85,11 @@ using sage_kernel = ck_tile::FmhaFwdSpargeSageKernel<sage_pipeline, sage_epilogu
 using pp_fused_kernel = ck_tile::FmhaFwdSpargePreprocessFusedKernel<
     cfg::InputDataType, {F_group_bool}, 256,
     ck_tile::BlockSageAttentionQuantScaleEnum::{F_pp_qscale_enum}, cfg::QDataType>;
-using mask_kernel = ck_tile::FmhaFwdSpargeMaskPredictionKernel<{F_group_bool}, 256, 256>;
+// Mask-prediction sort capacity is multi-variant (256/512/1024) and dispatched by
+// seqlen at runtime (see launch site). The kernel type depends only on (is_group,
+// kMaxKBlocksPow2, kBlockSize), so the linker dedups it across attention variants.
+template <ck_tile::index_t kMaxKBlocksPow2>
+using mask_kernel_t = ck_tile::FmhaFwdSpargeMaskPredictionKernel<{F_group_bool}, kMaxKBlocksPow2, 256>;
 // PERTENSOR: per-(b,h) global-absmax Q/K quant (one WG per (batch, head)).
 using qkquant_kernel = ck_tile::FmhaFwdSpargeQKQuantKernel<
     cfg::InputDataType, {F_group_bool}, 256, cfg::QDataType>;
@@ -228,9 +232,15 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
 
     // mask prediction smem sizing uses the max per-seq num_k_blocks; group passes the global
     // ceil(max_seqlen_k / block_size) via num_k_blocks (computed from a.seqlen_k = max in group).
-    auto mp_callable = ck_tile::make_kernel<mask_kernel::kBlockPerCu>(
-        mask_kernel{}, mask_kernel::GridSize(mp_kargs), mask_kernel::BlockSize(),
-        mask_kernel::GetSmemSize(a.hdim_q, num_k_blocks), mp_kargs);
+    // make_mp<kCap>() builds the mask-prediction callable for sort capacity kCap; the launch
+    // site below picks the smallest covering variant for num_k_blocks.
+    auto make_mp = [&](auto cap_const) {
+        constexpr ck_tile::index_t kCap = decltype(cap_const)::value;
+        using mk_ = mask_kernel_t<kCap>;
+        return ck_tile::make_kernel<mk_::kBlockPerCu>(
+            mk_{}, mk_::GridSize(mp_kargs), mk_::BlockSize(),
+            mk_::GetSmemSize(a.hdim_q, num_k_blocks), mp_kargs);
+    };
 
     // ---- 2c. PERTENSOR: global-absmax INT8 Q/K quant (one WG per (batch, head)) ----
     // int8 Q/K + 1 q/k scale per (b,h). Layouts match the attention consumer's int8 strides and
@@ -293,6 +303,25 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
         qkquant_kernel{}, qkquant_kernel::GridSize(kq_kargs), qkquant_kernel::BlockSize(),
         qkquant_kernel::GetSmemSize(a.hdim_q), kq_kargs);
 
+    // Mask sort-capacity dispatch: build the mp callable for the smallest covering variant
+    // and run the full kernel chain. with_quant selects the PERTENSOR path (extra Q/K quant
+    // kernels). 256 -> 32k tokens, 512 -> 64k, 1024 -> 128k (block_size=128).
+    auto dispatch_chain = [&](auto&& attn_callable, bool with_quant) -> float {
+        auto run = [&](auto cap_const) -> float {
+            auto mp_callable = make_mp(cap_const);
+            if(with_quant)
+                return ck_tile::launch_kernel(s, pp_callable, mp_callable,
+                                              qq_callable, kq_callable, attn_callable);
+            return ck_tile::launch_kernel(s, pp_callable, mp_callable, attn_callable);
+        };
+        if(num_k_blocks <= 256)  return run(ck_tile::number<256>{});
+        if(num_k_blocks <= 512)  return run(ck_tile::number<512>{});
+        if(num_k_blocks <= 1024) return run(ck_tile::number<1024>{});
+        std::cerr << "[sparge_sage] seqlen_k too large: num_k_blocks=" << num_k_blocks
+                  << " exceeds max sort capacity 1024 (131072 tokens @ block_size=128)\\n";
+        return -1.0f;
+    };
+
     // ---- 3. Quantized sage attention ----
     if constexpr(kIsGroup)
     {
@@ -341,11 +370,7 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
         auto attn_grids = sage_kernel::GridSize(a.batch, a.nhead_q, a.max_seqlen_q, a.hdim_v);
         auto attn_callable = ck_tile::make_kernel<sage_kernel::kBlockPerCu>(
             sage_kernel{}, attn_grids, sage_kernel::BlockSize(), 0, attn_kargs);
-        if constexpr(kIsPerTensor)
-            return ck_tile::launch_kernel(s, pp_callable, mp_callable,
-                                          qq_callable, kq_callable, attn_callable);
-        else
-            return ck_tile::launch_kernel(s, pp_callable, mp_callable, attn_callable);
+        return dispatch_chain(attn_callable, kIsPerTensor);
     }
     else
     {
@@ -386,11 +411,7 @@ float fmha_sparge_sage_fwd_<sage_trait_>(const ck_tile::stream_config& s,
         auto attn_grids = sage_kernel::GridSize(a.batch, a.nhead_q, a.max_seqlen_q, a.hdim_v);
         auto attn_callable = ck_tile::make_kernel<sage_kernel::kBlockPerCu>(
             sage_kernel{}, attn_grids, sage_kernel::BlockSize(), 0, attn_kargs);
-        if constexpr(kIsPerTensor)
-            return ck_tile::launch_kernel(s, pp_callable, mp_callable,
-                                          qq_callable, kq_callable, attn_callable);
-        else
-            return ck_tile::launch_kernel(s, pp_callable, mp_callable, attn_callable);
+        return dispatch_chain(attn_callable, kIsPerTensor);
     }
 }
 """

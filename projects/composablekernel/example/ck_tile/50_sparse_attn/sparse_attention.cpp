@@ -448,11 +448,12 @@ float sparge_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
         std::cerr << tag << " warning: simthreshold_per_head_ptr set but scalar "
                      "hp.simthreshold <= 0 → ptr ignored\n";
     }
-    // Mask-prediction sort-buffer cap (kMaxKBlocksPow2=256 in
-    // block_sparge_mask_pipelines.hpp): per-sequence seqlen_k must fit in 256
-    // K-blocks; above this the kernel-side assert fires only after LDS corruption.
+    // Mask-prediction sort-buffer cap: the kernel codegen emits multiple
+    // kMaxKBlocksPow2 variants (256/512/1024 in block_sparge_mask_pipelines.hpp) and
+    // dispatches by seqlen at runtime, so the largest covered K-block count is 1024
+    // (= 1024 * block_size tokens). Above this no variant exists -> reject here.
     {
-        constexpr int kMaxKBlocks = 256;
+        constexpr int kMaxKBlocks = 1024;
         if(is_group_mode)
         {
             for(size_t b = 0; b < seqlen_ks.size(); ++b)

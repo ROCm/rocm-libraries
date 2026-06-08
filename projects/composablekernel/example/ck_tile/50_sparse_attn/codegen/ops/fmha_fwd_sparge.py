@@ -180,6 +180,12 @@ static auto make_preprocess_callable_{F_idx}(const fmha_sparge_fwd_args& a,
 }}
 
 // ---- 2. Mask prediction callable ----
+// Templated on kMaxKBlocksPow2 (the K-block sort capacity). The mask-prediction kernel
+// type depends only on (is_group, kMaxKBlocksPow2, kBlockSize) -- NOT on the attention
+// trait -- so the linker dedups it across all attention .cpp variants: only one instance
+// per (is_group, kMaxKBlocksPow2) is emitted regardless of how many attention kernels
+// exist. The host dispatches by seqlen to the smallest covering variant (see body).
+template <ck_tile::index_t kMaxKBlocksPow2>
 static auto make_mask_prediction_callable_{F_idx}(const fmha_sparge_fwd_args& a,
                                                   float* d_k_means,
                                                   float* d_q_means,
@@ -190,8 +196,9 @@ static auto make_mask_prediction_callable_{F_idx}(const fmha_sparge_fwd_args& a,
                                                   ck_tile::index_t num_q_blocks,
                                                   ck_tile::index_t num_k_blocks)
 {{
-    using mp_ = typename fmha_kernel_{F_idx}::MaskPredictionKernel;
     constexpr bool is_group = trait_{F_idx}::kIsGroupMode;
+    using mp_ = ck_tile::FmhaFwdSpargeMaskPredictionKernel<
+        is_group, kMaxKBlocksPow2, fmha_kernel_{F_idx}::kBlockSize>;
 
     ck_tile::SpargeMaskPredictionKargs mp_kargs;
     mp_kargs.k_means             = d_k_means;
@@ -297,8 +304,6 @@ float fmha_sparge_fwd_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_spar
 
     auto pp_callable = make_preprocess_callable_{F_idx}(
         a, d_k_means, d_q_means, d_k_sim, d_q_sim, num_k_blocks, num_q_blocks);
-    auto mp_callable = make_mask_prediction_callable_{F_idx}(
-        a, d_k_means, d_q_means, d_k_sim, d_q_sim, d_lut, d_vbn, num_q_blocks, num_k_blocks);
 
     a.internal_lut_ptr = d_lut;
     a.internal_vbn_ptr = d_vbn;
@@ -306,7 +311,31 @@ float fmha_sparge_fwd_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_spar
 
     // Single launch chain — 3 kernels: fused K+Q preprocess, mask-pred, attn.
     // (K/Q preprocess fused into one launch; km subtraction proven a no-op for selection)
-    float r = ck_tile::launch_kernel(s, pp_callable, mp_callable, attn_callable);
+    //
+    // Mask-prediction sort-capacity dispatch: pick the smallest kMaxKBlocksPow2 variant
+    // that covers num_k_blocks. Only the mask kernel is multi-variant; pp/attn are shared.
+    //   256 -> 32k tokens, 512 -> 64k, 1024 -> 128k  (BLKK=128).
+    auto launch_with_cap = [&](auto cap_const) {{
+        constexpr ck_tile::index_t kCap = decltype(cap_const)::value;
+        auto mp_callable = make_mask_prediction_callable_{F_idx}<kCap>(
+            a, d_k_means, d_q_means, d_k_sim, d_q_sim, d_lut, d_vbn, num_q_blocks, num_k_blocks);
+        return ck_tile::launch_kernel(s, pp_callable, mp_callable, attn_callable);
+    }};
+
+    float r = -1.0f;
+    if(num_k_blocks <= 256)
+        r = launch_with_cap(ck_tile::number<256>{{}});
+    else if(num_k_blocks <= 512)
+        r = launch_with_cap(ck_tile::number<512>{{}});
+    else if(num_k_blocks <= 1024)
+        r = launch_with_cap(ck_tile::number<1024>{{}});
+    else
+    {{
+        std::cerr << "[sparge] seqlen_k too large: num_k_blocks=" << num_k_blocks
+                  << " exceeds max sort capacity 1024 (131072 tokens @ block_size=128)\\n";
+        if(own_workspace) (void)hipFree(workspace);
+        return -1.0f;
+    }}
     (void)sim_enabled; // sim path no longer needs a special branch.
 
     if(a.sparsity_out != nullptr)
