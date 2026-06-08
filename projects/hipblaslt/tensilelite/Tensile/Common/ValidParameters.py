@@ -884,6 +884,7 @@ validParameters = { # we need to make sure this matches develop
     "LdsPadMetadata": [-1, 0, 1, 2, 3, 4, 8],
     # Padding boundary for LDS. defines block-size for pad insertion. for every 'LdsBlockSizePerPad' bytes, LDS padding (pad value from LdsPad parameter)
     # is added (readOffset aware of the pad and adjusts offset value based on this parameter value).
+    # Only support LdsBlockSizePerPad >= unrollDepth * BPE
     # 0 means disable LdsBlockSizePerPad; -1 means auto-derive from problem geometry.
     # This is a derived byte size, not a discrete choice, so it is not validated here (-1 skips the
     # value check). Constraints are enforced in Solution.calcLdsBlockSizePerPad / checkLdsBlockSizePerPadForTDM.

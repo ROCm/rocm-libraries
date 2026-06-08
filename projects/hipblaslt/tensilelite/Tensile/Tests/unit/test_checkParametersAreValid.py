@@ -46,10 +46,9 @@ class TestLdsBlockSizePerPadSentinel:
         assert validParameters[param] == -1
 
     @pytest.mark.parametrize("param", LDS_BLOCK_SIZE_PER_PAD_PARAMS)
-    # Values that the generator can derive from problem geometry. The old discrete
-    # list ([-1, 0, 64, 128, 256, 512, 1024, 2048]) wrongly rejected anything above
-    # 2048 and every non-power-of-two (e.g. 96, 3072), breaking configs that loaded
-    # generated library logic back through Tensile. They must all be accepted now.
+    # Geometry-derived byte sizes the generator can emit, including values above
+    # 2048 and non-powers-of-two (e.g. 96, 3072). All are accepted because the
+    # value check is skipped for these params.
     @pytest.mark.parametrize("value", [-1, 0, 16, 96, 2048, 3072, 4096, 7680, 8192])
     def test_derived_values_accepted(self, param, value):
         # Must not raise.
