@@ -173,8 +173,6 @@ int main(int argc, char **argv)
     int missingFuncFlag = 0;
     int i = 0, j = 0;
     int maxHeight = 0, maxWidth = 0;
-    int maxDstHeight = 0, maxDstWidth = 0;
-    Rpp64u count = 0;
     Rpp64u ioBufferSize = 0;
     Rpp64u oBufferSize = 0;
     static int noOfImages = 0;
@@ -285,9 +283,7 @@ int main(int argc, char **argv)
     CHECK_RETURN_STATUS(hipHostMalloc(&dstImgSizes, batchSize * sizeof(RpptImagePatch)));
 
     // Set ROI tensors types for src/dst
-    RpptRoiType roiTypeSrc, roiTypeDst;
-    roiTypeSrc = RpptRoiType::XYWH;
-    roiTypeDst = RpptRoiType::XYWH;
+    RpptRoiType roiTypeSrc = RpptRoiType::XYWH;
 
     Rpp32u outputChannels = inputChannels;
     if(pln1OutTypeCase)
@@ -340,9 +336,6 @@ int main(int argc, char **argv)
     Rpp8u *inputu8Second = static_cast<Rpp8u *>(calloc(ioBufferSizeInBytes_u8, 1));
     Rpp8u *outputu8 = static_cast<Rpp8u *>(calloc(oBufferSizeInBytes_u8, 1));
 
-    Rpp8u *offsettedInput, *offsettedInputSecond;
-    offsettedInput = inputu8 + srcDescPtr->offsetInBytes;
-    offsettedInputSecond = inputu8Second + srcDescPtr->offsetInBytes;
     void *input, *input_second, *output;
     void *d_input, *d_input_second, *d_output;
 
@@ -678,9 +671,7 @@ int main(int argc, char **argv)
         vector<string>::const_iterator imagesPathStart = imageNamesPath.begin() + (iterCount * batchSize);
         vector<string>::const_iterator imagesPathEnd = imagesPathStart + batchSize;
         vector<string>::const_iterator imageNamesStart = imageNames.begin() + (iterCount * batchSize);
-        vector<string>::const_iterator imageNamesEnd = imageNamesStart + batchSize;
         vector<string>::const_iterator imagesPathSecondStart = imageNamesPathSecond.begin() + (iterCount * batchSize);
-        vector<string>::const_iterator imagesPathSecondEnd = imagesPathSecondStart + batchSize;
 
         // Set ROIs for src/dst
         if((testCase == YUV_TO_RGB || testCase == YUV_TO_RGB_CUBIC_V || testCase == YUV_TO_RGB_LINEAR_V))
@@ -2448,7 +2439,7 @@ int main(int argc, char **argv)
                 // Check if the ROI values for each input is within the bounds of the max buffer allocated
                 RpptROI roiDefault;
                 RpptROIPtr roiPtrDefault = &roiDefault;
-                roiPtrDefault->xywhROI =  {0, 0, static_cast<Rpp32s>(dstDescPtr->w), static_cast<Rpp32s>(dstDescPtr->h)};
+                roiPtrDefault->xywhROI =  {{0, 0}, static_cast<Rpp32s>(dstDescPtr->w), static_cast<Rpp32s>(dstDescPtr->h)};
                 for (int i = 0; i < dstDescPtr->n; i++)
                 {
                     roiTensorPtrDst[i].xywhROI.roiWidth = std::min(roiPtrDefault->xywhROI.roiWidth - roiTensorPtrDst[i].xywhROI.xy.x, roiTensorPtrDst[i].xywhROI.roiWidth);

@@ -224,7 +224,7 @@ int main(int argc, char * argv[])
         for (int perfRunCount = 0; perfRunCount < numRuns; perfRunCount++)
         {
             RppStatus errorCodeCapture = RPP_SUCCESS;
-            double startWallTime, endWallTime;
+            double startWallTime = 0.0, endWallTime;
             switch (testCase)
             {
                 case FUSED_MULTIPLY_ADD_SCALAR:
