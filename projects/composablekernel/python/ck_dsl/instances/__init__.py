@@ -118,11 +118,38 @@ from .common.attention_unified import (  # noqa: F401
     supports_native_unified_attention_tiled,
     supports_native_unified_attention_3d_tiled,
 )
+# Tiled-2D attention is arch-divergent (gfx950 wide-K/transpose-read vs gfx942
+# narrow-atom/strided-V). Route the public re-exports through the arch-aware
+# ``_tiled_2d_impl(arch)`` seam instead of binding the gfx950 module directly,
+# so no caller resolves the gfx950 builder/gate unconditionally for a gfx942
+# request. ``UnifiedAttention2DTiledSpec`` is re-exported from the gfx950 module
+# as the default spec shape (the gfx942 spec is a structural superset that only
+# adds flag-rejection in ``__post_init__``); arch-specific spec resolution goes
+# through ``_tiled_2d_impl(arch)``.
 from .gfx950.attention_tiled_2d import (  # noqa: F401
     UnifiedAttention2DTiledSpec,
-    build_unified_attention_2d_tiled,
-    supports_tiled_2d,
 )
+
+
+def build_unified_attention_2d_tiled(spec, *, arch: str = "gfx950"):
+    """Arch-aware wrapper: dispatch the tiled-2D builder on ``arch``.
+
+    Routes through ``instances/common/attention_unified._tiled_2d_impl`` so a
+    gfx942 request builds the gfx942 narrow-atom variant and a gfx950 request
+    (the default) builds the gfx950 wide-K variant -- never the wrong one.
+    """
+    from .common.attention_unified import _tiled_2d_impl
+
+    _, _build, _ = _tiled_2d_impl(arch)
+    return _build(spec, arch=arch)
+
+
+def supports_tiled_2d(*, arch: str = "gfx950", **kwargs):
+    """Arch-aware wrapper: dispatch the tiled-2D gate on ``arch``."""
+    from .common.attention_unified import _tiled_2d_impl
+
+    _, _, _supports = _tiled_2d_impl(arch)
+    return _supports(arch=arch, **kwargs)
 from .gfx950.attention_tiled_3d import (  # noqa: F401
     UnifiedAttention3DTiledSpec,
     UnifiedAttentionReduceTiledSpec,

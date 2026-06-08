@@ -311,6 +311,7 @@ def _check(s: int, where: str) -> None:
 
 
 _hip_inited = False
+_device_arch_cache: Dict[int, Optional[str]] = {}
 
 
 def _ensure_hip_init() -> None:
@@ -354,18 +355,25 @@ def get_device_arch(device: int = 0) -> Optional[str]:
     """
     import re
 
+    device = int(device)
+    if device in _device_arch_cache:
+        return _device_arch_cache[device]
+
     buf = ctypes.create_string_buffer(4096)
     for sym in ("hipGetDevicePropertiesR0600", "hipGetDeviceProperties"):
         fn = _b(sym, ctypes.c_void_p, ctypes.c_int)
         try:
-            rc = fn(buf, int(device))
+            rc = fn(buf, device)
         except (AttributeError, OSError):
             continue
         if rc != 0:
             continue
         m = re.search(rb"gfx[0-9a-z]+", buf.raw)
         if m:
-            return m.group(0).decode("ascii")
+            arch = m.group(0).decode("ascii")
+            _device_arch_cache[device] = arch
+            return arch
+    _device_arch_cache[device] = None
     return None
 
 

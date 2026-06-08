@@ -601,6 +601,29 @@ def mfma_16x16x32_for_dtype(
     raise ValueError(f"unsupported MFMA 16x16x32 dtype {dtype.name}")
 
 
+def mfma_32x32x8_for_dtype(
+    b: IRBuilder, dtype: Type, a: Value, bv: Value, c: Value
+) -> Value:
+    """Dispatch ``mfma_f32_32x32x8_<dtype>`` for fp16.
+
+    The 32x32x8 atom is the canonical wide-K f16 MFMA fragment that exists
+    on gfx942 (CDNA3) -- unlike 32x32x16, which is gfx950-only. Per-lane
+    operand types:
+      - A: ``<4 x half>``  (M=32 x K=8 / 64 lanes)
+      - B: ``<4 x half>``  (K=8 x N=32 / 64 lanes)
+      - C/D: ``<16 x float>`` (M=32 x N=32 / 64 lanes)
+
+    The C output lane layout is **identical** to the 32x32x16 atom (only K
+    per atom differs), so the shared ``_C32_DIST`` / ``_mfma_32x32_c_*``
+    distribution drives both. Only fp16 is wired: gfx942 has the
+    ``mfma_f32_32x32x8_f16`` atom; the bf16 32x32 atom on gfx942 is
+    32x32x16-only in the catalog, so bf16 stays on the narrow 16x16x16 path.
+    """
+    if dtype.name == "f16":
+        return b.mfma_f32_32x32x8_f16(a, bv, c)
+    raise ValueError(f"unsupported MFMA 32x32x8 dtype {dtype.name} (fp16 only)")
+
+
 def mfma_32x32x16_for_dtype(
     b: IRBuilder, dtype: Type, a: Value, bv: Value, c: Value
 ) -> Value:

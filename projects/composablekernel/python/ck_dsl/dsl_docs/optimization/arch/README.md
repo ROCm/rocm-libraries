@@ -25,6 +25,7 @@ inline breadcrumbs.
 | Architecture | GPU(s) | Reference |
 |---|---|---|
 | gfx950 (CDNA4) | MI350X / MI355X (DSL default target) | [arch/gfx950.md](gfx950.md) |
+| gfx942 (CDNA3) | MI300X / MI325X | [arch/gfx942.md](gfx942.md) |
 
 ## Arch-reference template (the 10-subsection skeleton)
 

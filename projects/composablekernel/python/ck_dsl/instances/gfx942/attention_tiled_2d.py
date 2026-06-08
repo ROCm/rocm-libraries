@@ -1,50 +1,48 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Tiled MFMA implementation of AITER's `kernel_unified_attention_2d`.
+"""gfx942 (CDNA3) tiled-2D unified-attention kernel (narrow-atom variant).
 
-This kernel mirrors the Triton reference 1:1 in semantics while using AMD's
-production-grade patterns from CK Tile's
-`BlockFmhaPipelineQRKSVSAsync`:
+This is the gfx942 sibling of ``instances/gfx950/attention_tiled_2d.py``. It
+mirrors the same online-softmax tiled algorithm but uses only ISA features that
+exist on CDNA3, where the gfx950 kernel cannot run:
 
-  - Q is staged in LDS once at the start of the CTA.
-  - K is loaded from cache to LDS each tile; we issue the global load early
-    so the QK MFMA can begin as soon as the LDS write retires.
-  - V is loaded from cache to LDS each tile; it is read again per PV atom.
-  - Online softmax statistics (`m`, `l`) live in registers across the loop.
-    The per-row max reduction uses `ds_bpermute` butterflies (4 stages on
-    wave64), matching CK's `block_tile_reduce_xor_sync` pattern, and avoids
-    any LDS round-trip.
-  - The output accumulator `o_acc` is held in MFMA accumulator distribution
-    (per-lane `<4 x float>` for each of the 8 N-tiles of the head dim) and
-    truncated to fp16 via an LDS-staged shuffle epilogue (16-byte stores).
+  * **MFMA atom**: gfx942 lacks the wide-K ``mfma_f32_16x16x32`` /
+    ``mfma_f32_32x32x16`` f16/bf16 atoms. Both QK and PV are built on the
+    **narrow ``16x16x16``** atom (selected up front via
+    ``ArchTarget.mma.select_largest_k(..., k_max=16)``; the multi-arch policy
+    forbids down-splitting a K=32 atom). The K-step is 16 head-dim elements per
+    atom, so ``QK_K_ITERS = HD // 16`` and ``PV_K_ITERS = T // 16``. bf16 routes
+    through ``mfma_16x16x16_for_dtype`` (the ``_1k`` intrinsic, valid on gfx942).
+  * **V B-operand**: gfx942 has no ``ds_read_b64_tr_b16`` (``ds_read_*_tr_*``).
+    The PV ``B`` operand is built from ordinary strided LDS loads that reproduce
+    the exact per-lane layout ``ds_read_tr16_b64`` produces for a ``16x16x16``
+    atom: lane ``l = 16*k_chunk + n`` (``k_chunk in 0..3``, ``n in 0..15``) holds
+    ``V_lds[v_buf, k*16 + k_chunk*4 + j, n_tile*16 + n]`` for ``j in 0..3``. This
+    is the dense ``helpers/mfma_attention.py`` precedent's B-operand index math.
+  * **LDS budget**: the LDS gate derives capacity from
+    ``ArchTarget.from_gfx(arch).lds_capacity_bytes`` (gfx942 → 65536 B), not a
+    hardcoded constant. The formula is identical to gfx950's; gfx942 is
+    tile-limited, not starved (the combo kernel runs ~24 KB on the decode shapes;
+    only the largest T=128/HD=128 configs exceed 64 KB and the gate rejects them).
 
-Scope (this revision):
-
-  - `head_size = 128`
-  - `dtype = fp16` (bf16 is a follow-up; the IR primitives are in place)
-  - `block_size in {16, 64}` with `TILE_SIZE = block_size` (the AITER all-decode
-    selector path used by the production decode workload)
-  - `num_queries_per_kv in {1, 2, 4, 8, 16}` so `BLOCK_M = 16`
-
-Correctness contract (validated against `aiter.op_tests.triton_tests.attention`
-`ref_paged_attn` with `torch.float16` inputs sampled `N(0,1)`):
-
-  - `max_abs` matches Triton bit-for-bit at fp16 ULP precision
-    (~`1.83e-4` for d=128, ~`2.74e-4` with sliding window).
-  - `max_abs` per the runbook target for fp32-accumulated fp16 attention
-    with random N(0,1) inputs is well under one fp16 ULP at the output
-    scale (~`5e-4` for outputs ~ 1.0).
+Scope on gfx942: the **default** QK→softmax→PV path only, for f16 and bf16. The
+gfx950-only experimental flags (fp8 K/V cache, 32x32x16 migration, native-fp8
+MFMA) are rejected up front because they depend on wide-K / transpose-read ISA
+that gfx942 does not have. gfx950 keeps its own file, byte-identical.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import os
 from typing import Optional, Tuple
 
 from ...core.ir import (
     BF16,
+    CACHE_ALL,
+    CACHE_GLOBAL,
     CACHE_STREAM,
     F16,
     F32,
@@ -54,8 +52,10 @@ from ...core.ir import (
     IRBuilder,
     KernelDef,
     PtrType,
+    NON_TEMPORAL,
     Type,
     Value,
+    VectorType,
 )
 from ...helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from ...helpers.attention import (
@@ -64,6 +64,7 @@ from ...helpers.attention import (
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
+    mfma_32x32x8_for_dtype,
     mfma_32x32x16_for_dtype,
     pv32_v_load_paired,
     warp_xor_reduce_max,
@@ -140,6 +141,7 @@ _apply_softcap = apply_softcap_log2
 _binary_search_seq_idx = binary_search_seq_idx
 _mfma_16x16x16 = mfma_16x16x16_for_dtype
 _mfma_16x16x32 = mfma_16x16x32_for_dtype
+_mfma_32x32x8 = mfma_32x32x8_for_dtype
 _mfma_32x32x16 = mfma_32x32x16_for_dtype
 _warp_xor_reduce_max = warp_xor_reduce_max
 _warp_xor_reduce_max_32lane = warp_xor_reduce_max_32lane
@@ -258,20 +260,24 @@ class UnifiedAttention2DTiledSpec:
     # budgets) where the trade-off might flip. See
     # ``/workspace/probe_blockm32_perf.py`` for the sweep.
     block_m_per_warp: int = 16
-    # Migrate the in-place tiled 2D kernel from the old 16x16x32 MFMA
-    # geometry to the CK Tile / Triton long-prefill geometry:
-    #
-    #   - per warp: M=32 rows, N=32 columns, K-step=16
-    #   - accumulator: <16 x f32> per lane
-    #   - row layout: rows are wholly contained within one 32-lane half
-    #
-    # This flag is deliberately in the main spec rather than a separate
-    # "fast path" module. It lets us replace the existing QK -> softmax
-    # -> PV pipeline in controlled stages while keeping the current
-    # production kernel available until the new layout is fully parity-
-    # clean. Once the migration is complete, this becomes the default for
-    # long-prefill and the old 16x16x32 body can be removed.
+    # gfx950-only knob: selects the 32x32 wide-K MFMA geometry (M=32, N=32,
+    # K-step=16, <16 x f32> accumulator). gfx942 has no f16/bf16 32x32x16
+    # atom, so the gfx942 variant rejects this in ``__post_init__`` and only
+    # the narrow 16x16x16 path is built. The field is retained so the spec
+    # stays a structural superset of the gfx950 spec.
     use_mfma_32x32: bool = False
+    # gfx942 (CDNA3) wide-fragment 32x32 path using the **32x32x8** f16 MFMA
+    # atom (``mfma_f32_32x32x8_f16``), which -- unlike the gfx950-only
+    # 32x32x16 atom -- IS legal on gfx942. It uses the SAME 32x32 C-output
+    # distribution (``_C32_DIST``), mask, softmax, P_lds bridge, and epilogue
+    # as the 32x32x16 path; only the K-step (8 vs 16) and the per-lane A/B
+    # operand widths (<4 x half> vs <8 x half>) differ. The PV V B-operand is
+    # built from NAIVE strided LDS reads (no ds_read_tr16_b64 -- gfx950-only),
+    # accepting today's bank conflicts (a conflict-free V feed is a follow-on).
+    # This is the correctness-first foundation for the gfx942 flash pipeline,
+    # gated behind ``HIPDNN_GFX942_FLASH_PIPELINE`` for D128 fp16. fp16-only
+    # (gfx942 has no bf16 32x32x8 atom catalog entry).
+    use_mfma_32x32x8: bool = False
     # Experimental orientation for the 32x32 migration. The first 32x32
     # prototype computed ``S = Q @ K^T`` and therefore still needed a
     # cross-lane reduction over K columns. Triton/CK Tile's efficient
@@ -331,8 +337,144 @@ class UnifiedAttention2DTiledSpec:
     # request zero AGPR allocation so LLVM selects VGPR-form MFMA and avoids
     # AGPR<->VGPR copies around the online-softmax/PV accumulator scaling.
     use_agpr_alloc_zero: bool = False
+    # Conflict-free transposed V feed (Stream B). On the transposed-x8 PV path the
+    # naive A-operand (V^T) read issues 4 strided ``ds_read_u16`` over 4 distinct
+    # V_lds rows at one head-dim column -> 32 wave-half lanes collapse onto the
+    # same LDS bank set (the rocprof bank-conflict bound, ~7.25 conflicts/LDS).
+    # When True, V is stored TRANSPOSED ``[HD, T + pad]`` (head-dim outer, token
+    # contiguous, kKPack-padded) so the 4 tokens a lane needs are CONTIGUOUS ->
+    # one wide ``ds_read_b64`` (bank-spread). The transpose is paid once on the
+    # LDS store (sync ``global_load + shaped smem_store``). f16-only, requires the
+    # transposed-x8 orientation (use_mfma_32x32x8 + use_transposed_qk_32x32). This
+    # is a KERNEL-SIGNATURE field (tagged "cfv" in kernel_name) so it produces a
+    # distinct compiled/cached kernel -- a bare env var would alias the cache.
+    use_conflict_free_v: bool = False
+    # Conflict-free transposed V feed, STORE-PATH vehicle (c) (Stream 2 GRIND).
+    # Same conflict-free ``V_lds[HD, T + pad]`` layout + ``ds_read_b64`` consumer
+    # as ``use_conflict_free_v`` above, but a DIFFERENT V *store* mechanism. The
+    # ``use_conflict_free_v`` store is vehicle (a) -- a SYNCHRONOUS token-strided
+    # ``global_load`` gather (V_T_VEC scalar loads at stride HD per item); that
+    # VMEM gather stalls on HBM and is ~5x slower (rocprof: ~30 TF vs wide4's
+    # 183). The conflict-free LDS read was already right; only the store vehicle
+    # was wrong. This field switches the store to the CK/flash way (gfx942
+    # playbook vehicle (c)): each lane ``global_load_vN``-reads V in its NATURAL
+    # ``[token, dim]`` layout (CONTIGUOUS dim run -> coalesced VMEM, pipelined),
+    # transposes 2x2 f16 blocks IN-REGISTER with ``perm_b32`` (``v_perm_b32``,
+    # in-thread, no cross-lane, no ``lgkmcnt``; CK ``transpose_vectors`` masks
+    # 0x01000504 / 0x03020706), then writes the now-A-consumable ``[HD,T+pad]``
+    # layout with ONE contiguous ``ds_write_b{32,64}`` per token group. The
+    # micro-tile loop is RUNTIME-rolled (a fully-unrolled transpose hit a 45-min
+    # JIT IR-explosion -- gfx942 playbook). f16-only, requires the transposed-x8
+    # orientation (same gate as use_conflict_free_v) and is MUTUALLY EXCLUSIVE
+    # with it. KERNEL-SIGNATURE field (tagged "cfvst" in kernel_name) so it
+    # produces a distinct compiled/cached kernel. DEFAULT OFF -> gfx950 and every
+    # existing kernel are byte-identical.
+    use_conflict_free_v_store: bool = False
+    # cfvst sub-knobs that affect IR shape. Keep them signature-tracked instead
+    # of env-only, otherwise A/B variants can alias a cached code object.
+    use_conflict_free_v_store_split: bool = True
+    use_conflict_free_v_ck_vlds: bool = True
+    # K single-buffer (OCCUPANCY lever, gfx942). The default path double-buffers
+    # K_lds (``[2, T, HD]``) so the next-tile async-DMA K[i+1] overlaps softmax+PV
+    # of tile i. On the transposed-x8 D128 fp16 path that double buffer is the LDS
+    # peak: K_lds(2*T*HD*2=32KB) + V_lds(T*HD*2=16KB) = 48KB > the 32KB
+    # 2-wg/CU threshold (STEP-0 evidence: Acc_lds is already backend-aliased into
+    # the loop region, so dropping it / acc->AGPR does NOT cross the threshold;
+    # only cutting LOOP LDS does). When True, K_lds is single-buffered
+    # (``[1, T, HD]`` = 16KB) so loop LDS = 16+16 = 32KB -> 2 wg/CU on gfx942.
+    # Correctness: the next-K async DMA into the shared slot races the tail of
+    # QK[i]'s LDS reads via raw_ptr_buffer_load_lds lgkmcnt accounting; we close
+    # the race by issuing next-K only AFTER a full post-QK ``s_waitcnt(lgkmcnt=0)
+    # + sync()`` (all QK K-reads retired before the shared-slot DMA write). The
+    # lost per-CTA prefetch overlap is compensated by cross-CTA latency hiding
+    # from 2 wg/CU. KERNEL-SIGNATURE field (tagged "k1buf" in kernel_name) so it
+    # produces a distinct compiled/cached kernel. f16-only, requires the
+    # transposed-x8 orientation + BLOCK_M <= T (so Q still aliases the single K
+    # slot). DEFAULT OFF -> gfx950 and every existing kernel are byte-identical.
+    use_k_single_buffer: bool = False
+    # Experimental CK-style sliced K staging for transposed-x8 D128 cfvst.
+    # Stages 32-head-dim K slices in a 3-slot ring instead of double-buffering
+    # full [T, HD] K tiles. This is the LDS prerequisite for NumPrefetchK/V=3
+    # on MI300X; v1 syncs per slice before adding overlap.
+    use_k_sliced_ring: bool = False
+    # Use CK Tile's explicit LDS buffer sequence for the sliced-K pipeline
+    # instead of the conservative round-robin slot map. This is opt-in because
+    # the sequence can reuse the previously consumed slot and therefore needs
+    # a carefully placed LDS-read drain before the overwrite.
+    use_k_sliced_ldsseq: bool = False
+    # Whole-loop scheduler hint experiment. Emits ``iglp_opt(1)`` at the top of
+    # the KV-loop body, letting the AMDGPU post-RA scheduler choose a canned
+    # MFMA/DS/VMEM interleave without explicit sched_group_barrier fences.
+    use_iglp_opt: bool = False
+    # Gather Q directly from global into Q32 registers instead of using K_lds as
+    # one-time Q scratch. This is tested independently from sliced K because it
+    # can remove a barrier/prologue even when full-tile K buffering remains.
+    use_q_direct_global: bool = False
+    # Cache policy for async K/V buffer->LDS loads. Gfx942 interprets these aux
+    # bits as sc0/nt/swz/sc1, so this stays explicit and benchmarked.
+    kv_cache_policy: str = "stream"
+    # Use flat/global ``global_load_lds`` for K staging instead of buffer-resource
+    # ``raw_ptr_buffer_load_lds``. This avoids constructing/using a buffer SRD for
+    # K and exercises the gfx942-native direct global->LDS path. V remains on its
+    # existing path (cfvst uses sync global loads, non-cfv uses buffer DMA).
+    use_global_load_lds_k: bool = False
+    # Launch-grid ordering experiment: default grid is (kv_head, q_block). When
+    # True the launcher uses (q_block, kv_head) and the kernel swaps block IDs so
+    # workgroups for one KV head walk q-blocks contiguously, improving L2/XCD
+    # locality for long-prefill.
+    use_q_major_grid: bool = False
 
     def __post_init__(self):
+        # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
+        # The wide-K (32x32x16 migration) and transpose-read / native-fp8
+        # experimental knobs all depend on gfx950-only ISA (wide-K MFMA atoms,
+        # ``ds_read_*_tr_*``) that does not exist on gfx942; reject them up front
+        # rather than emit IR that comgr cannot select. The fp8 K/V cache path
+        # uses ``ds_read_tr_b8`` for PV and is likewise gfx950-only here.
+        # ``use_transposed_qk_32x32`` is NO LONGER unconditionally gfx942-
+        # unsupported: paired with the gfx942-legal 32x32x8 atom
+        # (``use_mfma_32x32x8``) it computes S^T = K @ Q^T and consumes P^T
+        # directly from registers as the PV B-operand -- dropping the P_lds
+        # round-trip (Stream C). It is still rejected when paired with the
+        # gfx950-only 32x32x16 atom (``use_mfma_32x32``), and the dependent
+        # transposed-softmax VALU knobs (scalar_state/mask_once/...) remain
+        # gfx950-only here. So gate the transposed flag below (allow only the
+        # x8 pairing) rather than blanket-rejecting it.
+        _unsupported = [
+            name
+            for name, on in (
+                ("use_mfma_32x32", self.use_mfma_32x32),
+                ("use_transposed_half_local_pv", self.use_transposed_half_local_pv),
+                ("use_mfma32_skip_legacy_qreg", self.use_mfma32_skip_legacy_qreg),
+                ("use_grouped_kv2_softmax", self.use_grouped_kv2_softmax),
+                ("use_agpr_alloc_zero", self.use_agpr_alloc_zero),
+                ("use_fp8_mfma_qk", self.use_fp8_mfma_qk),
+                ("use_fp8_mfma_pv", self.use_fp8_mfma_pv),
+            )
+            if on
+        ]
+        if _unsupported:
+            raise ValueError(
+                "gfx942 tiled-2D attention supports only the narrow 16x16x16 "
+                "default path; these gfx950-only knobs are not available on "
+                f"gfx942: {', '.join(_unsupported)}"
+            )
+        # gfx942 transposed orientation is legal ONLY in the x8 pairing
+        # (S^T = K @ Q^T via the 32x32x8 atom + register P^T -> PV). The
+        # x16 pairing needs ds_read_tr16_b64, a gfx950-only transpose read,
+        # so it stays rejected. Mask/softmax VALU sub-knobs and the bf16
+        # path are likewise excluded on gfx942 (see the x8-transposed gate
+        # further below).
+        if self.use_transposed_qk_32x32 and not self.use_mfma_32x32x8:
+            raise ValueError(
+                "gfx942: use_transposed_qk_32x32 requires use_mfma_32x32x8 "
+                "(the x16 transposed path uses gfx950-only transpose reads)"
+            )
+        if self.kv_storage_dtype is not None:
+            raise ValueError(
+                "gfx942 tiled-2D attention does not support the fp8 K/V cache "
+                "(its PV path uses ds_read_tr_b8, a gfx950-only transpose read)"
+            )
         if self.num_warps not in (1, 2, 4, 8):
             raise ValueError(
                 f"num_warps must be 1, 2, 4, or 8 (got {self.num_warps}). "
@@ -345,11 +487,11 @@ class UnifiedAttention2DTiledSpec:
             raise ValueError(
                 f"block_m_per_warp must be 16 or 32 (got {self.block_m_per_warp})."
             )
-        if self.block_m_per_warp == 32 and self.num_warps not in (1, 2, 4):
+        if self.block_m_per_warp == 32 and self.num_warps not in (1, 2, 4, 8):
             raise ValueError(
-                f"block_m_per_warp=32 requires num_warps in {{1,2,4}} "
-                f"(got {self.num_warps}); the 8-warp variant would exceed "
-                f"the 1024-thread CTA cap with 32 rows per warp."
+                f"block_m_per_warp=32 requires num_warps in {{1,2,4,8}} "
+                f"(got {self.num_warps}); other values need new MFMA/launch "
+                f"distribution logic."
             )
         if self.use_mfma_32x32:
             if self.block_m_per_warp != 32:
@@ -365,8 +507,76 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "use_mfma_32x32 requires head_size to be a multiple of 16"
                 )
-        if self.use_transposed_qk_32x32 and not self.use_mfma_32x32:
-            raise ValueError("use_transposed_qk_32x32 requires use_mfma_32x32")
+        if self.use_mfma_32x32x8:
+            # gfx942-legal 32x32x8 wide-fragment path. Same 32x32 C layout as
+            # the (gfx950-only) 32x32x16 path, but K=8 per atom -- the atom IS
+            # present on gfx942. fp16-only; bf16 stays on 16x16x16.
+            if self.use_mfma_32x32:
+                raise ValueError(
+                    "use_mfma_32x32x8 and use_mfma_32x32 are mutually exclusive "
+                    "(K=8 gfx942 atom vs K=16 gfx950-only atom)"
+                )
+            if self.dtype != "fp16":
+                raise ValueError(
+                    "use_mfma_32x32x8 is fp16-only (gfx942 has no bf16 32x32x8 atom)"
+                )
+            if self.block_m_per_warp != 32:
+                raise ValueError(
+                    "use_mfma_32x32x8 requires block_m_per_warp=32: "
+                    "one 32-row MFMA atom per warp"
+                )
+            if self.tile_size_eff % 32 != 0:
+                raise ValueError(
+                    "use_mfma_32x32x8 requires tile_size to be a multiple of 32"
+                )
+            if self.head_size % 32 != 0:
+                raise ValueError(
+                    "use_mfma_32x32x8 requires head_size to be a multiple of 32"
+                )
+            if self.use_transposed_qk_32x32:
+                # x8-transposed (Stream C): S^T = K @ Q^T, P^T consumed from
+                # registers as the PV B-operand (no P_lds bridge). Same C
+                # distribution / mask / softmax / epilogue as the x8 plain
+                # path; only the QK/PV MFMA orientation differs. The scalar
+                # state / mask-once / mask-limit VALU rewrites are pure register
+                # scheduling and are legal for the x8 path too; half-local PV
+                # remains excluded because x8 already consumes P^T registers.
+                if self.dtype != "fp16":
+                    raise ValueError(
+                        "x8-transposed (use_transposed_qk_32x32 + "
+                        "use_mfma_32x32x8) is fp16-only"
+                    )
+                if self.head_size % 32 != 0:
+                    raise ValueError(
+                        "x8-transposed requires head_size to be a multiple of 32"
+                    )
+                if self.block_m_per_warp != 32:
+                    raise ValueError(
+                        "x8-transposed requires block_m_per_warp=32"
+                    )
+                if self.tile_size_eff % 32 != 0:
+                    raise ValueError(
+                        "x8-transposed requires tile_size to be a multiple of 32"
+                    )
+                _x8t_unsupported = [
+                    name
+                    for name, on in (
+                        ("use_transposed_half_local_pv", self.use_transposed_half_local_pv),
+                    )
+                    if on
+                ]
+                if _x8t_unsupported:
+                    raise ValueError(
+                        "gfx942 x8-transposed does not support the gfx950-only "
+                        "transposed-softmax PV sub-knobs: "
+                        f"{', '.join(_x8t_unsupported)}"
+                    )
+        if self.use_transposed_qk_32x32 and not (
+            self.use_mfma_32x32 or self.use_mfma_32x32x8
+        ):
+            raise ValueError(
+                "use_transposed_qk_32x32 requires use_mfma_32x32 or use_mfma_32x32x8"
+            )
         if self.use_transposed_scalar_state and not self.use_transposed_qk_32x32:
             raise ValueError(
                 "use_transposed_scalar_state requires use_transposed_qk_32x32"
@@ -383,11 +593,81 @@ class UnifiedAttention2DTiledSpec:
             raise ValueError(
                 "use_transposed_half_local_pv requires use_transposed_qk_32x32"
             )
+        if self.use_conflict_free_v and not (
+            self.use_mfma_32x32x8 and self.use_transposed_qk_32x32
+        ):
+            raise ValueError(
+                "use_conflict_free_v requires the transposed-x8 PV orientation "
+                "(use_mfma_32x32x8 + use_transposed_qk_32x32)"
+            )
+        if self.use_conflict_free_v_store and not (
+            self.use_mfma_32x32x8 and self.use_transposed_qk_32x32
+        ):
+            raise ValueError(
+                "use_conflict_free_v_store requires the transposed-x8 PV "
+                "orientation (use_mfma_32x32x8 + use_transposed_qk_32x32)"
+            )
+        if self.use_conflict_free_v_store and self.use_conflict_free_v:
+            raise ValueError(
+                "use_conflict_free_v_store and use_conflict_free_v are mutually "
+                "exclusive (they are two store vehicles for the same transposed "
+                "V_lds layout)"
+            )
+        if self.use_k_single_buffer:
+            if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
+                raise ValueError(
+                    "use_k_single_buffer requires the transposed-x8 PV orientation "
+                    "(use_mfma_32x32x8 + use_transposed_qk_32x32)"
+                )
+            if self.dtype != "fp16":
+                raise ValueError("use_k_single_buffer is fp16-only")
+            _block_m = self.num_warps * self.block_m_per_warp
+            _t = self.tile_size if self.tile_size is not None else self.block_size
+            if _block_m > _t:
+                raise ValueError(
+                    "use_k_single_buffer requires BLOCK_M <= tile_size so Q still "
+                    "aliases the single K slot (BLOCK_M="
+                    f"{_block_m}, tile_size={_t})"
+                )
+        if self.use_k_sliced_ring:
+            if not (
+                self.use_mfma_32x32x8
+                and self.use_transposed_qk_32x32
+                and self.use_conflict_free_v_store
+            ):
+                raise ValueError("use_k_sliced_ring requires the transposed-x8 cfvst path")
+            if (
+                self.dtype != "fp16"
+                or self.head_size not in (64, 128)
+                or self.head_size % 32 != 0
+                or self.tile_size_eff not in (64, 128)
+            ):
+                raise ValueError(
+                    "use_k_sliced_ring requires fp16, head_size in {64,128} "
+                    "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}"
+                )
+        if self.use_k_sliced_ldsseq and not self.use_k_sliced_ring:
+            raise ValueError("use_k_sliced_ldsseq requires use_k_sliced_ring")
+        if self.use_q_direct_global:
+            if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
+                raise ValueError("use_q_direct_global currently targets transposed-x8")
+        if self.num_warps == 8 and self.block_m_per_warp == 32:
+            if not (self.use_q_direct_global and self.use_conflict_free_v_store):
+                raise ValueError(
+                    "8-wave mw32 v1 requires direct-Q + cfvst to stay within LDS"
+                )
+        if self.kv_cache_policy not in ("all", "global", "stream", "nt"):
+            raise ValueError(
+                "kv_cache_policy must be one of 'all', 'global', 'stream', 'nt' "
+                f"(got {self.kv_cache_policy!r})"
+            )
+        if self.use_global_load_lds_k and self.kv_storage_dtype is not None:
+            raise ValueError("use_global_load_lds_k v1 supports bf16/fp16 KV only")
         if self.use_mfma32_skip_legacy_qreg and not self.use_mfma_32x32:
             raise ValueError("use_mfma32_skip_legacy_qreg requires use_mfma_32x32")
         if self.use_transposed_mask_limit:
             if not (
-                self.use_mfma_32x32
+                (self.use_mfma_32x32 or self.use_mfma_32x32x8)
                 and self.use_transposed_qk_32x32
                 and self.use_transposed_scalar_state
                 and self.use_transposed_mask_once
@@ -512,7 +792,7 @@ class UnifiedAttention2DTiledSpec:
         CK Tile's C distribution. Those 16 row slots are the state we
         need for ``m``/``l``/``P`` while we remove the old P_lds roundtrip.
         """
-        if self.use_mfma_32x32:
+        if self.use_mfma_32x32 or self.use_mfma_32x32x8:
             return 16
         return self.block_m_per_warp // 4  # 4 for M=16, 8 for M=32
 
@@ -566,8 +846,10 @@ class UnifiedAttention2DTiledSpec:
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
             f"w{self.num_warps}" if self.num_warps != 1 else "",
+            f"wpe{self.waves_per_eu}" if self.waves_per_eu is not None else "",
             f"mw{self.block_m_per_warp}" if self.block_m_per_warp != 16 else "",
             "mfma32" if self.use_mfma_32x32 else "",
+            "mfma32x8" if self.use_mfma_32x32x8 else "",
             "stqk" if self.use_transposed_qk_32x32 else "",
             "s1" if self.use_transposed_scalar_state else "",
             "mask1" if self.use_transposed_mask_once else "",
@@ -578,10 +860,27 @@ class UnifiedAttention2DTiledSpec:
             "gkv2" if self.use_grouped_kv2_softmax else "",
             "fastkvdesc" if self.use_fast_paged_kv_desc else "",
             "earlyv" if self.use_early_v_schedule else "",
+            "qdir" if self.use_q_direct_global else "",
+            f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "stream" else "",
+            "gldlds" if self.use_global_load_lds_k else "",
+            "qgrid" if self.use_q_major_grid else "",
             "agpr0" if self.use_agpr_alloc_zero else "",
             "fp8mfma" if self.use_fp8_mfma_qk else "",
             "fp8pv" if self.use_fp8_mfma_pv else "",
             "regpv" if self.use_register_pv else "",
+            "cfv" if self.use_conflict_free_v else "",
+            "cfvst" if self.use_conflict_free_v_store else "",
+            "cfvnosplit"
+            if self.use_conflict_free_v_store
+            and not self.use_conflict_free_v_store_split
+            else "",
+            "cfvplainv"
+            if self.use_conflict_free_v_store and not self.use_conflict_free_v_ck_vlds
+            else "",
+            "ksring" if self.use_k_sliced_ring else "",
+            "ldsseq" if self.use_k_sliced_ldsseq else "",
+            "iglp1" if self.use_iglp_opt else "",
+            "k1buf" if self.use_k_single_buffer else "",
         )
 
 
@@ -599,29 +898,30 @@ def supports_tiled_2d(
     block_m_per_warp: int = 16,
     kv_storage_dtype: Optional[str] = None,
     tile_size: Optional[int] = None,
-    arch: str = "gfx950",
+    arch: str = "gfx942",
     use_mfma_32x32x8: bool = False,
     use_transposed_qk_32x32: bool = False,
     use_k_single_buffer: bool = False,
     use_conflict_free_v_store: bool = False,
     use_k_sliced_ring: bool = False,
 ) -> Tuple[bool, str]:
-    # ``block_m_per_warp`` and the ``use_mfma_32x32x8`` /
-    # ``use_transposed_qk_32x32`` / ``use_k_single_buffer`` /
-    # ``use_conflict_free_v_store`` / ``use_k_sliced_ring`` flags are accepted
-    # for signature parity with the shared dispatch caller
-    # (``supports_native_unified_attention_tiled``) and the gfx942 gate; they
-    # select the gfx942 flash pipeline, so the gfx950 path does not key
-    # admission on them.
-    # The tiled 2D kernel's QK/PV math uses gfx950's wide-K MFMA atoms and
-    # LDS transpose reads; reject other targets up front with a structured
-    # reason rather than letting comgr abort at lower time. See
-    # ``instances/common/attention_arch.py``.
+    # The gfx942 variant runs the narrow 16x16x16 default path. The arch gate
+    # admits gfx942 (narrow atom present + non-transpose V pipeline selectable)
+    # and still rejects targets that have neither wide-K nor the narrow atom.
+    # See ``instances/common/attention_arch.py``.
     from ..common.attention_arch import validate_tiled_attention_arch
 
     arch_ok, arch_reason = validate_tiled_attention_arch(arch)
     if not arch_ok:
         return False, arch_reason
+    # The fp8 K/V cache path needs ds_read_tr_b8 (gfx950-only); the gfx942
+    # variant supports only the bf16/fp16 default path.
+    if kv_storage_dtype is not None:
+        return (
+            False,
+            "gfx942 tiled 2D kernel does not support the fp8 K/V cache "
+            "(ds_read_tr_b8 is gfx950-only)",
+        )
     if dtype not in ("fp16", "bf16"):
         return False, f"tiled 2D kernel currently supports fp16/bf16 (got {dtype!r})"
     if head_size not in (64, 128, 256):
@@ -673,18 +973,21 @@ def supports_tiled_2d(
                 f"tiled 2D kernel: tile_size={tile_size} must be a positive "
                 f"multiple of block_size={block_size}",
             )
-        # The async DMA call carries THREADS*8 lane-contiguous halves; the
-        # per-tile KV slab must hold at least that much, otherwise the wave
-        # under-fills the LDS slab and corrupts the partial buffer.
+        # The async DMA call carries THREADS*2 lane-contiguous halves on
+        # gfx942 (CDNA3 caps load-to-LDS at 1 dword = 4 bytes = 2 halves per
+        # lane); the per-tile KV slab must hold at least that much, otherwise
+        # the wave under-fills the LDS slab and corrupts the partial buffer.
+        halves_per_lane = 2
         threads = num_warps * 64
-        if tile_size * head_size < threads * 8:
+        if tile_size * head_size < threads * halves_per_lane:
             return (
                 False,
                 f"tiled 2D kernel: tile_size*head_size={tile_size * head_size} too "
-                f"small for num_warps={num_warps} (need >= {threads * 8})",
+                f"small for num_warps={num_warps} (need >= {threads * halves_per_lane})",
             )
         # Per-wave window must fit within one block. Each wave (64 lanes)
-        # owns ``WAVE * 8 // head_size`` consecutive tokens within a call.
+        # owns ``WAVE * 2 // head_size`` consecutive tokens within a call
+        # (gfx942: 2 halves per lane per call).
         # If a wave straddles two blocks, the per-lane block_table lookup
         # diverges within the wave -- the multi-block descriptor's
         # ``global_load_i32`` becomes lane-divergent (per-lane VMEM) and
@@ -693,12 +996,102 @@ def supports_tiled_2d(
         # uniformity (waves land in different blocks but each wave is
         # entirely in one block) is allowed; this is the
         # ``num_warps=8, HD=64, BS=32, T=64`` Triton-class config.
-        per_wave_tokens = (64 * 8) // head_size
+        per_wave_tokens = (64 * 2) // head_size
         if per_wave_tokens > block_size:
             return (
                 False,
                 f"tiled 2D kernel: per-wave tokens {per_wave_tokens} exceeds "
                 f"block_size={block_size}; would need lane-divergent block lookup",
+            )
+    # LDS-budget gate (ahead-of-time compilability). The kernel stages its
+    # tiles in LDS (the smem_alloc calls in build_unified_attention_2d_tiled);
+    # comgr CODEGEN (CODEGEN_BC_TO_RELOCATABLE) rejects a kernel whose static
+    # group segment exceeds the target LDS capacity (gfx950: 163840 B / 160 KB,
+    # arch_specs.json; arch is already gated to the tiled-attention family
+    # above). Rejecting here yields a clean reason instead of a comgr abort.
+    # The footprint mirrors the fp16/bf16 allocations (bpe=2):
+    #   K_lds  = 2*T*HD*bpe   (double-buffered async load)
+    #   V_lds  =   T*HD*bpe   (single-buffered)
+    #   P_lds  = BLOCK_M*(T+8)*bpe  (score tile; +8 pad)
+    #   Q_lds  = BLOCK_M*HD*bpe, 0 when it aliases K_lds (BLOCK_M <= 2*T)
+    #   Acc_lds= BLOCK_M*OUT_STRIPE*bpe,  OUT_STRIPE = 32 if HD<=64 else HD
+    # where BLOCK_M = num_warps*block_m_per_warp, T = tile_size_eff. This is
+    # LDS-only and conservative (assumes P_lds present -- the bf16 REGISTER_PV
+    # path drops it -- and ignores register/AGPR pressure, which can flip a
+    # couple of borderline mfma32 configs), so it never admits an unbuildable
+    # combo. FP8 staging has extra LDS allocations and a 1-byte KV dtype, so it
+    # is accounted separately; gate only the validated fp16/bf16 path here.
+    if not use_fp8:
+        # Per-arch LDS capacity from the catalog (gfx942 -> 65536 B / 64 KB),
+        # NOT a hardcoded gfx950 constant. The footprint formula is identical
+        # to gfx950's; gfx942 is tile-limited rather than starved, so the only
+        # effect is that the largest T/HD combos (which exceed 64 KB) are
+        # rejected here with a clean reason instead of a comgr CODEGEN abort.
+        from ...core.arch import ArchTarget
+
+        try:
+            _LDS_CAPACITY_BYTES = ArchTarget.from_gfx(arch).lds_capacity_bytes
+        except KeyError:
+            _LDS_CAPACITY_BYTES = 65536
+        _BPE = 2  # fp16/bf16
+        _t_eff = tile_size if tile_size is not None else block_size
+        _block_m = num_warps * block_m_per_warp
+        if use_mfma_32x32x8 and use_transposed_qk_32x32:
+            if use_k_sliced_ring:
+                # Overlapped sliced-K ring (CK Tile geometry): K is staged as a
+                # 3-slot ring of 32-head-dim slices (not double-buffered at full
+                # HD), Q is fed direct-from-global (no Q_lds), and V uses the
+                # conflict-free CK packed layout. This is what lets T=128 fit the
+                # 64 KB cap where the naive 2*T*HD K buffer would not.
+                _K_SLICE_HD = 32
+                _K_SLICE_SLOTS = 3
+                _k_bytes = _K_SLICE_SLOTS * _t_eff * _K_SLICE_HD * _BPE
+                # CK conflict-free transposed-V slot map (mirrors V_T_CK_SLOTS in
+                # build_unified_attention_2d_tiled): kgroups*ngroups*group_stride.
+                _v_kpack = 8
+                _v_pixels = 64
+                _v_nper_row = _v_pixels // _v_kpack
+                _v_ngroups = head_size // _v_nper_row
+                _v_kgroups = _t_eff // _v_kpack
+                _v_bytes = _v_kgroups * _v_ngroups * (_v_pixels + _v_kpack) * _BPE
+                _lds_x8 = _k_bytes + _v_bytes
+                if _lds_x8 > _LDS_CAPACITY_BYTES:
+                    return (
+                        False,
+                        f"gfx942 transposed-x8 sliced-K ring estimated LDS "
+                        f"{_lds_x8} B exceeds the {arch} {_LDS_CAPACITY_BYTES} B "
+                        f"LDS budget",
+                    )
+                return True, "supported"
+            k_slots = 1 if use_k_single_buffer else 2
+            q_lds = 0 if _block_m <= 2 * _t_eff else _block_m * head_size * _BPE
+            v_pad = 8 if use_conflict_free_v_store else 0
+            _lds_x8 = (
+                k_slots * _t_eff * head_size * _BPE
+                + (_t_eff + v_pad) * head_size * _BPE
+                + q_lds
+            )
+            if _lds_x8 > _LDS_CAPACITY_BYTES:
+                return (
+                    False,
+                    f"gfx942 transposed-x8 estimated LDS {_lds_x8} B exceeds "
+                    f"the {arch} {_LDS_CAPACITY_BYTES} B LDS budget",
+                )
+            return True, "supported"
+        _out_stripe = 32 if head_size <= 64 else head_size
+        _lds = (
+            2 * _t_eff * head_size * _BPE  # K_lds (double-buffered)
+            + _t_eff * head_size * _BPE  # V_lds
+            + _block_m * (_t_eff + 8) * _BPE  # P_lds
+            + (0 if _block_m <= 2 * _t_eff else _block_m * head_size * _BPE)  # Q_lds
+            + _block_m * _out_stripe * _BPE  # Acc_lds
+        )
+        if _lds > _LDS_CAPACITY_BYTES:
+            return (
+                False,
+                f"tiled 2D kernel: estimated LDS {_lds} B (BLOCK_M={_block_m}, T={_t_eff}, "
+                f"HD={head_size}) exceeds the {arch} {_LDS_CAPACITY_BYTES} B LDS budget; "
+                f"comgr CODEGEN would fail",
             )
     return True, "supported"
 
@@ -709,9 +1102,9 @@ def supports_tiled_2d(
 
 
 def build_unified_attention_2d_tiled(
-    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx950"
+    spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx942"
 ) -> KernelDef:
-    """Emit the tiled MFMA fp16 2D unified-attention kernel.
+    """Emit the gfx942 narrow-atom tiled MFMA 2D unified-attention kernel.
 
     Algorithm (per CTA = 1 wave64 = 64 lanes):
 
@@ -723,26 +1116,26 @@ def build_unified_attention_2d_tiled(
        4a. Look up `physical_block = block_tables[seq_idx, tile_idx]`.
        4b. Cooperatively stage K, V (each [T, 128]) from cache to LDS,
            zero-filling per-tile rows outside `max_seq_prefix_len`.
-       4c. Compute `S = Q @ K^T` via `v_mfma_f32_16x16x32_f16` (4 K-iters
+       4c. Compute `S = Q @ K^T` via `_mfma_16x16x16` (`HD/16` K-iters
            per N-tile, with `T/16` N-tiles).
        4d. Apply `qk_scale`, optional `softcap`, mask (causal, sliding
            window, padding rows, padding heads).
        4e. Online softmax: per-row max via `ds_bpermute` butterfly (lanes
            in 16-lane groups share their 4-row state). Compute P=exp2(S-m)
            in registers and stash it in LDS for the PV MFMA A operand.
-       4f. `acc *= alpha`, `acc += P @ V` via MFMA (8 N-tiles, T/K_STEP
-           K-iters). V is read scalar-by-scalar because its LDS layout is
-           [T, HD] (the K dim is the outer stride). A transposed LDS is a
-           planned follow-up.
+       4f. `acc *= alpha`, `acc += P @ V` via `_mfma_16x16x16` (8 N-tiles,
+           `T/16` K-iters). The V `B` operand is assembled from strided LDS
+           reads of `V_lds[T, HD]` that reproduce the 16x16x16 MFMA B
+           distribution directly, since gfx942 has no `ds_read_tr16_b64`
+           transpose read.
     5. Normalise `acc /= L` per row, stage into Acc_lds, and store fp16
        output via 8-half vector writes.
     """
 
-    # The QK/PV matmuls use gfx950's wide-K MFMA atoms (mfma_f32_16x16x32 /
-    # mfma_f32_32x32x16) and LDS transpose reads (ds_read_b64_tr_b16); these
-    # do not exist on gfx942 and would crash comgr with "LLVM ERROR: Cannot
-    # select intrinsic". Reject unsupported targets cleanly here, before any
-    # IR is emitted.
+    # gfx942 runs the narrow 16x16x16 default path. The arch gate admits gfx942
+    # (the narrow f16/bf16 atom exists and the non-transpose V pipeline is
+    # selectable) and rejects targets without it; reject cleanly before any IR
+    # is emitted. See ``instances/common/attention_arch.py``.
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
@@ -750,6 +1143,20 @@ def build_unified_attention_2d_tiled(
     if spec.dtype not in ("fp16", "bf16"):
         raise NotImplementedError("tiled 2D kernel supports fp16/bf16")
     dtype = spec.dtype_ir
+
+    # Select the narrow 16x16x16 atom up front from the arch catalog (the
+    # multi-arch policy forbids down-splitting a K=32 atom; we SELECT narrow).
+    # bf16 routes through the ``_1k`` intrinsic via mfma_16x16x16_for_dtype.
+    from ...core.arch import ArchTarget
+
+    _a_dt = "f16" if spec.dtype == "fp16" else "bf16"
+    _qk_atom = ArchTarget.from_gfx(arch).mma.select_largest_k(
+        family="mma", a_dtype=_a_dt, b_dtype=_a_dt, c_dtype="fp32", m=16, n=16, k_max=16
+    )
+    if _qk_atom is None or _qk_atom.k != 16:
+        raise NotImplementedError(
+            f"gfx942 tiled 2D kernel requires a 16x16x16 {_a_dt} MFMA atom on {arch}"
+        )
 
     HD = spec.head_size
     T = spec.tile_size_eff
@@ -793,34 +1200,107 @@ def build_unified_attention_2d_tiled(
     FP8_NATIVE_QK = False
     REGISTER_PV = spec.use_register_pv
     TRANSPOSED_QK_32X32 = spec.use_transposed_qk_32x32
+    CONFLICT_FREE_V = spec.use_conflict_free_v
+    # Store-path conflict-free V (vehicle (c)): reuses the SAME transposed
+    # ``V_lds[HD, T+pad]`` layout + conflict-free ``ds_read_b64`` consumer as
+    # ``CONFLICT_FREE_V`` (so ``TRANSPOSED_V`` below is driven by EITHER flag),
+    # but swaps the store fill from the sync HBM gather to register-load +
+    # ``perm_b32`` in-register transpose + contiguous LDS store.
+    CONFLICT_FREE_V_STORE = spec.use_conflict_free_v_store
+    K_SINGLE_BUF = spec.use_k_single_buffer
+    K_SLICED_RING = spec.use_k_sliced_ring
+    K_SLICED_LDSSEQ = spec.use_k_sliced_ldsseq
+    USE_IGLP_OPT = spec.use_iglp_opt
+    USE_GLOBAL_LOAD_LDS_K = spec.use_global_load_lds_k
+    # DIAGNOSTIC ONLY (not signature-gated -- toggle re-JITs via env): read the
+    # transposed cfv [HD,T+pad] V via 4 scalar n=1 reads instead of one n=4
+    # ds_read_b64. Isolates whether the wide read lowering is the cfv fault.
+    _CFV_SCALAR_READ = os.environ.get("HIPDNN_GFX942_CFV_SCALAR_READ", "0") == "1"
+    # DIAGNOSTIC: store-path vehicle (c) -- read the HBM dim-pair via 2 scalar
+    # loads + pack instead of one global_load_vN. Isolates the vectorized load.
+    _CFV_STORE_SCALAR_LOAD = (
+        os.environ.get("HIPDNN_GFX942_CFV_STORE_SCALAR_LOAD", "0") == "1"
+    )
+    # DIAGNOSTIC: store-path vehicle (c) -- element-wise scatter (no perm).
+    # Proves the (dim,token) mapping + coverage independent of the perm.
+    _CFV_STORE_SCATTER = (
+        os.environ.get("HIPDNN_GFX942_CFV_STORE_SCATTER", "0") == "1"
+    )
+    _CFV_STORE_PREZERO = (
+        os.environ.get("HIPDNN_GFX942_CFV_STORE_PREZERO", "0") == "1"
+    )
+    _CFV_STORE_SEPOFF = (
+        os.environ.get("HIPDNN_GFX942_CFV_STORE_SEPOFF", "0") == "1"
+    )
+    _CFV_STORE_SPLIT = spec.use_conflict_free_v_store_split
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
+    kv_cache_aux = {
+        "all": CACHE_ALL,
+        "global": CACHE_GLOBAL,
+        "stream": CACHE_STREAM,
+        "nt": NON_TEMPORAL,
+    }[spec.kv_cache_policy]
 
-    USE_MFMA_32X32 = spec.use_mfma_32x32
-    # QK geometry. The existing kernel uses 16x16x32 atoms:
-    #   - per-lane C: <4 x f32>
-    #   - N tile: 16 columns
-    #   - K step: 32 head-dim elements
-    #
-    # The CK Tile/Triton long-prefill geometry uses 32x32x16 atoms:
-    #   - per-lane C: <16 x f32>
-    #   - N tile: 32 columns
-    #   - K step: 16 head-dim elements
-    #
-    # Keep this as explicit local geometry, rather than overloading the
-    # module-wide MFMA_M/MFMA_N constants, because PV and epilogue still
-    # use the old 16x16 geometry until the migration reaches those phases.
-    QK_MFMA_N = 32 if USE_MFMA_32X32 else MFMA_N
-    QK_K_STEP = 16 if USE_MFMA_32X32 else 32
-    PV_K_STEP = 32 if T % 32 == 0 else 16
-    QK_K_ITERS = HD // QK_K_STEP
-    QK_N_TILES = T // QK_MFMA_N
-    PV_K_ITERS = T // PV_K_STEP
-    PV_N_TILES = HD // MFMA_N
+    # gfx942 32x32x8 wide-fragment path (correctness-first flash foundation).
+    # ``use_mfma_32x32`` (K=16) stays rejected in the spec; ``use_mfma_32x32x8``
+    # (K=8) is the gfx942-legal wide atom. ``USE_MFMA_32X32`` is the *umbrella*
+    # predicate driving all K-INDEPENDENT 32x32 branches (acc storage, mask,
+    # softmax, alpha/L, P_lds bridge, epilogue, Q32 gather control flow). The
+    # 32x32 C-output distribution is identical for K=8 and K=16. ``USE_MFMA_32X32X8``
+    # drives the K-SPECIFIC geometry (K-step 8, <4 x half> operands, atom select,
+    # naive strided V B-operand).
+    USE_MFMA_32X32X8 = spec.use_mfma_32x32x8
+    USE_MFMA_32X32 = spec.use_mfma_32x32 or USE_MFMA_32X32X8
+    if USE_MFMA_32X32:
+        # 32x32 score/output geometry: 32-column N-tiles, one M=32 atom/warp.
+        #   - per-lane C: <16 x f32>
+        #   - N tile: 32 columns
+        #   - K step: 8 (32x32x8) head-dim elements per atom
+        QK_MFMA_N = 32
+        QK_K_STEP = 8 if USE_MFMA_32X32X8 else 16
+        PV_K_STEP = QK_K_STEP
+        QK_K_ITERS = HD // QK_K_STEP
+        QK_N_TILES = T // QK_MFMA_N
+        PV_K_ITERS = T // PV_K_STEP
+        PV_N_TILES = HD // 32
+    else:
+        # gfx942 QK/PV geometry: narrow 16x16x16 atoms only.
+        #   - per-lane C: <4 x f32>
+        #   - N tile: 16 columns
+        #   - K step: 16 head-dim elements (no wide-K atom on gfx942)
+        # So ``QK_K_ITERS = HD // 16`` and ``PV_K_ITERS = T // 16``; the PV V
+        # B-operand is built from strided LDS loads (no ds_read_tr16_b64).
+        QK_MFMA_N = MFMA_N
+        QK_K_STEP = 16
+        PV_K_STEP = 16
+        QK_K_ITERS = HD // QK_K_STEP
+        QK_N_TILES = T // QK_MFMA_N
+        PV_K_ITERS = T // PV_K_STEP
+        PV_N_TILES = HD // MFMA_N
 
     NUM_WARPS = spec.num_warps
     WAVE = 64
     THREADS = NUM_WARPS * WAVE
+    # CDNA3 (gfx942) async global->LDS DMA width cap.
+    #
+    # ``llvm.amdgcn.raw.ptr.buffer.load.lds`` on CDNA3 can only legalise a
+    # per-lane DWORD (4-byte) load-to-LDS. The wider b96/b128 load-to-LDS
+    # forms (dwords 3 and 4) are a CDNA4 (gfx950)-only feature; emitting a
+    # 16-byte (dwords=4) LDS DMA on gfx942 makes the backend abort with
+    # ``LLVM ERROR: Do not know how to expand this operator's operand!``.
+    # The tiled-2D loaders were templated from the gfx950 async-copy width
+    # (16 bytes/lane), so on gfx942 we clamp every async-LDS-DMA to 1 dword
+    # and issue proportionally more calls to move the same bytes. The LDS
+    # deposit stays lane-contiguous, so the [T, HD] K_lds / V_lds layout
+    # (and the strided-V B-operand math that depends on it) is unchanged.
+    #
+    # There is no catalog field for this today: ``memory.buffer_load_max_dwords``
+    # describes the *register* vector buffer-load width (4 on both gfx942 and
+    # gfx950) and does NOT capture the narrower load-*to-LDS* limit, so we
+    # encode the gfx942-specific value here rather than touching core/arch/.
+    ASYNC_LDS_MAX_DWORDS = 1
+    ASYNC_LDS_MAX_BYTES_PER_LANE = ASYNC_LDS_MAX_DWORDS * 4
     BLOCK_M_PER_WARP = spec.block_m_per_warp
     # Number of stacked MFMA-M=16 atoms per warp's M dimension. For
     # ``block_m_per_warp=16`` this is 1 (the original kernel); for
@@ -888,8 +1368,12 @@ def build_unified_attention_2d_tiled(
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
 
-    kv_head_idx = b.block_id_x()
-    q_block_global_idx = b.block_id_y()
+    if spec.use_q_major_grid:
+        q_block_global_idx = b.block_id_x()
+        kv_head_idx = b.block_id_y()
+    else:
+        kv_head_idx = b.block_id_x()
+        q_block_global_idx = b.block_id_y()
     tid = b.thread_id_x()
 
     # Wave decomposition. For NUM_WARPS=1 this collapses to `wave_id=0,
@@ -1022,10 +1506,18 @@ def build_unified_attention_2d_tiled(
     V_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     P_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     Q_BYTES = BLOCK_M * HD * 2
+    K_SLICE_HD = 32
+    K_SLICE_SLOTS = 3
+    K_SLICED_ACTIVE = K_SLICED_RING and USE_MFMA_32X32X8 and TRANSPOSED_QK_32X32
     # K_BUF_BYTES depends on the K_LDS_DTYPE (1 byte for fp8, 2 for bf16).
     K_LDS_ELEM_BYTES = 1 if K_LDS_DTYPE == FP8E4M3 else 2
-    K_BUF_BYTES = T * HD * K_LDS_ELEM_BYTES
-    K_TOTAL_BYTES = 2 * K_BUF_BYTES  # K_lds has 2 double-buffer slots
+    K_BUF_BYTES = (T * K_SLICE_HD if K_SLICED_ACTIVE else T * HD) * K_LDS_ELEM_BYTES
+    # Number of K_lds double-buffer slots. Default 2 (next-tile prefetch overlaps
+    # softmax+PV). The OCCUPANCY lever single-buffers K (1 slot) to cut loop LDS
+    # from 48KB -> 32KB and reach 2 wg/CU; the next-K issue is then ordered after
+    # a post-QK LDS-read drain to close the shared-slot DMA race.
+    K_BUFS = K_SLICE_SLOTS if K_SLICED_ACTIVE else (1 if K_SINGLE_BUF else 2)
+    K_TOTAL_BYTES = K_BUFS * K_BUF_BYTES
     # Q can alias K_lds when (a) the dtypes match and (b) it fits in the
     # full K_lds region (both slots). When ``BLOCK_M <= T`` Q fits in one
     # slot (rows 0..BLOCK_M of K_lds[0]); when ``BLOCK_M > T`` Q spills
@@ -1033,11 +1525,204 @@ def build_unified_attention_2d_tiled(
     # store use ``(buf, row, col)`` indexing in both cases.
     # Aliasing requires same dtype because the Q_lds writes use bf16 stores;
     # for the fp8-MFMA path K_lds is fp8 so a dedicated Q_lds slab is needed.
-    Q_ALIAS_K = (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
+    Q_DIRECT_GLOBAL = K_SLICED_ACTIVE or spec.use_q_direct_global
+    Q_ALIAS_K = (not Q_DIRECT_GLOBAL) and (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
-    K_lds = b.smem_alloc(K_LDS_DTYPE, [2, T, HD], name_hint="Klds")
+    if K_SLICED_ACTIVE:
+        K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, K_SLICE_HD], name_hint="KldsS")
+    else:
+        K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, HD], name_hint="Klds")
     V_BUFS = 1  # single-buffer V (race-free: see comment above)
-    if FP8_MFMA_PV:
+    # ---- V_lds bank-deconflict swizzle (HIPDNN_GFX942_SWIZZLE_VLDS) ----
+    # The plain-atom PV B-operand is read with 4 strided ``ds_read_u16`` loads
+    # over the row-major ``V_lds[T, HD]`` tile (``_strided_v_b_operand`` below).
+    # For each read the 32 lanes of a wave-half map onto only 8 LDS banks
+    # (16-col atom window = 8 banks) -> a hard 4-way bank conflict, which the
+    # gfx942 rocprof trace flagged as the dominant stall (57% of busy cycles
+    # on the V read, ~11 conflicts/LDS-instruction). gfx942 has no
+    # ``ds_read_tr16`` transpose read to avoid it.
+    #
+    # The conflict is structural: bank = ((row*HD + col) >> 1) & 31, and for
+    # HD in {64, 128} the ``row*HD`` term is always 0 mod 32 banks, so the row
+    # never reaches the bank and 32 lanes collapse onto 8 banks. The fix is to
+    # give consecutive rows a *padded* row stride so they land on different
+    # banks. V_lds is written by a hardware-contiguous async DMA (no per-lane
+    # dest control), so the pad can only be inserted at a DMA *call* boundary.
+    # Each call writes ``V_ROWS_PER_CALL = THREADS*2 / HD`` whole rows. Padding
+    # at the call boundary moves the per-row bank far enough to break the
+    # 4-way collision down to the irreducible 2-way (the col-parity pair, which
+    # share one 4-byte bank word) ONLY when a call spans <= 2 rows -- i.e. the
+    # 4 colliding rows (lane_rg*4 apart) straddle a padded boundary. With
+    # 8 rows/call (the D64 nw=4 config) all 4 colliding rows fall inside one
+    # contiguous call, so the boundary pad cannot separate them; the swizzle is
+    # auto-disabled there (and on the fp8 / 32x32 / register-pv paths, whose
+    # V-lane map differs). The read inverts the same per-call pad with cheap
+    # shift/and on the already-live row value (VGPR-neutral, no per-element
+    # address recompute).
+    # The contiguous DMA interleaves (wave, call, lane): for the bf16/f16
+    # path each wave deposits ``WAVE * (ASYNC_LDS_MAX_BYTES_PER_LANE//2)``
+    # halves per call lane-contiguously, and the per-call/per-wave bases stack
+    # so the physical LDS half equals the logical ``token*HD + dim``. The
+    # swizzle's per-row pad only reduces cleanly to a ``row -> (group, within)``
+    # split when **one wave deposits exactly one V row per call** -- i.e.
+    # ``WAVE * halves_per_lane == HD`` -- so that ``within = wave`` and
+    # ``group = call``. Require that (true for the D128 nw=2 ship config:
+    # 64*2 == 128). When a wave spans several rows per call (e.g. D64 nw=4,
+    # HD=64: 8 rows/call) the row pad cannot be expressed as a per-call/per-wave
+    # base offset, so the swizzle is auto-disabled there.
+    _V_HALVES_PER_LANE = ASYNC_LDS_MAX_BYTES_PER_LANE // 2
+    _V_ROW_PER_WAVE_CALL = (WAVE * _V_HALVES_PER_LANE) == HD
+    V_ROWS_PER_CALL = NUM_WARPS  # one row per wave per call when eligible
+    # LDS-budget headroom guard: the swizzle adds ``N_GROUPS * V_ROWS_PER_CALL *
+    # PAD`` halves to V_lds. ``supports_tiled_2d`` sized V_lds at the natural
+    # (unpadded) figure, so disable the swizzle if the pad would push the total
+    # estimate past the gfx942 LDS budget (otherwise a borderline config would
+    # comgr-abort only when the env flag is set). Mirrors the gate's formula.
+    try:
+        from ...core.arch import ArchTarget as _ArchTarget
+
+        _LDS_CAP = _ArchTarget.from_gfx(arch).lds_capacity_bytes
+    except Exception:  # noqa: BLE001
+        _LDS_CAP = 65536
+    _swz_extra_bytes = (T // max(V_ROWS_PER_CALL, 1)) * V_ROWS_PER_CALL * 8 * 2
+    _out_stripe_b = 32 if HD <= 64 else HD
+    _lds_natural = (
+        2 * T * HD * 2
+        + T * HD * 2
+        + BLOCK_M * (T + 8) * 2
+        + (0 if BLOCK_M <= 2 * T else BLOCK_M * HD * 2)
+        + BLOCK_M * _out_stripe_b * 2
+    )
+    _swz_fits = (_lds_natural + _swz_extra_bytes) <= _LDS_CAP
+    # ---- Stream B: conflict-free transposed V LDS (flash level 3) ----
+    # On the transposed-x8 PV path (TRANSPOSED_X8) the A operand is V^T. The
+    # naive feed reads it from a row-major ``V_lds[T, HD]`` tile with 4 strided
+    # ``ds_read_u16`` over 4 distinct token rows at one head-dim column -> the 32
+    # wave-half lanes (varying head-dim) collapse onto the same LDS bank set (the
+    # rocprof bank-conflict bound, ~7.25 conflicts/LDS-inst). CK-Tile's gfx942
+    # ``qr_ks_vs`` recipe lays V K-contiguous so the 4 tokens a lane needs are
+    # CONTIGUOUS -> ONE wide ``ds_read_b64``, bank-spread by a kKPack pad. We
+    # adopt that: store V TRANSPOSED ``[HD, T + V_T_PAD]`` (head-dim outer, token
+    # contiguous). gfx942 async DMA cannot transpose HBM->LDS, so the transpose
+    # is paid ONCE on the LDS store via a sync ``global_load + shaped
+    # smem_store`` pass (CK technique #3, mirroring ``_issue_v_fp8_mfma_stripe``
+    # which already fills a non-natural V_lds). f16-only, requires the
+    # transposed-x8 orientation; signature-gated so it caches distinctly.
+    _v_t_pad = 8
+    _v_t_extra_bytes = HD * _v_t_pad * 2
+    _v_t_fits = (_lds_natural + _v_t_extra_bytes) <= _LDS_CAP
+    # ACCURATE transposed-x8 footprint for the cfv-store gate. The generic
+    # ``_lds_natural`` above over-counts the transposed-x8 path (it assumes
+    # P_lds present, K always double-buffered, full Acc_lds) and walls the wide
+    # (nw=4 / T=128) geometry the FLASH_WIDE=4 baseline actually runs. On
+    # TRANSPOSED_X8: P_lds=0 (P^T in registers); Acc_lds aliases the loop-dead
+    # K/V region (~0 to the binding peak); Q_lds=0 when BLOCK_M<=2*T; K is single-
+    # buffered when BLOCK_M<=T else double. V_lds is the transposed [HD,T+pad].
+    # Mirrors compile_service's ``_lds_bytes_transposed_x8``.
+    _x8_k_slots = 1 if (BLOCK_M <= T) else 2
+    _x8_q_lds = 0 if (BLOCK_M <= 2 * T) else BLOCK_M * HD * 2
+    _v_t_fits_x8 = (
+        _x8_k_slots * T * HD * 2
+        + (T + _v_t_pad) * HD * 2
+        + _x8_q_lds
+    ) <= _LDS_CAP
+    # Both conflict-free-V vehicles share the SAME transposed [HD,T+pad] V_lds
+    # layout + consumer; they differ only in the STORE fill. TRANSPOSED_V gates
+    # the shared layout/consumer; TRANSPOSED_V_STORE picks the store vehicle
+    # (True = vehicle (c), register-load + perm_b32 transpose; False = the
+    # vehicle (a) sync gather of the original CONFLICT_FREE_V path).
+    # The store path (vehicle (c)) uses the accurate transposed-x8 footprint so
+    # the wide (nw=4 / T=128) baseline geometry is admitted; the legacy gather
+    # (vehicle (a)) keeps the original conservative ``_v_t_fits`` byte-identically.
+    _v_t_fits_eff = _v_t_fits_x8 if CONFLICT_FREE_V_STORE else _v_t_fits
+    TRANSPOSED_V = (
+        (CONFLICT_FREE_V or CONFLICT_FREE_V_STORE)
+        and USE_MFMA_32X32X8
+        and TRANSPOSED_QK_32X32
+        and not FP8_MFMA_PV
+        and not FP8_MFMA_QK
+        and not KV_FP8
+        and not FAST_PAGED_KV_DESC
+        and V_LDS_DTYPE == dtype
+        and dtype == F16
+        and HD in (64, 128)
+        and (HD % 8 == 0)
+        and (T * HD) % THREADS == 0
+        and _v_t_fits_eff
+    )
+    # Store-vehicle selector: vehicle (c) (register-load + in-register perm_b32
+    # transpose) when the store-path flag drove TRANSPOSED_V; the 2x2 f16
+    # transpose needs T and HD both even (HD%8==0 already; T%2 below).
+    TRANSPOSED_V_STORE = (
+        TRANSPOSED_V and CONFLICT_FREE_V_STORE and (T % 2 == 0)
+    )
+    SWIZZLE_VLDS = (
+        os.environ.get("HIPDNN_GFX942_SWIZZLE_VLDS", "1") == "1"
+        and not FP8_MFMA_PV
+        and not FP8_MFMA_QK
+        and not USE_MFMA_32X32
+        and not REGISTER_PV
+        and not TRANSPOSED_V
+        and V_LDS_DTYPE == dtype
+        and _V_ROW_PER_WAVE_CALL
+        and NUM_WARPS in (1, 2)
+        and (T % V_ROWS_PER_CALL == 0)
+        and HD in (64, 128)
+        and not FAST_PAGED_KV_DESC  # FAST path uses a distinct per-call voff
+        and _swz_fits  # don't blow the LDS budget the static gate sized natural
+    )
+    # Pad of 8 halves (16 bytes) per V row: shifts each row's bank base by
+    # (8 >> 1) = 4 banks, the value the static probe shows breaks the 4-way
+    # collision down to the irreducible 2-way (col-parity pair). 16 bytes keeps
+    # the contiguous per-wave-row DMA store 16-byte aligned.
+    V_LDS_PAD = 8 if SWIZZLE_VLDS else 0
+    # Padded per-row stride and per-call (= V_ROWS_PER_CALL rows) group stride,
+    # both in halves. ``V_GROUP_SHIFT`` splits a row into (group, within=wave)
+    # with a cheap shift/and on the already-live row value.
+    V_LDS_STRIDE = HD + V_LDS_PAD
+    V_GROUP_STRIDE = V_ROWS_PER_CALL * V_LDS_STRIDE
+    V_GROUP_SHIFT = V_ROWS_PER_CALL.bit_length() - 1 if SWIZZLE_VLDS else 0
+    # Transposed-V column stride (in halves): the K=token axis is padded by
+    # ``V_T_PAD`` so consecutive head-dim rows land on a rotated bank base (CK's
+    # ``+kKPack``). T=64 f16 = 128 B = 32 banks * 4 -> one full bank sweep; the
+    # pad rotates each head-dim row's bank base by (8>>1)=4 banks.
+    V_T_PAD = _v_t_pad if TRANSPOSED_V else 0
+    V_T_STRIDE = T + V_T_PAD
+    # CK Tile V LDS descriptor equivalent for the transposed feed:
+    #
+    #   base dims   [K/kKPack, N/NPerRow, NPerRow, kKPack]
+    #   base stride [(N/NPerRow)*(PixelsPerRow+kKPack),
+    #                PixelsPerRow+kKPack, kKPack, 1]
+    #
+    # where logical N=head-dim and K=token. The simple [HD, T+pad] layout is
+    # correct but not the production bank layout; use the CK-packed slot map by
+    # default, and keep a kill-switch for quick A/B.
+    V_T_CK_LAYOUT = (
+        TRANSPOSED_V
+        and spec.use_conflict_free_v_ck_vlds
+    )
+    V_T_KPACK = 8
+    V_T_PIXELS_PER_ROW = 64  # 32 LDS banks * 4 bytes / sizeof(f16)
+    V_T_NPER_ROW = V_T_PIXELS_PER_ROW // V_T_KPACK
+    V_T_NGROUPS = HD // V_T_NPER_ROW
+    V_T_KGROUPS = T // V_T_KPACK
+    V_T_GROUP_STRIDE = V_T_PIXELS_PER_ROW + V_T_KPACK
+    V_T_CK_SLOTS = V_T_KGROUPS * V_T_NGROUPS * V_T_GROUP_STRIDE
+    if TRANSPOSED_V:
+        # Conflict-free transposed V LDS: ``[V_BUFS, HD, T + V_T_PAD]``. Logical
+        # ``V[token, dim]`` lives at ``V_lds[0, dim, token]`` (K=token contiguous
+        # along the fast/inner axis, padded by ``V_T_PAD``). The transposed-x8 PV
+        # A-operand read for a fixed head-dim row is a contiguous ``ds_read_b64``
+        # over consecutive tokens.
+        if V_T_CK_LAYOUT:
+            V_lds = b.smem_alloc(
+                V_LDS_DTYPE, [V_BUFS, V_T_CK_SLOTS], name_hint="VldsTck"
+            )
+        else:
+            V_lds = b.smem_alloc(
+                V_LDS_DTYPE, [V_BUFS, HD, V_T_STRIDE], name_hint="VldsT"
+            )
+    elif FP8_MFMA_PV:
         # Native-fp8 PV uses ds_read_b64_tr_b8. The validated lane mapping
         # (HIP probe in /tmp/probe_tr_b8_stripe.hip) is:
         #   for lane L in 16-lane group G = L/16, position l = L%16:
@@ -1056,9 +1741,80 @@ def build_unified_attention_2d_tiled(
         V_lds = b.smem_alloc(
             V_LDS_DTYPE, [V_BUFS, N_STRIPES, T, 16], name_hint="VldsStripe"
         )
+    elif SWIZZLE_VLDS:
+        # Bank-deconflicted V_lds: flat ``[V_BUFS, N_GROUPS * V_GROUP_STRIDE]``.
+        # Each DMA call fills one group (``V_ROWS_PER_CALL`` rows, one row per
+        # wave), with every row stored at the padded stride ``V_LDS_STRIDE``;
+        # the V_LDS_PAD-half gap after each row rotates that row's bank base.
+        # Reads recover the flat slot via ``_v_load1`` below.
+        V_N_GROUPS = T // V_ROWS_PER_CALL
+        V_N_SLOTS = V_N_GROUPS * V_GROUP_STRIDE
+        V_lds = b.smem_alloc(V_LDS_DTYPE, [V_BUFS, V_N_SLOTS], name_hint="Vlds")
     else:
         V_lds = b.smem_alloc(V_LDS_DTYPE, [V_BUFS, T, HD], name_hint="Vlds")
-    if not REGISTER_PV:
+
+    def _v_t_slot(dim: Value, tok: Value) -> Value:
+        """CK Tile transposed-V slot for logical ``V_lds[dim, token]``."""
+        k_group = b.div(tok, b.const_i32(V_T_KPACK))
+        k_inner = b.mod(tok, b.const_i32(V_T_KPACK))
+        n_group = b.div(dim, b.const_i32(V_T_NPER_ROW))
+        n_inner = b.mod(dim, b.const_i32(V_T_NPER_ROW))
+        return b.add(
+            b.add(
+                b.mul(
+                    k_group,
+                    b.const_i32(V_T_NGROUPS * V_T_GROUP_STRIDE),
+                ),
+                b.mul(n_group, b.const_i32(V_T_GROUP_STRIDE)),
+            ),
+            b.add(b.mul(n_inner, b.const_i32(V_T_KPACK)), k_inner),
+        )
+
+    def _v_t_store(dim: Value, tok: Value, value: Value, n: int) -> None:
+        if V_T_CK_LAYOUT:
+            b.smem_store_vN(V_lds, [b.const_i32(0), _v_t_slot(dim, tok)], value, n)
+        else:
+            b.smem_store_vN(V_lds, [b.const_i32(0), dim, tok], value, n)
+
+    def _v_t_load(dim: Value, tok: Value, *, n: int) -> Value:
+        v_buf0 = b.const_i32(0)
+        if V_T_CK_LAYOUT:
+            return b.smem_load_vN(
+                V_lds, v_buf0, _v_t_slot(dim, tok), dtype=dtype, n=n
+            )
+        return b.smem_load_vN(V_lds, v_buf0, dim, tok, dtype=dtype, n=n)
+
+    def _v_load1(v_buf: Value, v_row: Value, v_n_col: Value) -> Value:
+        """Load a single V_lds element ``V[v_row, v_n_col]`` as ``<1 x dtype>``.
+
+        When ``SWIZZLE_VLDS`` the physical store is the bank-rotated flat
+        layout, so the (row, col) logical coordinate maps to its padded flat
+        slot: ``group*V_GROUP_STRIDE + within*V_LDS_STRIDE + col`` with
+        ``group = row >> V_GROUP_SHIFT`` and ``within = row & (rows-1)``. Both
+        are cheap bit ops on the already-live ``v_row`` (no per-element address
+        recompute -> VGPR-neutral). When the swizzle is off this is exactly the
+        natural ``V_lds[v_buf, v_row, v_n_col]`` 3D access.
+        """
+        if not SWIZZLE_VLDS:
+            return b.smem_load_vN(V_lds, v_buf, v_row, v_n_col, dtype=dtype, n=1)
+        group = b.lshr(v_row, b.const_i32(V_GROUP_SHIFT))
+        within = b.land(v_row, b.const_i32(V_ROWS_PER_CALL - 1))
+        slot = b.add(
+            b.add(
+                b.mul(group, b.const_i32(V_GROUP_STRIDE)),
+                b.mul(within, b.const_i32(V_LDS_STRIDE)),
+            ),
+            v_n_col,
+        )
+        return b.smem_load_vN(V_lds, v_buf, slot, dtype=dtype, n=1)
+
+    # The x8-transposed path (Stream C) keeps P^T in registers and consumes it
+    # directly as the PV B-operand -- the P_lds bridge is never written or read,
+    # so skip its allocation entirely. That is the whole point: dropping the
+    # P_lds round-trip is the LDS-traffic / L2-pressure win this orientation
+    # buys. (REGISTER_PV is the bf16 16x16 register-P path; orthogonal.)
+    TRANSPOSED_X8 = USE_MFMA_32X32X8 and TRANSPOSED_QK_32X32
+    if not REGISTER_PV and not TRANSPOSED_X8:
         # P_lds row stride padding (16 bytes = 8 halves) to eliminate 4-way
         # LDS bank conflict on the softmax `ds_write_b16` stores. With row
         # stride T*2 = 128 bytes = exactly 32 banks, lanes 0, 16, 32, 48
@@ -1095,7 +1851,11 @@ def build_unified_attention_2d_tiled(
     if KV_FP8 and spec.use_fp8_mfma_qk:
         K_fp8_lds = b.smem_alloc(FP8E4M3, [2, T, HD], name_hint="Kfp8lds")
         V_fp8_lds = b.smem_alloc(FP8E4M3, [1, T, HD], name_hint="Vfp8lds")
-    if Q_ALIAS_K:
+    if Q_DIRECT_GLOBAL:
+        # Sliced-K ring is intentionally smaller than a full Q tile; Q is
+        # gathered directly from global into Q32_reg below and never uses LDS.
+        Q_lds = K_lds
+    elif Q_ALIAS_K:
         # Reuse K_lds[0] (and K_lds[1] if BLOCK_M > T) as Q-load scratch.
         # Q is gathered to VGPRs after, then the K-prefetch overwrites
         # the slot(s).
@@ -1170,49 +1930,50 @@ def build_unified_attention_2d_tiled(
         lengths=[1 << 30, NUM_QH, HD],
         coord_names=("token", "head", "dim"),
     )
-    for li in range(Q_VECS_PER_THREAD):
-        q_vid = b.add(b.mul(b.const_i32(li), b.const_i32(THREADS)), tid)
-        Q_row = b.div(q_vid, b.const_i32(Q_VECS_PER_ROW))
-        Q_col = b.mul(b.mod(q_vid, b.const_i32(Q_VECS_PER_ROW)), b.const_i32(8))
-        q_pos_t = b.add(qb_start_pos, b.div(Q_row, b.const_i32(NQK)))
-        qh_t = b.add(
-            b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(Q_row, b.const_i32(NQK))
-        )
-        qmask_t = b.land(
-            b.cmp_lt(q_pos_t, cur_batch_q_len), b.cmp_lt(qh_t, b.const_i32(NUM_QH))
-        )
-        q_pos_safe = b.select(qmask_t, q_pos_t, b.const_i32(0))
-        qh_safe = b.select(qmask_t, qh_t, b.const_i32(0))
-        q_off_base, _ = q_desc.offset(
-            b,
-            token=b.add(cu_q_start, q_pos_safe),
-            head=qh_safe,
-            dim=b.const_i32(0),
-        )
-        v8 = b.global_load_vN(query, b.add(q_off_base, Q_col), dtype, 8, align=16)
-        # When Q is aliased to K_lds (single shared scratch), the store
-        # goes through ``[buf, row_in_buf, col]`` indexing of the K_lds
-        # 3D buffer. ``buf = Q_row // T`` selects which K_lds slot,
-        # ``row_in_buf = Q_row % T`` is the row within that slot.
-        # For single-slot (BLOCK_M <= T), buf is statically 0 and
-        # row_in_buf == Q_row, so the div/mod fold to constants.
-        if Q_ALIAS_K:
-            if Q_USES_DUAL_SLOT:
-                q_buf = b.div(Q_row, b.const_i32(T))
-                q_row_in_buf = b.mod(Q_row, b.const_i32(T))
+    if not Q_DIRECT_GLOBAL:
+        for li in range(Q_VECS_PER_THREAD):
+            q_vid = b.add(b.mul(b.const_i32(li), b.const_i32(THREADS)), tid)
+            Q_row = b.div(q_vid, b.const_i32(Q_VECS_PER_ROW))
+            Q_col = b.mul(b.mod(q_vid, b.const_i32(Q_VECS_PER_ROW)), b.const_i32(8))
+            q_pos_t = b.add(qb_start_pos, b.div(Q_row, b.const_i32(NQK)))
+            qh_t = b.add(
+                b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(Q_row, b.const_i32(NQK))
+            )
+            qmask_t = b.land(
+                b.cmp_lt(q_pos_t, cur_batch_q_len), b.cmp_lt(qh_t, b.const_i32(NUM_QH))
+            )
+            q_pos_safe = b.select(qmask_t, q_pos_t, b.const_i32(0))
+            qh_safe = b.select(qmask_t, qh_t, b.const_i32(0))
+            q_off_base, _ = q_desc.offset(
+                b,
+                token=b.add(cu_q_start, q_pos_safe),
+                head=qh_safe,
+                dim=b.const_i32(0),
+            )
+            v8 = b.global_load_vN(query, b.add(q_off_base, Q_col), dtype, 8, align=16)
+            # When Q is aliased to K_lds (single shared scratch), the store
+            # goes through ``[buf, row_in_buf, col]`` indexing of the K_lds
+            # 3D buffer. ``buf = Q_row // T`` selects which K_lds slot,
+            # ``row_in_buf = Q_row % T`` is the row within that slot.
+            # For single-slot (BLOCK_M <= T), buf is statically 0 and
+            # row_in_buf == Q_row, so the div/mod fold to constants.
+            if Q_ALIAS_K:
+                if Q_USES_DUAL_SLOT:
+                    q_buf = b.div(Q_row, b.const_i32(T))
+                    q_row_in_buf = b.mod(Q_row, b.const_i32(T))
+                else:
+                    q_buf = b.const_i32(0)
+                    q_row_in_buf = Q_row
+                q_store_idx = [q_buf, q_row_in_buf, Q_col]
             else:
-                q_buf = b.const_i32(0)
-                q_row_in_buf = Q_row
-            q_store_idx = [q_buf, q_row_in_buf, Q_col]
-        else:
-            q_store_idx = [Q_row, Q_col]
-        b.smem_store_vN(
-            Q_lds,
-            q_store_idx,
-            b.vector_select(b.vector_splat(qmask_t, 8), v8, z8),
-            8,
-        )
-    b.sync()
+                q_store_idx = [Q_row, Q_col]
+            b.smem_store_vN(
+                Q_lds,
+                q_store_idx,
+                b.vector_select(b.vector_splat(qmask_t, 8), v8, z8),
+                8,
+            )
+        b.sync()
     # The per-lane Q → VGPR gather is deferred until after ``lane_rg`` /
     # ``lane_col`` / ``wave_row_base`` are materialized below; see
     # the ``Q_reg`` block right after the softmax-state allocation.
@@ -1406,30 +2167,37 @@ def build_unified_attention_2d_tiled(
     key_rsrc = b.buffer_rsrc(key, big_bytes)
     value_rsrc = b.buffer_rsrc(value, big_bytes)
 
-    # Async load contract (bf16 K/V path): dwords=4 means each lane writes
-    # 16 bytes lane-contiguous in LDS. One call writes 64 * 8 halfs = 512
-    # halfs = 1024 bytes, i.e. a contiguous slice of the natural [T, HD] tile.
-    # This works for HD=128 and HD=256 without changing the LDS layout.
-    KV_HALVES_PER_CALL = THREADS * 8
+    # Async load contract (bf16 K/V path): on gfx942 each lane writes
+    # ``ASYNC_LDS_MAX_BYTES_PER_LANE`` (= 4 bytes = 2 halves) lane-contiguous
+    # in LDS per call (CDNA3 caps load-to-LDS at 1 dword; see
+    # ASYNC_LDS_MAX_DWORDS above). One call writes THREADS*2 halves = a
+    # contiguous slice of the natural [T, HD] tile, so we issue 4x the calls
+    # the gfx950 16-byte template did while preserving the lane-contiguous
+    # [T, HD] LDS layout. Works for HD=128 and HD=256 unchanged.
+    KV_HALVES_PER_LANE = ASYNC_LDS_MAX_BYTES_PER_LANE // 2  # bf16: 2 bytes/half
+    KV_HALVES_PER_CALL = THREADS * KV_HALVES_PER_LANE
     assert (T * HD) % KV_HALVES_PER_CALL == 0
     kv_calls_per_tile = (T * HD) // KV_HALVES_PER_CALL
     bytes_per_call = KV_HALVES_PER_CALL * 2
-    # For fp8-MFMA mode K_lds is sized in fp8 (1 byte/element). The async
-    # DMA writes 16 bytes/lane regardless of dtype; that maps to 16 fp8
-    # elements per lane vs 8 bf16 halves per lane, so half the calls
-    # cover the same tile.
+    # For fp8-MFMA mode K_lds is sized in fp8 (1 byte/element). On gfx942 the
+    # async DMA is capped at ``ASYNC_LDS_MAX_BYTES_PER_LANE`` (4 bytes) per
+    # lane (CDNA3 1-dword load-to-LDS limit; see ASYNC_LDS_MAX_DWORDS above),
+    # so 4 fp8 elements per lane vs the 2 bf16 halves the bf16 path moves.
     K_FP8_MFMA = FP8_MFMA_QK
     PV_FP8_MFMA = FP8_MFMA_PV
     if K_FP8_MFMA or PV_FP8_MFMA:
         # Pick the largest dwords (and therefore widest per-lane payload)
-        # the tile bytes support. The AMDGPU async-DMA intrinsic
-        # ``raw.ptr.buffer.load.lds`` accepts dwords in {1, 3, 4} =
-        # {4, 12, 16} bytes/lane (a hardware quirk -- 2 is rejected).
-        # For T*HD smaller than the widest payload (e.g. T=32 HD=64 with
-        # nw=4 -> 2048 bytes/tile vs 4096 bytes/full-call), drop to a
-        # narrower per-lane payload so the loader still tiles cleanly.
+        # the tile bytes support, clamped to the gfx942 load-to-LDS max.
+        # The AMDGPU async-DMA intrinsic ``raw.ptr.buffer.load.lds`` accepts
+        # dwords in {1, 3, 4}; on CDNA3 only 1 (4 bytes/lane) legalises for
+        # the load-*to-LDS* form, so the candidate list is clamped here.
         tile_bytes = T * HD  # 1 byte per fp8 element
-        for dwords_try, bytes_per_lane in [(4, 16), (3, 12), (1, 4)]:
+        fp8_dword_candidates = [
+            (d, by)
+            for (d, by) in [(4, 16), (3, 12), (1, 4)]
+            if d <= ASYNC_LDS_MAX_DWORDS
+        ]
+        for dwords_try, bytes_per_lane in fp8_dword_candidates:
             payload = THREADS * bytes_per_lane
             if tile_bytes >= payload and tile_bytes % payload == 0:
                 K_FP8_DWORDS = dwords_try
@@ -1438,14 +2206,15 @@ def build_unified_attention_2d_tiled(
         else:
             raise AssertionError(
                 f"fp8-mfma K loader: T*HD={tile_bytes} cannot be covered by "
-                f"any supported async-DMA payload (THREADS={THREADS})"
+                f"any supported async-DMA payload (THREADS={THREADS}, "
+                f"max dwords={ASYNC_LDS_MAX_DWORDS})"
             )
         K_ELEMS_PER_CALL = THREADS * K_BYTES_PER_LANE
         K_BYTES_PER_CALL = K_ELEMS_PER_CALL  # 1 byte per fp8 element
         k_fp8_calls_per_tile = tile_bytes // K_ELEMS_PER_CALL
     else:
-        K_FP8_DWORDS = 4
-        K_BYTES_PER_LANE = 16
+        K_FP8_DWORDS = ASYNC_LDS_MAX_DWORDS
+        K_BYTES_PER_LANE = ASYNC_LDS_MAX_BYTES_PER_LANE
         k_fp8_calls_per_tile = 0  # unused
     # Byte strides for the paged-KV cache. ``KV_BYTES`` is 2 for bf16, 1
     # for fp8e4m3. The async DMA reads bytes verbatim (no implicit cast),
@@ -1457,7 +2226,10 @@ def build_unified_attention_2d_tiled(
     kv_stride_h_b = HD * KV_BYTES
     kv_block_bytes_c = b.const_i32(kv_stride_blk_b)  # one-block buffer bound
 
-    lane_half_base = b.mul(tid, b.const_i32(8))
+    # Per-lane starting half index. With the gfx942 1-dword DMA each lane
+    # contributes ``KV_HALVES_PER_LANE`` (= 2) contiguous halves per call,
+    # so the lane base advances by that many halves (not the gfx950 8).
+    lane_half_base = b.mul(tid, b.const_i32(KV_HALVES_PER_LANE))
 
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
@@ -1470,7 +2242,14 @@ def build_unified_attention_2d_tiled(
     # the wave-uniform `lds_dst`. Each wave issues its own instruction
     # but they share the LDS pointer unless we add a wave offset; with
     # NUM_WARPS=1 this collapses to zero.
-    WAVE_BYTES = WAVE * 16  # dwords=4 → 16 bytes per lane × 64 lanes
+    # Per-wave LDS slab stride for one async call. Each wave's 64 lanes
+    # deposit ``ASYNC_LDS_MAX_BYTES_PER_LANE`` bytes lane-contiguous, so the
+    # wave offset advances by ``WAVE * ASYNC_LDS_MAX_BYTES_PER_LANE`` (= 256
+    # bytes on gfx942). Pairing this with the ``bytes_per_call`` per-call
+    # stride keeps the LDS deposit an exact identity copy of the linear
+    # [T, HD] tile for every (wave, call, lane) — across all NUM_WARPS and
+    # call counts — which the [T, HD] K_lds/V_lds readers rely on.
+    WAVE_BYTES = WAVE * ASYNC_LDS_MAX_BYTES_PER_LANE
     if NUM_WARPS == 1:
         wave_lds_offset_i64 = b.const_i64(0)
     else:
@@ -1483,6 +2262,29 @@ def build_unified_attention_2d_tiled(
         # LDS base hoist" section).
         wave_lds_offset_i32 = b.to_sgpr_u32(b.mul(wave_id, b.const_i32(WAVE_BYTES)))
         wave_lds_offset_i64 = b.zext(wave_lds_offset_i32, I64)
+
+    # V's DMA dest base when the bank-deconflict swizzle is on: each wave owns
+    # one padded V row per call, so the wave's base advances by the padded row
+    # stride ``WAVE_BYTES + V_LDS_PAD*2`` (bytes) instead of ``WAVE_BYTES``.
+    # Wave-uniform -> pin to SGPR (same rationale as the K/V wave offset above).
+    V_WAVE_BYTES = WAVE_BYTES + (V_LDS_PAD * 2 if SWIZZLE_VLDS else 0)
+    # Per-call dest stride for V (bytes). With the swizzle each call writes
+    # ``V_ROWS_PER_CALL`` padded rows, so the call base steps by the padded
+    # group stride; without it, the natural contiguous ``bytes_per_call``.
+    V_BYTES_PER_CALL_SWZ = bytes_per_call + (
+        V_ROWS_PER_CALL * V_LDS_PAD * 2 if SWIZZLE_VLDS else 0
+    )
+    if not SWIZZLE_VLDS or NUM_WARPS == 1:
+        v_wave_lds_offset_i64 = (
+            b.const_i64(0)
+            if NUM_WARPS == 1
+            else wave_lds_offset_i64
+        )
+    else:
+        v_wave_lds_offset_i32 = b.to_sgpr_u32(
+            b.mul(wave_id, b.const_i32(V_WAVE_BYTES))
+        )
+        v_wave_lds_offset_i64 = b.zext(v_wave_lds_offset_i32, I64)
 
     # ---- Paged KV byte descriptor (full transform DAG) ----
     # The paged-KV cache is laid out ``[num_blocks, BS, NUM_KV, HD]`` with
@@ -1537,15 +2339,15 @@ def build_unified_attention_2d_tiled(
     # in_prefix masks already discard the bogus tokens.
     block_table_max_idx = b.to_sgpr_u32(b.mul(num_seqs_p, bt_stride_p))
     if FAST_PAGED_KV_DESC:
-        assert (BS, T, HD, NUM_KV, KV_BYTES, NUM_WARPS, kv_calls_per_tile) == (
-            32,
-            64,
-            64,
-            8,
-            2,
-            4,
-            2,
-        )
+        # Two logical blocks per tile (T=64 = 2 * BS=32). On gfx942 the
+        # 1-dword async DMA needs ``FAST_CALLS_PER_BLOCK`` calls to drain one
+        # block instead of the single 16-byte call the gfx950 template used,
+        # so a tile now takes ``2 * FAST_CALLS_PER_BLOCK`` calls. Each block
+        # is BS*HD halves; ``KV_HALVES_PER_CALL`` halves are moved per call.
+        assert (BS, T, HD, NUM_KV, KV_BYTES, NUM_WARPS) == (32, 64, 64, 8, 2, 4)
+        assert (BS * HD) % KV_HALVES_PER_CALL == 0
+        FAST_CALLS_PER_BLOCK = (BS * HD) // KV_HALVES_PER_CALL
+        assert kv_calls_per_tile == 2 * FAST_CALLS_PER_BLOCK
 
         def _fast_paged_kv_blocks(kv_tile_idx: Value) -> tuple[Value, Value]:
             logical_block0 = b.mul(kv_tile_idx, b.const_i32(2))
@@ -1571,13 +2373,20 @@ def build_unified_attention_2d_tiled(
             return b.to_sgpr_u32(block0), b.to_sgpr_u32(block1)
 
         def _fast_paged_kv_voff(call: int, block0: Value, block1: Value):
-            # Each call covers one full block. ``physical`` is uniform.
+            # ``FAST_CALLS_PER_BLOCK`` consecutive calls drain one logical
+            # block; calls ``[0, CPB)`` -> block0, ``[CPB, 2*CPB)`` -> block1.
+            # ``physical`` is uniform per call. Within the block the half
+            # index is ``(call_in_block)*KV_HALVES_PER_CALL + lane_half_base``.
             # Returns (i64 block base byte offset, within-block i32 voffset)
             # when I64_KV_ADDR (cache may exceed the 2 GiB i32-voffset cap),
             # else the legacy single i32 voffset (fast path, base = key).
-            physical = block0 if call == 0 else block1
-            token = b.lshr(lane_half_base, b.const_i32(6))  # lane_half_base / HD
-            dim = b.land(lane_half_base, b.const_i32(63))  # lane_half_base % HD
+            physical = block0 if call < FAST_CALLS_PER_BLOCK else block1
+            call_in_block = call % FAST_CALLS_PER_BLOCK
+            half_in_block = b.add(
+                b.const_i32(call_in_block * KV_HALVES_PER_CALL), lane_half_base
+            )
+            token = b.lshr(half_in_block, b.const_i32(6))  # half_in_block / HD
+            dim = b.land(half_in_block, b.const_i32(63))  # half_in_block % HD
             token_b = b.shl(token, b.const_i32(10))  # 8 * 64 * 2
             head_b = b.shl(kv_head_idx, b.const_i32(7))  # 64 * 2
             dim_b = b.shl(dim, b.const_i32(1))
@@ -1651,12 +2460,12 @@ def build_unified_attention_2d_tiled(
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
         for call in range(kv_calls_per_tile):
             k_rsrc = key_rsrc
+            k_ptr = key
             if FAST_PAGED_KV_DESC:
                 base_i64, voff = _fast_paged_kv_voff(call, fast_block0, fast_block1)
                 if base_i64 is not None:  # I64_KV_ADDR: per-block 64-bit base
-                    k_rsrc = b.buffer_rsrc(
-                        b.global_ptr_add(key, base_i64), kv_block_bytes_c
-                    )
+                    k_ptr = b.global_ptr_add(key, base_i64)
+                    k_rsrc = b.buffer_rsrc(k_ptr, kv_block_bytes_c)
             else:
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
@@ -1669,9 +2478,8 @@ def build_unified_attention_2d_tiled(
                         linear_half=linear_half,
                         kv_head=kv_head_idx,
                     )
-                    k_rsrc = b.buffer_rsrc(
-                        b.global_ptr_add(key, base_i64), kv_block_bytes_c
-                    )
+                    k_ptr = b.global_ptr_add(key, base_i64)
+                    k_rsrc = b.buffer_rsrc(k_ptr, kv_block_bytes_c)
                 else:
                     voff, _ = paged_kv_desc.offset(
                         b,
@@ -1680,13 +2488,76 @@ def build_unified_attention_2d_tiled(
                         kv_head=kv_head_idx,
                     )
             k_dst = b.smem_ptr_add(K_wave_base, b.const_i64(call * bytes_per_call))
-            # CACHE_STREAM (SLC): one-shot streaming load, never re-read
-            # within this kernel. Documented in
-            # ``dsl_docs/primitives/intrinsics_and_primitives.md`` as the
-            # right hint for K-loop streaming tile loads.
-            b.async_buffer_load_lds_addr(
-                k_rsrc, k_dst, voff, zero_soff, 4, coherency=CACHE_STREAM
+            if USE_GLOBAL_LOAD_LDS_K:
+                b.global_load_lds(
+                    k_ptr,
+                    voff,
+                    k_dst,
+                    ASYNC_LDS_MAX_BYTES_PER_LANE,
+                    coherency=kv_cache_aux,
+                )
+            else:
+                b.async_buffer_load_lds_addr(
+                    k_rsrc,
+                    k_dst,
+                    voff,
+                    zero_soff,
+                    ASYNC_LDS_MAX_DWORDS,
+                    coherency=kv_cache_aux,
+                )
+
+    K_SLICE_CALLS_PER_TILE = (T * K_SLICE_HD) // KV_HALVES_PER_CALL
+
+    def _issue_k_slice_load_runtime(kv_tile_idx: Value, slice_idx: int, slot_idx: int) -> None:
+        """Issue one 32-dim K slice into the sliced K ring."""
+        slot_off_i64 = b.const_i64(slot_idx * K_BUF_BYTES)
+        K_slot_base = b.smem_ptr_add(K_lds_addr, slot_off_i64)
+        K_wave_base = b.smem_ptr_add(K_slot_base, wave_lds_offset_i64)
+        for call in range(K_SLICE_CALLS_PER_TILE):
+            linear_local = b.add(
+                b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
             )
+            token = b.div(linear_local, b.const_i32(K_SLICE_HD))
+            dim_local = b.mod(linear_local, b.const_i32(K_SLICE_HD))
+            dim = b.add(b.const_i32(slice_idx * K_SLICE_HD), dim_local)
+            linear_half = b.add(b.mul(token, b.const_i32(HD)), dim)
+            k_rsrc = key_rsrc
+            k_ptr = key
+            if I64_KV_ADDR:
+                base_i64, voff, _ = paged_kv_desc.offset_i64_split(
+                    b,
+                    "physical_block",
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
+                k_ptr = b.global_ptr_add(key, base_i64)
+                k_rsrc = b.buffer_rsrc(k_ptr, kv_block_bytes_c)
+            else:
+                voff, _ = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_half,
+                    kv_head=kv_head_idx,
+                )
+            k_dst = b.smem_ptr_add(K_wave_base, b.const_i64(call * bytes_per_call))
+            if USE_GLOBAL_LOAD_LDS_K:
+                b.global_load_lds(
+                    k_ptr,
+                    voff,
+                    k_dst,
+                    ASYNC_LDS_MAX_BYTES_PER_LANE,
+                    coherency=kv_cache_aux,
+                )
+            else:
+                b.async_buffer_load_lds_addr(
+                    k_rsrc,
+                    k_dst,
+                    voff,
+                    zero_soff,
+                    ASYNC_LDS_MAX_DWORDS,
+                    coherency=kv_cache_aux,
+                )
 
     def _issue_v_load_runtime(kv_tile_idx: Value, buf_idx: Value) -> None:
         """Issue async V loads for one tile into V_lds[0] (single-buffered).
@@ -1696,8 +2567,10 @@ def build_unified_attention_2d_tiled(
         iter-start full drain). Saves 8 KiB LDS per CTA vs the original
         double-buffer V layout.
         """
-        # V is single-buffered; ignore buf_idx, always write slot 0.
-        V_wave_base = b.smem_ptr_add(V_lds_addr, wave_lds_offset_i64)
+        # V is single-buffered; ignore buf_idx, always write slot 0. The wave
+        # base uses the V-specific (swizzle-aware) wave offset so each wave's
+        # padded V row lands in its bank-rotated slot when SWIZZLE_VLDS is on.
+        V_wave_base = b.smem_ptr_add(V_lds_addr, v_wave_lds_offset_i64)
         if FAST_PAGED_KV_DESC:
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
         for call in range(kv_calls_per_tile):
@@ -1730,22 +2603,312 @@ def build_unified_attention_2d_tiled(
                         linear_half=linear_half,
                         kv_head=kv_head_idx,
                     )
-            v_dst = b.smem_ptr_add(V_wave_base, b.const_i64(call * bytes_per_call))
+            v_dst = b.smem_ptr_add(
+                V_wave_base, b.const_i64(call * V_BYTES_PER_CALL_SWZ)
+            )
             # CACHE_STREAM (SLC): V is consumed once per iter and never
             # re-read within this kernel; see _issue_k_load_runtime for
             # the rationale.
             b.async_buffer_load_lds_addr(
-                v_rsrc, v_dst, voff, zero_soff, 4, coherency=CACHE_STREAM
+                v_rsrc,
+                v_dst,
+                voff,
+                zero_soff,
+                ASYNC_LDS_MAX_DWORDS,
+                coherency=kv_cache_aux,
             )
+
+    # ---- Stream B (DECISIVE pivot): transposed-V VECTOR-store loader ----
+    # The transposed ``V_lds[HD, T+V_T_PAD]`` (head-dim outer, token inner) is the
+    # conflict-free PV feed (the PV A-operand read is then ONE wide contiguous
+    # ``ds_read_b64`` over consecutive tokens). gfx942 async DMA cannot transpose
+    # HBM->LDS, so the transpose is paid on the LDS store side.
+    #
+    # PROVEN DEAD VEHICLE (do NOT restore): the prior fill loaded 8 contiguous
+    # head-dims ``V[token, col..col+7]`` and SCATTERED them to 8 strided rows
+    # ``V_lds[col+i, token]`` with 8 scalar ``smem_store_vN(..., n=1)`` =
+    # sub-dword ``ds_write_b16``. That corrupts head-dims >=8 (12/5/9; d>=8
+    # garbage/inf, non-deterministic) on the transposed-x8 path -- two independent
+    # implementations failed identically. The ds_write_b16 scatter is the hazard.
+    #
+    # THE VECTOR-STORE FILL (this implementation): invert the per-thread tiling so
+    # the LDS STORE is contiguous. Each thread owns one head-dim row ``col`` and a
+    # group of ``V_T_VEC`` CONSECUTIVE tokens ``token_base..token_base+V_T_VEC-1``;
+    # it reads those tokens' value at head-dim ``col`` from HBM (token-strided
+    # global loads -- gathers in HBM are fine, no LDS hazard), packs them into one
+    # ``<V_T_VEC x half>`` and writes them with ONE vector ``smem_store_vN(V_lds,
+    # [0, col, token_base], vec, n=V_T_VEC)``. Because token is the INNER/fast
+    # axis of ``V_lds[HD, T+pad]``, those V_T_VEC slots are CONTIGUOUS in LDS ->
+    # the store lowers to a single ``ds_write_b{32,64,128}`` (NO sub-dword
+    # ds_write_b16). This is the brief's mandated pivot: vector ds_write, not
+    # scatter. ``paged_kv_desc.offset`` returns a BYTE offset because the async
+    # DMA path consumes it directly; sync ``global_load`` consumes element
+    # indices, so sync V fills must divide by ``KV_BYTES`` before loading.
+    V_T_VEC = 4 if (T % 4 == 0) else (2 if (T % 2 == 0) else 1)
+    if TRANSPOSED_V:
+        # token-groups along the inner axis: V_T_VEC consecutive tokens per group.
+        _v_t_token_groups = T // V_T_VEC
+        # Total (col, token-group) work items spread across the workgroup.
+        _v_t_total_items = HD * _v_t_token_groups
+        # Items each thread fills (loop trip count). May not divide evenly when
+        # THREADS > items; guard the tail with item < total below.
+        V_T_ITEMS_PER_THREAD = (_v_t_total_items + THREADS - 1) // THREADS
+        _v_t_need_item_guard = (_v_t_total_items % THREADS) != 0
+
+    def _issue_v_transposed(kv_tile_idx: Value) -> None:
+        """VECTOR-store transpose of V into ``V_lds[0, col, token]`` (f16).
+
+        Per work item: ``item = call*THREADS + tid`` maps to head-dim row
+        ``col = item // token_groups`` and token group ``g = item % token_groups``
+        (token_base = g*V_T_VEC). Reads V_T_VEC consecutive tokens at head-dim
+        ``col`` from HBM and writes them as ONE contiguous vector ds_write.
+        """
+        _tg = b.const_i32(_v_t_token_groups)
+        # Zero of the working dtype for masked (out-of-range) V tokens.
+        zero_h = b.cast_f32_to(b.const_f32(0.0), dtype)
+        for call in range(V_T_ITEMS_PER_THREAD):
+            item = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
+            if _v_t_need_item_guard:
+                # Tail items past the work set must not store (would scatter OOB
+                # of V_lds). Clamp to item 0 (a redundant valid write).
+                item = b.select(
+                    b.cmp_lt(item, b.const_i32(_v_t_total_items)),
+                    item,
+                    b.const_i32(0),
+                )
+            col = b.div(item, _tg)
+            g = b.mod(item, _tg)
+            token_base = b.mul(g, b.const_i32(V_T_VEC))
+            # Gather V_T_VEC consecutive tokens at head-dim ``col`` from HBM.
+            # HBM is [token, dim] row-major, so token t at dim col lives at
+            # linear (token_base + j) * HD + col -- stride HD between the j's.
+            # THE FIX (root cause of the L3 12/9/5 garbage + perf MEMORY FAULT):
+            # tokens past the valid KV length of the LAST (partial) tile are NOT
+            # real V. The naive async feed reads them through a BOUNDED
+            # ``buffer_rsrc`` (size ``kv_block_bytes_c``) so out-of-range lanes
+            # HARDWARE-mask to 0; this manual scalar gather had NO such bound, so
+            # the invalid V_lds slots held garbage (often inf/nan from
+            # unmapped/stale memory). Softmax correctly sets P=0 for those masked
+            # tokens, BUT the PV MFMA then computes ``P(0) * V(inf) = nan`` -> the
+            # whole O^T row goes nan/inf (observed: first mismatch at index 1,
+            # worst diff inf, ~70% wrong), and on large multi-tile shapes the
+            # unbounded load FAULTS (faulting addr ...c000 in the _cfv kernel).
+            # The descriptor carries NO validity predicate for this geometry
+            # (``valid_j`` is None), so reproduce the buffer-size bound EXPLICITLY:
+            # the tile-global KV position is ``kv_tile_idx*T + token_j``; it is a
+            # real token iff it is < ``max_seq_prefix_len`` (this CTA's valid KV
+            # length). Out-of-range -> clamp the offset to 0 (no fault) AND select
+            # 0 for the value (no nan) -- exactly the zeroing the bounded async
+            # DMA gave us for free.
+            tile_tok_base = b.mul(kv_tile_idx, b.const_i32(T))
+            elems = []
+            for j in range(V_T_VEC):
+                token_j = b.add(token_base, b.const_i32(j))
+                linear_j = b.add(b.mul(token_j, b.const_i32(HD)), col)
+                voff_j, valid_j = paged_kv_desc.offset(
+                    b,
+                    tile_idx=kv_tile_idx,
+                    linear_half=linear_j,
+                    kv_head=kv_head_idx,
+                )
+                in_range = b.cmp_lt(
+                    b.add(tile_tok_base, token_j), max_seq_prefix_len
+                )
+                if valid_j is not None:
+                    in_range = b.land(in_range, valid_j)
+                safe_voff_j = b.select(in_range, voff_j, b.const_i32(0))
+                safe_elem_j = (
+                    b.div(safe_voff_j, b.const_i32(KV_BYTES))
+                    if KV_BYTES != 1
+                    else safe_voff_j
+                )
+                v1 = b.global_load(value, safe_elem_j, dtype, align=2)
+                v1 = b.select(in_range, v1, zero_h)
+                elems.append(v1)
+            v_vec = b.vec_pack(elems, dtype)
+            # ONE contiguous vector store: token is the inner axis, so
+            # [0, col, token_base] + n=V_T_VEC writes V_T_VEC adjacent LDS slots
+            # -> a single ds_write_b{32,64,128} (no sub-dword scatter).
+            _v_t_store(col, token_base, v_vec, V_T_VEC)
+
+    # ---- Stream 2 (GRIND): conflict-free V STORE-PATH vehicle (c) ----
+    # gfx942 playbook's only conflict-free transposed-operand vehicle. The
+    # vehicle (a) ``_issue_v_transposed`` above is correct but ~5x slower: its
+    # HBM read is a SYNCHRONOUS token-strided ``global_load`` gather (V_T_VEC
+    # scalar loads at stride HD per item) that stalls on HBM (rocprof: ~30 TF).
+    # The LDS *store* and the LDS *read* were already conflict-free; only the
+    # HBM access pattern was wrong.
+    #
+    # This loader makes the HBM read NATURAL and the transpose IN-REGISTER, the
+    # CK ``transpose_vectors`` / flash way:
+    #   * Partition the (token, dim) tile into 2x2 f16 blocks. Block (tg, dg)
+    #     covers tokens {2*tg, 2*tg+1} x dims {2*dg, 2*dg+1}.
+    #   * Read each of the 2 token rows as ONE 2-half vector load over a
+    #     CONTIGUOUS dim pair: ``x0 = (V[t0,d0], V[t0,d1])``,
+    #     ``x1 = (V[t1,d0], V[t1,d1])`` -- coalesced VMEM (adjacent lanes / the
+    #     dim axis are contiguous in HBM), no token-stride gather.
+    #   * Transpose the 2x2 with ``perm_b32`` (in-thread VALU ``v_perm_b32``, no
+    #     cross-lane, no lgkmcnt). With src0=x0(t0), src1=x1(t1) the 8 concat
+    #     bytes are [t1.d0, t1.d1, t0.d0, t0.d1]; the CK masks give:
+    #       perm(x0,x1, 0x01000504) -> (V[t0,d0], V[t1,d0])  = dim-row d0
+    #       perm(x0,x1, 0x03020706) -> (V[t0,d1], V[t1,d1])  = dim-row d1
+    #     i.e. each output i32 holds 2 CONSECUTIVE tokens at a fixed dim.
+    #   * Write each output as ONE contiguous 2-half ``ds_write_b32`` into
+    #     ``V_lds[0, d, 2*tg]`` (token is the inner/fast axis) -- conflict-free.
+    # The block loop is RUNTIME-rolled (``scf_for`` over block index, stride
+    # THREADS) so the IR stays O(1) regardless of tile size (gfx942 playbook:
+    # a fully-unrolled transpose hit a 45-min JIT IR-explosion).
+    if TRANSPOSED_V_STORE:
+        _v_t2_tok_pairs = T // 2
+        _v_t2_dim_pairs = HD // 2
+        _v_t2_total_blocks = _v_t2_tok_pairs * _v_t2_dim_pairs
+
+    def _cfvst_load_v_regs(kv_tile_idx: Value):
+        """Issue cfvst VMEM loads and keep each thread's V tile in VGPRs."""
+        zero_h = b.cast_f32_to(b.const_f32(0.0), dtype)
+        zero_i32 = b.const_i32(0)
+        tile_tok_base = b.mul(kv_tile_idx, b.const_i32(T))
+        _dp = b.const_i32(_v_t2_dim_pairs)
+
+        def _load_token_row_pair(t_row: Value, d0: Value) -> Value:
+            """Load <2 x f16> = (V[t_row, d0], V[t_row, d0+1]) as i32, bounded.
+
+            Contiguous dim pair -> coalesced 2-half VMEM load. Out-of-range
+            tokens (past this CTA's valid KV length) are masked to 0 (matching
+            the bounded async DMA's hardware zero-fill) so masked P*V stays 0,
+            never P(0)*V(inf)=nan.
+            """
+            linear = b.add(b.mul(t_row, b.const_i32(HD)), d0)
+            voff, valid = paged_kv_desc.offset(
+                b,
+                tile_idx=kv_tile_idx,
+                linear_half=linear,
+                kv_head=kv_head_idx,
+            )
+            in_range = b.cmp_lt(b.add(tile_tok_base, t_row), max_seq_prefix_len)
+            if valid is not None:
+                in_range = b.land(in_range, valid)
+            safe_voff = b.select(in_range, voff, zero_i32)
+            safe_elem = (
+                b.div(safe_voff, b.const_i32(KV_BYTES))
+                if KV_BYTES != 1
+                else safe_voff
+            )
+            if _CFV_STORE_SEPOFF:
+                # ISOLATION: compute the (t_row, d0+1) offset via a SEPARATE
+                # descriptor call instead of voff+1. Tests the dim-contiguity
+                # assumption (does the paged descriptor have dim element-stride
+                # 1?). Vehicle (a) always uses separate per-element offsets.
+                linear1 = b.add(b.mul(t_row, b.const_i32(HD)), b.add(d0, b.const_i32(1)))
+                voff1, valid1 = paged_kv_desc.offset(
+                    b, tile_idx=kv_tile_idx, linear_half=linear1, kv_head=kv_head_idx
+                )
+                safe_voff1 = b.select(in_range, voff1, zero_i32)
+                safe_elem1 = (
+                    b.div(safe_voff1, b.const_i32(KV_BYTES))
+                    if KV_BYTES != 1
+                    else safe_voff1
+                )
+                e0 = b.global_load(value, safe_elem, dtype, align=2)
+                e1 = b.global_load(value, safe_elem1, dtype, align=2)
+                e0 = b.select(in_range, e0, zero_h)
+                e1 = b.select(in_range, e1, zero_h)
+                v2 = b.vec_pack([e0, e1], dtype)
+            elif _CFV_STORE_SCALAR_LOAD:
+                # ISOLATION: read the 2 dims as 2 scalar n=1 loads + manual pack
+                # (rules out the vectorized global_load_vN lowering). Same values.
+                e0 = b.global_load(value, safe_elem, dtype, align=2)
+                e1 = b.global_load(
+                    value, b.add(safe_elem, b.const_i32(1)), dtype, align=2
+                )
+                e0 = b.select(in_range, e0, zero_h)
+                e1 = b.select(in_range, e1, zero_h)
+                v2 = b.vec_pack([e0, e1], dtype)
+            else:
+                v2 = b.global_load_vN(value, safe_elem, dtype, 2, align=4)
+                # Zero masked rows (whole pair belongs to one token).
+                zero_vec = b.vec_pack([zero_h, zero_h], dtype)
+                v2 = b.select(in_range, v2, zero_vec)
+            return b.bitcast(v2, I32)
+
+        def _cfvst_block_coords(blk: Value):
+            # block (tg, dg): tokens {2*tg, 2*tg+1}, dims {2*dg, 2*dg+1}.
+            # Keep dim-pair as the fastest-varying coordinate so adjacent lanes
+            # issue coalesced VMEM loads over the natural V[token, dim] layout.
+            tg = b.div(blk, _dp)
+            dg = b.mod(blk, _dp)
+            t0 = b.mul(tg, b.const_i32(2))
+            t1 = b.add(t0, b.const_i32(1))
+            d0 = b.mul(dg, b.const_i32(2))
+            d1 = b.add(d0, b.const_i32(1))
+            return d0, d1, t0, t1
+
+        payload = []
+        for call in range(V_T_ITEMS_PER_THREAD):
+            blk = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
+            if _v_t_need_item_guard:
+                blk = b.select(
+                    b.cmp_lt(blk, b.const_i32(_v_t2_total_blocks)),
+                    blk,
+                    b.const_i32(0),
+                )
+            d0, d1, t0, t1 = _cfvst_block_coords(blk)
+            x0 = _load_token_row_pair(t0, d0)  # (V[t0,d0], V[t0,d1])
+            x1 = _load_token_row_pair(t1, d0)  # (V[t1,d0], V[t1,d1])
+            payload.append((d0, d1, t0, x0, x1))
+        return payload
+
+    def _cfvst_store_v_regs(payload) -> None:
+        """Permute loaded cfvst VGPRs and publish the transposed V LDS tile."""
+        zero_h = b.cast_f32_to(b.const_f32(0.0), dtype)
+        zero_i32 = b.const_i32(0)
+        if _CFV_STORE_PREZERO:
+            # DIAGNOSTIC: pre-zero every V_lds slot (dim x token) so any
+            # uncovered slot reads 0 instead of garbage. If this fixes the
+            # error, the store has a coverage gap.
+            _pz = b.scf_for(
+                tid, b.const_i32(HD * T), b.const_i32(THREADS), iv_name="vpz"
+            )
+            with _pz as pz:
+                _pd = b.div(pz, b.const_i32(T))
+                _ptk = b.mod(pz, b.const_i32(T))
+                _v_t_store(_pd, _ptk, zero_h, 1)
+            b.sync()
+
+        for d0, d1, t0, x0, x1 in payload:
+            if _CFV_STORE_SCATTER:
+                # DIAGNOSTIC: element-wise scatter (no perm) -- store each of
+                # the 4 loaded V values directly at its transposed slot.
+                x0v = b.bitcast(x0, VectorType(dtype, 2))  # (V[t0,d0],V[t0,d1])
+                x1v = b.bitcast(x1, VectorType(dtype, 2))  # (V[t1,d0],V[t1,d1])
+                v_t0_d0 = b.vec_extract(x0v, 0)
+                v_t0_d1 = b.vec_extract(x0v, 1)
+                v_t1_d0 = b.vec_extract(x1v, 0)
+                v_t1_d1 = b.vec_extract(x1v, 1)
+                _v_t_store(d0, t0, v_t0_d0, 1)
+                _v_t_store(d0, t1, v_t1_d0, 1)
+                _v_t_store(d1, t0, v_t0_d1, 1)
+                _v_t_store(d1, t1, v_t1_d1, 1)
+            else:
+                # 2x2 transpose: each output i32 = 2 consecutive tokens at one dim.
+                row_d0 = b.perm_b32(x0, x1, b.const_i32(0x01000504))  # (t0,t1)@d0
+                row_d1 = b.perm_b32(x0, x1, b.const_i32(0x03020706))  # (t0,t1)@d1
+                # ONE contiguous 2-half ds_write per dim row (token is inner).
+                _v_t_store(d0, t0, b.bitcast(row_d0, VectorType(dtype, 2)), 2)
+                _v_t_store(d1, t0, b.bitcast(row_d1, VectorType(dtype, 2)), 2)
+
+    def _issue_v_transposed_store(kv_tile_idx: Value) -> None:
+        """Register-load + ``perm_b32`` transpose + contiguous LDS store of V
+        into ``V_lds[0, dim, token]`` (vehicle (c), f16). See block comment."""
+        _cfvst_store_v_regs(_cfvst_load_v_regs(kv_tile_idx))
 
     # ---------------- FP8 K/V cache: async DMA loader (round 2) ----------------
     # Two-phase split that mirrors the bf16 path's HW DMA pipeline:
     #   1. `_issue_kv_fp8_async_load` issues `raw.ptr.buffer.load.lds`
-    #      writing fp8 bytes directly into K_fp8_lds / V_fp8_lds. Same
-    #      dwords=4 (16 bytes/lane) as the bf16 path; one wave covers
-    #      16 fp8 elements per lane vs 8 bf16 halves per lane, so fp8
-    #      needs half the calls per tile (1 call vs 2 for T=64 HD=64
-    #      THREADS=256).
+    #      writing fp8 bytes directly into K_fp8_lds / V_fp8_lds. On gfx942
+    #      this is the same capped 1-dword (4 bytes/lane) width as the bf16
+    #      path (CDNA3 load-to-LDS limit); each lane moves 4 fp8 elements
+    #      vs 2 bf16 halves, so fp8 needs half the bf16 call count.
     #   2. `_dequant_fp8_lds_to_bf16` runs in the kv loop, after the
     #      ``s_waitcnt vmcnt=0; s_barrier`` that publishes the fp8
     #      bytes. Each thread reads 8 fp8 from the fp8 slab, applies
@@ -1849,7 +3012,7 @@ def build_unified_attention_2d_tiled(
                     voff,
                     zero_soff,
                     FP8_DWORDS_PER_LANE,
-                    coherency=CACHE_STREAM,
+                    coherency=kv_cache_aux,
                 )
 
         # The dequant step distributes T*HD elements across THREADS in
@@ -2052,11 +3215,11 @@ def build_unified_attention_2d_tiled(
 
         K_lds is allocated as fp8 (8 KB for double-buf at T=64 HD=64 vs
         16 KB bf16). The async DMA writes ``K_BYTES_PER_LANE`` bytes per
-        lane per call; the dwords selector is picked at build time from
-        {1, 2, 4} = {4, 8, 16} bytes/lane based on T*HD so the loader
-        works for both T=64 (16 B/lane) and T=32 (8 B/lane) tiles. QK
-        reads K_lds as fp8 and dequants in-register with k_scale to the
-        bf16 input the standard bf16 MFMA expects.
+        lane per call; on gfx942 the dwords selector is clamped to the
+        CDNA3 load-to-LDS max (1 dword = 4 bytes/lane), issuing more calls
+        per tile to move the same bytes. QK reads K_lds as fp8 and dequants
+        in-register with k_scale to the bf16 input the standard bf16 MFMA
+        expects.
         """
         buf_off_i32 = b.mul(buf_idx, b.const_i32(T * HD))  # fp8: 1 byte/elem
         buf_off_i64 = b.zext(buf_off_i32, I64)
@@ -2100,7 +3263,7 @@ def build_unified_attention_2d_tiled(
                 voff,
                 zero_soff,
                 K_FP8_DWORDS,
-                coherency=CACHE_STREAM,
+                coherency=kv_cache_aux,
             )
 
     def _issue_v_fp8_mfma_async(kv_tile_idx: Value) -> None:
@@ -2137,7 +3300,7 @@ def build_unified_attention_2d_tiled(
                 voff,
                 zero_soff,
                 K_FP8_DWORDS,
-                coherency=CACHE_STREAM,
+                coherency=kv_cache_aux,
             )
 
     def _issue_v_fp8_mfma_stripe(kv_tile_idx: Value) -> None:
@@ -2194,6 +3357,8 @@ def build_unified_attention_2d_tiled(
           fp8 directly and the k_scale is applied to the f32 accumulator
           via the folded post-MFMA `qk_scale` constant.
         """
+        if K_SLICED_ACTIVE:
+            return
         if K_FP8_MFMA:
             _issue_k_fp8_mfma_async(tile_idx, buf_idx)
         elif KV_FP8:
@@ -2223,28 +3388,39 @@ def build_unified_attention_2d_tiled(
             _issue_v_fp8_mfma_stripe(tile_idx)
         elif KV_FP8:
             _issue_fp8_dequant_loads(tile_idx, b.const_i32(0), "V")
+        elif TRANSPOSED_V_STORE:
+            _issue_v_transposed_store(tile_idx)
+        elif TRANSPOSED_V:
+            _issue_v_transposed(tile_idx)
         else:
             _issue_v_load_runtime(tile_idx, buf_idx)
 
-    def _read_k8_mfma_operand(buf_idx: Value, k_row: Value, k_off: Value) -> Value:
-        """Read 8 K elements from K_lds as the bf16 MFMA operand.
+    def _read_k8_mfma_operand(
+        buf_idx: Value, k_row: Value, k_off: Value, frag: int = 8
+    ) -> Value:
+        """Read ``frag`` K elements from K_lds as the bf16 MFMA operand.
 
-        For the fp8-in-LDS path (``K_FP8_MFMA``) K_lds holds raw fp8 bytes
+        ``frag`` is 8 for the K=16 (32x32x16) atom and 4 for the K=8
+        (32x32x8) atom -- each lane owns half of K per MFMA. For the
+        fp8-in-LDS path (``K_FP8_MFMA``) K_lds holds raw fp8 bytes
         (half the LDS of bf16 -> higher occupancy). Dequant in register --
-        ``cvt_pk_f32_fp8`` + ``* k_scale`` + cast -- to the exact 8 bf16 the
+        ``cvt_pk_f32_fp8`` + ``* k_scale`` + cast -- to the exact bf16 the
         bf16 K_lds path would have held (bit-identical), then feed the
         standard bf16 MFMA. (Unfused cvt + explicit f32 multiply: the fused
         ``cvt_scalef32`` truncates non-pow2 scales; see the 16x16 path.)
         Otherwise read bf16 directly. Shared by the 16x16 and 32x32 QK
-        paths so both get the fp8 LDS-footprint win.
+        paths so both get the fp8 LDS-footprint win. (fp8 is rejected on
+        gfx942, so the x8-transposed path always takes the plain bf16 read.)
         """
         if not K_FP8_MFMA:
-            return b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=dtype, n=8)
+            return b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=dtype, n=frag)
         if FP8_NATIVE_QK:
             # Native fp8 QK: hand the raw fp8 K straight to the fp8 MFMA --
             # no dequant. (k_scale is folded into qk_scale post-MFMA.)
-            return b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=FP8E4M3, n=8)
-        k_fp8 = b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=FP8E4M3, n=8)
+            return b.smem_load_vN(
+                K_lds, buf_idx, k_row, k_off, dtype=FP8E4M3, n=frag
+            )
+        k_fp8 = b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=FP8E4M3, n=frag)
         return dequant_fp8x8_to_dtype(b, k_fp8, k_scale_p, dtype)
 
     # ---- Per-lane Q → VGPR gather (eliminates per-iter Q LDS reads) ----
@@ -2255,7 +3431,7 @@ def build_unified_attention_2d_tiled(
     # M_ATOMS_PER_WARP = up to 32 halves = 16 VGPRs for
     # ``BLOCK_M_PER_WARP=32``.
     Q_reg = [[None] * QK_K_ITERS for _ in range(M_ATOMS_PER_WARP)]
-    if not (USE_MFMA_32X32 and SKIP_LEGACY_QREG):
+    if not (Q_DIRECT_GLOBAL or (USE_MFMA_32X32 and SKIP_LEGACY_QREG)):
         for atom in range(M_ATOMS_PER_WARP):
             q_row_atom = b.add(wave_row_base, b.add(b.const_i32(atom * 16), lane_col))
             # Map Q_row → (buf, row_in_buf) for the K_lds-aliased case.
@@ -2267,18 +3443,17 @@ def build_unified_attention_2d_tiled(
                     q_buf_atom = b.const_i32(0)
                     q_row_in_buf_atom = q_row_atom
             for k in range(QK_K_ITERS):
-                q_col_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
+                # 16x16x16 A (Q) operand per lane: row = lane%16, K =
+                # k*16 + lane_rg*4 + 0..3 (<4 x dtype>). K-step is 16 on gfx942
+                # (no wide-K atom), so the per-lane column base is lane_rg*4.
+                q_col_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
                 q_load_idx_args = (
                     (q_buf_atom, q_row_in_buf_atom, q_col_off)
                     if Q_ALIAS_K
                     else (q_row_atom, q_col_off)
                 )
-                # Always gather as bf16; the fp8 cast (if needed) happens
-                # AFTER the dynamic q_scale reduction so we have the right
-                # scale to use. For non-fp8-MFMA paths this is just the
-                # original Q register.
                 Q_reg[atom][k] = b.smem_load_vN(
-                    Q_lds, *q_load_idx_args, dtype=dtype, n=8
+                    Q_lds, *q_load_idx_args, dtype=dtype, n=4
                 )
 
         if Q_ALIAS_K:
@@ -2335,12 +3510,44 @@ def build_unified_attention_2d_tiled(
             else:
                 q32_buf = b.const_i32(0)
                 q32_row_in_buf = q32_row
+        # 32x32x8 A (Q) per lane: <4 x half>, row = lane%32,
+        #   K = k*8 + (lane//32)*4 + [0..3]  (k_blk = lane//32).
+        # 32x32x16 A (Q) per lane: <8 x half>, K = k*16 + (lane//32)*8 + [0..7].
+        Q32_FRAG = 4 if USE_MFMA_32X32X8 else 8
+        Q32_HALF_STRIDE = 4 if USE_MFMA_32X32X8 else 8
         for k in range(QK_K_ITERS):
-            q32_col = b.add(b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8)))
-            q32_idx_args = (
-                (q32_buf, q32_row_in_buf, q32_col) if Q_ALIAS_K else (q32_row, q32_col)
+            q32_col = b.add(
+                b.const_i32(k * QK_K_STEP), b.mul(lane_half, b.const_i32(Q32_HALF_STRIDE))
             )
-            q32 = b.smem_load_vN(Q_lds, *q32_idx_args, dtype=dtype, n=8)
+            if Q_DIRECT_GLOBAL:
+                q32_pos = b.add(qb_start_pos, b.div(q32_row, b.const_i32(NQK)))
+                q32_h = b.add(
+                    b.mul(kv_head_idx, b.const_i32(NQK)),
+                    b.mod(q32_row, b.const_i32(NQK)),
+                )
+                q32_mask = b.land(
+                    b.cmp_lt(q32_pos, cur_batch_q_len),
+                    b.cmp_lt(q32_h, b.const_i32(NUM_QH)),
+                )
+                q32_pos_safe = b.select(q32_mask, q32_pos, b.const_i32(0))
+                q32_h_safe = b.select(q32_mask, q32_h, b.const_i32(0))
+                q32_off, _ = q_desc.offset(
+                    b,
+                    token=b.add(cu_q_start, q32_pos_safe),
+                    head=q32_h_safe,
+                    dim=q32_col,
+                )
+                q32_raw = b.global_load_vN(query, q32_off, dtype, Q32_FRAG, align=8)
+                q32 = b.vector_select(
+                    b.vector_splat(q32_mask, Q32_FRAG),
+                    q32_raw,
+                    b.zero_vec(dtype, Q32_FRAG),
+                )
+            else:
+                q32_idx_args = (
+                    (q32_buf, q32_row_in_buf, q32_col) if Q_ALIAS_K else (q32_row, q32_col)
+                )
+                q32 = b.smem_load_vN(Q_lds, *q32_idx_args, dtype=dtype, n=Q32_FRAG)
             if FP8_NATIVE_QK:
                 # Quantize the Q operand to fp8 once so the QK MFMA can run
                 # native fp8xfp8 (no per-tile K dequant). Q values are unit-
@@ -2492,6 +3699,8 @@ def build_unified_attention_2d_tiled(
     # False here) so the experiment can be re-tried behind a flag if a future
     # change makes the kernel throughput-bound.
     def _emit_kv_body(kv_tile_iv, carry, skip_mask):
+        if USE_IGLP_OPT:
+            b.iglp_opt(1)
         m_vals = [carry[2 * r] for r in range(SOFTMAX_STATE_SLOTS)]
         l_vals = [carry[2 * r + 1] for r in range(SOFTMAX_STATE_SLOTS)]
         ml_count = 2 * SOFTMAX_STATE_SLOTS
@@ -2506,7 +3715,10 @@ def build_unified_attention_2d_tiled(
             return acc_vals[n * ACC_M_ATOMS + atom]
 
         cur_buf = carry[ml_count + ACC_N_TILES * ACC_M_ATOMS]
-        nxt_buf = b.sub(b.const_i32(1), cur_buf)
+        # Single-buffered K: there is only slot 0, so the "next" buffer IS the
+        # current one. (cur_buf is also pinned to 0 by the const-0 carry init +
+        # the const-0 yield below.) Double-buffered K alternates 0<->1.
+        nxt_buf = cur_buf if K_SINGLE_BUF else b.sub(b.const_i32(1), cur_buf)
         tile_off = b.mul(kv_tile_iv, b.const_i32(T))
         if GROUPED_KV2:
             tile1_iv_raw = b.add(kv_tile_iv, b.const_i32(1))
@@ -2629,20 +3841,104 @@ def build_unified_attention_2d_tiled(
                 # already overwritten Q_lds with K data. Reading Q_lds
                 # would silently feed K values into the B operand and
                 # silently corrupt every transposed S^T.
-                ST32_n = [None] * QK_N_TILES
-                for n in range(QK_N_TILES):
-                    acc32 = b.zero_vec_f32(16)
-                    # K row becomes the M dimension of the transposed score
-                    # tile. K_lds layout is [T, HD], so A is K_lds[row, k].
-                    k_row_t = b.add(b.const_i32(n * 32), lane_col32)
-                    for k in range(QK_K_ITERS):
-                        k_off_t = b.add(
-                            b.const_i32(k * 16), b.mul(lane_half32, b.const_i32(8))
-                        )
-                        A_k_t = _read_k8_mfma_operand(cur_buf, k_row_t, k_off_t)
-                        B_q_t = Q32_reg[k]
-                        acc32 = _mfma_32x32x16(b, dtype, A_k_t, B_q_t, acc32)
-                    ST32_n[n] = acc32
+                # K-step parameterization for the transposed QK MFMA. For
+                # the gfx942-legal 32x32x8 atom each lane owns K = k*8 +
+                # (lane/32)*4 + [0..3] (<4 x half>); for the gfx950-only
+                # 32x32x16 atom it owns K = k*16 + (lane/32)*8 + [0..7]
+                # (<8 x half>). The A (K^T) and B (Q^T) operands share the
+                # SAME K distribution, so ``Q32_reg`` (gathered with the
+                # parameterized ``Q32_HALF_STRIDE`` above) is reused verbatim.
+                TQK_FRAG = 4 if USE_MFMA_32X32X8 else 8
+                TQK_HALF_STRIDE = 4 if USE_MFMA_32X32X8 else 8
+                if K_SLICED_ACTIVE:
+                    # CK-style sliced-K schedule, depth-3:
+                    #   prologue issues slices 0 and 1
+                    #   per slice kg, issue kg+2 into round-robin slot
+                    #   partial-wait leaving only the newest slice in flight
+                    #   consume kg while kg+2 streams into a distinct slot
+                    #
+                    # The wait value is exactly one slice prefetch worth of
+                    # VMEM calls. This is the same correctness invariant as the
+                    # streaming beat-CK kernel: partial waits are FIFO-count
+                    # fences, so the slot map must be pure kg % 3. The live set
+                    # {kg, kg+1, kg+2} then occupies three distinct slots.
+                    ST32_n = [b.zero_vec_f32(16) for _ in range(QK_N_TILES)]
+                    k_groups = HD // K_SLICE_HD
+                    k_steps_per_group = K_SLICE_HD // QK_K_STEP
+                    def _kslot(group_idx: int) -> int:
+                        if K_SLICED_LDSSEQ and k_groups == 4:
+                            return (1, 2, 0, 1)[group_idx]
+                        if K_SLICED_LDSSEQ and k_groups == 2:
+                            return (1, 2)[group_idx]
+                        return group_idx % K_SLICE_SLOTS
+
+                    _issue_k_slice_load_runtime(kv_tile_iv, 0, _kslot(0))
+                    if k_groups > 1:
+                        _issue_k_slice_load_runtime(kv_tile_iv, 1, _kslot(1))
+                    for kg in range(k_groups):
+                        slot = _kslot(kg)
+                        if kg + 2 < k_groups:
+                            next_slot = _kslot(kg + 2)
+                            if K_SLICED_LDSSEQ and kg > 0 and next_slot == _kslot(kg - 1):
+                                # CK's LdsSeq can reuse the slice consumed by the
+                                # previous kg. Drain LDS reads before overwriting
+                                # that slot; the VMEM prefetch still overlaps the
+                                # current slice's compute after the partial wait.
+                                b.s_waitcnt(lgkmcnt=0)
+                                b.s_barrier_bare()
+                            _issue_k_slice_load_runtime(
+                                kv_tile_iv, kg + 2, next_slot
+                            )
+                        # Leave one newer slice's VMEM stream in flight whenever
+                        # such a slice exists; fully drain for the final slice.
+                        if kg + 1 < k_groups:
+                            b.s_waitcnt(vmcnt=K_SLICE_CALLS_PER_TILE, lgkmcnt=0)
+                        else:
+                            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+                        b.s_barrier_bare()
+                        if USE_IGLP_OPT:
+                            b.sched_barrier(0)
+                        for n in range(QK_N_TILES):
+                            k_row_t = b.add(b.const_i32(n * 32), lane_col32)
+                            acc32 = ST32_n[n]
+                            for kk in range(k_steps_per_group):
+                                k = kg * k_steps_per_group + kk
+                                k_off_t = b.add(
+                                    b.const_i32(kk * QK_K_STEP),
+                                    b.mul(lane_half32, b.const_i32(TQK_HALF_STRIDE)),
+                                )
+                                A_k_t = b.smem_load_vN(
+                                    K_lds,
+                                    b.const_i32(slot),
+                                    k_row_t,
+                                    k_off_t,
+                                    dtype=dtype,
+                                    n=TQK_FRAG,
+                                )
+                                B_q_t = Q32_reg[k]
+                                acc32 = _mfma_32x32x8(b, dtype, A_k_t, B_q_t, acc32)
+                            ST32_n[n] = acc32
+                else:
+                    ST32_n = [None] * QK_N_TILES
+                    for n in range(QK_N_TILES):
+                        acc32 = b.zero_vec_f32(16)
+                        # K row becomes the M dimension of the transposed score
+                        # tile. K_lds layout is [T, HD], so A is K_lds[row, k].
+                        k_row_t = b.add(b.const_i32(n * 32), lane_col32)
+                        for k in range(QK_K_ITERS):
+                            k_off_t = b.add(
+                                b.const_i32(k * QK_K_STEP),
+                                b.mul(lane_half32, b.const_i32(TQK_HALF_STRIDE)),
+                            )
+                            A_k_t = _read_k8_mfma_operand(
+                                cur_buf, k_row_t, k_off_t, frag=TQK_FRAG
+                            )
+                            B_q_t = Q32_reg[k]
+                            if USE_MFMA_32X32X8:
+                                acc32 = _mfma_32x32x8(b, dtype, A_k_t, B_q_t, acc32)
+                            else:
+                                acc32 = _mfma_32x32x16(b, dtype, A_k_t, B_q_t, acc32)
+                        ST32_n[n] = acc32
                 if GROUPED_KV2:
                     # Second score tile for the opt-in grouped online-softmax
                     # experiment. For an odd tile count, safe_tile1 duplicates
@@ -2656,11 +3952,17 @@ def build_unified_attention_2d_tiled(
                         k_row_t = b.add(b.const_i32(n * 32), lane_col32)
                         for k in range(QK_K_ITERS):
                             k_off_t = b.add(
-                                b.const_i32(k * 16), b.mul(lane_half32, b.const_i32(8))
+                                b.const_i32(k * QK_K_STEP),
+                                b.mul(lane_half32, b.const_i32(TQK_HALF_STRIDE)),
                             )
-                            A_k_t = _read_k8_mfma_operand(nxt_buf, k_row_t, k_off_t)
+                            A_k_t = _read_k8_mfma_operand(
+                                nxt_buf, k_row_t, k_off_t, frag=TQK_FRAG
+                            )
                             B_q_t = Q32_reg[k]
-                            acc32 = _mfma_32x32x16(b, dtype, A_k_t, B_q_t, acc32)
+                            if USE_MFMA_32X32X8:
+                                acc32 = _mfma_32x32x8(b, dtype, A_k_t, B_q_t, acc32)
+                            else:
+                                acc32 = _mfma_32x32x16(b, dtype, A_k_t, B_q_t, acc32)
                         ST32_n_g1[n] = acc32
 
                 # Transposed softmax scaffold. ST32_n[n][reg] holds
@@ -2855,6 +4157,11 @@ def build_unified_attention_2d_tiled(
                 st_m_raw = b.fmax(m_vals[0], st_tile_max)
                 st_ok = b.fcmp("ogt", st_m_raw, neg_inf)
                 st_m_new = b.select(st_ok, st_m_raw, zero_f)
+                cfvst_payload = (
+                    _cfvst_load_v_regs(kv_tile_iv)
+                    if TRANSPOSED_V_STORE and _CFV_STORE_SPLIT
+                    else None
+                )
                 PT32_groups = [
                     [[None] * 16 for _ in range(QK_N_TILES)]
                     for _ in range(len(st_groups))
@@ -2873,6 +4180,8 @@ def build_unified_attention_2d_tiled(
                     PT32_n_g1 = PT32_groups[1]
                 st_l_remote = b.warp_shuffle_xor(st_l_local, 32)
                 st_l_sum = b.fadd(st_l_local, st_l_remote)
+                if TRANSPOSED_V_STORE and _CFV_STORE_SPLIT:
+                    _cfvst_store_v_regs(cfvst_payload)
                 # The transposed orientation has one softmax state per query
                 # column/lane, shared across all 16 output-dimension regs.
                 # ``m_new`` / ``l_local`` are intentionally broadcast across
@@ -2896,79 +4205,88 @@ def build_unified_attention_2d_tiled(
                 # and the running L per query column.
                 S32_n = None
             else:
-                # Non-transposed 32x32 QK: ``S32_n[n] = vec_f32(16)``,
-                # one 32x32x16 C tile per warp. Downstream softmax/PV
-                # consume this via the non-transposed mask block below.
+                # Non-transposed 32x32 QK (S = Q @ K^T): ``S32_n[n] =
+                # vec_f32(16)``, one 32x32 C tile per warp.  Downstream
+                # softmax/PV consume this via the non-transposed mask block.
+                #
+                # B (K^T) per lane:
+                #   32x32x8 : <4 x half>, col = n*32 + lane%32,
+                #             K = k*8  + (lane//32)*4 + [0..3]
+                #   32x32x16: <8 x half>, K = k*16 + (lane//32)*8 + [0..7]
+                B32_FRAG = 4 if USE_MFMA_32X32X8 else 8
+                B32_HALF_STRIDE = 4 if USE_MFMA_32X32X8 else 8
                 S32_n = [None] * QK_N_TILES
                 for n in range(QK_N_TILES):
                     acc32 = b.zero_vec_f32(16)
                     k_row32 = b.add(b.const_i32(n * 32), lane_col32)
                     for k in range(QK_K_ITERS):
                         kc_off32 = b.add(
-                            b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8))
+                            b.const_i32(k * QK_K_STEP),
+                            b.mul(lane_half, b.const_i32(B32_HALF_STRIDE)),
                         )
                         B32_v = b.smem_load_vN(
-                            K_lds, cur_buf, k_row32, kc_off32, dtype=dtype, n=8
+                            K_lds, cur_buf, k_row32, kc_off32, dtype=dtype, n=B32_FRAG
                         )
-                        acc32 = _mfma_32x32x16(b, dtype, Q32_reg[k], B32_v, acc32)
+                        if USE_MFMA_32X32X8:
+                            acc32 = _mfma_32x32x8(b, dtype, Q32_reg[k], B32_v, acc32)
+                        else:
+                            acc32 = _mfma_32x32x16(b, dtype, Q32_reg[k], B32_v, acc32)
                     S32_n[n] = acc32
         else:
             S_n = [[None] * QK_N_TILES for _ in range(M_ATOMS_PER_WARP)]
             for n in range(QK_N_TILES):
                 acc_per_atom = [b.zero_vec_f32(4) for _ in range(M_ATOMS_PER_WARP)]
                 for k in range(QK_K_ITERS):
-                    kc_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
+                    # 16x16x16 B (K^T) operand per lane: col = n*16 + lane%16,
+                    # K = k*16 + lane_rg*4 + 0..3 (<4 x dtype>). K-step is 16 on
+                    # gfx942 (no wide-K atom), so the per-lane column base is
+                    # lane_rg*4 and each load is <4 x dtype>.
+                    kc_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
                     k_row = b.add(b.const_i32(n * 16), lane_col)
-                    if K_FP8_MFMA:
-                        # K_lds holds raw fp8 bytes. Dequant in register to
-                        # bf16 (bit-identical to what the bf16 K_lds path
-                        # would have written) then run the standard bf16
-                        # MFMA.
-                        #
-                        # Uses gfx950's fused ``v_cvt_scalef32_pk_f32_fp8``
-                        # which folds the per-element scale multiply into
-                        # the cvt: 2 fused scaled cvts + 2 packed bf16
-                        # cvts = 4 instructions per 8-element load (vs the
-                        # old 2 cvt_pk_f32_fp8 + 8 fmul + 2 cvt_pk_bf16_f32
-                        # = 12 instructions). Triton uses the same fused
-                        # intrinsic in its long-prefill FP8 kernel.
-                        B_fp8 = b.smem_load_vN(
-                            K_lds,
-                            cur_buf,
-                            k_row,
-                            kc_off,
-                            dtype=FP8E4M3,
-                            n=8,
+                    B_v = b.smem_load_vN(
+                        K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=4
+                    )
+                    for atom in range(M_ATOMS_PER_WARP):
+                        acc_per_atom[atom] = _mfma_16x16x16(
+                            b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
                         )
-                        # See FP8 dequant note in dequant_fp8x8_to_dtype:
-                        # cvt_scalef32_pk_f32_fp8 uses E8M0-only scale,
-                        # silently truncating non-pow2 scales. The helper uses
-                        # the unfused cvt_pk_f32_fp8 + explicit f32 multiply.
-                        B_v = dequant_fp8x8_to_dtype(b, B_fp8, k_scale_p, dtype)
-                        for atom in range(M_ATOMS_PER_WARP):
-                            acc_per_atom[atom] = _mfma_16x16x32(
-                                b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
-                            )
-                    else:
-                        B_v = b.smem_load_vN(
-                            K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=8
-                        )
-                        for atom in range(M_ATOMS_PER_WARP):
-                            acc_per_atom[atom] = _mfma_16x16x32(
-                                b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
-                            )
                 for atom in range(M_ATOMS_PER_WARP):
                     S_n[atom][n] = acc_per_atom[atom]
 
         # Now that QK no longer needs VMEM, start current V first and next K
         # second. This ordering is what lets the partial wait before PV leave
         # only next K pending.
-        if GROUPED_KV2:
+        if K_SINGLE_BUF:
+            # OCCUPANCY lever: K is single-buffered, so next-K reuses the SAME
+            # slot QK just read. The next-K async DMA would race the tail of
+            # this iteration's QK K-reads (lgkmcnt accounting on
+            # raw_ptr_buffer_load_lds) and silently corrupt the tile. Drain ALL
+            # outstanding LDS reads + barrier BEFORE issuing the next-K DMA into
+            # the shared slot; the DMA then overlaps softmax + PV + epilogue, and
+            # the next iter's start-of-loop ``s_waitcnt(vmcnt=0,lgkmcnt=0); sync``
+            # waits for it before QK. V is also single-buffered: issue it after
+            # the same drain so its store does not race the K-read drain.
+            b.s_waitcnt(lgkmcnt=0)
+            b.sync()
+            if TRANSPOSED_V_STORE and _CFV_STORE_SPLIT:
+                # Store-path cfv split its V load/store across the transposed
+                # softmax work above, so only next-K remains to issue here.
+                pass
+            elif not EARLY_V_SCHEDULE:
+                # When EARLY_V is set, V was already issued at iter start; do not
+                # re-issue (it would double-load and race the in-flight V).
+                _issue_v(kv_tile_iv, cur_buf)
+            _issue_k(safe_next_tile, nxt_buf)
+        elif GROUPED_KV2:
             _issue_v(kv_tile_iv, cur_buf)
             # Both K buffers have been consumed by QK0/QK1. Refill cur_buf
             # with the next group's first K tile and carry cur_buf forward.
             _issue_k(safe_next_tile, cur_buf)
         elif EARLY_V_SCHEDULE:
+            _issue_k(safe_next_tile, nxt_buf)
+        elif TRANSPOSED_V_STORE and _CFV_STORE_SPLIT:
+            # Store-path cfv has already published V_lds during the transposed
+            # softmax block. Keep the next-K prefetch schedule unchanged.
             _issue_k(safe_next_tile, nxt_buf)
         else:
             _issue_v(kv_tile_iv, cur_buf)
@@ -3190,6 +4508,27 @@ def build_unified_attention_2d_tiled(
             # below ensures PV's V_lds reads see the just-loaded V bytes.
             b.s_waitcnt(vmcnt=0, lgkmcnt=0)
             b.sync()
+        elif TRANSPOSED_V_STORE and _CFV_STORE_SPLIT and not K_SLICED_ACTIVE:
+            # Split cfvst has already loaded/stored current V and then issued
+            # next K. Drain only the older current-V VMEM/LDS work and leave the
+            # just-issued next-K async DMA in flight across PV, matching CK Tile's
+            # partial wait + bare barrier pattern.
+            b.s_waitcnt(vmcnt=kv_calls_per_tile, lgkmcnt=kv_calls_per_tile)
+            b.s_barrier_bare()
+        elif TRANSPOSED_V_STORE and _CFV_STORE_SPLIT:
+            # Sliced-K v1 does not yet prefetch next K after softmax, so there is
+            # no younger VMEM work to preserve. Fully publish current V.
+            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+            b.sync()
+        elif TRANSPOSED_V:
+            # Transposed-V sync loader: ``global_load`` (vmcnt) followed by
+            # ``smem_store`` (lgkmcnt). The next-K async DMA is still pending on
+            # its own counters, but the partial-count trick below assumes an
+            # async-V deposit; the transpose fill uses a different instruction
+            # mix, so drain BOTH fully + barrier to publish the transposed V_lds
+            # before any PV A-operand read.
+            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+            b.sync()
         else:
             # Wait for current V while leaving next K pending. Current V was
             # issued before next K, so `kv_calls_per_tile` pending operations are
@@ -3233,6 +4572,96 @@ def build_unified_attention_2d_tiled(
 
                 def _apply_transposed_pv_regs(acc32: Value, n: int, p_regs) -> Value:
                     v_dim32 = b.add(b.const_i32(n * 32), lane_col32)
+                    if USE_MFMA_32X32X8:
+                        # gfx942-legal K=8 transposed PV: O^T = V^T @ P^T,
+                        # P^T consumed DIRECTLY from registers (NO P_lds).
+                        #   A = V^T[M=d, K=kv-token] per lane (<4 x half>):
+                        #     M=d  = n*32 + lane%32 (== v_dim32)
+                        #     K    = k*8 + (lane/32)*4 + [0..3]
+                        #     V_lds is row-major [T, HD]; 4 distinct strided
+                        #     single-element reads (naive V -- Stream B's job
+                        #     to make conflict-free).
+                        #   B = P^T[K=kv-token, N=query] per lane (<4 x half>):
+                        #     K    = k*8 + (lane/32)*4 + [0..3]
+                        #     The probability for K-row r lives in
+                        #     ``p_regs[r//32][reg]`` of the lane whose 32-half
+                        #     owns row (r%32); cross-half rows are fetched with
+                        #     a single ``lane ^ 32`` exchange (the cheap reshape
+                        #     that beats the plain orientation's serializing
+                        #     C->A cross-lane reduction).
+                        for k in range(T // 8):
+                            # A = V^T[M=d, K=token], 4 tokens per lane:
+                            #   token = k*8 + (lane/32)*4 + [0..3]
+                            #   head-dim row = v_dim32 (n*32 + lane%32)
+                            if TRANSPOSED_V:
+                                # CK technique #1: V is stored K-contiguous in
+                                # ``V_lds[HD, T+pad]``, so those 4 tokens are
+                                # CONTIGUOUS along the inner (token) axis at the
+                                # lane's head-dim row ``v_dim32`` -> ONE wide
+                                # ``ds_read_b64`` (<4 x half>) replaces the 4
+                                # strided ``ds_read_u16``. Bank-spread because
+                                # adjacent lanes (varying ``v_dim32``) land in
+                                # ``V_T_PAD``-rotated rows. The token base is the
+                                # SAME ``k*8 + lane_half32*4`` the naive feed used,
+                                # and the n=4 contiguous read covers tokens
+                                # base..base+3 -> element-for-element identical to
+                                # the naive A operand (same MFMA K mapping).
+                                tok_base = b.add(
+                                    b.const_i32(k * 8),
+                                    b.mul(lane_half32, b.const_i32(4)),
+                                )
+                                if _CFV_SCALAR_READ:
+                                    # ISOLATION: read the SAME [HD,T+pad] cfv
+                                    # layout but via 4 scalar n=1 reads (same
+                                    # values/order as the n=4 wide read). If this
+                                    # is CORRECT while n=4 is WRONG, the bug is the
+                                    # n=4 ds_read_b64 lowering over the padded
+                                    # row; if it still fails, it's the
+                                    # layout/MFMA mapping, not the read width.
+                                    _av = []
+                                    for _kk in range(4):
+                                        _t = b.add(tok_base, b.const_i32(_kk))
+                                        _v1 = _v_t_load(v_dim32, _t, n=1)
+                                        _av.append(b.vec_extract(_v1, 0))
+                                    A_v_t = b.vec_pack(_av, dtype)
+                                else:
+                                    A_v_t = _v_t_load(v_dim32, tok_base, n=4)
+                            else:
+                                a_v_elems = []
+                                for kk in range(4):
+                                    v_row = b.add(
+                                        b.const_i32(k * 8 + kk),
+                                        b.mul(lane_half32, b.const_i32(4)),
+                                    )
+                                    v1 = b.smem_load_vN(
+                                        V_lds, v_buf, v_row, v_dim32, dtype=dtype, n=1
+                                    )
+                                    a_v_elems.append(b.vec_extract(v1, 0))
+                                A_v_t = b.vec_pack(a_v_elems, dtype)
+                            b_p_elems = []
+                            for kk in range(4):
+                                # Low half wants K-row k0; high half wants k1.
+                                k0 = k * 8 + kk
+                                k1 = k * 8 + 4 + kk
+                                p_tile0 = k0 // 32
+                                p_tile1 = k1 // 32
+                                row0 = k0 % 32
+                                row1 = k1 % 32
+                                owner_half0 = (row0 % 8) // 4
+                                owner_half1 = (row1 % 8) // 4
+                                reg0 = (row0 // 8) * 4 + (row0 % 4)
+                                reg1 = (row1 // 8) * 4 + (row1 % 4)
+                                p0 = p_regs[p_tile0][reg0]
+                                p1 = p_regs[p_tile1][reg1]
+                                if owner_half0 == 1:
+                                    p0 = b.warp_shuffle_xor(p0, 32)
+                                if owner_half1 == 0:
+                                    p1 = b.warp_shuffle_xor(p1, 32)
+                                p_val = b.select(use_hi, p1, p0)
+                                b_p_elems.append(b.cast_f32_to(p_val, dtype))
+                            B_p_t = b.vec_pack(b_p_elems, dtype)
+                            acc32 = _mfma_32x32x8(b, dtype, A_v_t, B_p_t, acc32)
+                        return acc32
                     for k in range(T // 16):
                         if TRANSPOSED_HALF_LOCAL_PV:
                             # Half-local K orientation. Each 32-lane half
@@ -3339,10 +4768,55 @@ def build_unified_attention_2d_tiled(
                     b.sync()
                     for n in range(ACC_N_TILES):
                         new_acc[n] = _apply_transposed_pv_regs(new_acc[n], n, PT32_n_g1)
+            elif USE_MFMA_32X32X8:
+                # gfx942 32x32x8 PV (O = P @ V), P_lds bridge + NAIVE strided V.
+                #
+                # A = P[M,K] per lane (<4 x half>):
+                #   row = wave_row_base + lane%32
+                #   k   = k_iter*8 + (lane/32)*4 + [0..3]
+                #   P_lds is row-major [BLOCK_M, T] -> one contiguous <4 x half>.
+                # B = V[K,N] per lane (<4 x half>):
+                #   col = n_tile*32 + lane%32
+                #   k   = k_iter*8 + (lane/32)*4 + [0..3]
+                #   V_lds is row-major [T, HD]. Each of the 4 K rows is a
+                #   DISTINCT V_lds row at the SAME column -> 4 strided single-
+                #   element reads (``_v_load1``). This reproduces the 32x32x8 B
+                #   distribution without a transpose read; it carries today's
+                #   bank conflicts (a conflict-free V feed is Stream B's job).
+                v_buf = b.const_i32(0)
+                p_row32 = b.add(wave_row_base, lane_col32)
+                for n in range(ACC_N_TILES):
+                    scaled = []
+                    old_acc = _acc_get(n, 0)
+                    for reg in range(REGS_PER_LANE):
+                        e = b.vec_extract(old_acc, reg)
+                        scaled.append(b.fmul(e, alpha_regs[reg]))
+                    acc32 = b.vec_pack(scaled, F32)
+                    v_col32 = b.add(b.const_i32(n * 32), lane_col32)
+                    for k in range(PV_K_ITERS):  # T // 8
+                        p_off32 = b.add(
+                            b.const_i32(k * 8), b.mul(lane_half32, b.const_i32(4))
+                        )
+                        A_p32 = b.smem_load_vN(
+                            P_lds, p_row32, p_off32, dtype=dtype, n=4
+                        )
+                        # Naive strided V B-operand: 4 distinct K rows.
+                        k_row_base = b.add(
+                            b.const_i32(k * 8), b.mul(lane_half32, b.const_i32(4))
+                        )
+                        B_v32 = b.zero_vec(dtype, 4)
+                        for j in range(4):
+                            v_row = b.add(k_row_base, b.const_i32(j))
+                            elem = b.vec_extract(
+                                _v_load1(v_buf, v_row, v_col32), 0
+                            )
+                            B_v32 = b.vec_insert(B_v32, elem, j)
+                        acc32 = _mfma_32x32x8(b, dtype, A_p32, B_v32, acc32)
+                    new_acc[n] = acc32
             else:
-                # Transitional 32x32 PV consumer. This still reads P from the
-                # logical P_lds bridge written above, but it consumes and produces
-                # the new vec_f32(16) accumulator state with M32N32K16 MFMA.
+                # Transitional 32x32x16 PV consumer (gfx950-only ds_read_tr16
+                # transpose read; unreachable on gfx942 -- use_mfma_32x32 is
+                # rejected in the spec). Kept for structural parity with gfx950.
                 #
                 # PV32 operand layouts:
                 #   A = P[M,K] per lane:
@@ -3351,11 +4825,6 @@ def build_unified_attention_2d_tiled(
                 #   B = V[K,N] per lane:
                 #       k   = k_iter*16 + (lane/32)*8 + [0..7]
                 #       col = n_tile*32 + lane%32
-                #
-                # V is intentionally loaded with scalar strided LDS loads for this
-                # milestone. Once parity is clean, replace with CK Tile's 32x32
-                # swizzled/transposed LDS access so this path is fast as well as
-                # structurally correct.
                 v_buf = b.const_i32(0)
                 for n in range(ACC_N_TILES):
                     scaled = []
@@ -3372,13 +4841,6 @@ def build_unified_attention_2d_tiled(
                         A_p32 = b.smem_load_vN(
                             P_lds, p_row32, p_off32, dtype=dtype, n=8
                         )
-                        # M32N32K16 B operand from row-major V_lds[T, HD].
-                        # One 32-column MFMA tile is two 16-column transpose-read
-                        # groups. For each lane:
-                        #   - lane_col32 % 32 is the output column
-                        #   - lane_half32 selects K rows 0..7 or 8..15
-                        #   - ds_read_tr16 gives 4 consecutive K rows, so two
-                        #     reads compose the required <8 x dtype> B operand.
                         col_group16 = b.mul(
                             b.div(lane_col32, b.const_i32(16)), b.const_i32(16)
                         )
@@ -3421,47 +4883,55 @@ def build_unified_attention_2d_tiled(
                     scaled_comps.append(b.fmul(e, alpha_regs[reg]))
                 acc_per_atom.append(b.vec_pack(scaled_comps, F32))
 
-            # PV's K-direction TransposeLDSLayout row/col addresses are
-            # produced by ``pv_tr_reader`` -- :meth:`row(k_offset, read)`
-            # computes ``(lane/16)*K_L + read*4 + (lane/4)%4 + k_offset``
-            # for one ds_read_b64_tr_b16. ``tr_col_lane`` is the cached
-            # ``(lane%4)*4`` column component.
-            n_col_base = b.add(b.mul(b.const_i32(n), b.const_i32(16)), tr_col_lane)
+            # gfx942 has no ds_read_b64_tr_b16, so the PV ``B`` operand is built
+            # from ordinary strided LDS loads that reproduce the EXACT per-lane
+            # layout ds_read_tr16_b64 would produce for a 16x16x16 atom over the
+            # V_lds tile at (row base = k*16, col base = n*16):
+            #   lane l = 16*k_chunk + n_col  (k_chunk = lane/16, n_col = lane%16)
+            #   B[j] = V_lds[v_buf, k*16 + k_chunk*4 + j, n*16 + n_col], j in 0..3
+            # k_chunk = lane_rg, n_col = lane_col. Each of the 4 elements is a
+            # different LDS row (stride HD), so this is 4 strided ds_read_u16
+            # loads -- the same B operand the transpose read delivers, without
+            # the gfx950-only transpose intrinsic. (See helpers/mfma_attention.py
+            # 786-823 for the dense-kernel B-operand index precedent.)
+            v_n_col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col)
+            v_k_chunk_base = b.mul(lane_rg, b.const_i32(4))
+
+            def _strided_v_b_operand(k_iter: int) -> Value:
+                """<4 x dtype> PV B operand for K-iter ``k_iter`` via strided LDS.
+
+                Each of the 4 elements is a distinct V row. ``_v_load1`` applies
+                the bank-deconflict slot mapping when ``HIPDNN_GFX942_SWIZZLE_VLDS``
+                is on (foldable shift/and on ``v_row``); off, it is the natural
+                ``V_lds[v_buf, v_row, v_n_col]`` read.
+                """
+                bv = b.zero_vec(dtype, 4)
+                for j in range(4):
+                    v_row = b.add(
+                        b.const_i32(k_iter * 16 + j),
+                        v_k_chunk_base,
+                    )
+                    elem = b.vec_extract(_v_load1(v_buf, v_row, v_n_col), 0)
+                    bv = b.vec_insert(bv, elem, j)
+                return bv
 
             # V is single-buffered; the V_lds buffer index is always 0.
             v_buf = b.const_i32(0)
             for k in range(PV_K_ITERS):
-                if PV_K_STEP == 32:
-                    # K=32: P operand 8 halves, V via 2 ds_read_b64_tr_b16 reads.
+                if False:
+                    # gfx950-only wide-K (K=32) and native-fp8 PV paths are not
+                    # reachable on gfx942 (PV_K_STEP is always 16 and fp8 K/V is
+                    # rejected in the spec/builder); kept structurally for parity
+                    # with the gfx950 file but compiled out.
                     p_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
                     row_r0 = pv_tr_reader.row(b, k_offset=k * 32, read=0)
                     row_r1 = pv_tr_reader.row(b, k_offset=k * 32, read=1)
                     if PV_FP8_MFMA:
-                        # Native-fp8 PV path with stripe LDS layout.
-                        # Two ds_read_b64_tr_b8 calls compose the MFMA B
-                        # operand (each call gives K=32 x N=8 lane-tile;
-                        # second call targets cols 8..15 of the stripe).
-                        # The result is then a per-lane select on
-                        # lane_col < 8 to assemble the K=32 x N=16
-                        # operand. vaddr per lane has the (g, l/2) form
-                        # validated by the HIP probe.
                         stripe_const = b.const_i32(n)
-                        # `lane_rg = lane/16` already exists; we re-use it
-                        # as the K-chunk group selector.
-                        # The b8 transpose-read takes a single (smem,
-                        # indices) tuple and emits the inline-asm op; per
-                        # lane the address is computed from the indices
-                        # the same way smem_load_vN does, so we point at
-                        # V_lds[buf=0, stripe=n, k_start=lane_rg*8 +
-                        # (lane_col/2), col=0] for read0, and col=8 for
-                        # read1.
                         k_row_per_lane = b.add(
                             b.mul(lane_rg, b.const_i32(8)),
                             b.div(lane_col, b.const_i32(2)),
                         )
-                        # The actual K row the lane references is
-                        # (k_outer * 32) + (lane_rg * 8 + lane_col/2).
-                        # We bake k_outer into the literal stride.
                         k_row_for_iter = b.add(
                             b.const_i32(k * 32),
                             k_row_per_lane,
@@ -3537,14 +5007,13 @@ def build_unified_attention_2d_tiled(
                                 b, dtype, A_p, B_v, acc_per_atom[atom]
                             )
                 else:
-                    # K=16: single ds_read_b64_tr_b16 returns the full B operand.
-                    if PV_FP8_MFMA:
-                        raise NotImplementedError("native fp8 PV requires PV_K_STEP=32")
+                    # K=16 (gfx942 narrow atom): build the full <4 x dtype> PV B
+                    # operand from 4 strided LDS loads instead of a single
+                    # gfx950-only ds_read_b64_tr_b16. ``_strided_v_b_operand``
+                    # reproduces the transpose read's exact per-lane (row, col)
+                    # mapping for this 16x16x16 atom.
                     p_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
-                    row_lane = pv_tr_reader.row(b, k_offset=k * 16, read=0)
-                    B_v = b.ds_read_tr16_b64(
-                        V_lds, v_buf, row_lane, n_col_base, dtype=dtype
-                    )
+                    B_v = _strided_v_b_operand(k)
                     for atom in range(M_ATOMS_PER_WARP):
                         if REGISTER_PV:
                             A_p = _pack_p_a16(

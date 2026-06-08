@@ -1,25 +1,31 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Tiled MFMA implementation of AITER's split-KV ``kernel_unified_attention_3d``.
+"""gfx942 (CDNA3) narrow-atom port of the tiled split-KV 3D attention kernel.
 
-The 3D path runs many CTAs per (q-block, kv-head), each one covering a
-segment of the KV sequence. After the segment kernel, ``reduce_segments``
-combines the per-segment partial m / l / acc into the final attention
-output. AITER selects this path whenever
-``use_2d_kernel == False``: i.e. for long sequences with no sliding window
-when 2D grid is too small for the device.
+This is the gfx942 sibling of ``instances/gfx950/attention_tiled_3d.py``. The
+*structure* (split-KV segment kernel + online-softmax reduce) is identical to
+the gfx950 version; only the three gfx950-only ISA spots are swapped for the
+gfx942-legal forms that the 2D gfx942 kernel
+(``instances/gfx942_mi300/attention_tiled_2d.py``) already validates:
 
-This module re-uses every MFMA / async DMA / softmax helper from the
-2D tiled kernel and changes only what's structural to the 3D variant:
+  * **QK MFMA**: gfx942 has no wide-K ``mfma_f32_16x16x32`` f16/bf16 atom, so
+    the QK matmul uses the narrow ``16x16x16`` atom with a K-step of 16
+    (``QK_K_ITERS = HD // 16``). Both A (Q) and B (K^T) operands are loaded as
+    ``<4 x dtype>`` instead of ``<8 x dtype>``.
+  * **PV MFMA**: the gfx950 version reads the V B-operand with
+    ``ds_read_tr16_b64`` (an ``ds_read_*_tr_*`` transpose read absent on
+    gfx942) and runs a wide-K PV. gfx942 builds the V B-operand from ordinary
+    strided LDS loads (``_strided_v_b_operand``, reproducing the exact per-lane
+    (row, col) the transpose read delivers for a ``16x16x16`` atom) and runs the
+    narrow ``16x16x16`` PV with a K-step of 16 (``PV_K_ITERS = T // 16``).
+  * **FP8 K/V dequant**: uses the same ``cvt_pk_f32_fp8x4`` packed-cvt the
+    gfx942 2D kernel uses (gfx942-legal), via ``dequant_fp8x8_to_dtype``.
 
-  - Grid is ``(total_num_q_blocks, num_kv_heads, NUM_SEGMENTS)``.
-  - ``tile_start..tile_end`` is bounded by the segment range, not the full
-    sequence.
-  - Outputs are written to a workspace ``segm_output[total_q, num_qh,
-    num_segments, head_size]`` plus ``segm_max[..., num_segments]`` and
-    ``segm_expsum[..., num_segments]`` (all fp32).
-  - The final ``acc /= L`` and fp16 cast happen in the reduce kernel.
+The reduce kernel is pure f32 load / exp2 / store (no MFMA, no transpose read),
+so it is arch-neutral and is a byte-for-byte port of the gfx950 reduce kernel.
+
+See the gfx950 module docstring for the split-KV grid / workspace layout.
 """
 
 from __future__ import annotations
@@ -47,45 +53,31 @@ from ...helpers.attention import (
     binary_search_seq_idx as _binary_search_seq_idx_helper,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype as _mfma_16x16x16,
-    mfma_16x16x32_for_dtype as _mfma_16x16x32,
     warp_xor_reduce_max as _warp_xor_reduce_max,
     warp_xor_reduce_sum as _warp_xor_reduce_sum,
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
 from ...helpers.distribution import make_static_tile_distribution
-from ...helpers.layouts import TransposeLdsReader
-from ...helpers.transforms import TensorDescriptor, indirect, unmerge
+from ...helpers.transforms import TensorDescriptor, embed, indirect, unmerge
 
 
 MFMA_M = 16
 MFMA_N = 16
 
 
-# CK-Tile C-accumulator warp distribution for the 16x16x16 MFMA atom. This
-# segment kernel is single-warp (lane == tid), and every accumulator output
-# row decode it does is the same ``row = (lane // 16) * 4 + reg`` mapping that
-# CK Tile's ``CWarpDstrEncoding`` (``warp_gemm_attribute_mfma.hpp``) expresses
-# as a ``tile_distribution_encoding``: for one wavefront the lane splits as
-# ``(m_blk, n) = (lane // 16, lane % 16)`` and the per-lane ``<4 x f32>``
-# accumulator slot ``reg`` is the inner M Y dim (``kCM1PerLane = 4``), so
-# ``calculate_x`` returns ``row = m_blk * 4 + reg`` (and ``col = n``). Driving
-# the row decode through ``calculate_x`` replaces the open-coded ``mul``/``add``
-# lane math with the tile-distribution algebra (Phase-C adoption; the C layout
-# is dtype-independent so the f16 atom drives it for fp16 and bf16).
+# CK-Tile C-accumulator warp distribution for the 16x16x16 MFMA atom (identical
+# to the gfx950 file; the C layout is dtype- and arch-independent so the f16
+# atom drives it for both fp16 and bf16). This segment kernel is single-warp
+# (lane == tid); the per-lane ``<4 x f32>`` accumulator row decode is
+# ``row = (lane // 16) * 4 + reg`` expressed through ``calculate_x``.
 _C16_DIST = make_static_tile_distribution(
     make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16())
 )
 
 
 def _mfma_16x16_c_row(b, lane, reg: int):
-    """MFMA-local output row for a ``16x16`` C element ``reg`` (0..3).
-
-    Drives CK Tile's C-warp ``TileDistribution.calculate_x`` instead of the
-    hand-rolled ``row = (lane // 16) * 4 + reg`` lane arithmetic. The 16x16 C
-    layout has a single inner M Y dim of length 4 (``kCM0PerLane = 1``), so the
-    outer Y is always 0 and ``reg`` is the inner Y.
-    """
+    """MFMA-local output row for a ``16x16`` C element ``reg`` (0..3)."""
     if not (0 <= reg < 4):
         raise ValueError(f"mfma_16x16 reg must be 0..3, got {reg}")
     m_blk = b.div(lane, b.const_i32(16))
@@ -98,10 +90,10 @@ def _mfma_16x16_c_row(b, lane, reg: int):
 
 @dataclass(frozen=True)
 class UnifiedAttention3DTiledSpec:
-    """Spec for the split-KV 3D segment kernel.
+    """Spec for the split-KV 3D segment kernel (gfx942 narrow-atom variant).
 
-    Mirrors :class:`UnifiedAttention2DTiledSpec` and adds the segment-count
-    knob exactly as AITER's ``select_3d_config`` derives it.
+    Field-compatible with the gfx950 ``UnifiedAttention3DTiledSpec`` so the
+    dispatcher and harnesses can construct it identically.
     """
 
     head_size: int
@@ -116,22 +108,15 @@ class UnifiedAttention3DTiledSpec:
     use_alibi: bool = False
     use_qq_bias: bool = False
     num_seqs: int = 0
-    # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). Attention is
-    # register-pressure-bound; setting this to 2 or 3 tightens the
-    # VGPR allocation in exchange for higher occupancy. ``None`` keeps
-    # the LLVM heuristic.
     waves_per_eu: Optional[int] = None
-    # FP8 K/V cache (mirrors UnifiedAttention2DTiledSpec.kv_storage_dtype).
-    # See that spec's docstring for the semantics.
     kv_storage_dtype: Optional[str] = None
-    # ``tile_size_override`` / ``use_invariant_hoist`` / ``use_wide_kv_load``
-    # are accepted for signature parity with the shared dispatch spec builder
-    # (``_tiled_3d_spec_from_problem``) and the gfx942 spec. They select gfx942
-    # narrow-atom 3D optimizations; the corresponding ``_gfx942_3d_*`` helpers
-    # return None/False on gfx950, so the gfx950 segment kernel does not key on
-    # them.
     tile_size_override: Optional[int] = None
     use_invariant_hoist: bool = False
+    # Wide KV feed: replace the gfx942 1-DWORD (4-byte) async buffer_load_lds DMA
+    # with wide 128-bit (8-half) synchronous global->register->LDS loads (the same
+    # vehicle the in-kernel fp8 path and the 2D cfvst V feed use). 4x fewer load
+    # instructions -> less VMEM issue pressure on the memory-bound decode segment.
+    # fp16/bf16 only (the fp8 path already loads wide). Signature-tracked.
     use_wide_kv_load: bool = False
 
     def __post_init__(self):
@@ -154,7 +139,7 @@ class UnifiedAttention3DTiledSpec:
 
     @property
     def tile_size(self) -> int:
-        return self.block_size
+        return self.tile_size_override if self.tile_size_override is not None else self.block_size
 
     @property
     def dtype_ir(self) -> Type:
@@ -170,7 +155,7 @@ class UnifiedAttention3DTiledSpec:
         from ...helpers.spec import kernel_name_join
 
         return kernel_name_join(
-            "ck_dsl_uattn3d_tiled",
+            "ck_dsl_uattn3d_tiled_gfx942",
             f"d{self.head_size}",
             f"b{self.block_size}",
             f"h{self.num_query_heads}kv{self.num_kv_heads}",
@@ -182,6 +167,8 @@ class UnifiedAttention3DTiledSpec:
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
+            "hoist" if self.use_invariant_hoist else "",
+            "wkv" if self.use_wide_kv_load else "",
         )
 
 
@@ -196,11 +183,10 @@ def supports_tiled_3d(
     use_fp8: bool,
     q_dtype,
     kv_storage_dtype: Optional[str] = None,
-    arch: str = "gfx950",
+    arch: str = "gfx942",
 ) -> Tuple[bool, str]:
-    # The tiled 3D segment kernel uses the same gfx950-only wide-K MFMA +
-    # LDS transpose-read primitives as the 2D kernel; reject other targets
-    # with a structured reason. See ``instances/common/attention_arch.py``.
+    # gfx942 narrow-atom path: the arch gate admits gfx942 via the
+    # ``_NARROW_TILED_2D_ARCHES`` branch (16x16x16 f16/bf16 atom, strided-V).
     from ..common.attention_arch import validate_tiled_attention_arch
 
     arch_ok, arch_reason = validate_tiled_attention_arch(arch)
@@ -223,9 +209,6 @@ def supports_tiled_3d(
             False,
             f"tiled 3D kernel only supports block_size in {{16,32,64}} (got {block_size})",
         )
-    # FP8 K/V cache: enabled via ``kv_storage_dtype="fp8e4m3"``. The
-    # ``use_fp8`` flag mirrors the upstream API; both must be set
-    # consistently.
     if kv_storage_dtype is not None and kv_storage_dtype != "fp8e4m3":
         return (
             False,
@@ -245,24 +228,13 @@ def supports_tiled_3d(
         )
     if 16 % num_queries_per_kv != 0:
         return False, "tiled 3D kernel needs num_queries_per_kv to divide BLOCK_M=16"
-    # ALiBi and QQ-bias are now supported by the tiled 3D kernel; FP8 K/V
-    # cache is gated above via kv_storage_dtype.
     return True, "supported"
 
 
 def build_unified_attention_3d_tiled(
-    spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx950"
+    spec: UnifiedAttention3DTiledSpec, *, arch: str = "gfx942"
 ) -> KernelDef:
-    """Emit the tiled split-KV 3D segment kernel.
-
-    Each CTA writes its segment's partial state into ``segm_output``,
-    ``segm_max``, and ``segm_expsum``. The companion reduce kernel
-    (:func:`build_unified_attention_reduce_tiled`) combines those into the
-    final output.
-    """
-    # Same gfx950-only wide-K MFMA + LDS transpose-read dependency as the 2D
-    # kernel; reject unsupported targets before emitting IR (comgr would
-    # otherwise abort with "LLVM ERROR: Cannot select intrinsic").
+    """Emit the gfx942 tiled split-KV 3D segment kernel (narrow 16x16x16)."""
     from ..common.attention_arch import require_tiled_attention_arch
 
     require_tiled_attention_arch(arch)
@@ -285,13 +257,14 @@ def build_unified_attention_3d_tiled(
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
     USE_QQ_BIAS = spec.use_qq_bias
-    # FP8 K/V cache: see ``UnifiedAttention2DTiledSpec.kv_storage_dtype``.
+    USE_INVARIANT_HOIST = spec.use_invariant_hoist
     KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
 
-    QK_K_STEP = 32
-    PV_K_STEP = 32 if T % 32 == 0 else 16
+    # gfx942 narrow atom: K-step is 16 for both QK and PV (no wide-K atom).
+    QK_K_STEP = 16
+    PV_K_STEP = 16
     QK_K_ITERS = HD // QK_K_STEP
     QK_N_TILES = T // MFMA_N
     PV_K_ITERS = T // PV_K_STEP
@@ -305,8 +278,6 @@ def build_unified_attention_3d_tiled(
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
     # ---------------- parameter declarations ----------------
-    # NOTE: the AITER 3D signature distinguishes between segm_* workspace
-    # pointers and the regular K/V/cu/seq_lens inputs. We mirror that order.
     segm_output_ptr = b.param(
         "segm_output_ptr",
         PtrType(F32, "global"),
@@ -385,17 +356,6 @@ def build_unified_attention_3d_tiled(
     # tiles_per_segment = cdiv(seq_len, NUM_SEG * T)
     tps = b.div(b.add(seq_len, b.const_i32(NUM_SEG * T - 1)), b.const_i32(NUM_SEG * T))
 
-    # If this segment is past seq_len, write a neutral entry to the workspace
-    # (m=-inf zeros the reduce contribution; acc=0 and l=0 keep everything
-    # finite even when other segments have finite m). AITER's Triton kernel
-    # achieves the same effect through `tl.store` masks.
-    # Coordinate transforms over the three workspace tensors:
-    #   segm_max     [total_q, num_qh, num_segments]
-    #   segm_expsum  [total_q, num_qh, num_segments]
-    #   segm_output  [total_q, num_qh, num_segments, head_size]
-    # plus Q / output which both share ``(token, head, dim)``. ``1<<30``
-    # is a compile-time upper bound on ``total_q`` so the row-major
-    # stride product matches the kernel's layout assumptions exactly.
     ml_desc = TensorDescriptor.naive(
         "segm_ml",
         lengths=[1 << 30, NUM_QH, NUM_SEG],
@@ -433,8 +393,6 @@ def build_unified_attention_3d_tiled(
             with b.scf_if(lane_writes_ml_e):
                 b.global_store(segm_max_ptr, ml_idx, neg_inf_local, align=4)
                 b.global_store(segm_expsum_ptr, ml_idx, zero_local, align=4)
-        # Zero acc for this segment across all (n, lane_col) entries
-        # belonging to this CTA. Each lane writes its slot.
         lane_col_e = b.mod(tid, b.const_i32(16))
         for n in range(PV_N_TILES):
             for reg in range(4):
@@ -461,15 +419,12 @@ def build_unified_attention_3d_tiled(
         b.ret()
 
     # ---------------- LDS layout ----------------
+    # gfx942 uses the natural row-major V_lds[2, T, HD]; the PV B-operand is
+    # built from strided LDS loads (no transpose-read intrinsic).
     Q_lds = b.smem_alloc(dtype, [BLOCK_M, HD], name_hint="Qlds")
     K_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Klds")
     V_lds = b.smem_alloc(dtype, [2, T, HD], name_hint="Vlds")
     P_lds = b.smem_alloc(dtype, [BLOCK_M, T], name_hint="Plds")
-
-    # CK Tile ``TransposeLDSLayout<M=16, K=PV_K_STEP, B=1>`` lane formulas.
-    # The 3D segment kernel is single-warp, so ``lane == tid``.
-    pv_tr_reader = TransposeLdsReader(K=PV_K_STEP, M=16).bind(b, tid)
-    tr_col_lane = pv_tr_reader.col
 
     neg_inf = b.const_f32(float("-inf"))
     zero_f = b.const_f32(0.0)
@@ -517,31 +472,50 @@ def build_unified_attention_3d_tiled(
     max_seq_prefix_len = b.select(b.cmp_lt(msp_raw, seq_len), msp_raw, seq_len)
     num_tiles = b.div(b.add(max_seq_prefix_len, b.const_i32(T - 1)), b.const_i32(T))
 
-    # Segment bounds: [seg_idx * tps, min((seg_idx+1)*tps, num_tiles))
     tile_start = b.mul(seg_idx, tps)
     tile_end_raw = b.mul(b.add(seg_idx, b.const_i32(1)), tps)
     tile_end = b.select(b.cmp_lt(tile_end_raw, num_tiles), tile_end_raw, num_tiles)
 
-    # The sliding-window path is not used by the AITER 3D selector
-    # (use_2d_kernel returns True whenever sliding_window > 0), but we still
-    # mirror the mask code in case a future selector wants it. We never
-    # restrict the segment range by sliding window: the per-cell mask below
-    # already handles that case.
     _ = sw_const  # documented; only used inside the per-cell mask code below
 
     # ---------------- online softmax registers ----------------
     lane_rg = b.div(tid, b.const_i32(16))
     lane_col = b.mod(tid, b.const_i32(16))
 
+    if USE_INVARIANT_HOIST:
+        hoist_row = []
+        hoist_qp_r = []
+        hoist_qh_r = []
+        hoist_row_ok = []
+        hoist_causal_lim = []
+        for reg in range(4):
+            row = _mfma_16x16_c_row(b, tid, reg)
+            qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
+            qh_r = b.add(
+                b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
+            )
+            row_ok = b.land(
+                b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+            )
+            hoist_row.append(row)
+            hoist_qp_r.append(qp_r)
+            hoist_qh_r.append(qh_r)
+            hoist_row_ok.append(row_ok)
+            hoist_causal_lim.append(b.add(context_len, qp_r))
+    else:
+        hoist_row = hoist_qp_r = hoist_qh_r = hoist_row_ok = hoist_causal_lim = None
+
     if USE_SINKS:
-        # Triton's 3D applies sinks only when segm_idx == 0.
         seg0 = b.cmp_eq(seg_idx, b.const_i32(0))
         m_inits = []
         for r in range(4):
-            row = _mfma_16x16_c_row(b, tid, r)
-            qh = b.add(
-                b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
-            )
+            if USE_INVARIANT_HOIST:
+                qh = hoist_qh_r[r]
+            else:
+                row = _mfma_16x16_c_row(b, tid, r)
+                qh = b.add(
+                    b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
+                )
             qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
             sink_h = b.global_load(sinks, qh, dtype, align=2)
             sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
@@ -561,44 +535,71 @@ def build_unified_attention_3d_tiled(
     for n in range(PV_N_TILES):
         iter_args.append((f"acc{n}", acc_inits[n]))
 
-    # ---------------- async K/V infra (identical to 2D) ----------------
+    # ---------------- async K/V infra (gfx942 1-dword DMA) ----------------
+    # CDNA3 (gfx942) async global->LDS DMA caps at 1 DWORD (4 bytes = 2 halves)
+    # per lane: ``llvm.amdgcn.raw.ptr.buffer.load.lds`` can only legalise a
+    # 1-dword load-to-LDS on gfx942. The wider b96/b128 forms (3/4 dwords) are
+    # gfx950-only; emitting a 16-byte (4-dword) LDS DMA on gfx942 aborts the
+    # backend with "Do not know how to expand this operator's operand!". The
+    # gfx950 3D kernel used 8 halves/lane (16 bytes, 4 dwords), so here we clamp
+    # to 2 halves/lane (1 dword) and issue 4x as many calls to move the same
+    # bytes. The LDS deposit stays lane-contiguous, so the [2, T, HD] K/V_lds
+    # layout and the strided-V B-operand math are unchanged. See
+    # attention_tiled_2d.py ASYNC_LDS_MAX_DWORDS for the same clamp.
+    ASYNC_LDS_DWORDS = 1
+    HALVES_PER_LANE = ASYNC_LDS_DWORDS * 2  # 4 bytes / 2 bytes-per-half
     big_bytes = b.const_i32(0x7FFF0000)
     key_rsrc = b.buffer_rsrc(key, big_bytes)
     value_rsrc = b.buffer_rsrc(value, big_bytes)
 
-    KV_HALVES_PER_CALL = THREADS * 8
+    KV_HALVES_PER_CALL = THREADS * HALVES_PER_LANE
     assert (T * HD) % KV_HALVES_PER_CALL == 0
     kv_calls_per_tile = (T * HD) // KV_HALVES_PER_CALL
     bytes_per_call = KV_HALVES_PER_CALL * 2
-    # Byte strides for paged KV cache. KV_BYTES is 2 for bf16/fp16, 1 for
-    # fp8e4m3. The FP8 sync loader path below dequantises and stores to
-    # LDS in the working dtype, so ``bytes_per_buf`` stays at the working
-    # dtype slab size.
     kv_stride_blk_b = BS * NUM_KV * HD * KV_BYTES
     kv_stride_tok_b = NUM_KV * HD * KV_BYTES
     kv_stride_h_b = HD * KV_BYTES
     bytes_per_buf = T * HD * 2
 
-    lane_half_base = b.mul(tid, b.const_i32(8))
+    lane_half_base = b.mul(tid, b.const_i32(HALVES_PER_LANE))
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
     zero_soff = b.const_i32(0)
 
-    # Paged-KV byte descriptor — same DAG composition the 2D kernel uses:
-    # an ``indirect(tile_idx -> physical_block)`` table lookup followed
-    # by ``unmerge(linear_half -> (token, dim))`` to split the per-lane
-    # half offset, plus the byte-stride 4D base. One ``.offset()`` call
-    # produces the final byte address for one async DMA call.
     seq_base = b.mul(seq_idx, bt_stride_p)
-    paged_kv_desc = TensorDescriptor.naive(
+    _kv_base = TensorDescriptor.naive(
         "paged_kv_bytes",
-        lengths=[1 << 24, T, NUM_KV, HD],
+        lengths=[1 << 24, BS, NUM_KV, HD],
         strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
         coord_names=("physical_block", "token", "kv_head", "dim"),
-    ).transform(
-        indirect("tile_idx", into="physical_block", table=block_tables, base=seq_base),
-        unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
     )
+    if T == BS:
+        paged_kv_desc = _kv_base.transform(
+            indirect("tile_idx", into="physical_block", table=block_tables, base=seq_base),
+            unmerge("linear_half", into=("token", "dim"), dims=(T, HD)),
+        )
+    else:
+        assert BS % T == 0, "3D tile_size_override must divide block_size"
+        BLOCKS_PER_CACHE_BLOCK = BS // T
+        paged_kv_desc = _kv_base.transform(
+            unmerge(
+                "tile_idx",
+                into=("linear_block_idx", "tile_within_block"),
+                dims=(1 << 24, BLOCKS_PER_CACHE_BLOCK),
+            ),
+            indirect(
+                "linear_block_idx",
+                into="physical_block",
+                table=block_tables,
+                base=seq_base,
+            ),
+            unmerge("linear_half", into=("token_in_tile", "dim"), dims=(T, HD)),
+            embed(
+                ("tile_within_block", "token_in_tile"),
+                into="token",
+                strides=(T, 1),
+            ),
+        )
 
     def _issue_k_load(kv_tile_idx: Value, buf_idx: Value) -> None:
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
@@ -613,7 +614,7 @@ def build_unified_attention_3d_tiled(
                 kv_head=kv_head_idx,
             )
             k_dst = b.smem_ptr_add(K_buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(key_rsrc, k_dst, voff, zero_soff, 4)
+            b.async_buffer_load_lds_addr(key_rsrc, k_dst, voff, zero_soff, ASYNC_LDS_DWORDS)
 
     def _issue_v_load(kv_tile_idx: Value, buf_idx: Value) -> None:
         buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
@@ -628,11 +629,34 @@ def build_unified_attention_3d_tiled(
                 kv_head=kv_head_idx,
             )
             v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
-            b.async_buffer_load_lds_addr(value_rsrc, v_dst, voff, zero_soff, 4)
+            b.async_buffer_load_lds_addr(value_rsrc, v_dst, voff, zero_soff, ASYNC_LDS_DWORDS)
 
-    # FP8 K/V cache: sync dequant loader. See attention_tiled_2d.py for the
-    # rationale. The FP8 path stores the working dtype (bf16/fp16) into LDS,
-    # so the rest of the kernel reads K/V_lds unchanged.
+    # Wide KV feed (opt-in): 8-half (16-byte / b128) synchronous global->register
+    # ->LDS loads, mirroring the in-kernel fp8 loader and the 2D cfvst V store.
+    # Fills K/V_lds identically to the async path (every linear half written once
+    # with the correct paged value) -- only the per-lane load WIDTH changes from
+    # 1 DWORD to 4 DWORDs, cutting load-instruction count 4x. The dim axis is
+    # contiguous in the paged cache (stride = KV_BYTES) so 8 consecutive halves
+    # are a legal coalesced b128 load.
+    WIDE_ELEMS = 8
+    WIDE_OK = (T * HD) % (THREADS * WIDE_ELEMS) == 0
+    wide_chunks_per_thread = (T * HD) // (THREADS * WIDE_ELEMS) if WIDE_OK else 0
+
+    def _issue_wide_load(src, lds, kv_tile_idx: Value, buf_idx: Value) -> None:
+        for call in range(wide_chunks_per_thread):
+            chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
+            linear_half = b.mul(chunk_id, b.const_i32(WIDE_ELEMS))
+            row = b.div(linear_half, b.const_i32(HD))
+            col = b.mod(linear_half, b.const_i32(HD))
+            voff, _ = paged_kv_desc.offset(
+                b, tile_idx=kv_tile_idx, linear_half=linear_half, kv_head=kv_head_idx
+            )
+            # paged_kv_desc uses BYTE strides; global_load_vN is element-indexed,
+            # so convert (exact: every stride is a multiple of KV_BYTES).
+            elem_off = b.div(voff, b.const_i32(KV_BYTES))
+            vec = b.global_load_vN(src, elem_off, dtype, n=WIDE_ELEMS, align=16)
+            b.smem_store_vN(lds, [buf_idx, row, col], vec, WIDE_ELEMS)
+
     fp8_elems_per_chunk = 8
     fp8_total_chunks = (T * HD) // fp8_elems_per_chunk
     if KV_FP8:
@@ -647,35 +671,15 @@ def build_unified_attention_3d_tiled(
     ) -> None:
         """Sync per-thread fp8 -> f32 -> *scale -> bf16/fp16 -> LDS.
 
-        Uses gfx950's packed ``v_cvt_pk_f32_fp8`` (via
-        :meth:`IRBuilder.cvt_pk_f32_fp8x4`) instead of 8 scalar
-        ``v_cvt_f32_fp8`` per chunk. The 2D sync sibling
-        ``_issue_fp8_dequant_loads`` (in ``attention_tiled_2d.py``)
-        documents the rationale: the compiler does NOT fuse 8 scalar
-        cvts into 2 packed cvts on its own (ISA inspection of the
-        round-1 sync loader confirmed 8 scalar emits per chunk), and
-        AITER's production paged-attention FP8 K/V dequant uses the
-        packed primitive too (see
-        ``csrc/include/attention_common.cuh::to_float_fp8x4``).
-
-        The scale is applied **unfused** as a plain ``v_pk_mul``
-        against an f32 scale, NOT via the gfx950 fused
-        ``v_cvt_scalef32_pk_f32_fp8`` intrinsic. The fused form
-        interprets ``scale`` as an E8M0 micro-scaling exponent and
-        silently truncates arbitrary per-tensor scales like
-        ``k_scale = max_abs / 448`` to the nearest power of two,
-        giving ~0.71x of expected magnitude on production traces. See
-        the comment block in the 2D sync loader (~lines 1600-1630) for
-        the full correctness argument.
+        Uses ``cvt_pk_f32_fp8x4`` (the gfx942 2D kernel validates this packed
+        cvt; see ``dequant_fp8x8_to_dtype``). The scale is applied unfused as a
+        plain ``v_pk_mul`` against an f32 scale -- NOT the E8M0 micro-scaling
+        fused cvt -- so arbitrary per-tensor scales are exact.
         """
         scale = k_scale_p if lds_token == "K" else v_scale_p
         lds = K_lds if lds_token == "K" else V_lds
         src = key if lds_token == "K" else value
-        assert fp8_elems_per_chunk == 8, (
-            f"FP8 dequant loader expects 8-elem chunks (got "
-            f"{fp8_elems_per_chunk}); the packed-cvt path needs the chunk "
-            f"to split cleanly into 2× <4 x fp8> sub-chunks."
-        )
+        assert fp8_elems_per_chunk == 8
         for call in range(fp8_chunks_per_thread):
             chunk_id = b.add(b.mul(b.const_i32(call), b.const_i32(THREADS)), tid)
             row = b.div(chunk_id, b.const_i32(HD // fp8_elems_per_chunk))
@@ -693,22 +697,24 @@ def build_unified_attention_3d_tiled(
             fp8_vec = b.global_load_vN(
                 src, voff, FP8E4M3, n=fp8_elems_per_chunk, align=fp8_elems_per_chunk
             )
-            # Split <8 x fp8> into 2x <4 x fp8> for the packed cvt; the
-            # backend collapses the extract+pack chain back into a
-            # bitcast-equivalent shuffle once it sees the
-            # cvt.pk.f32.fp8 operand is whole-i32.
             packed = dequant_fp8x8_to_dtype(b, fp8_vec, scale, dtype)
             b.smem_store_vN(lds, [buf_idx, row, col], packed, fp8_elems_per_chunk)
+
+    WIDE_KV = spec.use_wide_kv_load and not KV_FP8 and WIDE_OK
 
     def _issue_k(tile_idx: Value, buf_idx: Value) -> None:
         if KV_FP8:
             _issue_fp8_dequant_loads(tile_idx, buf_idx, "K")
+        elif WIDE_KV:
+            _issue_wide_load(key, K_lds, tile_idx, buf_idx)
         else:
             _issue_k_load(tile_idx, buf_idx)
 
     def _issue_v(tile_idx: Value, buf_idx: Value) -> None:
         if KV_FP8:
             _issue_fp8_dequant_loads(tile_idx, buf_idx, "V")
+        elif WIDE_KV:
+            _issue_wide_load(value, V_lds, tile_idx, buf_idx)
         else:
             _issue_v_load(tile_idx, buf_idx)
 
@@ -735,28 +741,28 @@ def build_unified_attention_3d_tiled(
         b.s_waitcnt(vmcnt=0, lgkmcnt=0)
         b.sync()
 
-        # QK
+        # ---------------- QK (gfx942 narrow 16x16x16, K-step 16) ----------------
+        # A (Q) operand per lane: row = lane%16, K = k*16 + lane_rg*4 + 0..3
+        # (<4 x dtype>). gfx950 used 8-elem A and _mfma_16x16x32 (K-step 32).
         A_kits = []
         for k in range(QK_K_ITERS):
-            q_col_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
-            A_kits.append(b.smem_load_vN(Q_lds, lane_col, q_col_off, dtype=dtype, n=8))
+            q_col_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
+            A_kits.append(b.smem_load_vN(Q_lds, lane_col, q_col_off, dtype=dtype, n=4))
         S_n = []
         for n in range(QK_N_TILES):
             acc_v = b.zero_vec_f32(4)
             for k in range(QK_K_ITERS):
-                kc_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
+                # B (K^T) operand per lane: col = n*16 + lane%16,
+                # K = k*16 + lane_rg*4 + 0..3 (<4 x dtype>).
+                kc_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
                 k_row = b.add(b.const_i32(n * 16), lane_col)
-                B_v = b.smem_load_vN(K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=8)
-                acc_v = _mfma_16x16x32(b, dtype, A_kits[k], B_v, acc_v)
+                B_v = b.smem_load_vN(K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=4)
+                acc_v = _mfma_16x16x16(b, dtype, A_kits[k], B_v, acc_v)
             S_n.append(acc_v)
 
         _issue_v(kv_tile_iv, cur_buf)
         _issue_k(safe_next_tile, nxt_buf)
 
-        # See attention_tiled_2d.py for the rationale on applying ALiBi /
-        # QQ-bias before the select-with-(-inf) (equivalent to Triton's
-        # post-select add for finite biases via IEEE -inf semantics, with
-        # better robustness against compiler reordering).
         if USE_ALIBI:
             alibi_per_row = []
             for reg in range(4):
@@ -771,19 +777,25 @@ def build_unified_attention_3d_tiled(
                 alibi_per_row.append(slope)
         masked = {}
         for reg in range(4):
-            row = _mfma_16x16_c_row(b, tid, reg)
-            qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
-            qh_r = b.add(
-                b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
-            )
-            row_ok = b.land(
-                b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
-            )
+            if USE_INVARIANT_HOIST:
+                qp_r = hoist_qp_r[reg]
+                row_ok = hoist_row_ok[reg]
+                causal_lim = hoist_causal_lim[reg]
+            else:
+                row = _mfma_16x16_c_row(b, tid, reg)
+                qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
+                qh_r = b.add(
+                    b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
+                )
+                row_ok = b.land(
+                    b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+                )
             for n in range(QK_N_TILES):
                 col_abs = b.add(
                     b.add(tile_off, b.mul(b.const_i32(n), b.const_i32(16))), lane_col
                 )
-                causal_lim = b.add(context_len, qp_r)
+                if not USE_INVARIANT_HOIST:
+                    causal_lim = b.add(context_len, qp_r)
                 causal_ok = b.cmp_le(col_abs, causal_lim)
                 in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
                 m_ok = b.land(b.land(row_ok, causal_ok), in_prefix)
@@ -800,7 +812,6 @@ def build_unified_attention_3d_tiled(
                     add_term = b.fmul(b.fmul(alibi_per_row[reg], pos_f), rcp_ln2)
                     s_scaled = b.fadd(s_scaled, add_term)
                 if USE_QQ_BIAS:
-                    # See attention_tiled_2d.py for the rationale on row_ok.
                     krp = b.sub(col_abs, context_len)
                     krp_ok = b.land(
                         b.cmp_ge(krp, b.const_i32(0)), b.cmp_lt(krp, qq_bias_stride0_p)
@@ -847,13 +858,20 @@ def build_unified_attention_3d_tiled(
             b.fadd(b.fmul(l_vals[r], alpha_regs[r]), l_local[r]) for r in range(4)
         ]
         if KV_FP8:
-            # FP8 sync loader has no in-flight async work.
             b.s_waitcnt(vmcnt=0, lgkmcnt=0)
             b.sync()
         else:
             b.s_waitcnt(vmcnt=kv_calls_per_tile, lgkmcnt=kv_calls_per_tile)
             b.sync()
 
+        # ---------------- PV (gfx942 narrow 16x16x16, strided-V B) ----------
+        # gfx950 read the V B-operand via ds_read_tr16_b64 (transpose read,
+        # absent on gfx942) and ran a wide-K PV. gfx942 builds the <4 x dtype>
+        # B-operand from 4 strided LDS loads that reproduce the EXACT per-lane
+        # (row, col) the transpose read delivers for a 16x16x16 atom over
+        # V_lds[buf, T, HD] at (row base = k*16, col base = n*16):
+        #   lane l = 16*k_chunk + n_col  (k_chunk = lane/16, n_col = lane%16)
+        #   B[j] = V_lds[buf, k*16 + k_chunk*4 + j, n*16 + n_col], j in 0..3
         new_acc = []
         for n in range(PV_N_TILES):
             scaled_comps = []
@@ -862,30 +880,26 @@ def build_unified_attention_3d_tiled(
                 scaled_comps.append(b.fmul(e, alpha_regs[reg]))
             acc_v = b.vec_pack(scaled_comps, F32)
 
-            n_col_base = b.add(b.mul(b.const_i32(n), b.const_i32(16)), tr_col_lane)
+            v_n_col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col)
+            v_k_chunk_base = b.mul(lane_rg, b.const_i32(4))
+
+            def _strided_v_b_operand(k_iter: int, v_n_col=v_n_col,
+                                     v_k_chunk_base=v_k_chunk_base) -> Value:
+                bv = b.zero_vec(dtype, 4)
+                for j in range(4):
+                    v_row = b.add(b.const_i32(k_iter * 16 + j), v_k_chunk_base)
+                    elem = b.vec_extract(
+                        b.smem_load_vN(V_lds, cur_buf, v_row, v_n_col, dtype=dtype, n=1),
+                        0,
+                    )
+                    bv = b.vec_insert(bv, elem, j)
+                return bv
 
             for k in range(PV_K_ITERS):
-                if PV_K_STEP == 32:
-                    p_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
-                    A_p = b.smem_load_vN(P_lds, lane_col, p_off, dtype=dtype, n=8)
-                    row_r0 = pv_tr_reader.row(b, k_offset=k * 32, read=0)
-                    row_r1 = pv_tr_reader.row(b, k_offset=k * 32, read=1)
-                    B_r0 = b.ds_read_tr16_b64(
-                        V_lds, cur_buf, row_r0, n_col_base, dtype=dtype
-                    )
-                    B_r1 = b.ds_read_tr16_b64(
-                        V_lds, cur_buf, row_r1, n_col_base, dtype=dtype
-                    )
-                    B_v = b.vec_concat(B_r0, B_r1)
-                    acc_v = _mfma_16x16x32(b, dtype, A_p, B_v, acc_v)
-                else:
-                    p_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
-                    A_p = b.smem_load_vN(P_lds, lane_col, p_off, dtype=dtype, n=4)
-                    row_lane = pv_tr_reader.row(b, k_offset=k * 16, read=0)
-                    B_v = b.ds_read_tr16_b64(
-                        V_lds, cur_buf, row_lane, n_col_base, dtype=dtype
-                    )
-                    acc_v = _mfma_16x16x16(b, dtype, A_p, B_v, acc_v)
+                p_off = b.add(b.const_i32(k * 16), b.mul(lane_rg, b.const_i32(4)))
+                A_p = b.smem_load_vN(P_lds, lane_col, p_off, dtype=dtype, n=4)
+                B_v = _strided_v_b_operand(k)
+                acc_v = _mfma_16x16x16(b, dtype, A_p, B_v, acc_v)
             new_acc.append(acc_v)
 
         yields = []
@@ -903,23 +917,23 @@ def build_unified_attention_3d_tiled(
     l_final = [final[2 * r + 1] for r in range(4)]
     acc_final = [final[8 + n] for n in range(PV_N_TILES)]
 
-    # Per-thread: write own (row, col) of acc; only the lane in each
-    # 4-lane row group (lane%4 == 0) writes m and l. The workspace
-    # layouts ``segm_output[token, head, seg, dim]`` and
-    # ``segm_{max,expsum}[token, head, seg]`` are encoded by the
-    # ``seg_acc_desc`` / ``ml_desc`` coordinate transforms defined at
-    # the top of this function.
     for n in range(PV_N_TILES):
         for reg in range(4):
-            row = _mfma_16x16_c_row(b, tid, reg)
+            if USE_INVARIANT_HOIST:
+                row = hoist_row[reg]
+                qp_r = hoist_qp_r[reg]
+                qh_r = hoist_qh_r[reg]
+                row_ok = hoist_row_ok[reg]
+            else:
+                row = _mfma_16x16_c_row(b, tid, reg)
+                qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
+                qh_r = b.add(
+                    b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
+                )
+                row_ok = b.land(
+                    b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+                )
             col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col)
-            qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
-            qh_r = b.add(
-                b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
-            )
-            row_ok = b.land(
-                b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
-            )
             qtoken = b.add(cu_q_start, qp_r)
             seg_acc_idx, _ = seg_acc_desc.offset(
                 b,
@@ -934,12 +948,17 @@ def build_unified_attention_3d_tiled(
 
     lane_writes_ml = b.cmp_eq(b.mod(tid, b.const_i32(16)), b.const_i32(0))
     for reg in range(4):
-        row = _mfma_16x16_c_row(b, tid, reg)
-        qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
-        qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
-        row_ok = b.land(
-            b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
-        )
+        if USE_INVARIANT_HOIST:
+            qp_r = hoist_qp_r[reg]
+            qh_r = hoist_qh_r[reg]
+            row_ok = hoist_row_ok[reg]
+        else:
+            row = _mfma_16x16_c_row(b, tid, reg)
+            qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
+            qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
+            row_ok = b.land(
+                b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+            )
         qtoken = b.add(cu_q_start, qp_r)
         ml_idx, _ = ml_desc.offset(b, token=qtoken, head=qh_r, seg=seg_idx)
         do_write = b.land(lane_writes_ml, row_ok)
@@ -951,7 +970,7 @@ def build_unified_attention_3d_tiled(
 
 
 # ---------------------------------------------------------------------------
-# Reduce kernel
+# Reduce kernel (arch-neutral; byte-for-byte port of the gfx950 reduce kernel)
 # ---------------------------------------------------------------------------
 
 
@@ -962,8 +981,6 @@ class UnifiedAttentionReduceTiledSpec:
     num_kv_heads: int
     dtype: str
     num_segments: int
-    # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). ``None`` keeps
-    # the LLVM backend's heuristic.
     waves_per_eu: Optional[int] = None
 
     @property
@@ -974,7 +991,7 @@ class UnifiedAttentionReduceTiledSpec:
         from ...helpers.spec import kernel_name_join
 
         return kernel_name_join(
-            "ck_dsl_uattn_reduce_tiled",
+            "ck_dsl_uattn_reduce_tiled_gfx942",
             f"d{self.head_size}",
             f"h{self.num_query_heads}",
             f"seg{self.num_segments}",
@@ -985,23 +1002,9 @@ class UnifiedAttentionReduceTiledSpec:
 def build_unified_attention_reduce_tiled(
     spec: UnifiedAttentionReduceTiledSpec,
     *,
-    arch: str = "gfx950",
+    arch: str = "gfx942",
 ) -> KernelDef:
-    """Combine the per-segment partial state into the final fp16/bf16 output.
-
-    The reduce kernel is arch-neutral (pure f32 load / exp2 / store, no MFMA
-    or LDS transpose reads), so it builds on both gfx942 and gfx950. The
-    ``arch`` parameter is accepted for call-site symmetry with the segment
-    builder and is currently unused.
-
-    Grid: ``(total_q, num_query_heads, 1)``.  Each CTA reduces over the
-    ``NUM_SEGMENTS`` segments for one (token, head):
-
-      1. overall_max = max(segm_max)
-      2. overall_expsum = sum(segm_expsum * exp2(segm_max - overall_max))
-      3. acc[d] = sum_s segm_output[s,d] * exp2(segm_max[s] - overall_max)
-      4. output[d] = acc[d] / overall_expsum  (with 0/0 -> 0)
-    """
+    """Combine the per-segment partial state into the final fp16/bf16 output."""
     HD = spec.head_size
     NUM_SEG = spec.num_segments
     NUM_QH = spec.num_query_heads
@@ -1033,12 +1036,6 @@ def build_unified_attention_reduce_tiled(
     neg_inf = b.const_f32(float("-inf"))
     zero_f = b.const_f32(0.0)
 
-    # Workspace layouts (same as the segment kernel's outputs):
-    #   segm_max / segm_expsum : [total_q, num_qh, num_segments]
-    #   segm_output            : [total_q, num_qh, num_segments, head_size]
-    # And the final output uses ``(token, head, dim)``. Encoding them
-    # as descriptors makes the per-pass offset math one call instead of
-    # an `add(mul(qt,...), mul(qh,...))` ladder.
     ml_desc_red = TensorDescriptor.naive(
         "segm_ml",
         lengths=[1 << 30, NUM_QH, NUM_SEG],
@@ -1055,32 +1052,13 @@ def build_unified_attention_reduce_tiled(
         coord_names=("token", "head", "dim"),
     )
 
-    # Per-segment ml base for this (q_token, q_head); the
-    # segment-strided loads below add the segment index, which is the
-    # same as ``ml_desc_red.offset(... seg=sv)``.
     base_ml, _ = ml_desc_red.offset(b, token=q_token, head=q_head, seg=b.const_i32(0))
 
-    # The reduce CTA is a single wave64. The original kernel had all 64
-    # lanes redundantly walk the full ``NUM_SEG`` segment list twice
-    # (pass 1 max, pass 2 expsum) and a third time inside pass 3 — a
-    # 64x-redundant, serially-dependent chain of global loads that was
-    # the flat ~21 us floor on decode shapes (constant in KV length;
-    # see notes/ATTENTION_PARITY_REPORT.md split-KV analysis). Instead
-    # each lane now owns the strided segment subset ``{tid, tid+64,
-    # ...}``: it loads each ``(seg_max, seg_l)`` pair exactly once, and
-    # a 64-lane XOR butterfly folds the per-lane partials. This cuts the
-    # serial dependency chain from ``NUM_SEG`` to ``ceil(NUM_SEG/64)``
-    # and removes the 2x redundant ml reload.
-    #
-    # The per-segment NaN-safe factor ``exp2(seg_max - overall_max)`` is
-    # then cached in LDS once so pass 3 (the per-dim acc reduce) reuses
-    # it instead of reloading ``seg_max`` and recomputing ``exp2`` for
-    # every output dim.
     SEG_PER_LANE = (NUM_SEG + THREADS - 1) // THREADS
     factor_lds = b.smem_alloc_f32([NUM_SEG], name_hint="seg_factor")
 
     # ---- pass 1: per-lane partial max over the owned segments ----
-    seg_idx_of = []  # (sv_value, in_range_pred or None) per owned slot
+    seg_idx_of = []
     seg_max_cache = []
     seg_l_cache = []
     local_max = neg_inf
@@ -1110,16 +1088,10 @@ def build_unified_attention_reduce_tiled(
         sv, in_rng, sv_safe = seg_idx_of[j]
         ms = seg_max_cache[j]
         ls = seg_l_cache[j]
-        # NaN-safe factor: when both ms and overall_max are -inf, the
-        # difference is NaN; force factor to 0 in that case.
         ms_finite = b.fcmp("ogt", ms, neg_inf)
         factor_raw = b.exp2(b.fsub(ms, overall_max))
         factor = b.select(ms_finite, factor_raw, zero_f)
         local_den = b.fadd(local_den, b.fmul(ls, factor))
-        # Stash the factor for this lane's owned segments. Out-of-range
-        # lanes (when NUM_SEG < THREADS) must NOT write: their masked
-        # ``sv_safe == 0`` would otherwise race lane 0's real write to
-        # ``factor_lds[0]``. Guard the store on the in-range predicate.
         if in_rng is None:
             b.smem_store_vN_f32(factor_lds, [sv_safe], factor, 1)
         else:
@@ -1129,12 +1101,9 @@ def build_unified_attention_reduce_tiled(
     safe_expsum = b.fcmp("oeq", overall_expsum, zero_f)
     inv_l = b.select(safe_expsum, zero_f, b.rcp(overall_expsum))
 
-    b.sync()  # publish factor_lds before the per-dim acc reduce reads it
+    b.sync()
 
     # ---- pass 3: per-element reduce + normalize + write ----
-    # Each thread handles HALFS_PER_THREAD output dims. The per-segment
-    # factor is read from LDS (computed once above) rather than
-    # reloading seg_max + recomputing exp2 per dim.
     for li in range(HALFS_PER_THREAD):
         d = b.add(b.mul(b.const_i32(li), b.const_i32(THREADS)), tid)
         acc_loop = b.scf_for_iter(
