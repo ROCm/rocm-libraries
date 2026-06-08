@@ -264,29 +264,37 @@ class RuleSetCoverageTest(unittest.TestCase):
                 f"{len(sub_keys)} instances from '{sub_name}':\n{preview}{more}"
             )
 
-    def test_full_contains_profiler(self) -> None:
-        """'full' must contain every instance from the 'profiler' set."""
-        for arch in ARCHS:
-            with self.subTest(arch=arch):
-                self.assert_subset("profiler", "full", arch)
 
-    def test_full_contains_tests(self) -> None:
-        """'full' must contain every instance from the 'tests' set."""
-        for arch in ARCHS:
-            with self.subTest(arch=arch):
-                self.assert_subset("tests", "full", arch)
+# Containment relationships to verify: (test label, sub set, super set).
+# ``sub`` must be fully contained in ``super``.
+_RELATIONSHIPS: List[Tuple[str, str, str]] = [
+    ("full_contains_profiler",       "profiler",   "full"),
+    ("full_contains_tests",          "tests",      "full"),
+    ("full_tests_is_subset_of_full", "full-tests", "full"),
+    ("tiny_is_subset_of_full_tests", "tiny",       "full-tests"),
+]
 
-    def test_full_tests_is_subset_of_full(self) -> None:
-        """'full-tests' must be a subset of 'full'."""
-        for arch in ARCHS:
-            with self.subTest(arch=arch):
-                self.assert_subset("full-tests", "full", arch)
 
-    def test_tiny_is_subset_of_full_tests(self) -> None:
-        """'tiny' must be a subset of 'full-tests'."""
-        for arch in ARCHS:
-            with self.subTest(arch=arch):
-                self.assert_subset("tiny", "full-tests", arch)
+def _make_subset_test(sub_name: str, sup_name: str, arch: str):
+    def test(self: RuleSetCoverageTest) -> None:
+        self.assert_subset(sub_name, sup_name, arch)
+
+    test.__doc__ = f"[{arch}] '{sup_name}' must contain every '{sub_name}' instance."
+    return test
+
+
+# Generate one test method per (relationship, arch) so the architecture shows
+# up directly in the test id (e.g. ``test_full_contains_profiler_gfx942``),
+# making it visible under ``pytest -v`` without needing ``-s``.
+for _label, _sub, _sup in _RELATIONSHIPS:
+    for _arch in ARCHS:
+        setattr(
+            RuleSetCoverageTest,
+            f"test_{_label}_{_arch}",
+            _make_subset_test(_sub, _sup, _arch),
+        )
+
+del _label, _sub, _sup, _arch
 
 
 if __name__ == "__main__":
