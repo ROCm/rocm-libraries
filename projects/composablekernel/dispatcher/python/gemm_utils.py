@@ -401,6 +401,18 @@ def _dtype_from_kernel_name(name: str) -> str:
     return parts[1] if len(parts) > 1 else "fp16"
 
 
+def _layout_from_kernel_name(name: str) -> str:
+    """Extract the 3-char layout token (e.g. 'rcr') from a kernel name.
+
+    Name format is ``gemm_<dtype>_<layout>_...``; each char is 'r' (row-major)
+    or 'c' (column-major) for operands A, B, C respectively.
+    """
+    parts = name.split("_")
+    if len(parts) > 2 and len(parts[2]) == 3 and set(parts[2]) <= {"r", "c"}:
+        return parts[2]
+    return "rcr"
+
+
 class GpuGemmRunner:
     """High-level runner: construct from a .so path, call run(A, B, problem).
 
@@ -425,27 +437,38 @@ class GpuGemmRunner:
     ) -> GemmResult:
         M, N, K = problem.M, problem.N, problem.K
 
-        # A is row-major MxK; B is supplied KxN and stored column-major (the
-        # 'c' in rcr), matching how the kernel expects its operands. The element
-        # dtype is dictated by the compiled kernel (encoded in its name); the C
-        # ABI sizes its buffers from sizeof(ADataType), so the host buffers must
-        # match it byte-for-byte.
+        # Caller passes logical A (MxK) and B (KxN) row-major. The compiled
+        # kernel dictates both the element dtype and the memory layout of each
+        # operand (encoded in its name, e.g. gemm_bf16_rcr_...). The C ABI sizes
+        # its device buffers from sizeof(ADataType) and the kernel computes
+        # strides from its compiled layout + M,N,K -- so the host buffers must
+        # be laid out byte-for-byte in the order the kernel expects.
+        #
+        # For a 'c' (column-major) operand we transpose so the contiguous host
+        # buffer's flat memory matches column-major order:
+        #   col-major A (MxK)  <=>  ascontiguousarray(A.T)  (KxM row-major)
+        # Likewise column-major C (MxN) lands in memory as NxM row-major, so we
+        # allocate (N,M) and transpose the result back to logical MxN.
         dtype = _dtype_from_kernel_name(self._kernel_name)
+        la, lb, lc = _layout_from_kernel_name(self._kernel_name)
+
+        A_lay = A if la == "r" else A.T
+        B_lay = B if lb == "r" else B.T
+        C_shape = (M, N) if lc == "r" else (N, M)
+
         if dtype == "bf16":
-            A_h = _fp32_to_bf16_u16(A)
-            B_h = _fp32_to_bf16_u16(np.ascontiguousarray(B.T))
-            C_h = np.zeros((M, N), dtype=np.uint16)
+            A_h = _fp32_to_bf16_u16(np.ascontiguousarray(A_lay))
+            B_h = _fp32_to_bf16_u16(np.ascontiguousarray(B_lay))
+            C_h = np.zeros(C_shape, dtype=np.uint16)
         else:  # fp16 (default)
-            A_h = np.ascontiguousarray(A, dtype=np.float16)
-            B_h = np.ascontiguousarray(B.T, dtype=np.float16)
-            C_h = np.zeros((M, N), dtype=np.float16)
+            A_h = np.ascontiguousarray(A_lay, dtype=np.float16)
+            B_h = np.ascontiguousarray(B_lay, dtype=np.float16)
+            C_h = np.zeros(C_shape, dtype=np.float16)
 
         status, time_ms = self.lib.run(A_h, B_h, C_h, M, N, K)
 
-        if dtype == "bf16":
-            C_out = _bf16_u16_to_fp32(C_h)
-        else:
-            C_out = C_h
+        C_dec = _bf16_u16_to_fp32(C_h) if dtype == "bf16" else C_h
+        C_out = C_dec if lc == "r" else C_dec.T
 
         tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0
         return GemmResult(
