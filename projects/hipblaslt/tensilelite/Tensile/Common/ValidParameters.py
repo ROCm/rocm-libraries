@@ -884,13 +884,14 @@ validParameters = { # we need to make sure this matches develop
     "LdsPadMetadata": [-1, 0, 1, 2, 3, 4, 8],
     # Padding boundary for LDS. defines block-size for pad insertion. for every 'LdsBlockSizePerPad' bytes, LDS padding (pad value from LdsPad parameter)
     # is added (readOffset aware of the pad and adjusts offset value based on this parameter value).
-    # Only support LdsBlockSizePerPad >= unrollDepth * BPE
-    # 0 means disable LdsBlockSizePerPad
-    "LdsBlockSizePerPadA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
-    "LdsBlockSizePerPadMXSA": [-1, 0, 64, 128, 256, 512, 1024, 2048],
-    "LdsBlockSizePerPadB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
-    "LdsBlockSizePerPadMXSB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
-    "LdsBlockSizePerPadMetadata": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    # 0 means disable LdsBlockSizePerPad; -1 means auto-derive from problem geometry.
+    # This is a derived byte size, not a discrete choice, so it is not validated here (-1 skips the
+    # value check). Constraints are enforced in Solution.calcLdsBlockSizePerPad / checkLdsBlockSizePerPadForTDM.
+    "LdsBlockSizePerPadA": -1,
+    "LdsBlockSizePerPadMXSA": -1,
+    "LdsBlockSizePerPadB": -1,
+    "LdsBlockSizePerPadMXSB": -1,
+    "LdsBlockSizePerPadMetadata": -1,
     # Transpose LDS format. Local store in coalesced dimension , same as optimized global fetch dimension . applicable only in TLU=0 case for miSIMD(s)
     # -1 : keep LDS layout same as global fetch dimension for both A and B
     #      set TLDS = 1 for NN,TN,TT
