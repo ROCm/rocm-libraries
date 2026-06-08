@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -703,6 +703,16 @@ hipsparseStatus_t hipsparseLtMatmulAlgSetAttribute(const hipsparseLtHandle_t*   
                                                    const void*                      data,
                                                    size_t                           dataSize)
 {
+    if(attribute == HIPSPARSELT_MATMUL_SPLIT_K_MODE)
+    {
+        if(dataSize < sizeof(cusparseLtSplitKMode_t))
+            return HIPSPARSE_STATUS_INVALID_VALUE;
+
+        auto mode = HIPSplitKModeToCuSparseLtSplitKMode((hipsparseLtSplitKMode_t)*data);
+        memcpy(data, &mode, sizeof(cusparseLtSplitKMode_t));
+
+    }
+
     return hipCUSPARSEStatusToHIPStatus(
         cusparseLtMatmulAlgSetAttribute((const cusparseLtHandle_t*)handle,
                                         (cusparseLtMatmulAlgSelection_t*)algSelection,
@@ -718,12 +728,18 @@ hipsparseStatus_t
                                      void*                                  data,
                                      size_t                                 dataSize)
 {
-    return hipCUSPARSEStatusToHIPStatus(
-        cusparseLtMatmulAlgGetAttribute((const cusparseLtHandle_t*)handle,
-                                        (const cusparseLtMatmulAlgSelection_t*)algSelection,
+
+    auto status = hipCUSPARSEStatusToHIPStatus(
+        cusparseLtMatmulAlgSetAttribute((const cusparseLtHandle_t*)handle,
+                                        (cusparseLtMatmulAlgSelection_t*)algSelection,
                                         HIPMatmulAlgAttributeToCuSparseLtAlgAttribute(attribute),
                                         data,
                                         dataSize));
+    if(attribute == HIPSPARSELT_MATMUL_SPLIT_K_MODE && status == HIPSPARSE_STATUS_SUCCESS)
+    {
+        auto mode = CuSparseLtAlgAttributeToHIPMatmulAlgAttribute((cusparseLtSplitKMode_t)*data);
+        memcpy(data, &mode, sizeof(cusparseLtSplitKMode_t));
+    }
 }
 
 /* matmul plan */
