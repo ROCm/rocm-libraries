@@ -69,7 +69,7 @@ int main() {
   }
 
   // calculate the sizes of our arrays
-  size_t size_piv = (M < N) ? M : N; // count of Householder scalars
+  size_t size_piv = std::min(M, N);  // count of Householder scalars
 
   // allocate memory
   double *ipiv;

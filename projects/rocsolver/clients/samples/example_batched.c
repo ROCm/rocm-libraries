@@ -73,7 +73,7 @@ int main() {
 
   // calculate the sizes of the arrays
   size_t size_A = lda * (size_t)N;          // count of elements in each matrix A
-  rocblas_stride strideP = (M < N) ? M : N; // stride of Householder scalar sets
+  rocblas_stride strideP = std::min(M, N);  // stride of Householder scalar sets
   size_t size_piv = strideP * (size_t)batch_count; // elements in array for Householder scalars
 
   // allocate memory on the CPU for an array of pointers,

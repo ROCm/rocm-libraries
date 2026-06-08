@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -610,7 +610,7 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
             if(use_legacy_tests)
             {
                 err = norm_error('F', 1, numMatchingEigs, 1, lapackEigs.data(), rocsolverEigs.data());
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
             else
             {
@@ -624,7 +624,7 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
                     = *HMat::Convert(lapackEigs.data(), lapackEigs.size(),
                                      1); // convert eigenvalues from type S to type T, if required
                 err = (eigs - eigsRef).norm() / eigsRef.norm();
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
         }
         else
@@ -694,7 +694,7 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
                 // error is ||hA - hZRes|| / ||hA||
                 // using frobenius norm
                 err = norm_error('F', n, numMatchingEigs, lda, hA[b], hZRes[b], ldz);
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
             else // if(!use_legacy_tests)
             {
@@ -762,7 +762,7 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
                     VE = adjoint(V_b) * B_b * V_b - HMat::Eye(numMatchingEigs);
                 }
                 S eta = std::max(VE.norm(), std::numeric_limits<S>::epsilon());
-                *max_err = eta > *max_err ? eta : *max_err;
+                *max_err = rocblas_max_nan(eta, *max_err);
 
                 auto AE = HMat::Empty();
                 if(itype == rocblas_eform_abx)
@@ -776,7 +776,7 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
                 }
                 err = AE.norm() / eigsRef.norm();
                 err *= std::numeric_limits<S>::epsilon() / eta;
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
         }
     }

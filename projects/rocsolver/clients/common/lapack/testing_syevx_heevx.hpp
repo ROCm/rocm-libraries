@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -383,7 +383,7 @@ void syevx_heevx_getError(const rocblas_handle handle,
         if(hNev[b][0] != hNevRes[b][0])
             err++;
     }
-    *max_err = err > *max_err ? err : *max_err;
+    *max_err = rocblas_max_nan(err, *max_err);
 
     // (We expect the used input matrices to always converge. Testing
     // implicitly the equivalent non-converged matrix is very complicated and it boils
@@ -406,7 +406,7 @@ void syevx_heevx_getError(const rocblas_handle handle,
                     if(hIfailRes[b][j] == 0)
                         err++;
                 }
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
 
             continue;
@@ -424,7 +424,7 @@ void syevx_heevx_getError(const rocblas_handle handle,
             // only eigenvalues needed; can compare with LAPACK
 
             err = (eigs_ref - eigs_b).max_coeff_norm() / eigs_ref.max_coeff_norm();
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
         else
         {
@@ -438,7 +438,7 @@ void syevx_heevx_getError(const rocblas_handle handle,
                 if(hIfailRes[b][j] != 0)
                     err++;
             }
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
 
             // Create a thin wrapper of input matrix A (bc * lda * n), of size lda * n starting at b * lda * n
             auto AWrap_b = HMat::Wrap(A.data() + b * lda * n, lda, n);
@@ -457,13 +457,13 @@ void syevx_heevx_getError(const rocblas_handle handle,
             // Check orthogonality of computed eigenvectors
             auto OE = adjoint(V_b) * V_b - HMat::Eye(num_eigs);
             S ortho_err = OE.norm();
-            *max_err = ortho_err > *max_err ? ortho_err : *max_err;
+            *max_err = rocblas_max_nan(ortho_err, *max_err);
 
             // Check accuracy of eigenpairs
             auto AE = adjoint(V_b) * A_b * V_b - HMat::Zeros(num_eigs).diag(eigs_b);
             err = AE.max_col_norm() / eigs_ref.max_coeff_norm();
             /* err *= std::numeric_limits<S>::epsilon() / ortho_err; // Use "relative Weyl" error bound */
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
     }
 }

@@ -62,7 +62,7 @@ int main() {
 
   // calculate the sizes of our arrays
   size_t size_A = lda * (size_t)N;   // count of elements in matrix A
-  size_t size_piv = (M < N) ? M : N; // count of Householder scalars
+  size_t size_piv = std::min(M, N);  // count of Householder scalars
 
   // allocate memory on GPU
   double *dA, *dIpiv;
