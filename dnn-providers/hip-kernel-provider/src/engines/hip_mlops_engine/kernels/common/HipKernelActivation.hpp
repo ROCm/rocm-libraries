@@ -8,7 +8,7 @@
 namespace hip_kernel_provider
 {
 
-/// Note: Values match hip_kernel_utils::ActivationMode in HipKernelUtils.hpp
+/// Note: Values match ActivationMode in HipKernelUtils.hpp
 enum class ActivationMode : int
 {
     PASTHRU = 0,

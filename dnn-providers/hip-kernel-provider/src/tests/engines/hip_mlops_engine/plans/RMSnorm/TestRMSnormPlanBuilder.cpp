@@ -4,8 +4,8 @@
 #include <cstdio>
 #include <gtest/gtest.h>
 
-#include "HipKernelContext.hpp"
-#include "HipKernelHandle.hpp"
+#include "core/Context.hpp"
+#include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormPlanBuilder.hpp"
 #include "mocks/MockCompiledProgram.hpp"
 #include "mocks/MockDevicePropertyProvider.hpp"
@@ -28,7 +28,7 @@ protected:
     MockKernelCompiler _mockKernelCompiler;
     MockDevicePropertyProvider _mockDevicePropertyProvider;
     RMSnormPlanBuilder _planBuilder{_mockKernelCompiler, _mockDevicePropertyProvider};
-    HipKernelHandle _dummyHandle;
+    Handle _dummyHandle;
     MockEngineConfig _mockEngineConfig;
 
     void setupMockCompileChain()
@@ -90,7 +90,7 @@ TEST_F(TestRMSnormPlanBuilder, BuildPlanSetsPlanForSingleNodeInference)
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
-    HipKernelContext ctx;
+    Context ctx;
 
     EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
     EXPECT_TRUE(ctx.hasValidPlan());
@@ -105,7 +105,7 @@ TEST_F(TestRMSnormPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
-    const HipKernelSettings settings;
+    const Settings settings;
 
     EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings), 0u);
 }

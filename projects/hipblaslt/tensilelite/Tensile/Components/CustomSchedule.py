@@ -315,8 +315,10 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                       globalReadA, globalReadB, \
                       LWSwapA, LWSwapB, \
                       mfmaCode, loopCounterCode, \
+                      nta=0, ntb=0, \
                       ):
-
+    strNta = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s"%nta
+    strNtb = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTB%s"%ntb
     module = Module()
 
     globalReadIncACode = removeComments(globalReadIncACode)
@@ -413,7 +415,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
 
     InstStreams = {key: [stream, idMap[key]] for key, stream in opt1.optSchedule.items()}
 
-    macro = Macro("MAINLOOP", ["ID", "useGR=1", "usePLR=1", "useGRInc=1", "useLoop=1"])
+    macro = Macro("MAINLOOP%s%s"%(strNta, strNtb), ["ID", "useGR=1", "usePLR=1", "useGRInc=1", "useLoop=1"])
 
     lastIter = numLoopIter - 1
 
