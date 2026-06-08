@@ -79,12 +79,17 @@ def load_and_aggregate(csv_path):
     return grouped
 
 
+# Bar geometry constants — adjust to taste.
+_BAR_WIDTH   = 0.4    # width of each stacked bar
+_BAR_SPACING = 0.65   # centre-to-centre distance between consecutive bars
+
+
 def plot_panel(ax, grouped, title):
     """Draw a single stacked-bar timing breakdown on *ax*."""
     phase_cols = [c for c, _ in PHASES]
 
     sizes    = grouped["N"].values
-    x        = np.arange(len(sizes))
+    x        = np.arange(len(sizes)) * _BAR_SPACING   # compressed x positions
     ws_bytes = grouped["workspace_bytes"].values
 
     labels = []
@@ -101,7 +106,7 @@ def plot_panel(ax, grouped, title):
     bottom = np.zeros(len(sizes))
     for (col, label), color in zip(PHASES, COLORS):
         vals = grouped[col].values / totals * 100.0
-        ax.bar(x, vals, bottom=bottom, label=label, color=color, width=0.6)
+        ax.bar(x, vals, bottom=bottom, label=label, color=color, width=_BAR_WIDTH)
         bottom += vals
 
     ax.axhline(100, color="k", linestyle="--", lw=1.2, label="100 %")
@@ -111,16 +116,7 @@ def plot_panel(ax, grouped, title):
     ax.set_ylabel("% of total time", fontsize=8)
     ax.set_ylim(0, 110)
     ax.grid(axis="y", alpha=0.3)
-
-    # Build subtitle with chunk-size info if available.
-    sc_info = ""
-    if grouped["scale_chunk_size"].max() > 0:
-        sc_vals = grouped[["N", "scale_chunk_size", "gemm_chunk_size"]].copy()
-        sc_vals["N"] = sc_vals["N"].astype(int)
-        sc_parts = [f"N={r.N}: sc={int(r.scale_chunk_size)}/gc={int(r.gemm_chunk_size)}"
-                    for _, r in sc_vals.iterrows()]
-        sc_info = "\n" + ",  ".join(sc_parts)
-    ax.set_title(f"{title}  |  s=16, phi=0.5{sc_info}", fontsize=8)
+    ax.set_title(f"{title}  |  s=16, phi=0.5", fontsize=9)
 
 
 def main():
@@ -153,22 +149,18 @@ def main():
         # Single-panel mode — backward-compatible behaviour.
         grouped = load_and_aggregate(csv_paths[0])
         label   = trans_label_from_path(csv_paths[0])
-        fig, ax = plt.subplots(figsize=(max(6, 2 * len(grouped)), 5))
+        fig, ax = plt.subplots(figsize=(8, 6))   # roughly square panel
         plot_panel(ax, grouped, label)
         handles, labels = ax.get_legend_handles_labels()
         ax.legend(handles, labels, loc="upper left", fontsize=8, ncol=2, framealpha=0.9)
         fig.tight_layout()
     else:
-        # Multi-panel mode — 2-column grid.
+        # Multi-panel mode — 2-column grid with fixed per-panel size.
         ncols = min(2, n_csv)
         nrows = (n_csv + ncols - 1) // ncols
 
-        # Use the widest N set across all CSVs to determine panel width.
-        max_n = max(len(load_and_aggregate(p)) for p in csv_paths)
-        panel_w = max(6, 2 * max_n)
-
         fig, axes = plt.subplots(nrows, ncols,
-                                 figsize=(panel_w * ncols, 5 * nrows),
+                                 figsize=(8 * ncols, 6 * nrows),  # ~square panels
                                  squeeze=False)
         fig.suptitle("fp64 emulation timing breakdown  |  s=16 moduli, phi=0.5",
                      fontsize=11)
