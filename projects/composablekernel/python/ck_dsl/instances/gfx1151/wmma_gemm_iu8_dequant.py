@@ -26,7 +26,7 @@ one wave (32 lanes) per 16×16 tile, no LDS.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ...core.arch import ArchTarget
 from ...core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
@@ -44,7 +44,7 @@ class WmmaGemmIu8DequantSpec:
     """A gfx1151 true-int8 WMMA GEMM with f16 dequant output (int8 in / i32 acc /
     f16 out). Per-tensor symmetric scales are runtime args."""
 
-    name: str = "ck_dsl_wmma_gemm_iu8_dequant"
+    name: str = field(default="ck_dsl_wmma_gemm_iu8_dequant")
 
     @property
     def block_size(self) -> int:

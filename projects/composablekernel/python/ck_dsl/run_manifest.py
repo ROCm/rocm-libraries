@@ -322,7 +322,7 @@ def _matmul_nbits_problem(
         Cf = C.astype(np.float32)
         reff = ref.astype(np.float32)
         diff = np.abs(Cf - reff)
-        if os.environ.get("CKDSL_NBITS_DEBUG"):
+        if os.getenv("CKDSL_NBITS_DEBUG"):
             _nbits_debug_dump(np, Cf, reff, diff, M, N, K, group)
         return float(diff.max()), int(np.count_nonzero(diff > 0)), C.size
 

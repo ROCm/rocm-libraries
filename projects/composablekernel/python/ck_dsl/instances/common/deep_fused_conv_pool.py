@@ -27,7 +27,7 @@ so it stays a pure perf optimization that naturally disables itself for WMMA.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Sequence, Tuple
 
 from ...core.ir import F16, I32, IRBuilder, PtrType, Value
@@ -68,12 +68,12 @@ __all__ = [
 class FusedConvPoolProblem:
     """Shape contract for the conv0 -> conv1 -> maxpool prototype."""
 
-    conv: ConvProblem
-    conv1_k: int = 0
-    pool_y: int = 2
-    pool_x: int = 2
-    pool_stride_h: int = 2
-    pool_stride_w: int = 2
+    conv: ConvProblem = field()
+    conv1_k: int = field(default=0)
+    pool_y: int = field(default=2)
+    pool_x: int = field(default=2)
+    pool_stride_h: int = field(default=2)
+    pool_stride_w: int = field(default=2)
 
     @property
     def conv1_channels(self) -> int:
@@ -111,27 +111,31 @@ class DeepFusedConvPoolSpec:
     maxpool gather tile correctly on both ISAs.
     """
 
-    problem: FusedConvPoolProblem
-    name: str = "ck_dsl_deep_fused_conv_pool"
-    tile_m: int = 128
-    tile_n: int = 32
-    tile_k: int = 16
-    conv1_tile_k: int = 0
-    pool_tile_h: int = 4
-    pool_tile_w: int = 8
-    warp_m: int = 2
-    warp_n: int = 1
-    warp_tile_m: int = 32
-    warp_tile_n: int = 32
-    warp_tile_k: int = 16
-    wave_size: int = 64
-    pipeline: str = "mem"
-    async_dma: bool = False
-    unroll_k: bool = False
-    acc_epilogue: ConvAccumulatorEpilogue = ConvAccumulatorEpilogue(relu=True)
-    conv1_epilogue: ConvAccumulatorEpilogue = ConvAccumulatorEpilogue(relu=True)
-    cache_input_footprint: bool = False
-    direct_conv0_from_input_cache: bool = False
+    problem: FusedConvPoolProblem = field()
+    name: str = field(default="ck_dsl_deep_fused_conv_pool")
+    tile_m: int = field(default=128)
+    tile_n: int = field(default=32)
+    tile_k: int = field(default=16)
+    conv1_tile_k: int = field(default=0)
+    pool_tile_h: int = field(default=4)
+    pool_tile_w: int = field(default=8)
+    warp_m: int = field(default=2)
+    warp_n: int = field(default=1)
+    warp_tile_m: int = field(default=32)
+    warp_tile_n: int = field(default=32)
+    warp_tile_k: int = field(default=16)
+    wave_size: int = field(default=64)
+    pipeline: str = field(default="mem")
+    async_dma: bool = field(default=False)
+    unroll_k: bool = field(default=False)
+    acc_epilogue: ConvAccumulatorEpilogue = field(
+        default_factory=lambda: ConvAccumulatorEpilogue(relu=True)
+    )
+    conv1_epilogue: ConvAccumulatorEpilogue = field(
+        default_factory=lambda: ConvAccumulatorEpilogue(relu=True)
+    )
+    cache_input_footprint: bool = field(default=False)
+    direct_conv0_from_input_cache: bool = field(default=False)
 
     @property
     def block_size(self) -> int:
@@ -542,7 +546,7 @@ def _load_conv0_a_tile_specialized(
     c_c = b.const_i32(c.C)
     c_sc = b.const_i32(c.S * c.C)  # 24 for the target shape.
     c_k_gemm = b.const_i32(c.K_gemm)
-    c_oob = b.const_i32((1 << 31) - 1)
+    c_oob = b.const_i32((1 << 31) - 1)  # noqa: F841  -- OOB sentinel kept for the in-progress clamp path
 
     h_base = b.mul(b.block_id_y(), b.const_i32(spec.pool_tile_h * p.pool_stride_h))
     w_base = b.mul(b.block_id_z(), b.const_i32(spec.pool_tile_w * p.pool_stride_w))
@@ -576,7 +580,9 @@ def _load_conv0_a_tile_specialized(
 
         hi = b_.sub(b_.add(b_.add(h_base, local_oh), r), b_.const_i32(c.pH))
         wi = b_.sub(b_.add(b_.add(w_base, local_ow), s_col), b_.const_i32(c.pW))
-        h_ok = b_.land(b_.cmp_ge(hi, b_.const_i32(0)), b_.cmp_lt(hi, b_.const_i32(c.Hi)))
+        h_ok = b_.land(
+            b_.cmp_ge(hi, b_.const_i32(0)), b_.cmp_lt(hi, b_.const_i32(c.Hi))
+        )
         w_ok = b_.land(b_.cmp_ge(wi, b_.const_i32(0)), b_.cmp_lt(wi, c_wi))
         kg_ok = b_.cmp_lt(kg, c_k_gemm)
         valid = b_.land(kg_ok, b_.land(h_ok, w_ok))
@@ -1038,7 +1044,9 @@ def _maxpool_is_intra_lane(spec: DeepFusedConvPoolSpec, grid: WarpGrid) -> bool:
     )
 
 
-def _maxpool_is_intra_lane_wmma(spec: DeepFusedConvPoolSpec, grid: WarpGrid, op) -> bool:
+def _maxpool_is_intra_lane_wmma(
+    spec: DeepFusedConvPoolSpec, grid: WarpGrid, op
+) -> bool:
     """WMMA analogue of :func:`_maxpool_is_intra_lane`: can the conv1->maxpool
     handoff stay register-resident on RDNA4 (wave32, 16x16x16)?
 
@@ -1097,7 +1105,7 @@ def _emit_wmma_maxpool_from_registers(
     out_k = p.conv1_channels
     mfmas_n = grid.mfmas_per_warp_n
 
-    col = b.mod(grid.lane, b.const_i32(16))   # channel within an n-atom
+    col = b.mod(grid.lane, b.const_i32(16))  # channel within an n-atom
     half = b.div(grid.lane, b.const_i32(16))  # which 8-col half of the conv row
     block_pool_h = b.mul(b.block_id_y(), b.const_i32(spec.pool_tile_h))
     block_pool_w = b.mul(b.block_id_z(), b.const_i32(spec.pool_tile_w))
@@ -1202,9 +1210,7 @@ def _emit_inline_maxpool_from_registers(
             b.buffer_store_f16(y_rsrc, safe_off, b.const_i32(0), y_h)
 
 
-def build_deep_fused_conv_pool(
-    spec: DeepFusedConvPoolSpec, arch: str = "gfx950"
-):
+def build_deep_fused_conv_pool(spec: DeepFusedConvPoolSpec, arch: str = "gfx950"):
     """Build the one-CTA conv0 -> conv1 -> maxpool fused kernel for ``arch``."""
 
     ok, why = is_valid_spec(spec, arch=arch)
@@ -1364,9 +1370,7 @@ def build_deep_fused_conv_pool(
                 b, spec, conv1_accs, y_rsrc, grid, op, epilogue=deferred_epi
             )
         else:
-            conv1_smem = _stage_accumulators_to_cshuffle_lds(
-                b, op, conv1_accs, grid
-            )
+            conv1_smem = _stage_accumulators_to_cshuffle_lds(b, op, conv1_accs, grid)
             _emit_inline_maxpool_from_cshuffle(
                 b, spec, conv1_smem, y_rsrc, grid, epilogue=deferred_epi
             )

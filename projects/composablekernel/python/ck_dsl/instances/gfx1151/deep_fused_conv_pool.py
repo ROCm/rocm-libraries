@@ -43,7 +43,7 @@ needed. The verify harness unpacks with the identical nibble layout.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Sequence, Tuple
 
 from ...core.ir import F16, I8, I16, I32, IRBuilder, PtrType, Value, VectorType
@@ -67,18 +67,18 @@ _I4_PER_I32 = 8  # int4 K-values packed per i32 fragment slot
 class Gfx1151DeepFusedConvPoolSpec:
     """One concrete gfx1151 genuine-int8/int4 deep-fusion configuration."""
 
-    problem: FusedConvPoolProblem
-    name: str = "ck_dsl_gfx1151_deep_fused_conv_pool"
-    tile_m: int = 256
-    tile_n: int = 32
-    pool_tile_h: int = 8
-    pool_tile_w: int = 8
-    warp_m: int = 4
-    warp_n: int = 2
+    problem: FusedConvPoolProblem = field()
+    name: str = field(default="ck_dsl_gfx1151_deep_fused_conv_pool")
+    tile_m: int = field(default=256)
+    tile_n: int = field(default=32)
+    pool_tile_h: int = field(default=8)
+    pool_tile_w: int = field(default=8)
+    warp_m: int = field(default=4)
+    warp_n: int = field(default=2)
     # Optimization toggles (correctness-neutral; for in-process A/B benching).
-    vectorize_conv0_a: bool = True
-    vectorize_maxpool: bool = True
-    early_w1: bool = True
+    vectorize_conv0_a: bool = field(default=True)
+    vectorize_maxpool: bool = field(default=True)
+    early_w1: bool = field(default=True)
     # Conv0 A operand mode. False -> im2col: materialize a row-major
     # [tile_m, kpad] LDS tile (each input pixel staged R*S times). True ->
     # direct conv: cache the raw input halo footprint once into a small
@@ -87,44 +87,44 @@ class Gfx1151DeepFusedConvPoolSpec:
     # occupancy blocker) and a full LDS round-trip. Correctness-neutral.
     # Measured +38% over im2col at the full target shape (7.54 vs 5.44 useful
     # TFLOP/s), so it is the default.
-    direct_conv0: bool = True
+    direct_conv0: bool = field(default=True)
     # Grid dispatch order. False -> grid (1, H_tiles, W_tiles): H is the
     # x-fastest axis. True -> (1, W_tiles, H_tiles): W (the NHWC-contiguous
     # spatial dim) becomes the fast axis, so adjacent workgroups walk
     # contiguous input memory. Correctness-neutral; perf-only.
-    w_fast: bool = False
+    w_fast: bool = field(default=False)
     # --- multi-lever latency-hiding campaign toggles (correctness-neutral) ---
     # L1: waves-per-EU occupancy hint. 0 -> unset (compiler default). >0 emits
     # the "amdgpu-waves-per-eu" launch bound: direct-conv0 freed enough LDS
     # (~26 KB/CTA) that two workgroups can co-reside per CU; raising the hint
     # forces the compiler to cap VGPRs so a 2nd resident WG fits, buying free
     # latency-hiding on this issue/latency-bound kernel. Swept empirically.
-    waves_per_eu: int = 0
+    waves_per_eu: int = field(default=0)
     # L2: instruction-schedule policy for the two WMMA loops. "mem" (default)
     # emits no hints; "compv3"/"compv4"/"intrawave" emit sched_group_barrier
     # DS_READ/MFMA/VMEM interleave hints to keep the matrix pipe fed across
     # operand-delivery latency. See helpers/schedule.py.
-    sched_policy: str = "mem"
+    sched_policy: str = field(default="mem")
     # L3: maxpool tail control flow. False -> scf_if-guarded (only n_pix lanes
     # active). True -> predicated/masked: all lanes compute, the store address
     # is clamped in-range and trailing lanes write a harmless duplicate, cutting
     # branch/divergence overhead. Correctness-neutral.
-    mask_maxpool: bool = False
+    mask_maxpool: bool = field(default=False)
     # Native integer cleanup levers.
     # Q1: vectorize fixed power-of-two RNE/clamp over the whole WMMA accumulator.
     # Measured non-default: cleaner ISA shape but slightly slower than scalar
     # per-slot RNE on gfx1151.
-    specialized_rne: bool = False
+    specialized_rne: bool = field(default=False)
     # Q2: skip halo predicates for CTAs whose direct-conv input footprint is
     # fully inside the image.
-    interior_fastpath: bool = False
+    interior_fastpath: bool = field(default=False)
     # Q3: specialize direct-conv A-fragment K mapping for C=8/R=S=3 so
     # kg->(r,s,ci) is compile-time arithmetic, not magic-divide VALU.
-    static_direct_kmap: bool = False
+    static_direct_kmap: bool = field(default=False)
     # Q4: experimental packed C0 handoff. Even lanes pack their own int4 code
     # with the adjacent odd lane's code, then store one byte for two C0 columns.
     # This halves C0 LDS footprint/loads but adds a cross-lane permute.
-    packed_c0_handoff: bool = False
+    packed_c0_handoff: bool = field(default=False)
     # Lever 2: lane-local packed C0 handoff. Keep the byte-per-code conv0 scatter,
     # then run a one-time LDS->LDS repack pass that reads two adjacent-K codes from
     # C0 LDS (a plain LDS read -- lane-agnostic, NO ds_bpermute) and writes one
@@ -143,7 +143,7 @@ class Gfx1151DeepFusedConvPoolSpec:
     # C0 LDS round-trip ON the critical path. Same thesis as butterfly: the
     # cross-WMMA handoff barrier is the expensive part, not the VALU. Kept behind
     # the flag as a documented negative result; do not enable.
-    repack_c0: bool = False
+    repack_c0: bool = field(default=False)
     # L6: fused conv0->conv1 register handoff via permlanex16 (the gfx11 FMHA
     # C->A transpose). False (default) -> conv0 writes requantized i4 codes to
     # c0_smem, a full-WG barrier, then conv1 re-reads them (the LDS round-trip IS
@@ -161,7 +161,7 @@ class Gfx1151DeepFusedConvPoolSpec:
     # conv0 only (needs the iu8 acc + iu4 conv1 register frags). Mutually
     # exclusive with packed_c0_handoff / repack_c0 (all three target the handoff).
     # Correctness-preserving (same accs, explicit lane transpose). Board A/B pending.
-    fused_c0a1: bool = False
+    fused_c0a1: bool = field(default=False)
     # L4: butterfly register-fusion of conv0 -> conv1. ANALYZED NON-LEVER on
     # gfx1151 WMMA -- rejected by is_valid_spec (no codegen). The idea was to
     # transpose the conv0 WMMA C-fragment in-register straight into conv1's
@@ -179,7 +179,7 @@ class Gfx1151DeepFusedConvPoolSpec:
     # LDS round-trip is the CHEAP path. Same anti-staging thesis, opposite sign.
     # (rocprofv3 unavailable on Windows; this is the sanctioned instruction-shape
     # verdict, same as the w_fast / dispatch-order non-lever.)
-    butterfly_conv01: bool = False
+    butterfly_conv01: bool = field(default=False)
     # Native integer WMMA path for conv0. False (default) -> the fp16-emulation
     # path: int8 operands are sitofp->trunc to f16, run wmma_f32_16x16x16_f16,
     # accumulate in f32, rint-snap back to int. True -> conv0 uses the native
@@ -189,7 +189,7 @@ class Gfx1151DeepFusedConvPoolSpec:
     # written as f16 codes into c0_smem (the fp16 conv1 consumer is unchanged).
     # Forces the im2col A path (direct/butterfly are not ported). The fp16 path
     # is left byte-identical so a flag A/B benchmark is clean. iu8-only (conv0).
-    native_int: bool = False
+    native_int: bool = field(default=False)
     # Lever 1: register-level multi-buffered staging. False (default) ->
     # staging emits each global_load immediately followed by its dependent
     # ds_store, so the LLVM backend must insert s_waitcnt vmcnt(0) between every
@@ -204,7 +204,7 @@ class Gfx1151DeepFusedConvPoolSpec:
     # interleaved A/B): 14.74 ms -> 13.99 ms (~5.1% faster), bit-exact across 4
     # pairs. Default ON. Only the footprint loads coalesce so far (the W1 b128
     # load is still serialized in _stage_conv1_w1_packed -- a further lever).
-    batch_loads: bool = True
+    batch_loads: bool = field(default=True)
     # Lever 3: packed-int16 maxpool reduction. False (default) -> the maxpool
     # 2x2 max runs per-channel in full-width i32 (v_cmp + v_cndmask, ~144 ops
     # for the 24-channel reduction; v_pk_* count = 0 in the ISA). True -> widen
@@ -215,7 +215,7 @@ class Gfx1151DeepFusedConvPoolSpec:
     # at the nibble-pack boundary. Native-int finalpack path only; requires the
     # vectorized maxpool chunk conditions (tile_n % 8 == 0). Correctness-neutral
     # (signed max over identical values). STATIC-ISA / board A/B pending.
-    pk_maxpool: bool = False
+    pk_maxpool: bool = field(default=False)
     # Lever 4: conv1 cross-k-step fragment prefetch. False (default) -> the conv1
     # iu4 GEMM hoists all A/B fragment LDS loads inside each k-step then issues
     # the MMAs, so the k=1 ds_read latency (lgkmcnt) is exposed at the top of the
@@ -226,7 +226,7 @@ class Gfx1151DeepFusedConvPoolSpec:
     # (the extra in-flight k=1 frags; ~110 -> ~128, within the wave32 256 budget).
     # Native-int byte-coded conv1 path only (the from_lds variant, not packed).
     # Correctness-neutral (pure load reordering, same MMAs/accs). Board A/B pending.
-    conv1_prefetch_k: bool = False
+    conv1_prefetch_k: bool = field(default=False)
     # Lever 5: conv1 fused k-step schedule group. False (default) -> the conv1
     # iu4 GEMM emits a per-k-step sched_group_barrier(DS_READ, n_ds) +
     # sched_group_barrier(MFMA, n_mma) pair, which pins each k-step's LDS reads
@@ -239,7 +239,7 @@ class Gfx1151DeepFusedConvPoolSpec:
     # hiding the k=1 LDS latency behind k=0 WMMA compute. Native-int byte-coded
     # conv1 path only (the from_lds variant). Correctness-neutral (scheduling
     # hint only; identical MMAs/accs). Pairs with conv1_prefetch_k. Board A/B pending.
-    conv1_sched_fuse: bool = False
+    conv1_sched_fuse: bool = field(default=False)
     # Lever 6: do conv1 contraction in int8 (iu8 atom) instead of int4 (iu4).
     # False (default) -> the fused_c0a1 handoff squeezes the 16 contiguous-k0
     # int8 byte codes into a packed <2 x i32> int4 A-fragment (8 codes/i32) via
@@ -254,7 +254,7 @@ class Gfx1151DeepFusedConvPoolSpec:
     # pending. The hypothesis (delete the per-handoff nibble squeeze) carries the
     # repack_c0 caveat: static VALU reduction may not yield wall-time gains if the
     # pack hides under WMMA/LDS latency -- the ISA gate decides before board.
-    conv1_int8: bool = False
+    conv1_int8: bool = field(default=False)
     # Persistent kernel. False (default) -> one output tile per CTA: the grid is
     # (1, H_tiles, W_tiles) = 16,200 tiny CTAs, and every CTA re-stages the
     # tile-invariant weights W0 (conv0 3x3) and W1 (conv1 1x1) global->LDS even
@@ -273,19 +273,19 @@ class Gfx1151DeepFusedConvPoolSpec:
     # latency unless occupancy (resident WG/CU) is preserved. native_int +
     # direct_conv0 + fused_c0a1 only (the live winning path; the only path with no
     # per-tile c0_smem and a register weight/handoff). Board A/B + ISA gate pending.
-    persistent: bool = False
+    persistent: bool = field(default=False)
     # Persistent grid size (number of resident CTAs that grid-stride over tiles).
     # Load-bearing perf knob (see `persistent`): under-subscribing exposes conv1
     # barriers/bubbles; target ~ #CU(8) * steady-state-WG/CU. The grid-stride loop
     # covers ALL tiles for any value, so this is perf-only, swept on the board.
     # Default 16 = 8 CU * 2 WG/CU starting point; pair with a waves_per_eu sweep
     # (occupancy is what preserves steady-state latency hiding under persistence).
-    persistent_ctas: int = 16
+    persistent_ctas: int = field(default=16)
     # Per-node inverse requant multipliers (fold act/weight/out scales).
-    m0: float = 0.0625  # conv0 int32 -> int8
-    m0b: float = 0.5  # conv0 int8 -> int4
-    m1: float = 0.25  # conv1 int32 -> int4
-    mf: float = 1.0  # maxpool int4 -> int4
+    m0: float = field(default=0.0625)  # conv0 int32 -> int8
+    m0b: float = field(default=0.5)  # conv0 int8 -> int4
+    m1: float = field(default=0.25)  # conv1 int32 -> int4
+    mf: float = field(default=1.0)  # maxpool int4 -> int4
 
     @property
     def warp_tile_m(self) -> int:

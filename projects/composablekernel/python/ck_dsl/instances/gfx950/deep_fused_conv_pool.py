@@ -13,7 +13,7 @@ manifests keep working byte-for-byte (kernel name ``ck_dsl_gfx950_deep_fused_con
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 
 from ..common.deep_fused_conv_pool import (
     DeepFusedConvPoolSpec,
@@ -49,7 +49,7 @@ class Gfx950DeepFusedConvPoolSpec(DeepFusedConvPoolSpec):
     yields the same MFMA kernel as before.
     """
 
-    name: str = _GFX950_NAME
+    name: str = field(default=_GFX950_NAME)
 
 
 def make_deep_fused_conv_pool_spec(**kwargs) -> Gfx950DeepFusedConvPoolSpec:

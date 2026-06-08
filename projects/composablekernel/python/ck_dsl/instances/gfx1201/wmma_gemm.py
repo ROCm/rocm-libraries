@@ -24,7 +24,7 @@ matches numpy bit-for-bit.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ...core.ir import F16, I32, IRBuilder, KernelDef, PtrType
 
@@ -39,8 +39,8 @@ _HALF_K = 8  # K-elements per lane-half (gfx12: 8, no duplication)
 class WmmaGemmSpec:
     """A gfx1201 WMMA GEMM instance (fp16, fixed 16x16x16 WMMA tile)."""
 
-    name: str = "ck_dsl_wmma_gemm_gfx12"
-    dtype: str = "fp16"
+    name: str = field(default="ck_dsl_wmma_gemm_gfx12")
+    dtype: str = field(default="fp16")
 
     def __post_init__(self) -> None:
         if self.dtype != "fp16":

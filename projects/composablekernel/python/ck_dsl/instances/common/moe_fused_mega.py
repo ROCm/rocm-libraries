@@ -100,23 +100,23 @@ class FusedMegaKernelSpec:
     ``M`` / ``N`` / ``K`` / ``H_out`` are runtime args; tile geometry is static.
     """
 
-    name: str
-    tile_m: int = 16
-    tile_n_inter: int = 256
-    tile_k_gu: int = 32
-    warp_m: int = 1
-    warp_n: int = 4
-    warp_tile_m: int = 16
-    warp_tile_n: int = 16
-    warp_tile_k: int = 32
+    name: str = field()
+    tile_m: int = field(default=16)
+    tile_n_inter: int = field(default=256)
+    tile_k_gu: int = field(default=32)
+    warp_m: int = field(default=1)
+    warp_n: int = field(default=4)
+    warp_tile_m: int = field(default=16)
+    warp_tile_n: int = field(default=16)
+    warp_tile_k: int = field(default=32)
     # Down-GEMM tiling: contraction is tile_n_inter (the inter slice this TG
     # owns), tiled along the down output (H_out) in tile_n_down chunks.
-    tile_n_down: int = 256
-    tile_k_down: int = 64
+    tile_n_down: int = field(default=256)
+    tile_k_down: int = field(default=64)
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
-    wave_size: int = 64
-    block_size: int = 0
-    dtype: str = "fp16"
+    wave_size: int = field(default=64)
+    block_size: int = field(default=0)
+    dtype: str = field(default="fp16")
 
     def __post_init__(self) -> None:
         if self.block_size == 0:

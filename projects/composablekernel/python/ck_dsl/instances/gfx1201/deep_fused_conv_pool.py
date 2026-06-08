@@ -17,7 +17,7 @@ layout-agnostic cshuffle-LDS gather + maxpool path.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 
 from ..common.deep_fused_conv_pool import (
     DeepFusedConvPoolSpec,
@@ -51,11 +51,11 @@ class Gfx1201DeepFusedConvPoolSpec(DeepFusedConvPoolSpec):
     gfx1201 kernel name.
     """
 
-    name: str = _GFX1201_NAME
-    wave_size: int = 32
-    warp_tile_m: int = 16
-    warp_tile_n: int = 16
-    warp_tile_k: int = 16
+    name: str = field(default=_GFX1201_NAME)
+    wave_size: int = field(default=32)
+    warp_tile_m: int = field(default=16)
+    warp_tile_n: int = field(default=16)
+    warp_tile_k: int = field(default=16)
 
 
 def make_deep_fused_conv_pool_spec(**kwargs) -> Gfx1201DeepFusedConvPoolSpec:

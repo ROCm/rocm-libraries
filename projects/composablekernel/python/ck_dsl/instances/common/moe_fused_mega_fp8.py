@@ -55,7 +55,7 @@ toolkit (which dispatches the fp8 atom directly) rather than the
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from ...core.ir import (
@@ -126,7 +126,7 @@ _USE_ASM_AGPR_MFMA = False
 # (v[acc], a[srcA], a[srcB]). This isolates the rank-1 lever to the stage where
 # its accvgpr-drain win is concrete and where it does NOT touch the gate/up
 # critical path. DEFAULT off (golden-safe / byte-identical); A/B-measured below.
-_USE_ASM_AGPR_MFMA_DOWN = os.environ.get("CKDSL_FP8_AGPR_MFMA_DOWN", "0").strip() in (
+_USE_ASM_AGPR_MFMA_DOWN = os.getenv("CKDSL_FP8_AGPR_MFMA_DOWN", "0").strip() in (
     "1",
     "true",
     "True",
@@ -152,7 +152,7 @@ _USE_ASM_AGPR_MFMA_DOWN = os.environ.get("CKDSL_FP8_AGPR_MFMA_DOWN", "0").strip(
 # reused global->VGPR A load is already the cheaper option here. Kept behind
 # this flag (additive, golden-safe: default-off build is byte-identical to the
 # pre-edit kernel) to document the dead-end, NOT activated.
-_USE_X_DTLA = os.environ.get("CKDSL_FP8_X_DTLA", "0").strip() in ("1", "true", "True")
+_USE_X_DTLA = os.getenv("CKDSL_FP8_X_DTLA", "0").strip() in ("1", "true", "True")
 
 # NUCLEAR gate/up MFMA CLUSTER (the FINAL 1:1 lever). The per-op AGPR-source
 # inline-asm MFMA regressed +25-31% (sections 8/_USE_ASM_AGPR_MFMA) because EACH
@@ -167,7 +167,7 @@ _USE_X_DTLA = os.environ.get("CKDSL_FP8_X_DTLA", "0").strip() in ("1", "true", "
 # around it -- the lever the per-op route forfeited. Bit-exact to the intrinsic
 # (asm_mfma_cluster_parity). DEFAULT off (golden-safe / byte-identical);
 # A/B-measured this pass.
-_USE_MFMA_CLUSTER = os.environ.get("CKDSL_FP8_MFMA_CLUSTER", "0").strip() in (
+_USE_MFMA_CLUSTER = os.getenv("CKDSL_FP8_MFMA_CLUSTER", "0").strip() in (
     "1",
     "true",
     "True",
@@ -183,7 +183,7 @@ _USE_MFMA_CLUSTER = os.environ.get("CKDSL_FP8_MFMA_CLUSTER", "0").strip() in (
 # HARDENED parity (NOT a free perf knob: too-small a value silently corrupts
 # the accumulator, so every value is re-validated numerically). Overridable
 # via the CKDSL_FP8_MFMA_NOP env var for the sweep.
-_ASM_MFMA_HAZARD_NOP = int(os.environ.get("CKDSL_FP8_MFMA_NOP", "8"))
+_ASM_MFMA_HAZARD_NOP = int(os.getenv("CKDSL_FP8_MFMA_NOP", "8"))
 
 # D5 scheduling-cadence sweep knob (additive). Values:
 #   "iglp1" -> (KEPT, default) emit ``b.iglp_opt(1)``
@@ -197,7 +197,7 @@ _ASM_MFMA_HAZARD_NOP = int(os.environ.get("CKDSL_FP8_MFMA_NOP", "8"))
 #   "none"  -> no scheduler hint (pre-D5 baseline; byte-identical IR).
 #   "sgb"   -> explicit sched_group_barrier cadence in the active DTLA gate/up +
 #              down loops. D5-swept: REGRESSED (~0.166 T1) -> not kept.
-_SCHED_CADENCE = os.environ.get("CKDSL_FP8_SCHED", "iglp1").strip().lower()
+_SCHED_CADENCE = os.getenv("CKDSL_FP8_SCHED", "iglp1").strip().lower()
 
 
 def _emit_loop_cadence_hint(b: IRBuilder, cadence: str | None = None) -> None:
@@ -330,25 +330,31 @@ class FusedMegaKernelSpecFp8:
       pin the cadence on the spec (overrides the env for this build).
     """
 
-    name: str
-    tile_m: int = 16
-    tile_n_inter: int = 256
-    tile_k_gu: int = 32
-    warp_m: int = 1
-    warp_n: int = 4
-    warp_tile_m: int = 16
-    warp_tile_n: int = 16
-    warp_tile_k: int = 32
-    tile_n_down: int = 256
-    tile_k_down: int = 64
-    wave_size: int = 64
-    block_size: int = 0
-    dtype: str = "fp8e4m3"
+    name: str = field()
+    tile_m: int = field(default=16)
+    tile_n_inter: int = field(default=256)
+    tile_k_gu: int = field(default=32)
+    warp_m: int = field(default=1)
+    warp_n: int = field(default=4)
+    warp_tile_m: int = field(default=16)
+    warp_tile_n: int = field(default=16)
+    warp_tile_k: int = field(default=32)
+    tile_n_down: int = field(default=256)
+    tile_k_down: int = field(default=64)
+    wave_size: int = field(default=64)
+    block_size: int = field(default=0)
+    dtype: str = field(default="fp8e4m3")
     # -- optimization-lever flags (defaults = final best; see class docstring) --
-    gate_up_k: int = 128  # level 7 (K=128 hero atom); 32 = legacy baseline
-    down_k: int = 128  # level 7 (down hero atom); 32 = legacy baseline
-    use_dtla: bool = True  # level 8 (direct-to-LDS gate+up); False = global->VGPR
-    sched_cadence: str | None = None  # level 9; None defers to CKDSL_FP8_SCHED env
+    gate_up_k: int = field(
+        default=128
+    )  # level 7 (K=128 hero atom); 32 = legacy baseline
+    down_k: int = field(default=128)  # level 7 (down hero atom); 32 = legacy baseline
+    use_dtla: bool = field(
+        default=True
+    )  # level 8 (direct-to-LDS gate+up); False = global->VGPR
+    sched_cadence: str | None = field(
+        default=None
+    )  # level 9; None defers to CKDSL_FP8_SCHED env
 
     def __post_init__(self) -> None:
         if self.block_size == 0:

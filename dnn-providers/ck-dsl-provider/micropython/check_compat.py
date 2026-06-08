@@ -55,7 +55,11 @@ KNOWN_MPY_CROSS_INCOMPATIBLE = {
     "attention_tiled_2d.py",  # >255 locals in a codegen function (FMHA gfx950 instance)
 }
 
-SKIP_DIRS = {"__pycache__", "examples", "dsl_docs"}
+# remote_test is a host-only remote-execution harness (SSH / SLURM / docker
+# drivers); it is never frozen or loaded under MicroPython, so its host features
+# (os.environ, PEP-448 star-args) are legitimate -- same rationale as the
+# sweep_bench.py allowlist entry above.
+SKIP_DIRS = {"__pycache__", "examples", "dsl_docs", "remote_test"}
 
 
 def _is_dataclass(node):

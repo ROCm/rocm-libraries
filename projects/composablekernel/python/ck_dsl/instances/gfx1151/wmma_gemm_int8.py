@@ -26,7 +26,7 @@ Layout matches ``wmma_gemm.py`` exactly (RCR: A row-major ``M×K``, B row-major
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ...core.ir import F16, F32, I8, I32, IRBuilder, KernelDef, PtrType
 
@@ -44,8 +44,8 @@ class WmmaGemmInt8Spec:
     only carries the storage dtype and a name (the tile is the fixed 16x16x16
     WMMA, compute is f16)."""
 
-    name: str = "ck_dsl_wmma_gemm_int8"
-    dtype: str = "i8"
+    name: str = field(default="ck_dsl_wmma_gemm_int8")
+    dtype: str = field(default="i8")
 
     def __post_init__(self) -> None:
         if self.dtype != "i8":

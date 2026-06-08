@@ -24,7 +24,7 @@ The integer WMMA does no rounding — verify expects ``max_abs_diff == 0``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ...core.arch import ArchTarget
 from ...core.ir import I32, IRBuilder, KernelDef, PtrType
@@ -41,7 +41,7 @@ _OP_ID = "wmma_i32_16x16x16_iu8"
 class WmmaGemmIu8Spec:
     """A gfx1151 native-int WMMA GEMM instance (int8 in / i32 out)."""
 
-    name: str = "ck_dsl_wmma_gemm_iu8"
+    name: str = field(default="ck_dsl_wmma_gemm_iu8")
 
     @property
     def block_size(self) -> int:

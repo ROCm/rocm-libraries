@@ -24,7 +24,7 @@ This module is Milestone 1: spec, validator, signature, grid, and the
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List, Literal, Tuple
 
 from ...helpers.spec import (
@@ -93,19 +93,19 @@ class MatMulNBitsSpec(WarpTileBlockSizeMixin):
     :class:`WarpTileBlockSizeMixin`.
     """
 
-    name: str
-    N: int
-    K: int
-    tile: TileSpec
-    group_size: int = V1_GROUP_SIZE
-    seq_len_tile: int = 64
-    wave_size: int = 32
-    block_size: int = 0
-    scale_dtype: str = "fp16"
-    zero_points: bool = False
-    packing: str = "row_k_contiguous"
-    family: str = "large_n"
-    optimized: bool = False
+    name: str = field()
+    N: int = field()
+    K: int = field()
+    tile: TileSpec = field()
+    group_size: int = field(default=V1_GROUP_SIZE)
+    seq_len_tile: int = field(default=64)
+    wave_size: int = field(default=32)
+    block_size: int = field(default=0)
+    scale_dtype: str = field(default="fp16")
+    zero_points: bool = field(default=False)
+    packing: str = field(default="row_k_contiguous")
+    family: str = field(default="large_n")
+    optimized: bool = field(default=False)
 
     def __post_init__(self) -> None:
         self._init_block_size()
@@ -126,7 +126,9 @@ class MatMulNBitsSpec(WarpTileBlockSizeMixin):
         )
 
 
-def validate_common_spec(spec: MatMulNBitsSpec, arch: str = V1_ARCH) -> Tuple[bool, str]:
+def validate_common_spec(
+    spec: MatMulNBitsSpec, arch: str = V1_ARCH
+) -> Tuple[bool, str]:
     """Family-agnostic validity gate for ``spec`` on ``arch``.
 
     Returns ``(ok, reason)``. Covers the v1 contract (gfx1151-only,
@@ -145,8 +147,7 @@ def validate_common_spec(spec: MatMulNBitsSpec, arch: str = V1_ARCH) -> Tuple[bo
     # v1 contract gates.
     if arch not in SUPPORTED_ARCHES:
         return False, (
-            f"matmul_nbits v1 supports {sorted(SUPPORTED_ARCHES)} only "
-            f"(got {arch!r})"
+            f"matmul_nbits v1 supports {sorted(SUPPORTED_ARCHES)} only (got {arch!r})"
         )
     if spec.family not in FAMILIES:
         return False, f"unknown family {spec.family!r}; expected one of {FAMILIES}"
@@ -180,8 +181,7 @@ def validate_common_spec(spec: MatMulNBitsSpec, arch: str = V1_ARCH) -> Tuple[bo
     # Wave geometry must match the target.
     if spec.wave_size != target.wave_size:
         return False, (
-            f"spec wave_size {spec.wave_size} != {arch} wave_size "
-            f"{target.wave_size}"
+            f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
         )
 
     # The decode-GEMV family is a scalar (no-WMMA) body: one thread per output
@@ -329,9 +329,7 @@ def pack_i4_weights_for_matmul_nbits(
         raise ValueError(f"weights must be 2-D [N, K], got shape {w.shape}")
     n, k = w.shape
     if (n, k) != (spec.N, spec.K):
-        raise ValueError(
-            f"weights shape {(n, k)} != spec (N, K) {(spec.N, spec.K)}"
-        )
+        raise ValueError(f"weights shape {(n, k)} != spec (N, K) {(spec.N, spec.K)}")
     if k % 2:
         raise ValueError(f"K ({k}) must be even to pack two int4 per byte")
     if not np.issubdtype(w.dtype, np.integer):
@@ -340,8 +338,7 @@ def pack_i4_weights_for_matmul_nbits(
     wi = w.astype(np.int64)
     if wi.min() < -8 or wi.max() > 7:
         raise ValueError(
-            f"weights out of signed-int4 range [-8, 7] "
-            f"(min={wi.min()}, max={wi.max()})"
+            f"weights out of signed-int4 range [-8, 7] (min={wi.min()}, max={wi.max()})"
         )
     low = wi[:, 0::2] & 0x0F
     high = wi[:, 1::2] & 0x0F
@@ -362,15 +359,11 @@ def dequant_i4_weights(
 
     p = np.asarray(packed, dtype=np.uint8)
     if p.shape != (spec.N, spec.K // 2):
-        raise ValueError(
-            f"packed shape {p.shape} != expected {(spec.N, spec.K // 2)}"
-        )
+        raise ValueError(f"packed shape {p.shape} != expected {(spec.N, spec.K // 2)}")
     g = spec.group_size
     s = np.asarray(scales, dtype=np.float32)
     if s.shape != (spec.N, spec.K // g):
-        raise ValueError(
-            f"scales shape {s.shape} != expected {(spec.N, spec.K // g)}"
-        )
+        raise ValueError(f"scales shape {s.shape} != expected {(spec.N, spec.K // g)}")
 
     low = (p & 0x0F).astype(np.int32)
     high = ((p >> 4) & 0x0F).astype(np.int32)
