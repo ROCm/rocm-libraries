@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
-#include "HipKernelUtils.hpp"
+#include "core/Utils.hpp"
 
 namespace hip_kernel_provider::rmsnorm
 {
@@ -39,7 +39,7 @@ inline int64_t getStride(const hipdnn_flatbuffers_sdk::data_objects::TensorAttri
                          unsigned normalizeDim)
 {
     int64_t stride = 1;
-    auto isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(x);
+    auto isLayoutNHWC = core::utils::isChannelLastLayout(x);
     if(normalizeDim > 1 && isLayoutNHWC)
     {
         stride = static_cast<int64_t>(x->dims()->Get(1));

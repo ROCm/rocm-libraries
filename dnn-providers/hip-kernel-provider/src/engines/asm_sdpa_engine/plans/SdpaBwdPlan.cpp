@@ -406,7 +406,7 @@ SdpaBwdPlan::SdpaBwdPlan(HipModuleGuard odoKernel,
 // getWorkspaceSize
 // =============================================================================
 
-size_t SdpaBwdPlan::getWorkspaceSize(const HipKernelHandle& /*handle*/) const
+size_t SdpaBwdPlan::getWorkspaceSize(const Handle& /*handle*/) const
 {
     return sdpaBwdWorkspaceSize(_params.batchSize,
                                 _params.numHeadsQ,
@@ -419,7 +419,7 @@ size_t SdpaBwdPlan::getWorkspaceSize(const HipKernelHandle& /*handle*/) const
 // execute — 3-kernel orchestration
 // =============================================================================
 
-void SdpaBwdPlan::execute(const HipKernelHandle& handle,
+void SdpaBwdPlan::execute(const Handle& handle,
                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                           uint32_t numDeviceBuffers,
                           void* workspace) const
