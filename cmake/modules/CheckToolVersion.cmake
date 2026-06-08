@@ -14,17 +14,17 @@ if(NOT EXPECTED_LLVM_VERSION)
     set(EXPECTED_LLVM_VERSION "20")
 endif()
 
-# Allows using a tool when the found version doesn't match expected.
-option(ALLOW_CLANG_FORMAT_VERSION_MISMATCH
-    "Allow clang-format version different from EXPECTED_CLANG_FORMAT_VERSION (warn but continue)"
-    OFF
+# Allows using any tool when the found version doesn't match expected.
+# Individual tools can still be explicitly enabled via e.g. -DALLOW_CLANG_FORMAT_VERSION_MISMATCH=ON
+# when ALLOW_TOOL_VERSION_MISMATCH is OFF.
+option(ALLOW_TOOL_VERSION_MISMATCH
+    "Allow any tool version different from its expected version (warn but continue)" OFF
 )
-option(ALLOW_CLANG_TIDY_VERSION_MISMATCH
-    "Allow clang-tidy version different from EXPECTED_CLANG_TIDY_VERSION (warn but continue)" OFF
-)
-option(ALLOW_LLVM_VERSION_MISMATCH
-    "Allow LLVM tools version different from EXPECTED_LLVM_VERSION (warn but continue)" OFF
-)
+if(ALLOW_TOOL_VERSION_MISMATCH)
+    set(ALLOW_CLANG_FORMAT_VERSION_MISMATCH ON)
+    set(ALLOW_CLANG_TIDY_VERSION_MISMATCH ON)
+    set(ALLOW_LLVM_VERSION_MISMATCH ON)
+endif()
 
 # Build a list of versioned tool search paths from a base directory.
 function(get_versioned_search_paths OUTPUT_VAR BASE_PATH VERSION)
