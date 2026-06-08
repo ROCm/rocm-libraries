@@ -87,7 +87,7 @@ def get_rocm_version() -> str:
     Return:
         ROCm version string
     """
-    return _getVersion(ToolchainDefaults.HIP_CONFIG, "--version", r'(.+)')
+    return _getVersion(ToolchainDefaults.HIP_CONFIG, "--version", r'([\d.]+)')
 
 
 class Component:
