@@ -36,11 +36,6 @@
 #include <miopen/tensor_ops.hpp>
 #include <miopen/driver_arguments.hpp>
 #include <miopen/config.hpp>
-#include <miopen/db.hpp>
-#include <miopen/db_record.hpp>
-#include <miopen/find_db.hpp>
-#include <miopen/solver.hpp>
-#include <miopen/mlo_internal.hpp>
 
 #include <algorithm>
 #include <optional>

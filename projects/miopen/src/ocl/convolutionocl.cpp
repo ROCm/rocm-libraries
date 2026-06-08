@@ -93,12 +93,15 @@ void LogConvolutionExecution(const Handle& handle,
             return;
         }
 
-        const std::string driver_cmd = debug::ConvArgsForMIOpenDriver(problem.GetIn(),
-                                                                      problem.GetWeights(),
-                                                                      problem.GetConv(),
-                                                                      problem.GetOut(),
-                                                                      dir,
-                                                                      std::nullopt);
+        // ProblemDescription stores x in `in` for Forward but in `out` for Backward*
+        // (and vice versa for y), so swap them to match ConvArgsForMIOpenDriver's
+        // (xDesc, yDesc) contract for the non-forward directions.
+        const bool is_forward = direction == conv::Direction::Forward;
+        const auto& x_desc    = is_forward ? problem.GetIn() : problem.GetOut();
+        const auto& y_desc    = is_forward ? problem.GetOut() : problem.GetIn();
+
+        const std::string driver_cmd = debug::ConvArgsForMIOpenDriver(
+            x_desc, problem.GetWeights(), problem.GetConv(), y_desc, dir, std::nullopt);
 
         // Query find database for time
         std::string config_str = "N/A";
