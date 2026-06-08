@@ -2256,7 +2256,7 @@ class StreamKOff(StreamK):
                                        comment="select loopcounter (0 if summation is multiple of %u)"%maxUnit))
             if kernel["GlobalSplitU"] != 0:
                 # skip tailloopInNll code if GSU>1
-                module.add(SAndB32(dst=sgpr(tmpSgpr+1), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SAndB32(dst=sgpr(tmpSgpr+1), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SCmpGtU32(src0=sgpr(tmpSgpr+1), src1=1, comment="GSU > 1 ?"))
                 module.add(SCMovB32(dst=sgpr(tmpSgpr), src=0, comment="do not increment loopcounter if GSU > 1"))
             module.add(SAddU32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), \

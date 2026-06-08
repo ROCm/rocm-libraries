@@ -129,6 +129,24 @@ class TestSuiteConfigPluginPaths:
             )
 
 
+class TestSuiteConfigTolerances:
+    """Tests for SuiteConfig validation tolerance overrides."""
+
+    def test_defaults_use_dtype_aware_tolerances(self) -> None:
+        config = SuiteConfig()
+        assert config.rtol is None
+        assert config.atol is None
+        assert config.tolerance_override is None
+
+    def test_both_tolerances_override_dtype_defaults(self) -> None:
+        config = SuiteConfig(rtol=1e-3, atol=1e-4)
+        assert config.tolerance_override == (1e-3, 1e-4)
+
+    def test_single_tolerance_applies_to_both_values(self) -> None:
+        assert SuiteConfig(rtol=1e-3).tolerance_override == (1e-3, 1e-3)
+        assert SuiteConfig(atol=1e-4).tolerance_override == (1e-4, 1e-4)
+
+
 class TestValidationConfig:
     """Tests for ValidationConfig dataclass."""
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "ConfigHelpers.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
@@ -14,6 +15,7 @@ namespace asm_sdpa_engine
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hip_kernel_provider_common;
+using plan_utils::MaskType;
 
 static DataType toDataType(const std::string& configDataType)
 {
@@ -126,7 +128,7 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     bool causalMask = false;
     bool causalMaskBottomRight = false;
 
-    switch(config.mask)
+    switch(static_cast<MaskType>(config.mask))
     {
     case MaskType::NO_MASK:
         // No mask - leave all defaults
