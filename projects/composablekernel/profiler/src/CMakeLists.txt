@@ -161,10 +161,12 @@ if(CK_TILE_DISPATCHER AND SUPPORTED_GPU_TARGETS MATCHES "gfx9")
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
   # Build dispatcher instance libraries (defines ck_dispatcher_grouped_conv_* targets)
-  add_subdirectory(
-    ${PROJECT_SOURCE_DIR}/dispatcher/library
-    ${CMAKE_CURRENT_BINARY_DIR}/dispatcher_library
-  )
+  if(NOT TARGET ck_dispatcher_grouped_conv_fwd)
+    add_subdirectory(
+      ${PROJECT_SOURCE_DIR}/dispatcher/library
+      ${CMAKE_CURRENT_BINARY_DIR}/dispatcher_library
+    )
+  endif()
 
   # Profiler needs dispatcher API headers and builder test infrastructure
   target_include_directories(${PROFILER_EXECUTABLE} PRIVATE
