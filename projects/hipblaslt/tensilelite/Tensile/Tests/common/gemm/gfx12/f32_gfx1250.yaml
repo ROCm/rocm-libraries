@@ -66,7 +66,6 @@ BenchmarkProblems:
         - LdsPadMetadata: [0]
         - StaggerU: [0]
         - ScheduleIterAlg: [3]
-        - DisableSTWaitCnt: [1]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
@@ -139,7 +138,6 @@ BenchmarkProblems:
         - LdsPadMetadata: [0]
         - StaggerU: [0]
         - ScheduleIterAlg: [3]
-        - DisableSTWaitCnt: [1]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
@@ -211,7 +209,6 @@ BenchmarkProblems:
         - LdsPadMetadata: [0]
         - StaggerU: [0]
         - ScheduleIterAlg: [3]
-        - DisableSTWaitCnt: [1]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]
@@ -283,7 +280,6 @@ BenchmarkProblems:
         - LdsPadMetadata: [0]
         - StaggerU: [0]
         - ScheduleIterAlg: [3]
-        - DisableSTWaitCnt: [1]
         - PrefetchLocalRead: [1] #
         - PrefetchGlobalRead: [2] #
         - StoreRemapVectorWidth: [0]

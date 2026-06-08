@@ -71,7 +71,6 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [0]
-        - DisableSTWaitCnt: [1]
         - SourceSwap: [0]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]
