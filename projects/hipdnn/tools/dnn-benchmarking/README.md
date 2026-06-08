@@ -26,7 +26,7 @@ Run the provided setup script from the `dnn-benchmarking` directory:
 Requires Python 3.12 or newer.
 
 ```bash
-bash setup.sh
+bash setup.sh --workspace .workspace
 source .workspace/.venv/bin/activate
 ```
 

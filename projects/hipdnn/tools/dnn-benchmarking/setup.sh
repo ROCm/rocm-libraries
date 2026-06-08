@@ -166,20 +166,19 @@ find_rocm_wheel_prefix() {
     local kind="$1"
     python - "$kind" <<'PY'
 from pathlib import Path
-import site
 import sys
+import sysconfig
 
 kind = sys.argv[1]
+venv_root = Path(sys.prefix).resolve()
 
 roots = []
-try:
-    roots.extend(Path(p) for p in site.getsitepackages())
-except Exception:
-    pass
-try:
-    roots.append(Path(site.getusersitepackages()))
-except Exception:
-    pass
+for key in ("purelib", "platlib"):
+    value = sysconfig.get_path(key)
+    if value:
+        path = Path(value).resolve()
+        if path == venv_root or venv_root in path.parents:
+            roots.append(path)
 
 matches = {}
 for root in roots:
@@ -377,6 +376,35 @@ except Exception:
 sys.exit(0 if getattr(torch.version, "hip", None) else 1)
 PY
 }
+torch_mode_status() {
+    python - <<'PY'
+try:
+    import torch
+except Exception:
+    print("missing")
+else:
+    print("rocm" if getattr(torch.version, "hip", None) else "cpu")
+PY
+}
+
+require_torch_mode() {
+    local expected="$1"
+    local status
+    status=$(torch_mode_status)
+    if [ "$status" != "$expected" ]; then
+        echo "ERROR: --torch-mode $expected requested, but $VENV_DIR contains torch mode '$status'." >&2
+        echo "Use a clean workspace or remove the existing virtual environment before changing torch modes." >&2
+        exit 1
+    fi
+}
+
+validate_installed_torch_mode() {
+    case "$TORCH_MODE" in
+        cpu) require_torch_mode cpu ;;
+        rocm) require_torch_mode rocm ;;
+    esac
+}
+
 
 resolve_installed_rocm_prefix() {
     if [ -n "$ROCM_PREFIX" ]; then
@@ -407,8 +435,14 @@ install_torch() {
             ;;
         cpu)
             local index_url="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
+            if torch_is_importable; then
+                require_torch_mode cpu
+                echo "Using existing CPU-only PyTorch in $VENV_DIR."
+                return
+            fi
             echo "Installing CPU-only PyTorch from $index_url"
             pip install torch --index-url "$index_url"
+            validate_installed_torch_mode
             ;;
         rocm)
             local index_url="$TORCH_INDEX_URL"
@@ -430,8 +464,14 @@ install_torch() {
                 echo "Detected GPU: $gpu_arch"
             fi
             RESOLVED_TORCH_INDEX_URL="$index_url"
+            if torch_is_importable; then
+                require_torch_mode rocm
+                echo "Using existing ROCm PyTorch in $VENV_DIR."
+                return
+            fi
             echo "Installing ROCm PyTorch from $index_url"
             pip install --pre torch --index-url "$index_url"
+            validate_installed_torch_mode
             ;;
     esac
 }
@@ -552,6 +592,7 @@ build_hipdnn() {
         -DROCM_PATH="$toolchain_prefix" \
         -DHIPDNN_SKIP_TESTS=ON \
         -DHIPDNN_SKIP_JSON_LIB=ON \
+        -DHIPDNN_ENABLE_SDPA=ON \
         -DENABLE_CLANG_FORMAT=OFF \
         -DENABLE_CLANG_TIDY=OFF
     cmake --build "$BUILD_DIR"
