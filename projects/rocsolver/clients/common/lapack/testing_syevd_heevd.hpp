@@ -622,8 +622,9 @@ void syevd_heevd_getError(const rocblas_handle handle,
     // input data initialization
     syevd_heevd_initData<true, true, T>(handle, matrix, evect, n, dA, lda, bc, hA, A);
 
-    if (verbose >= 2) {
-        print_matrix( "A", n, n, dA[0], lda );
+    if(verbose >= 2)
+    {
+        print_matrix("A", n, n, dA[0], lda);
     }
 
     // execute computations
@@ -631,9 +632,10 @@ void syevd_heevd_getError(const rocblas_handle handle,
     CHECK_ROCBLAS_ERROR(rocsolver_syevd_heevd(STRIDED, handle, evect, uplo, n, dA.data(), lda, stA,
                                               dD.data(), stD, dE.data(), stE, dinfo.data(), bc));
 
-    if (verbose >= 2) {
-        print_matrix( "D", n, 1, dD[0], n );
-        print_matrix( "V", n, n, dA[0], lda );
+    if(verbose >= 2)
+    {
+        print_matrix("D", n, 1, dD[0], n);
+        print_matrix("V", n, n, dA[0], lda);
     }
 
     CHECK_HIP_ERROR(hDres.transfer_from(dD));
@@ -646,10 +648,10 @@ void syevd_heevd_getError(const rocblas_handle handle,
         cpu_syevd_heevd(evect, uplo, n, hA[b], lda, hD[b], work.data(), lwork, hE.data(), sizeE,
                         iwork.data(), liwork, hinfo[b]);
 
-
-    if (verbose >= 3) {
-        print_matrix( "hD", n, 1, hD[0], n );
-        print_matrix( "hV", n, n, hA[0], lda );
+    if(verbose >= 3)
+    {
+        print_matrix("hD", n, 1, hD[0], n);
+        print_matrix("hV", n, n, hA[0], lda);
     }
 
     // Check info for non-convergence
@@ -949,16 +951,16 @@ void testing_syevd_heevd(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
         {
-            syevd_heevd_getError<STRIDED, T>(handle, matrix, verbose, evect, uplo, n, dA, lda, stA, dD, stD,
-                                             dE, stE, dinfo, bc, hA, hAres, hD, hDres, hinfo,
-                                             hinfoRes, max_errors);
+            syevd_heevd_getError<STRIDED, T>(handle, matrix, verbose, evect, uplo, n, dA, lda, stA,
+                                             dD, stD, dE, stE, dinfo, bc, hA, hAres, hD, hDres,
+                                             hinfo, hinfoRes, max_errors);
         }
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
         {
-            syevd_heevd_getPerfData<STRIDED, T>(handle, matrix, verbose, evect, uplo, n, dA, lda, stA, dD,
-                                                stD, dE, stE, dinfo, bc, hA, hD, hinfo,
+            syevd_heevd_getPerfData<STRIDED, T>(handle, matrix, verbose, evect, uplo, n, dA, lda,
+                                                stA, dD, stD, dE, stE, dinfo, bc, hA, hD, hinfo,
                                                 &gpu_time_used, &cpu_time_used, hot_calls,
                                                 argus.profile, argus.profile_kernels, argus.perf);
         }
@@ -988,16 +990,16 @@ void testing_syevd_heevd(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
         {
-            syevd_heevd_getError<STRIDED, T>(handle, matrix, verbose, evect, uplo, n, dA, lda, stA, dD, stD,
-                                             dE, stE, dinfo, bc, hA, hAres, hD, hDres, hinfo,
-                                             hinfoRes, max_errors);
+            syevd_heevd_getError<STRIDED, T>(handle, matrix, verbose, evect, uplo, n, dA, lda, stA,
+                                             dD, stD, dE, stE, dinfo, bc, hA, hAres, hD, hDres,
+                                             hinfo, hinfoRes, max_errors);
         }
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
         {
-            syevd_heevd_getPerfData<STRIDED, T>(handle, matrix, verbose, evect, uplo, n, dA, lda, stA, dD,
-                                                stD, dE, stE, dinfo, bc, hA, hD, hinfo,
+            syevd_heevd_getPerfData<STRIDED, T>(handle, matrix, verbose, evect, uplo, n, dA, lda,
+                                                stA, dD, stD, dE, stE, dinfo, bc, hA, hD, hinfo,
                                                 &gpu_time_used, &cpu_time_used, hot_calls,
                                                 argus.profile, argus.profile_kernels, argus.perf);
         }
@@ -1041,15 +1043,17 @@ void testing_syevd_heevd(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                if (evect == rocblas_evect_none)
+                if(evect == rocblas_evect_none)
                 {
                     rocsolver_bench_output("cpu_time_us", "gpu_time_us", "eigval error");
                     rocsolver_bench_output(cpu_time_used, gpu_time_used, max_errors[0]);
                 }
                 else
                 {
-                    rocsolver_bench_output("cpu_time_us", "gpu_time_us", "eigval error", "eigvec error", "orthogonality");
-                    rocsolver_bench_output(cpu_time_used, gpu_time_used, max_errors[0], max_errors[1], max_errors[2]);
+                    rocsolver_bench_output("cpu_time_us", "gpu_time_us", "eigval error",
+                                           "eigvec error", "orthogonality");
+                    rocsolver_bench_output(cpu_time_used, gpu_time_used, max_errors[0],
+                                           max_errors[1], max_errors[2]);
                 }
             }
             else
@@ -1063,10 +1067,11 @@ void testing_syevd_heevd(Arguments& argus)
         {
             if(argus.norm_check)
             {
-                if (evect == rocblas_evect_none)
+                if(evect == rocblas_evect_none)
                     rocsolver_bench_output(gpu_time_used, max_errors[0]);
                 else
-                    rocsolver_bench_output(gpu_time_used, max_errors[0], max_errors[1], max_errors[2]);
+                    rocsolver_bench_output(gpu_time_used, max_errors[0], max_errors[1],
+                                           max_errors[2]);
             }
             else
             {

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -180,7 +180,7 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
     using S = decltype(std::real(T{}));
 
     // todo: fix const-correctness in rocsolver_gemm
-    T one    = T(1);
+    T one = T(1);
     T negone = T(-1);
 
     rocblas_pointer_mode old_mode;
@@ -192,11 +192,12 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
     // Work arrays for cpu_lange, cpu_gelqf, etc.
     // todo: query for optimal size; currently estimate nb=64.
     rocblas_int nb = 64;
-    std::vector<T> hW(std::max(m, n)*nb);
+    std::vector<T> hW(std::max(m, n) * nb);
     std::vector<S> hrwork(std::max(m, n));
 
     // input data initialization
-    gelq2_gelqf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+    gelq2_gelqf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                        hIpiv);
 
     if(verbose >= 2)
         print_matrix("A", m, n, dA[0], lda);
@@ -210,9 +211,8 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
     std::vector<S> A_norms(bc);
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        CHECK_ROCBLAS_ERROR(rocsolver_lange(
-            handle, rocsolver_norm_type_one,
-            m, n, dA[b], lda, dnorm[0]));
+        CHECK_ROCBLAS_ERROR(
+            rocsolver_lange(handle, rocsolver_norm_type_one, m, n, dA[b], lda, dnorm[0]));
         CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
         A_norms[b] = hnorm[0][0];
     }
@@ -269,25 +269,21 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
         // Copy L: lower trapezoid of A, zero elsewhere.
         // todo: laset and lacpy on GPU.
         std::vector<T> hC(lda * n, T(0));
-        cpu_lacpy( rocblas_fill_lower, m, min_mn, hARes[b], lda, hC.data(), lda );
+        cpu_lacpy(rocblas_fill_lower, m, min_mn, hARes[b], lda, hC.data(), lda);
 
         // Upload L to GPU.
         CHECK_HIP_ERROR(hipMemcpy(dC[0], hC.data(), sizeof(T) * lda * n, hipMemcpyHostToDevice));
 
         if(verbose >= 4)
-            print_matrix( "L", m, n, dC[0], lda );
+            print_matrix("L", m, n, dC[0], lda);
 
         // Compute L*Q on GPU using unmlq.
-        CHECK_ROCBLAS_ERROR(rocsolver_ormlx_unmlx(
-            GELQF, handle,
-            rocblas_side_right, rocblas_operation_none,
-            m, n, min_mn,
-            dA[b], lda,
-            dIpiv[b],
-            dC[0], lda));
+        CHECK_ROCBLAS_ERROR(rocsolver_ormlx_unmlx(GELQF, handle, rocblas_side_right,
+                                                  rocblas_operation_none, m, n, min_mn, dA[b], lda,
+                                                  dIpiv[b], dC[0], lda));
 
         if(verbose >= 4)
-            print_matrix( "L*Q", m, n, dC[0], lda );
+            print_matrix("L*Q", m, n, dC[0], lda);
 
         // Transfer L*Q back to host.
         // todo: geadd and lange on GPU.
@@ -299,7 +295,7 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
                 hC[i + j * lda] -= hA[b][i + j * lda];
 
         if(verbose >= 4)
-            print_matrix( "L*Q - A", m, n, hC.data(), lda );
+            print_matrix("L*Q - A", m, n, hC.data(), lda);
 
         double err = cpu_lange('1', m, n, hC.data(), lda, hrwork.data());
         err /= n;
@@ -335,39 +331,35 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
         CHECK_HIP_ERROR(hipMemcpy(dQ[0], dA[b], sizeof(T) * lda * n, hipMemcpyDeviceToDevice));
 
         if(verbose >= 4)
-            print_matrix( "V", min_mn, n, dQ[0], lda );
+            print_matrix("V", min_mn, n, dQ[0], lda);
 
         // Generate explicit Q (min_mn x n) in dQ via unglq.
-        CHECK_ROCBLAS_ERROR(rocsolver_orglx_unglx(
-            GELQF, handle,
-            min_mn, n, min_mn,
-            dQ[0], lda,
-            dIpiv[b]));
+        CHECK_ROCBLAS_ERROR(
+            rocsolver_orglx_unglx(GELQF, handle, min_mn, n, min_mn, dQ[0], lda, dIpiv[b]));
 
         if(verbose >= 4)
-            print_matrix( "Q", min_mn, n, dQ[0], lda );
+            print_matrix("Q", min_mn, n, dQ[0], lda);
 
         // Set dR = I (min_mn x min_mn).
         // todo: replace with laset
-        CHECK_HIP_ERROR(hipMemcpy(dR[0], hR_id.data(), sizeof(T) * min_mn * min_mn, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(
+            hipMemcpy(dR[0], hR_id.data(), sizeof(T) * min_mn * min_mn, hipMemcpyHostToDevice));
 
         // Compute dR = I - Q * Q^H.
-        CHECK_ROCBLAS_ERROR(rocsolver_gemm(
-            false, handle,
-            rocblas_operation_none, rocblas_operation_conjugate_transpose,
-            min_mn, min_mn, n, // opts
-            &negone, dQ[0], lda,    0, // Q
-                     dQ[0], lda,    0, // Q^H
-            &one,    dR[0], min_mn, 0, // R
-            1));
+        CHECK_ROCBLAS_ERROR(rocsolver_gemm(false, handle, rocblas_operation_none,
+                                           rocblas_operation_conjugate_transpose, min_mn, min_mn,
+                                           n, // opts
+                                           &negone, dQ[0], lda, 0, // Q
+                                           dQ[0], lda, 0, // Q^H
+                                           &one, dR[0], min_mn, 0, // R
+                                           1));
 
         if(verbose >= 4)
-            print_matrix( "I - QQ^H", min_mn, min_mn, dR[0], min_mn );
+            print_matrix("I - QQ^H", min_mn, min_mn, dR[0], min_mn);
 
         // Compute norm( I - Q * Q^H ).
-        CHECK_ROCBLAS_ERROR(rocsolver_lange(
-            handle, rocsolver_norm_type_one,
-            min_mn, min_mn, dR[0], min_mn, dnorm[0]));
+        CHECK_ROCBLAS_ERROR(rocsolver_lange(handle, rocsolver_norm_type_one, min_mn, min_mn, dR[0],
+                                            min_mn, dnorm[0]));
         CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
 
         double err = hnorm[0][0] / n;
@@ -403,14 +395,11 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
     rocblas_set_pointer_mode(handle, old_mode);
 
     S eps = std::numeric_limits<S>::epsilon();
-    bool status = max_errors[0] < 50*eps && max_errors[1] < 50*eps;
+    bool status = max_errors[0] < 50 * eps && max_errors[1] < 50 * eps;
     const char* msg = status ? "ok" : "FAILED";
-    std::cout << std::setprecision(3) << __func__
-              << ": m " << std::setw(3) << m
-              << ", n " << std::setw(3) << n
-              << ", berror "   << std::setw(8) << max_errors[0]
-              << ", ortho "    << std::setw(8) << max_errors[1]
-              << ", diff ref " << std::setw(8) << max_errors[2]
+    std::cout << std::setprecision(3) << __func__ << ": m " << std::setw(3) << m << ", n "
+              << std::setw(3) << n << ", berror " << std::setw(8) << max_errors[0] << ", ortho "
+              << std::setw(8) << max_errors[1] << ", diff ref " << std::setw(8) << max_errors[2]
               << " " << msg << "\n";
 }
 
@@ -438,7 +427,8 @@ void gelq2_gelqf_getPerfData(const rocblas_handle handle,
 
     if(!perf)
     {
-        gelq2_gelqf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        gelq2_gelqf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                             hIpiv);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -450,12 +440,14 @@ void gelq2_gelqf_getPerfData(const rocblas_handle handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    gelq2_gelqf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+    gelq2_gelqf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                         hIpiv);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        gelq2_gelqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        gelq2_gelqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                             hIpiv);
 
         CHECK_ROCBLAS_ERROR(rocsolver_gelq2_gelqf(STRIDED, GELQF, handle, m, n, dA.data(), lda, stA,
                                                   dIpiv.data(), stP, bc));
@@ -478,7 +470,8 @@ void gelq2_gelqf_getPerfData(const rocblas_handle handle,
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        gelq2_gelqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        gelq2_gelqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                             hIpiv);
 
         timer.start(stream);
         rocsolver_gelq2_gelqf(STRIDED, GELQF, handle, m, n, dA.data(), lda, stA, dIpiv.data(), stP,
@@ -662,8 +655,10 @@ void testing_gelq2_gelqf(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "backward error", "orthogonality", "forward comparison");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_errors[0], max_errors[1], max_errors[2]);
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "backward error",
+                                       "orthogonality", "forward comparison");
+                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_errors[0], max_errors[1],
+                                       max_errors[2]);
             }
             else
             {

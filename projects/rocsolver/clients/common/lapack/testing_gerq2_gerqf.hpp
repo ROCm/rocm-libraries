@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -180,7 +180,7 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     using S = decltype(std::real(T{}));
 
     // todo: fix const-correctness in rocsolver_gemm
-    T one    = T(1);
+    T one = T(1);
     T negone = T(-1);
 
     rocblas_pointer_mode old_mode;
@@ -192,11 +192,12 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     // Work arrays for cpu_lange, cpu_gerqf, etc.
     // todo: query for optimal size; currently estimate nb=64.
     rocblas_int nb = 64;
-    std::vector<T> hW(std::max(m, n)*nb);
+    std::vector<T> hW(std::max(m, n) * nb);
     std::vector<S> hrwork(std::max(m, n));
 
     // input data initialization
-    gerq2_gerqf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+    gerq2_gerqf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                        hIpiv);
 
     if(verbose >= 2)
         print_matrix("A", m, n, dA[0], lda);
@@ -210,9 +211,8 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     std::vector<S> A_norms(bc);
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        CHECK_ROCBLAS_ERROR(rocsolver_lange(
-            handle, rocsolver_norm_type_one,
-            m, n, dA[b], lda, dnorm[0]));
+        CHECK_ROCBLAS_ERROR(
+            rocsolver_lange(handle, rocsolver_norm_type_one, m, n, dA[b], lda, dnorm[0]));
         CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
         A_norms[b] = hnorm[0][0];
     }
@@ -273,20 +273,17 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
         }
 
         if(verbose >= 4)
-            print_matrix( "R", m, n, hC.data(), lda );
+            print_matrix("R", m, n, hC.data(), lda);
 
         // Compute R*Q on CPU using unmrq.
         // unmrq expects A to point to the Householder vectors V in the last
         // min_mn rows of the GERQF output, i.e., hARes[b] + (m - min_mn).
-        cpu_ormrq_unmrq(rocblas_side_right, rocblas_operation_none,
-                        m, n, min_mn,
-                        hARes[b] + (m - min_mn), lda,
-                        hIpiv[b],
-                        hC.data(), lda,
-                        hW.data(), rocblas_int(hW.size()));
+        cpu_ormrq_unmrq(rocblas_side_right, rocblas_operation_none, m, n, min_mn,
+                        hARes[b] + (m - min_mn), lda, hIpiv[b], hC.data(), lda, hW.data(),
+                        rocblas_int(hW.size()));
 
         if(verbose >= 4)
-            print_matrix( "R*Q", m, n, hC.data(), lda );
+            print_matrix("R*Q", m, n, hC.data(), lda);
 
         // Compute norm( R*Q - A ); hA[b] is still the original A.
         for(rocblas_int j = 0; j < n; ++j)
@@ -294,7 +291,7 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
                 hC[i + j * lda] -= hA[b][i + j * lda];
 
         if(verbose >= 4)
-            print_matrix( "R*Q - A", m, n, hC.data(), lda );
+            print_matrix("R*Q - A", m, n, hC.data(), lda);
 
         double err = cpu_lange('1', m, n, hC.data(), lda, hrwork.data());
         err /= n;
@@ -322,17 +319,15 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
             for(rocblas_int i = 0; i < min_mn; ++i)
                 hQ[i + j * lda] = hARes[b][(i + row_offset) + j * lda];
 
-        if (verbose >= 4)
-            print_matrix( "V", min_mn, n, hQ.data(), lda );
+        if(verbose >= 4)
+            print_matrix("V", min_mn, n, hQ.data(), lda);
 
         // Generate explicit Q (min_mn x n) in hQ via ungrq.
-        cpu_orgrq_ungrq(min_mn, n, min_mn,
-                        hQ.data(), lda,
-                        hIpiv[b],
-                        hW.data(), rocblas_int(hW.size()));
+        cpu_orgrq_ungrq(min_mn, n, min_mn, hQ.data(), lda, hIpiv[b], hW.data(),
+                        rocblas_int(hW.size()));
 
         if(verbose >= 4)
-            print_matrix( "Q", min_mn, n, hQ.data(), lda );
+            print_matrix("Q", min_mn, n, hQ.data(), lda);
 
         // Set hR = I (min_mn x min_mn).
         std::fill(hR.begin(), hR.end(), T(0));
@@ -340,14 +335,14 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
             hR[i + i * min_mn] = T(1);
 
         // Compute hR = I - Q * Q^H.
-        cpu_gemm(rocblas_operation_none, rocblas_operation_conjugate_transpose,
-                 min_mn, min_mn, n, // opts
+        cpu_gemm(rocblas_operation_none, rocblas_operation_conjugate_transpose, min_mn, min_mn,
+                 n, // opts
                  negone, hQ.data(), lda, // Q
-                         hQ.data(), lda, // Q^H
-                 one,    hR.data(), min_mn);  // R
+                 hQ.data(), lda, // Q^H
+                 one, hR.data(), min_mn); // R
 
         if(verbose >= 4)
-            print_matrix( "I - QQ^H", min_mn, min_mn, hR.data(), lda );
+            print_matrix("I - QQ^H", min_mn, min_mn, hR.data(), lda);
 
         // Compute norm( I - Q * Q^H ).
         double err = cpu_lange('1', min_mn, min_mn, hR.data(), min_mn, hrwork.data());
@@ -384,14 +379,11 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     rocblas_set_pointer_mode(handle, old_mode);
 
     S eps = std::numeric_limits<S>::epsilon();
-    bool status = max_errors[0] < 50*eps && max_errors[1] < 50*eps;
+    bool status = max_errors[0] < 50 * eps && max_errors[1] < 50 * eps;
     const char* msg = status ? "ok" : "FAILED";
-    std::cout << std::setprecision(3) << __func__
-              << ": m " << std::setw(3) << m
-              << ", n " << std::setw(3) << n
-              << ", berror "   << std::setw(8) << max_errors[0]
-              << ", ortho "    << std::setw(8) << max_errors[1]
-              << ", diff ref " << std::setw(8) << max_errors[2]
+    std::cout << std::setprecision(3) << __func__ << ": m " << std::setw(3) << m << ", n "
+              << std::setw(3) << n << ", berror " << std::setw(8) << max_errors[0] << ", ortho "
+              << std::setw(8) << max_errors[1] << ", diff ref " << std::setw(8) << max_errors[2]
               << " " << msg << "\n";
 }
 
@@ -419,7 +411,8 @@ void gerq2_gerqf_getPerfData(const rocblas_handle handle,
 
     if(!perf)
     {
-        gerq2_gerqf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        gerq2_gerqf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                             hIpiv);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -431,12 +424,14 @@ void gerq2_gerqf_getPerfData(const rocblas_handle handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    gerq2_gerqf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+    gerq2_gerqf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                         hIpiv);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        gerq2_gerqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        gerq2_gerqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                             hIpiv);
 
         CHECK_ROCBLAS_ERROR(rocsolver_gerq2_gerqf(STRIDED, GERQF, handle, m, n, dA.data(), lda, stA,
                                                   dIpiv.data(), stP, bc));
@@ -459,7 +454,8 @@ void gerq2_gerqf_getPerfData(const rocblas_handle handle,
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        gerq2_gerqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        gerq2_gerqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                             hIpiv);
 
         timer.start(stream);
         rocsolver_gerq2_gerqf(STRIDED, GERQF, handle, m, n, dA.data(), lda, stA, dIpiv.data(), stP,
@@ -562,8 +558,8 @@ void testing_gerq2_gerqf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gerq2_gerqf_getError<STRIDED, GERQF, T>(handle, matrix, verbose, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
-                                                    hARes, hIpiv, max_errors);
+            gerq2_gerqf_getError<STRIDED, GERQF, T>(handle, matrix, verbose, m, n, dA, lda, stA,
+                                                    dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -599,8 +595,8 @@ void testing_gerq2_gerqf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gerq2_gerqf_getError<STRIDED, GERQF, T>(handle, matrix, verbose, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
-                                                    hARes, hIpiv, max_errors);
+            gerq2_gerqf_getError<STRIDED, GERQF, T>(handle, matrix, verbose, m, n, dA, lda, stA,
+                                                    dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)

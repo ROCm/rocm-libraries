@@ -1014,8 +1014,32 @@ void zungrq_(int* m,
              int* lwork,
              int* info);
 
-void sormrq_(char* side, char* trans, int* m, int* n, int* k, float* A, int* lda, float* tau, float* C, int* ldc, float* work, int* lwork, int* info);
-void dormrq_(char* side, char* trans, int* m, int* n, int* k, double* A, int* lda, double* tau, double* C, int* ldc, double* work, int* lwork, int* info);
+void sormrq_(char* side,
+             char* trans,
+             int* m,
+             int* n,
+             int* k,
+             float* A,
+             int* lda,
+             float* tau,
+             float* C,
+             int* ldc,
+             float* work,
+             int* lwork,
+             int* info);
+void dormrq_(char* side,
+             char* trans,
+             int* m,
+             int* n,
+             int* k,
+             double* A,
+             int* lda,
+             double* tau,
+             double* C,
+             int* ldc,
+             double* work,
+             int* lwork,
+             int* info);
 void cunmrq_(char* side,
              char* trans,
              int* m,
@@ -1118,20 +1142,8 @@ void zgelqf_(int* m,
 void clacgv_(int* n, rocblas_float_complex* x, int* incx);
 void zlacgv_(int* n, rocblas_double_complex* x, int* incx);
 
-void slacpy_(char* uplo,
-             int* m,
-             int* n,
-             float* A,
-             int* lda,
-             float* B,
-             int* ldb);
-void dlacpy_(char* uplo,
-             int* m,
-             int* n,
-             double* A,
-             int* lda,
-             double* B,
-             int* ldb);
+void slacpy_(char* uplo, int* m, int* n, float* A, int* lda, float* B, int* ldb);
+void dlacpy_(char* uplo, int* m, int* n, double* A, int* lda, double* B, int* ldb);
 void clacpy_(char* uplo,
              int* m,
              int* n,
@@ -2895,12 +2907,12 @@ void cpu_lacgv<rocblas_double_complex>(rocblas_int n, rocblas_double_complex* x,
 // lacpy
 template <>
 void cpu_lacpy<float>(rocblas_fill uplo,
-                                      rocblas_int m,
-                                      rocblas_int n,
-                                      float* A,
-                                      rocblas_int lda,
-                                      float* B,
-                                      rocblas_int ldb)
+                      rocblas_int m,
+                      rocblas_int n,
+                      float* A,
+                      rocblas_int lda,
+                      float* B,
+                      rocblas_int ldb)
 {
     char uploC = rocblas2char_fill(uplo);
     slacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
@@ -2908,12 +2920,12 @@ void cpu_lacpy<float>(rocblas_fill uplo,
 
 template <>
 void cpu_lacpy<double>(rocblas_fill uplo,
-                                       rocblas_int m,
-                                       rocblas_int n,
-                                       double* A,
-                                       rocblas_int lda,
-                                       double* B,
-                                       rocblas_int ldb)
+                       rocblas_int m,
+                       rocblas_int n,
+                       double* A,
+                       rocblas_int lda,
+                       double* B,
+                       rocblas_int ldb)
 {
     char uploC = rocblas2char_fill(uplo);
     dlacpy_(&uploC, &m, &n, A, &lda, B, &ldb);
@@ -6570,7 +6582,7 @@ void cpu_ormrq_unmrq<float>(rocblas_side side,
                             rocblas_int lwork)
 {
     int info;
-    char sideC  = rocblas2char_side(side);
+    char sideC = rocblas2char_side(side);
     char transC = rocblas2char_operation(trans);
     sormrq_(&sideC, &transC, &m, &n, &k, A, &lda, tau, C, &ldc, work, &lwork, &info);
 }
@@ -6590,7 +6602,7 @@ void cpu_ormrq_unmrq<double>(rocblas_side side,
                              rocblas_int lwork)
 {
     int info;
-    char sideC  = rocblas2char_side(side);
+    char sideC = rocblas2char_side(side);
     char transC = rocblas2char_operation(trans);
     dormrq_(&sideC, &transC, &m, &n, &k, A, &lda, tau, C, &ldc, work, &lwork, &info);
 }
@@ -6610,7 +6622,7 @@ void cpu_ormrq_unmrq<rocblas_float_complex>(rocblas_side side,
                                             rocblas_int lwork)
 {
     int info;
-    char sideC  = rocblas2char_side(side);
+    char sideC = rocblas2char_side(side);
     char transC = rocblas2char_operation(trans);
     cunmrq_(&sideC, &transC, &m, &n, &k, A, &lda, tau, C, &ldc, work, &lwork, &info);
 }
@@ -6630,7 +6642,7 @@ void cpu_ormrq_unmrq<rocblas_double_complex>(rocblas_side side,
                                              rocblas_int lwork)
 {
     int info;
-    char sideC  = rocblas2char_side(side);
+    char sideC = rocblas2char_side(side);
     char transC = rocblas2char_operation(trans);
     zunmrq_(&sideC, &transC, &m, &n, &k, A, &lda, tau, C, &ldc, work, &lwork, &info);
 }

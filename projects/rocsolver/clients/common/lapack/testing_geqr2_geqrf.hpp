@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -187,7 +187,7 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
     using S = decltype(std::real(T{}));
 
     // todo: fix const-correctness in rocsolver_gemm
-    T one    = T(1);
+    T one = T(1);
     T negone = T(-1);
 
     rocblas_pointer_mode old_mode;
@@ -199,14 +199,15 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
     // Work arrays for cpu_lange, cpu_geqrf, etc.
     // todo: query for optimal size; currently estimate nb=64.
     rocblas_int nb = 64;
-    std::vector<T> hW(std::max(m, n)*nb);
+    std::vector<T> hW(std::max(m, n) * nb);
     std::vector<S> hrwork(std::max(m, n));
 
     // input data initialization
-    geqr2_geqrf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+    geqr2_geqrf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                        hIpiv);
 
-    if (verbose >= 2)
-        print_matrix( "A", m, n, dA[0], lda );
+    if(verbose >= 2)
+        print_matrix("A", m, n, dA[0], lda);
 
     // GPU scalar for lange output, shared by all checks below.
     device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
@@ -217,9 +218,8 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
     std::vector<S> A_norms(bc);
     for(I b = 0; b < bc; ++b)
     {
-        CHECK_ROCBLAS_ERROR(rocsolver_lange(
-            handle, rocsolver_norm_type_one,
-            m, n, dA[b], lda, dnorm[0]));
+        CHECK_ROCBLAS_ERROR(
+            rocsolver_lange(handle, rocsolver_norm_type_one, m, n, dA[b], lda, dnorm[0]));
         CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
         A_norms[b] = hnorm[0][0];
     }
@@ -230,10 +230,10 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hIpiv.transfer_from(dIpiv));
 
-    if (verbose >= 2)
+    if(verbose >= 2)
     {
-        print_matrix( "Aout", m, n, dA[0], lda );
-        print_matrix( "tau", min_mn, I(1), dIpiv[0], min_mn );
+        print_matrix("Aout", m, n, dA[0], lda);
+        print_matrix("tau", min_mn, I(1), dIpiv[0], min_mn);
     }
 
     //--------------------
@@ -273,25 +273,21 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
         // Copy R: upper trapezoid of A, zero elsewhere.
         // todo: laset and lacpy on GPU.
         std::vector<T> hC(lda * n, T(0));
-        cpu_lacpy( rocblas_fill_upper, min_mn, n, hARes[b], lda, hC.data(), lda );
+        cpu_lacpy(rocblas_fill_upper, min_mn, n, hARes[b], lda, hC.data(), lda);
 
         // Upload R to GPU.
         CHECK_HIP_ERROR(hipMemcpy(dC[0], hC.data(), sizeof(T) * lda * n, hipMemcpyHostToDevice));
 
         if(verbose >= 4)
-            print_matrix( "R", m, n, dC[0], lda );
+            print_matrix("R", m, n, dC[0], lda);
 
         // Compute Q*R on GPU using unmqr.
-        CHECK_ROCBLAS_ERROR(rocsolver_ormxr_unmxr(
-            GEQRF, handle,
-            rocblas_side_left, rocblas_operation_none,
-            m, n, min_mn,
-            dA[b], lda,
-            dIpiv[b],
-            dC[0], lda));
+        CHECK_ROCBLAS_ERROR(rocsolver_ormxr_unmxr(GEQRF, handle, rocblas_side_left,
+                                                  rocblas_operation_none, m, n, min_mn, dA[b], lda,
+                                                  dIpiv[b], dC[0], lda));
 
         if(verbose >= 4)
-            print_matrix( "Q*R", m, n, dC[0], lda );
+            print_matrix("Q*R", m, n, dC[0], lda);
 
         // Transfer Q*R back to host.
         CHECK_HIP_ERROR(hipMemcpy(hC.data(), dC[0], sizeof(T) * lda * n, hipMemcpyDeviceToHost));
@@ -303,9 +299,10 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
                 hC[i + j * lda] -= hA[b][i + j * lda];
 
         if(verbose >= 4)
-            print_matrix( "Q*R - A", m, n, hC.data(), lda );
+            print_matrix("Q*R - A", m, n, hC.data(), lda);
 
-        double err = cpu_lange('1', (rocblas_int)m, (rocblas_int)n, hC.data(), (rocblas_int)lda, hrwork.data());
+        double err = cpu_lange('1', (rocblas_int)m, (rocblas_int)n, hC.data(), (rocblas_int)lda,
+                               hrwork.data());
         err /= m;
         if(A_norms[b] != 0)
             err /= A_norms[b];
@@ -338,40 +335,35 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
         // Copy first min_mn columns of dA[b] (Householder vectors) to dQ.
         CHECK_HIP_ERROR(hipMemcpy(dQ[0], dA[b], sizeof(T) * lda * min_mn, hipMemcpyDeviceToDevice));
 
-        if (verbose >= 4)
-            print_matrix( "V", min_mn, n, dQ[0], lda );
+        if(verbose >= 4)
+            print_matrix("V", min_mn, n, dQ[0], lda);
 
         // Generate explicit Q (m x min_mn) in dQ via ungqr.
-        CHECK_ROCBLAS_ERROR(rocsolver_orgxr_ungxr(
-            GEQRF, handle,
-            (rocblas_int)m, min_mn, min_mn,
-            dQ[0], (rocblas_int)lda,
-            dIpiv[b]));
+        CHECK_ROCBLAS_ERROR(rocsolver_orgxr_ungxr(GEQRF, handle, (rocblas_int)m, min_mn, min_mn,
+                                                  dQ[0], (rocblas_int)lda, dIpiv[b]));
 
         if(verbose >= 4)
-            print_matrix( "Q", min_mn, n, dQ[0], lda );
+            print_matrix("Q", min_mn, n, dQ[0], lda);
 
         // Set dR = I (min_mn x min_mn).
         // todo: replace with laset
-        CHECK_HIP_ERROR(hipMemcpy(dR[0], hR_id.data(), sizeof(T) * min_mn * min_mn, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(
+            hipMemcpy(dR[0], hR_id.data(), sizeof(T) * min_mn * min_mn, hipMemcpyHostToDevice));
 
         // Compute dR = I - Q^H * Q.
-        CHECK_ROCBLAS_ERROR(rocsolver_gemm(
-            false, handle,
-            rocblas_operation_conjugate_transpose, rocblas_operation_none,
-            min_mn, min_mn, (rocblas_int)m, // opts
-            &negone, dQ[0], (rocblas_int)lda, 0, // Q^H
-                     dQ[0], (rocblas_int)lda, 0, // Q
-            &one,    dR[0], min_mn,           0, // R
-            1));
+        CHECK_ROCBLAS_ERROR(rocsolver_gemm(false, handle, rocblas_operation_conjugate_transpose,
+                                           rocblas_operation_none, min_mn, min_mn, (rocblas_int)m, // opts
+                                           &negone, dQ[0], (rocblas_int)lda, 0, // Q^H
+                                           dQ[0], (rocblas_int)lda, 0, // Q
+                                           &one, dR[0], min_mn, 0, // R
+                                           1));
 
         if(verbose >= 4)
-            print_matrix( "I - Q^H Q", min_mn, min_mn, dR[0], min_mn );
+            print_matrix("I - Q^H Q", min_mn, min_mn, dR[0], min_mn);
 
         // Compute norm( I - Q^H * Q ).
-        CHECK_ROCBLAS_ERROR(rocsolver_lange(
-            handle, rocsolver_norm_type_one,
-            min_mn, min_mn, dR[0], min_mn, dnorm[0]));
+        CHECK_ROCBLAS_ERROR(rocsolver_lange(handle, rocsolver_norm_type_one, min_mn, min_mn, dR[0],
+                                            min_mn, dnorm[0]));
         CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
 
         double err = hnorm[0][0] / m;
@@ -387,10 +379,10 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
               : cpu_geqr2(m, n, hA[b], lda, hIpiv[b], hW.data());
     }
 
-    if (verbose >= 3)
+    if(verbose >= 3)
     {
-        print_matrix( "Aref", m, n, hA[0], lda );
-        print_matrix( "tau_ref", min_mn, I(1), hIpiv[0], min_mn );
+        print_matrix("Aref", m, n, hA[0], lda);
+        print_matrix("tau_ref", min_mn, I(1), hIpiv[0], min_mn);
     }
 
     // forward comparison: ||hA - hARes|| / ||hA|| (GPU vs CPU factored form)
@@ -407,14 +399,11 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
     rocblas_set_pointer_mode(handle, old_mode);
 
     S eps = std::numeric_limits<S>::epsilon();
-    bool status = max_errors[0] < 50*eps && max_errors[1] < 50*eps;
+    bool status = max_errors[0] < 50 * eps && max_errors[1] < 50 * eps;
     const char* msg = status ? "ok" : "FAILED";
-    std::cout << std::setprecision(3) << __func__
-              << ": m " << std::setw(3) << m
-              << ", n " << std::setw(3) << n
-              << ", berror "   << std::setw(8) << max_errors[0]
-              << ", ortho "    << std::setw(8) << max_errors[1]
-              << ", diff ref " << std::setw(8) << max_errors[2]
+    std::cout << std::setprecision(3) << __func__ << ": m " << std::setw(3) << m << ", n "
+              << std::setw(3) << n << ", berror " << std::setw(8) << max_errors[0] << ", ortho "
+              << std::setw(8) << max_errors[1] << ", diff ref " << std::setw(8) << max_errors[2]
               << " " << msg << "\n";
 }
 
@@ -442,7 +431,8 @@ void geqr2_geqrf_getPerfData(const rocblas_handle handle,
 
     if(!perf)
     {
-        geqr2_geqrf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        geqr2_geqrf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                             hIpiv);
 
         // cpu-lapack performance (only if not in perf mode)
         *cpu_time_used = get_time_us_no_sync();
@@ -454,12 +444,14 @@ void geqr2_geqrf_getPerfData(const rocblas_handle handle,
         *cpu_time_used = get_time_us_no_sync() - *cpu_time_used;
     }
 
-    geqr2_geqrf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+    geqr2_geqrf_initData<true, false, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                         hIpiv);
 
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        geqr2_geqrf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        geqr2_geqrf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                             hIpiv);
 
         CHECK_ROCBLAS_ERROR(rocsolver_geqr2_geqrf(STRIDED, GEQRF, handle, m, n, dA.data(), lda, stA,
                                                   dIpiv.data(), stP, bc));
@@ -482,7 +474,8 @@ void geqr2_geqrf_getPerfData(const rocblas_handle handle,
 
     for(rocblas_int iter = 0; iter < hot_calls; iter++)
     {
-        geqr2_geqrf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
+        geqr2_geqrf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+                                             hIpiv);
 
         timer.start(stream);
         rocsolver_geqr2_geqrf(STRIDED, GEQRF, handle, m, n, dA.data(), lda, stA, dIpiv.data(), stP,
@@ -585,8 +578,8 @@ void testing_geqr2_geqrf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, verbose, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
-                                                    hARes, hIpiv, max_errors);
+            geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, verbose, m, n, dA, lda, stA,
+                                                    dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -621,8 +614,8 @@ void testing_geqr2_geqrf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, verbose, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
-                                                    hARes, hIpiv, max_errors);
+            geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, verbose, m, n, dA, lda, stA,
+                                                    dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -657,8 +650,8 @@ void testing_geqr2_geqrf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, verbose, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
-                                                    hARes, hIpiv, max_errors);
+            geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, verbose, m, n, dA, lda, stA,
+                                                    dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -701,8 +694,10 @@ void testing_geqr2_geqrf(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "backward error", "orthogonality", "forward comparison");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_errors[0], max_errors[1], max_errors[2]);
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "backward error",
+                                       "orthogonality", "forward comparison");
+                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_errors[0], max_errors[1],
+                                       max_errors[2]);
             }
             else
             {
