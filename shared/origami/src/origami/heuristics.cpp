@@ -50,15 +50,9 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   epilogue_salu_overhead           = other.epilogue_salu_overhead;
   epilogue_l_barrier               = other.epilogue_l_barrier;
   epilogue_l_smem                  = other.epilogue_l_smem;
-  epilogue_store_drain_cycles      = other.epilogue_store_drain_cycles;
   epilogue_k_padding_penalty       = other.epilogue_k_padding_penalty;
   postgsu_kernel_launch_overhead   = other.postgsu_kernel_launch_overhead;
   vw_dampening_exponent            = other.vw_dampening_exponent;
-  vw_efficiency_bytes2             = other.vw_efficiency_bytes2;
-  vw_efficiency_bytes4             = other.vw_efficiency_bytes4;
-  vw_efficiency_bytes8             = other.vw_efficiency_bytes8;
-  vw_efficiency_bytes16            = other.vw_efficiency_bytes16;
-  edge_padding_penalty             = other.edge_padding_penalty;
 
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;

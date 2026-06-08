@@ -156,8 +156,13 @@ class hardware_t {
         return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5};
       case architecture_t::gfx942:
         return {17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5};
-      case architecture_t::gfx950: 
-        return {8, 0, 0, 4, std::make_tuple(0, 0, 0), 0.7895};
+      case architecture_t::gfx950:
+        return {17,
+                1.21875121875121875122 * 7,
+                6,
+                4,
+                std::make_tuple(-0.000013, 0.007070, 0.027355),
+                1.5};
       case architecture_t::gfx1201:
         return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5};
       case architecture_t::gfx1100:
@@ -556,6 +561,9 @@ class hardware_t {
       mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
   size_t NUM_XCD;                  ///< Number of XCDs (XGMI Complex Die)
 
+  size_t wavefront_size         = 64;   ///< Wavefront size in lanes
+  size_t postgsu_threads_per_wg = 256;  ///< Workgroup size of the PostGSU reduction kernel
+
   struct cache_line_sizes_t {
     size_t l2       = 128;
     size_t mall     = 128;
@@ -585,6 +593,30 @@ class hardware_t {
   static double eval_bw(const bw_coef_t& coef, double CUs) {
     double bw = std::get<0>(coef) * CUs * CUs + std::get<1>(coef) * CUs + std::get<2>(coef);
     return std::max(bw, 0.0);
+  }
+
+  /// Convert a peak bandwidth in TB/s into the model's working unit of bytes per clock
+  /// cycle. Memory latency is accumulated in cycles, so each memory level's bandwidth is
+  /// expressed per cycle of the clock domain that drives it (mem1 the compute clock, mem2
+  /// the fabric clock, mem3 the memory clock); pass that domain's frequency in GHz.
+  static double bw_per_cycle(double peak_tbps, double clock_ghz) {
+    return 1e9 * peak_tbps / (clock_ghz * 1e6);
+  }
+
+  /// The clock domain (GHz) that drives each memory level. The model accumulates a
+  /// level's latency in cycles of its driving clock: L2/mem1 the compute clock,
+  /// MALL/mem2 the fabric clock (memory clock x mem_clock_ratio), HBM/mem3 the memory
+  /// clock. Single source of truth for the mapping shared by the constructor and
+  /// init_per_level_bw.
+  struct level_clocks_t {
+    double mem1_ghz;
+    double mem2_ghz;
+    double mem3_ghz;
+  };
+  static level_clocks_t level_clocks(double compute_clock_ghz,
+                                     double memory_clock_ghz,
+                                     double mem_clock_ratio) {
+    return {compute_clock_ghz, memory_clock_ghz * mem_clock_ratio, memory_clock_ghz};
   }
 
   void init_per_level_bw();
@@ -656,7 +688,7 @@ class hardware_t {
    *
    * @param other Another hardware_t instance to copy from
    */
-  hardware_t(const hardware_t& other);
+  hardware_t(const hardware_t& other) = default;
 
   /**
    * @brief Create hardware_t instance from HIP device properties.

@@ -48,46 +48,35 @@ struct heuristic_defaults_t {
   static constexpr double WEIGHT_COMPUTE       = 1.0;
   static constexpr double WEIGHT_MEMORY        = 1.0;
   static constexpr double WEIGHT_WG_SETUP      = 1.0;
-  static constexpr double WEIGHT_PROLOGUE      = 1.89;
-  static constexpr double WEIGHT_EPILOGUE      = 1.0;
-  static constexpr double WEIGHT_LOOP_OVERHEAD = 593.84;
+  static constexpr double WEIGHT_PROLOGUE      = 1.5;
+  static constexpr double WEIGHT_EPILOGUE      = 2.0;
+  static constexpr double WEIGHT_LOOP_OVERHEAD = 500.0;
   static constexpr double WEIGHT_TILE_TOTAL    = 1.0;
 
   // Empirical Constants
-  static constexpr double MAIN_MEMORY_LOAD_LATENCY         = 202.56;
-  static constexpr double OCCUPANCY_DECAY_BASE             = 0.88;
-  static constexpr double MALL_DEPTH_SQ                    = 2.20;
-  static constexpr double MALL_COLD_FLOOR                  = 0.60;
-  static constexpr double L2_DEPTH_SQ                      = 4.61;
-  static constexpr double L2_COLD_FLOOR                    = 0.94;
-  static constexpr double L2_POLLUTION_PENALTY             = 0.49;
-  static constexpr double L2_AMP_CEILING_BATCHED           = 0.95;
-  static constexpr double L2_AMP_CEILING_K_SPLIT           = 0.43;
-  static constexpr double L2_AMP_CEILING_SKINNY            = 0.68;
-  static constexpr double L2_DEPTH_PENALTY                 = 0.93;
-  static constexpr double L1_HIT_RATE_CEILING_SKINNY       = 0.57;
+  static constexpr double MAIN_MEMORY_LOAD_LATENCY         = 200.0;
+  static constexpr double OCCUPANCY_DECAY_BASE             = 0.95;
+  static constexpr double MALL_DEPTH_SQ                    = 2.0;
+  static constexpr double MALL_COLD_FLOOR                  = 0.85;
+  static constexpr double L2_DEPTH_SQ                      = 4.0;
+  static constexpr double L2_COLD_FLOOR                    = 0.75;
+  static constexpr double L2_POLLUTION_PENALTY             = 0.7;
+  static constexpr double L2_AMP_CEILING_BATCHED           = 0.9;
+  static constexpr double L2_AMP_CEILING_K_SPLIT           = 0.4;
+  static constexpr double L2_AMP_CEILING_SKINNY            = 0.6;
+  static constexpr double L2_DEPTH_PENALTY                 = 0.9;
+  static constexpr double L1_HIT_RATE_CEILING_SKINNY       = 0.7;
   static constexpr double EPILOGUE_CYCLES_PER_ACC_READ     = 8.0;
-  static constexpr double EPILOGUE_ACC_READ_PARALLELISM    = 0.99;
+  static constexpr double EPILOGUE_ACC_READ_PARALLELISM    = 0.9;
   static constexpr double EPILOGUE_CYCLES_PER_BOUNDS_CHECK = 6.0;
-  static constexpr double EPILOGUE_SCALAR_STORE_PENALTY    = 0.85;
-  static constexpr double EPILOGUE_SALU_OVERHEAD           = 45.50;
+  static constexpr double EPILOGUE_SCALAR_STORE_PENALTY    = 1.1;
+  static constexpr double EPILOGUE_SALU_OVERHEAD           = 35.0;
   static constexpr double EPILOGUE_L_BARRIER               = 100.0;
   static constexpr double EPILOGUE_L_SMEM = 900.0;  // s_load_dword(glc) cross-XCD flag poll
-  static constexpr double EPILOGUE_STORE_DRAIN_CYCLES    = 1.27;
-  static constexpr double EPILOGUE_K_PADDING_PENALTY     = 35200.79;
-  static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 15205.43;
+  static constexpr double EPILOGUE_K_PADDING_PENALTY     = 50000.0;
+  static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 12000.0;
 
-  static constexpr double VW_DAMPENING_EXPONENT = 1.25;
-
-  static constexpr double VW_EFFICIENCY_BYTES2  = 1.09;
-  static constexpr double VW_EFFICIENCY_BYTES4  = 0.81;
-  static constexpr double VW_EFFICIENCY_BYTES8  = 1.20;
-  static constexpr double VW_EFFICIENCY_BYTES16 = 0.95;
-
-  // Multiplicative penalty for tiles whose M- or N-edge tile wastes >50%
-  // of MT_M / MT_N. 0.0 = neutral. The penalty scales linearly with the
-  // wasted fraction in the worst-edge dimension.
-  static constexpr double EDGE_PADDING_PENALTY = 0.04;
+  static constexpr double VW_DAMPENING_EXPONENT = 1.08;
 
   // Main Loop Efficiency
   static constexpr double MAIN_LOOP_EFFICIENCY = 1.0;
@@ -135,16 +124,10 @@ struct heuristic_params_t {
   double epilogue_salu_overhead           = heuristic_defaults_t::EPILOGUE_SALU_OVERHEAD;
   double epilogue_l_barrier               = heuristic_defaults_t::EPILOGUE_L_BARRIER;
   double epilogue_l_smem                  = heuristic_defaults_t::EPILOGUE_L_SMEM;
-  double epilogue_store_drain_cycles      = heuristic_defaults_t::EPILOGUE_STORE_DRAIN_CYCLES;
   double epilogue_k_padding_penalty       = heuristic_defaults_t::EPILOGUE_K_PADDING_PENALTY;
   double postgsu_kernel_launch_overhead   = heuristic_defaults_t::POSTGSU_KERNEL_LAUNCH_OVERHEAD;
 
   double vw_dampening_exponent = heuristic_defaults_t::VW_DAMPENING_EXPONENT;
-  double vw_efficiency_bytes2  = heuristic_defaults_t::VW_EFFICIENCY_BYTES2;
-  double vw_efficiency_bytes4  = heuristic_defaults_t::VW_EFFICIENCY_BYTES4;
-  double vw_efficiency_bytes8  = heuristic_defaults_t::VW_EFFICIENCY_BYTES8;
-  double vw_efficiency_bytes16 = heuristic_defaults_t::VW_EFFICIENCY_BYTES16;
-  double edge_padding_penalty  = heuristic_defaults_t::EDGE_PADDING_PENALTY;
 
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;

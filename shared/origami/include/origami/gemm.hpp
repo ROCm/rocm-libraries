@@ -68,6 +68,10 @@ struct context_t {
   /// Debug flag (cached from runtime_options to avoid repeated singleton lookups).
   bool debug = false;
 
+  /// gfx950 BW-model / cache-line modeling opt-in (cached from runtime_options). When false,
+  /// the latency model uses the default per-workgroup bandwidth / cache-line path.
+  bool bw_model_enabled = false;
+
   /// Default constructor.
   context_t() = default;
 

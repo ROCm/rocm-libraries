@@ -50,9 +50,15 @@ hardware_t::hardware_t(architecture_t arch,
           N_CU,
           lds_capacity,
           num_xcds,
-          1e9 * constants.mem1_perf_ratio / (compute_clock_ghz * 1e6),
-          1e9 * constants.mem2_perf_ratio / (memory_clock_ghz * 1e6 * constants.mem_clock_ratio),
-          1e9 * constants.mem3_perf_ratio / (memory_clock_ghz * 1e6),
+          bw_per_cycle(
+              constants.mem1_perf_ratio,
+              level_clocks(compute_clock_ghz, memory_clock_ghz, constants.mem_clock_ratio).mem1_ghz),
+          bw_per_cycle(
+              constants.mem2_perf_ratio,
+              level_clocks(compute_clock_ghz, memory_clock_ghz, constants.mem_clock_ratio).mem2_ghz),
+          bw_per_cycle(
+              constants.mem3_perf_ratio,
+              level_clocks(compute_clock_ghz, memory_clock_ghz, constants.mem_clock_ratio).mem3_ghz),
           L2_capacity,
           compute_clock_ghz,
           constants.parallel_mi_cu,
@@ -60,28 +66,6 @@ hardware_t::hardware_t(architecture_t arch,
 
 hardware_t::hardware_t(hipDeviceProp_t properties)
     : hardware_t(get_hardware_for_properties(properties)) {}
-
-hardware_t::hardware_t(const hardware_t& other)
-    : arch(other.arch)
-    , N_CU(other.N_CU)
-    , lds_capacity(other.lds_capacity)
-    , mem1_perf_ratio(other.mem1_perf_ratio)
-    , mem2_perf_ratio(other.mem2_perf_ratio)
-    , mem3_perf_ratio(other.mem3_perf_ratio)
-    , L2_capacity(other.L2_capacity)
-    , CU_per_L2(other.CU_per_L2)
-    , compute_clock_ghz(other.compute_clock_ghz)
-    , parallel_mi_cu(other.parallel_mi_cu)
-    , mem_bw_per_wg_coefficients(other.mem_bw_per_wg_coefficients)
-    , NUM_XCD(other.NUM_XCD)
-    , cache_line_bytes(other.cache_line_bytes)
-    , l2_bw_read(other.l2_bw_read)
-    , l2_bw_write(other.l2_bw_write)
-    , mall_bw_read(other.mall_bw_read)
-    , mall_bw_write(other.mall_bw_write)
-    , hbm_bw_read(other.hbm_bw_read)
-    , hbm_bw_write(other.hbm_bw_write)
-    , uses_absolute_bw(other.uses_absolute_bw) {}
 
 hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
                                                    size_t num_xcds_override) {
@@ -104,8 +88,7 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
                     properties.memoryClockRate / 1.e6);
 }
 
-hardware_t hardware_t::get_hardware_for_device(int deviceId,
-                                               hipDeviceProp_t const& prop) {
+hardware_t hardware_t::get_hardware_for_device(int deviceId, hipDeviceProp_t const& prop) {
   size_t num_xcds = 0;
 #if HIP_VERSION_MAJOR >= 7
   int queried_xccs = 0;
@@ -231,8 +214,7 @@ bool hardware_t::has_MALL() const {
     case architecture_t::gfx950:
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
-    case architecture_t::gfx1151:
-      return true;
+    case architecture_t::gfx1151: return true;
     case architecture_t::gfx1150:
     case architecture_t::gfx1152:
     case architecture_t::gfx1153:
@@ -245,8 +227,7 @@ bool hardware_t::has_MALL() const {
 
 bool hardware_t::has_native_TF32() const {
   switch (arch) {
-    case architecture_t::gfx942:
-      return true;
+    case architecture_t::gfx942: return true;
     case architecture_t::gfx90a:
     case architecture_t::gfx950:
     case architecture_t::gfx1201:
@@ -261,7 +242,6 @@ bool hardware_t::has_native_TF32() const {
       return false;
   }
 }
-
 
 std::string hardware_t::get_before_first_colon(const std::string& input) {
   size_t pos = input.find(':');
@@ -314,47 +294,63 @@ dim3_t hardware_t::get_recommended_matrix_instruction(data_type_t mi_input_type)
 }
 
 void hardware_t::init_per_level_bw() {
-  if (arch == architecture_t::gfx950) {
+  // The per-VW absolute-bandwidth model is opt-in (ORIGAMI_GFX950_BW_MODEL=1) and only
+  // applies to gfx950. By default every architecture, gfx950 included, uses the legacy
+  // per-workgroup-coefficient bandwidth model below.
+  if (arch == architecture_t::gfx950 && runtime_options::get().gfx950_bw_model_enabled) {
     uses_absolute_bw = true;
     cache_lines      = {64, 128, 128, 64};
     cache_line_bytes = cache_lines.l2;
 
-    constexpr double L2_PEAK    = 7045.0;
-    constexpr double MALL_PEAK  = 3273.0;
-    constexpr double HBM_R_PEAK = 3035.0;
-    constexpr double HBM_W_PEAK = 2090.0;
+    // Measured per-VW peak bandwidth (TB/s) from gfx950 microbenchmarks, monotonic in
+    // vector width [Bytes2, Bytes4, Bytes8, Bytes16]. Each level's peaks are converted to
+    // the model's working unit (bytes per clock cycle) using the clock domain that drives
+    // that level: mem1 the compute clock, mem2 the fabric clock, mem3 the memory clock.
+    constexpr size_t NUM_VW         = static_cast<size_t>(mem_vector_width_t::Count);
+    constexpr double MEM1_R_PEAK[NUM_VW] = {2.601, 4.991, 8.360, 15.116};
+    constexpr double MEM1_W_PEAK[NUM_VW] = {3.726, 6.080, 7.059, 9.191};
+    constexpr double MEM2_R_PEAK[NUM_VW] = {5.139, 5.880, 6.310, 6.565};
+    constexpr double MEM2_W_PEAK[NUM_VW] = {3.905, 5.129, 5.158, 5.275};
+    constexpr double MEM3_R_PEAK[NUM_VW] = {5.106, 6.228, 6.369, 6.373};
+    constexpr double MEM3_W_PEAK[NUM_VW] = {4.430, 5.109, 5.153, 5.153};
 
-    auto scale = [](bw_coef_t c, double s) -> bw_coef_t {
-      return std::make_tuple(std::get<0>(c) * s, std::get<1>(c) * s, std::get<2>(c) * s);
+    const double mem_clock_ratio  = get_arch_constants(arch).mem_clock_ratio;
+    const double memory_clock_ghz = compute_clock_ghz / mem_clock_ratio;
+    // Same per-level clock mapping the constructor uses (single source of truth in
+    // level_clocks). This path has no measured memory clock, so it derives one as
+    // compute_clock / mem_clock_ratio; as a result the fabric clock collapses back to
+    // the compute clock (mem1 and mem2 share it) while mem3 uses the memory clock.
+    const auto clk = level_clocks(compute_clock_ghz, memory_clock_ghz, mem_clock_ratio);
+    auto to_mem1   = [&](double t) { return bw_per_cycle(t, clk.mem1_ghz); };
+    auto to_mem2   = [&](double t) { return bw_per_cycle(t, clk.mem2_ghz); };
+    auto to_mem3   = [&](double t) { return bw_per_cycle(t, clk.mem3_ghz); };
+
+    // Build a per-VW bandwidth array: every vector width reaches its measured peak at full
+    // occupancy, following a shared per-level occupancy shape (a*CU^2 + b*CU, normalized to
+    // 1.0 at full occupancy). mem1 is XCD-local, driven by the CUs sharing one cache domain
+    // (CU_per_L2), so it reaches peak at CU_per_L2 active CUs; mem2 and mem3 are device-wide
+    // and reach peak at N_CU. mem3 saturates (quadratic); mem1 and mem2 ramp ~linearly.
+    auto build =
+        [](double a_norm, double b_norm, const double (&peak)[NUM_VW], auto conv) -> bw_coef_array_t {
+      bw_coef_array_t arr{};
+      for (size_t i = 0; i < NUM_VW; ++i) {
+        const double p = conv(peak[i]);  // peak in bytes per clock cycle
+        arr[i]         = std::make_tuple(a_norm * p, b_norm * p, 0.0);
+      }
+      return arr;
     };
+    const double mem1_b = 1.0 / static_cast<double>(CU_per_L2);  // ramps to peak at CU_per_L2
+    const double dev_b  = 1.0 / static_cast<double>(N_CU);       // ramps to peak at N_CU
+    // mem3 occupancy shape (quadratic), fit from microbenchmark and normalized to 1.0 at N_CU.
+    const double mem3_r_a = -1.962e-5, mem3_r_b = 8.931e-3;
+    const double mem3_w_a = -2.975e-5, mem3_w_b = 1.152e-2;
 
-    hbm_bw_read = {{scale({-1.245e-05, 6.447e-03, 0.0}, HBM_R_PEAK),
-                    scale({-1.791e-05, 7.970e-03, 0.0}, HBM_R_PEAK),
-                    scale({-1.417e-05, 7.401e-03, 0.0}, HBM_R_PEAK),
-                    scale({-1.923e-05, 8.752e-03, 0.0}, HBM_R_PEAK)}};
-
-    hbm_bw_write = {{scale({-1.176e-05, 5.946e-03, 0.0}, HBM_W_PEAK),
-                     scale({-2.492e-05, 9.843e-03, 0.0}, HBM_W_PEAK),
-                     scale({-2.655e-05, 1.026e-02, 0.0}, HBM_W_PEAK),
-                     scale({-2.667e-05, 1.033e-02, 0.0}, HBM_W_PEAK)}};
-
-    l2_bw_read  = {{scale({0.0, 6.783e-04, 0.0}, L2_PEAK),
-                    scale({0.0, 1.311e-03, 0.0}, L2_PEAK),
-                    scale({0.0, 2.198e-03, 0.0}, L2_PEAK),
-                    scale({0.0, 3.906e-03, 0.0}, L2_PEAK)}};
-    l2_bw_write = {{scale({0.0, 2.202e-03, 0.0}, L2_PEAK),
-                    scale({0.0, 2.455e-03, 0.0}, L2_PEAK),
-                    scale({0.0, 2.604e-03, 0.0}, L2_PEAK),
-                    scale({0.0, 3.906e-03, 0.0}, L2_PEAK)}};
-
-    mall_bw_read  = {{scale({0.0, 5.355e-04, 0.0}, MALL_PEAK),
-                      scale({0.0, 1.078e-03, 0.0}, MALL_PEAK),
-                      scale({0.0, 2.091e-03, 0.0}, MALL_PEAK),
-                      scale({0.0, 3.906e-03, 0.0}, MALL_PEAK)}};
-    mall_bw_write = {{scale({0.0, 3.216e-03, 0.0}, MALL_PEAK),
-                      scale({0.0, 3.709e-03, 0.0}, MALL_PEAK),
-                      scale({0.0, 3.641e-03, 0.0}, MALL_PEAK),
-                      scale({0.0, 3.906e-03, 0.0}, MALL_PEAK)}};
+    l2_bw_read    = build(0.0, mem1_b, MEM1_R_PEAK, to_mem1);
+    l2_bw_write   = build(0.0, mem1_b, MEM1_W_PEAK, to_mem1);
+    mall_bw_read  = build(0.0, dev_b, MEM2_R_PEAK, to_mem2);
+    mall_bw_write = build(0.0, dev_b, MEM2_W_PEAK, to_mem2);
+    hbm_bw_read   = build(mem3_r_a, mem3_r_b, MEM3_R_PEAK, to_mem3);
+    hbm_bw_write  = build(mem3_w_a, mem3_w_b, MEM3_W_PEAK, to_mem3);
   } else {
     cache_lines      = {128, 128, 128, 128};
     cache_line_bytes = cache_lines.l2;

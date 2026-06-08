@@ -324,6 +324,11 @@ struct runtime_options {
   /// Heuristics variance threshold (reads from ANALYTICAL_GEMM_HEURISTICS_VARIANCE env var)
   double heuristics_variance;
 
+  /// Enable the gfx950 per-VW absolute-bandwidth model (reads from ORIGAMI_GFX950_BW_MODEL
+  /// env var). Off by default; when off, gfx950 uses the same per-workgroup-coefficient
+  /// bandwidth model as every other architecture.
+  bool gfx950_bw_model_enabled = false;
+
   /**
    * @brief Constructor with explicit values (does not read from environment).
    */
@@ -357,6 +362,12 @@ struct runtime_options {
    * @return double Variance value from ANALYTICAL_GEMM_HEURISTICS_VARIANCE, or 0.01 if not set
    */
   static double read_heuristics_variance_from_env();
+
+  /**
+   * @brief Read the gfx950 BW-model setting from environment variable.
+   * @return true if ORIGAMI_GFX950_BW_MODEL is set to "1", false otherwise
+   */
+  static bool read_gfx950_bw_model_from_env();
 
   /**
    * @brief Update runtime options from environment variables.

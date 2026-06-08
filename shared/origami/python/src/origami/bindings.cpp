@@ -175,18 +175,11 @@ NB_MODULE(origami, m) {
       .def_rw("epilogue_salu_overhead", &origami::heuristic_params_t::epilogue_salu_overhead)
       .def_rw("epilogue_l_barrier", &origami::heuristic_params_t::epilogue_l_barrier)
       .def_rw("epilogue_l_smem", &origami::heuristic_params_t::epilogue_l_smem)
-      .def_rw("epilogue_store_drain_cycles",
-              &origami::heuristic_params_t::epilogue_store_drain_cycles)
       .def_rw("epilogue_k_padding_penalty",
               &origami::heuristic_params_t::epilogue_k_padding_penalty)
       .def_rw("postgsu_kernel_launch_overhead",
               &origami::heuristic_params_t::postgsu_kernel_launch_overhead)
       .def_rw("vw_dampening_exponent", &origami::heuristic_params_t::vw_dampening_exponent)
-      .def_rw("vw_efficiency_bytes2",  &origami::heuristic_params_t::vw_efficiency_bytes2)
-      .def_rw("vw_efficiency_bytes4",  &origami::heuristic_params_t::vw_efficiency_bytes4)
-      .def_rw("vw_efficiency_bytes8",  &origami::heuristic_params_t::vw_efficiency_bytes8)
-      .def_rw("vw_efficiency_bytes16", &origami::heuristic_params_t::vw_efficiency_bytes16)
-      .def_rw("edge_padding_penalty",  &origami::heuristic_params_t::edge_padding_penalty)
       .def_rw("main_loop_efficiency", &origami::heuristic_params_t::main_loop_efficiency);
 
   m.def(

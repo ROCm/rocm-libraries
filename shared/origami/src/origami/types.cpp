@@ -38,10 +38,16 @@ double runtime_options::read_heuristics_variance_from_env() {
   return default_variance;
 }
 
+bool runtime_options::read_gfx950_bw_model_from_env() {
+  const char* env = std::getenv("ORIGAMI_GFX950_BW_MODEL");
+  return env && std::string(env) == "1";
+}
+
 void runtime_options::update_from_env() {
-  debug_enabled       = read_debug_from_env();
-  heuristics_enabled  = read_heuristics_from_env();
-  heuristics_variance = read_heuristics_variance_from_env();
+  debug_enabled           = read_debug_from_env();
+  heuristics_enabled      = read_heuristics_from_env();
+  heuristics_variance     = read_heuristics_variance_from_env();
+  gfx950_bw_model_enabled = read_gfx950_bw_model_from_env();
 }
 
 int datatype_to_bits(data_type_t type) {

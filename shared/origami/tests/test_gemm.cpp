@@ -1207,12 +1207,12 @@ TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
   origami::heuristic_params_t defaults;
 
   // Check default weight values
-  REQUIRE(defaults.weight_mem_l2 == 1.0);
-  REQUIRE(defaults.weight_mem_mall == 1.0);
-  REQUIRE(defaults.weight_mem_dram == 1.0);
-  REQUIRE(defaults.weight_compute == 1.0);
-  REQUIRE(defaults.weight_memory == 1.0);
-  REQUIRE(defaults.weight_wg_setup == 1.0);
+  REQUIRE(defaults.weight_mem_l2 == origami::heuristic_defaults_t::WEIGHT_MEM_L2);
+  REQUIRE(defaults.weight_mem_mall == origami::heuristic_defaults_t::WEIGHT_MEM_MALL);
+  REQUIRE(defaults.weight_mem_dram == origami::heuristic_defaults_t::WEIGHT_MEM_DRAM);
+  REQUIRE(defaults.weight_compute == origami::heuristic_defaults_t::WEIGHT_COMPUTE);
+  REQUIRE(defaults.weight_memory == origami::heuristic_defaults_t::WEIGHT_MEMORY);
+  REQUIRE(defaults.weight_wg_setup == origami::heuristic_defaults_t::WEIGHT_WG_SETUP);
   REQUIRE(defaults.weight_prologue == origami::heuristic_defaults_t::WEIGHT_PROLOGUE);
   REQUIRE(defaults.weight_epilogue == origami::heuristic_defaults_t::WEIGHT_EPILOGUE);
   REQUIRE(defaults.weight_loop_overhead == origami::heuristic_defaults_t::WEIGHT_LOOP_OVERHEAD);
@@ -1242,22 +1242,12 @@ TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
   REQUIRE(defaults.epilogue_l_smem == origami::heuristic_defaults_t::EPILOGUE_L_SMEM);
   REQUIRE(defaults.epilogue_k_padding_penalty ==
           origami::heuristic_defaults_t::EPILOGUE_K_PADDING_PENALTY);
-  REQUIRE(defaults.epilogue_store_drain_cycles ==
-          origami::heuristic_defaults_t::EPILOGUE_STORE_DRAIN_CYCLES);
   REQUIRE(defaults.postgsu_kernel_launch_overhead ==
           origami::heuristic_defaults_t::POSTGSU_KERNEL_LAUNCH_OVERHEAD);
 
-  // Per-VW BW dampening / efficiency (new modeling tunables)
+  // Per-VW BW dampening tunable
   REQUIRE(defaults.vw_dampening_exponent ==
           origami::heuristic_defaults_t::VW_DAMPENING_EXPONENT);
-  REQUIRE(defaults.vw_efficiency_bytes2  == origami::heuristic_defaults_t::VW_EFFICIENCY_BYTES2);
-  REQUIRE(defaults.vw_efficiency_bytes4  == origami::heuristic_defaults_t::VW_EFFICIENCY_BYTES4);
-  REQUIRE(defaults.vw_efficiency_bytes8  == origami::heuristic_defaults_t::VW_EFFICIENCY_BYTES8);
-  REQUIRE(defaults.vw_efficiency_bytes16 == origami::heuristic_defaults_t::VW_EFFICIENCY_BYTES16);
-
-  // Edge-tile padding penalty
-  REQUIRE(defaults.edge_padding_penalty ==
-          origami::heuristic_defaults_t::EDGE_PADDING_PENALTY);
 
   // Check default main loop efficiency
   REQUIRE(defaults.main_loop_efficiency == 1.0);
@@ -1272,11 +1262,6 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   override.weight_memory            = 3.0;
   override.main_memory_load_latency = 300.0;
   override.main_loop_efficiency     = 0.8;
-  override.vw_efficiency_bytes2     = 1.10;
-  override.vw_efficiency_bytes4     = 0.80;
-  override.vw_efficiency_bytes8     = 1.20;
-  override.vw_efficiency_bytes16    = 0.95;
-  override.edge_padding_penalty     = 0.05;
 
   // Merge override into base
   base.merge_with(override);
@@ -1286,11 +1271,6 @@ TEST_CASE("Heuristics: Parameter merging", "[heuristics]") {
   REQUIRE(base.weight_memory == 3.0);
   REQUIRE(base.main_memory_load_latency == 300.0);
   REQUIRE(base.main_loop_efficiency == 0.8);
-  REQUIRE(base.vw_efficiency_bytes2  == 1.10);
-  REQUIRE(base.vw_efficiency_bytes4  == 0.80);
-  REQUIRE(base.vw_efficiency_bytes8  == 1.20);
-  REQUIRE(base.vw_efficiency_bytes16 == 0.95);
-  REQUIRE(base.edge_padding_penalty == 0.05);
 
   // Check that non-overridden values remain default
   REQUIRE(base.weight_mem_l2 == origami::heuristic_defaults_t::WEIGHT_MEM_L2);
@@ -1839,7 +1819,13 @@ TEST_CASE("GEMM: compute_epilogue_latency", "[gemm]") {
 }
 
 TEST_CASE("Hardware: per-level cache_line_sizes_t and per-VW BW arrays (gfx950)", "[hardware]") {
-  auto hardware = make_hardware(950);
+  // The per-VW absolute-bandwidth model is opt-in (ORIGAMI_GFX950_BW_MODEL); enable it
+  // for the duration of construction so init_per_level_bw populates the per-VW arrays.
+  auto& opts                   = origami::runtime_options::get();
+  const bool prev_bw_model     = opts.gfx950_bw_model_enabled;
+  opts.gfx950_bw_model_enabled = true;
+  auto hardware                = make_hardware(950);
+  opts.gfx950_bw_model_enabled = prev_bw_model;  // arrays are already built; restore global
 
   // gfx950 carries non-uniform cache-line granularity.
   REQUIRE(hardware.cache_lines.l2       > 0);
@@ -1865,71 +1851,4 @@ TEST_CASE("Hardware: per-level cache_line_sizes_t and per-VW BW arrays (gfx950)"
   const double n  = 5.0;
   const double expected = 1.0 * n * n + 2.0 * n + 3.0;
   REQUIRE(origami::hardware_t::eval_bw(coef, n) == Approx(expected));
-}
-
-TEST_CASE("Heuristics: per-VW efficiency factors scale L_mem (gfx950)", "[heuristics]") {
-  auto hardware = make_hardware(950);
-  // Square-ish mid-AI problem so memory cost is meaningful.
-  auto problem = make_problem(4096, 4096, 4096);
-  problem.a_dtype  = origami::data_type_t::BFloat16;
-  problem.b_dtype  = origami::data_type_t::BFloat16;
-  problem.mi_dtype = origami::data_type_t::BFloat16;
-  // Pick a Float4-VW config (grvw_a/b = 8 with bf16 = 16 bytes/thread)
-  auto config        = make_config(256, 256, 64, 16, 16, 32);
-  config.grvw_a      = 8;
-  config.grvw_b      = 8;
-  config.gwvw_d      = 8;
-  config.vector_width_a = 8;
-  config.vector_width_b = 8;
-
-  // Baseline: efficiency = 1.0 everywhere.
-  origami::heuristic_params_t hp;
-  origami::heuristics_database_t::get_instance().set_default_params(hp);
-  origami::context_t ctx0(problem, hardware, config);
-  const double L_mem0 = origami::compute_memory_latency(problem, hardware, config, ctx0);
-
-  // Penalize the 16-byte VW efficiency by half — the Bytes16-VW kernel must
-  // look proportionally slower on memory.
-  hp.vw_efficiency_bytes16 = 0.50;
-  origami::heuristics_database_t::get_instance().set_default_params(hp);
-  origami::context_t ctx1(problem, hardware, config);
-  const double L_mem1 = origami::compute_memory_latency(problem, hardware, config, ctx1);
-
-  REQUIRE(L_mem1 > L_mem0);
-
-  // Restore defaults so subsequent tests aren't affected.
-  origami::heuristics_database_t::get_instance().set_default_params(origami::heuristic_params_t{});
-}
-
-TEST_CASE("Heuristics: edge_padding_penalty inflates total latency on wasted edge tile",
-          "[heuristics]") {
-  auto hardware = make_hardware(950);
-  // M=2108 with MT_M=128 → remainder 60, waste = 1 - 60/128 = 0.53 (>0.5)
-  // triggers the penalty. Use a realistic-sized problem to satisfy other
-  // config-validation paths in compute_total_latency.
-  auto problem =
-      make_problem(2108, 4096, 4096, origami::transpose_t::T, origami::transpose_t::N);
-  problem.a_dtype  = origami::data_type_t::BFloat16;
-  problem.b_dtype  = origami::data_type_t::BFloat16;
-  problem.mi_dtype = origami::data_type_t::BFloat16;
-  auto config = make_config(128, 128, 64, 16, 16, 32);
-
-  // Baseline: edge_padding_penalty = 0 (off)
-  origami::heuristic_params_t hp;
-  hp.edge_padding_penalty = 0.0;
-  origami::heuristics_database_t::get_instance().set_default_params(hp);
-  const double L0 = origami::compute_total_latency(problem, hardware, config, hardware.N_CU);
-
-  // Turn on the penalty
-  hp.edge_padding_penalty = 0.20;
-  origami::heuristics_database_t::get_instance().set_default_params(hp);
-  const double L1 = origami::compute_total_latency(problem, hardware, config, hardware.N_CU);
-
-  // Both predictions must be finite for the comparison to be meaningful.
-  REQUIRE(L0 < std::numeric_limits<double>::max());
-  REQUIRE(L1 < std::numeric_limits<double>::max());
-  REQUIRE(L1 > L0);
-
-  // Restore defaults.
-  origami::heuristics_database_t::get_instance().set_default_params(origami::heuristic_params_t{});
 }
