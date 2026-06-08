@@ -97,6 +97,29 @@ class TestAlwaysRunDryRun(unittest.TestCase):
         self.assertIn("Always-run class: none", out)
         self.assertNotIn("-R ^(", out)
 
+    def test_selective_multi_chunk_runs_each_chunk(self):
+        # NUM_CHUNKS > 1 exercises the for-loop path in smart_test.sh.
+        rc, out = self._run(
+            "selective",
+            non_compiled=["test_py_a"],
+            chunks=["^(test_gemm)$", "^(test_conv)$"],
+        )
+        self.assertEqual(rc, 0)
+        self.assertIn("-R ^(test_gemm)$", out)
+        self.assertIn("-R ^(test_conv)$", out)
+        self.assertIn(r"-R ^(test_py_a)$", out)  # always-run class still fires
+
+    def test_selective_zero_chunks_warns_and_runs_always_class(self):
+        # regex_chunks: [] triggers the NUM_CHUNKS=0 warning guard.
+        rc, out = self._run(
+            "selective",
+            non_compiled=["test_py_a"],
+            chunks=[],
+        )
+        self.assertEqual(rc, 0)
+        self.assertIn("no regex_chunks", out)
+        self.assertIn(r"-R ^(test_py_a)$", out)  # always-run class still fires
+
 
 if __name__ == "__main__":
     unittest.main()

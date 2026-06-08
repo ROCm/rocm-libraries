@@ -262,7 +262,12 @@ log_info "Configuring CMake to generate compile_commands.json..."
 # cluster node: CMAKE_EXTRA_ARGS="-DCMAKE_CXX_COMPILER=amdclang++ -DGPU_TARGETS=gfx942"
 # Suppress the verbose "-- Configuring..." progress lines; propagate cmake errors.
 cmake .. -GNinja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ${CMAKE_EXTRA_ARGS:-} 2>&1 \
-    | { grep -v "^-- " || true; }
+    | grep -v "^-- " || true
+_cmake_rc=${PIPESTATUS[0]}
+if [ "${_cmake_rc}" -ne 0 ]; then
+    log_error "CMake configuration failed (exit ${_cmake_rc})"
+    exit "${_cmake_rc}"
+fi
 
 if [ ! -f "compile_commands.json" ]; then
     log_error "CMake configuration failed - compile_commands.json not generated"

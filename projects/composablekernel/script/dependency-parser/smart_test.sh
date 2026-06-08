@@ -134,7 +134,9 @@ case "${MODE}" in
         NUM_CHUNKS=$(jq -r '.regex_chunks | length' tests_to_run.json)
         echo "Running ${NUM_CHUNKS} test chunk(s)"
 
-        if [ "$NUM_CHUNKS" -eq 1 ]; then
+        if [ "$NUM_CHUNKS" -eq 0 ]; then
+            echo "Warning: tests_to_run.json has no regex_chunks; running always-run class only"
+        elif [ "$NUM_CHUNKS" -eq 1 ]; then
             TEST_REGEX=$(jq -r '.regex_chunks[0]' tests_to_run.json)
             run_ctest --output-on-failure -R "${TEST_REGEX}"
         else

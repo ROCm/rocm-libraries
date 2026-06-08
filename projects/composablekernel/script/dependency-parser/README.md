@@ -704,7 +704,7 @@ uv run pytest tests/ --cov=src --cov-report=html
 | `src/validate_selection.py` | Validates selected executables against `ninja -t targets all` |
 | `src/selective_test_filter.py` | Test selection from git diff + depmap lookup |
 | `src/enhanced_ninja_parser.py` | LEGACY: Post-build dependency parser (`ninja -t deps`) |
-| `tests/` | Unit and integration tests (82 total; run with `uv run pytest tests/`) |
+| `tests/` | Unit and integration tests (run with `uv run pytest tests/`) |
 | `CI_GARDENING.md` | **Operator runbook**: decision tree, artifacts, failure scenarios, overrides |
 | `README_legacy.md` | Documentation for legacy post-build approach |
 

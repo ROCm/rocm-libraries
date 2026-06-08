@@ -124,7 +124,7 @@ if [ ! -f "tests_to_run.json" ]; then
     exit 1
 fi
 num_tests=$(jq -r '.tests_to_run | length' tests_to_run.json 2>/dev/null || echo "0")
-jq -r '.executables[]' tests_to_run.json 2>/dev/null | tr '\n' ' ' > selected_targets.txt
+jq -r '.executables[]' tests_to_run.json 2>/dev/null | paste -sd' ' - > selected_targets.txt
 echo "[OK] As-if selection: ${num_tests} tests"
 
 # Step 3b: Selection-validity smoke (advisory) - exercises the validate gate and

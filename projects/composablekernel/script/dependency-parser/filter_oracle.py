@@ -388,7 +388,7 @@ def _run_coverage(args):
     # project-root post depmap compare correctly. Scope post to PR-editable source
     # unless --include-nonsource is given.
     source_only = not args.include_nonsource
-    pre = _canon_f2e(_load_f2e(args.pre))
+    pre = _canon_f2e(_load_f2e(args.pre), source_only=source_only)
     post = _canon_f2e(_load_f2e(args.post), source_only=source_only)
     ctest_tests = load_ctest_tests(args.ctest) if args.ctest else None
 
@@ -449,6 +449,8 @@ def aggregate_coverage(results):
     unioned; the headline coverages are the worst (min) across arches. `results`
     is a list of per-arch coverage dicts (each tagged with `label`).
     """
+    if not results:
+        raise ValueError("aggregate_coverage requires at least one result")
     per_arch, union_fn, union_tests_fn = [], {}, set()
     worst = {"coverage": 1.0, "file_coverage": 1.0, "test_coverage": 1.0}
     any_fail = False

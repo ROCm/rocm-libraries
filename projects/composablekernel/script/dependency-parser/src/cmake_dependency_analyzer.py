@@ -367,7 +367,10 @@ class ScanDepsExtractor:
             if not line or ":" not in line:
                 continue
             _, _, deps_str = line.partition(":")
-            prereqs = [d for d in deps_str.split() if d.strip()]
+            # Rejoin backslash-escaped spaces before splitting so paths like
+            # "foo\ bar.hpp" survive as single tokens.
+            unescaped = deps_str.replace("\\ ", "\x00")
+            prereqs = [d.replace("\x00", " ") for d in unescaped.split() if d.strip()]
             if not prereqs:
                 continue
             src_key = None

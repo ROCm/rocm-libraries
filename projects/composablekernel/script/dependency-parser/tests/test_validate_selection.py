@@ -175,6 +175,20 @@ class TestJunit(unittest.TestCase):
 
         self.assertFalse(validate(["bin/a"], {"bin/a"}, mode="selective")["advisory"])
 
+    def test_none_mode_is_advisory(self):
+        from validate_selection import validate
+
+        result = validate([], {"bin/a"}, mode="none")
+        self.assertEqual(result["mode"], "none")
+        self.assertTrue(result["advisory"])
+
+    def test_junit_xml_is_well_formed(self):
+        import xml.etree.ElementTree as ET
+        from validate_selection import render_junit, validate
+
+        result = validate(["bin/a", "bin/bogus"], {"bin/a"})
+        ET.fromstring(render_junit(result))
+
     def test_label_tags_suite_and_classname(self):
         from validate_selection import render_junit, validate
 

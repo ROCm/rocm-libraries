@@ -4,11 +4,17 @@
 
 """Unit tests for the build-filter completeness oracle (pure logic)."""
 
+import json
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 # filter_oracle.py lives in the dependency-parser dir (parent of tests/).
+ORACLE_PY = Path(__file__).parent.parent / "filter_oracle.py"
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import filter_oracle as bfo  # noqa: E402
 
@@ -277,6 +283,108 @@ class TestCoverageAggregate(unittest.TestCase):
         a = bfo.aggregate_coverage([self._r("a"), self._r("b")])
         self.assertEqual(a["verdict"], "pass")
         self.assertEqual(a["n_false_negatives"], 0)
+
+    def test_empty_input_raises(self):
+        with self.assertRaises(ValueError):
+            bfo.aggregate_coverage([])
+
+
+class TestOracleCli(unittest.TestCase):
+    """End-to-end subprocess tests for filter_oracle.py CLI subcommands."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def _write_json(self, name, obj):
+        path = os.path.join(self.tmp, name)
+        with open(path, "w") as f:
+            json.dump(obj, f)
+        return path
+
+    def _write_text(self, name, text):
+        path = os.path.join(self.tmp, name)
+        with open(path, "w") as f:
+            f.write(text)
+        return path
+
+    def _run(self, *args):
+        proc = subprocess.run(
+            [sys.executable, str(ORACLE_PY)] + list(args),
+            capture_output=True, text=True,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+
+    def test_reachability_pass_exit_zero(self):
+        depmap = {"file_to_executables": {"a.hpp": ["bin/test_a"]}}
+        depmap_path = self._write_json("dep.json", depmap)
+        # ctest list: one compiled test that IS reachable
+        ctest_path = self._write_text("ctest.txt", "Test #1: test_a\n")
+        # ninja targets: bin/test_a exists
+        ninja_path = self._write_text("ninja.txt", "bin/test_a: phony\n")
+        out_path = os.path.join(self.tmp, "reach.json")
+        rc, stdout, _ = self._run(
+            "reachability",
+            "--depmap", depmap_path,
+            "--ctest", ctest_path,
+            "--ninja", ninja_path,
+            "--output", out_path,
+        )
+        self.assertEqual(rc, 0)
+        with open(out_path) as f:
+            result = json.load(f)
+        self.assertEqual(result["verdict"], "pass")
+        self.assertEqual(result["n_false_negatives"], 0)
+
+    def test_reachability_fail_exit_one_on_fn(self):
+        # test_b is not in the depmap; without --ninja, all unreachable tests are
+        # classified as false negatives (unclassified mode).
+        depmap = {"file_to_executables": {}}
+        depmap_path = self._write_json("dep.json", depmap)
+        ctest_path = self._write_text("ctest.txt", "Test #1: test_b\n")
+        out_path = os.path.join(self.tmp, "reach.json")
+        rc, _, _ = self._run(
+            "reachability",
+            "--depmap", depmap_path,
+            "--ctest", ctest_path,
+            "--output", out_path,
+        )
+        self.assertEqual(rc, 1)
+        with open(out_path) as f:
+            result = json.load(f)
+        self.assertEqual(result["verdict"], "fail")
+        self.assertIn("test_b", result["false_negatives"])
+
+    def test_coverage_pass_when_pre_superset(self):
+        pre = {"file_to_executables": {"a.hpp": ["bin/test_a"], "b.hpp": ["bin/test_a"]}}
+        post = {"file_to_executables": {"a.hpp": ["bin/test_a"]}}
+        pre_path = self._write_json("pre.json", pre)
+        post_path = self._write_json("post.json", post)
+        out_path = os.path.join(self.tmp, "cov.json")
+        rc, _, _ = self._run(
+            "coverage", "--pre", pre_path, "--post", post_path, "--output", out_path,
+        )
+        self.assertEqual(rc, 0)
+        with open(out_path) as f:
+            result = json.load(f)
+        self.assertEqual(result["verdict"], "pass")
+        self.assertEqual(result["coverage"], 1.0)
+
+    def test_coverage_fail_when_post_has_uncovered_edge(self):
+        pre = {"file_to_executables": {"a.hpp": ["bin/test_a"]}}
+        post = {"file_to_executables": {"a.hpp": ["bin/test_a"], "b.hpp": ["bin/test_b"]}}
+        pre_path = self._write_json("pre.json", pre)
+        post_path = self._write_json("post.json", post)
+        out_path = os.path.join(self.tmp, "cov.json")
+        rc, _, _ = self._run(
+            "coverage", "--pre", pre_path, "--post", post_path, "--output", out_path,
+        )
+        self.assertEqual(rc, 1)
+        with open(out_path) as f:
+            result = json.load(f)
+        self.assertEqual(result["verdict"], "fail")
 
 
 if __name__ == "__main__":

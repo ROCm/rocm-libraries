@@ -46,7 +46,6 @@ smart_build_ci.sh
 ├─ FULL_REQUIRED? ──YES──► full build, exit 1 (as-if above was advisory)
 ├─ 0 tests selected? ──YES──► exit 0 (build_mode.env = none; no build/test)
 └─ else ──► build_mode.env = selective; build_targets.txt = selected targets
-                              build_mode.env = selective
 ```
 
 ---
@@ -155,6 +154,8 @@ If the file is **absent**, `smart_build_ci.sh` crashed before it could write it
   "n_non_compiled": 37,    // python/try_compile tests — always-run class (run in selective/none), not FNs
   "non_compiled": [...],
   "allowlisted": [],       // tests suppressed via --allowlist (see §5)
+  "n_codegen_allowlisted": 5,  // tests classified as codegen class (see §5)
+  "codegen_allowlisted": [...],// their names (excluded from false_negatives count)
   "classified": true,      // true = build.ninja was provided for classification
   "verdict": "pass"        // "fail" if any compiled test is unreachable
 }
@@ -317,6 +318,7 @@ python3 "${SCRIPT_DIR}/filter_oracle.py" reachability \
     --ctest ctest_list.txt \
     --ninja build.ninja \
     --allowlist "${SCRIPT_DIR}/reachability_allowlist.txt" \
+    --codegen-inventory "${SCRIPT_DIR}/codegen_blindspots.json" \
     --output reachability_result.json
 ```
 
