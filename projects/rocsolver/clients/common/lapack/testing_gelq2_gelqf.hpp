@@ -36,8 +36,6 @@
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
 
-#include "print_matrix.hpp"
-
 template <bool STRIDED, bool GELQF, typename T, typename U>
 void gelq2_gelqf_checkBadArgs(const rocblas_handle handle,
                               const rocblas_int m,
@@ -163,7 +161,6 @@ void gelq2_gelqf_initData(const rocblas_handle handle,
 template <bool STRIDED, bool GELQF, typename T, typename Td, typename Ud, typename Th, typename Uh>
 void gelq2_gelqf_getError(const rocblas_handle handle,
                           const std::string& matrix,
-                          const rocblas_int verbose,
                           const rocblas_int m,
                           const rocblas_int n,
                           Td& dA,
@@ -199,9 +196,6 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
     gelq2_gelqf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
                                         hIpiv);
 
-    if(verbose >= 2)
-        print_matrix("A", m, n, dA[0], lda);
-
     // GPU scalar for lange output, shared by all checks below.
     device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
     CHECK_HIP_ERROR(dnorm.memcheck());
@@ -222,12 +216,6 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
                                               dIpiv.data(), stP, bc));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hIpiv.transfer_from(dIpiv));
-
-    if(verbose >= 2)
-    {
-        print_matrix("Aout", m, n, dA[0], lda);
-        print_matrix("tau", min_mn, 1, dIpiv[0], min_mn);
-    }
 
     //--------------------
     // Check 0: Backward error: norm( L*Q - A ) / (n * norm( A )), using 1-norm.
@@ -274,16 +262,10 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
         // Upload L to GPU.
         CHECK_HIP_ERROR(hipMemcpy(dC[0], hC.data(), sizeof(T) * lda * n, hipMemcpyHostToDevice));
 
-        if(verbose >= 4)
-            print_matrix("L", m, n, dC[0], lda);
-
         // Compute L*Q on GPU using unmlq.
         CHECK_ROCBLAS_ERROR(rocsolver_ormlx_unmlx(GELQF, handle, rocblas_side_right,
                                                   rocblas_operation_none, m, n, min_mn, dA[b], lda,
                                                   dIpiv[b], dC[0], lda));
-
-        if(verbose >= 4)
-            print_matrix("L*Q", m, n, dC[0], lda);
 
         // Transfer L*Q back to host.
         // todo: geadd and lange on GPU.
@@ -293,9 +275,6 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
         for(rocblas_int j = 0; j < n; ++j)
             for(rocblas_int i = 0; i < m; ++i)
                 hC[i + j * lda] -= hA[b][i + j * lda];
-
-        if(verbose >= 4)
-            print_matrix("L*Q - A", m, n, hC.data(), lda);
 
         double err = cpu_lange('1', m, n, hC.data(), lda, hrwork.data());
         err /= n;
@@ -330,15 +309,9 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
         // Copy dA[b] to dQ (unglq uses first min_mn rows; copying all lda*n is safe).
         CHECK_HIP_ERROR(hipMemcpy(dQ[0], dA[b], sizeof(T) * lda * n, hipMemcpyDeviceToDevice));
 
-        if(verbose >= 4)
-            print_matrix("V", min_mn, n, dQ[0], lda);
-
         // Generate explicit Q (min_mn x n) in dQ via unglq.
         CHECK_ROCBLAS_ERROR(
             rocsolver_orglx_unglx(GELQF, handle, min_mn, n, min_mn, dQ[0], lda, dIpiv[b]));
-
-        if(verbose >= 4)
-            print_matrix("Q", min_mn, n, dQ[0], lda);
 
         // Set dR = I (min_mn x min_mn).
         // todo: replace with laset
@@ -353,9 +326,6 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
                                            dQ[0], lda, 0, // Q^H
                                            &one, dR[0], min_mn, 0, // R
                                            1));
-
-        if(verbose >= 4)
-            print_matrix("I - QQ^H", min_mn, min_mn, dR[0], min_mn);
 
         // Compute norm( I - Q * Q^H ).
         CHECK_ROCBLAS_ERROR(rocsolver_lange(handle, rocsolver_norm_type_one, min_mn, min_mn, dR[0],
@@ -373,12 +343,6 @@ void gelq2_gelqf_getError(const rocblas_handle handle,
     {
         GELQF ? cpu_gelqf(m, n, hA[b], lda, hIpiv[b], hW.data(), m)
               : cpu_gelq2(m, n, hA[b], lda, hIpiv[b], hW.data());
-    }
-
-    if(verbose >= 3)
-    {
-        print_matrix("Aref", m, n, hA[0], lda);
-        print_matrix("tau_ref", min_mn, 1, hIpiv[0], min_mn);
     }
 
     // forward comparison: ||hA - hARes|| / ||hA|| (GPU vs CPU factored form)
@@ -491,7 +455,6 @@ void testing_gelq2_gelqf(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
-    rocblas_int verbose = argus.get<rocblas_int>("verbose", 0);
     std::string matrix = argus.get<std::string>("matrix", "default");
 
     rocblas_int bc = argus.batch_count;
@@ -574,8 +537,8 @@ void testing_gelq2_gelqf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gelq2_gelqf_getError<STRIDED, GELQF, T>(handle, matrix, verbose, m, n, dA, lda, stA,
-                                                    dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
+            gelq2_gelqf_getError<STRIDED, GELQF, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP,
+                                                    bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -611,8 +574,8 @@ void testing_gelq2_gelqf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gelq2_gelqf_getError<STRIDED, GELQF, T>(handle, matrix, verbose, m, n, dA, lda, stA,
-                                                    dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
+            gelq2_gelqf_getError<STRIDED, GELQF, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP,
+                                                    bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)

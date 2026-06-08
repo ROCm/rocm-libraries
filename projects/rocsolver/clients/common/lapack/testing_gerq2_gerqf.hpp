@@ -36,8 +36,6 @@
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
 
-#include "print_matrix.hpp"
-
 template <bool STRIDED, bool GERQF, typename T, typename U>
 void gerq2_gerqf_checkBadArgs(const rocblas_handle handle,
                               const rocblas_int m,
@@ -163,7 +161,6 @@ void gerq2_gerqf_initData(const rocblas_handle handle,
 template <bool STRIDED, bool GERQF, typename T, typename Td, typename Ud, typename Th, typename Uh>
 void gerq2_gerqf_getError(const rocblas_handle handle,
                           const std::string& matrix,
-                          const rocblas_int verbose,
                           const rocblas_int m,
                           const rocblas_int n,
                           Td& dA,
@@ -199,9 +196,6 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     gerq2_gerqf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
                                         hIpiv);
 
-    if(verbose >= 2)
-        print_matrix("A", m, n, dA[0], lda);
-
     // GPU scalar for lange output, shared by all checks below.
     device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
     CHECK_HIP_ERROR(dnorm.memcheck());
@@ -222,12 +216,6 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
                                               dIpiv.data(), stP, bc));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hIpiv.transfer_from(dIpiv));
-
-    if(verbose >= 2)
-    {
-        print_matrix("Aout", m, n, dA[0], lda);
-        print_matrix("tau", min_mn, 1, dIpiv[0], min_mn);
-    }
 
     //--------------------
     // Check 0: Backward error: norm( R*Q - A ) / (n * norm( A )), using 1-norm.
@@ -272,9 +260,6 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
             }
         }
 
-        if(verbose >= 4)
-            print_matrix("R", m, n, hC.data(), lda);
-
         // Compute R*Q on CPU using unmrq.
         // unmrq expects A to point to the Householder vectors V in the last
         // min_mn rows of the GERQF output, i.e., hARes[b] + (m - min_mn).
@@ -282,16 +267,10 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
                         hARes[b] + (m - min_mn), lda, hIpiv[b], hC.data(), lda, hW.data(),
                         rocblas_int(hW.size()));
 
-        if(verbose >= 4)
-            print_matrix("R*Q", m, n, hC.data(), lda);
-
         // Compute norm( R*Q - A ); hA[b] is still the original A.
         for(rocblas_int j = 0; j < n; ++j)
             for(rocblas_int i = 0; i < m; ++i)
                 hC[i + j * lda] -= hA[b][i + j * lda];
-
-        if(verbose >= 4)
-            print_matrix("R*Q - A", m, n, hC.data(), lda);
 
         double err = cpu_lange('1', m, n, hC.data(), lda, hrwork.data());
         err /= n;
@@ -319,15 +298,9 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
             for(rocblas_int i = 0; i < min_mn; ++i)
                 hQ[i + j * lda] = hARes[b][(i + row_offset) + j * lda];
 
-        if(verbose >= 4)
-            print_matrix("V", min_mn, n, hQ.data(), lda);
-
         // Generate explicit Q (min_mn x n) in hQ via ungrq.
         cpu_orgrq_ungrq(min_mn, n, min_mn, hQ.data(), lda, hIpiv[b], hW.data(),
                         rocblas_int(hW.size()));
-
-        if(verbose >= 4)
-            print_matrix("Q", min_mn, n, hQ.data(), lda);
 
         // Set hR = I (min_mn x min_mn).
         std::fill(hR.begin(), hR.end(), T(0));
@@ -340,9 +313,6 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
                  negone, hQ.data(), lda, // Q
                  hQ.data(), lda, // Q^H
                  one, hR.data(), min_mn); // R
-
-        if(verbose >= 4)
-            print_matrix("I - QQ^H", min_mn, min_mn, hR.data(), lda);
 
         // Compute norm( I - Q * Q^H ).
         double err = cpu_lange('1', min_mn, min_mn, hR.data(), min_mn, hrwork.data());
@@ -359,12 +329,6 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
               : cpu_gerq2(m, n, hA[b], lda, hIpiv[b], hW.data());
     }
 
-    if(verbose >= 3)
-    {
-        print_matrix("Aref", m, n, hA[0], lda);
-        print_matrix("tau_ref", min_mn, 1, hIpiv[0], min_mn);
-    }
-
     // forward comparison: ||hA - hARes|| / ||hA|| (GPU vs CPU factored form)
     // using frobenius norm
     // (This does not account for numerical reproducibility issues.
@@ -377,14 +341,6 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
     }
 
     rocblas_set_pointer_mode(handle, old_mode);
-
-    S eps = std::numeric_limits<S>::epsilon();
-    bool status = max_errors[0] < 50 * eps && max_errors[1] < 50 * eps;
-    const char* msg = status ? "ok" : "FAILED";
-    std::cout << std::setprecision(3) << __func__ << ": m " << std::setw(3) << m << ", n "
-              << std::setw(3) << n << ", berror " << std::setw(8) << max_errors[0] << ", ortho "
-              << std::setw(8) << max_errors[1] << ", diff ref " << std::setw(8) << max_errors[2]
-              << " " << msg << "\n";
 }
 
 template <bool STRIDED, bool GERQF, typename T, typename Td, typename Ud, typename Th, typename Uh>
@@ -475,7 +431,6 @@ void testing_gerq2_gerqf(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
-    rocblas_int verbose = argus.get<rocblas_int>("verbose", 0);
     std::string matrix = argus.get<std::string>("matrix", "default");
 
     rocblas_int bc = argus.batch_count;
@@ -558,8 +513,8 @@ void testing_gerq2_gerqf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gerq2_gerqf_getError<STRIDED, GERQF, T>(handle, matrix, verbose, m, n, dA, lda, stA,
-                                                    dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
+            gerq2_gerqf_getError<STRIDED, GERQF, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP,
+                                                    bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -595,8 +550,8 @@ void testing_gerq2_gerqf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            gerq2_gerqf_getError<STRIDED, GERQF, T>(handle, matrix, verbose, m, n, dA, lda, stA,
-                                                    dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
+            gerq2_gerqf_getError<STRIDED, GERQF, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP,
+                                                    bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
