@@ -162,11 +162,6 @@ namespace TensileLite
             return true;
         }
 
-        void SolutionIterator::recordNonFatalError()
-        {
-            m_encounteredNonFatalError = true;
-        }
-
         static origami::Formocast::ProblemInfo getProblemInfo(ContractionSolution&    solution,
                                                            ContractionProblemGemm& problem)
         {
