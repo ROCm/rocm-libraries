@@ -15600,12 +15600,9 @@ class KernelWriterAssembly(KernelWriter):
       addr0 = vgpr(addr,2)
       addr1 = ""
 
-    # TODO: add a NonTemporalGate kernel param (like NonTemporalC/D/E); for now default 0.
-    ntKey = "NonTemporal%s"%tc
-    ntVal = kernel.get(ntKey, 0) if tc == 'Gate' else kernel[ntKey]
-    isGlc = bool(ntVal & 0x1)
-    isSlc = bool(ntVal & 0x2)
-    isNT  = bool(ntVal & 0x4)
+    isGlc = bool(kernel["NonTemporal%s"%tc] & 0x1)
+    isSlc = bool(kernel["NonTemporal%s"%tc] & 0x2)
+    isNT  = bool(kernel["NonTemporal%s"%tc] & 0x4)
 
     soffset = 0
     if tc == 'E':

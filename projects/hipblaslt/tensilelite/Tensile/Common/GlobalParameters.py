@@ -453,6 +453,7 @@ defaultBenchmarkCommonParameters = [
     {"1LDSBuffer": [0]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
+    {"NonTemporalGate": [0]},
     {"NonTemporalD": [0]},
     {"NonTemporalC": [0]},
     {"NonTemporalA": [0]},
