@@ -30,15 +30,19 @@ from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.Types import IsaVersion
 from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Toolchain.Validators import validateToolchain
-from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, validateMIParameters
+from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    matrixInstructionToMIParameters,
+    validateMIParameters,
+)
 from Tensile.SolutionStructs.Validators.WorkGroup import validateWorkGroup
 
 cxxCompiler = validateToolchain("amdclang++")
 isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, cxxCompiler)
 
+
 def test_convert_9_item_custom_kernel_config():
     input_conf = yaml.load(
-"""
+        """
 ProblemType:
     OperationType: GEMM
     DataTypeA: f8n
@@ -60,7 +64,9 @@ ProblemType:
 MatrixInstruction: [32, 32, 8, 1, 1, 31, 16, 4, 2]
 WavefrontSize: 48
 WorkGroup: [16, 16, 1]
-""", yaml.SafeLoader)
+""",
+        yaml.SafeLoader,
+    )
 
     # NOTE: This is not a valid MatrixInstruction, but since we are testing the conversion
     # functionality, it is useful to have unique values for each item in the list.
@@ -104,7 +110,7 @@ WorkGroup: [16, 16, 1]
     assert outputConf["EnableF32XdlMathOp"] == False
     assert outputConf["MFMA_BF16_1K"] == False
 
-    solution = defaultSolution
+    solution = dict(defaultSolution)
     solution.update(input_conf)
     solution.update(outputConf)
 
@@ -125,7 +131,7 @@ WorkGroup: [16, 16, 1]
 def testConvert9ItemCustomKernelConfig():
 
     inputConf = yaml.load(
-"""
+        """
 custom.config:
    ProblemType:
       OperationType: GEMM
@@ -164,7 +170,9 @@ custom.config:
       SupportCustomWGM: False
       SupportCustomStaggerU: False
       UseUniversalArgs: False
-""", yaml.SafeLoader)
+""",
+        yaml.SafeLoader,
+    )
 
     inputConf = inputConf["custom.config"]
 
@@ -200,13 +208,17 @@ custom.config:
     assert outputConf["MIInputPerThreadB"] == 5
     assert outputConf["MIInputPerThreadMetadata"] == 5
     assert outputConf["ThreadTile"] == [1, 1]
-    assert outputConf["WorkGroup"] == [1280, 2, 6]  # Why do we change the workgroup here?
+    assert outputConf["WorkGroup"] == [
+        1280,
+        2,
+        6,
+    ]  # Why do we change the workgroup here?
     assert outputConf["WavefrontSize"] == 48
     assert outputConf["ISA"] == isa
     assert outputConf["EnableF32XdlMathOp"] == False
     assert outputConf["MFMA_BF16_1K"] == False
 
-    solution = defaultSolution
+    solution = dict(defaultSolution)
     solution.update(inputConf)
     solution.update(outputConf)
 

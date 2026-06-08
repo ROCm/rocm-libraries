@@ -21,6 +21,7 @@
 ################################################################################
 
 import argparse
+import copy
 
 import pytest
 
@@ -31,7 +32,25 @@ from Tensile.Common.GlobalParameters import (
     globalParameters,
     restoreDefaultGlobalParameters,
     defaultGlobalParameters,
+    defaultSolution,
 )
+
+_PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(defaultSolution)
+
+
+@pytest.fixture(autouse=True)
+def _clean_default_solution():
+    """Reset the shared defaultSolution to its import-time pristine state around each
+    test, so the full-flow re-parse here is immune to any other test that mutates the
+    global defaultSolution by reference (e.g. test_MatrixInstructionConversion)."""
+
+    def _reset():
+        defaultSolution.clear()
+        defaultSolution.update(copy.deepcopy(_PRISTINE_DEFAULT_SOLUTION))
+
+    _reset()
+    yield
+    _reset()
 
 
 @pytest.fixture(autouse=True)
