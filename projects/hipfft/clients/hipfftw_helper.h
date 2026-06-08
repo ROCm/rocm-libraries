@@ -2123,7 +2123,7 @@ public:
             throw std::runtime_error(
                 "Conversion to fft_params impossible for batch_rank != 1 or negative batch sizes");
         ret.nbatch        = batches[0];
-        ret.run_callbacks = false;
+        ret.run_callbacks = fft_callback_type_none;
         ret.scale_factor  = 1.0;
         ret.istride       = convert_vector_to<decltype(ret.istride)::value_type>(istrides);
         ret.ostride       = convert_vector_to<decltype(ret.ostride)::value_type>(ostrides);
