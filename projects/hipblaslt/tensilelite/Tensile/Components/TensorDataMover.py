@@ -255,21 +255,21 @@ class TensorDataMoverLoad(TensorDataMover):
 
         return mod
 
+    @staticmethod
+    def dataSizeShift(dtype: DataType, isMetadata: bool = False) -> int:
+        if isMetadata or dtype.isInt8() or dtype.is8bitFloat() or dtype.isFloat4() or dtype.is6bitFloat():
+            return 0
+        if dtype.isBFloat16() or dtype.isHalf():
+            return 1
+        if dtype.isSingle():
+            return 2
+        if dtype.isDouble():
+            return 3
+        raise AssertionError(f"unsupported dtype for TDM data_size: {dtype}")
+
     def setDataType(self, dtype: DataType, group1: str | int, isMetadata: bool = False) -> Module:
         mod = Module()
-        dataSizeOp = None
-
-        if isMetadata or dtype.isInt8() or dtype.is8bitFloat() or dtype.isFloat4() or dtype.is6bitFloat():
-            dataSizeOp = 0
-        elif dtype.isBFloat16() or dtype.isHalf():
-            dataSizeOp = 1
-        elif dtype.isSingle():
-            dataSizeOp = 2
-        elif dtype.isDouble():
-            dataSizeOp = 3
-
-        assert dataSizeOp is not None
-
+        dataSizeOp = self.dataSizeShift(dtype, isMetadata)
         mod.add(SAndB32(sgpr(group1), sgpr(group1), hex(0xFFFCFFFF), "Reset data_size"))
         mod.add(SOrB32(sgpr(group1), sgpr(group1), hex(dataSizeOp << 16), f"Set data_size to {dataSizeOp}"))
         return mod
@@ -311,8 +311,12 @@ class TensorDataMoverLoad(TensorDataMover):
 
     def setIterationEnabled(self, group1, enabled: bool) -> Module:
         mod = Module()
-        mask = 1 << 19 if enabled else 0xFFF7FFFF
-        mod.add(SAndB32(sgpr(group1), sgpr(group1), hex(mask)))
+        if enabled:
+            mod.add(SOrB32(sgpr(group1), sgpr(group1), hex(1 << 19),
+                           "set iterate_enable (D# Group 1 bit 19)"))
+        else:
+            mod.add(SAndB32(sgpr(group1), sgpr(group1), hex(0xFFF7FFFF),
+                            "clear iterate_enable (D# Group 1 bit 19)"))
         return mod
 
     def resetTensorDimForTail(self, group1: int | str, sgprTail: int, tdmDescIdx: int, writer: "KernelWriterAssembly", constShifter: int=0, isMXS: bool=False, isSparseTrack: bool=False) -> Module:

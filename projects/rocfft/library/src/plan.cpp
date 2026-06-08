@@ -3679,13 +3679,6 @@ bool rocfft_plan_t::BuildMultiDevicePlan()
         {
             return false;
         }
-        // FIXME: some real inverse transforms with odd innermost length produce
-        // wrong results [more investigation needed to determine exact root cause]
-        if(transformType == rocfft_transform_type_real_inverse
-           && desc.innermost_length_is_odd(io_data_label::OUTPUT))
-        {
-            return false;
-        }
 
         // desc.{in,out}Fields.size() == 1 guaranteed given validation checks
         const auto& ifield = desc.get_field_for(io_data_label::INPUT);
