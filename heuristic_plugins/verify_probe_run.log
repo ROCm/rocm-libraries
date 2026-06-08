@@ -1,0 +1,11 @@
+[PROBE_HEURISTIC] HandleCreate
+[PROBE_HEURISTIC] PolicyDescriptorCreate
+[PROBE_HEURISTIC] HandleSetDeviceProperties size=80
+[PROBE_HEURISTIC] PolicySetEngineIds count=1 -3
+[PROBE_HEURISTIC] PolicySetSerializedGraph size=344
+[PROBE_HEURISTIC] PolicyFinalize called - HEURISTIC IS ACTIVE
+[PROBE_HEURISTIC] PolicyGetSortedEngineIds count query
+[PROBE_HEURISTIC] PolicyGetSortedEngineIds retrieve
+[PROBE_HEURISTIC] PolicyDescriptorDestroy
+[PROBE_HEURISTIC] HandleDestroy
+verify_probe: finalize success

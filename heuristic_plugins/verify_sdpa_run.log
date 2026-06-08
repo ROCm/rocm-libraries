@@ -1,0 +1,9 @@
+[SDPA_HEURISTIC] HandleCreate
+[SDPA_HEURISTIC] PolicyDescriptorCreate
+[SDPA_HEURISTIC] HandleSetDeviceProperties size=80
+[SDPA_HEURISTIC] PolicySetEngineIds count=1
+[SDPA_HEURISTIC] PolicySetSerializedGraph size=664
+[SDPA_HEURISTIC] regime=MHA_PREFILL Hq=8 Sq=16 D=64 - OK (55-70 TFLOPS)
+[SDPA_HEURISTIC] PolicyDescriptorDestroy
+[SDPA_HEURISTIC] HandleDestroy
+verify_sdpa: finalize success
