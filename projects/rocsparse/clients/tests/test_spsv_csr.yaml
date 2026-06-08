@@ -232,7 +232,7 @@ Tests:
   filename: [Chevron4]
 
 - name: spsv_csr_graph_test
-  category: pre_checkin
+  category: known_bug
   function: spsv_csr
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real

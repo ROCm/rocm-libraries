@@ -49,57 +49,13 @@ if(NOT HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB AND NOT TARGET nlohmann_json::nlohma
     hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 endif()
 
-# --- Dependency processing ---
-set(_hipdnn_flatbuffers_sdk_local_export_targets)
-set(_hipdnn_flatbuffers_sdk_local_export_includes)
 
-# Function to process flatbuffers_sdk dependencies and populate local export lists.
-# TARGET_NAME - The actual target name (e.g., FlatBuffers)
-# ALIAS_NAME  - The alias target name (e.g., flatbuffers::flatbuffers)
-# INCLUDE_DIR - Optional parent include directory to bundle with the install
-function(_hipdnn_flatbuffers_sdk_process_dependency TARGET_NAME ALIAS_NAME)
-    set(options "")
-    set(oneValueArgs INCLUDE_DIR)
-    set(multiValueArgs "")
-    cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-
-    if(NOT TARGET ${TARGET_NAME})
-        return()
-    endif()
-
-    if(NOT TARGET ${ALIAS_NAME})
-        add_library(${ALIAS_NAME} ALIAS ${TARGET_NAME})
-    endif()
-
-    get_target_property(_is_imported ${TARGET_NAME} IMPORTED)
-    if(NOT _is_imported)
-        list(APPEND _hipdnn_flatbuffers_sdk_local_export_targets ${TARGET_NAME})
-        set(_hipdnn_flatbuffers_sdk_local_export_targets ${_hipdnn_flatbuffers_sdk_local_export_targets} PARENT_SCOPE)
-
-        if(ARG_INCLUDE_DIR)
-            list(APPEND _hipdnn_flatbuffers_sdk_local_export_includes ${ARG_INCLUDE_DIR})
-            set(_hipdnn_flatbuffers_sdk_local_export_includes ${_hipdnn_flatbuffers_sdk_local_export_includes} PARENT_SCOPE)
-        endif()
-    endif()
-endfunction()
-
-if(TARGET FlatBuffers)
-    # Workaround: flatbuffers sets INSTALL_INTERFACE to include/include which resolves incorrectly.
-    # Force it to the correct install path for hipdnn_flatbuffers_sdk.
-    get_target_property(_is_imported FlatBuffers IMPORTED)
-    if(NOT _is_imported)
-        get_target_property(current_includes FlatBuffers INTERFACE_INCLUDE_DIRECTORIES)
-        list(REMOVE_ITEM current_includes "$<INSTALL_INTERFACE:include/include>")
-        list(APPEND current_includes "$<INSTALL_INTERFACE:${HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR}>")
-        set_target_properties(
-            FlatBuffers PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${current_includes}"
-        )
-    endif()
-    _hipdnn_flatbuffers_sdk_process_dependency(
-        FlatBuffers flatbuffers::flatbuffers INCLUDE_DIR ${HIP_DNN_FLATBUFFERS_INCLUDE_DIR}
-    )
+# Upstream FlatBuffers exposes FlatBuffers when fetched via add_subdirectory,
+# while its installed package exposes flatbuffers::flatbuffers. Use the installed-package
+# spelling internally so the build and exported config follow the same dependency model.
+if(TARGET FlatBuffers AND NOT TARGET flatbuffers::flatbuffers)
+    add_library(flatbuffers::flatbuffers ALIAS FlatBuffers)
 endif()
-
 # --- Create the library target ---
 add_library(hipdnn_flatbuffers_sdk INTERFACE)
 
@@ -180,13 +136,11 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
 endif()
 
 # --- Export and install ---
-export(TARGETS hipdnn_flatbuffers_sdk ${_hipdnn_flatbuffers_sdk_local_export_targets}
+export(TARGETS hipdnn_flatbuffers_sdk
        FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk/hipdnn_flatbuffers_sdkTargets.cmake"
 )
 
-install(TARGETS hipdnn_flatbuffers_sdk ${_hipdnn_flatbuffers_sdk_local_export_targets}
-        EXPORT hipdnn_flatbuffers_sdk_targets COMPONENT Development
-)
+install(TARGETS hipdnn_flatbuffers_sdk EXPORT hipdnn_flatbuffers_sdk_targets COMPONENT Development)
 
 # cmake-lint: disable=E1122
 install(
@@ -210,30 +164,11 @@ install(EXPORT hipdnn_flatbuffers_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR
         FILE hipdnn_flatbuffers_sdkTargets.cmake COMPONENT Development
 )
 
-# Install behavior depends on local vs imported dependencies
-if(_hipdnn_flatbuffers_sdk_local_export_includes)
-    # cmake-lint: disable=E1122
-    install(
-        DIRECTORY ${_hipdnn_flatbuffers_sdk_local_export_includes}/
-        DESTINATION ${HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR}
-        COMPONENT Development
-        FILES_MATCHING
-        PATTERN "*.h"
-        PATTERN "*.hpp"
-        PATTERN "codegen" EXCLUDE
-    )
-    configure_package_config_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_flatbuffers_sdkConfig_local.cmake.in"
-        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk/hipdnn_flatbuffers_sdkConfig.cmake"
-        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk
-    )
-else()
-    configure_package_config_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_flatbuffers_sdkConfig_imported.cmake.in"
-        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk/hipdnn_flatbuffers_sdkConfig.cmake"
-        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk
-    )
-endif()
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_flatbuffers_sdkConfig.cmake.in"
+    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk/hipdnn_flatbuffers_sdkConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_flatbuffers_sdk
+)
 
 # Generate package version file for find_package version checking
 write_basic_package_version_file(

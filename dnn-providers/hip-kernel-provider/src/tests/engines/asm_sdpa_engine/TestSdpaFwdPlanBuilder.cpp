@@ -10,9 +10,9 @@
 
 #include "ConfigHelpers.hpp"
 #include "GraphTest.hpp"
-#include "HipKernelHandle.hpp"
-#include "HipKernelSettings.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
+#include "core/Handle.hpp"
+#include "core/Settings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 
@@ -25,7 +25,7 @@ class TestSdpaFwdPlanBuilder : public ::testing::Test
 {
 protected:
     SdpaFwdPlanBuilder _planBuilder;
-    HipKernelHandle _handle;
+    Handle _handle;
 };
 
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableReturnsFalseForNonSdpaGraph)
@@ -160,7 +160,7 @@ TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
         builder.GetBufferPointer(), builder.GetSize());
 
     // Get the workspace size from the plan builder
-    const HipKernelSettings settings;
+    const Settings settings;
     const size_t workspaceSize = _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, settings);
 
     // Forward-only kernel uses LDS internally, no external workspace needed
