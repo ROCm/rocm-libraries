@@ -65,8 +65,8 @@ _BWD_DATA_TILES: Dict[Tuple[int, str], List[Tuple[int, int, int]]] = {
 }
 
 _BWD_WEIGHT_TILES: Dict[Tuple[int, str], List[Tuple[int, int, int]]] = {
-    (2, 'bf16'): [(16, 16, 32), (16, 16, 64), (16, 32, 64), (16, 64, 64), (16, 128, 32), (16, 128, 64), (16, 256, 32), (16, 256, 64), (32, 16, 64), (32, 32, 32), (32, 64, 32), (32, 128, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 64, 64), (64, 128, 32), (64, 128, 64), (128, 16, 64), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 128, 64), (128, 256, 32), (256, 16, 64), (256, 32, 64), (256, 128, 32), (256, 256, 32)],
-    (2, 'fp16'): [(16, 16, 32), (16, 16, 64), (16, 32, 64), (16, 64, 64), (16, 128, 32), (16, 128, 64), (16, 256, 32), (16, 256, 64), (32, 16, 64), (32, 32, 32), (32, 64, 32), (32, 128, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 64, 64), (64, 128, 32), (64, 128, 64), (128, 16, 64), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 128, 64), (128, 256, 32), (256, 16, 64), (256, 32, 64), (256, 128, 32), (256, 256, 32)],
+    (2, 'bf16'): [(16, 16, 32), (16, 16, 64), (16, 32, 64), (16, 64, 64), (16, 128, 32), (16, 128, 64), (16, 256, 32), (16, 256, 64), (32, 16, 64), (32, 32, 32), (32, 64, 32), (32, 128, 32), (64, 16, 64), (64, 32, 32), (64, 32, 64), (64, 64, 32), (64, 64, 64), (64, 128, 32), (64, 128, 64), (128, 16, 64), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 128, 64), (128, 256, 32), (256, 16, 64), (256, 32, 64), (256, 128, 32), (256, 256, 32)],
+    (2, 'fp16'): [(16, 16, 32), (16, 16, 64), (16, 32, 64), (16, 64, 64), (16, 128, 32), (16, 128, 64), (16, 256, 32), (16, 256, 64), (32, 16, 64), (32, 32, 32), (32, 64, 32), (32, 128, 32), (64, 16, 64), (64, 32, 32), (64, 32, 64), (64, 64, 32), (64, 64, 64), (64, 128, 32), (64, 128, 64), (128, 16, 64), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 128, 64), (128, 256, 32), (256, 16, 64), (256, 32, 64), (256, 128, 32), (256, 256, 32)],
     (2, 'fp32'): [(16, 16, 32), (16, 32, 64), (32, 16, 64), (32, 64, 16), (32, 128, 16), (64, 16, 64), (64, 32, 16), (64, 64, 16), (64, 64, 64), (64, 128, 16), (128, 32, 16), (128, 32, 32), (128, 64, 16), (128, 128, 16), (128, 256, 16), (256, 128, 16)],
     (3, 'bf16'): [(16, 16, 32), (16, 16, 64), (16, 32, 64), (16, 64, 64), (16, 128, 32), (16, 128, 64), (16, 256, 32), (16, 256, 64), (32, 16, 64), (32, 32, 32), (32, 64, 32), (32, 128, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 64, 64), (64, 128, 32), (128, 16, 64), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 128, 64), (128, 256, 32), (256, 16, 64), (256, 128, 32), (256, 256, 32)],
     (3, 'fp16'): [(16, 16, 32), (16, 16, 64), (16, 32, 64), (16, 64, 64), (16, 128, 32), (16, 128, 64), (16, 256, 32), (16, 256, 64), (32, 16, 64), (32, 32, 32), (32, 64, 32), (32, 128, 32), (64, 16, 64), (64, 32, 32), (64, 64, 32), (64, 64, 64), (64, 128, 32), (128, 16, 64), (128, 32, 32), (128, 64, 32), (128, 128, 32), (128, 128, 64), (128, 256, 32), (256, 16, 64), (256, 128, 32), (256, 256, 32)],
@@ -256,7 +256,9 @@ _WAVE_STRATEGY_OVERRIDES: Dict[str, Dict[Tuple[int, int, int], List[WaveStrategy
         (128, 32, 64): [WaveStrategy.SPLIT_M4],
     },
     "bwd_weight": {
+        (16, 64, 64): [WaveStrategy.SPLIT_N, WaveStrategy.SPLIT_N4],
         (32, 128, 32): [WaveStrategy.SINGLE, WaveStrategy.SPLIT_N],
+        (64, 32, 64): [WaveStrategy.SPLIT_M, WaveStrategy.SPLIT_N],
         (128, 32, 32): [WaveStrategy.SINGLE, WaveStrategy.SPLIT_M],
     },
 }
@@ -271,6 +273,8 @@ _WARP_MN_EXCEPTIONS: Dict[
     Tuple[str, Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int]]
 ] = {
     ("forward", (64, 64, 32), (2, 2, 1)): [(16, 16)],
+    ("forward", (64, 64, 64), (2, 2, 1)): [(16, 16), (32, 32)],
+    ("forward", (128, 128, 64), (2, 2, 1)): [(16, 16), (32, 32)],
     ("forward", (256, 256, 32), (2, 2, 1)): [(16, 16), (32, 32)],
     ("bwd_weight", (64, 64, 64), (2, 2, 1)): [(16, 16), (32, 32)],
 }
@@ -376,6 +380,7 @@ def get_k_mfma(dtype_key: str, m_per_xdl: int) -> int:
 
 def compute_warp_tile_k(
     dtype_key: str, warp_tile_m: int, tile_k: int, streamk: bool = False,
+    use_legacy: bool = False,
 ) -> int:
     """Derive warp_tile_k (the MFMA K) for a config.
 
@@ -388,8 +393,12 @@ def compute_warp_tile_k(
     Hand-written StreamK *native* instances bypass get_k_mfma and carry the legacy
     (gfx942) warp_tile_k verbatim: half 32x32 -> 8, 16x16 -> 16, clamped to tile_k
     (fp32 native instances clamp to tile_k // 4 instead).
+
+    ``use_legacy`` applies the same legacy formula for non-streamk contexts that
+    nevertheless use the gfx942 warp_tile_k convention (e.g. some wavelet bwd_weight
+    instances).
     """
-    if streamk:
+    if streamk or use_legacy:
         legacy_half_k = 8 if warp_tile_m == 32 else 16
         cap = tile_k // 4 if dtype_key.startswith("fp32") else tile_k
         return min(legacy_half_k, cap)
@@ -746,8 +755,9 @@ _EXTRA_VEC_TRIPLES: Dict[str, Dict[Tuple[int, int, int], Dict[str, List[Tuple[in
         (32, 64, 64): {"float": [(4, 4, 8)]},
         (32, 128, 64): {"float": [(4, 4, 8)]},
         (64, 64, 32): {"half": [(1, 2, 1), (2, 1, 2)], "float": [(1, 2, 1), (2, 1, 2)]},
+        (64, 64, 64): {"half": [(8, 8, 1), (8, 8, 4)]},
         (128, 128, 32): {"float": [(4, 4, 8)]},
-        (128, 128, 64): {"float": [(4, 4, 8)]},
+        (128, 128, 64): {"half": [(8, 8, 1), (8, 8, 8)], "float": [(4, 4, 8)]},
         (256, 128, 32): {"half": [(2, 2, 2)]},
     },
     "bwd_data": {
@@ -762,7 +772,7 @@ _EXTRA_VEC_TRIPLES: Dict[str, Dict[Tuple[int, int, int], Dict[str, List[Tuple[in
         (16, 16, 32): {"float": [(1, 1, 2)]},
         (16, 16, 64): {"half": [(1, 4, 4)]},
         (16, 32, 64): {"half": [(1, 2, 4), (1, 4, 4), (2, 1, 1), (2, 2, 4), (2, 4, 4)]},
-        (16, 64, 64): {"half": [(2, 1, 1), (2, 8, 4)]},
+        (16, 64, 64): {"half": [(2, 1, 1), (2, 8, 4), (4, 8, 8)]},
         (16, 128, 32): {"half": [(4, 4, 1)]},
         (16, 128, 64): {"half": [(2, 8, 4)]},
         (16, 256, 64): {"half": [(2, 8, 4)]},
@@ -771,8 +781,9 @@ _EXTRA_VEC_TRIPLES: Dict[str, Dict[Tuple[int, int, int], Dict[str, List[Tuple[in
         (32, 64, 32): {"half": [(2, 2, 1), (2, 8, 8), (4, 4, 1), (4, 4, 2)]},
         (64, 16, 64): {"half": [(1, 2, 2)], "float": [(8, 2, 2)]},
         (64, 32, 32): {"half": [(4, 4, 1), (4, 4, 2)]},
+        (64, 32, 64): {"half": [(8, 8, 8)]},
         (64, 64, 32): {"half": [(2, 2, 2)]},
-        (64, 64, 64): {"half": [(1, 4, 4), (2, 2, 2), (2, 2, 4)]},
+        (64, 64, 64): {"half": [(1, 4, 4), (2, 2, 2), (2, 2, 4), (4, 8, 8)]},
         (128, 32, 32): {"float": [(8, 2, 2)]},
     },
 }
@@ -802,6 +813,15 @@ def get_extra_vec_triples(
                 out.append(tr)
     return out
 
+
+# bwd_weight wavelet tiles that use the legacy gfx942 warp_tile_k formula
+# (same as streamk native instances) rather than the new get_k_mfma formula.
+# Derived from the CK Builder conf files: these tiles carry warp_tile_k=16 for
+# half (warp_tile_m=16) instead of the new formula value of 32.
+_BWD_WEIGHT_WAVELET_LEGACY_WARP_K_TILES: Set[Tuple[int, int, int]] = {
+    (64, 32, 64),
+    (64, 64, 64),
+}
 
 # =============================================================================
 # Pipeline / Scheduler Rules (per-tile, replaces cross-product)
@@ -937,15 +957,18 @@ _BWD_WEIGHT_TILE_PIPELINES: Dict[Tuple[int, int, int], List[Tuple[str, str]]] = 
 _BWD_WEIGHT_TILE_PIPELINES_DCLASS: Dict[Tuple[int, int, int], Dict[str, List[Tuple[str, str]]]] = {
     (16, 16, 32): {'half': [('compv1', 'intrawave'), ('compv6', 'intrawave'), ('mem', 'intrawave')], 'float': [('compv6', 'intrawave'), ('mem', 'intrawave')]},
     (16, 32, 64): {'half': [('basic_async_v1', 'intrawave'), ('compv1', 'interwave'), ('compv1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')], 'float': [('compv1', 'intrawave')]},
+    (16, 64, 64): {'half': [('basic_async_v1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave'), ('wavelet', 'intrawave')], 'float': []},
     (32, 16, 64): {'half': [('compv1', 'interwave'), ('compv1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')], 'float': [('compv1', 'intrawave')]},
     (64, 16, 64): {'half': [('mem', 'interwave'), ('mem', 'intrawave')], 'float': [('mem', 'intrawave')]},
-    (64, 64, 64): {'half': [('basic_async_v1', 'intrawave'), ('compv1', 'intrawave')], 'float': [('compv1', 'intrawave')]},
+    (64, 32, 64): {'half': [('wavelet', 'intrawave')], 'float': []},
+    (64, 64, 64): {'half': [('basic_async_v1', 'intrawave'), ('compv1', 'intrawave'), ('wavelet', 'intrawave')], 'float': [('compv1', 'intrawave')]},
     (128, 32, 32): {'half': [('compv1', 'intrawave'), ('compv6', 'intrawave'), ('mem', 'intrawave')], 'float': [('compv1', 'intrawave')]},
 }
 
 _FWD_TILE_PIPELINES_DCLASS: Dict[Tuple[int, int, int], Dict[str, List[Tuple[str, str]]]] = {
+    (64, 64, 64): {'half': [('compv3', 'intrawave'), ('wavelet', 'intrawave')], 'float': [('compv3', 'intrawave')]},
     (128, 128, 32): {'half': [('compv1', 'intrawave'), ('compv4', 'intrawave')], 'float': [('compv4', 'intrawave')]},
-    (128, 128, 64): {'half': [('compv1', 'interwave'), ('compv3', 'intrawave'), ('compv4', 'intrawave'), ('compv6', 'intrawave')], 'float': [('compv1', 'interwave'), ('compv3', 'intrawave'), ('compv6', 'intrawave')]},
+    (128, 128, 64): {'half': [('compv1', 'interwave'), ('compv3', 'intrawave'), ('compv4', 'intrawave'), ('compv6', 'intrawave'), ('wavelet', 'intrawave')], 'float': [('compv1', 'interwave'), ('compv3', 'intrawave'), ('compv6', 'intrawave')]},
 }
 
 
@@ -1538,12 +1561,19 @@ def get_configs(
             vec_set.add(triple)
         vec_list = sorted(vec_set)
 
+        # bwd_weight wavelet tiles that use legacy warp_tile_k (gfx942 convention)
+        _bww_legacy = (
+            var_str == "bwd_weight"
+            and (tile_m, tile_n, tile_k) in _BWD_WEIGHT_WAVELET_LEGACY_WARP_K_TILES
+        )
+
         for (wave_m, wave_n, wave_k), (warp_tile_m, warp_tile_n) in pairs:
             # Derive warp_tile_k (the MFMA K) for the non-streamk case; this is
             # the value used both for the vec gate and for non-streamk configs.
             # StreamK configs re-derive it per-config below.
+            # Some bwd_weight wavelet tiles use the legacy gfx942 formula.
             warp_tile_k = compute_warp_tile_k(
-                dtype_key, warp_tile_m, tile_k, streamk=False,
+                dtype_key, warp_tile_m, tile_k, streamk=False, use_legacy=_bww_legacy,
             )
             # tile_math gate: a candidate vec triple survives only if it is valid
             # for this (tile, wave, warp) under this dtype_key.
@@ -1600,9 +1630,11 @@ def get_configs(
                         # Derive warp_tile_k for this config. Hand-written StreamK
                         # native instances bypass get_k_mfma and carry the legacy
                         # warp_tile_k, handled inside compute_warp_tile_k.
+                        # Same legacy convention applies to some bwd_weight wavelet tiles.
                         eff_warp_tile_k = compute_warp_tile_k(
                             dtype_key, warp_tile_m, tile_k,
                             streamk=sk_cfg.streamk_enabled,
+                            use_legacy=_bww_legacy and pipeline == "wavelet",
                         )
 
                         tile_cfg = TileConfig(

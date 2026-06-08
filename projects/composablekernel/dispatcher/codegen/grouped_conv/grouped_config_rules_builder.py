@@ -77,6 +77,7 @@ def map_pipeline_version(version_str):
         "V6": "compv6",
         "ASYNC_V1": "basic_async_v1",
         "ASYNC_V4": "mem",
+        "WAVELET": "wavelet",
     }
     return mapping.get(version_str, version_str.lower())
 

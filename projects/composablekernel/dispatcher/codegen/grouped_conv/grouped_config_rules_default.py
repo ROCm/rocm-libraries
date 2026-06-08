@@ -143,6 +143,8 @@ PIPELINE_VARIANTS: List[Tuple[str, str, int, int]] = [
     ("mem", "interwave", 1, 0),
     ("mem", "interwave", 0, 1),
     ("mem", "interwave", 1, 1),
+    # wavelet: intrawave only, single LDS (DoubleSmemBuffer=false hardcoded)
+    ("wavelet", "intrawave", 0, 0),
 ]
 
 
@@ -175,6 +177,7 @@ VARIANT_PIPELINES: Dict[str, List[str]] = {
         "compv6",
         "comp_async",
         "basic_async_v1",
+        "wavelet",
     ],
     "bwd_data": [
         "basic_v1",
@@ -185,6 +188,7 @@ VARIANT_PIPELINES: Dict[str, List[str]] = {
         "compv6",
         "comp_async",
         "basic_async_v1",
+        "wavelet",
     ],
     "bwd_weight": [
         "basic_v1",
@@ -195,6 +199,7 @@ VARIANT_PIPELINES: Dict[str, List[str]] = {
         "compv6",
         "comp_async",
         "basic_async_v1",
+        "wavelet",
     ],
 }
 

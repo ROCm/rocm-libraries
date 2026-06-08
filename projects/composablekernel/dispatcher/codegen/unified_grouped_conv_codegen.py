@@ -146,7 +146,7 @@ def deduce_block_per_cu(pipeline: str, double_smem_buffer: bool) -> int:
     # Pipelines that mandate double LDS (no user choice)
     _ALWAYS_DOUBLE = {"compv4", "comp_async"}
     # Pipelines that mandate single LDS (no user choice)
-    _ALWAYS_SINGLE = {"compv1", "compv2", "basic_v1", "basic_v2", "basic_async_v1"}
+    _ALWAYS_SINGLE = {"compv1", "compv2", "basic_v1", "basic_v2", "basic_async_v1", "wavelet"}
 
     if pipeline in _ALWAYS_DOUBLE:
         return 1
@@ -429,6 +429,7 @@ class GroupedConvTypeMappings:
         "compv6": "GemmPipeline::COMPUTE_V6",
         "comp_async": "GemmPipeline::COMPUTE_ASYNC",
         "basic_async_v1": "GemmPipeline::BASIC_ASYNC_V1",
+        "wavelet": "GemmPipeline::WAVELET",
     }
 
     SCHEDULER_TO_CK = {
@@ -845,6 +846,7 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
             "compv6": "GemmPipelineAgBgCrCompV6",
             "comp_async": "GemmPipelineAgBgCrCompAsync",
             "basic_async_v1": "GemmPipelineAGmemBGmemCRegAsyncV1",
+            "wavelet": "GemmPipelineAgBgCrWavelet",
         }
         return pipelines.get(pipeline, "GemmPipelineAgBgCrCompV3")
 
@@ -855,6 +857,8 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
         as a second template argument for conv-specific LDS banking.
         """
         base = self._get_pipeline(pipeline)
+        if pipeline == "wavelet":
+            return f"{base}<{problem_type}, GroupedConvUniversalPipelineAgBgCrPolicy, 4>"
         if pipeline in self._CONV_POLICY_PIPELINES:
             return f"{base}<{problem_type}, GroupedConvUniversalPipelineAgBgCrPolicy>"
         return f"{base}<{problem_type}>"
@@ -877,6 +881,7 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
             "compv6": "BaseGemmPipelineAgBgCrCompV6",
             "comp_async": "BaseGemmPipelineAgBgCrCompAsync",
             "basic_async_v1": "BaseGemmPipelineAGmemBGmemCRegV1",
+            "wavelet": "BaseGemmPipelineAgBgCrWavelet",
         }
         return pipelines.get(pipeline, "BaseGemmPipelineAgBgCrCompV3")
 
@@ -1628,6 +1633,7 @@ class GroupedConvDispatcherWrapperGenerator:
         "compv6": "Pipeline::CompV6",
         "preshufflev1": "Pipeline::PreShuffleV1",
         "preshufflev2": "Pipeline::PreShuffleV2",
+        "wavelet": "Pipeline::Wavelet",
     }
 
     SCHEDULER_TO_DISPATCHER = {
@@ -2338,6 +2344,7 @@ def main():
             "compv5",
             "compv6",
             "comp_async",
+            "wavelet",
         ],
         help="Pipeline type",
     )
