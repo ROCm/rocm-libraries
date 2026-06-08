@@ -1529,6 +1529,38 @@ class TestHelpers(unittest.TestCase):
                             else:
                                 self.assertIsInstance(spec3, spec_3d_cls)
 
+    def test_gfx942_l4_num_warps_matches_flash_selector(self):
+        """The gfx942 D128 fp16 flash/L4 branch in ``_select_2d_num_warps`` must
+        agree with ``_select_gfx942_flash_num_warps`` (what the flash kernel is
+        actually built and launched with). The branch is not on the live grid
+        path today (every flash site reads the flash selector directly), but
+        ``num_warps`` is not part of the JitCache key, so a silent disagreement
+        here is a latent wrong-CTA-count trap for any future caller. Pin them
+        equal.
+        """
+        from unittest import mock
+        import ck_dsl.instances.common.attention_unified as au
+
+        p = UnifiedAttentionProblem(
+            total_q=4096,
+            num_seqs=2,
+            num_query_heads=8,
+            num_kv_heads=1,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=2048,
+            max_seqlen_k=2048,
+            dtype="fp16",
+        )
+        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
+            self.assertTrue(
+                au._enable_gfx942_l4(p), "shape must be in the gfx942 L4 flash region"
+            )
+            self.assertEqual(
+                au._select_2d_num_warps(p),
+                au._select_gfx942_flash_num_warps(p),
+            )
+
     def test_tiled_3d_dispatch_gate_accepts_kwargs_per_arch(self):
         """Regression: the shared dispatch entry
         ``supports_native_unified_attention_3d_tiled`` forwards its kwargs to the

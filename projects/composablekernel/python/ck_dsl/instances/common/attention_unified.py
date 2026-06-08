@@ -579,11 +579,15 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     # which target the heavy flash/ring geometry.
     if _enable_gfx942_small_q_narrow(problem):
         return 1 if problem.num_queries_per_kv == 1 else 2
-    # gfx942 D128 fp16 L4 (shipped): the level-4 fitter fixes num_warps=1
-    # (BLOCK_M=32) on every D128 fp16 shape. Mirror it so the standalone DSL
-    # grid / cache key / spec stay coherent with the built L4 kernel.
+    # gfx942 D128 fp16 flash/L4 (shipped): the flash kernel runs at
+    # ``_select_gfx942_flash_num_warps`` (wide, default 4 -> BLOCK_M = 4 * 32),
+    # not the legacy num_warps=1 geometry. Every production flash site reads the
+    # flash selector directly, so this branch is not on the live grid path
+    # today; defer to that selector so a future caller can't read a count that
+    # disagrees with the built kernel (num_warps is not part of the JitCache
+    # key, so a drift would silently launch the wrong CTA count, not rebuild).
     if _enable_gfx942_l4(problem):
-        return 1
+        return _select_gfx942_flash_num_warps(problem)
     # gfx942 D64 oracle: paired with ``T=block_size`` and mw=32, four waves fit
     # in the MI300X 64 KB LDS budget and match the direct gfx942 harness.
     if _resolve_attention_arch() == "gfx942" and problem.head_size == 64:
