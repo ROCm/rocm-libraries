@@ -54,7 +54,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 803e48ef7ce9b6737c88099aa9c9109abb7c5c6e
+          ref: 1819ad3df3f8f44a42020f2c0cba449cc84bf16a
       - name: Install python deps
         run: |
           pip install -r TheRock/requirements.txt
