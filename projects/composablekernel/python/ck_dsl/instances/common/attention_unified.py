@@ -470,10 +470,16 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # variants were >=258us and often incorrect under hipcc).
     if problem.use_fp8 and problem.sliding_window > 0 and problem.max_seqlen_q > 256:
         return problem.block_size
-    # gfx942 D64 oracle: use a single KV block per tile. The generic
-    # ``2*block_size`` choice over-allocates LDS on MI300X when paired with the
-    # gfx942 D64 mw=32 path, while the direct gfx942 harness validates T=64.
+    # gfx942 D64. The flash/L4 regime (use_mfma_32x32x8 + sliced-K ring) requires
+    # T in {64,128} and a multiple of 32, so force T=64 there (mirrors the D128
+    # flash rule below); otherwise paged block_size in {16,32} would yield T=16/32
+    # and the spec validator would reject the build (reachable via the public
+    # backend="auto" dispatcher for a head_size=64 fp16 long-prefill problem with
+    # a 16/32-token paged KV cache). The narrow path keeps the single-KV-block
+    # oracle (the generic ``2*block_size`` over-allocates LDS on MI300X with mw=32).
     if _resolve_attention_arch() == "gfx942" and problem.head_size == 64:
+        if _enable_gfx942_fp16_flash(problem):
+            return 64
         return problem.block_size
     # gfx942 D128 (ALL dtypes): T=64. fp16 flash/L4 wants it for the overlapped
     # sliced-K ring -- an exhaustive ~1200-kernel sweep (exhaustive_sweep.py)

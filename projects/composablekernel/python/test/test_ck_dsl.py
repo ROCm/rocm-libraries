@@ -616,6 +616,32 @@ def _attention_problem_matrix():
         num_kv_heads=1,
         max_seqlen_k=2048,
     )
+    # gfx942 D64 fp16 flash with a paged block_size of 16/32 (e.g. a vLLM-style
+    # 16-token KV cache). The flash regime needs T in {64,128}; before the
+    # _select_2d_tile_size fix these yielded T=block_size and the spec validator
+    # rejected the build on the selected-2D path. Pin both (red->green).
+    add(
+        "long_prefill_flash_fp16_d64_b16",
+        head_size=64,
+        block_size=16,
+        dtype="fp16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+    )
+    add(
+        "long_prefill_flash_fp16_d64_b32",
+        head_size=64,
+        block_size=32,
+        dtype="fp16",
+        max_seqlen_q=2048,
+        num_seqs=2,
+        num_query_heads=8,
+        num_kv_heads=1,
+        max_seqlen_k=2048,
+    )
     # bf16 transposed "combo" branch cohort: HD=64, BS=32, NQH=64/NKV=8
     # (num_queries_per_kv=8), long prefill, multi-batch. With/without sinks.
     add(
