@@ -199,10 +199,18 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
             auto k        = mk / M;
             auto scale_id = (k / elementsPerMXBlock) * M + m;
 
-            auto data_id         = scale_id * elementsPerMXBlock + k % elementsPerMXBlock;
-            alignedDataBytes[mk] = dataBytes[data_id];
-            refFloat[mk]
-                = DGen::toFloat<DT>(scaleBytes.data(), dataBytes.data(), scale_id, data_id);
+            auto data_id = scale_id * elementsPerMXBlock + k % elementsPerMXBlock;
+            if(data_id < dataBytes.size())
+            {
+                alignedDataBytes[mk] = dataBytes[data_id];
+                refFloat[mk]
+                    = DGen::toFloat<DT>(scaleBytes.data(), dataBytes.data(), scale_id, data_id);
+            }
+            else
+            {
+                alignedDataBytes[mk] = 0;
+                refFloat[mk]         = 0.0f;
+            }
         }
         std::swap(dataBytes, alignedDataBytes);
     }
@@ -218,10 +226,18 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
             auto n        = kn % N;
             auto scale_id = (k / elementsPerMXBlock) * N + n;
 
-            auto data_id         = scale_id * elementsPerMXBlock + k % elementsPerMXBlock;
-            alignedDataBytes[kn] = dataBytes[data_id];
-            refFloat[kn]
-                = DGen::toFloat<DT>(scaleBytes.data(), dataBytes.data(), scale_id, data_id);
+            auto data_id = scale_id * elementsPerMXBlock + k % elementsPerMXBlock;
+            if(data_id < dataBytes.size())
+            {
+                alignedDataBytes[kn] = dataBytes[data_id];
+                refFloat[kn]
+                    = DGen::toFloat<DT>(scaleBytes.data(), dataBytes.data(), scale_id, data_id);
+            }
+            else
+            {
+                alignedDataBytes[kn] = 0;
+                refFloat[kn]         = 0.0f;
+            }
         }
         std::swap(dataBytes, alignedDataBytes);
     }
