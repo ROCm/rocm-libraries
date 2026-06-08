@@ -199,6 +199,7 @@ def main():
             ]
             payload = json.dumps({"items": items})
 
+            proc = None  # bind before Popen so the except handlers can't hit UnboundLocalError
             try:
                 proc = subprocess.Popen(
                     [sys.executable, str(worker_path)],
