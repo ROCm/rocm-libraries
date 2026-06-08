@@ -40,6 +40,8 @@ else()
     hipdnn_add_dependency(nanobind VERSION ${HIPDNN_NANOBIND_VERSION})
 endif()
 
+find_package(hip REQUIRED CONFIG)
+
 nanobind_add_module(
     hipdnn_frontend_python
     STABLE_ABI
@@ -50,6 +52,7 @@ nanobind_add_module(
     src/types_bindings.cpp
     src/handle_bindings.cpp
     src/memory_bindings.cpp
+    src/hip_bindings.cpp
 )
 
 target_link_libraries(
@@ -57,6 +60,7 @@ target_link_libraries(
     PRIVATE
         hipdnn_frontend
         hipdnn_backend
+        hip::host
 )
 
 set_target_properties(

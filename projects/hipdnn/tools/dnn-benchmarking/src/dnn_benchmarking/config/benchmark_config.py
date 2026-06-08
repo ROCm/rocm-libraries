@@ -262,7 +262,7 @@ class SuiteConfig:
             used for both. If neither is set, validation uses dtype-aware
             defaults.
         atol: Optional absolute tolerance override for correctness comparison.
-        gpu_backend: GPU timer backend to use.
+        gpu_backend: GPU timer backend to use ("hip", "auto", "none").
         reference_provider: Reference provider name for correctness checking.
         verbose: If True, print rich per-engine block per graph instead of summary.
         metrics: Metric collection configuration. Defaults to ``basic`` tier
@@ -309,7 +309,7 @@ class SuiteConfig:
                     raise ValueError(
                         "--plugin-path entry count must be 1 or match --engine count"
                     )
-        valid_gpu_backends = {"torch", "auto", "none"}
+        valid_gpu_backends = {"hip", "auto", "none"}
         if self.gpu_backend not in valid_gpu_backends:
             raise ValueError(
                 f"Invalid gpu_backend: '{self.gpu_backend}'. "

@@ -10,7 +10,12 @@ from ..common import torch_support
 from ..common.exceptions import ExecutionError, UnsupportedGraphError
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
-from .timing import GpuTimerInterface, Timer, create_gpu_timer
+from .timing import (
+    GpuTimerInterface,
+    Timer,
+    create_gpu_timer,
+    create_stream_synchronizer,
+)
 
 # Map graph JSON data type strings to hipdnn DataType enum names.
 # The hipdnn.DataType enum is only available when hipdnn_frontend is imported,
@@ -46,20 +51,12 @@ def _resolve_data_type(hipdnn: Any, type_str: str) -> Optional[Any]:
     return getattr(hipdnn.DataType, enum_name, None)
 
 
-def _torch_cuda_synchronize_if_available() -> Any:
-    """Return torch.cuda.synchronize when PyTorch has a visible GPU."""
-    # TODO: Replace the PyTorch dependency here with direct HIP runtime
-    # synchronization bindings so hipDNN timing can synchronize accurately
-    # even when torch is not installed.
-    if not torch_support.gpu_available():
-        return None
-    try:
-        import torch
-
-        return torch.cuda.synchronize
-    except Exception:
-        pass
-    return None
+def _get_handle_stream(handle: Any) -> int:
+    """Return a hipDNN handle's HIP stream pointer encoded as an integer."""
+    get_stream = getattr(handle, "get_stream", None)
+    if callable(get_stream):
+        return int(get_stream())
+    return 0
 
 
 class Executor:
@@ -77,7 +74,7 @@ class Executor:
         self,
         graph_json_str: str,
         config: BenchmarkConfig,
-        gpu_backend: Optional[Literal["torch", "auto", "none"]] = "auto",
+        gpu_backend: Optional[Literal["hip", "auto", "none"]] = "auto",
     ) -> None:
         """Initialize executor with graph JSON and configuration.
 
@@ -85,9 +82,9 @@ class Executor:
             graph_json_str: The graph as a JSON string.
             config: Benchmark configuration.
             gpu_backend: GPU timer backend to use:
-                - "torch": Force PyTorch backend (CUDA or ROCm)
-                - "auto": Auto-detect (uses PyTorch if available)
-                - "none": Disable GPU timing, use only E2E timing
+                - "hip": Force direct HIP event timing
+                - "auto": Auto-detect direct HIP timing
+                - "none": Disable GPU kernel timing, use synchronized E2E timing
         """
         self._graph_json_str = graph_json_str
         self._config = config
@@ -97,6 +94,7 @@ class Executor:
         self._workspace_ptr: int = 0
         self._workspace_size: int = 0
         self._init_time_ms: float = 0.0
+        self._stream_synchronizers: Dict[int, Any] = {}
 
     def _build_through_operation_graph(
         self, handle: Any, engine_id: Optional[int] = None
@@ -245,6 +243,18 @@ class Executor:
 
         self._init_time_ms = t.elapsed_ms
 
+    def _get_stream_synchronizer(self, handle: Any) -> Any:
+        """Return a reusable synchronizer for the handle's HIP stream."""
+        stream = _get_handle_stream(handle)
+        synchronizer = self._stream_synchronizers.get(stream)
+        if synchronizer is None:
+            try:
+                synchronizer = create_stream_synchronizer(stream)
+            except RuntimeError as e:
+                raise ExecutionError(str(e)) from e
+            self._stream_synchronizers[stream] = synchronizer
+        return synchronizer
+
     def execute_once(self, handle: Any, variant_pack: Dict[int, int]) -> None:
         """Execute the prepared graph once without collecting timings."""
         if self._graph is None:
@@ -276,12 +286,9 @@ class Executor:
 
         # hipDNN graph execution is asynchronous. Drain untimed warmup work before
         # benchmark() starts the measured loop, otherwise the first timed E2E
-        # iteration can include queued warmup kernels. This mirrors the PyTorch
-        # executor's warmup synchronization when a torch GPU runtime is present.
+        # iteration can include queued warmup kernels.
         if self._config.warmup_iters > 0:
-            torch_sync = _torch_cuda_synchronize_if_available()
-            if torch_sync:
-                torch_sync()
+            self._get_stream_synchronizer(handle).synchronize()
 
     def benchmark(
         self,
@@ -311,19 +318,14 @@ class Executor:
         kernel_timings: Optional[List[float]] = None
         gpu_timer: Optional[GpuTimerInterface] = None
         backend_name: str = ""
-        torch_sync = None
+        stream_synchronizer = None
+        stream = _get_handle_stream(handle)
 
-        # Set up torch sync for accurate E2E timing when PyTorch has a GPU
-        # backend. CPU-only torch is valid for reference validation, but it
-        # must not trigger torch.cuda synchronization or event timing.
-        torch_sync = _torch_cuda_synchronize_if_available()
-
-        # Create GPU timer if requested and available
+        # Create GPU timer if requested and available.
         if self._gpu_backend != "none":
             try:
-                gpu_timer = create_gpu_timer(
-                    "torch" if self._gpu_backend == "torch" else "auto"
-                )
+                requested_backend = "hip" if self._gpu_backend == "hip" else "auto"
+                gpu_timer = create_gpu_timer(requested_backend, stream=stream)
             except RuntimeError as e:
                 raise ExecutionError(str(e)) from e
             if gpu_timer is not None:
@@ -341,8 +343,12 @@ class Executor:
                     )
                 if gpu_timer:
                     gpu_timer.stop()
-                if torch_sync:
-                    torch_sync()
+                if gpu_timer:
+                    gpu_timer.synchronize()
+                else:
+                    if stream_synchronizer is None:
+                        stream_synchronizer = self._get_stream_synchronizer(handle)
+                    stream_synchronizer.synchronize()
 
             if gpu_timer:
                 kernel_timings.append(gpu_timer.elapsed_ms())

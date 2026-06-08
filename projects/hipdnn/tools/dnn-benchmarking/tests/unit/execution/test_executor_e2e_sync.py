@@ -3,9 +3,8 @@
 
 """Tests for hipDNN executor E2E timing synchronization."""
 
-import sys
 import time
-import types
+import sys
 from typing import Any, Dict
 
 import pytest
@@ -34,12 +33,12 @@ class DummyGraph:
         return DummyResult()
 
 
-class DummyTorchTimer(GpuTimerInterface):
-    """Minimal torch timer for executor tests."""
+class DummyHipTimer(GpuTimerInterface):
+    """Minimal HIP timer for executor tests."""
 
     @property
     def backend_name(self) -> str:
-        return "torch"
+        return "hip"
 
     def start(self) -> None:
         pass
@@ -47,8 +46,22 @@ class DummyTorchTimer(GpuTimerInterface):
     def stop(self) -> None:
         pass
 
+    def synchronize(self) -> None:
+        pass
+
     def elapsed_ms(self) -> float:
         return 1.0
+
+
+class TrackingSynchronizer:
+    """Synchronizer stub that records calls."""
+
+    def __init__(self, calls: list[str], stream: int = 0) -> None:
+        self.calls = calls
+        self.stream = stream
+
+    def synchronize(self) -> None:
+        self.calls.append("sync")
 
 
 def _make_executor(gpu_backend: str) -> executor_module.Executor:
@@ -70,13 +83,11 @@ def test_warmup_synchronizes_once_after_untimed_iterations(monkeypatch) -> None:
             calls.append("execute")
             return DummyResult()
 
-    fake_torch = types.SimpleNamespace(
-        cuda=types.SimpleNamespace(
-            is_available=lambda: True,
-            synchronize=lambda: calls.append("sync"),
-        )
+    monkeypatch.setattr(
+        executor_module,
+        "create_stream_synchronizer",
+        lambda stream=0: TrackingSynchronizer(calls, stream),
     )
-    monkeypatch.setitem(sys.modules, "torch", fake_torch)
 
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=3, benchmark_iters=1)
     executor = executor_module.Executor("{}", config, gpu_backend="none")
@@ -92,13 +103,11 @@ def test_warmup_zero_iterations_does_not_synchronize(monkeypatch) -> None:
     """No warmup iterations means no extra pre-benchmark synchronization."""
     calls: list[str] = []
 
-    fake_torch = types.SimpleNamespace(
-        cuda=types.SimpleNamespace(
-            is_available=lambda: True,
-            synchronize=lambda: calls.append("sync"),
-        )
+    monkeypatch.setattr(
+        executor_module,
+        "create_stream_synchronizer",
+        lambda stream=0: pytest.fail("zero warmup must not synchronize"),
     )
-    monkeypatch.setitem(sys.modules, "torch", fake_torch)
 
     executor = _make_executor("none")
     executor.warmup(handle=None, variant_pack={})
@@ -117,13 +126,11 @@ def test_benchmark_synchronizes_each_measured_iteration(monkeypatch) -> None:
             calls.append("execute")
             return DummyResult()
 
-    fake_torch = types.SimpleNamespace(
-        cuda=types.SimpleNamespace(
-            is_available=lambda: True,
-            synchronize=lambda: calls.append("sync"),
-        )
+    monkeypatch.setattr(
+        executor_module,
+        "create_stream_synchronizer",
+        lambda stream=0: TrackingSynchronizer(calls, stream),
     )
-    monkeypatch.setitem(sys.modules, "torch", fake_torch)
 
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=0, benchmark_iters=3)
     executor = executor_module.Executor("{}", config, gpu_backend="none")
@@ -136,16 +143,17 @@ def test_benchmark_synchronizes_each_measured_iteration(monkeypatch) -> None:
     assert len(result.e2e_timings) == 3
 
 
-def test_gpu_timer_start_stop_inside_timed_region(monkeypatch) -> None:
-    """Ensure GPU timer start/stop are invoked within the Timer context.
+def test_gpu_timer_start_stop_sync_inside_timed_region(monkeypatch) -> None:
+    """Ensure GPU timer start/stop/synchronize are invoked within Timer.
 
-    start() and stop() must be called inside the Timer so that E2E timing
-    covers the full GPU work interval. elapsed_ms() is called outside since
-    it only reads back the recorded duration.
+    start(), stop(), and synchronize() must be called inside the Timer so that
+    E2E timing covers the full GPU work interval. elapsed_ms() is called outside
+    since it only reads back the recorded duration.
     """
     in_timer = {"value": False}
     start_called_in_timer = {"value": False}
     stop_called_in_timer = {"value": False}
+    sync_called_in_timer = {"value": False}
     elapsed_called_in_timer = {"value": False}
 
     class FakeTimer:
@@ -161,11 +169,11 @@ def test_gpu_timer_start_stop_inside_timed_region(monkeypatch) -> None:
             return 1.0
 
     class TrackingGpuTimer(GpuTimerInterface):
-        """GPU timer that tracks when start/stop/elapsed_ms are called."""
+        """GPU timer that tracks when start/stop/synchronize/elapsed_ms are called."""
 
         @property
         def backend_name(self) -> str:
-            return "torch"
+            return "hip"
 
         def start(self) -> None:
             start_called_in_timer["value"] = in_timer["value"]
@@ -173,26 +181,32 @@ def test_gpu_timer_start_stop_inside_timed_region(monkeypatch) -> None:
         def stop(self) -> None:
             stop_called_in_timer["value"] = in_timer["value"]
 
+        def synchronize(self) -> None:
+            sync_called_in_timer["value"] = in_timer["value"]
+
         def elapsed_ms(self) -> float:
             elapsed_called_in_timer["value"] = in_timer["value"]
             return 1.0
 
     monkeypatch.setattr(executor_module, "Timer", FakeTimer)
     monkeypatch.setattr(
-        executor_module, "create_gpu_timer", lambda backend: TrackingGpuTimer()
+        executor_module,
+        "create_gpu_timer",
+        lambda backend, stream=0: TrackingGpuTimer(),
     )
 
-    executor = _make_executor("torch")
+    executor = _make_executor("hip")
     result = executor.benchmark(handle=None, variant_pack={})
 
-    # start() and stop() should be called inside the timer context
+    # start(), stop(), and synchronize() should be called inside the timer context
     assert start_called_in_timer["value"] is True
     assert stop_called_in_timer["value"] is True
+    assert sync_called_in_timer["value"] is True
     # elapsed_ms() should be called outside the timer context
     assert elapsed_called_in_timer["value"] is False
     assert result.kernel_timings is not None
     assert result.metadata is not None
-    assert result.metadata.gpu_backend == "torch"
+    assert result.metadata.gpu_backend == "hip"
 
 
 def test_e2e_timing_at_least_as_long_as_kernel(monkeypatch) -> None:
@@ -200,34 +214,39 @@ def test_e2e_timing_at_least_as_long_as_kernel(monkeypatch) -> None:
 
     With correct timer ordering, the wall-clock Timer wraps gpu_timer
     start/stop and synchronization, so E2E must always be >= kernel.
-    We simulate sync overhead in stop() so that the real Timer measures
+    We simulate sync overhead in synchronize() so that the real Timer measures
     more wall-clock time than the fixed kernel duration.
     """
     KERNEL_MS = 0.5
     SYNC_DELAY_S = 0.01  # 10ms simulated sync overhead
 
     class SlowSyncGpuTimer(GpuTimerInterface):
-        """GPU timer where stop() has measurable latency (simulating sync)."""
+        """GPU timer where synchronize() has measurable latency."""
 
         @property
         def backend_name(self) -> str:
-            return "torch"
+            return "hip"
 
         def start(self) -> None:
             pass
 
         def stop(self) -> None:
+            pass
+
+        def synchronize(self) -> None:
             time.sleep(SYNC_DELAY_S)
 
         def elapsed_ms(self) -> float:
             return KERNEL_MS
 
     monkeypatch.setattr(
-        executor_module, "create_gpu_timer", lambda backend: SlowSyncGpuTimer()
+        executor_module,
+        "create_gpu_timer",
+        lambda backend, stream=0: SlowSyncGpuTimer(),
     )
 
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=0, benchmark_iters=5)
-    executor = executor_module.Executor("{}", config, gpu_backend="torch")
+    executor = executor_module.Executor("{}", config, gpu_backend="hip")
     executor._graph = DummyGraph()
     executor._workspace_ptr = 0
 
@@ -258,6 +277,11 @@ def test_e2e_timings_recorded_without_gpu_timing(monkeypatch) -> None:
             return 2.0
 
     monkeypatch.setattr(executor_module, "Timer", FakeTimer)
+    monkeypatch.setattr(
+        executor_module,
+        "create_stream_synchronizer",
+        lambda stream=0: TrackingSynchronizer([], stream),
+    )
 
     executor = _make_executor("none")
     result = executor.benchmark(handle=None, variant_pack={})
@@ -266,9 +290,9 @@ def test_e2e_timings_recorded_without_gpu_timing(monkeypatch) -> None:
     assert result.kernel_timings is None
 
 
-def test_cpu_only_torch_does_not_synchronize(monkeypatch) -> None:
-    """CPU-only torch must not trigger torch.cuda.synchronize in hipDNN timing."""
-    sync_called = {"value": False}
+def test_cpu_only_torch_does_not_affect_hip_synchronization(monkeypatch) -> None:
+    """CPU-only torch must not be consulted for hipDNN timing synchronization."""
+    sync_calls: list[str] = []
 
     class FakeCuda:
         @staticmethod
@@ -277,14 +301,18 @@ def test_cpu_only_torch_does_not_synchronize(monkeypatch) -> None:
 
         @staticmethod
         def synchronize() -> None:
-            sync_called["value"] = True
-            raise AssertionError("CPU-only torch must not synchronize CUDA")
+            raise AssertionError("hipDNN timing must not call torch.cuda.synchronize")
 
-    fake_torch = types.SimpleNamespace(cuda=FakeCuda)
+    fake_torch = type("FakeTorch", (), {"cuda": FakeCuda})
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(
+        executor_module,
+        "create_stream_synchronizer",
+        lambda stream=0: TrackingSynchronizer(sync_calls, stream),
+    )
 
     executor = _make_executor("none")
     result = executor.benchmark(handle=None, variant_pack={})
 
     assert result.e2e_timings
-    assert sync_called["value"] is False
+    assert sync_calls == ["sync"]

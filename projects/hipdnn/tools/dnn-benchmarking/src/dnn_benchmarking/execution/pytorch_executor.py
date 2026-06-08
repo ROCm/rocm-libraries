@@ -12,7 +12,7 @@ from ..common import torch_support
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from . import pytorch_ops
-from .timing import Timer, TorchGpuTimer
+from .timing import HipGpuTimer, Timer, _is_torch_available, create_device_synchronizer
 
 
 class PyTorchExecutionError(Exception):
@@ -27,7 +27,7 @@ class PyTorchCudaExecutor:
     This class handles:
     - Validating graph operations are supported
     - Running warmup iterations
-    - Running timed benchmark iterations with TorchGpuTimer
+    - Running timed benchmark iterations with direct HIP event timing
     - Returning BenchmarkResult with E2E and kernel timings
     """
 
@@ -57,6 +57,7 @@ class PyTorchCudaExecutor:
         self._device = torch.device(device)
         self._init_time_ms: float = 0.0
         self._prepared = False
+        self._device_synchronizer: Optional[Any] = None
 
     def prepare(self) -> None:
         """Validate graph and prepare for execution.
@@ -73,9 +74,13 @@ class PyTorchCudaExecutor:
                     f"Supported: {list(pytorch_ops.get_supported_operations())}"
                 )
 
-            # Warm up CUDA/ROCm context if needed
+            # Warm up CUDA/ROCm context if needed, then create a direct HIP
+            # synchronizer for timing instead of using torch.cuda.synchronize().
             torch.cuda.init()
-
+            try:
+                self._device_synchronizer = create_device_synchronizer()
+            except RuntimeError as e:
+                raise PyTorchExecutionError(str(e)) from e
             self._prepared = True
 
         self._init_time_ms = t.elapsed_ms
@@ -94,7 +99,7 @@ class PyTorchCudaExecutor:
 
         for _ in range(self._config.warmup_iters):
             self._execute_graph(tensors)
-            torch.cuda.synchronize()
+            self._synchronize_device()
 
     def execute_once(self, tensors: Dict[int, torch.Tensor]) -> None:
         """Execute the graph once and synchronize.
@@ -106,7 +111,7 @@ class PyTorchCudaExecutor:
             raise PyTorchExecutionError("Executor not prepared. Call prepare() first.")
 
         self._execute_graph(tensors)
-        torch.cuda.synchronize()
+        self._synchronize_device()
 
     def benchmark(
         self,
@@ -132,14 +137,17 @@ class PyTorchCudaExecutor:
 
         e2e_timings: List[float] = []
         kernel_timings: List[float] = []
-        gpu_timer = TorchGpuTimer()
+        try:
+            gpu_timer = HipGpuTimer(stream=self._timing_stream())
+        except RuntimeError as e:
+            raise PyTorchExecutionError(str(e)) from e
 
         for _ in range(self._config.benchmark_iters):
             with Timer() as t:
                 gpu_timer.start()
                 self._execute_graph(tensors)
                 gpu_timer.stop()
-                torch.cuda.synchronize()
+                self._synchronize_device()
 
             kernel_timings.append(gpu_timer.elapsed_ms())
             e2e_timings.append(t.elapsed_ms)
@@ -151,7 +159,7 @@ class PyTorchCudaExecutor:
             warmup_iters=self._config.warmup_iters,
             benchmark_iters=self._config.benchmark_iters,
             engine_id=self._config.engine_id,
-            gpu_backend="torch",
+            gpu_backend="hip",
             execution_backend="pytorch",
         )
 
@@ -160,6 +168,19 @@ class PyTorchCudaExecutor:
             kernel_timings=kernel_timings,
             metadata=metadata,
         )
+
+    def _synchronize_device(self) -> None:
+        """Synchronize the current HIP device through hipdnn_frontend bindings."""
+        try:
+            if self._device_synchronizer is None:
+                self._device_synchronizer = create_device_synchronizer()
+            self._device_synchronizer.synchronize()
+        except RuntimeError as e:
+            raise PyTorchExecutionError(str(e)) from e
+
+    def _timing_stream(self) -> int:
+        """Return PyTorch's default CUDA/HIP stream pointer for HIP events."""
+        return int(torch.cuda.default_stream(self._device).cuda_stream)
 
     def _execute_graph(self, tensors: Dict[int, torch.Tensor]) -> None:
         """Execute all graph operations in order.

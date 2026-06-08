@@ -101,7 +101,7 @@ class BenchmarkMetadata:
         warmup_iters: Number of warmup iterations.
         benchmark_iters: Number of benchmark iterations.
         engine_id: Engine ID used for execution.
-        gpu_backend: GPU timer backend used ("torch" or "").
+        gpu_backend: GPU timer backend used ("hip" or "").
         execution_backend: Execution backend used ("hipdnn", "pytorch", or "").
         hostname: Machine hostname where benchmark was run.
     """

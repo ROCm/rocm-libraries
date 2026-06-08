@@ -483,7 +483,7 @@ class TestSuiteConfigValidation:
         config = SuiteConfig()
         assert config.gpu_backend == "auto"
         assert config.reference_provider == "none"
-        for backend in ("torch", "auto", "none"):
+        for backend in ("hip", "auto", "none"):
             SuiteConfig(gpu_backend=backend)
         for provider in ("none", "pytorch"):
             SuiteConfig(reference_provider=provider)
