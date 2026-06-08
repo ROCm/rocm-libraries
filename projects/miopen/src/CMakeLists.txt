@@ -330,12 +330,28 @@ if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     file(GLOB LGBM_RANK_SRCS conv/heuristics/lgbm_models/rank/*.c)
     file(GLOB LGBM_APPL_SRCS conv/heuristics/lgbm_models/appl/*.c)
     list(APPEND MIOpen_Source ${LGBM_RANK_SRCS} ${LGBM_APPL_SRCS})
-    # Generated C: silence machine-generated warnings, rename the exported
-    # predict() so the rank and appl translation units don't collide.
+    # Generated C: silence machine-generated warnings, and rename every
+    # exported symbol so the rank and appl translation units don't collide
+    # at link time. Treelite emits the same names in both: predict,
+    # postprocess, quantize, predict_unit0..7, the metadata accessors, and
+    # the is_categorical global.
+    set(LGBM_EXPORT_SYMS
+        predict postprocess quantize
+        predict_unit0 predict_unit1 predict_unit2 predict_unit3
+        predict_unit4 predict_unit5 predict_unit6 predict_unit7
+        get_num_target get_num_class get_num_feature
+        get_threshold_type get_leaf_output_type
+        is_categorical)
+    set(LGBM_RANK_DEFS "-w")
+    set(LGBM_APPL_DEFS "-w")
+    foreach(sym ${LGBM_EXPORT_SYMS})
+        list(APPEND LGBM_RANK_DEFS "-D${sym}=lgbm_rank_${sym}")
+        list(APPEND LGBM_APPL_DEFS "-D${sym}=lgbm_appl_${sym}")
+    endforeach()
     set_source_files_properties(${LGBM_RANK_SRCS} PROPERTIES
-        COMPILE_OPTIONS "-w;-Dpredict=lgbm_rank_predict")
+        COMPILE_OPTIONS "${LGBM_RANK_DEFS}")
     set_source_files_properties(${LGBM_APPL_SRCS} PROPERTIES
-        COMPILE_OPTIONS "-w;-Dpredict=lgbm_appl_predict")
+        COMPILE_OPTIONS "${LGBM_APPL_DEFS}")
 endif()
 
 list(APPEND MIOpen_Source tmp_dir.cpp binary_cache.cpp md5.cpp)
