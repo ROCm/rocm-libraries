@@ -34,7 +34,7 @@ Before this fix, ``kernel["CUOccupancy"]`` stayed at its default of ``-1``.
 The fix adds ``compute_occupancy_from_asm_source`` in ``OccupancyMeasure.py``, which
 parses ``.amdhsa_next_free_vgpr``, ``.amdhsa_next_free_sgpr``, and
 ``.amdhsa_group_segment_fixed_size`` from the custom ``.s`` source text, then calls
-the existing ``compute_occupancy_from_elf_metadata`` formula using hardware constants
+the existing ``compute_occupancy_from_resources`` formula using hardware constants
 derived via ``_arch_caps_for_kernel`` (ISA-table lookup, no GPU needed).
 
 ``getSourceFileString`` in ``KernelWriterAssembly.py`` calls this function for custom
@@ -70,7 +70,7 @@ import pytest
 
 from Tensile.OccupancyMeasure import (
     compute_occupancy_from_asm_source,
-    compute_occupancy_from_elf_metadata,
+    compute_occupancy_from_resources,
     _arch_caps_for_kernel,
 )
 

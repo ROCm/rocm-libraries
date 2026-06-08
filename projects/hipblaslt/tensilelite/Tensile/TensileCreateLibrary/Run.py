@@ -82,7 +82,6 @@ from Tensile.Utilities.Decorators.Profile import profile
 from Tensile.Utilities.Decorators.Timing import timing
 
 from .ParseArguments import parseArguments
-from Tensile.OccupancyMeasure import measure_occupancy_elf
 
 
 def libraryRoot(outputPath: Union[str, Path]) -> Path:
@@ -1049,39 +1048,6 @@ def run():
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")
 
     splitGSU = False  # TCL pipeline always uses splitGSU=False
-
-    # ── Optional ELF occupancy debug pass (off by default, opt-in) ──────────
-    # The .o files (relocatable ELF) are available in build_tmp/assembly/ at this
-    # point.  The full build_tmp is only cleaned up after passPostKernelInfoToLibrary
-    # below, so the .o files are still present here.
-    #
-    # WHY this is now opt-in:
-    # updateOccupancyFromScan() runs in kernelBody() AFTER rocIsaPass, rescanning
-    # the instruction body to find the actual max VGPR/AGPR indices.  It calls
-    # setGprs(scanned_vgprs, scanned_agprs) — which sets .amdhsa_next_free_vgpr in
-    # the descriptor — AND recomputes kernel["CUOccupancy"] from the same values.
-    # The assembler takes .amdhsa_next_free_vgpr literally, so the ELF's vgpr_count
-    # equals exactly what updateOccupancyFromScan wrote.  Reading it back and
-    # applying the same formula yields the same CUOccupancy already stored — the
-    # ELF pass cannot correct anything that the scan missed.
-    #
-    # ELF pass (--occupancy-from-elf): reads vgpr_count from AMDHSA msgpack in
-    # each assembled .o and recomputes CUOccupancy.  CPU-only, negligible overhead
-    # (~microseconds per kernel).  Useful as a debugging cross-check to confirm that
-    # the assembled .o matches the scan result, but NOT a correction pass.
-    #
-    # HIP-based occupancy measurement is NOT part of the build pipeline.  For
-    # authoritative hardware cross-validation use test_occupancy_hip.py /
-    # test_occupancy_buildtime.py on a machine with a compatible GPU.
-    _assembly_tmp = outputPath / "build_tmp" / outputPath.stem.upper() / "assembly"
-    if arguments.get("OccupancyFromElf", False) and _assembly_tmp.exists():
-        start_elf = timer()
-        print("\n[ELF occupancy pass] Reading vgpr_count from compiled .o files (CPU-only)…")
-        kernelInfo = measure_occupancy_elf(
-            uniqueKernels, kernelInfo, _assembly_tmp, splitGSU
-        )
-        print(f"[ELF occupancy pass] Completed in {timer()-start_elf:.2f}s\n")
-    # ── End build-time ELF occupancy correction ───────────────────────────────
 
     archs = [ # is this really different than the other archs above?
         isaToGfx(arch)

@@ -68,13 +68,8 @@ from types import SimpleNamespace
 
 import pytest
 
-# ── hip-python import (skip entire module if unavailable) ──────────────────────
-try:
-    from hip import hip as _hip
-    HIP_AVAILABLE = True
-except ImportError:
-    _hip = None
-    HIP_AVAILABLE = False
+# ── HIP availability and helpers (test-layer only) ─────────────────────────────
+from occupancy_hip_testutil import HIP_AVAILABLE, _hip, _hip_check
 
 # ── rocisa / Tensile imports ────────────────────────────────────────────────────
 from rocisa import rocIsa
@@ -258,19 +253,7 @@ def _assemble_to_co(gfx: str, asm_source: str, output_path: str) -> None:
             os.unlink(asm_path)
 
 
-# ── HIP helpers ─────────────────────────────────────────────────────────────────
-
-def _hip_check(result):
-    """Raise RuntimeError on non-zero HIP error code."""
-    if isinstance(result, tuple):
-        err = result[0]
-        if int(err) != 0:
-            raise RuntimeError(f"HIP error {err} ({int(err)})")
-        return result[1] if len(result) == 2 else result[1:]
-    if int(result) != 0:
-        raise RuntimeError(f"HIP error {result} ({int(result)})")
-    return result
-
+# ── HIP query for this test's minimal kernels ────────────────────────────────────
 
 def _query_hip_occupancy(co_path: str, num_threads: int) -> int:
     """
