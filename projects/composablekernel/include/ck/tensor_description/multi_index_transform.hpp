@@ -1043,12 +1043,32 @@ struct lambda_merge_generate_MagicDivision_calculate_magic_multiplier
 };
 
 template <typename LowLengths>
+struct lambda_merge_generate_MagicDivision_calculate_magic_multiplier64
+{
+    template <index_t I>
+    __host__ __device__ constexpr auto operator()(Number<I> i) const
+    {
+        return MagicDivision::CalculateMagicMultiplier64(static_cast<uint32_t>(LowLengths{}[i]));
+    }
+};
+
+template <typename LowLengths>
 struct lambda_merge_generate_MagicDivision_calculate_magic_shift
 {
     template <index_t I>
     __host__ __device__ constexpr auto operator()(Number<I> i) const
     {
         return MagicDivision::CalculateMagicShift(LowLengths{}[i]);
+    }
+};
+
+template <typename LowLengths>
+struct lambda_merge_generate_MagicDivision_calculate_magic_shift64
+{
+    template <index_t I>
+    __host__ __device__ constexpr auto operator()(Number<I> i) const
+    {
+        return MagicDivision::CalculateMagicShift64(static_cast<uint32_t>(LowLengths{}[i]));
     }
 };
 
@@ -1075,13 +1095,31 @@ struct Merge_v2_magic_division
     using UpLengths =
         decltype(make_tuple(container_reduce(LowLengths{}, math::multiplies{}, Number<1>{})));
 
-    using LowLengthsMagicDivisorMultipiler = decltype(generate_tuple(
-        lambda_merge_generate_MagicDivision_calculate_magic_multiplier<LowLengths>{},
-        Number<NDimLow>{}));
+    // Detect whether the low lengths are 64-bit (long_index_t or LongNumber).
+    using Elem0Type = remove_cvref_t<decltype(LowLengths{}[Number<0>{}])>;
+    static constexpr bool IsLong =
+        std::is_same_v<Elem0Type, long_index_t> || is_long_number_v<Elem0Type>;
 
-    using LowLengthsMagicDivisorShift = decltype(generate_tuple(
-        lambda_merge_generate_MagicDivision_calculate_magic_shift<LowLengths>{},
-        Number<NDimLow>{}));
+    // 64-bit path: multiplier is uint64_t, shift stays uint32_t.
+    // 32-bit path: both are uint32_t (existing behaviour).
+    using MultiplierLambda = std::conditional_t<
+        IsLong,
+        lambda_merge_generate_MagicDivision_calculate_magic_multiplier64<LowLengths>,
+        lambda_merge_generate_MagicDivision_calculate_magic_multiplier<LowLengths>>;
+
+    using LowLengthsMagicDivisorMultipiler =
+        decltype(generate_tuple(MultiplierLambda{}, Number<NDimLow>{}));
+
+    using ShiftLambda =
+        std::conditional_t<IsLong,
+                           lambda_merge_generate_MagicDivision_calculate_magic_shift64<LowLengths>,
+                           lambda_merge_generate_MagicDivision_calculate_magic_shift<LowLengths>>;
+
+    using LowLengthsMagicDivisorShift = decltype(generate_tuple(ShiftLambda{}, Number<NDimLow>{}));
+
+    // Arithmetic type used for the upper-index dividend in CalculateLowerIndex /
+    // UpdateLowerIndex.
+    using TmpType = std::conditional_t<IsLong, long_index_t, index_t>;
 
     LowLengths low_lengths_;
     LowLengthsMagicDivisorMultipiler low_lengths_magic_divisor_multiplier_;
@@ -1093,10 +1131,22 @@ struct Merge_v2_magic_division
     __host__ __device__ constexpr Merge_v2_magic_division(const LowLengths& low_lengths)
         : low_lengths_{low_lengths},
           low_lengths_magic_divisor_multiplier_{generate_tuple(
-              [&](auto i) { return MagicDivision::CalculateMagicMultiplier(low_lengths[i]); },
+              [&](auto i) {
+                  if constexpr(IsLong)
+                      return MagicDivision::CalculateMagicMultiplier64(
+                          static_cast<uint32_t>(low_lengths[i]));
+                  else
+                      return MagicDivision::CalculateMagicMultiplier(low_lengths[i]);
+              },
               Number<NDimLow>{})},
           low_lengths_magic_divisor_shift_{generate_tuple(
-              [&](auto i) { return MagicDivision::CalculateMagicShift(low_lengths[i]); },
+              [&](auto i) {
+                  if constexpr(IsLong)
+                      return MagicDivision::CalculateMagicShift64(
+                          static_cast<uint32_t>(low_lengths[i]));
+                  else
+                      return MagicDivision::CalculateMagicShift(low_lengths[i]);
+              },
               Number<NDimLow>{})},
           up_lengths_{make_tuple(container_reduce(low_lengths, math::multiplies{}, Number<1>{}))}
     {
@@ -1119,10 +1169,10 @@ struct Merge_v2_magic_division
         static_assert(LowIdx::Size() == NDimLow && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
-        index_t tmp = idx_up[Number<0>{}];
+        TmpType tmp = idx_up[Number<0>{}];
 
         static_for<NDimLow - 1, 0, -1>{}([&, this](auto i) {
-            index_t tmp2 =
+            TmpType tmp2 =
                 MagicDivision::DoMagicDivision(tmp,
                                                this->low_lengths_magic_divisor_multiplier_[i],
                                                this->low_lengths_magic_divisor_shift_[i]);
@@ -1148,15 +1198,15 @@ struct Merge_v2_magic_division
                           LowIdx::Size() == NDimLow && UpIdx::Size() == 1,
                       "wrong! inconsistent # of dimension");
 
-        index_t tmp = idx_up_new[Number<0>{}];
+        TmpType tmp = idx_up_new[Number<0>{}];
 
         static_for<NDimLow - 1, 0, -1>{}([&, this](auto i) {
-            index_t tmp2 =
+            TmpType tmp2 =
                 MagicDivision::DoMagicDivision(tmp,
                                                this->low_lengths_magic_divisor_multiplier_[i],
                                                this->low_lengths_magic_divisor_shift_[i]);
 
-            index_t idx_low_old = idx_low[i];
+            TmpType idx_low_old = idx_low[i];
 
             idx_low(i) = tmp - tmp2 * this->low_lengths_[i];
             tmp        = tmp2;
