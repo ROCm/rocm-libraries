@@ -251,11 +251,18 @@ Python source, no `sys.path`, and no filesystem import, so the trust
 boundary is exactly the `.so` itself — the same surface as any other
 shared library.
 
-In the on-disk **py** / **mpy** modes the modules ship as files in a
-bundle directory beside the plugin (`CKDSL_BUNDLE_DIR`, added to
-`sys.path` at startup). That directory must have the same permissions as
-the `.so`: world-readable, not user-writable. Anyone able to write to it
-can substitute the code that runs inside `compile()`.
+The on-disk **py** / **mpy** modes exist for **development iteration** —
+edit the bundled `ck_dsl` sources and rerun without re-freezing — so the
+bundle directory (`CKDSL_BUNDLE_DIR`, added to `sys.path` at startup) is
+meant to be developer-writable; that editability is the whole point of
+these modes. The trade-off is that on-disk code is part of the trust
+boundary: whoever can write the bundle controls the code that runs inside
+`compile()`. This is therefore a development convenience, not a deployment
+posture. For any shared or production install, use the default **frozen**
+mode (no on-disk code; trust boundary = the `.so`). If you deliberately
+ship an on-disk bundle to a multi-user host, treat that directory as part
+of the trust boundary and restrict who can write it — but for
+single-developer iteration, leave it writable.
 
 Because the interpreter is MicroPython, the CPython environment-injection
 surface does not exist: there is no `PYTHONPATH` / `PYTHONHOME` /
