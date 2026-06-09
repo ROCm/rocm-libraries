@@ -125,7 +125,7 @@ struct MmaPipelineBase
      * @param  accum Input/output accumulator WaveTile C.
      * @return The output WaveTile D after accumulation and post-transform.
      */
-    template <typename ATensor, typename BTensor, typename CTensor>
+    template <typename... Params, typename ATensor, typename BTensor, typename CTensor>
     CK_TILE_DEVICE static decltype(auto) exec(ATensor& a, BTensor& b, CTensor& accum)
     {
         if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsSupported)
@@ -135,7 +135,7 @@ struct MmaPipelineBase
                 decltype(auto) a_transformed = Derived::ATransform::exec(b);
                 decltype(auto) b_transformed = Derived::BTransform::exec(a);
                 decltype(auto) c_transformed = Derived::CTransform::exec(accum);
-                Derived::execImpl(a_transformed, b_transformed, c_transformed);
+                Derived::template execImpl<Params...>(a_transformed, b_transformed, c_transformed);
                 return Derived::DTransform::exec(c_transformed);
             }
             else
@@ -143,7 +143,7 @@ struct MmaPipelineBase
                 decltype(auto) a_transformed = Derived::ATransform::exec(a);
                 decltype(auto) b_transformed = Derived::BTransform::exec(b);
                 decltype(auto) c_transformed = Derived::CTransform::exec(accum);
-                Derived::execImpl(a_transformed, b_transformed, c_transformed);
+                Derived::template execImpl<Params...>(a_transformed, b_transformed, c_transformed);
                 return Derived::DTransform::exec(c_transformed);
             }
         }
@@ -153,7 +153,7 @@ struct MmaPipelineBase
             // Code should not reach here, but HOST/DEVICE compile passes are
             // weirdly intertwined and instead of having constexpr in the calling
             // site (tests) we do this. See also changes by this commit.
-            return Derived::MmaOp::exec({}, {}, {});
+            return Derived::MmaOp::template exec<Params...>({}, {}, {});
         }
     }
 
@@ -162,11 +162,10 @@ struct MmaPipelineBase
     template <typename... Params, typename CTensor, typename ATensor, typename BTensor>
     CK_TILE_DEVICE void operator()(CTensor& c, ATensor& a, const BTensor& b) const
     {
-        exec(a, b, c);
+        exec<Params...>(a, b, c);
     }
 
-    template <index_t opselA,
-              index_t opselB,
+    template <typename... Params,
               typename ATensor,
               typename BTensor,
               typename CTensor,
@@ -188,7 +187,7 @@ struct MmaPipelineBase
                 decltype(auto) a_transformed = Derived::ATransform::exec(b);
                 decltype(auto) b_transformed = Derived::BTransform::exec(a);
                 decltype(auto) c_transformed = Derived::CTransform::exec(accum);
-                Derived::template execImpl<opselA, opselB>(
+                Derived::template execImpl<Params...>(
                     a_transformed, b_transformed, c_transformed, scale_A, scale_B);
                 return Derived::DTransform::exec(c_transformed);
             }
@@ -197,7 +196,7 @@ struct MmaPipelineBase
                 decltype(auto) a_transformed = Derived::ATransform::exec(a);
                 decltype(auto) b_transformed = Derived::BTransform::exec(b);
                 decltype(auto) c_transformed = Derived::CTransform::exec(accum);
-                Derived::template execImpl<opselA, opselB>(
+                Derived::template execImpl<Params...>(
                     a_transformed, b_transformed, c_transformed, scale_A, scale_B);
                 return Derived::DTransform::exec(c_transformed);
             }
@@ -219,8 +218,7 @@ struct MmaPipelineBase
                                    const int32_t& a_scale,
                                    const int32_t& b_scale) const
     {
-        using P = WarpGemmParamsParser<Params...>;
-        exec<P::op_sel_a, P::op_sel_b>(a, b, c, a_scale, b_scale);
+        exec<Params...>(a, b, c, a_scale, b_scale);
     }
 };
 

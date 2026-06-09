@@ -185,7 +185,7 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
     static_assert(WaveTileK % MmaOp::kK == 0u, "WaveTileK must be a multiple of MmaOp::kK");
 
     // TODO: Why does this even need to be a template? The types should be known.
-    template <typename ATensor, typename BTensor, typename CTensor>
+    template <typename... Params, typename ATensor, typename BTensor, typename CTensor>
     CK_TILE_DEVICE static void execImpl(ATensor& a, BTensor& b, CTensor& c)
     {
         static_assert(
@@ -205,9 +205,10 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        c_buf.at(bm * FragsN + bn) = MmaOp::exec(a_buf.at(bm * FragsK + bk),
-                                                                 b_buf.at(bn * FragsK + bk),
-                                                                 c_buf.at(bm * FragsN + bn));
+                        c_buf.at(bm * FragsN + bn) =
+                            MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
+                                                            b_buf.at(bn * FragsK + bk),
+                                                            c_buf.at(bm * FragsN + bn));
                     }
                 }
             }
@@ -220,9 +221,10 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        c_buf.at(bm * FragsN + bn) = MmaOp::exec(a_buf.at(bm * FragsK + bk),
-                                                                 b_buf.at(bn * FragsK + bk),
-                                                                 c_buf.at(bm * FragsN + bn));
+                        c_buf.at(bm * FragsN + bn) =
+                            MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
+                                                            b_buf.at(bn * FragsK + bk),
+                                                            c_buf.at(bm * FragsN + bn));
                     }
                 }
             }

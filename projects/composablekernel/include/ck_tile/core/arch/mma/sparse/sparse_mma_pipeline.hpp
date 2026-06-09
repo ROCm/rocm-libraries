@@ -180,7 +180,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
 
     // ATransformResult is a big ext_vector plus idx, B and C are static_distributed tensors. Fix
     // later TODO.
-    template <typename ATransformResult, typename BTensor, typename CTensor>
+    template <typename... Params, typename ATransformResult, typename BTensor, typename CTensor>
     CK_TILE_DEVICE static void execImpl(ATransformResult& a, BTensor& b, CTensor& c)
     {
         static_assert(
@@ -206,7 +206,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        c_buf.at(bm * FragsN + bn) = MmaOp::exec(
+                        c_buf.at(bm * FragsN + bn) = MmaOp::template exec<Params...>(
                             a_frags[bm][bk],
                             b_buf.at(bn * FragsK + bk),
                             c_buf.at(bm * FragsN + bn),
@@ -224,7 +224,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        c_buf.at(bm * FragsN + bn) = MmaOp::exec(
+                        c_buf.at(bm * FragsN + bn) = MmaOp::template exec<Params...>(
                             a_frags[bm][bk],
                             b_buf.at(bn * FragsK + bk),
                             c_buf.at(bm * FragsN + bn),

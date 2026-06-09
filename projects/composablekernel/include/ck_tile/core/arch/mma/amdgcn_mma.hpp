@@ -305,7 +305,6 @@ concept MmaOpI = requires(MmaOp op) {
  *  @tparam FragM M-dimension of mma intrinsic (MmaTile)
  *  @tparam FragN N-dimension of mma intrinsic (MmaTile)
  *  @tparam FragK K-dimension of mma intrinsic (MmaTile)
- *  @tparam CtrlFlags Control flags for mma operation
  *  @tparam CompilerTarget The current compiler target
  *  @tparam OpFamily_ The type of operation (dense, sparse, scale, etc.)
  *  @tparam Enabler SFINAE enabler
@@ -316,7 +315,6 @@ template <typename ADataType,
           uint32_t FragM,
           uint32_t FragN,
           uint32_t FragK,
-          typename CtrlFlags,
           typename CompilerTarget,
           MmaOpFamily OpFamily_,
           typename Enabler = void>
@@ -326,6 +324,7 @@ struct amdgcn_mma : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 1u, 1u, 1u, 1u, 1, 1
 // clang-format on
 {
     // This is a default pass-through implementation that doesn't do anything practical.
+    template <typename... Params>
     CK_TILE_DEVICE static auto
     exec(AVecType const& regsA, BVecType const& regsB, CVecType const& regsC)
     {
@@ -347,7 +346,6 @@ template <typename ADataType,
           std::uint32_t FragM,
           std::uint32_t FragN,
           std::uint32_t FragK,
-          typename CtrlFlags,
           typename CompilerTarget,
           MmaOpFamily OpFamily_,
           typename Enabler = void>
@@ -357,7 +355,6 @@ CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
                                           FragM,
                                           FragN,
                                           FragK,
-                                          CtrlFlags,
                                           CompilerTarget,
                                           OpFamily_,
                                           Enabler> const& mmaObj)
@@ -392,10 +389,6 @@ CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
     printf("               kCNBlocks                : %d\n", mmaObj.kCNBlocks);
     printf("               CBlockDimInVecDim        : %d\n", mmaObj.CBlockDimInVecDim);
     printf("Instruction    name                     : %s\n", ObjType::instruction_name);
-    if constexpr(!std::is_same_v<CtrlFlags, void>)
-    {
-        print_flags(CtrlFlags{});
-    }
     print(CompilerTarget{});
 }
 
