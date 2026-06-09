@@ -1,0 +1,50 @@
+# 16 compare_graphs failures
+
+=== Failure 0 ===
+Subject's consumer PackA3[9] @ idx=43 reads from subject's producer PackA3[14] @ idx=45 at byte_keys (('v', 4),), but reference routes through LRA3[1] @ idx=39 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 1 ===
+Subject's consumer PackA3[9] @ idx=43 reads from subject's producer PackA3[15] @ idx=45 at byte_keys (('v', 3),), but reference routes through LRA3[1] @ idx=39 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 2 ===
+Subject's consumer PackB3[9] @ idx=32 reads from subject's producer PackB3[13] @ idx=33 at byte_keys (('v', 37),), but reference routes through LRB3[1] @ idx=41 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 3 ===
+Subject's consumer PackA3[9] @ idx=43 reads from subject's producer PackA3[12] @ idx=44 at byte_keys (('v', 6),), but reference routes through LRA3[1] @ idx=39 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 4 ===
+Subject's consumer PackB3[11] @ idx=32 reads from subject's producer PackB3[16] @ idx=35 at byte_keys (('v', 46),), but reference routes through LRB3[3] @ idx=45 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 5 ===
+Subject's consumer PackB3[11] @ idx=32 reads from subject's producer PackB3[17] @ idx=35 at byte_keys (('v', 45),), but reference routes through LRB3[3] @ idx=45 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 6 ===
+Subject's consumer PackB3[11] @ idx=32 reads from subject's producer PackB3[19] @ idx=36 at byte_keys (('v', 43),), but reference routes through LRB3[3] @ idx=45 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 7 ===
+Subject's consumer PackA3[11] @ idx=43 reads from subject's producer PackA3[17] @ idx=46 at byte_keys (('v', 13),), but reference routes through LRA3[3] @ idx=43 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 8 ===
+Subject's consumer PackB3[9] @ idx=32 reads from subject's producer PackB3[14] @ idx=34 at byte_keys (('v', 36),), but reference routes through LRB3[1] @ idx=41 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 9 ===
+Subject's consumer PackB3[11] @ idx=32 reads from subject's producer PackB3[18] @ idx=36 at byte_keys (('v', 44),), but reference routes through LRB3[3] @ idx=45 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 10 ===
+Subject's consumer PackA3[9] @ idx=43 reads from subject's producer PackA3[13] @ idx=44 at byte_keys (('v', 5),), but reference routes through LRA3[1] @ idx=39 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 11 ===
+Subject's consumer PackB3[9] @ idx=32 reads from subject's producer PackB3[12] @ idx=33 at byte_keys (('v', 38),), but reference routes through LRB3[1] @ idx=41 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 12 ===
+Subject's consumer PackA3[11] @ idx=43 reads from subject's producer PackA3[16] @ idx=46 at byte_keys (('v', 14),), but reference routes through LRA3[3] @ idx=43 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 13 ===
+Subject's consumer PackB3[9] @ idx=32 reads from subject's producer PackB3[15] @ idx=34 at byte_keys (('v', 35),), but reference routes through LRB3[1] @ idx=41 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 14 ===
+Subject's consumer PackA3[11] @ idx=43 reads from subject's producer PackA3[19] @ idx=47 at byte_keys (('v', 11),), but reference routes through LRA3[3] @ idx=43 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
+=== Failure 15 ===
+Subject's consumer PackA3[11] @ idx=43 reads from subject's producer PackA3[18] @ idx=47 at byte_keys (('v', 12),), but reference routes through LRA3[3] @ idx=43 (of next iteration). The subject schedule inserted or moved an intervening writer between the reference's producer and the consumer. (DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3)
+
