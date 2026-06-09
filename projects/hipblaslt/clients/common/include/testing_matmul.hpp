@@ -107,7 +107,7 @@ bool isSwizzleSupported(hipDataType datatype)
 bool MXUseRocroller()
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
-    return hipblaslt_get_arch() == 950;
+    return hipblaslt_get_arch() != 1250;
 #else
     return false;
 #endif
