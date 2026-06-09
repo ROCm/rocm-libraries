@@ -751,7 +751,7 @@ class TileInfo:
     if self._useCppQuery():
       return self._cppQuery().singleBufferLoadPlan(sId0, sId1)
     linearId = self.getLocalSubtileLinearId(sId0, sId1)
-    grBaseId = int(math.floor(linearId / self.loadRatioGR))
+    grBaseId = int(math.floor(linearId / self.loadRatioGR)) if self.loadRatioGR else 0
     if self.loadRatioGR > 1:
       firstInGroup = int(grBaseId * self.loadRatioGR)
       if linearId != firstInGroup:
