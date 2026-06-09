@@ -11,4 +11,5 @@ table CustomOpAttributes {
     input_tensor_uids: [long];
     output_tensor_uids: [long];
     data: [ubyte];
+    test_generation_marker: int = 0;
 }
