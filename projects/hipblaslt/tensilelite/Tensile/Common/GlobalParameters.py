@@ -376,6 +376,8 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+globalParameters["DisableSTWaitCnt"] = True
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)
@@ -529,6 +531,7 @@ defaultBenchmarkCommonParameters = [
     {"GroupLoadStore": [False]},
     {"MIArchVgpr": [False]},
     {"StreamK": [0]},
+    {"StreamKForceDPOnly": [0]},
     {"StreamKAtomic": [0]},
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},

@@ -13215,7 +13215,7 @@ class KernelWriterAssembly(KernelWriter):
       sgprBpeList = ["GSULog2BpeC", "GSULog2BpeD"] if kernel["GlobalSplitU"] != 0 else []
 
       # Set BPE based on reduction algorithm
-      if self.states.streamK.emitsWorkspaceReductionBpe:
+      if self.states.streamK.emitsWorkspaceReductionBpe and not kernel["StreamKForceDPOnly"]:
         sgprLog2BpeC = self.sgprPool.checkOut(1, preventOverflow=False)
         sgprLog2BpeD = self.sgprPool.checkOut(1, preventOverflow=False)
 
@@ -13246,7 +13246,7 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["StreamK"] == 0:
         module.add(self.undefineSgpr("AddressC"))
 
-      if self.states.streamK.emitsWorkspaceReductionBpe:
+      if self.states.streamK.emitsWorkspaceReductionBpe and not kernel["StreamKForceDPOnly"]:
         self.sgprPool.checkIn(sgprLog2BpeD)
         self.sgprPool.checkIn(sgprLog2BpeC)
     return module
@@ -13946,7 +13946,7 @@ class KernelWriterAssembly(KernelWriter):
 
     (fullVws, elements, fullVws_1, elements_1) = self.notLocalFullTileElements(kernel)
     # print("len(elements)= ", len(elements_1))
-    noGSUBranch = (kernel["GlobalSplitU"] == 0 and not self.states.streamK.requiresWorkspaceReductionStorePath)
+    noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.streamK.requiresWorkspaceReductionStorePath or kernel["StreamKForceDPOnly"]))
     module = Module("notLocalSplitUGlobalWrite")
     storeModule, deferredGSU0 = self.globalWriteElements(kernel, tPA, tPB, fullVws, fullVws_1, elements, elements_1, noGSUBranch=noGSUBranch)
     module.add(storeModule)
@@ -13993,7 +13993,7 @@ class KernelWriterAssembly(KernelWriter):
     vectorWidths   = [fullVw, edgeVw]
     vectorWidths_1 = [fullVw_1, edgeVw_1]
 
-    noGSUBranch = (kernel["GlobalSplitU"] == 0 and not self.states.streamK.requiresWorkspaceReductionStorePath)
+    noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.streamK.requiresWorkspaceReductionStorePath or kernel["StreamKForceDPOnly"]))
     module = Module("localSplitUGlobalWrite")
     storeModule, _ = self.globalWriteElements(kernel, tPA, tPB, vectorWidths, vectorWidths_1, elements_f0, elements_f1, noGSUBranch=noGSUBranch)
     module.add(storeModule)
@@ -14690,7 +14690,8 @@ class KernelWriterAssembly(KernelWriter):
 
     # GSU0 always sets useBias=NONE (no bias in workspace writes), so no barrier issue.
     deferGSU0 = (
-      kernel.get("UseSubtileImpl")
+      not noGSUBranch
+      and kernel.get("UseSubtileImpl")
       and kernel.get("StreamK", 0) > 0
     )
     gsu0DeferredLabel = None
