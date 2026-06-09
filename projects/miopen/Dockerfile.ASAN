@@ -280,6 +280,7 @@ RUN set -x && \
     # Unset ROCM_PATH to avoid HIP path conflicts during the cmake invocation
     unset ROCM_PATH && \
     cd /composable_kernel && \
+    rm -rf build && \
     mkdir build && cd build && \
     num_threads=$(nproc) && \
     ram_gb=$(free -g | awk '/^Mem:/{print $7}') && \
