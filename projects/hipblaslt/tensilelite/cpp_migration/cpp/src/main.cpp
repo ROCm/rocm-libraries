@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "tensile_writer/subtile_geometry.hpp"
+#include "tensile_writer/tile_info.hpp"
 
 namespace nb = nanobind;
 using namespace tw::subtile;
@@ -287,12 +288,76 @@ void bind_geometry(nb::module_& g) {
       nb::cast(MMAScaleLayout(16, 1, 0.25, 32, 64));
 }
 
+// ---------------------------------------------------------------------------
+// TileInfo query layer (read-only) — AB (ABTilePair) case.
+// ---------------------------------------------------------------------------
+void bind_tile_info(nb::module_& t) {
+  nb::class_<ABTileInfoQuery>(t, "ABTileInfoQuery")
+      .def(nb::init<const ABGRGeometry&, const ABLRGeometry&, long, long, long,
+                    long, long>(),
+           nb::arg("gr"), nb::arg("lr"), nb::arg("macroTile"),
+           nb::arg("depthU"), nb::arg("waveGroupSize"), nb::arg("waveSize"),
+           nb::arg("numWaves"))
+      // Inputs
+      .def_ro("gr", &ABTileInfoQuery::gr)
+      .def_ro("lr", &ABTileInfoQuery::lr)
+      .def_ro("macroTile", &ABTileInfoQuery::macroTile)
+      .def_ro("depthU", &ABTileInfoQuery::depthU)
+      .def_ro("waveGroupSize", &ABTileInfoQuery::waveGroupSize)
+      .def_ro("waveSize", &ABTileInfoQuery::waveSize)
+      .def_ro("numWaves", &ABTileInfoQuery::numWaves)
+      // Derived grids / ratios
+      .def_ro("globalMMATileGrid", &ABTileInfoQuery::globalMMATileGrid)
+      .def_ro("localMMATileGrid", &ABTileInfoQuery::localMMATileGrid)
+      .def_ro("subtileShape", &ABTileInfoQuery::subtileShape)
+      .def_prop_ro("subtileCount",
+                   [](const ABTileInfoQuery& s) -> nb::object {
+                     if (s.subtileCount.has_value())
+                       return nb::cast(*s.subtileCount);
+                     return nb::none();
+                   })
+      .def_prop_ro("subtileStride",
+                   [](const ABTileInfoQuery& s) -> nb::object {
+                     if (s.subtileStride.has_value())
+                       return nb::cast(*s.subtileStride);
+                     return nb::none();
+                   })
+      .def_ro("globalSubtileGrid", &ABTileInfoQuery::globalSubtileGrid)
+      .def_ro("localSubtileGrid", &ABTileInfoQuery::localSubtileGrid)
+      .def_ro("subtileSize", &ABTileInfoQuery::subtileSize)
+      .def_ro("loadRatioGR", &ABTileInfoQuery::loadRatioGR)
+      .def_ro("lrSubtileShape", &ABTileInfoQuery::lrSubtileShape)
+      .def_ro("lrSubtileSize", &ABTileInfoQuery::lrSubtileSize)
+      .def_ro("lrGlobalSubtileGrid", &ABTileInfoQuery::lrGlobalSubtileGrid)
+      .def_ro("lrLocalSubtileGrid", &ABTileInfoQuery::lrLocalSubtileGrid)
+      .def_ro("loadRatioLR", &ABTileInfoQuery::loadRatioLR)
+      // Count properties
+      .def_prop_ro("numMFMATiles", &ABTileInfoQuery::numMFMATiles)
+      .def_prop_ro("numGlobalSubtiles", &ABTileInfoQuery::numGlobalSubtiles)
+      .def_prop_ro("numLocalSubtiles", &ABTileInfoQuery::numLocalSubtiles)
+      // Grid / index query helpers
+      .def("getLocalSubtileLinearId", &ABTileInfoQuery::getLocalSubtileLinearId,
+           nb::arg("sId0"), nb::arg("sId1"))
+      .def("grLoadIndexForSubtile", &ABTileInfoQuery::grLoadIndexForSubtile,
+           nb::arg("sId0"), nb::arg("sId1"), nb::arg("loadIdx") = 0)
+      .def("lrTileIndexForSubtile", &ABTileInfoQuery::lrTileIndexForSubtile,
+           nb::arg("sId0"), nb::arg("sId1"), nb::arg("mfmaId") = 0)
+      .def("globalMmaTilesForSubtile",
+           &ABTileInfoQuery::globalMmaTilesForSubtile, nb::arg("sId0"),
+           nb::arg("sId1"))
+      .def("waveMmaTilesForSubtile", &ABTileInfoQuery::waveMmaTilesForSubtile,
+           nb::arg("sId0"), nb::arg("sId1"))
+      .def("grRegGroupForSubtileRow",
+           &ABTileInfoQuery::grRegGroupForSubtileRow, nb::arg("sId0"));
+}
+
 }  // namespace
 
 NB_MODULE(_tensile_writer, m) {
   m.doc() =
       "TensileLite C++ migration scaffold (nanobind). Hosts the pure subtile "
-      "geometry math under the subtile.geometry submodule.";
+      "geometry math under the subtile.geometry submodule and the read-only "
+      "TileInfo query layer under the subtile.tile_info submodule.";
 
   nb::module_ subtile = m.def_submodule(
       "subtile", "Subtile-based kernel geometry (pure math).");
@@ -300,4 +365,10 @@ NB_MODULE(_tensile_writer, m) {
       "geometry", "Tile geometry value/query layer ported from "
                   "Tensile.Components.Subtile.SubtileGeometry.");
   bind_geometry(geometry);
+
+  nb::module_ tile_info = subtile.def_submodule(
+      "tile_info", "Read-only TileInfo construction + grid/index query layer "
+                   "ported from Tensile.Components.Subtile.Kernel.TileInfo "
+                   "(ABTilePair case).");
+  bind_tile_info(tile_info);
 }

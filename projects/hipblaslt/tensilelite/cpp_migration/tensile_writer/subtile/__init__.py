@@ -4,5 +4,6 @@
 """Subtile-based kernel geometry (C++-backed)."""
 
 from . import geometry  # noqa: F401
+from . import tile_info  # noqa: F401
 
-__all__ = ["geometry"]
+__all__ = ["geometry", "tile_info"]

@@ -85,6 +85,34 @@ from .SubtileGeometry import (
   MXScaleTilePair,
 )
 
+# Read the optional C++ delegation switch from SubtileGeometry at call time
+# (the parity tests flip ``SubtileGeometry._USE_CPP`` / ``._CPP`` dynamically).
+from . import SubtileGeometry as _sg
+
+
+################################################################################
+# Optional C++ delegation for the read-only TileInfo query layer (opt-in).
+#
+# When SubtileGeometry's delegation switch is on AND the compiled
+# ``tensile_writer.subtile.tile_info`` submodule is importable, the read-only
+# TileInfo grid/index query methods for the ABTilePair case delegate to the C++
+# ``ABTileInfoQuery`` value object. The Python TileInfo remains the canonical
+# object: register allocation, rocisa emission, scale/CD paths, and main-loop
+# orchestration never cross into C++. With delegation disabled (the default),
+# behavior is byte-identical to the pure-Python path.
+################################################################################
+
+def _resolve_cpp_tileinfo():
+  try:
+    from tensile_writer.subtile import tile_info as _cpp_ti
+  except Exception:
+    # Opt-in may be requested but the extension is unavailable; fall back to
+    # the pure-Python path rather than failing the import.
+    return None
+  return _cpp_ti
+
+_CPP_TI = _resolve_cpp_tileinfo()
+
 ################################################################################
 # Concrete tile classes and pre-defined config instances
 #
@@ -567,9 +595,39 @@ class TileInfo:
         f"Minimum {label} = subtile_span({subtile_span}) x waveGroupSize({wg_size}) = {subtile_span * wg_size}."
       )
 
+  # --- Optional C++ delegation for the read-only query layer ---
+
+  def _useCppQuery(self) -> bool:
+    """True when the C++ ABTileInfoQuery should service read-only queries.
+
+    Gated on SubtileGeometry's delegation switch (read at call time), the
+    tile_info submodule being importable, and the ABTilePair geometry case
+    that the C++ value object covers. MXScale/CD paths stay pure-Python.
+    """
+    return (_sg._USE_CPP and _CPP_TI is not None
+            and isinstance(self.geometry, ABTilePair))
+
+  def _cppQuery(self):
+    """Build (and cache) the C++ ABTileInfoQuery twin for this TileInfo.
+
+    The twin is constructed from the already-materialized GR/LR configs plus
+    the kernel-derived scalar fields, reusing the C++ geometry surface rather
+    than duplicating any geometry formula.
+    """
+    q = getattr(self, '_cppQueryCache', None)
+    if q is None:
+      cpp_gr = self.gr.config._cpp_twin
+      cpp_lr = self.lr.config._cpp_twin
+      q = _CPP_TI.ABTileInfoQuery(cpp_gr, cpp_lr, self.macroTile, self.depthU,
+                                  self.waveGroupSize, self.waveSize, self.numWaves)
+      self._cppQueryCache = q
+    return q
+
   # --- Grid utility methods ---
 
   def getLocalSubtileLinearId(self, sId0, sId1):
+    if self._useCppQuery():
+      return self._cppQuery().getLocalSubtileLinearId(sId0, sId1)
     return sId1 * self.localSubtileGrid[0] + sId0
 
   def getLocalSubtileIdFromLinearId(self, linearId):
@@ -598,6 +656,8 @@ class TileInfo:
     GR load (they are serviced by the same buffer_load instruction).
     loadIdx selects among the numGRPerSubtile loads within that subtile.
     """
+    if self._useCppQuery():
+      return self._cppQuery().grLoadIndexForSubtile(sId0, sId1, loadIdx)
     linearId = self.getLocalSubtileLinearId(sId0, sId1)
     baseGR = int(linearId // self.loadRatioGR) if self.loadRatioGR else 0
     return baseGR + loadIdx
@@ -614,6 +674,8 @@ class TileInfo:
     Uses lrLocalSubtileGrid for linearization — for AB this equals
     localSubtileGrid; for scale it is derived from lrSubtileShape.
     """
+    if self._useCppQuery():
+      return self._cppQuery().lrTileIndexForSubtile(sId0, sId1, mfmaId)
     linearId = sId1 * self.lrLocalSubtileGrid[0] + sId0
     tilesPerSubtile = int(self.lrSubtileShape[0]) * int(self.lrSubtileShape[1])
     return linearId * tilesPerSubtile + mfmaId
@@ -624,6 +686,8 @@ class TileInfo:
     Uses gr_cfg.subtileForMmaTile to account for subtileCount/subtileStride.
     The returned list is in geometric order (M-outer, K-inner).
     """
+    if self._useCppQuery():
+      return [tuple(t) for t in self._cppQuery().globalMmaTilesForSubtile(sId0, sId1)]
     st = self.subtileShape
     baseRow = sId0 * int(st[0])
     baseCol = sId1 * int(st[1])
@@ -636,6 +700,8 @@ class TileInfo:
     Each wave covers localMMATileGrid rows; within that, subtile (sId0, sId1)
     spans subtileShape[0] rows x subtileShape[1] columns of MMA tiles.
     """
+    if self._useCppQuery():
+      return [tuple(t) for t in self._cppQuery().waveMmaTilesForSubtile(sId0, sId1)]
     st = self.subtileShape
     baseRow = sId0 * int(st[0])
     baseCol = sId1 * int(st[1])
@@ -650,6 +716,8 @@ class TileInfo:
     grouped by load.  When loadRatioGR >= 2, multiple subtile rows share
     the same buffer_load and therefore the same register group.
     """
+    if self._useCppQuery():
+      return self._cppQuery().grRegGroupForSubtileRow(sId0)
     if self.loadRatioGR >= 2.0:
       return int(sId0 // self.loadRatioGR)
     return sId0
