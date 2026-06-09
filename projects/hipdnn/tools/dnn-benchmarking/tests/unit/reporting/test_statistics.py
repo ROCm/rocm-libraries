@@ -219,6 +219,23 @@ class TestBenchmarkResult:
         assert result.metadata is not None
         assert result.metadata.timing_backend == "hip"
 
+    def test_from_dict_drops_legacy_gpu_backend_when_timing_backend_exists(
+        self,
+    ) -> None:
+        """Test from_dict ignores legacy gpu_backend when timing_backend exists."""
+        data = {
+            "e2e_timings": [1.0],
+            "kernel_timings": None,
+            "metadata": {
+                "graph_name": "test_graph",
+                "gpu_backend": "legacy",
+                "timing_backend": "hip",
+            },
+        }
+        result = BenchmarkResult.from_dict(data)
+        assert result.metadata is not None
+        assert result.metadata.timing_backend == "hip"
+
     def test_round_trip_serialization(self, tmp_path) -> None:
         """Test that results survive JSON round-trip."""
         original = BenchmarkResult(

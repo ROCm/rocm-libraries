@@ -192,8 +192,9 @@ class BenchmarkResult:
         metadata = None
         if "metadata" in data and data["metadata"]:
             metadata_dict = dict(data["metadata"])
-            if "gpu_backend" in metadata_dict and "timing_backend" not in metadata_dict:
-                metadata_dict["timing_backend"] = metadata_dict.pop("gpu_backend")
+            legacy_gpu_backend = metadata_dict.pop("gpu_backend", None)
+            if "timing_backend" not in metadata_dict and legacy_gpu_backend is not None:
+                metadata_dict["timing_backend"] = legacy_gpu_backend
             metadata = BenchmarkMetadata(**metadata_dict)
         return cls(
             e2e_timings=data["e2e_timings"],
