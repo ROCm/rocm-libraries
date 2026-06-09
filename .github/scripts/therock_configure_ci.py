@@ -198,19 +198,14 @@ GITHUB_WORKFLOWS_CI_PATTERNS = [
     "therock*",
 ]
 
-GITHUB_ACTIONS_CI_PATTERNS = [
-    "ci-env/action.yml",
-]
-
 
 def is_path_workflow_file_related_to_ci(path: str) -> bool:
     return any(
-        fnmatch.fnmatch(path, prefix + pattern)
-        for prefix in [".github/workflows/", ".github/scripts/"]
+        fnmatch.fnmatch(path, ".github/workflows/" + pattern)
         for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
     ) or any(
-        fnmatch.fnmatch(path, ".github/actions/" + pattern)
-        for pattern in GITHUB_ACTIONS_CI_PATTERNS
+        fnmatch.fnmatch(path, ".github/scripts/" + pattern)
+        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
     )
 
 
