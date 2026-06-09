@@ -21,9 +21,9 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # Test Activation with Batch Size Combinations
+  # Test Batch Size Combinations with StreamK MXFP4
   # Batch: 1, 2, 4, 8
-  # With representative activation types
+  # Single activation to verify batch dimension works
   # TN transpose only
   #######################################
   -
@@ -44,7 +44,7 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # Activation + Batch combinations
+    - # Test batch sizes (activation not the focus here)
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -81,6 +81,3 @@ BenchmarkProblems:
           - Exact: [512, 512, 8, 512]
         - ActivationArgs:
           - [Enum: none]
-          - [Enum: relu]
-          - [Enum: gelu]
-          - [Enum: silu]

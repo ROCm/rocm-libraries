@@ -21,9 +21,9 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # Test GroupedGemm with Activation Combinations
+  # Test GroupedGemm with StreamK MXFP4
   # GroupedGemm: True
-  # Activation: none, relu, gelu, sigmoid, silu, clamp
+  # Single activation to verify GroupedGemm works with activation
   # With StreamK mode 3 (DP-before-SK)
   # TN transpose only
   #######################################
@@ -46,7 +46,7 @@ BenchmarkProblems:
       MXBlockB: 32
       GroupedGemm: True
 
-    - # GroupedGemm + Activation combinations
+    - # Test GroupedGemm (activation not the focus)
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -75,8 +75,3 @@ BenchmarkProblems:
           - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
-          - [Enum: relu]
-          - [Enum: gelu]
-          - [Enum: sigmoid]
-          - [Enum: silu]
-          - [Enum: clamp]

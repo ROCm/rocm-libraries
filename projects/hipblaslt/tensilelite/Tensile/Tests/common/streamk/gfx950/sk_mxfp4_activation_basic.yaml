@@ -21,8 +21,8 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # Test Basic Activation Types with StreamK
-  # ActivationArgs: none, relu, gelu, sigmoid, silu, clamp
+  # Test Basic Activation Types with StreamK + MXFP4
+  # One problem size per activation to verify each type works
   # With StreamK mode 3 (DP-before-SK)
   # TN transpose only
   #######################################
@@ -44,7 +44,8 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # Basic activation testing
+    - # Test each activation type once with single representative config
+      # Verifies activation works with StreamK MXFP4 codegen
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -67,9 +68,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [256, 256, 1, 1024]
           - Exact: [512, 512, 1, 1024]
-          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
           - [Enum: relu]

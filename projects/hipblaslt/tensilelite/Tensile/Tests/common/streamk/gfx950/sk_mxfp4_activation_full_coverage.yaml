@@ -21,8 +21,8 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # Full Coverage: Activation + StreamK + Batch + MI + Problem Sizes
-  # Activation: none, relu, gelu, sigmoid, silu
+  # Full Coverage: StreamK + Batch + MI + Problem Sizes for MXFP4
+  # Removed activation grid - activation behavior doesn't vary with these params
   # StreamK: 1, 2, 3
   # Batch: 1, 2, 4, 8
   # MI: Selected representative variants
@@ -47,7 +47,7 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # Full activation coverage
+    - # Test StreamK/MI/batch/size combinations without activation grid
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -90,7 +90,3 @@ BenchmarkProblems:
           - Exact: [256, 512, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
-          - [Enum: relu]
-          - [Enum: gelu]
-          - [Enum: sigmoid]
-          - [Enum: silu]

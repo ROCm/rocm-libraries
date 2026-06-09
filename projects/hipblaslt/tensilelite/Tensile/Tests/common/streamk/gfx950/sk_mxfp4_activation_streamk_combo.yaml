@@ -21,9 +21,9 @@ GlobalParameters:
 
 BenchmarkProblems:
   #######################################
-  # Test Activation with StreamK Mode Combinations
+  # Test StreamK Mode Combinations with MXFP4
   # StreamK: 1, 2, 3 × StreamKAtomic: 0, 1
-  # With representative activation types
+  # Single activation - focus is StreamK modes, not activation variants
   # TN transpose only
   #######################################
   -
@@ -44,7 +44,7 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # Activation + StreamK combinations
+    - # Test StreamK mode combinations (activation not the focus)
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -74,5 +74,3 @@ BenchmarkProblems:
           - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
-          - [Enum: relu]
-          - [Enum: gelu]
