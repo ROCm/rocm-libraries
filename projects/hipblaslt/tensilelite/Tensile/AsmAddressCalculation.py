@@ -815,11 +815,33 @@ class AddrCalculation:
                                         comment="incToNextRow: gra SRD -= inc(upper)" ))
         return module
 
-    def incrementToNextRow(self, kernel, tc, ss, stmp, bpeType=None, dst=-1):
+    def incrementToNextRow(self, kernel, tc, ss, stmp, forceinitrow0=0,
+                           overrideAfterPrimerRows=0, bpeType=None, dst=-1):
         """
         Generate code to move to the next row(s)
         If optSrdIncForRow, this will move the SRD forward
         If not, this could generate some other instructions
+
+        CompactLoopStore (CLS-loop mode) uses a DELAYED primer pattern: s_add
+        uses s[stmp] prepared by the PREVIOUS call, and the stride compute
+        (s_lshl/s_mul) at the END primes s[stmp] for the NEXT call. Every elt
+        must emit (including rowInc==0) to preserve the s[stmp] chain --
+        elt-0's s_add is a no-op (s[stmp]=0 from preamble init) + s_lshl that
+        primes s[stmp]=StrideCD1<<log2(bpe) for elt-1's real advance. Caller
+        passes `forceinitrow0=1` to allow this chain-seed emit when rowInc==0.
+
+        `overrideAfterPrimerRows` > 0 replaces the AFTER-primer's numRows with
+        the given value. The caller (GlobalWriteBatch) computes this as the
+        rowInc of the NEXT EMITTING elt (look-ahead), so the primer that
+        elt-N writes to s[stmp] is exactly the increment elt-(N+1) needs.
+        Without override, the primer would carry elt-N's own rowInc, which
+        elt-(N+1) would then erroneously consume -- the off-by-one root cause.
+        0 means no override (default delayed chain, primer = own numRows).
+
+        Legacy path (CompactLoopStore=False): emit stride compute BEFORE s_add
+        (each call self-contained, gated by rowInc != 0). `forceinitrow0=0`
+        and `overrideAfterPrimerRows=0` defaults keep legacy behaviour.
+
         """
 
         module = Module("incrementToNextRow")
@@ -828,7 +850,10 @@ class AddrCalculation:
         if (tc == 'C' or tc == 'TD') and (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
             tmpBpe = int(self.kernelWriter.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())
         if ss.optSrdIncForRow:
-            if numRows:
+            # CLS chain seed: when caller asks for `forceinitrow0=1` we must
+            # also emit on rowInc==0 to keep s[stmp] primed; otherwise legacy
+            # behaviour: skip when no advance is needed.
+            if numRows or forceinitrow0:
                 packedC1 = kernel["PackedC1IndicesX"]
                 assert(len(packedC1) == 1)  # would need to extract each dim and scale
                 if tc == 'Bias' and (not kernel["WorkGroupReduction"]):
@@ -837,21 +862,33 @@ class AddrCalculation:
                 else:
                     td = "D" if tc == 'TD' else tc
                     strideCD1 = "Stride%s%s"%(td ,self.kernelWriter.states.indexChars[packedC1[0]])
-                if numRows > 1:
-                    module.add(SMulI32(dst=sgpr(stmp), \
-                                src0=sgpr(strideCD1), \
-                                src1=numRows*tmpBpe, \
-                                comment="scale Stride%s *= numRows(%u) * bpe"%(tc,numRows)))
-                elif numRows < 0:
-                    module.add(SMulI32(dst=sgpr(stmp), \
-                                src0=sgpr(strideCD1), \
-                                src1=(-numRows)*tmpBpe, \
-                                comment="scale Stride%s *= numRows(%u) * bpe"%(tc,numRows)))
-                else:
-                    module.add(SLShiftLeftB32(dst=sgpr(stmp), \
-                                src=sgpr(strideCD1), \
-                                shiftHex=log2(tmpBpe), \
-                                comment="incToNextRow: Scale by BPE"))
+
+                # Build a strideCompute block for a given numRows. Used for
+                # BOTH the legacy "before s_add" emit (with the call's own
+                # numRows) and the CLS delayed "after s_add" primer.
+                def _buildStrideCompute(nr):
+                    sc = Module("strideCompute")
+                    if nr > 1:
+                        sc.add(SMulI32(dst=sgpr(stmp), \
+                                    src0=sgpr(strideCD1), \
+                                    src1=nr*tmpBpe, \
+                                    comment="scale Stride%s *= numRows(%u) * bpe"%(tc,nr)))
+                    elif nr < 0:
+                        sc.add(SMulI32(dst=sgpr(stmp), \
+                                    src0=sgpr(strideCD1), \
+                                    src1=(-nr)*tmpBpe, \
+                                    comment="scale Stride%s *= numRows(%u) * bpe"%(tc,nr)))
+                    else:
+                        sc.add(SLShiftLeftB32(dst=sgpr(stmp), \
+                                    src=sgpr(strideCD1), \
+                                    shiftHex=log2(tmpBpe), \
+                                    comment="incToNextRow: Scale by BPE"))
+                    return sc
+
+                # Legacy (non-CompactLoopStore): stride compute BEFORE s_add,
+                # using the call's own numRows.
+                if not kernel["CompactLoopStore"]:
+                    module.add(_buildStrideCompute(numRows))
 
                 if dst == -1:
                     dstLow = "Srd%s+0"%(tc)
@@ -878,5 +915,16 @@ class AddrCalculation:
                                         src0=sgpr(dstHigh), \
                                         src1=0, \
                                         comment="incToNextRow: gra SRD -= inc(upper)" ))
+
+                # CompactLoopStore: stride compute AFTER s_add (primes s[stmp]
+                # for the NEXT call's s_add). When caller passes
+                # `overrideAfterPrimerRows > 0`, use it as the primer rows --
+                # this is the look-ahead value = NEXT EMITTING elt's rowInc,
+                # so elt-(N+1)'s s_add reads exactly its own advance. Without
+                # override, primer uses elt-N's own numRows (off-by-one for
+                # CLS, but kept as the documented fallback).
+                if kernel["CompactLoopStore"]:
+                    primerRows = overrideAfterPrimerRows if overrideAfterPrimerRows else numRows
+                    module.add(_buildStrideCompute(primerRows))
 
         return module

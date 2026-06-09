@@ -74,19 +74,22 @@ class GlobalWriteBatchComponent(GlobalWriteComponents):
     batchIdx, applyAlpha, beta, edge, atomic, gwvw, atomicW, \
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
-    codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion) -> Module:
+    codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion,
+    inter_iter_rowInc: int = 0) -> Module:
     return GlobalWriteBatchWriter(kernel, tPA, tPB, activation, ss, batchIdx, applyAlpha, \
       beta, edge, atomic, gwvw, atomicW, \
       batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit, \
       tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, \
-      codeAccVgprRead, codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion).emit()
+      codeAccVgprRead, codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion,
+      inter_iter_rowInc).emit()
 
 class GlobalWriteBatchWriter:
   def __init__(self, kernel: Solution, tPA, tPB, activation: ActivationModule, ss: StoreState, \
     batchIdx, applyAlpha, beta, edge, atomic, gwvw, atomicW, \
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
-    codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion):
+    codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion,
+    inter_iter_rowInc: int = 0):
     self.kernel = kernel
     self.tPA    = tPA
     self.tPB    = tPB
@@ -137,6 +140,13 @@ class GlobalWriteBatchWriter:
     self._subtileCloadPrevD1 = -1         # sentinel: last d1 group seen in C load guard
     self._subtilePendingSrdDInc = None    # deferred SrdD incToNextRow (emitted after N-group label)
     self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
+
+    # CompactLoopStore: stash the "next batch's first elt rowInc" passed in via
+    # `inter_iter_rowInc`. Used as the look-ahead fall-through value at the
+    # LAST emitting elt of the batch (cross-batch transition), where the
+    # intra-batch forward scan finds no further emitting elt.
+    # 0 means no override (non-CLS / last batch / atomic).
+    self.inter_iter_rowInc = inter_iter_rowInc
 
     # Internal state for GlobalWriteBatch
     # 0 for None, 1 for WorkGroupReduction = False, 2 for WorkGroupReduction = True
@@ -380,7 +390,9 @@ class GlobalWriteBatchWriter:
       captured `preamble` gates ONLY the ds_load (preamble=True = address only).
       """
       loadsIssued = 0
-      module.add(addrCalc.emitLdChange(self.kernel, self.ss, ldName, self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, self.tmpSgpr, addrVecVgpr, addrVec, dim))
+      tmpInrSgpr = self._epilogScratchSgpr(1)
+      module.add(addrCalc.emitLdChange(self.kernel, self.ss, ldName, self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrVecVgpr, addrVec, dim))
+      self._epilogScratchFree(tmpInrSgpr)
       ldsAddrVgpr = referenceVgpr if (referenceVgpr and (dim == referenceDim)) else addrVecVgpr
       if dataVec not in loadedDataVec:
         # GroupLoadStore routes barrier+ds_load into `loadInputCode` so they
@@ -467,8 +479,10 @@ class GlobalWriteBatchWriter:
     # emitAddressSetupCode for elt 0 is safe: coordOffset0=0 and rowInc=0, so it
     # only emits the (d1,vc1,d0,vc0) comment + sets coord0Vgpr state -- no real
     # instructions. The body re-runs it for elt 0 (just re-emits the comment).
+    tmpInrSgpr = self._epilogScratchSgpr(1)
     module.add(addrCalc.emitAddressSetupCode(self.kernel, self.tPB, self.ss, self.tmpVgpr, \
-        self.tmpS01, self.edge, self.beta, self.atomic, elementIdx, addrDVgpr))
+        tmpInrSgpr, self.edge, self.beta, self.atomic, elementIdx, addrDVgpr))
+    self._epilogScratchFree(tmpInrSgpr)
 
     # elt-0 epilogue hoist: optSingleColVgpr -> hoist the address compute
     # (preamble=True; body folds it via ss.singleCol*AddrUpdated). Else (Edge /
@@ -484,14 +498,16 @@ class GlobalWriteBatchWriter:
     # D scaleToBpe -- NonEdge only (Edge has its own per-elt path that is not
     # safe to hoist).
     if not self.edge:
+      tmpInrSgpr = self._epilogScratchSgpr(1)
       if self.kernel["GlobalSplitU"] == 1 or (self.kernel["GlobalSplitUAlgorithm"] != "MultipleBufferSingleKernel"):
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'D', self.edge, self.beta, \
-            mask, bufferOOB, True, self.tmpVgpr, self.tmpSgpr, addrDVgpr, self.addrD, 0))
+            mask, bufferOOB, True, self.tmpVgpr, tmpInrSgpr, addrDVgpr, self.addrD, 0))
+      self._epilogScratchFree(tmpInrSgpr)
 
     # Init sgpr offset -- NonEdge only. Needed for the delayed-pattern
     # incrementToNextRow when optSrdIncForRow=1 (NonEdge). Edge path
-    # (optSrdIncForRow=0) skips the delayed pattern entirely so these inits
-    # are not needed.
+    # (optSrdIncForRow=0) can skips the delayed pattern entirely so these inits
+    # might not needed.
 
     module.add(SMovB32(dst=sgpr(self.tmpS01),   src=0, comment="Init sgpr offset"))
     module.add(SMovB32(dst=sgpr(self.tmpS01+1), src=0, comment="Init sgpr offset"))
@@ -509,6 +525,41 @@ class GlobalWriteBatchWriter:
     if prewarmVgpr is not None:
       module.add(VMovB32(dst=vgpr(prewarmVgpr), src=vgpr(prewarmVgpr),
                           comment="prewarm VGPR MSB bank for upcoming ds_load"))
+
+  def _lookaheadRowInc(self, elementIdx: int) -> int:
+    """CompactLoopStore look-ahead: the rowInc that the NEXT EMITTING elt's
+    s_add will consume, so this elt's delayed AFTER-primer can encode it
+    (removes the off-by-one in the CLS primer chain). Forward-scan from
+    elementIdx+1 for the first elt with rowInc != 0; if none remain in this
+    batch, fall through to self.inter_iter_rowInc (the cross-batch advance,
+    precomputed by KernelWriterAssembly; 0 on the last batch). Returns 0 when
+    there is no override (non-CLS, no elementAddr, or no further advance).
+    """
+    if not (self.kernel["CompactLoopStore"] and self.ss.elementAddr):
+      return 0
+    for _j in range(elementIdx + 1, len(self.batchElements)):
+      _ri = self.ss.elementAddr[_j].rowInc
+      if _ri != 0:
+        return _ri
+    return self.inter_iter_rowInc
+
+  def _epilogScratchSgpr(self, n: int = 1):
+    """Scratch sgpr for epilogue address math.
+    CompactLoopStore: borrow `n` aligned sgpr(s) from the pool so the address
+    math does NOT clobber the row-increment primer chain (which lives in
+    tmpS01 / tmpS01+1). Non-CLS: reuse self.tmpSgpr -- this is the baseline, so
+    CLS=0 codegen is bit-for-bit unchanged. Pair with _epilogScratchFree.
+    """
+    if self.kernel["CompactLoopStore"]:
+      return self.parentWriter.sgprPool.checkOutAligned(n, 1)
+    return self.tmpSgpr
+
+  def _epilogScratchFree(self, sgprIdx):
+    """Release a scratch sgpr from _epilogScratchSgpr (no-op for non-CLS, which
+    reused self.tmpSgpr and owns nothing).
+    """
+    if self.kernel["CompactLoopStore"]:
+      self.parentWriter.sgprPool.checkIn(sgprIdx)
 
   def _prolog(self, module: Module):
     module.addComment0("optSingleColVgpr=%u optSharedColVgpr=%u optSGPRUsage=%s optSrdIncForRow=%u factorDim=%u" % \
@@ -641,15 +692,25 @@ class GlobalWriteBatchWriter:
       vc0 = element[3]
       sumIdxGSUSYNC = self.ss.elementSumIdx[elementIdx]
 
-      module.add(addrCalc.emitAddressSetupCode(self.kernel, self.tPB, self.ss, self.tmpVgpr, self.tmpS01, self.edge, self.beta, self.atomic, elementIdx, addrDVgpr))
+      # CompactLoopStore look-ahead override: this elt's delayed AFTER-primer
+      # encodes the NEXT EMITTING elt's rowInc (see _lookaheadRowInc).
+      _emitOverrideRows = self._lookaheadRowInc(elementIdx)
+
+      tmpInrSgpr = self._epilogScratchSgpr(1)
+      module.add(addrCalc.emitAddressSetupCode(self.kernel, self.tPB, self.ss, self.tmpVgpr, tmpInrSgpr, self.edge, self.beta, self.atomic, elementIdx, addrDVgpr))
+      self._epilogScratchFree(tmpInrSgpr)
 
       if self.edge:
-        module.add(addrCalc.edgeProtectCode(self.kernel, self.edge, self.beta, self.atomic, mask, self.tmpSgpr))
+        tmpInrSgpr = self._epilogScratchSgpr(2)
+        module.add(addrCalc.edgeProtectCode(self.kernel, self.edge, self.beta, self.atomic, mask, tmpInrSgpr))
+        self._epilogScratchFree(tmpInrSgpr)
         if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
           module.addComment1("edge Protect")
       # create code Module to push mov vgpr,acc instructions
       if self.beta:
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'C', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, self.tmpSgpr, addrCVgpr, self.addrC, 0))
+        tmpInrSgpr = self._epilogScratchSgpr(1)
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'C', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrCVgpr, self.addrC, 0))
+        self._epilogScratchFree(tmpInrSgpr)
         if dataBeta not in self.loadedDataBeta:
           # In the UseSubtileImpl NonEdge path the workgroup-level edge check is relaxed
           # (subtile-aligned remainder is allowed into NonEdge), so individual waves may
@@ -683,16 +744,25 @@ class GlobalWriteBatchWriter:
               else:
                 module.add(SCSelectB32(dst=sgpr("SrdC+2"), src0="BufferOOB", src1=0,
                                        comment="SrdC+2 = BufferOOB if M valid, else 0"))
+          # Pass `elementIdx` so the readInput's incrementToNextRow gate can
+          # open the CompactLoopStore chain-seed emit for elt-0. Pass
+          # `overrideAfterPrimerRows=_emitOverrideRows` so the AFTER-primer
+          # encodes the NEXT EMITTING elt's rowInc (look-ahead). Non-CLS:
+          # `elementIdx` is unused and `_emitOverrideRows`==0 means no override.
           if self.kernel["GroupLoadStore"]:
-            loadInputCode.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01))
+            loadInputCode.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01, elementIdx, self.batchIdx,
+                                                          overrideAfterPrimerRows=_emitOverrideRows))
           else:
-            module.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01))
+            module.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01, elementIdx, self.batchIdx,
+                                                  overrideAfterPrimerRows=_emitOverrideRows))
           self.loadedDataBeta[dataBeta] = ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16)
           self.loadsBetaIssued += ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.gwvw / 16)
       self.betaLoadIssued.append(len(self.loadedDataBeta) * ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16))
 
       if (self.kernel["ProblemType"]["UseE"] and self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none') and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'E', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, self.tmpSgpr, addrEVgpr, self.addrE, 0))
+        tmpInrSgpr = self._epilogScratchSgpr(1)
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'E', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrEVgpr, self.addrE, 0))
+        self._epilogScratchFree(tmpInrSgpr)
         if dataE not in self.loadedDataE:
           loadOffset = int((self.kernel["ProblemType"]["ComputeDataType"].numRegisters() - self.kernel["ProblemType"]["DataTypeE"].numRegisters()) * self.ss.cfg.gwvw)
           if self.kernel["GroupLoadStore"]:
@@ -711,16 +781,16 @@ class GlobalWriteBatchWriter:
       self._emitElt0EpilogueLoads(module, addrCalc, mask, elementIdx, bufferOOB,
                                    loadInputCode, factor_gwvw,
                                    False)
-
+      tmpInrSgpr = self._epilogScratchSgpr(1)
       if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'E', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, self.tmpSgpr, addrEVgpr, self.addrE, 0))
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'E', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrEVgpr, self.addrE, 0))
       if self.storeBiasD == 1:
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'Bias', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, self.tmpSgpr, addrBiasVgpr, self.addrBias, self.factorDim))
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'Bias', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrBiasVgpr, self.addrBias, self.factorDim))
       if self.kernel["GlobalSplitU"] == 1 or (self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel"): # "SingleBuffer" or "MultipleBuffer"
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'D', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, self.tmpSgpr, addrDVgpr, self.addrD, 0))
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'D', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrDVgpr, self.addrD, 0))
       if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'TD', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, self.tmpSgpr, addrCalc.addrGSUSyncVgprs, self.addrD, 0))
-
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'TD', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrCalc.addrGSUSyncVgprs, self.addrD, 0))
+      self._epilogScratchFree(tmpInrSgpr)
       if self.atomic and (not self.parentWriter.states.useAtomicAdd):
         # load c into data+1 because of CAS structure
         # TODO - Fix for double here, would need bigger load
@@ -760,13 +830,13 @@ class GlobalWriteBatchWriter:
           module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -1 -> exec"))
 
       if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
-        if self.ss.optSrdIncForRow and addrCalc.rowInc and self.kernel["StoreRemapVectorWidth"] > 0:
+        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
           module.addComment1("StoreRemap: shift coord1 address MultipleBufferSingleKernel")
           if self.kernel["ProblemType"]["UseE"] and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
             # TODO Check if works with StreamK
             printExit("Use E does not support StoreRemapVectorWidth if GSU == 1.")
             # module.add(addrCalc.incrementToNextRow(self.kernel, "E", self.ss, self.tmpS01, isCompute=True))
-          module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01))
+          module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01, forceinitrow0=1, overrideAfterPrimerRows=_emitOverrideRows))
           module.add(VMovB32(vgpr(self.tmpVgpr), addrCalc.rowInc, comment="set shift rows"))
           module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.tmpVgpr), "shift storeRemap coord1"))
 
@@ -847,7 +917,9 @@ class GlobalWriteBatchWriter:
     if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" and self.kernel["StoreRemapVectorWidth"]:
       if self.parentWriter.StoreRemapLastBatch == 1:
         module.addComment1("Handle local read and global write")
-        storeModule, numNewStores = self.parentWriter.storeRemapAddStore(self.kernel, self.tmpVgpr, self.tmpS01, self.edge, self.parentWriter.StoreRemapLastBatch)
+        tmpInrSgpr = self._epilogScratchSgpr(2)
+        storeModule, numNewStores = self.parentWriter.storeRemapAddStore(self.kernel, self.tmpVgpr, tmpInrSgpr, self.edge, self.parentWriter.StoreRemapLastBatch)
+        self._epilogScratchFree(tmpInrSgpr)
         module.add(storeModule)
         self.storesIssued += numNewStores
 
@@ -951,7 +1023,9 @@ class GlobalWriteBatchWriter:
         # this seems buggy? it's possible to issue more than one stores for SR
         # module.add(self.storeRemapAddStore(kernel, tmpVgpr, tmpS01, edge))
         # storesIssued += 1
-        storeModule, numNewStores = self.parentWriter.storeRemapAddStore(self.kernel, self.tmpVgpr, self.tmpS01, self.edge, self.parentWriter.StoreRemapLastBatch)
+        tmpInrSgpr = self._epilogScratchSgpr(2)
+        storeModule, numNewStores = self.parentWriter.storeRemapAddStore(self.kernel, self.tmpVgpr, tmpInrSgpr, self.edge, self.parentWriter.StoreRemapLastBatch)
+        self._epilogScratchFree(tmpInrSgpr)
         module.add(storeModule)
         self.storesIssued += numNewStores
 
@@ -1102,17 +1176,22 @@ class GlobalWriteBatchWriter:
       vc0 = element[3]
       sumIdx = self.ss.elementSumIdx[elementIdx]
 
+      # CompactLoopStore look-ahead override for this store loop (see
+      # _lookaheadRowInc). Separate for-loop pass from the _prolog one, so it is
+      # recomputed here.
+      _emitOverrideRows = self._lookaheadRowInc(elementIdx)
+
       # print(str(element)+" rowInc="+str(addrCalc.rowInc))
       # Already write wave column block into LDS
       # Now read lds data back to registers and write to global memroy
       if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel":
-        if self.ss.optSrdIncForRow and addrCalc.rowInc and self.kernel["StoreRemapVectorWidth"] > 0:
+        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
           module.addComment1("StoreRemap: shift coord1 address")
           if self.kernel["ProblemType"]["UseE"] and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
             # TODO Check if works with StreamK
             printExit("Use E does not support StoreRemapVectorWidth if GSU == 1.")
             # module.add(addrCalc.incrementToNextRow(self.kernel, "E", self.ss, self.tmpS01, isCompute=True))
-          module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01))
+          module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01, forceinitrow0=1, overrideAfterPrimerRows=_emitOverrideRows))
           module.add(VMovB32(vgpr(self.tmpVgpr), addrCalc.rowInc, comment="set shift rows"))
           module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.tmpVgpr), "shift storeRemap coord1"))
 
@@ -1587,7 +1666,9 @@ class GlobalWriteBatchWriter:
             self._emitAlign8ExecMask(storeCodeModule, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
                                      mGuardOffset=1, rowScaleShift=2)
             storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
-          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store D")
+          # _emitOverrideRows reused from the top of this store loop (see _lookaheadRowInc).
+          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
+                                                   overrideAfterPrimerRows=_emitOverrideRows, comment="store D")
           storeCodeModule.add(tmpStoreCode)
           if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
             storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
