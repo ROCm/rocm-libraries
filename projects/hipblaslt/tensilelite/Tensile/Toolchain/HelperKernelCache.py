@@ -59,18 +59,29 @@ def _computeCacheKey(kernelPath, includeDir, cmdlineArchs, compiler):
 
 
 def _checkCache(cacheDir, cacheKey):
-    """Check if a valid cache entry exists. Returns list of .hsaco Paths or None."""
+    """Check if a valid cache entry exists. Returns list of .hsaco Paths or None.
+
+    Walks one level: cache entries are organized as <key>/<base-arch>/<*.hsaco>
+    to mirror the on-disk install layout. A flat <key>/<*.hsaco> entry from an
+    older cache version is treated as missing so it gets rewritten in the new
+    structure on the next store.
+    """
     entryDir = Path(cacheDir) / cacheKey
     if not entryDir.is_dir():
         return None
-    hsacoFiles = list(entryDir.glob("*.hsaco"))
+    hsacoFiles = list(entryDir.glob("*/*.hsaco"))
     if not hsacoFiles or any(f.stat().st_size == 0 for f in hsacoFiles):
         return None
     return hsacoFiles
 
 
 def _populateCache(cacheDir, cacheKey, hsacoFiles):
-    """Atomically populate a cache entry. Safe under concurrent writes."""
+    """Atomically populate a cache entry. Safe under concurrent writes.
+
+    hsacoFiles are full destination paths whose parent directory name is the
+    per-base arch subdir. The cache mirrors that structure as
+    <cacheDir>/<key>/<base-arch>/<name>.
+    """
     cacheDir = Path(cacheDir)
     finalDir = cacheDir / cacheKey
     if finalDir.exists():
@@ -79,7 +90,10 @@ def _populateCache(cacheDir, cacheKey, hsacoFiles):
     tmpDir = cacheDir / f".tmp_{cacheKey}_{os.getpid()}"
     tmpDir.mkdir(parents=True, exist_ok=True)
     for f in hsacoFiles:
-        shutil.copy2(Path(f), tmpDir / Path(f).name)
+        src = Path(f)
+        archSubdir = tmpDir / src.parent.name
+        archSubdir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, archSubdir / src.name)
 
     try:
         tmpDir.rename(finalDir)
@@ -123,8 +137,11 @@ class HelperKernelCache:
         self._cacheKey = None
         _evictStale(self.dir, self._MAX_AGE_DAYS)
 
-    def restore(self, kernelPath, includeDir, cmdlineArchs, compiler, destDir):
-        """Try to restore cached .hsaco files into destDir.
+    def restore(self, kernelPath, includeDir, cmdlineArchs, compiler, destRoot):
+        """Try to restore cached .hsaco files into per-base subdirs under destRoot.
+
+        Cache entries are organized as <key>/<base-arch>/<*.hsaco>; restore copies
+        each file to <destRoot>/<base-arch>/<name>, recreating subdirs as needed.
 
         Returns (hit: bool, coPaths: List[str]).
         On hit, coPaths contains the copied file paths. On miss, coPaths is empty.
@@ -141,7 +158,9 @@ class HelperKernelCache:
             try:
                 os.utime(Path(self.dir) / self._cacheKey)
                 for f in cachedFiles:
-                    dst = Path(destDir) / f.name
+                    archSubdir = Path(destRoot) / f.parent.name
+                    archSubdir.mkdir(parents=True, exist_ok=True)
+                    dst = archSubdir / f.name
                     shutil.copy2(f, dst)
                     coPaths.append(str(dst))
                 return True, coPaths

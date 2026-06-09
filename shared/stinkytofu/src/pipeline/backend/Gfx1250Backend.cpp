@@ -139,7 +139,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createMemTokenConsistencyCheckPass());
     if (optLevel != OptLevel::O0) {
-        pm.addPass(createInsertDelayAluPass());
+        pm.addPass(createInsertDelayAluPass(/*minWavesPerSimd=*/2));
         pm.addPass(createLoopRegionRemarkPass());
     }
     pm.addPass(createEstimateAsmCyclesPass());

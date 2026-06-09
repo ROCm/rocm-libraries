@@ -120,9 +120,13 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), targetGfx)
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
   archs = [isaToGfx(isa) for isa in isaInfoMap.keys()]
-  libraryGlobBase = libraryDir(clientLibraryPath, archs)
-  coList = glob(os.path.join(libraryGlobBase, "*.co"))
-  yamlList = glob(os.path.join(libraryGlobBase, "*.yaml"))
+  # Kernels fan out into one per-base subdir per arch; union the globs across them.
+  coList = []
+  yamlList = []
+  for arch in archs:
+    archDir = libraryDir(clientLibraryPath, arch)
+    coList.extend(glob(os.path.join(archDir, "*.co")))
+    yamlList.extend(glob(os.path.join(archDir, "*.yaml")))
 
   clientParametersPaths = []
   splitGSU = False
@@ -561,6 +565,10 @@ def pruneModeName(mode):
 def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, probSolMap={}):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
+    # libraryFile must point at the per-base TensileLibrary{,.yaml,.dat}; the
+    # previous flat default `<sourceDir>/library/TensileLibrary.{dat,yaml}`
+    # silently masked the per-base layout when callers forgot to compute it.
+    assert libraryFile, "libraryFile is required; pass the per-base TensileLibrary path"
 
     with open(parametersFilePath, "w") as f:
         def param(key, value):
@@ -762,7 +770,19 @@ def writeClientConfig(
 
 def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataFilePath, configFile, deviceId, gfxName, problemTypeDict=None, archs=None):
 
-    libraryPath = libraryDir(libraryRootPath, archs or [])
+    # Benchmarking operates on a single arch at a time. Resolve the per-base
+    # dir from the arch the caller already holds (archs, else gfxName) via the
+    # same prescription used to write it; an unknown arch is a hard error, not
+    # a filesystem guess.
+    if archs:
+        libraryPath = libraryDir(libraryRootPath, archs[0])
+    elif gfxName:
+        libraryPath = libraryDir(libraryRootPath, gfxName)
+    else:
+        raise RuntimeError(
+            "CreateBenchmarkClientParametersForSizes: arch is required; "
+            "pass archs=[...] or a non-empty gfxName"
+        )
     libraryFiles = [os.path.join(str(libraryPath), f) for f in os.listdir(libraryPath)]
     codeObjectFiles = [f for f in libraryFiles if f.endswith("co")]
 

@@ -83,6 +83,20 @@ class Reporter:
         self._print_line("-")
         self._print("")
 
+    def print_reference_header(
+        self, config: BenchmarkConfig, graph_name: str, provider: str
+    ) -> None:
+        """Print a timed validation-provider reference row header."""
+        self._print_line("=")
+        self._print(f"Validation Reference Benchmark: {graph_name}")
+        self._print_line("=")
+        self._print(f"Graph:      {config.graph_path}")
+        self._print(f"Provider:   {provider}")
+        self._print(f"Warmup:     {config.warmup_iters} iterations")
+        self._print(f"Benchmark:  {config.benchmark_iters} iterations")
+        self._print_line("-")
+        self._print("")
+
     def print_init_time(self, init_time_ms: float) -> None:
         """Print initialization timing.
 
@@ -346,6 +360,16 @@ class Reporter:
     @staticmethod
     def _pe_outcome(pe: ProviderEngineResult) -> str:
         """Derive a short outcome label for a ProviderEngineResult."""
+        if pe.role == "reference" and pe.status == "success":
+            label = "reference"
+            timing = (
+                pe.gpu_kernel_stats if pe.gpu_kernel_stats is not None else pe.e2e_stats
+            )
+            if timing is not None:
+                exec_s = timing.total_ms / 1000
+                wall_s = pe.elapsed_time_ms / 1000
+                return f"{label} (exec {exec_s:.2f}s, elapsed {wall_s:.2f}s)"
+            return label
         if pe.status == "success":
             label = (
                 "failed"
@@ -414,6 +438,8 @@ class Reporter:
 
     @staticmethod
     def _pe_status(pe: ProviderEngineResult) -> str:
+        if pe.role == "reference" and pe.status == "success":
+            return "reference"
         if pe.status != "success":
             return pe.status
         if pe.correctness is not None and pe.correctness.tolerance_match is False:
@@ -443,7 +469,14 @@ class Reporter:
                 benchmark_iters=suite_config.benchmark_iters,
                 engine_id=pe.engine_id,
             )
-            self.print_header(cfg_view, graph_result.graph_name, provider=pe.provider)
+            if pe.role == "reference":
+                self.print_reference_header(
+                    cfg_view, graph_result.graph_name, pe.provider
+                )
+            else:
+                self.print_header(
+                    cfg_view, graph_result.graph_name, provider=pe.provider
+                )
 
             if pe.cpu_build_time_ms is not None:
                 self.print_init_time(pe.cpu_build_time_ms)
@@ -456,7 +489,12 @@ class Reporter:
                 # --metrics-tier off, and the user should still see where
                 # their artefacts landed plus any tool-failure detail.
                 self._print_profiling_block(pe)
-                if pe.correctness is not None:
+                if pe.role == "reference":
+                    self._print(
+                        "Reference: timing baseline (no correctness comparison)"
+                    )
+                    self._print("")
+                elif pe.correctness is not None:
                     self._print_pe_correctness(pe.correctness, suite_config)
             elif pe.status == "skipped":
                 self._print(f"Status: SKIPPED ({pe.skip_reason or 'no reason given'})")
