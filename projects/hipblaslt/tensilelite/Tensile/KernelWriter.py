@@ -6519,20 +6519,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self._capture_context.prefetch_pack_a = [_Module_for_prefetch_snap() for _ in range(self.states.numItersPLR)]
           self._capture_context.prefetch_pack_b = [_Module_for_prefetch_snap() for _ in range(self.states.numItersPLR)]
 
-        # rocm-libraries-oram Phase 2: per-plrIdx snapshot modules for the
-        # prologue capture. We collect the prefetch-side pack chain
-        # (packPrePrefetchA/B contents that get added to module via
-        # _interleavePackAB) under PackA{plrIdx}/PackB{plrIdx}. The pack
-        # snapshots are populated AFTER `_interleavePackAB` per plrIdx
-        # below, so they reflect exactly what landed in `module`.
+        # rocm-libraries-oram Phase 2 (hxcx): prologue capture accumulates
+        # post-interleave (leaf, category) tuples into
+        # `ctx.prologue_interleaved_items` inside the per-plrIdx loop below
+        # via the two-phase id-dict snapshot. `CaptureContext.__post_init__`
+        # already initializes `prologue_interleaved_items` to [].
         # NOTE: LR/LW/GR prologue capture is deferred — tracked as
         # rocm-libraries-6jbr (requires concurrent capture of the
         # prologue's s_waitcnt + s_barrier to keep
         # validate_edge_wait_coverage clean).
-        if getattr(self.states, "_captureDefaultSchedule", False):
-          from rocisa.code import Module as _Module_for_prologue_snap
-          self._capture_context.prologue_prefetch_pack_a = [_Module_for_prologue_snap() for _ in range(self.states.numItersPLR)]
-          self._capture_context.prologue_prefetch_pack_b = [_Module_for_prologue_snap() for _ in range(self.states.numItersPLR)]
 
       # prefetch-local
       if self.states.numItersPLR:
@@ -6629,18 +6624,31 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 module.add(self.localReadInc(kernel, iui, tensorParametersB))
           # Gather A, B conversion code based on scheduling order
           packPrePrefetchItems = []
-          self._interleavePackAB(kernel, packPrePrefetchA.flatitems(), packPrePrefetchB.flatitems(), packPrePrefetchItems, prefetch=True)
-          # rocm-libraries-oram Phase 2: snapshot the per-plrIdx prologue
-          # pack chain (the contents of packPrePrefetchA/B that get
-          # appended to module via addItems below). This is non-empty
-          # only when usePLRPack is active — that emptiness is the
-          # structural divergence the preloop-divergence test asserts
-          # compare_graphs catches.
+          # rocm-libraries-oram Phase 2 (hxcx): build id->category dict
+          # BEFORE _interleavePackAB so post-interleave items can be tagged.
+          # SNop pads inserted by _interleavePackAB are not in the dict and
+          # receive category "SNOP" (uppercase canonical string per
+          # _RECOGNIZED_CATEGORY_EXACT and _OPTSCHEDULE_IDMAP_SKIP_CATEGORIES).
           if getattr(self.states, "_captureDefaultSchedule", False):
-            for _leaf in packPrePrefetchA.flatitems():
-              self._capture_context.prologue_prefetch_pack_a[plrIdx].add(_leaf)
-            for _leaf in packPrePrefetchB.flatitems():
-              self._capture_context.prologue_prefetch_pack_b[plrIdx].add(_leaf)
+            _prologue_id_to_category = {
+                id(leaf): f"PackA{plrIdx}"
+                for leaf in packPrePrefetchA.flatitems()
+            }
+            _prologue_id_to_category.update({
+                id(leaf): f"PackB{plrIdx}"
+                for leaf in packPrePrefetchB.flatitems()
+            })
+          self._interleavePackAB(kernel, packPrePrefetchA.flatitems(), packPrePrefetchB.flatitems(), packPrePrefetchItems, prefetch=True)
+          # rocm-libraries-oram Phase 2 (hxcx): after _interleavePackAB
+          # populates packPrePrefetchItems, iterate the post-interleave list
+          # (preserving emission order including SNop pads) and accumulate
+          # (leaf, category) tuples into prologue_interleaved_items.
+          if getattr(self.states, "_captureDefaultSchedule", False):
+            _prologue_snap = [
+                (leaf, _prologue_id_to_category.get(id(leaf), "SNOP"))
+                for leaf in packPrePrefetchItems
+            ]
+            self._capture_context.prologue_interleaved_items.extend(_prologue_snap)
           if len(packPrePrefetchItems) > 0:
             module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA and LRB to complete (for pre Pack code)"))
 
@@ -6712,8 +6720,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       from Tensile.Components.ScheduleCapture import build_prologue_capture
       ctx_for_prologue = self._capture_context
       ctx_for_prologue.prologue = build_prologue_capture(
-        prefetch_pack_a=ctx_for_prologue.prologue_prefetch_pack_a,
-        prefetch_pack_b=ctx_for_prologue.prologue_prefetch_pack_b,
+        prologue_interleaved_items=ctx_for_prologue.prologue_interleaved_items,
       )
 
     loopCopies = 3 if kernel["HalfPLR"] else 2 if expand else 1

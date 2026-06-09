@@ -209,7 +209,8 @@ def test_preloop_divergence_catches_useplrpack_change(isa_infrastructure):
       1. The CMS+PLRPack build's SHADOW default capture must have a non-None
          prologue with at least one Pack* instruction — the prefetch-pack
          chain was emitted between setupNewTile and openLoop and snapshotted
-         into ctx.prologue_prefetch_pack_a/b.
+         into ctx.prologue_interleaved_items (post-interleave ordered list
+         of (leaf, category) tuples including SNOP pads).
 
       2. The non-CMS+NoPLRPack build's non-CMS reference capture must have
          NO Pack* instructions in its prologue (the pack chain lives inside
@@ -247,7 +248,7 @@ def test_preloop_divergence_catches_useplrpack_change(isa_infrastructure):
         f"categories present: "
         f"{sorted({ti.category for ti in cap_with.prologue.instructions})}. "
         f"The packPrePrefetchA/B chain did not get snapshotted into "
-        f"ctx.prologue_prefetch_pack_a/b. Without these the test cannot "
+        f"ctx.prologue_interleaved_items. Without these the test cannot "
         f"distinguish UsePLRPack=1 from UsePLRPack=0."
     )
 
@@ -429,15 +430,13 @@ def test_prologue_label_index_sorts_before_ml_prev():
 
 
 def test_build_prologue_capture_returns_none_when_all_inputs_empty():
-    """`build_prologue_capture` returns None when no source modules are
-    populated (PGR=0 kernels emit no prologue at all, and usePLRPack=False
-    kernels emit no prologue Pack producers).
+    """`build_prologue_capture` returns None when no source list is supplied
+    or the list is empty (PGR=0 kernels emit no prologue at all, and
+    usePLRPack=False kernels emit no prologue Pack producers).
     """
     from Tensile.Components.ScheduleCapture import build_prologue_capture
     assert build_prologue_capture() is None
-    assert build_prologue_capture(
-        prefetch_pack_a=[], prefetch_pack_b=[],
-    ) is None
+    assert build_prologue_capture(prologue_interleaved_items=[]) is None
 
 
 def test_build_dataflow_graph_handles_none_prologue():

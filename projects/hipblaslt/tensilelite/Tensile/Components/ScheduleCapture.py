@@ -610,13 +610,19 @@ class CaptureContext:
     # and `openLoop`); harvested at the prologue-end checkpoint to build
     # `ctx.prologue`.
     #
-    # `prologue_prefetch_pack_a` / `..._pack_b` are populated only when
-    # usePLRPack is active — they hold the per-plrIdx pack chain that
-    # `_interleavePackAB` lays into module via `addItems`. When
-    # usePLRPack=False these stay empty (the pack code lives in
-    # `pack[plrIdx]` for the mainloop instead). That emptiness is the
-    # load-bearing structural divergence the preloop-divergence test
-    # asserts compare_graphs catches.
+    # `prologue_interleaved_items` is a flat ordered list of (leaf, category)
+    # tuples in emission order, populated by the two-phase id-dict snapshot
+    # in KernelWriter.py (one dict-build before `_interleavePackAB`, one
+    # list-build after). It includes SNOP pads inserted by `_interleavePackAB`
+    # (category "SNOP") and all A/B pack leaves (category "PackA{plrIdx}" /
+    # "PackB{plrIdx}"). The list is accumulated across the full
+    # `for plrIdx in range(numItersPLR)` loop, producing one flat ordered
+    # stream matching physical emission order.
+    #
+    # Populated only when `_captureDefaultSchedule` is active and usePLRPack
+    # is True. Empty when usePLRPack=False (the pack code lives in
+    # `pack[plrIdx]` for the mainloop). That emptiness is the load-bearing
+    # structural divergence the preloop-divergence test asserts.
     #
     # NOTE: LR/LW/GR prologue capture is intentionally out of scope for
     # rocm-libraries-oram Phase 2. Capturing those producers without also
@@ -627,8 +633,7 @@ class CaptureContext:
     # `prologue` is the finalized capture (None when PGR=0 or when the
     # build skipped prologue collection). Promoted into
     # `ctx.default.prologue` during FourPartCapture assembly.
-    prologue_prefetch_pack_a: list = field(default_factory=list)
-    prologue_prefetch_pack_b: list = field(default_factory=list)
+    prologue_interleaved_items: list = field(default_factory=list)
     prologue: object = None  # LoopBodyCapture | None
 
     def reset(self):
@@ -641,8 +646,7 @@ class CaptureContext:
         self.builder = None
         self.prefetch_pack_a = []
         self.prefetch_pack_b = []
-        self.prologue_prefetch_pack_a = []
-        self.prologue_prefetch_pack_b = []
+        self.prologue_interleaved_items = []
         self.prologue = None
 
 
@@ -2333,7 +2337,7 @@ def clone_loop_body(body):
     return deepcopy(body)
 
 
-def build_prologue_capture(*, prefetch_pack_a=None, prefetch_pack_b=None):
+def build_prologue_capture(*, prologue_interleaved_items=None):
     """Build a `LoopBodyCapture` for the pre-mainloop prologue
     (rocm-libraries-oram Phase 2).
 
@@ -2343,17 +2347,25 @@ def build_prologue_capture(*, prefetch_pack_a=None, prefetch_pack_b=None):
     prologue writes are visible to mainloop reads in the per-byte
     latest-writer resolution.
 
-    Source modules / source-module lists:
+    Source:
 
-      prefetch_pack_a, prefetch_pack_b: lists indexed by plrIdx. Each
-        entry is a `Module` containing the pack leaves emitted into the
-        prologue when `usePLRPack` is active (the pack chain that
-        `_interleavePackAB` lays into module via `addItems` at line 5044
-        of KernelWriter.py). Tagged as PackA{plrIdx} / PackB{plrIdx}.
-        When usePLRPack=False these modules are empty (the pack code
-        lands in `pack[plrIdx]` for the mainloop instead) — that
-        emptiness is the load-bearing structural divergence the
-        rocm-libraries-oram Phase 2 preloop-divergence test asserts.
+      prologue_interleaved_items: flat ordered list of (leaf, category)
+        tuples in emission order, built by KernelWriter.py's two-phase
+        id-dict snapshot (one dict before `_interleavePackAB`, one list
+        after). The list preserves the post-interleave emission order
+        including SNOP pads inserted between MFMA-pair and CVT_PACK groups.
+        Leaves from side A carry category "PackA{plrIdx}"; side B carry
+        "PackB{plrIdx}"; injected nop pads carry "SNOP" (uppercase,
+        matching `_RECOGNIZED_CATEGORY_EXACT` and
+        `_OPTSCHEDULE_IDMAP_SKIP_CATEGORIES`). The list is accumulated
+        across the full `for plrIdx in range(numItersPLR)` loop, so it
+        represents one flat linear emission stream matching the physical
+        prologue order.
+
+        When usePLRPack=False this list is empty (the pack code lands in
+        `pack[plrIdx]` for the mainloop instead) — that emptiness is the
+        load-bearing structural divergence the preloop-divergence test
+        asserts.
 
     NOTE: LR/LW/GR prologue capture is intentionally out of scope for
     rocm-libraries-oram Phase 2. Capturing those producers without also
@@ -2361,46 +2373,32 @@ def build_prologue_capture(*, prefetch_pack_a=None, prefetch_pack_b=None):
     uncovered prologue->mainloop edges in `validate_edge_wait_coverage`.
     Tracked as a follow-up: rocm-libraries-6jbr.
 
-    Returns None when ALL source inputs are absent or empty (PGR=0
-    kernels emit no prologue at all, and usePLRPack=False kernels emit
-    no prologue Pack producers). A non-empty body is returned as a
-    `LoopBodyCapture`. The caller is responsible for setting the
-    capture's `name_to_idx` after harvesting RegSet directives.
+    Returns None when the source list is absent or empty (PGR=0 kernels
+    emit no prologue at all, and usePLRPack=False kernels emit no prologue
+    Pack producers). A non-empty body is returned as a `LoopBodyCapture`.
+    The caller is responsible for setting the capture's `name_to_idx`
+    after harvesting RegSet directives.
     """
     builder = LoopBodyCaptureBuilder()
     any_appended = False
 
-    def _append_module(module, category):
-        nonlocal any_appended
-        if module is None:
-            return
-        for leaf in module.flatitems():
-            if leaf is None:
-                continue
-            # Skip TextBlock/comments (no rocisa wiring; finalize would
-            # raise CaptureWiringError on inst=None). Also skip Label
-            # markers — they are scheduling markers, not dataflow nodes.
-            cls_name = type(leaf).__name__
-            if cls_name in ("TextBlock", "Label"):
-                continue
-            # A leaf with no rocisa inst (e.g., Module returned without
-            # being flattened) signals an upstream wiring bug; surface it
-            # via the existing finalize() guard rather than silently dropping.
-            builder.append(
-                inst=leaf,
-                category=category,
-                subiter=0,
-                slot_kind=SLOT_KIND_PRE_LOOP,
-                mfma_index=-1,
-            )
-            any_appended = True
-
-    if prefetch_pack_a is not None:
-        for plr_idx, mod in enumerate(prefetch_pack_a):
-            _append_module(mod, f"PackA{plr_idx}")
-    if prefetch_pack_b is not None:
-        for plr_idx, mod in enumerate(prefetch_pack_b):
-            _append_module(mod, f"PackB{plr_idx}")
+    for leaf, category in (prologue_interleaved_items or []):
+        if leaf is None:
+            continue
+        # Skip TextBlock/comments (no rocisa wiring; finalize would
+        # raise CaptureWiringError on inst=None). Also skip Label
+        # markers — they are scheduling markers, not dataflow nodes.
+        cls_name = type(leaf).__name__
+        if cls_name in ("TextBlock", "Label"):
+            continue
+        builder.append(
+            inst=leaf,
+            category=category,
+            subiter=0,
+            slot_kind=SLOT_KIND_PRE_LOOP,
+            mfma_index=-1,
+        )
+        any_appended = True
 
     if not any_appended:
         return None
