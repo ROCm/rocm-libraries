@@ -47,7 +47,7 @@ DEFAULT_PROBLEMS = [
 # column-major B (rcr). Constrain the CLI to what the runner actually supports so
 # a mismatched --dtype/--layout fails fast instead of silently benchmarking the
 # wrong thing. Later phases widen these sets as the runner gains signatures.
-SUPPORTED_DTYPES = ("fp16",)
+SUPPORTED_DTYPES = ("fp16", "bf16")
 SUPPORTED_LAYOUTS = ("rcr",)
 
 
