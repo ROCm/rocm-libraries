@@ -143,10 +143,10 @@ def cmake_build(Map conf=[:]){
             rm -f src/kernels/miopen*.udb
             cd build
         """
-    def setup_cmd = conf.get("setup_cmd", "${cmake_envs} cmake ${setup_args}   .. ")
+    def setup_cmd = conf.get("setup_cmd", "${cmake_envs} cmake -G Ninja ${setup_args}   .. ")
     // WORKAROUND_SWDEV_290754
     // It seems like this W/A is not required since 4.5.
-    def build_cmd = conf.get("build_cmd", "LLVM_PATH=/opt/rocm/llvm ${build_envs} dumb-init make -j\$(nproc) ${make_targets}")
+    def build_cmd = conf.get("build_cmd", "LLVM_PATH=/opt/rocm/llvm ${build_envs} dumb-init ninja -j\$(nproc) ${make_targets}")
     def execute_cmd = conf.get("execute_cmd", "")
 
     def cmd = conf.get("cmd", """
@@ -200,7 +200,7 @@ def cmake_fin_build_cmd(prefixpath){
             mkdir build
             cd build
             CXX=${compilerpath} cmake ${configargs} ${flags} ..
-            dumb-init make -j\$(nproc) ${make_targets}
+            dumb-init ninja -j\$(nproc) ${make_targets}
     """
     return fin_cmd
 }
