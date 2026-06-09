@@ -86,6 +86,13 @@ def run_suite_benchmark(
                 f"Reference provider '{config.reference_provider}' is not registered."
             )
             return 1
+        except ImportError:
+            # Lazily-resolved provider whose dependencies (e.g. torch) are absent.
+            reporter.print_error(
+                f"Reference provider '{config.reference_provider}' is not available "
+                "(check that its dependencies are installed)."
+            )
+            return 1
         if not ref.is_available():
             reporter.print_error(
                 f"Reference provider '{config.reference_provider}' is not available "

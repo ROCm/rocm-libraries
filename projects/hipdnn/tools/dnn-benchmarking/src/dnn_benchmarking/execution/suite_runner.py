@@ -136,6 +136,14 @@ def _get_reference_provider(
             file=sys.stderr,
         )
         return None
+    except ImportError:
+        # Lazily-resolved provider whose dependencies (e.g. torch) are absent.
+        print(
+            f"Reference provider '{config.reference_provider}' not available "
+            "(dependencies missing)",
+            file=sys.stderr,
+        )
+        return None
 
     if not provider.is_available():
         print(

@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("torch")
+
 from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
 from dnn_benchmarking.execution import pytorch_ops
 from dnn_benchmarking.execution.pytorch_buffer_manager import PyTorchCudaBufferManager

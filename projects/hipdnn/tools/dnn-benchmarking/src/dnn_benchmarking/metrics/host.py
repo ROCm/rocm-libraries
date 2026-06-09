@@ -3,18 +3,35 @@
 
 """Host-side probes: CPU time delta and host memory snapshot.
 
-``CpuTimeProbe`` is a context manager that diffs ``resource.getrusage``
-across a block to produce user/kernel CPU time consumed by the calling
-process. ``host_memory_snapshot`` returns process RSS and host RAM
-availability via ``psutil`` if installed. Both degrade gracefully:
-on any failure they yield ``None`` values rather than raising.
+``CpuTimeProbe`` is a context manager that diffs the calling process's
+user/kernel CPU time across a block, sampled via ``os.times`` so it behaves
+the same on POSIX and Windows. ``host_memory_snapshot`` returns process RSS
+and host RAM availability via ``psutil`` if installed. Both degrade
+gracefully: on any failure they yield ``None`` values rather than raising.
 """
 
-import resource
+import os
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from ._diagnostic import warn_once
+
+
+def _process_cpu_times() -> Optional[Tuple[float, float]]:
+    """Return ``(user_seconds, system_seconds)`` for the calling process.
+
+    Uses ``os.times``, the cross-platform stdlib accessor (backed by
+    ``GetProcessTimes`` on Windows). The probe wraps the whole benchmark
+    loop and reports a per-iteration average, so ``os.times``'s clock-tick
+    resolution is immaterial here. Returns ``None`` if it is unavailable,
+    so callers can degrade gracefully.
+    """
+    try:
+        times = os.times()
+        return (times.user, times.system)
+    except (AttributeError, OSError) as e:
+        warn_once("cpu_time", f"os.times() failed: {e}")
+        return None
 
 
 @dataclass
@@ -41,28 +58,22 @@ class CpuTimeProbe:
     """
 
     def __init__(self) -> None:
-        self._start: Optional[Any] = None
+        self._start: Optional[Tuple[float, float]] = None
         self.delta: Optional[CpuTimeDelta] = None
 
     def __enter__(self) -> "CpuTimeProbe":
-        try:
-            self._start = resource.getrusage(resource.RUSAGE_SELF)
-        except (OSError, ValueError) as e:
-            warn_once("cpu_time", f"start sample failed: {e}")
-            self._start = None
+        self._start = _process_cpu_times()
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         if self._start is None:
             return
-        try:
-            end = resource.getrusage(resource.RUSAGE_SELF)
-        except (OSError, ValueError) as e:
-            warn_once("cpu_time", f"end sample failed: {e}")
+        end = _process_cpu_times()
+        if end is None:
             return
         self.delta = CpuTimeDelta(
-            user_time_ms=(end.ru_utime - self._start.ru_utime) * 1000.0,
-            kernel_time_ms=(end.ru_stime - self._start.ru_stime) * 1000.0,
+            user_time_ms=(end[0] - self._start[0]) * 1000.0,
+            kernel_time_ms=(end[1] - self._start[1]) * 1000.0,
         )
 
 

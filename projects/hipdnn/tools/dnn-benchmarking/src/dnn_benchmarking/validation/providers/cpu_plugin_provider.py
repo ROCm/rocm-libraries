@@ -11,14 +11,10 @@ from typing import Any, Dict
 
 import numpy as np
 
-from ..reference_provider import (
-    ReferenceOutput,
-    ReferenceProvider,
-    ReferenceProviderRegistry,
-)
+from ..reference_provider import ReferenceOutput, ReferenceProvider
 
 
-@ReferenceProviderRegistry.register("cpu_plugin")
+# Registered lazily in providers/__init__.py (by import path).
 class CPUPluginReferenceProvider(ReferenceProvider):
     """Reference provider using hipDNN CPU reference plugin (not yet implemented).
 

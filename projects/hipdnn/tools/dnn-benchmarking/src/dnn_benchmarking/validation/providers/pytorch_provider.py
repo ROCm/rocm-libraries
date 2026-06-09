@@ -10,16 +10,14 @@ equivalent PyTorch operations on CPU.
 from typing import Any, Dict, List, Set
 
 import numpy as np
+import torch
 
 from ...execution import pytorch_ops
-from ..reference_provider import (
-    ReferenceOutput,
-    ReferenceProvider,
-    ReferenceProviderRegistry,
-)
+from ..reference_provider import ReferenceOutput, ReferenceProvider
 
 
-@ReferenceProviderRegistry.register("pytorch")
+# Registered lazily in providers/__init__.py (by import path), so this module —
+# and its torch dependency — is only imported when the provider is requested.
 class PyTorchReferenceProvider(ReferenceProvider):
     """Reference provider using PyTorch for computation.
 
@@ -41,17 +39,13 @@ class PyTorchReferenceProvider(ReferenceProvider):
         return "pytorch"
 
     def is_available(self) -> bool:
-        """Check if PyTorch is available.
+        """Return True; importing this module already required torch.
 
-        Returns:
-            True if torch can be imported.
+        The module imports ``torch`` at load time, so a successful import of
+        the provider means torch is present. The registry resolves the module
+        lazily, so callers without torch never reach this method.
         """
-        try:
-            import torch  # noqa: F401
-
-            return True
-        except ImportError:
-            return False
+        return True
 
     def supported_operations(self) -> Set[str]:
         """Get set of supported operation types.
@@ -98,16 +92,8 @@ class PyTorchReferenceProvider(ReferenceProvider):
             Mapping of output tensor UID to ReferenceOutput.
 
         Raises:
-            ImportError: If PyTorch is not available.
             ValueError: If graph contains unsupported operations.
         """
-        if not self.is_available():
-            raise ImportError(
-                "PyTorch is not available. Install with: pip install torch"
-            )
-
-        import torch
-
         # Check for unsupported operations
         unsupported = self.get_unsupported_operations(graph_json)
         if unsupported:

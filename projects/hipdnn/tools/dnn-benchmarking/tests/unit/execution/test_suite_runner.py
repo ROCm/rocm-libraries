@@ -517,14 +517,16 @@ class TestEngineFilter:
             )
 
         assert [r.engine_id for r in result.results] == [1, 1]
+        # plugin_path is stored as str(Path(...)), so it carries the
+        # platform separator.
         assert [r.plugin_path for r in result.results] == [
-            "/plugins/a",
-            "/plugins/b",
+            str(Path("/plugins/a")),
+            str(Path("/plugins/b")),
         ]
         hipdnn.set_engine_plugin_paths.assert_has_calls(
             [
-                call(["/plugins/a"], "absolute"),
-                call(["/plugins/b"], "absolute"),
+                call([str(Path("/plugins/a"))], "absolute"),
+                call([str(Path("/plugins/b"))], "absolute"),
             ]
         )
 
@@ -561,8 +563,8 @@ class TestEngineFilter:
             )
 
         assert [r.status for r in result.results] == ["success", "error"]
-        assert result.results[0].plugin_path == "/plugins/a"
-        assert result.results[1].plugin_path == "/plugins/b"
+        assert result.results[0].plugin_path == str(Path("/plugins/a"))
+        assert result.results[1].plugin_path == str(Path("/plugins/b"))
         assert "bad plugin" in (result.results[1].error_message or "")
         assert result.results[1].correctness is not None
         assert result.results[1].correctness.execution_success is False
