@@ -79,8 +79,8 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
     const size_t expectedDims = _params.spatialDimCount() + 2;
     int wDimCount = 0;
     int yDimCount = 0;
-    miopenGetTensorDescriptorSize(_params.w().tensorDescriptor(), &wDimCount);
-    miopenGetTensorDescriptorSize(_params.y().tensorDescriptor(), &yDimCount);
+    miopenGetTensorDescriptorSize_impl(_params.w().tensorDescriptor(), &wDimCount);
+    miopenGetTensorDescriptorSize_impl(_params.y().tensorDescriptor(), &yDimCount);
     if(static_cast<size_t>(wDimCount) != expectedDims)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -99,7 +99,7 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
     // Validate that there are solutions available for this configuration.
     size_t solutionCount;
     THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
+        miopenConvolutionForwardGetSolutionCount_impl(handle.miopenHandle,
                                                  _params.w().tensorDescriptor(),
                                                  _params.x().tensorDescriptor(),
                                                  _params.conv().convDescriptor(),
@@ -110,7 +110,7 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "miopenConvolutionForwardGetSolutionCount returned no solutions");
+            "miopenConvolutionForwardGetSolutionCount_impl returned no solutions");
     }
 
     // Determine initial workspace size
@@ -129,7 +129,7 @@ ConvFwdPlan::ConvFwdPlan(const HipdnnMiopenHandle& handle,
     else
     {
         THROW_ON_MIOPEN_FAILURE(
-            miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
+            miopenConvolutionForwardGetWorkSpaceSize_impl(handle.miopenHandle,
                                                      _params.w().tensorDescriptor(),
                                                      _params.x().tensorDescriptor(),
                                                      _params.conv().convDescriptor(),
@@ -167,7 +167,7 @@ void ConvFwdPlan::execute(const HipdnnMiopenHandle& handle,
                                          _executionSettings.benchmarkingEnabled());
 
     // Algorithm selection is performed on first execute() call rather than in constructor
-    // because miopenFindConvolutionForwardAlgorithm requires device memory buffers.
+    // because miopenFindConvolutionForwardAlgorithm_impl requires device memory buffers.
     // These buffers are only available during execute(), not during plan construction.
     // The selected algorithm is cached to avoid redundant find calls on subsequent executions.
     {
@@ -188,7 +188,7 @@ void ConvFwdPlan::execute(const HipdnnMiopenHandle& handle,
             int returnedAlgoCount;
 
             THROW_ON_MIOPEN_FAILURE(
-                miopenFindConvolutionForwardAlgorithm(handle.miopenHandle,
+                miopenFindConvolutionForwardAlgorithm_impl(handle.miopenHandle,
                                                       _params.x().tensorDescriptor(),
                                                       xBuffer.ptr,
                                                       _params.w().tensorDescriptor(),
@@ -207,7 +207,7 @@ void ConvFwdPlan::execute(const HipdnnMiopenHandle& handle,
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                    "miopenFindConvolutionForwardAlgorithm returned no algorithms");
+                    "miopenFindConvolutionForwardAlgorithm_impl returned no algorithms");
             }
 
             if(traceEnabled)
@@ -239,7 +239,7 @@ void ConvFwdPlan::execute(const HipdnnMiopenHandle& handle,
     float alpha = 1.0f;
     float beta = 0.0f;
 
-    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForward(handle.miopenHandle,
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForward_impl(handle.miopenHandle,
                                                      &alpha,
                                                      _params.x().tensorDescriptor(),
                                                      xBuffer.ptr,

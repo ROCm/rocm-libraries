@@ -74,7 +74,7 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnMiopenHandle& handle,
     // Validate that there are solutions available for this configuration.
     size_t solutionCount;
     THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
+        miopenConvolutionBackwardDataGetSolutionCount_impl(handle.miopenHandle,
                                                       _params.dy().tensorDescriptor(),
                                                       _params.w().tensorDescriptor(),
                                                       _params.conv().convDescriptor(),
@@ -85,7 +85,7 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnMiopenHandle& handle,
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "miopenConvolutionBackwardDataGetSolutionCount returned no solutions");
+            "miopenConvolutionBackwardDataGetSolutionCount_impl returned no solutions");
     }
 
     // Determine initial workspace size
@@ -103,7 +103,7 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnMiopenHandle& handle,
     else
     {
         THROW_ON_MIOPEN_FAILURE(
-            miopenConvolutionBackwardDataGetWorkSpaceSize(handle.miopenHandle,
+            miopenConvolutionBackwardDataGetWorkSpaceSize_impl(handle.miopenHandle,
                                                           _params.dy().tensorDescriptor(),
                                                           _params.w().tensorDescriptor(),
                                                           _params.conv().convDescriptor(),
@@ -141,7 +141,7 @@ void ConvBwdPlan::execute(const HipdnnMiopenHandle& handle,
                                          _executionSettings.benchmarkingEnabled());
 
     // Algorithm selection is performed on first execute() call rather than in constructor
-    // because miopenFindConvolutionBackwardDataAlgorithm requires device memory buffers.
+    // because miopenFindConvolutionBackwardDataAlgorithm_impl requires device memory buffers.
     // These buffers are only available during execute(), not during plan construction.
     // The selected algorithm is cached to avoid redundant find calls on subsequent executions.
     {
@@ -162,7 +162,7 @@ void ConvBwdPlan::execute(const HipdnnMiopenHandle& handle,
             int returnedAlgoCount;
 
             THROW_ON_MIOPEN_FAILURE(
-                miopenFindConvolutionBackwardDataAlgorithm(handle.miopenHandle,
+                miopenFindConvolutionBackwardDataAlgorithm_impl(handle.miopenHandle,
                                                            _params.dy().tensorDescriptor(),
                                                            yBuffer.ptr,
                                                            _params.w().tensorDescriptor(),
@@ -181,7 +181,7 @@ void ConvBwdPlan::execute(const HipdnnMiopenHandle& handle,
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                    "miopenFindConvolutionBackwardDataAlgorithm returned no algorithms");
+                    "miopenFindConvolutionBackwardDataAlgorithm_impl returned no algorithms");
             }
 
             if(traceEnabled)
@@ -213,7 +213,7 @@ void ConvBwdPlan::execute(const HipdnnMiopenHandle& handle,
     float alpha = 1.0f;
     float beta = 0.0f;
 
-    THROW_ON_MIOPEN_FAILURE(miopenConvolutionBackwardData(handle.miopenHandle,
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionBackwardData_impl(handle.miopenHandle,
                                                           &alpha,
                                                           _params.dy().tensorDescriptor(),
                                                           yBuffer.ptr,

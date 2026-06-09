@@ -1,0 +1,89 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+//
+// Symbol-rename header for the miopen-provider plugin (RFC 0001 Phase 4).
+//
+// When MIOpen is built with the hipDNN forwarding wrapper enabled, its public
+// API symbols (miopenFoo) live in libMIOpen.so (a thin shim that may forward
+// to hipDNN) while the real implementations are exported from libMIOpen_private
+// as renamed miopenFoo_impl symbols. The plugin must bypass the shim so its
+// own MIOpen calls do not round-trip back through hipDNN.
+//
+// The plugin's source files spell their calls explicitly as miopenFoo_impl(...).
+// This header makes the matching declarations available by force-including it
+// before <miopen/miopen.h> in every plugin translation unit (wired via
+// `-include` in CMakeLists.txt). Each #define below rewrites the corresponding
+// declaration in miopen.h so the compiler sees the _impl form, which then
+// resolves at link time against libMIOpen_private.so.
+//
+// Only entries actually called by the plugin are listed. Adding a new MIOpen
+// public API call to the plugin requires adding the matching #define here.
+
+#pragma once
+
+#define miopenBatchNormBackwardActivation miopenBatchNormBackwardActivation_impl
+#define miopenBatchNormForwardTrainingActivation_V2 miopenBatchNormForwardTrainingActivation_V2_impl
+#define miopenBatchNormalizationForwardInference_V2 miopenBatchNormalizationForwardInference_V2_impl
+#define miopenBatchNormalizationForwardTraining_V3 miopenBatchNormalizationForwardTraining_V3_impl
+#define miopenExecuteFusionPlan_v2 miopenExecuteFusionPlan_v2_impl
+#define miopenBatchNormForwardInferenceActivation miopenBatchNormForwardInferenceActivation_impl
+#define miopenBatchNormForwardInferenceActivationInvVariance miopenBatchNormForwardInferenceActivationInvVariance_impl
+#define miopenBatchNormForwardTrainingActivation miopenBatchNormForwardTrainingActivation_impl
+#define miopenBatchNormalizationForwardInference miopenBatchNormalizationForwardInference_impl
+#define miopenBatchNormalizationForwardInferenceInvVariance miopenBatchNormalizationForwardInferenceInvVariance_impl
+#define miopenBatchNormalizationForwardTraining miopenBatchNormalizationForwardTraining_impl
+#define miopenCompileFusionPlan miopenCompileFusionPlan_impl
+#define miopenConvolutionBackwardData miopenConvolutionBackwardData_impl
+#define miopenConvolutionBackwardDataGetSolution miopenConvolutionBackwardDataGetSolution_impl
+#define miopenConvolutionBackwardDataGetSolutionCount miopenConvolutionBackwardDataGetSolutionCount_impl
+#define miopenConvolutionBackwardDataGetWorkSpaceSize miopenConvolutionBackwardDataGetWorkSpaceSize_impl
+#define miopenConvolutionBackwardWeights miopenConvolutionBackwardWeights_impl
+#define miopenConvolutionBackwardWeightsGetSolution miopenConvolutionBackwardWeightsGetSolution_impl
+#define miopenConvolutionBackwardWeightsGetSolutionCount miopenConvolutionBackwardWeightsGetSolutionCount_impl
+#define miopenConvolutionBackwardWeightsGetWorkSpaceSize miopenConvolutionBackwardWeightsGetWorkSpaceSize_impl
+#define miopenConvolutionForward miopenConvolutionForward_impl
+#define miopenConvolutionForwardGetSolution miopenConvolutionForwardGetSolution_impl
+#define miopenConvolutionForwardGetSolutionCount miopenConvolutionForwardGetSolutionCount_impl
+#define miopenConvolutionForwardGetWorkSpaceSize miopenConvolutionForwardGetWorkSpaceSize_impl
+#define miopenCreate miopenCreate_impl
+#define miopenCreateActivationDescriptor miopenCreateActivationDescriptor_impl
+#define miopenCreateConvolutionDescriptor miopenCreateConvolutionDescriptor_impl
+#define miopenCreateFusionPlan miopenCreateFusionPlan_impl
+#define miopenCreateOpActivationForward miopenCreateOpActivationForward_impl
+#define miopenCreateOpBiasForward miopenCreateOpBiasForward_impl
+#define miopenCreateOpConvForward miopenCreateOpConvForward_impl
+#define miopenCreateOperatorArgs miopenCreateOperatorArgs_impl
+#define miopenCreateTensorDescriptor miopenCreateTensorDescriptor_impl
+#define miopenDestroy miopenDestroy_impl
+#define miopenDestroyActivationDescriptor miopenDestroyActivationDescriptor_impl
+#define miopenDestroyConvolutionDescriptor miopenDestroyConvolutionDescriptor_impl
+#define miopenDestroyFusionPlan miopenDestroyFusionPlan_impl
+#define miopenDestroyOperatorArgs miopenDestroyOperatorArgs_impl
+#define miopenDestroyTensorDescriptor miopenDestroyTensorDescriptor_impl
+#define miopenExecuteFusionPlan miopenExecuteFusionPlan_impl
+#define miopenFindConvolutionBackwardDataAlgorithm miopenFindConvolutionBackwardDataAlgorithm_impl
+#define miopenFindConvolutionBackwardWeightsAlgorithm miopenFindConvolutionBackwardWeightsAlgorithm_impl
+#define miopenFindConvolutionForwardAlgorithm miopenFindConvolutionForwardAlgorithm_impl
+#define miopenFusionPlanGetOp miopenFusionPlanGetOp_impl
+#define miopenFusionPlanGetWorkSpaceSize miopenFusionPlanGetWorkSpaceSize_impl
+#define miopenGetActivationDescriptor miopenGetActivationDescriptor_impl
+#define miopenGetConvolutionAttribute miopenGetConvolutionAttribute_impl
+#define miopenGetConvolutionGroupCount miopenGetConvolutionGroupCount_impl
+#define miopenGetConvolutionNdDescriptor miopenGetConvolutionNdDescriptor_impl
+#define miopenGetConvolutionSpatialDim miopenGetConvolutionSpatialDim_impl
+#define miopenGetErrorString miopenGetErrorString_impl
+#define miopenGetTensorDescriptor miopenGetTensorDescriptor_impl
+#define miopenGetTensorDescriptorSize miopenGetTensorDescriptorSize_impl
+#define miopenGetTuningPolicy miopenGetTuningPolicy_impl
+#define miopenInitConvolutionNdDescriptor miopenInitConvolutionNdDescriptor_impl
+#define miopenSetActivationDescriptor miopenSetActivationDescriptor_impl
+#define miopenSetConvolutionAttribute miopenSetConvolutionAttribute_impl
+#define miopenSetConvolutionGroupCount miopenSetConvolutionGroupCount_impl
+#define miopenSetOpArgsActivForward miopenSetOpArgsActivForward_impl
+#define miopenSetOpArgsBiasForward miopenSetOpArgsBiasForward_impl
+#define miopenSetOpArgsConvForward miopenSetOpArgsConvForward_impl
+#define miopenSetStream miopenSetStream_impl
+#define miopenSetTensorDescriptorV2 miopenSetTensorDescriptorV2_impl
+#define miopenSetTuningPolicy miopenSetTuningPolicy_impl
+
+#include <miopen/miopen.h>

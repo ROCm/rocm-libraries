@@ -157,6 +157,11 @@ find_package(miopen CONFIG REQUIRED)
 if(TARGET MIOpen_private)
     set(_MIOPEN_PROVIDER_LINK_TARGET MIOpen_private)
     message(STATUS "miopen-provider: linking MIOpen_private (Phase 4 short-circuit)")
+    # Force-include the symbol-rename header so every plugin TU sees miopen.h
+    # declarations rewritten to their _impl form, matching the plugin source's
+    # explicit miopenFoo_impl(...) call sites and the symbols exported by
+    # libMIOpen_private.so. See MiopenImplApi.hpp for details.
+    add_compile_options(-include "${CMAKE_CURRENT_SOURCE_DIR}/MiopenImplApi.hpp")
 else()
     set(_MIOPEN_PROVIDER_LINK_TARGET MIOpen)
     message(STATUS "miopen-provider: linking MIOpen (legacy single-library install)")

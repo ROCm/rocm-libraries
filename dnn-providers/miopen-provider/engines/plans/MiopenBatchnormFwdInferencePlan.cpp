@@ -131,7 +131,7 @@ void BatchnormFwdInferencePlan::execute(const HipdnnMiopenHandle& handle,
         auto activationOutBuffer = miopen_utils::findDeviceBuffer(
             _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
-        THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardInferenceActivationInvVariance(
+        THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardInferenceActivationInvVariance_impl(
             handle.miopenHandle,
             MIOPEN_BATCHNORM_MODE,
             &alpha,
@@ -154,7 +154,7 @@ void BatchnormFwdInferencePlan::execute(const HipdnnMiopenHandle& handle,
     {
         auto yBuffer = miopen_utils::findDeviceBuffer(
             _inferenceParams.y().uid(), deviceBuffers, numDeviceBuffers);
-        THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardInferenceInvVariance(
+        THROW_ON_MIOPEN_FAILURE(miopenBatchNormalizationForwardInferenceInvVariance_impl(
             handle.miopenHandle,
             MIOPEN_BATCHNORM_MODE,
             &alpha,

@@ -74,7 +74,7 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnMiopenHandle& handle,
     // Validate that there are solutions available for this configuration.
     size_t solutionCount;
     THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
+        miopenConvolutionBackwardWeightsGetSolutionCount_impl(handle.miopenHandle,
                                                          _params.dy().tensorDescriptor(),
                                                          _params.x().tensorDescriptor(),
                                                          _params.conv().convDescriptor(),
@@ -85,7 +85,7 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnMiopenHandle& handle,
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "miopenConvolutionBackwardWeightsGetSolutionCount returned no solutions");
+            "miopenConvolutionBackwardWeightsGetSolutionCount_impl returned no solutions");
     }
 
     // Determine initial workspace size
@@ -104,7 +104,7 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnMiopenHandle& handle,
     else
     {
         THROW_ON_MIOPEN_FAILURE(
-            miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
+            miopenConvolutionBackwardWeightsGetWorkSpaceSize_impl(handle.miopenHandle,
                                                              _params.dy().tensorDescriptor(),
                                                              _params.x().tensorDescriptor(),
                                                              _params.conv().convDescriptor(),
@@ -142,7 +142,7 @@ void ConvWrwPlan::execute(const HipdnnMiopenHandle& handle,
                                          _executionSettings.benchmarkingEnabled());
 
     // Algorithm selection is performed on first execute() call rather than in constructor
-    // because miopenFindConvolutionBackwardWeightsAlgorithm requires device memory buffers.
+    // because miopenFindConvolutionBackwardWeightsAlgorithm_impl requires device memory buffers.
     // These buffers are only available during execute(), not during plan construction.
     // The selected algorithm is cached to avoid redundant find calls on subsequent executions.
     {
@@ -163,7 +163,7 @@ void ConvWrwPlan::execute(const HipdnnMiopenHandle& handle,
             int returnedAlgoCount;
 
             THROW_ON_MIOPEN_FAILURE(
-                miopenFindConvolutionBackwardWeightsAlgorithm(handle.miopenHandle,
+                miopenFindConvolutionBackwardWeightsAlgorithm_impl(handle.miopenHandle,
                                                               _params.dy().tensorDescriptor(),
                                                               yBuffer.ptr,
                                                               _params.x().tensorDescriptor(),
@@ -182,7 +182,7 @@ void ConvWrwPlan::execute(const HipdnnMiopenHandle& handle,
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                    "miopenFindConvolutionBackwardWeightsAlgorithm returned no algorithms");
+                    "miopenFindConvolutionBackwardWeightsAlgorithm_impl returned no algorithms");
             }
 
             if(traceEnabled)
@@ -214,7 +214,7 @@ void ConvWrwPlan::execute(const HipdnnMiopenHandle& handle,
     float alpha = 1.0f;
     float beta = 0.0f;
 
-    THROW_ON_MIOPEN_FAILURE(miopenConvolutionBackwardWeights(handle.miopenHandle,
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionBackwardWeights_impl(handle.miopenHandle,
                                                              &alpha,
                                                              _params.dy().tensorDescriptor(),
                                                              yBuffer.ptr,

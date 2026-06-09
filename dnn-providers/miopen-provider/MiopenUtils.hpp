@@ -24,7 +24,7 @@
     {                                                                                           \
         if((status) != miopenStatusSuccess)                                                     \
         {                                                                                       \
-            HIPDNN_PLUGIN_LOG_ERROR("MIOpen error occurred: " << miopenGetErrorString(status)); \
+            HIPDNN_PLUGIN_LOG_ERROR("MIOpen error occurred: " << miopenGetErrorString_impl(status)); \
         }                                                                                       \
     } while(0)
 
@@ -35,7 +35,7 @@
         {                                                                               \
             throw hipdnn_plugin_sdk::HipdnnPluginException(                             \
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                    \
-                "MIOpen error occurred: " + std::string(miopenGetErrorString(status))); \
+                "MIOpen error occurred: " + std::string(miopenGetErrorString_impl(status))); \
         }                                                                               \
     } while(0)
 
@@ -65,21 +65,21 @@ public:
         : _handle(handle)
     {
         // Save original policy
-        auto status = miopenGetTuningPolicy(_handle, &_originalPolicy);
+        auto status = miopenGetTuningPolicy_impl(_handle, &_originalPolicy);
         if(status != miopenStatusSuccess)
         {
             HIPDNN_PLUGIN_LOG_ERROR(
-                "Failed to get tuning policy: " << miopenGetErrorString(status));
+                "Failed to get tuning policy: " << miopenGetErrorString_impl(status));
             _originalPolicy = miopenTuningPolicyNone; // Fallback
         }
 
         // Set new policy: Search (3) for benchmarking, None (1) otherwise
         auto policy = benchmarkingEnabled ? miopenTuningPolicySearch : miopenTuningPolicyNone;
-        status = miopenSetTuningPolicy(_handle, policy);
+        status = miopenSetTuningPolicy_impl(_handle, policy);
         if(status != miopenStatusSuccess)
         {
             HIPDNN_PLUGIN_LOG_ERROR(
-                "Failed to set tuning policy: " << miopenGetErrorString(status));
+                "Failed to set tuning policy: " << miopenGetErrorString_impl(status));
         }
         else
         {
@@ -92,11 +92,11 @@ public:
     /// @brief Destructor restores tuning policy to original value.
     ~ScopedTuningPolicy()
     {
-        auto status = miopenSetTuningPolicy(_handle, _originalPolicy);
+        auto status = miopenSetTuningPolicy_impl(_handle, _originalPolicy);
         if(status != miopenStatusSuccess)
         {
             HIPDNN_PLUGIN_LOG_ERROR(
-                "Failed to restore tuning policy: " << miopenGetErrorString(status));
+                "Failed to restore tuning policy: " << miopenGetErrorString_impl(status));
         }
         else
         {

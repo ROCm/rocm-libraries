@@ -31,6 +31,7 @@
 #include <miopen/miopen.h>
 
 #include <hipdnn_backend.h>
+#include <hip/hip_runtime_api.h>
 
 #include <atomic>
 #include <chrono>
@@ -2015,6 +2016,31 @@ inline std::atomic<unsigned>& hipdnn_create_seq() {
 inline void log_timing(const char* phase, long long ns) {
     std::fprintf(stderr, "[MIOpen->hipDNN] %s: %lld ns\n", phase, ns);
 }
+inline bool hipdnn_meminfo_enabled() {
+    static const bool enabled = [] {
+        const char* v = std::getenv("MIOPEN_HIPDNN_FORWARDING_MEMINFO");
+        return v != nullptr && std::string_view{v} == std::string_view{"1"};
+    }();
+    return enabled;
+}
+inline void log_meminfo(const char* tag) {
+    if(!hipdnn_meminfo_enabled())
+        return;
+    size_t free_bytes  = 0;
+    size_t total_bytes = 0;
+    const hipError_t e = hipMemGetInfo(&free_bytes, &total_bytes);
+    if(e == hipSuccess)
+        std::fprintf(stderr,
+                     "[MIOpen->hipDNN meminfo] %s: free=%zu MiB / total=%zu MiB\n",
+                     tag,
+                     free_bytes / (1024 * 1024),
+                     total_bytes / (1024 * 1024));
+    else
+        std::fprintf(stderr,
+                     "[MIOpen->hipDNN meminfo] %s: hipMemGetInfo failed (%d)\n",
+                     tag,
+                     static_cast<int>(e));
+}
 } // namespace
 // clang-format on
 
@@ -2067,14 +2093,55 @@ extern "C" miopenStatus_t miopenCreate(miopenHandle_t* handle)
 extern "C" miopenStatus_t miopenCreateWithStream(miopenHandle_t* handle,
                                                  miopenAcceleratorQueue_t stream)
 {
+    // Reversed-order debug variant: when MIOPEN_HIPDNN_FORWARDING_REVERSE_ORDER=1,
+    // call hipdnnCreate FIRST, then miopenCreateWithStream_impl. This isolates
+    // whether the OOM is "whoever calls hipblasLtCreate second fails" or
+    // genuinely dependent on MIOpen state being initialized first.
+    const char* rev_env = std::getenv("MIOPEN_HIPDNN_FORWARDING_REVERSE_ORDER");
+    const bool reverse_order = rev_env != nullptr && std::string_view{rev_env} == std::string_view{"1"};
+
+    if(reverse_order && hipdnn_forwarding_enabled())
+    {
+        log_meminfo("[REV] before hipdnnCreate");
+        hipdnnHandle_t h_early = nullptr;
+        const auto te0 = std::chrono::steady_clock::now();
+        const hipdnnStatus_t hse = hipdnnCreate(&h_early);
+        const auto te1 = std::chrono::steady_clock::now();
+        log_meminfo("[REV] after  hipdnnCreate");
+        std::fprintf(stderr,
+                     "[MIOpen->hipDNN REV] hipdnnCreate (early) status=%d in %lld ns\n",
+                     static_cast<int>(hse),
+                     (long long)std::chrono::duration_cast<std::chrono::nanoseconds>(te1 - te0).count());
+
+        log_meminfo("[REV] before miopenCreateWithStream_impl");
+        const miopenStatus_t s = miopenCreateWithStream_impl(handle, stream);
+        log_meminfo("[REV] after  miopenCreateWithStream_impl");
+
+        if(s == miopenStatusSuccess && handle != nullptr && *handle != nullptr &&
+           hse == HIPDNN_STATUS_SUCCESS && h_early != nullptr)
+        {
+            std::lock_guard<std::mutex> g{hipdnn_handle_map_mutex()};
+            hipdnn_handle_map().emplace(*handle, h_early);
+        }
+        else if(h_early != nullptr)
+        {
+            (void)hipdnnDestroy(h_early);
+        }
+        return s;
+    }
+
+    log_meminfo("before miopenCreateWithStream_impl");
     const miopenStatus_t s = miopenCreateWithStream_impl(handle, stream);
+    log_meminfo("after miopenCreateWithStream_impl");
     if(s == miopenStatusSuccess && handle != nullptr && *handle != nullptr &&
        hipdnn_forwarding_enabled())
     {
         hipdnnHandle_t h = nullptr;
+        log_meminfo("before hipdnnCreate");
         const auto t0    = std::chrono::steady_clock::now();
         const hipdnnStatus_t hs = hipdnnCreate(&h);
         const auto t1    = std::chrono::steady_clock::now();
+        log_meminfo("after hipdnnCreate");
         if(hs == HIPDNN_STATUS_SUCCESS && h != nullptr)
         {
             std::lock_guard<std::mutex> g{hipdnn_handle_map_mutex()};

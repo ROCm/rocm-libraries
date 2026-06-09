@@ -28,7 +28,7 @@ miopenTensorDescriptor_t
                 + ", strides.size()=" + std::to_string(inputStrides.size()));
     }
 
-    // Validate number of dimensions fits in int (miopenSetTensorDescriptorV2 nbDims parameter is int)
+    // Validate number of dimensions fits in int (miopenSetTensorDescriptorV2_impl nbDims parameter is int)
     if(inputDims.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -37,7 +37,7 @@ miopenTensorDescriptor_t
                 + ") exceeds int range for tensor UID: " + std::to_string(uid));
     }
 
-    // Convert int64_t dims/strides to size_t for miopenSetTensorDescriptorV2
+    // Convert int64_t dims/strides to size_t for miopenSetTensorDescriptorV2_impl
     std::vector<size_t> dims;
     dims.reserve(inputDims.size());
     for(auto d : inputDims)
@@ -68,12 +68,12 @@ miopenTensorDescriptor_t
 
     // Create and configure the descriptor
     miopenTensorDescriptor_t descriptor;
-    THROW_ON_MIOPEN_FAILURE(miopenCreateTensorDescriptor(&descriptor));
+    THROW_ON_MIOPEN_FAILURE(miopenCreateTensorDescriptor_impl(&descriptor));
 
     try
     {
         THROW_ON_MIOPEN_FAILURE(
-            miopenSetTensorDescriptorV2(descriptor,
+            miopenSetTensorDescriptorV2_impl(descriptor,
                                         miopen_utils::tensorDataTypeToMiopenDataType(dataType),
                                         static_cast<int>(dims.size()),
                                         dims.data(),
@@ -82,7 +82,7 @@ miopenTensorDescriptor_t
     }
     catch(...)
     {
-        miopenDestroyTensorDescriptor(descriptor);
+        miopenDestroyTensorDescriptor_impl(descriptor);
         throw;
     }
 }
@@ -124,7 +124,7 @@ MiopenTensor& MiopenTensor::operator=(MiopenTensor&& other) noexcept
     {
         if(_descriptor != nullptr)
         {
-            LOG_ON_MIOPEN_FAILURE(miopenDestroyTensorDescriptor(_descriptor));
+            LOG_ON_MIOPEN_FAILURE(miopenDestroyTensorDescriptor_impl(_descriptor));
         }
 
         _uid = other._uid;
@@ -139,7 +139,7 @@ MiopenTensor::~MiopenTensor()
 {
     if(_descriptor != nullptr)
     {
-        LOG_ON_MIOPEN_FAILURE(miopenDestroyTensorDescriptor(_descriptor));
+        LOG_ON_MIOPEN_FAILURE(miopenDestroyTensorDescriptor_impl(_descriptor));
     }
 }
 

@@ -46,7 +46,7 @@ bool isApplicableFwd(const HipdnnMiopenHandle& handle,
             return false;
         }
 
-        auto status = miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
+        auto status = miopenConvolutionForwardGetSolutionCount_impl(handle.miopenHandle,
                                                                params.w().tensorDescriptor(),
                                                                params.x().tensorDescriptor(),
                                                                params.conv().convDescriptor(),
@@ -84,7 +84,7 @@ bool isApplicableBwd(const HipdnnMiopenHandle& handle,
             return false;
         }
 
-        auto status = miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
+        auto status = miopenConvolutionBackwardDataGetSolutionCount_impl(handle.miopenHandle,
                                                                     params.dy().tensorDescriptor(),
                                                                     params.w().tensorDescriptor(),
                                                                     params.conv().convDescriptor(),
@@ -123,7 +123,7 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
         }
 
         auto status
-            = miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
+            = miopenConvolutionBackwardWeightsGetSolutionCount_impl(handle.miopenHandle,
                                                                params.dy().tensorDescriptor(),
                                                                params.x().tensorDescriptor(),
                                                                params.conv().convDescriptor(),
@@ -153,7 +153,7 @@ bool isApplicableWrw(const HipdnnMiopenHandle& handle,
 //
 //   1. miopenConvolution*GetWorkSpaceSize
 //        Per its header doc, this returns "the minimum size of the workspace
-//        that must be provided to miopenFindConvolutionForwardAlgorithm() in
+//        that must be provided to miopenFindConvolutionForwardAlgorithm_impl() in
 //        order for the latter to find the best candidate" — i.e. the workspace
 //        of the single fastest solver MIOpen would pick, not a maximum across
 //        the applicable solver set. In default Fast/Hybrid Find mode the
@@ -205,7 +205,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     // Seed both bounds with GetWorkSpaceSize; the loop below extends them with
     // std::min / std::max over the GetSolution subset.
     size_t maxWorkspace = 0;
-    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetWorkSpaceSize_impl(handle.miopenHandle,
                                                                      params.w().tensorDescriptor(),
                                                                      params.x().tensorDescriptor(),
                                                                      params.conv().convDescriptor(),
@@ -213,7 +213,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
                                                                      &maxWorkspace));
 
     size_t solutionCount = 0;
-    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetSolutionCount_impl(handle.miopenHandle,
                                                                      params.w().tensorDescriptor(),
                                                                      params.x().tensorDescriptor(),
                                                                      params.conv().convDescriptor(),
@@ -228,7 +228,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
 
     std::vector<miopenConvSolution_t> solutions(solutionCount);
     size_t returnedSolutionCount = 0;
-    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetSolution(handle.miopenHandle,
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionForwardGetSolution_impl(handle.miopenHandle,
                                                                 params.w().tensorDescriptor(),
                                                                 params.x().tensorDescriptor(),
                                                                 params.conv().convDescriptor(),
@@ -284,7 +284,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     // std::min / std::max over the GetSolution subset.
     size_t maxWorkspace = 0;
     THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardDataGetWorkSpaceSize(handle.miopenHandle,
+        miopenConvolutionBackwardDataGetWorkSpaceSize_impl(handle.miopenHandle,
                                                       params.dy().tensorDescriptor(),
                                                       params.w().tensorDescriptor(),
                                                       params.conv().convDescriptor(),
@@ -293,7 +293,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
 
     size_t solutionCount = 0;
     THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
+        miopenConvolutionBackwardDataGetSolutionCount_impl(handle.miopenHandle,
                                                       params.dy().tensorDescriptor(),
                                                       params.w().tensorDescriptor(),
                                                       params.conv().convDescriptor(),
@@ -308,7 +308,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
 
     std::vector<miopenConvSolution_t> solutions(solutionCount);
     size_t returnedSolutionCount = 0;
-    THROW_ON_MIOPEN_FAILURE(miopenConvolutionBackwardDataGetSolution(handle.miopenHandle,
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionBackwardDataGetSolution_impl(handle.miopenHandle,
                                                                      params.dy().tensorDescriptor(),
                                                                      params.w().tensorDescriptor(),
                                                                      params.conv().convDescriptor(),
@@ -364,7 +364,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     // std::min / std::max over the GetSolution subset.
     size_t maxWorkspace = 0;
     THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
+        miopenConvolutionBackwardWeightsGetWorkSpaceSize_impl(handle.miopenHandle,
                                                          params.dy().tensorDescriptor(),
                                                          params.x().tensorDescriptor(),
                                                          params.conv().convDescriptor(),
@@ -373,7 +373,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
 
     size_t solutionCount = 0;
     THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
+        miopenConvolutionBackwardWeightsGetSolutionCount_impl(handle.miopenHandle,
                                                          params.dy().tensorDescriptor(),
                                                          params.x().tensorDescriptor(),
                                                          params.conv().convDescriptor(),
@@ -389,7 +389,7 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
     std::vector<miopenConvSolution_t> solutions(solutionCount);
     size_t returnedSolutionCount = 0;
     THROW_ON_MIOPEN_FAILURE(
-        miopenConvolutionBackwardWeightsGetSolution(handle.miopenHandle,
+        miopenConvolutionBackwardWeightsGetSolution_impl(handle.miopenHandle,
                                                     params.dy().tensorDescriptor(),
                                                     params.x().tensorDescriptor(),
                                                     params.conv().convDescriptor(),
@@ -445,7 +445,7 @@ size_t getMaxWorkspaceSizeFwd(const HipdnnMiopenHandle& handle,
                   .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
         const ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
         THROW_ON_MIOPEN_FAILURE(
-            miopenConvolutionForwardGetWorkSpaceSize(handle.miopenHandle,
+            miopenConvolutionForwardGetWorkSpaceSize_impl(handle.miopenHandle,
                                                      params.w().tensorDescriptor(),
                                                      params.x().tensorDescriptor(),
                                                      params.conv().convDescriptor(),
@@ -471,7 +471,7 @@ size_t getMaxWorkspaceSizeBwd(const HipdnnMiopenHandle& handle,
         const ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         THROW_ON_MIOPEN_FAILURE(
-            miopenConvolutionBackwardDataGetWorkSpaceSize(handle.miopenHandle,
+            miopenConvolutionBackwardDataGetWorkSpaceSize_impl(handle.miopenHandle,
                                                           params.dy().tensorDescriptor(),
                                                           params.w().tensorDescriptor(),
                                                           params.conv().convDescriptor(),
@@ -497,7 +497,7 @@ size_t getMaxWorkspaceSizeWrw(const HipdnnMiopenHandle& handle,
         const ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
         THROW_ON_MIOPEN_FAILURE(
-            miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
+            miopenConvolutionBackwardWeightsGetWorkSpaceSize_impl(handle.miopenHandle,
                                                              params.dy().tensorDescriptor(),
                                                              params.x().tensorDescriptor(),
                                                              params.conv().convDescriptor(),

@@ -29,14 +29,14 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
-        ASSERT_EQ(miopenCreate(&_miopenHandle), miopenStatusSuccess);
+        ASSERT_EQ(miopenCreate_impl(&_miopenHandle), miopenStatusSuccess);
     }
 
     void TearDown() override
     {
         if(_miopenHandle != nullptr)
         {
-            EXPECT_EQ(miopenDestroy(_miopenHandle), miopenStatusSuccess);
+            EXPECT_EQ(miopenDestroy_impl(_miopenHandle), miopenStatusSuccess);
         }
     }
 

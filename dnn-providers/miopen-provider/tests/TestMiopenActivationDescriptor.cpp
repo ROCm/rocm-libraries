@@ -57,7 +57,7 @@ TEST(TestMiopenActivationDescriptor, CreatesStandardRelu)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationRELU);
@@ -80,7 +80,7 @@ TEST(TestMiopenActivationDescriptor, CreatesStandardReluBwd)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationRELU);
@@ -103,7 +103,7 @@ TEST(TestMiopenActivationDescriptor, CreatesClippedRelu)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationCLIPPEDRELU);
@@ -128,7 +128,7 @@ TEST(TestMiopenActivationDescriptor, CreatesLeakyRelu)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationLEAKYRELU);
@@ -151,7 +151,7 @@ TEST(TestMiopenActivationDescriptor, CreatesClamp)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationCLAMP);
@@ -173,7 +173,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSigmoidFwd)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationLOGISTIC);
@@ -193,7 +193,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSigmoidBwd)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationLOGISTIC);
@@ -213,7 +213,7 @@ TEST(TestMiopenActivationDescriptor, CreatesTanhFwd)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationTANH);
@@ -235,7 +235,7 @@ TEST(TestMiopenActivationDescriptor, CreatesTanhBwd)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationTANH);
@@ -260,7 +260,7 @@ TEST(TestMiopenActivationDescriptor, CreatesEluWithCustomAlpha)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationELU);
@@ -281,7 +281,7 @@ TEST(TestMiopenActivationDescriptor, CreatesEluWithDefaultAlpha)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationELU);
@@ -302,7 +302,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusFwdWithoutBeta)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationSOFTRELU);
@@ -322,7 +322,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusBwdWithoutBeta)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationSOFTRELU);
@@ -348,7 +348,7 @@ TEST(TestMiopenActivationDescriptor, CreatesSoftplusWithBetaOne)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationSOFTRELU);
@@ -386,7 +386,7 @@ TEST(TestMiopenActivationDescriptor, CreatesAbs)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationABS);
@@ -406,7 +406,7 @@ TEST(TestMiopenActivationDescriptor, CreatesIdentity)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationPASTHRU);
@@ -441,7 +441,7 @@ TEST(TestMiopenActivationDescriptor, ClampTakesPrecedenceOverClippedRelu)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationCLAMP);
@@ -467,7 +467,7 @@ TEST(TestMiopenActivationDescriptor, UpperClipWithoutLowerUsesClippedRelu)
     double alpha;
     double beta;
     double gamma;
-    EXPECT_EQ(miopenGetActivationDescriptor(
+    EXPECT_EQ(miopenGetActivationDescriptor_impl(
                   activDesc.activationDescriptor(), &mode, &alpha, &beta, &gamma),
               miopenStatusSuccess);
     EXPECT_EQ(mode, miopenActivationCLIPPEDRELU);

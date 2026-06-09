@@ -34,14 +34,14 @@ TEST(TestMiopenConvDescriptor, CreateValidDescriptorFwd)
 
     miopenStatus_t status;
     int returnedSpatialDimCount = 0;
-    status = miopenGetConvolutionSpatialDim(convDesc.convDescriptor(), &returnedSpatialDimCount);
+    status = miopenGetConvolutionSpatialDim_impl(convDesc.convDescriptor(), &returnedSpatialDimCount);
     EXPECT_EQ(status, miopenStatusSuccess);
     EXPECT_EQ(returnedSpatialDimCount, spatialDimCount);
 
     std::vector<int> returnedPadding(spatialDimCount);
     std::vector<int> returnedStride(spatialDimCount);
     std::vector<int> returnedDilation(spatialDimCount);
-    status = miopenGetConvolutionNdDescriptor(convDesc.convDescriptor(),
+    status = miopenGetConvolutionNdDescriptor_impl(convDesc.convDescriptor(),
                                               static_cast<int>(spatialDimCount),
                                               nullptr,
                                               returnedPadding.data(),
@@ -206,14 +206,14 @@ TEST(TestMiopenConvDescriptor, CreateValidDescriptorBwd)
 
     miopenStatus_t status;
     int returnedSpatialDimCount = 0;
-    status = miopenGetConvolutionSpatialDim(convDesc.convDescriptor(), &returnedSpatialDimCount);
+    status = miopenGetConvolutionSpatialDim_impl(convDesc.convDescriptor(), &returnedSpatialDimCount);
     EXPECT_EQ(status, miopenStatusSuccess);
     EXPECT_EQ(returnedSpatialDimCount, spatialDimCount);
 
     std::vector<int> returnedPadding(spatialDimCount);
     std::vector<int> returnedStride(spatialDimCount);
     std::vector<int> returnedDilation(spatialDimCount);
-    status = miopenGetConvolutionNdDescriptor(convDesc.convDescriptor(),
+    status = miopenGetConvolutionNdDescriptor_impl(convDesc.convDescriptor(),
                                               static_cast<int>(spatialDimCount),
                                               nullptr,
                                               returnedPadding.data(),
@@ -378,14 +378,14 @@ TEST(TestMiopenConvDescriptor, CreateValidDescriptorWrw)
 
     miopenStatus_t status;
     int returnedSpatialDimCount = 0;
-    status = miopenGetConvolutionSpatialDim(convDesc.convDescriptor(), &returnedSpatialDimCount);
+    status = miopenGetConvolutionSpatialDim_impl(convDesc.convDescriptor(), &returnedSpatialDimCount);
     EXPECT_EQ(status, miopenStatusSuccess);
     EXPECT_EQ(returnedSpatialDimCount, spatialDimCount);
 
     std::vector<int> returnedPadding(spatialDimCount);
     std::vector<int> returnedStride(spatialDimCount);
     std::vector<int> returnedDilation(spatialDimCount);
-    status = miopenGetConvolutionNdDescriptor(convDesc.convDescriptor(),
+    status = miopenGetConvolutionNdDescriptor_impl(convDesc.convDescriptor(),
                                               static_cast<int>(spatialDimCount),
                                               nullptr,
                                               returnedPadding.data(),
@@ -573,7 +573,7 @@ TEST(TestMiopenConvDescriptor, VerifiesGroupCountSetCorrectly)
 
     int returnedGroupCount = 0;
     const miopenStatus_t status
-        = miopenGetConvolutionGroupCount(convDesc.convDescriptor(), &returnedGroupCount);
+        = miopenGetConvolutionGroupCount_impl(convDesc.convDescriptor(), &returnedGroupCount);
     EXPECT_EQ(status, miopenStatusSuccess);
     EXPECT_EQ(returnedGroupCount, groupCount);
 }
@@ -623,7 +623,7 @@ TEST(TestMiopenConvDescriptor, SetsDeterministicAttributeWhenEnabled)
 
     // Verify the deterministic attribute is set to 1
     int deterministicValue = 0;
-    const miopenStatus_t status = miopenGetConvolutionAttribute(
+    const miopenStatus_t status = miopenGetConvolutionAttribute_impl(
         convDesc.convDescriptor(), MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, &deterministicValue);
     EXPECT_EQ(status, miopenStatusSuccess);
     EXPECT_EQ(deterministicValue, 1);
@@ -651,7 +651,7 @@ TEST(TestMiopenConvDescriptor, DeterministicAttributeDefaultsToDisabled)
 
     // Verify the deterministic attribute is 0 (disabled)
     int deterministicValue = -1;
-    const miopenStatus_t status = miopenGetConvolutionAttribute(
+    const miopenStatus_t status = miopenGetConvolutionAttribute_impl(
         convDesc.convDescriptor(), MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, &deterministicValue);
     EXPECT_EQ(status, miopenStatusSuccess);
     EXPECT_EQ(deterministicValue, 0);
@@ -679,7 +679,7 @@ TEST(TestMiopenConvDescriptor, SetsDeterministicAttributeForBwdDescriptor)
 
     // Verify the deterministic attribute is set to 1
     int deterministicValue = 0;
-    const miopenStatus_t status = miopenGetConvolutionAttribute(
+    const miopenStatus_t status = miopenGetConvolutionAttribute_impl(
         convDesc.convDescriptor(), MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, &deterministicValue);
     EXPECT_EQ(status, miopenStatusSuccess);
     EXPECT_EQ(deterministicValue, 1);
@@ -707,7 +707,7 @@ TEST(TestMiopenConvDescriptor, SetsDeterministicAttributeForWrwDescriptor)
 
     // Verify the deterministic attribute is set to 1
     int deterministicValue = 0;
-    const miopenStatus_t status = miopenGetConvolutionAttribute(
+    const miopenStatus_t status = miopenGetConvolutionAttribute_impl(
         convDesc.convDescriptor(), MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, &deterministicValue);
     EXPECT_EQ(status, miopenStatusSuccess);
     EXPECT_EQ(deterministicValue, 1);
