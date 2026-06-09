@@ -212,6 +212,8 @@ private:
 
 using IntegrationGpuSdpaBwdBf16 = SdpaBackward<bfloat16>;
 
+using IntegrationGpuSdpaBwdFp16 = SdpaBackward<hipdnn_data_sdk::types::half>;
+
 } // namespace
 
 TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
@@ -231,4 +233,23 @@ TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuSdpaBwdBf16,
+                         testing::ValuesIn(getSdpaBwdTestCases()));
+
+TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
+{
+    // FP16 backward shares the same softmax-recomputation error sources as bf16,
+    // but the 10-bit mantissa (vs bf16's 7) yields markedly tighter results: the
+    // worst-case element on this shape lands just under 0.25 in the combined
+    // atol+rtol metric. Use 0.5 — ~2x margin over that measured floor to absorb
+    // the |ref| ≈ 0 outliers and seed/driver variation, while staying 4x tighter
+    // than the bf16 bar.
+    // Tolerance: 5e-1 (atol=0.5, rtol=0.5)
+
+    auto tolerance = 5e-1f;
+
+    runGraphTest(tolerance);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuSdpaBwdFp16,
                          testing::ValuesIn(getSdpaBwdTestCases()));

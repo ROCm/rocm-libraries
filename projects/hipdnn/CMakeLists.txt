@@ -3,6 +3,12 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
+# Used by the shared CTest test categorisation helpers
+# (shared/ctest/TestCategories.cmake) to locate the parser script.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # hipDNN dependency versions to use
 set(_HIPDNN_DEFAULT_FLATBUFFERS_VERSION "25.9.23")
 

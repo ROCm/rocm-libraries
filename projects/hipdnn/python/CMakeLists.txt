@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 if(DEFINED SKBUILD)
-    cmake_minimum_required(VERSION 3.18)
+    cmake_minimum_required(VERSION 3.26)
     project(hipdnn_python_bindings LANGUAGES CXX)
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,7 +10,8 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+find_package(Python 3.12
+    REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 
 if(DEFINED SKBUILD)
     if(DEFINED ENV{ROCM_PATH})
@@ -28,6 +29,7 @@ endif()
 
 nanobind_add_module(
     hipdnn_frontend_python
+    STABLE_ABI
     src/module.cpp
     src/graph_bindings.cpp
     src/tensor_bindings.cpp

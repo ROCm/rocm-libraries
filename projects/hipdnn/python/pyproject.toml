@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 [build-system]
-requires = ["scikit-build-core>=0.10", "nanobind>=2.12.0", "cmake>=3.18"]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.12.0", "cmake>=3.26"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -10,7 +10,7 @@ name = "hipdnn-frontend"
 version = "0.1.0"
 description = "Python bindings for the hipDNN frontend library"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
     {name = "Advanced Micro Devices, Inc."},
@@ -20,10 +20,8 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
     "Topic :: Software Development :: Libraries",
 ]
@@ -40,3 +38,4 @@ dev = [
 [tool.scikit-build]
 cmake.build-type = "Release"
 wheel.packages = []
+wheel.py-api = "cp312"
