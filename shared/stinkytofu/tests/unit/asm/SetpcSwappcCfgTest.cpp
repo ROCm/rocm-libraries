@@ -41,13 +41,11 @@ class SetpcSwappcCfgTest : public ::testing::Test {
     GfxArchID arch = GfxArchID::Gfx1250;
     std::unique_ptr<Function> func;
     BasicBlock* entry = nullptr;
-    AnalysisManager am;
 
     void SetUp() override {
         func = std::make_unique<Function>("setpc_swappc_cfg_test");
         setFunctionArch(*func, arch);
         entry = func->createBasicBlock("entry");
-        registerAllAnalyses(am);
     }
 
     /// Build a fresh PassManager and run only the CFG builder over \p func.
@@ -62,14 +60,6 @@ class SetpcSwappcCfgTest : public ::testing::Test {
     StinkyInstruction* createSetpc(BasicBlock* bb, int srcSGPR) {
         AsmIRBuilder builder(*bb, arch);
         StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_setpc_b64, arch));
-        inst->addSrcReg(StinkyRegister("s", srcSGPR, 2));
-        return inst;
-    }
-
-    StinkyInstruction* createSwappc(BasicBlock* bb, int dstSGPR, int srcSGPR) {
-        AsmIRBuilder builder(*bb, arch);
-        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_swappc_b64, arch));
-        inst->addDestReg(StinkyRegister("s", dstSGPR, 2));
         inst->addSrcReg(StinkyRegister("s", srcSGPR, 2));
         return inst;
     }
