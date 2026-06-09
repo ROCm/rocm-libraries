@@ -1216,7 +1216,7 @@ void testing_aux_matmul_sm_count_target(const Arguments& arg)
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
 }
 
-void testing_aux_matmul_dyn_persistent_tile_ext(const Arguments& arg)
+void testing_aux_matmul_streamk_tile_scheduling_ext(const Arguments& arg)
 {
     size_t                sizeWritten = 0;
     hipblasLtMatmulDesc_t matmul      = nullptr;
@@ -1225,7 +1225,7 @@ void testing_aux_matmul_dyn_persistent_tile_ext(const Arguments& arg)
     // Default is AUTO (2).
     int32_t value_r = -1;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &value_r,
                                                           sizeof(value_r),
                                                           &sizeWritten),
@@ -1235,12 +1235,12 @@ void testing_aux_matmul_dyn_persistent_tile_ext(const Arguments& arg)
     // ON then OFF round-trip.
     int32_t enable = 1;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &enable,
                                                           sizeof(enable)),
                           HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &value_r,
                                                           sizeof(value_r),
                                                           &sizeWritten),
@@ -1250,12 +1250,12 @@ void testing_aux_matmul_dyn_persistent_tile_ext(const Arguments& arg)
     // AUTO (2) is also accepted and round-trips.
     int32_t auto_mode = 2;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &auto_mode,
                                                           sizeof(auto_mode)),
                           HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &value_r,
                                                           sizeof(value_r),
                                                           &sizeWritten),
@@ -1266,25 +1266,25 @@ void testing_aux_matmul_dyn_persistent_tile_ext(const Arguments& arg)
     // any nonzero value was silently clamped to 1).
     int32_t three = 3;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &three,
                                                           sizeof(three)),
                           HIPBLAS_STATUS_INVALID_VALUE);
     int32_t negative = -1;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &negative,
                                                           sizeof(negative)),
                           HIPBLAS_STATUS_INVALID_VALUE);
 
     int32_t disable = 0;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &disable,
                                                           sizeof(disable)),
                           HIPBLAS_STATUS_SUCCESS);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
-                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                           &value_r,
                                                           sizeof(value_r),
                                                           &sizeWritten),

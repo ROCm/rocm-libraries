@@ -395,7 +395,7 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
-    ROCBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT    = 104,
+    ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT    = 104,
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -586,15 +586,15 @@ struct RocblasltContractionProblem
     bool        swizzleB;
     hipblasLtBatchMode_t batchMode;   
     int32_t bias_stride; 
-    // Mirrors HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT. Forwarded
-    // into ContractionProblemParameters::setDynPersistentTileMode by
+    // Mirrors HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT. Forwarded
+    // into ContractionProblemParameters::setStreamKTileSchedulingMode by
     // tensile_host.cpp so that ContractionSolution::solve can populate
-    // StreamKSettings::dynPersistentTileMode. Tri-state:
+    // StreamKSettings::streamKTileSchedulingMode. Tri-state:
     //   0 = OFF  (force SK3 static path on SK5 kernels),
     //   1 = ON   (SK4 dynamic per-XCD work-queue on SK5 kernels),
     //   2 = AUTO (default; delegate to origami::streamk::select_hybrid_mode).
     // Ignored for non-StreamK=5 solutions.
-    int32_t dyn_persistent_tile_ext = 2;
+    int32_t streamk_tile_scheduling_ext = 2;
     // Effective sm_count_target after the (pref > desc > handle)
     // precedence resolution. 0 = "use all CUs the device exposes".
     int32_t sm_count_target = 0;
@@ -661,7 +661,7 @@ struct RocblasltContractionProblem
                                 bool                   swizzleB,
                                 hipblasLtBatchMode_t   batchMode,
                                 int32_t                bias_stride,
-                                int32_t                dyn_persistent_tile_ext = 2,
+                                int32_t                streamk_tile_scheduling_ext = 2,
                                 int32_t                sm_count_target         = 0);
 };
 

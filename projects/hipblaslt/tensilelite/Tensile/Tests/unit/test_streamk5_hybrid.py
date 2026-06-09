@@ -245,21 +245,21 @@ _CONTRACTION_SOLUTION_CPP = (_TENSILELITE_ROOT / "src"
 class TestStreamK5HybridAutoMode:
     def test_contraction_problem_param_setter_renamed_to_mode(self):
         src = _read(_CONTRACTION_PROBLEM_HPP)
-        assert "setDynPersistentTileMode" in src, (
-            "ContractionProblem.hpp must expose setDynPersistentTileMode(int)"
+        assert "setStreamKTileSchedulingMode" in src, (
+            "ContractionProblem.hpp must expose setStreamKTileSchedulingMode(int)"
         )
-        assert "dynPersistentTileMode()" in src, (
-            "ContractionProblem.hpp must expose dynPersistentTileMode() getter"
+        assert "streamKTileSchedulingMode()" in src, (
+            "ContractionProblem.hpp must expose streamKTileSchedulingMode() getter"
         )
 
     def test_contraction_problem_legacy_bool_api_removed(self):
         src = _read(_CONTRACTION_PROBLEM_HPP)
         assert not re.search(
-            r'\bvoid\s+setDynPersistentTile\s*\(\s*bool\b', src), \
-            "legacy setDynPersistentTile(bool) must be removed"
+            r'\bvoid\s+setStreamKTileScheduling\s*\(\s*bool\b', src), \
+            "legacy setStreamKTileScheduling(bool) must be removed"
         assert not re.search(
-            r'\bbool\s+dynPersistentTile\s*\(\s*\)', src), \
-            "legacy bool dynPersistentTile() getter must be removed"
+            r'\bbool\s+streamKTileScheduling\s*\(\s*\)', src), \
+            "legacy bool streamKTileScheduling() getter must be removed"
 
     def test_contraction_problem_has_sm_count_target_accessor(self):
         src = _read(_CONTRACTION_PROBLEM_HPP)
@@ -269,8 +269,8 @@ class TestStreamK5HybridAutoMode:
     def test_streamk_settings_uses_int_mode(self):
         src = _read(_CONTRACTION_SOLUTION_HPP)
         assert re.search(
-            r'dynPersistentTileMode\s*=\s*2', src), \
-            "StreamKSettings::dynPersistentTileMode default 2 (AUTO) not found"
+            r'streamKTileSchedulingMode\s*=\s*2', src), \
+            "StreamKSettings::streamKTileSchedulingMode default 2 (AUTO) not found"
         assert "smCountTarget" in src
 
     def test_contraction_solve_dispatches_auto_via_origami(self):
@@ -278,9 +278,9 @@ class TestStreamK5HybridAutoMode:
         assert "origami::streamk::select_hybrid_mode(" in src, \
             "SK5 AUTO branch must call origami::streamk::select_hybrid_mode"
         assert re.search(
-            r'sk\.dynPersistentTileMode\s*=\s*problem\.getParams\(\)\.dynPersistentTileMode\(\)',
+            r'sk\.streamKTileSchedulingMode\s*=\s*problem\.getParams\(\)\.streamKTileSchedulingMode\(\)',
             src), \
-            "sk.dynPersistentTileMode must be sourced from getParams().dynPersistentTileMode()"
+            "sk.streamKTileSchedulingMode must be sourced from getParams().streamKTileSchedulingMode()"
         assert re.search(
             r'sk\.smCountTarget\s*=\s*problem\.getParams\(\)\.smCountTarget\(\)',
             src), \

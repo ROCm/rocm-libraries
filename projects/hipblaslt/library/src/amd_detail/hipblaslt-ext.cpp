@@ -44,7 +44,7 @@ namespace hipblaslt_ext
     {
     public:
         size_t                           workspace_bytes          = 0;
-        hipblasLtDynPersistentTileMode_t dyn_persistent_tile_mode = HIPBLASLT_DYN_PERSISTENT_TILE_AUTO;
+        hipblasLtStreamKTileSchedulingMode_t streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO;
     };
 
     GemmPreference::GemmPreference()
@@ -78,24 +78,24 @@ namespace hipblaslt_ext
         return pimpl->workspace_bytes;
     }
 
-    void GemmPreference::setDynPersistentTileMode(hipblasLtDynPersistentTileMode_t mode)
+    void GemmPreference::setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode)
     {
         switch(mode)
         {
-        case HIPBLASLT_DYN_PERSISTENT_TILE_OFF:
-        case HIPBLASLT_DYN_PERSISTENT_TILE_ON:
-        case HIPBLASLT_DYN_PERSISTENT_TILE_AUTO:
-            pimpl->dyn_persistent_tile_mode = mode;
+        case HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF:
+        case HIPBLASLT_STREAMK_TILE_SCHEDULING_ON:
+        case HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO:
+            pimpl->streamk_tile_scheduling_mode = mode;
             break;
         default:
-            pimpl->dyn_persistent_tile_mode = HIPBLASLT_DYN_PERSISTENT_TILE_AUTO;
+            pimpl->streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO;
             break;
         }
     }
 
-    hipblasLtDynPersistentTileMode_t GemmPreference::getDynPersistentTileMode() const
+    hipblasLtStreamKTileSchedulingMode_t GemmPreference::getStreamKTileSchedulingMode() const
     {
-        return pimpl->dyn_persistent_tile_mode;
+        return pimpl->streamk_tile_scheduling_mode;
     }
 
     class GemmProblemType::GemmProblemTypeImpl
@@ -766,8 +766,8 @@ namespace hipblaslt_ext
             rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
-        m_dyn_persistent_tile_mode
-            = static_cast<int32_t>(pref.pimpl->dyn_persistent_tile_mode);
+        m_streamk_tile_scheduling_mode
+            = static_cast<int32_t>(pref.pimpl->streamk_tile_scheduling_mode);
         auto gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         auto results
             = reinterpret_cast<std::vector<rocblaslt_matmul_heuristic_result>*>(&heuristicResults);
@@ -777,7 +777,7 @@ namespace hipblaslt_ext
                                              gemmType,
                                              m_data,
                                              pref.pimpl->workspace_bytes,
-                                             m_dyn_persistent_tile_mode,
+                                             m_streamk_tile_scheduling_mode,
                                              requestedAlgoCount,
                                              *results));
         rocblaslt::Debug::Instance().markerStop();

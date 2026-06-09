@@ -199,7 +199,7 @@ globalParameters["DataInitTypeMXSB"] = 1
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
 # StreamK=5 hybrid-mode toggle values driven by the benchmark client.
 # Each list entry causes ClientProblemFactory to replay every base
-# problem with setParams().setDynPersistentTileMode(value). Accepts
+# problem with setParams().setStreamKTileSchedulingMode(value). Accepts
 # the full tri-state {0=OFF (static), 1=ON (dynamic per-XCD work-queue),
 # 2=AUTO (heuristic)}. Set to [0, 1] in YAML GlobalParameters to
 # deterministically exercise both SK5 sub-paths in a single sweep run;

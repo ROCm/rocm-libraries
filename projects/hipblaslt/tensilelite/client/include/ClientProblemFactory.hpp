@@ -94,7 +94,7 @@ namespace TensileLite
             std::vector<ActivationType>      m_activationEnumArg;
             // StreamK=5 hybrid-mode toggle values to test. Each element
             // generates a separate ContractionProblemGemm variant with
-            // setParams().setDynPersistentTileMode(value); the SK5
+            // setParams().setStreamKTileSchedulingMode(value); the SK5
             // kernel then runs the static (0), dynamic (1), or
             // heuristic-picked AUTO (2) path accordingly. Empty or
             // single-element vectors keep the host's default behavior.

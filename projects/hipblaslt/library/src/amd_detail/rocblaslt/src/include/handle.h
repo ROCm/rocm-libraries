@@ -212,11 +212,11 @@ struct _rocblaslt_matmul_desc
     // CUs the device exposes". Negative values are rejected by the setter.
     int32_t sm_count_target = 0;
 
-    // Opt-in to the dynamic persistent tile scheduler (work-stealing StreamK).
+    // StreamK tile scheduling mode (work-stealing StreamK scheduler).
     // Exposed via the _EXT attribute namespace (no equivalent in the base C API).
     // Tri-state: 0 = OFF (force SK3 static), 1 = ON (force SK4 dynamic),
     // 2 = AUTO (default; heuristic picks per launch).
-    int32_t dyn_persistent_tile_ext = 2;
+    int32_t streamk_tile_scheduling_ext = 2;
 
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
     // Default value is 0 which means same bias vector will be used across all batches (broadcast).
@@ -252,7 +252,7 @@ struct _rocblaslt_matmul_desc
         this->act0                    = src.act0;
         this->act1                    = src.act1;
         this->sm_count_target         = src.sm_count_target;
-        this->dyn_persistent_tile_ext = src.dyn_persistent_tile_ext;
+        this->streamk_tile_scheduling_ext = src.streamk_tile_scheduling_ext;
         this->bias_stride             = src.bias_stride;
     }
 };

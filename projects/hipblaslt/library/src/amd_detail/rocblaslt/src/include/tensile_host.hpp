@@ -301,10 +301,10 @@ TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<voi
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 
-// Push the GemmPreference-supplied dyn-persistent-tile mode onto every
+// Push the GemmPreference-supplied StreamK tile scheduling mode onto every
 // contraction problem currently carried by gemmData. Defined in
 // tensile_host.cpp because gemmData's concrete type
 // (TensileDataGemm / TensileDataGroupedGemm) only exists there.
-void applyDynPersistentTileMode(std::shared_ptr<void>  gemmData,
+void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 int32_t                mode);

@@ -497,7 +497,7 @@ namespace TensileLite
                             // runtime heuristic end-to-end on a real problem.
                             if(m < (int)m_streamKHybridMode.size())
                             {
-                                rv.back().setParams().setDynPersistentTileMode(
+                                rv.back().setParams().setStreamKTileSchedulingMode(
                                     m_streamKHybridMode[m]);
                             }
                         }

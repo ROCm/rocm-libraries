@@ -502,27 +502,27 @@ TEST(aux_handle_test, get_sm_count_target_rejects_null_handle)
     ASSERT_EQ(hipblasLtGetSmCountTarget(nullptr, &value), HIPBLAS_STATUS_NOT_INITIALIZED);
 }
 
-TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_mode_default_is_auto)
+TEST(aux_ext_test, gemm_preference_streamk_tile_scheduling_mode_default_is_auto)
 {
     hipblaslt_ext::GemmPreference pref;
-    ASSERT_EQ(pref.getDynPersistentTileMode(), HIPBLASLT_DYN_PERSISTENT_TILE_AUTO);
+    ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO);
 }
 
-TEST(aux_ext_test, gemm_preference_dyn_persistent_tile_mode_round_trip)
+TEST(aux_ext_test, gemm_preference_streamk_tile_scheduling_mode_round_trip)
 {
     hipblaslt_ext::GemmPreference pref;
 
-    pref.setDynPersistentTileMode(HIPBLASLT_DYN_PERSISTENT_TILE_ON);
-    ASSERT_EQ(pref.getDynPersistentTileMode(), HIPBLASLT_DYN_PERSISTENT_TILE_ON);
+    pref.setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_ON);
+    ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_ON);
 
-    pref.setDynPersistentTileMode(HIPBLASLT_DYN_PERSISTENT_TILE_AUTO);
-    ASSERT_EQ(pref.getDynPersistentTileMode(), HIPBLASLT_DYN_PERSISTENT_TILE_AUTO);
+    pref.setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO);
+    ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO);
 
-    pref.setDynPersistentTileMode(HIPBLASLT_DYN_PERSISTENT_TILE_OFF);
-    ASSERT_EQ(pref.getDynPersistentTileMode(), HIPBLASLT_DYN_PERSISTENT_TILE_OFF);
+    pref.setStreamKTileSchedulingMode(HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
+    ASSERT_EQ(pref.getStreamKTileSchedulingMode(), HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF);
 }
 
-TEST(aux_attr_test, desc_dyn_persistent_tile_ext_set_rejects_out_of_range)
+TEST(aux_attr_test, desc_streamk_tile_scheduling_ext_set_rejects_out_of_range)
 {
     hipblasLtMatmulDesc_t desc = nullptr;
     ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
@@ -531,7 +531,7 @@ TEST(aux_attr_test, desc_dyn_persistent_tile_ext_set_rejects_out_of_range)
     for(int32_t valid : {int32_t{0}, int32_t{1}, int32_t{2}})
     {
         ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
-                                                  HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                   &valid,
                                                   sizeof(valid)),
                   HIPBLAS_STATUS_SUCCESS);
@@ -540,7 +540,7 @@ TEST(aux_attr_test, desc_dyn_persistent_tile_ext_set_rejects_out_of_range)
     for(int32_t bad : {int32_t{-1}, int32_t{3}, int32_t{100}})
     {
         ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
-                                                  HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                   &bad,
                                                   sizeof(bad)),
                   HIPBLAS_STATUS_INVALID_VALUE);
@@ -586,21 +586,21 @@ TEST(aux_attr_test, desc_sm_count_target_get_rejects_undersized_buffer)
     ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
 }
 
-TEST(aux_attr_test, desc_dyn_persistent_tile_ext_set_rejects_undersized_buffer)
+TEST(aux_attr_test, desc_streamk_tile_scheduling_ext_set_rejects_undersized_buffer)
 {
     hipblasLtMatmulDesc_t desc = nullptr;
     ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
               HIPBLAS_STATUS_SUCCESS);
     const int32_t value = 1;
     ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
-                                              HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                              HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                               &value,
                                               sizeof(int32_t) - 1),
               HIPBLAS_STATUS_INVALID_VALUE);
     ASSERT_EQ(hipblasLtMatmulDescDestroy(desc), HIPBLAS_STATUS_SUCCESS);
 }
 
-TEST(aux_attr_test, desc_dyn_persistent_tile_ext_get_rejects_undersized_buffer)
+TEST(aux_attr_test, desc_streamk_tile_scheduling_ext_get_rejects_undersized_buffer)
 {
     hipblasLtMatmulDesc_t desc = nullptr;
     ASSERT_EQ(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
@@ -608,7 +608,7 @@ TEST(aux_attr_test, desc_dyn_persistent_tile_ext_get_rejects_undersized_buffer)
     int32_t out         = 0;
     size_t  sizeWritten = 0;
     ASSERT_EQ(hipblasLtMatmulDescGetAttribute(desc,
-                                              HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                              HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                               &out,
                                               sizeof(int32_t) - 1,
                                               &sizeWritten),

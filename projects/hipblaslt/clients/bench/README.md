@@ -74,7 +74,7 @@ cd hipBLASLt; cd build/release
 --wgm <value>              [Tuning parameter] Set workgroup mapping for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)
 --flush                    Flush icache
 --sm_count_target <value>  Target compute-unit (CU) count for the matmul kernel selection and persistent-grid sizing. 0 (default) means use all CUs the device exposes. Negative values are rejected. (Default value is: 0)
---dyn_persistent_tile <value>  Select the StreamK=5 dynamic persistent tile sub-path via the HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT extension attribute. Accepts off|0 (force SK3 static), on|1 (force SK4 dynamic), auto|2 (heuristic), case-insensitive. Omit to leave the attribute unset so the library default (auto) applies.  (Default value is: unset)
+--streamk_tile_scheduling <value>  Select the StreamK=5 tile scheduling sub-path via the HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. Accepts off|0 (force SK3 static), on|1 (force SK4 dynamic), auto|2 (heuristic), case-insensitive. Omit to leave the attribute unset so the library default (auto) applies.  (Default value is: unset)
 --help |-h                 produces this help message
 --version <value>          Prints the version number
 ```

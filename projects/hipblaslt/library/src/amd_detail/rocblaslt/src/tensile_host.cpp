@@ -137,7 +137,7 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          bool                   swizzleB,
                                                          hipblasLtBatchMode_t   batchMode,
                                                          int32_t                bias_stride,
-                                                         int32_t                dyn_persistent_tile_ext,
+                                                         int32_t                streamk_tile_scheduling_ext,
                                                          int32_t                sm_count_target)
     : trans_a(trans_a)
     , trans_b(trans_b)
@@ -204,7 +204,7 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , swizzleB(swizzleB)
     , batchMode(batchMode)
     , bias_stride(bias_stride)
-    , dyn_persistent_tile_ext(dyn_persistent_tile_ext)
+    , streamk_tile_scheduling_ext(streamk_tile_scheduling_ext)
     , sm_count_target(sm_count_target)
 {
     if(this->bias_type == HIPBLASLT_DATATYPE_INVALID)
@@ -2001,12 +2001,12 @@ namespace
         // set use gradient
         tensileProblem.setUseGradient(is_grad_enabled(prob.epilogue));
 
-        // Forward HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT. Tri-state
+        // Forward HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT. Tri-state
         // {OFF=0, ON=1, AUTO=2}. The mode is consumed in
         // ContractionSolution::solve's SK5 arg-pack: AUTO delegates to
         // origami::streamk::select_hybrid_mode using sm_count_target as
         // the effective CU budget. Non-StreamK=5 solutions ignore it.
-        tensileProblem.setParams().setDynPersistentTileMode(prob.dyn_persistent_tile_ext);
+        tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
 
         // set AmaxD
@@ -2304,9 +2304,9 @@ namespace
         tensileProblem.setActivationComputeType(compute_type);
         tensileProblem.setParams().setActivationEnum(getTensileActivationType(prob.epilogue));
 
-        // Forward HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT. See
+        // Forward HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT. See
         // companion block in ConstructTensileProblem for details.
-        tensileProblem.setParams().setDynPersistentTileMode(prob.dyn_persistent_tile_ext);
+        tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
 
         // set E
@@ -3110,13 +3110,13 @@ TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void> ge
     return &data->problem;
 }
 
-// Apply the GemmPreference-supplied dyn-persistent-tile mode onto every
+// Apply the GemmPreference-supplied StreamK tile scheduling mode onto every
 // contraction problem currently carried by gemmData. Called from
 // rocblaslt_algo_get_heuristic_cpp before solution ranking so the SK5
 // arg-pack and the heuristic-selection paths see the same mode value.
 // Defined here because gemmData's concrete type (TensileDataGemm /
 // TensileDataGroupedGemm) only exists in this translation unit.
-void applyDynPersistentTileMode(std::shared_ptr<void>  gemmData,
+void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 int32_t                mode)
 {
@@ -3126,7 +3126,7 @@ void applyDynPersistentTileMode(std::shared_ptr<void>  gemmData,
     {
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         if(data)
-            data->problem.setParams().setDynPersistentTileMode(mode);
+            data->problem.setParams().setStreamKTileSchedulingMode(mode);
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
@@ -3134,7 +3134,7 @@ void applyDynPersistentTileMode(std::shared_ptr<void>  gemmData,
         if(data)
         {
             for(auto& g : data->problem.gemms)
-                g.setParams().setDynPersistentTileMode(mode);
+                g.setParams().setStreamKTileSchedulingMode(mode);
         }
     }
 }

@@ -157,19 +157,19 @@ namespace TensileLite
         }
 
         // StreamK=5 hybrid-mode toggle. Forwarded by the host into
-        // StreamKSettings::dynPersistentTileMode at solve time. Values:
+        // StreamKSettings::streamKTileSchedulingMode at solve time. Values:
         //   0 = OFF  (SK3 static work-assignment),
         //   1 = ON   (SK4 dynamic per-XCD work-queue),
         //   2 = AUTO (default; delegate to origami::streamk::select_hybrid_mode).
         // Ignored when the chosen solution is not a StreamK=5 hybrid kernel.
-        void setDynPersistentTileMode(int dynPersistentTileMode)
+        void setStreamKTileSchedulingMode(int streamKTileSchedulingMode)
         {
-            m_dynPersistentTileMode = dynPersistentTileMode;
+            m_streamKTileSchedulingMode = streamKTileSchedulingMode;
         }
 
-        int dynPersistentTileMode() const
+        int streamKTileSchedulingMode() const
         {
-            return m_dynPersistentTileMode;
+            return m_streamKTileSchedulingMode;
         }
 
         void setSmCountTarget(int smCountTarget)
@@ -193,7 +193,7 @@ namespace TensileLite
         int              m_factorDim      = 0;
         ActivationType   m_activationType = ActivationType::None;
         bool             m_fallbackStatus = false; // default value
-        int              m_dynPersistentTileMode = 2; // SK5 hybrid mode tri-state (AUTO default)
+        int              m_streamKTileSchedulingMode = 2; // SK5 hybrid mode tri-state (AUTO default)
         int              m_smCountTarget = 0;
     };
 

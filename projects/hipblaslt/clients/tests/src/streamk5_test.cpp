@@ -10,7 +10,7 @@
 // Exercises the runtime mode toggle:
 //
 //     hipblasLtMatmulDescSetAttribute(desc,
-//         HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+//         HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
 //         &flag, sizeof(int32_t));
 //
 // The numerics test enumerates heuristic algos and explicitly selects
@@ -222,7 +222,7 @@ namespace
             ok = ok
                  && hipblasLtMatmulDescSetAttribute(
                         desc,
-                        HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                        HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                         &mode,
                         sizeof(mode))
                         == HIPBLAS_STATUS_SUCCESS;
@@ -529,13 +529,13 @@ namespace
 
         const int32_t want = 1;
         ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
-                      desc, HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT, &want, sizeof(want)),
+                      desc, HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT, &want, sizeof(want)),
                   HIPBLAS_STATUS_SUCCESS);
 
         int32_t got      = -1;
         size_t  writtenN = 0;
         ASSERT_EQ(hipblasLtMatmulDescGetAttribute(desc,
-                                                  HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                   &got,
                                                   sizeof(got),
                                                   &writtenN),
@@ -545,11 +545,11 @@ namespace
 
         const int32_t want0 = 0;
         ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
-                      desc, HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT, &want0, sizeof(want0)),
+                      desc, HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT, &want0, sizeof(want0)),
                   HIPBLAS_STATUS_SUCCESS);
         got = -1;
         ASSERT_EQ(hipblasLtMatmulDescGetAttribute(desc,
-                                                  HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                   &got,
                                                   sizeof(got),
                                                   &writtenN),
@@ -558,11 +558,11 @@ namespace
 
         const int32_t want2 = 2;
         ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
-                      desc, HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT, &want2, sizeof(want2)),
+                      desc, HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT, &want2, sizeof(want2)),
                   HIPBLAS_STATUS_SUCCESS);
         got = -1;
         ASSERT_EQ(hipblasLtMatmulDescGetAttribute(desc,
-                                                  HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                                                   &got,
                                                   sizeof(got),
                                                   &writtenN),
@@ -571,11 +571,11 @@ namespace
 
         const int32_t bad = 3;
         EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
-                      desc, HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT, &bad, sizeof(bad)),
+                      desc, HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT, &bad, sizeof(bad)),
                   HIPBLAS_STATUS_INVALID_VALUE);
         const int32_t neg = -1;
         EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
-                      desc, HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT, &neg, sizeof(neg)),
+                      desc, HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT, &neg, sizeof(neg)),
                   HIPBLAS_STATUS_INVALID_VALUE);
 
         (void)hipblasLtMatmulDescDestroy(desc);

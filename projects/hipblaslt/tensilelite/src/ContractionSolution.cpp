@@ -827,7 +827,7 @@ namespace TensileLite
                 }
                 else
                 {
-                    const int requestedMode = sk.dynPersistentTileMode;
+                    const int requestedMode = sk.streamKTileSchedulingMode;
                     switch(requestedMode)
                     {
                     case 0:
@@ -3206,10 +3206,10 @@ namespace TensileLite
                 sk.reduction = getSKReduction(problem, hardware);
             // Propagate the StreamK=5 hybrid-mode (tri-state) from the
             // problem — set by the host from the
-            // HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT matmul-descriptor
+            // HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT matmul-descriptor
             // attribute — into the StreamKSettings used by the kernel-arg
             // packing path below.
-            sk.dynPersistentTileMode = problem.getParams().dynPersistentTileMode();
+            sk.streamKTileSchedulingMode = problem.getParams().streamKTileSchedulingMode();
             sk.smCountTarget         = problem.getParams().smCountTarget();
             sk.grid = getSKGrid(problem, hardware, tiles, sk.reduction);
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
