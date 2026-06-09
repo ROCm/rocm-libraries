@@ -247,10 +247,6 @@ _BASE_TILE_WAVE_STRATEGIES: Dict[Tuple[int, int, int], List[WaveStrategy]] = {
 _WAVE_STRATEGY_OVERRIDES: Dict[str, Dict[Tuple[int, int, int], List[WaveStrategy]]] = {
     "forward": {
         (64, 64, 32): [WaveStrategy.SINGLE, WaveStrategy.SPLIT_MN],
-        # Drop SPLIT_MK (2,1,2): the forward implicit-GEMM kernel does not
-        # reduce partial accumulations across K-waves, so a K-wave split
-        # produces incorrect results. Only SPLIT_M (2,1,1) is valid here.
-        (128, 32, 32): [WaveStrategy.SPLIT_M],
     },
     "bwd_data": {
         (64, 16, 16): [WaveStrategy.SPLIT_M4],
@@ -1620,6 +1616,9 @@ def get_configs(
                     # 64x16x64 (2,1,1), 16x32x64 (1,2,1) -- ~50% of the weight
                     # output (whole groups) comes back zero.
                     #
+                    # This problems shows up when the CK Tile convolution integration
+                    # tests are executed against the instances generated with "full" rule set.
+                    # Rule set "tests" doesn't create the problematic instances.
 
                     # compv4 forces double_smem_buffer
                     dsb = (pipeline == "compv4") or (feat.double_smem_buffer if feat else False)
