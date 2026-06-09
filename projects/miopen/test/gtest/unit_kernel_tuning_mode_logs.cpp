@@ -51,11 +51,11 @@ protected:
 TEST_F(CPU_KernelTuningModeLogs_NONE, PhaseToStringMapping)
 {
     using miopen::KernelPhase;
-    EXPECT_STREQ(miopen::KernelPhaseToString(KernelPhase::Unknown), "unknown");
-    EXPECT_STREQ(miopen::KernelPhaseToString(KernelPhase::Execution), "execution");
-    EXPECT_STREQ(miopen::KernelPhaseToString(KernelPhase::Validation), "validation");
-    EXPECT_STREQ(miopen::KernelPhaseToString(KernelPhase::SolverTuning), "solver_tuning");
-    EXPECT_STREQ(miopen::KernelPhaseToString(KernelPhase::Tuning), "tuning");
+    EXPECT_EQ(miopen::KernelPhaseToString(KernelPhase::Unknown), "unknown");
+    EXPECT_EQ(miopen::KernelPhaseToString(KernelPhase::Execution), "execution");
+    EXPECT_EQ(miopen::KernelPhaseToString(KernelPhase::Validation), "validation");
+    EXPECT_EQ(miopen::KernelPhaseToString(KernelPhase::SolverTuning), "solver_tuning");
+    EXPECT_EQ(miopen::KernelPhaseToString(KernelPhase::Tuning), "tuning");
 }
 
 TEST_F(CPU_KernelTuningModeLogs_NONE, ScopedKernelPhaseRestoresPrevious)
