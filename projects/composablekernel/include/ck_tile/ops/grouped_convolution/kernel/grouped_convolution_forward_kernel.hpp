@@ -465,12 +465,15 @@ struct GroupedConvFwdKernelArgs
         index_t num_d_pieces = 1, num_h_pieces = 1, num_w_pieces = 1; // Split factors
 
         // Minimal per-piece data (only unique values)
+        // Default-initialized to 0 so that uninitialized pieces are detectable
+        // (the invoker sets these after MakeKernelArgs).
         struct PieceInfo
         {
-            index_t block_start;               // Starting block index for this piece
-            index_t block_end;                 // Ending block index (exclusive)
-            index_t d_start, h_start, w_start; // Piece starting position in OUTPUT space
-            index_t d_size, h_size, w_size;    // Piece size in OUTPUT space
+            index_t block_start = -1; // Starting block index for this piece
+            index_t block_end   = -1; // Ending block index (exclusive)
+            index_t d_start = -1, h_start = -1,
+                    w_start = -1; // Piece starting position in OUTPUT space
+            index_t d_size = -1, h_size = -1, w_size = -1; // Piece size in OUTPUT space
         };
 
         static constexpr index_t MaxPieces = 64; // Max pieces: 4 (1D), 16 (2D), 64 (3D)
@@ -596,7 +599,38 @@ struct GroupedConvolutionForwardKernel
     using GemmDsLayout                  = remove_cvref_t<typename EpiloguePipeline_::DsLayout>;
     static constexpr index_t NumDTensor = GroupedConvTraitsType_::NumDTensor;
 
-    static constexpr index_t kBlockSize = Pipeline::BlockSize;
+    // For wavelet, LaunchBlockSize > BlockSize (extra load-only waves). Use
+    // LaunchBlockSize for the kernel launch; non-wavelet pipelines fall back to BlockSize.
+    template <typename T, typename = void>
+    struct has_launch_block_size : std::false_type
+    {
+    };
+    template <typename T>
+    struct has_launch_block_size<T, std::void_t<decltype(T::LaunchBlockSize)>> : std::true_type
+    {
+    };
+    static constexpr index_t kBlockSize = []() {
+        if constexpr(has_launch_block_size<Pipeline>::value)
+            return Pipeline::LaunchBlockSize;
+        else
+            return Pipeline::BlockSize;
+    }();
+
+    // SFINAE helper: detect Pipeline::IsWavelet (load/math wave specialization).
+    template <typename T, typename = void>
+    struct has_is_wavelet : std::false_type
+    {
+    };
+    template <typename T>
+    struct has_is_wavelet<T, std::void_t<decltype(T::IsWavelet)>> : std::true_type
+    {
+    };
+    static constexpr bool kIsWavelet = []() {
+        if constexpr(has_is_wavelet<Pipeline>::value)
+            return Pipeline::IsWavelet;
+        else
+            return false;
+    }();
 
     using InDataType    = remove_cvref_t<typename Pipeline::ADataType>;
     using WeiDataType   = remove_cvref_t<typename Pipeline::BDataType>;
@@ -606,6 +640,8 @@ struct GroupedConvolutionForwardKernel
 
     using GroupedConvFwdKernelArgsSpecialized =
         GroupedConvFwdKernelArgs<GroupedConvTraitsType_, CDElementwise>;
+
+    static constexpr bool LargeTensors = Pipeline::LargeTensors;
 
     static constexpr bool IsSplitKSupported = false;
 
@@ -794,6 +830,37 @@ struct GroupedConvolutionForwardKernel
     MakeKernelArgs(const GroupedConvFwdHostArgs<CDElementwise>& hostArgs)
     {
         auto kargs = GroupedConvFwdKernelArgsSpecialized(hostArgs);
+
+        // Initialize split-image with a single piece covering the entire output.
+        // The invoker may later override this with multi-piece data for large
+        // tensors. Without this default, the split-image kernel path would use
+        // uninitialized piece data and produce wrong results.
+        if constexpr(EnableSplitImage)
+        {
+            constexpr index_t ndim = GroupedConvTraitsType_::NDimSpatial;
+            constexpr index_t off  = GroupedConvFwdKernelArgsSpecialized::NonSpatialDims;
+
+            const index_t total_w = kargs.out_g_n_k_wos_lengths[off + ndim - 1];
+            const index_t total_h = (ndim >= 2) ? kargs.out_g_n_k_wos_lengths[off + ndim - 2] : 1;
+            const index_t total_d = (ndim >= 3) ? kargs.out_g_n_k_wos_lengths[off + ndim - 3] : 1;
+
+            kargs.split_image.total_d       = total_d;
+            kargs.split_image.total_h       = total_h;
+            kargs.split_image.total_w       = total_w;
+            kargs.split_image.total_spatial = total_d * total_h * total_w;
+
+            kargs.num_spatial_pieces                = 1;
+            kargs.split_image.pieces[0].block_start = 0;
+            kargs.split_image.pieces[0].block_end =
+                TilePartitioner::GridSize(kargs.GemmM, kargs.GemmN);
+            kargs.split_image.pieces[0].d_start = 0;
+            kargs.split_image.pieces[0].h_start = 0;
+            kargs.split_image.pieces[0].w_start = 0;
+            kargs.split_image.pieces[0].d_size  = total_d;
+            kargs.split_image.pieces[0].h_size  = total_h;
+            kargs.split_image.pieces[0].w_size  = total_w;
+        }
+
         return kargs;
     }
 
@@ -1107,18 +1174,24 @@ struct GroupedConvolutionForwardKernel
     CK_TILE_DEVICE static auto
     MakeABlockWindow(const InDataType* a_ptr, const ADescType& a_desc, const index_t block_idx_m)
     {
+        constexpr bool pad_not_contiguous_dim = LargeTensors;
+
         if constexpr(GroupedConvTraitsType_::NumGroupsToMerge == 1)
         {
             // Access by K
             // Step 1: Create tensor view
-            const auto& a_tensor_view = make_tensor_view<address_space_enum::global>(a_ptr, a_desc);
+            const auto& a_tensor_view =
+                make_tensor_view<address_space_enum::global,
+                                 memory_operation_enum::set,
+                                 amd_buffer_coherence_enum::coherence_default,
+                                 LargeTensors>(a_ptr, a_desc);
 
             // Step 2: Create padded view
             const auto& a_pad_view =
                 pad_tensor_view(a_tensor_view,
                                 make_tuple(number<TilePartitioner::MPerBlock>{},
                                            number<TilePartitioner::KPerBlock>{}),
-                                sequence<false, true>{});
+                                sequence<pad_not_contiguous_dim, true>{});
 
             // Step 3: Create tile window
             return make_tile_window(a_pad_view,
@@ -1137,14 +1210,17 @@ struct GroupedConvolutionForwardKernel
                 make_tuple(sequence<1>{}, sequence<0>{}));
             // Step 1: Create tensor view
             const auto& a_tensor_view =
-                make_tensor_view<address_space_enum::global>(a_ptr, a_desc_reversed);
+                make_tensor_view<address_space_enum::global,
+                                 memory_operation_enum::set,
+                                 amd_buffer_coherence_enum::coherence_default,
+                                 LargeTensors>(a_ptr, a_desc_reversed);
 
             // Step 2: Create padded view
             const auto& a_pad_view =
                 pad_tensor_view(a_tensor_view,
                                 make_tuple(number<TilePartitioner::KPerBlock>{},
                                            number<TilePartitioner::MPerBlock>{}),
-                                sequence<false, true>{});
+                                sequence<pad_not_contiguous_dim, true>{});
 
             // Step 3: Create tile window
             return make_tile_window(a_pad_view,
@@ -1158,14 +1234,19 @@ struct GroupedConvolutionForwardKernel
     CK_TILE_DEVICE static auto
     MakeBBlockWindow(const WeiDataType* b_ptr, const BDescType& b_desc, const index_t block_idx_n)
     {
+        constexpr bool pad_not_contiguous_dim = LargeTensors;
+
         // Step 1: Create tensor view
-        const auto& b_tensor_view = make_tensor_view<address_space_enum::global>(b_ptr, b_desc);
+        const auto& b_tensor_view = make_tensor_view<address_space_enum::global,
+                                                     memory_operation_enum::set,
+                                                     amd_buffer_coherence_enum::coherence_default,
+                                                     LargeTensors>(b_ptr, b_desc);
 
         // Step 2: Create padded view
         const auto& b_pad_view = pad_tensor_view(
             b_tensor_view,
             make_tuple(number<TilePartitioner::NPerBlock>{}, number<TilePartitioner::KPerBlock>{}),
-            sequence<false, true>{});
+            sequence<pad_not_contiguous_dim, true>{});
 
         // Step 3: Create tile window
         return make_tile_window(
@@ -1180,6 +1261,8 @@ struct GroupedConvolutionForwardKernel
                                                  const index_t block_idx_m,
                                                  const index_t block_idx_n)
     {
+        constexpr bool pad_not_contiguous_dim = LargeTensors;
+
         // Step 1: Create tensor views
         const auto& ds_tensor_view = generate_tuple(
             [&](auto i) {
@@ -1190,8 +1273,11 @@ struct GroupedConvolutionForwardKernel
                 static_assert(std::is_same_v<std::tuple_element_t<i, DsDataType>, OutDataType>,
                               "Not supported!");
 
-                return make_tensor_view<address_space_enum::global>(
-                    static_cast<const OutDataType*>(ds_ptr[i]), c_desc);
+                return make_tensor_view<address_space_enum::global,
+                                        memory_operation_enum::set,
+                                        amd_buffer_coherence_enum::coherence_default,
+                                        LargeTensors>(static_cast<const OutDataType*>(ds_ptr[i]),
+                                                      c_desc);
             },
             number<NumDTensor>{});
 
@@ -1201,7 +1287,7 @@ struct GroupedConvolutionForwardKernel
                 return pad_tensor_view(ds_tensor_view[i],
                                        make_tuple(number<TilePartitioner::MPerBlock>{},
                                                   number<TilePartitioner::NPerBlock>{}),
-                                       sequence<false, true>{});
+                                       sequence<pad_not_contiguous_dim, true>{});
             },
             number<NumDTensor>{});
 
@@ -1223,16 +1309,20 @@ struct GroupedConvolutionForwardKernel
                                                 const index_t block_idx_n)
     {
         // Step 1: Create tensor view
-        const auto& c_tensor_view =
-            make_tensor_view<address_space_enum::global, DstInMemOp>(c_ptr, c_desc);
+        const auto& c_tensor_view = make_tensor_view<address_space_enum::global,
+                                                     DstInMemOp,
+                                                     amd_buffer_coherence_enum::coherence_default,
+                                                     LargeTensors>(c_ptr, c_desc);
 
-        // For bf16_t and atomic_add global_atomic_add is used instead of buffer_atomic_add
-        // Add padding for not contiguous dim due to the lack of OOB check
-        // Not needed from gfx950.
+        // For bf16_t and atomic_add global_atomic_add is used instead of buffer_atomic_add.
+        // Add padding for the non-contiguous dim due to the lack of OOB check.
+        // On gfx950, this padding is only needed for LargeTensors; on earlier targets it is
+        // also needed for bf16_t with atomic_add.
 #if defined(__gfx950__)
-        constexpr bool pad_not_contiguous_dim = false;
+        constexpr bool pad_not_contiguous_dim = LargeTensors;
 #else
         constexpr bool pad_not_contiguous_dim =
+            LargeTensors ||
             std::is_same_v<OutDataType, bf16_t> && DstInMemOp == memory_operation_enum::atomic_add;
 #endif
         // Step 2: Create padded view
@@ -1292,7 +1382,27 @@ struct GroupedConvolutionForwardKernel
             Pipeline{}.template operator()(a_block_window, b_block_window, num_loop, smem_ptr_0);
 
         // Run Epilogue Pipeline with k_batch dispatching
-        if(k_batch == 1)
+        if constexpr(kIsWavelet)
+        {
+            // Wavelet: only math waves hold accumulators and run the epilogue.
+            // Load waves run a matching barrier sequence to avoid LDS-sync deadlock.
+            // Forward has no split-K (IsSplitKSupported == false), so only the
+            // memory_operation_enum::set path is reachable.
+            if(Pipeline::IsMathWave())
+            {
+                auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
+                    c_ptr, c_desc, block_idx_m, block_idx_n);
+
+                EpiloguePipeline{elfunc}
+                    .template operator()<decltype(c_block_window), decltype(c_block_tile)>(
+                        c_block_window, c_block_tile, ds_block_window, smem_ptr_0);
+            }
+            else
+            {
+                EpiloguePipeline::RunBarrierStub();
+            }
+        }
+        else if(k_batch == 1)
         {
             auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
                 c_ptr, c_desc, block_idx_m, block_idx_n);

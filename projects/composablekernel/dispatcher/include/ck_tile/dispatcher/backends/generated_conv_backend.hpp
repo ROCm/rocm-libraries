@@ -151,7 +151,7 @@ inline GroupedConvKernelInstance::RunFn make_conv_bwd_weight_run_fn()
 }
 
 // -------------------------------------------------------------------------
-// IsSupportedFn factories — check kernel applicability without launching
+// IsSupportedFn factories -- check kernel applicability without launching
 // -------------------------------------------------------------------------
 
 template <typename LauncherType, int NDim>
@@ -184,7 +184,7 @@ inline GroupedConvKernelInstance::IsSupportedFn make_conv_bwd_data_is_supported_
 }
 
 // -------------------------------------------------------------------------
-// Instance string extraction — get CK Tile GetInstanceString() representation
+// Instance string extraction -- get CK Tile GetInstanceString() representation
 // -------------------------------------------------------------------------
 
 #ifdef CK_EXPERIMENTAL_BUILDER
