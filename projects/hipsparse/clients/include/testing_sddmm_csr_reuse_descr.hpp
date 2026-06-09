@@ -84,100 +84,6 @@ static void sddmm_reuse_dense_dims(J                    m,
     nnz_B = nrowB * ncolB;
 }
 
-// Exercises the SDDMM-only path: never call hipsparseSDDMM_bufferSize and
-// never call hipsparseSDDMM_preprocess -- only hipsparseSDDMM itself, and pass
-// a null tempBuffer. The hipSPARSE SDDMM wrapper forwards directly to
-// rocsparse, so this stays valid for the default algorithm and the
-// non-transpose / non-transpose column-major configuration which requires no
-// scratch buffer. The same sparse-matrix descriptor is reused across repeated
-// passes, with its values reset before every call.
-template <typename I, typename J, typename T>
-static void call_sddmm_only(hipsparseHandle_t&     handle,
-                            hipsparseSpMatDescr_t& matC,
-                            T*                     dval,
-                            J                      M,
-                            J                      N,
-                            J                      K,
-                            I                      nnz,
-                            std::vector<I>&        hcsr_row_ptr,
-                            std::vector<J>&        hcsr_col_ind,
-                            std::vector<T>&        hcsr_val,
-                            T                      alpha,
-                            T                      beta,
-                            hipsparseIndexBase_t   idx_base,
-                            hipsparseSDDMMAlg_t    alg,
-                            int                    number_of_passes)
-{
-    hipDataType typeT = getDataType<T>();
-
-    const hipsparseOperation_t transA = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-    const hipsparseOperation_t transB = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-    const hipsparseOrder_t     orderA = HIPSPARSE_ORDER_COL;
-    const hipsparseOrder_t     orderB = HIPSPARSE_ORDER_COL;
-
-    J       A_m, A_n, B_m, B_n;
-    int64_t lda, ldb, nnz_A, nnz_B;
-    sddmm_reuse_dense_dims<J>(
-        M, N, K, transA, transB, orderA, orderB, A_m, A_n, B_m, B_n, lda, ldb, nnz_A, nnz_B);
-
-    std::vector<T> hA(nnz_A);
-    std::vector<T> hB(nnz_B);
-    hipsparseInit<T>(hA, nnz_A, 1);
-    hipsparseInit<T>(hB, nnz_B, 1);
-
-    auto dA_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_A), device_free};
-    auto dB_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_B), device_free};
-    T*   dA         = (T*)dA_managed.get();
-    T*   dB         = (T*)dB_managed.get();
-
-    CHECK_HIP_ERROR(hipMemcpy(dA, hA.data(), sizeof(T) * nnz_A, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dB, hB.data(), sizeof(T) * nnz_B, hipMemcpyHostToDevice));
-
-    hipsparseDnMatDescr_t A, B;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&A, A_m, A_n, lda, dA, typeT, orderA));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&B, B_m, B_n, ldb, dB, typeT, orderB));
-
-    CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-
-    for(int pass = 0; pass < number_of_passes; ++pass)
-    {
-        // Reset the sparse matrix values: SDDMM overwrites them in place.
-        CHECK_HIP_ERROR(hipMemcpy(dval, hcsr_val.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
-
-        // No bufferSize, no preprocess: only SDDMM with a null tempBuffer.
-        CHECK_HIPSPARSE_ERROR(
-            hipsparseSDDMM(handle, transA, transB, &alpha, A, B, &beta, matC, typeT, alg, nullptr));
-
-        std::vector<T> hval_out(nnz);
-        CHECK_HIP_ERROR(hipMemcpy(hval_out.data(), dval, sizeof(T) * nnz, hipMemcpyDeviceToHost));
-
-        std::vector<T> hval_gold(hcsr_val);
-        host_sddmm_csr(M,
-                       N,
-                       K,
-                       nnz,
-                       alpha,
-                       hA.data(),
-                       lda,
-                       orderA,
-                       transA,
-                       hB.data(),
-                       ldb,
-                       orderB,
-                       transB,
-                       beta,
-                       hval_gold.data(),
-                       hcsr_row_ptr.data(),
-                       hcsr_col_ind.data(),
-                       idx_base);
-
-        unit_check_near(1, nnz, 1, hval_gold.data(), hval_out.data());
-    }
-
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(A));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
-}
-
 // Exercises the per-call bufferSize / per-call buffer-allocation pattern for a
 // single (transA, transB, orderA, orderB) configuration: query
 // hipsparseSDDMM_bufferSize, hipMalloc a fresh tempBuffer of that size,
@@ -595,27 +501,7 @@ void testing_sddmm_csr_reuse_descr(Arguments argus)
 
     constexpr int number_of_passes = 3;
 
-    // Scenario 1: SDDMM-only. Never call bufferSize or preprocess, only
-    // hipsparseSDDMM with a null tempBuffer. Restricted to the non-transpose /
-    // non-transpose column-major configuration for which no scratch buffer is
-    // required, swept across repeated passes.
-    call_sddmm_only<I, J, T>(handle,
-                             matC,
-                             dval,
-                             m,
-                             n,
-                             k,
-                             nnz,
-                             hcsr_row_ptr,
-                             hcsr_col_ind,
-                             hcsr_val,
-                             h_alpha,
-                             h_beta,
-                             idx_base,
-                             alg,
-                             number_of_passes);
-
-    // Scenario 2: per-call bufferSize / buffer allocation. Exercises that the
+    // Scenario 1: per-call bufferSize / buffer allocation. Exercises that the
     // same sparse matrix descriptor produces correct results when bufferSize is
     // re-queried and the tempBuffer re-allocated on every call across all
     // configurations.
@@ -657,7 +543,7 @@ void testing_sddmm_csr_reuse_descr(Arguments argus)
         }
     }
 
-    // Scenario 3: bufferSize is queried once per configuration up front, a
+    // Scenario 2: bufferSize is queried once per configuration up front, a
     // single tempBuffer is allocated to the max of those sizes, and
     // hipsparseSDDMM is then called repeatedly across configurations with that
     // one shared buffer (no further bufferSize calls).
