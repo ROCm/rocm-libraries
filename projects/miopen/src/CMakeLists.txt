@@ -741,6 +741,12 @@ if(MIOPEN_USE_ROCBLAS OR MIOPEN_USE_HIPBLASLT)
     )
 endif()
 
+if(MIOPEN_USE_HIPBLASLT)
+    list(APPEND MIOpen_Source
+        hipblaslt_gemm.cpp
+    )
+endif()
+
 if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
     list(APPEND MIOpen_Source
         hip/hiperrors.cpp

@@ -63,6 +63,7 @@
 
 #if MIOPEN_USE_HIPBLASLT
 #include <hipblas-common/hipblas-common.h>
+#include <miopen/hipblaslt_gemm.hpp>
 
 using hipblasLtHandle_t = void*;
 extern "C" hipblasStatus_t hipblasLtDestroy(hipblasLtHandle_t handle);
@@ -301,6 +302,7 @@ struct MIOPEN_EXPORT Handle : miopenHandle
 #endif
 #if MIOPEN_USE_HIPBLASLT
     const hipblasLt_handle_ptr& HipblasLtHandle() const;
+    hipblaslt_gemm_cache& GetHipblasLtGemmCache() const;
 #endif
 
 private:
