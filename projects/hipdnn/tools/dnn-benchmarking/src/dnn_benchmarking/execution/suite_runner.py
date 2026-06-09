@@ -389,7 +389,9 @@ def _run_timed_pytorch_reference(
                 benchmark_iters=config.benchmark_iters,
                 engine_id=0,
             )
-            executor = PyTorchCudaExecutor(graph_json, bench_config)
+            executor = PyTorchCudaExecutor(
+                graph_json, bench_config, timing_backend=config.timing_backend
+            )
             executor.prepare()
             result.cpu_build_time_ms = executor.init_time_ms
 

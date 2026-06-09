@@ -5,6 +5,7 @@
 
 #include <hip/hip_runtime.h>
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
 #include <stdexcept>
 #include <string>
 

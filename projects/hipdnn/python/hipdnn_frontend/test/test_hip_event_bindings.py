@@ -12,6 +12,7 @@ import hipdnn_frontend as fe
 _REQUIRED_API = (
     "HipEvent",
     "hip_event_create",
+    "hip_event_destroy",
     "hip_event_record",
     "hip_event_synchronize",
     "hip_event_elapsed_time",

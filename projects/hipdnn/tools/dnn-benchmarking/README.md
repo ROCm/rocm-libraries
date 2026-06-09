@@ -19,9 +19,10 @@ reference validation.
 - numpy
 - hipdnn_frontend (installed hipDNN Python bindings)
 - AMD GPU with ROCm + hipDNN provider plugins for the graphs under test
-- PyTorch *(optional)* — ROCm build enables the `--backend pytorch` executor and
-  the `--validate pytorch` reference provider. Not listed in `pyproject.toml`
-  because it must come from the ROCm nightly index.
+- PyTorch *(optional)* — any usable PyTorch build enables the `--validate pytorch`
+  reference provider. A ROCm PyTorch build additionally enables the
+  `--backend pytorch` GPU executor. Not listed in `pyproject.toml` because torch
+  package selection depends on the target environment.
 
 ## Installation
 
