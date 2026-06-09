@@ -1242,7 +1242,8 @@ class TestPlaceGRs:
         uid=0: A/B k=[0,2) only (uid's own k range), SA/SB k=[0,4).
         uid=1: A/B k=[2,4) (second data read), SA/SB skipped.
 
-        TODO: revisit uid=0 A/B atom splits for tighter multi-DU packing.
+        uid=0 is distributed across slots; uid=1 is consolidated into the
+        last slot so GRInc(uid=0) precedes all uid=1 GRs globally.
         """
         cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
         assert cfg.numSubIterK == 4
@@ -1252,18 +1253,15 @@ class TestPlaceGRs:
         slots = sched.place_GRs()
         assert len(slots) == 4
 
-        # uid=0: A k=[0,2) split across s0/s1; B k=[0,2) split across s1/s2
+        # uid=0 distributed across s0..s2
         _assert_gr(slots[0], 'A', 0, 2, 0, 5, mt=1, uid=0)
         _assert_gr(slots[1], 'A', 0, 2, 5, 8, mt=1, uid=0)
         _assert_gr(slots[1], 'B', 0, 2, 0, 1, mt=1, uid=0)
         _assert_gr(slots[2], 'B', 0, 2, 1, 8, mt=1, uid=0)
-
-        # SA/SB uid=0 @s2
         _assert_gr(slots[2], 'SA', 0, 4, 0, 8, mt=1, uid=0)
         _assert_gr(slots[2], 'SB', 0, 4, 0, 8, mt=1, uid=0)
 
-        # uid=1: consolidated into last existing slot (s3) so the
-        # instruction scheduler interleaves them with MFMAs
+        # uid=1 consolidated at s3
         _assert_gr(slots[3], 'A', 2, 4, 0, 4, mt=1, uid=1)
         _assert_gr(slots[3], 'A', 2, 4, 4, 8, mt=1, uid=1, idx=1)
         _assert_gr(slots[3], 'B', 2, 4, 0, 8, mt=1, uid=1)
@@ -1358,17 +1356,22 @@ class TestAnnotateDeps:
 
     def test_1x1_multi_du_unroll2_AB(self):
         """Multi-DU: uid=0 and uid=1 GRs get correct collision deps.
-        PGR=1 → GR at MT1, deps relative to MT1."""
+        PGR=1 → GR at MT1, deps relative to MT1.
+
+        uid=0 distributed across slots; uid=1 consolidated at s3."""
         cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
         sched = LogicalScheduler(cfg)
         sched.annotate_deps()
         slots = sched._partitions[0]
 
-        # LR A k=[1] @s0 → GR A uid=0 k=[0,2) @s1, MT-1
+        # LR A k=[1] @s0 → GR A uid=0 @s1, MT-1
         assert _dep_refs(_get_lr(slots[0], 'A')) == [('GR', 'A', 0, 1, -1, 0)]
 
-        # LR B k=[1] @s0 → GR B uid=0 k=[0,2) @s2, MT-1
+        # LR B k=[1] @s0 → GR B uid=0 @s2, MT-1
         assert _dep_refs(_get_lr(slots[0], 'B')) == [('GR', 'B', 0, 2, -1, 0)]
+
+        # LR SA k=[2,3] @s0 → GR SA uid=0 @s2, MT-1
+        assert _dep_refs(_get_lr(slots[0], 'SA')) == [('GR', 'SA', 0, 2, -1, 0)]
 
         # LR A k=[2] @s1 → GR A uid=1 @s3, MT-1
         assert _dep_refs(_get_lr(slots[1], 'A')) == [('GR', 'A', 0, 3, -1, 1)]
@@ -1376,39 +1379,36 @@ class TestAnnotateDeps:
         # LR B k=[2] @s1 → GR B uid=1 @s3, MT-1
         assert _dep_refs(_get_lr(slots[1], 'B')) == [('GR', 'B', 0, 3, -1, 1)]
 
+        # LR SB k=[2,3] @s1 → GR SB uid=0 @s2, MT-1
+        assert _dep_refs(_get_lr(slots[1], 'SB')) == [('GR', 'SB', 0, 2, -1, 0)]
+
         # LR A k=[3] @s2 → GR A uid=1 @s3, MT-1
         assert _dep_refs(_get_lr(slots[2], 'A')) == [('GR', 'A', 0, 3, -1, 1)]
 
         # LR B k=[3] @s2 → GR B uid=1 @s3, MT-1
         assert _dep_refs(_get_lr(slots[2], 'B')) == [('GR', 'B', 0, 3, -1, 1)]
 
-        # LR A k=[0] @s3 → GR A uid=0 k=[0,2) @s1, MT 0 (same iter)
+        # LR A k=[0] @s3 → GR A uid=0 @s1, MT 0 (same iter)
         assert _dep_refs(_get_lr(slots[3], 'A')) == [('GR', 'A', 0, 1, 0, 0)]
 
-        # LR B k=[0] @s3 → GR B uid=0 k=[0,2) @s2, MT 0 (same iter)
+        # LR B k=[0] @s3 → GR B uid=0 @s2, MT 0 (same iter)
         assert _dep_refs(_get_lr(slots[3], 'B')) == [('GR', 'B', 0, 2, 0, 0)]
 
-        # LR SA k=[2,3] @s0 → GR SA uid=0 k=[0,4) @s2, MT-1
-        assert _dep_refs(_get_lr(slots[0], 'SA')) == [('GR', 'SA', 0, 2, -1, 0)]
-
-        # LR SB k=[2,3] @s1 → GR SB uid=0 k=[0,4) @s2, MT-1
-        assert _dep_refs(_get_lr(slots[1], 'SB')) == [('GR', 'SB', 0, 2, -1, 0)]
-
-        # LR SA k=[0,1] @s3 → GR SA uid=0 k=[0,4) @s2, MT 0 (same iter)
+        # LR SA k=[0,1] @s3 → GR SA uid=0 @s2, MT 0 (same iter)
         assert _dep_refs(_get_lr(slots[3], 'SA')) == [('GR', 'SA', 0, 2, 0, 0)]
 
-        # LR SB k=[0,1] @s3 → GR SB uid=0 k=[0,4) @s2, MT 0 (same iter)
+        # LR SB k=[0,1] @s3 → GR SB uid=0 @s2, MT 0 (same iter)
         assert _dep_refs(_get_lr(slots[3], 'SB')) == [('GR', 'SB', 0, 2, 0, 0)]
 
         # GR A uid=0 @s0 → collision LR A @s0, MT-1
         gr_a_uid0_s0 = [gr for gr in slots[0].grs if gr.tensor == 'A' and gr.unrollId == 0][0]
         assert _dep_refs(gr_a_uid0_s0) == [('LR', 'A', 0, 0, -1)]
 
-        # GR A uid=1 @s3 (consolidated) (k=[2,4)) → collision LR A @s2, MT-1
+        # GR A uid=1 @s3 (k=[2,4)) → collision LR A @s2, MT-1
         gr_a_uid1_s3 = [gr for gr in slots[3].grs if gr.tensor == 'A' and gr.unrollId == 1][0]
         assert _dep_refs(gr_a_uid1_s3) == [('LR', 'A', 0, 2, -1)]
 
-        # GR B uid=1 @s3 (consolidated) (k=[2,4)) → collision LR B @s2, MT-1
+        # GR B uid=1 @s3 (k=[2,4)) → collision LR B @s2, MT-1
         gr_b_uid1_s3 = [gr for gr in slots[3].grs if gr.tensor == 'B' and gr.unrollId == 1][0]
         assert _dep_refs(gr_b_uid1_s3) == [('LR', 'B', 0, 2, -1)]
 
@@ -1528,18 +1528,142 @@ class TestRemoveCrossDeps:
         for slot in parts[3]:
             assert _preop_kinds(slot.mfma) == [('wait_lr', False, None)]
 
-        # LR A @P3:s3: wait_gr_sync with A=20
+        # LR A @P3:s3: wait_gr_sync — forward span from re-anchored GR dep
         lr_a_p3_s3 = _get_lr(parts[3][3], 'A')
-        assert lr_a_p3_s3.preOps[0].wait_gr_counts.A == 20
+        assert lr_a_p3_s3.preOps[0].wait_gr_counts.A == 4
 
         # LR SA @P3:s2: wait_gr_sync with SA=1
         lr_sa_p3_s2 = _get_lr(parts[3][2], 'SA')
         assert lr_sa_p3_s2.preOps[0].wait_gr_counts.SA == 1
 
+    def test_320x256_5part_reanchor_pi1(self):
+        """Asymmetric 5-partition MT: LR @ pi=1 k=1 uses same-partition sk=0 walk."""
+        kernel = create_kernel(320, 256, fp4=True, depthU=256, miWaveGroup=[2, 2])
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
+        scaleTiA = makeTileInfo('MXSA', kernel)
+        scaleTiB = makeTileInfo('MXSB', kernel)
+        grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        cfg = SchedulerConfig(
+            numMFMATilesM=10, numMFMATilesN=8, numSubIterK=2,
+            lrA=ReadGranularity(mn=1, k=1), lrB=ReadGranularity(mn=1, k=1),
+            grA=grA, grB=grB,
+            lrSA=ReadGranularity(mn=2, k=2), lrSB=ReadGranularity(mn=2, k=2),
+            grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0],
+                                 k=scaleTiA.localMMATileGrid[1]),
+            grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0],
+                                 k=scaleTiB.localMMATileGrid[1]),
+            partitionSizeM=2, partitionSizeN=8, pgr=1,
+        )
+        assert cfg.numPartitions == 5
+        sched = LogicalScheduler(cfg)
+        sched.remove_unnecessary_wait_lr_sync()
+        lr_a1 = _get_lr(sched._partitions[1][1], 'A')
+        wait = next(op for op in lr_a1.preOps if op.kind == 'wait_gr')
+        c = wait.wait_gr_counts
+        assert c.A + c.B + c.SA + c.SB <= 10, (
+            f"pi=1 k=1 wait_gr inflated: A={c.A} B={c.B} SA={c.SA} SB={c.SB}")
+        assert c.A == 0 and c.B == 2, (
+            f"expected same-partition sk=0 anchor: A={c.A} B={c.B}")
+        sched.remove_unnecessary_wait_gr_sync()
+        sched.emit()
+        assert len([e for e in sched._emitted[1][1] if e.opType == 'wait_gr']) == 0
 
-# ══════════════════════════════════════════════════════════════
-# Step 6: Insert gr/lr inc
-# ══════════════════════════════════════════════════════════════
+    def test_320x256_5part_mt_off_same_partition_sk1(self):
+        """LR @ pi=2 k=1 with mt_off=-1 dep on same-partition k=0 must not ring-wrap."""
+        kernel = create_kernel(320, 256, fp4=True, depthU=256, miWaveGroup=[2, 2])
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
+        scaleTiA = makeTileInfo('MXSA', kernel)
+        scaleTiB = makeTileInfo('MXSB', kernel)
+        grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        cfg = SchedulerConfig(
+            numMFMATilesM=10, numMFMATilesN=8, numSubIterK=2,
+            lrA=ReadGranularity(mn=1, k=1), lrB=ReadGranularity(mn=1, k=1),
+            grA=grA, grB=grB,
+            lrSA=ReadGranularity(mn=2, k=2), lrSB=ReadGranularity(mn=2, k=2),
+            grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0],
+                                 k=scaleTiA.localMMATileGrid[1]),
+            grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0],
+                                 k=scaleTiB.localMMATileGrid[1]),
+            partitionSizeM=2, partitionSizeN=8, pgr=1,
+        )
+        sched = LogicalScheduler(cfg)
+        sched.remove_unnecessary_wait_lr_sync()
+        lr_a1 = _get_lr(sched._partitions[2][1], 'A')
+        wait = next(op for op in lr_a1.preOps if op.kind == 'wait_gr')
+        c = wait.wait_gr_counts
+        assert c.A + c.B + c.SA + c.SB <= 12, (
+            f"pi=2 k=1 wait_gr inflated: A={c.A} B={c.B} SA={c.SA} SB={c.SB}")
+        assert c.A == 0 and c.B == 2, (
+            f"expected same-partition sk=0 walk (not ring wrap): A={c.A} B={c.B}")
+        sched.remove_unnecessary_wait_gr_sync()
+        sched.emit()
+        assert len([e for e in sched._emitted[2][1] if e.opType == 'wait_gr']) == 0
+
+    def test_320x256_5part_mt_off_cross_partition_sk1(self):
+        """LR @ pi=3 k=1 with mt_off=-1 dep at pi=2 k=0 must not ring-wrap."""
+        kernel = create_kernel(320, 256, fp4=True, depthU=256, miWaveGroup=[2, 2])
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
+        scaleTiA = makeTileInfo('MXSA', kernel)
+        scaleTiB = makeTileInfo('MXSB', kernel)
+        grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        cfg = SchedulerConfig(
+            numMFMATilesM=10, numMFMATilesN=8, numSubIterK=2,
+            lrA=ReadGranularity(mn=1, k=1), lrB=ReadGranularity(mn=1, k=1),
+            grA=grA, grB=grB,
+            lrSA=ReadGranularity(mn=2, k=2), lrSB=ReadGranularity(mn=2, k=2),
+            grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0],
+                                 k=scaleTiA.localMMATileGrid[1]),
+            grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0],
+                                 k=scaleTiB.localMMATileGrid[1]),
+            partitionSizeM=2, partitionSizeN=8, pgr=1,
+        )
+        sched = LogicalScheduler(cfg)
+        sched.remove_unnecessary_wait_lr_sync()
+        lr_a1 = _get_lr(sched._partitions[3][1], 'A')
+        wait = next(op for op in lr_a1.preOps if op.kind == 'wait_gr')
+        c = wait.wait_gr_counts
+        assert c.A + c.B + c.SA + c.SB <= 12, (
+            f"pi=3 k=1 wait_gr inflated: A={c.A} B={c.B} SA={c.SA} SB={c.SB}")
+        assert c.A == 2 and c.B == 0, (
+            f"expected forward-span inflight (not ring wrap): A={c.A} B={c.B}")
+        sched.remove_unnecessary_wait_gr_sync()
+        sched.emit()
+        assert len([e for e in sched._emitted[3][1] if e.opType == 'wait_gr']) == 0
+
+    def test_320x256_5part_same_partition_s0_anchor_p4_sk1(self):
+        """LR A @ pi=4 k=1 must re-anchor on pi=4 k=0 GR, not pi=0 k=0."""
+        kernel = create_kernel(320, 256, fp4=True, depthU=256, miWaveGroup=[2, 2])
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
+        scaleTiA = makeTileInfo('MXSA', kernel)
+        scaleTiB = makeTileInfo('MXSB', kernel)
+        grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        cfg = SchedulerConfig(
+            numMFMATilesM=10, numMFMATilesN=8, numSubIterK=2,
+            lrA=ReadGranularity(mn=1, k=1), lrB=ReadGranularity(mn=1, k=1),
+            grA=grA, grB=grB,
+            lrSA=ReadGranularity(mn=2, k=2), lrSB=ReadGranularity(mn=2, k=2),
+            grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0],
+                                 k=scaleTiA.localMMATileGrid[1]),
+            grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0],
+                                 k=scaleTiB.localMMATileGrid[1]),
+            partitionSizeM=2, partitionSizeN=8, pgr=1,
+        )
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        em = next(e for e in sched._emitted[4][1] if e.opType == 'wait_gr')
+        c = em.source.wait_gr_counts
+        assert c.A + c.B + c.SA + c.SB <= 8, (
+            f"pi=4 k=1 wait_gr inflated: A={c.A} B={c.B} SA={c.SA} SB={c.SB}")
+        assert c.A == 4, (
+            f"expected same-partition s0 anchor for LR A: A={c.A} B={c.B}")
 
 class TestInsertGrLrInc:
 
@@ -1785,6 +1909,43 @@ class TestComputeInflightLoads:
         lr_b = _get_lr(s0, 'B')
         assert lr_b.preOps[0].wait_gr_counts.A == 0
         assert lr_b.preOps[0].wait_gr_counts.B == 0
+
+    def test_multi_du_multi_partition_inflight_counts(self):
+        """Multi-DU + multi-partition: uid-aware distribution keeps GRs
+        at their natural positions, so _compute_inflight_loads produces
+        accurate non-zero counts (no force_drain needed)."""
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2,
+                                   partSizeM=4, partSizeN=4, pgr=1)
+        assert cfg.numPartitions > 1
+        assert max(cfg.numUnroll.values()) > 1
+
+        sched = LogicalScheduler(cfg)
+        sched.remove_cross_deps()
+
+        found_any = False
+        found_force_drain = False
+        for pi, slots in enumerate(sched._partitions):
+            for slot in slots:
+                for lr in slot.lrs:
+                    if not lr.preOps:
+                        continue
+                    wait = lr.preOps[0]
+                    if not hasattr(wait, 'wait_gr_counts'):
+                        continue
+                    gr_deps = [d for d in lr.deps if isinstance(d.ref, GRPlacement)]
+                    any_cross = any(d.mt_offset != 0 for d in gr_deps)
+                    if lr.mtIteration > 0 or any_cross:
+                        found_any = True
+                        if getattr(wait, 'force_drain', False):
+                            found_force_drain = True
+                            continue
+                        c = wait.wait_gr_counts
+                        has_nonzero = c.A > 0 or c.B > 0 or c.SA > 0 or c.SB > 0
+                        assert has_nonzero, (
+                            f"pi={pi} slot={slot.subIterK} lr={lr.tensor} "
+                            f"mt={lr.mtIteration}: expected non-zero inflight "
+                            f"counts, got {c}")
+        assert found_any, "Expected at least one cross-iter / next-MT LR dep"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2982,8 +3143,9 @@ class TestBuildNll:
         sched = LogicalScheduler(cfg)
         sched.emit()
         nll = sched.build_nll()
+        numK = cfg.numSubIterK
         for partition_emitted in nll:
-            for emitted in partition_emitted:
+            for k, emitted in enumerate(partition_emitted):
                 for em in emitted:
                     src = em.source
                     assert em.opType != 'gr', "NLL should have no GR ops"
@@ -2997,8 +3159,13 @@ class TestBuildNll:
                         from Tensile.Components.Subtile.LogicalScheduler import WaitGROp
                         if isinstance(src, WaitGROp) and src.wait_gr_counts:
                             cnts = src.wait_gr_counts
-                            assert cnts.A == 0 and cnts.B == 0 and cnts.SA == 0 and cnts.SB == 0, \
-                                f"NLL WaitGR should have zeroed counts, got {cnts}"
+                            slot_has_lr = any(
+                                e.opType == 'lr' for e in emitted)
+                            preserve = slot_has_lr and k == numK - 1
+                            if not preserve:
+                                assert cnts.A == 0 and cnts.B == 0 \
+                                    and cnts.SA == 0 and cnts.SB == 0, \
+                                    f"NLL WaitGR should have zeroed counts, got {cnts}"
 
 
 # ══════════════════════════════════════════════════════════════

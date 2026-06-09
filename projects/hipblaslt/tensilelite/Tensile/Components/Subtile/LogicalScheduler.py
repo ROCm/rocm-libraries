@@ -17,9 +17,8 @@ The schedule is built in these passes:
   insert_gr_lr_inc         — insert lr_inc/gr_inc preOps at MT transitions
   group                    — serialize and group (produce paths for instructionSchedule)
   remove_wait_lr_sync      — remove redundant wait_lr_sync after grouping
+  remove_wait_gr_sync      — drop redundant wait_gr_sync on interior partition s1
   emit                     — produce List[EmittedModule] with before-link chains
-
-  TODO: add a pass to remove redundant wait_gr_sync on multi-partition configs
 """
 
 from __future__ import annotations
@@ -51,9 +50,10 @@ class Pass(IntEnum):
     GR_INC              = 7
     GROUP_LR_GR         = 8
     REMOVE_WAIT_LR_SYNC = 9
-    EMIT                = 10
-    BUILD               = 11
-    POPULATE            = 12
+    REMOVE_WAIT_GR_SYNC = 10
+    EMIT                = 11
+    BUILD               = 12
+    POPULATE            = 13
 
 
 _PASS_PIPELINE = {
@@ -67,7 +67,8 @@ _PASS_PIPELINE = {
     Pass.GR_INC:               ('insert_gr_lr_inc',                 [Pass.REMOVE_DEPS]),
     Pass.GROUP_LR_GR:          ('group_lr_gr',                      [Pass.GR_INC]),
     Pass.REMOVE_WAIT_LR_SYNC:  ('remove_unnecessary_wait_lr_sync', [Pass.GROUP_LR_GR]),
-    Pass.EMIT:                 ('emit',                             [Pass.REMOVE_WAIT_LR_SYNC]),
+    Pass.REMOVE_WAIT_GR_SYNC:  ('remove_unnecessary_wait_gr_sync', [Pass.REMOVE_WAIT_LR_SYNC]),
+    Pass.EMIT:                 ('emit',                             [Pass.REMOVE_WAIT_GR_SYNC]),
     Pass.BUILD:                ('build',                            [Pass.EMIT]),
     Pass.POPULATE:             ('populate_instructions',            []),
 }
@@ -1181,31 +1182,47 @@ class LogicalScheduler:
                 return True
         return False
 
-    def _distribute_grs(self, gr_list, gr_slot_bounds, unrollId=0):
+    def _distribute_grs(self, gr_list, gr_slot_bounds, unrollId=0,
+                        slot_start=0, slot_end=None, allowed_slots=None):
         """Phase 2: Distribute GR atoms across partition × subIterK slots.
 
         Explodes GR entries into atomic loads, distributes them into flat
         buckets respecting LDS conflict constraints and load balance,
         then remerges consecutive atoms and places them into partitions.
+
+        slot_start/slot_end restrict distribution to [slot_start, slot_end)
+        in the flat partition×subIterK index space.  Used by place_GRs to
+        confine each unrollId to its own slot range in multi-DU configs.
+
+        allowed_slots, when set, restricts placement to an explicit list of
+        flat slot indices (e.g. all subIterK=1 slots for scale prefetch).
         """
         cfg = self.config
         numK = cfg.numSubIterK
         numP = cfg.numPartitions
         numSlots = numP * numK
+        if allowed_slots is None:
+            if slot_end is None:
+                slot_end = numSlots
+            slots = list(range(slot_start, slot_end))
+        else:
+            slots = sorted(allowed_slots)
+        if not slots:
+            return
         lower, upper = gr_slot_bounds
 
         # 2a. Explode GR entries into atomic loads (1 load each)
         atoms = []
         for tensor, mt_val, t_start, t_end, k_start, k_end, gr_gran in gr_list:
             mn = gr_gran.mn
-            last = max(0, min(upper.get((tensor, mt_val), numSlots) - 1,
-                            numSlots - 1))
+            last = max(slots[0], min(upper.get((tensor, mt_val), numSlots) - 1,
+                                       slots[-1]))
             for pos in range(t_start, t_end, mn):
                 atoms.append((tensor, mt_val, pos, pos + mn, k_start, k_end, last))
 
-        # 2b. Place atoms across [0..numSlots) weighted by partition MFMA count.
-        #     Each partition's slots get a share proportional to its MFMAs,
-        #     so larger partitions receive more GR loads.
+        # 2b. Place atoms across allowed slots weighted by partition MFMA
+        #     count.  Each partition's slots get a share proportional to its
+        #     MFMAs, so larger partitions receive more GR loads.
         nAtoms = len(atoms)
         buckets = [[] for _ in range(numSlots)]
 
@@ -1216,18 +1233,26 @@ class LogicalScheduler:
             mfma_per_partition.append(cfg.partitionSizesM[piM] * cfg.partitionSizesN[piN])
 
         weight_prefix = [0]
-        for s in range(numSlots):
+        for s in slots:
             weight_prefix.append(weight_prefix[-1] + mfma_per_partition[s // numK])
-        total_weight = weight_prefix[numSlots]
+        total_weight = weight_prefix[-1]
         slot_boundaries = [p * nAtoms for p in weight_prefix[1:]]
 
         for i, (tensor, mt_val, ts, te, ks, ke, last) in enumerate(atoms):
-            slot = min(bisect_left(slot_boundaries, i * total_weight + 1),
-                       last) if nAtoms else 0
+            rel = min(bisect_left(slot_boundaries, i * total_weight + 1),
+                      len(slots) - 1) if nAtoms else 0
+            slot = slots[rel]
+            slot = min(slot, last)
+            slot_idx = rel
             while (slot < last and
                    self._has_lr_conflict(lower, tensor, mt_val,
                                          slot // numK, slot % numK, ks, ke)):
-                slot += 1
+                slot_idx += 1
+                if slot_idx >= len(slots):
+                    break
+                slot = slots[slot_idx]
+            if slot_idx >= len(slots):
+                slot = min(last, slots[-1])
             buckets[slot].append((tensor, mt_val, ts, te, ks, ke))
 
         # 2c. Remerge consecutive atoms and place into partitions
@@ -1289,7 +1314,7 @@ class LogicalScheduler:
         return self._partitions[0]
 
     def _consolidate_uid_grs(self, maxUnroll):
-        """Move uid>0 GRs into the last existing slot of the last partition.
+        """Move uid>0 GRs into the last subIterK slot of the last partition.
 
         For multi-DU, all GR loads for uid=0 must complete before the
         GRInc that advances the SRD for uid=1.  Since all tensors share
@@ -1528,14 +1553,24 @@ class LogicalScheduler:
                     gr.partition,
                     gr.subIterK_slot,
                     gr_intra_rank[id(gr)])
-        return _dep_exec_order
+
+        def _gr_schedule_order(gr: GRPlacement) -> tuple:
+            return (gr.partition, gr.subIterK_slot, gr_intra_rank[id(gr)])
+
+        return _dep_exec_order, _gr_schedule_order
+
+    @staticmethod
+    def _lr_schedule_order(lr: LRPlacement) -> tuple:
+        return (lr.partition, lr.subIterK_slot)
 
     def remove_unnecessary_gr_deps(self):
         """Remove GR deps on LRs that are already guaranteed by an earlier LR's wait.
 
         Per tensor, walks LR placements in execution order. If an earlier LR
         already waits for a GR with equal or higher exec_order, the later LR's
-        dep is redundant and removed.
+        dep is redundant and removed — but only when that earlier wait's GR
+        completes before the current LR runs (same-partition / earlier-slot).
+        Cross-partition deps on later partitions must not subsume earlier waits.
 
         Wraps around: the first LR's dep is compared against the last from the
         previous MT iteration (max dep exec_order shifted by mt_offset -1).
@@ -1543,7 +1578,7 @@ class LogicalScheduler:
         self._ensure_pass(Pass.DEPS)
 
         for tensor in self.tensors:
-            _dep_exec_order = self._make_gr_dep_exec_order(tensor)
+            _dep_exec_order, _gr_schedule_order = self._make_gr_dep_exec_order(tensor)
 
             lr_with_gr_deps = []
             for pi, slots in enumerate(self._partitions):
@@ -1559,13 +1594,21 @@ class LogicalScheduler:
 
             max_eo = max(_dep_exec_order(dep) for _, dep in lr_with_gr_deps)
             max_guaranteed = (max_eo[0] - 1, max_eo[1], max_eo[2], 0)
+            _, max_dep = max(lr_with_gr_deps, key=lambda item: _dep_exec_order(item[1]))
+            guarantee_gr_order = _gr_schedule_order(max_dep.ref)
+            use_wraparound = True
 
             for lr, dep in lr_with_gr_deps:
                 eo = _dep_exec_order(dep)
-                if eo <= max_guaranteed:
+                lr_order = self._lr_schedule_order(lr)
+                if eo <= max_guaranteed and (use_wraparound
+                                             or guarantee_gr_order < lr_order):
                     lr.deps.clear()
                 else:
-                    max_guaranteed = eo
+                    if eo > max_guaranteed:
+                        max_guaranteed = eo
+                        guarantee_gr_order = _gr_schedule_order(dep.ref)
+                    use_wraparound = False
 
         self._completed.add(Pass.REMOVE_GR_DEPS)
 
@@ -1678,6 +1721,93 @@ class LogicalScheduler:
         n_k = (tiles.subIterK_end - tiles.subIterK_start) // gr_gran.k
         return n_tile * n_k
 
+    @staticmethod
+    def _gr_precedes_lr(gr: GRPlacement, lr: LRPlacement) -> bool:
+        """True if GR is issued before LR in global (partition, subIterK) order."""
+        return (gr.partition, gr.subIterK_slot) < (lr.partition, lr.subIterK_slot)
+
+    def _find_preceding_gr_dep(self, lr: LRPlacement, tensor: str,
+                               unrollId: int) -> Optional[Dep]:
+        """Nearest preceding GR for tensor/unrollId before lr in schedule order."""
+        numK = len(self._partitions[0])
+        lr_flat = lr.partition * numK + lr.subIterK_slot
+        for pos in range(lr_flat - 1, -1, -1):
+            pi = pos // numK
+            slot_k = pos % numK
+            slot = self._partitions[pi][slot_k]
+            candidates = [
+                g for g in slot.grs
+                if g.tensor == tensor and g.unrollId == unrollId]
+            if candidates:
+                gr = max(candidates, key=self._gr_sort_key)
+                return Dep(ref=gr, mt_offset=0)
+        return None
+
+    def _anchor_gr_in_slot(self, slot, tensor: str, unrollId: int) -> Optional[GRPlacement]:
+        """Pick a GR in slot for re-anchoring (same tensor/unrollId preferred)."""
+        pool = [g for g in slot.grs if g.tensor == tensor]
+        if pool:
+            same_uid = [g for g in pool if g.unrollId == unrollId]
+            use = same_uid if same_uid else pool
+        elif slot.grs:
+            use = slot.grs
+        else:
+            return None
+        return max(use, key=self._gr_sort_key)
+
+    def _wait_gr_dep_for_lr(self, lr: LRPlacement, dep: Dep) -> Dep:
+        """Re-anchor LR→GR deps for wait_gr inflight counting.
+
+        Tile overlap can pick a GR at or after the consumer LR in schedule
+        order.  The backward walk then wraps a full iteration and over-counts
+        inflight loads, producing a too-weak vmcnt.
+
+        subIterK==1: anchor on this partition's slot-0 GR (one-slot walk).
+        subIterK==0: when the tile dep is still in the future, anchor on the
+        immediately preceding schedule slot (typically previous partition sk=1),
+        or same-partition slot-0 at pi=0 sk=0 (zero inflight after prologue).
+        """
+        if len(self._partitions) <= 1:
+            return dep
+        gr = dep.ref
+        if not isinstance(gr, GRPlacement):
+            return dep
+
+        numK = len(self._partitions[0])
+
+        if lr.subIterK_slot == 1:
+            slot0 = self._partitions[lr.partition][0]
+            if gr.partition == lr.partition and gr.subIterK_slot == 0:
+                anchor_gr = gr
+            else:
+                anchor_gr = self._anchor_gr_in_slot(slot0, gr.tensor, gr.unrollId)
+            if anchor_gr is not None:
+                return Dep(ref=anchor_gr, mt_offset=0)
+
+        if self._gr_precedes_lr(gr, lr):
+            return dep
+
+        anchor = self._find_preceding_gr_dep(lr, gr.tensor, gr.unrollId)
+        if anchor is not None:
+            return anchor
+
+        lr_flat = lr.partition * numK + lr.subIterK_slot
+        if lr_flat > 0:
+            prev_flat = lr_flat - 1
+            prev_pi = prev_flat // numK
+            prev_k = prev_flat % numK
+            anchor_gr = self._anchor_gr_in_slot(
+                self._partitions[prev_pi][prev_k], gr.tensor, gr.unrollId)
+            if anchor_gr is not None:
+                return Dep(ref=anchor_gr, mt_offset=0)
+
+        slot0 = self._partitions[lr.partition][0]
+        anchor_gr = self._anchor_gr_in_slot(slot0, gr.tensor, gr.unrollId)
+        if anchor_gr is not None:
+            return Dep(ref=anchor_gr, mt_offset=0)
+
+        return dep
+
     def _compute_inflight_loads(self, consumer_pi: int, consumer_slot: int,
                                 tensor: str, dep_ref: Dep) -> WaitGRCounts:
         """Count inflight GR atomic loads between a dep GR and the consumer.
@@ -1715,14 +1845,30 @@ class LogicalScheduler:
             return WaitGRCounts()
 
         # Exact number of backward steps from consumer to dep's slot.
-        # Forward distance from dep (exclusive) to consumer (inclusive) =
-        #   wraps_needed full iterations + (consumer_flat - dep_flat) slots.
-        # Walking backward covers the same count of slots.
-        # When wraps_needed==0 and dep_flat >= consumer_flat, the dep GR is at or
-        # after the consumer in the same iteration — nothing is inflight yet.
-        # When wraps_needed >= 1, total_steps is always >= 1 by construction
-        # (wraps_needed*flat_len >= flat_len > flat_len-1 >= dep_flat-consumer_flat).
-        total_steps = wraps_needed * flat_len + consumer_flat - dep_flat
+        # Forward distance from dep (exclusive) to consumer (inclusive) within
+        # one mainloop sweep:
+        #   - same sweep (consumer_flat > dep_flat): consumer_flat - dep_flat
+        #   - wrapped (consumer_flat <= dep_flat) with mt prefetch offset:
+        #       wraps_needed * flat_len + consumer_flat - dep_flat
+        # mt_offset (-1, -2, …) marks MT prefetch distance on the dep GR. When the
+        # consumer LR is later in flattened schedule order (forward_span>0), walk
+        # only those slots for multi-partition configs. Single-partition rings
+        # and true wrap-around (forward_span<=0) keep the full ring term.
+        forward_span = consumer_flat - dep_flat
+        if numP > 1 and wraps_needed > 0 and forward_span <= 0:
+            # Tile dep still names a future slot after re-anchor; do not ring-wrap.
+            return WaitGRCounts()
+        if wraps_needed == 0:
+            total_steps = forward_span
+        elif forward_span <= 0:
+            total_steps = wraps_needed * flat_len + forward_span
+        elif numP == 1:
+            # Single-partition ring: MT-prefetch dep still needs full wrap term.
+            total_steps = wraps_needed * flat_len + forward_span
+        else:
+            # Multi-partition: consumer is later in schedule order than dep slot;
+            # walk only the forward span (do not add wraps_needed*flat_len).
+            total_steps = forward_span
         if total_steps <= 0:
             assert wraps_needed == 0, (
                 f"_compute_inflight_loads: total_steps={total_steps} < 1 "
@@ -1747,7 +1893,25 @@ class LogicalScheduler:
             # Walk GRs in reverse emission order (most recently issued first)
             sorted_grs = sorted(slot.grs, key=self._gr_sort_key, reverse=True)
             for gr in sorted_grs:
+                if is_final and (total_steps == 1 and consumer_slot == 1
+                                 and numP > 1):
+                    # sk=1 wait_gr: inflight = all GR loads in same-partition sk=0
+                    # since that slot's wait_gr (matches assembly buffer_load window).
+                    atoms = self._count_gr_atoms(gr)
+                    cur = getattr(counts, gr.tensor)
+                    setattr(counts, gr.tensor, cur + atoms)
+                    continue
                 if is_final and gr.tensor == tensor and gr is dep_ref.ref:
+                    # Cross-subIterK: include the dep GR's loads when the backward
+                    # walk did not already count same-tensor atoms after it (typical
+                    # when the dep is the last GR for that tensor in the slot).
+                    # Same-slot wrap-around (consumer_flat == dep_flat) keeps the
+                    # legacy A=0 + other-tensor inflight behavior.
+                    if consumer_flat != dep_flat:
+                        cur = getattr(counts, gr.tensor)
+                        if cur == 0 and len(self._partitions) > 1:
+                            atoms = self._count_gr_atoms(gr)
+                            setattr(counts, gr.tensor, cur + atoms)
                     return counts
                 atoms = self._count_gr_atoms(gr)
                 cur = getattr(counts, gr.tensor)
@@ -1787,26 +1951,11 @@ class LogicalScheduler:
                     lr.preOps = []
                     if gr_deps:
                         dep = gr_deps[0]
-                        cross_set = set(id(d) for d in cross)
-                        is_cross = id(dep) in cross_set
-                        # Multi-DU + multi-partition: when an LR has any GR
-                        # dep with non-zero mt_offset (= cross-body-iter dep),
-                        # the walk-back inflight count understates outstanding
-                        # loads because consolidate_uid_grs moved GRs across
-                        # slots.  Force a full vmcnt(0) drain so the LR sees
-                        # fully written LDS.  PR 7781 PR2 (mt320x256 / MIWT[10,8]
-                        # asymmetric-MIWT bug).
-                        any_cross_iter_dep = any(
-                            d.mt_offset != 0 for d in gr_deps)
-                        force_drain = (
-                            self.config.numPartitions > 1 and
-                            max(self.config.numUnroll.values()) > 1 and
-                            (lr.mtIteration > 0 or any_cross_iter_dep))
-                        if force_drain:
-                            counts = WaitGRCounts()
-                        else:
-                            counts = self._compute_inflight_loads(
-                                pi, lr.subIterK_slot, dep.ref.tensor, dep)
+                        wait_dep = self._wait_gr_dep_for_lr(lr, dep)
+                        is_cross = (wait_dep.ref.partition != pi
+                                    or wait_dep.ref.subIterK_slot != lr.subIterK_slot)
+                        counts = self._compute_inflight_loads(
+                            pi, lr.subIterK_slot, wait_dep.ref.tensor, wait_dep)
                         lr.preOps.append(WaitGROp(wait_gr_counts=counts,
                                                   has_sync=True,
                                                   adjustVmcnt=is_cross))
@@ -1945,22 +2094,29 @@ class LogicalScheduler:
                 gr.tiles.tileId_start)
 
     @staticmethod
-    def _merge_preops(all_preops: List[List['BaseOp']]) -> List['BaseOp']:
+    def _merge_preops(all_preops: List[List['BaseOp']],
+                      lr_tensors: Optional[List[str]] = None) -> List['BaseOp']:
         """Merge preOps from multiple placements.
 
         Combines wait_gr/wait_gr_sync counts into a single BaseOp, deduplicates barrier ops
         (wait_lr_sync, wait_lr), and collects the rest.
+
+        wait_gr merge: per tensor, take the strictest (min) count among ops that
+        report a non-zero count for that tensor.  Zero on an LR's own tensor
+        means "not waiting on this tensor" and must not erase another LR's
+        non-zero requirement (e.g. LR A wait_gr B=8 must survive LR B B=0).
         """
-        wait_gr_ops_full = []
+        wait_gr_by_lr = []
         has_wait_gr_sync = False
         seen_wait_lr = False
         others = []
-        for preops in all_preops:
+        for idx, preops in enumerate(all_preops):
+            lr_tensor = lr_tensors[idx] if lr_tensors else None
             for op in preops:
                 if isinstance(op, WaitGROp) and op.wait_gr_counts:
                     if op.has_sync:
                         has_wait_gr_sync = True
-                    wait_gr_ops_full.append(op)
+                    wait_gr_by_lr.append((op, lr_tensor))
                 elif isinstance(op, WaitLROp):
                     if not seen_wait_lr:
                         seen_wait_lr = True
@@ -1968,12 +2124,15 @@ class LogicalScheduler:
                 else:
                     others.append(op)
         result = []
-        if wait_gr_ops_full:
+        if wait_gr_by_lr:
             merged_counts = WaitGRCounts()
             for t in ('A', 'B', 'SA', 'SB'):
-                setattr(merged_counts, t,
-                        min(getattr(op.wait_gr_counts, t) for op in wait_gr_ops_full))
-            adjust = all(op.adjustVmcnt for op in wait_gr_ops_full)
+                vals = [
+                    getattr(op.wait_gr_counts, t)
+                    for op, _ in wait_gr_by_lr
+                    if getattr(op.wait_gr_counts, t) > 0]
+                setattr(merged_counts, t, min(vals) if vals else 0)
+            adjust = all(op.adjustVmcnt for op, _ in wait_gr_by_lr)
             result.append(WaitGROp(wait_gr_counts=merged_counts,
                                    has_sync=has_wait_gr_sync,
                                    adjustVmcnt=adjust))
@@ -2015,7 +2174,8 @@ class LogicalScheduler:
                 if len(ordered_lrs) > 1:
                     # Merge preOps onto first LR
                     merged = self._merge_preops(
-                        [lr.preOps for lr in ordered_lrs])
+                        [lr.preOps for lr in ordered_lrs],
+                        [lr.tensor for lr in ordered_lrs])
                     ordered_lrs[0].preOps = merged
                     for lr in ordered_lrs[1:]:
                         lr.preOps = []
@@ -2166,6 +2326,32 @@ class LogicalScheduler:
 
         self._completed.add(Pass.REMOVE_WAIT_LR_SYNC)
 
+    def remove_unnecessary_wait_gr_sync(self):
+        """Remove redundant wait_gr_sync on interior partition subIterK=1 slots.
+
+        In multi-partition configs, inflight GR from partition pi's s1 is
+        drained by partition (pi+1)'s s0 wait_gr before that partition's
+        ds_reads.  Baseline kernels only retain wait_gr at s1 on the last
+        partition (wrap to the next MacroTile iteration).
+        """
+        self._ensure_pass(Pass.REMOVE_WAIT_LR_SYNC)
+
+        if self.config.numPartitions <= 1:
+            self._completed.add(Pass.REMOVE_WAIT_GR_SYNC)
+            return
+
+        last_pi = self.config.numPartitions - 1
+        for pi, slots in enumerate(self._partitions):
+            for si, slot in enumerate(slots):
+                if si == 0 or pi == last_pi:
+                    continue
+                for lr in slot.lrs:
+                    lr.preOps = [
+                        op for op in lr.preOps
+                        if not isinstance(op, WaitGROp)]
+
+        self._completed.add(Pass.REMOVE_WAIT_GR_SYNC)
+
     def _split_deps(self, deps: List[Dep], consumer_pi: int,
                     consumer_slot: int) -> Tuple[List[Dep], List[Dep]]:
         """Split deps into same-subIterK and cross-subIterK lists.
@@ -2199,7 +2385,7 @@ class LogicalScheduler:
           - WaitLROp with has_sync expands to two modules: wait_lr then sync
           - Same-subIterK Dep deps become ordering constraints (no new module)
         """
-        self._ensure_pass(Pass.REMOVE_WAIT_LR_SYNC)
+        self._ensure_pass(Pass.REMOVE_WAIT_GR_SYNC)
 
         all_partitions = []
         for pi, slots in enumerate(self._partitions):
@@ -2372,7 +2558,8 @@ class LogicalScheduler:
 
     def build_nll(self) -> List[List[List[EmittedModule]]]:
         """NLL (No Load Loop): mainloop without GR, LR(n+1), GR_INC, LR_INC,
-        WaitGR(n+1)+Sync. Keeps LR(n), MFMAs, WaitGR(n) with zeroed counts."""
+        WaitGR(n+1)+Sync. Keeps LR(n), MFMAs, WaitGR(n). WaitGR counts are
+        zeroed only when no LR(n) remains in the last subIterK slot."""
         self._ensure_pass(Pass.EMIT)
 
         if self.config.pgr == 0:
@@ -2380,9 +2567,10 @@ class LogicalScheduler:
             return self._nll_emitted
 
         nll = []
+        numK = self.config.numSubIterK
         for partition_emitted in self._emitted:
             part_nll = []
-            for emitted in partition_emitted:
+            for k, emitted in enumerate(partition_emitted):
                 new_emitted = copy.deepcopy(emitted)
                 removed = set()
 
@@ -2401,7 +2589,10 @@ class LogicalScheduler:
                     elif em.opType == 'lr_inc' and not src.isUnrollSwap:
                         removed.add(em.moduleId)
 
-                # Zero inflight counts on remaining WaitGR.
+                has_lr = any(em.opType == 'lr' and em.moduleId not in removed
+                             for em in new_emitted)
+
+                # GR path is removed in NLL — no new global loads are in flight.
                 for em in new_emitted:
                     if em.opType == 'wait_gr' and em.moduleId not in removed:
                         em.source.wait_gr_counts = WaitGRCounts()
@@ -2415,8 +2606,6 @@ class LogicalScheduler:
                 # Remove WaitLR if no LR remains in this subIterK
                 # but keep WaitLR ops that non-removed modules depend on
                 # (e.g. MFMAs waiting for LRs issued in a previous subIterK)
-                has_lr = any(em.opType == 'lr' and em.moduleId not in removed
-                             for em in new_emitted)
                 if not has_lr:
                     depended_on = {em.before for em in new_emitted
                                    if em.moduleId not in removed
@@ -3304,8 +3493,10 @@ class LogicalScheduler:
         Uses per-tensor VGPR tile lists (vgprTilesA/B/SA/SB) indexed by
         vgprTileId from placement tile maps.
         """
-        if self._preloop_emitted is None or self._ngll_emitted is None \
-                or self._nll_emitted is None:
+        need_build = (self._preloop_emitted is None or self._ngll_emitted is None
+                      or self._nll_emitted is None)
+
+        if need_build:
             self.build()
 
         self._kernel = kernel

@@ -115,10 +115,36 @@ class _SlotPlacer:
         finding valid slots. When no empty slot is found, force-places at
         the closest valid position respecting dependencies (allowing >2
         items per slot).
+
+        wait_gr immediately followed by barrier is placed as an atomic pair
+        in the same slot so other paths cannot insert m0 setup between them.
         """
         limit = (self.totalSlots - 1) if reverse else 0
-        for idx, item in enumerate(pathInsts):
+        idx = 0
+        while idx < len(pathInsts):
+            item = pathInsts[idx]
             mid, inst = item
+            if (not reverse and idx + 1 < len(pathInsts)
+                    and _isWaitGr(inst) and _isBarrier(pathInsts[idx + 1][1])):
+                if not reverse:
+                    limit = self.adjustLimit(limit, inst)
+                pos = self.findSlot(mid, inst, limit, reverse=reverse)
+                if pos is None:
+                    pos = self._forceSlot(mid, limit, reverse)
+                self.place(pos, item, reverse=reverse)
+                sync_item = pathInsts[idx + 1]
+                if self._canPlace(pos, sync_item[1]):
+                    self.place(pos, sync_item, reverse=reverse)
+                else:
+                    sync_pos = self.findSlot(sync_item[0], sync_item[1],
+                                             pos + 1, reverse=reverse)
+                    if sync_pos is None:
+                        sync_pos = self._forceSlot(sync_item[0], pos + 1, reverse)
+                    self.place(sync_pos, sync_item, reverse=reverse)
+                    pos = sync_pos
+                limit = (pos - 1) if reverse else (pos + 1)
+                idx += 2
+                continue
             if not reverse:
                 limit = self.adjustLimit(limit, inst)
             pos = self.findSlot(mid, inst, limit, reverse=reverse)
@@ -126,6 +152,7 @@ class _SlotPlacer:
                 pos = self._forceSlot(mid, limit, reverse)
             self.place(pos, item, reverse=reverse)
             limit = (pos - 1) if reverse else (pos + 1)
+            idx += 1
 
     # ── Assembly ──
 
@@ -152,6 +179,8 @@ _isDsRead = lambda x: isinstance(x, LocalReadInstruction)
 _isBufferLoad = lambda x: isinstance(x, GlobalReadInstruction)
 _isWaitCnt = lambda x: isinstance(x, SWaitCnt)
 _isM0Update = lambda x: isinstance(x, CommonInstruction) and hasattr(x, 'dst') and hasattr(x.dst, 'regType') and x.dst.regType == 'm'
+_isWaitGr = lambda x: _isWaitCnt(x) and "Wait GR" in (getattr(x, "comment", "") or "")
+_isBarrier = lambda x: "Barrier" in (getattr(x, "comment", "") or "")
 
 
 class _SchedulingRules:
@@ -165,6 +194,8 @@ class _SchedulingRules:
         # Cross-path state
         self.lastDsReadPos = -1
         self.earliestWaitCntPos = totalSlots
+        self.waitGrBarrierPos: Optional[int] = None
+        self.maxDsReadAfterWaitGr = -1
         # Per-path state
         self._resetPath()
 
@@ -210,7 +241,27 @@ class _SchedulingRules:
             return not any(_isBufferLoad(item[1]) for s in slots for item in placer._placed[s])
         return not any(_isM0Update(item[1]) for s in slots for item in placer._placed[s])
 
+    def grAfterWaitGrDsReads(self, placer, pos, inst):
+        """Keep GR (m0 / buffer_load) out of the window after wait_gr+barrier until ds_reads finish."""
+        if not (_isBufferLoad(inst) or _isM0Update(inst)):
+            return True
+        if self.waitGrBarrierPos is None or self.maxDsReadAfterWaitGr < 0:
+            return True
+        if pos <= self.waitGrBarrierPos:
+            return True
+        return pos > self.maxDsReadAfterWaitGr
+
     # ── Adjusters: (placer, limit, inst) -> limit ──
+
+    def deferGrAfterWaitGrDsReads(self, placer, limit, inst):
+        """Once past wait_gr, start searching for GR only after post-barrier ds_reads."""
+        if not (_isBufferLoad(inst) or _isM0Update(inst)):
+            return limit
+        if self.waitGrBarrierPos is None or self.maxDsReadAfterWaitGr < 0:
+            return limit
+        if limit <= self.waitGrBarrierPos:
+            return limit
+        return max(limit, self.maxDsReadAfterWaitGr + 1)
 
     def spreadBufferLoads(self, placer, limit, inst):
         """Spread buffer_load instructions evenly across available range."""
@@ -255,6 +306,27 @@ class _SchedulingRules:
             numTailInsts = sum(1 for mid, _ in pathInsts if mid in tailModuleIds)
             # this is an approximation as we don't know exactly how many slots will be use by modules after the GR yet (in this codepath)
             self.bufLoadMaxSlot = max(0, rawMax - numTailInsts)
+
+    def setPostWaitGrDsReadFence(self, placer) -> None:
+        """After the wait_gr path is placed, record ds_read coverage for GR deferral."""
+        wg_pos = None
+        for pos, slot in enumerate(placer._placed):
+            for _, inst in slot:
+                if _isWaitGr(inst):
+                    wg_pos = pos if wg_pos is None else min(wg_pos, pos)
+        if wg_pos is None:
+            self.waitGrBarrierPos = None
+            self.maxDsReadAfterWaitGr = -1
+            return
+        max_ds = -1
+        for pos, slot in enumerate(placer._placed):
+            if pos <= wg_pos:
+                continue
+            for _, inst in slot:
+                if _isDsRead(inst):
+                    max_ds = max(max_ds, pos)
+        self.waitGrBarrierPos = wg_pos
+        self.maxDsReadAfterWaitGr = max_ds
 
 
 def _classifyPaths(pathOrders, emittedModules):
@@ -371,8 +443,11 @@ def instructionSchedule(emittedModules):
       - Before dependencies are respected at module order level.
       - Minimm distance between ds_read and it waitcnt (hardcoded for now)
       - Module-internal instruction order is preserved.
-      - LR path containing a WAIT_GR is packed from the end backwards. We want WAIT_GR to be done as late as possible.
+      - LR path containing a WAIT_GR is placed forward (wait_gr → sync → LR insts) so GR
+        waits complete before that path's ds_reads.
       - GR path is spread as much as possible across remaining valid slots. No backwards here as we want GRs to be done as early as possible.
+      - After a wait_gr path, GR m0/buffer_load must not be scheduled between the
+        wait_gr+barrier and that path's post-barrier ds_reads (LR before GR).
 
       TODO : To be tested on multi-partition setup.
     """
@@ -407,19 +482,21 @@ def instructionSchedule(emittedModules):
     rules = _SchedulingRules(totalSlots=(len(mfmas) - 1) * 2)
     placer = _SlotPlacer(
         len(mfmas) - 1, n, pathOrders,
-        validators=[rules.oneDsReadPerInterval, rules.minGapDsReadBeforeWait, rules.minGapDsReadToWait, rules.noM0WithBufferLoad],
-        adjusters=[rules.spreadBufferLoads],
+        validators=[rules.oneDsReadPerInterval, rules.minGapDsReadBeforeWait, rules.minGapDsReadToWait,
+                    rules.noM0WithBufferLoad, rules.grAfterWaitGrDsReads],
+        adjusters=[rules.deferGrAfterWaitGrDsReads, rules.spreadBufferLoads],
         onPlace=rules.trackPlacement)
 
-    for order, hasWaitGR in paths:
+    for path_idx, (order, hasWaitGR) in enumerate(paths):
         if not order:
             continue
-        pathInsts = _flattenPath(order, emittedModules, reverse=hasWaitGR)
+        pathInsts = _flattenPath(order, emittedModules, reverse=False)
         rules.resetPath()
         if not hasWaitGR:
             rules.setupBufLoadSpreading(placer, pathInsts, order)
-        placer.placePath(pathInsts, reverse=hasWaitGR)
-
+        placer.placePath(pathInsts, reverse=False)
+        if hasWaitGR:
+            rules.setPostWaitGrDsReadFence(placer)
 
     scheduled = Module()
     _emitPreMfma(scheduled)

@@ -1102,6 +1102,8 @@ MAINLOOP (dependency paths):
       preMFMA path 0:
         [ 5] wait_lr    wait_lr
       path 0:
+        [ 6] wait_gr    wait_gr(A=2,B=3)
+        [ 7] sync       sync
         [ 1] lr         LR A  (MT n, subIterK [3]) [0-1]
         [ 2] lr         LR B  (MT n, subIterK [3]) [0-5]
       path 1:
