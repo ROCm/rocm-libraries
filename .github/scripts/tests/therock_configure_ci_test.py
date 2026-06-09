@@ -112,9 +112,17 @@ class ConfigureCITest(unittest.TestCase):
         self.assertTrue(
             therock_configure_ci.is_path_workflow_file_related_to_ci(script_path)
         )
+        ci_env_path = ".github/actions/ci-env/action.yml"
+        self.assertTrue(
+            therock_configure_ci.is_path_workflow_file_related_to_ci(ci_env_path)
+        )
         bad_path = ".github/workflows/test.yml"
         self.assertFalse(
             therock_configure_ci.is_path_workflow_file_related_to_ci(bad_path)
+        )
+        bad_action_path = ".github/actions/setup-rocm-linux/action.yml"
+        self.assertFalse(
+            therock_configure_ci.is_path_workflow_file_related_to_ci(bad_action_path)
         )
 
     def test_is_path_skippable(self):
