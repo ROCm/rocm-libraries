@@ -53,7 +53,7 @@ def parseArguments():
         "--jobs",
         "-j",
         dest="Jobs",
-        action="store",
+        type=int,
         default=48,
         help="number of worker processes to use during validation checks",
     )

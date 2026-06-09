@@ -49,12 +49,6 @@ class TestActivationModule:
         assert 'gelu' in ActivationType.lookup
         assert 'relu' in ActivationType.lookup
         assert 'sigmoid' in ActivationType.lookup
-
-    def test_activation_type_all_in_lookup(self, Activation):
-        """Test that 'all' is in lookup"""
-        ActivationType = Activation.ActivationType
-
-        # 'all' should be in lookup
         assert 'all' in ActivationType.lookup
         assert 'hipblaslt_all' in ActivationType.lookup
 

@@ -24,7 +24,6 @@
 
 import pytest
 from pathlib import Path
-from unittest.mock import patch
 
 from Tensile.TensileLogic.ValidWorkGroup import _validateWorkGroup
 
@@ -33,25 +32,47 @@ from Tensile.TensileLogic.ValidWorkGroup import _validateWorkGroup
 class TestValidWorkGroup:
     """Tests for ValidWorkGroup validation function"""
 
-    def test_validate_workgroup_valid_solution(self):
-        """Test validation with a valid solution"""
+    def test_validate_workgroup_valid_16x16x1(self):
+        """Test validation with valid 16x16x1 workgroup"""
         solution = {
             "SolutionIndex": 0,
             "WorkGroup": [16, 16, 1],
-            "ThreadTile": [4, 4],
             "Valid": True
         }
         filepath = Path("test.yaml")
 
-        with patch('Tensile.TensileLogic.ValidWorkGroup.validateWorkGroup'):
-            result = _validateWorkGroup(solution, filepath)
-            assert result is True
+        result = _validateWorkGroup(solution, filepath)
+        assert result is True
 
-    def test_validate_workgroup_invalid_solution(self):
-        """Test validation with invalid solution (Valid=False)"""
+    def test_validate_workgroup_valid_8x8x1(self):
+        """Test validation with valid 8x8x1 workgroup"""
+        solution = {
+            "SolutionIndex": 0,
+            "WorkGroup": [8, 8, 1],
+            "Valid": True
+        }
+        filepath = Path("test.yaml")
+
+        result = _validateWorkGroup(solution, filepath)
+        assert result is True
+
+    def test_validate_workgroup_valid_32x8x1(self):
+        """Test validation with valid 32x8x1 workgroup"""
+        solution = {
+            "SolutionIndex": 0,
+            "WorkGroup": [32, 8, 1],
+            "Valid": True
+        }
+        filepath = Path("test.yaml")
+
+        result = _validateWorkGroup(solution, filepath)
+        assert result is True
+
+    def test_validate_workgroup_invalid_solution_flag(self):
+        """Test validation with solution Valid flag set to False"""
         solution = {
             "SolutionIndex": 1,
-            "WorkGroup": [0, 0, 0],  # Invalid
+            "WorkGroup": [16, 16, 1],
             "Valid": False
         }
         filepath = Path("test.yaml")
@@ -59,37 +80,51 @@ class TestValidWorkGroup:
         result = _validateWorkGroup(solution, filepath)
         assert result is False
 
-    def test_validate_workgroup_assertion_error(self):
-        """Test validation when validateWorkGroup raises AssertionError"""
+    def test_validate_workgroup_missing_workgroup_key(self):
+        """Test validation rejects solution missing WorkGroup key"""
         solution = {
             "SolutionIndex": 2,
-            "WorkGroup": [16, 16, 1],
             "Valid": True
         }
         filepath = Path("test.yaml")
 
-        with patch('Tensile.TensileLogic.ValidWorkGroup.validateWorkGroup',
-                   side_effect=AssertionError("Test error")):
-            result = _validateWorkGroup(solution, filepath)
-            assert result is False
+        result = _validateWorkGroup(solution, filepath)
+        assert result is False
 
-    def test_validate_workgroup_with_different_dimensions(self):
-        """Test with different workgroup dimensions"""
-        test_cases = [
-            ([8, 8, 1], True),
-            ([32, 8, 1], True),
-            ([16, 32, 1], True),
-        ]
+    def test_validate_workgroup_invalid_dimensions(self):
+        """Test validation rejects invalid workgroup dimensions"""
+        # [0, 0, 0] is not in valid workgroups list
+        solution = {
+            "SolutionIndex": 3,
+            "WorkGroup": [0, 0, 0],
+            "Valid": True
+        }
+        filepath = Path("test.yaml")
 
-        for workgroup, expected_valid in test_cases:
-            solution = {
-                "SolutionIndex": 0,
-                "WorkGroup": workgroup,
-                "Valid": expected_valid
-            }
-            filepath = Path("test.yaml")
+        result = _validateWorkGroup(solution, filepath)
+        assert result is False
 
-            with patch('Tensile.TensileLogic.ValidWorkGroup.validateWorkGroup'):
-                result = _validateWorkGroup(solution, filepath)
-                if expected_valid:
-                    assert result is True
+    def test_validate_workgroup_invalid_negative(self):
+        """Test validation rejects negative workgroup dimensions"""
+        solution = {
+            "SolutionIndex": 4,
+            "WorkGroup": [-1, 16, 1],
+            "Valid": True
+        }
+        filepath = Path("test.yaml")
+
+        result = _validateWorkGroup(solution, filepath)
+        assert result is False
+
+    def test_validate_workgroup_invalid_arbitrary(self):
+        """Test validation rejects arbitrary invalid workgroup"""
+        # [999, 999, 999] is not a valid workgroup
+        solution = {
+            "SolutionIndex": 5,
+            "WorkGroup": [999, 999, 999],
+            "Valid": True
+        }
+        filepath = Path("test.yaml")
+
+        result = _validateWorkGroup(solution, filepath)
+        assert result is False

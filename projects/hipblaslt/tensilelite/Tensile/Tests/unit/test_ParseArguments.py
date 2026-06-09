@@ -33,77 +33,74 @@ from Tensile.TensileLogic.ParseArguments import parseArguments
 class TestParseArguments:
     """Tests for ParseArguments function"""
 
-    def test_parse_arguments_basic(self):
+    def test_parse_arguments_basic(self, monkeypatch):
         """Test parsing basic arguments"""
         test_args = ["test_script.py", "/path/to/logic"]
-        sys.argv = test_args
+        monkeypatch.setattr(sys, "argv", test_args)
 
         args = parseArguments()
 
         assert args.LogicPath == "/path/to/logic"
         assert args.Verbose == 1  # default
-        # Note: Default is int, but argument parser doesn't specify type=int
-        assert args.Jobs == 48  # default is int
+        assert args.Jobs == 48  # default
 
-    def test_parse_arguments_with_verbose(self):
+    def test_parse_arguments_with_verbose(self, monkeypatch):
         """Test parsing with verbose flag"""
         test_args = ["test_script.py", "/path/to/logic", "-v", "2"]
-        sys.argv = test_args
+        monkeypatch.setattr(sys, "argv", test_args)
 
         args = parseArguments()
 
         assert args.Verbose == 2
 
-    def test_parse_arguments_with_jobs(self):
+    def test_parse_arguments_with_jobs(self, monkeypatch):
         """Test parsing with jobs argument"""
         test_args = ["test_script.py", "/path/to/logic", "--jobs", "16"]
-        sys.argv = test_args
+        monkeypatch.setattr(sys, "argv", test_args)
 
         args = parseArguments()
 
-        # Note: Jobs becomes a string when passed as argument because
-        # the argument parser doesn't specify type=int (inconsistent with default)
-        assert args.Jobs == "16"
+        assert args.Jobs == 16
 
-    def test_parse_arguments_with_check_all(self):
+    def test_parse_arguments_with_check_all(self, monkeypatch):
         """Test parsing with check-all flag"""
         test_args = ["test_script.py", "/path/to/logic", "--check-all"]
-        sys.argv = test_args
+        monkeypatch.setattr(sys, "argv", test_args)
 
         args = parseArguments()
 
         assert args.CheckAll is True
         assert args.CheckOnlyCustomKernels is False
 
-    def test_parse_arguments_with_check_only_custom_kernels(self):
+    def test_parse_arguments_with_check_only_custom_kernels(self, monkeypatch):
         """Test parsing with check-only-custom-kernels flag"""
         test_args = ["test_script.py", "/path/to/logic", "--check-only-custom-kernels"]
-        sys.argv = test_args
+        monkeypatch.setattr(sys, "argv", test_args)
 
         args = parseArguments()
 
         assert args.CheckOnlyCustomKernels is True
         assert args.CheckAll is False
 
-    def test_parse_arguments_with_cxx_compiler(self):
+    def test_parse_arguments_with_cxx_compiler(self, monkeypatch):
         """Test parsing with cxx-compiler argument"""
         test_args = ["test_script.py", "/path/to/logic", "--cxx-compiler", "/usr/bin/g++"]
-        sys.argv = test_args
+        monkeypatch.setattr(sys, "argv", test_args)
 
         args = parseArguments()
 
         assert args.CxxCompiler == "/usr/bin/g++"
 
-    def test_parse_arguments_with_known_bugs(self):
+    def test_parse_arguments_with_known_bugs(self, monkeypatch):
         """Test parsing with known-bugs argument"""
         test_args = ["test_script.py", "/path/to/logic", "--known-bugs", "bugs.yaml"]
-        sys.argv = test_args
+        monkeypatch.setattr(sys, "argv", test_args)
 
         args = parseArguments()
 
         assert args.KnownBugs == Path("bugs.yaml")
 
-    def test_parse_arguments_all_options(self):
+    def test_parse_arguments_all_options(self, monkeypatch):
         """Test parsing with all options"""
         test_args = [
             "test_script.py",
@@ -114,13 +111,13 @@ class TestParseArguments:
             "--cxx-compiler", "/opt/rocm/bin/amdclang++",
             "--known-bugs", "known_issues.yaml"
         ]
-        sys.argv = test_args
+        monkeypatch.setattr(sys, "argv", test_args)
 
         args = parseArguments()
 
         assert args.LogicPath == "/path/to/logic"
         assert args.Verbose == 3
-        assert args.Jobs == "32"
+        assert args.Jobs == 32
         assert args.CheckAll is True
         assert args.CxxCompiler == "/opt/rocm/bin/amdclang++"
         assert args.KnownBugs == Path("known_issues.yaml")

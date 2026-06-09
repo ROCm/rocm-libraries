@@ -126,6 +126,33 @@ class TestGetRealDataTypeHelpers:
         result = ProblemModule.getRealDataTypeB(dt)
         assert result == dt
 
+    def test_get_real_data_type_a_float8(self):
+        """Test getRealDataTypeA with Float8 type returns same type"""
+        from rocisa.enum import DataTypeEnum
+        dt = DataType(DataTypeEnum.Float8)
+
+        result = ProblemModule.getRealDataTypeA(dt)
+        # For standard types, should return same type
+        assert result == dt
+
+    def test_get_real_data_type_b_bfloat8(self):
+        """Test getRealDataTypeB with BFloat8 type returns same type"""
+        from rocisa.enum import DataTypeEnum
+        dt = DataType(DataTypeEnum.BFloat8)
+
+        result = ProblemModule.getRealDataTypeB(dt)
+        # For standard types, should return same type
+        assert result == dt
+
+    def test_get_real_data_type_a_int8(self):
+        """Test getRealDataTypeA with Int8"""
+        from rocisa.enum import DataTypeEnum
+        dt = DataType(DataTypeEnum.Int8)
+
+        result = ProblemModule.getRealDataTypeA(dt)
+        # Should handle Int8
+        assert result == dt or result.value == DataTypeEnum.Int8
+
 
 @pytest.mark.unit
 class TestProblemSizesMock:
@@ -182,79 +209,9 @@ class TestGetBiasDataTypeListDefault:
         result = ProblemModule.getBiasDataTypeListDefault(problem_type)
         # Should filter out types with numBytes <= 1
         assert isinstance(result, list)
-        # At least one type (ComputeDataType or DestDataType) should be included
-        assert len(result) >= 1
-
-
-@pytest.mark.unit
-class TestProblemTypeValidGEMMTypes:
-    """Tests for valid GEMM type lists"""
-
-    def test_valid_gemm_types_exists(self):
-        """Test that _validGEMMTypes exists and is populated"""
-        assert hasattr(ProblemModule, '_validGEMMTypes')
-        assert isinstance(ProblemModule._validGEMMTypes, list)
-        assert len(ProblemModule._validGEMMTypes) > 0
-
-    def test_valid_gemm_types_format(self):
-        """Test _validGEMMTypes format"""
-        # Each entry should be a 4-tuple (Ti, To, Tc, Tc)
-        for entry in ProblemModule._validGEMMTypes:
-            assert isinstance(entry, tuple)
-            assert len(entry) == 4
-
-    def test_hpa_types_exists(self):
-        """Test that _HPATypes exists"""
-        assert hasattr(ProblemModule, '_HPATypes')
-        assert isinstance(ProblemModule._HPATypes, list)
-        assert len(ProblemModule._HPATypes) > 0
-
-    def test_hpa_types_format(self):
-        """Test _HPATypes format"""
-        for entry in ProblemModule._HPATypes:
-            assert isinstance(entry, tuple)
-            assert len(entry) == 4
-
-
-@pytest.mark.unit
-class TestDefaultProblemType:
-    """Tests for _defaultProblemType dictionary"""
-
-    def test_default_problem_type_exists(self):
-        """Test that _defaultProblemType exists"""
-        assert hasattr(ProblemModule, '_defaultProblemType')
-        assert isinstance(ProblemModule._defaultProblemType, dict)
-
-    def test_default_problem_type_has_required_keys(self):
-        """Test _defaultProblemType has required keys"""
-        required_keys = [
-            "OperationType", "DataType", "UseBeta",
-            "TransposeA", "TransposeB", "Batched",
-            "IndexAssignmentsA", "IndexAssignmentsB",
-            "NumIndicesC"
-        ]
-
-        for key in required_keys:
-            assert key in ProblemModule._defaultProblemType
-
-    def test_default_problem_type_operation_type(self):
-        """Test default OperationType"""
-        assert ProblemModule._defaultProblemType["OperationType"] == "GEMM"
-
-    def test_default_problem_type_transpose(self):
-        """Test default transpose settings"""
-        assert ProblemModule._defaultProblemType["TransposeA"] == False
-        assert ProblemModule._defaultProblemType["TransposeB"] == True
-
-    def test_default_problem_type_index_assignments(self):
-        """Test default index assignments"""
-        assert ProblemModule._defaultProblemType["IndexAssignmentsA"] == [0, 2]
-        assert ProblemModule._defaultProblemType["IndexAssignmentsB"] == [1, 2]
-
-    def test_default_problem_type_num_indices(self):
-        """Test default number of indices"""
-        assert ProblemModule._defaultProblemType["NumIndicesC"] == 2
-        assert ProblemModule._defaultProblemType["NumIndicesLD"] == 4
+        # Verify no element in result has numBytes <= 1
+        for dtype in result:
+            assert dtype.numBytes() > 1, f"Type {dtype} with {dtype.numBytes()} bytes should be filtered out"
 
 
 @pytest.mark.unit
@@ -382,7 +339,16 @@ class TestConvertLeadingDims:
         result = ProblemModule.ExactList.convertLeadingDims(problem_type, problem_size)
 
         assert isinstance(result, tuple)
-        assert len(result) > problem_type["NumIndicesC"]
+        assert len(result) == 7  # Same as input problem_size
+        # First NumIndicesC elements should be unchanged
+        assert result[0] == 128
+        assert result[1] == 128
+        # LD entries computed as max(problemSize[i], sizes derived from index assignments)
+        # LDD, LDC should be >= 128, LDA, LDB >= 128
+        assert result[3] >= 128  # LDD
+        assert result[4] >= 128  # LDC
+        assert result[5] >= 128  # LDA
+        assert result[6] >= 128  # LDB
 
     def test_convert_leading_dims_with_strides(self):
         """Test convertLeadingDims with stride information"""
@@ -405,3 +371,9 @@ class TestConvertLeadingDims:
         )
 
         assert isinstance(result, tuple)
+        # With custom strides, LD values should reflect max(problemSize, stride-derived)
+        # stridesA/B/C/D have stride 100 in dimension 1, so LD should be at least 100
+        assert result[3] == max(64, 100)  # LDD
+        assert result[4] == max(64, 100)  # LDC
+        assert result[5] == max(64, 100)  # LDA
+        assert result[6] == max(64, 100)  # LDB

@@ -42,8 +42,11 @@ class TestActivationModuleImplementations:
         dt = DataType("s")
         result = module.getAbsModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.vgprCounter >= 0
 
     def test_get_abs_module_half(self):
@@ -54,8 +57,11 @@ class TestActivationModuleImplementations:
         dt = DataType("h")
         result = module.getAbsModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     def test_get_abs_module_double(self):
         """Test getAbsModule for double precision"""
@@ -65,8 +71,11 @@ class TestActivationModuleImplementations:
         dt = DataType("d")
         result = module.getAbsModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     def test_get_abs_module_int32(self):
         """Test getAbsModule for int32"""
@@ -76,8 +85,11 @@ class TestActivationModuleImplementations:
         dt = DataType("i")
         result = module.getAbsModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.vgprCounter > 0  # Should allocate vgprs
 
     def test_get_abs_module_int32_saturate(self):
@@ -89,8 +101,11 @@ class TestActivationModuleImplementations:
         dt = DataType("i")
         result = module.getAbsModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.vgprCounter > 0
 
     def test_get_abs_module_bfloat16(self):
@@ -101,8 +116,11 @@ class TestActivationModuleImplementations:
         dt = DataType("b")
         result = module.getAbsModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     def test_get_abs_module_unsupported_raises(self):
         """Test getAbsModule raises for unsupported type"""
@@ -122,8 +140,11 @@ class TestActivationModuleImplementations:
         dt = DataType("s")
         result = module.getReluModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     def test_get_relu_module_half(self):
         """Test getReluModule for half precision"""
@@ -133,8 +154,11 @@ class TestActivationModuleImplementations:
         dt = DataType("h")
         result = module.getReluModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     def test_get_relu_module_double(self):
         """Test getReluModule for double precision"""
@@ -144,8 +168,11 @@ class TestActivationModuleImplementations:
         dt = DataType("d")
         result = module.getReluModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     def test_get_relu_module_int32(self):
         """Test getReluModule for int32"""
@@ -155,8 +182,11 @@ class TestActivationModuleImplementations:
         dt = DataType("i")
         result = module.getReluModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     def test_get_relu_module_int32_saturate(self):
         """Test getReluModule for int32 with saturation"""
@@ -167,8 +197,11 @@ class TestActivationModuleImplementations:
         dt = DataType("i")
         result = module.getReluModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.vgprCounter > 0
 
     def test_get_relu_module_unsupported_raises(self):
@@ -201,8 +234,11 @@ class TestExpModule:
         dt = DataType("h")
         result = module.getExpModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.sgprCounter > 0
 
     @patch('Tensile.Activation.rocIsa')
@@ -219,8 +255,11 @@ class TestExpModule:
         dt = DataType("s")
         result = module.getExpModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     @patch('Tensile.Activation.rocIsa')
     def test_get_exp_module_unsupported_raises(self, mock_rocisa):
@@ -246,8 +285,11 @@ class TestClippedReluModule:
         dt = DataType("s")
         result = module.getClippedReluModule(dt, 0, 1, "alpha", "beta")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.vgprCounter > 0
 
     def test_get_clipped_relu_module_double(self):
@@ -258,8 +300,11 @@ class TestClippedReluModule:
         dt = DataType("d")
         result = module.getClippedReluModule(dt, 0, 1, "alpha", "beta")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.vgprCounter > 0
 
     def test_get_clipped_relu_module_int32(self):
@@ -270,8 +315,11 @@ class TestClippedReluModule:
         dt = DataType("i")
         result = module.getClippedReluModule(dt, 0, 1, "alpha", "beta")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
 
 @pytest.mark.unit
@@ -292,8 +340,11 @@ class TestGeluModule:
         dt = DataType("s")
         result = module.getGeluModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.vgprCounter > 0
         assert module.needCombine == True
 
@@ -311,8 +362,11 @@ class TestGeluModule:
         dt = DataType("s")
         result = module.getGeluModule(dt, 0, 1, "activationAlpha")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     @patch('Tensile.Activation.rocIsa')
     def test_get_gelu_module_unsupported_raises(self, mock_rocisa):
@@ -338,8 +392,11 @@ class TestLeakyReluModule:
         dt = DataType("s")
         result = module.getLeakyReluModule(dt, 0, 1, "alpha")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.vgprCounter > 0
 
     def test_get_leaky_relu_module_double(self):
@@ -350,8 +407,11 @@ class TestLeakyReluModule:
         dt = DataType("d")
         result = module.getLeakyReluModule(dt, 0, 1, "alpha")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     def test_get_leaky_relu_module_int32(self):
         """Test getLeakyReluModule for int32"""
@@ -361,8 +421,11 @@ class TestLeakyReluModule:
         dt = DataType("i")
         result = module.getLeakyReluModule(dt, 0, 1, "alpha")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     def test_get_leaky_relu_module_unsupported_raises(self):
         """Test getLeakyReluModule raises for unsupported type"""
@@ -393,8 +456,11 @@ class TestSigmoidModule:
         dt = DataType("s")
         result = module.getSigmoidModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.needCombine == True
 
     @patch('Tensile.Activation.rocIsa')
@@ -427,8 +493,11 @@ class TestTanhModule:
         dt = DataType("s")
         result = module.getTanhModule(dt, 0, 1, "alpha", "beta")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.needCombine == True
 
     @patch('Tensile.Activation.rocIsa')
@@ -445,8 +514,11 @@ class TestTanhModule:
         dt = DataType("s")
         result = module.getTanhModule(dt, 0, 1, "", "")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     @patch('Tensile.Activation.rocIsa')
     def test_get_tanh_module_unsupported_raises(self, mock_rocisa):
@@ -478,8 +550,11 @@ class TestDGeluModule:
         dt = DataType("s")
         result = module.getDGeluModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.needCombine == True
         assert module.vgprCounter > 0
         assert module.sgprCounter > 0
@@ -499,8 +574,11 @@ class TestDGeluModule:
         dt = DataType("s")
         result = module.getDGeluModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     @patch('Tensile.Activation.rocIsa')
     def test_get_dgelu_module_with_guard(self, mock_rocisa):
@@ -518,8 +596,11 @@ class TestDGeluModule:
         dt = DataType("s")
         result = module.getDGeluModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     @patch('Tensile.Activation.rocIsa')
     def test_get_dgelu_module_unsupported_raises(self, mock_rocisa):
@@ -546,8 +627,11 @@ class TestDReluModule:
         dt = DataType("s")
         result = module.getDReluModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.needCombine == True
 
     @patch('Tensile.Activation.rocIsa')
@@ -580,8 +664,11 @@ class TestSiluModule:
         dt = DataType("s")
         result = module.getSiluModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.needCombine == True
 
     @pytest.mark.skip(reason="SelectBit not imported in Activation.py - code issue")
@@ -599,8 +686,11 @@ class TestSiluModule:
         dt = DataType("h")
         result = module.getSiluModule(dt, 0, 1)
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     @patch('Tensile.Activation.rocIsa')
     def test_get_silu_module_unsupported_raises(self, mock_rocisa):
@@ -632,8 +722,11 @@ class TestSwishModule:
         dt = DataType("s")
         result = module.getSwishModule(dt, 0, 1, "alpha")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
         assert module.needCombine == True
 
     @patch('Tensile.Activation.rocIsa')
@@ -660,8 +753,11 @@ class TestClampModule:
         dt = DataType("s")
         result = module.getClampModule(dt, 0, 1, "alpha", "beta")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     def test_get_clamp_module_double(self):
         """Test getClampModule for double precision"""
@@ -671,8 +767,11 @@ class TestClampModule:
         dt = DataType("d")
         result = module.getClampModule(dt, 0, 1, "alpha", "beta")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
     def test_get_clamp_module_int32(self):
         """Test getClampModule for int32"""
@@ -682,8 +781,11 @@ class TestClampModule:
         dt = DataType("i")
         result = module.getClampModule(dt, 0, 1, "alpha", "beta")
 
-        # Should return a Module
+        # Should return a Module with instructions
         assert result is not None
+        # Verify module contains instructions
+        instructions = result.items()
+        assert len(instructions) > 0, "Module should contain at least one instruction"
 
 
 @pytest.mark.unit

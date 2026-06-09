@@ -24,89 +24,87 @@
 
 import pytest
 from pathlib import Path
-from unittest.mock import patch, Mock
+from Tensile.Common.DataType import DataType
 
 from Tensile.TensileLogic.ValidMatrixInstruction import _validateMatrixInstruction
+
+
+@pytest.fixture
+def base_valid_solution():
+    """Create a base valid solution with all required MI fields"""
+    return {
+        "SolutionIndex": 0,
+        "Valid": True,
+        "ISA": (9, 4, 2),  # Use gfx942 which is well-supported
+        "MatrixInstruction": [16, 16, 1, 4],
+        "EnableMatrixInstruction": True,
+        "MatrixInstM": 16,
+        "MatrixInstN": 16,
+        "MatrixInstK": 1,
+        "MatrixInstB": 4,
+        "MatrixInstBM": 1,
+        "MIWaveTile": [4, 1],
+        "MIWaveGroup": [2, 2],
+        "MIInputPerThread": 4,
+        "MIInputPerThreadA": 4,
+        "MIInputPerThreadB": 4,
+        "WorkGroup": [256, 4, 1],
+        "WavefrontSize": 64,
+        "ThreadTile": [1, 1],
+        "ProblemType": {
+            "DataType": DataType('s'),
+            "MacDataTypeA": DataType('s'),
+            "MacDataTypeB": DataType('s'),
+            "Sparse": 0,
+        }
+    }
 
 
 @pytest.mark.unit
 class TestValidMatrixInstruction:
     """Tests for ValidMatrixInstruction validation function"""
 
-    def test_validate_matrix_instruction_valid(self):
-        """Test validation with valid matrix instruction"""
-        solution = {
-            "SolutionIndex": 0,
-            "MatrixInstruction": [16, 16, 1, 4],
-            "Valid": True
-        }
+    def test_validate_matrix_instruction_disabled(self, base_valid_solution):
+        """Test validation with MI disabled"""
+        base_valid_solution["MatrixInstruction"] = []
+        base_valid_solution["EnableMatrixInstruction"] = False
+
         isaInfoMap = {}
         filepath = Path("test.yaml")
 
-        with patch('Tensile.TensileLogic.ValidMatrixInstruction.validateMIParameters'):
-            result = _validateMatrixInstruction(solution, isaInfoMap, filepath)
-            assert result is True
+        result = _validateMatrixInstruction(base_valid_solution, isaInfoMap, filepath)
+        assert result is True
 
-    def test_validate_matrix_instruction_invalid(self):
-        """Test validation with invalid solution (Valid=False)"""
-        solution = {
-            "SolutionIndex": 1,
-            "MatrixInstruction": [0, 0, 0, 0],
-            "Valid": False
-        }
+    def test_validate_matrix_instruction_invalid_solution_flag(self, base_valid_solution):
+        """Test validation with solution Valid flag set to False"""
+        base_valid_solution["Valid"] = False
+        # Also disable MI to avoid ISA lookup
+        base_valid_solution["MatrixInstruction"] = []
+        base_valid_solution["EnableMatrixInstruction"] = False
+
         isaInfoMap = {}
         filepath = Path("test.yaml")
 
-        result = _validateMatrixInstruction(solution, isaInfoMap, filepath)
+        result = _validateMatrixInstruction(base_valid_solution, isaInfoMap, filepath)
         assert result is False
 
-    def test_validate_matrix_instruction_assertion_error(self):
-        """Test validation when validateMIParameters raises AssertionError"""
-        solution = {
-            "SolutionIndex": 2,
-            "MatrixInstruction": [16, 16, 1, 4],
-            "Valid": True
-        }
+    def test_validate_matrix_instruction_invalid_mi_length(self, base_valid_solution):
+        """Test validation rejects MI with wrong length"""
+        base_valid_solution["MatrixInstruction"] = [16, 16, 1]  # Only 3 elements
+
         isaInfoMap = {}
         filepath = Path("test.yaml")
 
-        with patch('Tensile.TensileLogic.ValidMatrixInstruction.validateMIParameters',
-                   side_effect=AssertionError("Invalid MI parameters")):
-            result = _validateMatrixInstruction(solution, isaInfoMap, filepath)
-            assert result is False
+        result = _validateMatrixInstruction(base_valid_solution, isaInfoMap, filepath)
+        assert result is False
 
-    def test_validate_different_matrix_instructions(self):
-        """Test with different matrix instruction formats"""
-        test_cases = [
-            ([16, 16, 1, 4], True),
-            ([32, 32, 1, 2], True),
-            ([4, 4, 1, 16], True),
-        ]
+    def test_validate_matrix_instruction_enabled_but_empty(self, base_valid_solution):
+        """Test validation rejects empty MI when enabled"""
+        base_valid_solution["MatrixInstruction"] = []
+        base_valid_solution["EnableMatrixInstruction"] = True
 
-        isaInfoMap = {}
-        for mi, expected_valid in test_cases:
-            solution = {
-                "SolutionIndex": 0,
-                "MatrixInstruction": mi,
-                "Valid": expected_valid
-            }
-            filepath = Path("test.yaml")
-
-            with patch('Tensile.TensileLogic.ValidMatrixInstruction.validateMIParameters'):
-                result = _validateMatrixInstruction(solution, isaInfoMap, filepath)
-                if expected_valid:
-                    assert result is True
-
-    def test_validate_with_extended_format(self):
-        """Test with extended matrix instruction format (9 parameters)"""
-        solution = {
-            "SolutionIndex": 0,
-            "MatrixInstruction": [32, 32, 1, 2, 1, 4, 1, 2, 2],
-            "Valid": True
-        }
         isaInfoMap = {}
         filepath = Path("test.yaml")
 
-        with patch('Tensile.TensileLogic.ValidMatrixInstruction.validateMIParameters'):
-            result = _validateMatrixInstruction(solution, isaInfoMap, filepath)
-            assert result is True
+        result = _validateMatrixInstruction(base_valid_solution, isaInfoMap, filepath)
+        assert result is False
