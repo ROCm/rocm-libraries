@@ -20,7 +20,14 @@ void throwOnHipError(hipError_t status, const char* operation)
         return;
     }
 
-    throw std::runtime_error(std::string(operation) + " failed: " + hipGetErrorString(status));
+    const auto* operationName = operation == nullptr ? "HIP operation" : operation;
+    const auto* errorString = hipGetErrorString(status);
+    if(errorString == nullptr)
+    {
+        errorString = "unknown HIP error";
+    }
+
+    throw std::runtime_error(std::string(operationName) + " failed: " + errorString);
 }
 
 hipStream_t toHipStream(uintptr_t stream)

@@ -25,6 +25,7 @@ def test_hip_event_symbols_are_exported() -> None:
     assert missing == []
 
 
+@pytest.mark.gpu
 def test_hip_event_timing_smoke() -> None:
     if fe.hip_get_device_count() <= 0:
         pytest.skip("No HIP GPU available")
@@ -32,8 +33,12 @@ def test_hip_event_timing_smoke() -> None:
     start = fe.hip_event_create()
     stop = fe.hip_event_create()
 
-    fe.hip_event_record(start, 0)
-    fe.hip_event_record(stop, 0)
-    fe.hip_event_synchronize(stop)
+    try:
+        fe.hip_event_record(start, 0)
+        fe.hip_event_record(stop, 0)
+        fe.hip_event_synchronize(stop)
 
-    assert fe.hip_event_elapsed_time(start, stop) >= 0.0
+        assert fe.hip_event_elapsed_time(start, stop) >= 0.0
+    finally:
+        fe.hip_event_destroy(stop)
+        fe.hip_event_destroy(start)

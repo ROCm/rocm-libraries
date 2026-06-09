@@ -40,7 +40,10 @@ else()
     hipdnn_add_dependency(nanobind VERSION ${HIPDNN_NANOBIND_VERSION})
 endif()
 
-find_package(hip REQUIRED CONFIG)
+find_package(hip CONFIG)
+if(NOT hip_FOUND)
+    message(FATAL_ERROR "hipConfig.cmake not found. Set CMAKE_PREFIX_PATH to include the ROCm SDK devel prefix (for ROCm torch wheels, the _rocm_sdk_devel package directory). Searched CMAKE_PREFIX_PATH='${CMAKE_PREFIX_PATH}'")
+endif()
 
 nanobind_add_module(
     hipdnn_frontend_python
