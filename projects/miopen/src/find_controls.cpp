@@ -259,13 +259,9 @@ FindMode::Values GetFindModeValue(Variable variable, FindMode::Values defaultVal
 
 FindMode::FindMode(solver::Primitive primitive)
 {
-    switch(primitive)
-    {
-    case solver::Primitive::Fusion:
-        value = GetFindModeValue(MIOPEN_FIND_MODE_FUSION, FindMode::Values::Fast);
-        break;
-    default: value = GetFindModeValue(MIOPEN_FIND_MODE, FindMode::Values::Default_); break;
-    }
+    value = (primitive == solver::Primitive::Fusion)
+                ? GetFindModeValue(MIOPEN_FIND_MODE_FUSION, FindMode::Values::Fast)
+                : GetFindModeValue(MIOPEN_FIND_MODE, FindMode::Values::Default_);
 }
 
 std::ostream& operator<<(std::ostream& os, const FindMode& obj) { return os << obj.value; }
