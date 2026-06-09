@@ -534,7 +534,8 @@ try
 
         if(fp64EmulationWouldApply(h, type_a, m, n, k, batch_count)) {
             const size_t emul_ws =
-                fp64EmulationWorkspaceSize(m, n, k, fp64EmulationEffectiveNumModuli(h));
+                fp64EmulationWorkspaceSize(m, n, k, fp64EmulationEffectiveNumModuli(h),
+                                           desc_ptr->op_A, desc_ptr->op_B);
             if(status == HIPBLAS_STATUS_SUCCESS && returnAlgoCount && *returnAlgoCount > 0) {
                 heuristicResultsArray[0].workspaceSize = emul_ws;
             } else if(requestedAlgoCount >= 1 && returnAlgoCount) {
@@ -940,7 +941,10 @@ try
     /* Clamp num_moduli to the valid range [2, 20] used by the emulation. */
     if(num_moduli < 2u)  num_moduli = 2u;
     if(num_moduli > 20u) num_moduli = 20u;
-    return fp64EmulationWorkspaceSize(m, n, k, num_moduli);
+    /* opA/opB not available at this public API level; use HIPBLAS_OP_T/HIPBLAS_OP_N
+     * as conservative defaults (A8i workspace is symmetric w.r.t. opA; B8i for
+     * opB=N gives padded_k×n which equals the original pre-refactor formula). */
+    return fp64EmulationWorkspaceSize(m, n, k, num_moduli, HIPBLAS_OP_T, HIPBLAS_OP_N);
 }
 catch(...)
 {

@@ -13,15 +13,15 @@
  * Part 1 – Accurate scaling (OS II-accu):
  *   1a. Per-row 6-bit extraction of op(A) → A8i_high, with per-row shifts sftA[i].
  *   1b. Per-col 6-bit extraction of op(B) → B8i_high, with per-col shifts sftB[j].
- *   1c. Preliminary INT8 GEMM: C32i_prelim = A8i_high^T × B8i_high  (one extra GEMM).
+ *   1c. Preliminary INT8 GEMM: C32i_prelim = op(A8i_high) × op(B8i_high)  (one extra GEMM).
  *   1d. Refine sftA[i] from per-row max of |C32i_prelim| (tighter bound than Cauchy-Schwarz).
  *   1e. Refine sftB[j] from per-col max of |C32i_prelim|.
  *   1f. Final scaling: A8i[t], B8i[t] for t=0..num_moduli-1 using refined sftA, sftB.
  *
  * Part 2 – For each of s coprime moduli m_t (including implicit m_0=256):
- *   2a.  A'_t = symmetric_mod(A', m_t)  → INT8  in [-m_t/2, m_t/2]
+ *   2a.  A'_t = symmetric_mod(A', m_t)  → INT8  in [-m_t/2,...
  *   2b.  B'_t = symmetric_mod(B', m_t)  → INT8
- *   2c.  C'_t = A'_t × B'_t             → INT32  (INT8 tensor cores)
+ *   2c.  C'_t = op(A'_t) × op(B'_t)    → INT32  (INT8 tensor cores, same ops as FP64)
  *   2d.  Z    += C'_t * qPi_t           (CRT accumulation, double-double)
  *
  * Part 3 – Range reduction: X = Z mod M  (unique because |X| < M/2)
@@ -35,6 +35,14 @@
  *
  * Constants (tables) are taken verbatim from the open-source GEMMul8 implementation
  * (Y. Uchino, RIKEN R-CCS, https://github.com/RIKEN-RCCS/GEMMul8).
+ *
+ * INT8 GEMM transpose convention
+ * --------------------------------
+ * The inner INT8 GEMMs use the SAME opA/opB as the outer FP64 GEMM.  This means
+ * A8i is stored in the same memory layout as the FP64 A matrix (m×k for opA=N,
+ * k×m for opA=T) and B8i mirrors the FP64 B layout (k×n for opB=N, n×k for opB=T).
+ * Matching the layouts allows the scale and preliminary-extraction kernels to use
+ * fully coalesced memory access patterns regardless of the transpose configuration.
  *
  * This file MUST be compiled as HIP (LANGUAGE HIP in CMakeLists.txt).
  * Inner INT8 GEMMs use hipblasLtMatmul (INT8 tensor cores, INT32 accumulate).
@@ -54,14 +62,6 @@
 /* =========================================================================
  * Tuning constants
  * ========================================================================= */
-/* FP64_EMUL_AI_THRESHOLD — legacy arithmetic-intensity-only threshold for
- * architectures not yet calibrated in the Roofline performance model.
- * Kept as reference: the new fp64EmulationPerformanceCheck uses a component-
- * wise Roofline estimate instead of this single constant.
- * For a square N×N×N GEMM: AI = N/12; threshold=32 → min N ≈ 384.
- *   static constexpr double FP64_EMUL_AI_THRESHOLD = 32.0;
- */
-
 /* Maximum number of moduli supported (s = 2..OZ2_S_MAX).
  * Constant memory and table arrays are sized for the maximum. */
 static constexpr unsigned OZ2_S_MAX = 20;
@@ -74,30 +74,8 @@ static __host__ __device__ size_t oz2_pad(size_t n)
     return (n + OZ2_ALIGN - 1) / OZ2_ALIGN * OZ2_ALIGN;
 }
 
-/* oz2_compute_chunk_size — automatic chunked-accumulation parameter.
- *
- * Divides the s moduli into chunks of this size.  For each chunk, all
- * chunk_size GEMMs run back-to-back (storing separate C32i slices), then ONE
- * oz2_chunk_accum_kernel folds them into Zhi/Zlo in a single register loop.
- * This reduces kernel launches from (s+1) to (ceil(s/k)+1), which matters
- * most for small N where GEMM latency is low relative to launch overhead.
- *
- * The target keeps the C32i batch (chunk_size × ldc32i × n × 4 B) below
- * OZ2_CHUNK_TARGET_BYTES.  For large N this naturally falls back to k=1
- * (current behaviour, no extra memory); for small N it picks larger k.     */
+/* oz2_compute_chunk_size — automatic chunked-accumulation parameter. */
 static constexpr size_t OZ2_CHUNK_TARGET_BYTES = 8ull << 30;   /* 8 GiB    */
-
-/* oz2_compute_scale_chunk_size — number of moduli covered by ONE pair of
- * scale kernel invocations (oz2_scaleA_kernel + oz2_scaleB_kernel).
- * A and B are each read from HBM once per scale chunk, so a larger value
- * means fewer re-reads of the FP64 input matrices.
- *
- * The target keeps the combined A8i + B8i buffer below
- * OZ2_SCALE_CHUNK_TARGET_BYTES.  The result is clamped to be at least
- * gemm_chunk_sz (so every GEMM chunk fits inside one scale chunk) and at
- * most num_moduli.  For small/medium matrices the result equals num_moduli
- * (A and B are read exactly once); for very large matrices it gracefully
- * degrades toward gemm_chunk_sz.                                           */
 static constexpr size_t OZ2_SCALE_CHUNK_TARGET_BYTES = 8ull << 30;  /* 8 GiB */
 
 static unsigned oz2_compute_chunk_size(int64_t m, int64_t n, unsigned num_moduli)
@@ -108,16 +86,27 @@ static unsigned oz2_compute_chunk_size(int64_t m, int64_t n, unsigned num_moduli
     return static_cast<unsigned>(std::min(static_cast<size_t>(num_moduli), k));
 }
 
+/* oz2_compute_scale_chunk_size
+ *
+ * tA: true  → A8i stored as k×m (lda8i=padded_k, cola8i=padded_m)
+ *     false → A8i stored as m×k (lda8i=padded_m, cola8i=padded_k)
+ * tB: false → B8i stored as k×n (ldb8i=padded_k, colb=n)
+ *     true  → B8i stored as n×k (ldb8i=padded_n, colb=k)
+ *
+ * Note: A8i slice bytes = lda8i*cola8i = oz2_pad(k)*oz2_pad(m) regardless of tA
+ * (the product is symmetric).  B8i slice bytes depend on tB.               */
 static unsigned oz2_compute_scale_chunk_size(int64_t m, int64_t n, int64_t k,
                                               unsigned num_moduli,
-                                              unsigned gemm_chunk_sz)
+                                              unsigned gemm_chunk_sz,
+                                              bool tA, bool tB)
 {
-    const size_t lda8i       = oz2_pad(static_cast<size_t>(k));
-    const size_t cola8i      = oz2_pad(static_cast<size_t>(m));
-    const size_t ldb8i       = lda8i;
+    const size_t lda8i       = oz2_pad(static_cast<size_t>(tA ? k : m));
+    const size_t cola8i      = oz2_pad(static_cast<size_t>(tA ? m : k));
+    const size_t ldb8i       = oz2_pad(static_cast<size_t>(tB ? n : k));
+    const size_t colb        = static_cast<size_t>(tB ? k : n);  /* non-padded cols of B8i */
     /* Combined A8i + B8i bytes per modulus slice. */
     const size_t slice_bytes = lda8i * cola8i                             /* A8i slice */
-                             + ldb8i * static_cast<size_t>(n);            /* B8i slice */
+                             + ldb8i * colb;                              /* B8i slice */
     if(slice_bytes == 0u) return num_moduli;
     const size_t s = std::min(static_cast<size_t>(num_moduli),
                               std::max(static_cast<size_t>(gemm_chunk_sz),
@@ -176,9 +165,7 @@ static const double h_inv_mod[OZ2_S_MAX] = {
     0x1.6e1f76b4337c7p-8,   /* 1/179 */
     0x1.7ad2208e0ecc3p-8    /* 1/173 */
 };
-/* Float versions of 1/m_t — used in the 2nd-pass FMA refinement.
- * Values taken verbatim from GEMMul8/GEMMul8/src/table.hpp (moduli_f[].y),
- * prepended with the exact value for m_0=256. */
+/* Float versions of 1/m_t — used in the 2nd-pass FMA refinement. */
 static const float h_inv_mod_f[OZ2_S_MAX] = {
     0x1.000000p-8F,   /* 1/256  (exact) */
     0x1.010102p-8F,   /* 1/255  */
@@ -291,9 +278,7 @@ static const float h_accu_log2P_all[OZ2_S_MAX - 1] = {
     7.71856774e+01F,   /* s=20 */
 };
 
-/* qPi high parts for each s (row = table_idx = s-2, col = modulus index t).
- * For s <= 7 these come from qPi_1 (single double, exact product guaranteed).
- * For s >= 8 these are the hi halves of qPi_2 (double-double).             */
+/* qPi high parts for each s (row = table_idx = s-2, col = modulus index t). */
 static const double h_qpi_hi_all[OZ2_S_MAX - 1][OZ2_S_MAX] = {
     /* s=2  (qPi_1[0]) */
     {0x1.fc02000000000p+15, 0x1.0000000000000p+8,
@@ -403,7 +388,7 @@ static const double h_qpi_hi_all[OZ2_S_MAX - 1][OZ2_S_MAX] = {
      0x1.088d7305d7000p+155, 0x1.67ddaa2cae000p+154},
 };
 
-/* qPi low parts: 0 for s <= 7 (single-double is exact), double-double lo for s >= 8 */
+/* qPi low parts: 0 for s <= 7, double-double lo for s >= 8 */
 static const double h_qpi_lo_all[OZ2_S_MAX - 1][OZ2_S_MAX] = {
     /* s=2..7: lo = 0 */
     {0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0},
@@ -516,13 +501,10 @@ static hipError_t oz2_init_constants(unsigned num_moduli)
         }                            \
     } while(0)
 
-    /* Per-modulus tables: always upload all OZ2_S_MAX entries; kernels
-     * only read the first num_moduli of them.                           */
     OZ2_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cNegMod),  h_neg_mod,   sizeof(h_neg_mod)));
     OZ2_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cInvMod),  h_inv_mod,   sizeof(h_inv_mod)));
     OZ2_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cInvModF), h_inv_mod_f, sizeof(h_inv_mod_f)));
 
-    /* qPi and P/invP depend on the chosen num_moduli */
     OZ2_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cQpiHi), h_qpi_hi_all[idx],
                                 num_moduli * sizeof(double)));
     OZ2_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(cQpiLo), h_qpi_lo_all[idx],
@@ -551,22 +533,12 @@ bool fp64EmulationIsEnabled()
 
 bool fp64EmulationPerformanceCheck(int64_t m, int64_t n, int64_t k, unsigned num_moduli)
 {
-    /* Roofline model: estimate whether the emulation will be faster than a
-     * native FP64 DGEMM on the target hardware.  Calibrated for MI350.
-     *
-     * Hardware parameters — update for other architectures:
-     *   HBM_BW    : peak HBM bandwidth (bytes/s)
-     *   INT8_PEAK : peak INT8 GEMM throughput (INT8 ops/s), measured from data
-     *   FP64_EFF  : effective native DGEMM throughput (FP64 ops/s), measured
-     *   LATENCY_KERNEL : GPU kernel launch latency (s)
-     *   LATENCY_MATMUL : hipblasLtMatmul launch latency (s)
-     */
-    static constexpr double HBM_BW         = 6.4e12;   /* 6.4 TB/s               */
-    static constexpr double INT8_PEAK       = 3.05e15;  /* 3050 TOPS (measured)   */
-    static constexpr double FP64_EFF        = 7.0e13;   /* 70 TFLOPS (effective)  */
-    static constexpr double LATENCY_KERNEL  = 5.0e-6;   /* 5 µs per kernel launch */
-    static constexpr double LATENCY_MATMUL  = 10.0e-6;  /* 10 µs per hipblasLtMatmul */
-    static constexpr double LATENCY_MEMSET  = 2.0e-6;   /* 2 µs for hipMemsetAsync */
+    static constexpr double HBM_BW         = 6.4e12;
+    static constexpr double INT8_PEAK       = 3.05e15;
+    static constexpr double FP64_EFF        = 7.0e13;
+    static constexpr double LATENCY_KERNEL  = 5.0e-6;
+    static constexpr double LATENCY_MATMUL  = 10.0e-6;
+    static constexpr double LATENCY_MEMSET  = 2.0e-6;
     static constexpr double CHUNK_BYTES_D   = static_cast<double>(OZ2_CHUNK_TARGET_BYTES);
 
     const double s   = static_cast<double>(num_moduli);
@@ -575,34 +547,17 @@ bool fp64EmulationPerformanceCheck(int64_t m, int64_t n, int64_t k, unsigned num
     const double kn  = static_cast<double>(k) * static_cast<double>(n);
     const double mnk = mn * static_cast<double>(k);
 
-    /* Number of GEMM chunks (matches oz2_compute_chunk_size logic) */
     const double chunk_sz = std::max(1.0, std::min(s, CHUNK_BYTES_D / (mn * 4.0)));
     const double n_chunks = std::ceil(s / chunk_sz);
 
-    /* --- Emulation cost: Roofline lower bounds at peak bandwidth/compute --- */
-
-    /* Preliminary INT8 GEMM (one extra GEMM for shift refinement)            */
     const double t_prelim_gemm = 2.0 * mnk / INT8_PEAK;
-
-    /* Preliminary extraction: 2 passes reading A+B (FP64, 8B) + writing INT8 */
     const double t_prelim_kern = (mk + kn) * 17.0 / HBM_BW;
-
-    /* Shift refinement: read C32i for sftA and sftB (4B each)                */
     const double t_refine_kern = mn * 8.0 / HBM_BW;
-
-    /* Scaling: read A+B (8B each), write s INT8 slices per matrix (1B each)  */
     const double t_scale_kern  = (mk + kn) * (8.0 + s) / HBM_BW;
-
-    /* Main INT8 GEMMs: s moduli                                               */
     const double t_int8_gemms  = s * 2.0 * mnk / INT8_PEAK;
-
-    /* CRT accumulation + finalize: read s C32i slices (4B/element) +
-     * Zhi/Zlo intermediate round-trip + read C + write D (8B each)           */
     const double t_accum_kern  = mn * (4.0 * s + 48.0) / HBM_BW;
-
-    /* Kernel launch overhead: 5 fixed custom kernels + n_chunks accum kernels
-     * + 1 preliminary matmul + n_chunks main INT8 matmul batches + 1 memset  */
-    const double t_launch = (5.0 + n_chunks) * LATENCY_KERNEL
+    /* Two separate kernel launches (A + B scale) instead of one fused launch. */
+    const double t_launch = (6.0 + n_chunks) * LATENCY_KERNEL
                           + (1.0 + n_chunks) * LATENCY_MATMUL
                           + LATENCY_MEMSET;
 
@@ -610,18 +565,11 @@ bool fp64EmulationPerformanceCheck(int64_t m, int64_t n, int64_t k, unsigned num
                         + t_scale_kern  + t_int8_gemms  + t_accum_kern
                         + t_launch;
 
-    /* --- Native DGEMM cost: Roofline + one matmul launch (same API overhead) --- */
     const double t_native = std::max(2.0 * mnk / FP64_EFF,
                                      8.0 * (mk + kn + mn) / HBM_BW)
                           + LATENCY_MATMUL;
 
     return t_emul <= t_native;
-
-    /* Arithmetic-intensity-only check:
-     *   const double flops = 2.0 * mnk;
-     *   const double bytes = 8.0 * (mk + kn + mn);
-     *   return (flops / bytes) >= 32.0;
-     */
 }
 
 bool fp64EmulationIsEager()
@@ -637,7 +585,7 @@ uint32_t fp64EmulationSpecialValuesMask()
 {
     static const uint32_t mask = []() -> uint32_t {
         const char* v = std::getenv("HIPBLASLT_EMULATION_SPECIAL_VALUES_SUPPORT_MASK");
-        if(v == nullptr) return 0x3u;  /* default: Inf (bit 0) + NaN (bit 1) detection */
+        if(v == nullptr) return 0x3u;
         return static_cast<uint32_t>(std::strtoul(v, nullptr, 0));
     }();
     return mask;
@@ -645,21 +593,12 @@ uint32_t fp64EmulationSpecialValuesMask()
 
 /* =========================================================================
  * fp64EmulationWouldApply / fp64EmulationEffectiveNumModuli
- *
- * These centralise the emulation-eligibility check and num_moduli resolution
- * so that rocblaslt_matmul_impl and hipblasLtMatmulAlgoGetHeuristic share
- * exactly the same logic without duplication.
  * ========================================================================= */
-
-/* Cumulative log2 of the product of the first s moduli (s=2..20). */
 static constexpr double oz2_cum_bits[19] = {
-     15.994,  /* s=2  */  23.976,  /* s=3  */  31.945,  /* s=4  */
-     39.894,  /* s=5  */  47.807,  /* s=6  */  55.708,  /* s=7  */
-     63.572,  /* s=8  */  71.411,  /* s=9  */  79.238,  /* s=10 */
-     87.040,  /* s=11 */  94.801,  /* s=12 */ 102.522,  /* s=13 */
-    110.160,  /* s=14 */ 117.782,  /* s=15 */ 125.374,  /* s=16 */
-    132.949,  /* s=17 */ 140.448,  /* s=18 */ 147.931,  /* s=19 */
-    155.365,  /* s=20 */
+     15.994,  23.976,  31.945,  39.894,  47.807,  55.708,
+     63.572,  71.411,  79.238,  87.040,  94.801, 102.522,
+    110.160, 117.782, 125.374, 132.949, 140.448, 147.931,
+    155.365,
 };
 
 bool fp64EmulationWouldApply(const _rocblaslt_handle* h,
@@ -700,66 +639,67 @@ unsigned fp64EmulationEffectiveNumModuli(const _rocblaslt_handle* h)
 
 /* =========================================================================
  * fp64EmulationWorkspaceSize
+ *
+ * opA / opB: must match the transpose flags that will be passed to
+ *   fp64EmulatedGemm.  They determine the A8i / B8i storage layout and
+ *   therefore the workspace footprint.
  * ========================================================================= */
-size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_moduli)
+size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_moduli,
+                                   hipblasOperation_t opA, hipblasOperation_t opB)
 {
-    const size_t lda8i       = oz2_pad(static_cast<size_t>(k));
-    const size_t cola8i      = oz2_pad(static_cast<size_t>(m));
-    const size_t ldb8i       = lda8i;
-    const size_t ldc32i      = cola8i;
-    const size_t padn        = oz2_pad(static_cast<size_t>(n));
-    const size_t szC32i      = ldc32i * static_cast<size_t>(n);
-    const unsigned gemm_sz   = oz2_compute_chunk_size(m, n, num_moduli);
-    const unsigned scale_sz  = oz2_compute_scale_chunk_size(m, n, k, num_moduli, gemm_sz);
+    const bool tA = (opA != HIPBLAS_OP_N);
+    const bool tB = (opB != HIPBLAS_OP_N);
 
-    return   scale_sz * lda8i * cola8i * sizeof(int8_t)                   /* A8i batch  */
-           + scale_sz * ldb8i * static_cast<size_t>(n) * sizeof(int8_t)   /* B8i batch  */
-           + gemm_sz  * szC32i * sizeof(int32_t)                           /* C32i batch */
-           + szC32i * sizeof(double) * 2                                   /* Zhi + Zlo  */
-           + cola8i * sizeof(int16_t)                                      /* sftA       */
-           + padn   * sizeof(int16_t)                                      /* sftB       */
-           + sizeof(uint32_t)                                              /* nan_flag   */
-           + cola8i * sizeof(int32_t);                                     /* row_max    */
+    /* A8i: tA → k×m (lda8i=padded_k, cola8i=padded_m)
+     *     !tA → m×k (lda8i=padded_m, cola8i=padded_k)
+     * Product lda8i*cola8i = oz2_pad(k)*oz2_pad(m) regardless of tA.       */
+    const size_t lda8i  = oz2_pad(static_cast<size_t>(tA ? k : m));
+    const size_t cola8i = oz2_pad(static_cast<size_t>(tA ? m : k));
+
+    /* B8i: !tB → k×n (ldb8i=padded_k, colb=n)
+     *       tB → n×k (ldb8i=padded_n, colb=k)                              */
+    const size_t ldb8i  = oz2_pad(static_cast<size_t>(tB ? n : k));
+    const size_t colb   = static_cast<size_t>(tB ? k : n);
+
+    const size_t ldc32i = oz2_pad(static_cast<size_t>(m));   /* result m×n  */
+    const size_t padn   = oz2_pad(static_cast<size_t>(n));
+    const size_t szC32i = ldc32i * static_cast<size_t>(n);
+    const unsigned gemm_sz  = oz2_compute_chunk_size(m, n, num_moduli);
+    const unsigned scale_sz = oz2_compute_scale_chunk_size(m, n, k, num_moduli, gemm_sz,
+                                                            tA, tB);
+
+    return   scale_sz * lda8i * cola8i * sizeof(int8_t)           /* A8i batch  */
+           + scale_sz * ldb8i * colb   * sizeof(int8_t)           /* B8i batch  */
+           + gemm_sz  * szC32i * sizeof(int32_t)                   /* C32i batch */
+           + szC32i * sizeof(double) * 2                           /* Zhi + Zlo  */
+           + ldc32i * sizeof(int16_t)                              /* sftA       */
+           + padn   * sizeof(int16_t)                              /* sftB       */
+           + sizeof(uint32_t)                                      /* nan_flag   */
+           + ldc32i * sizeof(int32_t);                             /* row_max    */
 }
 
 /**
- * fp64EmulationNumModuli
- *
- * Returns the number of INT8 GEMMs (moduli) to use, in the range [2, OZ2_S_MAX].
- *
- * Reads HIPBLASLT_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT.  The value
- * specifies the total CRT capacity in bits: minimum s such that
- *   log2(prod(moduli 0..s-1)) >= target_bits.
- *
- * Default (env var absent or 0): 16 moduli (~125 bits of CRT capacity).
- * The full range [2, 20] is still reachable via the env var.
- *
- * Notable values (from design document §2.5):
- *   55 bits → s=7  ("fixed-mode default")
- *   79 bits → s=10 ("ADP max")
+ * fp64EmulationNumModuli — returns the number of INT8 GEMMs (moduli) to use.
  */
 unsigned fp64EmulationNumModuli()
 {
     static const unsigned num_moduli = []() -> unsigned {
         const char* v = std::getenv("HIPBLASLT_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT");
-        if(v == nullptr) return 16u;   /* default: 16 moduli (~125 bits) */
+        if(v == nullptr) return 16u;
 
         const unsigned target = static_cast<unsigned>(std::strtoul(v, nullptr, 0));
         if(target == 0u) return OZ2_S_MAX;
 
-        /* Cumulative log2 of the product of the first s moduli, for s=2..OZ2_S_MAX.
-         * Derived from the exact moduli: 256, 255, 253, 251, 247, 241, 239, 233,
-         * 229, 227, 223, 217, 211, 199, 197, 193, 191, 181, 179, 173. */
         static constexpr double cum_bits[OZ2_S_MAX - 1] = {
             15.994,   /* s=2  */
             23.976,   /* s=3  */
             31.945,   /* s=4  */
             39.894,   /* s=5  */
             47.807,   /* s=6  */
-            55.708,   /* s=7  ← design doc "55 bits"  */
+            55.708,   /* s=7  */
             63.572,   /* s=8  */
             71.411,   /* s=9  */
-            79.238,   /* s=10 ← design doc "79 bits" */
+            79.238,   /* s=10 */
             87.040,   /* s=11 */
             94.801,   /* s=12 */
            102.522,   /* s=13 */
@@ -776,7 +716,7 @@ unsigned fp64EmulationNumModuli()
             if(cum_bits[s - 2u] >= static_cast<double>(target))
                 return s;
         }
-        return OZ2_S_MAX;  /* target exceeds max capacity; use maximum */
+        return OZ2_S_MAX;
     }();
     return num_moduli;
 }
@@ -842,16 +782,21 @@ block_reduce_max_i32(int32_t warp_max, int32_t* __restrict__ s_wmax)
 /* =========================================================================
  * GPU kernels — accu mode Part 1: preliminary extraction (A and B fused)
  *
- * oz2_accu_prelim_AB_kernel processes both A rows and B columns in a single
- * dispatch.  Grid = dim3(m + n, 1), Block = dim3(256, 1).
- *   blockIdx.x <  m_blocks → A row processing   (row = blockIdx.x)
- *   blockIdx.x >= m_blocks → B column processing (col = blockIdx.x - m_blocks)
+ * Layout of A8i_high / B8i_high mirrors the INT8 GEMM transpose convention:
  *
- * The branch is scalar-uniform (all threads in a block share blockIdx.x),
- * so there is zero warp divergence and zero EXEC-mask overhead.
- * Combining both dispatches into one reduces kernel-launch overhead by one
- * and gives the GPU scheduler m+n independent blocks simultaneously, which
- * improves utilisation for small problem sizes.
+ *   transA=T (opA=T): A8i stored as k×m — element (j,row) at j + row*lda8i
+ *                     INT8 GEMM uses opT → op(A8i) = m×k ✓
+ *   transA=N (opA=N): A8i stored as m×k — element (row,j) at row + j*lda8i
+ *                     INT8 GEMM uses opN → op(A8i) = m×k ✓
+ *
+ *   transB=N (opB=N): B8i stored as k×n — element (j,col) at j + col*ldb8i
+ *   transB=T (opB=T): B8i stored as n×k — element (col,j) at col + j*ldb8i
+ *
+ * The reduction for sftA/sftB is per-row/per-column and does not change.
+ * When transA=N the A8i writes are non-coalesced (stride lda8i), which is
+ * acceptable because this kernel runs only once.  The main scale kernel
+ * (oz2_scaleA_kernel) uses a transpose-aware grid to achieve coalesced
+ * access for all opA/opB combinations.
  * ========================================================================= */
 __global__ static void
 oz2_accu_prelim_AB_kernel(const double* __restrict__ A,
@@ -865,14 +810,12 @@ oz2_accu_prelim_AB_kernel(const double* __restrict__ A,
                           uint32_t* __restrict__ nan_flag,
                           unsigned m_blocks)
 {
-    /* Shared memory is reused by both branches (only one executes per block). */
     __shared__ double  s_wmax[8];
     __shared__ int16_t s_sft;
 
     if(blockIdx.x < m_blocks) {
         /* ── A row processing ──────────────────────────────────────────── */
         const int64_t row = static_cast<int64_t>(blockIdx.x);
-        /* Guard is redundant (m_blocks == m) but kept for safety. */
 
         double local_max = 0.0;
         for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
@@ -887,8 +830,6 @@ oz2_accu_prelim_AB_kernel(const double* __restrict__ A,
 
         if(threadIdx.x == 0) {
             if(local_max < 1e-300) local_max = 1.0;
-            /* sft = 6 - floor(log2(amax)): scales amax to ≤64 as INT8.
-             * Negative sft is valid for large amax — see GEMMul8 maxUFP<INT8>=6. */
             int sft   = 6 - static_cast<int>(floor(log2(local_max)));
             s_sft     = static_cast<int16_t>(sft);
             sftA[row] = s_sft;
@@ -899,8 +840,14 @@ oz2_accu_prelim_AB_kernel(const double* __restrict__ A,
         for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
             double val    = transA ? A[row * lda + j] : A[j * lda + row];
             double scaled = ceil(ldexp(fabs(val), static_cast<int>(sft)));
-            A8i_high[static_cast<size_t>(j) + static_cast<size_t>(row) * lda8i] =
-                static_cast<int8_t>(static_cast<int32_t>(scaled));
+            /* Write A8i_high in the layout that matches the INT8 GEMM opA:
+             *   transA=T → k×m layout: index = j + row*lda8i  (j fast, coalesced)
+             *   transA=N → m×k layout: index = row + j*lda8i  (row fast in addressing,
+             *              j=threadIdx.x varies → stride lda8i, acceptable for prelim) */
+            const size_t a8i_idx = transA
+                ? (static_cast<size_t>(j)   + static_cast<size_t>(row) * lda8i)
+                : (static_cast<size_t>(row) + static_cast<size_t>(j)   * lda8i);
+            A8i_high[a8i_idx] = static_cast<int8_t>(static_cast<int32_t>(scaled));
         }
 
     } else {
@@ -930,56 +877,37 @@ oz2_accu_prelim_AB_kernel(const double* __restrict__ A,
         for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
             double val    = transB ? B[col + j * ldb] : B[j + col * ldb];
             double scaled = ceil(ldexp(fabs(val), static_cast<int>(sft)));
-            B8i_high[static_cast<size_t>(j) + static_cast<size_t>(col) * ldb8i] =
-                static_cast<int8_t>(static_cast<int32_t>(scaled));
+            /* Write B8i_high in the layout that matches the INT8 GEMM opB:
+             *   transB=N → k×n layout: index = j   + col*ldb8i  (j fast, coalesced)
+             *   transB=T → n×k layout: index = col + j*ldb8i    (col fixed, j varies) */
+            const size_t b8i_idx = transB
+                ? (static_cast<size_t>(col) + static_cast<size_t>(j) * ldb8i)
+                : (static_cast<size_t>(j)   + static_cast<size_t>(col) * ldb8i);
+            B8i_high[b8i_idx] = static_cast<int8_t>(static_cast<int32_t>(scaled));
         }
     }
 }
 
 /* =========================================================================
  * GPU kernels — accu mode Part 1: shift refinement from preliminary GEMM
- *
- * sftA refinement uses two passes to combine high occupancy with coalesced
- * access to the column-major C32i array:
- *
- * oz2_refine_sftA_partial_kernel — pass 1 (partial per-row max):
- *   Block = dim3(64), Grid = dim3(ceil(m/64), ceil(n/64)).
- *   Thread tx in each wavefront handles row = blockIdx.x*64 + tx.
- *   For each of the 64 columns covered by blockIdx.y, the wavefront reads
- *   64 consecutive rows of the same column → 256-byte coalesced burst.
- *   Result written to row_max[row] via atomicMax (workspace-resident buffer).
- *
- * oz2_refine_sftA_apply_kernel — pass 2 (apply refinement):
- *   Block = dim3(64), Grid = dim3(ceil(m/64)).
- *   Reads row_max[row], computes sftA[row] update, zeroes row_max[row].
- *
- * oz2_refine_sftB_kernel — per-column max of C32i → update sftB.
- *   Block = dim3(256), Grid = dim3(n).  One block per column; the column
- *   elements C32i[i + col*ldc32i] for i=0..m-1 are contiguous → coalesced.
  * ========================================================================= */
 __global__ static void
 oz2_refine_sftA_partial_kernel(const int32_t* __restrict__ C32i,
                                 int64_t m, int64_t n, size_t ldc32i,
                                 int32_t* __restrict__ row_max)
 {
-    /* One thread per row (tx dimension), one column-tile per block (y dim). */
     const int64_t row      = static_cast<int64_t>(blockIdx.x) * 64
                            + static_cast<int64_t>(threadIdx.x);
     const int64_t col_base = static_cast<int64_t>(blockIdx.y) * 64;
     if(row >= m) return;
 
     int32_t local_max = 0;
-
-    /* Iterate over ≤64 columns for this tile.  For each column, the 64
-     * threads in the wavefront access 64 consecutive rows → COALESCED.     */
     const int64_t col_end = (col_base + 64 < n) ? col_base + 64 : n;
     for(int64_t col = col_base; col < col_end; ++col) {
         int32_t v  = C32i[static_cast<size_t>(row) + static_cast<size_t>(col) * ldc32i];
         int32_t av = v < 0 ? -v : v;
         if(av > local_max) local_max = av;
     }
-
-    /* Write partial per-row max to the temporary buffer. */
     if(local_max > 0)
         atomicMax(row_max + static_cast<size_t>(row), local_max);
 }
@@ -1027,201 +955,229 @@ oz2_refine_sftB_kernel(const int32_t* __restrict__ C32i,
 }
 
 /* =========================================================================
- * GPU kernels — Part 1f: full multi-modulus scaling (A and B fused)
+ * GPU kernels — Part 1f: full multi-modulus scaling — A matrix
  *
- * oz2_scaleAB_kernel_rt: runtime-count fallback used when do_pass3=true
- * (num_moduli >= 19) or for any other partial-chunk case not covered by the
- * template specialisations below.
+ * oz2_scaleA_kernel_rt: runtime-count fallback (do_pass3 path).
+ * oz2_scaleA_kernel<T_COUNT, DO_PASS3, TRANS_A>: compile-time template.
  *
- * oz2_scaleAB_kernel<T_COUNT, DO_PASS3>: compile-time template version.
- * With T_COUNT known at compile time the compiler fully unrolls the inner
- * moduli loop.  All T_COUNT iterations are mutually independent (each
- * depends only on ival, not on any prior iteration), so the unrolled code
- * exposes instruction-level parallelism across all T_COUNT FP64 computation
- * chains simultaneously, hiding their individual ~5-10 cycle latencies.
+ * TRANS_A=true  (opA=T): A is k×m col-major.
+ *   blockIdx.x covers k-tiles of 64; threadIdx.x = j (k-index, fast dim).
+ *   Reads:  A[i*lda + j]       — j varies, stride 1 → coalesced ✓
+ *   Writes: A8i[j + i*lda8i]   — j varies, stride 1 → coalesced ✓
  *
- * Both variants use __builtin_nontemporal_store for INT8 writes to A8i and
- * B8i.  These buffers are write-only during scaling and together occupy
- * ~8 GiB (2 × num_moduli × m × k bytes), far exceeding L2 capacity.
- * Streaming stores bypass the L2, eliminating read-for-ownership traffic and
- * keeping the cache warm for the FP64 reads of A and B.
- *
- * Grid = dim3(ceil(k/64), ceil(m/4) + ceil(n/4)), Block = dim3(64, 4).
- *   blockIdx.y <  m_y_blocks → A scaling: i = blockIdx.y*4 + threadIdx.y
- *   blockIdx.y >= m_y_blocks → B scaling: l = (blockIdx.y - m_y_blocks)*4 + threadIdx.y
- *
- * threadIdx.x covers the k-index (fast) in both branches → A8i and B8i writes
- * remain coalesced (64 consecutive k-elements per wavefront).
- * The branch on blockIdx.y is scalar-uniform: zero warp divergence.
+ * TRANS_A=false (opA=N): A is m×k col-major.
+ *   blockIdx.x covers m-tiles of 64; threadIdx.x = i (m-index, fast dim).
+ *   Reads:  A[j*lda + i]       — i varies, stride 1 → coalesced ✓
+ *   Writes: A8i[i + j*lda8i]   — i varies, stride 1 → coalesced ✓
  * ========================================================================= */
 __global__ static void
-oz2_scaleAB_kernel_rt(const double* __restrict__ A,
-                      int64_t m, int64_t lda, bool transA,
-                      int8_t*  __restrict__       A8i,
-                      size_t                      lda8i,
-                      size_t                      cola8i,
-                      const int16_t* __restrict__ sftA,
-                      const double* __restrict__ B,
-                      int64_t n, int64_t ldb, bool transB,
-                      int8_t*  __restrict__       B8i,
-                      size_t                      ldb8i,
-                      const int16_t* __restrict__ sftB,
-                      int64_t k,
-                      unsigned t_start, unsigned t_count, bool do_pass3,
-                      unsigned m_y_blocks)
+oz2_scaleA_kernel_rt(const double* __restrict__ A,
+                     int64_t m, int64_t lda, bool transA,
+                     int8_t*  __restrict__       A8i,
+                     size_t                      lda8i,
+                     size_t                      cola8i,
+                     const int16_t* __restrict__ sftA,
+                     int64_t k,
+                     unsigned t_start, unsigned t_count, bool do_pass3)
 {
-    const int64_t j = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; /* k-index */
-
-    if(blockIdx.y < m_y_blocks) {
-        /* ── A scaling ─────────────────────────────────────────────────── */
-        const int64_t i = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
-        if(i >= m || j >= k) return;
-
-        const double val  = transA ? A[i * lda + j] : A[j * lda + i];
-        const int16_t sft = sftA[i];
-        const double ival = trunc(ldexp(val, static_cast<int>(sft)));
-
-        const size_t stride = lda8i * cola8i;
-        const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(i) * lda8i;
-
-        for(unsigned t_local = 0; t_local < t_count; ++t_local) {
-            const unsigned t = t_start + t_local;
-            const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
-            const float   rf  = static_cast<float>(r);
-            float rf2 = fmaf(rintf(rf * cInvModF[t]),
-                             static_cast<float>(cNegMod[t]), rf);
-            if(do_pass3)
-                rf2 = fmaf(rintf(rf2 * cInvModF[t]),
-                           static_cast<float>(cNegMod[t]), rf2);
-            __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
-                                        A8i + t_local * stride + offset);
-        }
-
+    /* TRANS_A=T: blockIdx.x→k-tiles, threadIdx.x=j
+     * TRANS_A=N: blockIdx.x→m-tiles, threadIdx.x=i */
+    int64_t i, j;
+    if(transA) {
+        j = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        i = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
     } else {
-        /* ── B scaling ─────────────────────────────────────────────────── */
-        const int64_t l = static_cast<int64_t>(blockIdx.y - m_y_blocks) * blockDim.y
-                        + threadIdx.y;
-        if(l >= n || j >= k) return;
+        i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        j = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+    }
+    if(i >= m || j >= k) return;
 
-        const double val  = transB ? B[j * ldb + l] : B[l * ldb + j];
-        const int16_t sft = sftB[l];
-        const double ival = trunc(ldexp(val, static_cast<int>(sft)));
+    const double val  = transA ? A[i * lda + j] : A[j * lda + i];
+    const int16_t sft = sftA[i];
+    const double ival = trunc(ldexp(val, static_cast<int>(sft)));
 
-        const size_t stride = ldb8i * static_cast<size_t>(n);
-        const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(l) * ldb8i;
+    const size_t stride = lda8i * cola8i;
+    /* A8i index: transA → k×m layout (j fast): j + i*lda8i
+     *           !transA → m×k layout (i fast): i + j*lda8i  */
+    const size_t offset = transA
+        ? (static_cast<size_t>(j) + static_cast<size_t>(i) * lda8i)
+        : (static_cast<size_t>(i) + static_cast<size_t>(j) * lda8i);
 
-        for(unsigned t_local = 0; t_local < t_count; ++t_local) {
-            const unsigned t = t_start + t_local;
-            const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
-            const float   rf  = static_cast<float>(r);
-            float rf2 = fmaf(rintf(rf * cInvModF[t]),
-                             static_cast<float>(cNegMod[t]), rf);
-                rf2 = fmaf(rintf(rf2 * cInvModF[t]),
-                           static_cast<float>(cNegMod[t]), rf2);
-            __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
-                                        B8i + t_local * stride + offset);
-        }
+    for(unsigned t_local = 0; t_local < t_count; ++t_local) {
+        const unsigned t = t_start + t_local;
+        const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
+        const float   rf  = static_cast<float>(r);
+        float rf2 = fmaf(rintf(rf * cInvModF[t]),
+                         static_cast<float>(cNegMod[t]), rf);
+        if(do_pass3)
+            rf2 = fmaf(rintf(rf2 * cInvModF[t]),
+                       static_cast<float>(cNegMod[t]), rf2);
+        __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
+                                    A8i + t_local * stride + offset);
     }
 }
 
-/* Template version: T_COUNT moduli are all mutually independent → the compiler
- * can issue all T_COUNT FP64 chains in parallel after full loop unrolling.
- * DO_PASS3 controls the optional third FP32 refinement pass (only needed
- * when num_moduli >= 19; evaluated at compile time via if constexpr).      */
-template <unsigned T_COUNT, bool DO_PASS3>
+template <unsigned T_COUNT, bool DO_PASS3, bool TRANS_A>
 __global__ static void
-oz2_scaleAB_kernel(const double* __restrict__ A,
-                   int64_t m, int64_t lda, bool transA,
-                   int8_t*  __restrict__       A8i,
-                   size_t                      lda8i,
-                   size_t                      cola8i,
-                   const int16_t* __restrict__ sftA,
-                   const double* __restrict__ B,
-                   int64_t n, int64_t ldb, bool transB,
-                   int8_t*  __restrict__       B8i,
-                   size_t                      ldb8i,
-                   const int16_t* __restrict__ sftB,
-                   int64_t k,
-                   unsigned t_start, unsigned m_y_blocks)
+oz2_scaleA_kernel(const double* __restrict__ A,
+                  int64_t m, int64_t lda,
+                  int8_t*  __restrict__       A8i,
+                  size_t                      lda8i,
+                  size_t                      cola8i,
+                  const int16_t* __restrict__ sftA,
+                  int64_t k,
+                  unsigned t_start)
 {
-    const int64_t j = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x; /* k-index */
-
-    if(blockIdx.y < m_y_blocks) {
-        /* ── A scaling ─────────────────────────────────────────────────── */
-        const int64_t i = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
-        if(i >= m || j >= k) return;
-
-        const double val  = transA ? A[i * lda + j] : A[j * lda + i];
-        const int16_t sft = sftA[i];
-        const double ival = trunc(ldexp(val, static_cast<int>(sft)));
-
-        const size_t stride = lda8i * cola8i;
-        const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(i) * lda8i;
-
-        #pragma unroll
-        for(unsigned t_local = 0; t_local < T_COUNT; ++t_local) {
-            const unsigned t = t_start + t_local;
-            const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
-            const float   rf  = static_cast<float>(r);
-            float rf2 = fmaf(rintf(rf * cInvModF[t]),
-                             static_cast<float>(cNegMod[t]), rf);
-            if constexpr (DO_PASS3)
-                rf2 = fmaf(rintf(rf2 * cInvModF[t]),
-                           static_cast<float>(cNegMod[t]), rf2);
-            __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
-                                        A8i + t_local * stride + offset);
-        }
-
+    int64_t i, j;
+    if constexpr (TRANS_A) {
+        /* opA=T: k-fast — threadIdx.x = j */
+        j = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        i = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
     } else {
-        /* ── B scaling ─────────────────────────────────────────────────── */
-        const int64_t l = static_cast<int64_t>(blockIdx.y - m_y_blocks) * blockDim.y
-                        + threadIdx.y;
-        if(l >= n || j >= k) return;
+        /* opA=N: m-fast — threadIdx.x = i */
+        i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        j = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+    }
+    if(i >= m || j >= k) return;
 
-        const double val  = transB ? B[j * ldb + l] : B[l * ldb + j];
-        const int16_t sft = sftB[l];
-        const double ival = trunc(ldexp(val, static_cast<int>(sft)));
+    const double val  = TRANS_A ? A[i * lda + j] : A[j * lda + i];
+    const int16_t sft = sftA[i];
+    const double ival = trunc(ldexp(val, static_cast<int>(sft)));
 
-        const size_t stride = ldb8i * static_cast<size_t>(n);
-        const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(l) * ldb8i;
+    const size_t stride = lda8i * cola8i;
+    const size_t offset = TRANS_A
+        ? (static_cast<size_t>(j) + static_cast<size_t>(i) * lda8i)
+        : (static_cast<size_t>(i) + static_cast<size_t>(j) * lda8i);
 
-        #pragma unroll
-        for(unsigned t_local = 0; t_local < T_COUNT; ++t_local) {
-            const unsigned t = t_start + t_local;
-            const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
-            const float   rf  = static_cast<float>(r);
-            float rf2 = fmaf(rintf(rf * cInvModF[t]),
-                             static_cast<float>(cNegMod[t]), rf);
-                rf2 = fmaf(rintf(rf2 * cInvModF[t]),
-                           static_cast<float>(cNegMod[t]), rf2);
-            __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
-                                        B8i + t_local * stride + offset);
-        }
+    #pragma unroll
+    for(unsigned t_local = 0; t_local < T_COUNT; ++t_local) {
+        const unsigned t = t_start + t_local;
+        const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
+        const float   rf  = static_cast<float>(r);
+        float rf2 = fmaf(rintf(rf * cInvModF[t]),
+                         static_cast<float>(cNegMod[t]), rf);
+        if constexpr (DO_PASS3)
+            rf2 = fmaf(rintf(rf2 * cInvModF[t]),
+                       static_cast<float>(cNegMod[t]), rf2);
+        __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
+                                    A8i + t_local * stride + offset);
+    }
+}
+
+/* =========================================================================
+ * GPU kernels — Part 1f: full multi-modulus scaling — B matrix
+ *
+ * oz2_scaleB_kernel_rt: runtime-count fallback.
+ * oz2_scaleB_kernel<T_COUNT, TRANS_B>: compile-time template.
+ * B always applies the 3rd FP32 refinement pass (no DO_PASS3 template param).
+ *
+ * TRANS_B=false (opB=N): B is k×n col-major.
+ *   blockIdx.x covers k-tiles of 64; threadIdx.x = j (k-index, fast dim).
+ *   Reads:  B[l*ldb + j]       — j varies, stride 1 → coalesced ✓
+ *   Writes: B8i[j + l*ldb8i]   — j varies, stride 1 → coalesced ✓
+ *
+ * TRANS_B=true  (opB=T): B is n×k col-major.
+ *   blockIdx.x covers n-tiles of 64; threadIdx.x = l (n-index, fast dim).
+ *   Reads:  B[j*ldb + l]       — l varies, stride 1 → coalesced ✓
+ *   Writes: B8i[l + j*ldb8i]   — l varies, stride 1 → coalesced ✓
+ * ========================================================================= */
+__global__ static void
+oz2_scaleB_kernel_rt(const double* __restrict__ B,
+                     int64_t n, int64_t ldb, bool transB,
+                     int8_t*  __restrict__       B8i,
+                     size_t                      ldb8i,
+                     size_t                      colb_real,
+                     const int16_t* __restrict__ sftB,
+                     int64_t k,
+                     unsigned t_start, unsigned t_count)
+{
+    /* TRANS_B=N: blockIdx.x→k-tiles, threadIdx.x=j
+     * TRANS_B=T: blockIdx.x→n-tiles, threadIdx.x=l */
+    int64_t j, l;
+    if(!transB) {
+        j = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        l = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+    } else {
+        l = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        j = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+    }
+    if(l >= n || j >= k) return;
+
+    /* Access element (j,l) of op(B):
+     *   transB=N: B is k×n col-major, B[j][l] at B+j+l*ldb → B[l*ldb+j]
+     *   transB=T: B is n×k col-major, B[l][j] at B+l+j*ldb → B[j*ldb+l] */
+    const double val  = transB ? B[j * ldb + l] : B[l * ldb + j];
+    const int16_t sft = sftB[l];
+    const double ival = trunc(ldexp(val, static_cast<int>(sft)));
+
+    const size_t stride = ldb8i * colb_real;
+    /* B8i index: transB=N → k×n layout (j fast): j + l*ldb8i
+     *            transB=T → n×k layout (l fast): l + j*ldb8i */
+    const size_t offset = transB
+        ? (static_cast<size_t>(l) + static_cast<size_t>(j) * ldb8i)
+        : (static_cast<size_t>(j) + static_cast<size_t>(l) * ldb8i);
+
+    for(unsigned t_local = 0; t_local < t_count; ++t_local) {
+        const unsigned t = t_start + t_local;
+        const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
+        const float   rf  = static_cast<float>(r);
+        float rf2 = fmaf(rintf(rf * cInvModF[t]),
+                         static_cast<float>(cNegMod[t]), rf);
+            rf2 = fmaf(rintf(rf2 * cInvModF[t]),
+                       static_cast<float>(cNegMod[t]), rf2);
+        __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
+                                    B8i + t_local * stride + offset);
+    }
+}
+
+template <unsigned T_COUNT, bool TRANS_B>
+__global__ static void
+oz2_scaleB_kernel(const double* __restrict__ B,
+                  int64_t n, int64_t ldb,
+                  int8_t*  __restrict__       B8i,
+                  size_t                      ldb8i,
+                  size_t                      colb_real,
+                  const int16_t* __restrict__ sftB,
+                  int64_t k,
+                  unsigned t_start)
+{
+    int64_t j, l;
+    if constexpr (!TRANS_B) {
+        /* opB=N: k-fast — threadIdx.x = j */
+        j = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        l = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+    } else {
+        /* opB=T: n-fast — threadIdx.x = l */
+        l = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        j = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
+    }
+    if(l >= n || j >= k) return;
+
+    const double val  = TRANS_B ? B[j * ldb + l] : B[l * ldb + j];
+    const int16_t sft = sftB[l];
+    const double ival = trunc(ldexp(val, static_cast<int>(sft)));
+
+    const size_t stride = ldb8i * colb_real;
+    const size_t offset = TRANS_B
+        ? (static_cast<size_t>(l) + static_cast<size_t>(j) * ldb8i)
+        : (static_cast<size_t>(j) + static_cast<size_t>(l) * ldb8i);
+
+    #pragma unroll
+    for(unsigned t_local = 0; t_local < T_COUNT; ++t_local) {
+        const unsigned t = t_start + t_local;
+        const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
+        const float   rf  = static_cast<float>(r);
+        float rf2 = fmaf(rintf(rf * cInvModF[t]),
+                         static_cast<float>(cNegMod[t]), rf);
+            rf2 = fmaf(rintf(rf2 * cInvModF[t]),
+                       static_cast<float>(cNegMod[t]), rf2);
+        __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
+                                    B8i + t_local * stride + offset);
     }
 }
 
 /* =========================================================================
  * GPU kernels — Part 2d: chunked CRT accumulation
- *
- * oz2_chunk_accum_kernel_rt<HAS_LO>: runtime-count fallback, used for
- * chunk sizes not covered by the template specialisations below.
- *
- * oz2_chunk_accum_kernel<HAS_LO, CHUNK_SIZE, IS_FIRST_CHUNK>: template
- * version with CHUNK_SIZE known at compile time, enabling #pragma unroll.
- * With the loop unrolled the compiler pre-issues all CHUNK_SIZE C32i_batch
- * loads simultaneously, overlapping their ~100-cycle HBM latencies instead
- * of serialising them one after the other.  IS_FIRST_CHUNK=true additionally
- * enables __builtin_nontemporal_store for the Zhi/Zlo writes (write-only
- * in that path, so bypassing L2 keeps the cache warm for C32i reads).
- *
- * oz2_accum_finalize_kernel_rt<HAS_LO> / oz2_accum_finalize_kernel<…>:
- * same pattern for the fused last-chunk kernel.
- *
- * Template parameter HAS_LO:
- *   true  — s ≥ 8: cQpiLo[t] is non-zero; fuse dc×cQpiLo[t] into a FMA
- *            with the local_lo update using the 2Sum rounding error.
- *   false — s ≤ 7: cQpiLo[t] = 0 for all t (single-double qPi suffices);
- *            only the hi chain is updated; local_lo tracks 2Sum errors.
  * ========================================================================= */
 template <bool HAS_LO>
 __global__ static void
@@ -1242,19 +1198,14 @@ oz2_chunk_accum_kernel_rt(const int32_t* __restrict__ C32i_batch,
     const size_t idx          = static_cast<size_t>(i) + static_cast<size_t>(l) * ldc32i;
     const size_t slice_stride = ldc32i * static_cast<size_t>(n);
 
-    /* Register-level double-double accumulator for this chunk */
     double local_hi = 0.0;
     double local_lo = 0.0;
 
     for(unsigned t_local = 0; t_local < chunk_size; ++t_local) {
         const unsigned t     = chunk_start + t_local;
         const double dc_raw  = static_cast<double>(C32i_batch[t_local * slice_stride + idx]);
-        /* Reduce to symmetric residue mod m_t (exact dc * qPiHi[t] in double) */
         const double dc      = fma(cNegMod[t], rint(dc_raw * cInvMod[t]), dc_raw);
         const double hi      = dc * cQpiHi[t];
-        /* 2Sum accumulation: captures the exact rounding error from local_hi+hi
-         * and feeds it into the lo chain.  The extra compute fills memory-latency
-         * gaps, keeping the GPU busy between C32i_batch loads.               */
         const double new_hi  = local_hi + hi;
         const double err     = hi - (new_hi - local_hi);
         local_hi = new_hi;
@@ -1264,7 +1215,6 @@ oz2_chunk_accum_kernel_rt(const int32_t* __restrict__ C32i_batch,
             local_lo += err;
     }
 
-    /* Merge local double-double into global Zhi/Zlo */
     if(is_first_chunk) {
         Zhi[idx] = local_hi;
         Zlo[idx] = local_lo;
@@ -1279,20 +1229,12 @@ oz2_chunk_accum_kernel_rt(const int32_t* __restrict__ C32i_batch,
 
 /* =========================================================================
  * GPU kernels — Parts 3+4: fused last-chunk CRT accumulation + finalize
- *
- * oz2_accum_finalize_kernel is dispatched for the LAST GEMM chunk only.
- * It fuses the CRT accumulation and the per-element inverse-scale step into
- * a single pass, eliminating an intermediate Zhi/Zlo global write+read.
- *
- * When is_first_chunk is also true (single chunk = most common case),
- * Zhi_in/Zlo_in are never read and the C32i slices flow directly to D
- * without any Zhi/Zlo traffic.
  * ========================================================================= */
 template <bool HAS_LO>
 __global__ static void
 oz2_accum_finalize_kernel_rt(const int32_t* __restrict__ C32i_batch,
-                          const double*  __restrict__ Zhi_in,  /* prev hi; ignored if is_first */
-                          const double*  __restrict__ Zlo_in,  /* prev lo; ignored if is_first */
+                          const double*  __restrict__ Zhi_in,
+                          const double*  __restrict__ Zlo_in,
                           const double*  __restrict__ C,
                           double*        __restrict__ D,
                           int64_t m, int64_t n, size_t ldc32i,
@@ -1310,7 +1252,6 @@ oz2_accum_finalize_kernel_rt(const int32_t* __restrict__ C32i_batch,
     const size_t idx          = static_cast<size_t>(i) + static_cast<size_t>(l) * ldc32i;
     const size_t slice_stride = ldc32i * static_cast<size_t>(n);
 
-    /* Phase 1: accumulate this chunk's C32i slices in registers. */
     double local_hi = 0.0;
     double local_lo = 0.0;
 
@@ -1328,7 +1269,6 @@ oz2_accum_finalize_kernel_rt(const int32_t* __restrict__ C32i_batch,
             local_lo += err;
     }
 
-    /* Phase 2: merge with previous Zhi/Zlo if this is not the first chunk. */
     double Zh, Zl;
     if(is_first_chunk) {
         Zh = local_hi;
@@ -1341,7 +1281,6 @@ oz2_accum_finalize_kernel_rt(const int32_t* __restrict__ C32i_batch,
         Zl = Zlo_in[idx] + err + local_lo;
     }
 
-    /* Phase 3: range reduction + inverse scale — write directly to D. */
     const double q = rint((Zh + Zl) * cInvP);
     const double X = fma(cP_lo, q, fma(cP_hi, q, Zh) + Zl);
 
@@ -1351,12 +1290,6 @@ oz2_accum_finalize_kernel_rt(const int32_t* __restrict__ C32i_batch,
     D[d_idx] = alpha * ldexp(X, inv_sft) + beta * C[c_idx];
 }
 
-/* Template versions: CHUNK_SIZE known at compile time enables #pragma unroll,
- * which lets the compiler pre-issue all CHUNK_SIZE C32i_batch loads
- * simultaneously, hiding their ~100-cycle HBM latencies instead of stalling
- * one load at a time.  IS_FIRST_CHUNK eliminates the runtime branch and,
- * for oz2_chunk_accum_kernel, uses __builtin_nontemporal_store for the
- * write-only Zhi/Zlo path (bypasses L2, keeps cache warm for C32i reads). */
 template <bool HAS_LO, unsigned CHUNK_SIZE, bool IS_FIRST_CHUNK>
 __global__ static void
 oz2_chunk_accum_kernel(const int32_t* __restrict__ C32i_batch,
@@ -1465,11 +1398,7 @@ oz2_accum_finalize_kernel(const int32_t* __restrict__ C32i_batch,
 }
 
 /* =========================================================================
- * Optional per-call profiling — activated by setting
- *   HIPBLASLT_EMULATION_PROFILE=/path/to/output.csv
- * One CSV row is appended per fp64EmulatedGemm call.  When the env var is
- * not set the only overhead is a single const-pointer check — effectively
- * free for GPU-bound workloads.
+ * Optional per-call profiling
  * ========================================================================= */
 static const char* oz2_profile_file()
 {
@@ -1498,7 +1427,6 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
                                   hipStream_t                  stream,
                                   const Fp64EmulationSettings& settings)
 {
-    /* Resolve settings: handle overrides first, then env vars. */
     const unsigned num_moduli = (settings.num_moduli >= 2u && settings.num_moduli <= OZ2_S_MAX)
                                     ? settings.num_moduli
                                     : fp64EmulationNumModuli();
@@ -1507,8 +1435,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         return rocblaslt_status_internal_error;
 
     /* ------------------------------------------------------------------
-     * Optional profiling — zero overhead when HIPBLASLT_EMULATION_PROFILE
-     * is not set (a single nullptr check, perfectly predicted branch).
+     * Optional profiling
      * ------------------------------------------------------------------ */
     const char* const _pf   = oz2_profile_file();
     const bool        _prof = (_pf != nullptr);
@@ -1531,67 +1458,74 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         }
     };
 
-    /* ------------------------------------------------------------------
-     * Chunk size: number of consecutive moduli batched into one
-     * oz2_chunk_accum_kernel call.  Reduces non-GEMM kernel launches from
-     * (s+1) to (ceil(s/chunk_size)+1) while keeping C32i batch ≤ 256 MiB.
-     * ------------------------------------------------------------------ */
     const unsigned chunk_size       = oz2_compute_chunk_size(m, n, num_moduli);
-    const unsigned scale_chunk_size = oz2_compute_scale_chunk_size(m, n, k, num_moduli, chunk_size);
+
+    const bool tA = (opA != HIPBLAS_OP_N);
+    const bool tB = (opB != HIPBLAS_OP_N);
+
+    const unsigned scale_chunk_size = oz2_compute_scale_chunk_size(m, n, k, num_moduli,
+                                                                    chunk_size, tA, tB);
 
     /* ------------------------------------------------------------------
-     * Padding / stride constants — needed both for the INT8 workspace
-     * query below and for the workspace layout that follows.
+     * Padding / stride constants
+     *
+     * A8i layout:
+     *   tA=T (opA=T): k×m — lda8i=padded_k, cola8i=padded_m
+     *   tA=N (opA=N): m×k — lda8i=padded_m, cola8i=padded_k
+     *   Note: lda8i * cola8i = oz2_pad(k)*oz2_pad(m) either way.
+     *
+     * B8i layout:
+     *   tB=N (opB=N): k×n — ldb8i=padded_k, colb_real=n  (non-padded)
+     *   tB=T (opB=T): n×k — ldb8i=padded_n, colb_real=k
+     *
+     * ldc32i is always oz2_pad(m): the result C32i is m×n for any opA/opB.
      * ------------------------------------------------------------------ */
-    const size_t lda8i  = oz2_pad(static_cast<size_t>(k));
-    const size_t cola8i = oz2_pad(static_cast<size_t>(m));
-    const size_t ldb8i  = lda8i;
-    const size_t ldc32i = cola8i;
-    const size_t padn   = oz2_pad(static_cast<size_t>(n));
-    const size_t szC32i = ldc32i * static_cast<size_t>(n);  /* one INT32 slice */
+    const size_t lda8i    = tA ? oz2_pad(static_cast<size_t>(k))
+                               : oz2_pad(static_cast<size_t>(m));
+    const size_t cola8i   = tA ? oz2_pad(static_cast<size_t>(m))
+                               : oz2_pad(static_cast<size_t>(k));
+    const size_t ldb8i    = tB ? oz2_pad(static_cast<size_t>(n))
+                               : oz2_pad(static_cast<size_t>(k));
+    const size_t colb_real = static_cast<size_t>(tB ? k : n); /* non-padded cols of B8i */
+    const size_t ldc32i   = oz2_pad(static_cast<size_t>(m));  /* always padded_m        */
+    const size_t padn     = oz2_pad(static_cast<size_t>(n));
+    const size_t szC32i   = ldc32i * static_cast<size_t>(n);  /* one INT32 output slice */
 
     /* ------------------------------------------------------------------
      * Workspace layout
      *
-     *   lda8i      = padding(k)           — INT8 leading dim for A slices
-     *   cola8i     = padding(m)           — INT8 col count for A slices
-     *   ldb8i      = lda8i               — INT8 leading dim for B slices
-     *   ldc32i     = cola8i              — INT32 leading dim for GEMM output
-     *   padn       = padding(n)          — padded n for sftB alignment
-     *   chunk_size = oz2_compute_chunk_size(m,n,s) — number of C32i slices
-     *
-     *   A8i        [scale_chunk_size × lda8i × cola8i]  INT8  (pos 0 = A8i_high)
-     *   B8i        [scale_chunk_size × ldb8i × n]       INT8  (pos 0 = B8i_high)
-     *   C32i_batch [chunk_size × ldc32i × n]            INT32 (batch, re-used each GEMM chunk)
-     *   Zhi        [ldc32i × n]                   FP64  CRT accumulator hi
-     *   Zlo        [ldc32i × n]                   FP64  CRT accumulator lo
-     *   sftA       [cola8i]                        INT16 per-row shifts for A
-     *   sftB       [padn]                          INT16 per-col shifts for B
-     *   nan_flag   [1]                             UINT32 Inf/NaN detection
-     *   row_max    [cola8i]                        INT32  partial per-row max (sftA refine)
+     *   A8i        [scale_chunk_size × lda8i × cola8i]  INT8
+     *   B8i        [scale_chunk_size × ldb8i × colb_real] INT8
+     *   C32i_batch [chunk_size × ldc32i × n]            INT32
+     *   Zhi        [ldc32i × n]                          FP64  CRT hi
+     *   Zlo        [ldc32i × n]                          FP64  CRT lo
+     *   sftA       [ldc32i]                              INT16 per-row shifts
+     *   sftB       [padn]                                INT16 per-col shifts
+     *   nan_flag   [1]                                   UINT32
+     *   row_max    [ldc32i]                              INT32  sftA refine
      * ------------------------------------------------------------------ */
-    const size_t szA8i    = scale_chunk_size * lda8i * cola8i;
-    const size_t szB8i    = scale_chunk_size * ldb8i * static_cast<size_t>(n);
-    // szC32i already computed above
-    const size_t szZhi    = szC32i;
-    const size_t szZlo    = szC32i;
-    const size_t szSftA   = cola8i;
-    const size_t szSftB   = padn;
-    const size_t szNanFlag = 1;
-    const size_t szRowMax  = cola8i;  /* partial per-row max for sftA refinement */
+    const size_t strideA8i  = lda8i * cola8i;
+    const size_t strideB8i  = ldb8i * colb_real;
+    const size_t szA8i      = scale_chunk_size * strideA8i;
+    const size_t szB8i      = scale_chunk_size * strideB8i;
+    const size_t szZhi      = szC32i;
+    const size_t szZlo      = szC32i;
+    const size_t szSftA     = ldc32i;   /* indexed by row (0..m-1) */
+    const size_t szSftB     = padn;
+    const size_t szNanFlag  = 1;
+    const size_t szRowMax   = ldc32i;   /* indexed by row (0..m-1) */
 
     const size_t wsBytes =
           szA8i             * sizeof(int8_t)
         + szB8i             * sizeof(int8_t)
-        + chunk_size * szC32i * sizeof(int32_t)   /* C32i batch */
+        + chunk_size * szC32i * sizeof(int32_t)
         + szZhi             * sizeof(double)
         + szZlo             * sizeof(double)
         + szSftA            * sizeof(int16_t)
         + szSftB            * sizeof(int16_t)
         + szNanFlag         * sizeof(uint32_t)
-        + szRowMax          * sizeof(int32_t);    /* row_max    */
+        + szRowMax          * sizeof(int32_t);
 
-    /* Use caller-provided workspace if large enough; otherwise allocate. */
     bool   ws_owned = false;
     char*  ws       = nullptr;
     if(settings.workspace != nullptr && settings.workspace_bytes >= wsBytes) {
@@ -1604,15 +1538,14 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
 
     int8_t*   const A8i        = reinterpret_cast<int8_t*>(ws);
     int8_t*   const B8i        = A8i + szA8i;
-    int32_t*  const C32i_batch = reinterpret_cast<int32_t*>(B8i + szB8i);  /* chunk_size slices */
+    int32_t*  const C32i_batch = reinterpret_cast<int32_t*>(B8i + szB8i);
     double*   const Zhi        = reinterpret_cast<double*>(C32i_batch + chunk_size * szC32i);
     double*   const Zlo        = Zhi + szZhi;
     int16_t*  const sftA       = reinterpret_cast<int16_t*>(Zlo + szZlo);
     int16_t*  const sftB       = sftA + szSftA;
     uint32_t* const nan_flag   = reinterpret_cast<uint32_t*>(sftB + szSftB);
     int32_t*  const row_max    = reinterpret_cast<int32_t*>(nan_flag + szNanFlag);
-    /* First C32i slice (used by preliminary GEMM and shift refinement) */
-    int32_t*  const C32i       = C32i_batch;
+    int32_t*  const C32i       = C32i_batch;   /* first slice = preliminary GEMM output */
 
     if(_prof) (void)hipEventRecord(_ev_tot, stream);
     if(hipMemsetAsync(nan_flag, 0, sizeof(uint32_t), stream) != hipSuccess) {
@@ -1623,34 +1556,42 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     int8_t* const A8i_high = A8i;
     int8_t* const B8i_high = B8i;
 
-    const bool tA = (opA != HIPBLAS_OP_N);
-    const bool tB = (opB != HIPBLAS_OP_N);
+    /* ------------------------------------------------------------------
+     * INT8 GEMM descriptors
+     *
+     * The INT8 GEMM uses the SAME opA/opB as the outer FP64 GEMM so that
+     * A8i / B8i share the identical memory layout as the FP64 inputs.
+     *
+     * layoutA dimensions: tA → k×m  (rows=k, cols=m, ld=lda8i=padded_k)
+     *                    !tA → m×k  (rows=m, cols=k, ld=lda8i=padded_m)
+     * layoutB dimensions: !tB → k×n (rows=k, cols=n, ld=ldb8i=padded_k)
+     *                      tB → n×k (rows=n, cols=k, ld=ldb8i=padded_n)
+     * layoutCD: m×n (rows=m, cols=n, ld=ldc32i=padded_m) — always.
+     * ------------------------------------------------------------------ */
+    const uint64_t A8i_rows = static_cast<uint64_t>(tA ? k : m);
+    const uint64_t A8i_cols = static_cast<uint64_t>(tA ? m : k);
+    const uint64_t B8i_rows = static_cast<uint64_t>(tB ? n : k);
+    const uint64_t B8i_cols = static_cast<uint64_t>(tB ? k : n);
 
-    /* hipBLASLt matmul descriptors */
     hipblasLtMatrixLayout_t layoutA  = nullptr;
     hipblasLtMatrixLayout_t layoutB  = nullptr;
     hipblasLtMatrixLayout_t layoutCD = nullptr;
     hipblasLtMatmulDesc_t   matmulDesc = nullptr;
 
-    hipblasLtMatrixLayoutCreate(&layoutA,  HIP_R_8I,
-                                static_cast<uint64_t>(k), static_cast<uint64_t>(m),
+    hipblasLtMatrixLayoutCreate(&layoutA,  HIP_R_8I, A8i_rows, A8i_cols,
                                 static_cast<int64_t>(lda8i));
-    hipblasLtMatrixLayoutCreate(&layoutB,  HIP_R_8I,
-                                static_cast<uint64_t>(k), static_cast<uint64_t>(n),
+    hipblasLtMatrixLayoutCreate(&layoutB,  HIP_R_8I, B8i_rows, B8i_cols,
                                 static_cast<int64_t>(ldb8i));
     hipblasLtMatrixLayoutCreate(&layoutCD, HIP_R_32I,
                                 static_cast<uint64_t>(m), static_cast<uint64_t>(n),
                                 static_cast<int64_t>(ldc32i));
 
     hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32I, HIP_R_32I);
-    {
-        hipblasOperation_t opT = HIPBLAS_OP_T;
-        hipblasOperation_t opN = HIPBLAS_OP_N;
-        hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA,
-                                        &opT, sizeof(opT));
-        hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSB,
-                                        &opN, sizeof(opN));
-    }
+    /* Use the same opA/opB as the outer FP64 GEMM. */
+    hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA,
+                                    &opA, sizeof(opA));
+    hipblasLtMatmulDescSetAttribute(matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSB,
+                                    &opB, sizeof(opB));
 
     const int32_t one_i  = 1;
     const int32_t zero_i = 0;
@@ -1664,7 +1605,6 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
                        nan_flag, m_blks);
     _pstop(_t_prelim);
 
-    /* Inf/NaN check: use setting if not sentinel, else env var */
     const uint32_t svmask = (settings.sv_mask != ~0u)
                                 ? settings.sv_mask
                                 : fp64EmulationSpecialValuesMask();
@@ -1694,11 +1634,6 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
 
     const float accu_log2P = h_accu_log2P_all[num_moduli - 2];
     _pstart();
-    /* sftA refinement — two-pass coalesced approach:
-     *   Pass 1: tile C32i into 64-row × 64-column blocks; each wavefront reads
-     *   64 consecutive rows per column (coalesced), accumulates per-row maxima
-     *   into row_max via atomicMax (workspace-resident, no extra allocation).
-     *   Pass 2: computes sftA[row] update from row_max.                     */
     const unsigned sftA_m_blks = static_cast<unsigned>((m + 63) / 64);
     const unsigned sftA_n_blks = static_cast<unsigned>((n + 63) / 64);
     (void)hipMemsetAsync(row_max, 0, szRowMax * sizeof(int32_t), stream);
@@ -1708,70 +1643,48 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     hipLaunchKernelGGL(oz2_refine_sftA_apply_kernel,
                        dim3(sftA_m_blks), dim3(64), 0, stream,
                        row_max, sftA, m, accu_log2P);
-    /* sftB refinement — one block per column, coalesced (unchanged). */
     hipLaunchKernelGGL(oz2_refine_sftB_kernel,
                        dim3(static_cast<unsigned>(n)), dim3(256), 0, stream,
                        C32i, m, n, ldc32i, sftB, accu_log2P);
     _pstop(_t_refine);
 
-    /* Parts 1f + 2a-d: two-level loop — scale chunks (outer) × GEMM chunks (inner).
+    /* ------------------------------------------------------------------
+     * Parts 1f + 2a-d: scale chunks (outer) × GEMM chunks (inner).
      *
-     * Outer loop (scale chunks of size scale_chunk_size):
-     *   oz2_scaleAB_kernel reads A and B ONCE and writes scale_chunk_size INT8
-     *   slices into A8i[0..actual_scale-1] / B8i[0..actual_scale-1].
-     *
-     * Inner loop (GEMM chunks of size chunk_size within one scale chunk):
-     *   A strided-batch INT8 GEMM over chunk_size slices (A8i_gemm / B8i_gemm
-     *   point into the pre-computed scale buffer at offset gemm_local).
-     *
-     * Scale kernel: Block (64,4), threadIdx.x=k-index (fast) for both A and B.
-     * A8i/B8i writes are always coalesced.  For transA=N the FP64 reads from A
-     * have stride=lda (non-coalesced), but keeping INT8 writes coalesced is the
-     * bandwidth-optimal trade-off.  The A and B branches are fused into a single
-     * kernel dispatch using a combined y-dimension grid.                      */
+     * Scale kernels are launched SEPARATELY for A and B so each can use
+     * the optimal grid layout for its own transpose configuration:
+     *   A: tA=T → grid (k/64, m/4) with j fast; tA=N → grid (m/64, k/4) with i fast
+     *   B: tB=N → grid (k/64, n/4) with j fast; tB=T → grid (n/64, k/4) with l fast
+     * ------------------------------------------------------------------ */
     const dim3 blk_scale(64u, 4u);
-    const unsigned m_y_blks = static_cast<unsigned>((m + 3) / 4);
-    const unsigned n_y_blks = static_cast<unsigned>((n + 3) / 4);
-    const dim3 gAB_scale(static_cast<unsigned>((k + 63) / 64),
-                         m_y_blks + n_y_blks);
+    /* Grid dimensions for A and B scale kernels (depend on opA / opB). */
+    const dim3 gA_scale = tA ? dim3(static_cast<unsigned>((k + 63) / 64),
+                                    static_cast<unsigned>((m + 3)  / 4))
+                             : dim3(static_cast<unsigned>((m + 63) / 64),
+                                    static_cast<unsigned>((k + 3)  / 4));
+    const dim3 gB_scale = tB ? dim3(static_cast<unsigned>((n + 63) / 64),
+                                    static_cast<unsigned>((k + 3)  / 4))
+                             : dim3(static_cast<unsigned>((k + 63) / 64),
+                                    static_cast<unsigned>((n + 3)  / 4));
+
+    const dim3 blk_acc(64, 8);
+    const dim3 grid_acc((m + 63) / 64, (n + 7) / 8);
 
     const bool do_pass3 = (num_moduli >= 19u);
 
-    /* Parts 2a-d (continued): chunk loop configuration.
-     * Block (64,8) = 512 threads = 8 wavefronts on MI300/MI350.  Each 64-thread
-     * wavefront covers 64 consecutive m-elements (one full row of C32i/Zhi/Zlo
-     * in the column-major layout), yielding two clean 256-byte HBM transactions
-     * per wavefront per slice — more efficient than (32,16) which spans two
-     * l-rows and touches separate cache-line groups per warp.               */
-    const dim3 blk_acc(64, 8);
-    const dim3 grid_acc((m + 63) / 64, (n + 7) / 8);
-    /* strideA8i / strideB8i: stride between consecutive moduli slices within
-     * the scale buffer (in INT8 elements).  Used by the scale kernels to
-     * write the t_local-th slice, and by the inner GEMM loop to compute
-     * A8i_gemm / B8i_gemm offsets into the pre-computed scale chunk.       */
-    const size_t strideA8i = lda8i * cola8i;
-    const size_t strideB8i = ldb8i * static_cast<size_t>(n);
-
-    /* Create batch layout objects once before the outer scale loop.
-     * BATCH_COUNT is updated only when actual_gemm changes (i.e. the last
-     * partial inner GEMM chunk, or when the next outer iteration resets to
-     * chunk_size).  The three Create/Destroy pairs are avoided for all but
-     * the final partial GEMM batch.                                         */
+    /* Batch GEMM layouts — created once, reused across all GEMM chunks.    */
     hipblasLtMatrixLayout_t layoutA_b  = nullptr;
     hipblasLtMatrixLayout_t layoutB_b  = nullptr;
     hipblasLtMatrixLayout_t layoutCD_b = nullptr;
 
-    hipblasLtMatrixLayoutCreate(&layoutA_b,  HIP_R_8I,
-                                static_cast<uint64_t>(k), static_cast<uint64_t>(m),
+    hipblasLtMatrixLayoutCreate(&layoutA_b,  HIP_R_8I, A8i_rows, A8i_cols,
                                 static_cast<int64_t>(lda8i));
-    hipblasLtMatrixLayoutCreate(&layoutB_b,  HIP_R_8I,
-                                static_cast<uint64_t>(k), static_cast<uint64_t>(n),
+    hipblasLtMatrixLayoutCreate(&layoutB_b,  HIP_R_8I, B8i_rows, B8i_cols,
                                 static_cast<int64_t>(ldb8i));
     hipblasLtMatrixLayoutCreate(&layoutCD_b, HIP_R_32I,
                                 static_cast<uint64_t>(m), static_cast<uint64_t>(n),
                                 static_cast<int64_t>(ldc32i));
 
-    /* HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET is in elements, not bytes. */
     int32_t       batch_cur  = static_cast<int32_t>(chunk_size);
     const int64_t stride_A_b = static_cast<int64_t>(strideA8i);  /* int8 elements  */
     const int64_t stride_B_b = static_cast<int64_t>(strideB8i);  /* int8 elements  */
@@ -1794,65 +1707,103 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         const unsigned actual_scale = (scale_start + scale_chunk_size <= num_moduli)
                                       ? scale_chunk_size : (num_moduli - scale_start);
 
-        /* Part 1f: extract INT8 slices for all actual_scale moduli in this
-         * scale chunk.  A and B are each read from HBM exactly once here,
-         * writing scale_chunk_size (or fewer) slices into A8i and B8i.
-         * When scale_chunk_size == num_moduli A and B are read once in total;
-         * otherwise ceil(num_moduli / scale_chunk_size) reads of each.      */
+        /* Part 1f: scale A and B for actual_scale moduli.
+         * Separate kernel launches for A (gA_scale) and B (gB_scale) so each
+         * can use the optimal fast dimension for its transpose configuration. */
         _pstart();
-        /* Dispatch oz2_scaleAB_kernel<T_COUNT, false>: with T_COUNT fixed at
-         * compile time, #pragma unroll fully unrolls the inner moduli loop and
-         * the compiler can issue all T_COUNT independent FP64 chains in parallel.
-         * The runtime fallback (oz2_scaleAB_kernel_rt) handles the rare
-         * do_pass3=true case (num_moduli >= 19).                             */
-#define OZ2_SCALE_LAUNCH(TC) \
-        hipLaunchKernelGGL((oz2_scaleAB_kernel<(TC), false>), gAB_scale, blk_scale, 0, stream, \
-                           A, m, lda, tA, A8i, lda8i, cola8i, sftA, \
-                           B, n, ldb, tB, B8i, ldb8i, sftB, k, scale_start, m_y_blks)
+
+        /* --- A scale kernel dispatch --- */
+/* Dispatch oz2_scaleA_kernel<TC, false, TRANS_A> for the no-pass3 path.
+ * Both TRANS_A variants (true/false) are instantiated; the runtime branch
+ * on tA selects the right one.  do_pass3=true falls back to the rt kernel. */
+#define OZ2_SCALE_A_TP(TC) \
+        do { \
+            if(tA) hipLaunchKernelGGL((oz2_scaleA_kernel<(TC),false,true>), \
+                       gA_scale, blk_scale, 0, stream, \
+                       A, m, lda, A8i, lda8i, cola8i, sftA, k, scale_start); \
+            else   hipLaunchKernelGGL((oz2_scaleA_kernel<(TC),false,false>), \
+                       gA_scale, blk_scale, 0, stream, \
+                       A, m, lda, A8i, lda8i, cola8i, sftA, k, scale_start); \
+        } while(0)
+
         if(!do_pass3) {
             switch(actual_scale) {
-                case  1: OZ2_SCALE_LAUNCH( 1); break;
-                case  2: OZ2_SCALE_LAUNCH( 2); break;
-                case  3: OZ2_SCALE_LAUNCH( 3); break;
-                case  4: OZ2_SCALE_LAUNCH( 4); break;
-                case  5: OZ2_SCALE_LAUNCH( 5); break;
-                case  6: OZ2_SCALE_LAUNCH( 6); break;
-                case  7: OZ2_SCALE_LAUNCH( 7); break;
-                case  8: OZ2_SCALE_LAUNCH( 8); break;
-                case  9: OZ2_SCALE_LAUNCH( 9); break;
-                case 10: OZ2_SCALE_LAUNCH(10); break;
-                case 11: OZ2_SCALE_LAUNCH(11); break;
-                case 12: OZ2_SCALE_LAUNCH(12); break;
-                case 13: OZ2_SCALE_LAUNCH(13); break;
-                case 14: OZ2_SCALE_LAUNCH(14); break;
-                case 15: OZ2_SCALE_LAUNCH(15); break;
-                case 16: OZ2_SCALE_LAUNCH(16); break;
-                case 17: OZ2_SCALE_LAUNCH(17); break;
-                case 18: OZ2_SCALE_LAUNCH(18); break;
+                case  1: OZ2_SCALE_A_TP( 1); break;
+                case  2: OZ2_SCALE_A_TP( 2); break;
+                case  3: OZ2_SCALE_A_TP( 3); break;
+                case  4: OZ2_SCALE_A_TP( 4); break;
+                case  5: OZ2_SCALE_A_TP( 5); break;
+                case  6: OZ2_SCALE_A_TP( 6); break;
+                case  7: OZ2_SCALE_A_TP( 7); break;
+                case  8: OZ2_SCALE_A_TP( 8); break;
+                case  9: OZ2_SCALE_A_TP( 9); break;
+                case 10: OZ2_SCALE_A_TP(10); break;
+                case 11: OZ2_SCALE_A_TP(11); break;
+                case 12: OZ2_SCALE_A_TP(12); break;
+                case 13: OZ2_SCALE_A_TP(13); break;
+                case 14: OZ2_SCALE_A_TP(14); break;
+                case 15: OZ2_SCALE_A_TP(15); break;
+                case 16: OZ2_SCALE_A_TP(16); break;
+                case 17: OZ2_SCALE_A_TP(17); break;
+                case 18: OZ2_SCALE_A_TP(18); break;
                 default:
-                    hipLaunchKernelGGL(oz2_scaleAB_kernel_rt, gAB_scale, blk_scale, 0, stream,
+                    hipLaunchKernelGGL(oz2_scaleA_kernel_rt,
+                                       gA_scale, blk_scale, 0, stream,
                                        A, m, lda, tA, A8i, lda8i, cola8i, sftA,
-                                       B, n, ldb, tB, B8i, ldb8i, sftB,
-                                       k, scale_start, actual_scale, false, m_y_blks);
+                                       k, scale_start, actual_scale, false);
             }
         } else {
-            /* num_moduli >= 19 (do_pass3=true): use runtime fallback kernel. */
-            hipLaunchKernelGGL(oz2_scaleAB_kernel_rt, gAB_scale, blk_scale, 0, stream,
+            hipLaunchKernelGGL(oz2_scaleA_kernel_rt,
+                               gA_scale, blk_scale, 0, stream,
                                A, m, lda, tA, A8i, lda8i, cola8i, sftA,
-                               B, n, ldb, tB, B8i, ldb8i, sftB,
-                               k, scale_start, actual_scale, true, m_y_blks);
+                               k, scale_start, actual_scale, true);
         }
-#undef OZ2_SCALE_LAUNCH
+#undef OZ2_SCALE_A_TP
+
+        /* --- B scale kernel dispatch --- */
+#define OZ2_SCALE_B_TP(TC) \
+        do { \
+            if(!tB) hipLaunchKernelGGL((oz2_scaleB_kernel<(TC),false>), \
+                        gB_scale, blk_scale, 0, stream, \
+                        B, n, ldb, B8i, ldb8i, colb_real, sftB, k, scale_start); \
+            else    hipLaunchKernelGGL((oz2_scaleB_kernel<(TC),true>), \
+                        gB_scale, blk_scale, 0, stream, \
+                        B, n, ldb, B8i, ldb8i, colb_real, sftB, k, scale_start); \
+        } while(0)
+
+        switch(actual_scale) {
+            case  1: OZ2_SCALE_B_TP( 1); break;
+            case  2: OZ2_SCALE_B_TP( 2); break;
+            case  3: OZ2_SCALE_B_TP( 3); break;
+            case  4: OZ2_SCALE_B_TP( 4); break;
+            case  5: OZ2_SCALE_B_TP( 5); break;
+            case  6: OZ2_SCALE_B_TP( 6); break;
+            case  7: OZ2_SCALE_B_TP( 7); break;
+            case  8: OZ2_SCALE_B_TP( 8); break;
+            case  9: OZ2_SCALE_B_TP( 9); break;
+            case 10: OZ2_SCALE_B_TP(10); break;
+            case 11: OZ2_SCALE_B_TP(11); break;
+            case 12: OZ2_SCALE_B_TP(12); break;
+            case 13: OZ2_SCALE_B_TP(13); break;
+            case 14: OZ2_SCALE_B_TP(14); break;
+            case 15: OZ2_SCALE_B_TP(15); break;
+            case 16: OZ2_SCALE_B_TP(16); break;
+            case 17: OZ2_SCALE_B_TP(17); break;
+            case 18: OZ2_SCALE_B_TP(18); break;
+            default:
+                hipLaunchKernelGGL(oz2_scaleB_kernel_rt,
+                                   gB_scale, blk_scale, 0, stream,
+                                   B, n, ldb, tB, B8i, ldb8i, colb_real, sftB,
+                                   k, scale_start, actual_scale);
+        }
+#undef OZ2_SCALE_B_TP
         _pstop(_t_scale);
 
-        /* Parts 2c-d: GEMM + accumulate for each GEMM chunk within this
-         * scale chunk.  A8i_gemm / B8i_gemm are offset pointers into the
-         * pre-computed scale-chunk buffers — A and B are NOT re-read here.  */
+        /* Parts 2c-d: GEMM + accumulate for each GEMM chunk within this scale chunk. */
         for(unsigned gemm_local = 0; gemm_local < actual_scale; gemm_local += chunk_size) {
             const unsigned actual_gemm = (gemm_local + chunk_size <= actual_scale)
                                          ? chunk_size : (actual_scale - gemm_local);
 
-            /* Update batch count only when the GEMM batch size changes. */
             if(static_cast<int32_t>(actual_gemm) != batch_cur) {
                 batch_cur = static_cast<int32_t>(actual_gemm);
                 hipblasLtMatrixLayoutSetAttribute(layoutA_b,
@@ -1863,7 +1814,6 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
                     HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch_cur, sizeof(batch_cur));
             }
 
-            /* Offset into the pre-computed scale chunk for this GEMM batch. */
             const int8_t* const A8i_gemm = A8i + gemm_local * strideA8i;
             const int8_t* const B8i_gemm = B8i + gemm_local * strideB8i;
 
@@ -1879,14 +1829,8 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
 
             const unsigned global_chunk_start = scale_start + gemm_local;
             const bool is_first = (global_chunk_start == 0);
-            /* Detect the final chunk: when true, dispatch the fused accum+finalize
-             * kernel that writes D directly and skips the Zhi/Zlo global write. */
             const bool is_last  = (global_chunk_start + actual_gemm == num_moduli);
             _pstart();
-            /* Dispatch template kernels with compile-time CHUNK_SIZE and
-             * IS_FIRST_CHUNK: #pragma unroll in the kernel body pre-issues all
-             * CHUNK_SIZE C32i_batch loads simultaneously.
-             * _rt fallbacks handle chunk sizes not in the switch table.      */
 #define OZ2_FARGS C32i_batch, Zhi, Zlo, C, D, m, n, ldc32i, ldc, ldd, *alpha, *beta, sftA, sftB, global_chunk_start
 #define OZ2_AARGS C32i_batch, Zhi, Zlo, m, n, ldc32i, global_chunk_start
 #define OZ2_FINALIZE(HL, CS) \
@@ -2016,9 +1960,6 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     hipblasLtMatrixLayoutDestroy(layoutB_b);
     hipblasLtMatrixLayoutDestroy(layoutA_b);
 
-    /* The last GEMM chunk is handled by oz2_accum_finalize_kernel which writes
-     * D directly; _t_finalize remains 0 (cost is included in _t_accum).    */
-
     hipblasLtMatmulDescDestroy(matmulDesc);
     hipblasLtMatrixLayoutDestroy(layoutCD);
     hipblasLtMatrixLayoutDestroy(layoutB);
@@ -2037,16 +1978,17 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         if(_f) {
             if(std::ftell(_f) == 0)
             std::fprintf(_f,
-                "m,n,k,num_moduli,scale_chunk_size,gemm_chunk_size,"
+                "m,n,k,opA,opB,num_moduli,scale_chunk_size,gemm_chunk_size,"
                 "workspace_bytes,"
                 "t_prelim_ms,t_prelim_gemm_ms,t_refine_ms,"
                 "t_scale_ms,t_int8_gemm_ms,t_accum_ms,"
                 "t_finalize_ms,t_total_ms\n");
             std::fprintf(_f,
-                "%lld,%lld,%lld,%u,%u,%u,"
+                "%lld,%lld,%lld,%c,%c,%u,%u,%u,"
                 "%llu,"
                 "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n",
                 (long long)m, (long long)n, (long long)k,
+                tA ? 'T' : 'N', tB ? 'T' : 'N',
                 num_moduli, scale_chunk_size, chunk_size,
                 (unsigned long long)wsBytes,
                 _t_prelim, _t_prelim_gemm, _t_refine,
