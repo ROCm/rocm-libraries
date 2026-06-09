@@ -10,12 +10,7 @@ from ..common import torch_support
 from ..common.exceptions import ExecutionError, UnsupportedGraphError
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
-from .timing import (
-    GpuTimerInterface,
-    Timer,
-    create_gpu_timer,
-    create_stream_synchronizer,
-)
+from .timing import GpuTimerInterface, HipGpuTimer, Timer, create_gpu_timer
 
 # Map graph JSON data type strings to hipdnn DataType enum names.
 # The hipdnn.DataType enum is only available when hipdnn_frontend is imported,
@@ -95,7 +90,7 @@ class Executor:
         self._workspace_ptr: int = 0
         self._workspace_size: int = 0
         self._init_time_ms: float = 0.0
-        self._stream_synchronizers: Dict[int, Any] = {}
+        self._stream_sync_timer: Optional[HipGpuTimer] = None
 
     def _build_through_operation_graph(
         self, handle: Any, engine_id: Optional[int] = None
@@ -257,16 +252,14 @@ class Executor:
             )
         return stream
 
-    def _get_stream_synchronizer(self, stream: int) -> Any:
-        """Return a reusable synchronizer for a HIP stream."""
-        synchronizer = self._stream_synchronizers.get(stream)
-        if synchronizer is None:
+    def _get_stream_sync_timer(self, stream: int) -> HipGpuTimer:
+        """Return the reusable event-backed synchronizer for the execution stream."""
+        if self._stream_sync_timer is None:
             try:
-                synchronizer = create_stream_synchronizer(stream)
+                self._stream_sync_timer = HipGpuTimer(stream)
             except RuntimeError as e:
                 raise ExecutionError(str(e)) from e
-            self._stream_synchronizers[stream] = synchronizer
-        return synchronizer
+        return self._stream_sync_timer
 
     def execute_once(self, handle: Any, variant_pack: Dict[int, int]) -> None:
         """Execute the prepared graph once without collecting timings."""
@@ -279,7 +272,7 @@ class Executor:
         result = self._graph.execute(handle, variant_pack, self._workspace_ptr)
         if result.is_bad():
             raise ExecutionError(f"Graph execution failed: {result.get_message()}")
-        self._get_stream_synchronizer(stream).synchronize()
+        self._get_stream_sync_timer(stream).synchronize_stream()
 
     def warmup(self, handle: Any, variant_pack: Dict[int, int]) -> None:
         """Run warmup iterations (timing discarded).
@@ -304,7 +297,7 @@ class Executor:
         # benchmark() starts the measured loop, otherwise the first timed E2E
         # iteration can include queued warmup kernels.
         if self._config.warmup_iters > 0:
-            self._get_stream_synchronizer(stream).synchronize()
+            self._get_stream_sync_timer(stream).synchronize_stream()
 
     def benchmark(
         self,
@@ -334,7 +327,7 @@ class Executor:
         kernel_timings: Optional[List[float]] = None
         gpu_timer: Optional[GpuTimerInterface] = None
         timing_backend_name: str = ""
-        stream_synchronizer = None
+        stream_sync_timer = None
         stream = self._get_execution_stream(handle)
 
         # Create GPU timer if requested and available.
@@ -362,9 +355,9 @@ class Executor:
                     gpu_timer.stop()
                     kernel_ms = gpu_timer.elapsed_ms()
                 else:
-                    if stream_synchronizer is None:
-                        stream_synchronizer = self._get_stream_synchronizer(stream)
-                    stream_synchronizer.synchronize()
+                    if stream_sync_timer is None:
+                        stream_sync_timer = self._get_stream_sync_timer(stream)
+                    stream_sync_timer.synchronize_stream()
 
             if kernel_ms is not None:
                 assert kernel_timings is not None

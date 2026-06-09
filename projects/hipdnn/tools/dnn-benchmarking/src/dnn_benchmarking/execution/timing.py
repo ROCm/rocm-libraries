@@ -22,6 +22,9 @@ from abc import ABC, abstractmethod
 from types import TracebackType
 from typing import Any, List, Literal, Optional, Type
 
+import hipdnn_frontend as hipdnn
+
+
 _HIP_EVENT_API = (
     "hip_event_create",
     "hip_event_record",
@@ -31,26 +34,17 @@ _HIP_EVENT_API = (
 )
 
 
-def _load_hipdnn_frontend() -> Any:
-    """Load hipdnn_frontend and verify that HIP event bindings are present."""
-    try:
-        import hipdnn_frontend as hipdnn
-    except ImportError as e:
-        raise RuntimeError(
-            "hipdnn_frontend with HIP event bindings is not available"
-        ) from e
-
+def _validate_hip_event_api() -> None:
+    """Verify hipdnn_frontend provides the HIP event bindings."""
     missing = [name for name in _HIP_EVENT_API if not hasattr(hipdnn, name)]
     if missing:
         joined = ", ".join(missing)
         raise RuntimeError(f"hipdnn_frontend is missing HIP event bindings: {joined}")
 
-    return hipdnn
-
 
 def _require_hip_runtime() -> Any:
     """Return hipdnn_frontend when at least one HIP device is visible."""
-    hipdnn = _load_hipdnn_frontend()
+    _validate_hip_event_api()
     if int(hipdnn.hip_get_device_count()) <= 0:
         raise RuntimeError("HIP GPU timing not available: no HIP devices are visible")
     return hipdnn
@@ -155,23 +149,32 @@ class HipGpuTimer(GpuTimerInterface):
         self._stream = int(stream)
         self._start_event = self._hipdnn.hip_event_create()
         self._stop_event = self._hipdnn.hip_event_create()
-        self._stopped = False
+        self._recorded_stop_event: Optional[Any] = None
 
     def start(self) -> None:
         """Record the start event on the configured HIP stream."""
         self._hipdnn.hip_event_record(self._start_event, self._stream)
-        self._stopped = False
+        self._recorded_stop_event = None
+
+    def _record_stop_event(self) -> None:
+        """Record the stop event on the configured HIP stream."""
+        self._hipdnn.hip_event_record(self._stop_event, self._stream)
+        self._recorded_stop_event = self._stop_event
 
     def stop(self) -> None:
         """Record the stop event on the configured HIP stream."""
-        self._hipdnn.hip_event_record(self._stop_event, self._stream)
-        self._stopped = True
+        self._record_stop_event()
 
     def synchronize(self) -> None:
-        """Block until the stop event has completed."""
-        if not self._stopped:
-            raise RuntimeError("HIP timer has not been stopped")
-        self._hipdnn.hip_event_synchronize(self._stop_event)
+        """Block until the recorded stop event has completed."""
+        if self._recorded_stop_event is None:
+            raise RuntimeError("HIP timer stop event has not been recorded")
+        self._hipdnn.hip_event_synchronize(self._recorded_stop_event)
+
+    def synchronize_stream(self) -> None:
+        """Record and wait for an event on the configured HIP stream."""
+        self._record_stop_event()
+        self.synchronize()
 
     def elapsed_ms(self) -> float:
         """Synchronize and return elapsed time in milliseconds."""
@@ -179,25 +182,6 @@ class HipGpuTimer(GpuTimerInterface):
         return float(
             self._hipdnn.hip_event_elapsed_time(self._start_event, self._stop_event)
         )
-
-
-class HipStreamSynchronizer:
-    """Reusable HIP event synchronizer for a single stream."""
-
-    def __init__(self, stream: int = 0) -> None:
-        self._hipdnn = _require_hip_runtime()
-        self._stream = int(stream)
-        self._event = self._hipdnn.hip_event_create()
-
-    @property
-    def stream(self) -> int:
-        """Return the synchronized stream pointer encoded as an integer."""
-        return self._stream
-
-    def synchronize(self) -> None:
-        """Record and wait for an event on the configured HIP stream."""
-        self._hipdnn.hip_event_record(self._event, self._stream)
-        self._hipdnn.hip_event_synchronize(self._event)
 
 
 def create_gpu_timer(
@@ -228,11 +212,6 @@ def create_gpu_timer(
         return HipGpuTimer(stream)
 
     raise ValueError(f"Unknown backend: {backend}")
-
-
-def create_stream_synchronizer(stream: int = 0) -> HipStreamSynchronizer:
-    """Create a reusable synchronizer for one HIP stream."""
-    return HipStreamSynchronizer(stream)
 
 
 # Backward compatibility alias.

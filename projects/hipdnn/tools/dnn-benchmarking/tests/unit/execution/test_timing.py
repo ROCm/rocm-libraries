@@ -266,7 +266,7 @@ class TestDirectHipTimers:
                 calls.append(("elapsed", start, stop))
                 return 1.25
 
-        monkeypatch.setattr(timing_module, "_load_hipdnn_frontend", lambda: FakeHipdnn)
+        monkeypatch.setattr(timing_module, "hipdnn", FakeHipdnn)
 
         timer = HipGpuTimer(stream=123)
         timer.start()
@@ -285,9 +285,11 @@ class TestDirectHipTimers:
             ("elapsed", events[0], events[1]),
         ]
 
-    def test_stream_synchronizer_records_event_on_stream(self, monkeypatch) -> None:
+    def test_hip_gpu_timer_synchronize_stream_records_event_on_stream(
+        self, monkeypatch
+    ) -> None:
         calls = []
-        event = object()
+        events = []
 
         class FakeHipdnn:
             @staticmethod
@@ -296,6 +298,8 @@ class TestDirectHipTimers:
 
             @staticmethod
             def hip_event_create():
+                event = object()
+                events.append(event)
                 calls.append(("create", event))
                 return event
 
@@ -307,15 +311,17 @@ class TestDirectHipTimers:
             def hip_event_synchronize(recorded_event) -> None:
                 calls.append(("synchronize", recorded_event))
 
-        monkeypatch.setattr(timing_module, "_load_hipdnn_frontend", lambda: FakeHipdnn)
+        monkeypatch.setattr(timing_module, "hipdnn", FakeHipdnn)
 
-        synchronizer = timing_module.create_stream_synchronizer(stream=456)
-        synchronizer.synchronize()
+        timer = HipGpuTimer(stream=456)
+        timer.synchronize_stream()
 
+        assert len(events) == 2
         assert calls == [
-            ("create", event),
-            ("record", event, 456),
-            ("synchronize", event),
+            ("create", events[0]),
+            ("create", events[1]),
+            ("record", events[1], 456),
+            ("synchronize", events[1]),
         ]
 
 

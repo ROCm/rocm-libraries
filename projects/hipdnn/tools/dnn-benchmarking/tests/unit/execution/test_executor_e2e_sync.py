@@ -53,14 +53,14 @@ class DummyHipTimer(GpuTimerInterface):
         return 1.0
 
 
-class TrackingSynchronizer:
-    """Synchronizer stub that records calls."""
+class TrackingStreamTimer:
+    """Stream-scoped HIP timer stub that records synchronization calls."""
 
     def __init__(self, calls: list[str], stream: int = 0) -> None:
         self.calls = calls
         self.stream = stream
 
-    def synchronize(self) -> None:
+    def synchronize_stream(self) -> None:
         self.calls.append("sync")
 
 
@@ -95,8 +95,8 @@ def test_warmup_synchronizes_once_after_untimed_iterations(monkeypatch) -> None:
 
     monkeypatch.setattr(
         executor_module,
-        "create_stream_synchronizer",
-        lambda stream=0: TrackingSynchronizer(calls, stream),
+        "HipGpuTimer",
+        lambda stream=0: TrackingStreamTimer(calls, stream),
     )
 
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=3, benchmark_iters=1)
@@ -115,7 +115,7 @@ def test_warmup_zero_iterations_does_not_synchronize(monkeypatch) -> None:
 
     monkeypatch.setattr(
         executor_module,
-        "create_stream_synchronizer",
+        "HipGpuTimer",
         lambda stream=0: pytest.fail("zero warmup must not synchronize"),
     )
 
@@ -138,8 +138,8 @@ def test_benchmark_synchronizes_each_measured_iteration(monkeypatch) -> None:
 
     monkeypatch.setattr(
         executor_module,
-        "create_stream_synchronizer",
-        lambda stream=0: TrackingSynchronizer(calls, stream),
+        "HipGpuTimer",
+        lambda stream=0: TrackingStreamTimer(calls, stream),
     )
 
     config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=0, benchmark_iters=3)
@@ -165,9 +165,8 @@ def test_benchmark_uses_handle_stream_for_timing_and_sync(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         executor_module,
-        "create_stream_synchronizer",
-        lambda stream=0: sync_streams.append(stream)
-        or TrackingSynchronizer([], stream),
+        "HipGpuTimer",
+        lambda stream=0: sync_streams.append(stream) or TrackingStreamTimer([], stream),
     )
 
     timed_executor = _make_executor("hip")
@@ -326,8 +325,8 @@ def test_e2e_timings_recorded_without_gpu_timing(monkeypatch) -> None:
     monkeypatch.setattr(executor_module, "Timer", FakeTimer)
     monkeypatch.setattr(
         executor_module,
-        "create_stream_synchronizer",
-        lambda stream=0: TrackingSynchronizer([], stream),
+        "HipGpuTimer",
+        lambda stream=0: TrackingStreamTimer([], stream),
     )
 
     executor = _make_executor("none")
@@ -354,8 +353,8 @@ def test_cpu_only_torch_does_not_affect_hip_synchronization(monkeypatch) -> None
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setattr(
         executor_module,
-        "create_stream_synchronizer",
-        lambda stream=0: TrackingSynchronizer(sync_calls, stream),
+        "HipGpuTimer",
+        lambda stream=0: TrackingStreamTimer(sync_calls, stream),
     )
 
     executor = _make_executor("none")

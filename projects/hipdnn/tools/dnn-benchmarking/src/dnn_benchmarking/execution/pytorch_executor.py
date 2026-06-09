@@ -12,7 +12,7 @@ from ..common import torch_support
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from . import pytorch_ops
-from .timing import HipGpuTimer, Timer, _is_torch_available, create_stream_synchronizer
+from .timing import HipGpuTimer, Timer, _is_torch_available
 
 
 class PyTorchExecutionError(Exception):
@@ -58,7 +58,7 @@ class PyTorchCudaExecutor:
         self._init_time_ms: float = 0.0
         self._prepared = False
         self._stream: Optional[Any] = None
-        self._stream_synchronizer: Optional[Any] = None
+        self._stream_sync_timer: Optional[HipGpuTimer] = None
 
     def prepare(self) -> None:
         """Validate graph and prepare for execution.
@@ -80,9 +80,7 @@ class PyTorchCudaExecutor:
             torch.cuda.init()
             self._stream = torch.cuda.default_stream(self._device)
             try:
-                self._stream_synchronizer = create_stream_synchronizer(
-                    self._timing_stream()
-                )
+                self._stream_sync_timer = HipGpuTimer(stream=self._timing_stream())
             except RuntimeError as e:
                 raise PyTorchExecutionError(str(e)) from e
             self._prepared = True
@@ -184,13 +182,11 @@ class PyTorchCudaExecutor:
         return self._stream
 
     def _synchronize_stream(self) -> None:
-        """Synchronize the PyTorch graph stream through hipdnn_frontend bindings."""
+        """Synchronize the PyTorch graph stream through a HIP event."""
         try:
-            if self._stream_synchronizer is None:
-                self._stream_synchronizer = create_stream_synchronizer(
-                    self._timing_stream()
-                )
-            self._stream_synchronizer.synchronize()
+            if self._stream_sync_timer is None:
+                self._stream_sync_timer = HipGpuTimer(stream=self._timing_stream())
+            self._stream_sync_timer.synchronize_stream()
         except RuntimeError as e:
             raise PyTorchExecutionError(str(e)) from e
 

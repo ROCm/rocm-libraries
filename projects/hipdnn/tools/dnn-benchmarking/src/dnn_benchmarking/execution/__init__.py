@@ -15,10 +15,8 @@ from .timing import (
     GpuTimer,
     GpuTimerInterface,
     HipGpuTimer,
-    HipStreamSynchronizer,
     Timer,
     create_gpu_timer,
-    create_stream_synchronizer,
     get_available_backends,
     is_gpu_timing_available,
 )
@@ -29,10 +27,8 @@ __all__ = [
     "GpuTimer",
     "GpuTimerInterface",
     "HipGpuTimer",
-    "HipStreamSynchronizer",
     "Timer",
     "create_gpu_timer",
-    "create_stream_synchronizer",
     "get_available_backends",
     "is_gpu_timing_available",
 ]
