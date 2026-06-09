@@ -123,6 +123,7 @@ SUPPORTED_BUILD_CU_COUNTS = {
 }
 
 SUPPORTED_CHIP_ID_FALLBACKS = {
+    "id=75b0": ["id=75a0"],
     "id=75a2": ["id=75a0"],
     "id=75b2": ["id=75a0"],
     "id=75a3": ["id=75a0"],
