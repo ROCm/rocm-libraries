@@ -3940,10 +3940,20 @@ def diagnose_missing_edge(
     """
     # Phase 0 — byte-key-based producer + consumer lookup.
     #
-    # Consumer: resolved by identity (consumer must be a DATA-FLOW node
-    # present in both captures — its absence is a capture-pipeline bug).
+    # Consumer: resolved by (identity, body_label, iter_index) — the three-field
+    # key that uniquely identifies one GraphNode in subj_graph.  Bare identity
+    # alone is body-blind: the same canonical instruction recurs in every body
+    # (PRO / ML-1 / ML / NGL / NLL) with emission_ordinal=0 in each, so
+    # next(...) on identity alone returns the PRO copy (lowest position).
+    # ref_edge.consumer carries the correct body from the ref-side graph-builder.
     c_id = ref_edge.consumer.identity
-    c_node = next((n for n in subj_graph.nodes if n.identity == c_id), None)
+    c_node = next(
+        (n for n in subj_graph.nodes
+         if n.identity == c_id
+         and n.body_label == ref_edge.consumer.body_label
+         and n.iter_index == ref_edge.consumer.iter_index),
+        None,
+    )
     if c_node is None:
         raise CaptureConsistencyError(
             f"diagnose_missing_edge: consumer identity {c_id!r} is absent from "
@@ -4124,10 +4134,17 @@ def diagnose_missing_edge(
             # (the instruction whose SCC value the consumer was supposed to
             # read), not p_node — which is the subj's closest-prior writer
             # for the SCC byte key (i.e. the clobber itself). Look up the
-            # original producer in subj by identity so cms_node_label can
-            # supply the body_capture context.
+            # original producer in subj by (identity, body_label, iter_index)
+            # so cms_node_label can supply the body_capture context.
+            # Bare identity alone is body-blind (same canonical instruction
+            # recurs in every body with ordinal=0); ref_edge.producer carries
+            # the correct body.
             orig_producer_node = next(
-                (n for n in subj_graph.nodes if n.identity == p_id), None
+                (n for n in subj_graph.nodes
+                 if n.identity == p_id
+                 and n.body_label == ref_edge.producer.body_label
+                 and n.iter_index == ref_edge.producer.iter_index),
+                None,
             )
             if orig_producer_node is None:
                 # Same-instruction-set contract: the original producer must
@@ -4356,11 +4373,23 @@ def diagnose_extra_edge(
     # rather than "at the point where subj's consumer happens to be in subj's
     # stream, which may be at a completely different position in ref."
     #
-    # If the consumer identity is absent from ref (capture-pipeline bug), fall
-    # back to the subj consumer's position — the Phase 0 gate for producer
-    # byte_keys will catch the inconsistency on the next line.
+    # Resolution uses (identity, body_label, iter_index) — not bare identity.
+    # Bare identity is body-blind: the same canonical instruction recurs in every
+    # body (PRO / ML-1 / ML / NGL / NLL) with emission_ordinal=0 in each, so
+    # next(...) on identity alone returns the PRO copy (lowest unrolled_position).
+    # cons.body_label and cons.iter_index carry the correct body from the subj
+    # graph-builder — body assignment is codegen-level, not schedule-level, so
+    # the same canonical instruction lands in the same body on both sides.
+    #
+    # If the consumer (identity, body_label, iter_index) triple is absent from ref
+    # (capture-pipeline bug), fall back to the subj consumer's position — the Phase
+    # 0 gate for producer byte_keys will catch the inconsistency on the next line.
     ref_cons_node = next(
-        (n for n in ref_graph.nodes if n.identity == cons.identity), None
+        (n for n in ref_graph.nodes
+         if n.identity == cons.identity
+         and n.body_label == cons.body_label
+         and n.iter_index == cons.iter_index),
+        None,
     )
     cons_pos = (ref_cons_node.unrolled_position if ref_cons_node is not None
                 else cons.unrolled_position)

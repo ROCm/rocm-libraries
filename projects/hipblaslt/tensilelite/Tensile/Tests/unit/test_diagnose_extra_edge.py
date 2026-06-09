@@ -539,3 +539,189 @@ class TestDiagnoseExtraEdgeSCCAndPartialMatch:
         from Tensile.Components.ScheduleCapture import CaptureConsistencyError
         with pytest.raises(CaptureConsistencyError, match="same-instruction-set contract"):
             diagnose_extra_edge(subj_edge, g_subj, g_ref)
+
+
+# =============================================================================
+# Test 7 — Multi-body identity collision: body-correct consumer resolution
+# =============================================================================
+
+
+class TestDiagnoseExtraEdgeMultiBodyIdentityCollision:
+    """Fix A (rocm-libraries-h7lo): diagnose_extra_edge must resolve the
+    ref consumer by (identity, body_label, iter_index), not bare identity.
+
+    When the same canonical MFMA appears in two bodies (e.g. ML_PREV and
+    NLL) in the ref graph, bare identity returns the first match
+    (ML_PREV — lowest unrolled_position).  Using that wrong consumer position
+    as `cons_pos` causes the closest-prior-writer search to find the ML_PREV
+    era writer, producing a failure message that names the wrong body and
+    the wrong reference producer.
+
+    Construction:
+      ref:  ML_PREV = [LR-A(lds64) → MFMA];  NLL = [LR-A(lds64) → MFMA]
+            (same LR, same MFMA → same identity in both bodies)
+      subj: ML_PREV = [LR-A(lds64) → MFMA];  NLL = [LR-B(lds128) → MFMA]
+            (NLL has a different LR → extra subj edge for that body)
+
+    The subj extra edge is NLL-LR-B → NLL-MFMA.  Its consumer carries
+    body_label=BODY_LABEL_NLL.
+
+    After Fix A:
+      - ref_cons_node is the NLL copy of MFMA (not the ML_PREV copy).
+      - cons_pos is the NLL MFMA's unrolled_position (> ML_PREV's).
+      - The closest-prior ref writer at cons_pos is LR-A in the NLL body.
+      - failure.ref_producer.body_label == BODY_LABEL_NLL.
+
+    Without Fix A (bare identity):
+      - ref_cons_node would be the ML_PREV copy (lower unrolled_position).
+      - cons_pos would be the ML_PREV MFMA's position.
+      - The closest-prior ref writer at cons_pos would be LR-A in ML_PREV.
+      - failure.ref_producer.body_label == BODY_LABEL_ML_PREV.   ← the bug
+    """
+
+    # Shared vgpr range for the "shared" LR→MFMA chain.  Must not conflict
+    # with the filler ranges used by _wrap (200-209 / 220-229 / 240-249).
+    _LR_DST_START = 8
+    _LR_DST_COUNT = 4
+    _MFMA_A_START = 8   # reads from the LR destination
+    _MFMA_A_COUNT = 4
+    _MFMA_C_START = 0
+    _MFMA_B_START = 32
+    _LDS_OFFSET_A = 64    # ref + subj ML_PREV + subj NLL-wrong ref
+    _LDS_OFFSET_B = 128   # subj NLL (the "extra" producer)
+
+    def _make_lr_mfma_capture(self, body_label: str, lds_offset: int) -> object:
+        """Build a LoopBodyCapture: LR(lds_offset) → MFMA, in the given body."""
+        return make_capture(body_label, [
+            make_lr(self._LR_DST_START, self._LR_DST_COUNT, lds_offset,
+                    slot=0, category="LRA0"),
+            make_swait(slot=1, dscnt=0),
+            make_mfma(c_dst_start=self._MFMA_C_START,
+                      a_src_start=self._MFMA_A_START,
+                      b_src_start=self._MFMA_B_START, slot=2,
+                      a_src_count=self._MFMA_A_COUNT),
+        ])
+
+    def _make_ml_filler(self) -> object:
+        """A distinct ML body that does not collide with the shared LR/MFMA vgprs."""
+        return make_capture(BODY_LABEL_ML, [make_mfma(
+            c_dst_start=100, a_src_start=104, b_src_start=108, slot=0,
+        )])
+
+    def _make_ngl_filler(self) -> object:
+        return make_capture(BODY_LABEL_NGL, [make_mfma(
+            c_dst_start=120, a_src_start=124, b_src_start=128, slot=0,
+        )])
+
+    def _build_ref_graph(self):
+        """Ref: ML_PREV and NLL both have LR-A(lds64) → same MFMA."""
+        fpc = FourPartCapture(
+            main_loop={0: self._make_ml_filler()},
+            main_loop_prev={0: self._make_lr_mfma_capture(BODY_LABEL_ML_PREV,
+                                                          self._LDS_OFFSET_A)},
+            n_gl={0: self._make_ngl_filler()},
+            n_ll={0: self._make_lr_mfma_capture(BODY_LABEL_NLL,
+                                                self._LDS_OFFSET_A)},
+            num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
+        )
+        return build_dataflow_graph(fpc)
+
+    def _build_subj_graph(self):
+        """Subj: ML_PREV has LR-A(lds64) → MFMA; NLL has LR-B(lds128) → same MFMA."""
+        fpc = FourPartCapture(
+            main_loop={0: self._make_ml_filler()},
+            main_loop_prev={0: self._make_lr_mfma_capture(BODY_LABEL_ML_PREV,
+                                                          self._LDS_OFFSET_A)},
+            n_gl={0: self._make_ngl_filler()},
+            n_ll={0: self._make_lr_mfma_capture(BODY_LABEL_NLL,
+                                                self._LDS_OFFSET_B)},
+            num_mfma=1, num_codepaths=1, source="cms",
+            arch_profile=_DEFAULT_CDNA4_ARCH_PROFILE,
+        )
+        return build_dataflow_graph(fpc)
+
+    def _find_nll_lr_to_mfma_edge(self, graph):
+        """Find the LR→MFMA raw_intrawave edge whose LR node is in the NLL body."""
+        for e in graph.edges:
+            if (e.edge_kind == "raw_intrawave"
+                    and e.producer_write_byte_key
+                    and e.producer.body_label == BODY_LABEL_NLL
+                    and e.consumer.body_label == BODY_LABEL_NLL):
+                return e
+        return None
+
+    def test_ref_consumer_resolved_to_nll_body(self):
+        """diagnose_extra_edge resolves the ref consumer to the NLL body
+        instance, not the ML_PREV instance that bare identity would return.
+
+        Concretely: failure.ref_producer.body_label must be BODY_LABEL_NLL
+        (ref's NLL-LR-A is the closest-prior writer when cons_pos is the
+        NLL-MFMA's position), not BODY_LABEL_ML_PREV (which bare identity
+        would produce by using ML_PREV-MFMA's position).
+        """
+        g_ref = self._build_ref_graph()
+        g_subj = self._build_subj_graph()
+
+        # Verify the MFMA identity collision exists: ML_PREV and NLL copies
+        # in ref must share the same identity tuple.
+        ref_nodes_by_body = {n.body_label: n for n in g_ref.nodes
+                             if n.category == "MFMA"}
+        assert BODY_LABEL_ML_PREV in ref_nodes_by_body, (
+            "ref must have an MFMA node in ML_PREV body"
+        )
+        assert BODY_LABEL_NLL in ref_nodes_by_body, (
+            "ref must have an MFMA node in NLL body"
+        )
+        ml_prev_mfma = ref_nodes_by_body[BODY_LABEL_ML_PREV]
+        nll_mfma = ref_nodes_by_body[BODY_LABEL_NLL]
+        assert ml_prev_mfma.identity == nll_mfma.identity, (
+            "ML_PREV and NLL MFMA nodes must share the same identity "
+            f"(body-blind by construction); got {ml_prev_mfma.identity!r} "
+            f"vs {nll_mfma.identity!r}"
+        )
+        # They must be at different unrolled_positions (NLL comes later).
+        assert nll_mfma.unrolled_position > ml_prev_mfma.unrolled_position, (
+            "NLL MFMA must be at a higher unrolled_position than ML_PREV MFMA"
+        )
+
+        # Find the subj NLL-LR-B → NLL-MFMA edge (the "extra" edge).
+        subj_nll_edge = self._find_nll_lr_to_mfma_edge(g_subj)
+        assert subj_nll_edge is not None, (
+            "Could not find a raw_intrawave edge in subj's NLL body — "
+            "check fixture construction"
+        )
+        assert subj_nll_edge.consumer.body_label == BODY_LABEL_NLL
+
+        # Call diagnose_extra_edge and inspect the failure.
+        result = diagnose_extra_edge(subj_nll_edge, g_subj, g_ref)
+
+        assert len(result) == 1, f"Expected 1 failure, got {result!r}"
+        failure = result[0]
+        assert isinstance(failure, EdgeRoutedDifferentlyFailure), (
+            f"Expected EdgeRoutedDifferentlyFailure; got {type(failure)}"
+        )
+
+        # The consumer label must reference the NLL body.
+        assert failure.subj_consumer is not None
+        assert failure.subj_consumer.body_label == BODY_LABEL_NLL, (
+            f"subj_consumer.body_label should be BODY_LABEL_NLL; "
+            f"got {failure.subj_consumer.body_label!r}"
+        )
+
+        # The ref_producer label must reference the NLL body (the LR-A that
+        # precedes the NLL MFMA in ref).  Before Fix A it would reference
+        # BODY_LABEL_ML_PREV (the wrong body — bare identity returned the
+        # ML_PREV MFMA, whose smaller unrolled_position caused the closest-
+        # prior-writer search to find the ML_PREV LR-A instead).
+        assert failure.ref_producer is not None, (
+            "ref_producer should be non-None: ref has LR-A before the NLL MFMA"
+        )
+        assert failure.ref_producer.body_label == BODY_LABEL_NLL, (
+            f"Fix A regression: ref_producer.body_label should be BODY_LABEL_NLL "
+            f"(the NLL-era LR-A), but got {failure.ref_producer.body_label!r}. "
+            f"This means diagnose_extra_edge resolved the ref consumer using bare "
+            f"identity and picked the ML_PREV copy (lower unrolled_position), "
+            f"causing the closest-prior-writer search to find ML_PREV's LR-A "
+            f"instead of NLL's LR-A."
+        )
