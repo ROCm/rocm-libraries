@@ -1,0 +1,21 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[project]
+name = "tensile_writer"
+version = "0.0.1"
+description = "C++ migration scaffold for the TensileLite KernelWriter (subtile geometry)."
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = []
+
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+cmake.args = ["-DCMAKE_POLICY_VERSION_MINIMUM=3.5"]
+# Ship the pure-Python tensile_writer package; the compiled _tensile_writer
+# extension is added next to it by the cmake install() rule.
+wheel.packages = ["tensile_writer"]

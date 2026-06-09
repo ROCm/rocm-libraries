@@ -1,0 +1,12 @@
+# Build / packaging artifacts
+build/
+_skbuild/
+dist/
+*.egg-info/
+wheelhouse/
+
+# Compiled extensions and Python caches
+*.so
+*.pyd
+__pycache__/
+*.pyc
