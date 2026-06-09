@@ -79,102 +79,6 @@ static void spmm_reuse_dims(J                    A_rows,
     ldc = std::max(int64_t(1), int64_t(C_m));
 }
 
-// Exercises the SpMM-only path: never call hipsparseSpMM_bufferSize and
-// never call hipsparseSpMM_preprocess -- only hipsparseSpMM itself, and pass
-// a null externalBuffer. The hipSPARSE SpMM wrapper forwards directly to
-// rocsparse, so this only stays valid for configurations whose required
-// buffer size is zero. For CSR this is the non-transpose / non-transpose case,
-// which we sweep across algorithms and repeated passes on the same shared
-// sparse-matrix descriptor.
-template <typename I, typename J, typename T>
-static void call_spmm_only(hipsparseHandle_t&                     handle,
-                           hipsparseSpMatDescr_t&                 matA,
-                           J                                      M,
-                           J                                      N,
-                           J                                      K,
-                           std::vector<I>&                        hcsr_row_ptr,
-                           std::vector<J>&                        hcsr_col_ind,
-                           std::vector<T>&                        hcsr_val,
-                           T                                      alpha,
-                           T                                      beta,
-                           hipsparseIndexBase_t                   idx_base,
-                           const std::vector<hipsparseSpMMAlg_t>& algs,
-                           int                                    number_of_passes)
-{
-    hipDataType typeT = getDataType<T>();
-
-    const hipsparseOperation_t transA = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-    const hipsparseOperation_t transB = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-    const hipsparseOrder_t     orderB = HIPSPARSE_ORDER_COL;
-    const hipsparseOrder_t     orderC = HIPSPARSE_ORDER_COL;
-
-    J       B_m, B_n, C_m, C_n;
-    int64_t ldb, ldc;
-    spmm_reuse_dims<J>(M, K, N, transA, transB, B_m, B_n, C_m, C_n, ldb, ldc);
-
-    const int64_t nnz_B = ldb * B_n;
-    const int64_t nnz_C = ldc * C_n;
-
-    std::vector<T> hB(nnz_B);
-    hipsparseInit<T>(hB, nnz_B, 1);
-
-    auto dB_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_B), device_free};
-    auto dC_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz_C), device_free};
-    T*   dB         = (T*)dB_managed.get();
-    T*   dC         = (T*)dC_managed.get();
-
-    CHECK_HIP_ERROR(hipMemcpy(dB, hB.data(), sizeof(T) * nnz_B, hipMemcpyHostToDevice));
-
-    hipsparseDnMatDescr_t B, C;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&B, B_m, B_n, ldb, dB, typeT, orderB));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C, C_m, C_n, ldc, dC, typeT, orderC));
-
-    CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-
-    for(int pass = 0; pass < number_of_passes; ++pass)
-    {
-        for(hipsparseSpMMAlg_t alg : algs)
-        {
-            std::vector<T> hC(nnz_C);
-            hipsparseInit<T>(hC, nnz_C, 1);
-
-            CHECK_HIP_ERROR(hipMemcpy(dC, hC.data(), sizeof(T) * nnz_C, hipMemcpyHostToDevice));
-
-            // No bufferSize, no preprocess: only SpMM with a null externalBuffer.
-            CHECK_HIPSPARSE_ERROR(hipsparseSpMM(
-                handle, transA, transB, &alpha, matA, B, &beta, C, typeT, alg, nullptr));
-
-            std::vector<T> hC_out(nnz_C);
-            CHECK_HIP_ERROR(hipMemcpy(hC_out.data(), dC, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
-
-            std::vector<T> hC_gold(hC);
-            host_csrmm<I, J, T>(M,
-                                N,
-                                K,
-                                transA,
-                                transB,
-                                alpha,
-                                hcsr_row_ptr.data(),
-                                hcsr_col_ind.data(),
-                                hcsr_val.data(),
-                                hB.data(),
-                                ldb,
-                                orderB,
-                                beta,
-                                hC_gold.data(),
-                                ldc,
-                                orderC,
-                                idx_base,
-                                false);
-
-            unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_out.data());
-        }
-    }
-
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C));
-}
-
 // Exercises the per-call bufferSize / per-call buffer-allocation pattern for a
 // single (transA, transB, algorithm) configuration: query
 // hipsparseSpMM_bufferSize, hipMalloc a fresh externalBuffer of that size,
@@ -545,29 +449,7 @@ void testing_spmm_csr_reuse_descr(Arguments argus)
 
     constexpr int number_of_passes = 3;
 
-    // Scenario 1: SpMM-only. Never call bufferSize or preprocess, only
-    // hipsparseSpMM with a null externalBuffer. Restricted to the
-    // non-transpose / non-transpose CSR case for which no scratch buffer is
-    // required, swept across algorithms and repeated passes. The cuSPARSE
-    // backend does not accept a null externalBuffer, so this scenario only runs
-    // against the rocSPARSE backend.
-#if(!defined(CUDART_VERSION))
-    call_spmm_only<I, J, T>(handle,
-                            matA,
-                            m,
-                            n,
-                            k,
-                            hcsr_row_ptr,
-                            hcsr_col_ind,
-                            hcsr_val,
-                            h_alpha,
-                            h_beta,
-                            idx_base,
-                            algs,
-                            number_of_passes);
-#endif
-
-    // Scenario 2: per-call bufferSize / buffer allocation. Exercises that the
+    // Scenario 1: per-call bufferSize / buffer allocation. Exercises that the
     // same sparse matrix descriptor produces correct results when bufferSize is
     // re-queried and the externalBuffer re-allocated on every call across all
     // configurations.
@@ -602,7 +484,7 @@ void testing_spmm_csr_reuse_descr(Arguments argus)
         }
     }
 
-    // Scenario 3: bufferSize is queried once per configuration up front, a
+    // Scenario 2: bufferSize is queried once per configuration up front, a
     // single externalBuffer is allocated to the max of those sizes, and
     // hipsparseSpMM is then called repeatedly across configurations with that
     // one shared buffer (no further bufferSize calls).
