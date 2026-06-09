@@ -920,7 +920,7 @@ struct PassThrough
         {
             y = ck_tile::type_convert<raw_t<Y>>(x);
         }
-        /*  otherwise (r-value or const)     → do nothing  */
+        /*  otherwise (r-value or const)     -> do nothing  */
     }
 
     template <typename Y, typename X>

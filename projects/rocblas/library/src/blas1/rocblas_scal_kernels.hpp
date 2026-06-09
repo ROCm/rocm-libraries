@@ -37,10 +37,8 @@ rocblas_scal_kernel(rocblas_int    n,
     uint32_t tid   = blockIdx.x * DIM_X + threadIdx.x;
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto* x     = load_ptr_batch(xa, batch, offset_x, stride_x);
         auto  alpha = load_scalar(alpha_device_host, batch, stride_alpha);
@@ -51,10 +49,7 @@ rocblas_scal_kernel(rocblas_int    n,
             Tex res                = (Tex)x[tid * int64_t(incx)] * alpha;
             x[tid * int64_t(incx)] = (T)res;
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //!
@@ -74,10 +69,8 @@ rocblas_sscal_2_kernel(rocblas_int    n,
     uint32_t tid   = (blockIdx.x * DIM_X + threadIdx.x) * 2;
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto* x     = load_ptr_batch(xa, batch, offset_x, stride_x);
         auto  alpha = load_scalar(alpha_device_host, batch, stride_alpha);
@@ -101,10 +94,7 @@ rocblas_sscal_2_kernel(rocblas_int    n,
                 x[tid]  = (T)res;
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //!
@@ -126,10 +116,8 @@ rocblas_hscal_mlt_4_kernel(rocblas_int    n,
     uint32_t tid   = (blockIdx.x * DIM_X + threadIdx.x) * 4;
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
 
@@ -173,10 +161,7 @@ rocblas_hscal_mlt_4_kernel(rocblas_int    n,
                 }
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename API_INT, int NB, typename T, typename Tex, typename Ta, typename Tx>

@@ -47,6 +47,7 @@
 #include "instruction/mfma.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
@@ -60,8 +61,8 @@ namespace {
 using namespace rocisa;
 using namespace stinkytofu;
 
-StinkyRegister toStinkyRegister(const Container* container, bool hasVgprMsb);
-StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb);
+StinkyRegister toStinkyRegister(const Container* container, bool hasVgprMsb, GfxArchID arch);
+StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb, GfxArchID arch);
 
 std::string itemToString(const rocisa::Item* item) {
     return item->toString();
@@ -93,6 +94,33 @@ stinkytofu::MUBUFScope convertMUBUFScope(rocisa::CacheScope scope) {
             return stinkytofu::MUBUFScope::SCOPE_SYS;
         default:
             return stinkytofu::MUBUFScope::SCOPE_NONE;
+    }
+}
+
+// rocisa and StinkyTofu use the same ISA TH[2:0] encoding, but keep distinct enum
+// types; map explicitly rather than static_cast so the two stay decoupled. Note
+// TH_WB aliases TH_LU and TH_NT_WB aliases TH_RESERVED (same encoding), so only the
+// canonical labels appear here.
+stinkytofu::TemporalHint convertTemporalHint(rocisa::TemporalHint th) {
+    switch (th) {
+        case rocisa::TemporalHint::TH_RT:
+            return stinkytofu::TemporalHint::TH_RT;
+        case rocisa::TemporalHint::TH_NT:
+            return stinkytofu::TemporalHint::TH_NT;
+        case rocisa::TemporalHint::TH_HT:
+            return stinkytofu::TemporalHint::TH_HT;
+        case rocisa::TemporalHint::TH_LU:
+            return stinkytofu::TemporalHint::TH_LU;
+        case rocisa::TemporalHint::TH_NT_RT:
+            return stinkytofu::TemporalHint::TH_NT_RT;
+        case rocisa::TemporalHint::TH_RT_NT:
+            return stinkytofu::TemporalHint::TH_RT_NT;
+        case rocisa::TemporalHint::TH_NT_HT:
+            return stinkytofu::TemporalHint::TH_NT_HT;
+        case rocisa::TemporalHint::TH_RESERVED:
+            return stinkytofu::TemporalHint::TH_RESERVED;
+        default:
+            return stinkytofu::TemporalHint::TH_NONE;
     }
 }
 
@@ -141,7 +169,8 @@ stinkytofu::MUBUFModifiers buildMUBUFModifiersForBufferOp(
 stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocMod,
                                                const std::map<std::string, int>& asmCaps) {
     bool hasSCOPEModifier = asmCaps.count("HasSCOPEModifier") && asmCaps.at("HasSCOPEModifier");
-    return stinkytofu::SMEMModifiers(rocMod.glc, rocMod.nv, rocMod.offset, hasSCOPEModifier);
+    return stinkytofu::SMEMModifiers(rocMod.glc, rocMod.nv != rocisa::NonVolatile::NV_NONE,
+                                     rocMod.offset, hasSCOPEModifier);
 }
 
 stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst) {
@@ -316,7 +345,7 @@ void addRegistersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
 
     // Add destination registers
     for (const InstructionInput& dst : inst->getDstParams()) {
-        StinkyRegister reg = toStinkyRegister(dst, hasVgprMsb);
+        StinkyRegister reg = toStinkyRegister(dst, hasVgprMsb, archId);
         if (reg.isValid()) {
             stinkyInst->addDestReg(reg);
         }
@@ -340,7 +369,7 @@ void addRegistersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
     }
 
     for (size_t i = 0; i < srcParams.size(); ++i) {
-        StinkyRegister reg = toStinkyRegister(srcParams[i], hasVgprMsb);
+        StinkyRegister reg = toStinkyRegister(srcParams[i], hasVgprMsb, archId);
         if (reg.isValid()) {
             stinkyInst->addSrcReg(reg);
         }
@@ -481,6 +510,23 @@ void handleSMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& inst
     stinkyInst->addModifier<MFMAModifiers>(mod);
 }
 
+/// Helper to handle global_prefetch_b8 (gl2-prefetch) temporal-hint / cache-scope
+/// modifiers. Read directly from rocisa's GLOBALModifiers (via getModifier()).
+void handleGlobalPrefetchModifier(StinkyInstruction* stinkyInst,
+                                  const rocisa::GlobalPrefetchB8* inst) {
+    const std::optional<rocisa::GLOBALModifiers>& gm = inst->getModifier();
+    if (!gm) return;
+
+    stinkytofu::TemporalHint th = convertTemporalHint(gm->th);
+    stinkytofu::MUBUFScope scope = convertMUBUFScope(gm->scope);
+    if (th == stinkytofu::TemporalHint::TH_NONE && scope == stinkytofu::MUBUFScope::SCOPE_NONE &&
+        gm->offset == 0) {
+        return;
+    }
+    stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(
+        stinkytofu::GLOBALModifiers(gm->offset, th, scope));
+}
+
 /// Helper to handle SWaitCnt instruction modifiers
 void handleSWaitCntModifiers(StinkyInstruction* stinkyInst, const rocisa::SWaitCnt* waitCntInst,
                              const std::map<std::string, int>& asmCaps) {
@@ -618,6 +664,24 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             else HANDLE_INST_TYPE(rocisa::SWaitCnt, handleSWaitCntModifiers(stinkyInst, typedInst, asmCaps))
             else HANDLE_INST_TYPE(rocisa::_SWaitDscnt, handleSWaitDscntModifiers(stinkyInst, typedInst, asmCaps))
             else HANDLE_INST_TYPE(rocisa::_SWaitLoadcnt, handleSWaitLoadcntModifiers(stinkyInst, typedInst, asmCaps))
+
+            // global_wb / global_inv: device-scope memory fences with no
+            // register operands. The only encoded modifier is the cache
+            // scope, which we attach as a dedicated CacheScopeModifiers so
+            // MUBUFModifiers can evolve independently without affecting
+            // fence emission.
+            else HANDLE_INST_TYPE(rocisa::GlobalWb,
+                                stinkyInst->addModifier<stinkytofu::CacheScopeModifiers>(
+                                    stinkytofu::CacheScopeModifiers(
+                                        convertMUBUFScope(typedInst->scope))))
+            else HANDLE_INST_TYPE(rocisa::GlobalInv,
+                                stinkyInst->addModifier<stinkytofu::CacheScopeModifiers>(
+                                    stinkytofu::CacheScopeModifiers(
+                                        convertMUBUFScope(typedInst->scope))))
+
+            // global_prefetch_b8 (gl2-prefetch): temporal hint + cache scope.
+            else HANDLE_INST_TYPE(rocisa::GlobalPrefetchB8,
+                                handleGlobalPrefetchModifier(stinkyInst, typedInst))
         }
     // clang-format on
 
@@ -650,7 +714,8 @@ int getMsbOffsetFromStinkyVgpr(const StinkyRegister& reg) {
 /// \param container Pointer to rocisa::Container to convert
 /// \param hasVgprMsb Whether VGPR MSB is supported (affects register offset for VGPRs > 255)
 /// \return StinkyRegister representing the container, or invalid register if conversion fails
-StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgprMsb) {
+StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgprMsb,
+                                GfxArchID arch) {
     if (const rocisa::RegisterContainer* regCont =
             dynamic_cast<const rocisa::RegisterContainer*>(container)) {
         // isOff=true signals the MUBUF "off" keyword (no address register).
@@ -698,9 +763,12 @@ StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgpr
     }
     if (const rocisa::HWRegContainer* hwregContainer =
             dynamic_cast<const rocisa::HWRegContainer*>(container)) {
-        // Handle hardware register containers like hwreg(26,4,1)
-        // These should be emitted as literal strings in the assembly
-        return StinkyRegister(hwregContainer->toString());
+        uint16_t id = HwReg::parseId(arch, hwregContainer->reg).value_or(0);
+        uint16_t offset =
+            hwregContainer->value.size() > 0 ? static_cast<uint16_t>(hwregContainer->value[0]) : 0;
+        uint16_t size =
+            hwregContainer->value.size() > 1 ? static_cast<uint16_t>(hwregContainer->value[1]) : 32;
+        return StinkyRegister::Hwreg(id, offset, size);
     }
     return StinkyRegister{};
 }
@@ -716,9 +784,9 @@ StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgpr
 /// \param input The InstructionInput variant to convert
 /// \param hasVgprMsb Whether VGPR MSB is supported
 /// \return StinkyRegister representing the input value
-StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb) {
+StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb, GfxArchID arch) {
     if (auto pptr = std::get_if<std::shared_ptr<rocisa::Container>>(&input)) {
-        return toStinkyRegister(pptr->get(), hasVgprMsb);
+        return toStinkyRegister(pptr->get(), hasVgprMsb, arch);
     } else if (const int* literalInt = std::get_if<int>(&input)) {
         return StinkyRegister(*literalInt);
     } else if (const double* literalDouble = std::get_if<double>(&input)) {
@@ -828,18 +896,9 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     // Get GfxArchID from architecture array
     GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
-    // Populate assembler-capability-derived module options from rocisa asmCaps.
-    // This is done here (in the rocisa conversion layer, which is the only
-    // stinkytofu TU allowed to depend on rocisa headers) so that the
-    // stinkytofu library itself stays decoupled from rocisa.
-    StinkyAsmModule::ModuleOptions finalModuleOptions = moduleOptions;
-    {
-        auto probedCaps = rocisa::rocIsa::getInstance().getAsmCaps();
-        finalModuleOptions.HasVgprMSB16 =
-            probedCaps.count("HasVgprMSB16") && probedCaps.at("HasVgprMSB16");
-    }
-
-    StinkyAsmModule stinkyAsmModule(moduleName, arch, finalModuleOptions);
+    // VgprMsbMode is auto-probed by Backend::configurePassManager() when it
+    // sees VgprMsbMode::None, so no need to read it from rocisa caps here.
+    StinkyAsmModule stinkyAsmModule(moduleName, arch, moduleOptions);
 
     // Add instruction groups registered by the target backend.
     if (auto* pipeline = BackendRegistry::getArchPipeline(arch)) {
@@ -1209,6 +1268,11 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 
             // Convert signature to StinkyTofu format, using the wavefrontSize passed from Python
             auto stinkySig = toStinkySignature(signature, archArray, moduleOptions.wavefrontSize);
+
+            // Expose per-wave VGPR allocation on the Function.
+            stinkyModule->getFunction().setMetaData(
+                kSigTotalVgprsMetaKey,
+                static_cast<uint64_t>(stinkySig->kernelDescriptor.totalVgprs));
 
             // Set optimization config
             std::array<int, 2> tt = {moduleOptions.TileA0, moduleOptions.TileB0};

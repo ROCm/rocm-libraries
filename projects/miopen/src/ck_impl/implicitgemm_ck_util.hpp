@@ -1,32 +1,10 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <ck/utility/data_type.hpp>
@@ -470,6 +448,9 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
             return (ptr_iter != conv_ptrs.end()) && CKArgsType{problem}.IsSupportedBy(*ptr_iter);
         }
     }
+#else
+    (void)problem;
+    (void)kernel_id;
 #endif
     return false;
 }
@@ -664,9 +645,12 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
 #endif
 
     result.invoker_factory =
-        [ck_args_     = CKArgsType{problem},
+        [kernel_id_   = kernel_id,
+         ck_args_     = CKArgsType{problem},
          sh_conv_ptr_ = std::shared_ptr{std::move(*ptr_iter)}](const std::vector<Kernel>&) mutable {
-            return [ck_args2 = std::move(ck_args_), sh_conv_ptr2 = std::move(sh_conv_ptr_)](
+            return [kernel_id2   = std::move(kernel_id_),
+                    ck_args2     = std::move(ck_args_),
+                    sh_conv_ptr2 = std::move(sh_conv_ptr_)](
                        const Handle& handle, const AnyInvokeParams& primitive_parameters) {
                 const auto& data_ctx = primitive_parameters.CastTo<CastType>();
                 auto argument_ptr    = ck_args2.MakeArgPtr(sh_conv_ptr2, data_ctx);
@@ -678,6 +662,7 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
                 if(handle.IsProfilingEnabled())
                 {
                     float elapsed_time = handle.GetKernelTime();
+                    AddKernelToJsonAccumulator(kernel_id2, elapsed_time, false);
                     handle.ResetKernelTime();
                     handle.AccumKernelTime(elapsed_time);
                 }
@@ -701,6 +686,7 @@ OutElemOp GetOutElementOp(const miopen::fusion::ActivationOpInvokeParam& activat
                      "Unsupported activation type: " + std::to_string(activationMode));
     }
 #else
+    (void)activationOp;
     MIOPEN_THROW(miopenStatusNotImplemented, "Not implemented without ck enabled");
 #endif
 }
@@ -951,7 +937,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         internal::MakeTaggedTransposeInstances<CKArgsType>(
             result, ctx, problem, ck_args, input1_op, input2_op, output_op, _ck_buff_des);
 
-    result.invoker_factory = [kernel_id_           = &kernel_id,
+    result.invoker_factory = [kernel_id_           = kernel_id,
                               split_k_             = split_k,
                               ck_args_             = std::move(ck_args),
                               sh_conv_ptr_         = std::shared_ptr{std::move(*ptr_iter)},
@@ -961,7 +947,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                               output_init_tr_inst_ = std::move(_output_init_tr_inst),
                               ck_buff_des_ =
                                   _ck_buff_des](const std::vector<Kernel>& kernels) mutable {
-        return [kernel_id2 = kernel_id_,
+        return [kernel_id2 = std::move(kernel_id_),
                 split_k2   = split_k_,
                 kernels,
                 ck_args2             = std::move(ck_args_),
@@ -1045,6 +1031,12 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             if(handle.IsProfilingEnabled())
             {
                 elapsed += handle.GetKernelTime();
+
+                // Kernel logging for CK kernels
+                if(IsLoggingKernel())
+                {
+                    AddKernelToJsonAccumulator(kernel_id2, elapsed, false);
+                }
                 handle.ResetKernelTime();
                 handle.AccumKernelTime(elapsed);
             }
@@ -1053,6 +1045,12 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             output_tr_inst2.ConvertTo(handle, kernels, conv_tensors);
         };
     };
+#else
+    (void)ctx;
+    (void)kernel_id;
+    (void)input1_op;
+    (void)input2_op;
+    (void)output_op;
 #endif
     return result;
 }
@@ -1063,7 +1061,7 @@ template <bool ZeroOutputs,
           typename CastType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
-                                    const ProblemDescriptionType& problem,
+                                    [[maybe_unused]] const ProblemDescriptionType& problem,
                                     const std::string& kernel_id)
 {
     ConvSolution result;
@@ -1156,6 +1154,12 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 if(handle.IsProfilingEnabled())
                 {
                     elapsed += handle.GetKernelTime();
+
+                    // Kernel logging for CK kernels
+                    if(IsLoggingKernel())
+                    {
+                        AddKernelToJsonAccumulator(kernel_id2, elapsed, false);
+                    }
                     handle.ResetKernelTime();
                     handle.AccumKernelTime(elapsed);
                 }
@@ -1211,6 +1215,13 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                 if(handle.IsProfilingEnabled())
                 {
                     elapsed += handle.GetKernelTime();
+
+                    // Kernel logging for CK kernels
+                    if(IsLoggingKernel())
+                    {
+                        AddKernelToJsonAccumulator(kernel_id2, elapsed, false);
+                    }
+
                     handle.ResetKernelTime();
                     handle.AccumKernelTime(elapsed);
                 }
@@ -1330,6 +1341,10 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
             "3DGroupConvolutionImplicitGemmXdlops operation not implemented for this data type");
     }
 #else
+    (void)problem;
+    (void)invoker_factory_maker_ncdhw;
+    (void)invoker_factory_maker_ndhwc;
+    (void)use_tf32;
     return {};
 #endif
 }

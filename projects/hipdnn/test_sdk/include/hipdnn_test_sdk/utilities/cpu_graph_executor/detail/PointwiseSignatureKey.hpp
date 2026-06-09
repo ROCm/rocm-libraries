@@ -175,6 +175,14 @@ struct PointwiseSignatureKey
                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
         addBinaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,

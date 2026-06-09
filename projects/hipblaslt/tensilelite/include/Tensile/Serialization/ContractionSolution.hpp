@@ -133,6 +133,7 @@ namespace TensileLite
                 iot::mapRequired(io, "synchronizerSizePerWG", s.synchronizerSizePerWG);
                 iot::mapRequired(io, "nonTemporalA", s.nonTemporalA);
                 iot::mapRequired(io, "nonTemporalB", s.nonTemporalB);
+                iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
                 iot::mapRequired(io, "NonTemporalD", s.NonTemporalD);
                 iot::mapRequired(io, "WaveSeparateGlobalReadA", s.WaveSeparateGlobalReadA);
@@ -148,6 +149,8 @@ namespace TensileLite
                 iot::mapRequired(io, "LocalSplitU", s.LocalSplitU);
                 iot::mapRequired(io, "DirectToLdsA", s.DirectToLdsA);
                 iot::mapRequired(io, "DirectToLdsB", s.DirectToLdsB);
+                iot::mapOptional(io, "ExpertSchedulingMode", s.expertSchedulingMode);
+                iot::mapOptional(io, "clusterDim", s.clusterDim);
             }
 
             const static bool flow = false;
