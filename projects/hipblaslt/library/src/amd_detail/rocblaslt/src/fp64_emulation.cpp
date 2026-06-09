@@ -54,7 +54,13 @@
 /* =========================================================================
  * Tuning constants
  * ========================================================================= */
-static constexpr double FP64_EMUL_AI_THRESHOLD = 32.0;
+/* FP64_EMUL_AI_THRESHOLD — legacy arithmetic-intensity-only threshold for
+ * architectures not yet calibrated in the Roofline performance model.
+ * Kept as reference: the new fp64EmulationPerformanceCheck uses a component-
+ * wise Roofline estimate instead of this single constant.
+ * For a square N×N×N GEMM: AI = N/12; threshold=32 → min N ≈ 384.
+ *   static constexpr double FP64_EMUL_AI_THRESHOLD = 32.0;
+ */
 
 /* Maximum number of moduli supported (s = 2..OZ2_S_MAX).
  * Constant memory and table arrays are sized for the maximum. */
@@ -532,7 +538,7 @@ static hipError_t oz2_init_constants(unsigned num_moduli)
 }
 
 /* =========================================================================
- * fp64EmulationIsEnabled / fp64EmulationAICheck / eager / mask / numModuli
+ * fp64EmulationIsEnabled / fp64EmulationPerformanceCheck / eager / mask / numModuli
  * ========================================================================= */
 bool fp64EmulationIsEnabled()
 {
@@ -543,15 +549,79 @@ bool fp64EmulationIsEnabled()
     return enabled;
 }
 
-bool fp64EmulationAICheck(int64_t m, int64_t n, int64_t k)
+bool fp64EmulationPerformanceCheck(int64_t m, int64_t n, int64_t k, unsigned num_moduli)
 {
-    const double flops = 2.0 * static_cast<double>(m)
-                             * static_cast<double>(n)
-                             * static_cast<double>(k);
-    const double bytes = 8.0 * (  static_cast<double>(m) * static_cast<double>(k)
-                                 + static_cast<double>(k) * static_cast<double>(n)
-                                 + static_cast<double>(m) * static_cast<double>(n));
-    return (flops / bytes) >= FP64_EMUL_AI_THRESHOLD;
+    /* Roofline model: estimate whether the emulation will be faster than a
+     * native FP64 DGEMM on the target hardware.  Calibrated for MI350.
+     *
+     * Hardware parameters — update for other architectures:
+     *   HBM_BW    : peak HBM bandwidth (bytes/s)
+     *   INT8_PEAK : peak INT8 GEMM throughput (INT8 ops/s), measured from data
+     *   FP64_EFF  : effective native DGEMM throughput (FP64 ops/s), measured
+     *   LATENCY_KERNEL : GPU kernel launch latency (s)
+     *   LATENCY_MATMUL : hipblasLtMatmul launch latency (s)
+     */
+    static constexpr double HBM_BW         = 6.4e12;   /* 6.4 TB/s               */
+    static constexpr double INT8_PEAK       = 3.05e15;  /* 3050 TOPS (measured)   */
+    static constexpr double FP64_EFF        = 7.0e13;   /* 70 TFLOPS (effective)  */
+    static constexpr double LATENCY_KERNEL  = 5.0e-6;   /* 5 µs per kernel launch */
+    static constexpr double LATENCY_MATMUL  = 10.0e-6;  /* 10 µs per hipblasLtMatmul */
+    static constexpr double LATENCY_MEMSET  = 2.0e-6;   /* 2 µs for hipMemsetAsync */
+    static constexpr double CHUNK_BYTES_D   = static_cast<double>(OZ2_CHUNK_TARGET_BYTES);
+
+    const double s   = static_cast<double>(num_moduli);
+    const double mn  = static_cast<double>(m) * static_cast<double>(n);
+    const double mk  = static_cast<double>(m) * static_cast<double>(k);
+    const double kn  = static_cast<double>(k) * static_cast<double>(n);
+    const double mnk = mn * static_cast<double>(k);
+
+    /* Number of GEMM chunks (matches oz2_compute_chunk_size logic) */
+    const double chunk_sz = std::max(1.0, std::min(s, CHUNK_BYTES_D / (mn * 4.0)));
+    const double n_chunks = std::ceil(s / chunk_sz);
+
+    /* --- Emulation cost: Roofline lower bounds at peak bandwidth/compute --- */
+
+    /* Preliminary INT8 GEMM (one extra GEMM for shift refinement)            */
+    const double t_prelim_gemm = 2.0 * mnk / INT8_PEAK;
+
+    /* Preliminary extraction: 2 passes reading A+B (FP64, 8B) + writing INT8 */
+    const double t_prelim_kern = (mk + kn) * 17.0 / HBM_BW;
+
+    /* Shift refinement: read C32i for sftA and sftB (4B each)                */
+    const double t_refine_kern = mn * 8.0 / HBM_BW;
+
+    /* Scaling: read A+B (8B each), write s INT8 slices per matrix (1B each)  */
+    const double t_scale_kern  = (mk + kn) * (8.0 + s) / HBM_BW;
+
+    /* Main INT8 GEMMs: s moduli                                               */
+    const double t_int8_gemms  = s * 2.0 * mnk / INT8_PEAK;
+
+    /* CRT accumulation + finalize: read s C32i slices (4B/element) +
+     * Zhi/Zlo intermediate round-trip + read C + write D (8B each)           */
+    const double t_accum_kern  = mn * (4.0 * s + 48.0) / HBM_BW;
+
+    /* Kernel launch overhead: 5 fixed custom kernels + n_chunks accum kernels
+     * + 1 preliminary matmul + n_chunks main INT8 matmul batches + 1 memset  */
+    const double t_launch = (5.0 + n_chunks) * LATENCY_KERNEL
+                          + (1.0 + n_chunks) * LATENCY_MATMUL
+                          + LATENCY_MEMSET;
+
+    const double t_emul = t_prelim_gemm + t_prelim_kern + t_refine_kern
+                        + t_scale_kern  + t_int8_gemms  + t_accum_kern
+                        + t_launch;
+
+    /* --- Native DGEMM cost: Roofline + one matmul launch (same API overhead) --- */
+    const double t_native = std::max(2.0 * mnk / FP64_EFF,
+                                     8.0 * (mk + kn + mn) / HBM_BW)
+                          + LATENCY_MATMUL;
+
+    return t_emul <= t_native;
+
+    /* Arithmetic-intensity-only check:
+     *   const double flops = 2.0 * mnk;
+     *   const double bytes = 8.0 * (mk + kn + mn);
+     *   return (flops / bytes) >= 32.0;
+     */
 }
 
 bool fp64EmulationIsEager()
@@ -609,7 +679,8 @@ bool fp64EmulationWouldApply(const _rocblaslt_handle* h,
 
     const bool eager = (h->emulation.strategy == 2)
                      || (h->emulation.strategy != 1 && fp64EmulationIsEager());
-    return eager || fp64EmulationAICheck(m, n, k);
+    const unsigned s = fp64EmulationEffectiveNumModuli(h);
+    return eager || fp64EmulationPerformanceCheck(m, n, k, s);
 }
 
 unsigned fp64EmulationEffectiveNumModuli(const _rocblaslt_handle* h)

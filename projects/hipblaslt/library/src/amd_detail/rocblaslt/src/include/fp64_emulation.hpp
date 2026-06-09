@@ -13,10 +13,11 @@
  * Environment variable:
  *   HIPBLASLT_EMULATE_DOUBLE_PRECISION=1   enables emulation
  *
- * Tuning constant (in fp64_emulation.cpp):
- *   FP64_EMUL_AI_THRESHOLD   minimum arithmetic intensity (flops/byte) required
- *                            before emulation is used (default: 32.0, roughly
- *                            min(M,N,K) >= 512 for square problems).
+ * Performance model (in fp64_emulation.cpp — fp64EmulationPerformanceCheck):
+ *   A Roofline-based estimate comparing t_emulation vs t_native_DGEMM.
+ *   Calibrated for MI350 (HBM_BW=6.4 TB/s, INT8_PEAK=3050 TOPS,
+ *   FP64_EFF=70 TFLOPS effective).  Update the hardware constants for
+ *   other architectures.
  */
 
 #include "rocblaslt.h"
@@ -26,9 +27,10 @@
  * The environment variable is read once and cached. */
 bool fp64EmulationIsEnabled();
 
-/* Returns true when the problem's arithmetic intensity exceeds the threshold
- * that makes Ozaki-II emulation likely faster than native FP64. */
-bool fp64EmulationAICheck(int64_t m, int64_t n, int64_t k);
+/* Returns true when the emulation is estimated to be at least as fast as
+ * native FP64 DGEMM for the given problem size and number of moduli.
+ * Uses a Roofline performance model calibrated for the target hardware. */
+bool fp64EmulationPerformanceCheck(int64_t m, int64_t n, int64_t k, unsigned num_moduli);
 
 /* Returns true when HIPBLASLT_EMULATION_STRATEGY=eager is set.
  * In eager mode emulation is used regardless of arithmetic intensity. */
