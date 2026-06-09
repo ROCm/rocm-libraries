@@ -1318,20 +1318,25 @@ def mainLoop(writer, kernel):
   # gfx1250: enable expert scheduling mode and disable WMMA arb stall
   # before entering the mainloop / any wmma issue.
   if writer.states.archCaps.get("HasWmmaArbStallBit", False):
+    module.add(SNop(waitState=0, comment="nop before SSetReg"))
     module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0, 2]),
-                               src=1,
+                               src=2,
                                comment="enable expert scheduling mode"))
+    module.add(SNop(waitState=0, comment="nop after SSetReg"))
     module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[4, 1]),
                                src=1,
                                comment="Disable WMMA arb stall"))
+    module.add(SNop(waitState=0, comment="nop after SSetReg"))
 
   module.add(scheduler.emitMainAndExitLoops(writer, kernel, tensorParametersA, tensorParametersB))
 
   # gfx1250: disable expert scheduling mode after NLL.
   if writer.states.archCaps.get("HasWmmaArbStallBit", False):
+    module.add(SNop(waitState=0, comment="nop before SSetReg"))
     module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0, 2]),
                                src=0,
                                comment="disable expert scheduling mode"))
+    module.add(SNop(waitState=0, comment="nop after SSetReg"))
 
   # Wrap the tail loop with the runtime K%DU counter setup and skip branch,
   # mirroring the legacy KernelWriter pattern (KernelWriter.py:5237 / 5618).
