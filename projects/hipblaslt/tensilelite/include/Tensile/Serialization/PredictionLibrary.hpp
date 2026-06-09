@@ -128,10 +128,6 @@ namespace TensileLite
                                 .cache_hints_d             = solution->sizeMapping.NonTemporalD,
                                 .direct_to_lds_a           = solution->sizeMapping.DirectToLdsA,
                                 .direct_to_lds_b           = solution->sizeMapping.DirectToLdsB,
-                                .grvw_a                    = solution->sizeMapping.grvwA,
-                                .grvw_b                    = solution->sizeMapping.grvwB,
-                                .lds_bytes                 = solution->sizeMapping.LdsNumBytes,
-                                .lds_tr_inst               = solution->sizeMapping.LDSTrInst,
                                 .local_split_u             = solution->sizeMapping.LocalSplitU,
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
@@ -139,20 +135,13 @@ namespace TensileLite
                                 .prefetch_global_read      = solution->sizeMapping.PrefetchGlobalRead,
                                 .wave                      = {static_cast<std::size_t>(solution->sizeMapping.waveGroup[0]),
                                                               static_cast<std::size_t>(solution->sizeMapping.waveGroup[1])},
-                                .workgroup                 = {solution->sizeMapping.workGroupSize.x,
-                                                              solution->sizeMapping.workGroupSize.y,
-                                                              solution->sizeMapping.workGroupSize.z},
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                                 .index                     = local_index,
-                                .gwvw_d                    = solution->sizeMapping.gwvwD,
                                 .vector_width_a            = solution->sizeMapping.VectorWidthA,
                                 .vector_width_b            = solution->sizeMapping.VectorWidthB,
                             };
-                            origami_config.tensile().wave_group_m = solution->sizeMapping.waveGroup[0];
-                            origami_config.tensile().wave_group_n = solution->sizeMapping.waveGroup[1];
-
                             lib.origami_config_list.emplace_back(origami_config);
                         }
                     }

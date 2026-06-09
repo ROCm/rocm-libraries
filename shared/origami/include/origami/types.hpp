@@ -417,10 +417,6 @@ struct tensile_params_t {
   /// Number of waves per workgroup
   std::size_t wave_num = 4;
 
-  /// Wave group dimensions [wave_group_m, wave_group_n]
-  int wave_group_m = 2;
-  int wave_group_n = 2;
-
   /// Prefetch global read depth
   int prefetch_global_read = 2;
 
@@ -444,7 +440,6 @@ struct tensile_params_t {
            direct_to_lds_a == o.direct_to_lds_a && direct_to_lds_b == o.direct_to_lds_b &&
            num_loads_coalesced_a == o.num_loads_coalesced_a &&
            num_loads_coalesced_b == o.num_loads_coalesced_b && wave_num == o.wave_num &&
-           wave_group_m == o.wave_group_m && wave_group_n == o.wave_group_n &&
            prefetch_global_read == o.prefetch_global_read &&
            math_clocks_unrolled_loop == o.math_clocks_unrolled_loop && swizzle_a == o.swizzle_a &&
            swizzle_b == o.swizzle_b && workgroup_mapping_xcc == o.workgroup_mapping_xcc &&
@@ -465,8 +460,6 @@ struct tensile_params_t {
                               num_loads_coalesced_a,
                               num_loads_coalesced_b,
                               wave_num,
-                              wave_group_m,
-                              wave_group_n,
                               prefetch_global_read,
                               math_clocks_unrolled_loop,
                               swizzle_a,
@@ -511,20 +504,6 @@ struct config_t {
   bool direct_to_lds_a = false;
   bool direct_to_lds_b = false;
 
-  /// Global read vector width (Bytes per load) for matrix A
-  std::size_t grvw_a = 8;
-
-  /// Global read vector width (Bytes per load) for matrix B
-  std::size_t grvw_b = 8;
-
-  /// LDS footprint of this kernel in bytes (from TensileLite LdsNumBytes).
-  /// Used to compute per-CU occupancy: floor(hardware.lds_capacity / lds_bytes).
-  std::size_t lds_bytes = 0;
-
-  /// LDS Transpose Instruction: uses hardware ds_load_b64_tr_b16 to transpose
-  /// 16-bit data during LDS read, eliminating explicit VALU pack/shuffle.
-  bool lds_tr_inst = false;
-
   /// LocalSplitU factor (intra-workgroup K-split across threads).
   int local_split_u = 0;
 
@@ -542,9 +521,6 @@ struct config_t {
   /// per workgroup along the M/N directions of the output tile.
   dim2_t wave{2, 2};
 
-  /// Tensile workgroup shape.
-  dim3_t workgroup{0, 0, 0};
-
   /// Reorder workgroup id for L2 reuse.
   int workgroup_mapping = 0;
 
@@ -554,9 +530,6 @@ struct config_t {
 
   /// Index of config, not used by Origami but can be used by the user
   std::size_t index = 0;
-
-  /// Global write vector width for matrix D (elements per store)
-  std::size_t gwvw_d = 1;
 
   /// LDS load vector width for matrix A (elements per LDS read)
   int vector_width_a = 1;
@@ -600,13 +573,12 @@ struct config_t {
            cache_hints_d == o.cache_hints_d &&
            prefetch_global_read == o.prefetch_global_read &&
            direct_to_lds_a == o.direct_to_lds_a && direct_to_lds_b == o.direct_to_lds_b &&
-           local_split_u == o.local_split_u && lds_bytes == o.lds_bytes &&
-           one_lds_buffer == o.one_lds_buffer &&
-          lds_tr_inst == o.lds_tr_inst && wave == o.wave && workgroup == o.workgroup &&
+           local_split_u == o.local_split_u &&
+           one_lds_buffer == o.one_lds_buffer && wave == o.wave &&
           workgroup_mapping == o.workgroup_mapping &&
           reduction_strategy == o.reduction_strategy &&
-           prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
-           grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
+           prediction_mode == o.prediction_mode && target == o.target &&
+           vector_width_a == o.vector_width_a &&
            vector_width_b == o.vector_width_b && backend == o.backend;
   }
 
@@ -625,21 +597,13 @@ struct config_t {
                                           direct_to_lds_a,
                                           direct_to_lds_b,
                                           local_split_u,
-                                          lds_bytes,
                                           one_lds_buffer,
-                                          lds_tr_inst,
                                           wave.m,
                                           wave.n,
-                                          workgroup.m,
-                                          workgroup.n,
-                                          workgroup.k,
                                           workgroup_mapping,
                                           static_cast<std::uint32_t>(reduction_strategy),
                                           static_cast<std::uint32_t>(prediction_mode),
                                           static_cast<std::uint32_t>(target),
-                                          grvw_a,
-                                          grvw_b,
-                                          gwvw_d,
                                           vector_width_a,
                                           vector_width_b);
     // Hash backend-specific parameters if present. The visitor pattern allows

@@ -115,10 +115,6 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("CacheHintsD: " << int(config.cache_hints_d));
     OLOG_DEBUG("DirectToLdsA: " << int(config.direct_to_lds_a));
     OLOG_DEBUG("DirectToLdsB: " << int(config.direct_to_lds_b));
-    OLOG_DEBUG("GRVWA: " << int(config.grvw_a));
-    OLOG_DEBUG("GRVWB: " << int(config.grvw_b));
-    OLOG_DEBUG("LDSTrInst: " << int(config.lds_tr_inst));
-    OLOG_DEBUG("LdsBytes: " << int(config.lds_bytes));
     OLOG_DEBUG("CUOccupancy(cfg): " << int(config.occupancy));
     OLOG_DEBUG("LocalSplitU: " << int(config.local_split_u));
     OLOG_DEBUG("OneLDSBuffer: " << int(config.one_lds_buffer));
@@ -1698,9 +1694,7 @@ double compute_epilogue_latency(const problem_t& problem,
   const double reads_per_wave = acc_elems_per_thread * mi_reg_per_out;
   const size_t elements_per_vectorized_store = std::max(
       static_cast<size_t>(1),
-      (config.gwvw_d > 0)
-          ? config.gwvw_d
-          : static_cast<size_t>(std::ceil(heuristic.epilogue_bytes_per_vectorized_store / d_bytes)));
+      static_cast<size_t>(std::ceil(heuristic.epilogue_bytes_per_vectorized_store / d_bytes)));
   const size_t elements_per_cache_line =
       static_cast<size_t>(std::ceil(heuristic.epilogue_cache_line_bytes / d_bytes));
   const double alignment_penalty = (M % elements_per_cache_line != 0) ? 1.1 : 1.0;
@@ -2302,20 +2296,15 @@ double compute_tile_latency(const problem_t& problem,
   // latency-hiding (rocprof: CUOcc 2 = saturated/fast, CUOcc 1 = ~2x exposed).
   // Self-gating: only multiplies the epilogue term, so it is negligible for
   // mainloop-bound (deep-K) tiles and only bites store-bound shapes.
-  // Gate on partial-M tiles.  A kernel that exactly tiles M is fully utilized,
-  // and a big low-occupancy tile then amortizes the store by running fewer
-  // timesteps, so low occupancy is *not* a penalty there (rocprof: exact-M
-  // 256x192 wins on 256x98304x128 despite CUOcc=1).  The store-latency exposure
-  // only bites when a partial M-tile already wastes lanes/registers, which
-  // compounds with the low occupancy.  (Validated: the uniform penalty's new
-  // regressions were 8/10 exact-M, its new improvements 8/9 partial-M.)
+  // Applied uniformly to every tile.  An earlier version gated this on
+  // partial-M tiles (small-sample rationale: exact-M tiles amortize the store
+  // over fewer timesteps), but a full-sweep A/B showed the gate regressed
+  // aggregate latency (+0.42%, 636 tile-pick flips that pushed NN large-N
+  // shapes off the HW-winner MT128x320x32) while adding nothing to the case it
+  // targeted -- the uniform penalty already fixes 257x286720 by ~40%.
   constexpr double EPILOGUE_OCC_SATURATION = 2.0;
-  const bool has_m_edge_epi =
-      (config.mt.m > 0) && (problem.size.m % config.mt.m != 0);
   const double cu_occ_epi = static_cast<double>(std::max(config.occupancy, 1));
-  const double epi_occ_exposure = has_m_edge_epi
-      ? std::max(1.0, EPILOGUE_OCC_SATURATION / cu_occ_epi)
-      : 1.0;
+  const double epi_occ_exposure = std::max(1.0, EPILOGUE_OCC_SATURATION / cu_occ_epi);
   const double L_epilogue_hbm =
       compute_epilogue_latency(problem, hardware, config, context)
       * occupancy_factor * epi_occ_exposure;
@@ -2815,11 +2804,6 @@ static double compute_formocast_latency(const problem_t& problem,
   size_mapping.globalAccumulation = config.tensile().global_accumulation;
   size_mapping.LocalSplitU        = config.tensile().local_split_u;
 
-  size_mapping.grvwA = config.grvw_a;
-  size_mapping.grvwB = config.grvw_b;
-  size_mapping.gwvwD = config.gwvw_d;
-  size_mapping.gwvwC = config.gwvw_d;  // Typically same as D
-
   size_mapping.DirectToVgprA = config.tensile().direct_to_vgpr_a;
   size_mapping.DirectToVgprB = config.tensile().direct_to_vgpr_b;
   size_mapping.DirectToLdsA  = config.tensile().direct_to_lds_a;
@@ -2831,8 +2815,8 @@ static double compute_formocast_latency(const problem_t& problem,
   size_mapping.VectorWidthB       = config.vector_width_b;
 
   size_mapping.waveNum      = config.tensile().wave_num;
-  size_mapping.waveGroup[0] = config.tensile().wave_group_m;
-  size_mapping.waveGroup[1] = config.tensile().wave_group_n;
+  size_mapping.waveGroup[0] = static_cast<int>(config.wave.m);
+  size_mapping.waveGroup[1] = static_cast<int>(config.wave.n);
 
   size_mapping.workGroupMapping         = config.workgroup_mapping;
   size_mapping.workGroupMappingXCC      = config.tensile().workgroup_mapping_xcc;

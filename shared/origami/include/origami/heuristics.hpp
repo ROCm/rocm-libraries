@@ -79,7 +79,6 @@ struct heuristic_defaults_t {
   static constexpr double EPILOGUE_SALU_OVERHEAD            = 35.0;
   static constexpr double EPILOGUE_L_BARRIER                = 100.0;
   static constexpr double EPILOGUE_L_SMEM = 1900.0;  // s_load_dword(glc) cross-XCD flag poll
-  static constexpr double EPILOGUE_K_PADDING_PENALTY     = 50000.0;
   static constexpr size_t POSTGSU_COMPUTE_BYTES          = 4;  // workspace partials stored as f32
   static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 8000.0;
   static constexpr size_t POSTGSU_THREADS_PER_WG         = 256;
@@ -94,21 +93,6 @@ struct heuristic_defaults_t {
   //   compute stream = L_compute * num_iter
   //   duration = max(memory, compute)   (additive for PGR=1)
 
-  // --- LSU (LocalSplitU) ---
-  // Intra-WG LDS reduction overhead after the K-loop; scales as lsu * log2(lsu).
-  static constexpr double LSU_REDUCTION_OVERHEAD = 1.0;   // cycles per element-group per log2(lsu) pass
-
-  // --- 1LDSBuffer ---
-  // Per-iteration overhead (cycles) when using a single LDS buffer instead
-  // of double-buffering.  Represents the read-sync-write barrier stall.
-  static constexpr double ONE_LDS_BUFFER_OVERHEAD = 80.0;
-
-  // --- LDSTrInst ---
-  // Per-iteration VALU pack/transpose overhead (cycles) when NOT using
-  // hardware LDS transpose loads (16-bit types only).  Without LDSTrInst,
-  // each iteration needs explicit VPermB32/VSwapB32 after ds_load.
-  static constexpr double PACK_TRANSPOSE_OVERHEAD = 15.0;
-
   // --- Tail Loop ---
   // Fixed overhead per tail-loop sub-iteration (cycles).
   // Covers K-masking, LDS address reset, barrier, ds_read/write, conditional branching.
@@ -119,27 +103,6 @@ struct heuristic_defaults_t {
   // Covers WG dispatch, pipeline setup, address generation, and barriers.
   // Compresses the cost ratio between large and small tiles.
   static constexpr double TILE_FIXED_OVERHEAD = 1500.0;
-
-  // --- DepthU Waste (tail-only kernels) ---
-  // When k_iters==0 the full MT_K LDS allocation and register footprint are
-  // paid but only tail_k < MT_K is actually used.  Larger MT_K means more
-  // wasted LDS, higher register pressure, and heavier setup for zero benefit.
-  // Penalty = DU_WASTE_OVERHEAD * (MT_K / tail_k).
-  static constexpr double DU_WASTE_OVERHEAD = 500.0;
-
-  // --- MFMA Pipeline Hazard (DepthU too shallow for back-to-back MI reuse) ---
-  // When MT_K <= MI_K each main-loop iteration contains exactly one (or fewer)
-  // MI K-fold, so there is no opportunity to issue back-to-back MFMAs within
-  // the iteration.  Every iteration restarts the MFMA pipeline, paying a
-  // fixed bubble at iteration boundaries (typically ~dep_latency MFMA cycles
-  // waiting on LDS + reg alloc).  On gfx950 MI16x16x32_bf16 (MI_K=32) this
-  // manifests as a ~20-25% slowdown at MT_K=32 relative to MT_K=64, holding
-  // all other tile dimensions constant.
-  // Multiplier on L_mainloop:
-  //   (1 + MI_PIPELINE_HAZARD_PENALTY * max(0, 2 - MT_K/MI_K)).
-  // Smooth, bounded, and zero once MT_K/MI_K >= 2 (the first back-to-back
-  // reuse opportunity kicks in).
-  static constexpr double MI_PIPELINE_HAZARD_PENALTY = 0.15;
 
   // Per-store-instruction issue cost (cycles) for the epilogue store path.
   // Independent of SourceSwap; represents fixed v_buffer_store / s_swap
@@ -185,7 +148,6 @@ struct heuristic_params_t {
   double epilogue_salu_overhead         = heuristic_defaults_t::EPILOGUE_SALU_OVERHEAD;
   double epilogue_l_barrier             = heuristic_defaults_t::EPILOGUE_L_BARRIER;
   double epilogue_l_smem                = heuristic_defaults_t::EPILOGUE_L_SMEM;
-  double epilogue_k_padding_penalty     = heuristic_defaults_t::EPILOGUE_K_PADDING_PENALTY;
   size_t postgsu_compute_bytes          = heuristic_defaults_t::POSTGSU_COMPUTE_BYTES;
   double postgsu_kernel_launch_overhead = heuristic_defaults_t::POSTGSU_KERNEL_LAUNCH_OVERHEAD;
   size_t postgsu_threads_per_wg         = heuristic_defaults_t::POSTGSU_THREADS_PER_WG;
@@ -194,14 +156,9 @@ struct heuristic_params_t {
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
 
-  // === PGR / LSU / DTL parameters ===
-  double lsu_reduction_overhead    = heuristic_defaults_t::LSU_REDUCTION_OVERHEAD;
-  double one_lds_buffer_overhead   = heuristic_defaults_t::ONE_LDS_BUFFER_OVERHEAD;
-  double pack_transpose_overhead   = heuristic_defaults_t::PACK_TRANSPOSE_OVERHEAD;
+  // === Loop & tile overhead parameters ===
   double tail_loop_overhead        = heuristic_defaults_t::TAIL_LOOP_OVERHEAD;
   double tile_fixed_overhead     = heuristic_defaults_t::TILE_FIXED_OVERHEAD;
-  double du_waste_overhead       = heuristic_defaults_t::DU_WASTE_OVERHEAD;
-  double mi_pipeline_hazard_penalty = heuristic_defaults_t::MI_PIPELINE_HAZARD_PENALTY;
   double epilogue_store_issue_cycles = heuristic_defaults_t::EPILOGUE_STORE_ISSUE_CYCLES;
 
   /**

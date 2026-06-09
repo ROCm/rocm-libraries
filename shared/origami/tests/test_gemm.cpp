@@ -1268,8 +1268,6 @@ TEST_CASE("Heuristics: Default parameters", "[heuristics]") {
   REQUIRE(defaults.epilogue_salu_overhead == origami::heuristic_defaults_t::EPILOGUE_SALU_OVERHEAD);
   REQUIRE(defaults.epilogue_l_barrier == origami::heuristic_defaults_t::EPILOGUE_L_BARRIER);
   REQUIRE(defaults.epilogue_l_smem == origami::heuristic_defaults_t::EPILOGUE_L_SMEM);
-  REQUIRE(defaults.epilogue_k_padding_penalty ==
-          origami::heuristic_defaults_t::EPILOGUE_K_PADDING_PENALTY);
   REQUIRE(defaults.postgsu_compute_bytes == origami::heuristic_defaults_t::POSTGSU_COMPUTE_BYTES);
   REQUIRE(defaults.postgsu_kernel_launch_overhead ==
           origami::heuristic_defaults_t::POSTGSU_KERNEL_LAUNCH_OVERHEAD);

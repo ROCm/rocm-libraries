@@ -2,9 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
-#include <cmath>
-#include <cstdlib>
-#include <iostream>
 #include <string>
 
 #include "origami/gemm.hpp"
@@ -14,42 +11,6 @@
 #include "origami/types.hpp"
 
 namespace origami {
-
-namespace {
-// Calibration helper: allow env-var overrides of tunable heuristic knobs so
-// that coefficient sweeps can run without a rebuild.  Only non-zero / finite
-// values are accepted; anything else leaves the compiled default in place.
-//
-// The env vars are read ONCE at process start (lazy-init via the local
-// static below) and cached, so lookup() -- which fires for every candidate
-// solution during heuristic ranking -- pays no per-call getenv/stod cost.
-struct env_overrides_t {
-};
-
-std::optional<double> read_env_double(const char* name) {
-  if (const char* raw = std::getenv(name)) {
-    try {
-      double val = std::stod(raw);
-      if (std::isfinite(val)) { return val; }
-    } catch (...) {
-      // fall through -- leave unset
-    }
-  }
-  return std::nullopt;
-}
-
-const env_overrides_t& env_overrides() {
-  static const env_overrides_t cache = []() {
-    env_overrides_t e;
-    return e;
-  }();
-  return cache;
-}
-
-inline void apply_env_overrides(heuristic_params_t& /*p*/) {
-  (void)env_overrides();
-}
-}  // namespace
 
 // ============================================================================
 // heuristic_params_t Implementation
@@ -85,18 +46,12 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   epilogue_salu_overhead              = other.epilogue_salu_overhead;
   epilogue_l_barrier                  = other.epilogue_l_barrier;
   epilogue_l_smem                     = other.epilogue_l_smem;
-  epilogue_k_padding_penalty          = other.epilogue_k_padding_penalty;
   postgsu_compute_bytes               = other.postgsu_compute_bytes;
   postgsu_kernel_launch_overhead      = other.postgsu_kernel_launch_overhead;
   postgsu_threads_per_wg              = other.postgsu_threads_per_wg;
   postgsu_wavefront_size              = other.postgsu_wavefront_size;
-  lsu_reduction_overhead              = other.lsu_reduction_overhead;
-  one_lds_buffer_overhead             = other.one_lds_buffer_overhead;
-  pack_transpose_overhead             = other.pack_transpose_overhead;
   tail_loop_overhead                  = other.tail_loop_overhead;
   tile_fixed_overhead                 = other.tile_fixed_overhead;
-  du_waste_overhead                   = other.du_waste_overhead;
-  mi_pipeline_hazard_penalty          = other.mi_pipeline_hazard_penalty;
   epilogue_store_issue_cycles          = other.epilogue_store_issue_cycles;
 
   // Main loop efficiency
@@ -162,12 +117,6 @@ size_t heuristic_key_t::specificity() const {
 
 heuristics_database_t::heuristics_database_t() {
   initialize_defaults();
-  // Apply env-var overrides to default_params_.  These only take effect when
-  // lookup() falls through to the defaults, which is the common path -- the
-  // hand-optimized specialisations in initialize_defaults() only tweak
-  // main_loop_efficiency and do not touch the primality / prologue-cap /
-  // GRVW knobs we override here.
-  apply_env_overrides(default_params_);
 }
 
 heuristics_database_t& heuristics_database_t::get_instance() {
@@ -218,12 +167,6 @@ heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
 
   // Apply matches in order of increasing specificity
   for (const auto& [spec, params] : matches) { result.merge_with(*params); }
-
-  // Env-var overrides apply LAST so they are not clobbered by hand-optimized
-  // or per-MT entries (whose merge_with overwrites every field, even those
-  // they did not specialise).  The cached env_overrides() above makes this a
-  // branch-only hot path -- no getenv/stod per call.
-  apply_env_overrides(result);
 
   return result;
 }
