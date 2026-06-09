@@ -271,7 +271,7 @@ namespace rocsparse
         {
             return rocsparse::primitives::radix_sort_pairs_buffer_size<K, int64_t>;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             return nullptr;
         }
@@ -293,7 +293,7 @@ namespace rocsparse
         {
             return find_V<int64_t>(V);
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             return nullptr;
         }

@@ -77,7 +77,7 @@ if(WIN32 AND BUILD_SHARED_LIBS)
 endif()
 
 # Target compile options
-target_compile_options(rocsparse PRIVATE -Wno-deprecated-declarations -Wno-unused-command-line-argument -Wall)
+target_compile_options(rocsparse PRIVATE -Wno-unused-command-line-argument -Wall)
 
 # Target include directories
 target_include_directories(rocsparse

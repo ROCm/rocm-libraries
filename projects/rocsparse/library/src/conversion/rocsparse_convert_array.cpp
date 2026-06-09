@@ -168,7 +168,7 @@ namespace rocsparse
         switch(source_indextype_)
         {
         // LCOV_EXCL_START
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -201,7 +201,7 @@ namespace rocsparse
         switch(target_indextype_)
         {
         // LCOV_EXCL_START
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -278,7 +278,7 @@ namespace rocsparse
         switch(source_indextype_)
         {
         // LCOV_EXCL_START
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -311,7 +311,7 @@ namespace rocsparse
         switch(target_indextype_)
         {
         // LCOV_EXCL_START
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }

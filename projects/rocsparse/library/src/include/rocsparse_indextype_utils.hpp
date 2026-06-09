@@ -26,6 +26,8 @@
 
 #include "rocsparse-types.h"
 
+#define deprecated_rocsparse_indextype_u16 static_cast<rocsparse_indextype>(1)
+
 namespace rocsparse
 {
     template <rocsparse_indextype v>

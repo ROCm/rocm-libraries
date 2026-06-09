@@ -31,7 +31,7 @@ rocsparse_indextype rocsparse::get_indextype<int32_t>()
 template <>
 rocsparse_indextype rocsparse::get_indextype<uint16_t>()
 {
-    return rocsparse_indextype_u16;
+    return deprecated_rocsparse_indextype_u16;
 }
 
 template <>
