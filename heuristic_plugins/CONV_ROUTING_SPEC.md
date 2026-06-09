@@ -52,6 +52,43 @@ conv graphs ever pass multiple candidate IDs through `PolicySetEngineIds`.
 Run the same conv heuristic against the production MIOpen engine plugin instead of
 `libtest_good_default_plugin.so`.
 
+The production provider target is `miopen_plugin` in:
+
+```text
+dnn-providers/miopen-provider/CMakeLists.txt
+```
+
+Its expected build output is:
+
+```text
+<provider-build>/lib/hipdnn_plugins/engines/libmiopen_plugin.so
+```
+
+As of the Session 12 investigation, no production MIOpen engine plugin `.so` exists in
+the current hipDNN build tree. The configured hipDNN build only contains the manually
+installed test engine plugin:
+
+```text
+projects/hipdnn/build/lib/hipdnn_plugins/engines/libhipdnn_test_plugin1.so
+```
+
+Standalone provider build attempts were made against ROCm 7.1.1 and ROCm 7.2.70200. Both
+configured after pointing CMake at the hipDNN SDK package configs, but both failed to build
+`miopen_plugin` because the installed MIOpen headers do not expose batchnorm APIs expected
+by this provider source:
+
+```text
+miopenBatchNormForwardInferenceActivationInvVariance
+miopenBatchNormalizationForwardInferenceInvVariance
+```
+
+There is no provider CMake option to build only convolution plans or exclude the batchnorm
+plan files from `miopen_plugin_impl`, so the production plugin cannot be produced from this
+checkout without either:
+
+- a matching newer MIOpen SDK/header package that provides those APIs, or
+- a provider source/build adjustment that excludes or gates the newer batchnorm plan code.
+
 Expected evidence needed before routing:
 
 ```text
