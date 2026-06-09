@@ -53,11 +53,20 @@ SKIPPABLE_PATH_PATTERNS = [
     "shared/*/docs/*",
     "projects/composablekernel/Jenkinsfile",
     "projects/composablekernel/Docker*",
-    "projects/composablekernel/tutorial/*",
-    "projects/composablekernel/script/*",
     "projects/composablekernel/client_example/*",
+    "projects/composablekernel/codegen/*",
+    "projects/composablekernel/dispatcher/*",
+    "projects/composablekernel/example/*",
+    "projects/composablekernel/experimental/*",
+    "projects/composablekernel/profiler/*",
+    "projects/composablekernel/python/*",
+    "projects/composablekernel/rocm_ck/*",
+    "projects/composablekernel/script/*",
+    "projects/composablekernel/test/*",
+    "projects/composablekernel/test_data/*",
     "projects/composablekernel/tile_engine/*",
-    "projects/composablekernel/vars/ck.groovy",
+    "projects/composablekernel/tutorial/*",
+    "projects/composablekernel/vars/*",
 ]
 
 
