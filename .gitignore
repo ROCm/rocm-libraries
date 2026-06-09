@@ -12,3 +12,6 @@ CMakeUserPresets.json
 
 # claude tmp files
 .nfs*
+
+# clangd cache
+.cache/clangd/**
