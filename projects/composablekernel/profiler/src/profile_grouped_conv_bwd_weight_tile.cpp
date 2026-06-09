@@ -8,7 +8,7 @@
 
 #include "ck_tile/builder/testing/conv/ck_tile.hpp"
 #include "ck_tile/host/device_prop.hpp"
-#if defined(CK_TILE_DISPATCHER)
+#ifdef CK_TILE_DISPATCHER
 #include "profiler/grouped_convolution_backward_weight_tile_dispatcher_algs.hpp"
 #else
 #include "profiler/grouped_convolution_backward_weight_tile_algs.hpp"

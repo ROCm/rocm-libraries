@@ -14,8 +14,8 @@
 
 namespace ck_tile::builder::profiling {
 
-namespace ckb = ::ck_tile::builder;
-namespace ckt = ::ck_tile::builder::test;
+namespace ckb = ck_tile::builder;
+namespace ckt = ck_tile::builder::test;
 
 inline std::vector<int> get_split_k_values(const std::string& split_k)
 {
@@ -45,20 +45,20 @@ get_rtol_atol(const int num_accums, const int k_batch, const float max_accumulat
         std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP32,
                            float,
                            std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP16,
-                                              ::ck_tile::half_t,
-                                              ::ck_tile::bfloat16_t>>;
+                                              ck_tile::half_t,
+                                              ck_tile::bfloat16_t>>;
     using ComputeType = DataType;
     using AccDataType = float;
 
     // Assign middle value of the range for auto deduce
     const int num_accums_split_k = k_batch > 0 ? k_batch : 64;
-    auto rtol = ::ck_tile::get_relative_threshold<ComputeType, DataType, AccDataType>(
+    auto rtol = ck_tile::get_relative_threshold<ComputeType, DataType, AccDataType>(
         num_accums / num_accums_split_k);
-    auto atol = ::ck_tile::get_absolute_threshold<ComputeType, DataType, AccDataType>(
+    auto atol = ck_tile::get_absolute_threshold<ComputeType, DataType, AccDataType>(
         max_accumulated_value / num_accums_split_k, num_accums / num_accums_split_k);
     // Calculate error due to split_k accumulation
     auto rtol_split_k =
-        ::ck_tile::get_relative_threshold<DataType, DataType, DataType>(num_accums_split_k);
+        ck_tile::get_relative_threshold<DataType, DataType, DataType>(num_accums_split_k);
     auto atol_split_k = ::ck_tile::get_absolute_threshold<DataType, DataType, DataType>(
         max_accumulated_value, num_accums_split_k);
     // Use higher threshold

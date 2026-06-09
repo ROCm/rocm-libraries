@@ -967,16 +967,16 @@ struct GroupedConvolutionForwardKernel
                 }
             }
 
-        if constexpr((GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                      is_any_of<OutDataType, fp16_t, bf16_t>::value) ||
-                     !IsSplitKSupported)
-        {
-            if(kargs.k_batch != 1)
+            if constexpr((GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
+                        is_any_of<OutDataType, fp16_t, bf16_t>::value) ||
+                        !IsSplitKSupported)
             {
-                LogInfo("Conditions not met for Kbatch >1 !");
-                return false;
+                if(kargs.k_batch != 1)
+                {
+                    LogInfo("Conditions not met for Kbatch >1 !");
+                    return false;
+                }
             }
-        }
 
             const index_t ConvK = kargs.wei_g_k_c_xs_lengths[number<1>{}];
             const index_t ConvC = kargs.wei_g_k_c_xs_lengths[number<2>{}];
@@ -1030,30 +1030,111 @@ struct GroupedConvolutionForwardKernel
                 }
             }
 
-        if constexpr(GroupedConvTraitsType_::ExplicitGemm &&
-                     ConvSpecialization != ConvolutionSpecialization::Filter1x1Stride1Pad0)
-        {
-            LogInfo("ExplicitGemm is only supported for Filter1x1Stride1Pad0 specialization.");
-            return false;
-        }
+            if constexpr(GroupedConvTraitsType_::ExplicitGemm &&
+                        ConvSpecialization != ConvolutionSpecialization::Filter1x1Stride1Pad0)
+            {
+                LogInfo("ExplicitGemm is only supported for Filter1x1Stride1Pad0 specialization.");
+                return false;
+            }
 
             namespace ctc = tensor_layout::convolution;
 
-        if constexpr(std::is_same_v<InLayout, ctc::NWGC> || std::is_same_v<InLayout, ctc::NHWGC> ||
-                     std::is_same_v<InLayout, ctc::NDHWGC>)
-        {
-            // Check access for A tensor
-            if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0 &&
-               GroupedConvTraitsType_::NumGroupsToMerge == 1)
+            if constexpr(std::is_same_v<InLayout, ctc::NWGC> || std::is_same_v<InLayout, ctc::NHWGC> ||
+                        std::is_same_v<InLayout, ctc::NDHWGC>)
             {
-                LogInfo("Conv C is not a multiple of vector load size for input image! ConvC: ",
-                        ConvC,
-                        ", VectorSizeA: ",
-                        GroupedConvTraitsType_::VectorSizeA);
+                // Check access for A tensor
+                if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0 &&
+                GroupedConvTraitsType_::NumGroupsToMerge == 1)
+                {
+                    LogInfo("Conv C is not a multiple of vector load size for input image! ConvC: ",
+                            ConvC,
+                            ", VectorSizeA: ",
+                            GroupedConvTraitsType_::VectorSizeA);
+                    return false;
+                }
+                else if(GroupedConvTraitsType_::NumGroupsToMerge > 1)
+                {
+                    if(ConvC != 1)
+                    {
+                        LogInfo("ConvC must be equal to 1 for NumGroupsToMerge > 1 to allow "
+                                "vector reads on group dimension!");
+                        return false;
+                    }
+
+                    const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
+                    if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0)
+                    {
+                        LogInfo("ConvG must be a multiple of NumGroupsToMerge!");
+                        return false;
+                    }
+                }
+            }
+            else
+            {
+                LogInfo("Not supported input layout! Now InLayout is ", InLayout::name);
                 return false;
             }
-            else if(GroupedConvTraitsType_::NumGroupsToMerge > 1)
+
+            // check vector access of B
+            // FIXME: layout
+            if constexpr(std::is_same_v<WeiLayout, ctc::GKXC> ||
+                        std::is_same_v<WeiLayout, ctc::GKYXC> ||
+                        std::is_same_v<WeiLayout, ctc::GKZYXC>)
             {
+                if(ConvC % GroupedConvTraitsType_::VectorSizeB != 0)
+                {
+                    LogInfo("Conv C is not a multiple of vector load size for weight! ConvC: ",
+                            ConvC,
+                            ", VectorSizeB: ",
+                            GroupedConvTraitsType_::VectorSizeB);
+                    return false;
+                }
+            }
+            else
+            {
+                LogInfo("Not supported weight layout! Now WeiLayout is ", WeiLayout::name);
+                return false;
+            }
+
+            // check vector access of E
+            if constexpr(std::is_same_v<OutLayout, ctc::NWGK> ||
+                        std::is_same_v<OutLayout, ctc::NHWGK> ||
+                        std::is_same_v<OutLayout, ctc::NDHWGK>)
+            {
+                if(ConvK % GroupedConvTraitsType_::VectorSizeC != 0)
+                {
+                    // Try to read over G
+                    if(GroupedConvTraitsType_::NumGroupsToMerge > 1)
+                    {
+                        const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
+                        if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0 ||
+                        ConvG % GroupedConvTraitsType_::VectorSizeC != 0)
+                        {
+                            LogInfo("ConvG must be a multiple of NumGroupsToMerge to allow "
+                                    "writing over G dimension");
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        LogInfo("Conv K is not a multiple of vector store size for output! ConvK: ",
+                                ConvK,
+                                ", VectorSizeC: ",
+                                GroupedConvTraitsType_::VectorSizeC);
+                        return false;
+                    }
+                }
+            }
+            else
+            {
+                LogInfo("Not supported output layout! Now OutLayout is ", OutLayout::name);
+                return false;
+            }
+
+            if constexpr(GroupedConvTraitsType_::NumGroupsToMerge > 1)
+            {
+                // currently group merging works only for C == 1 due to tensor transformation
+                // limitations
                 if(ConvC != 1)
                 {
                     LogInfo("ConvC must be equal to 1 for NumGroupsToMerge > 1 to allow "
@@ -1064,94 +1145,13 @@ struct GroupedConvolutionForwardKernel
                 const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
                 if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0)
                 {
-                    LogInfo("ConvG must be a multiple of NumGroupsToMerge!");
+                    LogInfo("Number of groups must be divisible by NumGroupsToMerge! ConvG: ",
+                            ConvG,
+                            ", NumGroupsToMerge: ",
+                            GroupedConvTraitsType_::NumGroupsToMerge);
                     return false;
                 }
             }
-        }
-        else
-        {
-            LogInfo("Not supported input layout! Now InLayout is ", InLayout::name);
-            return false;
-        }
-
-        // check vector access of B
-        // FIXME: layout
-        if constexpr(std::is_same_v<WeiLayout, ctc::GKXC> ||
-                     std::is_same_v<WeiLayout, ctc::GKYXC> ||
-                     std::is_same_v<WeiLayout, ctc::GKZYXC>)
-        {
-            if(ConvC % GroupedConvTraitsType_::VectorSizeB != 0)
-            {
-                LogInfo("Conv C is not a multiple of vector load size for weight! ConvC: ",
-                        ConvC,
-                        ", VectorSizeB: ",
-                        GroupedConvTraitsType_::VectorSizeB);
-                return false;
-            }
-        }
-        else
-        {
-            LogInfo("Not supported weight layout! Now WeiLayout is ", WeiLayout::name);
-            return false;
-        }
-
-        // check vector access of E
-        if constexpr(std::is_same_v<OutLayout, ctc::NWGK> ||
-                     std::is_same_v<OutLayout, ctc::NHWGK> ||
-                     std::is_same_v<OutLayout, ctc::NDHWGK>)
-        {
-            if(ConvK % GroupedConvTraitsType_::VectorSizeC != 0)
-            {
-                // Try to read over G
-                if(GroupedConvTraitsType_::NumGroupsToMerge > 1)
-                {
-                    const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
-                    if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0 ||
-                       ConvG % GroupedConvTraitsType_::VectorSizeC != 0)
-                    {
-                        LogInfo("ConvG must be a multiple of NumGroupsToMerge to allow "
-                                "writing over G dimension");
-                        return false;
-                    }
-                }
-                else
-                {
-                    LogInfo("Conv K is not a multiple of vector store size for output! ConvK: ",
-                            ConvK,
-                            ", VectorSizeC: ",
-                            GroupedConvTraitsType_::VectorSizeC);
-                    return false;
-                }
-            }
-        }
-        else
-        {
-            LogInfo("Not supported output layout! Now OutLayout is ", OutLayout::name);
-            return false;
-        }
-
-        if constexpr(GroupedConvTraitsType_::NumGroupsToMerge > 1)
-        {
-            // currently group merging works only for C == 1 due to tensor transformation
-            // limitations
-            if(ConvC != 1)
-            {
-                LogInfo("ConvC must be equal to 1 for NumGroupsToMerge > 1 to allow "
-                        "vector reads on group dimension!");
-                return false;
-            }
-
-            const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
-            if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0)
-            {
-                LogInfo("Number of groups must be divisible by NumGroupsToMerge! ConvG: ",
-                        ConvG,
-                        ", NumGroupsToMerge: ",
-                        GroupedConvTraitsType_::NumGroupsToMerge);
-                return false;
-            }
-        }
 
             return true;
 
