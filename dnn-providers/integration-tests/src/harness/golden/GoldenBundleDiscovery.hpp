@@ -30,7 +30,7 @@ struct DiscoveredBundle
     std::string testName;
 };
 
-inline constexpr std::array<const char*, 4> kTierNames = {
+inline constexpr std::array<const char*, 4> K_TIER_NAMES = {
     "quick", "standard", "comprehensive", "full"};
 
 // RFC 0011 §4.3 test-naming scheme: the tier becomes a GTest suite prefix.
@@ -61,7 +61,7 @@ inline std::string sanitizeForGtest(const std::string& input)
 {
     std::string result;
     result.reserve(input.size());
-    for(char c : input)
+    for(const char c : input)
     {
         result += (std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_') ? c : '_';
     }
@@ -238,13 +238,13 @@ inline std::string deriveLayoutFromGraph(
     auto tensorMap = wrapper.getTensorMap();
     for(auto& [uid, attrs] : tensorMap)
     {
-        if(attrs == nullptr || attrs->dim() == nullptr || attrs->stride() == nullptr)
+        if(attrs == nullptr || attrs->dims() == nullptr || attrs->strides() == nullptr)
         {
             continue;
         }
-        if(attrs->dim()->size() >= 4)
+        if(attrs->dims()->size() >= 4)
         {
-            return deriveLayoutFromStrides(attrs->dim(), attrs->stride());
+            return deriveLayoutFromStrides(attrs->dims(), attrs->strides());
         }
     }
     return "unknown";
@@ -272,19 +272,19 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
             builder, graphJson);
     builder.Finish(offset);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
-    auto opName = deriveOperationName(wrapper);
-    auto layout = deriveLayoutFromGraph(wrapper);
-    auto dtype = deriveDataTypeFromGraph(wrapper);
+    const auto opName = deriveOperationName(wrapper);
+    const auto layout = deriveLayoutFromGraph(wrapper);
+    const auto dtype = deriveDataTypeFromGraph(wrapper);
 
-    std::string suite = tierPrefix(tierName) + sanitizeForGtest(opName) + "_"
-                        + sanitizeForGtest(layout) + "_" + sanitizeForGtest(dtype);
+    const std::string suite = tierPrefix(tierName) + sanitizeForGtest(opName) + "_"
+                              + sanitizeForGtest(layout) + "_" + sanitizeForGtest(dtype);
 
     // Test name = bundle directory name (the immediate parent of the .json)
-    auto bundleDirName = jsonPath.parent_path().filename().string();
-    std::string test = sanitizeForGtest(bundleDirName);
+    const auto bundleDirName = jsonPath.parent_path().filename().string();
+    const std::string test = sanitizeForGtest(bundleDirName);
 
     return {suite, test};
 }
@@ -312,8 +312,8 @@ inline std::vector<DiscoveredBundle> discoverGoldenBundles(
             continue;
         }
         auto dirName = entry.path().filename().string();
-        bool isTier = std::any_of(
-            kTierNames.begin(), kTierNames.end(), [&](const char* tier) {
+        const bool isTier = std::any_of(
+            K_TIER_NAMES.begin(), K_TIER_NAMES.end(), [&](const char* tier) {
                 return dirName == tier;
             });
         if(!isTier)
@@ -325,7 +325,7 @@ inline std::vector<DiscoveredBundle> discoverGoldenBundles(
         }
     }
 
-    for(const auto& tierName : kTierNames)
+    for(const auto& tierName : K_TIER_NAMES)
     {
         auto tierDir = goldenDataDir / tierName;
         if(!std::filesystem::exists(tierDir) || !std::filesystem::is_directory(tierDir))
@@ -346,7 +346,7 @@ inline std::vector<DiscoveredBundle> discoverGoldenBundles(
         for(const auto& jsonPath : jsonPaths)
         {
             // deriveTestName throws on an unparseable .json; let it propagate.
-            DerivedTestName derived = deriveTestName(jsonPath, tierName);
+            const DerivedTestName derived = deriveTestName(jsonPath, tierName);
 
             auto fullName = derived.suiteName + "." + derived.testName;
             auto it = nameToPath.find(fullName);

@@ -111,11 +111,11 @@ protected:
                     tensorName = attrs->name()->str();
                 }
                 std::vector<int64_t> shape;
-                if(attrs->dim() != nullptr)
+                if(attrs->dims() != nullptr)
                 {
-                    for(flatbuffers::uoffset_t i = 0; i < attrs->dim()->size(); ++i)
+                    for(flatbuffers::uoffset_t i = 0; i < attrs->dims()->size(); ++i)
                     {
-                        shape.push_back(attrs->dim()->Get(i));
+                        shape.push_back(attrs->dims()->Get(i));
                     }
                 }
                 auto dtypeStr = dataTypeToShortString(dataType);

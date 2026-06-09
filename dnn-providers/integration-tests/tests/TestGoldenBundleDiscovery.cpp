@@ -43,7 +43,7 @@ protected:
     // Writes a minimal but schema-valid batchnorm-inference graph (nchw, fp32).
     // The bundle directory name becomes the test name; suite is derived from
     // graph content -> "BatchnormInference_nchw_fp32".
-    void createMinimalBundle(const std::filesystem::path& dir, const std::string& name)
+    static void createMinimalBundle(const std::filesystem::path& dir, const std::string& name)
     {
         std::filesystem::create_directories(dir);
         std::ofstream ofs(dir / (name + ".json"));
