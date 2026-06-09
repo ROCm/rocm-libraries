@@ -119,6 +119,7 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("GRVWB: " << int(config.grvw_b));
     OLOG_DEBUG("LDSTrInst: " << int(config.lds_tr_inst));
     OLOG_DEBUG("LdsBytes: " << int(config.lds_bytes));
+    OLOG_DEBUG("CUOccupancy(cfg): " << int(config.occupancy));
     OLOG_DEBUG("LocalSplitU: " << int(config.local_split_u));
     OLOG_DEBUG("OneLDSBuffer: " << int(config.one_lds_buffer));
     OLOG_DEBUG("PrefetchGlobalRead: " << int(config.prefetch_global_read));
@@ -2290,8 +2291,39 @@ double compute_tile_latency(const problem_t& problem,
   // the L2 BW advantage matters fully.  Blend factor is the
   // store-rate-ratio remapped into [0, 1] across an empirical band.
   // ---------------------------------------------------------------------------
+  // Epilogue store/DRAM latency is hidden by resident-wave memory-level
+  // parallelism.  config.occupancy is the real register-limited waves/CU
+  // (CUOccupancy, from the kernel's allocated VGPR/LDS).  Below the occupancy
+  // that saturates the store/return pipeline, the un-overlapped store latency is
+  // exposed and scales ~1/occupancy.  This is the physical reason a 1-wave/CU
+  // (high-VGPR) kernel runs ~2x slower per timestep than a 2-wave/CU kernel on
+  // store-bound (shallow-K, huge-N) shapes -- invisible to the bandwidth-only
+  // epilogue model.  Saturation at 2 waves/CU is calibrated to gfx950 store
+  // latency-hiding (rocprof: CUOcc 2 = saturated/fast, CUOcc 1 = ~2x exposed).
+  // Self-gating: only multiplies the epilogue term, so it is negligible for
+  // mainloop-bound (deep-K) tiles and only bites store-bound shapes.
+  // Gate on partial-M tiles.  A kernel that exactly tiles M is fully utilized,
+  // and a big low-occupancy tile then amortizes the store by running fewer
+  // timesteps, so low occupancy is *not* a penalty there (rocprof: exact-M
+  // 256x192 wins on 256x98304x128 despite CUOcc=1).  The store-latency exposure
+  // only bites when a partial M-tile already wastes lanes/registers, which
+  // compounds with the low occupancy.  (Validated: the uniform penalty's new
+  // regressions were 8/10 exact-M, its new improvements 8/9 partial-M.)
+  constexpr double EPILOGUE_OCC_SATURATION = 2.0;
+  const bool has_m_edge_epi =
+      (config.mt.m > 0) && (problem.size.m % config.mt.m != 0);
+  const double cu_occ_epi = static_cast<double>(std::max(config.occupancy, 1));
+  const double epi_occ_exposure = has_m_edge_epi
+      ? std::max(1.0, EPILOGUE_OCC_SATURATION / cu_occ_epi)
+      : 1.0;
   const double L_epilogue_hbm =
-      compute_epilogue_latency(problem, hardware, config, context) * occupancy_factor;
+      compute_epilogue_latency(problem, hardware, config, context)
+      * occupancy_factor * epi_occ_exposure;
+
+  if (debug) {
+    OLOG_DEBUG("epi_cu_occupancy: " << cu_occ_epi);
+    OLOG_DEBUG("epi_occ_exposure: " << epi_occ_exposure);
+  }
 
   double L_epilogue = L_epilogue_hbm;
   double store_rate_ratio = 0.0;
