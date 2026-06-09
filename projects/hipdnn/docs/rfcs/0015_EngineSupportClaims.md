@@ -1,8 +1,6 @@
 # RFC 0015: Per-Graph Engine Support Claims
 
-- Contributors: TBD
-- **Status**: Draft
-- **Implementation Version**: TBD
+- Contributors: Adam Dickin
 
 ## Table of Contents
 
