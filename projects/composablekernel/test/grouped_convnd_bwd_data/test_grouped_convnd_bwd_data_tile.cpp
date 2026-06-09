@@ -86,10 +86,11 @@ class TestGroupedConvndBwdDataTile : public ::testing::Test
                 std::cout << args.make_output_descriptor() << std::endl;
                 [[maybe_unused]] auto&& [case_passed,
                                          avg_time,
+                                         best_tflops,
+                                         best_gbs,
                                          op_name,
                                          best_split_k,
                                          best_instance] =
-
                     ckp::run_grouped_conv_backward_data_tile_algs(
                         args,
                         split_k,
