@@ -241,30 +241,27 @@ class TestDirectHipTimers:
         calls = []
         events = []
 
+        class FakeEvent:
+            def __init__(self) -> None:
+                events.append(self)
+                calls.append(("create", self))
+
+            def record(self, stream: int) -> None:
+                calls.append(("record", self, stream))
+
+            def synchronize(self) -> None:
+                calls.append(("synchronize", self))
+
+            def elapsed_time(self, stop) -> float:
+                calls.append(("elapsed", self, stop))
+                return 1.25
+
         class FakeHipdnn:
             @staticmethod
             def hip_get_device_count() -> int:
                 return 1
 
-            @staticmethod
-            def hip_event_create():
-                event = object()
-                events.append(event)
-                calls.append(("create", event))
-                return event
-
-            @staticmethod
-            def hip_event_record(event, stream: int) -> None:
-                calls.append(("record", event, stream))
-
-            @staticmethod
-            def hip_event_synchronize(event) -> None:
-                calls.append(("synchronize", event))
-
-            @staticmethod
-            def hip_event_elapsed_time(start, stop) -> float:
-                calls.append(("elapsed", start, stop))
-                return 1.25
+            HipEvent = FakeEvent
 
         monkeypatch.setattr(timing_module, "hipdnn", FakeHipdnn)
 
@@ -291,29 +288,26 @@ class TestDirectHipTimers:
         calls = []
         events = []
 
+        class FakeEvent:
+            def __init__(self) -> None:
+                events.append(self)
+                calls.append(("create", self))
+
+            def record(self, stream: int) -> None:
+                calls.append(("record", self, stream))
+
+            def synchronize(self) -> None:
+                calls.append(("synchronize", self))
+
+            def elapsed_time(self, stop) -> float:
+                return 0.0
+
         class FakeHipdnn:
             @staticmethod
             def hip_get_device_count() -> int:
                 return 1
 
-            @staticmethod
-            def hip_event_create():
-                event = object()
-                events.append(event)
-                calls.append(("create", event))
-                return event
-
-            @staticmethod
-            def hip_event_record(recorded_event, stream: int) -> None:
-                calls.append(("record", recorded_event, stream))
-
-            @staticmethod
-            def hip_event_synchronize(recorded_event) -> None:
-                calls.append(("synchronize", recorded_event))
-
-            @staticmethod
-            def hip_event_elapsed_time(start, stop) -> float:
-                return 0.0
+            HipEvent = FakeEvent
 
         monkeypatch.setattr(timing_module, "hipdnn", FakeHipdnn)
 

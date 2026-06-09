@@ -122,11 +122,6 @@ __all__ = [
     "set_stream",
     "get_stream",
     "HipEvent",
-    "hip_event_create",
-    "hip_event_destroy",
-    "hip_event_record",
-    "hip_event_synchronize",
-    "hip_event_elapsed_time",
     "hip_stream_synchronize",
     "hip_get_device_count",
 ]

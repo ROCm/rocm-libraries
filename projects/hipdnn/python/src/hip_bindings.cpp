@@ -158,26 +158,6 @@ void hipBindings(nb::module_& m)
             return "<hipdnn_frontend.HipEvent at " + std::to_string(event.ptr()) + ">";
         });
 
-    m.def("hip_event_create", []() { return HipEvent(); }, "Create a HIP event");
-    m.def("hip_event_destroy", [](HipEvent& event) { event.destroy(); }, nb::arg("event"));
-    m.def(
-        "hip_event_record",
-        [](HipEvent& event, uintptr_t stream) { event.record(stream); },
-        nb::arg("event"),
-        nb::arg("stream") = 0,
-        "Record a HIP event on a stream pointer encoded as an integer");
-    m.def(
-        "hip_event_synchronize",
-        [](const HipEvent& event) { event.synchronize(); },
-        nb::arg("event"),
-        nb::call_guard<nb::gil_scoped_release>(),
-        "Block until a HIP event has completed");
-    m.def(
-        "hip_event_elapsed_time",
-        [](const HipEvent& start, const HipEvent& stop) { return start.elapsedTime(stop); },
-        nb::arg("start_event"),
-        nb::arg("stop_event"),
-        "Return elapsed time in milliseconds between two HIP events");
     m.def("hip_stream_synchronize",
           &streamSynchronize,
           nb::arg("stream") = 0,

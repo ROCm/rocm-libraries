@@ -11,11 +11,6 @@ import hipdnn_frontend as fe
 
 _REQUIRED_API = (
     "HipEvent",
-    "hip_event_create",
-    "hip_event_destroy",
-    "hip_event_record",
-    "hip_event_synchronize",
-    "hip_event_elapsed_time",
     "hip_stream_synchronize",
     "hip_get_device_count",
 )
@@ -31,15 +26,11 @@ def test_hip_event_timing_smoke() -> None:
     if fe.hip_get_device_count() <= 0:
         pytest.skip("No HIP GPU available")
 
-    start = fe.hip_event_create()
-    stop = fe.hip_event_create()
+    start = fe.HipEvent()
+    stop = fe.HipEvent()
 
-    try:
-        fe.hip_event_record(start, 0)
-        fe.hip_event_record(stop, 0)
-        fe.hip_event_synchronize(stop)
+    start.record(0)
+    stop.record(0)
+    stop.synchronize()
 
-        assert fe.hip_event_elapsed_time(start, stop) >= 0.0
-    finally:
-        fe.hip_event_destroy(stop)
-        fe.hip_event_destroy(start)
+    assert start.elapsed_time(stop) >= 0.0

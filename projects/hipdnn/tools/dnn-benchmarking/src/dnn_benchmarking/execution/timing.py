@@ -25,13 +25,7 @@ from typing import Any, List, Literal, Optional, Type
 import hipdnn_frontend as hipdnn
 
 
-_HIP_EVENT_API = (
-    "hip_event_create",
-    "hip_event_record",
-    "hip_event_synchronize",
-    "hip_event_elapsed_time",
-    "hip_get_device_count",
-)
+_HIP_EVENT_API = ("HipEvent", "hip_get_device_count")
 
 
 def _validate_hip_event_api() -> None:
@@ -147,18 +141,18 @@ class HipGpuTimer(GpuTimerInterface):
         """
         self._hipdnn = _require_hip_runtime()
         self._stream = int(stream)
-        self._start_event = self._hipdnn.hip_event_create()
-        self._stop_event = self._hipdnn.hip_event_create()
+        self._start_event = self._hipdnn.HipEvent()
+        self._stop_event = self._hipdnn.HipEvent()
         self._recorded_stop_event: Optional[Any] = None
 
     def start(self) -> None:
         """Record the start event on the configured HIP stream."""
-        self._hipdnn.hip_event_record(self._start_event, self._stream)
+        self._start_event.record(self._stream)
         self._recorded_stop_event = None
 
     def _record_stop_event(self) -> None:
         """Record the stop event on the configured HIP stream."""
-        self._hipdnn.hip_event_record(self._stop_event, self._stream)
+        self._stop_event.record(self._stream)
         self._recorded_stop_event = self._stop_event
 
     def stop(self) -> None:
@@ -169,7 +163,7 @@ class HipGpuTimer(GpuTimerInterface):
         """Block until the recorded stop event has completed."""
         if self._recorded_stop_event is None:
             raise RuntimeError("HIP timer stop event has not been recorded")
-        self._hipdnn.hip_event_synchronize(self._recorded_stop_event)
+        self._recorded_stop_event.synchronize()
 
     def synchronize_stream(self) -> None:
         """Record and wait for an event on the configured HIP stream."""
@@ -179,9 +173,7 @@ class HipGpuTimer(GpuTimerInterface):
     def elapsed_ms(self) -> float:
         """Synchronize and return elapsed time in milliseconds."""
         self.synchronize()
-        return float(
-            self._hipdnn.hip_event_elapsed_time(self._start_event, self._stop_event)
-        )
+        return float(self._start_event.elapsed_time(self._stop_event))
 
 
 def create_gpu_timer(
