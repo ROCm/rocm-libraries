@@ -19,6 +19,25 @@
   SOFTWARE.
 """
 
+import os
+from pathlib import Path as path
+import csv
+from decimal import Decimal
+
+def get_csv_val(datastr, title, gpu=0):
+    """
+    Parse the csv value for 'title' from 'datastr'. Ensures that the 'datastr' is for the 'gpu' passed.
+    """
+    reader = csv.reader(datastr.split('\n'))
+    try:
+        header = next(reader)
+        data = next(reader)
+        if int(data[header.index('gpu')]) != gpu:
+            return "error"
+        return data[header.index(title)]
+    except:
+        return "error"
+
 def _subprocess_helper(cmd, *args, **kwargs):
     import subprocess
     import tempfile
@@ -42,18 +61,50 @@ def get_smi_exec(cuda):
     if cuda:
         return "nvidia-smi"
     else:
-        return "/opt/rocm/bin/rocm-smi"
+        return "/opt/rocm/bin/amd-smi"
+
+_AMD_SMI_CLOCKS = {
+    'sclk': {'static': 'SYS', 'metric_cols': ['gfx_0_clk', 'clk', 'cur_clk']},
+    'mclk': {'static': 'MEM', 'metric_cols': ['mem_0_clk', 'MEM_clk', 'MEM_cur_clk']},
+    'fclk': {'static': 'DF', 'metric_cols': ['fclk_0_clk']},
+    'socclk': {'static': 'SOC', 'metric_cols': ['socclk_0_clk']},
+    'vclk0': {'static': 'VCLK0', 'metric_cols': ['vclk_0_clk', 'VCLK0_clk', 'VCLK0_cur_clk']},
+}
+
+def _metric_clock_val(cout, devicenum, metric_cols):
+    for col in metric_cols:
+        val = get_csv_val(cout, col, devicenum)
+        if val != 'error':
+            return val
+    return "error"
 
 def getgfx(devicenum, cuda):
     if cuda:
         return "N/A"
+
+    cmd = ["/opt/rocm/bin/rocm_agent_enumerator"]
+    success, cout = _subprocess_helper(cmd)
+    if not success:
+        return "N/A"
+
+    gfx_archs = [
+        line.strip()
+        for line in cout.splitlines()
+        if line.strip().startswith('gfx')
+    ]
+    if not gfx_archs:
+        return "N/A"
+
+    # Older rocm_agent_enumerator builds prepend a placeholder gfx000 line.
+    if gfx_archs[0] == 'gfx000' and len(gfx_archs) > 1:
+        index = devicenum + 1
     else:
-        cmd = ["/opt/rocm/bin/rocm_agent_enumerator"]
-        success, cout = _subprocess_helper(cmd)
-        if not success:
-            return "N/A"
-        # Add 1 to devicenum since rocm-agent-enum always prints gfx900 first
-        return cout.splitlines()[devicenum+1]
+        index = devicenum
+
+    if index < 0 or index >= len(gfx_archs):
+        return "N/A"
+
+    return gfx_archs[index]
 
 # Get the hostname
 def gethostname():
@@ -110,19 +161,19 @@ def getdistro():
 
 # Get the version number for rocm
 def getrocmversion():
-    cmd = ["apt", "show", "rocm-libs"]
-    success, cout = _subprocess_helper(cmd)
-    if not success:
+    if os.path.isfile("/opt/rocm/.info/version-utils"):
+        rocm_info = path("/opt/rocm/.info/version-utils").read_text()
+    elif os.path.isfile("/opt/rocm/.info/version"):
+        rocm_info = path("/opt/rocm/.info/version").read_text()
+    else:
         return "N/A"
-    searchstr = "Version:"
-    for line in cout.split("\n"):
-        if line.startswith(searchstr):
-            return line[len(searchstr):].strip()
+
+    return rocm_info.strip()
 
 
 # Get the vbios version for the specified device
 def getvbios(devicenum, cuda):
-    cmd = [get_smi_exec(cuda), "-v", "-d", str(devicenum)]
+    cmd = [get_smi_exec(cuda), "static", "-g", str(devicenum), "-V", "--csv"]
     if cuda:
         cmd = [get_smi_exec(cuda), "--query-gpu=vbios_version", "--format=csv,noheader", "-i", str(devicenum)]
     success, cout = _subprocess_helper(cmd)
@@ -131,18 +182,10 @@ def getvbios(devicenum, cuda):
     if cuda:
         return cout
 
-    searchstr = "GPU["+str(devicenum)+"]"
-    for line in cout.split("\n"):
-        if line.startswith(searchstr):
-            tmp = line[len(searchstr):].strip()[1:]
-            pos = tmp.find(":")
-            return tmp[pos+1:].strip()
-    return ""
+    return get_csv_val(cout, 'version', devicenum)
 
 def getgpuid(devicenum, cuda):
-    import re
-    name = ""
-    cmd = [get_smi_exec(cuda), "-i", "-d", str(devicenum)]
+    cmd = [get_smi_exec(cuda), "static", "-g", str(devicenum), "-a", "--csv"]
     if cuda:
         cmd = [get_smi_exec(cuda), "--query-gpu=name", "--format=csv,noheader", "-i", str(devicenum)]
     success, cout = _subprocess_helper(cmd)
@@ -151,15 +194,7 @@ def getgpuid(devicenum, cuda):
     if cuda:
         return cout
 
-    searchstr = "GPU["+str(devicenum)+"]"
-    for line in cout.split("\n"):
-        if line.startswith(searchstr):
-            line = line[len(searchstr):].strip()
-            line = re.sub(":", "", line)
-            line = re.sub("GPU ID", "", line)
-            name += " " + line.strip()
-            name = name.replace(" ", "")
-    return name
+    return get_csv_val(cout, 'market_name', devicenum)
 
 # Get the name of the device from lshw which has index devicenum
 def getdeviceinfo(devicenum, cuda):
@@ -185,8 +220,7 @@ def getdeviceinfo(devicenum, cuda):
 
 # Get the vram for the specified device
 def getvram(devicenum, cuda):
-    import re
-    cmd = [get_smi_exec(cuda), "--showmeminfo", "vram", "-d", str(devicenum)]
+    cmd = [get_smi_exec(cuda), "static", "-g", str(devicenum), "-v", "--csv"]
     if cuda:
         cmd = [get_smi_exec(cuda), "--query-gpu=memory.total", "--format=csv,noheader", "-i", str(devicenum)]
     success, cout = _subprocess_helper(cmd)
@@ -196,22 +230,14 @@ def getvram(devicenum, cuda):
     if cuda:
         return cout
 
-    searchstr = "GPU["+str(devicenum)+"]"
-    for line in cout.split("\n"):
-        if line.startswith(searchstr):
-            line = line[len(searchstr):].strip()
-            prestring = "vram :: total:"
-            line = re.sub(":", "", line)
-            line = re.sub("vram", "", line)
-            line = re.sub("total", "", line)
-            pos = line.find("used")
-            print(line[:pos].strip())
-            return line[:pos].strip()
+    val = get_csv_val(cout, 'size', devicenum)
+    if val == 'error':
+        val = get_csv_val(cout, 'vram_size_mb', devicenum)
+    return val + " MB"
 
 # Get the performance level for the specified device
 def getperflevel(devicenum, cuda):
-    import re
-    cmd = [get_smi_exec(cuda), "-p", "-d", str(devicenum)]
+    cmd = [get_smi_exec(cuda), "metric", "-g", str(devicenum), "-l", "--csv"]
     if cuda:
         cmd = [get_smi_exec(cuda), "--query-gpu=pstate", "--format=csv,noheader", "-i", str(devicenum)]
     success, cout = _subprocess_helper(cmd)
@@ -220,18 +246,14 @@ def getperflevel(devicenum, cuda):
     if cuda:
         return cout
 
-    searchstr = "GPU["+str(devicenum)+"]"
-    for line in cout.split("\n"):
-        if line.startswith(searchstr):
-            line = line[len(searchstr):].strip()
-            skipstr = "Current Performance Level "
-            line = re.sub(":", "", line)[len(skipstr):].strip()
-            return line
+    val = get_csv_val(cout, 'perf_level', devicenum)
+    if val == 'error':
+        return "N/A"
+    return val.replace('AMDSMI_DEV_PERF_LEVEL_', '')
 
 # Get the memory clock for the specified device
 def getmclk(devicenum, cuda):
-    import re
-    cmd = [get_smi_exec(cuda), "--showclocks", "-d", str(devicenum)]
+    cmd = [get_smi_exec(cuda), "metric", "-g", str(devicenum), "-c", "--csv"]
     if cuda:
         cmd = [get_smi_exec(cuda), "--query-gpu=clocks.mem", "--format=csv,noheader", "-i", str(devicenum)]
     success, cout = _subprocess_helper(cmd)
@@ -240,18 +262,11 @@ def getmclk(devicenum, cuda):
     if cuda:
         return cout
 
-    searchstr = "mclk"
-    for line in cout.split("\n"):
-        m = re.search(searchstr, line)
-        if m != None:
-            p0 = line.find("(")
-            p1 = line.find(")")
-            return line[p0+1:p1]
+    return _metric_clock_val(cout, devicenum, _AMD_SMI_CLOCKS['mclk']['metric_cols'])
 
 # Get the system clock for the specified device
 def getsclk(devicenum, cuda):
-    import re
-    cmd = [get_smi_exec(cuda), "--showclocks", "-d", str(devicenum)]
+    cmd = [get_smi_exec(cuda), "metric", "-g", str(devicenum), "-c", "--csv"]
     if cuda:
         cmd = [get_smi_exec(cuda), "--query-gpu=clocks.sm", "--format=csv,noheader", "-i", str(devicenum)]
     success, cout = _subprocess_helper(cmd)
@@ -260,13 +275,7 @@ def getsclk(devicenum, cuda):
     if cuda:
         return cout
 
-    searchstr = "sclk"
-    for line in cout.split("\n"):
-        m = re.search(searchstr, line)
-        if m != None:
-            p0 = line.find("(")
-            p1 = line.find(")")
-            return line[p0+1:p1]
+    return _metric_clock_val(cout, devicenum, _AMD_SMI_CLOCKS['sclk']['metric_cols'])
 
 def getbandwidth(devicenum, cuda):
     gpuid = getgpuid(devicenum, cuda)
@@ -281,9 +290,12 @@ def listdevices(cuda, smi=None):
         if not success:
             return []
         return list(range(0, int(cout)))
-        # something
-    elif smi is not None:
-        return smi.listDevices()
+    else:
+        cmd = [get_smi_exec(cuda), "list", "--csv"]
+        success, cout = _subprocess_helper(cmd)
+        if not success:
+            return []
+        return list(range(0, cout.count('\n') - 2))
 
 def getbus(devicenum, cuda, smi=None):
     if cuda:
@@ -293,28 +305,25 @@ def getbus(devicenum, cuda, smi=None):
             return "N/A"
         return cout
     else:
-        if smi is not None:
-            return smi.getBus(devicenum)
+        cmd = [get_smi_exec(cuda), "static", "-g", str(devicenum), "-b", "--csv"]
+        success, cout = _subprocess_helper(cmd)
+        if not success:
+            return "N/A"
+        val = get_csv_val(cout, 'bdf', devicenum)
+        if val == 'error':
+            val = get_csv_val(cout, 'gpu_bdf', devicenum)
+        return val
 
 def getprofile(devicenum, cuda):
-    import re
     if cuda:
         return "N/A"
     else:
-        cmd = [get_smi_exec(cuda), "-l", "-d", str(devicenum)]
+        cmd = [get_smi_exec(cuda), "metric", "-g", str(devicenum), "-p", "--csv"]
         success, cout = _subprocess_helper(cmd)
-
         if not success:
             return "N/A"
 
-        searchstr = "GPU["+str(devicenum)+"]"
-        for line in cout.split("\n"):
-            if line.startswith(searchstr) and "*" in line:
-                line = line[len(searchstr):].strip()
-                line = re.sub(":", "", line).strip()
-                return line[0]
-
-        return "N/A"
+        return get_csv_val(cout, 'power_management', devicenum)
 
 def getfanspeedpercent(devicenum, cuda, smi=None):
     if cuda:
@@ -323,17 +332,20 @@ def getfanspeedpercent(devicenum, cuda, smi=None):
         if not success:
             return "N/A"
         return str(cout)
-    elif smi is not None:
-        return str(smi.getFanSpeed(devicenum)[1])
+    else:
+        cmd = [get_smi_exec(cuda), "metric", "-g", str(devicenum), "-f", "--csv"]
+        success, cout = _subprocess_helper(cmd)
+        if not success:
+            return "N/A"
+        return get_csv_val(cout, 'usage', devicenum)
 
 def validclocknames(cuda, smi=None):
     if cuda:
         return ["graphics", "sm", "memory", "video"]
-    elif smi is not None:
-        return smi.validClockNames
+    else:
+        return ["sclk", "mclk", "fclk", "socclk", "vclk0"]
 
 def getcurrentclockfreq(devicenum, clock, cuda, smi=None):
-    import re
     if cuda:
         cmd = [get_smi_exec(cuda), "--query-gpu=clocks.current." + clock, "--format=csv,noheader", "-i", str(devicenum)]
         success, cout = _subprocess_helper(cmd)
@@ -341,75 +353,64 @@ def getcurrentclockfreq(devicenum, clock, cuda, smi=None):
             return "N/A"
         return cout
     else:
-        cmd = [get_smi_exec(cuda), "--showclocks", "-d", str(devicenum)]
+        clock_info = _AMD_SMI_CLOCKS.get(clock)
+        if clock_info is None:
+            return "N/A"
+        cmd = [get_smi_exec(cuda), "metric", "-g", str(devicenum), "-c", "--csv"]
         success, cout = _subprocess_helper(cmd)
         if not success:
             return "N/A"
-
-        for line in cout.split("\n"):
-            m = re.search(clock, line)
-            if m != None:
-                p0 = line.find("(")
-                p1 = line.find(")")
-                return line[p0+1:p1]
-
-    return "N/A"
+        return _metric_clock_val(cout, devicenum, clock_info['metric_cols'])
 
 def getcurrentclocklevel(devicenum, clock, cuda):
-    import re
     if cuda:
         return "N/A"
     else:
-        cmd = [get_smi_exec(cuda), "--showclocks", "-d", str(devicenum)]
+        clock_info = _AMD_SMI_CLOCKS.get(clock)
+        if clock_info is None:
+            return "N/A"
+        cmd = [get_smi_exec(cuda), "static", "-g", str(devicenum), "-C", clock_info['static'], "--csv"]
         success, cout = _subprocess_helper(cmd)
         if not success:
             return "N/A"
 
-        searchstr = clock + " clock level: "
-        for line in cout.split("\n"):
-            m = re.search(searchstr, line)
-            if m != None:
-                p0 = line.find(searchstr)
-                line = line[p0 + len(searchstr):]
-                p1 = line.find(":")
-                line = line[:p1]
-                return line
-
-    return "N/A"
+        val = get_csv_val(cout, 'current_level', devicenum)
+        if val != 'error':
+            return val
+        prefix = clock_info['static'].lower()
+        return get_csv_val(cout, prefix + '_current_level', devicenum)
 
 def getmaxlevel(devicenum, clock, cuda):
-    import re
     if cuda:
         return "N/A"
     else:
-        cmd = [get_smi_exec(cuda), "-s", "-d", str(devicenum)]
+        clock_info = _AMD_SMI_CLOCKS.get(clock)
+        if clock_info is None:
+            return "N/A"
+        cmd = [get_smi_exec(cuda), "static", "-g", str(devicenum), "-C", clock_info['static'], "--csv"]
         success, cout = _subprocess_helper(cmd)
         if not success:
             return "N/A"
 
-        maxlevel = -1
-        searchstr = "Supported " + clock + " frequencies on GPU" + str(devicenum)
-        idstr = "GPU["+str(devicenum)+"]"
-        p0 = cout.find(searchstr)
-        if p0 != -1:
-            cout = cout[p0:]
-            for line in cout.split("\n"):
-                line=line[len(idstr):].strip()
-                line=re.sub(":","",line).strip()
-                if line:
-                    maxlevel = line[0]
-                else:
-                    break
-            return maxlevel
-    return "N/A"
+        reader = csv.reader(cout.split('\n'))
+        try:
+            header = next(reader)
+        except StopIteration:
+            return "N/A"
+        level_cols = [
+            col for col in header
+            if col.startswith('frequency_levels_Level') or col.startswith('Level ')
+        ]
+        if not level_cols:
+            return "N/A"
+        return str(len(level_cols) - 1)
 
 
 def validmemtypes(cuda, smi=None):
     if cuda:
         return ["vram"]
-    elif smi is not None:
-        # Hardcoded in /opt/rocm/rocm_smi/bindings/rsmiBindings.py
-        return ["VRAM", "VIS_VRAM", "GTT"]
+    else:
+        return ["vram", "visible_vram", "gtt"]
 
 def getmeminfo(devicenum, mem_type, cuda, smi=None):
     if cuda:
@@ -425,16 +426,18 @@ def getmeminfo(devicenum, mem_type, cuda, smi=None):
             return cout_used, cout_total
         else:
             return "N/A"
-    elif smi is not None:
-        return smi.getMemInfo(devicenum, mem_type)
+    else:
+        cmd = [get_smi_exec(cuda), "metric", "-g", str(devicenum), "-m", "--csv"]
+        success, cout = _subprocess_helper(cmd)
+        if not success:
+            return "N/A", "N/A"
+        return get_csv_val(cout, "used_" + mem_type, devicenum), get_csv_val(cout, "total_" + mem_type, devicenum)
 
 def validversioncomponents(cuda, smi=None):
-    # currently only driver according to /opt/rocm/bin/rocm_smi.py
-    # driver corresponds to 0 in /opt/rocm/bin/rocm_smi.py
     if cuda:
         return ['driver']
     else:
-        return [0]
+        return ['driver']
 
 def getversion(devicenum, component, cuda, smi=None):
     if cuda:
@@ -446,5 +449,14 @@ def getversion(devicenum, component, cuda, smi=None):
             return cout
         else:
             return "N/A"
-    elif smi is not None:
-        return smi.getVersion([devicenum], component)
+    elif component == 'driver':
+        cmd = [get_smi_exec(cuda), "static", "-g", str(devicenum), "-d", "--csv"]
+        success, cout = _subprocess_helper(cmd)
+        if not success:
+            return "N/A"
+        val = get_csv_val(cout, 'version', devicenum)
+        if val == 'error':
+            val = get_csv_val(cout, 'driver_version', devicenum)
+        return val
+    else:
+        return "N/A"
