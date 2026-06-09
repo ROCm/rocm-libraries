@@ -3779,16 +3779,14 @@ class StreamKHybrid(StreamK):
                              comment="Check if work item index is valid"))
         module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
 
-        # Total tiles
-        sTotalTiles = writer.sgprPool.checkOut(1, "TotalTiles")
-        module.add(SMulI32(dst=sgpr(sTotalTiles), src0=sgpr("NumWorkGroups0"),
-                           src1=sgpr("NumWorkGroups1"), comment="Total tiles"))
-
-        # Full tile vs partial tile
+        # Full tile vs partial tile. The full-tile work-item count spans all
+        # batches (as TotalItems does), so it must use the batch-inclusive
+        # total tile count (nWG0 * nWG1 * batchCount). SK5: SKTiles is the
+        # SK4-dedicated tiles SGPR (uppercase).
         sFullTile = writer.sgprPool.checkOut(1, "fullTile")
-        # SK5: SKTiles is the SK4-dedicated tiles SGPR (uppercase).
-        module.add(SSubU32(dst=sgpr(sFullTile), src0=sgpr(sTotalTiles), src1=sgpr("SKTiles"),
-                           comment="Get number of full-tile work items"))
+        module.add(self.computeTotalTiles(writer, kernel, sFullTile))
+        module.add(SSubU32(dst=sgpr(sFullTile), src0=sgpr(sFullTile), src1=sgpr("SKTiles"),
+                           comment="Get number of full-tile work items (across all batches)"))
         module.add(SCmpLtU32(src0=sgpr(sWorkItemIdx), src1=sgpr(sFullTile),
                              comment="Check if work item is a full tile"))
         module.add(SCBranchSCC0(labelName=skPartialTile.getLabelName(),
@@ -3838,8 +3836,12 @@ class StreamKHybrid(StreamK):
         tmpVgpr = writer.vgprPool.checkOut(2, "div")
         tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
         sRemainder = writer.sgprPool.checkOut(1, "StreamKTileIdxRemainder")
+        # Per-batch tile count (NOT batch-inclusive): splits the global tile
+        # index into batch (WorkGroup2) and the in-batch tile.
+        sTilesPerBatch = writer.sgprPool.checkOut(1, "TilesPerBatch")
+        module.add(SMulI32(dst=sgpr(sTilesPerBatch), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="tiles per batch = nWG0 * nWG1"))
         module.add(scalarUInt32DivideAndRemainder(
-            qReg="WorkGroup2", dReg="StreamKTileIdx", divReg=sTotalTiles,
+            qReg="WorkGroup2", dReg="StreamKTileIdx", divReg=sTilesPerBatch,
             rReg=sRemainder, tmpVgprRes=tmpVgprRes,
             wavewidth=kernel["WavefrontSize"], doRemainder=True,
             comment="TileID // nWG0*nWG1"))
@@ -3853,7 +3855,7 @@ class StreamKHybrid(StreamK):
         writer.sgprPool.checkIn(sRemainder)
         module.addSpaceLine()
 
-        writer.sgprPool.checkIn(sTotalTiles)
+        writer.sgprPool.checkIn(sTilesPerBatch)
 
         # alpha == 0 short-circuit
         alphaLabelD = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
