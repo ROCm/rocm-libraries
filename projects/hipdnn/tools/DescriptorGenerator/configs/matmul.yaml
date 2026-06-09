@@ -41,25 +41,23 @@ operation:
     graph_return_type: "single"
     graph_return_outputs:
       - "c"
+    node_type_enum: "NodeType::MATMUL"
 
   tensor_fields:
     - name: "a"
       fbs_field: "a_tensor_uid"
-      attr_suffix: "A"
+      attr_suffix: "ADESC"
       required: true
-      frontend_getter: "get_a()"
 
     - name: "b"
       fbs_field: "b_tensor_uid"
-      attr_suffix: "B"
+      attr_suffix: "BDESC"
       required: true
-      frontend_getter: "get_b()"
 
     - name: "c"
       fbs_field: "c_tensor_uid"
-      attr_suffix: "C"
+      attr_suffix: "CDESC"
       required: true
-      frontend_getter: "get_c()"
 
   data_fields: []
 

@@ -61,9 +61,10 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   grid_n           = math::safe_ceil_div(N, MT_N);
   num_output_tiles = grid_m * grid_n * batch;
 
-  // Launch parameters: N_CU is the CU cap used for grid selection in both modes.
+  // Launch parameters. The default path passes 0 (no explicit CU cap); the BW model caps
+  // grid selection at N_CU.
   auto [reduction, wgs, cus, timesteps, split] = compute_launch_parameters(
-      problem, hardware, config, config.grid_selection, N_CU);
+      problem, hardware, config, config.grid_selection, bw_model_enabled ? N_CU : 0);
   reduction_strategy = reduction;
   num_wgs            = wgs;
   num_timesteps      = timesteps;

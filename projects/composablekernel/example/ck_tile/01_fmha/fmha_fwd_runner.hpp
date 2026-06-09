@@ -27,6 +27,10 @@
 #error "we should enable fmha_fwd_splitkv() api in order to cooperate with fmha_fwd_appendkv()"
 #endif
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
+#endif
 enum class fwd_result
 {
     success,
@@ -161,8 +165,10 @@ int override_num_splits_if_necessary(
 
     if(num_splits < 1 && p_drop == 0.0f)
     {
+        // props.multiProcessorCount for >=gfx10 is the number of WGPs (each has 2 CUs)
+        const int num_blocks_per_SM = props.warpSize == 32 ? 4 : 2;
         return num_splits_heuristic(
-            batch * nhead * num_m_blocks, props.multiProcessorCount * 2, 128);
+            batch * nhead * num_m_blocks, props.multiProcessorCount * num_blocks_per_SM, 128);
     }
 
     return num_splits;
@@ -644,8 +650,18 @@ fwd_result fmha_fwd_run(mode_enum mode,
     // legalize num_splits according to other options
     if(num_splits < 1)
     {
+        int nhead_merged        = nhead;
+        int max_seqlen_q_merged = max_seqlen_q;
+        // When max_seqlen_q == 1 and multiple head groups are merged (kMergeNumHeadGroupsSeqLenQ)
+        // then more splits are required
+        if(bias.type == bias_enum::no_bias && mask.type == mask_enum::no_mask &&
+           max_seqlen_q == 1 && nhead_k < nhead)
+        {
+            nhead_merged        = nhead_k;
+            max_seqlen_q_merged = max_seqlen_q * (nhead / nhead_k);
+        }
         num_splits = override_num_splits_if_necessary(
-            batch, nhead, max_seqlen_q, hdim_v, p_drop, num_splits);
+            batch, nhead_merged, max_seqlen_q_merged, hdim_v, p_drop, num_splits);
     }
     if(128 < num_splits)
     {
@@ -898,12 +914,17 @@ fwd_result fmha_fwd_run(mode_enum mode,
         gen_scales(q_descale_host, QDataType{}, 3);
         gen_scales(k_descale_host, KDataType{}, 3);
         // When P is fp4, only 8 values (0, 0.5, 1, 1.5, 2, 3, 4, 6) are used to quantize P.
+        // When P is fp6, only 32 values (0 .. 7.5) are used.
         // Too large V values can create rare error outliers between host (no quantization) and
         // device ("running" FA softmax + quantization), here we reduce max value by using smaller
         // range of V scales.
         gen_scales(v_descale_host,
                    VDataType{},
-                   std::is_same_v<typename TypeConfig::PDataType, ck_tile::pk_fp4_t> ? 1 : 3);
+                   ck_tile::is_any_of<typename TypeConfig::PDataType,
+                                      ck_tile::pk_fp4_t,
+                                      ck_tile::pk_fp6x16_t>::value
+                       ? 1
+                       : 3);
     }
     else if(qscale.type == quant_scale_enum::pertensor)
     {
@@ -1136,7 +1157,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
             traits.has_logits_soft_cap = 0.f < logits_soft_cap;
             traits.mask_type           = mask.type;
             traits.bias_type           = bias.type;
-            traits.has_sink            = mask.sink > 0 ? true : false;
+            traits.has_sink            = (mask.sink > 0 || init_sink_value != 0) ? true : false;
             traits.has_lse             = lse;
 
             if constexpr(std::is_same_v<fmha_fwd_traits, std::decay_t<decltype(traits)>>)
@@ -2484,3 +2505,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
     return pass ? fwd_result::success : fwd_result::failure;
 }
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

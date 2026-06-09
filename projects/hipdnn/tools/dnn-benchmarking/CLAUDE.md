@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Benchmarking and validation tool for hipDNN graphs. Loads JSON-serialized hipDNN graphs, executes them via the MIOpen plugin, captures performance metrics, and supports A/B testing between different plugin/engine configurations.
+Benchmarking and validation tool for hipDNN graphs. Loads JSON-serialized hipDNN graphs, executes them via hipDNN engine plugins, captures performance metrics, and supports explicit multi-engine comparison.
 
 ## Build and Development Commands
 
@@ -15,9 +15,9 @@ Benchmarking and validation tool for hipDNN graphs. Loads JSON-serialized hipDNN
 # Full setup AND build hipDNN + MIOpen provider from source (overwrites existing artifacts)
 ./setup.sh --force-build
 
-# Manual setup for ROCm/AMD GPU development
-pip install -r requirements-rocm.txt   # torch from ROCm nightly index
-pip install -e .                        # package + PyPI deps (numpy, pytest)
+# Manual setup for ROCm/AMD GPU development (gfx90X or gfx94X)
+pip install --pre torch --index-url https://rocm.nightlies.amd.com/v2-staging/gfx94X-dcgpu/
+pip install -e .                              # package + PyPI deps (numpy, pytest)
 
 # hipDNN bindings must be installed separately from your hipDNN build
 cd /path/to/hipdnn/python && pip install -e . --no-deps
@@ -28,14 +28,12 @@ Pass `/opt/rocm/lib/hipdnn_plugins/engines/` to `--plugin-path` when running ben
 
 ### ROCm PyTorch Setup
 
-The `requirements-rocm.txt` installs PyTorch from ROCm nightly indexes. The correct index depends on GPU architecture:
+`setup.sh` auto-detects the GPU architecture and installs PyTorch from the matching ROCm nightly index (`https://rocm.nightlies.amd.com/v2-staging/{arch}-dcgpu/`). Supported architectures:
 
-| GPU | Architecture | Index |
-|-----|-------------|-------|
-| MI200/MI210/MI250 | gfx90X | `v2-staging/gfx90X-dcgpu` |
-| MI300X/MI300A | gfx94X | `v2/gfx94X-dcgpu` |
-
-To switch architectures, change the `--index-url` line in `requirements-rocm.txt`.
+| GPU | Architecture |
+|-----|-------------|
+| MI200/MI210/MI250 | gfx90X |
+| MI300X/MI300A | gfx94X |
 
 ## Running Tests
 
@@ -56,6 +54,13 @@ LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --cov=dnn_benchmarking tes
 **Note:** GPU tests require ROCm libraries to be findable. Set `LD_LIBRARY_PATH=/opt/rocm/lib` before running tests that depend on `hipdnn_frontend`.
 
 Test markers: `gpu` (requires GPU), `slow` (slow integration tests).
+
+Strict profiling tests that require real profiler artifacts are skipped by
+default. Run them explicitly on a known-good profiling host:
+
+```bash
+LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --profiling-strict -m profiling_strict
+```
 
 ## Running the Tool
 
@@ -91,8 +96,11 @@ python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
 python -m dnn_benchmarking --graph 'graphs/*.json' \
   --plugin-path /path/to/hipdnn/plugins --output results.json
 
-# A/B testing (separate path, kept for now)
-python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2
+# Repeatable recipe from TOML config
+python -m dnn_benchmarking --config sample_configs/basic.toml.example --graph ./graphs/sample_conv_fwd.json
+
+# Engine comparison
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1,2
 
 # PyTorch backend (separate executor; single graph only)
 python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --backend pytorch
@@ -102,12 +110,12 @@ python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --backend pytor
 
 ```
 src/dnn_benchmarking/
-├── cli/              # Entry point (main.py, parser.py)
+├── cli/              # Entry point, parser, TOML config loading
 ├── common/           # Shared utilities (exceptions.py)
-├── config/           # BenchmarkConfig, ABTestConfig, SuiteConfig dataclasses
-├── execution/        # executor.py, buffer_manager.py, ab_runner.py,
-│                     # suite_runner.py, timing.py,
-│                     # pytorch_executor.py, pytorch_buffer_manager.py, pytorch_ops.py
+├── config/           # BenchmarkConfig, MetricsConfig, SuiteConfig dataclasses
+├── execution/        # executor.py, buffer_manager.py, suite_runner.py,
+│                     # timing.py, pytorch_executor.py,
+│                     # pytorch_buffer_manager.py, pytorch_ops.py
 ├── graph/            # loader.py (JSON loading), validator.py, tensor_info.py
 ├── reporting/        # reporter.py (console output), statistics.py, suite_results.py
 └── validation/       # validator.py, comparison.py, reference_provider.py
@@ -124,4 +132,4 @@ src/dnn_benchmarking/
 
 - 0: Success (all pass)
 - 1: Error (graph load, execution, configuration)
-- 2: Correctness failure (A/B comparison mismatch or suite tolerance_match failure)
+- 2: Correctness failure (suite tolerance_match failure)

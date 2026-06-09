@@ -15,9 +15,10 @@
 
 #include <hip/hip_runtime.h>
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck_tile {
 
 /// @brief The Grouped GEMM kernel host arguments.
@@ -216,7 +217,7 @@ struct QuantGroupedGemmKernel
         int occupancy;
         HIP_CHECK_ERROR(
             hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel_func, kBlockSize, 0));
-        const int grid_size = get_available_compute_units(s) * occupancy;
+        const int grid_size = get_available_compute_units(s) * max(occupancy, 1);
         return dim3(grid_size, 1, 1);
     }
 
@@ -313,12 +314,18 @@ struct QuantGroupedGemmKernel
 
         const typename Base::SplitKBatchOffset splitk_batch_offset(kargs, block_idx_z);
 
-        // options
-        const ADataType* a_ptr   = static_cast<const ADataType*>(kargs.a_ptr);
-        const BDataType* b_ptr   = static_cast<const BDataType*>(kargs.b_ptr);
-        const AQDataType* aq_ptr = static_cast<const AQDataType*>(kargs.aq_ptr);
-        const BQDataType* bq_ptr = static_cast<const BQDataType*>(kargs.bq_ptr);
-        CDataType* c_ptr         = static_cast<CDataType*>(kargs.c_ptr);
+        // Apply split-K per-batch offsets to every input pointer, mirroring the
+        // non-grouped QuantGemmKernel::Run_ path.  All offsets are 0 when
+        // k_batch == 1, so this is a no-op for non-split-K launches.
+        const ADataType* a_ptr =
+            static_cast<const ADataType*>(kargs.a_ptr) + splitk_batch_offset.a_k_split_offset;
+        const BDataType* b_ptr =
+            static_cast<const BDataType*>(kargs.b_ptr) + splitk_batch_offset.b_k_split_offset;
+        const AQDataType* aq_ptr =
+            static_cast<const AQDataType*>(kargs.aq_ptr) + splitk_batch_offset.aq_k_split_offset;
+        const BQDataType* bq_ptr =
+            static_cast<const BQDataType*>(kargs.bq_ptr) + splitk_batch_offset.bq_k_split_offset;
+        CDataType* c_ptr = static_cast<CDataType*>(kargs.c_ptr);
 
         // allocate LDS
         __shared__ char smem_ptr[GetSmemSize()];
@@ -340,7 +347,6 @@ struct QuantGroupedGemmKernel
         }
         else
         {
-
             if constexpr(UsePersistentKernel)
             {
                 RunGemmWithPipelineSelection(a_ptr,
@@ -454,8 +460,11 @@ struct QuantGroupedGemmKernel
             Base::MakeABlockWindow(a_ptr, kargs, splitk_batch_offset.splitted_k, block_idx_m);
         const auto& b_block_window =
             Base::MakeBBlockWindow(b_ptr, kargs, splitk_batch_offset.splitted_k, block_idx_n);
-        const auto& aq_block_window =
-            Base::MakeAQBlockWindow(aq_ptr, kargs, block_idx_m, block_idx_n);
+        // Pass aq_group_offset so the AQ tensor view dimension reflects the
+        // remaining K-groups from this split-K batch's offset position
+        // (mirrors QuantGemmKernel::RunGemm).
+        const auto& aq_block_window = Base::MakeAQBlockWindow(
+            aq_ptr, kargs, block_idx_m, block_idx_n, splitk_batch_offset.aq_group_offset);
         const auto& bq_block_window = Base::MakeBQBlockWindow(
             bq_ptr, kargs, splitk_batch_offset.bq_group_offset, block_idx_m, block_idx_n);
 
@@ -637,6 +646,7 @@ struct QuantGroupedGemmKernel
                 const auto block_idx_2d = OffsetTile1DPartitioner::GetOffsetedTileIndex(
                     0, kargs.M, kargs.N, (block_id - block_start) % grid_size_2d);
                 Run(kargs, block_idx_2d, (block_id - block_start) / grid_size_2d);
+                block_sync_lds();
                 block_id = block_id + grid_size; // advance to next block
                 // NOTE: this check is redundant but helps the compiler avoid spilling some VGPR
                 if(block_id >= cum_grid_size)
@@ -649,4 +659,6 @@ struct QuantGroupedGemmKernel
 };
 
 } // namespace ck_tile
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

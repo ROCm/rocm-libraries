@@ -3,7 +3,10 @@
 
 #include <argparse.hpp>
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
@@ -47,6 +50,17 @@ bool engineIsLoaded(hipdnnHandle_t handle, std::string_view targetEngineName)
 
 int main(int argc, char** argv) noexcept
 {
+    // Shared hipdnn handle + HIP stream are created below before any fixture
+    // runs, so per-fixture SKIP_IF_NO_DEVICES is too late. Bail early on a
+    // no-GPU runner so ctest reports PASS.
+    int deviceCount = 0;
+    auto deviceStatus = hipGetDeviceCount(&deviceCount);
+    if(deviceStatus == hipErrorNoDevice || deviceCount == 0)
+    {
+        std::cout << "No HIP devices available; skipping " << argv[0] << "\n";
+        return 0;
+    }
+
     try
     {
         // Parse custom arguments before InitGoogleTest to avoid unknown flag warnings
@@ -69,6 +83,9 @@ int main(int argc, char** argv) noexcept
                   "without executing or validating the graph");
         parser.add_argument("--tc", "--test-config")
             .help("Path to a TOML configuration file for per-test tolerance overrides.");
+        parser.add_argument("--reference-executor")
+            .help("Reference executor for validation: 'cpu' (default) or 'gpu'. "
+                  "Can also be set via HIPDNN_TEST_REFERENCE_EXECUTOR env var.");
         parser.add_argument("--generate-support-matrix")
             .default_value(std::string("support_matrix.md"))
             .implicit_value(std::string("support_matrix.md"))
@@ -106,6 +123,29 @@ int main(int argc, char** argv) noexcept
             catch(const std::filesystem::filesystem_error&)
             {
                 std::cerr << "Error: Config path does not exist: " << configPathArg << '\n';
+                return 1;
+            }
+        }
+
+        // Parse --reference-executor argument (case-insensitive)
+        std::optional<hipdnn_integration_tests::ReferenceExecutorType> refExecType;
+        if(parser.is_used("--reference-executor"))
+        {
+            auto val = parser.get<std::string>("--reference-executor");
+            std::transform(val.begin(), val.end(), val.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if(val == "gpu")
+            {
+                refExecType = hipdnn_integration_tests::ReferenceExecutorType::GPU;
+            }
+            else if(val == "cpu")
+            {
+                refExecType = hipdnn_integration_tests::ReferenceExecutorType::CPU;
+            }
+            else
+            {
+                std::cerr << "Error: --reference-executor must be 'cpu' or 'gpu'\n";
                 return 1;
             }
         }
@@ -149,7 +189,8 @@ int main(int argc, char** argv) noexcept
                                                          std::move(engineName),
                                                          failOnUnsupported,
                                                          skipGraphValidation,
-                                                         std::move(configPath));
+                                                         std::move(configPath),
+                                                         refExecType);
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
         // argv[0] (program name) must be first — GTest requires it.
@@ -190,6 +231,7 @@ int main(int argc, char** argv) noexcept
         if(hipdnnSetStream(handle, stream) != HIPDNN_STATUS_SUCCESS)
         {
             std::cerr << "Failed to set stream on shared handle\n";
+            static_cast<void>(hipStreamDestroy(stream));
             return 1;
         }
 
@@ -200,6 +242,7 @@ int main(int argc, char** argv) noexcept
             std::cerr << "Error: Engine '"
                       << hipdnn_integration_tests::TestConfig::get().getEngineName()
                       << "' is not loaded. Check the plugin path.\n";
+            static_cast<void>(hipStreamDestroy(stream));
             return 1;
         }
 
@@ -213,7 +256,7 @@ int main(int argc, char** argv) noexcept
             if(hipdnn_integration_tests::TestConfig::get().hasEngineName())
             {
                 allEngineNames.emplace_back(
-                    std::string(hipdnn_integration_tests::TestConfig::get().getEngineName()));
+                    hipdnn_integration_tests::TestConfig::get().getEngineName());
             }
             else
             {

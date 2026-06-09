@@ -1211,6 +1211,10 @@ protected:
         DropoutDescGuard DropoutDesc;
         size_t statesSizeInBytes = 0;
 
+        // See DestroyInternalRnnDropoutDesc — frees the descriptor allocated
+        // by miopenCreateRNNDescriptor that the upcoming Set* will leak.
+        DestroyInternalRnnDropoutDesc(rnnDesc);
+
         miopenRNNAlgo_t algoMode  = miopenRNNdefault;
         miopenHandle_t mio_handle = nullptr;
 #if MIOPEN_BACKEND_HIP
@@ -1485,6 +1489,12 @@ protected:
         //                                        seqLength, numLayers,
         //                                        biasMode, dirMode,
         //                                        inputMode, rnnMode, inVecReal});
+
+        // Free the DropoutDescriptor that miopenSetRNNDescriptor just allocated.
+        // In the dropout path, the internal pointer aliases the user-owned
+        // DropoutDescGuard — freeing it would double-free.
+        if(useDropout == 0)
+            DestroyInternalRnnDropoutDesc(rnnDesc);
 
         if(useDropout != 0)
         {

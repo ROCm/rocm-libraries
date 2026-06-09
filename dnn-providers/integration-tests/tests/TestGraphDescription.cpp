@@ -54,7 +54,7 @@ TEST(TestGraphDescription, ConvPlusPointwiseRelu)
     auto desc = hipdnn_integration_tests::describeGraph(graph);
     EXPECT_NE(desc.find("ConvFprop"), std::string::npos) << "desc=" << desc;
     EXPECT_NE(desc.find("Pointwise:RELU_FWD"), std::string::npos) << "desc=" << desc;
-    EXPECT_NE(desc.find("+"), std::string::npos) << "desc=" << desc;
+    EXPECT_NE(desc.find('+'), std::string::npos) << "desc=" << desc;
 }
 
 TEST(TestGraphDescription, DataTypeAnnotations)
