@@ -1168,11 +1168,7 @@ class LogicalScheduler:
         """
         self._ensure_pass(Pass.GR)
         cfg = self.config
-        numK = cfg.numSubIterK
 
-        # Build global lr_by_data across all partitions (MFMA deps are cross-partition)
-        # lr_by_data[data_k][tensor] → list of LRPlacements loading subIterK=data_k
-        lr_by_data = [{} for _ in range(numK)]
         # gr_by_tensor[tensor] → list of all GRPlacements (LR→GR deps are cross-partition)
         gr_by_tensor = {}
         # lr_by_tensor[tensor] → list of all LRPlacements (GR→LR collision is cross-partition)
@@ -1180,20 +1176,18 @@ class LogicalScheduler:
         for slots in self._partitions:
             for slot in slots:
                 for lr in slot.lrs:
-                    for data_k in lr.tiles.subIterK_list:
-                        lr_by_data[data_k].setdefault(lr.tensor, []).append(lr)
                     lr_by_tensor.setdefault(lr.tensor, []).append(lr)
                 for gr in slot.grs:
                     gr_by_tensor.setdefault(gr.tensor, []).append(gr)
 
         for pi, slots in enumerate(self._partitions):
-            self._annotate_deps_partition(pi, slots, cfg, lr_by_data,
+            self._annotate_deps_partition(pi, slots, cfg,
                                           gr_by_tensor, lr_by_tensor)
 
         self._completed.add(Pass.DEPS)
 
     def _annotate_deps_partition(self, pi: int, slots: List[SubIterKSlot],
-                                 cfg: SchedulerConfig, lr_by_data: list,
+                                 cfg: SchedulerConfig,
                                  gr_by_tensor: dict, lr_by_tensor: dict):
         """Annotate deps for a single partition (in-place on placements)."""
         numK = len(slots)
@@ -1210,7 +1204,7 @@ class LogicalScheduler:
         # ── Pass 1: build per-partition lookups ──
         # lr_by_slot[k][tensor] → LRPlacement at subIterK=k
         # gr_by_slot[k][tensor] → GRPlacement at subIterK=k
-        # (lr_by_data, gr_by_tensor, lr_by_tensor are built globally in annotate_deps)
+        # (gr_by_tensor, lr_by_tensor are built globally in annotate_deps)
         lr_by_slot = [{} for _ in range(numK)]
         gr_by_slot = [{} for _ in range(numK)]
 

@@ -330,7 +330,6 @@ class LogicalScheduler {
   // ── Pass: annotate_deps ──────────────────────────────────
   void annotate_deps();
   void annotate_deps_partition(int pi, std::vector<CSlot>& slots,
-                               std::vector<std::map<std::string, std::vector<Placement*>>>& lr_by_data,
                                std::map<std::string, std::vector<Placement*>>& gr_by_tensor,
                                std::map<std::string, std::vector<Placement*>>& lr_by_tensor);
 
@@ -932,35 +931,26 @@ inline void LogicalScheduler::place_GRs() {
 
 inline void LogicalScheduler::annotate_deps() {
   ensure(Pass::GR);
-  int numK = config.numSubIterK;
 
-  std::vector<std::map<std::string, std::vector<Placement*>>> lr_by_data(numK);
   std::map<std::string, std::vector<Placement*>> gr_by_tensor;
   std::map<std::string, std::vector<Placement*>> lr_by_tensor;
   for (auto& slots : partitions) {
     for (auto& slot : slots) {
-      for (auto* lr : slot.lrs) {
-        for (int data_k : lr->tiles.subIterK_list())
-          lr_by_data[data_k][lr->tensor].push_back(lr);
-        lr_by_tensor[lr->tensor].push_back(lr);
-      }
+      for (auto* lr : slot.lrs) lr_by_tensor[lr->tensor].push_back(lr);
       for (auto* gr : slot.grs) gr_by_tensor[gr->tensor].push_back(gr);
     }
   }
 
   for (int pi = 0; pi < (int)partitions.size(); ++pi)
-    annotate_deps_partition(pi, partitions[pi], lr_by_data, gr_by_tensor,
-                            lr_by_tensor);
+    annotate_deps_partition(pi, partitions[pi], gr_by_tensor, lr_by_tensor);
 
   completed.insert(static_cast<int>(Pass::DEPS));
 }
 
 inline void LogicalScheduler::annotate_deps_partition(
     int pi, std::vector<CSlot>& slots,
-    std::vector<std::map<std::string, std::vector<Placement*>>>& lr_by_data,
     std::map<std::string, std::vector<Placement*>>& gr_by_tensor,
     std::map<std::string, std::vector<Placement*>>& lr_by_tensor) {
-  (void)lr_by_data;
   // clear annotations
   for (auto& slot : slots) {
     if (slot.mfma) slot.mfma->deps.clear();
