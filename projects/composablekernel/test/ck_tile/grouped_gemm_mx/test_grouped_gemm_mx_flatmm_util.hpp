@@ -17,8 +17,9 @@
 #include "ck_tile/ops/flatmm.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
-// Arch traits shared with the single-problem MX FLATMM tests.
-#include "../flatmm/mx_flatmm_arch_traits.hpp"
+// Arch traits for MX FLATMM grouped tests. Local copy so grouped_gemm_mx
+// does not depend on the flatmm test folder.
+#include "mx_flatmm_arch_traits.hpp"
 
 // Initialization proxy: pk_fp6x16_t lacks converters for FillUniformDistribution.
 // Initialize through pk_fp6_t and memcpy the raw bytes.
