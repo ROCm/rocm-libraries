@@ -9,6 +9,8 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
+#define DEBUG_TYPE "StinkyRemoveNopPass"
+
 namespace {
 using namespace stinkytofu;
 
@@ -48,8 +50,8 @@ class StinkyRemoveNopPass : public StinkyInstPass {
         for (BasicBlock& bb : func) {
             if (passCtx.shouldProcessBasicBlock(bb)) {
                 const size_t removed = removeNopsInBlock(bb);
-                std::cout << "[StinkyRemoveNopPass] bb=\"" << bb.getLabel()
-                          << "\" removed_nops=" << removed << "\n";
+                PASS_DEBUG(std::cerr << "[StinkyRemoveNopPass] bb=\"" << bb.getLabel()
+                                     << "\" removed_nops=" << removed << "\n");
             }
         }
         return preserveCFGAnalyses();

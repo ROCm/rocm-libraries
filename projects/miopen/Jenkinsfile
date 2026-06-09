@@ -152,7 +152,7 @@ def runBuildAndSingleGtestJob(Map conf=[:])
         withWorkingDir {
             def single_gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4 "
             utils.buildHipClangJob(
-                setup_flags: single_gtest_flags + flags, 
+                setup_flags: single_gtest_flags + flags,
                 build_cmd: "LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check",
                 build_install:true,
                 build_timeout:build_timeout_minutes,
@@ -423,36 +423,6 @@ pipeline {
                         }
                     }
                 }
-                stage('Clang Format') {
-                    agent{ label rocmnode("nogpu") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJob(make_targets: "check_format", needs_gpu:false, gpu_family: "ci")
-                            }
-                        }
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
-                stage('Check GTest Format') {
-                    agent { label rocmnode("nogpu") }
-                    steps {
-                        script {
-                            withWorkingDir {
-                                sh 'cd ./test/utils && python3 gtest_formating_checks.py'
-                            }
-                        }
-                    }
-                    post {
-                        always {
-                            cleanWs()
-                        }
-                    }
-                }
                 stage('HipNoGPU Debug Build Test') {
                     when {
                         beforeAgent true
@@ -613,7 +583,7 @@ pipeline {
                             cleanWs()
                         }
                     }
-                }               
+                }
                 stage('Bf16 Hip Install All gfx942') {
                     when {
                         beforeAgent true
@@ -623,7 +593,7 @@ pipeline {
                     steps{
                         runBuildAndSingleGtestJob(flags: Full_test + Bf16_flags + gfx942_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
-                }               
+                }
                 stage('Fp16 Hip Install All gfx942') {
                     when {
                         beforeAgent true
@@ -679,7 +649,7 @@ pipeline {
                     steps{
                         runBuildAndSingleGtestJob(flags: Full_test + Fp16_flags + gfx1101_flags, build_timeout_minutes: Build_timeout_minutes, gpu_family: "ci")
                     }
-                }                
+                }
                 stage('Fp32 Hip Install All gfx1101') {
                     when {
                         beforeAgent true

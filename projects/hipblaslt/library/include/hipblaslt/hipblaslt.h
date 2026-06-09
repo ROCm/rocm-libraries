@@ -224,10 +224,12 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE = 23,              /**<The batch stride of the bias vector pointer in the device memory. This is only applicable for hipblasltBatchMode_t is 0 (Strided Batched GEMM) and hipblasltEpilogue_t is BIAS enabled. Default value is 0 meaning same bias value broadcast across all batches. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_A_SCALE_MODE = 31,                   /**<Scaling mode that defines how the matrix scaling factor for matrix A is interpreted. See ``hipblasLtMatmulMatrixScale_t``. */
   HIPBLASLT_MATMUL_DESC_B_SCALE_MODE = 32,                   /**<Scaling mode that defines how the matrix scaling factor for matrix B is interpreted. See ``hipblasLtMatmulMatrixScale_t``. */
+  HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET = 33,                /**<Target the matmul kernel selection and persistent-grid sizing for this many compute units (CUs). Set to ``0`` (the default) to use all CUs the device exposes. Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. This is a hint to the library heuristics; the launched grid is not guaranteed to use exactly this many CUs. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT = 100,     /**<Compute input A types. Defines the data type used for the input A of a matrix multiply. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,           /**<Compute input B types. Defines the data type used for the input B of a matrix multiply. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,              /**<First extra argument for the activation function. Data type: ``float``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,              /**<Second extra argument for the activation function. Data type: ``float``. */
+  HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT = 104,      /**<Opt in to the hipBLASLt dynamic persistent tile scheduler (work-stealing StreamK). Provided as an ``_EXT`` attribute. ``0`` (default) means use the library default scheduler; non-zero enables the dynamic persistent tile path when the selected kernel supports it. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 
@@ -237,7 +239,8 @@ typedef enum {
 typedef enum {
   HIPBLASLT_MATMUL_PREF_SEARCH_MODE = 0,          /**<Search mode. Data type: ``uint32_t``. */
   HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,  /**<Maximum allowed workspace memory. Default is 0 (no workspace memory allowed). Data type: ``uint64_t``. */
-  HIPBLASLT_MATMUL_PREF_MAX = 2
+  HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET = 2,      /**<Bias heuristic algorithm selection toward kernels that perform well at this targeted compute-unit count. ``0`` (default) means no constraint. Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
+  HIPBLASLT_MATMUL_PREF_MAX = 3
 } hipblasLtMatmulPreferenceAttributes_t;
 
 /*! \ingroup types_module
@@ -490,6 +493,56 @@ hipblasStatus_t hipblasLtCreate(hipblasLtHandle_t* handle);
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtDestroy(const hipblasLtHandle_t handle);
+
+/*! \ingroup library_module
+ *  \brief Set the handle-level target compute-unit (CU / SM) count.
+ *
+ *  \details
+ *  The hipBLASLt analogue of cuBLAS's ``cublasSetSmCountTarget``. The value
+ *  hints how many compute units hipBLASLt should target for kernel selection
+ *  and persistent-grid sizing on subsequent matmul calls that use this handle.
+ *
+ *  ``0`` (the default) means "no override; use all CUs the device exposes".
+ *  Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. A
+ *  per-matmul-descriptor (``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET``) or
+ *  per-preference (``HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET``) attribute, when
+ *  set to a non-zero value, takes precedence over this handle-level value.
+ *
+ *  The user must ensure thread safety when modifying handle state from
+ *  multiple threads, the same as for any other handle-mutating helper.
+ *
+ *  @param[in]
+ *  handle           hipBLASLt library context.
+ *  @param[in]
+ *  smCountTarget    target CU/SM count; ``0`` for "use all CUs".
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value stored.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p smCountTarget is negative.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetSmCountTarget(hipblasLtHandle_t handle,
+                                          int32_t           smCountTarget);
+
+/*! \ingroup library_module
+ *  \brief Return the handle-level target compute-unit (CU / SM) count.
+ *
+ *  \details
+ *  Returns the value previously programmed via ``hipblasLtSetSmCountTarget``.
+ *  Equivalent to cuBLAS's ``cublasGetSmCountTarget``.
+ *
+ *  @param[in]
+ *  handle           hipBLASLt library context.
+ *  @param[out]
+ *  smCountTarget    receives the previously stored value (``0`` if never set).
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value returned.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p smCountTarget is null.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtGetSmCountTarget(hipblasLtHandle_t handle,
+                                          int32_t*          smCountTarget);
 
 /*! \ingroup library_module
  *  \brief Drain the post-GEMM check-numerics flag without destroying the handle.
