@@ -651,7 +651,16 @@ struct {kernel_name}_Config {{
         # whose TailHandler takes (run_func, has_hot_loop) and invokes
         # run_func(bool_constant<...>) -- 1 lambda arg. Other pipelines pass
         # (run_func, has_hot_loop, tail_number) and invoke 2-arg run_func.
-        if tr.pipeline in ("compv1", "basic_v1", "basic_async_v1"):
+        if tr.pipeline == "wavelet":
+            # The wavelet pipeline has no Base*/TailHandler. Its operator()
+            # consumes num_loop at runtime, so there is no compile-time hot-loop
+            # / tail dispatch -- launch the kernel once directly. (The Run lambda
+            # ignores has_hot_loop_/tail_number_ for the conv kernel.)
+            tail_handler_call = "Run(has_hot_loop, tail_num);"
+            run_lambda_signature = (
+                "[&](const auto has_hot_loop_, const auto tail_number_)"
+            )
+        elif tr.pipeline in ("compv1", "basic_v1", "basic_async_v1"):
             tail_handler_call = "BaseGemmPipeline::TailHandler(Run, has_hot_loop);"
             run_lambda_signature = "[&](const auto has_hot_loop_)"
         else:
@@ -881,7 +890,9 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
             "compv6": "BaseGemmPipelineAgBgCrCompV6",
             "comp_async": "BaseGemmPipelineAgBgCrCompAsync",
             "basic_async_v1": "BaseGemmPipelineAGmemBGmemCRegV1",
-            "wavelet": "BaseGemmPipelineAgBgCrWavelet",
+            # The wavelet pipeline has no separate Base class; it exposes the
+            # BlockHasHotloop / GetBlockLoopTailNum statics directly.
+            "wavelet": "GemmPipelineAgBgCrWavelet",
         }
         return pipelines.get(pipeline, "BaseGemmPipelineAgBgCrCompV3")
 

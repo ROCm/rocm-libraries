@@ -247,6 +247,10 @@ _BASE_TILE_WAVE_STRATEGIES: Dict[Tuple[int, int, int], List[WaveStrategy]] = {
 _WAVE_STRATEGY_OVERRIDES: Dict[str, Dict[Tuple[int, int, int], List[WaveStrategy]]] = {
     "forward": {
         (64, 64, 32): [WaveStrategy.SINGLE, WaveStrategy.SPLIT_MN],
+        # Drop SPLIT_MK (2,1,2): the forward implicit-GEMM kernel does not
+        # reduce partial accumulations across K-waves, so a K-wave split
+        # produces incorrect results. Only SPLIT_M (2,1,1) is valid here.
+        (128, 32, 32): [WaveStrategy.SPLIT_M],
     },
     "bwd_data": {
         (64, 16, 16): [WaveStrategy.SPLIT_M4],
@@ -1598,6 +1602,25 @@ def get_configs(
 
             for vec_a, vec_b, vec_c in gated_vecs:
                 for pipeline, scheduler in pipelines:
+                    # The wavelet pipeline uses its own direct kernel path and
+                    # does not implement the UniversalGemmKernel interface that
+                    # the explicit_gemm path routes through (its operator() takes
+                    # 4 arguments, not the 6 UniversalGemmKernel::RunGemm passes).
+                    # The two are therefore incompatible.
+                    if pipeline == "wavelet" and feat and feat.explicit_gemm:
+                        continue
+
+                    # KNOWN LIMITATION (bwd_weight, half precision):
+                    # The interwave pipelines -- "compv1" (runtime BASIC_V1) and
+                    # "mem" (runtime MEMORY) -- produce INCORRECT results for the
+                    # bwd_weight Default specialization when the macro tile is
+                    # split across multiple waves (wave_m * wave_n > 1) in fp16/bf16
+                    # on grouped convolutions with a small per-group GEMM-M
+                    # (per-group K). Observed failing tiles: 64x64x64 (2,2,1),
+                    # 64x16x64 (2,1,1), 16x32x64 (1,2,1) -- ~50% of the weight
+                    # output (whole groups) comes back zero.
+                    #
+
                     # compv4 forces double_smem_buffer
                     dsb = (pipeline == "compv4") or (feat.double_smem_buffer if feat else False)
 
