@@ -740,8 +740,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: i
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       #UseBias: True
       Batched: True

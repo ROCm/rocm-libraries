@@ -133,6 +133,11 @@ def validate_skill(skill: Path) -> list[str]:
         "hipdnn-superbuild",
         "hipdnn-superbuild-test",
         "pr-summary",
+        "rfc-backlog",
+        "rfc-review",
+        "rfc-review-compatibility",
+        "rfc-review-ops",
+        "rfc-review-security",
     }
     if skill.name in claude_commands:
         for field in REQUIRED_CLAUDE_COMMAND_FIELDS:

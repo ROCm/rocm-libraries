@@ -170,6 +170,8 @@ Provenance and calibration data is stored in a **separate companion file** (`{Na
 
 When `gpu_architecture` is present, the arch guard skips the test if the current device doesn't match. When absent (as in the first example), the data is portable across all ASICs.
 
+The `.meta.json` file itself is optional for forward bundles. A bundle without one is valid: it falls back to the per-operation default tolerance (see [Tolerance Framework](#tolerance-framework)) and is never skipped or rejected on that basis — this is the expected state for bundles migrated from the old test system. When a `.meta.json` *is* present, the `generator`, `reference_source`, and `reference_strategy` fields are mandatory and the pre-commit bundle verifier rejects a `.meta.json` missing them. Remaining fields are optional. Generator scripts populate the metadata file automatically. (Backward bundles are the exception: they must include a `.meta.json` with a `forward_source` field — see [Forward-Backward Generation Constraint](#forward-backward-generation-constraint).)
+
 **Field reference:**
 
 | Field | Required | Type | Purpose |
