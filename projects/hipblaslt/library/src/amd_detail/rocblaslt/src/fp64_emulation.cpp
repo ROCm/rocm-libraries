@@ -1148,11 +1148,9 @@ oz2_scaleAB_kernel(const double* __restrict__ A,
  *
  * Template parameter HAS_LO:
  *   true  — s ≥ 8: cQpiLo[t] is non-zero; fuse dc×cQpiLo[t] into a FMA
- *            with the local_lo update, saving one multiply vs the separate
- *            lo = dc*cQpiLo[t] + two-add form.
+ *            with the local_lo update using the 2Sum rounding error.
  *   false — s ≤ 7: cQpiLo[t] = 0 for all t (single-double qPi suffices);
- *            skip the lo multiply entirely and reduce local_lo += err,
- *            saving two FP64 ops per modulus.
+ *            only the hi chain is updated; local_lo tracks 2Sum errors.
  * ========================================================================= */
 template <bool HAS_LO>
 __global__ static void
@@ -1183,14 +1181,12 @@ oz2_chunk_accum_kernel_rt(const int32_t* __restrict__ C32i_batch,
         /* Reduce to symmetric residue mod m_t (exact dc * qPiHi[t] in double) */
         const double dc      = fma(cNegMod[t], rint(dc_raw * cInvMod[t]), dc_raw);
         const double hi      = dc * cQpiHi[t];
-        /* 2Sum accumulation of hi into local_hi */
+        /* 2Sum accumulation: captures the exact rounding error from local_hi+hi
+         * and feeds it into the lo chain.  The extra compute fills memory-latency
+         * gaps, keeping the GPU busy between C32i_batch loads.               */
         const double new_hi  = local_hi + hi;
         const double err     = hi - (new_hi - local_hi);
         local_hi = new_hi;
-        /* lo update — two variants selected at compile time:
-         *   HAS_LO=true:  fuse dc×cQpiLo[t] and the lo+err accumulation into
-         *                 one FMA, saving one multiply over the split form.
-         *   HAS_LO=false: cQpiLo[t] == 0 for all t (s ≤ 7); skip entirely. */
         if constexpr (HAS_LO)
             local_lo = fma(dc, cQpiLo[t], local_lo + err);
         else
