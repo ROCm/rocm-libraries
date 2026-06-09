@@ -61,7 +61,9 @@ public:
                            bool skipGraphValidation = false,
                            std::optional<std::filesystem::path> configPath = std::nullopt,
                            std::optional<ReferenceExecutorType> referenceExecutorType
-                           = std::nullopt)
+                           = std::nullopt,
+                           bool allowBundles = false,
+                           std::optional<std::filesystem::path> goldenDataDir = std::nullopt)
     {
         TestConfig& instance = get();
         if(instance._initialized)
@@ -102,6 +104,27 @@ public:
         if(configPath.has_value())
         {
             instance._testSettings.emplace(*configPath);
+        }
+
+        // Golden bundle configuration
+        instance._allowBundles = allowBundles;
+        if(!instance._allowBundles)
+        {
+            auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
+            if(envVal == "1" || envVal == "true")
+            {
+                instance._allowBundles = true;
+            }
+        }
+
+        instance._goldenDataDir = std::move(goldenDataDir);
+        if(!instance._goldenDataDir.has_value())
+        {
+            auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR");
+            if(!envVal.empty())
+            {
+                instance._goldenDataDir = std::filesystem::path(envVal);
+            }
         }
 
         // Detect device 0's gfx arch once at startup. Used by [[test_skips]]
@@ -234,6 +257,29 @@ public:
         return _referenceExecutorType.value_or(ReferenceExecutorType::CPU);
     }
 
+    bool allowBundles() const
+    {
+        throwIfNotInitialized();
+        return _allowBundles;
+    }
+
+    bool hasGoldenDataDir() const
+    {
+        throwIfNotInitialized();
+        return _goldenDataDir.has_value();
+    }
+
+    const std::filesystem::path& getGoldenDataDir() const
+    {
+        throwIfNotInitialized();
+        if(!_goldenDataDir.has_value())
+        {
+            throw std::runtime_error(
+                "getGoldenDataDir() called but --golden-data-dir was not provided");
+        }
+        return _goldenDataDir.value();
+    }
+
 private:
     TestConfig() = default;
 
@@ -249,10 +295,12 @@ private:
     std::optional<std::string> _engineName;
     std::optional<TestSettings> _testSettings;
     std::optional<ReferenceExecutorType> _referenceExecutorType;
+    std::optional<std::filesystem::path> _goldenDataDir;
     std::string _currentArch;
     std::string _currentPlatform;
     bool _failOnUnsupported = false;
     bool _skipGraphValidation = false;
+    bool _allowBundles = false;
     bool _initialized = false;
 };
 
