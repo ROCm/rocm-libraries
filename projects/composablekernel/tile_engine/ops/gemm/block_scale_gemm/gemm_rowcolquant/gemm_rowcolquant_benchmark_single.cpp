@@ -92,24 +92,25 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
         throw std::invalid_argument("m, n, k must be positive integers");
     }
 
-    RowColQuantGemmProblem problem{arg_parser.get_int("split_k"),
-                                   M,
-                                   N,
-                                   K,
-                                   arg_parser.get_int("stride_a"),
-                                   arg_parser.get_int("stride_b"),
-                                   arg_parser.get_int("stride_c"),
+    RowColQuantGemmProblem problem{GemmProblem{arg_parser.get_int("split_k"),
+                                               M,
+                                               N,
+                                               K,
+                                               arg_parser.get_int("stride_a"),
+                                               arg_parser.get_int("stride_b"),
+                                               arg_parser.get_int("stride_c"),
+                                               dtype_a,
+                                               dtype_b,
+                                               dtype_acc,
+                                               dtype_c,
+                                               layout_a,
+                                               layout_b,
+                                               layout_c,
+                                               false},
                                    0, // stride_aq computed by profiler
                                    0, // stride_bq computed by profiler
-                                   dtype_a,
-                                   dtype_b,
                                    dtype_aq,
-                                   dtype_bq,
-                                   dtype_acc,
-                                   dtype_c,
-                                   layout_a,
-                                   layout_b,
-                                   layout_c};
+                                   dtype_bq};
 
     Settings setting{arg_parser.get_int("warmup"),
                      arg_parser.get_int("repeat"),
