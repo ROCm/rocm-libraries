@@ -354,7 +354,9 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::FLAT;
 
     FLATModifiers(int offset12 = 0, bool glc = false, bool slc = false, bool lds = false,
-                  bool isStore = false, bool hasGLCModifier = false, bool hasSC0Modifier = false)
+                  bool isStore = false, bool hasGLCModifier = false, bool hasSC0Modifier = false,
+                  MUBUFScope scope = MUBUFScope::SCOPE_NONE,
+                  TemporalHint th = TemporalHint::TH_NONE)
         : TypedModifier<FLATModifiers>(),
           offset12(offset12),
           glc(glc),
@@ -362,7 +364,9 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
           lds(lds),
           isStore(isStore),
           hasGLCModifier(hasGLCModifier),
-          hasSC0Modifier(hasSC0Modifier) {}
+          hasSC0Modifier(hasSC0Modifier),
+          scope(scope),
+          th(th) {}
 
     int offset12;
     uint32_t glc : 1;
@@ -371,6 +375,9 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
     uint32_t isStore : 1;
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
+    // gfx12+ FLAT cache hints; default-NONE values are not emitted.
+    MUBUFScope scope;
+    TemporalHint th;
 };
 
 // Modifiers for global_* memory ops. Carries the immediate offset (offset:N)

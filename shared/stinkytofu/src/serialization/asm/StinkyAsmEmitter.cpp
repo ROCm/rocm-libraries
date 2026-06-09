@@ -181,6 +181,15 @@ inline std::ostream& operator<<(std::ostream& os, const FLATModifiers& flatMod) 
         else if (flatMod.hasSC0Modifier)
             os << " sc1";
     }
+    // gfx12+ FLAT ops use scope:/th: in place of glc/slc/sc0/sc1; the rocisa
+    // emitter writes these for cross-CU sync (e.g. flat_atomic_dec_u32 for
+    // MBSK GSU), and dropping them on re-emit silently breaks coherence.
+    if (flatMod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(flatMod.scope);
+    }
+    if (hasTemporalHint(flatMod.th)) {
+        os << " th:" << toString(flatMod.th);
+    }
     if (flatMod.lds) {
         os << " lds";
     }

@@ -68,6 +68,10 @@ std::string itemToString(const rocisa::Item* item) {
     return item->toString();
 }
 
+// Forward decls (definitions appear below; convertFLATModifiers references them).
+stinkytofu::MUBUFScope convertMUBUFScope(rocisa::CacheScope scope);
+stinkytofu::TemporalHint convertTemporalHint(rocisa::TemporalHint th);
+
 // Helper functions to convert rocisa modifiers to stinkytofu modifiers
 stinkytofu::DSModifiers convertDSModifiers(const rocisa::DSModifiers& rocMod) {
     return stinkytofu::DSModifiers(rocMod.na, rocMod.offset, rocMod.offset0, rocMod.offset1,
@@ -78,8 +82,9 @@ stinkytofu::FLATModifiers convertFLATModifiers(const rocisa::FLATModifiers& rocM
                                                const std::map<std::string, int>& asmCaps) {
     bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
     bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
-    return stinkytofu::FLATModifiers(rocMod.offset12, rocMod.glc, rocMod.slc, rocMod.lds,
-                                     rocMod.isStore, hasGLCModifier, hasSC0Modifier);
+    return stinkytofu::FLATModifiers(
+        rocMod.offset12, rocMod.glc, rocMod.slc, rocMod.lds, rocMod.isStore, hasGLCModifier,
+        hasSC0Modifier, convertMUBUFScope(rocMod.scope), convertTemporalHint(rocMod.th));
 }
 
 stinkytofu::MUBUFScope convertMUBUFScope(rocisa::CacheScope scope) {
