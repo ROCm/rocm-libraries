@@ -82,7 +82,7 @@ from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     sgpr,
     vgpr,
 )
-from rocisa_stinkytofu_adaptor.enum import CacheScope, HighBitSel, SelectBit  # noqa: E402
+from rocisa_stinkytofu_adaptor.enum import CacheScope, HighBitSel, NonVolatile, SelectBit, TemporalHint  # noqa: E402
 
 
 # ===========================================================================
@@ -1783,14 +1783,28 @@ class TestModifiersGfx1250(_Gfx1250CapsTestCase):
     def test_global_modifiers(self):
         self.assertEqual(str(GLOBALModifiers()), "")
         self.assertEqual(str(GLOBALModifiers(16)), " offset:16")
+        gl2 = GLOBALModifiers(
+            th=TemporalHint.TH_NT, scope=CacheScope.SCOPE_SE,
+        )
+        self.assertEqual(str(gl2), " th:TH_LOAD_NT scope:SCOPE_SE")
+        self.assertEqual(
+            str(GLOBALModifiers(16, TemporalHint.TH_NT, CacheScope.SCOPE_SE)),
+            " offset:16 th:TH_LOAD_NT scope:SCOPE_SE",
+        )
 
     def test_flat_modifiers_gfx1250(self):
         # gfx1250: HasGLCModifier=0, HasSC0Modifier=0 -> glc/slc bits are silent.
         flat = FLATModifiers(
             offset12=8, glc=True, slc=False, dlc=False,
-            scope=CacheScope.SCOPE_NONE, lds=True, isStore=False,
+            lds=True, isStore=False, scope=CacheScope.SCOPE_NONE,
         )
         self.assertEqual(str(flat), " offset:8  lds")
+
+    def test_flat_modifiers_th_nv(self):
+        flat = FLATModifiers(
+            offset12=4, th=TemporalHint.TH_NT, nv=NonVolatile.NV,
+        )
+        self.assertEqual(str(flat), " offset:4 th:TH_LOAD_NT nv")
 
     def test_mubuf_modifiers_gfx1250(self):
         mubuf = MUBUFModifiers(
@@ -1800,13 +1814,32 @@ class TestModifiersGfx1250(_Gfx1250CapsTestCase):
         )
         self.assertEqual(str(mubuf), " offen offset:12 ")
 
+    def test_mubuf_modifiers_th_over_nt(self):
+        mubuf = MUBUFModifiers(
+            offen=True, offset12=12, nt=True,
+            th=TemporalHint.TH_NT, isStore=False,
+        )
+        self.assertEqual(str(mubuf), " offen offset:12 th:TH_LOAD_NT")
+
+    def test_mubuf_modifiers_store_th_lu(self):
+        mubuf = MUBUFModifiers(
+            offen=True, offset12=0, th=TemporalHint.TH_LU, isStore=True,
+        )
+        self.assertEqual(str(mubuf), " offen offset:0 th:TH_STORE_WB")
+
     def test_smem_modifiers_gfx1250(self):
         # HasSCOPEModifier=1 -> literal "glc" is suppressed (C++ SMEM path).
         smem = SMEMModifiers(
             glc=True, dlc=False, scope=CacheScope.SCOPE_NONE,
-            nv=False, offset=8,
+            nv=NonVolatile.NV_NONE, offset=8,
         )
         self.assertEqual(str(smem), " offset:8")
+
+    def test_smem_modifiers_th_nv(self):
+        smem = SMEMModifiers(
+            offset=0, th=TemporalHint.TH_RT, nv=NonVolatile.NV,
+        )
+        self.assertEqual(str(smem), " th:TH_LOAD_RT nv")
 
     def test_smem_scope_when_set(self):
         smem = SMEMModifiers(
@@ -1847,9 +1880,10 @@ class TestModifiersGfx1250(_Gfx1250CapsTestCase):
     def test_clone_and_pickle(self):
         for obj in (
             DSModifiers(gds=True),
-            FLATModifiers(lds=True),
-            MUBUFModifiers(offen=True, offset12=12, glc=True, nt=True),
-            SMEMModifiers(offset=8),
+            FLATModifiers(lds=True, th=TemporalHint.TH_NT, nv=NonVolatile.NV),
+            GLOBALModifiers(th=TemporalHint.TH_NT, scope=CacheScope.SCOPE_SE),
+            MUBUFModifiers(offen=True, offset12=12, glc=True, nt=True, th=TemporalHint.TH_NT),
+            SMEMModifiers(offset=8, th=TemporalHint.TH_RT, nv=NonVolatile.NV),
             SDWAModifiers(dst_sel=SelectBit.WORD_0),
             VOP3PModifiers([1], [2], [3]),
             DPPModifiers(row_bcast=2),

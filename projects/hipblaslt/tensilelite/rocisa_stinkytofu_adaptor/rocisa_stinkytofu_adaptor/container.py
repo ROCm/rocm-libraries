@@ -38,7 +38,8 @@ Done (real):
 
 Done (modifiers, T5.2):
     - ``DS/FLAT/GLOBAL/MUBUF/SMEM/SDWA/DPP/VOP3P/True16Modifiers``
-      (``toString`` follows ``container.hpp`` + active ``rocIsa`` asm caps).
+      (``toString`` follows ``container.hpp`` + active ``rocIsa`` asm caps,
+      including gfx1250 ``th:`` / ``nv`` / ``scope:`` memory modifiers).
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ from copy import deepcopy
 from typing import List, Optional, Tuple, Union
 
 from .caps import glc_bit_name_from_caps, slc_bit_name_from_caps
-from .enum import CacheScope, HighBitSel, SelectBit, UnusedBit
+from .enum import CacheScope, HighBitSel, NonVolatile, SelectBit, TemporalHint, UnusedBit
 
 _P = "rocisa.container"
 
@@ -1410,6 +1411,38 @@ def _int_vector_to_string(vec: List[int]) -> str:
     return f"[{inner}]"
 
 
+def _has_temporal_hint(th: TemporalHint) -> bool:
+    """Mirror ``rocisa::hasTemporalHint`` (``enum.hpp``)."""
+    return th != TemporalHint.TH_NONE
+
+
+def _temporal_hint_to_string(th: TemporalHint, is_store: bool) -> str:
+    """Mirror ``rocisa::toString(TemporalHint, bool isStore)`` (``enum.hpp``)."""
+    prefix = "TH_STORE_" if is_store else "TH_LOAD_"
+    if th == TemporalHint.TH_RT:
+        return prefix + "RT"
+    if th == TemporalHint.TH_NT:
+        return prefix + "NT"
+    if th == TemporalHint.TH_HT:
+        return prefix + "HT"
+    if th in (TemporalHint.TH_LU, TemporalHint.TH_WB):
+        return prefix + ("WB" if is_store else "LU")
+    if th == TemporalHint.TH_NT_RT:
+        return prefix + "NT_RT"
+    if th == TemporalHint.TH_RT_NT:
+        return prefix + "RT_NT"
+    if th == TemporalHint.TH_NT_HT:
+        return prefix + "NT_HT"
+    if th in (TemporalHint.TH_RESERVED, TemporalHint.TH_NT_WB):
+        return prefix + ("NT_WB" if is_store else "RESERVED")
+    return ""
+
+
+def _non_volatile_to_string(nv: NonVolatile) -> str:
+    """Mirror ``rocisa::toString(NonVolatile)`` (``enum.hpp``)."""
+    return "nv" if nv == NonVolatile.NV else ""
+
+
 class DSModifiers(Container):
     """LDS/GDS modifier bundle (``rocisa::DSModifiers``)."""
 
@@ -1462,7 +1495,7 @@ class FLATModifiers(Container):
     """FLAT memory modifier bundle (``rocisa::FLATModifiers``)."""
 
     __slots__ = (
-        "offset12", "glc", "slc", "dlc", "scope", "lds", "isStore",
+        "offset12", "glc", "slc", "dlc", "lds", "isStore", "scope", "th", "nv",
     )
 
     def __init__(
@@ -1471,22 +1504,28 @@ class FLATModifiers(Container):
         glc: bool = False,
         slc: bool = False,
         dlc: bool = False,
-        scope: CacheScope = CacheScope.SCOPE_NONE,
         lds: bool = False,
         isStore: bool = False,
+        scope: CacheScope = CacheScope.SCOPE_NONE,
+        th: TemporalHint = TemporalHint.TH_NONE,
+        nv: NonVolatile = NonVolatile.NV_NONE,
     ) -> None:
         self.offset12 = offset12
         self.glc = glc
         self.slc = slc
         self.dlc = dlc
-        self.scope = scope
         self.lds = lds
         self.isStore = isStore
+        self.scope = scope
+        self.th = th
+        self.nv = nv
 
     def toString(self) -> str:
         caps = _asm_caps()
         has_dlc = bool(caps.get("HasDLCModifier"))
         has_scope = bool(caps.get("HasSCOPEModifier"))
+        has_th = bool(caps.get("HasTHModifier"))
+        has_nv = bool(caps.get("HasNVModifier"))
         k_str = ""
         if self.offset12 != 0:
             k_str += f" offset:{self.offset12}"
@@ -1498,6 +1537,10 @@ class FLATModifiers(Container):
             k_str += " dlc"
         if has_scope and self.scope != CacheScope.SCOPE_NONE:
             k_str += f" scope:{_cache_scope_to_string(self.scope)}"
+        if has_th and _has_temporal_hint(self.th):
+            k_str += " th:" + _temporal_hint_to_string(self.th, self.isStore)
+        if has_nv and self.nv != NonVolatile.NV_NONE:
+            k_str += " " + _non_volatile_to_string(self.nv)
         if self.lds:
             k_str += " lds"
         return k_str
@@ -1505,69 +1548,92 @@ class FLATModifiers(Container):
     def __repr__(self) -> str:
         return (
             f"FLATModifiers(offset12={self.offset12!r}, glc={self.glc!r}, "
-            f"slc={self.slc!r}, dlc={self.dlc!r}, scope={self.scope!r}, "
-            f"lds={self.lds!r}, isStore={self.isStore!r})"
+            f"slc={self.slc!r}, dlc={self.dlc!r}, lds={self.lds!r}, "
+            f"isStore={self.isStore!r}, scope={self.scope!r}, "
+            f"th={self.th!r}, nv={self.nv!r})"
         )
 
     def __copy__(self) -> "FLATModifiers":
         return FLATModifiers(
             self.offset12, self.glc, self.slc, self.dlc,
-            self.scope, self.lds, self.isStore,
+            self.lds, self.isStore, self.scope, self.th, self.nv,
         )
 
     def __deepcopy__(self, memo: dict) -> "FLATModifiers":
         return self.__copy__()
 
-    def __getstate__(self) -> Tuple[int, bool, bool, bool, int, bool, bool]:
+    def __getstate__(
+        self,
+    ) -> Tuple[int, bool, bool, bool, bool, bool, int, int, int]:
         return (
             self.offset12, self.glc, self.slc, self.dlc,
-            int(self.scope), self.lds, self.isStore,
+            self.lds, self.isStore, int(self.scope), int(self.th), int(self.nv),
         )
 
     def __setstate__(
-        self, state: Tuple[int, bool, bool, bool, int, bool, bool],
+        self, state: Tuple[int, bool, bool, bool, bool, bool, int, int, int],
     ) -> None:
         (
             self.offset12, self.glc, self.slc, self.dlc,
-            scope_val, self.lds, self.isStore,
+            self.lds, self.isStore, scope_val, th_val, nv_val,
         ) = state
         self.scope = CacheScope(scope_val)
+        self.th = TemporalHint(th_val)
+        self.nv = NonVolatile(nv_val)
 
 
 class GLOBALModifiers(Container):
-    """GLOBAL memory offset modifier (``rocisa::GLOBALModifiers``)."""
+    """GLOBAL memory modifier bundle (``rocisa::GLOBALModifiers``)."""
 
-    __slots__ = ("offset",)
+    __slots__ = ("offset", "th", "scope")
 
-    def __init__(self, offset: int = 0) -> None:
+    def __init__(
+        self,
+        offset: int = 0,
+        th: TemporalHint = TemporalHint.TH_NONE,
+        scope: CacheScope = CacheScope.SCOPE_NONE,
+    ) -> None:
         self.offset = offset
+        self.th = th
+        self.scope = scope
 
     def toString(self) -> str:
+        k_str = ""
         if self.offset != 0:
-            return f" offset:{self.offset}"
-        return ""
+            k_str += f" offset:{self.offset}"
+        if _has_temporal_hint(self.th):
+            k_str += " th:" + _temporal_hint_to_string(self.th, False)
+        if self.scope != CacheScope.SCOPE_NONE:
+            k_str += f" scope:{_cache_scope_to_string(self.scope)}"
+        return k_str
 
     def __repr__(self) -> str:
-        return f"GLOBALModifiers(offset={self.offset!r})"
+        return (
+            f"GLOBALModifiers(offset={self.offset!r}, th={self.th!r}, "
+            f"scope={self.scope!r})"
+        )
 
     def __copy__(self) -> "GLOBALModifiers":
-        return GLOBALModifiers(self.offset)
+        return GLOBALModifiers(self.offset, self.th, self.scope)
 
     def __deepcopy__(self, memo: dict) -> "GLOBALModifiers":
-        return GLOBALModifiers(self.offset)
+        return GLOBALModifiers(self.offset, self.th, self.scope)
 
-    def __getstate__(self) -> Tuple[int]:
-        return (self.offset,)
+    def __getstate__(self) -> Tuple[int, int, int]:
+        return (self.offset, int(self.th), int(self.scope))
 
-    def __setstate__(self, state: Tuple[int]) -> None:
-        self.offset = state[0]
+    def __setstate__(self, state: Tuple[int, int, int]) -> None:
+        self.offset, th_val, scope_val = state
+        self.th = TemporalHint(th_val)
+        self.scope = CacheScope(scope_val)
 
 
 class MUBUFModifiers(Container):
     """MUBUF memory modifier bundle (``rocisa::MUBUFModifiers``)."""
 
     __slots__ = (
-        "offen", "offset12", "glc", "slc", "dlc", "scope", "nt", "lds", "isStore",
+        "offen", "offset12", "glc", "slc", "dlc", "nt", "lds", "isStore",
+        "scope", "th", "nv",
     )
 
     def __init__(
@@ -1577,26 +1643,32 @@ class MUBUFModifiers(Container):
         glc: bool = False,
         slc: bool = False,
         dlc: bool = False,
-        scope: CacheScope = CacheScope.SCOPE_NONE,
         nt: bool = False,
         lds: bool = False,
         isStore: bool = False,
+        scope: CacheScope = CacheScope.SCOPE_NONE,
+        th: TemporalHint = TemporalHint.TH_NONE,
+        nv: NonVolatile = NonVolatile.NV_NONE,
     ) -> None:
         self.offen = offen
         self.offset12 = offset12
         self.glc = glc
         self.slc = slc
         self.dlc = dlc
-        self.scope = scope
         self.nt = nt
         self.lds = lds
         self.isStore = isStore
+        self.scope = scope
+        self.th = th
+        self.nv = nv
 
     def toString(self) -> str:
         caps = _asm_caps()
         has_dlc = bool(caps.get("HasDLCModifier"))
         has_scope = bool(caps.get("HasSCOPEModifier"))
         has_nt = bool(caps.get("HasNTModifier"))
+        has_th = bool(caps.get("HasTHModifier"))
+        has_nv = bool(caps.get("HasNVModifier"))
         k_str = ""
         if self.offen:
             k_str += f" offen offset:{self.offset12}"
@@ -1608,8 +1680,12 @@ class MUBUFModifiers(Container):
             k_str += " dlc"
         if has_scope and self.scope != CacheScope.SCOPE_NONE:
             k_str += f" scope:{_cache_scope_to_string(self.scope)}"
-        if has_nt and self.nt:
+        if has_th and _has_temporal_hint(self.th):
+            k_str += " th:" + _temporal_hint_to_string(self.th, self.isStore)
+        elif has_nt and self.nt:
             k_str += " nt"
+        if has_nv and self.nv != NonVolatile.NV_NONE:
+            k_str += " " + _non_volatile_to_string(self.nv)
         if self.lds:
             k_str += " lds"
         return k_str
@@ -1618,14 +1694,14 @@ class MUBUFModifiers(Container):
         return (
             f"MUBUFModifiers(offen={self.offen!r}, offset12={self.offset12!r}, "
             f"glc={self.glc!r}, slc={self.slc!r}, dlc={self.dlc!r}, "
-            f"scope={self.scope!r}, nt={self.nt!r}, lds={self.lds!r}, "
-            f"isStore={self.isStore!r})"
+            f"nt={self.nt!r}, lds={self.lds!r}, isStore={self.isStore!r}, "
+            f"scope={self.scope!r}, th={self.th!r}, nv={self.nv!r})"
         )
 
     def __copy__(self) -> "MUBUFModifiers":
         return MUBUFModifiers(
             self.offen, self.offset12, self.glc, self.slc, self.dlc,
-            self.scope, self.nt, self.lds, self.isStore,
+            self.nt, self.lds, self.isStore, self.scope, self.th, self.nv,
         )
 
     def __deepcopy__(self, memo: dict) -> "MUBUFModifiers":
@@ -1633,46 +1709,55 @@ class MUBUFModifiers(Container):
 
     def __getstate__(
         self,
-    ) -> Tuple[bool, int, bool, bool, bool, int, bool, bool, bool]:
+    ) -> Tuple[bool, int, bool, bool, bool, bool, bool, bool, int, int, int]:
         return (
             self.offen, self.offset12, self.glc, self.slc, self.dlc,
-            int(self.scope), self.nt, self.lds, self.isStore,
+            self.nt, self.lds, self.isStore, int(self.scope),
+            int(self.th), int(self.nv),
         )
 
     def __setstate__(
         self,
-        state: Tuple[bool, int, bool, bool, bool, int, bool, bool, bool],
+        state: Tuple[bool, int, bool, bool, bool, bool, bool, bool, int, int, int],
     ) -> None:
         (
             self.offen, self.offset12, self.glc, self.slc, self.dlc,
-            scope_val, self.nt, self.lds, self.isStore,
+            self.nt, self.lds, self.isStore, scope_val, th_val, nv_val,
         ) = state
         self.scope = CacheScope(scope_val)
+        self.th = TemporalHint(th_val)
+        self.nv = NonVolatile(nv_val)
 
 
 class SMEMModifiers(Container):
     """SMEM modifier bundle (``rocisa::SMEMModifiers``)."""
 
-    __slots__ = ("glc", "dlc", "scope", "nv", "offset")
+    __slots__ = ("glc", "dlc", "offset", "isStore", "scope", "th", "nv")
 
     def __init__(
         self,
         glc: bool = False,
         dlc: bool = False,
-        scope: CacheScope = CacheScope.SCOPE_NONE,
-        nv: bool = False,
         offset: int = 0,
+        isStore: bool = False,
+        scope: CacheScope = CacheScope.SCOPE_NONE,
+        th: TemporalHint = TemporalHint.TH_NONE,
+        nv: NonVolatile = NonVolatile.NV_NONE,
     ) -> None:
         self.glc = glc
         self.dlc = dlc
-        self.scope = scope
-        self.nv = nv
         self.offset = offset
+        self.isStore = isStore
+        self.scope = scope
+        self.th = th
+        self.nv = nv
 
     def toString(self) -> str:
         caps = _asm_caps()
         has_dlc = bool(caps.get("HasDLCModifier"))
         has_scope = bool(caps.get("HasSCOPEModifier"))
+        has_th = bool(caps.get("HasTHModifier"))
+        has_nv = bool(caps.get("HasNVModifier"))
         k_str = ""
         if self.offset != 0:
             k_str += f" offset:{self.offset}"
@@ -1682,28 +1767,45 @@ class SMEMModifiers(Container):
             k_str += " dlc"
         if has_scope and self.scope != CacheScope.SCOPE_NONE:
             k_str += f" scope:{_cache_scope_to_string(self.scope)}"
-        if self.nv:
-            k_str += " nv"
+        if has_th and _has_temporal_hint(self.th):
+            k_str += " th:" + _temporal_hint_to_string(self.th, self.isStore)
+        if has_nv and self.nv != NonVolatile.NV_NONE:
+            k_str += " " + _non_volatile_to_string(self.nv)
         return k_str
 
     def __repr__(self) -> str:
         return (
             f"SMEMModifiers(glc={self.glc!r}, dlc={self.dlc!r}, "
-            f"scope={self.scope!r}, nv={self.nv!r}, offset={self.offset!r})"
+            f"offset={self.offset!r}, isStore={self.isStore!r}, "
+            f"scope={self.scope!r}, th={self.th!r}, nv={self.nv!r})"
         )
 
     def __copy__(self) -> "SMEMModifiers":
-        return SMEMModifiers(self.glc, self.dlc, self.scope, self.nv, self.offset)
+        return SMEMModifiers(
+            self.glc, self.dlc, self.offset, self.isStore,
+            self.scope, self.th, self.nv,
+        )
 
     def __deepcopy__(self, memo: dict) -> "SMEMModifiers":
-        return SMEMModifiers(self.glc, self.dlc, self.scope, self.nv, self.offset)
+        return SMEMModifiers(
+            self.glc, self.dlc, self.offset, self.isStore,
+            self.scope, self.th, self.nv,
+        )
 
-    def __getstate__(self) -> Tuple[bool, bool, int, bool, int]:
-        return (self.glc, self.dlc, int(self.scope), self.nv, self.offset)
+    def __getstate__(self) -> Tuple[bool, bool, int, bool, int, int, int]:
+        return (
+            self.glc, self.dlc, self.offset, self.isStore,
+            int(self.scope), int(self.th), int(self.nv),
+        )
 
-    def __setstate__(self, state: Tuple[bool, bool, int, bool, int]) -> None:
-        self.glc, self.dlc, scope_val, self.nv, self.offset = state
+    def __setstate__(self, state: Tuple[bool, bool, int, bool, int, int, int]) -> None:
+        (
+            self.glc, self.dlc, self.offset, self.isStore,
+            scope_val, th_val, nv_val,
+        ) = state
         self.scope = CacheScope(scope_val)
+        self.th = TemporalHint(th_val)
+        self.nv = NonVolatile(nv_val)
 
 
 class SDWAModifiers(Container):
