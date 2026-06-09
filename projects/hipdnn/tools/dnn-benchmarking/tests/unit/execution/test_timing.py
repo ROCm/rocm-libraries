@@ -311,6 +311,10 @@ class TestDirectHipTimers:
             def hip_event_synchronize(recorded_event) -> None:
                 calls.append(("synchronize", recorded_event))
 
+            @staticmethod
+            def hip_event_elapsed_time(start, stop) -> float:
+                return 0.0
+
         monkeypatch.setattr(timing_module, "hipdnn", FakeHipdnn)
 
         timer = HipGpuTimer(stream=456)
