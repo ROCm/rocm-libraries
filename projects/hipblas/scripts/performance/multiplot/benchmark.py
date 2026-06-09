@@ -128,27 +128,33 @@ def L2_theo_max(GBps):
 
     return L2_theo_max_dict
 
-def write_machine_spec_yaml(machine_spec_filename):
+GBPS_BY_ARCH = {
+    'gfx906': 1000,
+    'gfx908': 1100,
+    'gfx90a': 1600,
+    'gfx942': 5300,
+    'gfx950': 8000,
+}
+
+def write_machine_spec_yaml(machine_spec_filename, device_number=0):
     machine_spec_dict = {}
-    device_number = 1
     cuda = False
     machine_spec_dict['arch'] = getspecs.getgfx(device_number, cuda)
-
-    if machine_spec_dict['arch'] == 'gfx906':
-        GBps = 1000
-    elif machine_spec_dict['arch'] == 'gfx908':
-        GBps = 1100
-    elif machine_spec_dict['arch'] == 'gfx90a':
-        GBps = 1600
-    else:
-        print("do not know GBps memory bandwidth for ", machine_spec_dict['arch'])
-        print("add GBps to", sys.argv[0])
+    if machine_spec_dict['arch'] == 'N/A':
+        print("Unable to detect GPU architecture for device {}".format(device_number))
         print("quitting ", sys.argv[0])
         quit()
 
-    machine_spec_dict['GBps'] = GBps
-    machine_spec_dict.update(L1_theo_max(GBps))
-    machine_spec_dict.update(L2_theo_max(GBps))
+    arch = machine_spec_dict['arch']
+    if arch in GBPS_BY_ARCH:
+        GBps = GBPS_BY_ARCH[arch]
+        machine_spec_dict['GBps'] = GBps
+        machine_spec_dict['theo_max'] = True
+        machine_spec_dict.update(L1_theo_max(GBps))
+        machine_spec_dict.update(L2_theo_max(GBps))
+    else:
+        print("Warning: unknown GBps for {}, theoretical max disabled".format(arch))
+        machine_spec_dict['theo_max'] = False
 
     with open(machine_spec_filename, 'w') as outfile:
         yaml.dump(machine_spec_dict, outfile)
@@ -180,12 +186,15 @@ if __name__ =='__main__':
     parser.add_argument('-t', help='tag.',            dest='tag',            default="gfx906")
     parser.add_argument('-f', help='function names.', dest='function_names', required=True, action='append')
     parser.add_argument('-b', help='bench command.',  dest='bench_command',  default="../../../build/release/clients/staging/hipblas-bench")
+    parser.add_argument('-d', help='GPU device number.', dest='device_number', type=int, default=0)
 
     args = parser.parse_args()
 
-    device_number = 1
     cuda = False
-    arch = getspecs.getgfx(device_number, cuda)
+    arch = getspecs.getgfx(args.device_number, cuda)
+    if arch == 'N/A':
+        print("Unable to detect GPU architecture for device {}".format(args.device_number))
+        quit()
     if arch not in args.tag:
         print("Warning: tag does not contain architecture, it is recommended that tag contain the architecture")
         print("         tag, architecture = ", args.tag, ", ", arch)
@@ -199,7 +208,7 @@ if __name__ =='__main__':
 
     machine_spec_filename = os.path.join(args.level, args.tag, "machine_spec.yaml")
 
-    write_machine_spec_yaml(machine_spec_filename)
+    write_machine_spec_yaml(machine_spec_filename, args.device_number)
 
     for function_name in args.function_names:
 

@@ -147,9 +147,18 @@ bool serializeVisit(const FLATModifiers& mod, std::ostream& os) {
     return true;
 }
 
-// GLOBALModifiers
+// GLOBALModifiers — offset plus the temporal hint / cache scope used by
+// global_prefetch_b8 (gl2-prefetch). Serialized so the .stir IR roundtrip
+// preserves the hint/scope; TH_NONE / SCOPE_NONE are omitted.
 bool serializeVisit(const GLOBALModifiers& mod, std::ostream& os) {
-    os << ", mod.global = { offset = " << mod.offset << " }";
+    os << ", mod.global = { offset = " << mod.offset;
+    if (hasTemporalHint(mod.th)) {
+        os << ", th = \"" << toString(mod.th) << "\"";
+    }
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << ", scope = \"" << toString(mod.scope) << "\"";
+    }
+    os << " }";
     return true;
 }
 
@@ -428,7 +437,9 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             FLATModifiers(getInt(fields, "offset12", 0), getBool(fields, "glc", false),
                           getBool(fields, "slc", false), getBool(fields, "lds", false)));
     } else if (attrKey == "mod.global") {
-        inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0)));
+        inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0),
+                                          parseTemporalHint(getStr(fields, "th", "")),
+                                          parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.mubuf") {
         MUBUFScope scope = parseMUBUFScope(getStr(fields, "scope", ""));
         inst->addModifier(

@@ -187,8 +187,11 @@ bool isLdsWriterAnchor(const StinkyInstruction& inst) {
 /// DS writes, and DS atomics. Tensor loads themselves are deliberately excluded
 /// because the hardware FIFO already orders them on the shared tlcnt counter.
 /// Mirrors the anchor set tagged by @c StinkyBuildImplicitDependencyPass.
-bool isTensorWaitAnchor(const StinkyInstruction& inst) {
-    return isBarrier(inst) || isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst);
+bool isTensorWaitAnchor(const StinkyInstruction& inst, int numWaves) {
+    if (numWaves == 1) {
+        return isBarrier(inst) || isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst);
+    }
+    return isBarrier(inst);
 }
 
 /// True when @p a and @p b share the same hardware memory pipeline, so the
@@ -700,11 +703,12 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
 
         buildBlockExitStates(func, passCtx);
 
+        const auto numWaves = passCtx.getGemmTileConfig().NumWaves;
         for (auto* bb : rpo) {
             if (!passCtx.shouldProcessBasicBlock(*bb)) {
                 continue;
             }
-            WaitInsertionList waits = computeRequiredWaits(*bb);
+            WaitInsertionList waits = computeRequiredWaits(*bb, numWaves);
             emitWaitInstructions(*bb, arch, waits);
         }
 
@@ -1040,7 +1044,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     ///        @c lastEmittedWait; collapse the per-pred tensor paths into a
     ///        single union exit view; store the refined state into
     ///        @c blockExitMemState for successors.
-    WaitInsertionList computeRequiredWaits(BasicBlock& bb) {
+    WaitInsertionList computeRequiredWaits(BasicBlock& bb, int numWaves) {
         PendingMemOpTracker localState;
         WaitInsertionList waits;
         CounterWaitState dsState;
@@ -1075,7 +1079,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             }
 
             // Tensor-wait check: per-path planner.
-            if (isTensorWaitAnchor(*inst)) {
+            if (isTensorWaitAnchor(*inst, numWaves)) {
                 auto twResult = collectTensorLoadDependencies(inst, bb, localState);
                 if (twResult.forceTensorDrain) {
                     if (tensorState.needsNewWait(0)) {

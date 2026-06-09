@@ -12,3 +12,5 @@ test_categories:
       - "standard"
       - "comprehensive"
       - "full"
+      - "ffm-quick"
+      - "ffm-full"
