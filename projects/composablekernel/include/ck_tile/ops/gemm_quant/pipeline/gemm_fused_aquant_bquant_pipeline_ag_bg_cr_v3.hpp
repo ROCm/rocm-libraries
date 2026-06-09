@@ -434,6 +434,9 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
             ABlockTile a_block_tile;
             BBlockTile b_block_tile;
+
+            // AQ needs to be loaded once per A load, while B is loaded once less than B
+            // (no need to juggle through pipeline register)
             AQBlockTile aq_block_tile[3];
             BQBlockTile bq_block_tile[2];
             int AQIdx = 0;

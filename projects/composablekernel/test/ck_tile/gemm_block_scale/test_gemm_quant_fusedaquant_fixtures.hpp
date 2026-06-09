@@ -22,25 +22,6 @@
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/gemm_quant.hpp"
 
-// template <typename TTuple, size_t Index, typename DefaultType, typename Enable = void>
-// struct StandaloneSafeTupleElement
-// {
-//     using type = DefaultType;
-// };
-
-// template <typename TTuple, size_t Index, typename DefaultType>
-// struct StandaloneSafeTupleElement<TTuple,
-//                                   Index,
-//                                   DefaultType,
-//                                   std::enable_if_t<(Index < std::tuple_size_v<TTuple>)>>
-// {
-//     using type = std::tuple_element_t<Index, TTuple>;
-// };
-
-// template <typename TTuple, size_t Index, typename DefaultType>
-// using StandaloneSafeTupleElement_t =
-//     typename StandaloneSafeTupleElement<TTuple, Index, DefaultType>::type;
-
 template <typename Tuple>
 class TestCkTileGemmFusedAQuantStandalone : public ::testing::Test
 {
