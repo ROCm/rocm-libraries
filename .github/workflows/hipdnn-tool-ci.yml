@@ -144,8 +144,13 @@ jobs:
             --wheel-dir wheelhouse
           pip install --no-deps wheelhouse/hipdnn_frontend-*.whl
 
-      - name: Install benchmark tool deps
-        run: pip install -e "rocm-libraries/projects/hipdnn/tools/dnn-benchmarking[test]"
+      - name: Install tool test deps
+        # Both suites share the one job venv and overlap on pytest, so install
+        # both editable packages in a single resolve.
+        run: |
+          pip install \
+            -e "rocm-libraries/projects/hipdnn/tools/dnn-benchmarking[test]" \
+            -e "rocm-libraries/projects/hipdnn/tools/dnn-convert-shapes[test]"
 
       - name: Run dnn-benchmarking pytest suite
         working-directory: rocm-libraries/projects/hipdnn/tools/dnn-benchmarking
@@ -160,9 +165,7 @@ jobs:
 
       - name: Run dnn-convert-shapes pytest suite
         working-directory: rocm-libraries/projects/hipdnn/tools/dnn-convert-shapes
-        run: |
-          pip install -e .[test]
-          python -m pytest -ra
+        run: python -m pytest -ra
 
       - name: Post-job GPU process cleanup
         if: ${{ always() }}
