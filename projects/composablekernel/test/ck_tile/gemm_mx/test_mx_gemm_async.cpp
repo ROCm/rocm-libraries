@@ -10,15 +10,14 @@ using F4  = ck_tile::pk_fp4_t;
 using F8  = ck_tile::fp8_t;
 
 // clang-format off
-using MxTypes = ::testing::Types<std::tuple<F4, F4, MX_GemmConfig16,         Row, Col, Row>,
-                                 std::tuple<F4, F4, MX_GemmConfigEightWaves, Row, Col, Row>,
-                                 std::tuple<F8, F8, MX_GemmConfig16,         Row, Col, Row>,
-                                 std::tuple<F8, F8, MX_GemmConfigEightWaves, Row, Col, Row>>;
-
-// Preshuffle configs 
-using MxTypesPreshuffle = ::testing::Types<
-    std::tuple<F4, F4, MXfp4_GemmConfig_Preshuffle, Row, Col, Row>,
-    std::tuple<F8, F8, MXfp8_GemmConfig_Preshuffle, Row, Col, Row>>;
+using MxTypes = ::testing::Types<std::tuple<F4, F4, MX_GemmConfig16,               Row, Col, Row>,
+                                 std::tuple<F4, F4, MX_GemmConfigEightWaves,       Row, Col, Row>,
+                                 std::tuple<F4, F4, MXfp4_GemmConfig16_Preshuffle, Row, Col, Row>,
+                                 std::tuple<F4, F4, MXfp4_GemmConfig16_PermuteN,   Row, Col, Row>,
+                                 std::tuple<F8, F8, MX_GemmConfig16,               Row, Col, Row>,
+                                 std::tuple<F8, F8, MX_GemmConfigEightWaves,       Row, Col, Row>,
+                                 std::tuple<F8, F8, MXfp8_GemmConfig16_Preshuffle, Row, Col, Row>,
+                                 std::tuple<F8, F8, MXfp8_GemmConfig16_PermuteN,   Row, Col, Row>>;
 // clang-format on
 
 template <typename TypeParam>
@@ -30,26 +29,24 @@ TYPED_TEST_SUITE(TestMxGemm, MxTypes);
 
 TYPED_TEST(TestMxGemm, Default)
 {
-    // No M/N/K padding so we use 128x256x256 as smallest dimensions
-    this->Run(128, 256, 256);
-    this->Run(256, 256, 512);
+    this->Run(128, 512, 256);
+    this->Run(256, 512, 512);
     this->Run(1024, 1024, 1024);
 }
 
-// Preshuffle tests
+// Preshuffle split-K coverage. MxTypes already exercises the preshuffle configs on the
+// non-split-K shapes (TestMxGemm.Default); this fixture pins the split-K shapes to the
+// fp4/fp8 preshuffle configs.
+using MxTypesPreshuffle =
+    ::testing::Types<std::tuple<F4, F4, MXfp4_GemmConfig16_Preshuffle, Row, Col, Row>,
+                     std::tuple<F8, F8, MXfp8_GemmConfig16_Preshuffle, Row, Col, Row>>;
+
 template <typename TypeParam>
 class TestMxGemmPreshuffle : public TestMxGemmUtil<TypeParam>
 {
 };
 
 TYPED_TEST_SUITE(TestMxGemmPreshuffle, MxTypesPreshuffle);
-
-TYPED_TEST(TestMxGemmPreshuffle, Default)
-{
-    this->Run(128, 512, 256);
-    this->Run(256, 512, 512);
-    this->Run(1024, 1024, 1024);
-}
 
 // Split-K for the preshuffle pipeline: each k_id offsets the flat-B window and the
 // host-preshuffled A/B scale windows into its own K slice (and accumulates via atomic-add).
