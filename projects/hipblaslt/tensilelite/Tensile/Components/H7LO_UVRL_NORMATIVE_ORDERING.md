@@ -187,15 +187,26 @@ is the NGL body, shown below.
 | `cms_capture_listing.txt:612` | NGL / mfma 46 | `v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+15], ...` | pack-cvt (the `('v',14)` producer `PackA3@idx46`) |
 
 Observe: the `ds_read` comes **before** the pack chain. Confirmed in the real
-emitted assembly (same instructions, same order):
+emitted assembly. The NGL body is emitted as the OptNLL `MAINLOOP` macro (macro
+body defined `kernel.s:1889-2237`, instantiated `MAINLOOP 0,0,1,1,0` at
+`kernel.s:2253`). The relevant A-fragment instructions inside that macro body:
 
 | `kernel.s` line | instruction |
 |---|---|
-| `kernel.s:2665` | `ds_read_b128 v[vgprValuA_X0_I0+12:vgprValuA_X0_I0+12+3], v[vgprLocalReadAddrA+0] offset:192` |
-| `kernel.s:3000` | `v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_X0_I0+12:vgprValuA_X0_I0+12+3], ...` |
-| `kernel.s:3008` | `v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+15], v[vgprValuA_X0_I0+14], v[vgprValuA_X0_I0+15]` |
+| `kernel.s:2175` | `ds_read_b128 v[vgprValuA_X0_I0+12:vgprValuA_X0_I0+12+3], v[vgprLocalReadAddrA+0] offset:192` |
+| `kernel.s:2208` | `v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_X0_I0+12:vgprValuA_X0_I0+12+3], ...` |
+| `kernel.s:2225` | `v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+15], v[vgprValuA_X0_I0+14], v[vgprValuA_X0_I0+15]` |
 
-The listing is faithful to the emitted assembly.
+ds_read (`:2175`) precedes pack-mfma (`:2208`) precedes pack-cvt (`:2225`) — the
+captured order (`cms_capture_listing.txt:584 -> 604 -> 612`) matches the emitted
+order exactly. The CMS NGL capture is **faithful to the emitted assembly**
+(verified directly; this was the explicit test of the "are we capturing NGL
+properly?" hypothesis — answer: yes).
+
+Note: do NOT confuse these NGL macro-body lines with the visually identical
+ds_read/mfma/cvt sequence at `kernel.s:2665/3000/3008` — those are under
+`label_TailLoopBeginL` (the tail loop, starts `kernel.s:2659`), a different body
+that is not where the 16 failures live.
 
 ### Reference (default) order — `shadow_capture_listing.txt`, NGL body
 
@@ -333,6 +344,31 @@ Fix A and hxcx did **not** change this picture; they removed the messaging
 misattribution and the timing failures respectively, leaving the substantive
 divergence cleanly isolated.
 
+### Ruled out: "is the NGL captured incorrectly?" (the hxcx-style hypothesis)
+
+Because the hxcx bug WAS an unfaithful capture (prologue built from
+pre-interleave side-snapshots), the natural next suspicion is that the NGL body
+has the same defect — that the "divergence" is a capture artifact, not a real
+schedule difference. This was investigated explicitly (see
+`hxcx_artifacts/NGL_CAPTURE_INVESTIGATION_MEMO.md`) and **ruled out**:
+
+- **CMS NGL capture is faithful to emission.** The captured order
+  (`cms_capture_listing.txt:584 ds_read -> 604 mfma -> 612 cvt`) matches the
+  emitted OptNLL `MAINLOOP` macro body exactly (`kernel.s:2175 -> 2208 -> 2225`,
+  macro instantiated at `:2253`). Direct text comparison; they agree.
+- **SHADOW NGL capture is faithful by construction.** It is produced by the real
+  default emitter `_noLoadLoopBodyDefault(...)` (`KernelWriter.py:4196-4205`) and
+  captured by a **post-interleave** walk of the already-assembled `iterCode`
+  (`_captureSubIterToBuilder`, `KernelWriter.py:2694-2706`; defined
+  `ScheduleCapture.py:2708-2713`) — the structural *inverse* of the hxcx bug,
+  which snapshotted *pre*-interleave side lists. The `mfma_index=-1` head block at
+  `shadow_capture_listing.txt:439-452` is genuine pre-first-mfma PLR
+  leftover-pack flush, not a concatenation artifact (the body below it is
+  properly mfma-interleaved).
+
+So both NGL captures reflect what the schedules actually emit. The divergence is
+real, and Fix B is a validator-modeling change (case B1), not a capture fix.
+
 ---
 
 ## Why this is benign today
@@ -357,10 +393,15 @@ artifacts changed these concrete things (the substantive conclusion is unchanged
    `intra_operand_byte_offset = 3`). A naive read of the listing as `('v',N)` =
    `X0_I0+N` is off by one — the `name_to_idx` base in `_byte_keys_for_resource`
    (`ScheduleCapture.py:1598`) shifts it.
-2. **`kernel.s` line citations corrected.** The prior memo cited `kernel.s:1814 /
-   1845 / 1856` — those were an earlier (prologue/first-ML) region. The correct
-   NGL-region writers in the freshly regenerated `kernel.s` are `:2665` (ds_read),
-   `:3000` (pack-mfma), `:3008` (pack-cvt `X0_I0+15`).
+2. **`kernel.s` line citations corrected (twice — see rocm-libraries-bxqw).**
+   The original memo cited `kernel.s:1814 / 1845 / 1856` (a prologue/first-ML
+   region). An intermediate revision then cited `kernel.s:2665 / 3000 / 3008` —
+   but those are under `label_TailLoopBeginL` (the **tail loop**, starts
+   `kernel.s:2659`), NOT the NGL body. The correct NGL writers are inside the
+   OptNLL `MAINLOOP` macro body: `:2175` (ds_read), `:2208` (pack-mfma), `:2225`
+   (pack-cvt `X0_I0+15`), instantiated at `kernel.s:2253`. The
+   captured-vs-emitted NGL order match was verified explicitly against these
+   lines (the "are we capturing NGL properly?" check — capture is faithful).
 3. **Reference order is now first-class.** The prior doc had to reconstruct the
    default ordering from a graph-dump memo "because the SHADOW schedule is not
    emitted as assembly." It is now read directly from
