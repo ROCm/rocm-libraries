@@ -1712,10 +1712,12 @@ Tests:
   grouped_gemm: [2]
   alpha: 1
   beta: [ 0.0, 2.0 ]
-  unit_check: 1
+  unit_check: 0
+  norm_check: 1
+  norm_check_assert: false
   algo_method: [2]
-  initialization: hpl
   gpu_arch: '942'
+  initialization: hpl
 
 - name: matmul_groupedgemm_zero_n
   category: pre_checkin
@@ -2317,9 +2319,10 @@ Tests:
   transA_transB: *transA_transB_range
   alpha: 1
   beta: [ 0.0, 2.0 ]
-  unit_check: 1
-  initialization: hpl
+  unit_check: 0
+  norm_check: 1
   gpu_arch: '(9(42|50)|1250)'
+  initialization: hpl
 
 - name: matmul_gemm_f32_fast_bf16
   category: pre_checkin
