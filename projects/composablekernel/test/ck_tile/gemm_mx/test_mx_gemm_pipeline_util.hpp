@@ -24,12 +24,14 @@ constexpr ck_tile::index_t get_k_warp_tile()
 {
 #if CK_TILE_USE_WMMA
 #if defined(CK_USE_GFX1250)
+    // is_8bit: all 8-bit types (including non-MX int8). is_mxtype: types with MX scale support.
     constexpr bool is_8bit = std::is_same_v<PrecType, ck_tile::fp8_t> ||
                              std::is_same_v<PrecType, ck_tile::bf8_t> ||
                              std::is_same_v<PrecType, ck_tile::int8_t>;
-    constexpr bool is_mxtype =
-        std::is_same_v<PrecType, ck_tile::fp8_t> || std::is_same_v<PrecType, ck_tile::pk_fp4_t>;
-    if constexpr(M_Warp_Tile == 32 && is_mxtype)
+    constexpr bool is_mxtype = std::is_same_v<PrecType, ck_tile::fp8_t> ||
+                               std::is_same_v<PrecType, ck_tile::bf8_t> ||
+                               std::is_same_v<PrecType, ck_tile::pk_fp4_t>;
+    if constexpr(is_mxtype && (M_Warp_Tile == 32 || M_Warp_Tile == 16))
     {
         return 128;
     }
@@ -122,8 +124,8 @@ void preShuffleScaleBuffer_gfx1250(const ScaleType* src,
                                    ck_tile::index_t MN,
                                    ck_tile::index_t K)
 {
-    static_assert(ScaleBlockSize == 32 && sizeof(ScaleType) == 1,
-                  "wrong! only support 8-bit scale with ScaleBlockSize=32");
+    static_assert((ScaleBlockSize == 32 || ScaleBlockSize == 16) && sizeof(ScaleType) == 1,
+                  "wrong! only support 8-bit scale with ScaleBlockSize=32 or 16");
 
     constexpr ck_tile::index_t MPerXdlops = 16;
     constexpr ck_tile::index_t KPerXdlops = 128;
@@ -194,7 +196,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
     static constexpr bool Persistent    = false;
     static constexpr bool ClusterLaunch = false;
 
-    static constexpr ck_tile::index_t ScaleBlockSize = 32;
+    static constexpr ck_tile::index_t ScaleBlockSize = std::tuple_element_t<16, Tuple>{};
 
     protected:
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
@@ -256,7 +258,8 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
                                            AComputeDataType,
                                            BComputeDataType,
                                            AScaleDataType,
-                                           BScaleDataType>;
+                                           BScaleDataType,
+                                           ScaleBlockSize>;
 
         using GemmPipeline =
             typename MxGemmPipelineTypeSelector<PipelineType, UniversalGemmProblem>::pipeline;
@@ -368,8 +371,12 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         // scale_a: (M, K/ScaleBlockSize) row-major
         // scale_b: (N, K/ScaleBlockSize) col-major
         const index_t num_scale_k = K / ScaleBlockSize;
-        const index_t scale_padded_M =
-            integer_least_multiple(static_cast<index_t>(M), static_cast<index_t>(M_Warp_Tile));
+        // Pre-shuffle interleaves 2 K-lanes (MNPack=2) with MPerXdlops=16 stride,
+        // so M must be padded to at least MNPack * MPerXdlops = 32.
+        constexpr index_t ScaleShuffleAlign = 32;
+        const index_t scale_padded_M        = integer_least_multiple(
+            static_cast<index_t>(M),
+            static_cast<index_t>(ck_tile::max(M_Warp_Tile, ScaleShuffleAlign)));
 
         HostTensor<AScaleDataType> scale_a(
             {static_cast<std::size_t>(scale_padded_M), static_cast<std::size_t>(num_scale_k)},
@@ -440,13 +447,20 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
 
         // Pre-shuffle for gfx1250 (WaveSize=32, WMMA)
-        preShuffleScaleBuffer_gfx1250<AScaleDataType, ScaleBlockSize, true>(
-            scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k);
-
-        // For B scale: B is ColMajor, so scale_b is organized as (N, K/ScaleBlockSize)
-        // where N is the fast-changing dimension for col-major B
-        preShuffleScaleBuffer_gfx1250<BScaleDataType, ScaleBlockSize, true>(
-            scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k);
+        // For scale16 with descriptor [packs_m, MThreadPerXdl, packs_k]:
+        // the natural row-major layout matches, so skip pre-shuffle.
+        if constexpr(ScaleBlockSize == 16)
+        {
+            std::copy(scale_a.mData.begin(), scale_a.mData.end(), scale_a_shuffled.mData.begin());
+            std::copy(scale_b.mData.begin(), scale_b.mData.end(), scale_b_shuffled.mData.begin());
+        }
+        else
+        {
+            preShuffleScaleBuffer_gfx1250<AScaleDataType, ScaleBlockSize, true>(
+                scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k);
+            preShuffleScaleBuffer_gfx1250<BScaleDataType, ScaleBlockSize, true>(
+                scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k);
+        }
 
         // Allocate device memory
         DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
