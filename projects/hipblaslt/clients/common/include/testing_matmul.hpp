@@ -1655,6 +1655,23 @@ size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
     return swizzle_mx_scale(scaleBuf.buf(), scaleRows, scaleCols, MXBlock, kAlongRows);
 }
 
+// Compute the padded MX scale tensor dimensions the gfx1250 kernels expect.
+// Mirrors setMXScaleA/B in tensilelite/src/ContractionProblem.cpp: the K-block
+// (contraction/bound) dimension is rounded up to a multiple of 8 and the free
+// (M/N) dimension to a multiple of 32. The scale tensor is column-major, so its
+// per-batch stride (and total per-batch size) is padRows*padCols.
+//
+// scaleRows/scaleCols are the UNPADDED scale dims (rows = the fast, stride-1
+// dimension). kAlongRows is true when the K-block dimension is the row (fast)
+// dimension, i.e. transA=T for scaleA and transB=N for scaleB.
+inline void mxScalePaddedDims(
+    size_t scaleRows, size_t scaleCols, bool kAlongRows, size_t& padRows, size_t& padCols)
+{
+    auto roundUp = [](size_t v, size_t m) { return ((v + m - 1) / m) * m; };
+    padRows = kAlongRows ? roundUp(scaleRows, 8) : roundUp(scaleRows, 32);
+    padCols = kAlongRows ? roundUp(scaleCols, 32) : roundUp(scaleCols, 8);
+}
+
 
 void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      TiA,
@@ -2056,17 +2073,15 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(isBlockScaling(arg.scaleA))
             {
 #ifndef HIPBLASLT_USE_ROCROLLER
-                // Account for padding in the swizzled MX layout
+                // Size the host/device scale buffer to the kernel's padded MX scale
+                // tensor (setMXScaleA): K-block dim -> multiple of 8, M -> multiple
+                // of 32, per-batch stride = padRows*padCols.
                 size_t MXBlock_A = blockSize(arg.scaleA);
-                size_t dimk    = 128 / MXBlock_A;
-                size_t scaleA_r = A_row[i] / ((transA == HIPBLAS_OP_T) ? MXBlock_A : 1);
-                size_t scaleA_c = A_col[i] / ((transA == HIPBLAS_OP_T) ? 1 : MXBlock_A);
-                bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
-                size_t kDim   = kAlongRowsA ? scaleA_r : scaleA_c;
-                size_t mnDim  = kAlongRowsA ? scaleA_c : scaleA_r;
-                size_t padDim    = kAlongRowsA ? kDim : mnDim;
-                size_t paddedDim = (padDim + dimk - 1) / dimk * dimk;
-                size_scaleAVec[i] = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
+                size_t scaleA_r  = A_row[i] / ((transA == HIPBLAS_OP_T) ? MXBlock_A : 1);
+                size_t scaleA_c  = A_col[i] / ((transA == HIPBLAS_OP_T) ? 1 : MXBlock_A);
+                size_t padRowsA, padColsA;
+                mxScalePaddedDims(scaleA_r, scaleA_c, (transA == HIPBLAS_OP_T), padRowsA, padColsA);
+                size_scaleAVec[i] = padRowsA * padColsA;
 #else
                 size_scaleAVec[i] = scaleBufferSize(A_row[i], A_col[i], arg.scaleA);
 #endif
@@ -2080,16 +2095,15 @@ void testing_matmul_with_bias(const Arguments& arg,
             else if(isBlockScaling(arg.scaleB))
             {
 #ifndef HIPBLASLT_USE_ROCROLLER
+                // Size the host/device scale buffer to the kernel's padded MX scale
+                // tensor (setMXScaleB): K-block dim -> multiple of 8, N -> multiple
+                // of 32, per-batch stride = padRows*padCols.
                 size_t MXBlock_B = blockSize(arg.scaleB);
-                size_t dimk    = 128 / MXBlock_B;
-                size_t scaleB_r = B_row[i] / ((transB == HIPBLAS_OP_T) ? 1 : MXBlock_B);
-                size_t scaleB_c = B_col[i] / ((transB == HIPBLAS_OP_T) ? MXBlock_B : 1);
-                bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
-                size_t kDim   = kAlongRowsB ? scaleB_r : scaleB_c;
-                size_t mnDim  = kAlongRowsB ? scaleB_c : scaleB_r;
-                size_t padDim    = kAlongRowsB ? kDim : mnDim;
-                size_t paddedDim = (padDim + dimk - 1) / dimk * dimk;
-                size_scaleBVec[i] = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
+                size_t scaleB_r  = B_row[i] / ((transB == HIPBLAS_OP_T) ? 1 : MXBlock_B);
+                size_t scaleB_c  = B_col[i] / ((transB == HIPBLAS_OP_T) ? MXBlock_B : 1);
+                size_t padRowsB, padColsB;
+                mxScalePaddedDims(scaleB_r, scaleB_c, (transB == HIPBLAS_OP_N), padRowsB, padColsB);
+                size_scaleBVec[i] = padRowsB * padColsB;
 #else
                 size_scaleBVec[i] = scaleBufferSize(B_row[i], B_col[i], arg.scaleB);
 #endif
@@ -2801,13 +2815,29 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   (arg.swizzle_a) ? A_row[i] * A_col[i] : stride_a[i],
                                   num_batches[i]);
 
-            hipblaslt_init(hScaleA[i].buf(),
-                           A_row[i] / scaleA_row,
-                           A_col[i] / scaleA_col,
-                           lda[i] / scaleA_row,
-                           scaleDataType(arg.scaleA),
-                           stride_a[i] / scaleA_row / scaleA_col,
-                           num_batches[i]);
+            {
+                // The gfx1250 MX kernel reads the scale as a padded column-major
+                // tensor (setMXScaleA): K-blocks -> multiple of 8, M -> multiple of
+                // 32, per-batch stride = size_scaleAVec. Zero the buffer so the
+                // padding the kernel/swizzle touch is well-defined, then fill only
+                // the valid region using the library's leading dim and per-batch
+                // stride so init, CPU reference, swizzle and kernel all agree for
+                // batch_count > 1.
+                size_t padRowsA, padColsA;
+                mxScalePaddedDims(A_row[i] / scaleA_row,
+                                  A_col[i] / scaleA_col,
+                                  (transA == HIPBLAS_OP_T),
+                                  padRowsA,
+                                  padColsA);
+                memset(hScaleA[i].buf(), 0, size_scaleAVec[i] * num_batches[i]);
+                hipblaslt_init(hScaleA[i].buf(),
+                               A_row[i] / scaleA_row,
+                               A_col[i] / scaleA_col,
+                               padRowsA,
+                               scaleDataType(arg.scaleA),
+                               size_scaleAVec[i],
+                               num_batches[i]);
+            }
 #endif
         }
         else
@@ -2910,13 +2940,25 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   stride_b[i],
                                   num_batches[i]);
 
-            hipblaslt_init(hScaleB[i].buf(),
-                           B_row[i] / scaleB_row,
-                           B_col[i] / scaleB_col,
-                           ldb[i] / scaleB_row,
-                           scaleDataType(arg.scaleB),
-                                  stride_b[i] / scaleB_row / scaleB_col,
-                                  num_batches[i]);
+            {
+                // Padded column-major MX scale tensor (setMXScaleB): K-blocks ->
+                // multiple of 8, N -> multiple of 32, per-batch stride =
+                // size_scaleBVec. Zero then fill only the valid region.
+                size_t padRowsB, padColsB;
+                mxScalePaddedDims(B_row[i] / scaleB_row,
+                                  B_col[i] / scaleB_col,
+                                  (transB == HIPBLAS_OP_N),
+                                  padRowsB,
+                                  padColsB);
+                memset(hScaleB[i].buf(), 0, size_scaleBVec[i] * num_batches[i]);
+                hipblaslt_init(hScaleB[i].buf(),
+                               B_row[i] / scaleB_row,
+                               B_col[i] / scaleB_col,
+                               padRowsB,
+                               scaleDataType(arg.scaleB),
+                               size_scaleBVec[i],
+                               num_batches[i]);
+            }
 #endif
         }
         else
@@ -3001,16 +3043,29 @@ void testing_matmul_with_bias(const Arguments& arg,
             size_t dataBatchBytesA
                 = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
             size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
-            std::vector<float> refAAll;
+            // The scale buffer is a padded column-major tensor (leading dim
+            // padRowsA); mx_type_to_f32 expects a compact tensor (leading dim =
+            // valid scale rows), so copy each padded per-batch slot's valid region
+            // out before computing the reference.
+            size_t scaleRowsA = A_row[i] / scaleA_row;
+            size_t scaleColsA = A_col[i] / scaleA_col;
+            size_t padRowsA, padColsA;
+            mxScalePaddedDims(scaleRowsA, scaleColsA, (transA == HIPBLAS_OP_T), padRowsA, padColsA);
+            std::vector<float>   refAAll;
+            std::vector<uint8_t> compactScaleA(scaleRowsA * scaleColsA);
             refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
             for(int64_t b = 0; b < num_batches[i]; ++b)
             {
                 auto* dataPtr  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
                 auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
+                for(size_t c = 0; c < scaleColsA; ++c)
+                    memcpy(compactScaleA.data() + c * scaleRowsA,
+                           scalePtr + c * padRowsA,
+                           scaleRowsA);
                 auto  batchRef = mx_type_to_f32(TiA,
                                                scaleDataType(arg.scaleA),
                                                dataPtr,
-                                               scalePtr,
+                                               compactScaleA.data(),
                                                A_row[i],
                                                A_col[i],
                                                scaleA_row,
@@ -3024,16 +3079,25 @@ void testing_matmul_with_bias(const Arguments& arg,
             size_t dataBatchBytesB
                 = (num_batches[i] > 1) ? elementsToBytes(stride_b[i], TiB) : 0;
             size_t scaleBatchBytesB = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
-            std::vector<float> refBAll;
+            size_t scaleRowsB = B_row[i] / scaleB_row;
+            size_t scaleColsB = B_col[i] / scaleB_col;
+            size_t padRowsB, padColsB;
+            mxScalePaddedDims(scaleRowsB, scaleColsB, (transB == HIPBLAS_OP_N), padRowsB, padColsB);
+            std::vector<float>   refBAll;
+            std::vector<uint8_t> compactScaleB(scaleRowsB * scaleColsB);
             refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
             for(int64_t b = 0; b < num_batches[i]; ++b)
             {
                 auto* dataPtr  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
                 auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
+                for(size_t c = 0; c < scaleColsB; ++c)
+                    memcpy(compactScaleB.data() + c * scaleRowsB,
+                           scalePtr + c * padRowsB,
+                           scaleRowsB);
                 auto  batchRef = mx_type_to_f32(TiB,
                                                scaleDataType(arg.scaleB),
                                                dataPtr,
-                                               scalePtr,
+                                               compactScaleB.data(),
                                                B_row[i],
                                                B_col[i],
                                                scaleB_row,
@@ -3049,29 +3113,41 @@ void testing_matmul_with_bias(const Arguments& arg,
         // batches 1..N-1 stay un-swizzled and the kernel reads them with a swizzled layout (wrong / OOB).
         if(isBlockScaling(arg.scaleA))
         {
-            size_t scaleA_r    = A_row[i] / scaleA_row;
-            size_t scaleA_c    = A_col[i] / scaleA_col;
             size_t MXBlockA    = blockSize(arg.scaleA);
             bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
+            size_t scaleRowsA  = A_row[i] / scaleA_row;
+            size_t scaleColsA  = A_col[i] / scaleA_col;
+            size_t padRowsA, padColsA;
+            mxScalePaddedDims(scaleRowsA, scaleColsA, kAlongRowsA, padRowsA, padColsA);
+            // Only the K-block (bound) dim is padded (to a multiple of 8) for the
+            // in-slot swizzle; the free (M/N) dim stays unpadded. Its pad-to-32 only
+            // grows the per-batch stride (size_scaleAVec), so the swizzled data lands
+            // at the start of each slot and the trailing M/N pad stays zero.
+            size_t swzRowsA = kAlongRowsA ? padRowsA : scaleRowsA;
+            size_t swzColsA = kAlongRowsA ? scaleColsA : padColsA;
             for(int64_t b = 0; b < num_batches[i]; ++b)
             {
                 auto* scalePtr
                     = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * size_scaleAVec[i];
-                swizzle_mx_scale(scalePtr, scaleA_r, scaleA_c, MXBlockA, kAlongRowsA);
+                swizzle_mx_scale(scalePtr, swzRowsA, swzColsA, MXBlockA, kAlongRowsA);
             }
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
         }
         if(isBlockScaling(arg.scaleB))
         {
-            size_t scaleB_r    = B_row[i] / scaleB_row;
-            size_t scaleB_c    = B_col[i] / scaleB_col;
             size_t MXBlockB    = blockSize(arg.scaleB);
             bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
+            size_t scaleRowsB  = B_row[i] / scaleB_row;
+            size_t scaleColsB  = B_col[i] / scaleB_col;
+            size_t padRowsB, padColsB;
+            mxScalePaddedDims(scaleRowsB, scaleColsB, kAlongRowsB, padRowsB, padColsB);
+            size_t swzRowsB = kAlongRowsB ? padRowsB : scaleRowsB;
+            size_t swzColsB = kAlongRowsB ? scaleColsB : padColsB;
             for(int64_t b = 0; b < num_batches[i]; ++b)
             {
                 auto* scalePtr
                     = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * size_scaleBVec[i];
-                swizzle_mx_scale(scalePtr, scaleB_r, scaleB_c, MXBlockB, kAlongRowsB);
+                swizzle_mx_scale(scalePtr, swzRowsB, swzColsB, MXBlockB, kAlongRowsB);
             }
             CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
         }
