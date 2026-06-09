@@ -10,8 +10,10 @@ Also tests the print2-gated CUOccupancy<=0 warning in processKernelSource.
 
 import io
 import os
+import shutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,6 +22,12 @@ from Tensile.OccupancyMeasure import (
     compute_occupancy_from_resources,
     _arch_caps_for_kernel,
 )
+
+try:
+    from Tensile.KernelWriterAssembly import KernelWriterAssembly as _KWA
+    _KWA_AVAILABLE = True
+except Exception:
+    _KWA_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -395,3 +403,176 @@ class TestPythonDebugWarning:
         """Warning also fires at verbosity=3 (higher than 2)."""
         output = self._run_warning_check(cuocc_value=-1, verbosity=3)
         assert "CUOccupancy=-1" in output
+
+
+# ---------------------------------------------------------------------------
+# TestGetSourceFileStringCustomKernelPath
+# Regression test for the AttributeError bug fixed in commit ba0056217d3.
+# ---------------------------------------------------------------------------
+
+class _KernelObj(dict):
+    """dict subclass with attribute-style access, matching the kernel objects
+    that TensileCreateLibrary passes to getSourceFileString."""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+    def __setattr__(self, name, val):
+        self[name] = val
+
+
+@pytest.mark.skipif(not _KWA_AVAILABLE, reason="KernelWriterAssembly import requires rocisa")
+@pytest.mark.skipif(
+    not _CUSTOM_KERNEL_DIR.is_dir(),
+    reason=f"CustomKernels directory not found: {_CUSTOM_KERNEL_DIR}",
+)
+class TestGetSourceFileStringCustomKernelPath:
+    """Regression guard for commit ba0056217d3.
+
+    The bug: getSourceFileString for custom kernels accessed self.states.regCaps
+    and self.states.archCaps to compute CUOccupancy.  On the TensileCreateLibrary
+    custom-kernel path, only setRocIsa() is called (not setKernel/setKernel via
+    _initKernel), so StateValues is never constructed and those attributes do not
+    exist — raising AttributeError and breaking ALL gfx9 custom-kernel builds.
+
+    The fix (ba0056217d3): query rocIsa.getInstance() directly instead of
+    self.states.regCaps/archCaps.
+
+    This test exercises the REAL getSourceFileString custom-kernel code block with
+    a KernelWriterAssembly whose self.states has NO regCaps/archCaps attribute —
+    exactly mirroring the setRocIsa-only production path.  It would have failed
+    (AttributeError propagating out of getSourceFileString) with the pre-fix code.
+    """
+
+    # gfx942 kernel: 256 unified VGPRs (accum_offset=128), LDS=32768 → occ=2
+    _KERNEL_STEM = (
+        "Custom_Cijk_Ailk_Bljk_HSS_BH_Bias_GG_AS_SAV_UserArgs_shortname0_gfx942"
+    )
+    _ISA = (9, 4, 2)
+    _WAVEFRONT_SIZE = 64
+    _EXPECTED_OCC = 2
+
+    @pytest.fixture(autouse=True)
+    def _init_rocisa_gfx942(self):
+        """Initialize the rocisa singleton for gfx942.
+
+        Mirrors what setKernel() does in _initKernel so that the singleton holds
+        live caps for gfx942.  In production, this state is captured via getData()
+        and restored via setData() inside setRocIsa(), making getRegCaps() /
+        getArchCaps() valid when getSourceFileString calls rocIsa.getInstance().
+        """
+        from rocisa import rocIsa
+
+        asm_path = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        if not os.path.exists(asm_path):
+            pytest.skip(f"amdclang++ not found at {asm_path}; cannot init rocisa")
+
+        ti = rocIsa.getInstance()
+        ti.init(self._ISA, asm_path)
+        ti.setKernel(self._ISA, self._WAVEFRONT_SIZE)
+
+        assert ti.getRegCaps().get("MaxVgpr") is not None, (
+            "rocisa singleton not properly initialized; getRegCaps() returned empty dict"
+        )
+
+    def _make_kernel(self):
+        """Construct a kernel object matching the production custom-kernel dict."""
+        k = _KernelObj({
+            "CustomKernelName": self._KERNEL_STEM,
+            "ISA": list(self._ISA),
+            "NumThreads": 256,
+            "KernelLanguage": "Assembly",
+            "CUOccupancy": -1,
+        })
+        # duplicate is set as an attribute by TensileCreateLibrary before dispatch
+        k.duplicate = False
+        return k
+
+    def _make_kwa_setrocisa_path(self, asm_source):
+        """Create a KernelWriterAssembly that mirrors the setRocIsa-only init path.
+
+        Key invariant: self.states has NO regCaps and NO archCaps.
+
+        On the production custom-kernel path, only setRocIsa() is ever called
+        (it calls ti.setData() + ti.setOutputOptions() but never _initKernel).
+        _initKernel is the only place that creates StateValues and populates
+        self.states.regCaps / self.states.archCaps.  A custom-kernel KWA therefore
+        never has those attributes — which is precisely what the pre-fix code failed
+        to account for.
+
+        _getCustomKernelSource is monkeypatched to return the real .s file content
+        directly, avoiding the need for self.assembler / self.debugConfig.
+        """
+        kwa = object.__new__(_KWA)
+        # states WITHOUT regCaps/archCaps — the critical setRocIsa-path invariant
+        kwa.states = SimpleNamespace()
+        # return the .s content without touching the filesystem or assembler
+        kwa._getCustomKernelSource = lambda kernel, directory: asm_source
+        return kwa
+
+    # ------------------------------------------------------------------
+    # Sanity: verify the test setup genuinely lacks regCaps
+    # ------------------------------------------------------------------
+
+    def test_setup_has_no_regcaps_on_states(self):
+        """The test fixture must NOT have regCaps on self.states.
+
+        This confirms the test setup faithfully reproduces the pre-fix failure
+        condition: accessing self.states.regCaps raises AttributeError, which
+        is exactly what happened in production before the fix.
+        """
+        s_path = _CUSTOM_KERNEL_DIR / f"{self._KERNEL_STEM}.s"
+        if not s_path.exists():
+            pytest.skip(f"File not found: {s_path.name}")
+
+        kwa = self._make_kwa_setrocisa_path(s_path.read_text())
+        with pytest.raises(AttributeError):
+            _ = kwa.states.regCaps
+
+    # ------------------------------------------------------------------
+    # Real regression: getSourceFileString must not raise
+    # ------------------------------------------------------------------
+
+    def test_getSourceFileString_no_raise_on_setrocisa_path(self):
+        """getSourceFileString must not raise AttributeError on the setRocIsa path.
+
+        Pre-fix: the occupancy block accessed self.states.regCaps which does not
+        exist → AttributeError propagated up (NOT caught by 'except RuntimeError').
+        Post-fix: rocIsa.getInstance().getRegCaps() is called instead → no error.
+        """
+        s_path = _CUSTOM_KERNEL_DIR / f"{self._KERNEL_STEM}.s"
+        if not s_path.exists():
+            pytest.skip(f"File not found: {s_path.name}")
+
+        kwa = self._make_kwa_setrocisa_path(s_path.read_text())
+        kernel = self._make_kernel()
+
+        errcode, code = kwa.getSourceFileString(kernel)
+        assert errcode == 0, f"Expected errcode=0, got {errcode}"
+        assert code, "Expected non-empty assembly source"
+
+    def test_getSourceFileString_sets_cuoccupancy_from_singleton(self):
+        """getSourceFileString must compute CUOccupancy from the rocisa singleton.
+
+        Verifies the correct value (occ=2 for a 256-vgpr gfx942 kernel) is set,
+        not the default -1.  Pre-fix, this would never be reached because the
+        AttributeError on self.states.regCaps would propagate first.
+        """
+        s_path = _CUSTOM_KERNEL_DIR / f"{self._KERNEL_STEM}.s"
+        if not s_path.exists():
+            pytest.skip(f"File not found: {s_path.name}")
+
+        kwa = self._make_kwa_setrocisa_path(s_path.read_text())
+        kernel = self._make_kernel()
+
+        kwa.getSourceFileString(kernel)
+
+        assert kernel["CUOccupancy"] == self._EXPECTED_OCC, (
+            f"Expected CUOccupancy={self._EXPECTED_OCC} (from rocisa singleton caps), "
+            f"got {kernel['CUOccupancy']}. "
+            f"Pre-fix code would have raised AttributeError on self.states.regCaps "
+            f"before ever reaching this line."
+        )
