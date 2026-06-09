@@ -13,6 +13,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
+#include "gemm/gemm_benchmark.hpp"
 #include "gemm_rowcolquant_common.hpp"
 
 #pragma clang diagnostic push
@@ -22,15 +23,11 @@
 // ADataType, BDataType, AQDataType, BQDataType, AccDataType, CDataType
 // ALayout, BLayout, CLayout, AQLayout, BQLayout
 
-struct RowColQuantGemmProblem
+struct RowColQuantGemmProblem : GemmProblem
 {
-    int split_k_;
-    int m_, n_, k_;
-    int stride_a_, stride_b_, stride_c_;
     int stride_aq_, stride_bq_;
 
-    std::string dtype_a_, dtype_b_, dtype_aq_, dtype_bq_, dtype_acc_, dtype_c_;
-    std::string layout_a_, layout_b_, layout_c_;
+    std::string dtype_aq_, dtype_bq_;
 
     friend std::ostream& operator<<(std::ostream& os, const RowColQuantGemmProblem& problem)
     {
