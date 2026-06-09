@@ -537,6 +537,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     int                     row_dim, col_dim;
     hipblasOperation_t      transA = (hipblasOperation_t)prob.trans_a;
     hipblasOperation_t      transB = (hipblasOperation_t)prob.trans_b;
+    void **devicePtrArray_A = nullptr, **devicePtrArray_B = nullptr, **devicePtrArray_C = nullptr,
+         **devicePtrArray_D = nullptr;
     if(prob.trans_a == rocblas_operation_none)
     {
         row_dim = prob.m;
@@ -772,54 +774,57 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         std::vector<Ti*> B(batch_count, nullptr);
         std::vector<To*> C(batch_count, nullptr);
         std::vector<To*> D(batch_count, nullptr);
-        auto             addOffset = []<typename T1, typename T2>(
-                             std::vector<T1*>& vec, T2* batch_ptr, int batch_count, size_t offset) {
-            THROW_IF_HIP_ERROR(hipMemcpy(
-                (void*)(&vec[0]), batch_ptr, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
+        RETURN_IF_HIP_ERROR(hipMalloc((void**)&devicePtrArray_A, sizeof(void*) * batch_count));
+        RETURN_IF_HIP_ERROR(hipMalloc((void**)&devicePtrArray_B, sizeof(void*) * batch_count));
+        RETURN_IF_HIP_ERROR(hipMalloc((void**)&devicePtrArray_C, sizeof(void*) * batch_count));
+        RETURN_IF_HIP_ERROR(hipMalloc((void**)&devicePtrArray_D, sizeof(void*) * batch_count));
+        auto addOffset = []<typename T1, typename T2>(std::vector<T1*>& host_vec,
+                                                      T2*               input_device_pointer_array,
+                                                      void**            output_device_pointer_array,
+                                                      int               batch_count,
+                                                      size_t            offset) {
+            THROW_IF_HIP_ERROR(hipMemcpy((void*)(&host_vec[0]),
+                                         input_device_pointer_array,
+                                         sizeof(void*) * batch_count,
+                                         hipMemcpyDeviceToHost));
             for(int batch = 0; batch < batch_count; batch++)
-                vec[batch] += offset;
-            THROW_IF_HIP_ERROR(hipMemcpy(const_cast<void*>(static_cast<const void*>(batch_ptr)),
-                                         (void*)(&vec[0]),
+                host_vec[batch] += offset;
+            THROW_IF_HIP_ERROR(hipMemcpy(output_device_pointer_array,
+                                         (void*)(&host_vec[0]),
                                          sizeof(void*) * batch_count,
                                          hipMemcpyHostToDevice));
         };
         if(prob.buffer_offset_a > 0 && prob.batch_A != nullptr)
-            addOffset(A, prob.batch_A, batch_count, prob.buffer_offset_a);
-        else
-            return rocblas_status_invalid_value;
-        if(prob.buffer_offset_b > 0 && prob.batch_B != nullptr)
-            addOffset(B, prob.batch_B, batch_count, prob.buffer_offset_b);
-        else
-            return rocblas_status_invalid_value;
-        if(prob.buffer_offset_c > 0 && prob.batch_C != nullptr)
-            addOffset(C, prob.batch_C, batch_count, prob.buffer_offset_c);
-        else
-            return rocblas_status_invalid_value;
-        if(prob.buffer_offset_d > 0 && prob.batch_D != nullptr)
-            addOffset(D, prob.batch_D, batch_count, prob.buffer_offset_d);
-        else
-            return rocblas_status_invalid_value;
+            addOffset(A, prob.batch_A, devicePtrArray_A, batch_count, prob.buffer_offset_a);
 
-        EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatmul(handle,
-                            matmulDesc,
-                            &alpha,
-                            const_cast<void*>(static_cast<const void*>(prob.batch_A)),
-                            matA,
-                            const_cast<void*>(static_cast<const void*>(prob.batch_B)),
-                            matB,
-                            &beta,
-                            const_cast<void*>(static_cast<const void*>(prob.batch_C)),
-                            matC,
-                            const_cast<void*>(static_cast<const void*>(prob.batch_D)),
-                            matD,
-                            &heuristicResult.algo,
-                            workspace,
-                            workspaceSize,
-                            prob.handle->get_stream()),
-            HIPBLAS_STATUS_SUCCESS,
-            __FILE__,
-            __LINE__);
+        if(prob.buffer_offset_b > 0 && prob.batch_B != nullptr)
+            addOffset(B, prob.batch_B, devicePtrArray_B, batch_count, prob.buffer_offset_b);
+
+        if(prob.buffer_offset_c > 0 && prob.batch_C != nullptr)
+            addOffset(C, prob.batch_C, devicePtrArray_C, batch_count, prob.buffer_offset_c);
+
+        if(prob.buffer_offset_d > 0 && prob.batch_D != nullptr)
+            addOffset(D, prob.batch_D, devicePtrArray_D, batch_count, prob.buffer_offset_d);
+
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
+                                              matmulDesc,
+                                              &alpha,
+                                              devicePtrArray_A,
+                                              matA,
+                                              devicePtrArray_B,
+                                              matB,
+                                              &beta,
+                                              devicePtrArray_C,
+                                              matC,
+                                              devicePtrArray_D,
+                                              matD,
+                                              &heuristicResult.algo,
+                                              workspace,
+                                              workspaceSize,
+                                              prob.handle->get_stream()),
+                              HIPBLAS_STATUS_SUCCESS,
+                              __FILE__,
+                              __LINE__);
     }
     else
     {
