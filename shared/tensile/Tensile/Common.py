@@ -25,10 +25,10 @@
 from . import __version__
 from . import Parallel
 from .Utilities.ConditionalImports import print, TENSILE_TERM_COLORS
-from .Utilities.Toolchain import getVersion
 from collections import OrderedDict
 
 from copy import deepcopy
+from pathlib import Path
 from .AsmCaps import getCapabilitiesCache
 from typing import Any, NamedTuple, Optional, Tuple, Dict
 
