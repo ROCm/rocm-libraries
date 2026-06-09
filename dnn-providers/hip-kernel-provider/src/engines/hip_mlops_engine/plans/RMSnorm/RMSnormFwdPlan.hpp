@@ -7,15 +7,16 @@
 
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
-#include "HipKernelHandle.hpp"
-#include "hip/ICompiledProgram.hpp"
-#include "hip/IRunnableKernel.hpp"
+#include "compilation/ICompiledProgram.hpp"
+#include "compilation/IKernelCompiler.hpp"
+#include "compilation/IRunnableKernel.hpp"
+#include "core/Handle.hpp"
 
 #include <memory>
 
 namespace hip_kernel_provider
 {
-class IKernelCompiler;
+using namespace compilation;
 
 namespace rmsnorm
 {
@@ -51,7 +52,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _epsilon;
 };
 
-class RMSnormFwdPlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
+class RMSnormFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
 public:
     explicit RMSnormFwdPlan(RMSnormFwdParams&& params);
@@ -64,9 +65,9 @@ public:
 
     void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
-    size_t getWorkspaceSize(const HipKernelHandle& handle) const override;
+    size_t getWorkspaceSize(const Handle& handle) const override;
 
-    void execute(const HipKernelHandle& handle,
+    void execute(const Handle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;

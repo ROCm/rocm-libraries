@@ -5,17 +5,20 @@
 
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
-#include "HipKernelContext.hpp"
-#include "HipKernelHandle.hpp"
-#include "HipKernelSettings.hpp"
-#include "IDevicePropertyProvider.hpp"
-#include "hip/IKernelCompiler.hpp"
+#include "compilation/IKernelCompiler.hpp"
+#include "core/Context.hpp"
+#include "core/Handle.hpp"
+#include "core/Settings.hpp"
+#include "device/IDevicePropertyProvider.hpp"
 
 namespace hip_kernel_provider::batchnorm
 {
 
+using namespace compilation;
+using namespace device;
+
 class BatchnormFwdTrainingPlanBuilder
-    : public hipdnn_plugin_sdk::IPlanBuilder<HipKernelHandle, HipKernelSettings, HipKernelContext>
+    : public hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>
 {
 public:
     BatchnormFwdTrainingPlanBuilder(const IKernelCompiler& kernelCompiler,
@@ -27,26 +30,26 @@ public:
     BatchnormFwdTrainingPlanBuilder& operator=(const BatchnormFwdTrainingPlanBuilder&) = delete;
 
     bool isApplicable(
-        const HipKernelHandle& handle,
+        const Handle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
-    size_t getMaxWorkspaceSize(const HipKernelHandle& handle,
+    size_t getMaxWorkspaceSize(const Handle& handle,
                                const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-                               const HipKernelSettings& executionSettings) const override;
+                               const Settings& executionSettings) const override;
 
     void initializeExecutionSettings(
-        const HipKernelHandle& handle,
+        const Handle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-        HipKernelSettings& executionSettings) const override;
+        Settings& executionSettings) const override;
 
-    void buildPlan(const HipKernelHandle& handle,
+    void buildPlan(const Handle& handle,
                    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-                   HipKernelContext& executionContext) const override;
+                   Context& executionContext) const override;
 
     std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> getCustomKnobs(
-        const HipKernelHandle& handle,
+        const Handle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
 private:
