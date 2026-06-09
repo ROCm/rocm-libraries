@@ -275,6 +275,21 @@ class ConfigureCITest(unittest.TestCase):
         self.assertEqual(plan.benchmark, therock_configure_ci.BenchmarkMode.NIGHTLY)
 
     @patch("therock_configure_ci.get_modified_paths")
+    def test_benchmark_ci_workflow_change_runs_nightly(self, mock_get_modified):
+        # Editing the benchmark's own reusable workflow must re-validate it in
+        # nightly mode even though no hipDNN code is built this run.
+        mock_get_modified.return_value = [
+            ".github/workflows/hipdnn-tool-ci.yml",
+        ]
+
+        plan = therock_configure_ci.retrieve_projects(
+            {"is_pull_request": True, "base_ref": "HEAD^"}
+        )
+
+        self.assertEqual(plan.projects, [])
+        self.assertEqual(plan.benchmark, therock_configure_ci.BenchmarkMode.NIGHTLY)
+
+    @patch("therock_configure_ci.get_modified_paths")
     def test_benchmark_hipdnn_change_runs_run_id(self, mock_get_modified):
         # A hipDNN code change builds hipDNN this run -> run-id mode.
         mock_get_modified.return_value = [

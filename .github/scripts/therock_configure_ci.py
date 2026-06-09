@@ -266,6 +266,11 @@ def is_hipdnn_tool_path(path: str) -> bool:
     return fnmatch.fnmatch(path, "projects/hipdnn/tools/*")
 
 
+def is_hipdnn_benchmark_ci_path(path: str) -> bool:
+    """The reusable workflow that runs the hipDNN benchmark smoke gate."""
+    return fnmatch.fnmatch(path, ".github/workflows/hipdnn-tool-ci.yml")
+
+
 def retrieve_projects(args):
     # For pushes and pull_requests, we only want to test changed projects
     base_ref = args.get("base_ref")
@@ -274,10 +279,14 @@ def retrieve_projects(args):
     # by default, we select standard tests
     test_type = "standard"
 
-    # The hipDNN benchmark smoke gate runs whenever a hipDNN tool changed (nightly
-    # install) or hipDNN itself was built this run (run-id install). tool_changed
-    # is independent of the skippable early-returns below.
-    tool_changed = any(is_hipdnn_tool_path(p) for p in (modified_paths or []))
+    # The hipDNN benchmark smoke gate runs whenever a hipDNN tool or the
+    # benchmark's own CI workflow changed (nightly install), or hipDNN itself was
+    # built this run (run-id install). benchmark_changed is independent of the
+    # skippable early-returns below.
+    benchmark_changed = any(
+        is_hipdnn_tool_path(p) or is_hipdnn_benchmark_ci_path(p)
+        for p in (modified_paths or [])
+    )
 
     # Variables to track if labels override defaults
     label_projects = []
@@ -303,7 +312,9 @@ def retrieve_projects(args):
         # build is skipped.
         if not contains_non_skippable_files and not label_projects:
             logging.info("Only skippable paths were modified, skipping CI")
-            benchmark = BenchmarkMode.NIGHTLY if tool_changed else BenchmarkMode.OFF
+            benchmark = (
+                BenchmarkMode.NIGHTLY if benchmark_changed else BenchmarkMode.OFF
+            )
             return CIPlan([], test_type, benchmark)
 
         if "skip-therockci" in pr_labels:
@@ -355,12 +366,12 @@ def retrieve_projects(args):
 
     project_to_run = collect_projects_to_run(subtrees)
 
-    # run-id when this run actually builds hipDNN; nightly when only a tool
-    # changed; off otherwise.
+    # run-id when this run actually builds hipDNN; nightly when only a tool or the
+    # benchmark CI workflow changed; off otherwise.
     hipdnn_built = any("hipdnn" in p["projects_to_test"] for p in project_to_run)
     if hipdnn_built:
         benchmark = BenchmarkMode.RUN_ID
-    elif tool_changed:
+    elif benchmark_changed:
         benchmark = BenchmarkMode.NIGHTLY
     else:
         benchmark = BenchmarkMode.OFF
