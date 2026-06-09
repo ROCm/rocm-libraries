@@ -42,6 +42,8 @@ enum class ScaleOverride
     B_WRONG_TYPE, // scale_b dtype != FP8_E8M0 (invalid)
     A_WRONG_SHAPE, // scale_a element count != M*(K/blockSize) (invalid)
     B_WRONG_SHAPE, // scale_b element count != (K/blockSize)*N (invalid)
+    A_TRANSPOSED_SHAPE, // scale_a is [K/blockSize, M]: right total, K split on the wrong axis
+    B_TRANSPOSED_SHAPE, // scale_b is [N, K/blockSize]: right total, K split on the wrong axis
 };
 
 // Build a 3-node FP8 dequant+dequant+matmul flatbuffer graph. Valid by default;
@@ -109,9 +111,15 @@ inline flatbuffers::FlatBufferBuilder
         virtualOverride == VirtualOverride::XA_VIRTUAL));
 
     // Scale_A: [m, k/32]. A_WRONG_SHAPE perturbs the inner dim so the element
-    // count no longer equals M*(K/blockSize).
-    std::vector<int64_t> scalADims = {
-        m, (scaleOverride == ScaleOverride::A_WRONG_SHAPE) ? (k / blockSize) + 1 : k / blockSize};
+    // count no longer equals M*(K/blockSize); A_TRANSPOSED_SHAPE swaps the axes so
+    // the count is right but K is split on the wrong axis.
+    std::vector<int64_t> scalADims
+        = (scaleOverride == ScaleOverride::A_TRANSPOSED_SHAPE)
+              ? std::vector<int64_t>{k / blockSize, m}
+              : std::vector<int64_t>{m,
+                                     (scaleOverride == ScaleOverride::A_WRONG_SHAPE)
+                                         ? (k / blockSize) + 1
+                                         : k / blockSize};
     std::vector<int64_t> scalAStrides = {scalADims[1], 1};
     prependBatch(scalADims, scalAStrides);
     const DT scaleAType = (scaleOverride == ScaleOverride::A_WRONG_TYPE) ? DT::FLOAT : DT::FP8_E8M0;
@@ -156,10 +164,16 @@ inline flatbuffers::FlatBufferBuilder
         virtualOverride == VirtualOverride::XB_VIRTUAL));
 
     // Scale_B: [k/32, n]. B_WRONG_SHAPE perturbs the outer dim so the element
-    // count no longer equals (K/blockSize)*N.
-    std::vector<int64_t> scalBDims = {
-        (scaleOverride == ScaleOverride::B_WRONG_SHAPE) ? (k / blockSize) + 1 : k / blockSize, n};
-    std::vector<int64_t> scalBStrides = {n, 1};
+    // count no longer equals (K/blockSize)*N; B_TRANSPOSED_SHAPE swaps the axes so
+    // the count is right but K is split on the wrong axis.
+    std::vector<int64_t> scalBDims
+        = (scaleOverride == ScaleOverride::B_TRANSPOSED_SHAPE)
+              ? std::vector<int64_t>{n, k / blockSize}
+              : std::vector<int64_t>{(scaleOverride == ScaleOverride::B_WRONG_SHAPE)
+                                         ? (k / blockSize) + 1
+                                         : k / blockSize,
+                                     n};
+    std::vector<int64_t> scalBStrides = {scalBDims[1], 1};
     prependBatch(scalBDims, scalBStrides);
     const DT scaleBType = (scaleOverride == ScaleOverride::B_WRONG_TYPE) ? DT::FLOAT : DT::FP8_E8M0;
     const int64_t scaleBUid = uid++;

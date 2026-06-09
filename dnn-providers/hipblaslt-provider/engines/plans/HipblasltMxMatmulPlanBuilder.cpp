@@ -228,9 +228,10 @@ void checkShapesMatchOutput(const TensorWrapper& tXA,
 }
 
 // Validate the block-scale tensors. The VEC32_UE8M0 mode stores one UE8M0
-// (DataType::FP8_E8M0) value per 32-element block of the operand, so each scale
-// tensor must be FP8_E8M0 and declare exactly that many elements: M*(K/32) for A
-// and (K/32)*N for B. hipBLASLt is handed only the scale device pointer.
+// (DataType::FP8_E8M0) value per 32-element block along the operand's K axis, so
+// each scale tensor must be FP8_E8M0 and mirror its operand's shape with the K
+// axis divided by 32: [M, K/32] for A (K innermost) and [K/32, N] for B (K is the
+// second-to-last axis).
 void checkScaleTensors(const BlockScaleDequantizeAttributes& deqAttrA,
                        const BlockScaleDequantizeAttributes& deqAttrB,
                        const TensorWrapper& tXA,
@@ -257,41 +258,50 @@ void checkScaleTensors(const BlockScaleDequantizeAttributes& deqAttrA,
             "MX matmul: B scale must be FP8_E8M0 (UE8M0) for VEC32 block scaling");
     }
 
-    const auto elementCount = [](const auto& dims) {
-        int64_t count = 1;
-        for(size_t i = 0; i < dims.size(); ++i)
+    // Validate that a scale tensor mirrors its operand's shape with the K axis
+    // divided into VEC32_BLOCK_SIZE-wide blocks. kAxisFromEnd is 1 for A (K is the
+    // innermost axis) and 2 for B (K is the second-to-last axis). Operand rank
+    // (>= 2) is already guaranteed by checkShapesMatchOutput.
+    const auto checkScaleShape = [](const TensorWrapper& tOperand,
+                                    const TensorWrapper& tScale,
+                                    size_t kAxisFromEnd,
+                                    const char* operand) {
+        const auto& opDims = tOperand.dims();
+        const auto& scaleDims = tScale.dims();
+        if(scaleDims.size() != opDims.size())
         {
-            count *= dims[i];
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string("MX matmul: ") + operand + " scale rank ("
+                    + std::to_string(scaleDims.size()) + ") must equal operand rank ("
+                    + std::to_string(opDims.size()) + ")");
         }
-        return count;
+
+        const size_t kIdx = opDims.size() - kAxisFromEnd;
+        if(opDims[kIdx] % VEC32_BLOCK_SIZE != 0)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string("MX matmul: ") + operand + " K-dim (" + std::to_string(opDims[kIdx])
+                    + ") must be a multiple of 32 for VEC32 block scaling");
+        }
+
+        for(size_t i = 0; i < opDims.size(); ++i)
+        {
+            const int64_t expected = (i == kIdx) ? opDims[i] / VEC32_BLOCK_SIZE : opDims[i];
+            if(scaleDims[i] != expected)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    std::string("MX matmul: ") + operand + " scale dim[" + std::to_string(i) + "] ("
+                        + std::to_string(scaleDims[i]) + ") must equal " + std::to_string(expected)
+                        + " (operand shape with the K axis divided by 32)");
+            }
+        }
     };
 
-    const int64_t aElements = elementCount(tXA.dims());
-    const int64_t bElements = elementCount(tXB.dims());
-    if(aElements % VEC32_BLOCK_SIZE != 0 || bElements % VEC32_BLOCK_SIZE != 0)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: operand element count must be a multiple of 32 for VEC32 block scaling");
-    }
-
-    const int64_t expectedAScales = aElements / VEC32_BLOCK_SIZE;
-    const int64_t expectedBScales = bElements / VEC32_BLOCK_SIZE;
-
-    if(elementCount(tScaleA.dims()) != expectedAScales)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: A scale element count (" + std::to_string(elementCount(tScaleA.dims()))
-                + ") must equal M*(K/32) = " + std::to_string(expectedAScales));
-    }
-    if(elementCount(tScaleB.dims()) != expectedBScales)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: B scale element count (" + std::to_string(elementCount(tScaleB.dims()))
-                + ") must equal (K/32)*N = " + std::to_string(expectedBScales));
-    }
+    checkScaleShape(tXA, tScaleA, 1, "A");
+    checkScaleShape(tXB, tScaleB, 2, "B");
 }
 
 // hipBLASLt's own restrictions for the VEC32_UE8M0 scale mode.

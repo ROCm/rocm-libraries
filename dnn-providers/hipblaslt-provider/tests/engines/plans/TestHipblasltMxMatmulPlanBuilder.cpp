@@ -496,6 +496,51 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongScaleShapeB)
     EXPECT_FALSE(_builder.isApplicable(_handle, graph));
 }
 
+// A scale with the correct total element count but the K axis split on the wrong
+// axis ([K/32, M] instead of [M, K/32]) must be rejected. A total-count-only check
+// would accept this and then compute silently-wrong results on the GPU.
+TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsTransposedScaleA)
+{
+    auto fb = createMxMatmulGraph(32,
+                                  128,
+                                  32,
+                                  DT::FP8_E4M3,
+                                  DT::HALF,
+                                  32,
+                                  true,
+                                  true,
+                                  1,
+                                  false,
+                                  false,
+                                  DT::FLOAT,
+                                  0,
+                                  VirtualOverride::NONE,
+                                  ScaleOverride::A_TRANSPOSED_SHAPE);
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+}
+
+TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsTransposedScaleB)
+{
+    auto fb = createMxMatmulGraph(32,
+                                  128,
+                                  32,
+                                  DT::FP8_E4M3,
+                                  DT::HALF,
+                                  32,
+                                  true,
+                                  true,
+                                  1,
+                                  false,
+                                  false,
+                                  DT::FLOAT,
+                                  0,
+                                  VirtualOverride::NONE,
+                                  ScaleOverride::B_TRANSPOSED_SHAPE);
+    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+    EXPECT_FALSE(_builder.isApplicable(_handle, graph));
+}
+
 // ===========================================================================
 // getWorkspaceSize
 // ===========================================================================
