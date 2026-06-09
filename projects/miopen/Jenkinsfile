@@ -373,7 +373,7 @@ def runHipClangStage(Map conf=[:]) {
 def runAsanTests(String gpuLabel, String gfxFamily) {
     withWorkingDir {
         def variant = env.STAGE_NAME
-        def asanImage = env.ASAN_CANDIDATE_IMAGE?.trim() ? env.ASAN_CANDIDATE_IMAGE : "${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan"
+        def asanImage = env.ASAN_CANDIDATE_IMAGE?.trim() ? env.ASAN_CANDIDATE_IMAGE : "${env.MIOPEN_DOCKER_IMAGE_URL}:asan"
         def video_id = sh(returnStdout: true, script: 'getent group video | cut -d: -f3').trim()
         def render_id = sh(returnStdout: true, script: 'getent group render | cut -d: -f3').trim()
         def dockerOpts = "--user root " +
@@ -492,8 +492,8 @@ def runAsanDockerBuild() {
 
 def promoteAsanDockerImage() {
     def variant = env.STAGE_NAME
-    def candidateTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan_candidate"
-    def finalTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan"
+    def candidateTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:asan_potential_build"
+    def finalTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:asan"
     utils.setGithubStatus(variant, 'pending', 'In progress')
     try {
         withDockerRegistry([credentialsId: "docker_test_cred", url: ""]) {
@@ -522,8 +522,8 @@ def runAsanDockerPromote() {
                 promoteAsanDockerImage()
             }
         } finally {
-            sh "docker rmi ${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan_candidate || true"
-            sh "docker rmi ${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan || true"
+            sh "docker rmi ${env.MIOPEN_DOCKER_IMAGE_URL}:asan_potential_build || true"
+            sh "docker rmi ${env.MIOPEN_DOCKER_IMAGE_URL}:asan || true"
             cleanWs()
         }
     }
@@ -532,31 +532,46 @@ def runAsanDockerPromote() {
 def buildAsanDockerImage(Map conf=[:]) {
     def variant = env.STAGE_NAME
     env.DOCKER_BUILDKIT = 1
-    def asanTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan_candidate"
+    def asanTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:asan_potential_build"
+    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:asan_source_cache"
     def amdgpuFamilies = conf.get("amdgpuFamilies", "gfx94X-dcgpu")
     def amdgpuArchs = conf.get("amdgpuArchs", "gfx942")
+
+    // Read TheRock hash from the single source of truth (same pattern as buildTheRockDockerImage)
+    def theRockHash = sh(
+        script: """
+            grep -A 2 'therock-ref:' ${env.WORKSPACE}/.github/actions/ci-env/action.yml \
+            | grep 'value:' | awk '{print \$2}' | tr -d '"'
+        """.stripIndent(),
+        returnStdout: true
+    ).trim()
 
     def dockerArgs = "--build-arg BUILD_TYPE=source_build " +
                      "--build-arg AMDGPU_FAMILIES=\"${amdgpuFamilies}\" " +
                      "--build-arg GPU_ARCHS=\"${amdgpuArchs}\" " +
+                     "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
                      "--build-arg ASAN_SCCACHE_CACHE_BUSTER=\"MiOpen-ASAN-Docker-CK\" " +
                      " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile.ASAN "
-    def buildContext = "${env.WORKSPACE}/${env.MIOPEN_DIR}/."
+    // Build context is projects/ so both composablekernel and miopen are reachable
+    def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+    def dockerCacheArgs = "--cache-from type=registry,ref=${cacheRef} " +
+                          "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=min "
 
-    echo "Building ASAN image ${asanTag} from source (families=${amdgpuFamilies})"
+    echo "Building ASAN image ${asanTag} from source (TheRock=${theRockHash}, families=${amdgpuFamilies})"
     utils.setGithubStatus(variant, 'pending', 'In progress')
     try {
         withDockerRegistry([credentialsId: "docker_test_cred", url: ""]) {
             sh label: 'Set up Docker Buildx', script: """
-                docker buildx rm ci-builder || true
+                docker buildx inspect ci-builder >/dev/null 2>&1 || \
                 docker buildx create --name ci-builder --driver docker-container --use
+                docker buildx use ci-builder
                 docker buildx inspect --bootstrap
             """.stripIndent()
             sh label: 'Build and push ASAN Docker image', script: """
                 DOCKER_BUILDKIT=1 docker buildx build \
-                  --no-cache \
                   --push \
                   --tag ${asanTag} \
+                  ${dockerCacheArgs} \
                   ${dockerArgs} \
                   ${buildContext}
             """.stripIndent()
@@ -640,7 +655,7 @@ CRON_SETTINGS = BRANCH_NAME == "develop" ? '''
 0 0 * * * % RUN_NIGHTLY_TESTS=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=false;TARGET_GFX90A=true;TARGET_GFX942=true
 0 1 * * * % NONCRITICAL_HW_NIGHTLY=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=true;TARGET_NAVI35=true;TARGET_GFX90A=false;TARGET_GFX942=false
 0 22 * * * % BUILD_THEROCK_DOCKER=true
-0 23 * * * % BUILD_ASAN_DOCKER=true;BUILD_DOCKER=false;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false
+0 23 * * 0 % BUILD_ASAN_DOCKER=true;BUILD_DOCKER=false;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false
 ''' : ""
 
 
@@ -754,11 +769,7 @@ pipeline {
         booleanParam(
             name: "BUILD_ASAN_DOCKER",
             defaultValue: false,
-            description: "Build and push rocm/miopen:ci_asan ASAN Docker image (run nightly)")
-        string(
-            name: "ASAN_ARTIFACTS_RUN_ID",
-            defaultValue: "",
-            description: "TheRock CI run ID for ASAN artifacts (leave empty to auto-resolve the latest passing multi_arch_ci_asan.yml run on main; set to override/pin a specific run)")
+            description: "Build and push rocm/miopen-dev:asan_potential_build ASAN Docker image (run weekly on Sundays)")
         booleanParam(
             name: "RUN_NIGHTLY_TESTS",
             defaultValue: false,
@@ -869,7 +880,7 @@ pipeline {
                 }
             }
         }
-        // Promotes ci_asan_candidate to ci_asan only after the ASAN test in Full Tests passes.
+        // Promotes asan_potential_build to :asan only after the ASAN test in Full Tests passes.
         stage('Promote ASAN Docker') {
             when {
                 expression { params.BUILD_ASAN_DOCKER }
