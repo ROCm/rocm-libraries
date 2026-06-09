@@ -44,7 +44,7 @@ jobs:
     uses: ./.github/workflows/hipblaslt-logic-library-audit.yml
     with:
       # Bump when TheRock includes build_tools/audit_hipblaslt_libraries.py.
-      therock_ref: fc468e7381b38b23c1e08d0be0a16804dc1ed514 # branch hipblaslt-library-audit (2026-06-03)
+      therock_ref: 6f3c7cbe9091c32b672cdfe3514104ac5a4e8738 # branch hipblaslt-library-audit (2026-06-09)
 
   setup:
     name: "Setup"
