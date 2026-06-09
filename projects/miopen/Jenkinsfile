@@ -492,7 +492,7 @@ def runAsanDockerBuild() {
 
 def promoteAsanDockerImage() {
     def variant = env.STAGE_NAME
-    def candidateTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:asan_potential_build"
+    def candidateTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan_candidate"
     def finalTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:asan"
     utils.setGithubStatus(variant, 'pending', 'In progress')
     try {
@@ -522,7 +522,7 @@ def runAsanDockerPromote() {
                 promoteAsanDockerImage()
             }
         } finally {
-            sh "docker rmi ${env.MIOPEN_DOCKER_IMAGE_URL}:asan_potential_build || true"
+            sh "docker rmi ${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan_candidate || true"
             sh "docker rmi ${env.MIOPEN_DOCKER_IMAGE_URL}:asan || true"
             cleanWs()
         }
@@ -532,7 +532,7 @@ def runAsanDockerPromote() {
 def buildAsanDockerImage(Map conf=[:]) {
     def variant = env.STAGE_NAME
     env.DOCKER_BUILDKIT = 1
-    def asanTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:asan_potential_build"
+    def asanTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan_candidate"
     def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:asan_source_cache"
     def amdgpuFamilies = conf.get("amdgpuFamilies", "gfx94X-dcgpu")
     def amdgpuArchs = conf.get("amdgpuArchs", "gfx942")
@@ -769,7 +769,7 @@ pipeline {
         booleanParam(
             name: "BUILD_ASAN_DOCKER",
             defaultValue: false,
-            description: "Build and push rocm/miopen-dev:asan_potential_build ASAN Docker image (run weekly on Sundays)")
+            description: "Build and push rocm/miopen-dev:ci_asan_candidate ASAN Docker image (run weekly on Sundays)")
         booleanParam(
             name: "RUN_NIGHTLY_TESTS",
             defaultValue: false,
@@ -880,7 +880,7 @@ pipeline {
                 }
             }
         }
-        // Promotes asan_potential_build to :asan only after the ASAN test in Full Tests passes.
+        // Promotes ci_asan_candidate to :asan only after the ASAN test in Full Tests passes.
         stage('Promote ASAN Docker') {
             when {
                 expression { params.BUILD_ASAN_DOCKER }
