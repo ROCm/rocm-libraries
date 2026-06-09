@@ -63,6 +63,13 @@ Dep = _ls.Dep
 SubIterKSlot = _ls.SubIterKSlot
 EmittedModule = _ls.EmittedModule
 
+# Writer-free pass pipeline (place_LRs through emit/build). Operates purely on
+# the data-only logical schedule and exposes byte-identical print_* helpers for
+# pass-by-pass parity with the Python LogicalScheduler. It does NOT populate
+# rocisa instructions, allocate writer VGPR pools, or emit Kernel.mainLoop
+# control flow — those remain Python-only.
+LogicalScheduler = _ls.LogicalScheduler
+
 
 def get_partition_candidates(tileInfoA, tileInfoB):
     """C++-backed ``SchedulerConfig.get_partition_candidates``.
@@ -97,5 +104,6 @@ __all__ = [
     "Dep",
     "SubIterKSlot",
     "EmittedModule",
+    "LogicalScheduler",
     "get_partition_candidates",
 ]

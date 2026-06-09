@@ -27,6 +27,7 @@
 
 #include "tensile_writer/instruction_scheduler.hpp"
 #include "tensile_writer/logical_scheduler.hpp"
+#include "tensile_writer/logical_scheduler_passes.hpp"
 #include "tensile_writer/subtile_geometry.hpp"
 #include "tensile_writer/tile_info.hpp"
 
@@ -727,6 +728,49 @@ void bind_logical_scheduler(nb::module_& s) {
       .def_prop_ro("opType", &EmittedModule::opType);
 }
 
+// ---------------------------------------------------------------------------
+// Subtile LogicalScheduler writer-free pass pipeline (data-only model).
+// ---------------------------------------------------------------------------
+void bind_logical_scheduler_passes(nb::module_& s) {
+  using tw::subtile::lsched::SchedulerConfig;
+  using LS = tw::subtile::lsched::passes::LogicalScheduler;
+
+  nb::class_<LS>(
+      s, "LogicalScheduler",
+      "Writer-free C++ port of the subtile LogicalScheduler pass pipeline "
+      "(place_LRs through emit/build). Operates purely on the data-only logical "
+      "schedule; it does NOT populate rocisa instructions, allocate writer VGPR "
+      "pools, or emit Kernel.mainLoop control flow. Each pass auto-runs its "
+      "prerequisites, mirroring the Python LogicalScheduler. The print_* methods "
+      "produce byte-identical output to the Python print_* helpers for "
+      "pass-by-pass parity testing.")
+      .def(nb::init<SchedulerConfig>(), nb::arg("config"))
+      .def("place_LRs", &LS::place_LRs)
+      .def("assign_vgpr_tiles", &LS::assign_vgpr_tiles)
+      .def("place_GRs", &LS::place_GRs)
+      .def("annotate_deps", &LS::annotate_deps)
+      .def("remove_unnecessary_gr_deps", &LS::remove_unnecessary_gr_deps)
+      .def("remove_unnecessary_lr_deps", &LS::remove_unnecessary_lr_deps)
+      .def("remove_cross_deps", &LS::remove_cross_deps)
+      .def("insert_gr_lr_inc", &LS::insert_gr_lr_inc)
+      .def("group_lr_gr", &LS::group_lr_gr)
+      .def("remove_unnecessary_wait_lr_sync",
+           &LS::remove_unnecessary_wait_lr_sync)
+      .def("emit", &LS::emit)
+      .def("build", &LS::build)
+      .def_ro("needs_unrolling", &LS::needs_unrolling)
+      .def_ro("unroll_factor", &LS::unroll_factor)
+      .def_prop_ro("tile_peaks",
+                   [](const LS& self) { return self.tile_peaks; })
+      .def("print_lr", &LS::print_lr)
+      .def("print_vgpr", &LS::print_vgpr)
+      .def("print_gr", &LS::print_gr)
+      .def("print_deps", &LS::print_deps)
+      .def("print_remove_deps", &LS::print_remove_deps)
+      .def("print_group_lr_gr", &LS::print_group_lr_gr)
+      .def("print_emit", &LS::print_emit);
+}
+
 }  // namespace
 
 NB_MODULE(_tensile_writer, m) {
@@ -763,4 +807,5 @@ NB_MODULE(_tensile_writer, m) {
       "(Pass, ReadGranularity, MFMATileRange, SchedulerConfig, placement/op "
       "value types) only; the scheduling passes remain in Python.");
   bind_logical_scheduler(logical_scheduler);
+  bind_logical_scheduler_passes(logical_scheduler);
 }

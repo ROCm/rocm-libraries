@@ -9,14 +9,18 @@ These tests compare the pure-Python data/config primitives in
 extension is importable; otherwise they skip, so the default (Python-only)
 TensileLite build is unaffected.
 
-Scope: this ports the value/config layer (Pass, fmt_mt, MFMATileRange,
+Scope: this covers the value/config layer (Pass, fmt_mt, MFMATileRange,
 ReadGranularity, SchedulerConfig — including partition normalization and
-candidate generation — plus the placement / op value types) and the remaining
-value types: the pass-populated placement fields (deps / preOps / postOps /
-vgpr_tile_map[s]), Dep, SubIterKSlot, EmittedModule, and InlineModuleOp. The
-scheduling passes (place_LRs / place_GRs / build / populate_instructions),
-InstructionEmitter, and rocisa Module emission are NOT ported and remain pure
-Python, so the pass-populated fields default to empty (no C++ pass fills them).
+candidate generation — plus the placement / op value types), the value types
+(Dep, SubIterKSlot, EmittedModule, InlineModuleOp), AND the writer-free pass
+pipeline (place_LRs through emit/build) exposed by the C++ ``LogicalScheduler``.
+The pass-pipeline tests compare the C++ schedule against the Python one
+pass-by-pass via the byte-identical print_* helpers.
+
+Still NOT ported (and exercised only on the Python side): populate_instructions,
+InstructionEmitter dispatch, writer VGPR-pool allocation, and rocisa Module /
+Kernel.mainLoop control-flow emission. The C++ pipeline operates purely on the
+data-only logical schedule.
 
 The config cases below mirror those exercised by
 ``test_SubtileBasedLogicalScheduler`` and ``test_SubtileBasedSchedulerRef``.
@@ -559,3 +563,102 @@ def test_default_path_is_python_only():
         pytest.skip("TENSILE_WRITER_CPP is set; default-off behavior not under test")
     assert ls._USE_CPP is False
     assert ls._CPP is None
+
+
+# ===========================================================================
+# Writer-free pass pipeline (place_LRs through emit/build)
+# ---------------------------------------------------------------------------
+# The C++ ``LogicalScheduler`` ports the pure, data-only pass pipeline. It does
+# NOT populate rocisa instructions, allocate writer VGPR pools, or emit
+# Kernel.mainLoop control flow — those remain Python-only. The print_* helpers
+# emit byte-identical output to the Python LogicalScheduler, so we compare the
+# two implementations pass-by-pass on representative BF16/fp8 gfx950 reference
+# configs across PGR=0/1/2.
+# ===========================================================================
+
+# Additional pass-pipeline configs exercising PGR=0/1/2 and the scale (fp8/fp4)
+# path beyond the value-layer CONFIGS above. These mirror cases from
+# test_SubtileBasedLogicalScheduler / test_SubtileBasedSchedulerRef.
+_PASS_EXTRA_CONFIGS = {
+    # fp8-style 256x256 single full partition (8x8), PGR=2 then PGR=1.
+    "fp8_8x8_pgr2": dict(numMFMATilesM=8, numMFMATilesN=8, numSubIterK=2,
+                         lrA=(1, 1), lrB=(1, 1), grA=(1, 2), grB=(1, 2), pgr=2),
+    "fp8_8x8_pgr1": dict(numMFMATilesM=8, numMFMATilesN=8, numSubIterK=2,
+                         lrA=(1, 1), lrB=(1, 1), grA=(1, 2), grB=(1, 2), pgr=1),
+    # Multi-partition BF16 256x384 with PGR=1 (offsetPartition=0).
+    "bf16_256x384_n6_pgr1": dict(numMFMATilesM=8, numMFMATilesN=12, numSubIterK=2,
+                                 lrA=(1, 1), lrB=(1, 1), grA=(1, 2), grB=(1, 2),
+                                 partitionSizeN=6, pgr=1),
+    # FP4 2x2 with scales, PGR=1.
+    "fp4_2x2_pgr1": dict(numMFMATilesM=8, numMFMATilesN=8, numSubIterK=2,
+                         lrA=(1, 1), lrB=(1, 1), grA=(1, 2), grB=(1, 2),
+                         lrSA=(2, 2), lrSB=(2, 2), grSA=(2, 2), grSB=(2, 2),
+                         partitionSizeM=4, partitionSizeN=4, pgr=1),
+}
+
+# name -> kwargs spec for the pass-pipeline parity sweep.
+_PASS_CONFIGS = {name: spec for name, (spec, _exp) in CONFIGS.items()}
+_PASS_CONFIGS.update(_PASS_EXTRA_CONFIGS)
+
+# print_* method -> terminal pass that must run first. Each pass auto-runs its
+# prerequisites in both implementations, so running the terminal pass exercises
+# the whole chain up to that point.
+_PRINT_TO_PASS = {
+    "print_lr": "place_LRs",
+    "print_vgpr": "assign_vgpr_tiles",
+    "print_gr": "place_GRs",
+    "print_deps": "annotate_deps",
+    "print_remove_deps": "remove_cross_deps",
+    "print_group_lr_gr": "group_lr_gr",
+    "print_emit": "emit",
+}
+
+
+def test_shim_reexports_pass_pipeline():
+    """The Python shim must expose the C++ pass-pipeline scheduler class."""
+    assert hasattr(cppls, "LogicalScheduler")
+    assert "LogicalScheduler" in cppls.__all__
+
+
+@pytest.mark.parametrize("name", list(_PASS_CONFIGS))
+@pytest.mark.parametrize("print_method", list(_PRINT_TO_PASS))
+def test_pass_pipeline_print_parity(name, print_method):
+    """C++ pass output must match Python byte-for-byte, pass-by-pass."""
+    spec = _PASS_CONFIGS[name]
+    py_sched = ls.LogicalScheduler(_build(ls, spec))
+    cpp_sched = cppls.LogicalScheduler(_build(cppls, spec))
+
+    run = _PRINT_TO_PASS[print_method]
+    getattr(py_sched, run)()
+    getattr(cpp_sched, run)()
+
+    py_out = getattr(py_sched, print_method)()
+    cpp_out = getattr(cpp_sched, print_method)()
+    assert cpp_out == py_out, (
+        f"{name} / {print_method} mismatch\n"
+        f"--- Python ---\n{py_out}\n--- C++ ---\n{cpp_out}"
+    )
+
+
+@pytest.mark.parametrize("name", list(_PASS_CONFIGS))
+def test_pass_pipeline_vgpr_metadata_parity(name):
+    """assign_vgpr_tiles scalar outputs (unroll factor / tile peaks) match."""
+    spec = _PASS_CONFIGS[name]
+    py_sched = ls.LogicalScheduler(_build(ls, spec))
+    cpp_sched = cppls.LogicalScheduler(_build(cppls, spec))
+    py_sched.assign_vgpr_tiles()
+    cpp_sched.assign_vgpr_tiles()
+    assert cpp_sched.needs_unrolling == py_sched.needs_unrolling
+    assert cpp_sched.unroll_factor == py_sched.unroll_factor
+    assert dict(cpp_sched.tile_peaks) == dict(py_sched.tile_peaks)
+
+
+@pytest.mark.parametrize("name", list(_PASS_CONFIGS))
+def test_pass_pipeline_build_matches_emit(name):
+    """build() runs the full pipeline and yields the same emit output."""
+    spec = _PASS_CONFIGS[name]
+    py_sched = ls.LogicalScheduler(_build(ls, spec))
+    cpp_sched = cppls.LogicalScheduler(_build(cppls, spec))
+    py_sched.build()
+    cpp_sched.build()
+    assert cpp_sched.print_emit() == py_sched.print_emit()
