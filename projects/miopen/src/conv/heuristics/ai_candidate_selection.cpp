@@ -283,8 +283,9 @@ std::size_t EncodePrecisionLabel(float precision_feature)
 } // namespace
 
 MIOPEN_INTERNALS_EXPORT
-std::vector<float> EngineerCandidateSelectionInputFeatures(
-    const std::vector<float>& raw_features, const std::map<std::string, float>& features_by_name)
+std::vector<float>
+EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
+                                        const std::map<std::string, float>& features_by_name)
 {
     (void)raw_features;
 
@@ -306,26 +307,25 @@ std::vector<float> EngineerCandidateSelectionInputFeatures(
     const std::size_t C_out =
         static_cast<std::size_t>(is_fwd ? FeatureAt(features_by_name, "out_channels")
                                         : FeatureAt(features_by_name, "in_channels"));
-    const std::size_t H_in =
-        static_cast<std::size_t>(is_fwd ? FeatureAt(features_by_name, "in_h")
-                                        : FeatureAt(features_by_name, "out_h"));
-    const std::size_t W_in =
-        static_cast<std::size_t>(is_fwd ? FeatureAt(features_by_name, "in_w")
-                                        : FeatureAt(features_by_name, "out_w"));
-    const std::size_t H_out =
-        static_cast<std::size_t>(is_fwd ? FeatureAt(features_by_name, "out_h")
-                                        : FeatureAt(features_by_name, "in_h"));
-    const std::size_t W_out =
-        static_cast<std::size_t>(is_fwd ? FeatureAt(features_by_name, "out_w")
-                                        : FeatureAt(features_by_name, "in_w"));
-    const std::size_t K_h = static_cast<std::size_t>(FeatureAt(features_by_name, "fil_h"));
-    const std::size_t K_w = static_cast<std::size_t>(FeatureAt(features_by_name, "fil_w"));
-    std::size_t groups    = static_cast<std::size_t>(FeatureAt(features_by_name, "group_count"));
+    const std::size_t H_in = static_cast<std::size_t>(
+        is_fwd ? FeatureAt(features_by_name, "in_h") : FeatureAt(features_by_name, "out_h"));
+    const std::size_t W_in = static_cast<std::size_t>(
+        is_fwd ? FeatureAt(features_by_name, "in_w") : FeatureAt(features_by_name, "out_w"));
+    const std::size_t H_out = static_cast<std::size_t>(
+        is_fwd ? FeatureAt(features_by_name, "out_h") : FeatureAt(features_by_name, "in_h"));
+    const std::size_t W_out = static_cast<std::size_t>(
+        is_fwd ? FeatureAt(features_by_name, "out_w") : FeatureAt(features_by_name, "in_w"));
+    const std::size_t K_h    = static_cast<std::size_t>(FeatureAt(features_by_name, "fil_h"));
+    const std::size_t K_w    = static_cast<std::size_t>(FeatureAt(features_by_name, "fil_w"));
+    std::size_t groups       = static_cast<std::size_t>(FeatureAt(features_by_name, "group_count"));
     const std::size_t num_cu = 254;
 
-    const auto in_layout  = OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "in_layout")), 2);
-    const auto fil_layout = OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "fil_layout")), 2);
-    const auto out_layout = OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "out_layout")), 2);
+    const auto in_layout =
+        OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "in_layout")), 2);
+    const auto fil_layout =
+        OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "fil_layout")), 2);
+    const auto out_layout =
+        OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "out_layout")), 2);
     const auto precision =
         OneHot(EncodePrecisionLabel(FeatureAt(features_by_name, "precision")), 3);
     // Direction one-hot is present in ExtractTunaNetND2dFeatures but omitted here because
@@ -348,18 +348,18 @@ std::vector<float> EngineerCandidateSelectionInputFeatures(
         return std::isfinite(logged) ? logged : 0.0;
     };
 
-    const double flops =
-        safe_ratio(2.0 * static_cast<double>(N) * static_cast<double>(C_out) *
-                       static_cast<double>(C_in) * static_cast<double>(K_h) *
-                       static_cast<double>(K_w) * static_cast<double>(H_out) *
-                       static_cast<double>(W_out),
-                   static_cast<double>(groups));
+    const double flops = safe_ratio(2.0 * static_cast<double>(N) * static_cast<double>(C_out) *
+                                        static_cast<double>(C_in) * static_cast<double>(K_h) *
+                                        static_cast<double>(K_w) * static_cast<double>(H_out) *
+                                        static_cast<double>(W_out),
+                                    static_cast<double>(groups));
 
-    const double M = safe_ratio(static_cast<double>(N) * static_cast<double>(H_out) *
-                                    static_cast<double>(W_out),
-                                static_cast<double>(groups));
+    const double M =
+        safe_ratio(static_cast<double>(N) * static_cast<double>(H_out) * static_cast<double>(W_out),
+                   static_cast<double>(groups));
     const double N_gemm = safe_ratio(static_cast<double>(C_out), static_cast<double>(groups));
-    const double K_gemm = static_cast<double>(C_in) * static_cast<double>(K_h) * static_cast<double>(K_w);
+    const double K_gemm =
+        static_cast<double>(C_in) * static_cast<double>(K_h) * static_cast<double>(K_w);
     const double gemm_size = M * N_gemm * K_gemm;
     const double work_per_cu =
         safe_ratio(static_cast<double>(N) * static_cast<double>(H_out) *
@@ -424,9 +424,9 @@ std::vector<float> EngineerCandidateSelectionInputFeatures(
 
     if(engineered.size() != kCandidateSelectionEncoderInputSize)
     {
-        MIOPEN_THROW("EngineerCandidateSelectionInputFeatures: expected "
-                     + std::to_string(kCandidateSelectionEncoderInputSize) + " features, got "
-                     + std::to_string(engineered.size()));
+        MIOPEN_THROW("EngineerCandidateSelectionInputFeatures: expected " +
+                     std::to_string(kCandidateSelectionEncoderInputSize) + " features, got " +
+                     std::to_string(engineered.size()));
     }
 
     return engineered;
@@ -517,8 +517,9 @@ void AppendKernelConfigOneHot(std::vector<float>& engineered,
 } // namespace
 
 MIOPEN_INTERNALS_EXPORT
-std::vector<float> EngineerCandidateSelectionKernelConfigFeatures(
-    const std::vector<float>& raw_config_features, const CandidateSelectionMetadata& metadata)
+std::vector<float>
+EngineerCandidateSelectionKernelConfigFeatures(const std::vector<float>& raw_config_features,
+                                               const CandidateSelectionMetadata& metadata)
 {
     const auto active_params              = ActiveOutputParams(metadata);
     const auto& sequence_encodings        = metadata.sequence_encodings();
@@ -527,9 +528,9 @@ std::vector<float> EngineerCandidateSelectionKernelConfigFeatures(
 
     if(raw_config_features.size() != active_params.size())
     {
-        MIOPEN_THROW("EngineerCandidateSelectionKernelConfigFeatures: expected "
-                     + std::to_string(active_params.size()) + " raw features, got "
-                     + std::to_string(raw_config_features.size()));
+        MIOPEN_THROW("EngineerCandidateSelectionKernelConfigFeatures: expected " +
+                     std::to_string(active_params.size()) + " raw features, got " +
+                     std::to_string(raw_config_features.size()));
     }
 
     std::vector<float> engineered;
@@ -543,8 +544,7 @@ std::vector<float> EngineerCandidateSelectionKernelConfigFeatures(
         if(enc_it == sequence_encodings.end())
             continue;
 
-        AppendKernelConfigOneHot(
-            engineered, raw_config_features[i], enc_it->second, missing_token);
+        AppendKernelConfigOneHot(engineered, raw_config_features[i], enc_it->second, missing_token);
     }
 
     // 2. Raw numerical features (non-categorical active params).
@@ -595,9 +595,9 @@ std::vector<float> EngineerCandidateSelectionKernelConfigFeatures(
 
     if(engineered.size() != expected_output_dim)
     {
-        MIOPEN_THROW("EngineerCandidateSelectionKernelConfigFeatures: expected "
-                     + std::to_string(expected_output_dim) + " features, got "
-                     + std::to_string(engineered.size()));
+        MIOPEN_THROW("EngineerCandidateSelectionKernelConfigFeatures: expected " +
+                     std::to_string(expected_output_dim) + " features, got " +
+                     std::to_string(engineered.size()));
     }
 
     return engineered;
@@ -639,7 +639,8 @@ CandidateSelectionModel::EncodeInputFeatures(const std::map<std::string, float>&
         }
     }
 
-    const auto engineered_features = EngineerCandidateSelectionInputFeatures(filtered_features, features);
+    const auto engineered_features =
+        EngineerCandidateSelectionInputFeatures(filtered_features, features);
     return EncodeInputFeaturesWithFdeep(engineered_features, arch_, solver_);
 }
 
@@ -1035,9 +1036,7 @@ ModelSelectBestCandidate(const std::string& arch,
         const auto& encoded_features = model.EncodeInputFeatures(features);
         {
             std::ostringstream encoded_features_log;
-            miopen::LogRange(encoded_features_log << "Encoded features: [",
-                             encoded_features,
-                             ", ")
+            miopen::LogRange(encoded_features_log << "Encoded features: [", encoded_features, ", ")
                 << "]";
             MIOPEN_LOG_I2(encoded_features_log.str());
         }

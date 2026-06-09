@@ -54,15 +54,16 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
 /// Produces the same 2D engineered features as ExtractTunaNetND2dFeatures (ai_heuristics.cpp),
 /// except direction one-hot is omitted when direction is a CandidateSelection constant.
 /// Logic is duplicated so either path can evolve independently.
-MIOPEN_INTERNALS_EXPORT std::vector<float> EngineerCandidateSelectionInputFeatures(
-    const std::vector<float>& raw_features,
-    const std::map<std::string, float>& features_by_name);
+MIOPEN_INTERNALS_EXPORT std::vector<float>
+EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
+                                        const std::map<std::string, float>& features_by_name);
 
 /// Expands metadata-ordered encoded kernel params into the vector consumed by the
 /// kernel_config_encoder submodel (one-hot + raw numerical + derived features).
 /// Matches ConvKernConfigPreprocessor in models.py.
-MIOPEN_INTERNALS_EXPORT std::vector<float> EngineerCandidateSelectionKernelConfigFeatures(
-    const std::vector<float>& raw_config_features, const CandidateSelectionMetadata& metadata);
+MIOPEN_INTERNALS_EXPORT std::vector<float>
+EngineerCandidateSelectionKernelConfigFeatures(const std::vector<float>& raw_config_features,
+                                               const CandidateSelectionMetadata& metadata);
 
 using ValidationFunc = std::function<bool(int, int)>;
 
