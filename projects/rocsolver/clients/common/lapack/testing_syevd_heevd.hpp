@@ -643,21 +643,22 @@ void syevd_heevd_getError(const rocblas_handle handle,
     // implicitly the equivalent non-converged matrix is very complicated and it boils
     // down to essentially run the algorithm again and until convergence is achieved).
 
+    max_errors[1] = 0;
+    max_errors[2] = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        // Check 0: Compare eigenvalues with LAPACK
-        // error is ||hD - hDRes|| / (n * ||hD||)
-        // using frobenius norm
-        double err = 0;
-        if(hinfo[b][0] == 0)
-            err = norm_error('F', 1, n, 1, hD[b], hDres[b]) / n;
-        max_errors[0] = rocblas_max_nan(err, max_errors[0]);
-
-        if(evect == rocblas_evect_original)
+        double err;
+        if(hinfo[b][0] == 0 && n > 0)
         {
-            // both eigenvalues and eigenvectors needed; compare with input matrix
-            if((hinfo[b][0] == 0) && (n > 0))
+            // Check 0: Compare eigenvalues with LAPACK
+            // error is ||hD - hDRes|| / (n * ||hD||)
+            // using frobenius norm
+            err = norm_error('F', 1, n, 1, hD[b], hDres[b]) / n;
+            max_errors[0] = rocblas_max_nan(err, max_errors[0]);
+
+            if(evect == rocblas_evect_original)
             {
+                // both eigenvalues and eigenvectors needed; compare with input matrix
                 // Input matrix
                 auto M = HMat::Wrap(A.data() + b * lda * n, lda, n)->block(BDesc().nrows(n).ncols(n));
 
