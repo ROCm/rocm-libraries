@@ -529,66 +529,21 @@ def runAsanDockerPromote() {
     }
 }
 
-// Note: FRAGILE - Depends on the specific job and workflow structure of TheRock's multi_arch_ci_asan.yml
-// Queries the GitHub API for the most recent completed TheRock ASAN CI run on main
-// where the "Validate Artifact Structure" job succeeded.
-def resolveAsanRunId() {
-    def override = env.ASAN_ARTIFACTS_RUN_ID?.trim()
-    if (override) {
-        echo "Using pinned ASAN_ARTIFACTS_RUN_ID=${override}"
-        return override
-    }
-    echo "Resolving latest TheRock ASAN run ID from GitHub API..."
-    def runId = null
-    withCredentials([usernamePassword(credentialsId: 'github-app-miopen', usernameVariable: 'GITHUB_APP', passwordVariable: 'GITHUB_TOKEN')]) {
-        runId = sh(returnStdout: true, script: """
-            set -e
-            RUNS=\$(curl -sf \
-              -H "Authorization: token \$GITHUB_TOKEN" \
-              "https://api.github.com/repos/ROCm/TheRock/actions/workflows/multi_arch_ci_asan.yml/runs?branch=main&status=completed&per_page=20" \
-              | jq -r '.workflow_runs[].id')
-            if [ -z "\$RUNS" ]; then
-                echo "ERROR: No completed ASAN runs found" >&2
-                exit 1
-            fi
-            for RUN_ID in \$RUNS; do
-                CONCLUSION=\$(curl -sf \
-                  -H "Authorization: token \$GITHUB_TOKEN" \
-                  "https://api.github.com/repos/ROCm/TheRock/actions/runs/\${RUN_ID}/jobs?per_page=100" \
-                  | jq -r '[.jobs[] | select(.name | contains("Validate Artifact Structure")) | .conclusion] | first // empty')
-                if [ "\$CONCLUSION" = "success" ]; then
-                    printf '%s' "\$RUN_ID"
-                    exit 0
-                fi
-            done
-            echo "ERROR: No ASAN run with a passing Validate Artifact Structure job found in the last 20 runs" >&2
-            exit 1
-        """).trim()
-    }
-    if (!runId) {
-        error("resolveAsanRunId: GitHub API returned an empty run ID")
-    }
-    echo "Resolved ASAN run ID: ${runId}"
-    return runId
-}
-
 def buildAsanDockerImage(Map conf=[:]) {
     def variant = env.STAGE_NAME
     env.DOCKER_BUILDKIT = 1
     def asanTag = "${env.MIOPEN_DOCKER_IMAGE_URL}:ci_asan_candidate"
-    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:asan_cache"
-    def asanRunId = conf.get("asanRunId", null) ?: resolveAsanRunId()
     def amdgpuFamilies = conf.get("amdgpuFamilies", "gfx94X-dcgpu")
-    def amdgpuArchs = conf.get("amdgpuArchs", "gfx942") 
+    def amdgpuArchs = conf.get("amdgpuArchs", "gfx942")
 
-    def dockerArgs = "--build-arg BUILD_TYPE=prebuilt " +
-                     "--build-arg ASAN_ARTIFACTS_RUN_ID=\"${asanRunId}\" " +
+    def dockerArgs = "--build-arg BUILD_TYPE=source_build " +
                      "--build-arg AMDGPU_FAMILIES=\"${amdgpuFamilies}\" " +
                      "--build-arg GPU_ARCHS=\"${amdgpuArchs}\" " +
+                     "--build-arg ASAN_SCCACHE_CACHE_BUSTER=\"MiOpen-ASAN-Docker-CK\" " +
                      " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile.ASAN "
     def buildContext = "${env.WORKSPACE}/${env.MIOPEN_DIR}/."
 
-    echo "Building ASAN image ${asanTag} (run_id=${asanRunId}, families=${amdgpuFamilies})"
+    echo "Building ASAN image ${asanTag} from source (families=${amdgpuFamilies})"
     utils.setGithubStatus(variant, 'pending', 'In progress')
     try {
         withDockerRegistry([credentialsId: "docker_test_cred", url: ""]) {
@@ -599,10 +554,9 @@ def buildAsanDockerImage(Map conf=[:]) {
             """.stripIndent()
             sh label: 'Build and push ASAN Docker image', script: """
                 DOCKER_BUILDKIT=1 docker buildx build \
+                  --no-cache \
                   --push \
                   --tag ${asanTag} \
-                  --cache-from type=registry,ref=${cacheRef} \
-                  --cache-to type=registry,ref=${cacheRef},compression=zstd,mode=min \
                   ${dockerArgs} \
                   ${buildContext}
             """.stripIndent()
