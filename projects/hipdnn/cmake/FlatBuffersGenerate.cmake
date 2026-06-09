@@ -22,6 +22,18 @@ set(_HIPDNN_FLATBUFFERS_GENERATE_DIR "${CMAKE_CURRENT_LIST_DIR}")
 
 # Resolve the flatc compiler command and build dependency for header generation.
 function(_hipdnn_resolve_flatc_command OUT_COMMAND OUT_DEPENDENCY)
+    if(TARGET flatbuffers::flatc)
+        set(${OUT_COMMAND} "$<TARGET_FILE:flatbuffers::flatc>" PARENT_SCOPE)
+        set(${OUT_DEPENDENCY} flatbuffers::flatc PARENT_SCOPE)
+        return()
+    endif()
+
+    if(TARGET flatc)
+        set(${OUT_COMMAND} "$<TARGET_FILE:flatc>" PARENT_SCOPE)
+        set(${OUT_DEPENDENCY} flatc PARENT_SCOPE)
+        return()
+    endif()
+
     foreach(_candidate_var
             IN ITEMS
                FLATBUFFERS_FLATC_EXECUTABLE
@@ -34,18 +46,6 @@ function(_hipdnn_resolve_flatc_command OUT_COMMAND OUT_DEPENDENCY)
             return()
         endif()
     endforeach()
-
-    if(TARGET flatbuffers::flatc)
-        set(${OUT_COMMAND} "$<TARGET_FILE:flatbuffers::flatc>" PARENT_SCOPE)
-        set(${OUT_DEPENDENCY} flatbuffers::flatc PARENT_SCOPE)
-        return()
-    endif()
-
-    if(TARGET flatc)
-        set(${OUT_COMMAND} "$<TARGET_FILE:flatc>" PARENT_SCOPE)
-        set(${OUT_DEPENDENCY} flatc PARENT_SCOPE)
-        return()
-    endif()
 
     set(_flatc_hints "")
     if(DEFINED flatbuffers_DIR)

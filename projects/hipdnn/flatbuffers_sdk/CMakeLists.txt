@@ -23,6 +23,16 @@ set(HIP_DNN_FLATBUFFERS_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hip
 # The validation logic is shared with the imported Config template via
 # hipdnn_flatbuffers_version_check.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipdnn_flatbuffers_version_check.cmake)
+if(DEFINED _HIPDNN_DEFAULT_FLATBUFFERS_VERSION
+       AND NOT HIPDNN_FLATBUFFERS_VERSION STREQUAL "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}")
+    message(
+        WARNING
+            "HIPDNN_FLATBUFFERS_VERSION was overridden to ${HIPDNN_FLATBUFFERS_VERSION}. "
+            "hipDNN officially supports FlatBuffers ${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}; "
+            "other versions may fail to build or generate incompatible headers."
+    )
+endif()
+
 hipdnn_add_dependency(
     flatbuffers
     VERSION ${HIPDNN_FLATBUFFERS_VERSION}

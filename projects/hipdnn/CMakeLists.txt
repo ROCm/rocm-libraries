@@ -5,10 +5,6 @@ cmake_minimum_required(VERSION 3.25.2)
 
 # hipDNN dependency versions to use
 set(_HIPDNN_DEFAULT_FLATBUFFERS_VERSION "25.9.23")
-if(DEFINED HIPDNN_FLATBUFFERS_VERSION
-       AND NOT HIPDNN_FLATBUFFERS_VERSION STREQUAL "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}")
-    set(_HIPDNN_FLATBUFFERS_VERSION_OVERRIDDEN TRUE)
-endif()
 
 set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
 set(HIPDNN_FLATBUFFERS_VERSION "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}" CACHE STRING "Version of flatbuffers to use")
@@ -16,15 +12,6 @@ set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
 set(HIPDNN_NANOBIND_VERSION "2.12.0" CACHE STRING "Version of nanobind to use")
 set(HIPDNN_TSL_ROBIN_MAP_VERSION "1.4.1" CACHE STRING "Version of tsl-robin-map to use")
-
-if(_HIPDNN_FLATBUFFERS_VERSION_OVERRIDDEN)
-    message(
-        WARNING
-            "HIPDNN_FLATBUFFERS_VERSION was overridden to ${HIPDNN_FLATBUFFERS_VERSION}. "
-            "hipDNN officially supports FlatBuffers ${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}; "
-            "other versions may fail to build or generate incompatible headers."
-    )
-endif()
 
 option(HIPDNN_SKIP_JSON_LIB "Defines whether SDK public headers should not include nlohmann/json.hpp." OFF)
 
