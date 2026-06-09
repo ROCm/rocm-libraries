@@ -648,13 +648,8 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         OPTIONAL
     )
 
-    if(TARGET tensilelite-client)
-        install(
-            TARGETS tensilelite-client
-            DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite"
-            COMPONENT tests
-        )
-    endif()
+    # TODO: Add C++ test tools (tensilelite-client, cpu-gemm-driver) when
+    # common/generator tests are enabled in CI.
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)

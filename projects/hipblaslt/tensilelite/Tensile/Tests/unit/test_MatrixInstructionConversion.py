@@ -22,7 +22,6 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-import pytest
 import yaml
 from pprint import pformat
 
@@ -34,14 +33,10 @@ from Tensile.Toolchain.Validators import validateToolchain
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, validateMIParameters
 from Tensile.SolutionStructs.Validators.WorkGroup import validateWorkGroup
 
+cxxCompiler = validateToolchain("amdclang++")
+isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, cxxCompiler)
 
-@pytest.fixture(scope="module")
-def isa_info_map():
-    cxxCompiler = validateToolchain("amdclang++")
-    return makeIsaInfoMap(SUPPORTED_ISA, cxxCompiler)
-
-
-def test_convert_9_item_custom_kernel_config(isa_info_map):
+def test_convert_9_item_custom_kernel_config():
     input_conf = yaml.load(
 """
 ProblemType:
@@ -81,7 +76,7 @@ WorkGroup: [16, 16, 1]
         wavefrontSize,
         ptype,
         workgroup,
-        isa_info_map,
+        isaInfoMap,
     )
 
     input = {
@@ -113,7 +108,7 @@ WorkGroup: [16, 16, 1]
     solution.update(input_conf)
     solution.update(outputConf)
 
-    assert validateMIParameters(solution, isa_info_map, True)
+    assert validateMIParameters(solution, isaInfoMap, True)
     assert validateWorkGroup(solution)
 
     mi4 = solution["MatrixInstruction"]
@@ -127,7 +122,7 @@ WorkGroup: [16, 16, 1]
     assert format9 == mi
 
 
-def testConvert9ItemCustomKernelConfig(isa_info_map):
+def testConvert9ItemCustomKernelConfig():
 
     inputConf = yaml.load(
 """
@@ -183,7 +178,7 @@ custom.config:
         wavefrontSize,
         inputConf["ProblemType"],
         workGroup,
-        isa_info_map,
+        isaInfoMap,
     )
 
     input = {
@@ -215,4 +210,4 @@ custom.config:
     solution.update(inputConf)
     solution.update(outputConf)
 
-    assert validateMIParameters(solution, isa_info_map, True) == True
+    assert validateMIParameters(solution, isaInfoMap, True) == True
