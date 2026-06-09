@@ -1,10 +1,72 @@
 ## CK Tile direct convolutions
 
-CK Tile convolutions use warp-level GEMM pipelines to compute forward, backward data, and backward weight convolutions.
+CK Tile convolutions use warp-level GEMM pipelines to compute forward, backward data convolutions.
 
-The initial implementations port the MIOpen HIP convolutions (`projects/miopen/src/hipconv`) to use CK Tile abstractions.
+### Direct convolution for sparse grouped convolutions
 
-For the original README, see [`projects/miopen/src/hipconv/README.md`](../../../../../miopen/src/hipconv/README.md).
+### Direct dense convolution algorithm
+
+Consider a non-grouped forward convolution in the channels last layout
+
+$$
+\mathcal{O}(n,h_o, w_o, k) = \sum_{y=0}^{Y-1}\sum_{x=0}^{X-1}\sum_{c=0}^{C_{\text{tot}}} \mathcal{I}(n,s_h \times h_o + d_h \times y - p_h, s_w \times w_o + d_w \times x - p_w, c) \times \mathcal{W}(k, y, x, c)
+$$
+
+where
+
+- $n \in \{0,...,N-1\}$ is the batch index and $N$ is the number of batches
+- $h_o,\,w_o$ are the height and width of the output
+- $d_w,\,d_w$ are the dilation
+- $s_h,\,s_w$ are the stride
+- $p_h,\,p_w$ are the padding
+- $C_{\text{tot}}$ is the total number of input channel (in dense convolution all input channels contribute to all output channels)
+
+and $\mathcal{I}$, $\mathcal{W}$, and $\mathcal{O}$ are the input, weight, and output tensors, respectively.
+
+Denote a slice of the output tensor as $\mathcal{O}(n,h_o, :, :)$ which is a small 2D matrix of size $M_{\text{mfma}}^{}$ and  $N_{\text{mfma}}^{}$.
+Then, we can break the sum over the input channels as
+
+$$
+\sum_{c=0}^{C_{\text{tot}}} = \sum_{i_C=0}^{N_C - 1}\sum_{\tilde{k}=0}^{K_{\text{mfma}}^{}}
+$$
+
+where $N_C = (C_{\text{tot}} + K_{\text{mfma}}^{} - 1) / K_{\text{mfma}}^{}$ (ceiling division). We have basically divided the accumulation over the 
+input channel as chunks of size $K_{\text{mfma}}^{}$.
+
+For computing the outptu tensor slice $\mathcal{O}(n,h_o, :, :)$, we use the following notation
+
+$$
+\begin{aligned}
+&A_{\tilde{m}, \tilde{k}}(n, h_o, y, x, i_C) = \mathcal{I}((n,s_h \times h_o + d_h \times y - p_h, s_w \times \tilde{m} + d_w \times x - p_w, \tilde{k})) \\
+&B_{\tilde{k}, \tilde{n}}(y,x, i_c) = \mathcal{W}(\tilde{n}, y, x, \tilde{k}) \\
+&C_{\tilde{m}, \tilde{n}}(n,h_o) = \mathcal{O}(n,h_o, \tilde{m}, \tilde{n})
+\end{aligned}
+$$
+
+we can write the initial convolution as
+
+$$
+C_{\tilde{m}, \tilde{n}}(n,h_o) = \sum_{i_C=0}^{N_C - 1} \sum_{y=0}^{Y-1}\sum_{x=0}^{X-1} \sum_{\tilde{k}=0}^{K_{\text{mfma}}^{}} A_{\tilde{m}, \tilde{k}}(n, h_o, y, x, i_C) \times B_{\tilde{k}, \tilde{n}}(y,x, i_c)
+$$
+
+The innermost loop 
+
+$$
+\sum_{\tilde{k}=0}^{K_{\text{mfma}}^{}} A_{\tilde{m}, \tilde{k}}(n, h_o, y, x, i_C) \times B_{\tilde{k}, \tilde{n}}(y,x, i_c) \leftrightarrow \text{MFMA instruction output}
+$$
+
+can be efficiently calculated using the MFMA instruction, where a full lane of 64 threads computes the small matrix product using a device built-in instruction.
+Hence, we can map the convolution problem into an accumulation of wavefront level GEMM problems.
+The $\sum_{i_C=0}^{N_C - 1}$ loop over the input channel slices can be further broken into 
+
+$$
+\sum_{i_C=0}^{N_C - 1} = \sum_{i_{\text{wave}_0} = 0}^{N-1} + \cdots +  \sum_{i_{\text{wave}_{N_w-1}} = 0}^{N-1}
+$$
+
+where we have $N_w$ waves of 64 threads such that each wave computes $N$ slices of $K_{\text{mfma}}^{}$ input channels. 
+The accumulation within wave happens naturally via MFMA instruction (as it is matrix-fused-multiply-add). 
+The cross-wave accumulation takes place via LDS, i.e., each wave writes its final result into LDS with an appropriate synchronization for the in-fligt LDS operations.
+By moving more slices to the intrawave comoutation, we save LDS usage and allow more wavefronts to reside on a given CU.
 
 ## Supported configurations
 
@@ -55,29 +117,11 @@ utils/                                   — utilities for kernel implementation
   detail.hpp                             — static_for / dispatch compile-time helpers
 ```
 
-## Documentation
-
-Detailed documentation is available at `projects/composablekernel/docs/direct_convolution`:
-
-- [HIP conv Utility Components](../../../../docs/direct_convolution/utils.md) — Conv2dParams, SizeView, MatrixLayout, Swizzle, and other utilities
-- [HIP conv 4-Channel FP16 Kernel](../../../../docs/direct_convolution/kernel_4c_fp16.md) — Kernel architecture, MFMA usage, streaming pipeline, Dgrad specifics
-- [CK Tile distributions encoding for direct convolution](../../../../docs/direct_convolution/tile_distribution_encoding.md) - Description of tile distribution encodings relevant to direct convolutions.
-
-## Basic CK Tile utilities
-
-- BufferView - `projects/composablekernel/include/ck_tile/core/tensor/buffer_view.hpp` (raw linear memory access abstraction)
-- TensorDescriptor - `projects/composablekernel/include/ck_tile/core/tensor/tensor_descriptor.hpp` (multi-dimensional strided access to linear memory) 
-- TensorView - `projects/composablekernel/include/ck_tile/core/tensor/tensor_view.hpp` (multi-dimensional tensor over linear memory usinf BufferView and TensorDescriptor)
-- TileDistributionEncoding - `projects/composablekernel/include/ck_tile/core/tensor/tile_distribution.hpp` (distribution of a tensor over threads)
-- TileDistribution - `projects/composablekernel/include/ck_tile/core/tensor/tile_distribution.hpp` (mapping between tensor coordinates and data based on TileDistribution encoding).
-- TileWindow - `projects/composablekernel/include/ck_tile/core/tensor/tile_window.hpp` (abstaraction of data load/store using tile distribution).
-- StaticDistributedTensor - `projects/composablekernel/include/ck_tile/core/tensor/static_distributed_tensor.hpp` (thread local data container defined by the TileDistribution). 
-
 ## Building
 
-### Dispatcher codegen (recommended)
+### Dispatcher codegen
 
-The CK Tile Dispatcher is the recommended way to build and profile direct convolution
+The CK Tile Dispatcher is the way to build and profile direct convolution
 kernels. It generates each kernel as a separate compilation unit for better build
 parallelism. Enable it with `CK_TILE_DISPATCHER=ON`:
 
@@ -99,20 +143,6 @@ Dispatcher pipeline that emits only `kind=direct_conv` instances:
 
 ```
   -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON                                                           \
-```
-
-### CK Builder codegen (legacy)
-
-The CK Builder codegen path (`CK_EXPERIMENTAL_BUILDER=ON`, `CK_TILE_DISPATCHER=OFF`)
-includes only the implicit-GEMM instances. Direct convolution instances are no longer
-part of the CK Builder path — use the Dispatcher codegen instead.
-
-One can speed-up the configuration step by defining additional flags to disable the tile engine and CK examples generation
-
-```
--D BUILD_CK_TILE_ENGINE=OFF                                                                     \
--D BUILD_CK_EXAMPLES=OFF                                                                        \
--D BUILD_CK_TUTORIALS=OFF                                                                       \
 ```
 
 ## Testing
