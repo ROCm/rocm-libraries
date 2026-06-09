@@ -16,6 +16,7 @@
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
+#include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/golden/GoldenBundleDiscovery.hpp"
 #include "harness/golden/GoldenTensorComparator.hpp"
@@ -65,12 +66,49 @@ protected:
 
     virtual void executeUnderTest(hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors) = 0;
 
+    // GTest entry point. The base owns the load/execute/compare flow; the only
+    // per-runner variation is executeUnderTest (CPU ref / GPU ref / engine).
+    // This keeps the base abstract (executeUnderTest is pure) while making each
+    // subclass a concrete, registrable test.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    void TestBody() override
+    {
+        runGoldenComparison();
+    }
+
+    // Runs a reference-graph executor (the ALMIOPEN-1944 IReferenceGraphExecutor
+    // port) against the loaded bundle. The interface drives host-vs-device
+    // variant-pack selection via requiresDeviceMemory(), so the CPU and GPU
+    // golden subclasses no longer hand-roll that branching. Device executors
+    // write to GPU memory, so outputs are marked device-modified to trigger a
+    // device-to-host sync when the comparator reads them.
+    static void runReferenceExecutor(
+        IReferenceGraphExecutor& executor,
+        hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors)
+    {
+        const bool usesDevice = executor.requiresDeviceMemory();
+        const auto variantPack
+            = usesDevice ? deviceVariantPack(graphAndTensors) : graphAndTensors.hostBufferMap();
+
+        executor.execute(graphAndTensors.graphBuffer.data(),
+                         graphAndTensors.graphBuffer.size(),
+                         variantPack);
+
+        if(usesDevice)
+        {
+            for(const auto uid : graphAndTensors.outputTensorUids)
+            {
+                graphAndTensors.tensorMap.at(uid)->markDeviceModified();
+            }
+        }
+    }
+
     void runGoldenComparison()
     {
         ASSERT_NO_FATAL_FAILURE(executeUnderTest(_graphAndTensors));
 
         auto wrapper = _graphAndTensors.createGraphWrapper();
-        auto tensorAttrMap = wrapper.getTensorMap();
+        const auto& tensorAttrMap = wrapper.getTensorMap();
 
         for(auto uid : _graphAndTensors.outputTensorUids)
         {
@@ -127,13 +165,24 @@ protected:
     }
 
 private:
-    void resolveTolerances(
+    static std::unordered_map<int64_t, void*> deviceVariantPack(
+        hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors)
+    {
+        std::unordered_map<int64_t, void*> pack;
+        for(auto& [uid, tensor] : graphAndTensors.tensorMap)
+        {
+            pack[uid] = tensor->rawDeviceData();
+        }
+        return pack;
+    }
+
+    static void resolveTolerances(
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
         hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
         float& atol,
-        float& rtol) const
+        float& rtol)
     {
-        float defaultTolerance = deriveDefaultTolerance(wrapper, dataType);
+        const float defaultTolerance = deriveDefaultTolerance(wrapper, dataType);
         atol = defaultTolerance;
         rtol = defaultTolerance;
     }

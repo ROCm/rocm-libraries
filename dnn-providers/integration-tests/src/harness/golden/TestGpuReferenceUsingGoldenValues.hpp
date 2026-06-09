@@ -11,6 +11,9 @@
 namespace hipdnn_integration_tests::golden
 {
 
+// Validates the GPU reference executor (the ALMIOPEN-1944 port) against golden
+// bundle data. The base class owns load/compare and, via runReferenceExecutor,
+// the device variant-pack handling; this subclass only selects the executor.
 class TestGpuReferenceUsingGoldenValues
     : public IntegrationGraphGoldenReferenceVerificationHarness
 {
@@ -25,29 +28,8 @@ protected:
     void executeUnderTest(
         hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors) override
     {
-        auto deviceBufferMap = toDeviceVariantPack(graphAndTensors);
         gpu_graph_executor::GpuReferenceGraphExecutor executor;
-        executor.execute(
-            graphAndTensors.graphBuffer.data(),
-            graphAndTensors.graphBuffer.size(),
-            deviceBufferMap);
-
-        for(auto uid : graphAndTensors.outputTensorUids)
-        {
-            graphAndTensors.tensorMap.at(uid)->markDeviceModified();
-        }
-    }
-
-private:
-    static std::unordered_map<int64_t, void*> toDeviceVariantPack(
-        hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors)
-    {
-        std::unordered_map<int64_t, void*> pack;
-        for(auto& [uid, tensor] : graphAndTensors.tensorMap)
-        {
-            pack[uid] = tensor->rawDeviceData();
-        }
-        return pack;
+        runReferenceExecutor(executor, graphAndTensors);
     }
 };
 

@@ -3,10 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
-
-#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
 #include "harness/golden/GoldenBundleDiscovery.hpp"
 
@@ -157,14 +156,43 @@ TEST_F(GoldenBundleDiscoveryFixture, DiscoversBundlesAcrossAllTiers)
 TEST_F(GoldenBundleDiscoveryFixture, SkipsMetaJson)
 {
     populateAllTiers();
-    // A meta.json companion must not be counted as a bundle.
+    // Both a bare meta.json and a {Name}.meta.json companion must be ignored.
     auto bundleDir = _tempDir / "quick" / "Bn" / "withmeta";
     createMinimalBundle(bundleDir, "withmeta");
     std::ofstream(bundleDir / "withmeta.meta.json") << "{}";
+    std::ofstream(bundleDir / "meta.json") << "{}";
 
     auto result = discoverGoldenBundles(_tempDir);
-    // 4 from populateAllTiers + 1 "withmeta"; the meta.json adds nothing.
+    // 4 from populateAllTiers + 1 "withmeta"; neither meta file adds a bundle.
     EXPECT_EQ(result.size(), 5u);
+}
+
+TEST_F(GoldenBundleDiscoveryFixture, ScanFilesByExtensionIsGenericAndSorted)
+{
+    // The generic scanner carries no golden-ref knowledge: it returns every
+    // matching file (including meta files), recursively, in sorted order.
+    auto root = _tempDir / "scan";
+    std::filesystem::create_directories(root / "sub");
+    std::ofstream(root / "b.json") << "{}";
+    std::ofstream(root / "a.json") << "{}";
+    std::ofstream(root / "sub" / "c.json") << "{}";
+    std::ofstream(root / "sub" / "c.meta.json") << "{}";
+    std::ofstream(root / "note.txt") << "ignore me";
+
+    auto json = scanFilesByExtension(root, ".json");
+    ASSERT_EQ(json.size(), 4u); // a, b, sub/c, sub/c.meta — .txt excluded
+    EXPECT_TRUE(std::is_sorted(json.begin(), json.end()));
+    EXPECT_EQ(json.front().filename(), "a.json");
+}
+
+TEST(IsGoldenMetaFile, IdentifiesCompanionMetadata)
+{
+    EXPECT_TRUE(isGoldenMetaFile("dir/meta.json"));
+    EXPECT_TRUE(isGoldenMetaFile("dir/resnet50.meta.json"));
+    EXPECT_TRUE(isGoldenMetaFile("resnet50.meta.json"));
+    EXPECT_FALSE(isGoldenMetaFile("dir/resnet50.json"));
+    EXPECT_FALSE(isGoldenMetaFile("dir/metadata.json"));
+    EXPECT_FALSE(isGoldenMetaFile("dir/meta.bin"));
 }
 
 TEST(SanitizeForGtest, ReplacesInvalidChars)

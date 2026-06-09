@@ -16,7 +16,6 @@
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
-#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
 
@@ -29,6 +28,40 @@ struct DiscoveredBundle
     std::string suiteName;
     std::string testName;
 };
+
+// Generic recursive file scanner: returns every file under `directory` whose
+// extension matches `extension` (e.g. ".json"), sorted for deterministic test
+// ordering. It carries NO golden-ref knowledge — meta-file exclusion is layered
+// on top by the caller (see isGoldenMetaFile / discoverGoldenBundles). This is
+// the clean split called for in ALMIOPEN-1968: a generic scan, with golden-ref
+// filtering applied separately rather than baked into the directory walk.
+inline std::vector<std::filesystem::path> scanFilesByExtension(
+    const std::filesystem::path& directory, const std::string& extension)
+{
+    std::vector<std::filesystem::path> paths;
+    for(const auto& entry : std::filesystem::recursive_directory_iterator(directory))
+    {
+        if(entry.is_regular_file() && entry.path().extension() == extension)
+        {
+            paths.push_back(entry.path());
+        }
+    }
+    std::sort(paths.begin(), paths.end());
+    return paths;
+}
+
+// Golden-ref filter: true for companion metadata files, i.e. either a bare
+// `meta.json` or any `{Name}.meta.json`. These are not bundle graphs and must
+// be excluded from discovery.
+inline bool isGoldenMetaFile(const std::filesystem::path& jsonPath)
+{
+    if(jsonPath.filename() == "meta.json")
+    {
+        return true;
+    }
+    const auto stem = jsonPath.stem().string();
+    return stem.size() >= 5 && stem.substr(stem.size() - 5) == ".meta";
+}
 
 inline constexpr std::array<const char*, 4> K_TIER_NAMES = {
     "quick", "standard", "comprehensive", "full"};
@@ -304,6 +337,26 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
 //   - a stray top-level directory that is not one of the four tiers
 //   - a tier directory that is missing or empty
 //   - an unparseable bundle .json
+// Scans a single tier directory for bundle .json files: a recursive scan with
+// the golden-ref meta-file filter layered on top. This is the "recursive .json
+// scan per tier" the ticket (ALMIOPEN-1968) describes. It deliberately does NOT
+// own the root-level rules (stray-dir rejection, all-tiers-exist, cross-tier
+// collision) — those need visibility across all tiers and live in
+// discoverGoldenBundles, which is why that entry point takes the data root
+// rather than a single tierDir.
+inline std::vector<std::filesystem::path> scanTier(const std::filesystem::path& tierDir)
+{
+    std::vector<std::filesystem::path> jsonPaths;
+    for(auto& p : scanFilesByExtension(tierDir, ".json"))
+    {
+        if(!isGoldenMetaFile(p))
+        {
+            jsonPaths.push_back(std::move(p));
+        }
+    }
+    return jsonPaths;
+}
+
 //   - a generated test-name collision (names both producing paths)
 // The caller registers tests only on success, so any throw aborts startup and
 // surfaces the authoring mistake loudly rather than silently dropping coverage.
@@ -344,7 +397,7 @@ inline std::vector<DiscoveredBundle> discoverGoldenBundles(
                 + "; every tier (quick, standard, comprehensive, full) must exist");
         }
 
-        auto jsonPaths = hipdnn_test_sdk::utilities::scanBundleJsonFiles(tierDir);
+        const auto jsonPaths = scanTier(tierDir);
         if(jsonPaths.empty())
         {
             throw std::runtime_error(
@@ -354,13 +407,6 @@ inline std::vector<DiscoveredBundle> discoverGoldenBundles(
 
         for(const auto& jsonPath : jsonPaths)
         {
-            // Skip companion metadata files ({Name}.meta.json).
-            const auto stem = jsonPath.stem().string();
-            if(stem.size() >= 5 && stem.substr(stem.size() - 5) == ".meta")
-            {
-                continue;
-            }
-
             const DerivedTestName derived = deriveTestName(jsonPath, tierName);
 
             auto fullName = derived.suiteName + "." + derived.testName;

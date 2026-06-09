@@ -3,13 +3,15 @@
 
 #pragma once
 
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
-
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/golden/IntegrationGraphGoldenReferenceVerificationHarness.hpp"
 
 namespace hipdnn_integration_tests::golden
 {
 
+// Validates the CPU reference executor (the ALMIOPEN-1944 port) against golden
+// bundle data. The base class owns load/compare; this subclass only selects
+// which IReferenceGraphExecutor runs.
 class TestCpuReferenceUsingGoldenValues
     : public IntegrationGraphGoldenReferenceVerificationHarness
 {
@@ -17,11 +19,8 @@ protected:
     void executeUnderTest(
         hipdnn_test_sdk::utilities::GraphAndTensorMap& graphAndTensors) override
     {
-        auto hostBuffers = graphAndTensors.hostBufferMap();
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
-            graphAndTensors.graphBuffer.data(),
-            graphAndTensors.graphBuffer.size(),
-            hostBuffers);
+        CpuReferenceGraphExecutorAdapter executor;
+        runReferenceExecutor(executor, graphAndTensors);
     }
 };
 
