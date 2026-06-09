@@ -539,14 +539,12 @@ def setupSolutionsAndKernels(
 ) -> Tuple[List[Solution], List[Solution], KernelWriterAssembly, KernelWriterSource]:
     """Reusable logic for setting up testable solutions and kernels"""
 
-    (cxxCompiler, cCompiler, assembler, offloadBundler, deviceEnumerator) = (
-        validateToolchain(
-            ToolchainDefaults.CXX_COMPILER,
-            ToolchainDefaults.C_COMPILER,
-            ToolchainDefaults.ASSEMBLER,
-            ToolchainDefaults.OFFLOAD_BUNDLER,
-            ToolchainDefaults.DEVICE_ENUMERATOR,
-        )
+    (cxxCompiler, cCompiler, assembler, offloadBundler, deviceEnumerator) = validateToolchain(
+        ToolchainDefaults.CXX_COMPILER,
+        ToolchainDefaults.C_COMPILER,
+        ToolchainDefaults.ASSEMBLER,
+        ToolchainDefaults.OFFLOAD_BUNDLER,
+        ToolchainDefaults.DEVICE_ENUMERATOR,
     )
     params = {
         "CxxCompiler": cxxCompiler,
