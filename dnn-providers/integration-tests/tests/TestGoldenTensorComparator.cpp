@@ -142,7 +142,7 @@ TEST(GoldenTensorComparator, FormatComparisonFailureContainsAllFields)
         "/path/to/bundle.json", 5, "output_tensor", {10, 10}, "fp32", result);
 
     EXPECT_NE(msg.find("bundle.json"), std::string::npos);
-    EXPECT_NE(msg.find("5"), std::string::npos);
+    EXPECT_NE(msg.find('5'), std::string::npos);
     EXPECT_NE(msg.find("output_tensor"), std::string::npos);
     EXPECT_NE(msg.find("[10, 10]"), std::string::npos);
     EXPECT_NE(msg.find("fp32"), std::string::npos);

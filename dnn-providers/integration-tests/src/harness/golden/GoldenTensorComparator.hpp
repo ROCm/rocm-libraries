@@ -94,15 +94,17 @@ ComparisonResult compareTensors(const hipdnn_data_sdk::utilities::ITensor& expec
     int64_t idx = 0;
     while(expectedIt != expectedEnd)
     {
-        auto expVal = static_cast<double>(static_cast<T>(*expectedIt));
-        auto actVal = static_cast<double>(static_cast<T>(*actualIt));
+        const auto expVal
+            = static_cast<double>(*static_cast<const T*>(*expectedIt));
+        const auto actVal
+            = static_cast<double>(*static_cast<const T*>(*actualIt));
 
-        double absErr = std::abs(expVal - actVal);
-        double denom = std::max(std::abs(expVal), std::abs(actVal));
-        double relErr = (denom > 0.0) ? absErr / denom : 0.0;
+        const double absErr = std::abs(expVal - actVal);
+        const double denom = std::max(std::abs(expVal), std::abs(actVal));
+        const double relErr = (denom > 0.0) ? absErr / denom : 0.0;
 
-        bool elementPassed = absErr <= static_cast<double>(atol)
-                             || absErr <= static_cast<double>(rtol) * denom;
+        const bool elementPassed = absErr <= static_cast<double>(atol)
+                                   || absErr <= static_cast<double>(rtol) * denom;
 
         if(!elementPassed)
         {
