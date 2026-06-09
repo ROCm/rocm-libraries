@@ -183,6 +183,13 @@ def _tensor(
         ) from e
 
 
+def _tensor_shape(graph_json: Dict[str, Any], uid: int) -> Optional[Tuple[int, ...]]:
+    for tensor_json in graph_json.get("tensors", []):
+        if tensor_json.get("uid") == uid:
+            return tuple(int(dim) for dim in tensor_json.get("dims", []))
+    return None
+
+
 def _store_tensor(
     tensors: Dict[int, torch.Tensor], uid: int, value: torch.Tensor
 ) -> None:
@@ -192,6 +199,46 @@ def _store_tensor(
         tensors[uid] = existing
     else:
         tensors[uid] = value
+
+
+def _store_channel_tensor(
+    tensors: Dict[int, torch.Tensor],
+    uid: Optional[int],
+    values: torch.Tensor,
+    fallback_ndim: int,
+) -> None:
+    if uid is None:
+        return
+    existing = tensors.get(uid)
+    if existing is not None:
+        shaped = values.reshape(existing.shape)
+    else:
+        shaped = values.reshape([1, values.numel()] + [1] * max(fallback_ndim - 2, 0))
+    _store_tensor(tensors, uid, shaped)
+
+
+def _channel_values(tensor: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    values = tensor.reshape(-1).to(dtype=torch.float32)
+    if x.ndim < 2:
+        raise ValueError("Batchnorm tensors require at least 2 dimensions")
+    if values.numel() != x.shape[1]:
+        raise ValueError(
+            f"Batchnorm channel tensor has {values.numel()} elements, expected {x.shape[1]}"
+        )
+    return values
+
+
+def _reject_peer_stats(node: Dict[str, Any], operation: str) -> None:
+    peer_stats = _node_param(node, "peer_stats_tensor_uid", None)
+    if peer_stats is None:
+        return
+    if isinstance(peer_stats, (list, tuple)) and len(peer_stats) == 0:
+        return
+    raise ValueError(f"{operation} does not support peer statistics")
+
+
+def _channel_broadcast(values: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    return values.reshape([1, values.numel()] + [1] * (x.ndim - 2)).to(device=x.device)
 
 
 def _scalar_value(
@@ -300,6 +347,36 @@ def _conv2d_forward(
 def _conv_padding_is_symmetric(node: Dict[str, Any]) -> bool:
     pre, post = _conv_padding(node)
     return pre == post
+
+
+def _bn_reduce_dims(x: torch.Tensor) -> Tuple[int, ...]:
+    if x.ndim < 2:
+        raise ValueError("Batchnorm requires at least 2D tensor (batch and channel)")
+    return tuple(dim for dim in range(x.ndim) if dim != 1)
+
+
+def _bn_mean_var(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    x_float = x.to(dtype=torch.float32)
+    reduce_dims = _bn_reduce_dims(x)
+    mean = x_float.mean(dim=reduce_dims)
+    mean_sq = (x_float * x_float).mean(dim=reduce_dims)
+    var = mean_sq - mean * mean
+    return mean, var
+
+
+def _bn_affine(
+    x: torch.Tensor,
+    scale: torch.Tensor,
+    bias: torch.Tensor,
+    mean: torch.Tensor,
+    inv_variance: torch.Tensor,
+) -> torch.Tensor:
+    x_float = x.to(dtype=torch.float32)
+    scale_b = _channel_broadcast(scale, x_float)
+    bias_b = _channel_broadcast(bias, x_float)
+    mean_b = _channel_broadcast(mean, x_float)
+    inv_b = _channel_broadcast(inv_variance, x_float)
+    return (scale_b * ((x_float - mean_b) * inv_b) + bias_b).to(dtype=x.dtype)
 
 
 def _sdpa_bool(node: Dict[str, Any], key: str, default: bool = False) -> bool:
@@ -489,6 +566,94 @@ def handle_conv_fwd(
     _store_tensor(tensors, y_uid, y)
 
 
+@register_handler("ConvolutionBwdAttributes")
+def handle_conv_bwd(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+) -> None:
+    """Handle ConvolutionBwdAttributes (gradient with respect to input)."""
+    _validate_cross_correlation(node)
+    dy_uid = _required_input_uid(node, "dy_tensor_uid")
+    w_uid = _required_input_uid(node, "w_tensor_uid")
+    dx_uid = _required_output_uid(node, "dx_tensor_uid")
+
+    dy = _tensor(tensors, dy_uid, node)
+    w = _tensor(tensors, w_uid, node)
+    input_size = _tensor_shape(graph_json, dx_uid)
+    if input_size is None:
+        raise ValueError(
+            f"ConvolutionBwdAttributes missing dx tensor shape for UID {dx_uid}"
+        )
+
+    stride, dilation = _conv_stride_dilation(node)
+    pre, post = _conv_padding(node)
+    groups = _conv_group_count(input_size, w.shape)
+    if _conv_padding_is_symmetric(node):
+        dx = torch.nn.grad.conv2d_input(
+            input_size,
+            w,
+            dy,
+            stride=stride,
+            padding=pre,
+            dilation=dilation,
+            groups=groups,
+        )
+    else:
+        with torch.enable_grad():
+            x = torch.zeros(
+                input_size, dtype=dy.dtype, device=dy.device, requires_grad=True
+            )
+            y = _conv2d_forward(node, x, w.detach())
+            y.backward(dy)
+            dx = x.grad.detach()
+    _store_tensor(tensors, dx_uid, dx)
+
+
+@register_handler("ConvolutionWrwAttributes")
+def handle_conv_wrw(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+) -> None:
+    """Handle ConvolutionWrwAttributes (gradient with respect to weights)."""
+    _validate_cross_correlation(node)
+    x_uid = _required_input_uid(node, "x_tensor_uid")
+    dy_uid = _required_input_uid(node, "dy_tensor_uid")
+    dw_uid = _required_output_uid(node, "dw_tensor_uid")
+
+    x = _tensor(tensors, x_uid, node)
+    dy = _tensor(tensors, dy_uid, node)
+    weight_size = _tensor_shape(graph_json, dw_uid)
+    if weight_size is None:
+        raise ValueError(
+            f"ConvolutionWrwAttributes missing dw tensor shape for UID {dw_uid}"
+        )
+
+    stride, dilation = _conv_stride_dilation(node)
+    pre, _post = _conv_padding(node)
+    groups = _conv_group_count(x.shape, weight_size)
+    if _conv_padding_is_symmetric(node):
+        dw = torch.nn.grad.conv2d_weight(
+            x,
+            weight_size,
+            dy,
+            stride=stride,
+            padding=pre,
+            dilation=dilation,
+            groups=groups,
+        )
+    else:
+        with torch.enable_grad():
+            w = torch.zeros(
+                weight_size, dtype=x.dtype, device=x.device, requires_grad=True
+            )
+            y = _conv2d_forward(node, x.detach(), w)
+            y.backward(dy)
+            dw = w.grad.detach()
+    _store_tensor(tensors, dw_uid, dw)
+
+
 @register_handler("MatmulAttributes")
 def handle_matmul(
     node: Dict[str, Any],
@@ -502,6 +667,179 @@ def handle_matmul(
 
     c = torch.matmul(_tensor(tensors, a_uid, node), _tensor(tensors, b_uid, node))
     _store_tensor(tensors, c_uid, c)
+
+
+@register_handler("BatchnormInferenceAttributes")
+def handle_batchnorm_inference(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+) -> None:
+    """Handle batchnorm inference with precomputed inverse variance."""
+    x_uid = _required_input_uid(node, "x_tensor_uid")
+    mean_uid = _required_input_uid(node, "mean_tensor_uid")
+    inv_uid = _required_input_uid(node, "inv_variance_tensor_uid")
+    scale_uid = _required_input_uid(node, "scale_tensor_uid")
+    bias_uid = _required_input_uid(node, "bias_tensor_uid")
+    y_uid = _required_output_uid(node, "y_tensor_uid")
+
+    x = _tensor(tensors, x_uid, node)
+    y = _bn_affine(
+        x,
+        _channel_values(_tensor(tensors, scale_uid, node), x),
+        _channel_values(_tensor(tensors, bias_uid, node), x),
+        _channel_values(_tensor(tensors, mean_uid, node), x),
+        _channel_values(_tensor(tensors, inv_uid, node), x),
+    )
+    _store_tensor(tensors, y_uid, y)
+
+
+@register_handler("BatchnormInferenceAttributesVarianceExt")
+def handle_batchnorm_inference_variance(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+) -> None:
+    """Handle batchnorm inference with variance and epsilon."""
+    x_uid = _required_input_uid(node, "x_tensor_uid")
+    mean_uid = _required_input_uid(node, "mean_tensor_uid")
+    variance_uid = _required_input_uid(node, "variance_tensor_uid")
+    scale_uid = _required_input_uid(node, "scale_tensor_uid")
+    bias_uid = _required_input_uid(node, "bias_tensor_uid")
+    epsilon_uid = _required_input_uid(node, "epsilon_tensor_uid")
+    y_uid = _required_output_uid(node, "y_tensor_uid")
+
+    x = _tensor(tensors, x_uid, node)
+    variance = _channel_values(_tensor(tensors, variance_uid, node), x)
+    epsilon = _scalar_value(tensors, epsilon_uid, node)
+    inv_variance = torch.rsqrt(variance + epsilon)
+    y = _bn_affine(
+        x,
+        _channel_values(_tensor(tensors, scale_uid, node), x),
+        _channel_values(_tensor(tensors, bias_uid, node), x),
+        _channel_values(_tensor(tensors, mean_uid, node), x),
+        inv_variance,
+    )
+    _store_tensor(tensors, y_uid, y)
+
+
+@register_handler("BatchnormAttributes")
+def handle_batchnorm_training(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+) -> None:
+    """Handle batchnorm forward training."""
+    _reject_peer_stats(node, "Batchnorm forward training")
+    x_uid = _required_input_uid(node, "x_tensor_uid")
+    scale_uid = _required_input_uid(node, "scale_tensor_uid")
+    bias_uid = _required_input_uid(node, "bias_tensor_uid")
+    epsilon_uid = _required_input_uid(node, "epsilon_tensor_uid")
+    y_uid = _required_output_uid(node, "y_tensor_uid")
+
+    x = _tensor(tensors, x_uid, node)
+    scale = _channel_values(_tensor(tensors, scale_uid, node), x)
+    bias = _channel_values(_tensor(tensors, bias_uid, node), x)
+    epsilon = _scalar_value(tensors, epsilon_uid, node)
+    mean, variance = _bn_mean_var(x)
+    inv_variance = torch.rsqrt(variance + epsilon)
+    y = _bn_affine(x, scale, bias, mean, inv_variance)
+    _store_tensor(tensors, y_uid, y)
+
+    _store_channel_tensor(tensors, _optional_uid(node, "mean_tensor_uid"), mean, x.ndim)
+    _store_channel_tensor(
+        tensors,
+        _optional_uid(node, "inv_variance_tensor_uid"),
+        inv_variance,
+        x.ndim,
+    )
+
+    prev_mean_uid = _optional_uid(node, "prev_running_mean_tensor_uid")
+    prev_var_uid = _optional_uid(node, "prev_running_variance_tensor_uid")
+    next_mean_uid = _optional_uid(node, "next_running_mean_tensor_uid")
+    next_var_uid = _optional_uid(node, "next_running_variance_tensor_uid")
+    momentum_uid = _optional_uid(node, "momentum_tensor_uid")
+    running_present = [
+        prev_mean_uid,
+        prev_var_uid,
+        next_mean_uid,
+        next_var_uid,
+        momentum_uid,
+    ]
+    if any(uid is not None for uid in running_present):
+        if not all(uid is not None for uid in running_present):
+            raise ValueError(
+                "Batchnorm running-stat update requires prev mean/var, next mean/var, and momentum"
+            )
+        momentum = _scalar_value(tensors, int(momentum_uid), node)
+        prev_mean = _channel_values(_tensor(tensors, int(prev_mean_uid), node), x)
+        prev_var = _channel_values(_tensor(tensors, int(prev_var_uid), node), x)
+        elements_per_channel = x.numel() // x.shape[1]
+        if elements_per_channel == 1:
+            adjusted_variance = variance
+        else:
+            adjusted_variance = variance * (
+                elements_per_channel / (elements_per_channel - 1)
+            )
+        next_mean = (1.0 - momentum) * prev_mean + momentum * mean
+        next_var = (1.0 - momentum) * prev_var + momentum * adjusted_variance
+        _store_channel_tensor(tensors, next_mean_uid, next_mean, x.ndim)
+        _store_channel_tensor(tensors, next_var_uid, next_var, x.ndim)
+
+
+@register_handler("BatchnormBackwardAttributes")
+def handle_batchnorm_backward(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+) -> None:
+    """Handle batchnorm backward."""
+    _reject_peer_stats(node, "Batchnorm backward")
+    dy_uid = _required_input_uid(node, "dy_tensor_uid")
+    x_uid = _required_input_uid(node, "x_tensor_uid")
+    scale_uid = _required_input_uid(node, "scale_tensor_uid")
+    dx_uid = _required_output_uid(node, "dx_tensor_uid")
+    dscale_uid = _required_output_uid(node, "dscale_tensor_uid")
+    dbias_uid = _required_output_uid(node, "dbias_tensor_uid")
+
+    dy = _tensor(tensors, dy_uid, node).to(dtype=torch.float32)
+    x = _tensor(tensors, x_uid, node)
+    x_float = x.to(dtype=torch.float32)
+    scale = _channel_values(_tensor(tensors, scale_uid, node), x)
+    mean_uid = _optional_uid(node, "mean_tensor_uid")
+    inv_uid = _optional_uid(node, "inv_variance_tensor_uid")
+    if (mean_uid is None) != (inv_uid is None):
+        raise ValueError(
+            "Batchnorm backward requires both mean and inv variance, or neither"
+        )
+    if mean_uid is None:
+        mean, variance = _bn_mean_var(x)
+        inv_variance = torch.rsqrt(variance + 1e-5)
+    else:
+        mean = _channel_values(_tensor(tensors, int(mean_uid), node), x)
+        inv_variance = _channel_values(_tensor(tensors, int(inv_uid), node), x)
+
+    x_hat = (x_float - _channel_broadcast(mean, x_float)) * _channel_broadcast(
+        inv_variance, x_float
+    )
+    reduce_dims = _bn_reduce_dims(x)
+    dscale = (x_hat * dy).sum(dim=reduce_dims)
+    dbias = dy.sum(dim=reduce_dims)
+    elements_per_channel = x.numel() // x.shape[1]
+    mean_dy = dbias / elements_per_channel
+    mean_dy_xhat = dscale / elements_per_channel
+    dx = (
+        (
+            dy
+            - _channel_broadcast(mean_dy, x_float)
+            - x_hat * _channel_broadcast(mean_dy_xhat, x_float)
+        )
+        * _channel_broadcast(scale * inv_variance, x_float)
+    ).to(dtype=x.dtype)
+
+    _store_tensor(tensors, dx_uid, dx)
+    _store_channel_tensor(tensors, dscale_uid, dscale.to(dtype=scale.dtype), x.ndim)
+    _store_channel_tensor(tensors, dbias_uid, dbias.to(dtype=scale.dtype), x.ndim)
 
 
 @register_handler("SdpaAttributes")

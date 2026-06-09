@@ -81,6 +81,12 @@ class TestPyTorchOps:
         assert "ConvolutionFwdAttributes" in supported
         assert "MatmulAttributes" in supported
         assert "PointwiseAttributes" in supported
+        assert "ConvolutionBwdAttributes" in supported
+        assert "ConvolutionWrwAttributes" in supported
+        assert "BatchnormAttributes" in supported
+        assert "BatchnormInferenceAttributes" in supported
+        assert "BatchnormInferenceAttributesVarianceExt" in supported
+        assert "BatchnormBackwardAttributes" in supported
         assert "SdpaAttributes" in supported
 
     def test_supports_graph(self, sample_conv_graph):
@@ -282,8 +288,14 @@ class TestPyTorchCudaExecutor:
     @pytest.mark.parametrize(
         "graph_name",
         [
+            "sample_conv_dgrad.json",
+            "sample_conv_wgrad.json",
             "sample_matmul_batched.json",
             "sample_matmul_broadcast.json",
+            "sample_batchnorm_training.json",
+            "sample_batchnorm_inference.json",
+            "sample_batchnorm_inference_variance.json",
+            "sample_batchnorm_backward.json",
             "sample_sdpa.json",
             "sample_mha_sdpa.json",
         ],
