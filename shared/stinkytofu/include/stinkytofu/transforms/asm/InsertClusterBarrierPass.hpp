@@ -114,46 +114,43 @@ class Pass;
 /// every load in a label-/branch-delimited segment we walk backward
 /// to the nearest preceding `s_barrier_wait -1`; triggers are
 /// deduplicated by identity so multiple loads sharing the same anchor
-/// wait yield exactly one handshake. Two emission modes, selected by
-/// `findLiveLoopCounterLCmpUpstream`:
+/// wait yield exactly one handshake.
 ///
-///   (a) inherited-SCC mode -- when SIA (typically `ScheduleIterAlg=4`)
-///       hoists the loop-exit `s_cmp_eq_{u32,i32} LCL, imm` above the
-///       anchor, the outer cbranch reuses that SCC instead of emitting
-///       a fresh gate cmp (which would clobber the SCC the downstream
-///       cbranch still needs). The cluster WAIT is ungated and only the
-///       wave-gated signal is suppressed (single-iter skip); a clone of
-///       the upstream cmp is inserted between the inner and outer skip
-///       labels to rebuild SCC for the downstream cbranch. Left
-///       untouched by "Fix B".
+/// Drain-drop gating: the whole cluster handshake is unnecessary on the
+/// drain iterations where the paired `tensor_load_to_lds` is disabled
+/// (`LCL <= pgrValue`). Because the ping-pong pairing is offset (each
+/// wait consumes the PREVIOUS signal), the WAIT and SIGNAL are gated
+/// with ASYMMETRIC thresholds: skip the WAIT at `LCL <= pgrValue` and
+/// the SIGNAL one stage earlier at `LCL <= pgrValue+1` (so the trailing
+/// leftover signal is dropped too). This keeps cluster signal/wait
+/// balanced for every trip count, and the `<= pgr` predicate matches
+/// Tensile's own `s_cmp_le_i32 LCL, pgrValue` load-disable cmov.
 ///
-///   (b) fresh-gate mode ("Fix B" drain-drop) -- when no such upstream
-///       cmp is live, the whole cluster handshake is dropped on the
-///       drain iterations where the paired `tensor_load_to_lds` is
-///       disabled (`LCL <= pgrValue`). Because the ping-pong pairing is
-///       offset (each wait consumes the PREVIOUS signal), the WAIT and
-///       SIGNAL are gated with ASYMMETRIC thresholds: skip the WAIT at
-///       `LCL <= pgrValue` and the SIGNAL one stage earlier at
-///       `LCL <= pgrValue+1` (so the trailing leftover signal is dropped
-///       too). This keeps cluster signal/wait balanced for every trip
-///       count, and the `<= pgr` predicate matches Tensile's own
-///       `s_cmp_le_i32 LCL, pgrValue` load-disable cmov.
+/// LCL pre-decrement compensation: the two thresholds are calibrated
+/// against the loop counter value at segment entry. Some schedules
+/// hoist the per-iteration `s_sub_{u32,i32} LCL, LCL, <imm>` ABOVE the
+/// anchor, so the gate would otherwise read an already-decremented LCL
+/// and fire one iteration too early. The pass therefore sums those
+/// hoisted decrements (backward scan, bounded by the segment) and
+/// subtracts the total from BOTH thresholds, so the gate keys off the
+/// same absolute iteration regardless of where the decrement landed.
+/// When no decrement precedes the anchor (the default schedule) the
+/// sum is 0 and the thresholds are unchanged.
 ///
-///       LCL pre-decrement compensation: the two thresholds are
-///       calibrated against the loop counter value at segment entry.
-///       Some schedules hoist the per-iteration
-///       `s_sub_{u32,i32} LCL, LCL, <imm>` ABOVE the anchor, so the
-///       gate would otherwise read an already-decremented LCL and fire
-///       one iteration too early. The pass therefore sums those
-///       hoisted decrements (backward scan, bounded by the segment) and
-///       subtracts the total from BOTH thresholds, so the gate keys off
-///       the same absolute iteration regardless of where the decrement
-///       landed. When no decrement precedes the anchor (the default
-///       schedule) the sum is 0 and the thresholds are unchanged.
+/// Live-SCC restore: the two gate cmps clobber SCC, so when an upstream
+/// SCC-producing compare is still live at the anchor -- e.g. SIA
+/// (typically `ScheduleIterAlg=4`) hoists the loop-exit
+/// `s_cmp_{eq,le,...} LCL, imm` above the anchor and a downstream
+/// `s_cbranch` consumes its SCC -- the pass re-emits a clone of that
+/// compare immediately before the anchor (after every gate skip-label,
+/// on the merged fall-through path) to rebuild SCC for the downstream
+/// consumer. `findRestorableLiveSccUpstream` only reports a compare that
+/// is safely re-executable (writes SCC but has no GPR destination), so
+/// the clone is side-effect-free; any live SCC writer with a GPR
+/// destination (e.g. `s_sub`) is skipped and the gates run un-restored.
 ///
-/// Shape (fresh-gate / Fix B mode shown; inherited-SCC mode keeps an
-/// ungated leading wait, drops the signal gate cmp, and inserts a
-/// `<clone of upstream LCL cmp>` line between the two skip labels):
+/// Shape (the `<clone of live SCC cmp>` line is present only when an
+/// upstream compare's SCC is still live at the anchor):
 ///
 ///     s_cmp_le_i32 s[sgprLoopCounterL], <pgrValue>                  // WAIT gate (drain iter)
 ///     s_cbranch_scc1 label_skipCBWait_LCL_<HASH_WAIT>
@@ -166,6 +163,7 @@ class Pass;
 ///     s_barrier_signal -3
 ///   label_skipCBPreSignal_<HASH_INNER>:
 ///   label_skipCBPreSignal_LCL_<HASH_OUTER>:
+///     <clone of live SCC cmp>                                       // restore SCC for downstream cbranch
 ///
 /// Rule 5 (kernel scope only) -- tail-loop cluster handshake (paired).
 /// Anchors on the first `tensor_load_to_lds` that follows the
@@ -201,13 +199,11 @@ class Pass;
 /// \p pgrValue is Tensile's `PrefetchGlobalRead` setting. It controls the
 /// outer LoopCounterL gates of Rules 3 and 4:
 ///   - Rule 3 skips the signal when `LoopCounterL <= pgrValue`.
-///   - Rule 4 fresh-gate ("Fix B") mode skips the WAIT when
-///     `LoopCounterL <= pgrValue` and the SIGNAL when
-///     `LoopCounterL <= pgrValue + 1`; inherited-SCC mode keeps an
-///     ungated wait and reuses an upstream `LoopCounterL == imm` compare
-///     for a single-iter signal skip.
+///   - Rule 4 skips the WAIT when `LoopCounterL <= pgrValue` and the
+///     SIGNAL when `LoopCounterL <= pgrValue + 1` (both adjusted by any
+///     LCL pre-decrement hoisted above the anchor).
 /// The default of 1 matches PGR=1 (`<= 1` for Rule 3; `<= 1` wait / `<= 2`
-/// signal for Rule 4 fresh-gate mode).
+/// signal for Rule 4).
 ///
 /// \p plrValue is Tensile's `PrefetchLocalRead` setting. It enables Rule
 /// 3's anchor mode (b): when `plrValue == 0` and the backward scan from
