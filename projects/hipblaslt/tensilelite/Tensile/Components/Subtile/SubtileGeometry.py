@@ -308,13 +308,14 @@ class ABInputGeometry(TileGeometry):
     object.__setattr__(self, 'mmaTileSize', mmaTileSize)
     object.__setattr__(self, 'mmaTileRegCount', float(self.mmaLayout.vgprs))
 
+  @cached_property
   def _cpp_twin(self):
     # Concrete subclasses (ABGRGeometry, ABLRGeometry) build the matching
     # tensile_writer C++ object. A subclass that delegates query math to C++
     # (_USE_CPP=True) but forgets to override this would otherwise fail with an
     # opaque AttributeError; surface the contract explicitly instead.
     raise NotImplementedError(
-        f"{type(self).__name__} must override _cpp_twin() to support "
+        f"{type(self).__name__} must override the _cpp_twin property to support "
         "TENSILE_WRITER_CPP delegation")
 
   # --- MMA tile grid queries (no subtile shape dependency) ---
