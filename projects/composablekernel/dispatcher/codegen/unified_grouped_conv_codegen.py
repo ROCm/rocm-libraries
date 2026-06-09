@@ -828,6 +828,9 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
     # (from conv_configs.hpp PipelineTypeTraits -- basic_v1/mem/compv3)
     # CompV4/V5/V6/comp_async/basic_async_v1 use their own default policies.
     _CONV_POLICY_PIPELINES = {"basic_v1", "basic_v2", "compv1", "compv2", "mem", "compv3"}
+    # Number of additional load waves for the Wavelet pipeline
+    # (matches TilePipelineType<GemmPipeline::WAVELET> in conv_tile_tuning_params.hpp)
+    _WAVELET_NUM_LOAD_WAVES = 4
 
     _SPECIALIZATION_TO_CK = {
         "default": "ConvolutionSpecialization::Default",
@@ -867,7 +870,7 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
         """
         base = self._get_pipeline(pipeline)
         if pipeline == "wavelet":
-            return f"{base}<{problem_type}, GroupedConvUniversalPipelineAgBgCrPolicy, 4>"
+            return f"{base}<{problem_type}, GroupedConvUniversalPipelineAgBgCrPolicy, {self._WAVELET_NUM_LOAD_WAVES}>"
         if pipeline in self._CONV_POLICY_PIPELINES:
             return f"{base}<{problem_type}, GroupedConvUniversalPipelineAgBgCrPolicy>"
         return f"{base}<{problem_type}>"
