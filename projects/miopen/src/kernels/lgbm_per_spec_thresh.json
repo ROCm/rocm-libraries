@@ -1,29 +1,18 @@
 {
-  "per_spec_thresh": {
-    "gfx1150": 1.0999999999999996,
-    "gfx1151": 1.1749999999999994,
-    "gfx1201": 1.9749999999999965,
-    "gfx90a-mi210x": 1.0749999999999997,
-    "gfx942-mi300a": 1.0,
-    "gfx942-mi300x": 1.7999999999999972,
-    "gfx942-mi325x": 1.0,
-    "gfx950-mi350x": 1.0749999999999997,
-    "gfx950-mi355x": 1.9749999999999965
+  "_version": "v2-margin-off",
+  "_date": "2026-06-08",
+  "_cost_model": "abstain and invalid both cost 3x best_time (realistic MIOpen quick-tuning fallback)",
+  "_history": "Replaces per_spec_thresh_compact.json. The margin-abstain mechanism was tuned for a fictional 10x invalid penalty; under realistic 3x cost it is net-negative (abstains on borderline picks that would have been cheaper to commit to). The per-spec appl thresholds (0.95-0.999) were similarly over-conservative.",
+  "_metrics_val_3x_cost": {
+    "global_geomean": 1.0090,
+    "global_abstain_rate": 0.0001,
+    "global_top1_among_covered": 0.9556,
+    "global_coverage": 0.9970,
+    "global_invalid_pct": 0.0029
   },
-  "default": 1.7,
-  "cap_used": 0.105,
-  "source": "2026-06-08 compact (medium t1200 + appl t1000)",
-  "appl_prob_thresh": 0.99,
-  "per_spec_appl_thresh": {
-    "gfx1150": 0.95,
-    "gfx1151": 0.95,
-    "gfx1201": 0.95,
-    "gfx90a-mi210x": 0.95,
-    "gfx950-mi350x": 0.95,
-    "gfx950-mi355x": 0.95,
-    "gfx942-mi300x": 0.99,
-    "gfx942-mi300a": 0.999,
-    "gfx942-mi325x": 0.999
-  },
-  "notes": "2026-06-08 COMPACT: medium rank truncated to 1200 trees (33.8MB) + appl truncated to 1000 trees (13.8MB) = 47.6MB total. geomean 1.0035 at 11.6% abstain, wasted_ms ~3,907, invalid 12. Best <50MB config."
+  "per_spec_thresh": {},
+  "default": 1.0,
+  "appl_prob_thresh": 0.10,
+  "per_spec_appl_thresh": {},
+  "notes": "Empty per_spec_thresh means margin abstain is effectively disabled (default 1.0 = no margin requirement). Empty per_spec_appl_thresh means every spec uses the global 0.10."
 }
