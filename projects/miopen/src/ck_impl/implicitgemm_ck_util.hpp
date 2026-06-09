@@ -1047,6 +1047,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
     };
 #else
     (void)ctx;
+    (void)problem;
     (void)kernel_id;
     (void)input1_op;
     (void)input2_op;
