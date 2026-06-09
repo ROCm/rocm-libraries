@@ -371,9 +371,9 @@ class StreamK(Component):
         # SK3/SK4 mode-select bit and is already cleared in place by
         # _emitModeExtraction at preLoop. Bit 31 is the magic-division "add"
         # indicator and bits 0-4 are the shift amount; sMagicDiv2 consumes
-        # both, so they must be preserved (the old 0x1F mask stripped the add
-        # bit and broke the tile-index divide). Mask to {add bit | 5-bit
-        # shift} defensively in case the source value is ever re-fetched.
+        # both, so the mask must preserve them and drop only the mode bit.
+        # Mask to {add bit | 5-bit shift} defensively in case the source
+        # value is ever re-fetched.
         if kernel["StreamK"] == 5:
             module.add(SAndB32(dst=sgpr(sMagicShift), src0=sgpr(sMagicShift), src1=hex(0x8000001F),
                                comment="SK5: keep magic add bit (31) + 5-bit shift, drop mode bit (30)"))
@@ -3394,7 +3394,7 @@ class StreamKHybrid(StreamK):
     packed into bit 30 of the MagicShiftItersPerTile kernel arg selects
     which path executes. Bit 31 of that slot is unavailable because
     magicNumberAlg2 uses it as the magic-division "add" indicator (set for
-    any non-power-of-two itersPerTile); using it for the mode made static
+    any non-power-of-two itersPerTile); a mode bit there would make static
     problems read as dynamic and deadlock in the fixup flag-wait loop. The
     bit is extracted once at preLoop entry into the StreamKHybridMode SGPR;
     every divergent SK3-vs-SK4 callsite emits both fragments back-to-back
@@ -3435,13 +3435,11 @@ class StreamKHybrid(StreamK):
         a clean tile count, while the SK3 path keeps its magic-division
         "add" bit.
 
-        Bit 31 cannot carry the mode: magicNumberAlg2 sets bit 31 of the
-        magic shift as the division "add" indicator for many itersPerTile
-        values (any non-power-of-two tile depth). Stealing it for the mode
-        made the static path read as dynamic and hang. The mode bit lives in
-        bit 30 instead, which is free in both encodings: the magic shift only
-        ever uses bits 0-4 (shift, <= 31) plus bit 31 (add), and the SK4 tile
-        count is far below 2^30.
+        Bit 31 cannot carry the mode (magicNumberAlg2 uses it as the
+        magic-division "add" indicator; see the class docstring). Bit 30 is
+        free in both encodings: the magic shift only ever uses bits 0-4
+        (shift, <= 31) plus bit 31 (add), and the SK4 tile count is far below
+        2^30.
         """
         module = Module("SK5 mode extraction")
         module.add(SLShiftRightB32(dst=sgpr("StreamKHybridMode"),
