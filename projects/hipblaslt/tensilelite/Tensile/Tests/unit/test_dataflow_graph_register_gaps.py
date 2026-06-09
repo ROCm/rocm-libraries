@@ -3587,8 +3587,8 @@ class TestNodeLabelAfterCoverageFix:
 def test_cross_iter_ml_cycle_count():
     """Producer DSLoadB128 in BODY_LABEL_ML_PREV (iter_index=0) writes
     v8..v11; consumer standard MFMA in BODY_LABEL_ML (iter_index=1) reads
-    v8..v9 as its `a` source. `cumulative_issue_cycles` must walk using
-    `unrolled_position` and yield the correct cross-iter gap.
+    v8..v9 as its `a` source. `cumulative_issue_cycles` must yield the
+    correct cross-iter gap.
 
     Fixture unrolled stream (PRO absent):
       pos=0: ML_PREV LR  (producer, iter_index=0)
@@ -3604,14 +3604,12 @@ def test_cross_iter_ml_cycle_count():
         current_issue = max(1, mfma_free_at=0) = 1; c_issue_start=1. Break.
       gap = c_issue_start - p_issue_start - 1 = 1 - 0 - 1 = 0.
 
-    The key invariant under test: `cumulative_issue_cycles` locates both
-    nodes via their `unrolled_position` (global monotone integers stamped
-    across the entire unrolled timeline), not via per-body or per-iter
-    loop_index comparisons. A regression that searched by body_label or
-    iter_index only would fail to locate the producer in ML_PREV or the
-    consumer in ML, returning the fallback 0 for a different reason —
-    covered by the assertion that the RAW edge EXISTS and that the
-    iter_index values are correct.
+    The gap == 0 arithmetic holds under both the body-discovery +
+    identity-based walk (pre-C3g) and any future unrolled-position-based
+    walk implementation. The principal invariants under test here are
+    Phase 1 stamping correctness (iter_index and unrolled_position ordering)
+    and the existence of the cross-iter RAW edge — the gap assertion acts as
+    a regression guard for any re-implementation of cumulative_issue_cycles.
     """
     ml_prev_cap = make_capture(BODY_LABEL_ML_PREV, [
         # Producer: LR writes v8..v11 (a_src_count=4 so that the MFMA
@@ -3662,7 +3660,7 @@ def test_cross_iter_ml_cycle_count():
     producer = edge.producer
     consumer = edge.consumer
 
-    # Verify iter_index assignments from C3g: ML_PREV body = iter_index=0,
+    # Verify iter_index assignments: ML_PREV body = iter_index=0,
     # ML body = iter_index=1. This is what the unrolled timeline stamps.
     assert producer.iter_index == 0, (
         f"Producer in BODY_LABEL_ML_PREV must have iter_index=0 "
@@ -3676,9 +3674,8 @@ def test_cross_iter_ml_cycle_count():
     )
 
     # Verify the unrolled_position ordering: producer must come strictly
-    # before consumer in the global timeline. This is the core invariant
-    # that `cumulative_issue_cycles` relies on — it short-circuits to 0
-    # when producer.unrolled_position >= consumer.unrolled_position.
+    # before consumer in the global timeline. This is stamped by Phase 1
+    # of build_dataflow_graph and is independent of cumulative_issue_cycles.
     assert producer.unrolled_position < consumer.unrolled_position, (
         f"Producer (ML_PREV, iter=0) must have a lower unrolled_position "
         f"than consumer (ML, iter=1). Got producer.unrolled_position="
