@@ -3,10 +3,10 @@
 
 #include "BatchnormFwdTrainingPlan.hpp"
 #include "BatchnormCommon.hpp"
-#include "BatchnormHipKernelCompileOptions.hpp"
+#include "BatchnormKernelCompileOptions.hpp"
 
-#include "HipKernelUtils.hpp"
-#include "hip/IKernelCompiler.hpp"
+#include "compilation/IKernelCompiler.hpp"
+#include "core/Utils.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -22,10 +22,10 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
-    , _y(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.y_tensor_uid())))
-    , _scale(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.scale_tensor_uid())))
-    , _bias(&(hip_kernel_utils::findTensorAttributes(tensorMap, attributes.bias_tensor_uid())))
+    : _x(&(findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
+    , _y(&(findTensorAttributes(tensorMap, attributes.y_tensor_uid())))
+    , _scale(&(findTensorAttributes(tensorMap, attributes.scale_tensor_uid())))
+    , _bias(&(findTensorAttributes(tensorMap, attributes.bias_tensor_uid())))
     , _activationOut(nullptr)
 {
     // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
@@ -36,14 +36,13 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     // Save mean and inv_variance are optional
     if(attributes.mean_tensor_uid().has_value())
     {
-        _mean = &(hip_kernel_utils::findTensorAttributes(tensorMap,
-                                                         attributes.mean_tensor_uid().value()));
+        _mean = &(findTensorAttributes(tensorMap, attributes.mean_tensor_uid().value()));
     }
 
     if(attributes.inv_variance_tensor_uid().has_value())
     {
-        _invVariance = &(hip_kernel_utils::findTensorAttributes(
-            tensorMap, attributes.inv_variance_tensor_uid().value()));
+        _invVariance
+            = &(findTensorAttributes(tensorMap, attributes.inv_variance_tensor_uid().value()));
     }
 
     if(attributes.prev_running_mean_tensor_uid().has_value()
@@ -57,14 +56,14 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
         _momentumValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
             momentumTensorAttr, "Momentum");
 
-        _prevRunningMean = &(hip_kernel_utils::findTensorAttributes(
-            tensorMap, attributes.prev_running_mean_tensor_uid().value()));
-        _prevRunningVariance = &(hip_kernel_utils::findTensorAttributes(
-            tensorMap, attributes.prev_running_variance_tensor_uid().value()));
-        _nextRunningMean = &(hip_kernel_utils::findTensorAttributes(
-            tensorMap, attributes.next_running_mean_tensor_uid().value()));
-        _nextRunningVariance = &(hip_kernel_utils::findTensorAttributes(
-            tensorMap, attributes.next_running_variance_tensor_uid().value()));
+        _prevRunningMean
+            = &(findTensorAttributes(tensorMap, attributes.prev_running_mean_tensor_uid().value()));
+        _prevRunningVariance = &(
+            findTensorAttributes(tensorMap, attributes.prev_running_variance_tensor_uid().value()));
+        _nextRunningMean
+            = &(findTensorAttributes(tensorMap, attributes.next_running_mean_tensor_uid().value()));
+        _nextRunningVariance = &(
+            findTensorAttributes(tensorMap, attributes.next_running_variance_tensor_uid().value()));
         _hasRunningStats = true;
     }
 }
@@ -78,7 +77,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     : BatchnormFwdTrainingParams(attributes, tensorMap)
 {
     // Initialize activation attributes
-    _optActivation = hip_kernel_utils::parseActivation(pointwiseAttributes);
+    _optActivation = parseActivation(pointwiseAttributes);
     _activationOut = tensorMap.at(pointwiseAttributes.out_0_tensor_uid());
 
     // Validate that activation input matches batchnorm output
@@ -168,8 +167,7 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     return _nextRunningVariance;
 }
 
-const std::optional<hip_kernel_utils::ActivationParams>&
-    BatchnormFwdTrainingParams::optActivation() const
+const std::optional<ActivationParams>& BatchnormFwdTrainingParams::optActivation() const
 {
     return _optActivation;
 }
@@ -185,8 +183,7 @@ BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& 
 {
 }
 
-size_t
-    BatchnormFwdTrainingPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& handle) const
+size_t BatchnormFwdTrainingPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
     // No workspace needed for batchnorm training
     return 0;
@@ -248,7 +245,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     auto invInNhw = static_cast<float>(1.0 / inNhw);
 
     // Detect layout
-    const bool isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(_trainingParams.x());
+    const bool isLayoutNHWC = isChannelLastLayout(_trainingParams.x());
 
     // Kernel launch parameters
     // NOTE: These are generally selected based on heuristics and tuning,
@@ -382,14 +379,14 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     // Get activation mode
-    auto activationMode = hip_kernel_utils::ActivationMode::PASTHRU;
+    auto activationMode = ActivationMode::PASTHRU;
     if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
     {
         activationMode = (*_trainingParams.optActivation()).mode;
     }
 
     // Prepare compilation options
-    BatchnormHipKernelCompileOptions options(_trainingParams.x(), deviceProperties, activationMode);
+    BatchnormKernelCompileOptions options(_trainingParams.x(), deviceProperties, activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
     // Not using FP16 and BFP16 paths due to affine data type requirements
@@ -470,7 +467,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     _invInNhw = invInNhw;
 }
 
-void BatchnormFwdTrainingPlan::execute(const HipKernelHandle& handle,
+void BatchnormFwdTrainingPlan::execute(const Handle& handle,
                                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                        uint32_t numDeviceBuffers,
                                        [[maybe_unused]] void* workspace) const
@@ -483,12 +480,11 @@ void BatchnormFwdTrainingPlan::execute(const HipKernelHandle& handle,
     }
 
     // Get device buffer pointers
-    auto xBuffer = hip_kernel_utils::findDeviceBuffer(
-        _trainingParams.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = hip_kernel_utils::findDeviceBuffer(
-        _trainingParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto biasBuffer = hip_kernel_utils::findDeviceBuffer(
-        _trainingParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer = findDeviceBuffer(_trainingParams.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer
+        = findDeviceBuffer(_trainingParams.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto biasBuffer
+        = findDeviceBuffer(_trainingParams.bias()->uid(), deviceBuffers, numDeviceBuffers);
 
     // Handle save mean/variance if provided (optional)
     void* resultSaveMeanPtr = nullptr;
@@ -496,13 +492,12 @@ void BatchnormFwdTrainingPlan::execute(const HipKernelHandle& handle,
 
     if(_trainingParams.hasSaveMeanVariance())
     {
-        resultSaveMeanPtr = hip_kernel_utils::findDeviceBuffer(
-                                _trainingParams.mean()->uid(), deviceBuffers, numDeviceBuffers)
-                                .ptr;
-        resultSaveInvVariancePtr
-            = hip_kernel_utils::findDeviceBuffer(
-                  _trainingParams.invVariance()->uid(), deviceBuffers, numDeviceBuffers)
-                  .ptr;
+        resultSaveMeanPtr
+            = findDeviceBuffer(_trainingParams.mean()->uid(), deviceBuffers, numDeviceBuffers).ptr;
+        resultSaveInvVariancePtr = findDeviceBuffer(_trainingParams.invVariance()->uid(),
+                                                    deviceBuffers,
+                                                    numDeviceBuffers)
+                                       .ptr;
     }
 
     // Handle running stats if provided (optional)
@@ -513,22 +508,22 @@ void BatchnormFwdTrainingPlan::execute(const HipKernelHandle& handle,
 
     if(_trainingParams.hasRunningStats())
     {
-        prevRunningMeanPtr
-            = hip_kernel_utils::findDeviceBuffer(
-                  _trainingParams.prevRunningMean()->uid(), deviceBuffers, numDeviceBuffers)
-                  .ptr;
-        prevRunningVariancePtr
-            = hip_kernel_utils::findDeviceBuffer(
-                  _trainingParams.prevRunningVariance()->uid(), deviceBuffers, numDeviceBuffers)
-                  .ptr;
-        nextRunningMeanPtr
-            = hip_kernel_utils::findDeviceBuffer(
-                  _trainingParams.nextRunningMean()->uid(), deviceBuffers, numDeviceBuffers)
-                  .ptr;
-        nextRunningVariancePtr
-            = hip_kernel_utils::findDeviceBuffer(
-                  _trainingParams.nextRunningVariance()->uid(), deviceBuffers, numDeviceBuffers)
-                  .ptr;
+        prevRunningMeanPtr = findDeviceBuffer(_trainingParams.prevRunningMean()->uid(),
+                                              deviceBuffers,
+                                              numDeviceBuffers)
+                                 .ptr;
+        prevRunningVariancePtr = findDeviceBuffer(_trainingParams.prevRunningVariance()->uid(),
+                                                  deviceBuffers,
+                                                  numDeviceBuffers)
+                                     .ptr;
+        nextRunningMeanPtr = findDeviceBuffer(_trainingParams.nextRunningMean()->uid(),
+                                              deviceBuffers,
+                                              numDeviceBuffers)
+                                 .ptr;
+        nextRunningVariancePtr = findDeviceBuffer(_trainingParams.nextRunningVariance()->uid(),
+                                                  deviceBuffers,
+                                                  numDeviceBuffers)
+                                     .ptr;
     }
 
     // Get epsilon value from training parameters
@@ -550,7 +545,7 @@ void BatchnormFwdTrainingPlan::execute(const HipKernelHandle& handle,
     hipdnnPluginDeviceBuffer_t yBuffer = {-1, nullptr};
     if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
     {
-        yBuffer = hip_kernel_utils::findDeviceBuffer(
+        yBuffer = findDeviceBuffer(
             _trainingParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
         const auto& activation = *_trainingParams.optActivation();
@@ -559,8 +554,7 @@ void BatchnormFwdTrainingPlan::execute(const HipKernelHandle& handle,
     }
     else
     {
-        yBuffer = hip_kernel_utils::findDeviceBuffer(
-            _trainingParams.y()->uid(), deviceBuffers, numDeviceBuffers);
+        yBuffer = findDeviceBuffer(_trainingParams.y()->uid(), deviceBuffers, numDeviceBuffers);
     }
 
     if(_kernelVariant != 2)

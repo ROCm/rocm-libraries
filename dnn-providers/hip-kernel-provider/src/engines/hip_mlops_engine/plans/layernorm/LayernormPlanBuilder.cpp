@@ -7,11 +7,11 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <string>
 
-#include "IDevicePropertyProvider.hpp"
 #include "LayernormPlanBuilder.hpp"
+#include "compilation/IKernelCompiler.hpp"
+#include "device/IDevicePropertyProvider.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormFwdPlan.hpp"
-#include "hip/IKernelCompiler.hpp"
 
 namespace hip_kernel_provider::layernorm
 {
@@ -24,7 +24,7 @@ LayernormPlanBuilder::LayernormPlanBuilder(const IKernelCompiler& kernelCompiler
 }
 
 bool LayernormPlanBuilder::isApplicable(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     auto anyNodeIsNotF32Compute = [&]() {
@@ -88,9 +88,9 @@ bool LayernormPlanBuilder::isApplicable(
 }
 
 size_t LayernormPlanBuilder::getMaxWorkspaceSize(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-    [[maybe_unused]] const HipKernelSettings& executionSettings) const
+    [[maybe_unused]] const Settings& executionSettings) const
 {
     // Layernorm plan builder does not require workspace size
     return 0;
@@ -99,12 +99,12 @@ size_t LayernormPlanBuilder::getMaxWorkspaceSize(
 namespace
 {
 
-void buildPlanFwd([[maybe_unused]] const HipKernelHandle& handle,
+void buildPlanFwd([[maybe_unused]] const Handle& handle,
                   const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                   const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
                   const IKernelCompiler& kernelCompiler,
                   const IDevicePropertyProvider& devicePropertyProvider,
-                  HipKernelContext& executionContext)
+                  Context& executionContext)
 {
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_flatbuffers_sdk::data_objects::LayernormAttributes>();
@@ -119,20 +119,20 @@ void buildPlanFwd([[maybe_unused]] const HipKernelHandle& handle,
 } // namespace
 
 void LayernormPlanBuilder::initializeExecutionSettings(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
-    [[maybe_unused]] HipKernelSettings& executionSettings) const
+    [[maybe_unused]] Settings& executionSettings) const
 {
 }
 
 void LayernormPlanBuilder::buildPlan(
-    const HipKernelHandle& handle,
+    const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
-    HipKernelContext& executionContext) const
+    Context& executionContext) const
 {
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
@@ -143,7 +143,7 @@ void LayernormPlanBuilder::buildPlan(
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> LayernormPlanBuilder::getCustomKnobs(
-    [[maybe_unused]] const HipKernelHandle& handle,
+    [[maybe_unused]] const Handle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};
