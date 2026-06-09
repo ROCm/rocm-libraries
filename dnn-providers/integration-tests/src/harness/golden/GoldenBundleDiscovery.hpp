@@ -265,7 +265,16 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
         throw std::runtime_error("Cannot open bundle JSON: " + jsonPath.string());
     }
 
-    auto graphJson = nlohmann::json::parse(file);
+    nlohmann::json graphJson;
+    try
+    {
+        graphJson = nlohmann::json::parse(file);
+    }
+    catch(const std::exception& e)
+    {
+        throw std::runtime_error(
+            "Failed to parse bundle JSON " + jsonPath.string() + ": " + e.what());
+    }
     flatbuffers::FlatBufferBuilder builder;
     auto offset
         = hipdnn_flatbuffers_sdk::json::to<hipdnn_flatbuffers_sdk::data_objects::Graph>(
@@ -345,7 +354,13 @@ inline std::vector<DiscoveredBundle> discoverGoldenBundles(
 
         for(const auto& jsonPath : jsonPaths)
         {
-            // deriveTestName throws on an unparseable .json; let it propagate.
+            // Skip companion metadata files ({Name}.meta.json).
+            const auto stem = jsonPath.stem().string();
+            if(stem.size() >= 5 && stem.substr(stem.size() - 5) == ".meta")
+            {
+                continue;
+            }
+
             const DerivedTestName derived = deriveTestName(jsonPath, tierName);
 
             auto fullName = derived.suiteName + "." + derived.testName;

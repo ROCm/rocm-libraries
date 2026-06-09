@@ -17,6 +17,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestReferenceGraphExecutorFactory.cpp
     TestGoldenBundleDiscovery.cpp
     TestGoldenTensorComparator.cpp
+    TestGoldenVerificationPaths.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests
