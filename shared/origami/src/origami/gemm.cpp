@@ -96,7 +96,7 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     const auto a_bits = datatype_to_bits(problem.a_dtype);
     const auto b_bits = datatype_to_bits(problem.b_dtype);
 
-    OLOG_DEBUG("======== Origami Debug Info ========");
+    OLOG_DEBUG("======== Origami Debug Info ========"); // This signature indicates the start of the debug information.
     OLOG_DEBUG("M: " << int(M));
     OLOG_DEBUG("N: " << int(N));
     OLOG_DEBUG("Batch: " << int(batch));
@@ -1921,7 +1921,7 @@ double compute_total_latency(const problem_t& problem,
   if (context.debug) {
     OLOG_DEBUG("L_parallel_reduce: " << L_parallel_reduce);
     OLOG_DEBUG("total_latency: " << total_latency);
-    OLOG_DEBUG("=================================");
+    OLOG_DEBUG("================================="); // This signature indicates the end of the debug information.
   }
 
   return total_latency;
