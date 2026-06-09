@@ -139,8 +139,9 @@ def make_dummy_enum(full_name: str, values: Iterable[str]) -> Type[Any]:
     Each member exposes ``.name`` and ``.value`` (matching nanobind), is an
     ``int`` itself (so ``DataTypeEnum.Float == 0`` keeps working), and the
     class is callable as ``DataTypeEnum(0)``. The numeric value of each
-    member is its 0-based index in ``values`` — this matches the implicit
-    ``nb::enum_<...>::value(...)`` ordering used by ``rocisa::enum.cpp``.
+    member is its 0-based index in ``values`` — this matches enums whose C++
+    underlying values are sequential from zero (``RegisterType``,
+    ``DataTypeEnum``, ``CacheScope``, ...).
 
     Note (was originally a "structural-only" dummy):
         Tensile's import-time machinery in ``Tensile/Common/DataType.py``
@@ -149,6 +150,9 @@ def make_dummy_enum(full_name: str, values: Iterable[str]) -> Type[Any]:
         enough to pass ``import Tensile``. ``IntEnum`` gives us both the
         attribute surface and the raw-int behaviour the rest of the code
         treats it as.
+
+    For enums with explicit non-sequential C++ values (``InstType``,
+    ``TemporalHint``, ...), use ``make_bound_enum`` instead.
     """
 
     short = full_name.rsplit(".", 1)[-1]
@@ -156,6 +160,28 @@ def make_dummy_enum(full_name: str, values: Iterable[str]) -> Type[Any]:
     module = full_name.rsplit(".", 1)[0]
 
     cls = _stdenum.IntEnum(short, [(v, i) for i, v in enumerate(values)])
+    cls.__module__ = module
+    cls.__qualname__ = short
+    return cls
+
+
+def make_bound_enum(
+    full_name: str,
+    members: Iterable[tuple[str, int]],
+) -> Type[Any]:
+    """Create an ``IntEnum`` with explicit per-member C++ integral values.
+
+    Mirrors ``nb::enum_<T>::value("NAME", T::NAME)`` bindings in
+    ``rocisa::enum.cpp`` where the exposed ``.value`` is the C++ enumerator,
+    not a 0-based Python index. Supports alias members that share a value
+    (e.g. ``TH_WB`` and ``TH_LU`` both equal ``3``).
+    """
+
+    short = full_name.rsplit(".", 1)[-1]
+    module = full_name.rsplit(".", 1)[0]
+    member_list = list(members)
+
+    cls = _stdenum.IntEnum(short, member_list)
     cls.__module__ = module
     cls.__qualname__ = short
     return cls

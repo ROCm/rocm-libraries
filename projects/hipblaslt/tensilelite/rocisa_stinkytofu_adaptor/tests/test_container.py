@@ -1758,7 +1758,7 @@ class TestVCCWavefront(_WavefrontTestCase):
 
 
 class _Gfx1250CapsTestCase(unittest.TestCase):
-    """Pin gfx1250 asm caps for modifier ``toString`` (``caps.py`` snapshot)."""
+    """Exercise modifier ``toString`` under gfx1250 caps from ``getHardwareCaps``."""
 
     def setUp(self):
         self._saved = rocIsa.getInstance().getKernel()

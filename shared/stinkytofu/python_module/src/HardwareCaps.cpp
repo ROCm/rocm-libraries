@@ -183,6 +183,18 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
          "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0, scope:SCOPE_DEV"});
     rv["HasNTModifier"] =
         tryAsm(isaName, ws, "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, nt");
+    // gfx1250 temporal-hint (th:) and non-volatile (nv) modifiers replace the
+    // legacy nt bit on buffer/global/flat memory ops.
+    rv["HasTHModifier"] = tryAsmAny(
+        isaName, ws,
+        {"buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 th:TH_LOAD_NT",
+         "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 th:TH_LOAD_NT"});
+    rv["HasNVModifier"] = tryAsmAny(
+        isaName, ws,
+        {"buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 nv",
+         "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 nv"});
+    rv["HasGlobalPrefetch"] = tryAsm(
+        isaName, ws, "global_prefetch_b8 v[0:1], off scope:SCOPE_SE th:TH_LOAD_NT");
     rv["HasMUBUFConst"] = tryAsmAny(isaName, ws,
                                     {"buffer_load_dword v40, v36, s[24:27], 1 offen offset:0",
                                      "buffer_load_b32 v40, v36, s[24:27], 1 offen offset:0"});
@@ -337,6 +349,12 @@ CacheEntry g_hwcapsCache[kMaxArchs];
 }  // namespace
 
 HardwareCapsResult HardwareCaps::query(uint32_t major, uint32_t minor, uint32_t stepping) {
+    // Resolve by ISA tuple first. ``getGfxArchID`` asserts on unknown triples;
+    // callers such as ``caps.getCaps`` must get an empty result instead of
+    // aborting the Python interpreter.
+    const auto* info = ArchHelper::getInstance().getArchInfo(major, minor, stepping);
+    if (!info) return {};
+
     auto archID = getGfxArchID(major, minor, stepping);
     auto idx = static_cast<size_t>(archID);
     if (idx >= kMaxArchs) return {};

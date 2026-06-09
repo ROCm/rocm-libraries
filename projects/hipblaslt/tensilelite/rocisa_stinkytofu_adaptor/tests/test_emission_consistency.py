@@ -262,7 +262,7 @@ def emit_path2_rocisa_stinkyasm(build_snippet: str, *,
                 sgprWorkGroup=(1, 1, 0),
                 vgprWorkItem=0,
                 flatWorkGroupSize=64,
-                preloadKernArgs=False,
+                numSgprPreload=0,
             )
             module.setParent()
             st = rocisa.toStinkyTofuModule(

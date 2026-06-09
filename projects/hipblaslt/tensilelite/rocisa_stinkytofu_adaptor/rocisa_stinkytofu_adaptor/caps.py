@@ -19,34 +19,31 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
-"""Static ISA capability snapshots for the logicalIR ``rocisa`` adaptor.
+"""ISA capability access for the logicalIR ``rocisa`` adaptor.
 
 What this file is:
-    Pre-captured ``asmCaps`` / ``archCaps`` / ``regCaps`` / ``asmBugs``
-    dictionaries returned by ``rocIsa.getIsaInfo(v)``. The C++
-    ``rocisa::rocIsa::init`` populates these by shelling out to
-    ``llvm-mc`` / ``hipcc``; the logicalIR adaptor doesn't have that
-    machinery yet, so we ship pre-captured data here.
+    Bridge between ``rocIsa.getIsaInfo`` / ``base.init`` and the four
+    capability dictionaries Tensile expects
+    (``asmCaps``, ``archCaps``, ``regCaps``, ``asmBugs``).
 
 What it does (real):
-    - ``_GFX1250_ASM_CAPS`` / ``_ARCH_CAPS`` / ``_REG_CAPS`` /
-      ``_ASM_BUGS`` — the four cap dictionaries.
+    - ``getCaps`` — delegates to ``stinkytofu.getHardwareCaps`` (comgr +
+      mnemonic probes in ``shared/stinkytofu/.../HardwareCaps.cpp``).
+      Returns fresh shallow copies on every call. No static snapshot
+      table: probing is entirely dynamic and does not require the host
+      GPU to match the requested ISA (same model as rocisa ``llvm-mc`` /
+      comgr assembly probes).
     - ``normalize_isa_key`` — coerces strings / tuples / IsaVersion-like
       objects into ``(major, minor, patch)``.
-    - ``getCaps`` — returns shallow copies (registry stays immutable).
-    - ``supportedIsas`` — registry introspection.
+    - ``glc_bit_name_from_caps`` / ``slc_bit_name_from_caps`` — modifier
+      name helpers used by ``container.py`` and ``__init__.py``.
 
-Not yet done:
-    - Only ``gfx1250`` captured. Add more ISAs by running a real probe
-      with the nanobind backend (see "Refreshing a snapshot" below).
-    - No real ``llvm-mc`` / ``hipcc`` probing — that lives in C++.
-
-Refreshing a snapshot:
-    Run a normal Tensile build with the nanobind backend (no
-    ``ROCISA_BACKEND=stinkytofu``) plus temporary ``print(...)`` calls in
-    ``Tensile/Common/Capabilities.makeIsaInfoMap``. Copy the four dicts
-    into a matching ``_GFX*`` block below. Each ISA must declare all
-    four of ``asmCaps``, ``archCaps``, ``regCaps``, ``asmBugs``.
+Requirements:
+    - The compiled ``stinkytofu`` Python binding must be on ``PYTHONPATH``
+      (see ``tests/test.sh``). After editing ``HardwareCaps.cpp`` (or any
+      stinkytofu C++ source), rebuild ``stinkytofu_python`` so
+      ``import stinkytofu`` succeeds. Unregistered ISAs raise
+      ``KeyError`` with an empty ``asmCaps`` result.
 """
 
 from __future__ import annotations
@@ -56,156 +53,8 @@ from typing import Any, Dict, Tuple
 IsaKey = Tuple[int, int, int]
 
 
-# ---------------------------------------------------------------------------
-# gfx1250 — captured from a real ``rocIsa.init((12,5,0), <hipcc>, False)``
-# probe via the nanobind backend (see module docstring on how to refresh).
-# ---------------------------------------------------------------------------
-
-_GFX1250_ASM_CAPS: Dict[str, int] = {
-    "HasAddLshl": 1,
-    "HasAdd_PC_i64": 0,
-    "HasAtomicAdd": 1,
-    "HasBF16CVT": 1,
-    "HasCvtFP8toF16": 1,
-    "HasDLCModifier": 0,
-    "HasDirectToLds": 0,
-    "HasDirectToLdsx4": 0,
-    "HasExplicitCO": 1,
-    "HasExplicitNC": 1,
-    "HasGLCModifier": 0,
-    "HasGLTr16B128": 0,
-    "HasGLTr8B64": 0,
-    "HasLDSTr": 1,
-    "HasLDSTrB128B16": 1,
-    "HasLDSTrB64B16": 0,
-    "HasLDSTrB64B4": 1,
-    "HasLDSTrB64B8": 1,
-    "HasLDSTrB96B6": 1,
-    "HasLshlOr": 1,
-    "HasMFMA": 0,
-    "HasMFMA_b8": 0,
-    "HasMFMA_bf16_1k": 0,
-    "HasMFMA_explictB": 0,
-    "HasMFMA_f64": 0,
-    "HasMFMA_f8": 0,
-    "HasMFMA_f8f6f4": 0,
-    "HasMFMA_xf32": 0,
-    "HasMUBUFConst": 0,
-    "HasNTModifier": 0,
-    "HasNewBarrier": 1,
-    "HasPartialOOB": 0,
-    "HasPkF16CVT": 1,
-    "HasSC0Modifier": 0,
-    "HasSCMPK": 0,
-    "HasSCOPEModifier": 1,
-    "HasSMFMA": 0,
-    "HasSMulHi": 1,
-    "HasSWMMAC": 1,
-    "HasSWMMAC_gfx1250": 1,
-    "HasScalarStore": 0,
-    "HasTDM": 1,
-    "HasVgprMSB": 1,
-    "HasVgprMSB16": 1,
-    "HasWMMA": 1,
-    "HasWMMA_V1": 0,
-    "HasWMMA_V2": 0,
-    "HasWMMA_V3": 1,
-    "HasWMMA_V3_f64": 0,
-    "HasWMMA_f8f6f4": 1,
-    "Hascvtf16_fp8_sf32": 0,
-    "Hascvtfp8_f16": 0,
-    "MaxDscnt": 63,
-    "MaxKmcnt": 31,
-    "MaxLoadcnt": 63,
-    "MaxStorecnt": 63,
-    "SeparateLGKMcnt": 1,
-    "SeparateVMcnt": 1,
-    "SeparateVscnt": 0,
-    "ShortBranchMaxLength": 8192,
-    "SupportedISA": 1,
-    "SupportedSource": 1,
-    "VOP3v_dot4_i32_i8": 1,
-    "s_delay_alu": 1,
-    "s_sub_u64": 1,
-    "v_dot2_f32_bf16": 0,
-    "v_dot2_f32_f16": 0,
-    "v_dot2c_f32_bf16": 0,
-    "v_dot2c_f32_f16": 0,
-    "v_dot4_i32_i8": 0,
-    "v_dot4c_i32_i8": 0,
-    "v_fma_f16": 1,
-    "v_fma_f32": 1,
-    "v_fma_f64": 1,
-    "v_fma_mix_f32": 1,
-    "v_fmac_f16": 0,
-    "v_fmac_f32": 1,
-    "v_mac_f16": 0,
-    "v_mac_f32": 0,
-    "v_mad_mix_f32": 0,
-    "v_mov_b64": 1,
-    "v_pk_add_f32": 1,
-    "v_pk_fma_f16": 1,
-    "v_pk_fmac_f16": 0,
-    "v_pk_mul_f32": 1,
-    "v_prng_b32": 1,
-}
-
-_GFX1250_ARCH_CAPS: Dict[str, int] = {
-    "ArchAccUnifiedRegs": 0,
-    "CMPXWritesSGPR": 0,
-    "CrosslaneWait": 1,
-    "DSLow16NotPreserve": 1,
-    "DeviceLDS": 327680,
-    "HasAccCD": 0,
-    "HasEccHalf": 1,
-    "HasF32XEmulation": 1,
-    "HasFP8_OCP": 1,
-    "HasSchedMode": 0,
-    "HasWave32": 1,
-    "HasWmmaArbStallBit": 1,
-    "NoSDWA": 1,
-    "SDWAWait": 1,
-    "TransOpWait": 1,
-    "VOP3ByteSel": 1,
-    "VgprBank": 1,
-    "Waitcnt0Disabled": 0,
-    "WorkGroupIdFromTTM": 1,
-    "vL1DCacheLineBytes": 128,
-}
-
-_GFX1250_REG_CAPS: Dict[str, int] = {
-    "MaxSgpr": 102,
-    "MaxVgpr": 1024,
-    "PhysicalMaxSgpr": 800,
-    "PhysicalMaxVgpr": 1024,
-    "PhysicalMaxVgprCU": 131072,
-    "maxLDSConstOffset": 65536,
-}
-
-_GFX1250_ASM_BUGS: Dict[str, bool] = {
-    "ExplicitCO": True,
-    "ExplicitNC": True,
-}
-
-
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-# ISA-keyed table. Keys are ``(major, minor, patch)`` 3-tuples to match
-# ``rocisa::IsaVersion`` / ``Tensile.Common.Types.SemanticVersion`` exactly.
-_REGISTRY: Dict[IsaKey, Tuple[Dict, Dict, Dict, Dict]] = {
-    (12, 5, 0): (
-        _GFX1250_ASM_CAPS,
-        _GFX1250_ARCH_CAPS,
-        _GFX1250_REG_CAPS,
-        _GFX1250_ASM_BUGS,
-    ),
-}
-
-
-# Friendly-name aliases (``"gfx1250"`` etc.). Keep this in lock-step with
-# ``Tensile/Common/Architectures.isaToGfx`` if you add new ISAs.
+# Friendly-name aliases (``"gfx1250"`` etc.). Keep in lock-step with
+# ``Tensile/Common/Architectures.isaToGfx`` when adding ISAs.
 _GFX_ALIASES: Dict[str, IsaKey] = {
     "gfx1250": (12, 5, 0),
 }
@@ -250,27 +99,39 @@ def normalize_isa_key(arch: Any) -> IsaKey:
 def getCaps(key: IsaKey) -> Tuple[Dict, Dict, Dict, Dict]:
     """Return ``(asmCaps, archCaps, regCaps, asmBugs)`` for ``key``.
 
+    Delegates to ``stinkytofu.getHardwareCaps`` (result cached inside C++).
+    Probing uses comgr against the target ISA name (e.g.
+    ``amdgcn-amd-amdhsa--gfx1250``); the host GPU identity is irrelevant.
+
     Returns *fresh shallow copies* so callers (and Tensile's pickle of
-    ``rocIsa.getData()``) cannot mutate the registry in place.
+    ``rocIsa.getData()``) cannot mutate shared tables in place.
     """
 
-    try:
-        asm, arch_, reg, bugs = _REGISTRY[key]
-    except KeyError:
-        raise KeyError(
-            f"caps.getCaps: no static snapshot for ISA {key}; the "
-            f"rocisa_stinkytofu_adaptor only has snapshots for "
-            f"{sorted(_REGISTRY)} today. Capture one (see caps.py "
-            "docstring) or run with the nanobind backend by unsetting "
-            "ROCISA_BACKEND."
-        ) from None
+    import stinkytofu  # noqa: WPS433  (runtime required dep; ImportError propagates)
 
-    return (dict(asm), dict(arch_), dict(reg), dict(bugs))
+    raw = stinkytofu.getHardwareCaps(list(key))
+    asm_caps = raw.get("asmCaps") or {}
+    if not asm_caps:
+        raise KeyError(
+            f"caps.getCaps: stinkytofu has no hardware caps for ISA {key}. "
+            f"Registered backends: {stinkytofu.getRegisteredArchKeys()}"
+        )
+
+    arch_caps = raw.get("archCaps") or {}
+    reg_caps = raw.get("regCaps") or {}
+    asm_bugs = raw.get("asmBugs") or {}
+    return (
+        {str(k): int(v) for k, v in asm_caps.items()},
+        {str(k): int(v) for k, v in arch_caps.items()},
+        {str(k): int(v) for k, v in reg_caps.items()},
+        {str(k): bool(v) for k, v in asm_bugs.items()},
+    )
 
 
 def supportedIsas() -> Tuple[IsaKey, ...]:
-    """Return the ISAs we have static caps for (debug / introspection)."""
-    return tuple(_REGISTRY)
+    """Return ISA keys that have a gfx alias mapping in this adaptor."""
+
+    return tuple(_GFX_ALIASES.values())
 
 
 def glc_bit_name_from_caps(asm_caps: Dict[str, int]) -> str:

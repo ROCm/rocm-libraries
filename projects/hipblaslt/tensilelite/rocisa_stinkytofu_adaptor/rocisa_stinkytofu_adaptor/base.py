@@ -310,8 +310,9 @@ def init(arch: Any, assemblerPath: str = "", debug: bool = False) -> None:
     version short-circuits on ``m_isainfo.find(isaVersion) !=
     m_isainfo.end()``, we mirror that with ``if key not in _data``.
 
-    ``debug`` is accepted for signature parity but ignored (the logical
-    adaptor never invokes ``initAsmCaps`` / ``llvm-mc``).
+    ``debug`` is accepted for signature parity but ignored. Capability
+    probing is delegated to ``stinkytofu.getHardwareCaps`` via
+    ``caps.getCaps`` (comgr inside stinkytofu, not ``llvm-mc`` here).
     """
     global _current_isa, _assembler_path, _is_init
     key = _caps.normalize_isa_key(arch)
