@@ -8784,13 +8784,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["StreamKAtomic"] == 0:
         requiredAligned4SgprVar.append("SrdWS")
     elif kernel["StreamK"] == 5:
-      # Hybrid SK3+SK4: union of both runtime SGPR sets plus the dedicated
-      # StreamKHybridMode SGPR that captures the runtime SK3/SK4 mode bit
-      # (extracted from MSB of MagicShiftItersPerTile at preLoop entry).
+      # Hybrid SK3+SK4: the SK3 and SK4 code paths are mutually exclusive at
+      # runtime (selected by StreamKHybridMode), so their path-specific
+      # persistent SGPRs overlap. Only allocate the shared SGPRs, the
+      # SK4-only pair (StreamKTileIdx/StreamKPartialIdx) and the dedicated
+      # StreamKHybridMode bit (extracted from MSB of MagicShiftItersPerTile
+      # at preLoop entry). The SK3-only pair (StreamKIter/StreamKIterEnd) is
+      # NOT defined here: it is RegSet-aliased onto the SK4-only
+      # StreamKTileIdx/StreamKPartialIdx slots in KernelWriterAssembly.py
+      # (SK5 block), mirroring the kernarg-slot aliasing, so SK5 allocates
+      # the same persistent SGPR count as SK4 plus the single mode bit.
       requiredUnalignedSgprVar += [
         "StreamKIdx",
-        "StreamKIter",
-        "StreamKIterEnd",
         "StreamKTileIdx",
         "StreamKPartialIdx",
         "StreamKLocalStart",

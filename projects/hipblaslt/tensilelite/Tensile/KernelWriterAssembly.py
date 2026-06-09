@@ -1563,6 +1563,14 @@ class KernelWriterAssembly(KernelWriter):
         module.add(RegSet("s", "sgprSKSplit",      "sgprSKItersPerWG",            0))
         module.add(RegSet("s", "sgprSKItersPerWI", "sgprskGrid",                  0))
         module.add(RegSet("s", "sgprSKGrid",       "sgprskTiles",                 0))
+        # SK5 hybrid: the SK3-only and SK4-only persistent SGPRs are mutually
+        # exclusive at runtime (StreamKHybridMode selects one path), so the
+        # SK3-only iter SGPRs are RegSet-aliased onto the SK4-only idx SGPRs
+        # (defined via the for-skey RegSet loop above) instead of taking their
+        # own physical registers. Drops 2 real SGPRs vs the naive union.
+        module.addComment0("SK5 hybrid: SK3-only iter SGPR -> SK4-only idx slot (mutually exclusive)")
+        module.add(RegSet("s", "sgprStreamKIter",    "sgprStreamKTileIdx",    0))
+        module.add(RegSet("s", "sgprStreamKIterEnd", "sgprStreamKPartialIdx", 0))
     elif kernel["StreamK"] == 4:
       module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
 
