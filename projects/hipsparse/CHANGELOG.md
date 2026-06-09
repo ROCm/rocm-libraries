@@ -9,7 +9,6 @@ Documentation for hipSPARSE is available at
 ### Added
 * Add `hipsparseCreateBsr` and `hipsparseCreateConstBsr` in order to enable BSR format support in generic routines.
 * Add BSR format support to `hipsparseSpMV`.
-* Added testing for reusing the same sparse matrix descriptor across multiple `hipsparseSpMM` calls, covering the SpMM-only, per-call buffer, and shared-buffer usage patterns.
 
 ### Resolved issues
 * Fixed an issue where calling `hipsparseSpMV` multiple times with different `hipsparseOperation_t`, `hipsparseSpMVAlg_t`, or compute-datatypes using the same sparse matrix descriptor resulted in errors.
