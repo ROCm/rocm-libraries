@@ -26,6 +26,8 @@
 
 namespace rocisa
 {
+    using ParamVariant = std::variant<std::shared_ptr<rocisa::Container>, int, std::string>;
+
     DataType instTypeToDataType(InstType instType);
 
     bool is8bitFloat(DataType value);
@@ -74,9 +76,8 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> a;
         std::shared_ptr<RegisterContainer> b;
         std::optional<InstructionInput>    acc2;
+        int                                acc2_imm=0;
         bool                               neg;
-        bool                               reuseA;
-        bool                               reuseB;
 
         MFMAInstruction(InstType                                  instType,
                         InstType                                  accType,
@@ -85,10 +86,8 @@ namespace rocisa
                         const std::shared_ptr<RegisterContainer>& acc,
                         const std::shared_ptr<RegisterContainer>& a,
                         const std::shared_ptr<RegisterContainer>& b,
-                        const std::optional<InstructionInput>&     acc2    = std::nullopt,
+                        const std::optional<InstructionInput>&    acc2    = std::nullopt,
                         bool                                      neg     = false,
-                        bool                                      reuseA  = false,
-                        bool                                      reuseB  = false,
                         const std::string&                        comment = "")
             : Instruction(instType, comment)
             , accType(accType)
@@ -98,9 +97,31 @@ namespace rocisa
             , a(a)
             , b(b)
             , acc2(acc2.has_value() ? acc2.value() : InstructionInput(acc))
+            , acc2_imm(0)
             , neg(neg)
-            , reuseA(reuseA)
-            , reuseB(reuseB)
+        {
+        }
+
+        MFMAInstruction(InstType                                  instType,
+                        InstType                                  accType,
+                        const std::vector<int>&                   variant,
+                        bool                                      mfma1k,
+                        const std::shared_ptr<RegisterContainer>& acc,
+                        const std::shared_ptr<RegisterContainer>& a,
+                        const std::shared_ptr<RegisterContainer>& b,
+                        int                                       acc2_imm,
+                        bool                                      neg     = false,
+                        const std::string&                        comment = "")
+            : Instruction(instType, comment)
+            , accType(accType)
+            , variant(variant)
+            , mfma1k(mfma1k)
+            , acc(acc)
+            , a(a)
+            , b(b)
+            , acc2(std::nullopt)
+            , acc2_imm(acc2_imm)
+            , neg(neg)
         {
         }
 
@@ -114,8 +135,6 @@ namespace rocisa
             , b(other.b ? other.b->clone2() : nullptr)
             , acc2(other.acc2.has_value() ? copyInstructionInput(other.acc2.value()) : std::optional<InstructionInput>(std::nullopt))
             , neg(other.neg)
-            , reuseA(other.reuseA)
-            , reuseB(other.reuseB)
         {
         }
 
@@ -202,7 +221,7 @@ namespace rocisa
         {
             std::string negStr
                 = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
-            return {acc, a, b, acc2.value(), negStr};
+            return {acc, a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm), negStr};
         }
 
         std::vector<InstructionInput> getDstParams() const override
@@ -216,9 +235,9 @@ namespace rocisa
             {
                 // Keep operand model consistent with emitted assembly:
                 // v_wmma_scale_* requires two explicit scale operands.
-                return {a, b, acc2.value(), 0, 0};
+                return {a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm), 0, 0};
             }
-            return {a, b, acc2.value()};
+            return {a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm)};
         }
 
         std::string preStr() const override
@@ -252,9 +271,6 @@ namespace rocisa
             size_t      f4_t = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
             std::string negStr
                 = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
-            // Conditions for reuseA(B)Str setting
-            std::string reuseAStr       = typeConvert(instType) == "f8f6f4" || !getAsmCaps()["HasWMMA_V3"]? "": (!reuseA ? "" : " matrix_a_reuse");
-            std::string reuseBStr       = typeConvert(instType) == "f8f6f4" || !getAsmCaps()["HasWMMA_V3"]? "": (!reuseB ? "" : " matrix_b_reuse");
             std::string inputPermuteStr = "";
             std::string scaleStr        = "";
             if(getAsmCaps()["HasMFMA_f8f6f4"])
@@ -481,7 +497,8 @@ namespace rocisa
                 }
             }
             return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
-                   + InstructionInputToString(acc2.value()) + scaleStr + negStr + inputPermuteStr + reuseAStr + reuseBStr;
+                   + (!acc2.has_value() ? std::to_string(acc2_imm) : InstructionInputToString(acc2.value()))
+                   + scaleStr + negStr + inputPermuteStr;
         }
 
         std::string toString() const override
@@ -489,7 +506,7 @@ namespace rocisa
             auto        newInstStr = preStr();
             std::string kStr       = newInstStr + " " + getArgStr();
             kStr = formatWithComment(kStr);
-            setMsb(kStr, {a, b, acc2.value()}, acc);
+            setMsb(kStr, {a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm)}, acc);
             return kStr;
         }
 
@@ -512,12 +529,11 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> a;
         std::shared_ptr<RegisterContainer> b;
         std::shared_ptr<RegisterContainer> acc2;
+        int                                acc2_imm=0;
         std::shared_ptr<RegisterContainer> mxsa;
         std::shared_ptr<RegisterContainer> mxsb;
         std::optional<VOP3PModifiers>      vop3;
         int                                block;
-        bool                               reuseA;
-        bool                               reuseB;
 
         MXMFMAInstruction(InstType                                  instType,
                           InstType                                  accType,
@@ -532,8 +548,6 @@ namespace rocisa
                           InstType                                  mxScaleAType = InstType::INST_F32,
                           InstType                                  mxScaleBType = InstType::INST_F32,
                           int                                       block        = 0,
-                          bool                                      reuseA       = false,
-                          bool                                      reuseB       = false,
                           const std::string&                        comment      = "")
             : Instruction(instType, comment)
             , accType(accType)
@@ -544,12 +558,42 @@ namespace rocisa
             , a(a)
             , b(b)
             , acc2(acc2 ? acc2 : acc)
+            , acc2_imm(0)
             , mxsa(mxsa)
             , mxsb(mxsb)
             , vop3(vop3)
             , block(block)
-            , reuseA(reuseA)
-            , reuseB(reuseB)
+        {
+        }
+
+        MXMFMAInstruction(InstType                                  instType,
+                          InstType                                  accType,
+                          const std::vector<int>&                   variant,
+                          const std::shared_ptr<RegisterContainer>& acc,
+                          const std::shared_ptr<RegisterContainer>& a,
+                          const std::shared_ptr<RegisterContainer>& b,
+                          int                                       acc2_imm = 0,
+                          const std::shared_ptr<RegisterContainer>& mxsa         = nullptr,
+                          const std::shared_ptr<RegisterContainer>& mxsb         = nullptr,
+                          const std::optional<VOP3PModifiers>&      vop3         = std::nullopt,
+                          InstType                                  mxScaleAType = InstType::INST_F32,
+                          InstType                                  mxScaleBType = InstType::INST_F32,
+                          int                                       block        = 0,
+                          const std::string&                        comment      = "")
+            : Instruction(instType, comment)
+            , accType(accType)
+            , mxScaleAType(mxScaleAType)
+            , mxScaleBType(mxScaleBType)
+            , variant(variant)
+            , acc(acc)
+            , a(a)
+            , b(b)
+            , acc2(nullptr)
+            , acc2_imm(acc2_imm)
+            , mxsa(mxsa)
+            , mxsb(mxsb)
+            , vop3(vop3)
+            , block(block)
         {
         }
 
@@ -567,8 +611,6 @@ namespace rocisa
             , mxsb(other.mxsb ? other.mxsb->clone2() : nullptr)
             , vop3(other.vop3)
             , block(other.block)
-            , reuseA(other.reuseA)
-            , reuseB(other.reuseB)
         {
         }
 
@@ -598,7 +640,7 @@ namespace rocisa
         std::vector<InstructionInput> getSrcParams() const override
         {
             // ignore block parameter since it's not an operand in mxmfma instruction.
-            return {a, b, acc2, mxsa, mxsb};
+            return {a, b, (acc2 ? InstructionInput(acc2) : InstructionInput(acc2_imm)), mxsa, mxsb};
         }
 
         std::string preStr() const override
@@ -670,11 +712,6 @@ namespace rocisa
         std::string wmmaInputPermuteStr() const
         {
             constexpr size_t f4_t = 32;
-            // Conditions for reuseA(B)Str setting (typeConvert() is member: "f4" vs "f8f6f4")
-            std::string reuseAStr       = typeConvert() == "f4" || !getAsmCaps()["HasWMMA_V3"] ? ""
-                                                                                              : (!reuseA ? "" : " matrix_a_reuse");
-            std::string reuseBStr       = typeConvert() == "f4" || !getAsmCaps()["HasWMMA_V3"] ? ""
-                                                                                              : (!reuseB ? "" : " matrix_b_reuse");
             std::string inputPermuteStr = "";
             switch(instType)
             {
@@ -833,7 +870,7 @@ namespace rocisa
                 break;
             }
 
-            return inputPermuteStr + reuseAStr + reuseBStr;
+            return inputPermuteStr;
         }
 
         std::string getArgStr() const
@@ -843,8 +880,9 @@ namespace rocisa
                 std::string mxsaStr = mxsa ? mxsa->toString() : "";
                 std::string mxsbStr = mxsb ? mxsb->toString() : "";
                 // op_sel/op_sel_hi must appear before cbsz/blgp for the assembler
-                std::string result  = acc->toString() + ", " + a->toString() + ", " + b->toString()
-                                    + ", " + acc2->toString() + ", " + mxsaStr + ", " + mxsbStr;
+                std::string result  = acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
+                                    + (acc2==nullptr ? std::to_string(acc2_imm) : acc2->toString()) + ", "
+                                    + mxsaStr + ", " + mxsbStr;
                 if(vop3)
                 {
                     result += vop3->toString();
@@ -855,8 +893,8 @@ namespace rocisa
             else
             {
                 return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
-                       + acc2->toString() + ", " + mxsa->toString() + ", " + mxsb->toString()
-                       + wmmaInputPermuteStr();
+                       + (acc2==nullptr ? std::to_string(acc2_imm) : acc2->toString()) + ", "
+                       + mxsa->toString() + ", " + mxsb->toString() + wmmaInputPermuteStr();
             }
         }
 
