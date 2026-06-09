@@ -168,7 +168,9 @@ struct GemmQuantPipelineProblemBase
     }();
 
     CK_TILE_HOST_DEVICE static constexpr auto GetAlignmentBQ()
-    { return VectorLoadSize / sizeof(BQDataType); }
+    {
+        return VectorLoadSize / sizeof(BQDataType);
+    }
 
     static constexpr index_t VectorSizeBQ = []() { return kPadK ? 1 : GetAlignmentBQ(); }();
 };

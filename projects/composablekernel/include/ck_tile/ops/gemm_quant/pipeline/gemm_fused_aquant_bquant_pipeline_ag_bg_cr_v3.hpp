@@ -263,7 +263,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             using ReduceShape = Reduce2dShape<BlockWarps, BlockTile, WarpTile, ThreadTile>;
 
             // TODO: Computedatatype float?
-            using ReduceProblem = BlockReduce2dProblem<ADataType, AQDataType, ReduceShape>;
+            using ReduceProblem = BlockReduce2dProblem<ADataType, ADataType, ReduceShape>;
 
             using ReducePolicy = Reduce2dDefaultPolicy;
 
@@ -275,12 +275,11 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             // Only absmax computed during reduction; range scaling applied later
             auto reduce_func = ReduceOp::AbsMax{};
 
-            const float fp8_inv_range = 1.f / (type_convert<float>(numeric<fp8_t>::max()) -
-                                               type_convert<float>(numeric<fp8_t>::min()));
+            const float fp8_inv_max = 1.f / type_convert<float>(numeric<fp8_t>::max());
 
             auto aq_reduce = blockreduce.template MakeYBlockTile<decltype(a_reduce)>();
 
-            set_tile(aq_reduce, ReduceOp::AbsMax::GetIdentityValue<AQDataType>());
+            set_tile(aq_reduce, ReduceOp::AbsMax::GetIdentityValue<ADataType>());
 
             blockreduce(a_reduce, aq_reduce, reduce_func);
             blockreduce_sync(aq_reduce, reduce_func);
@@ -296,13 +295,14 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
             // Copy the first lanes values to all threads
             static_for<0, thread_buf_size, 1>{}([&](auto i) {
-                AQDataType abs_max = amd_wave_read_first_lane(aq_reduce.get_thread_buffer()[i]);
+                ADataType abs_max = amd_wave_read_first_lane(aq_reduce.get_thread_buffer()[i]);
                 if(abs_max == 0.f)
                 {
                     abs_max = 1.f;
                 };
+
                 aq_block_tile.get_thread_buffer()[i] =
-                    type_convert<AQDataType>(abs_max * fp8_inv_range);
+                    type_convert<AQDataType>(type_convert<float>(abs_max) * fp8_inv_max);
             });
 
             // Apply scales and convert data to the original block tile distribution

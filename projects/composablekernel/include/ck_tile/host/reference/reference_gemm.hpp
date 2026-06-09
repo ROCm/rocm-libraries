@@ -281,8 +281,7 @@ CK_TILE_HOST void reference_gemm_fused_aquant(const HostTensor<ADataType>& a_m_k
     HostTensor<AQDataType> aq_m_aqk(
         ck_tile::host_tensor_descriptor(AQM, AQK, AQK, ck_tile::bool_constant<true>{}));
 
-    const float fp8_inv_range = 1.f / (type_convert<float>(numeric<fp8_t>::max()) -
-                                       type_convert<float>(numeric<fp8_t>::min()));
+    const float fp8_inv_max = 1.f / type_convert<float>(numeric<fp8_t>::max());
 
     for(std::size_t m = 0; m < M; ++m)
     {
@@ -291,12 +290,12 @@ CK_TILE_HOST void reference_gemm_fused_aquant(const HostTensor<ADataType>& a_m_k
             const std::size_t k_begin = k_group * AQuantGroupSize::kK;
             const std::size_t k_end   = std::min<std::size_t>(k_begin + AQuantGroupSize::kK, K);
 
-            AQDataType max_abs = 0.0f;
+            ADataType max_abs = 0.0f;
 
             for(std::size_t k = k_begin; k < k_end; ++k)
             {
-                const AQDataType v = ck_tile::type_convert<AQDataType>(a_m_k(m, k));
-                max_abs            = std::max(max_abs, std::abs(v));
+                const ADataType v = a_m_k(m, k);
+                max_abs           = ck_tile::max(max_abs, ck_tile::abs(v));
             }
 
             if(max_abs == 0.0f)
@@ -304,7 +303,8 @@ CK_TILE_HOST void reference_gemm_fused_aquant(const HostTensor<ADataType>& a_m_k
                 max_abs = 1.0f;
             }
 
-            aq_m_aqk(m, k_group) = ck_tile::type_convert<AQDataType>(max_abs * fp8_inv_range);
+            aq_m_aqk(m, k_group) =
+                ck_tile::type_convert<AQDataType>(type_convert<float>(max_abs) * fp8_inv_max);
         }
     }
 
@@ -319,7 +319,8 @@ CK_TILE_HOST void reference_gemm_fused_aquant(const HostTensor<ADataType>& a_m_k
             // size_t mg = m / AQuantGroupSize::kM;
             size_t kg = k / AQuantGroupSize::kK;
 
-            a_m_k_fp8(m, k) = type_convert<fp8_t>(a_m_k(m, k) / aq_m_aqk(m, kg));
+            a_m_k_fp8(m, k) =
+                type_convert<fp8_t>(type_convert<AQDataType>(a_m_k(m, k)) / aq_m_aqk(m, kg));
         }
     }
 
