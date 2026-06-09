@@ -4,6 +4,7 @@
 """Unit tests for suite CLI argument parsing and run_suite() workflow."""
 
 import json
+import importlib
 import os
 import sys
 import tempfile
@@ -24,6 +25,8 @@ from dnn_benchmarking.reporting.suite_results import (
     SuiteMetadata,
     SuiteResult,
 )
+
+MAIN_MODULE = importlib.import_module("dnn_benchmarking.cli.main")
 
 
 def _mock_hipdnn():
@@ -80,14 +83,21 @@ class TestParserGlobAndFilters:
         args = parser.parse_args(["--graph", "g.json"])
         assert args.engine is None
 
-    def test_engine_flag_deduplicates_preserving_order(self) -> None:
-        """--engine 1,1,1 -> [1]; '3,1,3,2' -> [3, 1, 2] (first-seen order)."""
+    def test_engine_flag_preserves_duplicates(self) -> None:
+        """--engine entries are ordered execution selections, not a set."""
         parser = create_parser()
         args = parser.parse_args(["--graph", "g.json", "--engine", "1,1,1"])
-        assert args.engine == [1]
+        assert args.engine == [1, 1, 1]
 
         args = parser.parse_args(["--graph", "g.json", "--engine", "3,1,3,2"])
-        assert args.engine == [3, 1, 2]
+        assert args.engine == [3, 1, 3, 2]
+
+    def test_plugin_path_accepts_comma_separated_list(self) -> None:
+        parser = create_parser()
+        args = parser.parse_args(
+            ["--graph", "g.json", "--plugin-path", "/plugins/a,/plugins/b"]
+        )
+        assert args.plugin_path == [Path("/plugins/a"), Path("/plugins/b")]
 
     def test_verbose_flag_default_false(self) -> None:
         """No -v / --verbose => args.verbose is False."""
@@ -120,10 +130,9 @@ class TestMainRouting:
             paths.append(str(p))
         return paths
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.main.run_suite_cli")
     def test_multi_file_glob_routes_to_orchestrator(
-        self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
+        self, mock_orchestrate: MagicMock
     ) -> None:
         """Multi-file glob routes to the unified orchestrator."""
         mock_orchestrate.return_value = 0
@@ -147,10 +156,9 @@ class TestMainRouting:
             assert len(graph_paths) == 3
             assert result == 0
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.main.run_suite_cli")
     def test_single_file_also_routes_to_orchestrator(
-        self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
+        self, mock_orchestrate: MagicMock
     ) -> None:
         """Single file routes through the unified orchestrator (no separate run_benchmark)."""
         mock_orchestrate.return_value = 0
@@ -173,10 +181,9 @@ class TestMainRouting:
             assert len(graph_paths) == 1
             assert result == 0
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_verbose_flag_propagates_to_suite_config(
-        self, mock_benchmark: MagicMock, mock_gpu: MagicMock
+        self, mock_benchmark: MagicMock
     ) -> None:
         """-v sets SuiteConfig.verbose=True when routing through the orchestrator."""
         mock_benchmark.return_value = 0
@@ -192,10 +199,9 @@ class TestMainRouting:
         suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.verbose is True
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_engine_list_propagates_to_suite_config(
-        self, mock_benchmark: MagicMock, mock_gpu: MagicMock
+        self, mock_benchmark: MagicMock
     ) -> None:
         """--engine 1,2 lands in SuiteConfig.engine_filter as [1, 2]."""
         mock_benchmark.return_value = 0
@@ -214,14 +220,96 @@ class TestMainRouting:
         suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.engine_filter == [1, 2]
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
+    @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
+    def test_plugin_paths_propagate_to_suite_config(
+        self, mock_benchmark: MagicMock
+    ) -> None:
+        mock_benchmark.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._create_graph_files(Path(tmpdir), 1)
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch(
+                "sys.argv",
+                [
+                    "dnn-benchmark",
+                    "--graph",
+                    paths[0],
+                    "--engine",
+                    "2,1",
+                    "--plugin-path",
+                    "/plugins/b,/plugins/a",
+                ],
+            ):
+                main()
+
+        suite_config = mock_benchmark.call_args.kwargs["config"]
+        assert suite_config.engine_filter == [2, 1]
+        assert suite_config.plugin_paths == [Path("/plugins/b"), Path("/plugins/a")]
+
+    @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
+    def test_same_engine_plugin_paths_propagate_as_ordered_selections(
+        self, mock_benchmark: MagicMock
+    ) -> None:
+        mock_benchmark.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._create_graph_files(Path(tmpdir), 1)
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch(
+                "sys.argv",
+                [
+                    "dnn-benchmark",
+                    "--graph",
+                    paths[0],
+                    "--engine",
+                    "1,1",
+                    "--plugin-path",
+                    "/plugins/a,/plugins/b",
+                ],
+            ):
+                main()
+
+        suite_config = mock_benchmark.call_args.kwargs["config"]
+        selections = suite_config.engine_selections_for(suite_config.engine_filter)
+        assert suite_config.engine_filter == [1, 1]
+        assert [s.plugin_path for s in selections] == [
+            Path("/plugins/a"),
+            Path("/plugins/b"),
+        ]
+
+    def test_plugin_path_count_mismatch_rejected_at_cli_layer(self) -> None:
+        from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli
+
+        parser = create_parser()
+        args = parser.parse_args(
+            [
+                "--graph",
+                "g.json",
+                "--engine",
+                "1,2,3",
+                "--plugin-path",
+                "/plugins/a,/plugins/b",
+            ]
+        )
+        reporter = MagicMock(spec=Reporter)
+
+        rc = run_suite_cli(args, graph_paths=[Path("g.json")], reporter=reporter)
+
+        assert rc == 1
+        reporter.print_error.assert_called_once()
+        assert "entry count" in reporter.print_error.call_args[0][0]
+
     @patch("dnn_benchmarking.cli.main.run_pytorch_cli")
     @patch("dnn_benchmarking.cli.main.run_suite_cli")
     def test_pytorch_backend_single_file_uses_pytorch_path(
         self,
         mock_orchestrate: MagicMock,
         mock_run_pytorch: MagicMock,
-        mock_gpu: MagicMock,
     ) -> None:
         """--backend pytorch on single file goes to run_pytorch_cli, not unified."""
         mock_run_pytorch.return_value = 0
@@ -241,8 +329,7 @@ class TestMainRouting:
             mock_orchestrate.assert_not_called()
             assert result == 0
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    def test_pytorch_backend_multi_file_rejected(self, mock_gpu: MagicMock) -> None:
+    def test_pytorch_backend_multi_file_rejected(self) -> None:
         """--backend pytorch with a glob exits 1 (suite not supported)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             self._create_graph_files(Path(tmpdir), 3)
@@ -258,10 +345,9 @@ class TestMainRouting:
 
             assert result == 1
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.main.run_suite_cli")
     def test_recursive_glob_matches_nested_directories(
-        self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
+        self, mock_orchestrate: MagicMock
     ) -> None:
         """`**` glob with recursive=True matches graphs in nested directories."""
         mock_orchestrate.return_value = 0
@@ -414,7 +500,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -445,7 +530,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -491,7 +575,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -520,7 +603,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=output_file,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -554,7 +636,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -584,7 +665,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -623,7 +703,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -656,7 +735,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -664,67 +742,15 @@ class TestRunSuiteWorkflow:
         assert result == 1
 
 
-class TestEngineFlagModeRejection:
-    """--engine list is incompatible with A/B and PyTorch single-engine modes."""
+class TestBackendEngineRouting:
+    """Tests for engine selection rules across execution backends."""
 
     def _create_graph(self, tmpdir: Path) -> Path:
         p = tmpdir / "g.json"
         p.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
         return p
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    def test_engine_list_with_ab_mode_rejected(self, mock_gpu: MagicMock) -> None:
-        from dnn_benchmarking.cli.main import main
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            graph = self._create_graph(Path(tmpdir))
-            with patch(
-                "sys.argv",
-                [
-                    "dnn-benchmark",
-                    "--graph",
-                    str(graph),
-                    "--engine",
-                    "1,2",
-                    "--AId",
-                    "1",
-                    "--BId",
-                    "2",
-                ],
-            ):
-                result = main()
-        assert result == 1
-
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    def test_single_engine_with_ab_mode_also_rejected(
-        self, mock_gpu: MagicMock
-    ) -> None:
-        """Even a single-element --engine list is rejected in A/B (it has --AId/--BId)."""
-        from dnn_benchmarking.cli.main import main
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            graph = self._create_graph(Path(tmpdir))
-            with patch(
-                "sys.argv",
-                [
-                    "dnn-benchmark",
-                    "--graph",
-                    str(graph),
-                    "--engine",
-                    "5",
-                    "--AId",
-                    "1",
-                    "--BId",
-                    "2",
-                ],
-            ):
-                result = main()
-        assert result == 1
-
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    def test_engine_list_with_pytorch_backend_rejected(
-        self, mock_gpu: MagicMock
-    ) -> None:
+    def test_engine_list_with_pytorch_backend_rejected(self) -> None:
         from dnn_benchmarking.cli.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -744,10 +770,9 @@ class TestEngineFlagModeRejection:
                 result = main()
         assert result == 1
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.pytorch_runner_cli.run_pytorch_benchmark")
     def test_single_engine_with_pytorch_backend_accepted(
-        self, mock_run_pytorch: MagicMock, mock_gpu: MagicMock
+        self, mock_run_pytorch: MagicMock
     ) -> None:
         """A single --engine ID is fine with --backend pytorch."""
         mock_run_pytorch.return_value = 0
@@ -803,7 +828,6 @@ class TestValidationStartupGate:
                 graph_paths=[graph],
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -830,7 +854,6 @@ class TestValidationStartupGate:
                 graph_paths=[graph],
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -931,32 +954,11 @@ class TestValidationStartupGate:
                 graph_paths=[graph],
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
         assert result == 0
         mock_run.assert_called_once()
-
-
-class TestNoGpuDetected:
-    """main() returns 1 when no GPU is detected (check is centralized in main)."""
-
-    @patch("dnn_benchmarking.cli.main._resolve_graphs")
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=False)
-    def test_main_returns_one_when_no_gpu(
-        self, mock_gpu: MagicMock, mock_resolve: MagicMock
-    ) -> None:
-        from dnn_benchmarking.cli.main import main
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            graph = Path(tmpdir) / "g.json"
-            graph.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
-            with patch("sys.argv", ["dnn-benchmark", "--graph", str(graph)]):
-                result = main()
-
-        assert result == 1
-        mock_resolve.assert_not_called()
 
 
 class TestProfilingFlagParsing:

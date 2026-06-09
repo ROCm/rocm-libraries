@@ -18,14 +18,14 @@ struct ActivTestCase
     std::optional<float> reluUpperClip = std::nullopt;
     std::optional<float> swishBeta = std::nullopt;
 
-    ActivTestCase(hipdnn_frontend::PointwiseMode mode_,
-                  std::optional<float> reluLowerClip_ = std::nullopt,
-                  std::optional<float> reluUpperClip_ = std::nullopt,
-                  std::optional<float> swishBeta_ = std::nullopt)
-        : mode(mode_)
-        , reluLowerClip(reluLowerClip_)
-        , reluUpperClip(reluUpperClip_)
-        , swishBeta(swishBeta_)
+    ActivTestCase(hipdnn_frontend::PointwiseMode mode,
+                  std::optional<float> reluLowerClip = std::nullopt,
+                  std::optional<float> reluUpperClip = std::nullopt,
+                  std::optional<float> swishBeta = std::nullopt)
+        : mode(mode)
+        , reluLowerClip(reluLowerClip)
+        , reluUpperClip(reluUpperClip)
+        , swishBeta(swishBeta)
     {
         using PM = hipdnn_frontend::PointwiseMode;
 

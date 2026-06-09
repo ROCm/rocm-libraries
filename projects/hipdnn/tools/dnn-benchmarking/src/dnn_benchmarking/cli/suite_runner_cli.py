@@ -9,7 +9,7 @@ from typing import Any, List, Optional
 
 from ..common.exceptions import ExecutionError, GraphLoadError
 from ..config.benchmark_config import MetricsConfig, SuiteConfig
-from ..execution.suite_runner import run_graph_all_providers
+from ..execution.suite_runner import run_graph_all_providers, set_plugin_path
 from ..graph.loader import GraphLoader
 from ..reporting.reporter import Reporter
 from ..reporting.suite_results import (
@@ -61,7 +61,6 @@ def run_suite_benchmark(
     graph_paths: List[Path],
     config: SuiteConfig,
     output_path: Optional[Path],
-    plugin_path: Optional[Path],
     reporter: Reporter,
     tarball_source: Optional[str] = None,
 ) -> int:
@@ -71,7 +70,6 @@ def run_suite_benchmark(
         graph_paths: List of resolved graph file paths to benchmark.
         config: Suite configuration.
         output_path: Optional path to export results as JSON.
-        plugin_path: Optional path to plugin .so directory.
         reporter: Reporter instance for console output.
         tarball_source: Optional tarball source path for display.
 
@@ -102,12 +100,20 @@ def run_suite_benchmark(
     )
 
     reporter.print_hipdnn_init_start()
+    # hipDNN handle creation is the authoritative GPU/runtime check for this
+    # backend. Apply plugin paths before constructing the handle; do not depend
+    # on optional telemetry tools such as rocm-smi or amdsmi.
     try:
         import hipdnn_frontend as hipdnn
 
-        if plugin_path is not None:
-            hipdnn.set_engine_plugin_paths([str(plugin_path)])
-        handle = hipdnn.Handle()
+        plugin_paths = config.plugin_paths
+        per_engine_plugin_paths = plugin_paths is not None and len(plugin_paths) > 1
+
+        if not per_engine_plugin_paths:
+            set_plugin_path(hipdnn, config.plugin_path)
+            handle = hipdnn.Handle()
+        else:
+            handle = None
     except ImportError:
         reporter.print_hipdnn_init_newline()
         reporter.print_error(
@@ -131,6 +137,8 @@ def run_suite_benchmark(
             reporter.print_no_engines_applicable()
         if config.verbose:
             reporter.print_verbose_graph_result(gr, config)
+        else:
+            reporter.print_graph_result_table(gr)
         graph_results.append(gr)
 
     suite_result = SuiteResult.from_graph_results(graph_results, total_graphs=total)
@@ -179,6 +187,7 @@ def run_suite_cli(
                 "source requested (--pmc, --emit-trace, --perf, "
                 "--roofline); the directory will not be written to"
             )
+        plugin_paths = args.plugin_path
         config = SuiteConfig(
             warmup_iters=args.warmup,
             benchmark_iters=args.iters,
@@ -190,7 +199,7 @@ def run_suite_cli(
             reference_provider=args.validate,
             verbose=args.verbose,
             metrics=metrics_config,
-            plugin_path=args.plugin_path,
+            plugin_paths=plugin_paths,
         )
     except ValueError as e:
         reporter.print_error(f"Suite configuration error: {e}")
@@ -200,7 +209,6 @@ def run_suite_cli(
         graph_paths=graph_paths,
         config=config,
         output_path=args.output,
-        plugin_path=args.plugin_path,
         reporter=reporter,
         tarball_source=tarball_source,
     )

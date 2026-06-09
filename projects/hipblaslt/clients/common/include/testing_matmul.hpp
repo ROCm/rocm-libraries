@@ -32,6 +32,7 @@
 #include "efficiency_monitor.hpp"
 #include "flops.hpp"
 #include "hipBuffer.hpp"
+#include "hipblaslt_bench_options.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_math.hpp"
@@ -223,14 +224,17 @@ std::vector<float> mx_type_to_f32(T* buf, S* sbuf, size_t row, size_t col, size_
     return ref;
 }
 
-std::vector<float> mx_type_to_f32(hipDataType    type,
-                                  hipDataType    stype,
-                                  HipHostBuffer& buf,
-                                  HipHostBuffer& sbuf,
-                                  size_t         row,
-                                  size_t         col,
-                                  size_t         srow,
-                                  size_t         scol)
+// Raw-pointer overload so callers can pass per-batch offsets into packed
+// (sub-byte) data buffers via uint8_t* arithmetic without taking a sub-view
+// of HipHostBuffer.
+std::vector<float> mx_type_to_f32(hipDataType type,
+                                  hipDataType stype,
+                                  void*       buf_ptr,
+                                  void*       sbuf_ptr,
+                                  size_t      row,
+                                  size_t      col,
+                                  size_t      srow,
+                                  size_t      scol)
 {
     switch(type)
     {
@@ -238,8 +242,12 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
-            return mx_type_to_f32(
-                buf.as<hipblaslt_f8>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_f8*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_e8*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
         default:
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
@@ -248,8 +256,12 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
-            return mx_type_to_f32(
-                buf.as<hipblaslt_bf8>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_bf8*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_e8*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
         default:
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
@@ -259,8 +271,12 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
-            return mx_type_to_f32(
-                buf.as<hipblaslt_f6x16>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_f6x16*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_e8*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
         default:
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
@@ -271,8 +287,12 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
-            return mx_type_to_f32(
-                buf.as<hipblaslt_bf6x16>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_bf6x16*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_e8*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
         default:
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
@@ -283,17 +303,29 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
-            return mx_type_to_f32(
-                buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_f4x2*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_e8*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
         case HIP_R_8F_E4M3:
-            return mx_type_to_f32(
-                buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_f8>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_f4x2*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_f8*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wswitch"
         case HIP_R_8F_E5M3_EXT:
 #pragma GCC diagnostic pop
-            return mx_type_to_f32(
-                buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_e5m3>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_f4x2*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_e5m3*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
         default:
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
@@ -303,6 +335,18 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
         throw std::runtime_error("Error type in mx_type_to_f32()");
     }
+}
+
+std::vector<float> mx_type_to_f32(hipDataType    type,
+                                  hipDataType    stype,
+                                  HipHostBuffer& buf,
+                                  HipHostBuffer& sbuf,
+                                  size_t         row,
+                                  size_t         col,
+                                  size_t         srow,
+                                  size_t         scol)
+{
+    return mx_type_to_f32(type, stype, buf.buf(), sbuf.buf(), row, col, srow, scol);
 }
 
 template <typename T>
@@ -1511,11 +1555,15 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
 //   transB=T scaleB: scale is N x (K/MX)  -> kAlongRows = false
 //
 // Returns the total number of elements in the swizzled (potentially padded) buffer.
-size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
-                        size_t         scaleRows,
-                        size_t         scaleCols,
-                        size_t         MXBlock,
-                        bool           kAlongRows)
+// Raw-pointer overload so callers can pass per-batch offsets into the scale
+// buffer via uint8_t* arithmetic. hScaleA/B hold num_batches scale blocks
+// concatenated (size_scale*Vec[i] bytes each), and each block must be swizzled
+// independently.
+size_t swizzle_mx_scale(void*  scalePtr,
+                        size_t scaleRows,
+                        size_t scaleCols,
+                        size_t MXBlock,
+                        bool   kAlongRows)
 {
     using Tensor = Tensor::Manipulation::Tensor;
     size_t dimk = 128 / MXBlock;
@@ -1550,7 +1598,7 @@ size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
         auto kDim  = scaleRows; // K/MX
 
         auto tmpTensor = Tensor({mnDim, kDim}, sizeof(uint8_t));
-        memcpy(tmpTensor.as<void>(), scaleBuf.buf(), mnDim * kDim);
+        memcpy(tmpTensor.as<void>(), scalePtr, mnDim * kDim);
 
         // Pad kDim (K/MX, the fast dim) to multiple of dimk
         ::Tensor::Manipulation::Shape paddedShape{mnDim, (kDim + dimk - 1) / dimk * dimk};
@@ -1565,7 +1613,7 @@ size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
         Tensor permuted = permute(paddedTensor, {1, 0, 2});
 
         auto totalElements = permuted.getDesc().flattenSize();
-        memcpy(scaleBuf.buf(), permuted.as<void>(), totalElements);
+        memcpy(scalePtr, permuted.as<void>(), totalElements);
         return totalElements;
     }
     else
@@ -1577,7 +1625,7 @@ size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
         auto mnDim = scaleRows; // M
 
         auto tmpTensor = Tensor({kDim, mnDim}, sizeof(uint8_t));
-        memcpy(tmpTensor.as<void>(), scaleBuf.buf(), kDim * mnDim);
+        memcpy(tmpTensor.as<void>(), scalePtr, kDim * mnDim);
 
         // Pad mnDim (M, the fast dim) to multiple of dimk
         ::Tensor::Manipulation::Shape paddedShape{kDim, (mnDim + dimk - 1) / dimk * dimk};
@@ -1592,9 +1640,19 @@ size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
         Tensor permuted = permute(paddedTensor, {1, 0, 2});
 
         auto totalElements = permuted.getDesc().flattenSize();
-        memcpy(scaleBuf.buf(), permuted.as<void>(), totalElements);
+        memcpy(scalePtr, permuted.as<void>(), totalElements);
         return totalElements;
     }
+}
+
+// Convenience overload: swizzle a single scale block held by a HipHostBuffer.
+size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
+                        size_t         scaleRows,
+                        size_t         scaleCols,
+                        size_t         MXBlock,
+                        bool           kAlongRows)
+{
+    return swizzle_mx_scale(scaleBuf.buf(), scaleRows, scaleCols, MXBlock, kAlongRows);
 }
 
 
@@ -2071,6 +2129,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                     size_bias[i] = M[i];
                 else if(arg.bias_source == hipblaslt_bias_source::b)
                     size_bias[i] = N[i];
+
+                if(arg.bias_stride > 0)
+                {
+                    size_bias[i] = arg.bias_stride * num_batches[i];
+                }
             }
             else
             {
@@ -2231,6 +2294,28 @@ void testing_matmul_with_bias(const Arguments& arg,
             matmul[0][i], HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t)));
         CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
             matmul[0][i], HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(int32_t)));
+
+        // Forward CLI knobs from hipblaslt-bench into the matmul descriptor.
+        {
+            int32_t sm = hipblaslt_bench_options::sm_count_target();
+            if(sm != 0)
+            {
+                CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                    matmul[0][i],
+                    HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                    &sm,
+                    sizeof(sm)));
+            }
+            int32_t dyn = hipblaslt_bench_options::dyn_persistent_tile_enabled() ? 1 : 0;
+            if(dyn != 0)
+            {
+                CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                    matmul[0][i],
+                    HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                    &dyn,
+                    sizeof(dyn)));
+            }
+        }
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
@@ -2907,43 +2992,87 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         false,
                                         stream));
 
-        // Build CPU reference from unswizzled scale before mutating the buffer
-        if(isBlockScaling(arg.scaleA))
-            refA.emplace_back(mx_type_to_f32(TiA,
-                                             scaleDataType(arg.scaleA),
-                                             hA[i],
-                                             hScaleA[i],
-                                             A_row[i],
-                                             A_col[i],
-                                             scaleA_row,
-                                             scaleA_col));
-        if(isBlockScaling(arg.scaleB))
-            refB.emplace_back(mx_type_to_f32(TiB,
-                                             scaleDataType(arg.scaleB),
-                                             hB[i],
-                                             hScaleB[i],
-                                             B_row[i],
-                                             B_col[i],
-                                             scaleB_row,
-                                             scaleB_col));
-
-        // Swizzle MX scale on CPU and upload to GPU (unconditional — kernel always expects swizzled)
+        // Build CPU reference for every batch from the unswizzled data/scale
+        // before mutating the scale buffer. The cblas_gemm validation loop
+        // below offsets refA/refB by stride_* * batchIdx, so we must cover
+        // all num_batches batches (otherwise batchIdx>0 reads past end).
         if(isBlockScaling(arg.scaleA))
         {
-            size_t scaleA_r = A_row[i] / scaleA_row;
-            size_t scaleA_c = A_col[i] / scaleA_col;
-            size_t MXBlockA = blockSize(arg.scaleA);
+            size_t dataBatchBytesA
+                = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
+            size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
+            std::vector<float> refAAll;
+            refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
+            for(int64_t b = 0; b < num_batches[i]; ++b)
+            {
+                auto* dataPtr  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
+                auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
+                auto  batchRef = mx_type_to_f32(TiA,
+                                               scaleDataType(arg.scaleA),
+                                               dataPtr,
+                                               scalePtr,
+                                               A_row[i],
+                                               A_col[i],
+                                               scaleA_row,
+                                               scaleA_col);
+                refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
+            }
+            refA.emplace_back(std::move(refAAll));
+        }
+        if(isBlockScaling(arg.scaleB))
+        {
+            size_t dataBatchBytesB
+                = (num_batches[i] > 1) ? elementsToBytes(stride_b[i], TiB) : 0;
+            size_t scaleBatchBytesB = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
+            std::vector<float> refBAll;
+            refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
+            for(int64_t b = 0; b < num_batches[i]; ++b)
+            {
+                auto* dataPtr  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
+                auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
+                auto  batchRef = mx_type_to_f32(TiB,
+                                               scaleDataType(arg.scaleB),
+                                               dataPtr,
+                                               scalePtr,
+                                               B_row[i],
+                                               B_col[i],
+                                               scaleB_row,
+                                               scaleB_col);
+                refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
+            }
+            refB.emplace_back(std::move(refBAll));
+        }
+
+        // Swizzle MX scale on CPU and upload to GPU (unconditional — kernel always expects swizzled).
+        // hScaleA/B hold num_batches scale blocks concatenated (size_scale*Vec[i] bytes each,
+        // padding already included), so swizzle every batch in place before uploading; otherwise
+        // batches 1..N-1 stay un-swizzled and the kernel reads them with a swizzled layout (wrong / OOB).
+        if(isBlockScaling(arg.scaleA))
+        {
+            size_t scaleA_r    = A_row[i] / scaleA_row;
+            size_t scaleA_c    = A_col[i] / scaleA_col;
+            size_t MXBlockA    = blockSize(arg.scaleA);
             bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
-            swizzle_mx_scale(hScaleA[i], scaleA_r, scaleA_c, MXBlockA, kAlongRowsA);
+            for(int64_t b = 0; b < num_batches[i]; ++b)
+            {
+                auto* scalePtr
+                    = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * size_scaleAVec[i];
+                swizzle_mx_scale(scalePtr, scaleA_r, scaleA_c, MXBlockA, kAlongRowsA);
+            }
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
         }
         if(isBlockScaling(arg.scaleB))
         {
-            size_t scaleB_r = B_row[i] / scaleB_row;
-            size_t scaleB_c = B_col[i] / scaleB_col;
-            size_t MXBlockB = blockSize(arg.scaleB);
+            size_t scaleB_r    = B_row[i] / scaleB_row;
+            size_t scaleB_c    = B_col[i] / scaleB_col;
+            size_t MXBlockB    = blockSize(arg.scaleB);
             bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
-            swizzle_mx_scale(hScaleB[i], scaleB_r, scaleB_c, MXBlockB, kAlongRowsB);
+            for(int64_t b = 0; b < num_batches[i]; ++b)
+            {
+                auto* scalePtr
+                    = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * size_scaleBVec[i];
+                swizzle_mx_scale(scalePtr, scaleB_r, scaleB_c, MXBlockB, kAlongRowsB);
+            }
             CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
         }
 #endif
@@ -2978,27 +3107,29 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                 if(arg.dump_matrix)
                 {
-                    hipblasltDispatchValuesToFile(transA,
-                                                  TiA,
-                                                  M[i],
-                                                  K[i],
-                                                  lda[i],
-                                                  hA[i].buf(),
-                                                  "batch_" + std::to_string(i) + "_A_input.txt");
-                    hipblasltDispatchValuesToFile(transB,
-                                                  TiB,
-                                                  K[i],
-                                                  N[i],
-                                                  ldb[i],
-                                                  hB[i].buf(),
-                                                  "batch_" + std::to_string(i) + "_B_input.txt");
-                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                  To,
-                                                  M[i],
-                                                  N[i],
-                                                  ldc[i],
-                                                  hC[i].buf(),
-                                                  "batch_" + std::to_string(i) + "_C_input.txt");
+                    for(int batchId = 0; batchId < num_batches[i]; batchId++){
+                        hipblasltDispatchValuesToFile(transA,
+                                                    TiA,
+                                                    M[i],
+                                                    K[i],
+                                                    lda[i],
+                                                    hA[i].buf(),
+                                                    "batch_" + std::to_string(batchId) + "_" + std::to_string(i) + "_A_input.txt");
+                        hipblasltDispatchValuesToFile(transB,
+                                                    TiB,
+                                                    K[i],
+                                                    N[i],
+                                                    ldb[i],
+                                                    hB[i].buf(),
+                                                    "batch_" + std::to_string(batchId) + "_" + std::to_string(i) + "_B_input.txt");
+                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                    To,
+                                                    M[i],
+                                                    N[i],
+                                                    ldc[i],
+                                                    hC[i].buf(),
+                                                    "batch_" + std::to_string(batchId) + "_" + std::to_string(i) + "_C_input.txt");
+                    }
                 }
             }
 
@@ -3025,7 +3156,11 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(arg.bias_vector)
             {
-                hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias);
+                // Filling up unique bias values for each batch in Strided Batch
+                if(arg.bias_stride > 0)
+                    hipblaslt_init(hBias[i].buf(), arg.bias_stride, 1, arg.bias_stride, Tbias, arg.bias_stride, num_batches[i]);
+                else
+                    hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias);
             }
 
             if(arg.scaleA == hipblaslt_scaling_format::Scalar
@@ -3208,6 +3343,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.bias_vector)
             {
                 const void* bias_addr;
+                int32_t bias_stride = arg.bias_stride;
                 EXPECT_HIPBLAS_STATUS(
                     hipblasLtMatmulDescSetAttribute(matmul[0][i],
                                                     HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE,
@@ -3222,6 +3358,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                     &bias_addr,
                                                     sizeof(void*)),
                     HIPBLAS_STATUS_SUCCESS);
+                
+                if(bias_stride > 0)
+                    EXPECT_HIPBLAS_STATUS(
+                        hipblasLtMatmulDescSetAttribute(matmul[0][i],
+                                                        HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE,
+                                                        &bias_stride,
+                                                        sizeof(bias_stride)),
+                        HIPBLAS_STATUS_SUCCESS);
             }
 
             if(arg.scaleA != hipblaslt_scaling_format::none)
@@ -3611,6 +3755,29 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                 &TciB,
                                                 sizeof(void*)),
                 HIPBLAS_STATUS_SUCCESS);
+
+            // Forward CLI knobs from hipblaslt-bench into the matmul descriptor.
+            {
+                int32_t sm = hipblaslt_bench_options::sm_count_target();
+                if(sm != 0)
+                {
+                    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                        matmul[b][i],
+                        HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                        &sm,
+                        sizeof(sm)));
+                }
+                int32_t dyn = hipblaslt_bench_options::dyn_persistent_tile_enabled() ? 1 : 0;
+                if(dyn != 0)
+                {
+                    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+                        matmul[b][i],
+                        HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                        &dyn,
+                        sizeof(dyn)));
+                }
+            }
+
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 // Update bias, E
@@ -4797,93 +4964,102 @@ void testing_matmul_with_bias(const Arguments& arg,
                               : ((*hEInst)[gemmIdx].as<char>() + pos * realDataTypeSize(Taux));
                     auto  applyBias = arg.gradient ? false : arg.bias_vector;
                     void* hBias_buf = ((hBias).size() <= gemmIdx) ? nullptr : hBias[gemmIdx].buf();
-
+                    if(applyBias && arg.bias_stride > 0)
+                    {
+                        hBias_buf = ((char*)hBias_buf) + (arg.bias_stride * batchIdx * realDataTypeSize(Tbias));
+                    }
                     switch(arg.activation_type)
                     {
-                    case hipblaslt_activation_type::gelu:
-                        if(arg.gradient)
+                        case hipblaslt_activation_type::gelu:
+                            if(arg.gradient)
+                                epilogue_func(epilogue_param,
+                                            hBias_buf,
+                                            Tbias,
+                                            arg.activation_arg1,
+                                            arg.activation_arg2,
+                                            ::_dgelu,
+                                            true,
+                                            To,
+                                            Talpha);
+                            else
+                            {
+                                epilogue_func(epilogue_param,
+                                            hBias_buf,
+                                            Tbias,
+                                            arg.activation_arg1,
+                                            arg.activation_arg2,
+                                            ::_gelu,
+                                            false,
+                                            To,
+                                            Talpha);
+                            }
+                            break;
+                        case hipblaslt_activation_type::relu:
+                            if(arg.gradient)
+                            {
+                                epilogue_func(epilogue_param,
+                                            hBias_buf,
+                                            Tbias,
+                                            arg.activation_arg1,
+                                            arg.activation_arg2,
+                                            ::_drelu,
+                                            true,
+                                            To,
+                                            Talpha);
+                            }
+                            else
+                            {
+                                epilogue_func(epilogue_param,
+                                            hBias_buf,
+                                            Tbias,
+                                            arg.activation_arg1,
+                                            arg.activation_arg2,
+                                            ::_relu,
+                                            false,
+                                            To,
+                                            Talpha);
+                            }
+                            break;
+                        case hipblaslt_activation_type::swish:
                             epilogue_func(epilogue_param,
-                                          hBias_buf,
-                                          Tbias,
-                                          arg.activation_arg1,
-                                          arg.activation_arg2,
-                                          ::_dgelu,
-                                          true,
-                                          To,
-                                          Talpha);
-                        else
-                        {
+                                        hBias_buf,
+                                        Tbias,
+                                        arg.activation_arg1,
+                                        arg.activation_arg2,
+                                        ::_silu,
+                                        arg.gradient,
+                                        To,
+                                        Talpha);
+                            break;
+                        case hipblaslt_activation_type::clamp:
                             epilogue_func(epilogue_param,
-                                          hBias_buf,
-                                          Tbias,
-                                          arg.activation_arg1,
-                                          arg.activation_arg2,
-                                          ::_gelu,
-                                          false,
-                                          To,
-                                          Talpha);
-                        }
-                        break;
-                    case hipblaslt_activation_type::relu:
-                        if(arg.gradient)
-                        {
-                            epilogue_func(epilogue_param,
-                                          hBias_buf,
-                                          Tbias,
-                                          arg.activation_arg1,
-                                          arg.activation_arg2,
-                                          ::_drelu,
-                                          true,
-                                          To,
-                                          Talpha);
-                        }
-                        else
-                        {
-                            epilogue_func(epilogue_param,
-                                          hBias_buf,
-                                          Tbias,
-                                          arg.activation_arg1,
-                                          arg.activation_arg2,
-                                          ::_relu,
-                                          false,
-                                          To,
-                                          Talpha);
-                        }
-                        break;
-                    case hipblaslt_activation_type::swish:
-                        epilogue_func(epilogue_param,
-                                      hBias_buf,
-                                      Tbias,
-                                      arg.activation_arg1,
-                                      arg.activation_arg2,
-                                      ::_silu,
-                                      arg.gradient,
-                                      To,
-                                      Talpha);
-                        break;
-                    case hipblaslt_activation_type::clamp:
-                        epilogue_func(epilogue_param,
-                                      hBias_buf,
-                                      Tbias,
-                                      arg.activation_arg1,
-                                      arg.activation_arg2,
-                                      ::_clamp,
-                                      arg.gradient,
-                                      To,
-                                      Talpha);
-                        break;
-                    default:
-                        epilogue_func(epilogue_param, hBias_buf, Tbias, false, To, Talpha);
-                        break;
+                                        hBias_buf,
+                                        Tbias,
+                                        arg.activation_arg1,
+                                        arg.activation_arg2,
+                                        ::_clamp,
+                                        arg.gradient,
+                                        To,
+                                        Talpha);
+                            break;
+                        default:
+                            epilogue_func(epilogue_param, hBias_buf, Tbias, false, To, Talpha);
+                            break;
                     }
+
                     if(arg.gradient && arg.bias_vector && batchIdx == num_batches[gemmIdx] - 1)
                     {
+                        auto *hBias_gold_buf = hBias_gold[gemmIdx].buf();
+                        if(arg.bias_stride > 0 && hBias_gold_buf != nullptr)
+                        {
+                            hBias_gold_buf = (char*)hBias_gold_buf + arg.bias_stride * batchIdx * realDataTypeSize(Tbias);
+                        }
                         if(arg.bias_source == hipblaslt_bias_source::d)
                         {
                             reduction_func<false, float>(hBias_gold_epl[gemmIdx].as<char>()
                                                              + pos * realDataTypeSize(Talpha),
                                                          Talpha,
-                                                         hBias_gold[gemmIdx].buf(),
+                                                         hBias_gold_buf,
                                                          Tbias,
                                                          M[gemmIdx],
                                                          N[gemmIdx],
@@ -4900,7 +5076,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           &s1,
                                           &s2,
                                           &s3,
-                                          &hBias_gold,
+                                          &hBias_gold_buf,
                                           &Tbias,
                                           &size_bias,
                                           &K,
@@ -4911,7 +5087,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 {
                                     reduction_func<true, float>(ptr,
                                                                 Ti,
-                                                                hBias_gold[gemmIdx].buf(),
+                                                                hBias_gold_buf,
                                                                 Tbias,
                                                                 size_bias[gemmIdx],
                                                                 K[gemmIdx],
@@ -4924,7 +5100,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 {
                                     reduction_func<false, float>(ptr,
                                                                  Ti,
-                                                                 hBias_gold[gemmIdx].buf(),
+                                                                 hBias_gold_buf,
                                                                  Tbias,
                                                                  size_bias[gemmIdx],
                                                                  K[gemmIdx],
@@ -5765,20 +5941,23 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 if(arg.dump_matrix)
                 {
-                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                  To,
-                                                  M[0],
-                                                  N[0],
-                                                  ldd[0],
-                                                  hD_1[0].buf(),
-                                                  "batch_0_D_output.txt");
-                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                  To,
-                                                  M[0],
-                                                  N[0],
-                                                  ldd[0],
-                                                  hD_gold[0].buf(),
-                                                  "batch_0_D_Gold_output.txt");
+                    for(int batchId = 0; batchId < num_batches[0]; batchId++)
+                    {
+                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                    To,
+                                                    M[0],
+                                                    N[0],
+                                                    ldd[0],
+                                                    hD_1[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
+                                                    "batch_" + std::to_string(batchId) + "_D_output.txt");
+                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                    To,
+                                                    M[0],
+                                                    N[0],
+                                                    ldd[0],
+                                                    hD_gold[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
+                                                    "batch_" + std::to_string(batchId) + "_D_Gold_output.txt");
+                    }
                 }
                 check(stream,
                       arg,

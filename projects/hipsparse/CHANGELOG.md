@@ -10,6 +10,9 @@ Documentation for hipSPARSE is available at
 * Add `hipsparseCreateBsr` and `hipsparseCreateConstBsr` in order to enable BSR format support in generic routines.
 * Add BSR format support to `hipsparseSpMV`.
 
+### Resolved issues
+* Fixed an issue where calling `hipsparseSpMV` multiple times with different `hipsparseOperation_t`, `hipsparseSpMVAlg_t`, or compute-datatypes using the same sparse matrix descriptor resulted in errors.
+
 ### Upcoming changes
 * The routines `hipsparseXcsrgeamNnz`, `hipsparseScsrgeam`, `hipsparseDcsrgeam`, `hipsparseCcsrgeam`, and `hipsparseZcsrgeam` have been deprecated and will be removed in a future release. Users should use the generic SpGEAM routines instead.
 
