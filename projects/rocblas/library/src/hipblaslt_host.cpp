@@ -111,8 +111,6 @@ namespace
             throw std::runtime_error("rocBLAS error: hipBLASLt API returned "           \
                                      + std::to_string(STATUS) + " at " + __FILE__ + ":" \
                                      + std::to_string(__LINE__));                       \
-            \    
-                                                                               \
         }                                                                               \
     } while(0)
 
