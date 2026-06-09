@@ -170,7 +170,9 @@ WORKDIR /TheRock
 RUN . /opt/venv/bin/activate && \
     python ./build_tools/fetch_sources.py
 
-RUN MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="${ASAN_SCCACHE_CACHE_BUSTER}" \
+RUN . /opt/venv/bin/activate && \
+    THEROCK_PKG_VERSION=$(python -c "import json; v=json.load(open('version.json'))['rocm-version']; print(v+'.dev0')") && \
+    MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="${ASAN_SCCACHE_CACHE_BUSTER}" \
     cmake -B build -GNinja . \
         --preset linux-release-asan \
         -DTHEROCK_AMDGPU_FAMILIES=$AMDGPU_FAMILIES \
@@ -179,7 +181,7 @@ RUN MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="${ASAN_SCCACHE_CACHE_BUSTER}" \
         -DTHEROCK_ENABLE_ALL=OFF \
         -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON \
         -DTHEROCK_ENABLE_MIOPEN=ON \
-        -DTHEROCK_PACKAGE_VERSION=6.4.0.dev0
+        -DTHEROCK_PACKAGE_VERSION="${THEROCK_PKG_VERSION}"
 
 RUN if [ "$BUILD_JOBS" = "0" ]; then \
         cmake --build build; \
