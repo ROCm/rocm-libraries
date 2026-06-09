@@ -46,26 +46,29 @@ MFMA):
      edge (PackA1 was the last writer in stream order).
   2. The CMS-side graph contains the semantically correct
      `PackA0 -> MFMA` edge.
-  3. With the section-7.3 carve-out engaged (production behavior),
-     `compare_graphs` returns zero failures despite the edge mismatch,
-     because the carve-out classifies cross-subiter ALU-producer
-     order inversions as legitimate pipelining.
-  4. With the carve-out neutralized (probe via monkey-patched
-     `_node_subiter`), the missing edge surfaces as one
-     `OrderInvertedFailure` — confirming the carve-out is the only
-     mechanism suppressing it.
+  3. Under the unrolled walk, `compare_graphs(ref, subj)` returns zero
+     failures — not because of a carve-out (the cross-graph exemption in
+     `diagnose_missing_edge` was deleted in C1 / rocm-libraries-5tf9),
+     but because the byte-key edge keys differ by `emission_ordinal`
+     (Option E / rocm-libraries-56e3) and `diagnose_missing_edge` Phase 2
+     routes the ALU->MFMA synthetic-fixture edge through the unconditional
+     passthrough fallback (`num_mfma_per_subiter=0` in this fixture).
+     The artifact is real at the individual-graph level but harmless in
+     the cross-graph comparison.
 
-This is the synthetic equivalent of the 768-edge failure reported in
-`test_ScheduleCapture.py::TestRealKernelCapture::test_tf32_4x4_tn_capture_shape`
-when the carve-out is neutralized.
+The carve-out neutralization probe (item 4 from the original list) was
+deleted in C4 (rocm-libraries-5ryl): it monkeypatched `GraphNode.subiter`
+to expose the missing edge as an `OrderInvertedFailure`, but the synthetic
+fixture's `num_mfma_per_subiter=0` causes the `nmps=0` gate in
+`_evaluate_gap_rule_condition` to short-circuit before `subiter()` is ever
+called — making the probe doubly dead (also, the cross-graph exemption it
+originally targeted no longer exists post-C1).
 """
 
 from rocisa.container import vgpr
 from rocisa.instruction import VCvtPkF32toBF16
 
-from Tensile.Components import CMSValidator
 from Tensile.Components.CMSValidator import (
-    OrderInvertedFailure,
     _DEFAULT_CDNA4_ARCH_PROFILE,
     build_dataflow_graph,
     compare_graphs,
@@ -183,7 +186,8 @@ def _v133_edges(graph):
 
 
 class TestCrossSubiterPackArtifact:
-    """Three positive assertions that demonstrate the artifact + suppression."""
+    """Three positive assertions that demonstrate the artifact and why it is harmless
+    in cross-graph comparison under the unrolled walk."""
 
     def test_artifact_present_in_default_graph(self):
         """Default schedule produces the artifactual `PackA1 -> MFMA` edge.
@@ -210,10 +214,9 @@ class TestCrossSubiterPackArtifact:
             f"{producer.category}."
         )
         assert consumer.category == "MFMA"
-        # Producer is positionally AFTER consumer in stream order would be
-        # the inversion case — here we instead have producer-before-consumer
-        # in default's linear emission, which is exactly what the carve-out
-        # site (CMSValidator.py:2584) gates on as the inversion direction.
+        # Producer is positionally before consumer in default's linear emission.
+        # Under the unrolled walk, `position` maps to `unrolled_position`.
+        # PackA1 is at unrolled_position=1; MFMA is at unrolled_position=2 → True.
         assert producer.position < consumer.position
 
     def test_correct_edge_present_in_cms_graph(self):
@@ -231,43 +234,30 @@ class TestCrossSubiterPackArtifact:
             f"as producer; got {producer.category}."
         )
 
-    def test_carveout_suppresses_artifact_and_neutralization_surfaces_it(self):
-        """End-to-end: with the section-7.3 carve-out engaged (production
-        behavior), `compare_graphs` reports zero failures even though the
+    def test_compare_graphs_returns_no_failures_for_cross_subiter_artifact(self):
+        """End-to-end: `compare_graphs` reports zero failures even though the
         default-side graph carries the artifactual `PackA1 -> MFMA` edge
         that does not exist in the CMS-side graph.
 
-        Neutralizing the carve-out via a monkey-patch on `_node_subiter`
-        (the same probe technique used in
-        `Tests/scratch/run_with_carveout_off.py` per bwfr §3.2) flips the
-        suppression off and surfaces the artifact as exactly one
-        `OrderInvertedFailure`.
+        As of C3 (rocm-libraries-si5f), the reason is NOT a carve-out in
+        `diagnose_missing_edge` (that code was deleted in C1 /
+        rocm-libraries-5tf9).  The zero-failure result arises because
+        `diagnose_missing_edge` Phase 2 dispatches the ALU->MFMA edge
+        through the unconditional passthrough fallback: the synthetic
+        fixture's `num_mfma_per_subiter=0` causes the `nmps=0` gate in
+        `_evaluate_gap_rule_condition` to return False for all
+        condition-gated rules, so the `unconditional_passthrough` rule
+        fires and returns `_PASSTHROUGH` → `[]`.  No exemption is
+        involved; the passthrough is the principled fallback for
+        `nmps=0` synthetic fixtures.
         """
         g_default = build_dataflow_graph(_wrap(_build_default_capture()))
         g_cms = build_dataflow_graph(_wrap(_build_cms_capture()))
 
-        # Production behavior: carve-out absorbs the diff -> 0 failures.
-        failures_with_carveout = compare_graphs(g_default, g_cms)
-        assert failures_with_carveout == [], (
-            f"Expected the section-7.3 carve-out to suppress the artifact; "
-            f"got {len(failures_with_carveout)} failure(s): "
-            f"{[type(f).__name__ for f in failures_with_carveout]}"
+        failures = compare_graphs(g_default, g_cms)
+        assert failures == [], (
+            f"Expected zero failures for the cross-subiter artifact under the "
+            f"unrolled walk (ALU->MFMA unconditional passthrough for nmps=0); "
+            f"got {len(failures)} failure(s): "
+            f"{[type(f).__name__ for f in failures]}"
         )
-
-        # Probe: neutralize the carve-out's subiter predicate by forcing
-        # both producer and consumer to look like subiter 0. The
-        # `p.subiter(n) != c.subiter(n)` check fails, the carve-out
-        # branch is skipped, and the OrderInvertedFailure path fires.
-        from Tensile.Components.CMSValidator import GraphNode
-        original_subiter = GraphNode.subiter
-        GraphNode.subiter = lambda self, nmps: 0
-        try:
-            failures_neutralized = compare_graphs(g_default, g_cms)
-        finally:
-            GraphNode.subiter = original_subiter
-
-        assert len(failures_neutralized) == 1, (
-            f"With the carve-out neutralized, the artifact must surface as "
-            f"exactly one OrderInvertedFailure; got {len(failures_neutralized)}."
-        )
-        assert isinstance(failures_neutralized[0], OrderInvertedFailure)
