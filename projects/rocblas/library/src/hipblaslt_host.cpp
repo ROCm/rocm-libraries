@@ -468,9 +468,11 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                               rocblas_gemm_algo                            algo,
                                               int32_t solution_index)
 {
-#if defined(HIPBLASLT_VERSION_MAJOR) && HIPBLASLT_VERSION_MAJOR >= 1    \
-    && defined(HIPBLASLT_VERSION_MINOR) && HIPBLASLT_VERSION_MINOR >= 4 \
-    && defined(HIPBLASLT_VERSION_PATCH) && HIPBLASLT_VERSION_PATCH >= 1
+#if defined(HIPBLASLT_VERSION_MAJOR) && defined(HIPBLASLT_VERSION_MINOR) && defined(HIPBLASLT_VERSION_PATCH) \
+    && (HIPBLASLT_VERSION_MAJOR > 1 \
+        || (HIPBLASLT_VERSION_MAJOR == 1 \
+            && (HIPBLASLT_VERSION_MINOR > 4 \
+                || (HIPBLASLT_VERSION_MINOR == 4 && HIPBLASLT_VERSION_PATCH >= 1))))
     hipblasLtHandle_t& handle     = *(prob.handle->getHipblasLtHandle());
     int                batchMode  = 0; // General Batched GEMM support in hipBLASLt
     int                batchCount = prob.batch_count > 0 ? prob.batch_count
