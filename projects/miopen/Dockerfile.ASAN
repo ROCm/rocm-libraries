@@ -172,10 +172,10 @@ RUN . /opt/venv/bin/activate && \
 
 RUN . /opt/venv/bin/activate && \
     THEROCK_PKG_VERSION=$(python -c "import json; v=json.load(open('version.json'))['rocm-version']; print(v+'.dev0')") && \
-    MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="${ASAN_SCCACHE_CACHE_BUSTER}" \
+    export MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="${ASAN_SCCACHE_CACHE_BUSTER}" && \
     cmake -B build -GNinja . \
         --preset linux-release-asan \
-        -DTHEROCK_AMDGPU_FAMILIES=$AMDGPU_FAMILIES \
+        -DTHEROCK_AMDGPU_FAMILIES="${AMDGPU_FAMILIES}" \
         -DBUILD_TESTING=ON \
         -DCMAKE_INSTALL_PREFIX=/opt/rocm \
         -DTHEROCK_ENABLE_ALL=OFF \
@@ -196,7 +196,6 @@ RUN . /opt/venv/bin/activate && \
         -DTHEROCK_ENABLE_ROCPROF_TRACE_DECODER_BINARY=ON \
         -DTHEROCK_ENABLE_ROCGDB=ON \
         -DTHEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF \
-        -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
         -DTHEROCK_PACKAGE_VERSION="${THEROCK_PKG_VERSION}"
 
 RUN if [ "$BUILD_JOBS" = "0" ]; then \
