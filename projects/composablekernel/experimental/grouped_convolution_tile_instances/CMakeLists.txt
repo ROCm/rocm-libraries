@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 if(GPU_TARGETS MATCHES "gfx9")
-  if(NOT DISABLE_IMPLICIT_GEMM_INSTANCES)
     # Generate instances using python script if instance directories don't exist
     set(INSTANCES_DIR ${CMAKE_CURRENT_BINARY_DIR})
     if(NOT EXISTS ${INSTANCES_DIR}/forward OR
@@ -39,7 +38,4 @@ if(GPU_TARGETS MATCHES "gfx9")
     target_include_directories(device_grouped_conv_bwd_data_tile_instances PRIVATE
           "${PROJECT_SOURCE_DIR}/experimental/builder/test/utils")
     target_compile_options(device_grouped_conv_bwd_data_tile_instances PRIVATE -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=0 -DCK_TILE_EXPERIMENTAL_USE_BUFFER_LOAD_OOB_CHECK_OFFSET_TRICK=1)
-  else()
-    message(STATUS "DISABLE_IMPLICIT_GEMM_INSTANCES=ON: skipping implicit-GEMM conv instance compilation")
-  endif()  
 endif()

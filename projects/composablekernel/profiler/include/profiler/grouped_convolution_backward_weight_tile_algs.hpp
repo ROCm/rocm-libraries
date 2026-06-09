@@ -29,7 +29,6 @@ namespace ckt = ck_tile::builder::test;
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_fp16.inc"
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_bf16.inc"
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp16.inc"
-
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp32_streamk.inc"
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_fp32_streamk.inc"
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_bf16_streamk.inc"

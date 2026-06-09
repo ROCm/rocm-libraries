@@ -54,7 +54,7 @@ void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
         hipMemcpy(&ref.data()[0], reference.output, output_bytes_num, hipMemcpyDeviceToHost));
     HIP_CHECK_ERROR(
         hipMemcpy(&out.data()[0], outputs.output, output_bytes_num, hipMemcpyDeviceToHost));
-        
+    
     constexpr double rtol = ck::profiler::get_rtol<DataType>();
     constexpr double atol = ck::profiler::get_atol<DataType>();
     ck_tile::check_err(out, ref, "Error: Incorrect results!", rtol, atol);
@@ -168,8 +168,8 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                     std::cout << "\tNumber of incorrect values: " << error.wrong_elements
                               << " Is all zero:" << error.is_all_zero()
                               << " max err: " << error.max_error << std::endl;
-                    run_cpu_validation<SIGNATURE, ConvBuffer::Output>(
-                        args, outputs, reference.get());
+                    // Check with cpu verification to get a values
+                    run_cpu_validation<SIGNATURE>(args, outputs, reference.get());
                 }
             }
             }

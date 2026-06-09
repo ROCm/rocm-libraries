@@ -92,10 +92,7 @@ namespace ckt = ck_tile::builder::test;
 namespace ckp = ck_tile::builder::profiling;
 
 template <auto SIGNATURE>
-int call_profiler(const ckt::Args<SIGNATURE>& args, 
-                  bool do_verification,
-                  bool time_kernel,
-                  ck_tile::index_t instance_index)
+int call_profiler(const ckt::Args<SIGNATURE>& args, bool do_verification, bool time_kernel, ck_tile::index_t instance_index)
 {
     auto inputs  = alloc_inputs(args);
     auto outputs = alloc_outputs(args);
@@ -105,19 +102,18 @@ int call_profiler(const ckt::Args<SIGNATURE>& args,
     std::cout << args.make_weight_descriptor() << std::endl;
     std::cout << args.make_output_descriptor() << std::endl;
     auto&& [valid, avg_time, tflops, gbs, op_name, best_instance_index] =
-        ckp::run_grouped_conv_forward_tile_algs(
-            args,
-            instance_index,
-            inputs.get(),
-            outputs.get(),
-            ck_tile::stream_config{nullptr,
-                                   time_kernel,
-                                   0 /*log_level*/,
-                                   5 /*cold_iters*/,
-                                   50 /*nrepeat_*/,
-                                   true /*is_gpu_timer_*/,
-                                   time_kernel /*flush_cache*/},
-            do_verification);
+        ckp::run_grouped_conv_forward_tile_algs(args,
+                                                instance_index,
+                                                inputs.get(),
+                                                outputs.get(),
+                                                ck_tile::stream_config{nullptr,
+                                                                       time_kernel,
+                                                                       0 /*log_level*/,
+                                                                       5 /*cold_iters*/,
+                                                                       50 /*nrepeat_*/,
+                                                                       true /*is_gpu_timer_*/,
+                                                                       time_kernel /*flush_cache*/},
+                                                do_verification);
     if(time_kernel)
     {
         std::cout << "\nBest configuration parameters:"
@@ -246,8 +242,7 @@ int profile_grouped_conv_fwd_tile(int argc, char* argv[])
             {
                 constexpr auto SIGNATURE = ckp::SIGNATURE_NGCHW_BF16_FWD;
                 return call_profiler<SIGNATURE>(
-                    ckp::parse_conv_args<SIGNATURE>(10, argv), do_verification, time_kernel,
-                                                instance_index);
+                    ckp::parse_conv_args<SIGNATURE>(10, argv), do_verification, time_kernel, instance_index);
             }
         }
     }
