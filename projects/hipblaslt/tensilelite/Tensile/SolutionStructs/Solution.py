@@ -2322,8 +2322,9 @@ class Solution(collections.abc.Mapping):
     # numComp = numWaves//2 to be a power of two; equivalently, numWaves
     # itself must be a power of two (>= 2).
     if state["enableTDMA"] and state["enableTDMB"]:
-      if state["NumWaves"] > 1 and (state["NumWaves"] & (state["NumWaves"] - 1)) != 0:
-        reject(state, printRejectionReason, f"Wave-separated TDM requires NumWaves={state["NumWaves"]} to be a power of two")
+      numWaves: int = state["NumWaves"]
+      if numWaves > 1 and (numWaves & (numWaves - 1)) != 0:
+        reject(state, printRejectionReason, f"Wave-separated TDM requires NumWaves={numWaves} to be a power of two")
         return
 
     # DepthU == -1?
