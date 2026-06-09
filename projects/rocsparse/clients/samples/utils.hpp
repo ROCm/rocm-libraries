@@ -165,12 +165,6 @@ inline void utils_seedrand()
     srand(0);
 }
 
-// template <>
-// inline rocsparse_indextype utils_indextype<uint16_t>(void)
-// {
-//     return rocsparse_indextype_u16;
-// }
-
 template <>
 inline rocsparse_indextype utils_indextype<int32_t>(void)
 {
