@@ -10,7 +10,7 @@ from functools import singledispatch
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from Tensile.Components.Subtile.LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
-      ReadGranularity)
+      ReadGranularity, GRPlacementStrategy)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion
@@ -471,8 +471,11 @@ class TileInfo:
       self.depthUBytes   = int(self.depthU * geometry.bpe)
       self.subIterKBytes = self.depthUBytes // self.localSubtileGrid[1]
       # TDM path. We apply 16 Bytes padding to each row.
+      # Swizzled LDS layout (gfx950 only) does not need this pad. Tests may
+      # pass writer=None; treat that as non-swizzled.
       isTDM = kernel.get("enableTDM%s" % tc, False)
-      self.ldsRowPadBytes = 16 if (isTDM and not writer.states.subtileLdsSwizzle) else 0
+      isSwizzled = bool(writer is not None and writer.states.subtileLdsSwizzle)
+      self.ldsRowPadBytes = 16 if (isTDM and not isSwizzled) else 0
 
       # Convenience counts for scheduler / diagram
       self.mmaTileLocalTotalCount = self.localMMATileGrid[0] * self.localMMATileGrid[1]
@@ -1273,6 +1276,9 @@ def mainLoop(writer, kernel):
   N = tiB.localMMATileGrid[0]
   candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
   for partSizeM, partSizeN in candidates:
+      hasTDM = bool(kernel.get("enableTDMA")) and bool(kernel.get("enableTDMB"))
+      grPlacement = (GRPlacementStrategy.BUNCHED if hasTDM
+                     else GRPlacementStrategy.SPREAD)
       cfg = MFMASchedulerConfig(
           numMFMATilesM=M,
           numMFMATilesN=N,
@@ -1287,7 +1293,8 @@ def mainLoop(writer, kernel):
           grSB=grSBGran,
           partitionSizeM=partSizeM,
           partitionSizeN=partSizeN,
-          pgr=schedulerPgr
+          pgr=schedulerPgr,
+          grPlacement=grPlacement,
       )
 
       scheduler = LogicalScheduler(cfg)
