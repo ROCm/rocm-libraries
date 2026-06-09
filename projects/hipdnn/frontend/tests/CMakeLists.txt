@@ -43,7 +43,9 @@ add_executable(
     TestFrontendLogging.cpp
     TestGraph.cpp
     TestGraphAttributes.cpp
+    TestGraphOverrideValidation.cpp
     TestHandle.cpp
+    TestHeuristicPolicyInfo.cpp
     TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
     TestKnob.cpp

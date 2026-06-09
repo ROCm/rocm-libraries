@@ -149,6 +149,40 @@ class GemmKernelBuilder:
         for tile_config in tile_configs:
             for trait_combo in trait_combos:
                 kernel_name = self._format_kernel_name(trait_combo, tile_config)
+                (
+                    pipeline,
+                    epilogue,
+                    scheduler,
+                    pad_m,
+                    pad_n,
+                    pad_k,
+                    persistent,
+                ) = trait_combo
+
+                # Skip if this tile config is not valid for this specific pipeline
+                if not self._validate_tile_config(
+                    tile_config["tile_m"],
+                    tile_config["tile_n"],
+                    tile_config["tile_k"],
+                    tile_config["warp_m"],
+                    tile_config["warp_n"],
+                    tile_config["warp_k"],
+                    tile_config["warp_tile_m"],
+                    tile_config["warp_tile_n"],
+                    tile_config["warp_tile_k"],
+                    pipeline,
+                ):
+                    continue
+
+                # Create kernel name with proper boolean capitalization
+                kernel_name = f"{self.kernel_name_prefix}_{self.datatype}_{self.layout}_{pipeline}_{epilogue}_{scheduler}_{str(pad_m).capitalize()}_{str(pad_n).capitalize()}_{str(pad_k).capitalize()}_{str(persistent).capitalize()}"
+
+                # Create tile configuration string
+                tile_str = f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
+                tile_str += f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
+                tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
+
+                kernel_name += f"_{tile_str}"
 
                 kernel_list.append(
                     {
@@ -300,18 +334,21 @@ class GemmKernelBuilder:
                                 for warp_tile_m in warp_tile_m_values:
                                     for warp_tile_n in warp_tile_n_values:
                                         for warp_tile_k in warp_tile_k_values:
-                                            # Validate configuration
-                                            if self._validate_tile_config(
-                                                tile_m,
-                                                tile_n,
-                                                tile_k,
-                                                warp_m,
-                                                warp_n,
-                                                warp_k,
-                                                warp_tile_m,
-                                                warp_tile_n,
-                                                warp_tile_k,
-                                                default_pipeline,
+                                            # Accept tile if valid for any pipeline
+                                            if any(
+                                                self._validate_tile_config(
+                                                    tile_m,
+                                                    tile_n,
+                                                    tile_k,
+                                                    warp_m,
+                                                    warp_n,
+                                                    warp_k,
+                                                    warp_tile_m,
+                                                    warp_tile_n,
+                                                    warp_tile_k,
+                                                    pipeline,
+                                                )
+                                                for pipeline in pipelines
                                             ):
                                                 configs.append(
                                                     {
