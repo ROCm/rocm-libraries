@@ -367,14 +367,16 @@ class StreamK(Component):
         if skConstsInVgprs:
             module.add(VReadfirstlaneB32(dst=sgpr(sMagicNum), src=vgpr(writer.states.skConstVgprs["MagicNumberItersPerTile"])))
             module.add(VReadfirstlaneB32(dst=sgpr(sMagicShift), src=vgpr(writer.states.skConstVgprs["MagicShiftItersPerTile"])))
-        # SK5 hybrid mode: the MSB of MagicShiftItersPerTile carries the
-        # SK3/SK4 mode-select bit. The bit is already extracted into the
-        # StreamKHybridMode SGPR at preLoop, but the source SGPR/VGPR may
-        # still hold the packed value (re-fetched above), so mask here for
-        # safety before consuming the magic-shift in sMagicDiv2.
+        # SK5 hybrid mode: bit 30 of MagicShiftItersPerTile carries the
+        # SK3/SK4 mode-select bit and is already cleared in place by
+        # _emitModeExtraction at preLoop. Bit 31 is the magic-division "add"
+        # indicator and bits 0-4 are the shift amount; sMagicDiv2 consumes
+        # both, so they must be preserved (the old 0x1F mask stripped the add
+        # bit and broke the tile-index divide). Mask to {add bit | 5-bit
+        # shift} defensively in case the source value is ever re-fetched.
         if kernel["StreamK"] == 5:
-            module.add(SAndB32(dst=sgpr(sMagicShift), src0=sgpr(sMagicShift), src1=hex(0x1F),
-                               comment="SK5: strip mode bit (MSB) -> 5-bit magic shift"))
+            module.add(SAndB32(dst=sgpr(sMagicShift), src0=sgpr(sMagicShift), src1=hex(0x8000001F),
+                               comment="SK5: keep magic add bit (31) + 5-bit shift, drop mode bit (30)"))
         module.add(sMagicDiv2(sgpr(sTmp), sgpr(sTmp+1), sgpr("StreamKIter"), sgpr(sMagicNum), sgpr(sMagicShift), sgpr(sTmp+2)))
         writer.releaseStreamKConstSgpr(sMagicNum)
         writer.releaseStreamKConstSgpr(sMagicShift)
@@ -3328,11 +3330,14 @@ class StreamKHybrid(StreamK):
     """
     Hybrid SK3 + SK4: emits both the static (TwoTileDPFirst) and dynamic
     (Dynamic work-queue) code paths in a single kernel. A runtime mode bit
-    packed into bit 31 of the MagicShiftItersPerTile kernel arg selects
-    which path executes. The bit is extracted once at preLoop entry into
-    the StreamKHybridMode SGPR; every divergent SK3-vs-SK4 callsite emits
-    both fragments back-to-back gated by an s_cmp_eq_u32 + s_cbranch on
-    that single SGPR.
+    packed into bit 30 of the MagicShiftItersPerTile kernel arg selects
+    which path executes. Bit 31 of that slot is unavailable because
+    magicNumberAlg2 uses it as the magic-division "add" indicator (set for
+    any non-power-of-two itersPerTile); using it for the mode made static
+    problems read as dynamic and deadlock in the fixup flag-wait loop. The
+    bit is extracted once at preLoop entry into the StreamKHybridMode SGPR;
+    every divergent SK3-vs-SK4 callsite emits both fragments back-to-back
+    gated by an s_cmp_eq_u32 + s_cbranch on that single SGPR.
 
     Kernel-argument layout (see Tensile/Components/Signature.py SK5 branch
     and tensilelite/src/ContractionSolution.cpp SK5 branch):
@@ -3363,24 +3368,33 @@ class StreamKHybrid(StreamK):
     # Helpers
     # ------------------------------------------------------------------
     def _emitModeExtraction(self, writer, kernel):
-        """Extract bit 31 of MagicShiftItersPerTile -> StreamKHybridMode,
-        then clear bit 31 in place so the SK4 path's read via the SKTiles
-        RegSet alias (which aliases sgprMagicShiftItersPerTile) sees a
-        clean tile count.
+        """Extract bit 30 of MagicShiftItersPerTile -> StreamKHybridMode,
+        then clear only bit 30 in place so the SK4 path's read via the
+        SKTiles RegSet alias (which aliases sgprMagicShiftItersPerTile) sees
+        a clean tile count, while the SK3 path keeps its magic-division
+        "add" bit.
 
-        The SK3 magic-shift consumer in skTileIndex applies its own 0x1F
-        mask on a local copy, so this in-place 0x7FFFFFFF mask is harmless
-        for the SK3 path.
+        Bit 31 cannot carry the mode: magicNumberAlg2 sets bit 31 of the
+        magic shift as the division "add" indicator for many itersPerTile
+        values (any non-power-of-two tile depth). Stealing it for the mode
+        made the static path read as dynamic and hang. The mode bit lives in
+        bit 30 instead, which is free in both encodings: the magic shift only
+        ever uses bits 0-4 (shift, <= 31) plus bit 31 (add), and the SK4 tile
+        count is far below 2^30.
         """
         module = Module("SK5 mode extraction")
         module.add(SLShiftRightB32(dst=sgpr("StreamKHybridMode"),
                                    src=sgpr("MagicShiftItersPerTile"),
-                                   shiftHex=hex(31),
-                                   comment="SK5: extract mode bit (MSB) -> StreamKHybridMode (0=static SK3, 1=dynamic SK4)"))
+                                   shiftHex=hex(30),
+                                   comment="SK5: shift mode bit (bit 30) down"))
+        module.add(SAndB32(dst=sgpr("StreamKHybridMode"),
+                           src0=sgpr("StreamKHybridMode"),
+                           src1=hex(0x1),
+                           comment="SK5: isolate mode bit -> StreamKHybridMode (0=static SK3, 1=dynamic SK4); bit 31 (magic add bit) ignored"))
         module.add(SAndB32(dst=sgpr("MagicShiftItersPerTile"),
                            src0=sgpr("MagicShiftItersPerTile"),
-                           src1=hex(0x7FFFFFFF),
-                           comment="SK5: clear mode bit so SK4 alias 'SKTiles' reads a clean tile count"))
+                           src1=hex(0xBFFFFFFF),
+                           comment="SK5: clear only bit 30 (mode); keep bits 0-4 shift and bit 31 magic add bit"))
         return module
 
     # ------------------------------------------------------------------

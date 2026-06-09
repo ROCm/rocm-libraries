@@ -795,11 +795,18 @@ namespace TensileLite
                 // block in Tensile/KernelWriterAssembly.py and the SK5 branch
                 // in Tensile/Components/Signature.py).
                 //
-                // The mode bit lives in bit 31 of slot 2:
-                //   SK3 mode -> slot 2 = magicShiftItersPerTile (5 bits, MSB=0)
-                //   SK4 mode -> slot 2 = sk4_skTiles | 0x80000000u
-                // The kernel extracts the bit at preLoop, then masks bit 31
-                // off in place so the SK4 alias 'SKTiles' reads a clean count.
+                // The mode bit lives in bit 30 of slot 2:
+                //   SK3 mode -> slot 2 = magicShiftItersPerTile
+                //               (bits 0-4 = shift, bit 31 = magic "add" bit,
+                //                bit 30 = mode bit = 0)
+                //   SK4 mode -> slot 2 = sk4_skTiles | 0x40000000u
+                // Bit 31 cannot carry the mode: magicNumberAlg2 sets it as the
+                // magic-division "add" indicator for many itersPerTile values
+                // (any non-power-of-two tile depth), which would otherwise be
+                // misread as "dynamic mode". The kernel extracts bit 30 at
+                // preLoop, then clears only bit 30 in place so the SK4 alias
+                // 'SKTiles' reads a clean count while the SK3 path keeps its
+                // add bit.
 
                 AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
                 hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
@@ -896,14 +903,18 @@ namespace TensileLite
                         = (sk3_tiles - sk4_skTiles) + sk4_skTiles * sk4_skSplit;
 
                     // SK4 stores the tile count in slot 2. We OR in the mode
-                    // bit (bit 31). SKTiles is bounded by the total tile
-                    // count of the GEMM, which is many orders of magnitude
-                    // below 2^31 in practice; fail loudly if a pathological
-                    // problem ever hits the bound so the kernel-side mask
-                    // does not silently corrupt the count.
-                    assert((sk4_skTiles & 0x80000000u) == 0u
-                           && "SK5 SK4 skTiles must not collide with mode bit (bit 31)");
-                    uint32_t packedSkTiles = sk4_skTiles | 0x80000000u;
+                    // bit (bit 30). Bit 31 is reserved by the SK3 (static)
+                    // path for the magic-division "add" indicator emitted by
+                    // magicNumberAlg2, so the mode bit must live below it.
+                    // SKTiles is bounded by the total tile count of the GEMM,
+                    // which is many orders of magnitude below 2^30 in
+                    // practice; fail loudly if a pathological problem ever
+                    // hits the bound so the kernel-side mask does not
+                    // silently corrupt the count.
+                    assert((sk4_skTiles & 0xC0000000u) == 0u
+                           && "SK5 SK4 skTiles must not collide with mode bit "
+                              "(bit 30) or magic add bit (bit 31)");
+                    uint32_t packedSkTiles = sk4_skTiles | 0x40000000u;
 
                     // 6 args in canonical (SK3-named) slot order. The
                     // kernarg labels here are the SK3 *primary* names — the
@@ -931,9 +942,14 @@ namespace TensileLite
                     uint32_t magicShiftItersPerTile;
                     magicNumberItersPerTile = magicNumber(
                         2, sk3_itersPerTile, &magicShiftItersPerTile);
-                    assert((magicShiftItersPerTile & 0x1Fu)
-                               == magicShiftItersPerTile
-                           && "magicShiftItersPerTile must fit in 5 bits for SK5 hybrid");
+                    // magicNumberAlg2 encodes the division in bits 0-4 (shift)
+                    // and bit 31 (the "add" indicator); the latter is set for
+                    // any non-power-of-two itersPerTile. The SK5 mode bit
+                    // lives in bit 30, which the magic shift never uses, so the
+                    // value is packed verbatim (mode bit naturally 0) and the
+                    // kernel keeps the add bit for a correct tile-index divide.
+                    assert((magicShiftItersPerTile & 0x40000000u) == 0u
+                           && "SK5 magic shift must leave mode bit (bit 30) clear");
 
                     int sk3_fullTiles = pAMDGPU->skFullTiles;
                     bool sk3_bigEnough = sk3_tiles > sk.grid;
