@@ -1296,7 +1296,6 @@ struct BlockSpargeMaskPredictionPipeline
         }
 
         // Dispatch sort+select to smallest pow-of-2 >= num_k_blocks
-        const index_t warp_size = static_cast<index_t>(get_warp_size());
         int32_t n_target = 0;
         auto do_select = [&](auto N_const) {
             constexpr index_t N_pow2 = decltype(N_const)::value;
@@ -1311,39 +1310,12 @@ struct BlockSpargeMaskPredictionPipeline
             }
             block_sync_lds();
 
-            // TopK path with the row inside a single warp: use the ck_tile tile-programmed
-            // BlockTopkStream2D (iterative argmax) instead of the LDS bitonic sort. CDF mode
-            // and wider rows (N > warp_size) keep the bitonic+scan below.
-            if constexpr(N_pow2 <= 64) // bound by max warp_size; runtime-guarded below too
-            {
-                if(topk_mode && N_pow2 <= warp_size)
-                {
-                    n_target = max(
-                        int32_t{1},
-                        static_cast<int32_t>(head_topk * static_cast<float>(num_k_blocks)));
-                    // top-n_target original block indices -> sort_vals_smem (idx output);
-                    // aux_smem is throwaway value scratch. Warp 0 owns the row.
-                    if(tid < warp_size)
-                        topk_select_ck_tile<N_pow2>(
-                            sort_keys_smem, aux_smem, sort_vals_smem, n_target);
-                    block_sync_lds();
-
-                    if(tid < static_cast<index_t>(n_target))
-                    {
-                        int32_t orig = sort_vals_smem[tid];
-                        if(orig >= 0 && orig < static_cast<int32_t>(num_k_blocks))
-                        {
-                            const bool causal_ok = !causal_type ||
-                                (orig >= causal_min_k && orig <= causal_max_k);
-                            if(causal_ok)
-                                scores_smem[orig] = kScoreSelected;
-                        }
-                    }
-                    block_sync_lds();
-                    return;
-                }
-            }
-
+            // Both TopK and CDF selection go through the LDS bitonic sort + top-n compaction
+            // below. The earlier BlockTopkStream2D (iterative warp-argmax) fast path was removed:
+            // with near-tied block scores it returned the same argmax index repeatedly (duplicate
+            // indices) instead of distinct top-k columns, so the LUT/VBN under-counted the selected
+            // blocks. The bitonic sort selects distinct sorted indices and is the same path the CDF
+            // mode already uses, so TopK now reuses it for correctness.
             bitonic_sort_desc_smem<N_pow2, kBlockSize>(sort_keys_smem, sort_vals_smem, tid);
             // Cumsum scan only needed for the CDF threshold path.
             if(!topk_mode)
