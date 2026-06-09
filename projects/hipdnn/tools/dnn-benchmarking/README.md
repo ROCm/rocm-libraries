@@ -7,15 +7,15 @@ Benchmarking and validation tool for hipDNN graphs.
 > **Caution**: This tool is in early development and subject to change.
 > Do not use it in build workflows or CI pipelines.
 
-This tool loads serialized hipDNN graphs, executes them via the MIOpen plugin, and captures performance metrics using PyTorch CUDA/ROCm events for kernel timing.
+This tool loads serialized hipDNN graphs, executes them via the MIOpen plugin, and captures performance metrics. PyTorch is optional but strongly recommended: when installed (ROCm or CUDA build) it provides GPU kernel-event timing and `torch.cuda.synchronize()` for accurate E2E timing. Without it, host-side E2E timings are still reported but may not capture full GPU execution.
 
 ## Requirements
 
 - Python 3.9+
 - numpy
-- PyTorch (any variant; ROCm or CUDA build required for GPU kernel timing)
 - hipdnn_frontend (installed hipDNN Python bindings)
 - AMD GPU with ROCm + MIOpen plugin
+- PyTorch *(optional)* — ROCm or CUDA build enables GPU kernel-event timing, the `--backend pytorch` executor, and the `--validate pytorch` reference provider. Not listed in `pyproject.toml` because it must come from the ROCm/CUDA nightly index.
 
 ## Installation
 
@@ -42,7 +42,7 @@ pip install -e .
 ```
 
 **Note**: hipDNN Python bindings (`hipdnn_frontend`) must be installed separately for hipDNN benchmarking.
-**Note**: ROCm PyTorch is required for GPU kernel timing on AMD; validation remains CPU-only.
+**Note**: PyTorch is optional. Without it the tool still runs and reports host-side E2E timings (may not capture full GPU execution); with a ROCm/CUDA build installed, GPU kernel-event timings, accurate E2E via `torch.cuda.synchronize()`, `--backend pytorch`, and `--validate pytorch` become available.
 
 ## Usage
 
@@ -55,20 +55,20 @@ engines).
 
 ```bash
 # Single graph (default summary output)
-python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --warmup 10 --iters 100
+dnn-benchmark --graph ./graphs/sample_conv_fwd.json --warmup 10 --iters 100
 
 # Single graph, verbose: rich per-engine block
-python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json -v
+dnn-benchmark --graph ./graphs/sample_conv_fwd.json -v
 
 # Filter to specific engine(s) — comma-separated
-python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1
-python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1,2
+dnn-benchmark --graph ./graphs/sample_conv_fwd.json --engine 1
+dnn-benchmark --graph ./graphs/sample_conv_fwd.json --engine 1,2
 
 # Multiple graphs (glob): same path, default summary table
-python -m dnn_benchmarking --graph 'graphs/*.json' --warmup 10 --iters 100
+dnn-benchmark --graph 'graphs/*.json' --warmup 10 --iters 100
 
 # With reproducible random seed
-python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --seed 42
+dnn-benchmark --graph ./graphs/sample_conv_fwd.json --seed 42
 ```
 
 ### Running from a Tarball
@@ -81,16 +81,16 @@ Supported formats: `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`
 
 ```bash
 # Run every graph in a tarball (summary table)
-python -m dnn_benchmarking --graph ./Workloads/conv_workloads.tar.gz
+dnn-benchmark --graph ./Workloads/conv_workloads.tar.gz
 
 # Tarball + JSON output
-python -m dnn_benchmarking --graph ./Workloads/conv_workloads.tar.gz --output results.json
+dnn-benchmark --graph ./Workloads/conv_workloads.tar.gz --output results.json
 
 # Tarball + verbose per-engine blocks
-python -m dnn_benchmarking --graph ./Workloads/conv_workloads.tar.gz -v
+dnn-benchmark --graph ./Workloads/conv_workloads.tar.gz -v
 
 # Glob that mixes tarballs and plain JSON files
-python -m dnn_benchmarking --graph 'Workloads/*.tar.gz'
+dnn-benchmark --graph 'Workloads/*.tar.gz'
 ```
 
 The extraction progress is reported on stderr:
@@ -105,15 +105,15 @@ Compare two different plugin/engine configurations and validate accuracy:
 
 ```bash
 # Compare two different engines on the default plugin
-python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2
+dnn-benchmark --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2
 
 # Compare two different plugins with specific engine IDs
-python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
+dnn-benchmark --graph ./graphs/sample_conv_fwd.json \
   --APath /path/to/pluginA --AId 1 \
   --BPath /path/to/pluginB --BId 2
 
 # With custom tolerance for accuracy comparison
-python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
+dnn-benchmark --graph ./graphs/sample_conv_fwd.json \
   --AId 1 --BId 2 --rtol 1e-3 --atol 1e-6
 ```
 
@@ -241,32 +241,9 @@ Reference Validation: SKIPPED (no reference comparison performed)
 ================================================================================
 ```
 
-## Utility Tools
+## Related Tools
 
-The package ships a helper CLI tool installed alongside the main `dnn_benchmarking` entry point.
-
-### `dnn-convert-shapes` — Convert MIOpen driver shape files to hipDNN JSON graphs
-
-Reads MIOpen driver shape `.txt` files (one driver invocation per line) and writes a hipDNN JSON graph file for each shape. Supports `convbfp16`/`conv` and `bnormbfp16`/`bnorm` operations, 2-D and 3-D convolutions, forward/backward/wgrad directions, and NCHW/NHWC layouts.
-
-```bash
-# Convert one or more shape files (output goes next to each input file)
-dnn-convert-shapes graphs/shapes.txt graphs/shapes_3D.txt
-
-# Write output to a specific directory
-dnn-convert-shapes shapes.txt --outdir graphs/generic_convolutions/
-
-# Convert a single inline MIOpen driver invocation
-dnn-convert-shapes --args 'convbfp16 -n 16 -c 96 -H 48 -W 32 -k 96 -y 3 -x 1 -p 1 -q 0 -F 1'
-
-# Inline args with explicit output path
-dnn-convert-shapes --args 'convbfp16 -n 16 -c 96 -H 48 -W 32 -k 96 -y 3 -x 1' \
-  --output graphs/my_conv.json
-```
-
-Each converted graph is written as `<stem>_conv_<direction>_n<N>c<C>H<H>W<W>_....json`. Duplicate shapes within a file get a numeric suffix. Lines beginning with `#` and blank lines are skipped. A leading repeat-count column (e.g. `5  ./bin/MIOpenDriver ...`) is stripped automatically.
-
-Exit code is `0` if all shapes convert without warnings, `1` if any warnings were emitted.
+For the MIOpen shape conversion tool, see the standalone [`dnn-convert-shapes`](../dnn-convert-shapes/) package.
 
 ## Workload Files (DVC)
 
