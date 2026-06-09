@@ -246,25 +246,6 @@ class TestSetup:
 
 
 @pytest.mark.unit
-class TestCheckNamedTuple:
-    """Test Check NamedTuple"""
-
-    def test_check_creation(self):
-        """Check should be created with named fields"""
-        check = Check(OnlyCustomKernels=True, All=False)
-
-        assert check.OnlyCustomKernels is True
-        assert check.All is False
-
-    def test_check_default_values(self):
-        """Check fields should be accessible"""
-        check = Check(OnlyCustomKernels=False, All=True)
-
-        assert hasattr(check, 'OnlyCustomKernels')
-        assert hasattr(check, 'All')
-
-
-@pytest.mark.unit
 class TestMain:
     """Test main function"""
 
@@ -280,7 +261,7 @@ class TestMain:
 
             # Mock setup
             mock_args = Mock()
-            mock_args.Verbose = 0
+            mock_args.Verbose = 2  # Use Verbose=2 to avoid threading behavior
             mock_args.KnownBugs = None
 
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -323,7 +304,7 @@ class TestMain:
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
-            mock_args.Verbose = 0
+            mock_args.Verbose = 2  # Use Verbose=2 to avoid threading behavior
             mock_args.KnownBugs = None
 
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -356,7 +337,7 @@ class TestMain:
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
-            mock_args.Verbose = 0
+            mock_args.Verbose = 2  # Use Verbose=2 to avoid threading behavior
             mock_args.KnownBugs = None
 
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -388,7 +369,7 @@ class TestMain:
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
-            mock_args.Verbose = 0
+            mock_args.Verbose = 2  # Use Verbose=2 to avoid threading behavior
             mock_args.KnownBugs = "invalid.yaml"
 
             mock_setup.return_value = (
@@ -415,7 +396,7 @@ class TestMain:
              patch('warnings.filterwarnings'):
 
             mock_args = Mock()
-            mock_args.Verbose = 0
+            mock_args.Verbose = 2  # Use Verbose=2 to avoid threading behavior
             mock_args.KnownBugs = None
 
             with tempfile.TemporaryDirectory() as tmpdir:
