@@ -944,7 +944,7 @@ class TestAssignVgprTiles:
         (6, 12, [6, 6]),
         (4, 8,  [4, 4, 4]),
         (3, 6,  [3, 3, 3, 3]),
-        (5, 10, [5, 2, 5]),
+        (5, 10, [5, 5, 2]),
     ])
     def test_bf16_partition_256x384(self, partSizeN, expected_peak_B, expected_partN):
         """BF16 256x384 (tilesN=12) with partitions along N."""
@@ -959,8 +959,8 @@ class TestAssignVgprTiles:
         self._assert_no_conflict_and_unrolling(sched)
 
     @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
-        (4, 8,  [4, 3, 4]),
-        (3, 6,  [3, 2, 3, 3]),
+        (4, 8,  [4, 4, 3]),
+        (3, 6,  [3, 3, 3, 2]),
         (6, 12, [6, 5]),
     ])
     def test_bf16_partition_256x352(self, partSizeN, expected_peak_B, expected_partN):
@@ -976,9 +976,9 @@ class TestAssignVgprTiles:
         self._assert_no_conflict_and_unrolling(sched)
 
     @pytest.mark.parametrize("partSizeN,expected_peak_B,expected_partN", [
-        (4, 8,  [4, 4, 3, 4, 4, 4]),
-        (6, 12, [6, 5, 6, 6]),
-        (8, 16, [8, 7, 8]),
+        (4, 8,  [4, 4, 4, 4, 4, 3]),
+        (6, 12, [6, 6, 6, 5]),
+        (8, 16, [8, 8, 7]),
     ])
     def test_bf16_partition_256x368(self, partSizeN, expected_peak_B, expected_partN):
         """BF16 256x368 miWaveGroup=[4,1] (tilesM=4, tilesN=23) with partitions along N."""
@@ -2244,15 +2244,17 @@ class TestNormalizePartitionSizes:
         assert self.norm(8, 12, 'N') == [8, 4]
         assert self.norm(22, 23, 'N') == [22, 1]
 
-    def test_remainder_placed_in_middle(self):
-        # num_full=2, remainder=4, mid=1 → [s, rem, s]
-        assert self.norm(8, 20, 'N') == [8, 4, 8]
-        # num_full=2, remainder=7, mid=1 → [8,7,8]
-        assert self.norm(8, 23, 'N') == [8, 7, 8]
-        # num_full=5, remainder=3, mid=2 → [4,4,3,4,4,4]
-        assert self.norm(4, 23, 'N') == [4, 4, 3, 4, 4, 4]
-        # num_full=3, remainder=2, mid=1 → [4,2,4,4]
-        assert self.norm(4, 14, 'N') == [4, 2, 4, 4]
+    def test_remainder_placed_last(self):
+        # The short (remainder) partition must come LAST so the subtile
+        # PGR=1 multi-DU codegen sees only full-size partitions before it.
+        # num_full=2, remainder=4 → [s, s, rem]
+        assert self.norm(8, 20, 'N') == [8, 8, 4]
+        # num_full=2, remainder=7 → [8,8,7]
+        assert self.norm(8, 23, 'N') == [8, 8, 7]
+        # num_full=5, remainder=3 → [4,4,4,4,4,3]
+        assert self.norm(4, 23, 'N') == [4, 4, 4, 4, 4, 3]
+        # num_full=3, remainder=2 → [4,4,4,2]
+        assert self.norm(4, 14, 'N') == [4, 4, 4, 2]
 
     def test_spec_one(self):
         assert self.norm(1, 4, 'N') == [1, 1, 1, 1]
@@ -2299,25 +2301,26 @@ class TestNormalizePartitionSizes:
 
     def test_mn_default_is_one(self):
         # Default mn=1: behavior identical to the pre-mn algorithm.
-        assert self.norm(8, 23, 'N') == [8, 7, 8]
+        assert self.norm(8, 23, 'N') == [8, 8, 7]
 
     def test_mn_already_aligned_passthrough(self):
         assert self.norm(8, 16, 'N', 2) == [8, 8]
         assert self.norm(8, 24, 'N', 4) == [8, 8, 8]
 
     def test_mn_snaps_spec_down(self):
-        # 7 snaps down to 6 (largest mn-multiple <= 7), then split as usual.
-        assert self.norm(7, 16, 'N', 2) == [6, 4, 6]
+        # 7 snaps down to 6 (largest mn-multiple <= 7), then split as usual
+        # with the remainder partition placed last.
+        assert self.norm(7, 16, 'N', 2) == [6, 6, 4]
 
     def test_mn_snaps_spec_clamped_to_mn(self):
         # spec=1 with mn=2 snaps up to mn (the floor of valid sizes).
         assert self.norm(1, 16, 'N', 2) == [2] * 8
 
     def test_mn_remainder_stays_aligned(self):
-        # total=22, s=8 → num_full=2, remainder=6 (even). mid=1 → [8,6,8].
-        assert self.norm(8, 22, 'N', 2) == [8, 6, 8]
-        # total=20, s=8 → [8,4,8]; remainder 4 is mn-aligned.
-        assert self.norm(8, 20, 'N', 4) == [8, 4, 8]
+        # total=22, s=8 → num_full=2, remainder=6 (even), placed last → [8,8,6].
+        assert self.norm(8, 22, 'N', 2) == [8, 8, 6]
+        # total=20, s=8 → [8,8,4]; remainder 4 is mn-aligned.
+        assert self.norm(8, 20, 'N', 4) == [8, 8, 4]
 
     def test_mn_zero_spec_uses_full_dim(self):
         # spec=0 means "one partition for the whole dim"; if the whole dim

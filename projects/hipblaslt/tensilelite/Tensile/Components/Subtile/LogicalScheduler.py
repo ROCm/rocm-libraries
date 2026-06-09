@@ -176,10 +176,17 @@ class SchedulerConfig:
         remainder = total - num_full * s
         if remainder == 0:
             return [s] * num_full
-        if num_full == 1:
-            return [s, remainder]
-        mid = num_full // 2
-        return [s] * mid + [remainder] + [s] * (num_full - mid)
+        # The remainder (short) partition must come LAST.  The subtile
+        # PGR=1 multi-DU codegen (GR pre-advance + uid>0 GR consolidation
+        # into the last partition) assumes every partition before the last
+        # is the full size `s`; a short partition sitting *between* full
+        # partitions corrupts the per-partition pre-advance addressing and
+        # the kernel accumulates wrong values that grow with K iteration
+        # count (catastrophically so at extreme aspect ratios, e.g.
+        # MT384x160).  Placing the remainder last keeps this consistent with
+        # the num_full==1 case ([s, remainder]) and is the only ordering the
+        # codegen handles correctly.
+        return [s] * num_full + [remainder]
 
     @staticmethod
     def _build_prefix(sizes: List[int]) -> List[int]:
