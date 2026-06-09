@@ -190,5 +190,3 @@
 /projects/rpp/**/*.rst                              @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers
 /projects/rpp/**/.readthedocs.yaml                  @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers
 /projects/rpp/**/docs/                              @ROCm/rpp-reviewers @ROCm/rpp-docs-reviewers
-
-
