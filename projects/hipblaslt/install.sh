@@ -81,6 +81,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --keep-build-tmp          Keep build artifacts"
             echo "  --no-compress             Don't compress asm objects"
             echo "  --logic-yaml-filter <f>   Logic filter"
+            echo "  --build_dir <path>        Override the build directory"
             echo ""
             echo "Prefer using 'invoke build' directly. Run 'invoke --help build' for all options."
             exit 0
@@ -102,6 +103,7 @@ while [[ $# -gt 0 ]]; do
         --keep-build-tmp)   INVOKE_ARGS="$INVOKE_ARGS --keep-build-tmp" ;;
         --no-compress)      INVOKE_ARGS="$INVOKE_ARGS --no-compress" ;;
         --logic-yaml-filter) shift; INVOKE_ARGS="$INVOKE_ARGS --logic-filter=$1" ;;
+        --build_dir|--build-dir) shift; INVOKE_ARGS="$INVOKE_ARGS --build-dir='$1'" ;;
         --use-system-packages) INVOKE_ARGS="$INVOKE_ARGS --use-system-packages" ;;
         --tensile-verbose)  shift; INVOKE_ARGS="$INVOKE_ARGS --tensile-verbose=$1" ;;
         *)
