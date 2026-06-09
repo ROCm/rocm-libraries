@@ -1673,7 +1673,7 @@ class _SignatureKernelDescriptor(Item):
     __slots__ = (
         "totalVgprs", "totalAgprs", "totalSgprs", "originalTotalVgprs",
         "accumOffset", "groupSegSize", "sgprWorkGroup", "vgprWorkItem",
-        "enablePreloadKernArgs",
+        "numSgprPreload",
     )
 
     def __init__(
@@ -1685,7 +1685,7 @@ class _SignatureKernelDescriptor(Item):
         totalVgprs: int = 0,
         totalAgprs: int = 0,
         totalSgprs: int = 0,
-        preloadKernArgs: bool = False,
+        numSgprPreload: int = 0,
     ) -> None:
         super().__init__(name=name)
         self.groupSegSize = int(groupSegSize)
@@ -1694,7 +1694,7 @@ class _SignatureKernelDescriptor(Item):
         self.totalAgprs = int(totalAgprs)
         self.totalSgprs = int(totalSgprs)
         self.originalTotalVgprs = int(totalVgprs)
-        self.enablePreloadKernArgs = bool(preloadKernArgs)
+        self.numSgprPreload = int(numSgprPreload)
         self._apply_gpr_layout(int(totalVgprs), int(totalAgprs))
 
     def _apply_gpr_layout(self, total_vgprs: int, total_agprs: int) -> None:
@@ -1785,14 +1785,16 @@ class _SignatureKernelDescriptor(Item):
         )
         out += f"{kd_indent}.amdhsa_float_denorm_mode_32 3\n"
         out += f"{kd_indent}.amdhsa_float_denorm_mode_16_64 3\n"
-        if self.enablePreloadKernArgs:
-            num_wg_sgpr = sum(self.sgprWorkGroup)
+        if self.numSgprPreload:
+            # kernArg ptr (2 sgprs) is preloaded in user sgpr, but not counted
+            # in preload_length (rocisa code.hpp SignatureKernelDescriptor).
             out += (
-                f"{kd_indent}.amdhsa_user_sgpr_count {16 - num_wg_sgpr}\n"
+                f"{kd_indent}.amdhsa_user_sgpr_count "
+                f"{self.numSgprPreload + 2}\n"
             )
             out += (
                 f"{kd_indent}.amdhsa_user_sgpr_kernarg_preload_length "
-                f"{14 - num_wg_sgpr}\n"
+                f"{self.numSgprPreload}\n"
             )
             out += (
                 f"{kd_indent}.amdhsa_user_sgpr_kernarg_preload_offset 0\n"
@@ -1925,7 +1927,7 @@ class SignatureBase(Item):
         totalVgprs: int = 0,
         totalAgprs: int = 0,
         totalSgprs: int = 0,
-        preloadKernArgs: bool = False,
+        numSgprPreload: int = 0,
     ) -> None:
         super().__init__(name=kernelName)
         self.kernelDescriptor = _SignatureKernelDescriptor(
@@ -1936,7 +1938,7 @@ class SignatureBase(Item):
             totalVgprs,
             totalAgprs,
             totalSgprs,
-            preloadKernArgs,
+            numSgprPreload,
         )
         self.codeMeta = SignatureCodeMeta(
             kernelName,

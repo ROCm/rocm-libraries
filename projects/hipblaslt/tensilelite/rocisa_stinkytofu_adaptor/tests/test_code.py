@@ -3304,14 +3304,22 @@ class TestSignatureBaseToString(_SignatureKernelSetup, unittest.TestCase):
             sgprWorkGroup=(1, 1, 100),
             vgprWorkItem=1,
             flatWorkGroupSize=256,
-            preloadKernArgs=True,
+            numSgprPreload=16,
         )
         s = str(sig)
         self.assertIn('.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"', s)
         self.assertIn(".protected 123", s)
-        self.assertIn(".amdhsa_user_sgpr_kernarg_preload_length", s)
+        self.assertIn(".amdhsa_user_sgpr_count 18\n", s)
+        self.assertIn(".amdhsa_user_sgpr_kernarg_preload_length 16\n", s)
+        self.assertIn(".amdhsa_user_sgpr_kernarg_preload_offset 0\n", s)
         self.assertIn(".amdgpu_metadata", s)
         self.assertIn("123:\n", s)
+
+    def test_num_sgpr_preload_zero_omits_preload_lines(self):
+        sig = _make_signature_base(numSgprPreload=0)
+        s = str(sig)
+        self.assertNotIn(".amdhsa_user_sgpr_kernarg_preload_length", s)
+        self.assertNotIn(".amdhsa_user_sgpr_count", s)
 
 
 class TestSignatureBaseCopyRejected(unittest.TestCase):
