@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -888,6 +888,8 @@ void hipsparseLtInitialize()
 hipsparseStatus_t hipsparseLtGetVersion(const hipsparseLtHandle_t* handle, int* version)
 try
 {
+    if(version == nullptr)
+        return HIPSPARSE_STATUS_INVALID_VALUE;
     *version = hipsparseltVersionMajor * 100000 + hipsparseltVersionMinor * 100
                + hipsparseltVersionPatch;
 
@@ -901,6 +903,9 @@ catch(...)
 hipsparseStatus_t hipsparseLtGetProperty(hipLibraryPropertyType propertyType, int* value)
 try
 {
+    if(value == nullptr)
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+
     switch(propertyType)
     {
     case HIP_LIBRARY_MAJOR_VERSION:
@@ -943,6 +948,9 @@ catch(...)
 hipsparseStatus_t hipsparseLtGetArchName(char** archName)
 try
 {
+    if(archName == nullptr)
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+
     *archName = nullptr;
     auto arch = rocsparselt_internal_get_arch_name();
     *archName = (char*)malloc((arch.size() + 1) * sizeof(char));

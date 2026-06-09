@@ -218,8 +218,9 @@ ConvTestCase::GetProblemDescription(miopen::conv::Direction direction) const
     case miopen::conv::Direction::BackwardData:
     case miopen::conv::Direction::BackwardWeights:
         return miopen::conv::ProblemDescription(y_desc, w_desc, x_desc, conv_desc, direction);
-    default: throw std::runtime_error("unknown direction");
     }
+
+    throw std::runtime_error("unknown direction");
 }
 
 std::ostream& operator<<(std::ostream& os, const ConvTestCase& tc)
@@ -830,10 +831,10 @@ void RunSolver(const miopen::solver::conv::ConvSolverInterface& solver,
     case miopen::conv::Direction::BackwardWeights:
         RunSolverWrw<T, Tref>(solver, params, conv_config, algo);
         return;
-    default:
-        throw std::runtime_error("unknown direction");
     }
     // clang-format on
+
+    throw std::runtime_error("unknown direction");
 }
 
 void RunSolver(const miopen::solver::conv::ConvSolverInterface& solver,
@@ -860,7 +861,12 @@ void RunSolver(const miopen::solver::conv::ConvSolverInterface& solver,
         case miopenInt8:
             RunSolver<int8_t, int8_t>(solver, params, direction, conv_config, algo);
             return;
-        default:
+
+        case miopenInt32:
+        case miopenDouble:
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
+        case miopenInt64:
             throw std::runtime_error("handling of this data type is not yet implemented");
         }
         // clang-format on
