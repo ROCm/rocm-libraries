@@ -80,14 +80,12 @@ def test_CreateSolutionFromCustomKernel(objs):
         cCompiler,
         assembler,
         offloadBundler,
-        hipconfig,
         # deviceEnumerator
     ) = validateToolchain(
         ToolchainDefaults.CXX_COMPILER,
         ToolchainDefaults.C_COMPILER,
         ToolchainDefaults.ASSEMBLER,
         ToolchainDefaults.OFFLOAD_BUNDLER,
-        ToolchainDefaults.HIP_CONFIG,
         # ToolchainDefaults.DEVICE_ENUMERATOR
     )
     params = {
@@ -95,7 +93,6 @@ def test_CreateSolutionFromCustomKernel(objs):
         "CCompiler": cCompiler,
         "Assembler": assembler,
         "OffloadBundler": offloadBundler,
-        "HipConfig": hipconfig,
         # "ROCmAgentEnumeratorPath": deviceEnumerator,
     }
     params["ROCmAgentEnumeratorPath"] = None

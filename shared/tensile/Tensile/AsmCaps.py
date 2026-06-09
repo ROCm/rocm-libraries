@@ -27,7 +27,7 @@ def getCapabilitiesCache(rocmVersion: NamedTuple) -> dict:
     """Returns a compiler version dependent capabilities cache.
 
     Args:
-        rocmVersion: The rocm major/minor version (often obtained from hipconfig maj/min version).
+        rocmVersion: The rocm major/minor version.
 
     Returns:
         A dictionary representing the capabilities cache.

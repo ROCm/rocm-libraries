@@ -2415,19 +2415,15 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
     for root in [os.environ.get("ROCM_PATH"), os.environ.get("HIP_PATH"), "/opt/rocm"]:
       if root:
         try:
-          version_str = open(os.path.join(root, ".info", "version")).read().strip()
+          version_str = (Path(root) / ".info" / "version").read_text().strip()
           break
         except OSError:
           continue
   if version_str:
     globalParameters["HipClangVersion"] = version_str
     tPrint(1, f"# Found HIP version: {globalParameters['HipClangVersion']}")
-  elif "HipConfig" in config:
-    output = getVersion(config["HipConfig"], regex=r'(.+)')
-    globalParameters["HipClangVersion"] = output.strip()
-    tPrint(1, f"# Found HIP version: {globalParameters['HipClangVersion']}")
   else:
-    raise ValueError("HipConfig not specified in config and ROCM_VERSION not set, could not set HipClangVersion")
+    raise ValueError("ROCM_VERSION not set, could not set HipClangVersion")
 
   # User-specified global parameters
   tPrint(3, "GlobalParameters:")
@@ -2541,7 +2537,6 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
     "Version",
     "ClientConfig",
     "WriteMasterSolutionIndex",
-    "HipConfig",
     "OffloadBundler",
     "Assembler",
   }
