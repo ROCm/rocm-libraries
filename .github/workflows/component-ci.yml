@@ -6,7 +6,7 @@ on:
       - develop
       - release/therock-*
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
