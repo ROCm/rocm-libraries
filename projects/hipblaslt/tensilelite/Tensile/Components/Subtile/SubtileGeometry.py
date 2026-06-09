@@ -685,6 +685,15 @@ class MXScaleInputGeometry(TileGeometry):
     object.__setattr__(self, 'mmaTileSize',     mmaTileSize)
     object.__setattr__(self, 'mmaTileRegCount', mmaTileSize / self.scaleLayout.waveSize / 4)
 
+  def _cpp_twin(self):
+    # Concrete subclasses (MXScaleGRGeometry, MXScaleLRGeometry) build the
+    # matching tensile_writer C++ object. A subclass that delegates query math
+    # to C++ (_USE_CPP=True) but forgets to override this would otherwise fail
+    # with an opaque AttributeError; surface the contract explicitly instead.
+    raise NotImplementedError(
+        f"{type(self).__name__} must override _cpp_twin() to support "
+        "TENSILE_WRITER_CPP delegation")
+
   def globalMMATileGrid(self, macroTile: int, depthU: int) -> Tuple[int, int]:
     # depthU is in data elements; divide by instK (not instKScale) to get scale MMA K tiles.
     if _USE_CPP:
