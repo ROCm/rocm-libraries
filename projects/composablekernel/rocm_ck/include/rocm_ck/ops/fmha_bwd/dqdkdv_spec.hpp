@@ -66,7 +66,7 @@ struct FmhaBwdDQDKDVTileConfig
 // Base tile table (compact tuning parameters)
 // ---------------------------------------------------------------------------
 
-/// Base tile geometry — the ONLY parameters that are empirically tuned
+/// Base tile geometry -- the ONLY parameters that are empirically tuned
 /// per (arch, dtype, head-dimension tier). All other tile fields are derived
 /// from these via invariant rules documented below.
 struct FmhaBwdBaseTile
@@ -120,7 +120,7 @@ static_assert(
         return true;
     }(),
     "GFX9_FP16_DQDKDV_BASE_TILES: every entry must satisfy bn0 % bk4 == 0"
-    " (bk4 divides bn0 — see FmhaBwdBaseTile::bk4 doc)");
+    " (bk4 divides bn0 -- see FmhaBwdBaseTile::bk4 doc)");
 
 // Invariant (see FmhaBwdBaseTile::occupancy doc): the table stores concrete
 // tuned occupancies, never the -1/auto sentinel. The auto path lives in

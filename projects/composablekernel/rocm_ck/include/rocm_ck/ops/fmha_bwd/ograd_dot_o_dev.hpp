@@ -135,23 +135,24 @@ __device__ void runFmhaBwdOGradDotO(Args args)
             {t_o.ptr,                    // o_ptr
              t_do.ptr,                   // do_ptr
              const_cast<void*>(t_d.ptr), // d_ptr (output: TensorArg::ptr is const void*)
-             p_undrop,                   // p_undrop
-             -1,                         // seqlen_q (updated per-batch)
-             hdim_v,                     // hdim_v
-             stride_do,                  // stride_do
-             stride_o,                   // stride_o
-             nhead_stride_do,            // nhead_stride_do
-             nhead_stride_o,             // nhead_stride_o
-             // lse_ptr: nullptr is safe here -- the LSE load in the OGradDotO pipeline is
-             // gated on (atomic_sink_grad_ptr != nullptr), and we always pass d_sink_ptr =
-             // nullptr (sink-grad disabled), so LSE is never dereferenced. CK Tile still
-             // computes address arithmetic on it unconditionally; a follow-up upstream issue
-             // should skip that math when sink-grad is off so this nullptr goes away entirely.
+             // lse_ptr/sink_ptr/d_sink_ptr: all nullptr (sink-grad disabled in rocm_ck).
+             // Safe because the LSE load is gated on (atomic_sink_grad_ptr != nullptr) and
+             // the sink read on (sink_ptr != nullptr); with d_sink_ptr null neither fires.
+             // CK Tile still computes address arithmetic on lse_ptr unconditionally; a
+             // follow-up upstream issue should skip that math when sink-grad is off so this
+             // nullptr goes away entirely.
              nullptr,         // lse_ptr
              nullptr,         // sink_ptr
              nullptr,         // d_sink_ptr
-             0,               // nhead (only indexes sink_ptr -- 0 when disabled)
-             nhead_stride_d}, // nhead_stride_lsed (was nhead_stride_d; same value)
+             p_undrop,        // p_undrop
+             -1,              // seqlen_q (updated per-batch)
+             hdim_v,          // hdim_v
+             0,               // nhead (only indexes sink_ptr/d_sink_ptr -- 0 when disabled)
+             stride_do,       // stride_do
+             stride_o,        // stride_o
+             nhead_stride_do, // nhead_stride_do
+             nhead_stride_o,  // nhead_stride_o
+             nhead_stride_d}, // nhead_stride_lsed (D and LSE share layout)
             // FmhaBwdOGradDotOGroupModeKargs extension
             reinterpret_cast<const int32_t*>( // seqstart_q_ptr
                 t_seqstart_q.ptr),
@@ -173,23 +174,24 @@ __device__ void runFmhaBwdOGradDotO(Args args)
             {t_o.ptr,                    // o_ptr
              t_do.ptr,                   // do_ptr
              const_cast<void*>(t_d.ptr), // d_ptr (output: TensorArg::ptr is const void*)
-             p_undrop,                   // p_undrop
-             seqlen_q,                   // seqlen_q
-             hdim_v,                     // hdim_v
-             stride_do,                  // stride_do
-             stride_o,                   // stride_o
-             nhead_stride_do,            // nhead_stride_do
-             nhead_stride_o,             // nhead_stride_o
-             // lse_ptr: nullptr is safe here -- the LSE load in the OGradDotO pipeline is
-             // gated on (atomic_sink_grad_ptr != nullptr), and we always pass d_sink_ptr =
-             // nullptr (sink-grad disabled), so LSE is never dereferenced. CK Tile still
-             // computes address arithmetic on it unconditionally; a follow-up upstream issue
-             // should skip that math when sink-grad is off so this nullptr goes away entirely.
+             // lse_ptr/sink_ptr/d_sink_ptr: all nullptr (sink-grad disabled in rocm_ck).
+             // Safe because the LSE load is gated on (atomic_sink_grad_ptr != nullptr) and
+             // the sink read on (sink_ptr != nullptr); with d_sink_ptr null neither fires.
+             // CK Tile still computes address arithmetic on lse_ptr unconditionally; a
+             // follow-up upstream issue should skip that math when sink-grad is off so this
+             // nullptr goes away entirely.
              nullptr,         // lse_ptr
              nullptr,         // sink_ptr
              nullptr,         // d_sink_ptr
-             0,               // nhead (only indexes sink_ptr -- 0 when disabled)
-             nhead_stride_d}, // nhead_stride_lsed (was nhead_stride_d; same value)
+             p_undrop,        // p_undrop
+             seqlen_q,        // seqlen_q
+             hdim_v,          // hdim_v
+             0,               // nhead (only indexes sink_ptr/d_sink_ptr -- 0 when disabled)
+             stride_do,       // stride_do
+             stride_o,        // stride_o
+             nhead_stride_do, // nhead_stride_do
+             nhead_stride_o,  // nhead_stride_o
+             nhead_stride_d}, // nhead_stride_lsed (D and LSE share layout)
             // FmhaBwdOGradDotOBatchModeKargs extension
             batch_stride_do, // batch_stride_do
             batch_stride_o,  // batch_stride_o

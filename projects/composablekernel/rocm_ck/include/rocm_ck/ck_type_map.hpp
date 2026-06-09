@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Role: device — maps DataType to CK Tile types. Requires --cuda-device-only.
+// Role: device -- maps DataType to CK Tile types. Requires --cuda-device-only.
 //
 // Maps DataType enum values to CK Tile C++ numeric types.
 
@@ -13,12 +13,12 @@
 
 #include <rocm_ck/datatype.hpp>
 
-#include "ck_tile/core.hpp"
+#include <ck_tile/core.hpp>
 
 namespace rocm_ck {
 
 /// Maps a DataType enum value to the corresponding CK Tile numeric type.
-/// Primary template is intentionally undefined — only valid specializations compile.
+/// Primary template is intentionally undefined -- only valid specializations compile.
 /// Add specializations as new DataType values are used in device kernels.
 template <DataType>
 struct CkTypeMap;

@@ -84,13 +84,23 @@ inline void validateArgs([[maybe_unused]] const Args& args, [[maybe_unused]] Fmh
 #ifndef NDEBUG
     namespace S = fmha_bwd_convert_dq_slots;
 
+    // Slot 2 is mode-overloaded (BATCH: NSPLITS; GROUP: SEQSTART_Q), and GROUP
+    // mode packs the workspace slots after the seq* slots (see the slot-layout
+    // comment in convert_dq_spec.hpp). Use a per-mode name table sized to that
+    // mode's requiredTensors() so the lookup below never indexes out of bounds.
     // clang-format off
-    static constexpr const char* tensor_names[] = {
-        "DQ_ACC", "DQ", "SEQSTART_Q", "SEQLEN_Q", "SEQSTART_K", "SEQLEN_K"
+    static constexpr const char* batch_tensor_names[] = {
+        "DQ_ACC", "DQ", "NSPLITS"
+    };
+    static constexpr const char* group_tensor_names[] = {
+        "DQ_ACC", "DQ", "SEQSTART_Q", "SEQLEN_Q", "SEQSTART_K", "SEQLEN_K",
+        "NSPLITS", "DQ_ACC_BATCH_OFFSET"
     };
     // clang-format on
 
-    int n = S::requiredTensors(k);
+    const bool is_group      = (k.mode == FmhaMode::GROUP);
+    const char* const* names = is_group ? group_tensor_names : batch_tensor_names;
+    const int n              = S::requiredTensors(k); // 3 (batch) or 8 (group)
     for(int i = 0; i < n; ++i)
     {
         if(args.tensors[i].ptr == nullptr)
@@ -98,7 +108,7 @@ inline void validateArgs([[maybe_unused]] const Args& args, [[maybe_unused]] Fmh
             std::fprintf(stderr,
                          "rocm_ck::validateArgs(ConvertDQ): tensor \"%s\" (slot %d)"
                          " has null pointer\n",
-                         tensor_names[i],
+                         names[i],
                          i);
             std::abort();
         }

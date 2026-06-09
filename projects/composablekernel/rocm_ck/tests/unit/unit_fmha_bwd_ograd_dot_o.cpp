@@ -64,7 +64,7 @@ TEST(FmhaBwdOGradDotO, MakeSpecGroupMode)
 TEST(FmhaBwdOGradDotO, MakeSpecAllHdims)
 {
     // Test all supported hdim_v values. Each must be a separate constexpr
-    // variable because makeSpec is consteval — cannot use a runtime loop.
+    // variable because makeSpec is consteval -- cannot use a runtime loop.
     constexpr auto k32  = makeSpec(FmhaBwdOGradDotOConfig{
          .signature = {.dtype = DataType::FP16, .hdim_v = 32, .mode = FmhaMode::BATCH},
          .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});

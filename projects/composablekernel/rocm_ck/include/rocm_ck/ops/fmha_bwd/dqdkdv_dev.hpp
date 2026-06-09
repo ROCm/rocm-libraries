@@ -353,10 +353,10 @@ __device__ void runFmhaBwdDQDKDV(Args args)
     const index_t stride_do       = static_cast<index_t>(t_do.strides[0]);
     const index_t nhead_stride_do = static_cast<index_t>(t_do.strides[1]);
 
-    // DQ_ACC: strides[0]=stride_dq_acc, [1]=nhead_stride_dq_acc (int64!),
-    //         [2]=batch_stride_dq_acc (int64!), [3]=split_stride_dq_acc
-    const index_t stride_dq_acc            = static_cast<index_t>(t_dq_acc.strides[0]);
-    const long_index_t nhead_stride_dq_acc = t_dq_acc.strides[1];
+    // DQ_ACC carries no stride fields in FmhaBwdCommonKargs: the DqDkDv kernel
+    // derives the dq_acc layout internally (compact split-K layout computed from
+    // hdim_q/seqlen/nsplits). Only t_dq_acc.ptr is consumed below; its strides
+    // in the generic Args are reserved for the ConvertDQ kernel.
 
     // DK: strides[0]=stride_dk, [1]=nhead_stride_dk, [2]=batch_stride_dk
     const index_t stride_dk       = static_cast<index_t>(t_dk.strides[0]);
@@ -370,7 +370,7 @@ __device__ void runFmhaBwdDQDKDV(Args args)
     //
     // The Kargs struct uses multiple inheritance with conditional base classes.
     // Aggregate initialization must match the exact inheritance order:
-    //   1. FmhaBwdCommonKargs                (32 fields, common to both modes)
+    //   1. FmhaBwdCommonKargs                (30 fields, common to both modes)
     //   2..6. Bias / BiasGrad / Mask / Dropout / Deterministic kargs
     //         (each is either FmhaBwdEmptyKargs<N> or its full counterpart,
     //          chosen at compile time by the pipeline problem traits)
@@ -386,7 +386,7 @@ __device__ void runFmhaBwdDQDKDV(Args args)
     // fragility flagged by the W7 finding.
 
     typename T::Kargs kargs{
-        // FmhaBwdCommonKargs (32 positional fields)
+        // FmhaBwdCommonKargs (30 positional fields)
         {t_q.ptr,                         // q_ptr
          t_k.ptr,                         // k_ptr
          t_v.ptr,                         // v_ptr
@@ -411,7 +411,6 @@ __device__ void runFmhaBwdDQDKDV(Args args)
          stride_k,                                             // stride_k
          stride_v,                                             // stride_v
          stride_do,                                            // stride_do
-         stride_dq_acc,                                        // stride_dq_acc
          stride_dk,                                            // stride_dk
          stride_dv,                                            // stride_dv
          nhead_stride_q,                                       // nhead_stride_q
@@ -419,7 +418,6 @@ __device__ void runFmhaBwdDQDKDV(Args args)
          nhead_stride_v,                                       // nhead_stride_v
          nhead_stride_do,                                      // nhead_stride_do
          nhead_stride_lsed,                                    // nhead_stride_lsed
-         nhead_stride_dq_acc,                                  // nhead_stride_dq_acc
          nhead_stride_dk,                                      // nhead_stride_dk
          nhead_stride_dv},                                     // nhead_stride_dv
         {}, // bias placeholder    (EmptyKargs<0> or BiasKargs)

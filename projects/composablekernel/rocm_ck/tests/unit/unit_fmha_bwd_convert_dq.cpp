@@ -67,7 +67,7 @@ TEST(FmhaBwdConvertDQ, MakeSpecGroupMode)
 TEST(FmhaBwdConvertDQ, MakeSpecAllHdims)
 {
     // Test all supported hdim_q values. Each must be a separate constexpr
-    // variable because makeSpec is consteval — cannot use a runtime loop.
+    // variable because makeSpec is consteval -- cannot use a runtime loop.
     constexpr auto k32  = makeSpec(FmhaBwdConvertDQConfig{
          .signature = {.dtype = DataType::FP16, .hdim_q = 32, .mode = FmhaMode::BATCH},
          .algorithm = {}});
