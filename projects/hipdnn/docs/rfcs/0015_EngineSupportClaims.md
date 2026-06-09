@@ -97,9 +97,8 @@ This section is the contract boundary. Reviewers should anchor here.
 
 | Non-regression | Rationale |
 |----------------|-----------|
-| A graph with **no bundle** loses or gains support. | The contract is declared-graphs-only (principle 2). A graph nobody authored a bundle for is not part of the contract. To gate a graph, give it a bundle — an `applicability` bundle is enough. |
 | A whole bundle is deleted, removing its claim. | Catalog shrinkage is a code-review concern; the per-tier floor (§7.2, once available) catches whole-bundle loss, and version-control history records it. |
-| A claim is eroded *within* a surviving bundle — `support.json` deleted, or a verdict downgraded from `supported` to absent. | **Not** caught by the bundle-count floor (the bundle still discovers and queries). This is part of the accepted declared-graphs-only tail-risk; the claim-diff guard in §9.3 is the mitigation, not the floor. |
+| A claim is eroded *within* a surviving bundle — `support.json` deleted, or a verdict downgraded from `supported` to absent. | **Not** caught by the bundle-count floor (the bundle still discovers and queries). This is accepted declared-graphs-only tail-risk, mitigated only by code review and version-control history. |
 | A stale `unsupported` claim masks a later re-loss of support. | If support is granted then lost again while the claim still reads `unsupported`, the loss is by design not gated until `--write-support-claims` is re-run. Consistent with principle 2. |
 | An arch has no claim for a graph yet. | New-arch bring-up: absence is "not enforced." The engineer runs `--write-support-claims` once on the new hardware. |
 
@@ -130,9 +129,15 @@ verdict against a live engine support query for the exact graph the bundle conta
 
 Claim evaluation is built on RFC 0011's existing machinery:
 
-- **Discovery** is unchanged: `discoverGoldenBundles` recursively registers one test per
-  bundle. A `support.json` does not create or remove tests; it annotates the bundle that is
-  already discovered.
+- **Discovery must exclude the new sidecar.** Bundle discovery (`scanBundleJsonFiles` in
+  `test_sdk/.../FileUtilities.hpp`) recursively scans for `*.json` and registers one test per
+  match, already skipping the `meta.json` sidecar by an exact-filename filter. The new
+  `support.json` is a third `*.json` in the bundle directory, so the filter **must be extended
+  to skip it too** — otherwise a spurious test registers per claim-bearing bundle and tries to
+  `loadGraphAndTensors()` on a support file. A `support.json` annotates a bundle that is
+  already discovered; it must never create or remove a test. *Acceptance criterion:* a bundle
+  directory containing `{Name}.json` + `{Name}.support.json` registers exactly one test, and
+  the support sidecar is never loaded as a graph.
 - **The claim key is the on-disk bundle**, not a content hash. RFC 0011 derives only a
   *suite name* from `(operation, layout, dtype)` and disambiguates scenarios by the bundle
   directory name; it does not produce a unique per-graph identity. This RFC therefore keys a
@@ -166,7 +171,7 @@ Claim evaluation is built on RFC 0011's existing machinery:
 | `version` | yes | Schema version of the support file. A reader refuses a version it does not understand (loud, not silent) and the engineer regenerates. |
 | `claims` | yes | Map of engine name → arch → platform → verdict. |
 | engine key | — | Exact engine name as reported by `getEngineInfo`. |
-| arch key | — | Exact match against `archTokenOf(gcnArchName)` — the prefix before the first `:` of the raw `gcnArchName` (e.g. `gfx942:sramecc+:xnack-` → `gfx942`). Substring matching is rejected; it would collide families. **`archTokenOf` is net-new** (today only `currentDeviceArchRaw()` exists, which returns the raw string and whose comment recommends *substring* matching); this RFC introduces the exact-prefix helper and the loader must use it, not substring matching. |
+| arch key | — | Exact match against the arch token — the prefix before the first `:` of the raw `gcnArchName` (e.g. `gfx942:sramecc+:xnack-` → `gfx942`).
 | platform key | — | Exact `"linux"` or `"windows"`. |
 | verdict value | — | `"supported"` or `"unsupported"`. |
 
@@ -207,44 +212,53 @@ A bundle's enforcement level is selected by a new **`enforcement_level`** field 
 name is deliberately *not* `verification`, to avoid colliding with RFC 0011's runtime
 `--verification-mode` CLI flag — they are orthogonal axes (see §6.1).
 
-| Level | Needs `.bin`? | Action |
-|-------|---------------|--------|
-| `full` (default) | yes (golden) or runtime-computed | Build the graph, execute the engine, numeric-verify against golden data. If a `support.json` claims `supported` and the engine returns *declined*, this is a **claim-broken FAIL** instead of RFC 0011's silent skip. |
-| `applicability` | no | Build the graph, query engine support, assert the verdict against `support.json`. **No input generation, no execution, no reference, no comparison.** |
+| Level | `.bin` data | Action |
+|-------|-------------|--------|
+| `full` (default) | optional | Build the graph, execute the engine, numeric-verify. Reference outputs come from committed golden `.bin` when present; when absent, RFC 0011 computes a runtime **GPU or CPU reference** instead (graph-only behaviour) — `.bin` is therefore not required for a `full` bundle. If a `support.json` claims `supported` and the engine returns *declined*, this is a **claim-broken FAIL** instead of RFC 0011's silent skip. |
+| `applicability` | ignored | Build the graph, query engine support, assert the verdict against `support.json`. **No input generation, no execution, no reference, no comparison.** A bundle may carry `.bin` files, but `applicability` never reads them. |
 
-`applicability` is a third behaviour of RFC 0011's graph-only bundles. RFC 0011 today
-defines a graph-only bundle as one that still generates inputs, runs the engine *and* a
-reference, and compares at runtime; an `applicability` bundle branches **before input
-generation** and stops after the support query. The level is chosen explicitly by
-`enforcement_level`, never inferred from the mere absence of `.bin` files (a `full` bundle
-whose `.bin` files have not yet been generated is still `full`, not `applicability`).
+`applicability` is a distinct **run mode**, not a reference source: it is not `golden`,
+`gpu`, or `cpu` (§6.1). Its purpose is to check whether an engine *accepts* a graph without
+running it — the home for graphs with very large tensor sizes where executing or comparing
+outputs is infeasible, and for cheap "this shape must remain supported" declarations. The
+runner branches **before input generation** and stops after the support query. The level is
+chosen explicitly by `enforcement_level`, never inferred from the presence or absence of
+`.bin` files (a `full` bundle whose `.bin` files have not yet been generated is still `full`
+and falls back to a runtime reference; it is not `applicability`).
 
 This makes the support gate available to graphs that can never have golden data, and lets an
-engineer pin "this shape must remain supported" with a graph-only bundle that costs nothing
-to store or run.
+engineer pin "this shape must remain supported" with a bundle that costs nothing to execute.
 
 ### 6.1 Composition with RFC 0011 `--verification-mode`
 
-`enforcement_level` (per-bundle: *what kind of check this bundle gets*) and RFC 0011's
-`--verification-mode` (run-wide: *which reference source supplies expected outputs* —
-`auto`/`golden`/`gpu`/`cpu`) are independent. **Support-claim enforcement runs for every
-claim-bearing bundle regardless of `--verification-mode`** — it depends only on the live
-support query, not on any reference source. In particular:
+These are **two orthogonal axes** and must not be read off the same list of words:
 
-| `--verification-mode` | `full` claim-bearing bundle | `applicability` bundle |
-|-----------------------|-----------------------------|------------------------|
-| `auto` / `golden` / `gpu` / `cpu` | Support claim is always evaluated. The reference-source selection governs only the *numeric* comparison; it never gates the support check. | Support claim is always evaluated. The bundle is **never** subject to RFC 0011's "golden mode skips bundles with no `.bin`" rule — an applicability bundle has no `.bin` by definition and must not be skipped in the very mode (`golden`, used by Nightly/Weekly CI) meant to enforce it. |
+- **`--verification-mode`** (run-wide CLI flag, values `auto` / `golden` / `gpu` / `cpu`) selects
+  *which reference source supplies expected outputs* for numeric comparison.
+- **`enforcement_level`** (per-bundle `meta.json` field, values `full` / `applicability`) selects
+  *what kind of check this bundle gets*. `applicability` is its own run mode — it never produces
+  or compares reference outputs, so no `--verification-mode` value applies to it.
 
-This is a normative override of RFC 0011's golden-mode no-`.bin` SKIP for claim-bearing
-applicability bundles, and must be stated in the RFC 0011 verification-modes section when
-that schema extension lands.
+**Support-claim enforcement runs for every claim-bearing bundle regardless of
+`--verification-mode`** — it depends only on the live support query, not on any reference
+source. The grid below shows the two axes crossed:
+
+| `enforcement_level` ↓ \ `--verification-mode` → | `auto` / `golden` / `gpu` / `cpu` |
+|---|---|
+| **`full`** | Support claim always evaluated. The verification-mode value governs only the *numeric* comparison's reference source; it never gates the support check. |
+| **`applicability`** | Support claim always evaluated; the verification-mode value is irrelevant (no comparison happens). The bundle is **never** subject to RFC 0011's "golden mode skips bundles with no `.bin`" rule — an applicability bundle typically has no `.bin`, and must not be skipped in the very mode (`golden`, used by Nightly/Weekly CI) meant to enforce it. |
+
+The second cell is a normative override of RFC 0011's golden-mode no-`.bin` SKIP for
+claim-bearing applicability bundles, and must be stated in the RFC 0011 verification-modes
+section when that schema extension lands.
 
 ### 6.2 Acceptance criteria
 
 - [ ] `meta.json` carries `enforcement_level` ∈ {`full`, `applicability`}; default is `full`
       when absent **for non-claim-bearing bundles**, and a **hard pre-commit error** when a
       `support.json` exists but `enforcement_level` is missing or invalid (a typo must never
-      silently turn an `applicability` bundle into a `full` bundle missing all `.bin`).
+      silently flip whether a claim-bearing bundle executes-and-compares vs only queries
+      support).
 - [ ] A `full` claim-bearing bundle returning *declined* FAILs (not skips) under every
       `--verification-mode`.
 - [ ] An `applicability` bundle is evaluated under `golden` mode and is never SKIPped for
@@ -314,35 +328,33 @@ refuse-to-run.
 The `applicability` level and the "errored before assert" outcome both require the harness
 to **build a graph and query engine support without executing it**:
 
-> Given a `{Name}.json`, produce a queryable `hipdnn_frontend::graph::Graph`, finalize it
-> (`validate` → `build_operation_graph`) **with no tensor data**, and call
-> `get_ranked_engine_ids`, mapping the result to supported / declined / unknown by status
-> code (§5.2).
+> Given a `{Name}.json`, produce a finalized `hipdnn_frontend::graph::Graph` **with no tensor
+> data**, call `get_ranked_engine_ids`, and map the result to supported / declined / unknown
+> by status code (§5.2).
 
-This is a first-class requirement of this RFC, not an optional optimization. It rests on
-three points; the first is verified, the latter two are **ASSUMPTIONS that require a frontend
-spike before the `applicability` level is committed**:
+Every step of this is an **existing frontend capability** — no spike is required before the
+`applicability` level is committed:
 
-1. **Status-code tri-state is available (verified).** `get_ranked_engine_ids` returns a
-   status plus an id vector; the dedicated `GRAPH_NOT_SUPPORTED` code signals "well-formed but
-   no engine accepts it," distinct from other error codes. The existing live-compute harness
-   collapses these into a single branch only because it never needed to distinguish them;
-   this RFC reads the specific code instead. *This is why §5.2/§7.1 key on the status code,
-   not on list-emptiness — there is no "clean empty list" distinct from an error status.*
-2. **Build-without-execute path (ASSUMPTION).** RFC 0011's `loadGraphAndTensors` yields a
-   *FlatBuffers* graph buffer, not a `frontend::graph::Graph`; `get_ranked_engine_ids` is a
-   method on the latter, reached only after the frontend builder runs. A bundle-JSON →
-   `frontend::graph::Graph` bridge is **new work** (the existing `GraphUnpacker` unpacks a
-   post-build backend descriptor, not a bundle's JSON). Note the live-compute harness already
-   queries support *before* tensor generation (and has a `skipGraphValidation` early-exit that
-   is essentially applicability today), so the *capability* exists on that path — it is the
-   bundle-JSON-to-queryable-graph bridge that must be built for the golden path.
-3. **Finalize succeeds with no tensor data (ASSUMPTION).** Finalize performs id/type
-   inference ("tensor Ids and types may be inferred during graph finalization"), which may
-   require shape/dtype completeness even without host/device buffers. The §9.3
-   dtype-resolution pre-commit check is the hedge. If finalize hard-requires tensors, the
-   `applicability` path allocates **metadata-only tensors** (no host/device data); treat this
-   as the default path until the spike proves bare finalize works.
+1. **Status-code tri-state is available.** `get_ranked_engine_ids` returns an `Error` plus an
+   id vector, and `ErrorCode::GRAPH_NOT_SUPPORTED` (`frontend/.../Error.hpp`) signals
+   "well-formed but no engine accepts it," distinct from `HIPDNN_BACKEND_ERROR` and the other
+   codes. The existing live-compute harness collapses these into a single branch only because
+   it never needed to distinguish them; this RFC reads the specific code instead. *This is why
+   §5.2/§7.1 key on the status code, not on list-emptiness — there is no "clean empty list"
+   distinct from an error status.*
+2. **Bundle JSON deserializes into a queryable graph today.** The frontend already exposes
+   `Graph::from_json(handle, json)` (`frontend/.../Graph.hpp`), built on
+   `detail::deserializeAndUnpackJsonGraph` (`frontend/.../detail/GraphUnpacker.hpp`), which
+   parses a bundle's `{Name}.json`, reconstructs the backend operation-graph descriptor, and
+   unpacks it into frontend nodes — no new bundle-JSON→graph bridge is needed.
+3. **Finalize needs metadata, not tensor data.** `get_ranked_engine_ids` requires a *finalized*
+   descriptor (`hasReadyGraphDesc()` = valid **and** finalized), so the graph must be built
+   (`from_json` with a handle finalizes it). That finalize step — including the id/type
+   inference done during finalization — needs only the graph's shape/dtype **metadata**, which
+   the JSON already carries; it does **not** need host/device tensor buffers, which are
+   consumed only by `graph.execute()`. So "going as far as finalize" is cheap and data-free:
+   the applicability path runs `from_json(handle, json)` → `get_ranked_engine_ids()` with no
+   tensor allocation, no execution, and no golden-data pull.
 
 ## 9. Write Tool and Contract
 
@@ -372,19 +384,14 @@ the actor and cadence differ.
 - **Surgical, idempotent writes.** A write reads the current `support.json`, updates only the
   current `(engine, arch, platform)` keys, and re-emits the whole file with canonical JSON
   (sorted keys, fixed number formatting, stable newline) so sibling keys are byte-identical
-  and re-running with no change produces a zero diff. **Single-writer per working copy.** The
-  write unit is the whole file (read-modify-rewrite), so two writers racing against the *same*
-  checkout are last-writer-wins at file granularity and would silently drop a sibling arch's
-  verdict. Concurrent per-arch regeneration must therefore run on **disjoint working copies**;
-  the resulting property is "sequential edits / separate checkouts produce disjoint git diffs
-  that merge cleanly," not "concurrent in-place edits are safe." (A future per-engine index,
-  §15, would need an explicit advisory lock or re-read-merge instead.)
-- **Atomic.** The file is generated in memory, written to `{Name}.support.json.tmp.<pid>`,
-  flushed, and atomically renamed over the target (`MoveFileEx` with replace+write-through on
-  Windows; close+fsync+rename on POSIX, **plus fsync of the containing directory** so the
-  rename itself is durable). On failure the tmp is unlinked and the original is never
-  partially overwritten. Stray `.tmp.<pid>` files from a killed process are gitignored and
-  rejected by the pre-commit verifier (§9.3).
+  and re-running with no change produces a zero diff. Because different arches/platforms write
+  disjoint keys, per-arch regeneration on separate checkouts produces git diffs that merge
+  cleanly. No multi-writer coordination is needed: only one integration-test binary runs at a
+  time, so concurrent writes from multiple threads/processes are not a scenario.
+- **Written at end of sweep.** The tool writes each bundle's `support.json` directly after the
+  test sweep completes. If a target file cannot be opened for writing (e.g. it is locked), the
+  tool reports a clear error naming the file rather than silently dropping the verdict; it does
+  not need the tmp-file/atomic-rename machinery a concurrent writer would.
 - **DVC-independent.** Querying support needs only the graph (`.json`), never the
   (potentially multi-GB) `.bin` files. The write and `applicability` passes must not trigger
   a golden-data pull.
@@ -396,26 +403,15 @@ the actor and cadence differ.
 
 The RFC 0011 pre-commit bundle verifier is extended to:
 
-- **Read `enforcement_level` first**, then branch: apply RFC 0011's existing "every tensor
-  UID has a `.bin`" check (Data Integrity #6) only when `enforcement_level: full`, and apply
-  the no-`.bin` requirement only when `enforcement_level: applicability`. A missing/invalid
-  `enforcement_level` on a claim-bearing bundle is a **hard error** (never defaulted to
-  `full`), so a typo cannot silently reclassify an applicability bundle as a full bundle
-  missing all its `.bin`.
+- **Require an explicit `enforcement_level` on claim-bearing bundles.** A bundle that carries a
+  `support.json` must declare `enforcement_level` ∈ {`full`, `applicability`}; missing or
+  invalid is a **hard error** (never silently defaulted), so a typo cannot flip whether the
+  bundle executes-and-compares or only queries support. RFC 0011's existing `.bin` data-integrity
+  checks are unchanged and apply per its own rules (e.g. a bundle that ships `.bin` files must
+  ship them for every tensor UID); this RFC adds no new `.bin` presence/absence requirement.
 - Validate `support.json` against the schema (§5): known `version`, well-formed
   `engine/arch/platform` keys, verdict values in the allowed set. A bad `version` or unknown
   verdict is a pre-commit FAIL (not a runtime surprise).
-- Require that an `applicability` bundle has **no** `.bin` files; reject stray
-  `.support.json.tmp.<pid>` artifacts.
-- Require that a claim-bearing bundle's `{Name}.json` is **fully dtype-resolved** — every
-  operand tensor carries an explicit `data_type` rather than relying on context fill — so the
-  on-disk graph the claim attaches to is unambiguous and matches what the engine dispatches
-  on at finalize time. (Spike dependency: confirm the check can detect an unresolved operand
-  *before* finalize, since some inference happens at finalize time — §8 assumption 3.)
-- **Claim-diff guard.** Flag any commit that deletes a `support.json` or downgrades an
-  existing `supported` verdict to absent (the canonical-JSON surgical-write property makes
-  this a cheap diff to detect). This is the mitigation for within-bundle claim erosion
-  (§3.2), which the per-tier floor does not catch.
 
 ### 9.4 Acceptance criteria
 
@@ -423,10 +419,7 @@ The RFC 0011 pre-commit bundle verifier is extended to:
       (canonical-JSON idempotency).
 - [ ] A write run with an empty/absent observation set does not null an existing `supported`
       verdict (empty-write guard).
-- [ ] The verifier branches on `enforcement_level` before the `.bin` checks; a claim-bearing
-      bundle with missing/invalid `enforcement_level` fails pre-commit.
-- [ ] A commit deleting a `support.json` or downgrading a `supported` verdict is flagged by
-      the claim-diff guard.
+- [ ] A claim-bearing bundle with a missing/invalid `enforcement_level` fails pre-commit.
 
 ## 10. Oversized and Golden-Infeasible Graphs
 
@@ -500,6 +493,13 @@ This preserves the §9.2 invariant that **CI never writes claims**: CI only *emi
 (read-only with respect to the contract); turning observations into committed claims is an
 offline, engineer-reviewed step.
 
+> **Provisional.** The concrete near-term intent is simply to **print these observations into
+> the CI logs** so we can collect them after the fact, because we do not yet fully know what
+> artifact storage / data egress the CI environment will allow. The structured-record and
+> JSONL-artifact design below is the direction we want; the exact transport may change once we
+> learn what is actually retrievable from CI. Treat §12 as the target shape, not a frozen
+> contract.
+
 ### 12.1 Emitting observations
 
 An enforcement run (`--enforce-support-claims`) gains a side output,
@@ -517,10 +517,12 @@ pass/fail. Each record carries what the offline consumer needs to attribute and 
 - Provenance (`rocm_version`, `commit`, `run_id`, `timestamp`) lets the consumer break ties
   (prefer the newest observation) and audit where a claim came from.
 
-**Two transports.** The primary output is a **JSONL artifact** the CI job uploads
-(`support_observations.jsonl`). Where only console logs are retained, the same records are also
-emitted to stdout behind a stable tag — `[[HIPDNN_SUPPORT_OBS]] {json}`, one per line — so they
-can be scraped from a build log after the fact. Both are append-only and union-safe.
+**Two transports.** The transport we can rely on first is the **CI log**: each record is
+emitted to stdout behind a stable tag — `[[HIPDNN_SUPPORT_OBS]] {json}`, one per line — so it
+can be scraped from a build log after the fact with no artifact-storage dependency. Where the CI
+job *can* retain artifacts, the same records are additionally written as a **JSONL artifact**
+(`support_observations.jsonl`) for direct upload. Which of these is primary depends on what the
+CI environment supports (see the provisional note above); both are append-only and union-safe.
 
 ### 12.2 Shard- and ASIC-tolerant by construction
 
@@ -641,11 +643,10 @@ run. **Rejected** — the claim attaches to the graph, never to a test name.
 |------|------------|
 | A graph regresses while it has no bundle, so it is not gated. | Accepted by design (§3.2, principle 2). `applicability` bundles make pinning a shape cheap; the support matrix (§11) makes coverage visible so gaps are noticeable. |
 | Per-arch write runs produce noisy diffs across many `support.json` files. | Surgical, canonical-JSON, disjoint-key writes (§9.2) keep diffs minimal and idempotent. Fallback: per-engine index (§15). |
-| `graph.fbs` / serialization evolution changes how a graph deserializes, shifting the identity a claim attaches to. | The claim attaches to the deserialized graph object, not raw bytes; FlatBuffers schema changes must stay backwards compatible (same constraint RFC 0011 already carries). The pre-commit dtype-resolution check (§9.3) guards the one ambiguity that matters for dispatch. |
+| `graph.fbs` / serialization evolution changes how a graph deserializes, shifting the identity a claim attaches to. | The claim attaches to the deserialized graph object, not raw bytes; FlatBuffers schema changes must stay backwards compatible (same constraint RFC 0011 already carries). |
 | `applicability` FAIL is ambiguous between a builder bug and an engine regression for oversized shapes. | Shape-selection rule in §10 (smallest golden-infeasible shape, overflow handling as a separate labelled test). |
-| Build-without-execute / bundle-JSON→`frontend::graph::Graph` bridge / bare finalize may not work as assumed. | Marked as ASSUMPTIONS requiring a frontend spike (§8) before the `applicability` level is committed; metadata-only tensor allocation is the fallback. The live-compute harness already queries support before tensor generation, so the capability is plausible, but the golden-path bridge is new work. |
 | The support query cannot distinguish "declined" from "errored". | Keyed on the specific `GRAPH_NOT_SUPPORTED` status code, not list-emptiness (§5.2, §8); only that code is treated as a verdict, all other errors are "unknown". |
-| A claim is eroded within a surviving bundle (support.json deleted / verdict downgraded). | Claim-diff guard in §9.3 (the per-tier floor does not catch this); acknowledged in §3.2 as accepted tail-risk. |
+| A claim is eroded within a surviving bundle (support.json deleted / verdict downgraded). | Accepted declared-graphs-only tail-risk (§3.2); mitigated by code review and version-control history rather than a dedicated guard. |
 | A no-GPU or plugin-load-failure run silently passes or nulls claims. | Empty-query guard and empty-write guard (§7.2, §9.2). |
 | CI harvest (§12) proposes a wrong/over-broad `supported` upgrade. | Harvest is monotonic (adds/upgrades only), ignores `unknown`, and never auto-commits — every proposed change is an engineer-reviewed diff/PR (§12.3). Provenance fields let the reviewer audit which run/commit/ROCm version produced an observation. |
 | Stale or spoofed observation logs corrupt the harvest. | Observations carry `commit`/`run_id`/`rocm_version`/`timestamp`; the consumer prefers newest and the result is reviewed before merge. Logs are inputs to a proposal, never directly the contract. |
@@ -695,5 +696,7 @@ run. **Rejected** — the claim attaches to the graph, never to a test name.
 - **Enforcement level.** `full` (execute + numeric verify) or `applicability` (build + query
   support only), selected by the bundle's `meta.json` `enforcement_level` field (named to
   avoid collision with RFC 0011's runtime `--verification-mode`).
-- **Applicability bundle.** A graph-only bundle (no `.bin`) validated only for engine
-  support, never executed or numerically compared. The home for golden-infeasible graphs.
+- **Applicability bundle.** A bundle whose `enforcement_level` is `applicability`: validated
+  only for engine support, never executed or numerically compared. Typically graph-only, but
+  may carry `.bin` files (they are simply ignored in this mode). The home for golden-infeasible
+  graphs.
