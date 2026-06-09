@@ -217,9 +217,12 @@ void ShallowPredPromotion::rewrite(WaitInsertionPlan& plan, const DataflowResult
     plan.tailDrains.clear();
     std::vector<BasicBlock*> orderedPreds;
     orderedPreds.reserve(tailMin.size());
+    // NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order) -- sorted below
     for (const auto& kv : tailMin) orderedPreds.push_back(kv.first);
-    std::sort(orderedPreds.begin(), orderedPreds.end(),
-              [](BasicBlock* a, BasicBlock* b) { return a < b; });
+    std::sort(orderedPreds.begin(), orderedPreds.end(), [](BasicBlock* a, BasicBlock* b) {
+        if (a->getLabel() != b->getLabel()) return a->getLabel() < b->getLabel();
+        return a < b;
+    });
 
     for (BasicBlock* pred : orderedPreds) {
         const auto& m = tailMin.at(pred);
