@@ -539,13 +539,12 @@ def setupSolutionsAndKernels(
 ) -> Tuple[List[Solution], List[Solution], KernelWriterAssembly, KernelWriterSource]:
     """Reusable logic for setting up testable solutions and kernels"""
 
-    (cxxCompiler, cCompiler, assembler, offloadBundler, hipconfig, deviceEnumerator) = (
+    (cxxCompiler, cCompiler, assembler, offloadBundler, deviceEnumerator) = (
         validateToolchain(
             ToolchainDefaults.CXX_COMPILER,
             ToolchainDefaults.C_COMPILER,
             ToolchainDefaults.ASSEMBLER,
             ToolchainDefaults.OFFLOAD_BUNDLER,
-            ToolchainDefaults.HIP_CONFIG,
             ToolchainDefaults.DEVICE_ENUMERATOR,
         )
     )
@@ -554,7 +553,6 @@ def setupSolutionsAndKernels(
         "CCompiler": cCompiler,
         "Assembler": assembler,
         "OffloadBundler": offloadBundler,
-        "HipConfig": hipconfig,
         "ROCmAgentEnumeratorPath": deviceEnumerator,
     }
     Common.assignGlobalParameters(params)
