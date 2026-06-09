@@ -6,6 +6,7 @@
 import json
 from typing import Any, Dict, List, Literal, Optional
 
+from ..common import torch_support
 from ..common.exceptions import ExecutionError, UnsupportedGraphError
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
@@ -50,11 +51,12 @@ def _torch_cuda_synchronize_if_available() -> Any:
     # TODO: Replace the PyTorch dependency here with direct HIP runtime
     # synchronization bindings so hipDNN timing can synchronize accurately
     # even when torch is not installed.
+    if not torch_support.gpu_available():
+        return None
     try:
         import torch
 
-        if torch.cuda.is_available():
-            return torch.cuda.synchronize
+        return torch.cuda.synchronize
     except Exception:
         pass
     return None

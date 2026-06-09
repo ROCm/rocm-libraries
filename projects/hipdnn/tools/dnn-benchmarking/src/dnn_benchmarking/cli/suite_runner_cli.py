@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from ..common.exceptions import ExecutionError, GraphLoadError
-from ..config.benchmark_config import MetricsConfig, SuiteConfig
+from ..config.benchmark_config import MetricsConfig, ReferenceProviderName, SuiteConfig
 from ..execution.suite_runner import run_graph_all_providers, set_plugin_path
 from ..graph.loader import GraphLoader
 from ..reporting.reporter import Reporter
@@ -86,7 +86,7 @@ def run_suite_benchmark(
     """
     total = len(graph_paths)
 
-    if config.reference_provider != "none":
+    if config.reference_provider != ReferenceProviderName.NONE.value:
         try:
             ref = ReferenceProviderRegistry.get_provider(config.reference_provider)
         except ValueError:

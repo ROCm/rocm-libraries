@@ -8,6 +8,8 @@ from typing import Dict, List, Optional
 import numpy as np
 import torch
 
+from ..common import torch_support
+
 from ..graph.tensor_info import TensorInfo
 from .buffer_manager import generate_input_data
 
@@ -185,7 +187,7 @@ class PyTorchCudaBufferManager:
         # CPU-only torch installs expose the torch package but not a usable
         # CUDA/ROCm backend; cleanup must remain a no-op there.
         try:
-            if torch.cuda.is_available():
+            if torch_support.gpu_available():
                 torch.cuda.empty_cache()
         except Exception:
             pass

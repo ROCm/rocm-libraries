@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
+from ..common import torch_support
 from ..common.exceptions import GraphLoadError
 from ..config.benchmark_config import BenchmarkConfig
 from ..graph.loader import GraphLoader
@@ -46,19 +47,17 @@ def run_pytorch_benchmark(
             # PyTorch backend must be gated by PyTorch itself: CPU-only torch
             # cannot execute these GPU benchmarks even if ROCm management tools
             # can see a device.
-            import torch
-
-            if not torch.cuda.is_available():
+            if not torch_support.module_available():
+                reporter.print_error(
+                    "PyTorch not available. Install with: pip install torch"
+                )
+                return 1
+            if not torch_support.gpu_available():
                 reporter.print_error(
                     "PyTorch GPU not available. "
                     "Install PyTorch with CUDA or ROCm support."
                 )
                 return 1
-        except ImportError:
-            reporter.print_error(
-                "PyTorch not available. Install with: pip install torch"
-            )
-            return 1
         except Exception as e:
             reporter.print_error(f"PyTorch GPU availability check failed: {e}")
             return 1

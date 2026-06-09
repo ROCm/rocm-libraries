@@ -11,6 +11,9 @@ from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
 
+from ...common import torch_support
+from ...config.benchmark_config import ReferenceProviderName
+
 from ..reference_provider import (
     ReferenceOutput,
     ReferenceProvider,
@@ -68,7 +71,7 @@ def _numpy_output_for_tensor(tensor: Any, graph_dtype: Optional[str]) -> np.ndar
     return tensor.detach().cpu().numpy()
 
 
-@ReferenceProviderRegistry.register("pytorch")
+@ReferenceProviderRegistry.register(ReferenceProviderName.PYTORCH.value)
 class PyTorchReferenceProvider(ReferenceProvider):
     """Reference provider using PyTorch for computation.
 
@@ -87,7 +90,7 @@ class PyTorchReferenceProvider(ReferenceProvider):
     @property
     def name(self) -> str:
         """Provider name."""
-        return "pytorch"
+        return ReferenceProviderName.PYTORCH.value
 
     def is_available(self) -> bool:
         """Check if PyTorch is available.
@@ -95,12 +98,7 @@ class PyTorchReferenceProvider(ReferenceProvider):
         Returns:
             True if torch can be imported.
         """
-        try:
-            import torch  # noqa: F401
-
-            return True
-        except ImportError:
-            return False
+        return torch_support.module_available()
 
     def supported_operations(self) -> Set[str]:
         """Get set of supported operation types.

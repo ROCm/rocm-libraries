@@ -9,6 +9,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, FrozenSet, List, Optional
 
+from ..config.benchmark_config import (
+    REFERENCE_PROVIDER_CHOICES,
+    ReferenceProviderName,
+)
+
 
 class ConfigKind(str, Enum):
     """Config-file value normalization strategies."""
@@ -95,7 +100,7 @@ def _parse_plugin_path_list(s: str) -> List[Path]:
 
 
 _BACKEND_CHOICES = frozenset({"hipdnn", "pytorch"})
-_VALIDATE_CHOICES = frozenset({"pytorch", "none"})
+_REFERENCE_PROVIDER_HELP = ", ".join(sorted(REFERENCE_PROVIDER_CHOICES))
 _METRICS_TIER_CHOICES = frozenset({"basic", "off"})
 _EMIT_TRACE_CHOICES = frozenset({"pftrace", "kineto"})
 _PMC_CHOICES = frozenset({"basic", "memory", "flops", "all"})
@@ -232,13 +237,13 @@ CLI_OPTIONS: tuple[CliOption, ...] = (
         flags=("--validate",),
         dest="validate",
         parser_type=str,
-        choices=_VALIDATE_CHOICES,
-        default="none",
+        choices=REFERENCE_PROVIDER_CHOICES,
+        default=ReferenceProviderName.NONE.value,
         metavar="PROVIDER",
         group="Reference Validation",
         help=(
             "Reference provider for validation (default: none). "
-            "Options: pytorch, none. "
+            f"Options: {_REFERENCE_PROVIDER_HELP}. "
             "With pytorch, suite output includes a timed reference row when "
             "PyTorch GPU execution is available."
         ),
