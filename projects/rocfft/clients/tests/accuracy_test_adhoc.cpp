@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -486,6 +486,12 @@ const auto adhoc_nondefault_layout_complex_tokens = {
     "complex_forward_len_31_16_9_single_op_batch_2599_istride_144_9_1_CI_ostride_9_279_1_CI_idist_4464_odist_4464_ioffset_0_0_ooffset_0_0",
     "complex_inverse_len_23_16_8_double_op_batch_912_istride_186_8_1_CI_ostride_173_8_1_CI_idist_5888_odist_5888_ioffset_0_0_ooffset_0_0",
     "complex_forward_len_23_8_25_double_ip_batch_2056_istride_323_25_1_CI_ostride_323_25_1_CI_idist_9200_odist_9200_ioffset_0_0_ooffset_0_0",
+    // 3D complex with slowest stride padded ({B*C+1, C, 1}) to verify a
+    // fused 2D kernel pinned by a min_token solution-map entry stays correct
+    // when reused in a 3D context with non-default strides.
+    "complex_forward_len_64_32_32_single_ip_batch_2_istride_1025_32_1_CI_ostride_1025_32_1_CI_idist_65600_odist_65600_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_64_32_32_single_op_batch_2_istride_1025_32_1_CI_ostride_1025_32_1_CI_idist_65600_odist_65600_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_64_32_32_single_op_batch_2_istride_1025_32_1_CI_ostride_1025_32_1_CI_idist_65600_odist_65600_ioffset_0_0_ooffset_0_0",
     // clang-format on
 };
 
@@ -532,6 +538,8 @@ const auto adhoc_nondefault_layout_real_tokens = {
     "real_forward_len_7_14_76_double_ip_batch_202_istride_3588_78_1_R_ostride_1794_39_1_HI_idist_150696_odist_75348_ioffset_0_0_ooffset_0_0",
     "real_forward_len_2_14_46_single_ip_batch_499_istride_2050_50_1_R_ostride_1025_25_1_HI_idist_71750_odist_35875_ioffset_0_0_ooffset_0_0",
     "real_forward_len_26_52_double_op_batch_3899_istride_240_4_R_ostride_224_7_HI_idist_15600_odist_8960_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_160_72_72_single_op_batch_20_istride_5328_74_1_R_ostride_2664_37_1_HI_idist_852480_odist_426240_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_160_72_72_single_op_batch_20_istride_2664_37_1_HI_ostride_5328_74_1_R_idist_426240_odist_852480_ioffset_0_0_ooffset_0_0",
     // clang-format on
 };
 

@@ -45,6 +45,21 @@ def _resolve_data_type(hipdnn: Any, type_str: str) -> Optional[Any]:
     return getattr(hipdnn.DataType, enum_name, None)
 
 
+def _torch_cuda_synchronize_if_available() -> Any:
+    """Return torch.cuda.synchronize when PyTorch has a visible GPU."""
+    # TODO: Replace the PyTorch dependency here with direct HIP runtime
+    # synchronization bindings so hipDNN timing can synchronize accurately
+    # even when torch is not installed.
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return torch.cuda.synchronize
+    except ImportError:
+        pass
+    return None
+
+
 class Executor:
     """Executes hipDNN graphs with warmup and timed benchmark loops.
 
@@ -228,6 +243,17 @@ class Executor:
 
         self._init_time_ms = t.elapsed_ms
 
+    def execute_once(self, handle: Any, variant_pack: Dict[int, int]) -> None:
+        """Execute the prepared graph once without collecting timings."""
+        if self._graph is None:
+            raise ExecutionError("Graph not prepared. Call prepare() first.")
+        if self._workspace is not None:
+            self._workspace.zeros()
+
+        result = self._graph.execute(handle, variant_pack, self._workspace_ptr)
+        if result.is_bad():
+            raise ExecutionError(f"Graph execution failed: {result.get_message()}")
+
     def warmup(self, handle: Any, variant_pack: Dict[int, int]) -> None:
         """Run warmup iterations (timing discarded).
 
@@ -245,6 +271,15 @@ class Executor:
             result = self._graph.execute(handle, variant_pack, self._workspace_ptr)
             if result.is_bad():
                 raise ExecutionError(f"Warmup execution failed: {result.get_message()}")
+
+        # hipDNN graph execution is asynchronous. Drain untimed warmup work before
+        # benchmark() starts the measured loop, otherwise the first timed E2E
+        # iteration can include queued warmup kernels. This mirrors the PyTorch
+        # executor's warmup synchronization when a torch GPU runtime is present.
+        if self._config.warmup_iters > 0:
+            torch_sync = _torch_cuda_synchronize_if_available()
+            if torch_sync:
+                torch_sync()
 
     def benchmark(
         self,
@@ -277,13 +312,7 @@ class Executor:
         torch_sync = None
 
         # Set up torch sync for accurate E2E timing (needed regardless of GPU timer)
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                torch_sync = torch.cuda.synchronize
-        except ImportError:
-            torch_sync = None
+        torch_sync = _torch_cuda_synchronize_if_available()
 
         # Create GPU timer if requested and available
         if self._gpu_backend != "none":
