@@ -1,0 +1,202 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Weekly Sunday workflow that:
+#   1. Builds the ASAN Docker image from TheRock source (no cached artifacts)
+#   2. Runs the MIOpen ASAN test suite inside the candidate image (4 shards)
+#   3. Promotes rocm/miopen-dev:asan_potential_build -> rocm/miopen-dev:asan
+#      only when tests pass
+#
+# The two-tag staging pattern (asan_potential_build -> asan) ensures the
+# stable :asan tag is never updated from a build whose tests have not passed.
+
+name: MIOpen ASAN Weekly
+
+on:
+  schedule:
+    - cron: '0 7 * * 0'   # Sundays 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  build_asan_image:
+    name: "Build ASAN image from source"
+    runs-on: azure-linux-scale-rocm
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
+      - name: Docker login
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_CI_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_CI_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5730b7f4757a6c7ca5a4e66870b63b36cff1d53 # v3.10.0
+
+      - name: Build and push ASAN candidate image
+        run: |
+          # --no-cache: do not reuse Docker layer cache from non-ASAN builds
+          # BUILD_TYPE=source_build: compile TheRock + MIOpen from source with
+          #   linux-release-asan preset rather than downloading prebuilt artifacts
+          # ASAN_SCCACHE_CACHE_BUSTER: keeps ASAN sccache keys isolated from the
+          #   standard MiOpen-Docker-CK bucket to prevent cross-contamination
+          docker buildx build \
+            --no-cache \
+            --push \
+            --tag rocm/miopen-dev:asan_potential_build \
+            --build-arg BUILD_TYPE=source_build \
+            --build-arg AMDGPU_FAMILIES=gfx94X-dcgpu \
+            --build-arg GPU_ARCHS=gfx942 \
+            --build-arg "ASAN_SCCACHE_CACHE_BUSTER=MiOpen-ASAN-Docker-CK-$(date +%Y%m%d)" \
+            -f projects/miopen/Dockerfile.ASAN \
+            projects/miopen
+
+  run_asan_stage:
+    name: "Run MIOpen ASAN tests"
+    needs: build_asan_image
+    runs-on: linux-gfx942-gpu-rocm
+    timeout-minutes: 480
+    container:
+      image: rocm/miopen-dev:asan_potential_build
+      options: >-
+        --ipc host
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add video
+        --group-add render
+        --cap-add SYS_PTRACE
+        --security-opt seccomp=unconfined
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Pull DVC files
+        run: LOGNAME=temp-user dvc pull -v
+
+      - name: Build MIOpen with ASAN
+        run: |
+          set -e
+          cd projects/miopen
+          rm -rf build && mkdir build && cd build
+
+          export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:$(dirname $("${ROCM_PATH}/llvm/bin/clang" --print-file-name libclang_rt.asan-x86_64.so))"
+
+          CXX="${ROCM_PATH}/llvm/bin/clang++" cmake \
+            -DMIOPEN_TEST_FLAGS="--disable-verification-cache" \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O2 -g1" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g -shared-libasan" \
+            -DCMAKE_INSTALL_PREFIX="${ROCM_PATH}" \
+            -DCMAKE_PREFIX_PATH="${ROCM_PATH};${ROCM_PATH}/lib" \
+            -DMIOPEN_USE_MLIR=OFF \
+            -DMIOPEN_USE_COMPOSABLEKERNEL=ON \
+            -DMIOPEN_TEST_DISCRETE=OFF \
+            -DMIOPEN_GPU_SYNC=OFF \
+            -DGTEST_PARALLEL_LEVEL=4 \
+            -DMIOPEN_INSTALL_GPU_DATABASES=gfx942 \
+            -DGPU_TARGETS="gfx942:xnack+" \
+            -DHIP_PLATFORM=amd \
+            -DBUILD_TESTING=ON \
+            -DENABLE_ASAN_PACKAGING=ON \
+            -DTHEROCK_SANITIZER=ASAN \
+            ..
+
+          ASAN_OPTIONS=detect_leaks=0 make -j$(nproc) install
+
+      - name: Run ASAN test shards
+        run: |
+          set -e
+          export LD_PRELOAD="$("${ROCM_PATH}/llvm/bin/clang" --print-file-name libclang_rt.asan-x86_64.so)"
+          export ASAN_OPTIONS="${ASAN_OPTIONS}:print_stats=1"
+          . /opt/venv/bin/activate
+          cd /TheRock
+
+          SHARD_LOGS_DIR="${GITHUB_WORKSPACE}/shard_logs"
+          mkdir -p "${SHARD_LOGS_DIR}"
+          pids=()
+          for i in 1 2 3 4; do
+            (
+              THEROCK_BIN_DIR="${ROCM_PATH}/bin" \
+              AMDGPU_FAMILIES=gfx94X-dcgpu \
+              TEST_TYPE=full \
+              SHARD_INDEX=$i \
+              TOTAL_SHARDS=4 \
+              python build_tools/github_actions/test_executable_scripts/test_miopen.py
+              echo $? > "${SHARD_LOGS_DIR}/asan_shard_${i}.exit"
+            ) 2>&1 | tee "${SHARD_LOGS_DIR}/asan_shard_${i}.log" | sed "s/^/[shard ${i}] /" &
+            pids+=($!)
+          done
+          for pid in "${pids[@]}"; do
+            wait "$pid"
+          done
+
+          overall_exit=0
+          for i in 1 2 3 4; do
+            shard_exit=$(cat "${SHARD_LOGS_DIR}/asan_shard_${i}.exit" 2>/dev/null || echo 1)
+            if [ "${shard_exit}" != "0" ]; then
+              echo "[shard ${i}] FAILED with exit code ${shard_exit}"
+              overall_exit=1
+            fi
+          done
+          exit $overall_exit
+
+      - name: Upload shard logs
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: asan-shard-logs
+          path: shard_logs/
+          retention-days: 7
+
+  promote_asan_image:
+    name: "Promote asan_potential_build -> asan"
+    needs: run_asan_stage
+    if: success()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Docker login
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_CI_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_CI_TOKEN }}
+
+      - name: Promote staging tag to stable
+        run: |
+          docker pull rocm/miopen-dev:asan_potential_build
+          docker tag  rocm/miopen-dev:asan_potential_build rocm/miopen-dev:asan
+          docker push rocm/miopen-dev:asan
+
+  asan_weekly_summary:
+    name: "MIOpen ASAN Weekly Summary"
+    if: always()
+    needs:
+      - build_asan_image
+      - run_asan_stage
+      - promote_asan_image
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report results
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "Failed jobs: ${FAILED_JOBS}"
+            exit 1
+          fi
