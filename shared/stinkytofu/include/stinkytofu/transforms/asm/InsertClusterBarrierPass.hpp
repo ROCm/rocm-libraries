@@ -55,7 +55,9 @@ class Pass;
 /// Rule 2 (kernel scope only) -- a single `s_barrier_wait -3` immediately
 /// before the first `tensor_load_to_lds` of the whole kernel.
 ///
-/// Rule 3 -- LoopCounterL-gated signal-only handshake at
+/// Rule 3 (currently disabled via the `kRule3Enabled` master switch in
+/// the .cpp; the description below is retained for when it is re-enabled)
+/// -- LoopCounterL-gated signal-only handshake at
 /// the LDS publication point that precedes `label_openLoopL:`. Same
 /// shape as Rule 1 but with the outer gate set to
 /// `s_cmp_le_u32 s[sgprLoopCounterL], pgrValue` (the cbranch skips the
@@ -109,63 +111,39 @@ class Pass;
 /// `Gfx1250Backend::buildGfx1250Pipeline` runs this pass at kernel scope
 /// when `moduleOptions.ClusterBarrier == true`.
 ///
-/// Rule 4 -- cluster wait + LoopCounterL-gated signal after each
-/// workgroup-scope wait that precedes a `tensor_load_to_lds`. For
-/// every load in a label-/branch-delimited segment we walk backward
-/// to the nearest preceding `s_barrier_wait -1`; triggers are
-/// deduplicated by identity so multiple loads sharing the same anchor
-/// wait yield exactly one handshake. Two emission modes, selected by
-/// `findLiveLoopCounterLCmpUpstream`:
+/// Rule 4 -- cluster handshake after each workgroup-scope wait that
+/// precedes a `tensor_load_to_lds`. For every load in a label-/branch-
+/// delimited segment we walk backward to the nearest preceding
+/// `s_barrier_wait -1`; triggers are deduplicated by identity so multiple
+/// loads sharing the same anchor wait yield exactly one handshake. The
+/// handshake emits a `s_barrier_signal -3` THEN a bare `s_barrier_wait -3`
+/// (signal-before-wait); there is no LoopCounterL drain gate. Two emission
+/// modes, selected by `findLiveLoopCounterLCmpUpstream`:
 ///
 ///   (a) inherited-SCC mode -- when SIA (typically `ScheduleIterAlg=4`)
 ///       hoists the loop-exit `s_cmp_eq_{u32,i32} LCL, imm` above the
-///       anchor, the outer cbranch reuses that SCC instead of emitting
-///       a fresh gate cmp (which would clobber the SCC the downstream
-///       cbranch still needs). The cluster WAIT is ungated and only the
-///       wave-gated signal is suppressed (single-iter skip); a clone of
-///       the upstream cmp is inserted between the inner and outer skip
-///       labels to rebuild SCC for the downstream cbranch. Left
-///       untouched by "Fix B".
+///       anchor, a downstream cbranch still consumes its SCC. The
+///       inherited-SCC signal block is emitted FIRST (a clone of the
+///       upstream cmp is re-emitted between the inner and outer skip
+///       labels to rebuild SCC for that downstream cbranch), then the
+///       bare `s_barrier_wait -3`. The bare wait has no SCC side effect,
+///       so it is safe to place after the block.
 ///
-///   (b) fresh-gate mode ("Fix B" drain-drop) -- when no such upstream
-///       cmp is live, the whole cluster handshake is dropped on the
-///       drain iterations where the paired `tensor_load_to_lds` is
-///       disabled (`LCL <= pgrValue`). Because the ping-pong pairing is
-///       offset (each wait consumes the PREVIOUS signal), the WAIT and
-///       SIGNAL are gated with ASYMMETRIC thresholds: skip the WAIT at
-///       `LCL <= pgrValue` and the SIGNAL one stage earlier at
-///       `LCL <= pgrValue+1` (so the trailing leftover signal is dropped
-///       too). This keeps cluster signal/wait balanced for every trip
-///       count, and the `<= pgr` predicate matches Tensile's own
-///       `s_cmp_le_i32 LCL, pgrValue` load-disable cmov.
+///   (b) fresh-gate mode -- when no such upstream cmp is live, emit a
+///       WaveIdx-gated `s_barrier_signal -3` (only wave 0 signals)
+///       followed by a bare `s_barrier_wait -3`. The LoopCounterL drain
+///       gate is intentionally omitted; only the WaveIdx gate on the
+///       signal is retained.
 ///
-///       LCL pre-decrement compensation: the two thresholds are
-///       calibrated against the loop counter value at segment entry.
-///       Some schedules hoist the per-iteration
-///       `s_sub_{u32,i32} LCL, LCL, <imm>` ABOVE the anchor, so the
-///       gate would otherwise read an already-decremented LCL and fire
-///       one iteration too early. The pass therefore sums those
-///       hoisted decrements (backward scan, bounded by the segment) and
-///       subtracts the total from BOTH thresholds, so the gate keys off
-///       the same absolute iteration regardless of where the decrement
-///       landed. When no decrement precedes the anchor (the default
-///       schedule) the sum is 0 and the thresholds are unchanged.
+/// Shape (fresh-gate mode; inherited-SCC mode replaces the WaveIdx gate
+/// with the inherited-SCC signal block, i.e. a `<clone of upstream LCL
+/// cmp>` between the two skip labels):
 ///
-/// Shape (fresh-gate / Fix B mode shown; inherited-SCC mode keeps an
-/// ungated leading wait, drops the signal gate cmp, and inserts a
-/// `<clone of upstream LCL cmp>` line between the two skip labels):
-///
-///     s_cmp_le_i32 s[sgprLoopCounterL], <pgrValue>                  // WAIT gate (drain iter)
-///     s_cbranch_scc1 label_skipCBWait_LCL_<HASH_WAIT>
-///     s_barrier_wait -3                                            // cluster barrier wait
-///   label_skipCBWait_LCL_<HASH_WAIT>:
-///     s_cmp_le_i32 s[sgprLoopCounterL], <pgrValue+1>                // SIGNAL gate (one stage earlier)
-///     s_cbranch_scc1 label_skipCBPreSignal_LCL_<HASH_OUTER>
-///     s_cmp_eq_u32 s[sgprWaveIdx], 0                                // inner wave gate
+///     s_cmp_eq_u32 s[sgprWaveIdx], 0                               // inner wave gate
 ///     s_cbranch_scc0 label_skipCBPreSignal_<HASH_INNER>
 ///     s_barrier_signal -3
 ///   label_skipCBPreSignal_<HASH_INNER>:
-///   label_skipCBPreSignal_LCL_<HASH_OUTER>:
+///     s_barrier_wait -3                                            // bare cluster wait
 ///
 /// Rule 5 (kernel scope only) -- tail-loop cluster handshake (paired).
 /// Anchors on the first `tensor_load_to_lds` that follows the
@@ -198,21 +176,18 @@ class Pass;
 /// tensor_load of the whole kernel" anchor is meaningful only at kernel
 /// scope.
 ///
-/// \p pgrValue is Tensile's `PrefetchGlobalRead` setting. It controls the
-/// outer LoopCounterL gates of Rules 3 and 4:
-///   - Rule 3 skips the signal when `LoopCounterL <= pgrValue`.
-///   - Rule 4 fresh-gate ("Fix B") mode skips the WAIT when
-///     `LoopCounterL <= pgrValue` and the SIGNAL when
-///     `LoopCounterL <= pgrValue + 1`; inherited-SCC mode keeps an
-///     ungated wait and reuses an upstream `LoopCounterL == imm` compare
-///     for a single-iter signal skip.
-/// The default of 1 matches PGR=1 (`<= 1` for Rule 3; `<= 1` wait / `<= 2`
-/// signal for Rule 4 fresh-gate mode).
+/// \p pgrValue is Tensile's `PrefetchGlobalRead` setting. It is currently
+/// not consulted: Rule 4 no longer emits a LoopCounterL drain gate, and
+/// Rule 3 (whose `LoopCounterL <= pgrValue` gate would use it) is disabled
+/// via `kRule3Enabled`. It is retained in the signature so the Rule 3 gate
+/// and the Rule 4 drain-gate threshold compensation can be reinstated
+/// without an API change. The default is 1 (PGR=1).
 ///
-/// \p plrValue is Tensile's `PrefetchLocalRead` setting. It enables Rule
-/// 3's anchor mode (b): when `plrValue == 0` and the backward scan from
-/// `label_openLoopL:` finds no `s_barrier_wait -1` before reaching the
-/// prefetch boundary (`tensor_load_to_lds`), the rule synthesizes the
+/// \p plrValue is Tensile's `PrefetchLocalRead` setting. It only takes
+/// effect while Rule 3 is enabled (see `kRule3Enabled`), where it selects
+/// Rule 3's anchor mode (b): when `plrValue == 0` and the backward scan
+/// from `label_openLoopL:` finds no `s_barrier_wait -1` before reaching
+/// the prefetch boundary (`tensor_load_to_lds`), the rule synthesizes the
 /// missing publication point (workgroup `s_barrier_signal -1` /
 /// `s_barrier_wait -1`) followed by the same `LCL <= pgrValue` gated
 /// cluster signal as anchor mode (a). Any non-zero value disables mode
