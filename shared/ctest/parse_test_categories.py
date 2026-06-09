@@ -230,7 +230,7 @@ def main():
         help=(
             "Optional CTest RESOURCE_GROUPS token (e.g. 'gfx942' or 'gpus'). "
             "When set, generated test names get a '_<resource>' segment after "
-            "the target name and each suite gets RESOURCE_GROUPS \"1,<resource>:1\" applied."
+            'the target name and each suite gets RESOURCE_GROUPS "1,<resource>:1" applied.'
         ),
     )
 
