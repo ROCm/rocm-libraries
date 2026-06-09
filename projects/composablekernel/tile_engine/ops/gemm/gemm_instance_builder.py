@@ -279,31 +279,16 @@ class GemmKernelBuilder:
         warp_tile_k_values = tile_config.get("warp_tile_k").get("values")
 
         # Generate all combinations
-        default_pipeline = ""
-        if self.kernel_name_prefix == "gemm_universal":
-            default_pipeline = "compv4"
-        elif self.kernel_name_prefix == "gemm_multi_d":
-            default_pipeline = "compv4"
-        elif self.kernel_name_prefix == "gemm_multi_abd":
-            default_pipeline = "compv4"
-        elif self.kernel_name_prefix == "gemm_preshuffle":
-            default_pipeline = "preshufflev2"
-        elif self.kernel_name_prefix == "grouped_gemm":
-            default_pipeline = "compv4"
-        elif self.kernel_name_prefix == "grouped_gemm_rowcolquant":
-            default_pipeline = "compv3"
-        elif self.kernel_name_prefix == "grouped_gemm_tensorquant":
-            default_pipeline = "compv3"
-        elif self.kernel_name_prefix == "gemm_rowcolquant":
-            default_pipeline = "compv3"
-        elif self.kernel_name_prefix == "batched_contraction":
-            default_pipeline = "compv4"
-        elif self.kernel_name_prefix == "mx_gemm":
-            default_pipeline = "comp_async"
-        elif self.kernel_name_prefix == "gemm_tensor_quant":
-            default_pipeline = "compv3"
-        elif self.kernel_name_prefix == "batched_gemm":
-            default_pipeline = "compv4"
+        pipelines = self.config["trait_config"].get("pipeline", {}).get("values", [])
+        if not pipelines:
+            if self.kernel_name_prefix == "gemm_preshuffle":
+                pipelines = ["preshufflev2"]
+            elif self.kernel_name_prefix == "mx_gemm":
+                pipelines = ["comp_async"]
+            elif self.kernel_name_prefix in ["grouped_gemm_rowcolquant", "grouped_gemm_tensorquant", "gemm_rowcolquant", "gemm_tensor_quant"]:
+                pipelines = ["compv3"]
+            elif self.kernel_name_prefix in ["gemm_universal", "gemm_multi_d", "gemm_multi_abd", "grouped_gemm", "batched_contraction", "batched_gemm"]
+                pipelines = ["compv4"]
 
         configs = []
         for tile_m in tile_m_values:
