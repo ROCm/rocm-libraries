@@ -34,6 +34,12 @@ import math
 from rocisa.code import Module
 
 
+# Debug: emit `s_mov_b32 m0, LoopCounterL; s_ttracedata` at the start of
+# every mainloop iteration so SQTT / trace decoders can identify iterations.
+# Set to False to drop the markers (saves 2 instructions per iter).
+DEBUG_EMIT_MAINLOOP_TRACE_MARKER = True
+
+
 class Pass(IntEnum):
     """Scheduler passes in dependency order.
 
@@ -2585,7 +2591,18 @@ class LogicalScheduler:
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         module.add(loopBegin)
+        if DEBUG_EMIT_MAINLOOP_TRACE_MARKER:
+            from rocisa.code import TextBlock
+            from rocisa.container import mgpr
+            from rocisa.instruction import SMovB32 as _SMovB32
         for ui in range(uf):
+            if DEBUG_EMIT_MAINLOOP_TRACE_MARKER:
+                # Mainloop iteration marker for SQTT / trace decoder: write
+                # LoopCounterL into M0 then emit it via s_ttracedata. Decoder
+                # only uses low 8 bits, so M0 wrap past 256 is fine.
+                module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
+                                    comment="trace: M0 = LoopCounterL"))
+                module.add(TextBlock("s_ttracedata                                      // trace: emit M0 to SQTT\n"))
             module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
                                       self._emitted_per_unroll[ui]))
             module.add(SSubU32(dst=sgpr("LoopCounterL"),
