@@ -191,8 +191,9 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
     using DsLayout   = ck_tile::tuple<>;
     using DsDataType = ck_tile::tuple<>;
 
-    static constexpr bool Persistent    = false;
-    static constexpr bool ClusterLaunch = ck_tile::tuple_element_or_default_t<Tuple, 16, std::false_type>::value;
+    static constexpr bool Persistent = false;
+    static constexpr bool ClusterLaunch =
+        ck_tile::tuple_element_or_default_t<Tuple, 16, std::false_type>::value;
 
     static constexpr ck_tile::index_t ScaleBlockSize = 32;
 
@@ -230,7 +231,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         static constexpr bool StructuredSparsity = false;
         static constexpr bool NumWaveGroup       = 1;
 
-        constexpr int kBlockPerCu = 1;
+        constexpr int kBlockPerCu                         = 1;
         constexpr ck_tile::index_t TileParitionerGroupNum = 8;
         constexpr ck_tile::index_t TileParitionerM01      = 4;
 
