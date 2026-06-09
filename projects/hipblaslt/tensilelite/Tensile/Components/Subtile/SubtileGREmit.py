@@ -849,13 +849,12 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
   """
   module = Module()
 
-  linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
-  grBaseId = int(math.floor(linearId / tileInfo.loadRatioGR))
-
-  if tileInfo.loadRatioGR > 1:
-    firstInGroup = int(grBaseId * tileInfo.loadRatioGR)
-    if linearId != firstInGroup:
-      return module
+  # Instruction-shape plan (skip predicate, MUBUF offsetK, per-load m0 offsets)
+  # computed by TileInfo — pure data, optionally delegated to C++. Register
+  # state (soffset/voff) below stays Python-side.
+  plan = tileInfo.singleBufferLoadPlan(sId0, sId1)
+  if plan.skip:
+    return module
 
   tc = tileInfo.tc
   isGlc = bool(kernel["NonTemporal%s"%tc] & 0x1)
@@ -866,18 +865,15 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
   regList = tileInfo.localSubtilesRegister[regListIdx]
   useSgpr = regList.is_sgpr
 
-  offsetK = sId1 * int(tileInfo.mmaTileShape[1] * tileInfo.subtileShape[1] * tileInfo.bpe)
-
-  subtileOffset = int(math.ceil(tileInfo.loadRatioGR*tileInfo.subtileSize))
+  offsetK = plan.offsetK
   WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
-  for i in range(tileInfo.numGRPerSubtile):
-    m0Offset = int(i * subtileOffset + (sId0 + sId1 * tileInfo.globalSubtileGrid[0]) * tileInfo.subtileSize)
+  for i, m0Offset in enumerate(plan.m0Offsets):
     module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=(m0Offset - offsetK)))
     mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
 
     soffset = regList.ref(0) if len(regList) > 0 and useSgpr else 0
     voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.indices[i]
-    module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(grBaseId , i)))
+    module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(plan.grBaseId , i)))
 
   return module
 

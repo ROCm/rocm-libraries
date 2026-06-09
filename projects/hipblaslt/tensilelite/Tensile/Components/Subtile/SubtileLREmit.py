@@ -594,25 +594,21 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile):
   multiple ds_read_b128 instructions (one per 4 VGPRs), each using the next
   sharedVgprLROffset entry.
   """
-  REGS_PER_DS_READ = tileInfo.loadWidthLR // 4  # load width in bytes / 4 bytes per VGPR
-
-  # du maps to mfmaC, mfmaR is always 0 (subtileShape[0]=1)
-  mfmaId = tileInfo.getSubtileShapeLinearId(subIterK, 0)
-
-  offsetStride = int(tileInfo.subtileSize)
-  offset = sId0 * offsetStride + sId1 * int(tileInfo.globalSubtileGrid[0]) * offsetStride
-
   dstVgpr = dstTile.regList.indices[0]
   numRegs = len(dstTile.regList.indices)
-  numReadsForTile = numRegs // REGS_PER_DS_READ
+
+  # Instruction-shape plan (DS offset, register stride, per-read map) computed
+  # by TileInfo — pure data, optionally delegated to C++. The destination VGPR
+  # base and the sharedVgprLROffset registers stay Python-side.
+  plan = tileInfo.singleDsReadPlan(sId0, sId1, subIterK, numRegs)
 
   module = Module()
-  for readIdx in range(numReadsForTile):
-    addrVgpr = tileInfo.sharedVgprLROffset[mfmaId * numReadsForTile + readIdx]
+  for readIdx, rd in enumerate(plan.reads):
+    addrVgpr = tileInfo.sharedVgprLROffset[rd.addrIdx]
     module.add(DSLoadB128(
-        dst=vgpr(dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ),
+        dst=vgpr(dstVgpr + rd.dstRegOffset, plan.regsPerDsRead),
         src=vgpr(addrVgpr),
-        ds=DSModifiers(offset=offset),
+        ds=DSModifiers(offset=plan.offset),
         comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx)))
   return module
 
@@ -623,28 +619,15 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
   sId0 = subtileId[0]
   sId1 = subtileId[1]
 
-  REGS_PER_DS_READ = tileInfo.loadWidthLR // 4  # load width in bytes / 4 bytes per VGPR
-  offsetStride = int(tileInfo.subtileSize)
-  offset = sId0 * offsetStride + sId1 * int(tileInfo.globalSubtileGrid[0]) * offsetStride
-
-  lrOffsetIdx = 0
+  # Emit one ds_read group per K-direction MMA tile in the subtile. Each group
+  # is built by emitSingleDsRead from the (optionally C++-delegated) plan; with
+  # subtileShape[0]==1 the per-du address indices are contiguous, matching the
+  # previous flat lrOffsetIdx walk byte-for-byte.
   for du in range(tileInfo.subtileShape[1]):
     mfmaId = tileInfo.getSubtileShapeLinearId(du, 0)
     tileIdx = tileInfo.lrTileIndexForSubtile(sId0, sId1, mfmaId)
     dstTile = tileInfo.vgprTiles[tileIdx]
-    dstVgpr = dstTile.regList.indices[0]
-    numRegs = len(dstTile.regList.indices)
-    # Each tile may need multiple ds_read_b128 when numRegs > 4 (e.g. FP8 8-vgpr tiles).
-    # Each read uses the next sharedVgprLROffset entry.
-    numReadsForTile = numRegs // REGS_PER_DS_READ
-    for readIdx in range(numReadsForTile):
-      addrVgpr = tileInfo.sharedVgprLROffset[lrOffsetIdx]
-      module.add(DSLoadB128(
-          dst=vgpr(dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ),
-          src=vgpr(addrVgpr),
-          ds=DSModifiers(offset=offset),
-          comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, du, readIdx)))
-      lrOffsetIdx += 1
+    module.add(emitSingleDsRead(tileInfo, sId0, sId1, du, dstTile))
 
   return module
 

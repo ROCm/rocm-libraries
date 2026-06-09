@@ -18,7 +18,15 @@ from tensile_writer import _tensile_writer as _ext
 _ti = _ext.subtile.tile_info
 
 ABTileInfoQuery = _ti.ABTileInfoQuery
+# Data-only emit-leaf plans returned by ABTileInfoQuery.singleBufferLoadPlan /
+# singleDsReadPlan (instruction shape only — no rocisa objects).
+SingleBufferLoadPlan = _ti.SingleBufferLoadPlan
+SingleDsReadPlan = _ti.SingleDsReadPlan
+DsReadEntry = _ti.DsReadEntry
 
 __all__ = [
     "ABTileInfoQuery",
+    "SingleBufferLoadPlan",
+    "SingleDsReadPlan",
+    "DsReadEntry",
 ]

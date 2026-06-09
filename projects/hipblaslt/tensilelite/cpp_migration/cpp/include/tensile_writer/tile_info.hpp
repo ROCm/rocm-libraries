@@ -28,6 +28,38 @@
 namespace tw::subtile {
 
 // ---------------------------------------------------------------------------
+// Data-only plans for the subtile emit leaves.
+//
+// These mirror exactly the instruction-shape arithmetic of
+// SubtileGREmit.emitSingleBufferLoad and SubtileLREmit.emitSingleDsRead. They
+// carry NO rocisa objects and NO writer register state (soffset/voff/dst VGPR
+// indices stay on the Python side); only the integer offsets / strides and the
+// per-instruction loop structure are computed here.
+// ---------------------------------------------------------------------------
+struct SingleBufferLoadPlan {
+  // When loadRatioGR > 1 several local subtiles share one global read; only the
+  // first subtile of each group emits. ``skip`` mirrors the early ``return
+  // module`` (empty) in the Python leaf.
+  bool skip;
+  long grBaseId;
+  long offsetK;             // MUBUF offset12, also subtracted from m0
+  std::vector<long> m0Offsets;  // one entry per GR load within the subtile
+};
+
+struct DsReadEntry {
+  long dstRegOffset;  // VGPR offset within the destination tile for this read
+  long addrIdx;       // index into sharedVgprLROffset for this read
+};
+
+struct SingleDsReadPlan {
+  long regsPerDsRead;
+  long mfmaId;
+  long offset;  // DS immediate offset (LDS byte position of the subtile)
+  long numReadsForTile;
+  std::vector<DsReadEntry> reads;
+};
+
+// ---------------------------------------------------------------------------
 // ABTileInfoQuery — read-only snapshot of the AB (ABTilePair) TileInfo state.
 //
 // Built from an *already materialized* ABGRGeometry (subtileCount/subtileStride
@@ -181,6 +213,78 @@ struct ABTileInfoQuery {
           std::floor(static_cast<double>(sId0) / loadRatioGR));
     }
     return sId0;
+  }
+
+  // TileInfo.getSubtileShapeLinearId(k0, k1) = k1 * subtileShape[0] + k0.
+  long getSubtileShapeLinearId(long k0, long k1) const {
+    return k1 * subtileShape.first + k0;
+  }
+
+  // numGRPerSubtile = ceil(1 / loadRatioGR) (0 when loadRatioGR == 0).
+  long numGRPerSubtile() const {
+    if (loadRatioGR == 0.0) return 0;
+    return static_cast<long>(std::ceil(1.0 / loadRatioGR));
+  }
+
+  // --- Emit-leaf plans (instruction shape only) ---
+
+  // Pure port of SubtileGREmit.emitSingleBufferLoad's offset arithmetic.
+  SingleBufferLoadPlan singleBufferLoadPlan(long sId0, long sId1) const {
+    SingleBufferLoadPlan plan;
+    long linearId = getLocalSubtileLinearId(sId0, sId1);
+    plan.grBaseId =
+        loadRatioGR != 0.0
+            ? static_cast<long>(std::floor(static_cast<double>(linearId) /
+                                           loadRatioGR))
+            : 0;
+    plan.skip = false;
+    if (loadRatioGR > 1.0) {
+      long firstInGroup =
+          static_cast<long>(static_cast<double>(plan.grBaseId) * loadRatioGR);
+      if (linearId != firstInGroup) {
+        plan.skip = true;
+        plan.offsetK = 0;
+        return plan;
+      }
+    }
+
+    // offsetK = sId1 * int(mmaTileShape[1] * subtileShape[1] * bpe)
+    long offsetKUnit = static_cast<long>(static_cast<double>(gr.mmaTileShape.second) *
+                                         subtileShape.second * gr.bpe);
+    plan.offsetK = sId1 * offsetKUnit;
+
+    long subtileOffset = static_cast<long>(std::ceil(loadRatioGR * subtileSize));
+    long numGR = numGRPerSubtile();
+    for (long i = 0; i < numGR; ++i) {
+      double m0 = static_cast<double>(i) * subtileOffset +
+                  (static_cast<double>(sId0) +
+                   static_cast<double>(sId1) * globalSubtileGrid.first) *
+                      subtileSize;
+      plan.m0Offsets.push_back(static_cast<long>(m0));
+    }
+    return plan;
+  }
+
+  // Pure port of SubtileLREmit.emitSingleDsRead's offset / read arithmetic.
+  // numRegs is the destination tile register count (Python register state).
+  SingleDsReadPlan singleDsReadPlan(long sId0, long sId1, long subIterK,
+                                    long numRegs) const {
+    SingleDsReadPlan plan;
+    plan.regsPerDsRead = lr.loadWidth / 4;
+    plan.mfmaId = getSubtileShapeLinearId(subIterK, 0);
+    long offsetStride = static_cast<long>(subtileSize);
+    plan.offset = sId0 * offsetStride +
+                  sId1 * static_cast<long>(globalSubtileGrid.first) *
+                      offsetStride;
+    plan.numReadsForTile =
+        plan.regsPerDsRead != 0 ? numRegs / plan.regsPerDsRead : 0;
+    for (long readIdx = 0; readIdx < plan.numReadsForTile; ++readIdx) {
+      DsReadEntry e;
+      e.dstRegOffset = readIdx * plan.regsPerDsRead;
+      e.addrIdx = plan.mfmaId * plan.numReadsForTile + readIdx;
+      plan.reads.push_back(e);
+    }
+    return plan;
   }
 };
 

@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import singledispatch
+from types import SimpleNamespace
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from Tensile.Components.Subtile.LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
@@ -112,6 +113,22 @@ def _resolve_cpp_tileinfo():
   return _cpp_ti
 
 _CPP_TI = _resolve_cpp_tileinfo()
+
+
+def _resolve_cpp_emit():
+  """Import the optional C++ emit-leaf decision submodule, or return None.
+
+  Mirrors ``_resolve_cpp_tileinfo``: opt-in delegation is requested via
+  SubtileGeometry's switch, but if the compiled extension is unavailable we
+  fall back to the pure-Python emit path rather than failing the import.
+  """
+  try:
+    from tensile_writer.subtile import emit as _cpp_emit
+  except Exception:
+    return None
+  return _cpp_emit
+
+_CPP_EMIT = _resolve_cpp_emit()
 
 ################################################################################
 # Concrete tile classes and pre-defined config instances
@@ -722,6 +739,52 @@ class TileInfo:
       return int(sId0 // self.loadRatioGR)
     return sId0
 
+  # --- Emit-leaf plans (instruction shape only) ---
+  # These compute the pure-data decisions for the buffer-load / ds-read emit
+  # leaves (skip predicate, m0/DS offsets, per-instruction loop structure).
+  # The emit functions in SubtileGREmit / SubtileLREmit build the rocisa Module
+  # from the returned plan. Both delegate to the C++ ABTileInfoQuery when the
+  # read-only query layer is active, falling back to byte-identical Python math.
+
+  def singleBufferLoadPlan(self, sId0, sId1):
+    """Plan for emitSingleBufferLoad: skip flag, MUBUF offsetK, m0 offsets."""
+    if self._useCppQuery():
+      return self._cppQuery().singleBufferLoadPlan(sId0, sId1)
+    linearId = self.getLocalSubtileLinearId(sId0, sId1)
+    grBaseId = int(math.floor(linearId / self.loadRatioGR))
+    if self.loadRatioGR > 1:
+      firstInGroup = int(grBaseId * self.loadRatioGR)
+      if linearId != firstInGroup:
+        return SimpleNamespace(skip=True, grBaseId=grBaseId, offsetK=0,
+                               m0Offsets=[])
+    offsetK = sId1 * int(self.mmaTileShape[1] * self.subtileShape[1] * self.bpe)
+    subtileOffset = int(math.ceil(self.loadRatioGR * self.subtileSize))
+    m0Offsets = []
+    for i in range(self.numGRPerSubtile):
+      m0Offsets.append(int(i * subtileOffset
+                           + (sId0 + sId1 * self.globalSubtileGrid[0])
+                           * self.subtileSize))
+    return SimpleNamespace(skip=False, grBaseId=grBaseId, offsetK=offsetK,
+                           m0Offsets=m0Offsets)
+
+  def singleDsReadPlan(self, sId0, sId1, subIterK, numRegs):
+    """Plan for emitSingleDsRead: DS offset, register stride, per-read map."""
+    if self._useCppQuery():
+      return self._cppQuery().singleDsReadPlan(sId0, sId1, subIterK, numRegs)
+    regsPerDsRead = self.loadWidthLR // 4
+    mfmaId = self.getSubtileShapeLinearId(subIterK, 0)
+    offsetStride = int(self.subtileSize)
+    offset = sId0 * offsetStride \
+        + sId1 * int(self.globalSubtileGrid[0]) * offsetStride
+    numReadsForTile = numRegs // regsPerDsRead
+    reads = []
+    for readIdx in range(numReadsForTile):
+      reads.append(SimpleNamespace(dstRegOffset=readIdx * regsPerDsRead,
+                                   addrIdx=mfmaId * numReadsForTile + readIdx))
+    return SimpleNamespace(regsPerDsRead=regsPerDsRead, mfmaId=mfmaId,
+                           offset=offset, numReadsForTile=numReadsForTile,
+                           reads=reads)
+
   # --- Register allocation ---
 
   def allocOffsetRegisters(self, writer, kernel):
@@ -1036,6 +1099,22 @@ def _selectF8F6F4InstType(kernel):
   # Pure types
   aIsF8  = _pred(aType, "isFloat8")
   bIsF8  = _pred(bType, "isFloat8")
+
+  # Optional C++ delegation: the instType selection is pure data, so when the
+  # SubtileGeometry delegation switch is on AND the compiled emit submodule is
+  # importable, defer the mapping to C++. aType/bType were already swapped above
+  # for SourceSwap, so we pass sourceSwap=False here and fall back to the native
+  # Python branches on any C++ error (e.g. unsupported combination).
+  if _sg._USE_CPP and _CPP_EMIT is not None:
+    try:
+      _name = _CPP_EMIT.mfma_f8f6f4_inst_type(
+          aIsF8, _pred(aType, "isBFloat8"), _pred(aType, "isFloat4"),
+          bIsF8, _pred(bType, "isBFloat8"), _pred(bType, "isFloat4"),
+          False)
+      return getattr(InstType, _name)
+    except Exception:
+      pass
+
   if aIsF8 and bIsF8:
     return InstType.INST_F8
 

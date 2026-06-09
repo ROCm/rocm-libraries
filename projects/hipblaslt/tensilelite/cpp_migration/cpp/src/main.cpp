@@ -25,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include "tensile_writer/emit_leaves.hpp"
 #include "tensile_writer/instruction_scheduler.hpp"
 #include "tensile_writer/logical_scheduler.hpp"
 #include "tensile_writer/logical_scheduler_passes.hpp"
@@ -297,6 +298,34 @@ void bind_geometry(nb::module_& g) {
 // TileInfo query layer (read-only) — AB (ABTilePair) case.
 // ---------------------------------------------------------------------------
 void bind_tile_info(nb::module_& t) {
+  // -- Emit-leaf plan value types (instruction shape only) --------------
+  nb::class_<SingleBufferLoadPlan>(
+      t, "SingleBufferLoadPlan",
+      "Data-only plan for SubtileGREmit.emitSingleBufferLoad: the skip "
+      "decision, MUBUF offsetK, and per-load m0 offsets. Register state "
+      "(soffset/voff) stays in Python.")
+      .def_ro("skip", &SingleBufferLoadPlan::skip)
+      .def_ro("grBaseId", &SingleBufferLoadPlan::grBaseId)
+      .def_ro("offsetK", &SingleBufferLoadPlan::offsetK)
+      .def_ro("m0Offsets", &SingleBufferLoadPlan::m0Offsets);
+
+  nb::class_<DsReadEntry>(t, "DsReadEntry",
+                          "One ds_read within a tile: destination VGPR offset "
+                          "and sharedVgprLROffset index.")
+      .def_ro("dstRegOffset", &DsReadEntry::dstRegOffset)
+      .def_ro("addrIdx", &DsReadEntry::addrIdx);
+
+  nb::class_<SingleDsReadPlan>(
+      t, "SingleDsReadPlan",
+      "Data-only plan for SubtileLREmit.emitSingleDsRead: the DS offset, "
+      "register stride, and per-read structure. Destination/address VGPR "
+      "base indices stay in Python.")
+      .def_ro("regsPerDsRead", &SingleDsReadPlan::regsPerDsRead)
+      .def_ro("mfmaId", &SingleDsReadPlan::mfmaId)
+      .def_ro("offset", &SingleDsReadPlan::offset)
+      .def_ro("numReadsForTile", &SingleDsReadPlan::numReadsForTile)
+      .def_ro("reads", &SingleDsReadPlan::reads);
+
   nb::class_<ABTileInfoQuery>(t, "ABTileInfoQuery")
       .def(nb::init<const ABGRGeometry&, const ABLRGeometry&, long, long, long,
                     long, long>(),
@@ -353,7 +382,31 @@ void bind_tile_info(nb::module_& t) {
       .def("waveMmaTilesForSubtile", &ABTileInfoQuery::waveMmaTilesForSubtile,
            nb::arg("sId0"), nb::arg("sId1"))
       .def("grRegGroupForSubtileRow",
-           &ABTileInfoQuery::grRegGroupForSubtileRow, nb::arg("sId0"));
+           &ABTileInfoQuery::grRegGroupForSubtileRow, nb::arg("sId0"))
+      .def("getSubtileShapeLinearId",
+           &ABTileInfoQuery::getSubtileShapeLinearId, nb::arg("k0"),
+           nb::arg("k1"))
+      .def_prop_ro("numGRPerSubtile", &ABTileInfoQuery::numGRPerSubtile)
+      // Emit-leaf plans (instruction shape only).
+      .def("singleBufferLoadPlan", &ABTileInfoQuery::singleBufferLoadPlan,
+           nb::arg("sId0"), nb::arg("sId1"))
+      .def("singleDsReadPlan", &ABTileInfoQuery::singleDsReadPlan,
+           nb::arg("sId0"), nb::arg("sId1"), nb::arg("subIterK"),
+           nb::arg("numRegs"));
+}
+
+// ---------------------------------------------------------------------------
+// Subtile emit-leaf data-only decisions (no rocisa). MFMA instType selection.
+// ---------------------------------------------------------------------------
+void bind_emit(nb::module_& e) {
+  using namespace tw::subtile::emit;
+  e.def("mfma_f8f6f4_inst_type", &mfma_f8f6f4_inst_type, nb::arg("aIsF8"),
+        nb::arg("aIsBF8"), nb::arg("aIsF4"), nb::arg("bIsF8"),
+        nb::arg("bIsBF8"), nb::arg("bIsF4"), nb::arg("sourceSwap") = false,
+        "Select the rocisa InstType member name for the "
+        "V_MFMA_SCALE_F32_16x16x128_F8F6F4 family from per-operand 8-bit/4-bit "
+        "float predicates. Mirrors Kernel._selectF8F6F4InstType; raises on "
+        "unsupported combinations so the caller falls back to Python.");
 }
 
 // ---------------------------------------------------------------------------
@@ -808,4 +861,12 @@ NB_MODULE(_tensile_writer, m) {
       "value types) only; the scheduling passes remain in Python.");
   bind_logical_scheduler(logical_scheduler);
   bind_logical_scheduler_passes(logical_scheduler);
+
+  nb::module_ emit = subtile.def_submodule(
+      "emit",
+      "Subtile emit-leaf data-only decisions ported from "
+      "Tensile.Components.Subtile (Kernel.emitMfmaInstruction instType "
+      "selection). No rocisa objects are built in C++; the Python emit "
+      "functions construct the rocisa Module from these decisions.");
+  bind_emit(emit);
 }
