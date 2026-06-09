@@ -532,9 +532,7 @@ class TestValidateProblemTypeParameterTypes:
 
 
 class TestValidateProblemTypeRaiseMode:
-    """Step 4: default raiseOnMismatch=True path."""
-
-    pytestmark = pytest.mark.usefixtures("_force_strict_gate_on")
+    """Default raiseOnMismatch=True path."""
 
     def setup_method(self):
         resetTypeMismatchCollector()

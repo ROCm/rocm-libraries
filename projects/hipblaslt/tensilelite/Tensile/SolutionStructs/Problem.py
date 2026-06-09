@@ -772,8 +772,7 @@ def validateProblemTypeParameterTypes(state, srcFile="", *, raiseOnMismatch: boo
     :class:`ConfigTypeError` on the first mistyped key encountered.
   - ``raiseOnMismatch=False`` (library-logic path): mismatches are only
     appended to the module-level ``_typeMismatchCollector`` (printed
-    later via ``printTypeMismatchSummary``). Never raises; unaffected
-    by the kill switch.
+    later via ``printTypeMismatchSummary``). Never raises.
 
   Args:
       state: The ProblemType state dict (parameter name -> value).
@@ -788,14 +787,8 @@ def validateProblemTypeParameterTypes(state, srcFile="", *, raiseOnMismatch: boo
   from Tensile.SolutionStructs.Solution import _typeMismatchCollector
   from Tensile.Common.ValidParameters import _skipTypeCheck
   from Tensile.Common.TypeValidationErrors import (
-      ConfigTypeError, formatMismatch, _STRICT_GATE_ENABLED,
+      ConfigTypeError, formatMismatch,
   )
-
-  # Kill-switch: when gated off, skip the raise-on-mismatch path only.
-  # The collector-mode path (raiseOnMismatch=False, used by library-logic
-  # loads) is unaffected — it never raises.
-  if raiseOnMismatch and not _STRICT_GATE_ENABLED:
-    return
 
   for key, value in state.items():
     if key not in _expectedProblemTypeParamTypes or key in _skipTypeCheck:

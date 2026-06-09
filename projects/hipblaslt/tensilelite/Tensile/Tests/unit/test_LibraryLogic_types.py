@@ -32,8 +32,6 @@ import pytest
 from Tensile.LibraryLogic import generateLogic
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 
-pytestmark = pytest.mark.usefixtures("_force_strict_gate_on")
-
 
 def _call(config, tmp_path):
     """Invoke generateLogic with a clean output dir and an unreadable input dir.
