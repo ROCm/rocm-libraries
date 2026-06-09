@@ -159,15 +159,19 @@ FROM base AS therock_source_build
 
 ARG AMDGPU_FAMILIES=gfx94X-dcgpu
 ARG BUILD_JOBS=0
+# Distinct cache buster so ASAN-instrumented sccache entries don't collide
+# with the standard MiOpen-Docker-CK bucket used by non-ASAN builds.
+ARG ASAN_SCCACHE_CACHE_BUSTER="MiOpen-ASAN-Docker-CK"
 
 ENV ROCM_PATH=/opt/rocm
 
 WORKDIR /TheRock
- 
+
 RUN . /opt/venv/bin/activate && \
     python ./build_tools/fetch_sources.py
 
-RUN cmake -B build -GNinja . \
+RUN MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="${ASAN_SCCACHE_CACHE_BUSTER}" \
+    cmake -B build -GNinja . \
         --preset linux-release-asan \
         -DTHEROCK_AMDGPU_FAMILIES=$AMDGPU_FAMILIES \
         -DBUILD_TESTING=ON \
