@@ -14,9 +14,9 @@ compile, and a flat extern "C" ABI, and ``GpuGemmRunner`` runs the resulting
 .so against a NumPy reference.
 
 It demonstrates the generality the bridge gained over the original fp16/rcr-only
-slice: every kernel below is a different (dtype, layout) pair -- fp16 and bf16,
-across the row/col layout combinations the universal GEMM supports
-(row-major C only).
+slice by running multiple (dtype, layout) pairs: fp16 across the four A/B
+row/col layout combinations supported by universal GEMM (row-major C), plus a
+couple of bf16 cases.
 
 Usage:
     python3 12_te_bridge.py
