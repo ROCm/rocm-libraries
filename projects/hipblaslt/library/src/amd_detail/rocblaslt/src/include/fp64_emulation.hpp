@@ -51,12 +51,8 @@ uint32_t fp64EmulationSpecialValuesMask();
 unsigned fp64EmulationNumModuli();
 
 /* Returns the byte count of the emulation workspace for the given problem.
- * opA and opB must match the transpose flags passed to fp64EmulatedGemm:
- * they determine whether A8i / B8i are stored in transposed or non-transposed
- * layout and therefore affect the workspace footprint.
  * Use this to check whether a caller-provided workspace is sufficient. */
-size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_moduli,
-                                   hipblasOperation_t opA, hipblasOperation_t opB);
+size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_moduli);
 
 /* Forward declaration — callers already include handle.h which provides the full
  * definition.  Declared here so the two helpers below can use the type.     */
