@@ -168,7 +168,7 @@ struct BatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
                 out[index] = cast<FpType>(
                     hip_kernel_provider::applyActivation<FpPrecType,
                                                          hip_kernel_provider::ActivationMode{
-                                                             HIP_PLUGIN_NRN_OP_ID}>(
+                                                             HIP_PLUGIN_BN_NRN_OP_ID}>(
                         value, _alpha, _beta));
             }};
 
@@ -182,7 +182,7 @@ struct BatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
                 out[index] = cast<FpType>(
                     hip_kernel_provider::applyActivation<FpPrecType,
                                                          hip_kernel_provider::ActivationMode{
-                                                             HIP_PLUGIN_NRN_OP_ID}>(
+                                                             HIP_PLUGIN_BN_NRN_OP_ID}>(
                         value, _alpha, _beta));
             }
         }
@@ -411,7 +411,7 @@ struct BatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         out[index] = cast<FpType>(
                             hip_kernel_provider::applyActivation<
                                 FpPrecType,
-                                hip_kernel_provider::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
+                                hip_kernel_provider::ActivationMode{HIP_PLUGIN_BN_NRN_OP_ID}>(
                                 fma(pvscale,
                                     (cast<FpPrecType>(in[index]) - mean) * invVariance,
                                     pvbias),
@@ -447,7 +447,7 @@ struct BatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         out[index] = cast<FpType>(
                             hip_kernel_provider::applyActivation<
                                 FpPrecType,
-                                hip_kernel_provider::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
+                                hip_kernel_provider::ActivationMode{HIP_PLUGIN_BN_NRN_OP_ID}>(
                                 fma(pvscale, xhat[j], pvbias), alpha, beta));
                     }
                 }
@@ -482,7 +482,7 @@ struct BatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         out[index] = cast<FpType>(
                             hip_kernel_provider::applyActivation<
                                 FpPrecType,
-                                hip_kernel_provider::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
+                                hip_kernel_provider::ActivationMode{HIP_PLUGIN_BN_NRN_OP_ID}>(
                                 fma(pvscale, xhat[j], pvbias), alpha, beta));
                     }
                 }
@@ -601,7 +601,7 @@ struct BatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
                     out[index] = cast<FpType>(
                         hip_kernel_provider::applyActivation<FpPrecType,
                                                              hip_kernel_provider::ActivationMode{
-                                                                 HIP_PLUGIN_NRN_OP_ID}>(
+                                                                 HIP_PLUGIN_BN_NRN_OP_ID}>(
                             fma(pvscale, inhat, pvbias), alpha, beta));
                 }}; // end for
 
@@ -735,10 +735,11 @@ struct BatchNormFwdTrainSpatialImplVar2
                 inhat = hip_kernel_provider::fma(
                     cast<FpPrecLsType>(pvt_scale), inhat, cast<FpPrecLsType>(pvt_bias));
 
-                value = cast<FpLsType>(hip_kernel_provider::applyActivation<
-                                       FpPrecLsType,
-                                       hip_kernel_provider::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
-                    inhat, cast<FpPrecLsType>(alpha), cast<FpPrecLsType>(beta)));
+                value = cast<FpLsType>(
+                    hip_kernel_provider::applyActivation<FpPrecLsType,
+                                                         hip_kernel_provider::ActivationMode{
+                                                             HIP_PLUGIN_BN_NRN_OP_ID}>(
+                        inhat, cast<FpPrecLsType>(alpha), cast<FpPrecLsType>(beta)));
 
                 *((FpLsType*)(out + index)) = value;
             } // end for(n)
@@ -1018,7 +1019,7 @@ extern "C" __global__ void
 // but it's hard becasue C does not support function
 // overloads.
 // [[deprecated]]
-#if(HIP_PLUGIN_RUNNING_RESULT == 1)
+#if(HIP_PLUGIN_BN_RUNNING_RESULT == 1)
             double expAvgFactor,
             const typename hip_plugin_bn_config::fp_prec_type* __restrict prevResultRunningMean,
             const typename hip_plugin_bn_config::fp_prec_type* __restrict prevResultRunningVariance,
@@ -1026,7 +1027,7 @@ extern "C" __global__ void
             typename hip_plugin_bn_config::fp_prec_type* __restrict nextResultRunningVariance,
 #endif
             double epsilon
-#if(HIP_PLUGIN_SAVE_MEAN_VARIANCE == 1)
+#if(HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE == 1)
             ,
             typename hip_plugin_bn_config::fp_prec_type* __restrict resultSaveMean,
             typename hip_plugin_bn_config::fp_prec_type* __restrict resultSaveInvVariance
@@ -1055,7 +1056,7 @@ extern "C" __global__ void
     if(lid == 0)
     {
 // TODO: this should also be removed, but using constexpr can lead compile error
-#if(HIP_PLUGIN_RUNNING_RESULT == 1)
+#if(HIP_PLUGIN_BN_RUNNING_RESULT == 1)
         using StashUpdater = hip_kernel_provider::batchnorm::StashUpdater<fp_accum_c_type>;
         StashUpdater updater(static_cast<fp_accum_c_type>(mean),
                              static_cast<fp_accum_c_type>(variance),
@@ -1069,7 +1070,7 @@ extern "C" __global__ void
                                                                          updater,
                                                                          grpid);
 #endif
-#if(HIP_PLUGIN_SAVE_MEAN_VARIANCE == 1)
+#if(HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE == 1)
         hip_kernel_provider::batchnorm::saved_stash<fp_accum_c_type, fp_prec_c_type>(
             resultSaveMean,
             resultSaveInvVariance,
@@ -1100,7 +1101,7 @@ extern "C" __global__ void
         BatchNormFwdTrainSpatialFinalMeanVariance(
             hip_plugin_bn_config::fp_type* __restrict__ meanvarbuff,
             hip_plugin_bn_config::fp_prec_type INHW
-#if(HIP_PLUGIN_RUNNING_RESULT == 1)
+#if(HIP_PLUGIN_BN_RUNNING_RESULT == 1)
             ,
             double expAvgFactor /* input momentum */
             ,
@@ -1111,7 +1112,7 @@ extern "C" __global__ void
 #endif
             ,
             double epsilon
-#if(HIP_PLUGIN_SAVE_MEAN_VARIANCE == 1)
+#if(HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE == 1)
             ,
             hip_plugin_bn_config::fp_prec_type* __restrict__ resultSaveMean /*output only*/
             ,
@@ -1139,7 +1140,7 @@ extern "C" __global__ void
     // Save mean and calculate and save running mean
     if(ygid == commitID && zgid == 0)
     {
-#if(HIP_PLUGIN_RUNNING_RESULT == 1)
+#if(HIP_PLUGIN_BN_RUNNING_RESULT == 1)
         using StashUpdater = hip_kernel_provider::batchnorm::StashUpdater<fp_accum_c_type>;
         StashUpdater updater(hip_kernel_provider::cast<fp_accum_c_type>(mean),
                              hip_kernel_provider::cast<fp_accum_c_type>(variance),
@@ -1155,7 +1156,7 @@ extern "C" __global__ void
                 xgid);
 #endif
 
-#if(HIP_PLUGIN_SAVE_MEAN_VARIANCE == 1)
+#if(HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE == 1)
         hip_kernel_provider::batchnorm::saved_stash<fp_accum_c_type, fp_prec_c_type>(
             (hip_plugin_bn_config::fp_prec_c_type*)resultSaveMean,
             (hip_plugin_bn_config::fp_prec_c_type*)resultSaveInvVariance,
