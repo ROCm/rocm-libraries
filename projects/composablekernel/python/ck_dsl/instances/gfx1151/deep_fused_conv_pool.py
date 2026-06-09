@@ -43,6 +43,7 @@ needed. The verify harness unpacks with the identical nibble layout.
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
@@ -50,7 +51,14 @@ from ...core.ir import F16, I8, I16, I32, IRBuilder, PtrType, Value, VectorType
 from ...helpers.geometry import WarpGrid
 from ...helpers.schedule import DS_READ, MFMA, SchedulePolicy
 from ...helpers.spec import kernel_name_join
+from ...runtime.hip_module import Runtime
+from ..common._matmul_nbits_common import (
+    MatMulNBitsSpec,
+    pack_i4_weights_for_matmul_nbits,
+)
 from ..common.conv_implicit_gemm import ConvProblem, _emit_frag_smem_load
+from ..common.gemm_universal import TileSpec
+from ..common.manifest_runner.utils import as_u8_buffer, nbytes, require_numpy
 from ..gfx950.deep_fused_conv_pool import FusedConvPoolProblem
 
 _WMMA = 16
@@ -3075,3 +3083,156 @@ def build_deep_fused_conv_pool(
         _emit_maxpool_finalquant(b, spec, c1_smem, Y, grid)
 
     return b.kernel
+
+
+def _q_int_codes(np, scaled_f32, lo: float, hi: float):
+    """Clamp then round-to-nearest-even, matching the integer fusion kernels."""
+    return np.rint(np.clip(scaled_f32, lo, hi))
+
+
+def _pack_i4_rows(np, codes):
+    """Signed int4 codes ``(rows, cols)`` -> two codes per byte."""
+    spec = MatMulNBitsSpec(
+        name="deep_fused_w1_pack",
+        N=int(codes.shape[0]),
+        K=int(codes.shape[1]),
+        tile=TileSpec(
+            tile_m=16,
+            tile_n=16,
+            tile_k=16,
+            warp_m=1,
+            warp_n=1,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+        ),
+    )
+    return pack_i4_weights_for_matmul_nbits(codes, spec).view(np.int8)
+
+
+def _unpack_deep_fused_y(np, words, channels: int):
+    """``(pool_h, pool_w, words)`` int32 output -> signed int4 channel codes."""
+    ph, pw, _ = words.shape
+    out = np.empty((ph, pw, channels), dtype=np.int32)
+    for ch in range(channels):
+        word = words[:, :, ch // 8].astype(np.uint32)
+        nib = (word >> (4 * (ch % 8))) & 0xF
+        signed = nib.astype(np.int32)
+        out[:, :, ch] = np.where(signed >= 8, signed - 16, signed)
+    return out
+
+
+def _deep_fused_i8i4_reference(np, X, W0, W1_codes, manifest: dict):
+    """Integer-exact reference for gfx1151 deep fused conv0->conv1->pool."""
+    N, H, W, C, K0, R, S, sH, sW, pH, pW, dH, dW = [
+        int(x) for x in manifest["conv"][:13]
+    ]
+    K1 = int(manifest["conv1"]["K1"])
+    pool_y, pool_x, pool_s_h, pool_s_w = [int(x) for x in manifest["pool"]]
+    quant = manifest.get("quant", {})
+    m0 = np.float32(quant.get("m0", 0.0625))
+    m0b = np.float32(quant.get("m0b", 0.5))
+    m1 = np.float32(quant.get("m1", 0.25))
+    mf = np.float32(quant.get("mf", 1.0))
+    Ho = (H + 2 * pH - dH * (R - 1) - 1) // sH + 1
+    Wo = (W + 2 * pW - dW * (S - 1) - 1) // sW + 1
+    pool_ho = (Ho - pool_y) // pool_s_h + 1
+    pool_wo = (Wo - pool_x) // pool_s_w + 1
+
+    Xp = np.pad(
+        X.astype(np.int64),
+        ((0, 0), (pH, pH), (pW, pW), (0, 0)),
+    )
+    P0 = np.zeros((N, Ho, Wo, K0), dtype=np.int64)
+    for r in range(R):
+        for s in range(S):
+            x = Xp[
+                :,
+                r * dH : r * dH + Ho * sH : sH,
+                s * dW : s * dW + Wo * sW : sW,
+                :,
+            ]
+            w = W0[:, r, s, :].astype(np.int64)
+            P0 += np.einsum("nhwc,kc->nhwk", x, w, optimize=True)
+
+    q0 = _q_int_codes(np, P0.astype(np.float32) * m0, -127.0, 127.0)
+    q0_relu = np.maximum(q0, 0.0)
+    C0 = _q_int_codes(np, q0_relu * m0b, -8.0, 7.0)
+
+    P1 = np.einsum("nhwk,ok->nhwo", C0, W1_codes.astype(np.float32), optimize=True)
+    q1 = _q_int_codes(np, P1 * m1, -8.0, 7.0)
+    C1 = np.maximum(q1, 0.0)
+
+    ref = np.empty((pool_ho, pool_wo, K1), dtype=np.int32)
+    for ho in range(pool_ho):
+        for wo in range(pool_wo):
+            h0 = ho * pool_s_h
+            w0 = wo * pool_s_w
+            patch = C1[0, h0 : h0 + pool_y, w0 : w0 + pool_x, :]
+            pooled = patch.max(axis=(0, 1)).astype(np.float32)
+            ref[ho, wo, :] = _q_int_codes(np, pooled * mf, -8.0, 7.0).astype(np.int32)
+    return ref
+
+
+def run_deep_fused_conv_pool_i8i4_manifest_problem(
+    manifest: dict, shape: Tuple[int, int, int] | None, verify: bool
+) -> tuple:
+    """gfx1151 deep-fused int8/int4 conv+pool manifest-runner problem."""
+    if shape is not None:
+        raise ValueError("deep_fused_conv_pool_i8i4 uses manifest shape, not --shape")
+    np = require_numpy()
+    N, H, W, C, K0, R, S, sH, sW, pH, pW, dH, dW = [
+        int(x) for x in manifest["conv"][:13]
+    ]
+    K1 = int(manifest["conv1"]["K1"])
+    pool_y, pool_x, pool_s_h, pool_s_w = [int(x) for x in manifest["pool"]]
+    Ho = (H + 2 * pH - dH * (R - 1) - 1) // sH + 1
+    Wo = (W + 2 * pW - dW * (S - 1) - 1) // sW + 1
+    pool_ho = (Ho - pool_y) // pool_s_h + 1
+    pool_wo = (Wo - pool_x) // pool_s_w + 1
+
+    rng = np.random.default_rng(int(manifest.get("seed", 123)))
+    X = rng.integers(-3, 4, size=(N, H, W, C), dtype=np.int8)
+    W0 = rng.integers(-3, 4, size=(K0, R, S, C), dtype=np.int8)
+    W1_codes = rng.integers(-3, 4, size=(K1, K0), dtype=np.int8)
+    W1 = _pack_i4_rows(np, W1_codes)
+    Y = np.zeros((pool_ho, pool_wo, (K1 + 7) // 8), dtype=np.int32)
+
+    if "grid_explicit" in manifest:
+        grid = tuple(int(x) for x in manifest["grid_explicit"])
+    else:
+        pool_tile_h, pool_tile_w = [int(x) for x in manifest["pool_tile"]]
+        grid = (1, pool_ho // pool_tile_h, pool_wo // pool_tile_w)
+    block = (int(manifest["threads_per_block"]), 1, 1)
+    flop = 2.0 * (N * Ho * Wo * K0 * R * S * C + N * Ho * Wo * K1 * K0)
+    bytes_xfer = float(X.nbytes + W0.nbytes + W1.nbytes + Y.nbytes)
+    tol = int(manifest.get("verify_tol", 0))
+
+    def make_args(rt: Runtime):
+        X_dev = rt.alloc(nbytes(X))
+        W0_dev = rt.alloc(nbytes(W0))
+        Y_dev = rt.alloc(nbytes(Y))
+        W1_dev = rt.alloc(nbytes(W1))
+        rt.memcpy_h2d(X_dev, as_u8_buffer(X), nbytes(X))
+        rt.memcpy_h2d(W0_dev, as_u8_buffer(W0), nbytes(W0))
+        rt.memcpy_h2d(W1_dev, as_u8_buffer(W1), nbytes(W1))
+        rt.memset(Y_dev, 0, nbytes(Y))
+        return struct.pack("<QQQQ", X_dev, W0_dev, Y_dev, W1_dev), (
+            X_dev,
+            W0_dev,
+            Y_dev,
+            W1_dev,
+        )
+
+    def check(rt: Runtime, ptrs):
+        if not verify:
+            return 0.0, 0, pool_ho * pool_wo * K1
+        rt.memcpy_d2h(as_u8_buffer(Y), ptrs[2], nbytes(Y))
+        got = _unpack_deep_fused_y(np, Y, K1)
+        ref = _deep_fused_i8i4_reference(np, X, W0, W1_codes, manifest)
+        diff = np.abs(got - ref)
+        max_diff = int(diff.max()) if diff.size else 0
+        return float(max_diff), int(np.count_nonzero(diff > tol)), got.size
+
+    return make_args, grid, block, flop, bytes_xfer, check

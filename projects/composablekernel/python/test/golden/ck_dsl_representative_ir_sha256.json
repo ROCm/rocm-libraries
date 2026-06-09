@@ -1,0 +1,324 @@
+{
+  "cases": {
+    "conv/gfx1151/n1h8c16k32r3": {
+      "arch": "gfx1151",
+      "bytes": 42339,
+      "family": "conv",
+      "kernel_name": "irhash_conv_1151_a_N1H8W8C16_K32R3S3_t32x32x16_w2x1_a16x16x16_mem_default",
+      "sha256": "d8957173e8b675d65ee6148f4892770f9dbb4f669951f3244c1194da160227da",
+      "status": "ok"
+    },
+    "conv/gfx1151/n2h16c32k32r1": {
+      "arch": "gfx1151",
+      "bytes": 41596,
+      "family": "conv",
+      "kernel_name": "irhash_conv_1151_b_N2H16W16C32_K32R1S1_t32x32x16_w2x1_a16x16x16_mem_default",
+      "sha256": "98f5de701c2591d5376b50a2d8f29a8537b4746bdc1d259897f0a87bc0dce2ed",
+      "status": "ok"
+    },
+    "conv/gfx1201/n1h8c16k32r3": {
+      "arch": "gfx1201",
+      "bytes": 35776,
+      "family": "conv",
+      "kernel_name": "irhash_conv_1201_a_N1H8W8C16_K32R3S3_t32x32x16_w2x1_a16x16x16_mem_default",
+      "sha256": "5cf3d8eafc229735558b462e26dd6ff49d664de92860a9f19fe8b39235495a6b",
+      "status": "ok"
+    },
+    "conv/gfx942/n1h8c16k32r3": {
+      "arch": "gfx942",
+      "bytes": 28400,
+      "family": "conv",
+      "kernel_name": "irhash_conv_942_a_N1H8W8C16_K32R3S3_t64x32x16_w2x2_a16x16x16_mem_default",
+      "sha256": "7b99d1fa62ae665f6a7806a5b413b8f7fbb6ec5058685addd21dc8682ce7750c",
+      "status": "ok"
+    },
+    "conv/gfx950/n1h8c16k32r3": {
+      "arch": "gfx950",
+      "bytes": 23935,
+      "family": "conv",
+      "kernel_name": "irhash_conv_950_a_N1H8W8C16_K32R3S3_t64x64x32_w2x2_a32x32x16_compv4_cshuffle",
+      "sha256": "9707bc06918e79691db5933442c0b0ac9eca896acb4accb112cd1ff351cabc65",
+      "status": "ok"
+    },
+    "conv/gfx950/n2h16c32k32r1": {
+      "arch": "gfx950",
+      "bytes": 27187,
+      "family": "conv",
+      "kernel_name": "irhash_conv_950_b_N2H16W16C32_K32R1S1_t64x32x16_w2x2_a16x16x16_mem_default",
+      "sha256": "8a6e53ca00c5ab4c4eee15a823134d532b80151706078f8e98a179ea0b311f16",
+      "status": "ok"
+    },
+    "deep/common_gfx950_wt16/h16w16_k32": {
+      "arch": "gfx950",
+      "bytes": 54920,
+      "family": "deep_fused_conv",
+      "kernel_name": "irhash_deep_gfx950_wt16_N1H16W16C16_K32R3S3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+      "sha256": "5f8873cc072aacb95fc80fbf1b9974ef60f8a9677895e4f7363ac77e2aedd915",
+      "status": "ok"
+    },
+    "deep/common_gfx950_wt16/h24w24_k32": {
+      "arch": "gfx950",
+      "bytes": 54979,
+      "family": "deep_fused_conv",
+      "kernel_name": "irhash_deep_gfx950_wt16b_N1H24W24C16_K32R3S3_t64x32x16_w2x1_a16x16x16_mem_cshuffle_epi_relu",
+      "sha256": "2f1619d993e86117888f7a3bd1e996d62c223c67d98c1f1c8fcf5e00353b4336",
+      "status": "ok"
+    },
+    "deep/gfx1151/native_h16w16": {
+      "arch": "gfx1151",
+      "bytes": 118084,
+      "family": "deep_fused_conv",
+      "kernel_name": "ck_dsl_gfx1151_deep_fused_conv_pool_N1H16W16C16_K32R3S3_K132_pool2x2_s2x2_t64x32_pt4x4_w4x2_wmma16x16x16_directa_nativeiu8_i8i4_realquant",
+      "sha256": "1bd482fda3e5645e57fdbc765783e1eda6d4214c2f7e7e4a258553ba7d3a9a97",
+      "status": "ok"
+    },
+    "deep/gfx1151/native_h24w24": {
+      "arch": "gfx1151",
+      "bytes": 118085,
+      "family": "deep_fused_conv",
+      "kernel_name": "ck_dsl_gfx1151_deep_fused_conv_pool_N1H24W24C16_K32R3S3_K132_pool2x2_s2x2_t64x32_pt4x4_w4x2_wmma16x16x16_directa_nativeiu8_i8i4_realquant",
+      "sha256": "a998210db92320f62d9d7cb1b2c6e67a590f8c0806c75a8299fb20644c53c611",
+      "status": "ok"
+    },
+    "deep/gfx11_generic/native_h16w16": {
+      "arch": "gfx11-generic",
+      "bytes": 118084,
+      "family": "deep_fused_conv",
+      "kernel_name": "ck_dsl_gfx1151_deep_fused_conv_pool_N1H16W16C16_K32R3S3_K132_pool2x2_s2x2_t64x32_pt4x4_w4x2_wmma16x16x16_directa_nativeiu8_i8i4_realquant",
+      "sha256": "1bd482fda3e5645e57fdbc765783e1eda6d4214c2f7e7e4a258553ba7d3a9a97",
+      "status": "ok"
+    },
+    "deep/gfx1201/h16w16_k32": {
+      "arch": "gfx1201",
+      "bytes": 74690,
+      "family": "deep_fused_conv",
+      "kernel_name": "ck_dsl_gfx1201_deep_fused_conv_pool_N1H16W16C16_K32R3S3_t64x32x16_w2x1_a16x16x16_mem_default_epi_relu",
+      "sha256": "c178114efd7ebc2c25e3a6d135a65fa3f0a48697c5d54ef83011679c1f5fc41b",
+      "status": "ok"
+    },
+    "deep/gfx1201/h24w24_k32": {
+      "arch": "gfx1201",
+      "bytes": 74691,
+      "family": "deep_fused_conv",
+      "kernel_name": "ck_dsl_gfx1201_deep_fused_conv_pool_N1H24W24C16_K32R3S3_t64x32x16_w2x1_a16x16x16_mem_default_epi_relu",
+      "sha256": "040ddd2d7e7918d0e2048e4905bd5de954b2e6dd1e90a26d40256447022059d0",
+      "status": "ok"
+    },
+    "fused_moe/gfx950/gather_h128": {
+      "arch": "gfx950",
+      "bytes": 1797,
+      "family": "moe",
+      "kernel_name": "irhash_fused_moe_gather_gather_T32_E8_K2_H128_I256_f16_b128_v4",
+      "sha256": "e268ac538fec8cf72d0702beb5c54136d9d0f1a9ae864f5922b86cb35d1d0e43",
+      "status": "ok"
+    },
+    "fused_moe/gfx950/reduce_h128": {
+      "arch": "gfx950",
+      "bytes": 2202,
+      "family": "moe",
+      "kernel_name": "irhash_fused_moe_reduce_reduce_T32_E8_K2_H128_I256_f16_b128_v4",
+      "sha256": "62e3fb533c7cbead0f4d545a898a5ac23d7dccf9ba90c66515ee07649bd3b5fd",
+      "status": "ok"
+    },
+    "fused_moe/gfx950/silu_i256": {
+      "arch": "gfx950",
+      "bytes": 2948,
+      "family": "moe",
+      "kernel_name": "irhash_fused_moe_silu_silu_mul_T32_E8_K2_H128_I256_f16_b128_v4",
+      "sha256": "ba083a9f753cf5de73b3a4f462bf519e3ec1afd4ef2fdd1a981869005bc0e3e5",
+      "status": "ok"
+    },
+    "gemm/gfx1151/t32x32x16": {
+      "arch": "gfx1151",
+      "bytes": 15802,
+      "family": "gemm",
+      "kernel_name": "irhash_gemm_1151_a_fp16_t32x32x16_w2x2x1_wt16x16x16_mem_intrawave_default_pad",
+      "sha256": "41f6c17179ca3f9c529b6b3bc96914bf810765970432e40c844542e65510e62d",
+      "status": "ok"
+    },
+    "gemm/gfx1151/t64x32x16": {
+      "arch": "gfx1151",
+      "bytes": 39996,
+      "family": "gemm",
+      "kernel_name": "irhash_gemm_1151_b_fp16_t64x32x16_w2x1x1_wt16x16x16_mem_intrawave_default_pad",
+      "sha256": "4df6a1f513b1941e94fb0a5c7044a67e4f9732c34ec7c5730ac78a40512c123c",
+      "status": "ok"
+    },
+    "gemm/gfx1201/t32x32x16": {
+      "arch": "gfx1201",
+      "bytes": 11555,
+      "family": "gemm",
+      "kernel_name": "irhash_gemm_1201_a_fp16_t32x32x16_w2x2x1_wt16x16x16_mem_intrawave_default_pad",
+      "sha256": "c4fb419807e955ed061a875f27dcd48681a9f343f5a3a8df478eaadb4a10f216",
+      "status": "ok"
+    },
+    "gemm/gfx1201/t64x32x16": {
+      "arch": "gfx1201",
+      "bytes": 31645,
+      "family": "gemm",
+      "kernel_name": "irhash_gemm_1201_b_fp16_t64x32x16_w2x1x1_wt16x16x16_mem_intrawave_default_pad",
+      "sha256": "e77b480bc87f5c61f56354a32a880f9acf372adf4bf9353e643dd27961a83418",
+      "status": "ok"
+    },
+    "gemm/gfx942/t128x128x16": {
+      "arch": "gfx942",
+      "bytes": 52055,
+      "family": "gemm",
+      "kernel_name": "irhash_gemm_942_b_fp16_t128x128x16_w2x2x1_wt32x32x8_compv4_intrawave_cshuffle_pad",
+      "sha256": "2522141688cb71dbd54467c681b69c14da1fdf54b1eabacb57a4006306a82581",
+      "status": "ok"
+    },
+    "gemm/gfx942/t64x64x16": {
+      "arch": "gfx942",
+      "bytes": 20774,
+      "family": "gemm",
+      "kernel_name": "irhash_gemm_942_a_fp16_t64x64x16_w2x2x1_wt16x16x16_mem_intrawave_default_pad",
+      "sha256": "515ec12617f8e6b369fecede1e0a4409d0d6fd899e8359b9a402ad16ac736d50",
+      "status": "ok"
+    },
+    "gemm/gfx950/t128x128x32": {
+      "arch": "gfx950",
+      "bytes": 46478,
+      "family": "gemm",
+      "kernel_name": "irhash_gemm_950_a_fp16_t128x128x32_w2x2x1_wt32x32x16_compv4_intrawave_cshuffle_pad",
+      "sha256": "79f30f1e1766884631634ae4703bbe645781a6d709c6777d9fdabb862bafacf8",
+      "status": "ok"
+    },
+    "gemm/gfx950/t64x128x32": {
+      "arch": "gfx950",
+      "bytes": 29860,
+      "family": "gemm",
+      "kernel_name": "irhash_gemm_950_b_fp16_t64x128x32_w2x2x1_wt16x16x32_mem_intrawave_default_pad",
+      "sha256": "be2494690209993a28771b12a3b8fa0c0b700bda8d00848a72066857d08152d3",
+      "status": "ok"
+    },
+    "moe_sort/gfx1151/hist_t32_k2_e8": {
+      "arch": "gfx1151",
+      "bytes": 3010,
+      "family": "moe",
+      "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+      "sha256": "2a345008540988c9341e01fe3fd20efbbf9548805f1918fc4e8626f88840fc69",
+      "status": "ok"
+    },
+    "moe_sort/gfx1201/hist_t32_k2_e8": {
+      "arch": "gfx1201",
+      "bytes": 3010,
+      "family": "moe",
+      "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+      "sha256": "2a345008540988c9341e01fe3fd20efbbf9548805f1918fc4e8626f88840fc69",
+      "status": "ok"
+    },
+    "moe_sort/gfx942/hist_t32_k2_e8": {
+      "arch": "gfx942",
+      "bytes": 3014,
+      "family": "moe",
+      "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+      "sha256": "1e7c3b23fe17eef71537b7c6855a700ecc77b21e5bfe1f0ed5450241760e4e69",
+      "status": "ok"
+    },
+    "moe_sort/gfx950/hist_t32_k2_e8": {
+      "arch": "gfx950",
+      "bytes": 3014,
+      "family": "moe",
+      "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+      "sha256": "1e7c3b23fe17eef71537b7c6855a700ecc77b21e5bfe1f0ed5450241760e4e69",
+      "status": "ok"
+    },
+    "moe_sort/gfx950/scan_t64_k2_e16": {
+      "arch": "gfx950",
+      "bytes": 2955,
+      "family": "moe",
+      "kernel_name": "irhash_moe_sort_scan_scan_T64_K2_E16_b128",
+      "sha256": "5b6ab59c20b992b1530366716187326e46cf74332a4f5ea2479662e4497150b4",
+      "status": "ok"
+    },
+    "moe_sort/gfx950/scatter_t64_k2_e16": {
+      "arch": "gfx950",
+      "bytes": 2883,
+      "family": "moe",
+      "kernel_name": "irhash_moe_sort_scatter_scatter_T64_K2_E16_b128",
+      "sha256": "42b46dbb2203f1d2b1a25918ee0a355be2bd4e049ed4091f265975c6905d5e12",
+      "status": "ok"
+    },
+    "ua/gfx1151/2d_decode_fp16": {
+      "arch": "gfx1151",
+      "bytes": 26553,
+      "family": "unified_attention",
+      "kernel_name": "irhash_ua_2d_decode_q4_h4_kv2_d64_b16_fp16",
+      "sha256": "1bd019a1176047d5d178481466fa3b31a40e364d9ae777f3f8e073388cf886ae",
+      "status": "ok"
+    },
+    "ua/gfx1201/reduce_decode": {
+      "arch": "gfx1201",
+      "bytes": 4443,
+      "family": "unified_attention",
+      "kernel_name": "irhash_ua_reduce_decode_q4_h4_d64_seg4_fp16",
+      "sha256": "3c1427a18a5f9915d90bcf62465ba84179e2c10f25aa9b9322da23abc0cfbcbc",
+      "status": "ok"
+    },
+    "ua/gfx942/2d_decode_fp16": {
+      "arch": "gfx942",
+      "bytes": 26553,
+      "family": "unified_attention",
+      "kernel_name": "irhash_ua_2d_decode_q4_h4_kv2_d64_b16_fp16",
+      "sha256": "1bd019a1176047d5d178481466fa3b31a40e364d9ae777f3f8e073388cf886ae",
+      "status": "ok"
+    },
+    "ua/gfx942/reduce_prefill": {
+      "arch": "gfx942",
+      "bytes": 4456,
+      "family": "unified_attention",
+      "kernel_name": "irhash_ua_reduce_prefill_q64_h8_d128_seg8_bf16",
+      "sha256": "feabdab8d9ac1fa5dc57b2494692d07579fbe5e67c50fff526834e01fd5782b0",
+      "status": "ok"
+    },
+    "ua/gfx950/2d_prefill_bf16_sw": {
+      "arch": "gfx950",
+      "bytes": 48278,
+      "family": "unified_attention",
+      "kernel_name": "irhash_ua_2d_prefill_q64_h8_kv2_d128_b16_bf16_sink_sw_softcap",
+      "sha256": "ed35e4bb79d619add96a086ab0aa85ca4c874382b38c54dc7adc6c83d736d35b",
+      "status": "ok"
+    },
+    "ua/gfx950/3d_prefill": {
+      "arch": "gfx950",
+      "bytes": 49911,
+      "family": "unified_attention",
+      "kernel_name": "irhash_ua_3d_prefill_q64_h8_kv2_d128_b16_seg8_bf16",
+      "sha256": "209c7bba79e799fb224a9a09ed7fab79af808ee8e5a322546098ed706b6f05fe",
+      "status": "ok"
+    }
+  },
+  "description": "Representative no-GPU LLVM IR SHA256 golden references for CK DSL family kernels. Generated from clean HEAD 733355b013 and verified unchanged after the run_manifest manifest-runner refactor.",
+  "expected_failures": {
+    "deep/gfx950/h16w16_k32": {
+      "message": "no verified 'a' layout map for MMA op_id 'mfma_f32_32x32x16_f16' (32x32x16); add one to _MMA_FRAGMENT_INFO before consuming it",
+      "type": "NotImplementedError"
+    },
+    "deep/gfx950/h24w24_k32": {
+      "message": "no verified 'a' layout map for MMA op_id 'mfma_f32_32x32x16_f16' (32x32x16); add one to _MMA_FRAGMENT_INFO before consuming it",
+      "type": "NotImplementedError"
+    }
+  },
+  "generator": "/tmp/ckdsl_broad_ir_hash.py",
+  "head": "733355b013",
+  "schema": "ck.dsl.ir_golden_sha256/v1",
+  "summary": {
+    "arches": {
+      "gfx11-generic": 1,
+      "gfx1151": 8,
+      "gfx1201": 7,
+      "gfx942": 6,
+      "gfx950": 14
+    },
+    "expected_failures": 2,
+    "families": {
+      "conv": 6,
+      "deep_fused_conv": 7,
+      "gemm": 8,
+      "moe": 9,
+      "unified_attention": 6
+    },
+    "ok_cases": 36
+  }
+}
