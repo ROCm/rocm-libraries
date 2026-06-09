@@ -17,6 +17,7 @@
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/variant.h>
 #include <nanobind/stl/vector.h>
 
 #include <stdexcept>
@@ -24,6 +25,7 @@
 #include <vector>
 
 #include "tensile_writer/instruction_scheduler.hpp"
+#include "tensile_writer/logical_scheduler.hpp"
 #include "tensile_writer/subtile_geometry.hpp"
 #include "tensile_writer/tile_info.hpp"
 
@@ -421,6 +423,248 @@ void bind_instruction_scheduler(nb::module_& s) {
         "precondition violations (the caller should fall back to Python).");
 }
 
+// ---------------------------------------------------------------------------
+// Subtile LogicalScheduler data/config primitives (pure value types).
+// ---------------------------------------------------------------------------
+void bind_logical_scheduler(nb::module_& s) {
+  using namespace tw::subtile::lsched;
+
+  // -- Pass enum --------------------------------------------------------
+  nb::enum_<Pass>(s, "Pass",
+                  "Scheduler passes in dependency order. The numeric value "
+                  "defines topological order. Mirrors LogicalScheduler.Pass.")
+      .value("LR", Pass::LR)
+      .value("VGPR_TILES", Pass::VGPR_TILES)
+      .value("GR", Pass::GR)
+      .value("DEPS", Pass::DEPS)
+      .value("REMOVE_GR_DEPS", Pass::REMOVE_GR_DEPS)
+      .value("REMOVE_LR_DEPS", Pass::REMOVE_LR_DEPS)
+      .value("REMOVE_DEPS", Pass::REMOVE_DEPS)
+      .value("GR_INC", Pass::GR_INC)
+      .value("GROUP_LR_GR", Pass::GROUP_LR_GR)
+      .value("REMOVE_WAIT_LR_SYNC", Pass::REMOVE_WAIT_LR_SYNC)
+      .value("EMIT", Pass::EMIT)
+      .value("BUILD", Pass::BUILD)
+      .value("POPULATE", Pass::POPULATE);
+
+  // -- free helpers -----------------------------------------------------
+  s.def("fmt_mt", &fmt_mt, nb::arg("mt"),
+        "Format an MT iteration integer as a display string "
+        "(0 -> 'n', 1 -> 'n+1').");
+
+  // -- MFMATileRange ----------------------------------------------------
+  nb::class_<MFMATileRange>(s, "MFMATileRange",
+                            "A rectangular range of MFMA tile coordinates for "
+                            "one read.")
+      .def(nb::init<int, int, int, int>(), nb::arg("subIterK_start"),
+           nb::arg("subIterK_end"), nb::arg("tileId_start"),
+           nb::arg("tileId_end"))
+      .def_ro("subIterK_start", &MFMATileRange::subIterK_start)
+      .def_ro("subIterK_end", &MFMATileRange::subIterK_end)
+      .def_ro("tileId_start", &MFMATileRange::tileId_start)
+      .def_ro("tileId_end", &MFMATileRange::tileId_end)
+      .def_prop_ro("subIterK_list", &MFMATileRange::subIterK_list)
+      .def_prop_ro("tileId_list", &MFMATileRange::tileId_list)
+      .def("fmt_k", &MFMATileRange::fmt_k)
+      .def("fmt_tiles", &MFMATileRange::fmt_tiles);
+
+  // -- ReadGranularity --------------------------------------------------
+  nb::class_<ReadGranularity>(s, "ReadGranularity",
+                              "Load granularity for one operation on one "
+                              "tensor, measured in MFMA tiles.")
+      .def(nb::init<int, int>(), nb::arg("mn"), nb::arg("k"))
+      .def_ro("mn", &ReadGranularity::mn)
+      .def_ro("k", &ReadGranularity::k)
+      .def("tile_range", &ReadGranularity::tile_range, nb::arg("k"),
+           nb::arg("t_start"), nb::arg("t_end"));
+
+  // -- SchedulerConfig --------------------------------------------------
+  nb::class_<SchedulerConfig>(s, "SchedulerConfig",
+                              "Configuration for the MFMATile-based scheduler.")
+      .def(
+          "__init__",
+          [](SchedulerConfig* self, int numMFMATilesM, int numMFMATilesN,
+             int numSubIterK, ReadGranularity lrA, ReadGranularity lrB,
+             ReadGranularity grA, ReadGranularity grB,
+             std::optional<ReadGranularity> lrSA,
+             std::optional<ReadGranularity> lrSB,
+             std::optional<ReadGranularity> grSA,
+             std::optional<ReadGranularity> grSB, PartitionSpec partitionSizeM,
+             PartitionSpec partitionSizeN, int pgr) {
+            new (self) SchedulerConfig();
+            self->numMFMATilesM = numMFMATilesM;
+            self->numMFMATilesN = numMFMATilesN;
+            self->numSubIterK = numSubIterK;
+            self->lrA = lrA;
+            self->lrB = lrB;
+            self->grA = grA;
+            self->grB = grB;
+            self->lrSA = lrSA;
+            self->lrSB = lrSB;
+            self->grSA = grSA;
+            self->grSB = grSB;
+            self->partitionSizeM = partitionSizeM;
+            self->partitionSizeN = partitionSizeN;
+            self->pgr = pgr;
+            self->post_init();
+          },
+          nb::arg("numMFMATilesM"), nb::arg("numMFMATilesN"),
+          nb::arg("numSubIterK"), nb::arg("lrA"), nb::arg("lrB"),
+          nb::arg("grA"), nb::arg("grB"), nb::arg("lrSA") = nb::none(),
+          nb::arg("lrSB") = nb::none(), nb::arg("grSA") = nb::none(),
+          nb::arg("grSB") = nb::none(), nb::arg("partitionSizeM") = 0,
+          nb::arg("partitionSizeN") = 0, nb::arg("pgr") = 2)
+      .def_ro("numMFMATilesM", &SchedulerConfig::numMFMATilesM)
+      .def_ro("numMFMATilesN", &SchedulerConfig::numMFMATilesN)
+      .def_ro("numSubIterK", &SchedulerConfig::numSubIterK)
+      .def_ro("lrA", &SchedulerConfig::lrA)
+      .def_ro("lrB", &SchedulerConfig::lrB)
+      .def_ro("grA", &SchedulerConfig::grA)
+      .def_ro("grB", &SchedulerConfig::grB)
+      .def_ro("lrSA", &SchedulerConfig::lrSA)
+      .def_ro("lrSB", &SchedulerConfig::lrSB)
+      .def_ro("grSA", &SchedulerConfig::grSA)
+      .def_ro("grSB", &SchedulerConfig::grSB)
+      .def_ro("pgr", &SchedulerConfig::pgr)
+      .def_ro("plr", &SchedulerConfig::plr)
+      .def_ro("offsetPartition", &SchedulerConfig::offsetPartition)
+      .def_prop_ro("partitionSizesM", &SchedulerConfig::partitionSizesM)
+      .def_prop_ro("partitionSizesN", &SchedulerConfig::partitionSizesN)
+      .def_prop_ro("prefixM",
+                   [](const SchedulerConfig& c) { return c._prefixM; })
+      .def_prop_ro("prefixN",
+                   [](const SchedulerConfig& c) { return c._prefixN; })
+      .def_prop_ro("hasScale", &SchedulerConfig::hasScale)
+      .def_prop_ro("numPartitionsM", &SchedulerConfig::numPartitionsM)
+      .def_prop_ro("numPartitionsN", &SchedulerConfig::numPartitionsN)
+      .def_prop_ro("numPartitions", &SchedulerConfig::numPartitions)
+      .def_static(
+          "_normalize_partition_sizes",
+          [](PartitionSpec spec, int total, const std::string& dim, int mn) {
+            return SchedulerConfig::normalize_partition_sizes(spec, total, dim,
+                                                              mn);
+          },
+          nb::arg("spec"), nb::arg("total"), nb::arg("dim"), nb::arg("mn") = 1)
+      .def_static("get_partition_candidates",
+                  &SchedulerConfig::get_partition_candidates, nb::arg("M"),
+                  nb::arg("N"),
+                  "Return partition candidates as [(sizeM, sizeN), ...] given "
+                  "the two localMMATileGrid[0] values M and N.");
+
+  // -- Placement value types -------------------------------------------
+  nb::class_<MFMAPlacement>(s, "MFMAPlacement",
+                            "MFMA operation consuming data for one subIterK.")
+      .def(nb::init<int, MFMATileRange, MFMATileRange>(), nb::arg("subIterK"),
+           nb::arg("tileA"), nb::arg("tileB"))
+      .def_ro("subIterK", &MFMAPlacement::subIterK)
+      .def_ro("tileA", &MFMAPlacement::tileA)
+      .def_ro("tileB", &MFMAPlacement::tileB)
+      .def_ro("kind", &MFMAPlacement::kind)
+      .def("__str__", &MFMAPlacement::str);
+
+  nb::class_<LRPlacement>(s, "LRPlacement",
+                          "Local Read placement for one tensor in one subIterK "
+                          "slot.")
+      .def(nb::init<std::string, int, MFMATileRange, int, int>(),
+           nb::arg("tensor"), nb::arg("mtIteration"), nb::arg("tiles"),
+           nb::arg("subIterK_slot"), nb::arg("partition") = 0)
+      .def_ro("tensor", &LRPlacement::tensor)
+      .def_ro("mtIteration", &LRPlacement::mtIteration)
+      .def_ro("tiles", &LRPlacement::tiles)
+      .def_ro("subIterK_slot", &LRPlacement::subIterK_slot)
+      .def_ro("partition", &LRPlacement::partition)
+      .def_ro("kind", &LRPlacement::kind)
+      .def("__str__", &LRPlacement::str);
+
+  nb::class_<GRPlacement>(s, "GRPlacement",
+                          "Global Read placement for one tensor in one "
+                          "subIterK slot.")
+      .def(nb::init<std::string, int, MFMATileRange, int, int>(),
+           nb::arg("tensor"), nb::arg("mtIteration"), nb::arg("tiles"),
+           nb::arg("subIterK_slot"), nb::arg("partition") = 0)
+      .def_ro("tensor", &GRPlacement::tensor)
+      .def_ro("mtIteration", &GRPlacement::mtIteration)
+      .def_ro("tiles", &GRPlacement::tiles)
+      .def_ro("subIterK_slot", &GRPlacement::subIterK_slot)
+      .def_ro("partition", &GRPlacement::partition)
+      .def_ro("kind", &GRPlacement::kind)
+      .def("__str__", &GRPlacement::str);
+
+  // -- Dependency / before-chain op value types ------------------------
+  nb::class_<WaitGRCounts>(s, "WaitGRCounts",
+                           "Per-tensor inflight load counts for wait_gr preOp.")
+      .def(nb::init<int, int, int, int>(), nb::arg("A") = 0, nb::arg("B") = 0,
+           nb::arg("SA") = 0, nb::arg("SB") = 0)
+      .def_ro("A", &WaitGRCounts::A)
+      .def_ro("B", &WaitGRCounts::B)
+      .def_ro("SA", &WaitGRCounts::SA)
+      .def_ro("SB", &WaitGRCounts::SB)
+      .def("__str__", &WaitGRCounts::str);
+
+  nb::class_<WaitGROp>(s, "WaitGROp",
+                       "Wait for global reads to complete. Optionally includes "
+                       "a sync barrier.")
+      .def(nb::init<std::optional<WaitGRCounts>, bool, bool>(),
+           nb::arg("wait_gr_counts") = nb::none(), nb::arg("has_sync") = false,
+           nb::arg("adjustVmcnt") = true)
+      .def_ro("wait_gr_counts", &WaitGROp::wait_gr_counts)
+      .def_ro("has_sync", &WaitGROp::has_sync)
+      .def_ro("adjustVmcnt", &WaitGROp::adjustVmcnt)
+      .def_ro("kind", &WaitGROp::kind)
+      .def("__str__", &WaitGROp::str);
+
+  nb::class_<WaitLROp>(s, "WaitLROp",
+                       "Wait for local reads to complete. Optionally includes "
+                       "a sync barrier.")
+      .def(nb::init<bool>(), nb::arg("has_sync") = false)
+      .def_ro("has_sync", &WaitLROp::has_sync)
+      .def_ro("kind", &WaitLROp::kind)
+      .def("__str__", &WaitLROp::str);
+
+  nb::class_<SyncOp>(s, "SyncOp", "Standalone sync barrier.")
+      .def(nb::init<>())
+      .def_ro("kind", &SyncOp::kind)
+      .def("__str__", &SyncOp::str);
+
+  nb::class_<MaskKOp>(s, "MaskKOp",
+                      "Zero A/B vgprs whose K-index >= remaining tail K for one "
+                      "subIterK group.")
+      .def(nb::init<int>(), nb::arg("subIterK") = 0)
+      .def_ro("subIterK", &MaskKOp::subIterK)
+      .def_ro("kind", &MaskKOp::kind)
+      .def("__str__", &MaskKOp::str);
+
+  nb::class_<LRIncOp>(s, "LRIncOp",
+                      "LDS buffer swap for local reads on a specific tensor.")
+      .def(nb::init<std::string>(), nb::arg("tensor") = std::string())
+      .def_ro("tensor", &LRIncOp::tensor)
+      .def_ro("kind", &LRIncOp::kind)
+      .def("__str__", &LRIncOp::str);
+
+  nb::class_<GRIncOp>(s, "GRIncOp",
+                      "Pointer update + LDS swap for global reads on a specific "
+                      "tensor.")
+      .def(nb::init<std::string>(), nb::arg("tensor") = std::string())
+      .def_ro("tensor", &GRIncOp::tensor)
+      .def_ro("kind", &GRIncOp::kind)
+      .def("__str__", &GRIncOp::str);
+
+  nb::class_<SkipOp>(s, "SkipOp",
+                     "Skip guard: compare LoopCounter and branch.")
+      .def(nb::init<std::string, int, std::string, bool, std::string>(),
+           nb::arg("compare") = std::string(), nb::arg("value") = 0,
+           nb::arg("target") = std::string(), nb::arg("rawLabel") = false,
+           nb::arg("branchComment") = std::string())
+      .def_ro("compare", &SkipOp::compare)
+      .def_ro("value", &SkipOp::value)
+      .def_ro("target", &SkipOp::target)
+      .def_ro("rawLabel", &SkipOp::rawLabel)
+      .def_ro("branchComment", &SkipOp::branchComment)
+      .def_ro("kind", &SkipOp::kind)
+      .def_prop_ro("tensor", &SkipOp::tensor)
+      .def("__str__", &SkipOp::str);
+}
+
 }  // namespace
 
 NB_MODULE(_tensile_writer, m) {
@@ -449,4 +693,12 @@ NB_MODULE(_tensile_writer, m) {
       "data-only instruction/module model; a Python shim maps the resulting "
       "order back onto live rocisa objects.");
   bind_instruction_scheduler(instruction_scheduler);
+
+  nb::module_ logical_scheduler = subtile.def_submodule(
+      "logical_scheduler",
+      "Subtile LogicalScheduler data/config primitives ported from "
+      "Tensile.Components.Subtile.LogicalScheduler. Pure value/config types "
+      "(Pass, ReadGranularity, MFMATileRange, SchedulerConfig, placement/op "
+      "value types) only; the scheduling passes remain in Python.");
+  bind_logical_scheduler(logical_scheduler);
 }
