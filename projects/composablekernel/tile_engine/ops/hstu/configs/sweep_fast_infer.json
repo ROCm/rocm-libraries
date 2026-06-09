@@ -1,0 +1,18 @@
+{
+  "description": "Fast infer-tuning grid (d=64, bf16, hstu). Trimmed from sweep_d64.json for quick iteration on GPU 1. Drops axes that are falsified or useless on gfx942: trload (gfx950-only, hard compile fail), agpr (NaN/broken), occupancy!=-1 (marginal, ~noise vs default), qr_async (std-fallback stub), num_splits>0 (auto=2 is optimal; >2 currently wrong), max_k 96/128 (padded, slower for d=64). Keeps the levers that actually moved the needle on infer: use_splitkv {false,true}, mtile {64,128}, warp_k {16,32}, pingpong {false,true} (pp was marginally fastest at ~26.7 ms). Expected ~12 kernels build. Use for --problem-index 5/6 quick A/B; use sweep_d64.json for the exhaustive run.",
+  "variant": "jagged_fwd",
+  "trait_config": {
+    "data_type": {"values": ["bf16"]},
+    "use_causal": {"values": [true]},
+    "max_k": {"values": [64]},
+    "mtile": {"values": [64, 128]},
+    "use_splitkv": {"values": [false, true]},
+    "pipeline": {"values": ["std"]},
+    "warp_k": {"values": [16, 32]},
+    "agpr": {"values": [false]},
+    "pingpong": {"values": [false, true]},
+    "trload": {"values": [false]},
+    "occupancy": {"values": [-1]},
+    "num_splits": {"values": [0,2,4]}
+  }
+}

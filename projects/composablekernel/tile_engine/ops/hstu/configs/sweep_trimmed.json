@@ -1,0 +1,11 @@
+{
+  "description": "Trimmed HSTU jagged-fwd kernel sweep (v1): fp16/bf16 × causal × maxk 64/128 × mtile 64/128, no softmax/bias. split-KV disabled in JIT (mtile=64 only when enabled).",
+  "variant": "jagged_fwd",
+  "trait_config": {
+    "data_type": {"values": ["fp16", "bf16"]},
+    "use_causal": {"values": [true, false]},
+    "max_k": {"values": [64, 128]},
+    "mtile": {"values": [64, 128]},
+    "use_splitkv": {"values": [false]}
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "description": "Full block-tile shape sweep for inference (d=64, bf16, hstu). Sweeps sequence<kM0,kN0,kN0Sub,kN1,kK1,MaxK>: M=km0 {64,128,192}, N=kn0 {32,64,128}, K-stream=kn0sub+kk1 (must be equal; sweep kk1 {16,32,64}, kn0sub auto-matched in instance_gen gate), V head tile kn1 {16,32,64}, warp_k {16,32}. Invalid combos skipped by instance_gen (kN0Sub==kK1, divisibility, spill). Kernel names get _km0NNN _n0NNN _n0sNNN _n1NNN _k1NNN tokens when overridden. splitkv/pingpong off to isolate tile shape. Use --problem-index 5.",
+  "variant": "jagged_fwd",
+  "trait_config": {
+    "data_type": {"values": ["bf16"]},
+    "use_causal": {"values": [true]},
+    "max_k": {"values": [64]},
+    "mtile": {"values": [64, 128]},
+    "use_splitkv": {"values": [true, false]},
+    "pipeline": {"values": ["std"]},
+    "warp_k": {"values": [16, 32]},
+    "agpr": {"values": [false]},
+    "pingpong": {"values": [false]},
+    "trload": {"values": [false]},
+    "occupancy": {"values": [-1]},
+    "num_splits": {"values": [0]},
+    "km0": {"values": [64, 128, 192]},
+    "kn0": {"values": [32, 64, 128]},
+    "kn0sub": {"values": [16, 32, 64]},
+    "kn1": {"values": [16, 32, 64]},
+    "kk1": {"values": [16, 32, 64]}
+  }
+}

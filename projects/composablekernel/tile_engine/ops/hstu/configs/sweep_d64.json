@@ -1,0 +1,11 @@
+{
+  "description": "Deployment d=64 exhaustive bf16 sweep: causal × max_k {64,96,128} × mtile {64,128} × splitkv {0,1} (splitkv requires mtile=64). 6 non-splitkv + 3 splitkv = 9 kernels.",
+  "variant": "jagged_fwd",
+  "trait_config": {
+    "data_type": {"values": ["bf16"]},
+    "use_causal": {"values": [true]},
+    "max_k": {"values": [64, 96, 128]},
+    "mtile": {"values": [64, 128]},
+    "use_splitkv": {"values": [false, true]}
+  }
+}

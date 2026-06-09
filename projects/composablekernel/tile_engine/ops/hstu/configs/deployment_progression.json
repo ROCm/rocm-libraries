@@ -1,0 +1,98 @@
+{
+  "description": "Deployment-target shapes small→large (d=64, hstu mask). Run one problem at a time via --problem-index or --only-problem.",
+  "data_types": ["bf16"],
+  "mask_configs": [
+    {"label": "hstu", "max_attn_len": 0, "contextual_seq_len": 0, "target_size": 0}
+  ],
+  "problems": [
+    {
+      "problem_id": "step0_smoke",
+      "mode": "smoke",
+      "batch": 128,
+      "num_head": 4,
+      "max_seqlen_q": 1024,
+      "hdim_qk": 64,
+      "hdim_v": 64,
+      "target_size": 10,
+      "num_targets_fixed": true
+    },
+    {
+      "problem_id": "step1_proxy_b128_n4096",
+      "mode": "proxy",
+      "batch": 128,
+      "num_head": 4,
+      "max_seqlen_q": 4096,
+      "hdim_qk": 64,
+      "hdim_v": 64,
+      "target_size": 10,
+      "num_targets_fixed": true
+    },
+    {
+      "problem_id": "step2_infer_proxy_b120_n4096",
+      "mode": "inference_proxy",
+      "batch": 120,
+      "num_head": 4,
+      "max_seqlen_q": 4096,
+      "hdim_qk": 64,
+      "hdim_v": 64,
+      "target_size": 300,
+      "num_targets_fixed": true
+    },
+    {
+      "problem_id": "step3_train_b1024_n16384_h4",
+      "mode": "train",
+      "batch": 1024,
+      "num_head": 4,
+      "max_seqlen_q": 16384,
+      "hdim_qk": 64,
+      "hdim_v": 64,
+      "target_size": 10,
+      "num_targets_fixed": true
+    },
+    {
+      "problem_id": "step4_train_b1024_n16384_h8",
+      "mode": "train",
+      "batch": 1024,
+      "num_head": 8,
+      "max_seqlen_q": 16384,
+      "hdim_qk": 64,
+      "hdim_v": 64,
+      "target_size": 10,
+      "num_targets_fixed": true
+    },
+    {
+      "problem_id": "step5_infer_b120_n16384_h4",
+      "mode": "inference",
+      "batch": 120,
+      "num_head": 4,
+      "max_seqlen_q": 16384,
+      "hdim_qk": 64,
+      "hdim_v": 64,
+      "target_size": 300,
+      "num_targets_fixed": true
+    },
+    {
+      "problem_id": "step6_infer_b120_n16384_h8",
+      "mode": "inference",
+      "batch": 120,
+      "num_head": 8,
+      "max_seqlen_q": 16384,
+      "hdim_qk": 64,
+      "hdim_v": 64,
+      "target_size": 300,
+      "num_targets_fixed": true
+    }
+  ],
+  "smoke_problems": [
+    {
+      "problem_id": "step0_smoke",
+      "batch": 128,
+      "num_head": 4,
+      "max_seqlen_q": 1024,
+      "hdim_qk": 64,
+      "hdim_v": 64,
+      "target_size": 10,
+      "num_targets_fixed": true
+    }
+  ]
+}

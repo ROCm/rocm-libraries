@@ -1,0 +1,42 @@
+{
+  "description": "Reference latencies for deployment reproduction (d=64, N=16384 UIH, hstu mask, fixed targets). CK AMD from comparison slide; Triton genrec from mvonstra harness.",
+  "match": {
+    "hdim_qk": 64,
+    "max_seqlen_q": 16384,
+    "mask": "hstu"
+  },
+  "entries": [
+    {
+      "mode": "train",
+      "batch": 1024,
+      "num_head": 4,
+      "target_size": 10,
+      "ck_amd_ms": 193.63,
+      "triton_genrec_ms": 191.31
+    },
+    {
+      "mode": "train",
+      "batch": 1024,
+      "num_head": 8,
+      "target_size": 10,
+      "ck_amd_ms": 388.12,
+      "triton_genrec_ms": 380.69
+    },
+    {
+      "mode": "inference",
+      "batch": 120,
+      "num_head": 4,
+      "target_size": 300,
+      "ck_amd_ms": 26.86,
+      "triton_genrec_ms": 21.2
+    },
+    {
+      "mode": "inference",
+      "batch": 120,
+      "num_head": 8,
+      "target_size": 300,
+      "ck_amd_ms": 54.61,
+      "triton_genrec_ms": 42.79
+    }
+  ]
+}

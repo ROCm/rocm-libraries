@@ -1,0 +1,53 @@
+{
+  "description": "Full deployment table shapes (d=64, N=16384) with per-problem fixed targets. hstu mask only; target_size on each problem (not mask grid).",
+  "data_types": ["bf16"],
+  "mask_configs": [
+    {"label": "hstu", "max_attn_len": 0, "contextual_seq_len": 0, "target_size": 0}
+  ],
+  "problems": [
+    {
+      "problem_id": "train_b1024_h4",
+      "mode": "train",
+      "batch": 1024,
+      "num_head": 4,
+      "max_seqlen_q": 16384,
+      "hdim_qk": 64,
+      "hdim_v": 64,
+      "target_size": 10,
+      "num_targets_fixed": true
+    },
+    {
+      "problem_id": "train_b1024_h8",
+      "mode": "train",
+      "batch": 1024,
+      "num_head": 8,
+      "max_seqlen_q": 16384,
+      "hdim_qk": 64,
+      "hdim_v": 64,
+      "target_size": 10,
+      "num_targets_fixed": true
+    },
+    {
+      "problem_id": "infer_b120_h4",
+      "mode": "inference",
+      "batch": 120,
+      "num_head": 4,
+      "max_seqlen_q": 16384,
+      "hdim_qk": 64,
+      "hdim_v": 64,
+      "target_size": 300,
+      "num_targets_fixed": true
+    },
+    {
+      "problem_id": "infer_b120_h8",
+      "mode": "inference",
+      "batch": 120,
+      "num_head": 8,
+      "max_seqlen_q": 16384,
+      "hdim_qk": 64,
+      "hdim_v": 64,
+      "target_size": 300,
+      "num_targets_fixed": true
+    }
+  ]
+}
