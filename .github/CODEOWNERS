@@ -35,6 +35,7 @@
 /projects/rocsparse/                                @ROCm/sparses-reviewers
 /projects/rocthrust/                                @ROCm/prims-rands-reviewers
 /projects/rocwmma/                                  @ROCm/rocwmma-reviewers
+/projects/rpp/                                      @ROCm/rpp-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
 /shared/mxdatagenerator/                            @ROCm/rocroller-developers
 /shared/rocroller/                                  @ROCm/rocroller-developers
