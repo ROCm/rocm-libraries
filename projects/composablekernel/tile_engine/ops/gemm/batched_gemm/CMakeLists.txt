@@ -166,7 +166,7 @@ foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
 endforeach()
 
 if(NOT BATCHED_GEMM_GPU_TARGETS)
-    message(WARNING "Skipping Tile Engine batched GEMM build: No supported GPU targets (gfx90a, gfx942) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
+    message(WARNING "Skipping Tile Engine batched GEMM build: No supported GPU targets (gfx90a, gfx942, gfx950, gfx1201) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 else()
     message(VERBOSE "Building individual batched GEMM targets for GPU targets: ${BATCHED_GEMM_GPU_TARGETS}")
 
