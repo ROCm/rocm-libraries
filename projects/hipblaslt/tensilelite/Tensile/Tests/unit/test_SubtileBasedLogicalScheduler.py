@@ -1242,7 +1242,7 @@ class TestPlaceGRs:
         uid=0: A/B k=[0,2) only (uid's own k range), SA/SB k=[0,4).
         uid=1: A/B k=[2,4) (second data read), SA/SB skipped.
 
-        uid=0 is distributed across slots; uid=1 is consolidated into the
+        uid=0 is distributed across slots; uid=1 is placed only in the
         last slot so GRInc(uid=0) precedes all uid=1 GRs globally.
         """
         cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
@@ -1261,7 +1261,7 @@ class TestPlaceGRs:
         _assert_gr(slots[2], 'SA', 0, 4, 0, 8, mt=1, uid=0)
         _assert_gr(slots[2], 'SB', 0, 4, 0, 8, mt=1, uid=0)
 
-        # uid=1 consolidated at s3
+        # uid=1 at s3 only
         _assert_gr(slots[3], 'A', 2, 4, 0, 4, mt=1, uid=1)
         _assert_gr(slots[3], 'A', 2, 4, 4, 8, mt=1, uid=1, idx=1)
         _assert_gr(slots[3], 'B', 2, 4, 0, 8, mt=1, uid=1)
@@ -1358,7 +1358,7 @@ class TestAnnotateDeps:
         """Multi-DU: uid=0 and uid=1 GRs get correct collision deps.
         PGR=1 → GR at MT1, deps relative to MT1.
 
-        uid=0 distributed across slots; uid=1 consolidated at s3."""
+        uid=0 distributed across slots; uid=1 placed at s3 only."""
         cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
         sched = LogicalScheduler(cfg)
         sched.annotate_deps()

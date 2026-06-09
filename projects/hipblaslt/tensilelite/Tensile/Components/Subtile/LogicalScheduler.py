@@ -178,8 +178,8 @@ class SchedulerConfig:
         if remainder == 0:
             return [s] * num_full
         # The remainder (short) partition must come LAST.  The subtile
-        # PGR=1 multi-DU codegen (GR pre-advance + uid>0 GR consolidation
-        # into the last partition) assumes every partition before the last
+        # PGR=1 multi-DU codegen (GR pre-advance + uid>0 GRs placed in the
+        # last partition's last subIterK slot) assumes every partition before the last
         # is the full size `s`; a short partition sitting *between* full
         # partitions corrupts the per-partition pre-advance addressing and
         # the kernel accumulates wrong values that grow with K iteration
@@ -1196,31 +1196,40 @@ class LogicalScheduler:
 
         allowed_slots, when set, restricts placement to an explicit list of
         flat slot indices (e.g. all subIterK=1 slots for scale prefetch).
+        A single allowed slot still runs the normal weighted distribution
+        across the full [slot_start, slot_end) range, remerges per virtual
+        slot, then places all resulting GRs into that one slot (multi-DU
+        uid>0 under PGR=1).
         """
         cfg = self.config
         numK = cfg.numSubIterK
         numP = cfg.numPartitions
         numSlots = numP * numK
+        if slot_end is None:
+            slot_end = numSlots
+        collapse_slot = None
         if allowed_slots is None:
-            if slot_end is None:
-                slot_end = numSlots
             slots = list(range(slot_start, slot_end))
         else:
             slots = sorted(allowed_slots)
+            if len(slots) == 1:
+                collapse_slot = slots[0]
         if not slots:
             return
+        dist_slots = (list(range(slot_start, slot_end))
+                      if collapse_slot is not None else slots)
         lower, upper = gr_slot_bounds
 
         # 2a. Explode GR entries into atomic loads (1 load each)
         atoms = []
         for tensor, mt_val, t_start, t_end, k_start, k_end, gr_gran in gr_list:
             mn = gr_gran.mn
-            last = max(slots[0], min(upper.get((tensor, mt_val), numSlots) - 1,
-                                       slots[-1]))
+            last = max(dist_slots[0], min(upper.get((tensor, mt_val), numSlots) - 1,
+                                          dist_slots[-1]))
             for pos in range(t_start, t_end, mn):
                 atoms.append((tensor, mt_val, pos, pos + mn, k_start, k_end, last))
 
-        # 2b. Place atoms across allowed slots weighted by partition MFMA
+        # 2b. Place atoms across dist_slots weighted by partition MFMA
         #     count.  Each partition's slots get a share proportional to its
         #     MFMAs, so larger partitions receive more GR loads.
         nAtoms = len(atoms)
@@ -1233,52 +1242,69 @@ class LogicalScheduler:
             mfma_per_partition.append(cfg.partitionSizesM[piM] * cfg.partitionSizesN[piN])
 
         weight_prefix = [0]
-        for s in slots:
+        for s in dist_slots:
             weight_prefix.append(weight_prefix[-1] + mfma_per_partition[s // numK])
         total_weight = weight_prefix[-1]
         slot_boundaries = [p * nAtoms for p in weight_prefix[1:]]
 
         for i, (tensor, mt_val, ts, te, ks, ke, last) in enumerate(atoms):
             rel = min(bisect_left(slot_boundaries, i * total_weight + 1),
-                      len(slots) - 1) if nAtoms else 0
-            slot = slots[rel]
+                      len(dist_slots) - 1) if nAtoms else 0
+            slot = dist_slots[rel]
             slot = min(slot, last)
             slot_idx = rel
             while (slot < last and
                    self._has_lr_conflict(lower, tensor, mt_val,
                                          slot // numK, slot % numK, ks, ke)):
                 slot_idx += 1
-                if slot_idx >= len(slots):
+                if slot_idx >= len(dist_slots):
                     break
-                slot = slots[slot_idx]
-            if slot_idx >= len(slots):
-                slot = min(last, slots[-1])
-            buckets[slot].append((tensor, mt_val, ts, te, ks, ke))
+                slot = dist_slots[slot_idx]
+            if slot_idx >= len(dist_slots):
+                slot = min(last, dist_slots[-1])
+            dest = collapse_slot if collapse_slot is not None else slot
+            entry = ((slot, tensor, mt_val, ts, te, ks, ke)
+                     if collapse_slot is not None
+                     else (tensor, mt_val, ts, te, ks, ke))
+            buckets[dest].append(entry)
 
         # 2c. Remerge consecutive atoms and place into partitions
         for flat, bucket in enumerate(buckets):
+            if not bucket:
+                continue
             pi = flat // numK
             si = flat % numK
             target_slot = self._partitions[pi][si]
             uid = unrollId
             gr_list_for_uid = target_slot.grs_by_unroll.setdefault(uid, [])
-            for atom in bucket:
-                tensor, mt_val, ts, te, ks, ke = atom
-                if gr_list_for_uid:
-                    prev = gr_list_for_uid[-1]
-                    if (prev.tensor == tensor and
-                            prev.mtIteration == mt_val and
-                            prev.tiles.subIterK_start == ks and
-                            prev.tiles.subIterK_end == ke and
-                            prev.tiles.tileId_end == ts):
-                        prev.tiles = MFMATileRange(ks, ke, prev.tiles.tileId_start, te)
-                        continue
-                gr_list_for_uid.append(GRPlacement(
-                    tensor=tensor, mtIteration=mt_val,
-                    tiles=MFMATileRange(ks, ke, ts, te),
-                    subIterK_slot=si,
-                    partition=pi,
-                    unrollId=uid))
+            atom_groups = [bucket]
+            if collapse_slot is not None:
+                by_virtual = {}
+                for virtual_slot, tensor, mt_val, ts, te, ks, ke in bucket:
+                    by_virtual.setdefault(virtual_slot, []).append(
+                        (tensor, mt_val, ts, te, ks, ke))
+                atom_groups = [by_virtual[v] for v in sorted(by_virtual)]
+            for group_idx, group in enumerate(atom_groups):
+                for atom_idx, atom in enumerate(group):
+                    tensor, mt_val, ts, te, ks, ke = atom
+                    can_merge = (gr_list_for_uid and
+                                 not (collapse_slot is not None
+                                      and group_idx > 0 and atom_idx == 0))
+                    if can_merge:
+                        prev = gr_list_for_uid[-1]
+                        if (prev.tensor == tensor and
+                                prev.mtIteration == mt_val and
+                                prev.tiles.subIterK_start == ks and
+                                prev.tiles.subIterK_end == ke and
+                                prev.tiles.tileId_end == ts):
+                            prev.tiles = MFMATileRange(ks, ke, prev.tiles.tileId_start, te)
+                            continue
+                    gr_list_for_uid.append(GRPlacement(
+                        tensor=tensor, mtIteration=mt_val,
+                        tiles=MFMATileRange(ks, ke, ts, te),
+                        subIterK_slot=si,
+                        partition=pi,
+                        unrollId=uid))
 
     def place_GRs(self) -> List[SubIterKSlot]:
         """Place Global Reads by iterating MFMAs across partitions.
@@ -1302,50 +1328,29 @@ class LogicalScheduler:
 
         maxUnroll = max(self.config.numUnroll.values())
         gr_slot_bounds = self._build_gr_slot_bounds()
+        numK = self.config.numSubIterK
+        last_uid_slot = None
+        if maxUnroll > 1 and pgr == 1:
+            # Multi-DU shares one SRD: all uid=0 GRs must finish (and
+            # GRInc(uid=0) fire) before any uid>0 GR.  Place uid>0 only in
+            # the last subIterK slot of the last partition so _gr_sort_key and
+            # group_lr_gr chain them after GRInc(uid=0); that slot has an MFMA
+            # so the instruction scheduler can interleave uid>0 GRs with compute.
+            last_pi = len(self._partitions) - 1
+            last_si = len(self._partitions[last_pi]) - 1
+            last_uid_slot = last_pi * numK + last_si
+
         for uid in range(maxUnroll):
             gr_list = self._build_gr_list(part_ranges, offsetMT,
                                           self.config.offsetPartition, unrollId=uid)
-            self._distribute_grs(gr_list, gr_slot_bounds, unrollId=uid)
-
-        if maxUnroll > 1 and pgr == 1:
-            self._consolidate_uid_grs(maxUnroll)
+            if uid > 0 and last_uid_slot is not None:
+                self._distribute_grs(gr_list, gr_slot_bounds, unrollId=uid,
+                                      allowed_slots=[last_uid_slot])
+            else:
+                self._distribute_grs(gr_list, gr_slot_bounds, unrollId=uid)
 
         self._completed.add(Pass.GR)
         return self._partitions[0]
-
-    def _consolidate_uid_grs(self, maxUnroll):
-        """Move uid>0 GRs into the last subIterK slot of the last partition.
-
-        For multi-DU, all GR loads for uid=0 must complete before the
-        GRInc that advances the SRD for uid=1.  Since all tensors share
-        a single SRD, the ordering must hold *globally* across partitions:
-
-            all uid=0 GRs (all partitions) → GRInc(uid=0) → all uid=1 GRs
-
-        We collect every uid>0 GR from every partition and merge them
-        into the last existing subIterK slot.  The _gr_sort_key places
-        uid=0 before uid=1, and group_lr_gr chains them so uid=1 GRs
-        follow the GRInc(uid=0) postOp.  Because the target slot has
-        an MFMA, the instruction scheduler interleaves uid=1 GRs with
-        compute — avoiding the stale-LDS-read that occurs when uid=1
-        GRs land in a separate MFMA-less slot after the scheduled block.
-        """
-        last_pi = len(self._partitions) - 1
-        last_partition = self._partitions[last_pi]
-        target_slot = last_partition[-1]
-
-        for pi, slots in enumerate(self._partitions):
-            for si, slot in enumerate(slots):
-                if pi == last_pi and si == len(last_partition) - 1:
-                    continue
-                for uid in range(1, maxUnroll):
-                    if uid in slot.grs_by_unroll and slot.grs_by_unroll[uid]:
-                        target_list = target_slot.grs_by_unroll.setdefault(uid, [])
-                        for gr in slot.grs_by_unroll[uid]:
-                            gr.subIterK_slot = target_slot.subIterK
-                            gr.partition = last_pi
-                        target_list.extend(slot.grs_by_unroll[uid])
-                        slot.grs_by_unroll[uid] = []
 
     # ── Annotate dependencies ─────────────────────────────
 
