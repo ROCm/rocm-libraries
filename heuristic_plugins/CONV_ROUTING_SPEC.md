@@ -16,12 +16,13 @@ candidate list.
 
 ## Engine ID Probe Results
 
-Two standalone verifier probes have run on gfx942:
+Standalone verifier probes have run on gfx942:
 
 | Probe | Shape | Regime | Candidate count | Candidate IDs |
 |-------|-------|--------|-----------------|---------------|
 | `conv_engine_id_probe.log` | N=4 C=4 H=4 W=4, K=4 R=1 S=1, stride=1 | `GEMM_CONV` | 1 | `-3` |
 | `conv_realistic_probe.log` | N=32 C=64 H=56 W=56, K=64 R=3 S=3, stride=1 | `WINOGRAD` | 1 | `-3` |
+| `conv_miopen712_probe.log` | N=32 C=64 H=56 W=56, K=64 R=3 S=3, stride=1 | `WINOGRAD` | 2 | `-6748551569128940061`, `1563989756945604898` |
 
 `engine_id=-3` is not a production MIOpen engine. It maps to the test engine plugin:
 
@@ -35,22 +36,53 @@ it can expose is the test plugin's fixed ID. This means the probes validate that
 `conv_heuristic` sees and classifies convolution graphs, but they do not reveal production
 Winograd, GEMM, or direct MIOpen engine IDs.
 
+The production MIOpen provider path was validated by `verify_conv_miopen`, which loads the
+prebuilt ROCm 7.12 provider plugin:
+
+```text
+/cluster/apps/ubuntu-24/rocm/rocm-7.12.0.60610/lib/hipdnn_plugins/engines/libmiopen_plugin.so
+```
+
+That path produced real hipDNN engine IDs:
+
+```text
+[CONV_HEURISTIC] PolicySetEngineIds count=2
+[CONV_HEURISTIC]   candidate engine_id[0] = -6748551569128940061
+[CONV_HEURISTIC]   candidate engine_id[1] = 1563989756945604898
+[CONV_HEURISTIC] regime=WINOGRAD N=32 C=64 H=56 W=56 K=64 filterC=64 R=3 S=3 stride=1x1 pad=1x1 dtype=FLOAT
+```
+
+These IDs map to the registered engine names in `EngineNames.hpp`:
+
+```text
+MIOPEN_ENGINE_DETERMINISTIC = -6748551569128940061
+MIOPEN_ENGINE               =  1563989756945604898
+```
+
 ## Conclusion
 
-Routing is not actionable from the current verifier results.
+Routing is now actionable at the coarse MIOpen-engine level.
 
-The heuristic can classify regimes correctly, but the runtime candidate list in the current
-test path contains a single test engine candidate. There is no choice to make, and the ID is
-not a production convolution algorithm ID.
+The test-plugin verifier path is non-production evidence only, but the ROCm 7.12 MIOpen
+provider path proves hipDNN can present multiple production engine candidates to the
+heuristic. For the realistic 3x3 stride-1 WINOGRAD-class shape, the candidate order was:
 
-Before implementing routing, use a verifier path that loads the production MIOpen engine
-plugin and produces real convolution candidates. The key question is whether production
-conv graphs ever pass multiple candidate IDs through `PolicySetEngineIds`.
+```text
+MIOPEN_ENGINE_DETERMINISTIC
+MIOPEN_ENGINE
+```
+
+This still does not expose separate internal MIOpen solver IDs for Winograd, GEMM, or
+direct kernels. The heuristic can route between the two hipDNN-level MIOpen engines, but it
+cannot directly select an internal MIOpen solver unless the provider exposes more granular
+engine IDs in the future.
 
 ## Required Next Probe
 
-Run the same conv heuristic against the production MIOpen engine plugin instead of
-`libtest_good_default_plugin.so`.
+Run additional production MIOpen provider probes for 1x1 and large-filter shapes using
+`verify_conv_miopen` variants. Confirm whether candidate order changes by regime and
+whether `MIOPEN_ENGINE_DETERMINISTIC` should be preferred only for WINOGRAD-like shapes or
+for all convolution shapes.
 
 The production provider target is `miopen_plugin` in:
 
@@ -89,7 +121,7 @@ checkout without either:
 - a matching newer MIOpen SDK/header package that provides those APIs, or
 - a provider source/build adjustment that excludes or gates the newer batchnorm plan code.
 
-Expected evidence needed before routing:
+Evidence format:
 
 ```text
 [CONV_HEURISTIC] PolicySetEngineIds count=N
@@ -106,22 +138,22 @@ not a heuristic selection problem.
 
 Use the same pattern as `Q3_ROUTING_SPEC.md`:
 
-- `WINOGRAD_ENGINE_ID`: activate for `regime=WINOGRAD` (3x3 stride-1, not depthwise)
-- `GEMM_ENGINE_ID`: activate for `regime=GEMM_CONV` (1x1)
-- Leave `DIRECT`, `DEPTHWISE`, and `GENERAL_CONV` as fallthrough until benchmarks prove a
-  reorder improves them
+- `MIOPEN_ENGINE_DETERMINISTIC`: candidate observed first for `regime=WINOGRAD`
+- `MIOPEN_ENGINE`: general MIOpen engine candidate observed second
+- Leave actual routing off until before/after benchmarks prove that changing the
+  hipDNN-level engine order improves a specific regime
 
 In `PolicyFinalize`:
 
 ```cpp
-if(regime == WINOGRAD && candidate list contains WINOGRAD_ENGINE_ID)
+if(regime == WINOGRAD && candidate list contains MIOPEN_ENGINE_DETERMINISTIC)
 {
-    routed_engine_id = WINOGRAD_ENGINE_ID;
+    routed_engine_id = MIOPEN_ENGINE_DETERMINISTIC;
     *out_applied = 1;
 }
-else if(regime == GEMM_CONV && candidate list contains GEMM_ENGINE_ID)
+else if(regime == GEMM_CONV && candidate list contains MIOPEN_ENGINE)
 {
-    routed_engine_id = GEMM_ENGINE_ID;
+    routed_engine_id = MIOPEN_ENGINE;
     *out_applied = 1;
 }
 else

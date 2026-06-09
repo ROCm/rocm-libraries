@@ -1,0 +1,11 @@
+[CONV_HEURISTIC] HandleCreate
+[CONV_HEURISTIC] PolicyDescriptorCreate
+[CONV_HEURISTIC] HandleSetDeviceProperties size=80
+[CONV_HEURISTIC] PolicySetEngineIds count=2
+[CONV_HEURISTIC]   candidate engine_id[0] = -6748551569128940061
+[CONV_HEURISTIC]   candidate engine_id[1] = 1563989756945604898
+[CONV_HEURISTIC] PolicySetSerializedGraph size=656
+[CONV_HEURISTIC] regime=WINOGRAD N=32 C=64 H=56 W=56 K=64 filterC=64 R=3 S=3 stride=1x1 pad=1x1 dtype=FLOAT
+[CONV_HEURISTIC] PolicyDescriptorDestroy
+[CONV_HEURISTIC] HandleDestroy
+=== exit: 0 ===
