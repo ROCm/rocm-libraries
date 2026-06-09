@@ -448,6 +448,9 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
             return (ptr_iter != conv_ptrs.end()) && CKArgsType{problem}.IsSupportedBy(*ptr_iter);
         }
     }
+#else
+    (void)problem;
+    (void)kernel_id;
 #endif
     return false;
 }
@@ -673,16 +676,23 @@ OutElemOp GetOutElementOp(const miopen::fusion::ActivationOpInvokeParam& activat
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto activationMode = activationOp.activMode;
-    switch(activationMode)
+    if(activationMode == miopenActivationRELU)
     {
-    case miopenActivationRELU: return OutElemOp{0, ck::NumericLimits<DataType>::Max()};
-    case miopenActivationCLIPPEDRELU: return OutElemOp{0, activationOp.activAlpha};
-    case miopenActivationCLAMP: return OutElemOp{activationOp.activAlpha, activationOp.activBeta};
-    default:
-        MIOPEN_THROW(miopenStatusInternalError,
-                     "Unsupported activation type: " + std::to_string(activationMode));
+        return OutElemOp{0, ck::NumericLimits<DataType>::Max()};
     }
+    else if(activationMode == miopenActivationCLIPPEDRELU)
+    {
+        return OutElemOp{0, activationOp.activAlpha};
+    }
+    else if(activationMode == miopenActivationCLAMP)
+    {
+        return OutElemOp{activationOp.activAlpha, activationOp.activBeta};
+    }
+
+    MIOPEN_THROW(miopenStatusInternalError,
+                 "Unsupported activation type: " + std::to_string(activationMode));
 #else
+    (void)activationOp;
     MIOPEN_THROW(miopenStatusNotImplemented, "Not implemented without ck enabled");
 #endif
 }
@@ -933,7 +943,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         internal::MakeTaggedTransposeInstances<CKArgsType>(
             result, ctx, problem, ck_args, input1_op, input2_op, output_op, _ck_buff_des);
 
-    result.invoker_factory = [kernel_id_           = &kernel_id,
+    result.invoker_factory = [kernel_id_           = kernel_id,
                               split_k_             = split_k,
                               ck_args_             = std::move(ck_args),
                               sh_conv_ptr_         = std::shared_ptr{std::move(*ptr_iter)},
@@ -943,7 +953,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                               output_init_tr_inst_ = std::move(_output_init_tr_inst),
                               ck_buff_des_ =
                                   _ck_buff_des](const std::vector<Kernel>& kernels) mutable {
-        return [kernel_id2 = kernel_id_,
+        return [kernel_id2 = std::move(kernel_id_),
                 split_k2   = split_k_,
                 kernels,
                 ck_args2             = std::move(ck_args_),
@@ -1031,7 +1041,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                 // Kernel logging for CK kernels
                 if(IsLoggingKernel())
                 {
-                    AddKernelToJsonAccumulator(*kernel_id2, elapsed, false);
+                    AddKernelToJsonAccumulator(kernel_id2, elapsed, false);
                 }
                 handle.ResetKernelTime();
                 handle.AccumKernelTime(elapsed);
@@ -1041,6 +1051,12 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             output_tr_inst2.ConvertTo(handle, kernels, conv_tensors);
         };
     };
+#else
+    (void)ctx;
+    (void)kernel_id;
+    (void)input1_op;
+    (void)input2_op;
+    (void)output_op;
 #endif
     return result;
 }
@@ -1051,7 +1067,7 @@ template <bool ZeroOutputs,
           typename CastType,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
-                                    const ProblemDescriptionType& problem,
+                                    [[maybe_unused]] const ProblemDescriptionType& problem,
                                     const std::string& kernel_id)
 {
     ConvSolution result;
@@ -1295,7 +1311,6 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
         case miopenDouble:
         case miopenFloat8_fnuz:
         case miopenBFloat8_fnuz:
-        default:
             MIOPEN_THROW(miopenStatusInternalError,
                          "3DGroupConvolutionImplicitGemmXdlops operation not implemented for this "
                          "data type");
@@ -1318,7 +1333,6 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
         case miopenDouble:
         case miopenFloat8_fnuz:
         case miopenBFloat8_fnuz:
-        default:
             MIOPEN_THROW(miopenStatusInternalError,
                          "3DGroupConvolutionImplicitGemmXdlops operation not implemented for this "
                          "data type");
@@ -1331,6 +1345,10 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
             "3DGroupConvolutionImplicitGemmXdlops operation not implemented for this data type");
     }
 #else
+    (void)problem;
+    (void)invoker_factory_maker_ncdhw;
+    (void)invoker_factory_maker_ndhwc;
+    (void)use_tf32;
     return {};
 #endif
 }
