@@ -22,7 +22,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 
-#include <compatibility/cudnn/cudnn_frontend.h>
+#include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
 
 namespace
 {

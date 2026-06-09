@@ -5,7 +5,7 @@
 // includes ONLY the cuDNN-compatibility shim umbrella header must compile and
 // link. This TU is gated behind HIPDNN_ENABLE_CUDNN_COMPATIBILITY in the
 // frontend tests CMakeLists, so it is only built when the shim is enabled.
-#include <compatibility/cudnn/cudnn_frontend.h>
+#include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
 
 #include <gtest/gtest.h>
 

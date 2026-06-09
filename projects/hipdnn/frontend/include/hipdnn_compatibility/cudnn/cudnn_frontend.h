@@ -12,7 +12,7 @@
  *
  * @code{.cpp}
  * // Textual hipification (RFC §4.2 workflow 1):
- * #include <compatibility/cudnn/cudnn_frontend.h>
+ * #include <hipdnn_compatibility/cudnn/cudnn_frontend.h>
  * namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
  * @endcode
  *

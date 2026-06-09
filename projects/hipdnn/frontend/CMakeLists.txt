@@ -82,10 +82,11 @@ export(
 install(TARGETS hipdnn_frontend EXPORT hipdnn_frontend_targets COMPONENT Development)
 
 # cmake-lint: disable=E1122
-# The cuDNN-compatibility shim subtree (include/compatibility/) is excluded here
-# and installed separately, gated behind HIPDNN_ENABLE_CUDNN_COMPATIBILITY below.
-# REGEX matches each candidate file's full path (forward slashes), which contains
-# "/compatibility/"; any EXCLUDE match wins regardless of clause order.
+# The cuDNN-compatibility shim subtree (include/hipdnn_compatibility/) is excluded
+# here and installed separately, gated behind HIPDNN_ENABLE_CUDNN_COMPATIBILITY
+# below. REGEX matches each candidate file's full path (forward slashes), which
+# contains "/hipdnn_compatibility/"; any EXCLUDE match wins regardless of clause
+# order.
 install(
     DIRECTORY ${HIP_DNN_FRONTEND_INCLUDE_DIR}/
     DESTINATION ${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}
@@ -94,7 +95,7 @@ install(
     PATTERN "*.h"
     PATTERN "*.hpp"
     PATTERN "*.h.in" EXCLUDE
-    REGEX "/compatibility/" EXCLUDE
+    REGEX "/hipdnn_compatibility/" EXCLUDE
 )
 
 # cuDNN-compatibility shim headers — installed only when the shim is enabled,
@@ -102,8 +103,8 @@ install(
 if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
     # cmake-lint: disable=E1122
     install(
-        DIRECTORY ${HIP_DNN_FRONTEND_INCLUDE_DIR}/compatibility/
-        DESTINATION ${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}/compatibility
+        DIRECTORY ${HIP_DNN_FRONTEND_INCLUDE_DIR}/hipdnn_compatibility/
+        DESTINATION ${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}/hipdnn_compatibility
         COMPONENT Development
         FILES_MATCHING
         PATTERN "*.h"
