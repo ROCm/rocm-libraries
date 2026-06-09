@@ -943,6 +943,20 @@ def tuning_2D_example():
                                      reals=[False],
                                      max_wgs=1024)
 
+def real_2D_single_kernel():
+    """Some 2D real single-precision transforms computed via a single kernel"""
+
+    lengths = [(32,32), (64,32), (32,64), (64,64), (96,96), (100,100)] 
+    # batch size set to make 32x32 data size 1 GiB 
+    batch_sz = 1024*1024*1024//(32*32*4)
+
+    yield from default_length_params("2D_SINGLE",
+                                     lengths,
+                                     batch_sz,
+                                     precisions=['single'],
+                                     inplaces=[False],
+                                     reals=[True])
+
 
 def tuning_suite():
     """tuning"""

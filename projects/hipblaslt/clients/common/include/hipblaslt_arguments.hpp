@@ -162,6 +162,7 @@ struct Arguments
     hipDataType              aux_type;
     hipblaslt_bias_source    bias_source;
     bool                     bias_vector;
+    int32_t                  bias_stride; // Stride within bias vector for strided batch cases where each batch has unique bias value.
     hipblaslt_scaling_format scaleA;
     hipblaslt_scaling_format scaleB;
     bool                     scaleC;
@@ -270,6 +271,7 @@ struct Arguments
     OPER(aux_type) SEP               \
     OPER(bias_source) SEP            \
     OPER(bias_vector) SEP            \
+    OPER(bias_stride) SEP            \
     OPER(scaleA) SEP                 \
     OPER(scaleB) SEP                 \
     OPER(scaleC) SEP                 \

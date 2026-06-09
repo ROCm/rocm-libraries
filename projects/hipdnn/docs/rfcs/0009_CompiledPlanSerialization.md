@@ -4,6 +4,12 @@
 - Status: Implemented initial slice
 - Scope: frontend, backend, engine plugin API, fusilli sample implementation
 
+> **Status note:** The fusilli sample implementation referenced throughout
+> this RFC was removed from rocm-libraries / TheRock after the design was
+> implemented. The serialization envelope and plugin-payload contract
+> described here remain authoritative; the fusilli code blocks are
+> retained as the original worked example.
+
 ## Summary
 
 hipDNN can serialize a compiled execution plan to bytes, deserialize those bytes later, and execute

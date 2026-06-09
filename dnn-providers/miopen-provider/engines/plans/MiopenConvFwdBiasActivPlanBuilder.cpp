@@ -353,9 +353,9 @@ void checkComputeTypes(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    uint32_t convAttrIdx = 0;
-    uint32_t biasAttrIdx = 1;
-    uint32_t activAttrIdx = (biasAttr != nullptr) ? 2 : 1;
+    const uint32_t convAttrIdx = 0;
+    const uint32_t biasAttrIdx = 1;
+    const uint32_t activAttrIdx = (biasAttr != nullptr) ? 2 : 1;
 
     if(graph.getNode(convAttrIdx).compute_data_type()
        != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
@@ -372,9 +372,9 @@ void checkComputeTypes(
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Bias node must have a second input tensor (in_1)");
         }
-        int64_t biasIdx = convAttr.y_tensor_uid() != biasAttr->in_0_tensor_uid()
-                              ? biasAttr->in_0_tensor_uid()
-                              : *biasIn1Uid;
+        const int64_t biasIdx = convAttr.y_tensor_uid() != biasAttr->in_0_tensor_uid()
+                                    ? biasAttr->in_0_tensor_uid()
+                                    : *biasIn1Uid;
 
         if(tensorMap.at(biasIdx)->data_type() != graph.getNode(biasAttrIdx).compute_data_type())
         {
@@ -449,8 +449,8 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
                                       std::get<2>(nodeAttrs.value()),
                                       opGraph.getTensorMap(),
                                       _deterministic);
-        HipdnnMiopenSettings executionSettings;
-        ConvFwdBiasActivPlan plan(handle, std::move(params), executionSettings, true, false);
+        const HipdnnMiopenSettings executionSettings;
+        const ConvFwdBiasActivPlan plan(handle, std::move(params), executionSettings, true, false);
         return true;
     }
     catch(const std::exception& e)
@@ -470,7 +470,7 @@ size_t MiopenConvFwdBiasActivPlanBuilder::getMaxWorkspaceSize(
 
     ConvFwdBiasActivParams params(
         convAttr, biasAttr, activAttr, opGraph.getTensorMap(), _deterministic);
-    ConvFwdBiasActivPlan plan(handle, std::move(params), executionSettings, false, true);
+    const ConvFwdBiasActivPlan plan(handle, std::move(params), executionSettings, false, true);
     return plan.getWorkspaceSize(handle);
 }
 
