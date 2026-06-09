@@ -103,19 +103,60 @@ namespace
         }
     }
 
-    inline auto hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expect)
+    inline auto hipblaslt_expect_status(hipblasStatus_t status,
+                                        hipblasStatus_t expect,
+                                        const char*     file,
+                                        int             line)
     {
         if(status != expect)
         {
             rocblas_internal_ostream msg;
-            print_if_verbose(msg << "rocBLAS error received at " << __FILE__ << ":" << __LINE__
+            print_if_verbose(msg << "rocBLAS error received at " << file << ":" << line
                                  << std::endl);
             return rocblas_status_internal_error;
         }
         return rocblas_status_success;
     }
 
-#define EXPECT_HIPBLAS_STATUS hipblaslt_expect_status
+    void cleanup_hipblaslt_resources(hipblasLtMatmulDesc_t&       matmulDesc,
+                                     hipblasLtMatrixLayout_t&     matA,
+                                     hipblasLtMatrixLayout_t&     matB,
+                                     hipblasLtMatrixLayout_t&     matC,
+                                     hipblasLtMatrixLayout_t&     matD,
+                                     hipblasLtMatmulPreference_t& pref,
+                                     void*                        workspace,
+                                     size_t                       workspaceSize)
+    {
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescDestroy(matmulDesc), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatrixLayoutDestroy(matA), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatrixLayoutDestroy(matB), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatrixLayoutDestroy(matC), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatrixLayoutDestroy(matD), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulPreferenceDestroy(pref), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
+        if(workspaceSize > 0)
+            RETURN_IF_HIP_ERROR(hipFree(workspace));
+    }
+
+#define EXPECT_HIPBLAS_STATUS(STATUS, EXPECT)                                                \
+    do                                                                                       \
+    {                                                                                        \
+        auto s = hipblaslt_expect_status(STATUS, EXPECT, __FILE__, __LINE__);                \
+        if(s != rocblas_status_success)                                                      \
+        {                                                                                    \
+            [&matmulDesc, &matA, &matB, &matC, &matD, &pref, &workspace, &workspaceSize]() { \
+                cleanup_hipblaslt_resources(                                                 \
+                    matmulDesc, matA, matB, matC, matD, pref, workspace, workspaceSize);     \
+            }();                                                                             \
+            return s;                                                                        \
+        }                                                                                    \
+    } while(0)
+
 #define CHECK_SOLUTION_FOUND(SOL_COUNT)                                                         \
     do                                                                                          \
     {                                                                                           \
@@ -124,6 +165,10 @@ namespace
             rocblas_internal_ostream msg;                                                       \
             print_if_verbose(msg << "rocBLAS warning: No solution found in hipblaslt. Falling " \
                                     "back to Tensile backend.\n");                              \
+            [&matmulDesc, &matA, &matB, &matC, &matD, &pref, &workspace, &workspaceSize]() {    \
+                cleanup_hipblaslt_resources(                                                    \
+                    matmulDesc, matA, matB, matC, matD, pref, workspace, workspaceSize);        \
+            }();                                                                                \
             return rocblas_status_not_implemented;                                              \
         }                                                                                       \
     } while(0)
@@ -136,6 +181,10 @@ namespace
             print_if_verbose(msg << "Returned workspace size (" << WORKSPACE_SIZE << ") is "    \
                                  << "larger than user allocated(" << MAX_WORKSPACE_SIZE << ")!" \
                                  << " at " __FILE__ ":" << __LINE__ << std::endl);              \
+            [&matmulDesc, &matA, &matB, &matC, &matD, &pref, &workspace, &workspaceSize]() {    \
+                cleanup_hipblaslt_resources(                                                    \
+                    matmulDesc, matA, matB, matC, matD, pref, workspace, workspaceSize);        \
+            }();                                                                                \
             return rocblas_status_internal_error;                                               \
         }                                                                                       \
     } while(0)
@@ -468,10 +517,11 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                               rocblas_gemm_algo                            algo,
                                               int32_t solution_index)
 {
-#if defined(HIPBLASLT_VERSION_MAJOR) && defined(HIPBLASLT_VERSION_MINOR) && defined(HIPBLASLT_VERSION_PATCH) \
-    && (HIPBLASLT_VERSION_MAJOR > 1 \
-        || (HIPBLASLT_VERSION_MAJOR == 1 \
-            && (HIPBLASLT_VERSION_MINOR > 4 \
+#if defined(HIPBLASLT_VERSION_MAJOR) && defined(HIPBLASLT_VERSION_MINOR) \
+    && defined(HIPBLASLT_VERSION_PATCH)                                  \
+    && (HIPBLASLT_VERSION_MAJOR > 1                                      \
+        || (HIPBLASLT_VERSION_MAJOR == 1                                 \
+            && (HIPBLASLT_VERSION_MINOR > 4                              \
                 || (HIPBLASLT_VERSION_MINOR == 4 && HIPBLASLT_VERSION_PATCH >= 1))))
     hipblasLtHandle_t& handle     = *(prob.handle->getHipblasLtHandle());
     int                batchMode  = 0; // General Batched GEMM support in hipBLASLt
@@ -499,13 +549,19 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     }
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutCreate(
                               &matA, hipblaslt_datatype<Ti>, row_dim, col_dim, prob.col_stride_a),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matA, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matA, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     if(prob.trans_b == rocblas_operation_none)
     {
         row_dim = prob.k;
@@ -518,75 +574,110 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     }
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutCreate(
                               &matB, hipblaslt_datatype<Ti>, row_dim, col_dim, prob.col_stride_b),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matB, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matB, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutCreate(
                               &matC, hipblaslt_datatype<To>, prob.m, prob.n, prob.col_stride_c),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matC, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matC, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutCreate(
                               &matD, hipblaslt_datatype<To>, prob.m, prob.n, prob.col_stride_d),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matD, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
                               matD, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatrixLayoutSetAttribute(matA,
                                           HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                           &(prob.batch_stride_a),
                                           sizeof(int64_t)),
-        HIPBLAS_STATUS_SUCCESS);
+        HIPBLAS_STATUS_SUCCESS,
+        __FILE__,
+        __LINE__);
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatrixLayoutSetAttribute(matB,
                                           HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                           &(prob.batch_stride_b),
                                           sizeof(int64_t)),
-        HIPBLAS_STATUS_SUCCESS);
+        HIPBLAS_STATUS_SUCCESS,
+        __FILE__,
+        __LINE__);
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatrixLayoutSetAttribute(matC,
                                           HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                           &(prob.batch_stride_c),
                                           sizeof(int64_t)),
-        HIPBLAS_STATUS_SUCCESS);
+        HIPBLAS_STATUS_SUCCESS,
+        __FILE__,
+        __LINE__);
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatrixLayoutSetAttribute(matD,
                                           HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
                                           &(prob.batch_stride_d),
                                           sizeof(int64_t)),
-        HIPBLAS_STATUS_SUCCESS);
+        HIPBLAS_STATUS_SUCCESS,
+        __FILE__,
+        __LINE__);
     hipblasLtMatmulDesc_t matmulDesc;
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescCreate(&matmulDesc, hipblaslt_compute_type<Tc>, hipblaslt_datatype<Ti>),
-        HIPBLAS_STATUS_SUCCESS);
+        HIPBLAS_STATUS_SUCCESS,
+        __FILE__,
+        __LINE__);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
                               matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t)),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
                               matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(int32_t)),
-                          HIPBLAS_STATUS_SUCCESS);
+                          HIPBLAS_STATUS_SUCCESS,
+                          __FILE__,
+                          __LINE__);
 
     hipblasLtMatmulPreference_t pref;
-    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulPreferenceSetAttribute(pref,
                                               HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
                                               &max_workspace_size,
                                               sizeof(max_workspace_size)),
-        HIPBLAS_STATUS_SUCCESS);
-    hipblasLtMatmulHeuristicResult_t heuristicResult;
+        HIPBLAS_STATUS_SUCCESS,
+        __FILE__,
+        __LINE__);
+    hipblasLtMatmulHeuristicResult_t heuristicResult{};
     bool                             solution_query = algo == rocblas_gemm_algo_solution_index
                           && prob.flags & rocblas_gemm_flags_check_solution_index;
     std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
@@ -632,7 +723,9 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                                                  matD,
                                                                  &workspaceSize,
                                                                  &returnedAlgoCount),
-                              HIPBLAS_STATUS_SUCCESS);
+                              HIPBLAS_STATUS_SUCCESS,
+                              __FILE__,
+                              __LINE__);
     }
     else
     {
@@ -646,14 +739,16 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                                               requestedAlgoCount,
                                                               &heuristicResult,
                                                               &returnedAlgoCount),
-                              HIPBLAS_STATUS_SUCCESS);
+                              HIPBLAS_STATUS_SUCCESS,
+                              __FILE__,
+                              __LINE__);
         workspaceSize = heuristicResult.workspaceSize;
     }
     CHECK_SOLUTION_FOUND(returnedAlgoCount);
     CHECK_RETURNED_WORKSPACE_SIZE(workspaceSize, max_workspace_size);
     if(workspaceSize > 0)
     {
-        THROW_IF_HIP_ERROR(hipMalloc(&workspace, workspaceSize));
+        RETURN_IF_HIP_ERROR(hipMalloc(&workspace, workspaceSize));
     }
     hipblaslt_alpha_beta_type<Tc> alpha, beta;
     if(prob.alpha != nullptr)
@@ -721,8 +816,10 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                             &heuristicResult.algo,
                             workspace,
                             workspaceSize,
-                            0),
-            HIPBLAS_STATUS_SUCCESS);
+                            prob.handle->get_stream()),
+            HIPBLAS_STATUS_SUCCESS,
+            __FILE__,
+            __LINE__);
     }
     else
     {
@@ -741,17 +838,13 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                               &heuristicResult.algo,
                                               workspace,
                                               workspaceSize,
-                                              0),
-                              HIPBLAS_STATUS_SUCCESS);
+                                              prob.handle->get_stream()),
+                              HIPBLAS_STATUS_SUCCESS,
+                              __FILE__,
+                              __LINE__);
     }
-    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescDestroy(matmulDesc), HIPBLAS_STATUS_SUCCESS);
-    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutDestroy(matA), HIPBLAS_STATUS_SUCCESS);
-    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutDestroy(matB), HIPBLAS_STATUS_SUCCESS);
-    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutDestroy(matC), HIPBLAS_STATUS_SUCCESS);
-    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutDestroy(matD), HIPBLAS_STATUS_SUCCESS);
-    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceDestroy(pref), HIPBLAS_STATUS_SUCCESS);
-    if(workspaceSize > 0)
-        THROW_IF_HIP_ERROR(hipFree(workspace));
+    cleanup_hipblaslt_resources(matmulDesc, matA, matB, matC, matD, pref, workspace, workspaceSize);
+    ;
 #else
     bool solution_query = algo == rocblas_gemm_algo_solution_index
                           && prob.flags & rocblas_gemm_flags_check_solution_index;
