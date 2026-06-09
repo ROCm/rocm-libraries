@@ -80,7 +80,6 @@ void LogConvolutionExecution(const Handle& handle,
         case conv::Direction::Forward: dir = miopenProblemDirectionForward; break;
         case conv::Direction::BackwardData: dir = miopenProblemDirectionBackward; break;
         case conv::Direction::BackwardWeights: dir = miopenProblemDirectionBackwardWeights; break;
-        default: MIOPEN_LOG_I2("Warning: Unknown direction, skipping summary log"); return;
         }
 
         // Verify that the network_config matches what the problem generates
