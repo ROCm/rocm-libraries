@@ -78,7 +78,7 @@ RUN mkdir -p /etc/apt/keyrings && \
 RUN apt-get remove --purge -y python3-pyparsing python3-cryptography python3-jwt
 
 # Add requirements files
-ADD docs/sphinx/requirements.txt /doc-requirements.txt
+ADD miopen/docs/sphinx/requirements.txt /doc-requirements.txt
 
 # Install doc requirements
 RUN pip3 install --break-system-packages -r /doc-requirements.txt && \
@@ -207,9 +207,9 @@ ENV ROCM_PATH=/opt/rocm
 ARG USE_FIN="OFF"
 
 # Add requirements files
-ADD rbuild.ini /rbuild.ini
-ADD requirements.txt /requirements.txt
-ADD dev-requirements.txt /dev-requirements.txt
+ADD miopen/rbuild.ini /rbuild.ini
+ADD miopen/requirements.txt /requirements.txt
+ADD miopen/dev-requirements.txt /dev-requirements.txt
 
 # rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
 # Composable Kernel install separated from rbuild 
@@ -241,5 +241,46 @@ ENV THEROCK_BIN_DIR="${ROCM_PATH}/bin"
 ENV AMDGPU_FAMILIES=${AMDGPU_FAMILIES}
 ENV TEST_TYPE=full
 ENV HIP_PLATFORM=amd
+
+# ============================================================================
+# Build Composable Kernel with ASAN instrumentation
+#
+# CK does not have its own ASAN flag; it reads THEROCK_SANITIZER to enable
+# ASAN packaging mode (xnack+ GPU targets). When building outside TheRock's
+# toolchain injection we pass THEROCK_SANITIZER=ASAN and explicit sanitizer
+# compiler/linker flags manually.
+# ============================================================================
+FROM miopen_deps AS build_ck_asan
+# xnack+ is required for device-side ASAN; must match ASAN_GPU_TARGETS
+ARG ASAN_GPU_TARGETS="gfx942:xnack+"
+
+# Copy Composable Kernel source (build context is projects/)
+COPY /composablekernel /composable_kernel
+
+RUN set -x && \
+    # Unset ROCM_PATH to avoid HIP path conflicts during the cmake invocation
+    unset ROCM_PATH && \
+    cd /composable_kernel && \
+    mkdir build && cd build && \
+    num_threads=$(nproc) && \
+    ram_gb=$(free -g | awk '/^Mem:/{print $7}') && \
+    if [ "$ram_gb" -lt $((num_threads * 4)) ]; then \
+        num_threads=$((ram_gb / 4 > 0 ? ram_gb / 4 : 1)); \
+    fi && \
+    echo "Building CK with ASAN, ${num_threads} threads, GPU targets: ${ASAN_GPU_TARGETS}" && \
+    CXX=/opt/rocm/llvm/bin/amdclang++ cmake \
+        -G Ninja \
+        -D CMAKE_PREFIX_PATH=/opt/rocm \
+        -D CMAKE_BUILD_TYPE=Release \
+        -D GPU_TARGETS="${ASAN_GPU_TARGETS}" \
+        -D MIOPEN_REQ_LIBS_ONLY=ON \
+        -D HIPTENSOR_REQ_LIBS_ONLY=OFF \
+        -D THEROCK_SANITIZER=ASAN \
+        -D CMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g -shared-libasan -O3" \
+        -D CMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g -shared-libasan" \
+        -D CMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
+        -D CMAKE_SHARED_LINKER_FLAGS="-fsanitize=address" \
+        .. && \
+    ninja -j ${num_threads} install
 
 WORKDIR /workspace
