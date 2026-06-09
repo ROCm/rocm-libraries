@@ -396,10 +396,53 @@ def parse_native_fwd_instance(args, instance_id, _):
     )
 
 
-def parse_native_bwd_data_instance(args, instance_id, problem_name):
-    """Parse a native CK Tile backward data instance string."""
-    raise NotImplementedError(
-        "Native backward data instance parsing is not yet implemented."
+def parse_native_bwd_data_instance(args, instance_id, _):
+    """Parse a native CK Tile backward data instance string
+    (GroupedConvolutionBackwardDataKernel<...>).
+
+    Same field layout as backward_weight (fields 0-30) but with no trailing
+    StreamK fields. Backward data has no two-stage path, so two_stage is always
+    False.
+    """
+    spec = args[1]
+    tile_size = [int(args[12]), int(args[13]), int(args[14])]
+    warps = [int(args[15]), int(args[16]), int(args[17])]
+    warp_tile = [int(args[18]), int(args[19]), int(args[20])]
+
+    pipeline_name = args[23]
+    if pipeline_name not in PIPELINE_NAME_TO_VERSION:
+        raise RuntimeError(
+            f"Unknown pipeline name '{pipeline_name}' in native instance {instance_id}"
+        )
+    pipeline_version = PIPELINE_NAME_TO_VERSION[pipeline_name]
+
+    scheduler = args[24]
+    double_smem_buffer = int(args[25]) != 0
+    num_wave_groups = int(args[26])
+
+    scalar_per_vector = [int(args[6]), int(args[7]), int(args[8])]
+    num_groups_to_merge = int(args[9])
+    split_image = int(args[10]) != 0
+    explicit_gemm = int(args[11]) != 0
+
+    return ConvInstanceTemplateParams(
+        spec,
+        tile_size,
+        warps,
+        warp_tile,
+        double_smem_buffer,
+        num_wave_groups,
+        False,  # backward data has no two-stage path
+        pipeline_version,
+        scheduler,
+        scalar_per_vector,
+        num_groups_to_merge,
+        split_image,
+        explicit_gemm,
+        instance_id,
+        streamk_enabled=False,
+        streamk_reduction_strategy=None,
+        streamk_persistent=False,
     )
 
 
