@@ -118,6 +118,84 @@ def main():
     assert cms_cap is not None, "CMS capture not populated"
     assert default_cap is not None, "Default capture not populated"
 
+    # Render each FourPartCapture as a line-numbered, body-ordered instruction
+    # listing. The SHADOW (default) schedule is NOT emitted as assembly text by
+    # the kernel writer; this listing is the apples-to-apples way to read it
+    # next to the CMS schedule. Body order follows the unrolled timeline:
+    # PRO -> ML_PREV (=ML iter0) -> ML (=ML iter1) -> NGL -> NLL.
+    def _dump_capture_listing(cap, label, path):
+        bodies = [
+            ("PRO", cap.prologue),
+            ("ML_PREV", cap.main_loop_prev),
+            ("ML", cap.main_loop),
+            ("NGL", cap.n_gl),
+            ("NLL", cap.n_ll),
+        ]
+        lines = []
+        lines.append(f"# {label} schedule capture listing for "
+                     f"BPG#11 TF32 4x4 TN (CANONICAL_KERNEL_CONFIG)")
+        lines.append(f"# Body order = unrolled timeline: PRO -> ML_PREV(iter0) "
+                     f"-> ML(iter1) -> NGL -> NLL")
+        lines.append(f"# Columns: <file_line> | body | body_idx | "
+                     f"mfma_index | seq | canonical_render")
+        lines.append("#" + "=" * 78)
+        # main_loop / main_loop_prev / n_gl / n_ll may be dicts keyed by
+        # codepath, or a LoopBodyCapture, or None. Normalize to an ordered
+        # list of LoopBodyCapture.
+        def _as_bodies(b):
+            if b is None:
+                return []
+            if hasattr(b, "instructions"):
+                return [b]
+            if isinstance(b, dict):
+                return [b[k] for k in sorted(b.keys())]
+            if isinstance(b, (list, tuple)):
+                out = []
+                for x in b:
+                    out.extend(_as_bodies(x))
+                return out
+            return []
+        for body_label, raw in bodies:
+            sub_bodies = _as_bodies(raw)
+            if not sub_bodies:
+                lines.append("")
+                lines.append(f"### body {body_label}: (empty / absent)")
+                continue
+            for cp_i, lbc in enumerate(sub_bodies):
+                lines.append("")
+                tag = body_label if len(sub_bodies) == 1 else f"{body_label}[codepath={cp_i}]"
+                lines.append(f"### body {tag}: {len(lbc.instructions)} instructions")
+                for body_idx, ti in enumerate(lbc.instructions):
+                    slot = getattr(ti, "slot", None)
+                    mfma_index = getattr(slot, "mfma_index", "?")
+                    seq = getattr(slot, "sequence", "?")
+                    wrapped = getattr(ti, "wrapped", None)
+                    inst = getattr(wrapped, "rocisa_inst", None)
+                    try:
+                        render = wrapped.canonical_str(inst) if wrapped is not None else str(ti)
+                    except Exception:
+                        render = repr(ti)
+                    # file_line is the 1-based line number IN THIS listing file
+                    # (filled after the fact below).
+                    lines.append(f"PLACEHOLDER | {tag} | {body_idx} | "
+                                 f"{mfma_index} | {seq} | {render}")
+        # Now stamp real file-line numbers in place of PLACEHOLDER.
+        numbered = []
+        for i, ln in enumerate(lines, start=1):
+            if ln.startswith("PLACEHOLDER | "):
+                numbered.append(f"{i:5d} | " + ln[len("PLACEHOLDER | "):])
+            else:
+                numbered.append(f"{i:5d} | {ln}" if not ln.startswith("#") and ln.strip() and not ln.startswith("###") else f"{i:5d} | {ln}")
+        path.write_text("\n".join(numbered) + "\n")
+        return len(lines)
+
+    cms_listing = out_dir / "cms_capture_listing.txt"
+    shadow_listing = out_dir / "shadow_capture_listing.txt"
+    n_cms = _dump_capture_listing(cms_cap, "CMS (subject)", cms_listing)
+    n_shadow = _dump_capture_listing(default_cap, "SHADOW (reference / default)", shadow_listing)
+    print(f"  -> {cms_listing} ({n_cms} lines)")
+    print(f"  -> {shadow_listing} ({n_shadow} lines)")
+
     subj_graph = build_dataflow_graph(cms_cap)
     ref_graph = build_dataflow_graph(default_cap)
 
