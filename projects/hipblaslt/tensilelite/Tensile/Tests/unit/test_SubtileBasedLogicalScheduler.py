@@ -19,6 +19,7 @@ from Tensile.Components.Subtile.Kernel import (
     TileInfo, AB_B8, AB_B16, AB_B16_W32, AB_B4, MXSA_B4, MXSB_B4, CD_F32, CD_F32_W32,
 )
 from Tensile.Components.Subtile.LogicalScheduler import (
+    GRPlacementStrategy,
     LogicalScheduler,
     MFMATileRange,
     ReadGranularity,
@@ -2468,11 +2469,23 @@ if __name__ == "__main__":
     scaleTiA = makeTileInfo('MXSA', kernel) if fp4 else None
     scaleTiB = makeTileInfo('MXSB', kernel) if fp4 else None
 
-    # Mirror Kernel.py:1139-1140 — gr granularity widens to (2,2) when the
-    # tile's GR load ratio exceeds 1.0.
-    grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
-    grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+    # Mirror Kernel.py mainLoop GR granularity selection:
+    #   - gfx950 (buffer load): mn=subtileShape[0] (doubled when loadRatioGR>1),
+    #                            k=subtileShape[1]
+    #   - gfx1250 (TDM):        one tensor_load_to_lds covers the full local
+    #                            MMA grid -> mn=localMMATileGrid[0], k=[1]
+    if args.arch == "gfx1250":
+        grA = ReadGranularity(mn=tiA.localMMATileGrid[0], k=tiA.localMMATileGrid[1])
+        grB = ReadGranularity(mn=tiB.localMMATileGrid[0], k=tiB.localMMATileGrid[1])
+    else:
+        grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
 
+    # gfx1250 enables TDM (tensor_load_to_lds); GR doesn't pressure SIMD issue
+    # slots, so bunch all GR atoms into partition 0 / subIterK 0. Mirrors
+    # Kernel.py's grPlacement selection.
+    grPlacement = (GRPlacementStrategy.BUNCHED if args.arch == "gfx1250"
+                   else GRPlacementStrategy.SPREAD)
     cfg_kwargs = dict(
         numMFMATilesM=tiA.localMMATileGrid[0],
         numMFMATilesN=tiB.localMMATileGrid[0],
@@ -2484,6 +2497,7 @@ if __name__ == "__main__":
         partitionSizeM=partSizeM,
         partitionSizeN=partSizeN,
         pgr=args.pgr,
+        grPlacement=grPlacement,
     )
     if fp4:
         cfg_kwargs.update(
