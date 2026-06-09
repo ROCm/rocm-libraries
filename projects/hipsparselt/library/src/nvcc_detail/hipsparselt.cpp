@@ -714,9 +714,14 @@ hipsparseStatus_t hipsparseLtMatmulAlgSetAttribute(const hipsparseLtHandle_t*   
         if(dataSize < sizeof(cusparseLtSplitKMode_t))
             return HIPSPARSE_STATUS_INVALID_VALUE;
 
-        auto mode = HIPSplitKModeToCuSparseLtSplitKMode((hipsparseLtSplitKMode_t)*data);
-        memcpy(data, &mode, sizeof(cusparseLtSplitKMode_t));
-
+        auto mode = *(reinterpret_cast<const hipsparseLtSplitKMode_t*>(data));
+        auto cmode = HIPSplitKModeToCuSparseLtSplitKMode(mode);
+        return hipCUSPARSEStatusToHIPStatus(
+            cusparseLtMatmulAlgSetAttribute((const cusparseLtHandle_t*)handle,
+                                            (cusparseLtMatmulAlgSelection_t*)algSelection,
+                                            HIPMatmulAlgAttributeToCuSparseLtAlgAttribute(attribute),
+                                            &cmode,
+                                            dataSize));
     }
 
     return hipCUSPARSEStatusToHIPStatus(
@@ -743,8 +748,9 @@ hipsparseStatus_t
                                         dataSize));
     if(attribute == HIPSPARSELT_MATMUL_SPLIT_K_MODE && status == HIPSPARSE_STATUS_SUCCESS)
     {
-        auto mode = CuSparseLtAlgAttributeToHIPMatmulAlgAttribute((cusparseLtSplitKMode_t)*data);
-        memcpy(data, &mode, sizeof(cusparseLtSplitKMode_t));
+        auto cmode = *(reinterpret_cast<cusparseLtSplitKMode_t*>(data));
+        auto mode = CuSparseLtSplitKModeToHIPSplitKMode(cmode);
+        *(reinterpret_cast<hipsparseLtSplitKMode_t*>(data)) = mode;
     }
 }
 
