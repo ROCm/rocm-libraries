@@ -36,7 +36,7 @@ namespace rocsparse
             source_tag(const char* function_name, const char* file_name, int32_t file_line)
         {
             std::stringstream s;
-            s << "from " << function_name << "at line " << file_line << " in " << file_name;
+            s << "from " << function_name << " at line " << file_line << " in " << file_name;
             return s.str();
         }
     }

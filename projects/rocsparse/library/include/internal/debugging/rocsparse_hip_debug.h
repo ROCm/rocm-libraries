@@ -219,4 +219,4 @@ ROCSPARSE_EXPORT rocsparse_status rocsparse_hip_debug_info_get(rocsparse_handle 
 
 #endif // ROCSPARSE_DEBUGGING
 
-#endif // ROCSPARSE_SCTR_H
+#endif // ROCSPARSE_HIP_DEBUG_H

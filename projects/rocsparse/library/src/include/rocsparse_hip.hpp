@@ -41,7 +41,7 @@
     hipMemcpy((TARGET), (SOURCE), (SIZE), (KIND))
 #define rocsparse_hipMemsetAsync(TARGET, VALUE, SIZE, STREAM) \
     hipMemsetAsync((TARGET), (VALUE), (SIZE), (STREAM))
-#define rocsparse_hipMemset(TARGET, VAKUE, SIZE, KIND) hipMemset((TARGET), (VALUE), (SIZE))
+#define rocsparse_hipMemset(TARGET, VALUE, SIZE, KIND) hipMemset((TARGET), (VALUE), (SIZE))
 #define rocsparse_hipDeviceSynchronize() hipDeviceSynchronize()
 #define rocsparse_hipStreamSynchronize(STREAM) hipStreamSynchronize((STREAM))
 #define rocsparse_hipMemcpy2DAsync(TARGET, TPITCH, SOURCE, SPITCH, WIDTH, HEIGHT, KIND, STREAM) \
@@ -151,7 +151,7 @@ namespace rocsparse
 #define rocsparse_hipMemsetAsync(TARGET, VALUE, SIZE, STREAM) \
     rocsparse::hip::hipMemsetAsync(                           \
         (TARGET), (VALUE), (SIZE), (STREAM), __FUNCTION__, __FILE__, __LINE__)
-#define rocsparse_hipMemset(TARGET, VAKUE, SIZE, KIND) \
+#define rocsparse_hipMemset(TARGET, VALUE, SIZE, KIND) \
     rocsparse::hip::hipMemset((TARGET), (VALUE), (SIZE), __FUNCTION__, __FILE__, __LINE__)
 #define rocsparse_hipDeviceSynchronize() \
     rocsparse::hip::hipDeviceSynchronize(__FUNCTION__, __FILE__, __LINE__)
