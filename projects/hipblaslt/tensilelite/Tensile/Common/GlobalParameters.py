@@ -362,6 +362,8 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+globalParameters["DisableSTWaitCnt"] = True
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)
@@ -432,7 +434,6 @@ defaultBenchmarkCommonParameters = [
     {"ScheduleGlobalRead": [1]},
     {"ScheduleLocalWrite": [1]},
     {"ScheduleIterAlg": [3]},
-    {"DisableSTWaitCnt": [1]},
     {"GlobalReadPerMfma": [1]},
     {"LocalWritePerMfma": [-1]},
     {"InterleaveAlpha": [0]},
