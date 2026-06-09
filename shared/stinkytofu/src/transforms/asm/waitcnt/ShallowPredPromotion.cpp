@@ -52,12 +52,9 @@ bool isPhi(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::PHI;
 }
 
-bool isOnSamePipeline(const StinkyInstruction& a, const StinkyInstruction& b) {
-    return classifyMemOp(a) == CK_DS && classifyMemOp(b) == CK_DS;
-}
-
 /// Collect the concrete memops on counter `c` that `consumer` transitively
-/// depends on, flattening PHI sources to their incoming defs.
+/// depends on via SSA RAW edges, flattening PHI sources to their incoming
+/// defs.
 std::unordered_set<StinkyInstruction*> collectMemOpDeps(StinkyInstruction* consumer,
                                                         CounterKind c) {
     std::unordered_set<StinkyInstruction*> result;
@@ -70,7 +67,6 @@ std::unordered_set<StinkyInstruction*> collectMemOpDeps(StinkyInstruction* consu
                 continue;
             }
             if (classifyMemOp(*src) != c) continue;
-            if (isOnSamePipeline(*src, *consumer)) continue;
             result.insert(src);
         }
     };

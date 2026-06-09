@@ -358,7 +358,7 @@ After `materializePlan()`, `WaitPlanOptimizer::rewrite` may relax the plan. `Sha
 
 **Solution**: for each anchor wait at a join (≥2 predecessors), per constrained counter:
 
-1. **Collect deps** — flatten PHIs to concrete memops via `collectMemOpDeps`, skipping same-pipeline DS pairs.
+1. **Collect deps** — flatten PHIs to concrete memops via `collectMemOpDeps` (RAW SSA only).
 2. **Per-pred required wait** — from `DataflowResult.exitState[pred]`, compute the strictest `w` that path alone would need (`perPredRequiredWait`).
 3. **Classify predecessors** — *correctable* if not a self-pred and the pred has only this block as successor (otherwise a tail drain would also fire on the pred's other successors); otherwise *uncorrectable*.
 4. **Choose relaxed anchor wait**:
