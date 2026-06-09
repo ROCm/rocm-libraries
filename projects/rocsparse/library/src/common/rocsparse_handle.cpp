@@ -44,13 +44,9 @@ _rocsparse_handle::_rocsparse_handle(hipStream_t user_stream)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        // Associate the handle with the user-provided stream before any
-        // stream-ordered setup work is enqueued. When user_stream is the
-        // default value (0) this preserves the historical behavior; when a
-        // non-default stream is supplied, all warm-up work below is routed
-        // onto that stream so handle creation never touches the default
-        // (NULL) stream and therefore never implicitly synchronizes with the
-        // user's other streams.
+        // Route all stream-ordered setup onto the user stream so creation never
+        // touches the default (NULL) stream (which would otherwise implicitly
+        // synchronize with the user's other streams).
         this->stream = user_stream;
 
         // Default device is active device
@@ -91,39 +87,36 @@ _rocsparse_handle::_rocsparse_handle(hipStream_t user_stream)
         // Allocate device buffer — stream-ordered so handle creation never blocks
         // streams other than the one passed by the caller.
         buffer_size = (coomv_size > 1024 * 1024) ? coomv_size : 1024 * 1024;
-        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&buffer, buffer_size, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&buffer, buffer_size, this->stream));
 
         // Device alpha and beta
-        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&alpha, sizeof(double) * 2, stream));
-        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&beta, sizeof(double) * 2, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&alpha, sizeof(double) * 2, this->stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&beta, sizeof(double) * 2, this->stream));
 
         // Device one
-        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&sone, sizeof(float) * 2, stream));
-        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&done, sizeof(double) * 2, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&sone, sizeof(float) * 2, this->stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&done, sizeof(double) * 2, this->stream));
 
         // Execute empty kernel for initialization
 
         THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL");
-        hipLaunchKernelGGL(init_kernel, dim3(1), dim3(1), 0, stream);
+        hipLaunchKernelGGL(init_kernel, dim3(1), dim3(1), 0, this->stream);
         THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel scheduling failed'");
 
         // Execute memset for initialization
-        THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float) * 2, stream));
-        THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double) * 2, stream));
+        THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float) * 2, this->stream));
+        THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double) * 2, this->stream));
 
         const float  s_value = 1.0f;
         const double d_value = 1.0;
         THROW_IF_HIP_ERROR(
-            hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
+            hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, this->stream));
         THROW_IF_HIP_ERROR(
-            hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
+            hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, this->stream));
 
-        // No hipStreamSynchronize here: all initialization is enqueued on
-        // `stream`, so any operation the caller later submits on the same
-        // stream will automatically see the initialized values. If the handle
-        // must be used on a different stream before the creation stream has
-        // completed, the caller is responsible for synchronizing that stream
-        // (e.g. via hipStreamSynchronize or a HIP event) first.
+        // No sync needed: all initialization is enqueued on `stream`, so a later
+        // operation on the same stream sees it. Using the handle on a different
+        // stream first requires the caller to synchronize `stream`.
 
 #if defined(ROCSPARSE_WITH_ASAN)
         const size_t required_stack_size = 64 * 1024;

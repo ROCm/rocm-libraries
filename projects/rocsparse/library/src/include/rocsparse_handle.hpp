@@ -58,11 +58,11 @@
 struct _rocsparse_handle
 {
     // constructor
-    // An optional user-defined stream can be provided so that all
-    // stream-ordered setup work during construction runs on that stream
-    // instead of the default (NULL) stream, which would otherwise implicitly
-    // synchronize with all other streams on the device.
-    explicit _rocsparse_handle(hipStream_t stream = 0);
+    // A user-defined stream must be provided so that all stream-ordered setup
+    // work during construction runs on that stream instead of the default
+    // (NULL) stream, which would otherwise implicitly synchronize with all
+    // other streams on the device.
+    explicit _rocsparse_handle(hipStream_t stream);
     // destructor
     ~_rocsparse_handle();
 

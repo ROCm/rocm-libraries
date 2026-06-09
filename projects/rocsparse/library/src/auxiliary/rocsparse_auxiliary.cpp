@@ -577,7 +577,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, handle);
-    *handle = new _rocsparse_handle();
+    *handle = new _rocsparse_handle(static_cast<hipStream_t>(0));
     rocsparse::log_trace(*handle, "rocsparse_create_handle");
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -621,8 +621,12 @@ try
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    ROCSPARSE_CHECKARG_HANDLE(0, handle);
-    delete handle;
+    // A null handle is accepted and treated as a no-op (matching free/delete
+    // semantics), so destroying an already-null handle is not an error.
+    if(handle != nullptr)
+    {
+        delete handle;
+    }
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

@@ -59,9 +59,15 @@ rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
  *
  *  \details
  *  \p rocsparse_handle_create associates the handle with the user-provided \p stream
- *  before performing any setup work. All device memory allocation and initialization is enqueued on \p stream
- *  using stream-ordered operations, so handle creation returns to the caller without
- *  blocking any GPU stream or the calling CPU thread.
+ *  before performing any setup work. All device memory allocation and initialization is
+ *  enqueued on \p stream using stream-ordered operations, so handle creation is
+ *  asynchronous with respect to the host: it returns to the caller without blocking the
+ *  calling CPU thread or any GPU stream.
+ *
+ *  \note
+ *  This routine is not compatible with HIP graph stream capture. It performs
+ *  stream-ordered device allocations and a warm-up kernel launch, so it must not be
+ *  called while \p stream (or any other stream) is being captured into a HIP graph.
  *
  *  \note
  *  The handle is fully initialized for operations submitted on \p stream (stream
@@ -78,7 +84,7 @@ rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
  *  stream   the user-defined stream to associate with the handle and to use for
  *           all stream-ordered setup work during creation.
  *  @param[out]
- *  p_error  reserved for extended error information; pass \p nullptr if not needed.
+ *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
  *
  *  \retval rocsparse_status_success the initialization succeeded.
  *  \retval rocsparse_status_invalid_pointer \p handle pointer is invalid.
@@ -113,12 +119,11 @@ rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle);
  *  all resources used by the rocSPARSE library.
  *
  *  @param[in]
- *  handle   the handle to the rocSPARSE library context.
+ *  handle   the handle to the rocSPARSE library context, which can be a null pointer.
  *  @param[out]
- *  p_error  reserved for extended error information; pass \p nullptr if not needed.
+ *  p_error  error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_handle \p handle is invalid.
  *  \retval rocsparse_status_internal_error an internal error occurred.
  */
 ROCSPARSE_EXPORT
