@@ -331,17 +331,8 @@ static void call_spmm_shared_buffer(hipsparseHandle_t&                       han
 
                     if(use_preprocess)
                     {
-                        CHECK_HIPSPARSE_ERROR(hipsparseSpMM_preprocess(handle,
-                                                                       transA,
-                                                                       transB,
-                                                                       &alpha,
-                                                                       matA,
-                                                                       B,
-                                                                       &beta,
-                                                                       C,
-                                                                       typeT,
-                                                                       alg,
-                                                                       buffer));
+                        CHECK_HIPSPARSE_ERROR(hipsparseSpMM_preprocess(
+                            handle, transA, transB, &alpha, matA, B, &beta, C, typeT, alg, buffer));
                     }
 
                     CHECK_HIPSPARSE_ERROR(hipsparseSpMM(
