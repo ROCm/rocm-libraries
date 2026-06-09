@@ -34,7 +34,7 @@ struct GemmQuantPipelineProblemBase
           CDataType_,
           BlockGemmShape_,
           Traits_,
-          std::conditional_t<
+          std::conditional_t< // FIXME: Refactor A/BComputeDatatype selection
               Traits_::FuseAQuant,
               mixed_prec_compute_type_from_input_t<
                   fp8_t,
@@ -61,7 +61,7 @@ struct GemmQuantPipelineProblemBase
         CDataType_,
         BlockGemmShape_,
         Traits_,
-        std::conditional_t<
+        std::conditional_t< // FIXME: Refactor A/BComputeDatatype selection
             Traits_::FuseAQuant,
             mixed_prec_compute_type_from_input_t<
                 fp8_t,

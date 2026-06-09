@@ -295,14 +295,14 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
             // Copy the first lanes values to all threads
             static_for<0, thread_buf_size, 1>{}([&](auto i) {
-                ADataType abs_max = amd_wave_read_first_lane(aq_reduce.get_thread_buffer()[i]);
-                if(abs_max == 0.f)
+                ADataType max_abs = amd_wave_read_first_lane(aq_reduce.get_thread_buffer()[i]);
+                if(max_abs == 0.f)
                 {
-                    abs_max = 1.f;
+                    max_abs = 1.f;
                 };
 
                 aq_block_tile.get_thread_buffer()[i] =
-                    type_convert<AQDataType>(type_convert<float>(abs_max) * fp8_inv_max);
+                    type_convert<AQDataType>(type_convert<float>(max_abs) * fp8_inv_max);
             });
 
             // Apply scales and convert data to the original block tile distribution
