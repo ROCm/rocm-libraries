@@ -219,6 +219,7 @@ struct HandleImpl
 #if MIOPEN_USE_HIPBLASLT
     hipblasLt_handle_ptr hip_blasLt_handle;
     using HipblasLtHandlePtrPool = std::vector<hipblasLt_handle_ptr>;
+    mutable hipblaslt_gemm_cache hipblaslt_gemm_descriptor_cache;
 #endif
 
     StreamPtr root_stream = nullptr;
@@ -936,6 +937,11 @@ hipblasLt_handle_ptr Handle::CreateHipblasLtHandle() const
     }
 
     return hipblasLt_handle_ptr{handle};
+}
+
+hipblaslt_gemm_cache& Handle::GetHipblasLtGemmCache() const
+{
+    return this->impl->hipblaslt_gemm_descriptor_cache;
 }
 #endif
 } // namespace miopen
