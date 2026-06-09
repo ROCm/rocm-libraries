@@ -21,20 +21,23 @@
 # SOFTWARE.
 #
 ################################################################################
-"""Standalone tests for ``rocisa_stinkytofu_adaptor.functions.ArgumentLoader``.
+"""Standalone tests for ``rocisa_stinkytofu_adaptor.functions``.
 
 Run from any working directory:
 
-    python3 projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
+    python3 projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_functions.py
 
 Or with pytest if available:
 
-    pytest projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
+    pytest projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_functions.py
 
-These tests pin down the offset-bookkeeping contract that Tensile's
-KernelWriterAssembly relies on (``self.argLoader.getOffset()`` is read
-directly to compute ``s_load_b*`` immediates). The instruction-emission
-half is stubbed today; only the byte advancement is checked here.
+Section A — ``ArgumentLoader`` (real): offset-bookkeeping contract that
+Tensile's KernelWriterAssembly relies on (``self.argLoader.getOffset()``
+is read directly to compute ``s_load_b*`` immediates). Instruction
+emission is stubbed; only byte advancement is checked here.
+
+Section B — dummy exports (structural): every ``make_dummy_func`` symbol
+in ``functions.py`` must import, be callable, and return ``None``.
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from unittest import mock
 
 # ---------------------------------------------------------------------------
 # Self-contained sys.path bootstrap so the test runs without any install /
@@ -49,7 +53,7 @@ import unittest
 # lives at:
 #     projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/
 # This file lives at:
-#     projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
+#     projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_functions.py
 # So the package's parent directory (where ``import
 # rocisa_stinkytofu_adaptor`` resolves) is one level up.
 # ---------------------------------------------------------------------------
@@ -58,15 +62,54 @@ _PKG_PARENT = os.path.normpath(os.path.join(_HERE, ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
+from rocisa_stinkytofu_adaptor import functions as _functions  # noqa: E402
 from rocisa_stinkytofu_adaptor.functions import ArgumentLoader  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Construction + simple getters/setters
+# Registry of dummy function exports in ``functions.py``.
 # ---------------------------------------------------------------------------
 
+FUNCTIONS_DUMMY_EXPORTS: tuple[str, ...] = (
+    # Branch helpers
+    "BranchIfZero",
+    "BranchIfNotZero",
+    # Cast helper
+    "VSaturateCastInt",
+    # Vector math
+    "vectorStaticDivideAndRemainder",
+    "vectorStaticDivide",
+    "vectorUInt32DivideAndRemainder",
+    "vectorUInt32CeilDivideAndRemainder",
+    "vectorStaticRemainder",
+    "vectorStaticMultiply",
+    "vectorStaticMultiplyAdd",
+    "vectorAddMultiplyBpe",
+    "vectorMultiplyBpe",
+    "vectorMultiply64Bpe",
+    # Scalar math
+    "scalarStaticDivideAndRemainder",
+    "scalarStaticCeilDivide",
+    "scalarStaticRemainder",
+    "scalarUInt24DivideAndRemainder",
+    "scalarUInt32DivideAndRemainder",
+    "scalarStaticMultiply64",
+    "scalarMultiplyBpe",
+    "scalarMultiply64Bpe",
+    # Magic divide
+    "sMagicDiv",
+    "sMagicDiv2",
+    # DS init
+    "DSInit",
+)
 
-class TestConstruction(unittest.TestCase):
+
+# ===========================================================================
+# Section A — ArgumentLoader (real implementation)
+# ===========================================================================
+
+
+class TestArgumentLoaderConstruction(unittest.TestCase):
     def test_initial_offset_is_zero(self):
         # Mirrors ``ArgumentLoader() : kernArgOffset(0)`` in argument.hpp:34.
         loader = ArgumentLoader()
@@ -79,7 +122,7 @@ class TestConstruction(unittest.TestCase):
         self.assertIsInstance(loader.getOffset(), int)
 
 
-class TestSetGetReset(unittest.TestCase):
+class TestArgumentLoaderSetGetReset(unittest.TestCase):
     def test_setOffset_then_getOffset(self):
         loader = ArgumentLoader()
         loader.setOffset(64)
@@ -109,17 +152,7 @@ class TestSetGetReset(unittest.TestCase):
         self.assertEqual(loader.getOffset(), 0)
 
 
-# ---------------------------------------------------------------------------
-# loadKernArg — mirrors argument.hpp:60-121
-#
-#   kernArgOffset += sgprOffset ? 0 : dword * 4
-#
-# (The C++ advances OUTSIDE the ``if(writeSgpr)`` block, so ``writeSgpr=False``
-# still advances the offset.)
-# ---------------------------------------------------------------------------
-
-
-class TestLoadKernArgAdvance(unittest.TestCase):
+class TestArgumentLoaderLoadKernArg(unittest.TestCase):
     def test_default_dword_advances_4_bytes(self):
         loader = ArgumentLoader()
         loader.loadKernArg("AddressDbg", "KernArgAddress")
@@ -173,16 +206,7 @@ class TestLoadKernArgAdvance(unittest.TestCase):
         self.assertIsNone(loader.loadKernArg("a", "KernArgAddress"))
 
 
-# ---------------------------------------------------------------------------
-# loadAllKernArg — mirrors argument.hpp:126-199
-#
-# Total advancement = numSgprToLoad * 4 (chunks of {16,8,4,2,1} that
-# partition ``actualLoad = numSgprToLoad - numSgprPreload``, plus an
-# initial ``numSgprPreload * 4`` bump).
-# ---------------------------------------------------------------------------
-
-
-class TestLoadAllKernArgAdvance(unittest.TestCase):
+class TestArgumentLoaderLoadAllKernArg(unittest.TestCase):
     def test_basic_total_advance(self):
         loader = ArgumentLoader()
         loader.loadAllKernArg(sgprStartIndex=0, srcAddr="KernArgAddress",
@@ -224,18 +248,7 @@ class TestLoadAllKernArgAdvance(unittest.TestCase):
         self.assertIsNone(loader.loadAllKernArg(0, "KernArgAddress", 4))
 
 
-# ---------------------------------------------------------------------------
-# Regression: exact arithmetic Tensile does at KernelWriterAssembly.py:2351
-#
-#   self.argLoader.getOffset() - (self.states.numSgprPreload * 4)
-#
-# This test pins the workaround's purpose: an integer subtraction must succeed
-# after a realistic load sequence. Before the workaround this raised
-#   TypeError: unsupported operand type(s) for -: 'NoneType' and 'int'
-# ---------------------------------------------------------------------------
-
-
-class TestTensileUsageRegression(unittest.TestCase):
+class TestArgumentLoaderTensileRegression(unittest.TestCase):
     def test_kernarg_wait_arithmetic_does_not_raise(self):
         # Reproduce the L1909-1916 + L2351 pattern: reset, loadAllKernArg,
         # then read getOffset() and subtract numSgprPreload*4.
@@ -261,6 +274,45 @@ class TestTensileUsageRegression(unittest.TestCase):
         a.loadKernArg("x", "KernArgAddress", dword=4)
         self.assertEqual(a.getOffset(), 16)
         self.assertEqual(b.getOffset(), 0)
+
+
+# ===========================================================================
+# Section B — dummy function exports (structural smoke)
+# ===========================================================================
+
+
+class TestFunctionsModuleExports(unittest.TestCase):
+    def test_argument_loader_is_real_class(self):
+        self.assertTrue(callable(ArgumentLoader))
+        self.assertIsInstance(ArgumentLoader(), ArgumentLoader)
+
+    def test_all_dummy_symbols_exported(self):
+        for name in FUNCTIONS_DUMMY_EXPORTS:
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(_functions, name),
+                                f"functions.{name} missing")
+
+    def test_dummy_registry_matches_module(self):
+        # Guard against adding a dummy to functions.py without updating tests.
+        _skip = frozenset({"annotations", "make_dummy_func"})
+        module_dummies = {
+            name for name in dir(_functions)
+            if not name.startswith("_")
+            and name not in _skip
+            and name != "ArgumentLoader"
+            and callable(getattr(_functions, name))
+        }
+        self.assertEqual(set(FUNCTIONS_DUMMY_EXPORTS), module_dummies)
+
+
+class TestFunctionsDummyCallables(unittest.TestCase):
+    def test_each_dummy_callable_returns_none(self):
+        for name in FUNCTIONS_DUMMY_EXPORTS:
+            with self.subTest(name=name):
+                fn = getattr(_functions, name)
+                self.assertTrue(callable(fn))
+                with mock.patch("builtins.print"):
+                    self.assertIsNone(fn())
 
 
 if __name__ == "__main__":

@@ -43,41 +43,87 @@ stinkytofu itself. Two consequences drive the placement:
 
 ```text
 projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/
-├── rocisa_stinkytofu_adaptor/        # Python package
-│   ├── __init__.py                   # rocIsa / IsaInfo singletons
-│   ├── base.py / caps.py / enum.py   # real implementations
-│   ├── register.py / functions.py    # real implementations
-│   ├── code.py                       # SrdUpperValue (gfx1250)
-│   ├── _dummy.py                     # factory for not-yet-real shims
-│   └── …                             # rest still dummies (see __init__.py)
+├── rocisa_stinkytofu_adaptor/     # Python package (mirrors rocisa submodules)
+│   ├── __init__.py                # rocIsa singleton shell + re-exports
+│   ├── base.py                    # Item, rocIsa state sink, isaToGfx
+│   ├── caps.py / enum.py          # gfx1250 caps + IntEnum shims
+│   ├── register.py                # RegisterPool (real)
+│   ├── container.py               # RegisterContainer, vgpr/sgpr/… factories
+│   ├── code.py                    # Module, TextBlock, Signature*, …
+│   ├── label.py                   # LabelManager (real)
+│   ├── instruction.py             # Instruction bases + VMovB32 (partial)
+│   ├── functions.py               # ArgumentLoader (real) + dummy helpers
+│   ├── macro.py / asmpass.py      # dummy exports (structural)
+│   └── _dummy.py                  # make_dummy_* factories
 ├── tests/
+│   ├── test.sh                    # wrapper: PYTHONPATH + unittest discover
+│   ├── test_base.py
 │   ├── test_register.py
-│   └── test_argument_loader.py
-└── README.md                         # this file
+│   ├── test_container.py
+│   ├── test_code.py
+│   ├── test_label.py
+│   ├── test_instruction.py
+│   ├── test_functions.py
+│   ├── test_macro.py
+│   ├── test_asmpass.py
+│   └── test_emission_consistency.py
+└── README.md
 ```
 
-No CMake or `pyproject.toml`: deliberately minimal infrastructure because
-the package is transient (see *Scope* above) and lives on `PYTHONPATH`
-managed by the rocisa dispatcher.
+## Tests — 1:1 shim ↔ test mapping
+
+| Shim module | Test file |
+|-------------|-----------|
+| `base.py` | `test_base.py` |
+| `register.py` | `test_register.py` |
+| `container.py` | `test_container.py` |
+| `code.py` | `test_code.py` |
+| `label.py` | `test_label.py` |
+| `instruction.py` | `test_instruction.py` |
+| `functions.py` | `test_functions.py` |
+| `macro.py` | `test_macro.py` |
+| `asmpass.py` | `test_asmpass.py` |
+
+`test_emission_consistency.py` is the cross-module integration suite (not tied
+to a single shim file).
 
 ## Running the tests
 
-```bash
-python3 projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_register.py
-python3 projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_argument_loader.py
-```
+Use `test.sh` only — it sets `PYTHONPATH` and discovers the binding build
+so callers do not run `python3 test_*.py` or `pytest` directly.
 
-Each test self-bootstraps `sys.path`, so no install / `PYTHONPATH` setup
-is required. With pytest:
+From the tests directory (or any cwd):
 
 ```bash
-pytest projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/
+cd projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests
+
+./test.sh                 # all test_*.py (unittest discover)
+./test.sh -v              # same, verbose
+./test.sh test_register   # one file only — basename of test_*.py, no .py suffix
+./test.sh --help
 ```
+
+The second argument to `./test.sh` must be a **test file** name (`test_register`,
+`test_code`, …), not an individual test method
+(`test_kernarg_address_at_index_0` will not work).
+
+`test.sh` handles the environment: it auto-discovers
+`<tensilelite>/*build*/tensilelite/rocisa`, sets `PYTHONPATH` to
+`<binding_root>:<tensilelite>`, then runs `python3 -m unittest discover`.
+No manual `PYTHONPATH` or `STINKY_BUILD_DIR` is needed in the normal case.
+See `./test.sh --help` for optional overrides.
+
+### Python version must match the build
+
+Extension modules are tagged by CPython ABI, e.g.
+`_stinkytofu.cpython-312-x86_64-linux-gnu.so` only loads under **Python 3.12**.
+If `python3` and the build disagree, integration tests are **skipped** (not
+failed). After `./test.sh -v`, expect `OK (skipped=0)` when the binding matches.
 
 ## Smoke check (stinkytofu backend wired in)
 
 ```bash
-ROCISA_BACKEND=stinkytofu PYTHONPATH=<rocisa_build_dir> \
+ROCISA_BACKEND=stinkytofu PYTHONPATH=<build>/tensilelite/rocisa:<tensilelite> \
     python3 -c "import rocisa; print(rocisa)"
 ```
 

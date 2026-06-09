@@ -21,28 +21,27 @@
 # SOFTWARE.
 #
 ################################################################################
-"""Standalone tests for ``rocisa_stinkytofu_adaptor.code`` (Module / TextBlock).
+"""Standalone tests for ``rocisa_stinkytofu_adaptor.code``.
+
+1:1 mirror of every export in ``code.py``: TextBlock, Module,
+ValueIf/ElseIf/Endif, ValueSet, RegSet, Label, StructuredModule,
+Macro, Signature*, KernelBody, BitfieldUnion, and ``to_stinky_asm``.
+
+``Item`` inheritance shape for TextBlock / Module lives in
+``test_base.py``. Cross-backend emit parity lives in
+``test_emission_consistency.py``.
 
 Run from any working directory:
 
     python3 projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_code.py
 
-Or with pytest:
+Or via the wrapper:
 
-    pytest projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_code.py
+    ./test.sh test_code
 
-These tests pin behaviour that the rest of the adapter (and KernelWriter)
-depend on -- the code-composition-tree semantics ``add`` /
-``replaceItem`` / ``popFirstNItems`` / ``flatitems`` / parent
-rebinding must match ``rocisa::Module`` byte-for-byte so an adapter
-swap does not silently re-order, drop, or re-parent items in the
-emitted asm.
-
-The ``to_stinky_asm`` test block is gated on a built ``stinkytofu``
+The ``TestToStinkyAsm`` block is gated on a built ``stinkytofu``
 binding and exercises the full left-path lowering pipeline (Module tree
--> ``LogicalModule`` -> ``StinkyAsmModule.emitAssembly``) using a fake
-instruction that fabricates a single ``_stinkytofu.VMovB32`` -- decoupling
-the Module-layer tests from Step-3 (instruction shims) progress.
+-> ``LogicalModule`` -> ``StinkyAsmModule.emitAssembly``).
 """
 
 from __future__ import annotations
@@ -79,6 +78,63 @@ from rocisa_stinkytofu_adaptor.code import (  # noqa: E402
     ValueIf,
     ValueSet,
 )
+
+
+# ---------------------------------------------------------------------------
+# Shared fixtures -- isolate rocIsa singleton side effects across tests.
+# ---------------------------------------------------------------------------
+
+
+class _VgprIdxIsolation:
+    """Snapshots / restores ``_vgpr_idx`` and ``HasVgprMSB`` for RegSet."""
+
+    def setUp(self) -> None:
+        from rocisa_stinkytofu_adaptor import base as _base  # noqa: WPS433
+        self._base = _base
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+        rocIsa.getInstance().init((12, 5, 0))
+        self._caps = _base.getAsmCaps()
+        self._saved_hasvgprmsb = self._caps.get("HasVgprMSB", 0)
+        self._saved_vgpr_idx = dict(_base.getVgprIdx())
+
+    def tearDown(self) -> None:
+        if self._saved_hasvgprmsb == 0:
+            self._caps.pop("HasVgprMSB", None)
+        else:
+            self._caps["HasVgprMSB"] = self._saved_hasvgprmsb
+        live = self._base.getVgprIdx()
+        live.clear()
+        live.update(self._saved_vgpr_idx)
+
+
+class _VgprMsbIsolation:
+    """Snapshots / restores ``HasVgprMSB`` and ``_vgpr_msb`` for Label."""
+
+    def setUp(self) -> None:
+        from rocisa_stinkytofu_adaptor import base as _base  # noqa: WPS433
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+        self._base = _base
+        rocIsa.getInstance().init((12, 5, 0))
+        self._caps = _base.getAsmCaps()
+        self._saved_hasvgprmsb = self._caps.get("HasVgprMSB", 0)
+        self._saved_vgpr_msb = _base.getVgprMsb()
+
+    def tearDown(self) -> None:
+        if self._saved_hasvgprmsb == 0:
+            self._caps.pop("HasVgprMSB", None)
+        else:
+            self._caps["HasVgprMSB"] = self._saved_hasvgprmsb
+        self._base.setVgprMsb(self._saved_vgpr_msb)
+
+
+class _SignatureKernelSetup(unittest.TestCase):
+    """Pump ISA + wavefront so signature emitters can read kernel()."""
+
+    def setUp(self) -> None:
+        from rocisa_stinkytofu_adaptor import base as _base  # noqa: WPS433
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+        rocIsa.getInstance().init((12, 5, 0))
+        _base.setKernel((12, 5, 0), 64)
 
 
 # ===========================================================================
@@ -1107,9 +1163,10 @@ class TestModulePickleRejected(unittest.TestCase):
 # logicalIR handoff -- _collect_logical_insts walk semantics.
 # ===========================================================================
 #
-# Decoupled from stinkytofu: a fake instruction with ``to_stinky_logical()``
-# is enough to assert the walk picks it up. The TestToStinkyAsm block
-# below covers the end-to-end binding call.
+# Module-side collector tests (fake leaves, traversal, dummy skip).
+# Real ``VMovB32`` pickup when stinkytofu is built lives in
+# ``test_instruction.TestCollectLogicalIntegration``. End-to-end lowering
+# is in ``TestToStinkyAsm`` below and ``test_emission_consistency``.
 
 
 class _FakeLogicalInst:
@@ -1436,77 +1493,16 @@ class TestStinkytofuOptional(unittest.TestCase):
 
 
 # ===========================================================================
-# Item-hierarchy parity -- Commit Y.
+# Item hierarchy -- BitfieldUnion exception + Module recursion.
 # ===========================================================================
 #
-# These pin the rocisa C++ inheritance shape one-for-one:
-#   * ``TextBlock`` / ``Module`` are subclasses of ``Item``
-#     (code.hpp:133 / code.hpp:330).
-#   * Dummy code-composition nodes (Label / Macro / ValueSet / ...) are
-#     also ``Item`` subclasses via ``make_dummy_class(..., base=Item)``.
-#   * ``StructuredModule`` is a ``Module`` subclass in C++
-#     (code.hpp:469); the dummy here uses ``base=Module`` for the
-#     same shape.
-#   * ``BitfieldUnion`` is a standalone polymorphic root in C++
-#     (code.hpp:928, NOT a subclass of Item); the dummy correctly
-#     stays out of the Item hierarchy.
-#
-# Module's ``countType`` / ``countExactType`` overrides are recursive
-# (mirror of code.hpp:441-459). The non-recursive base-class
-# behaviour is tested in test_base.py; here we verify recursion +
-# the isinstance-vs-identity distinction across a real tree.
-
-
-class TestItemInheritanceShape(unittest.TestCase):
-    """``isinstance(x, Item)`` parity with the C++ class hierarchy."""
-
-    def test_textblock_isinstance_item(self):
-        self.assertIsInstance(TextBlock("x"), Item)
-
-    def test_module_isinstance_item(self):
-        self.assertIsInstance(Module("k"), Item)
-
-    def test_textblock_name_and_parent_inherited_from_item(self):
-        # ``__slots__`` for TextBlock are ``("text",)`` only -- name /
-        # parent live on Item. The class must NOT redeclare them or
-        # Python raises TypeError at class-creation time, so reaching
-        # this test at all means the slot composition is correct;
-        # the assertions below pin the runtime values.
-        tb = TextBlock("hello")
-        self.assertEqual(tb.name, "hello")
-        self.assertIsNone(tb.parent)
-
-    def test_module_name_and_parent_inherited_from_item(self):
-        m = Module("kernel")
-        self.assertEqual(m.name, "kernel")
-        self.assertIsNone(m.parent)
-
-    def test_module_slots_do_not_redeclare_item_slots(self):
-        # Catch accidental future regression -- if Module's __slots__
-        # ever re-adds "name" or "parent" the class itself fails to
-        # build (Python raises TypeError on slot conflict). We make
-        # the test explicit by checking the declared slot tuple.
-        self.assertNotIn("name", Module.__slots__)
-        self.assertNotIn("parent", Module.__slots__)
-
-    def test_textblock_slots_do_not_redeclare_item_slots(self):
-        self.assertNotIn("name", TextBlock.__slots__)
-        self.assertNotIn("parent", TextBlock.__slots__)
+# ``TextBlock`` / ``Module`` isinstance-Item shape is in ``test_base``.
+# Here: ``BitfieldUnion`` stays outside Item (code.hpp:928); Module's
+# recursive ``countType`` / ``countExactType`` (code.hpp:441-459).
 
 
 class TestDummyClassesInheritItem(unittest.TestCase):
-    """Every dummy code-composition node uses ``base=Item`` (with the
-    exception of ``BitfieldUnion`` which is intentionally standalone).
-    This is the foundation that lets ``Module.findIndexByType(Item)``
-    / ``isinstance``-based KernelWriter walks see dummies as
-    composition nodes during the bring-up phase."""
-
-    # NB: Macro / ValueIf / ValueElseIf / ValueEndif / ValueSet /
-    # RegSet / Label / StructuredModule used to be dummies and were
-    # tested here. They became real classes (see TestMacro* /
-    # TestValueConditionals / TestValueSet* / TestRegSet* / TestLabel*
-    # / TestStructuredModule* below); isinstance-Item coverage is
-    # preserved there alongside the rest of their behavioural tests.
+    """``BitfieldUnion`` is the only code export outside the Item tree."""
 
     def test_bitfieldunion_is_not_item(self):
         # Intentionally NOT in the Item hierarchy -- mirror of
@@ -1622,10 +1618,11 @@ class TestStructuredModuleConstruction(unittest.TestCase):
     ``itemList`` at construction. Mirror of ``rocisa::StructuredModule``
     (code.hpp:763-791)."""
 
-    def test_inherits_module_and_item(self):
+    def test_inherits_module(self):
         sm = StructuredModule()
         self.assertIsInstance(sm, Module)
-        self.assertIsInstance(sm, Item)
+        # ``isinstance(sm, Item)`` follows from Module; see
+        # ``test_base.TestItemInheritanceShape``.
 
     def test_default_name_empty(self):
         # rocisa ctor default: ``StructuredModule(name="")``.
@@ -1905,11 +1902,6 @@ class TestStructuredModuleCountType(unittest.TestCase):
 
 
 # ===========================================================================
-# (end of StructuredModule tests)
-# ===========================================================================
-
-
-# ===========================================================================
 # Preprocessor conditional blocks -- ValueIf / ValueElseIf / ValueEndif.
 # ===========================================================================
 #
@@ -2186,7 +2178,7 @@ class TestValueConditionalModuleIntegration(unittest.TestCase):
 #
 # Mirror of rocisa's ``ValueSet`` (assembler ``.set`` directive) and
 # ``RegSet`` (a ValueSet subclass that also tracks VGPR allocation
-# in the rocIsa singleton for MSB-aware archs). Byte-for-byte parity
+# in the rocIsa singleton for MSB-aware archs).
 # matters because KernelWriter sprinkles ``.set`` lines throughout
 # every kernel and any divergence (whitespace, decimal-vs-hex,
 # +offset literal preservation) shows up as a noisy diff against the
@@ -2400,39 +2392,9 @@ class TestValueSetModuleIntegration(unittest.TestCase):
         self.assertEqual(m.countType(Item), 3)
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # RegSet -- ValueSet subclass with VGPR-index side effect.
-# ---------------------------------------------------------------------------
-#
-# Tests that exercise the ``setVgprIdx`` side effect MUST isolate the
-# process-wide ``_vgpr_idx`` map and the ``HasVgprMSB`` cap value, or
-# they will leak state into every subsequent test. The mixin below
-# snapshots both at setUp and restores them at tearDown.
-
-
-class _VgprIdxIsolation:
-    """setUp/tearDown helper that snapshots and restores the rocIsa
-    singleton bits that ``RegSet`` mutates (``_vgpr_idx`` and the
-    ``HasVgprMSB`` cap on the active arch)."""
-
-    def setUp(self) -> None:
-        from rocisa_stinkytofu_adaptor import base as _base  # noqa: WPS433
-        self._base = _base
-        # Ensure caps are initialised so getAsmCaps() doesn't raise.
-        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
-        rocIsa.getInstance().init((12, 5, 0))
-        self._caps = _base.getAsmCaps()
-        self._saved_hasvgprmsb = self._caps.get("HasVgprMSB", 0)
-        self._saved_vgpr_idx = dict(_base.getVgprIdx())
-
-    def tearDown(self) -> None:
-        if self._saved_hasvgprmsb == 0:
-            self._caps.pop("HasVgprMSB", None)
-        else:
-            self._caps["HasVgprMSB"] = self._saved_hasvgprmsb
-        live = self._base.getVgprIdx()
-        live.clear()
-        live.update(self._saved_vgpr_idx)
+# ===========================================================================
 
 
 class TestRegSetCtor(_VgprIdxIsolation, unittest.TestCase):
@@ -2662,38 +2624,6 @@ class TestRegSetModuleIntegration(_VgprIdxIsolation, unittest.TestCase):
 # pickle / deepcopy / Module-integration round-trips.
 
 
-class _VgprMsbIsolation:
-    """setUp/tearDown helper for tests that exercise
-    ``Label.toString``'s ``setVgprMsb(-1)`` side effect.
-
-    Snapshots and restores:
-      * The ``HasVgprMSB`` cap on the active arch (so tests can flip
-        it on / off without leaking into siblings).
-      * The ``_vgpr_msb`` global (so tests can ``setVgprMsb(...)``
-        without leaking).
-
-    Also pumps ``rocIsa.init((12, 5, 0))`` so ``getAsmCaps()`` doesn't
-    raise the "init() or setKernel() must be called first" error
-    that gates every cap accessor.
-    """
-
-    def setUp(self) -> None:
-        from rocisa_stinkytofu_adaptor import base as _base  # noqa: WPS433
-        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
-        self._base = _base
-        rocIsa.getInstance().init((12, 5, 0))
-        self._caps = _base.getAsmCaps()
-        self._saved_hasvgprmsb = self._caps.get("HasVgprMSB", 0)
-        self._saved_vgpr_msb = _base.getVgprMsb()
-
-    def tearDown(self) -> None:
-        if self._saved_hasvgprmsb == 0:
-            self._caps.pop("HasVgprMSB", None)
-        else:
-            self._caps["HasVgprMSB"] = self._saved_hasvgprmsb
-        self._base.setVgprMsb(self._saved_vgpr_msb)
-
-
 class TestLabelConstruction(unittest.TestCase):
     """``Label(label, comment, alignment=1)`` stores the three fields
     verbatim and leaves ``Item.name`` empty (rocisa's ``Item("")``)."""
@@ -2729,10 +2659,7 @@ class TestLabelConstruction(unittest.TestCase):
         self.assertEqual(lbl.comment, "bar")
         self.assertEqual(lbl.alignment, 4)
 
-    def test_is_item(self):
-        # Item-subclass coverage that previously lived in
-        # ``TestDummyClassesInheritItem.test_label_is_item`` -- moved
-        # here now that Label is no longer a dummy.
+    def test_is_item_subclass(self):
         self.assertIsInstance(Label(0, ""), Item)
 
 
@@ -2979,12 +2906,10 @@ class TestMacroConstruction(unittest.TestCase):
         mc = Macro("GLOBAL_OFFSET_A", ["vgprAddr:req", "vgprTmp:req"])
         self.assertEqual(mc.name, "GLOBAL_OFFSET_A")
         self.assertEqual(mc.itemList, [])
-        # The internal MacroInstruction (used to render ``.macro NAME args``)
-        # is constructed at __init__ time.
+        # Internal header object type; field parity is in
+        # ``test_instruction.TestMacroInstruction*``.
         from rocisa_stinkytofu_adaptor.instruction import MacroInstruction
         self.assertIsInstance(mc.macro, MacroInstruction)
-        self.assertEqual(mc.macro.name, "GLOBAL_OFFSET_A")
-        self.assertEqual(mc.macro.args, ["vgprAddr:req", "vgprTmp:req"])
 
     def test_empty_args(self):
         # KWA:1774 pattern: ``Macro("MAC_...", [])``.
@@ -3218,24 +3143,8 @@ class TestMacroModuleIntegration(unittest.TestCase):
 
 
 # ===========================================================================
-# (end of Macro tests)
-# ===========================================================================
-
-
-# ===========================================================================
 # SignatureCodeMeta / SignatureBase
 # ===========================================================================
-
-
-class _SignatureKernelSetup(unittest.TestCase):
-    """Pump ISA + wavefront so signature emitters can read kernel()."""
-
-    def setUp(self) -> None:
-        from rocisa_stinkytofu_adaptor import base as _base  # noqa: WPS433
-        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
-
-        rocIsa.getInstance().init((12, 5, 0))
-        _base.setKernel((12, 5, 0), 64)
 
 
 def _make_signature_code_meta() -> SignatureCodeMeta:
@@ -3418,11 +3327,6 @@ class TestSignatureBaseCopyRejected(unittest.TestCase):
 
 
 # ===========================================================================
-# (end of Signature tests)
-# ===========================================================================
-
-
-# ===========================================================================
 # KernelBody
 # ===========================================================================
 
@@ -3535,11 +3439,6 @@ class TestKernelBodyModuleIntegration(_SignatureKernelSetup, unittest.TestCase):
         outer.add(kb)
         self.assertEqual(outer.countType(Item), 2)
         self.assertEqual(outer.countType(KernelBody), 1)
-
-
-# ===========================================================================
-# (end of KernelBody tests)
-# ===========================================================================
 
 
 if __name__ == "__main__":

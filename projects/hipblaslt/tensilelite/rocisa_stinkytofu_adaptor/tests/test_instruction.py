@@ -42,8 +42,10 @@ These tests pin:
   * ``to_stinky_logical()`` and the ``_to_stinky_register`` coercion
     table -- both register operands (via ``RegisterContainer.to_stinky``)
     and the int / float / str literal paths.
-  * Step-3 collector contract: ``Module._collect_logical_insts`` picks up
-    real VMovB32 shims and skips dummy ``LogicalInstructionBase`` items.
+  * Step-3 collector contract: ``VMovB32.to_stinky_logical`` is callable and,
+    when stinkytofu is built, is picked up by ``Module._collect_logical_insts``.
+    Dummy-only skip behaviour (e.g. ``SBarrier``) lives in
+    ``test_code.TestCollectLogicalInsts``.
 
 End-to-end byte-equality of the emitted asm against the rocisa right-path
 is covered in ``tests/test_emission_consistency.py`` (a stronger check
@@ -618,35 +620,23 @@ class TestVMovB32Construction(unittest.TestCase):
 
 
 class TestCollectLogicalIntegration(unittest.TestCase):
-    """Step-3 leaves are expected to expose ``to_stinky_logical()``; the
-    Step-2 collector skips dummies on a None-return sentinel. These tests
-    confirm the contract from the Module-side without touching the C++
-    binding -- the dummy-skip test in test_code.py would now fail-fast
-    if we accidentally regressed VMovB32 back to a dummy, so we keep
-    coverage symmetric here.
+    """``VMovB32`` instruction-side contract for ``_collect_logical_insts``.
+
+    Collector walk semantics (fake leaves, TextBlock filter, dummy skip)
+    are owned by ``test_code.TestCollectLogicalInsts`` -- this class only
+    pins that the real ``VMovB32`` shim exposes ``to_stinky_logical`` and
+    is actually collected when the stinkytofu binding is importable.
     """
 
-    def test_vmovb32_collected_by_module(self):
-        # We can't test the full pipeline without stinkytofu, but we
-        # can check that to_stinky_logical exists and is callable.
+    def test_vmovb32_exposes_to_stinky_logical(self):
         v = VMovB32(vgpr(0), vgpr(1))
         self.assertTrue(callable(getattr(v, "to_stinky_logical", None)))
 
-    def test_dummy_instructions_skipped_when_mixed_with_real(self):
-        # A Module holding both VMovB32 and a still-dummy instruction
-        # (e.g. SBarrier) should ONLY collect the VMovB32.
-        from rocisa_stinkytofu_adaptor.instruction import SBarrier  # noqa: WPS433
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_vmovb32_collected_by_module(self):
         m = Module()
-        v = VMovB32(vgpr(0), vgpr(1))
-        m.add(v)
-        m.add(SBarrier())  # dummy: to_stinky_logical -> None
-        if not _STINKY_OK:
-            # Real VMovB32.to_stinky_logical does an import; skip the
-            # actual call but assert the collector logic works.
-            return
-        out = m._collect_logical_insts()
-        # Exactly one logical leaf collected (the VMovB32).
-        self.assertEqual(len(out), 1)
+        m.add(VMovB32(vgpr(0), vgpr(1)))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
 # ===========================================================================

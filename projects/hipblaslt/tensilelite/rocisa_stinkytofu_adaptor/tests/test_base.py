@@ -21,13 +21,11 @@
 # SOFTWARE.
 #
 ################################################################################
-"""Standalone tests for the ``rocisa_stinkytofu_adaptor.base`` state sink.
+"""Standalone tests for ``rocisa_stinkytofu_adaptor.base``.
 
-These tests verify the invariant that ALL ``rocisa::rocIsa`` singleton
-state -- KernelInfo, IsaInfo dict, current ISA, vgpr_idx, vgpr_msb,
-OutputOptions, is_init, assembler_path -- lives in ``base.py``
-module-level globals, and the ``rocIsa`` class in ``__init__.py`` is a
-thin forwarding shell with NO instance state.
+Covers the ``rocIsa`` singleton state sink (``Item``, ``DummyItem``,
+``isaToGfx``, forwarding shell) and the ``Item`` inheritance contract
+for ``code.py`` subclasses (``TextBlock``, ``Module``).
 
 Run from any working directory:
 
@@ -62,6 +60,7 @@ from rocisa_stinkytofu_adaptor import (  # noqa: E402
     rocIsa,
 )
 from rocisa_stinkytofu_adaptor.base import DummyItem, Item  # noqa: E402
+from rocisa_stinkytofu_adaptor.code import Module, TextBlock  # noqa: E402
 
 
 # ===========================================================================
@@ -503,6 +502,49 @@ class TestItemConstruction(unittest.TestCase):
         # ``__slots__ = ("name", "parent")`` so no __dict__ -- catches
         # accidental future regression where someone removes slots.
         self.assertFalse(hasattr(Item(), "__dict__"))
+
+
+class TestItemInheritanceShape(unittest.TestCase):
+    """``isinstance(x, Item)`` parity for ``code.py`` subclasses.
+
+    Mirror of rocisa C++ ``TextBlock`` / ``Module`` inheriting from
+    ``Item`` (code.hpp:133 / code.hpp:330). Non-recursive
+    ``countType`` / ``countExactType`` on bare ``Item`` are tested
+    here; recursive ``Module`` overrides live in ``test_code.py``.
+    """
+
+    def test_textblock_isinstance_item(self):
+        self.assertIsInstance(TextBlock("x"), Item)
+
+    def test_module_isinstance_item(self):
+        self.assertIsInstance(Module("k"), Item)
+
+    def test_textblock_name_and_parent_inherited_from_item(self):
+        # ``__slots__`` for TextBlock are ``("text",)`` only -- name /
+        # parent live on Item. The class must NOT redeclare them or
+        # Python raises TypeError at class-creation time, so reaching
+        # this test at all means the slot composition is correct;
+        # the assertions below pin the runtime values.
+        tb = TextBlock("hello")
+        self.assertEqual(tb.name, "hello")
+        self.assertIsNone(tb.parent)
+
+    def test_module_name_and_parent_inherited_from_item(self):
+        m = Module("kernel")
+        self.assertEqual(m.name, "kernel")
+        self.assertIsNone(m.parent)
+
+    def test_module_slots_do_not_redeclare_item_slots(self):
+        # Catch accidental future regression -- if Module's __slots__
+        # ever re-adds "name" or "parent" the class itself fails to
+        # build (Python raises TypeError on slot conflict). We make
+        # the test explicit by checking the declared slot tuple.
+        self.assertNotIn("name", Module.__slots__)
+        self.assertNotIn("parent", Module.__slots__)
+
+    def test_textblock_slots_do_not_redeclare_item_slots(self):
+        self.assertNotIn("name", TextBlock.__slots__)
+        self.assertNotIn("parent", TextBlock.__slots__)
 
 
 class TestItemDefaultMethods(unittest.TestCase):
