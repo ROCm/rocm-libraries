@@ -116,6 +116,7 @@ def getRequiredParametersMin() -> set:
         'StoreSyncOpt',
         'StoreVectorWidth',
         'StreamK',
+        'StreamKForceDPOnly',
         'StreamKXCCMapping',
         'StreamKFixupTreeReduction',
         'SuppressNoLoadLoop',
