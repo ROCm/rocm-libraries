@@ -2187,6 +2187,18 @@ class StreamK(Component):
 
         return module
     
+    def stridedBatchOrGeneralBatch(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK stridedBatchOrGeneralBatch")
+        if kernel["ProblemType"]["SupportUserArgs"]:
+            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
+            # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
+            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
+            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D is dereferenced as pointer array                   
+            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+            module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))
+        return module
+
     @abc.abstractmethod
     def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
         pass
@@ -2403,14 +2415,7 @@ class StreamKBasic(StreamK):
 
     def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
         module = Module("StreamK Basic routeToGeneralBatchedOrStridedBatched")
-        if kernel["ProblemType"]["SupportUserArgs"]:
-            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
-            # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
-            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
-            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D is dereferenced as pointer array                   
-            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-            module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))        
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
         return module
 
     def kernelEnd(self, writer, kernel):
@@ -2587,14 +2592,7 @@ class StreamKTwoTileOriginal(StreamK):
 
     def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
         module = Module("StreamK TwoTileOriginal routeToGeneralBatchedOrStridedBatched")
-        if kernel["ProblemType"]["SupportUserArgs"]:
-            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
-            # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
-            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
-            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D is dereferenced as pointer array                   
-            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-            module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))       
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
         return module
 
     def kernelEnd(self, writer, kernel):
@@ -3006,14 +3004,7 @@ class StreamKTwoTileDPFirst(StreamK):
 
     def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
         module = Module("StreamK TwoTileDPFirst routeToGeneralBatchedOrStridedBatched")
-        if kernel["ProblemType"]["SupportUserArgs"]:
-            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
-            # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
-            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
-            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D is dereferenced as pointer array                   
-            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-            module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))        
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
         return module
 
     def kernelEnd(self, writer, kernel):
@@ -3387,14 +3378,7 @@ class StreamKDynamic(StreamK):
 
     def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
         module = Module("StreamK Dynamic routeToGeneralBatchedOrStridedBatched")
-        if kernel["ProblemType"]["SupportUserArgs"]:
-            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
-            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
-            # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
-            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
-            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D is dereferenced as pointer array                   
-            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-            module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))        
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
         return module
         
     def kernelEnd(self, writer, kernel):
