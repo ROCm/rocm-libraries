@@ -808,8 +808,7 @@ namespace TensileLite
                 // 'SKTiles' reads a clean count while the SK3 path keeps its
                 // add bit.
 
-                AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
-                hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
                 assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
                 // ---- Shared (mode-independent) ----
@@ -817,70 +816,13 @@ namespace TensileLite
                 auto sk3_itersPerTile
                     = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
 
-                // ---- Decide active mode FIRST, so we only do the work that
-                // matches the mode being packed (and only push 6 args).
-                // Tri-state mode (OFF/ON/AUTO) lives on the problem; the
-                // debug env override (TENSILE_STREAMK5_FORCE_MODE) trumps
-                // everything when set to 0 or 1. ----
-                int sk5DebugMode = Debug::Instance().streamK5ForceMode();
-                bool effectiveDyn;
-                if(sk5DebugMode == 0)
-                {
-                    effectiveDyn = false;
-                }
-                else if(sk5DebugMode == 1)
-                {
-                    effectiveDyn = true;
-                }
-                else
-                {
-                    const int requestedMode = sk.streamKTileSchedulingMode;
-                    switch(requestedMode)
-                    {
-                    case 0:
-                        effectiveDyn = false;
-                        break;
-                    case 1:
-                        effectiveDyn = true;
-                        break;
-                    case 2:
-                    {
-                        size_t x = 1, y = 1, z = 1, batchSz = 1;
-                        for(size_t i = 0; i < problem.freeIndicesA().size(); ++i)
-                            x *= problem.freeSizeA(i);
-                        for(size_t i = 0; i < problem.freeIndicesB().size(); ++i)
-                            y *= problem.freeSizeB(i);
-                        for(size_t i = 0; i < problem.boundIndices().size(); ++i)
-                            z *= problem.boundSize(i);
-                        for(size_t i = 0; i < problem.batchIndices().size(); ++i)
-                            batchSz *= problem.batchSize(i);
-
-                        origami::problem_t origami_problem = {
-                            .size  = {x, y, z},
-                            .batch = batchSz,
-                        };
-                        origami::config_t origami_config = {
-                            .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
-                                   static_cast<size_t>(sizeMapping.macroTile.y),
-                                   static_cast<size_t>(sizeMapping.depthU)},
-                        };
-
-                        TENSILE_ASSERT_EXC(hipAMDGPU != nullptr
-                                           && hipAMDGPU->analyticalHardware != nullptr);
-                        const auto autoMode = origami::streamk::select_hybrid_mode(
-                            origami_problem,
-                            *(hipAMDGPU->analyticalHardware),
-                            origami_config,
-                            static_cast<size_t>(
-                                problem.getParams().smCountTarget()));
-                        effectiveDyn = (autoMode == origami::hybrid_mode_t::dynamic);
-                        break;
-                    }
-                    default:
-                        effectiveDyn = false;
-                        break;
-                    }
-                }
+                // ---- Decide the active sub-mode FIRST, so we only do the work
+                // that matches the mode being packed (and only push 6 args).
+                // streamK5EffectiveDynamic is the single source of truth shared
+                // with getSKGrid, so the launch grid (sk.grid) and these packed
+                // args can never disagree. Precedence: TENSILE_STREAMK5_FORCE_MODE
+                // env override > problem tri-state OFF/ON > AUTO heuristic. ----
+                bool effectiveDyn = streamK5EffectiveDynamic(problem, *hardware);
 
                 if(effectiveDyn)
                 {
@@ -938,6 +880,14 @@ namespace TensileLite
                 else
                 {
                     // ---- SK3 (static) arg values ----
+                    // Mirror the standalone SK3 (two-tile DP-first) arg packing
+                    // exactly so SK5-off == SK3: identical parallel-vs-tree
+                    // split, identical forceDPOnly handling, identical
+                    // skTiles/skItersPerWG. The mode bit lives in bit 30 of
+                    // slot 2 (MagicShiftItersPerTile) and is 0 for the static
+                    // path; the parallel-vs-tree choice only changes the VALUES
+                    // of the SKItersPerWG/skGrid/skTiles slots (3,4,5), never
+                    // the mode bit, so the kernel's mode dispatch is unaffected.
                     uint32_t magicNumberItersPerTile;
                     uint32_t magicShiftItersPerTile;
                     magicNumberItersPerTile = magicNumber(
@@ -951,23 +901,46 @@ namespace TensileLite
                     assert((magicShiftItersPerTile & 0x40000000u) == 0u
                            && "SK5 magic shift must leave mode bit (bit 30) clear");
 
-                    int sk3_fullTiles = pAMDGPU->skFullTiles;
-                    bool sk3_bigEnough = sk3_tiles > sk.grid;
-                    uint32_t sk3_skTiles = sk.grid;
-                    if(sk3_tiles % sk.grid != 0)
+                    uint32_t sk3_skItersPerWG;
+                    uint32_t sk3_skTiles;
+                    if(sk.reduction == origami::reduction_t::parallel)
                     {
-                        sk3_skTiles
-                            = sk3_bigEnough
-                                  ? sk.grid * sk3_fullTiles + sk3_tiles % sk.grid
-                                  : sk3_tiles;
-                        sk3_skTiles = std::min(
-                            sk3_skTiles, static_cast<uint32_t>(sk3_tiles));
+                        // Parallel (K-split) reduction: the skTiles slot carries
+                        // the split factor and SKItersPerWG = itersPerTile /
+                        // split. Matches the SK3 parallel branch; the kernel
+                        // reads the split via the sgprSkSplit RegSet alias onto
+                        // the skTiles slot (KernelWriterAssembly.py SK5 block).
+                        uint32_t skSplit
+                            = static_cast<uint32_t>(sk.grid / sk3_tiles);
+                        sk3_skItersPerWG
+                            = static_cast<uint32_t>(sk3_itersPerTile) / skSplit;
+                        sk3_skTiles = skSplit;
                     }
-                    uint32_t sk3_skItersPerWG
-                        = sk3_skTiles * sk3_itersPerTile / sk.grid;
+                    else
+                    {
+                        // Tree (single-kernel fixup) reduction: matches the SK3
+                        // non-parallel branch, including the forceDPOnly mode
+                        // (skTiles == 0 keeps every output tile data-parallel).
+                        int  sk3_fullTiles = pAMDGPU->skFullTiles;
+                        bool sk3_bigEnough = sk3_tiles > sk.grid;
+                        bool forceDPOnly   = sizeMapping.streamKForceDPOnly != 0;
+                        sk3_skTiles
+                            = forceDPOnly ? 0u : static_cast<uint32_t>(sk.grid);
+                        if(!forceDPOnly && sk3_tiles % sk.grid != 0)
+                        {
+                            sk3_skTiles
+                                = sk3_bigEnough
+                                      ? sk.grid * sk3_fullTiles + sk3_tiles % sk.grid
+                                      : sk3_tiles;
+                            sk3_skTiles = std::min(
+                                sk3_skTiles, static_cast<uint32_t>(sk3_tiles));
+                        }
+                        sk3_skItersPerWG = sk3_skTiles * sk3_itersPerTile / sk.grid;
+                    }
 
-                    // SK3 mode -> bit 31 of slot 2 is 0 (mode bit clear). The
-                    // value is already a 5-bit magic shift, so no OR needed.
+                    // SK3 mode -> bit 30 of slot 2 (the mode bit) is 0; the
+                    // magic shift is appended verbatim (bits 0-4 shift + bit 31
+                    // add bit kept), so no OR is needed (see assert above).
                     args.template append<uint32_t>("ItersPerTile",
                                                    sk3_itersPerTile);
                     args.template append<uint32_t>("MagicNumberItersPerTile",
@@ -976,7 +949,8 @@ namespace TensileLite
                                                    magicShiftItersPerTile);
                     args.template append<uint32_t>("SKItersPerWG",
                                                    sk3_skItersPerWG);
-                    args.template append<uint32_t>("skGrid", sk.grid);
+                    args.template append<uint32_t>("skGrid",
+                                                   static_cast<uint32_t>(sk.grid));
                     args.template append<uint32_t>("skTiles", sk3_skTiles);
                 }
             }
@@ -3219,8 +3193,21 @@ namespace TensileLite
         if(sizeMapping.streamK > 0)
         {
             auto tiles           = problem.getNumTiles(sizeMapping, 1);
-            if (sizeMapping.streamK == 4 || sizeMapping.streamK == 5)
+            // SK4 always uses tree reduction. SK5 is a hybrid: when it resolves
+            // to its dynamic (SK4) sub-path it must use tree reduction like SK4;
+            // when it resolves to its static (SK3) sub-path it must use the SAME
+            // reduction strategy SK3 would (which may be parallel/K-split for the
+            // deep-K, low-tile regime), so SK5-off matches standalone SK3 in
+            // launch grid, packed args, workspace, synchronizer/flags and the
+            // post-kernel set. streamK5EffectiveDynamic is the shared single
+            // source of truth used by getSKGrid and the kernel-arg packing in
+            // generateSingleCall, so reduction, grid and args can never disagree.
+            if(sizeMapping.streamK == 4)
                 sk.reduction = origami::reduction_t::tree;
+            else if(sizeMapping.streamK == 5)
+                sk.reduction = streamK5EffectiveDynamic(problem, hardware)
+                                   ? origami::reduction_t::tree
+                                   : getSKReduction(problem, hardware);
             else
                 sk.reduction = getSKReduction(problem, hardware);
             // Propagate the StreamK=5 hybrid-mode (tri-state) from the
@@ -3239,8 +3226,14 @@ namespace TensileLite
             {
                 // Check ideal amount of workspace for optimal performance
                 size_t idealWorkspace = partialTileSize(sk.grid);
-                // SK4/SK5 also need the 256*8 byte work-queue base region.
-                if(sizeMapping.streamK == 4 || sizeMapping.streamK == 5)
+                // The 256*8 byte per-XCD work-queue base region is needed only
+                // by the dynamic (SK4) path: SK4 itself, and SK5 only when it
+                // resolves to its dynamic sub-path. SK5-static must reserve the
+                // same workspace as standalone SK3, so gate on the effective
+                // sub-mode rather than on streamK == 5 unconditionally.
+                if(sizeMapping.streamK == 4
+                   || (sizeMapping.streamK == 5
+                       && streamK5EffectiveDynamic(problem, hardware)))
                     idealWorkspace += 256 * 8;
                 // If given workspace is less than ideal, we can fall back to DP mode
                 // Performance will likely be lower, but the kernel can run if workspace is unavailable
@@ -3661,11 +3654,15 @@ namespace TensileLite
                 {
                     // Check ideal amount of workspace for optimal performance
                     size_t idealWorkspace = partialTileSize(skGrid);
-                    // SK4 (dynamic) and SK5 (hybrid which may run the SK4
-                    // path at runtime) additionally require a per-XCD work
-                    // queue buffer (256 entries * 8 bytes = 2048 bytes,
-                    // see StreamK.py partialsWriteProcedure flag offset).
-                    if(sizeMapping.streamK == 4 || sizeMapping.streamK == 5)
+                    // SK4 (dynamic), and SK5 only when it resolves to its
+                    // dynamic (SK4) sub-path, additionally require a per-XCD
+                    // work queue buffer (256 entries * 8 bytes = 2048 bytes,
+                    // see StreamK.py partialsWriteProcedure flag offset). SK5
+                    // running its static (SK3) sub-path must size its workspace
+                    // exactly like standalone SK3, so gate on the effective mode.
+                    if(sizeMapping.streamK == 4
+                       || (sizeMapping.streamK == 5
+                           && streamK5EffectiveDynamic(problem, hardware)))
                         idealWorkspace += 256 * 8;
                     // If given workspace is less than ideal, we can fall back to DP mode
                     // Performance will likely be lower, but the kernel can run if workspace is unavailable
@@ -3853,6 +3850,62 @@ namespace TensileLite
         return reductionStrat;
     }
 
+    bool ContractionSolution::streamK5EffectiveDynamic(Problem const&  problem,
+                                                       Hardware const& hardware) const
+    {
+        // Debug env override (TENSILE_STREAMK5_FORCE_MODE) trumps everything
+        // when set to 0 (force static SK3) or 1 (force dynamic SK4).
+        const int sk5DebugMode = Debug::Instance().streamK5ForceMode();
+        if(sk5DebugMode == 0)
+            return false;
+        if(sk5DebugMode == 1)
+            return true;
+
+        // Tri-state mode requested by the host on the problem.
+        const int requestedMode = problem.getParams().streamKTileSchedulingMode();
+        switch(requestedMode)
+        {
+        case 0: // OFF  -> static (SK3) path
+            return false;
+        case 1: // ON   -> dynamic (SK4) path
+            return true;
+        case 2: // AUTO -> origami hybrid-mode heuristic
+        {
+            size_t x = 1, y = 1, z = 1, batchSz = 1;
+            for(size_t i = 0; i < problem.freeIndicesA().size(); ++i)
+                x *= problem.freeSizeA(i);
+            for(size_t i = 0; i < problem.freeIndicesB().size(); ++i)
+                y *= problem.freeSizeB(i);
+            for(size_t i = 0; i < problem.boundIndices().size(); ++i)
+                z *= problem.boundSize(i);
+            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+                batchSz *= problem.batchSize(i);
+
+            origami::problem_t origami_problem = {
+                .size  = {x, y, z},
+                .batch = batchSz,
+            };
+            origami::config_t origami_config = {
+                .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
+                       static_cast<size_t>(sizeMapping.macroTile.y),
+                       static_cast<size_t>(sizeMapping.depthU)},
+            };
+
+            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            TENSILE_ASSERT_EXC(hipAMDGPU != nullptr
+                               && hipAMDGPU->analyticalHardware != nullptr);
+            const auto autoMode = origami::streamk::select_hybrid_mode(
+                origami_problem,
+                *(hipAMDGPU->analyticalHardware),
+                origami_config,
+                static_cast<size_t>(problem.getParams().smCountTarget()));
+            return autoMode == origami::hybrid_mode_t::dynamic;
+        }
+        default:
+            return false;
+        }
+    }
+
     size_t ContractionSolution::getSKGrid(Problem const&       problem,
                                           Hardware const&      hardware,
                                           size_t               tiles,
@@ -3884,11 +3937,18 @@ namespace TensileLite
         }
         else if(pAMDGPU->skDynamicGrid > 0)
         {
-            if(sizeMapping.streamK == 4 || sizeMapping.streamK == 5)
+            // StreamK=5 is a hybrid kernel: its dynamic (SK4) sub-path needs the
+            // SK4 persistent grid, but its static (SK3) sub-path must launch the
+            // SK3 analytical grid so SK5-off matches standalone SK3 (grid, args,
+            // and performance). Resolve the effective sub-mode here so the grid
+            // agrees with the kernel-arg packing in generateSingleCall (both use
+            // streamK5EffectiveDynamic as the single source of truth).
+            const bool sk5UsesSK4Grid
+                = (sizeMapping.streamK == 5) && streamK5EffectiveDynamic(problem, hardware);
+            if(sizeMapping.streamK == 4 || sk5UsesSK4Grid)
             {
-                // Grid for dynamic kernel (SK4) and hybrid kernel (SK5).
-                // SK5 must satisfy the SK4 grid constraint (persistent), so
-                // we share the SK4 sizing rule here.
+                // Persistent grid for the dynamic kernel (SK4), and for the SK5
+                // hybrid kernel when it runs its dynamic (SK4) sub-path.
                 // Limit workgroups per CU to 3
                 // TODO Verify this limit is best
                 auto kernelOccupancy = std::min(sizeMapping.CUOccupancy, 3);
@@ -3905,6 +3965,10 @@ namespace TensileLite
             }
             else
             {
+                // Analytical grid for the static StreamK kernel (SK3), and for
+                // the SK5 hybrid kernel when it runs its static (SK3) sub-path
+                // (SK5-off / AUTO-resolved-to-static), so the launch grid and the
+                // derived skTiles/skItersPerWG match standalone SK3.
                 size_t x     = 1;
                 size_t y     = 1;
                 size_t batch = 1;

@@ -290,3 +290,49 @@ TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
     ASSERT_NE(tiles % _CPX_CU, 0);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, device), 0);
 }
+
+// ===========================================================================
+// StreamK5HybridModeTest -- the SK5 hybrid kernel must size its launch grid
+// per the *effective* sub-mode: OFF/static borrows the SK3 grid, ON/dynamic
+// borrows the SK4 persistent grid. The grid sizing (getSKGrid) and the
+// kernel-arg packing (generateSingleCall) share streamK5EffectiveDynamic as
+// the single source of truth; these tests lock that resolution so SK5-off
+// can never silently launch the SK4 grid again (the original regression where
+// SK5-off matched SK4's grid_size=256 instead of SK3's tile-count grid).
+// AUTO (mode 2) routes through the origami heuristic and needs analytical
+// hardware, so it is exercised by the on-device OOB sweep rather than here.
+// ===========================================================================
+
+TEST(StreamK5HybridModeTest, TriStateOffResolvesStatic)
+{
+    ContractionSolution solution;
+    solution.sizeMapping.streamK           = 5;
+    solution.sizeMapping.macroTile         = dim3(128, 128, 1);
+    solution.sizeMapping.depthU            = 64;
+    solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
+    solution.sizeMapping.CUOccupancy       = 1;
+
+    auto problem = dummyProblem();
+    auto device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+
+    problem.setParams().setStreamKTileSchedulingMode(0); // OFF -> static (SK3)
+    EXPECT_FALSE(solution.streamK5EffectiveDynamic(problem, device))
+        << "StreamK=5 OFF must resolve to the static (SK3) sub-path";
+}
+
+TEST(StreamK5HybridModeTest, TriStateOnResolvesDynamic)
+{
+    ContractionSolution solution;
+    solution.sizeMapping.streamK           = 5;
+    solution.sizeMapping.macroTile         = dim3(128, 128, 1);
+    solution.sizeMapping.depthU            = 64;
+    solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
+    solution.sizeMapping.CUOccupancy       = 1;
+
+    auto problem = dummyProblem();
+    auto device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+
+    problem.setParams().setStreamKTileSchedulingMode(1); // ON -> dynamic (SK4)
+    EXPECT_TRUE(solution.streamK5EffectiveDynamic(problem, device))
+        << "StreamK=5 ON must resolve to the dynamic (SK4) sub-path";
+}
