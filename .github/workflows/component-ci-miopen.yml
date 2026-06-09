@@ -22,8 +22,6 @@ env:
 jobs:
   miopen-build:
     name: ${{ matrix.name }}
-    permissions:
-      id-token: write
     container:
       image: rocm/miopen-dev:latest
       options: -v /runner/config:/home/awsconfig/
