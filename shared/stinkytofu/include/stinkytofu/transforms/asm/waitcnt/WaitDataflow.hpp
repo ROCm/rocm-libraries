@@ -64,7 +64,11 @@ struct StinkyInstruction;
 namespace waitcnt {
 
 /// Hardware counters we track. Index matches arrays in DataflowState.
-enum CounterKind { CK_DS = 0, CK_Buffer = 1, CK_Tensor = 2, CK_Count = 3 };
+enum CounterKind { CK_DS = 0, CK_Buffer = 1, CK_KM = 2, CK_Tensor = 3, CK_Count = 4 };
+
+/// Map a tracked async memop to its hardware counter. Returns CK_Count when
+/// `inst` is not tracked by the waitcnt pass.
+CounterKind classifyMemOp(const StinkyInstruction& inst);
 
 /// One queue of in-flight memops on a given counter, tagged by the CFG
 /// predecessor it was seeded from. For an op OP at index I in a queue of
@@ -89,7 +93,8 @@ struct PerPredQueue {
 /// equal to WaitCountSpec::kUnused means the PHI imposes no constraint on
 /// that counter (e.g. all incoming sources were VALU).
 struct PhiSummary {
-    int waits[CK_Count] = {WaitCountSpec::kUnused, WaitCountSpec::kUnused, WaitCountSpec::kUnused};
+    int waits[CK_Count] = {WaitCountSpec::kUnused, WaitCountSpec::kUnused, WaitCountSpec::kUnused,
+                           WaitCountSpec::kUnused};
 
     bool operator==(const PhiSummary& other) const {
         for (int c = 0; c < CK_Count; ++c) {

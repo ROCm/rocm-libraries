@@ -37,45 +37,19 @@ namespace stinkytofu {
 namespace waitcnt {
 
 // ---------------------------------------------------------------------------
-// Classification helpers
-// ---------------------------------------------------------------------------
-
-namespace {
-
-constexpr size_t kMaxInFlight = 64;
-
-// ---------------------------------------------------------------------------
 // Per-counter policy
 //
 // Everything that is *specific to one hardware counter* lives in this table
 // so the dataflow transfer (transferBlock) stays counter-agnostic. To add a
 // counter, or to change WHEN a counter drains, edit this table -- not the
 // transfer loop.
-//
-// Fields:
-//   isProducer    `inst` issues an async op tracked by this counter, so it
-//                 is enqueued and can be the source of a RAW SSA edge. This
-//                 is the single source of truth for classifyMemOp().
-//   rawNeedsWait  DEFAULT for: given a RAW dependency carried on this
-//                 counter, does the consumer `inst` actually require a drain
-//                 here? Most counters realise their hazard at the direct
-//                 consumer (always true). The tensor counter is special: a
-//                 tensor_load_to_lds writes LDS asynchronously and the
-//                 hazard only becomes observable past a barrier, so only a
-//                 barrier anchors a tlcnt wait. Callers can override this
-//                 per counter at runtime via WaitDataflow::setRawNeedsWait();
-//                 the value here is just the seed.
-//
-// Future per-counter knobs (e.g. anti-dep scans, conservative untagged
-// fallbacks) can migrate here behind their own function-pointer fields so
-// transferBlock never grows another `if (c == CK_Foo)`.
 // ---------------------------------------------------------------------------
 struct CounterPolicy {
     bool (*isProducer)(const StinkyInstruction&);
     bool (*rawNeedsWait)(const StinkyInstruction&);
 };
 
-const CounterPolicy& defaultCounterPolicy(CounterKind c) {
+static const CounterPolicy& defaultCounterPolicy(CounterKind c) {
     // Indexed by CounterKind; row order MUST match the enum. Captureless
     // lambdas decay to plain function pointers, so this stays a constant
     // table with no per-call allocation.
@@ -83,8 +57,11 @@ const CounterPolicy& defaultCounterPolicy(CounterKind c) {
         // CK_DS: ds_read / ds_write / ds_atomic; every consumer drains.
         {[](const StinkyInstruction& i) { return isDSRead(i) || isDSWrite(i) || isDSAtomic(i); },
          [](const StinkyInstruction&) { return true; }},
-        // CK_Buffer: global/buffer load+store; every consumer drains.
-        {[](const StinkyInstruction& i) { return isGlobalMemLoad(i) || isGlobalMemStore(i); },
+        // CK_Buffer: vector global/buffer load+store; every consumer drains.
+        {[](const StinkyInstruction& i) { return isBufferMemLoad(i) || isBufferMemStore(i); },
+         [](const StinkyInstruction&) { return true; }},
+        // CK_KM: SMRD scalar loads (s_load_*); every consumer drains.
+        {[](const StinkyInstruction& i) { return isSMemLoad(i); },
          [](const StinkyInstruction&) { return true; }},
         // CK_Tensor: tensor_load_to_lds; every consumer drains.
         {[](const StinkyInstruction& i) { return isTensorLoad(i); },
@@ -101,6 +78,10 @@ CounterKind classifyMemOp(const StinkyInstruction& inst) {
     }
     return CK_Count;
 }
+
+namespace {
+
+constexpr size_t kMaxInFlight = 64;
 
 bool isPhi(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::PHI;
@@ -353,6 +334,8 @@ const char* counterName(CounterKind c) {
             return "ds (dscnt)";
         case CK_Buffer:
             return "buffer (loadcnt/storecnt)";
+        case CK_KM:
+            return "scalar (kmcnt)";
         case CK_Tensor:
             return "tensor (tlcnt)";
         default:
@@ -366,6 +349,8 @@ int getCounterField(const WaitCountSpec& spec, CounterKind c) {
             return spec.dsCount;
         case CK_Buffer:
             return spec.bufferCount;
+        case CK_KM:
+            return spec.kmCount;
         case CK_Tensor:
             return spec.tensorCount;
         default:
@@ -380,6 +365,9 @@ void setCounterField(WaitCountSpec& spec, CounterKind c, int w) {
             break;
         case CK_Buffer:
             spec.bufferCount = w;
+            break;
+        case CK_KM:
+            spec.kmCount = w;
             break;
         case CK_Tensor:
             spec.tensorCount = w;
@@ -675,6 +663,9 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
                 case CK_Buffer:
                     spec.bufferCount = required[c];
                     break;
+                case CK_KM:
+                    spec.kmCount = required[c];
+                    break;
                 case CK_Tensor:
                     spec.tensorCount = required[c];
                     break;
@@ -845,6 +836,7 @@ WaitInsertionPlan WaitDataflow::materializePlan() const {
                 WaitCountSpec spec;
                 if (entry.second.dsCount != WaitCountSpec::kUnused) spec.dsCount = 0;
                 if (entry.second.bufferCount != WaitCountSpec::kUnused) spec.bufferCount = 0;
+                if (entry.second.kmCount != WaitCountSpec::kUnused) spec.kmCount = 0;
                 if (entry.second.tensorCount != WaitCountSpec::kUnused) spec.tensorCount = 0;
                 if (spec.isValid()) plan.anchorWaits[entry.first] = spec;
             }

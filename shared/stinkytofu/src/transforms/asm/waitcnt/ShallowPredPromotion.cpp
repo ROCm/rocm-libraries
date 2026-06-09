@@ -41,13 +41,6 @@ namespace waitcnt {
 
 namespace {
 
-CounterKind classifyMemOp(const StinkyInstruction& inst) {
-    if (isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst)) return CK_DS;
-    if (isGlobalMemLoad(inst) || isGlobalMemStore(inst)) return CK_Buffer;
-    if (isTensorLoad(inst)) return CK_Tensor;
-    return CK_Count;
-}
-
 bool isPhi(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::PHI;
 }
@@ -83,6 +76,9 @@ void setCounter(WaitCountSpec& spec, CounterKind c, int w) {
         case CK_Buffer:
             spec.bufferCount = w;
             break;
+        case CK_KM:
+            spec.kmCount = w;
+            break;
         case CK_Tensor:
             spec.tensorCount = w;
             break;
@@ -97,6 +93,8 @@ int getCounter(const WaitCountSpec& spec, CounterKind c) {
             return spec.dsCount;
         case CK_Buffer:
             return spec.bufferCount;
+        case CK_KM:
+            return spec.kmCount;
         case CK_Tensor:
             return spec.tensorCount;
         default:

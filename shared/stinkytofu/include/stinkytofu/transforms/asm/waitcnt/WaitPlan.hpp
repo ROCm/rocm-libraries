@@ -37,17 +37,19 @@ struct StinkyInstruction;
 namespace waitcnt {
 
 /// One immediate per hardware counter that the emit phase will turn into an
-/// s_wait_dscnt / s_wait_loadcnt / s_wait_tensorcnt before the anchor.
-/// A field of kUnused means "do not emit a wait for this counter".
+/// s_wait_dscnt / s_wait_loadcnt / s_wait_kmcnt / s_wait_tensorcnt before the
+/// anchor. A field of kUnused means "do not emit a wait for this counter".
 struct WaitCountSpec {
     static constexpr int kUnused = -1;
 
     int dsCount = kUnused;      // dlcnt -> s_wait_dscnt
     int bufferCount = kUnused;  // vlcnt -> s_wait_loadcnt
+    int kmCount = kUnused;      // kmcnt -> s_wait_kmcnt
     int tensorCount = kUnused;  // tlcnt -> s_wait_tensorcnt
 
     bool isValid() const {
-        return dsCount != kUnused || bufferCount != kUnused || tensorCount != kUnused;
+        return dsCount != kUnused || bufferCount != kUnused || kmCount != kUnused ||
+               tensorCount != kUnused;
     }
 };
 

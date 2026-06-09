@@ -156,6 +156,13 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             d.vlcnt = spec.bufferCount;
             w->addModifier<SWaitCntData>(d);
         }
+        if (spec.kmCount != WaitCountSpec::kUnused) {
+            StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_kmcnt, arch), anchor);
+            w->addSrcReg(StinkyRegister(spec.kmCount));
+            SWaitCntData d;
+            d.kmcnt = spec.kmCount;
+            w->addModifier<SWaitCntData>(d);
+        }
         if (spec.tensorCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w =
                 builder.create(getMCIDByUOp(GFX::s_wait_tensorcnt, arch), anchor);

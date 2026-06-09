@@ -351,6 +351,70 @@ st.func @test_ds_read_wmma() {
     EXPECT_EQ(waitcnts[1].waitData->kmcnt, -1);
 }
 
+/**
+ * @brief SMRD scalar loads (s_load_*) consumed downstream -> s_wait_kmcnt.
+ *
+ * SMRD scalar loads retire on the kmcnt counter, not loadcnt/dscnt. The pass
+ * must classify them as CK_KM and emit s_wait_kmcnt (SWaitCntData::kmcnt)
+ * before each consumer, with the FIFO counter math identical to the other
+ * counters.
+ *
+ * IR:
+ *   s[8:9]   = s_load_b64 (scalar load 0)
+ *   s[10:11] = s_load_b64 (scalar load 1)
+ *   s20 = s_add_u32 s8, s8     (uses load 0)
+ *   s21 = s_add_u32 s10, s10   (uses load 1)
+ *
+ * Expected:
+ *   s_wait_kmcnt 1 before first  s_add_u32 (wait for load 0; leave load 1)
+ *   s_wait_kmcnt 0 before second s_add_u32 (wait for the remaining load 1)
+ * and no other counter fields are set.
+ */
+TEST_F(WaitCntInsertionTest, SMemLoadBeforeConsumerKmcnt) {
+    std::string irString = R"(
+st.func @test_smem_load_kmcnt() {
+^entry:
+  s[8:9] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 20 }
+  s[10:11] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 20 }
+  s20 = "st.s_add_u32"(s8, s8) { issueCycles = 1, latencyCycles = 1 }
+  s21 = "st.s_add_u32"(s10, s10) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    auto waitcnts = getAllWaitCnts(entryBB);
+
+    ASSERT_EQ(waitcnts.size(), 2) << "Should have exactly 2 waitcnts (before each consumer)";
+
+    StinkyInstruction* add1 = findNthInst(entryBB, GFX::s_add_u32, 0);
+    StinkyInstruction* add2 = findNthInst(entryBB, GFX::s_add_u32, 1);
+    ASSERT_NE(add1, nullptr);
+    ASSERT_NE(add2, nullptr);
+
+    int add1Pos = getInstructionPosition(entryBB, add1);
+    int add2Pos = getInstructionPosition(entryBB, add2);
+
+    EXPECT_EQ(waitcnts[0].position, add1Pos - 1);
+    EXPECT_EQ(waitcnts[0].waitData->kmcnt, 1) << "Wait for load 0 (leave load 1) -> kmcnt=1";
+    EXPECT_EQ(waitcnts[0].waitData->dlcnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->dscnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->vlcnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->vscnt, -1);
+
+    EXPECT_EQ(waitcnts[1].position, add2Pos - 1);
+    EXPECT_EQ(waitcnts[1].waitData->kmcnt, 0) << "Wait for remaining load 1 -> kmcnt=0";
+    EXPECT_EQ(waitcnts[1].waitData->dlcnt, -1);
+    EXPECT_EQ(waitcnts[1].waitData->dscnt, -1);
+    EXPECT_EQ(waitcnts[1].waitData->vlcnt, -1);
+    EXPECT_EQ(waitcnts[1].waitData->vscnt, -1);
+}
+
 // ============================================================================
 // Test Suite 3: Complete Preloop + WMMA + Barrier Pattern
 //
