@@ -144,9 +144,10 @@ add_library(
     HipblasltContainer.cpp
     HipblasltPlugin.cpp
     HipblasltUtils.cpp
-    # Matmul-related files
     engines/plans/HipblasltMatmulPlan.cpp
     engines/plans/HipblasltMatmulPlanBuilder.cpp
+    engines/plans/HipblasltMxMatmulPlan.cpp
+    engines/plans/HipblasltMxMatmulPlanBuilder.cpp
     HipblasltMatmulDesc.cpp
     HipblasltMatrixLayout.cpp
 )

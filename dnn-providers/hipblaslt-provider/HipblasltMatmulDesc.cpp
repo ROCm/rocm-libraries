@@ -59,4 +59,28 @@ hipblasLtMatmulDesc_t HipblasltMatmulDesc::matmulDesc() const
     return _desc;
 }
 
+void HipblasltMatmulDesc::setAScaleMode(hipblasLtMatmulMatrixScale_t scaleMode)
+{
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
+        _desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scaleMode, sizeof(scaleMode)));
+}
+
+void HipblasltMatmulDesc::setBScaleMode(hipblasLtMatmulMatrixScale_t scaleMode)
+{
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
+        _desc, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scaleMode, sizeof(scaleMode)));
+}
+
+void HipblasltMatmulDesc::setAScalePointer(const void* ptr)
+{
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
+        _desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, static_cast<const void*>(&ptr), sizeof(ptr)));
+}
+
+void HipblasltMatmulDesc::setBScalePointer(const void* ptr)
+{
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
+        _desc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, static_cast<const void*>(&ptr), sizeof(ptr)));
+}
+
 } // namespace hipblaslt_plugin

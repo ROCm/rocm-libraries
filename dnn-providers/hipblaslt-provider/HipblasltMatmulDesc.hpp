@@ -27,6 +27,11 @@ public:
 
     hipblasLtMatmulDesc_t matmulDesc() const;
 
+    void setAScaleMode(hipblasLtMatmulMatrixScale_t scaleMode);
+    void setBScaleMode(hipblasLtMatmulMatrixScale_t scaleMode);
+    void setAScalePointer(const void* ptr);
+    void setBScalePointer(const void* ptr);
+
 private:
     hipblasLtMatmulDesc_t _desc = nullptr;
 };

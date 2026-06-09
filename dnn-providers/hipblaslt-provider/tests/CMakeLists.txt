@@ -18,6 +18,8 @@ add_executable(
     hipblaslt_plugin_tests
     engines/plans/TestHipblasltMatmulPlan.cpp
     engines/plans/TestHipblasltMatmulPlanBuilder.cpp
+    engines/plans/TestHipblasltMxMatmulPlan.cpp
+    engines/plans/TestHipblasltMxMatmulPlanBuilder.cpp
     engines/TestHipblasltEngine.cpp
     main.cpp
     TestHipblasltEngineManager.cpp
