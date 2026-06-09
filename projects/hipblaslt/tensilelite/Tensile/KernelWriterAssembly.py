@@ -664,9 +664,7 @@ class KernelWriterAssembly(KernelWriter):
     GlobalReadIncs*; see calculateStagger).
     """
     module = Module("ReleaseGlobalReadIncsAfterTdmWaveSep")
-    needsStaggerSgprs = kernel["StaggerU"] > 0 or kernel["InternalSupportParams"]["SupportCustomStaggerU"]
-    if not self.isTdmWaveSeparated(kernel) or needsStaggerSgprs:
-      # Already pinned in removeGROffsetsVariableSgprsFromPool; nothing to release.
+    if not self.isTdmWaveSeparated(kernel):
       return module
     if self.states.a.numSgprGlobalReadIncs > 0:
       module.add(self.addSgprVarToPool("GlobalReadIncsA"))
