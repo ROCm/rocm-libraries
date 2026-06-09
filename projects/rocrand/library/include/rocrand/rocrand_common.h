@@ -38,7 +38,9 @@
 #define ROCRAND_NAN_DOUBLE (0x7ff8000000000000)
 
 #include <hip/hip_runtime.h>
+#if !defined(__HIPCC_RTC__)
 #include <utility>
+#endif // !defined(__HIPCC_RTC__)
 
 #define ROCRAND_KERNEL __global__ static
 
