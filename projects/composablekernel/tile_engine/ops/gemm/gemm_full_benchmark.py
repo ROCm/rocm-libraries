@@ -43,6 +43,13 @@ DEFAULT_PROBLEMS = [
     {"M": 257, "N": 257, "K": 257},
 ]
 
+# Phase-1 scope: the worker feeds fp16 inputs and the host transpose assumes a
+# column-major B (rcr). Constrain the CLI to what the runner actually supports so
+# a mismatched --dtype/--layout fails fast instead of silently benchmarking the
+# wrong thing. Later phases widen these sets as the runner gains signatures.
+SUPPORTED_DTYPES = ("fp16", "bf16")
+SUPPORTED_LAYOUTS = ("rcr",)
+
 
 def load_problems(path):
     if not path:
@@ -57,8 +64,18 @@ def main():
     parser = argparse.ArgumentParser(description="GEMM Benchmark Sweep (via Dispatcher)")
     parser.add_argument("configs", nargs="+", help="TE sweep config JSON files")
     parser.add_argument("--arch", default="gfx942")
-    parser.add_argument("--dtype", default="fp16")
-    parser.add_argument("--layout", default="rcr")
+    parser.add_argument(
+        "--dtype",
+        default="fp16",
+        choices=SUPPORTED_DTYPES,
+        help=f"Input dtype (supported: {', '.join(SUPPORTED_DTYPES)})",
+    )
+    parser.add_argument(
+        "--layout",
+        default="rcr",
+        choices=SUPPORTED_LAYOUTS,
+        help=f"A/B/C layout (supported: {', '.join(SUPPORTED_LAYOUTS)})",
+    )
     parser.add_argument("--problems", default=None, help="JSON file of M,N,K problems")
     parser.add_argument("--csv", type=str, default="gemm_results.csv")
     parser.add_argument("--workers", type=int, default=8, help="Parallel build workers")
