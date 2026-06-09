@@ -3,12 +3,15 @@
 
 #include "plans/SdpaBwdPlan.hpp"
 #include "asm/SdpaBwdKernelArgs.hpp"
+#include "plans/SdpaPlanUtils.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <limits>
+#include <string>
 #include <unordered_map>
 #include <utility>
 
@@ -121,11 +124,6 @@ struct MhaBwdArgs
 constexpr unsigned int K_BF16_SIZE = 2;
 constexpr unsigned int K_FP32_SIZE = 4;
 
-// Kernel tile sizes from AITER CSV metadata (commit 9522048).
-// TODO(Task I8.3): Production should read these from AITER CSV metadata per kernel config.
-constexpr unsigned int K_TS_ODO = 128; // fmha_bwd_odo.csv
-constexpr unsigned int K_TS_KV = 192; // fmha_bwd_dqdkdv.csv
-constexpr unsigned int K_TS_DQ = 64; // fmha_bwd_dq_convert.csv (hd128, rtne)
 constexpr unsigned int K_BWD_BLOCK_DIM = 256;
 
 // AITER reference: mha_bwd.cu::run_fmha_bwd_odo() (commit 9522048)
@@ -152,12 +150,18 @@ asm_sdpa_engine::fmha_bwd_odo_args buildOdoArgs(const MhaBwdArgs& a)
 }
 
 // AITER reference: mha_bwd.cu::run_fmha_bwd_dqdkdv() (commit 9522048)
-asm_sdpa_engine::fmha_bwd_dqdkdv_args buildDqdkdvArgs(const MhaBwdArgs& a)
+//
+// `tsKv` is the K/V tile size for the resolved kernel (CSV column 'ts').  In
+// AITER it comes from the kernel-traits template parameter at the call site;
+// here it is plumbed in from the dispatch tuple via SdpaBwdParams::dqdkdvTiles.
+// Kept as an explicit parameter (not a field on MhaBwdArgs) to mirror AITER's
+// mha_bwd_args layout exactly.
+asm_sdpa_engine::fmha_bwd_dqdkdv_args buildDqdkdvArgs(const MhaBwdArgs& a, unsigned int tsKv)
 {
     asm_sdpa_engine::fmha_bwd_dqdkdv_args dqdkdv{};
 
-    // a32: write dQ to FP32 dq_acc workspace (post-converted by DQ_CONVERT)
-    // a16: write dQ directly to user's BF16 output buffer
+    // A32: write dQ to FP32 dq_acc workspace (DQ_CONVERT casts it to BF16 afterward).
+    // A16: write dQ directly to the output BF16 buffer.
     dqdkdv.ptr_dq = (a.accType == asm_sdpa_engine::AccumulatorType::A32) ? a.dq_acc_ptr : a.dq_ptr;
     dqdkdv.ptr_dk = a.dk_ptr;
     dqdkdv.ptr_dv = a.dv_ptr;
@@ -182,8 +186,8 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args buildDqdkdvArgs(const MhaBwdArgs& a)
     dqdkdv.head_dim_v = a.hdim_v;
     dqdkdv.nhead_q = a.nhead_q;
 
-    // Tile size: ts_kv * stride_k * sizeof(BF16)
-    dqdkdv.Ts = K_TS_KV * a.stride_k * K_BF16_SIZE;
+    // Tile size: tsKv * stride_k * sizeof(BF16)
+    dqdkdv.Ts = tsKv * a.stride_k * K_BF16_SIZE;
 
     // Q strides (bytes)
     dqdkdv.Hs_q = a.nhead_stride_q * K_BF16_SIZE;
@@ -383,7 +387,7 @@ namespace asm_sdpa_engine
 
 SdpaBwdPlan::SdpaBwdPlan(HipModuleGuard odoKernel,
                          HipModuleGuard dqdkdvKernel,
-                         HipModuleGuard postKernel,
+                         std::optional<HipModuleGuard> postKernel,
                          SdpaBwdParams params)
     : _odoKernel(std::move(odoKernel))
     , _dqdkdvKernel(std::move(dqdkdvKernel))
@@ -424,11 +428,15 @@ void SdpaBwdPlan::execute(const Handle& handle,
                           uint32_t numDeviceBuffers,
                           void* workspace) const
 {
-    // 1. Validate workspace
+    // 1. Validate workspace.  getMaxWorkspaceSize() always reports a non-zero
+    // size for backward SDPA, so a null workspace pointer here is a contract
+    // violation by the caller.
     if(workspace == nullptr)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Backward SDPA requires workspace but received nullptr");
-        return;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "SdpaBwdPlan::execute: workspace is null but backward SDPA requires a non-zero "
+            "workspace (see getMaxWorkspaceSize())");
     }
 
     // 2. Build UID->ptr map from device buffers
@@ -449,10 +457,12 @@ void SdpaBwdPlan::execute(const Handle& handle,
     void* dkPtr = uidToPtrMap.at(_params.dkUid);
     void* dvPtr = uidToPtrMap.at(_params.dvUid);
 
-    // 4. Carve workspace into sub-buffers
+    // 4. Carve workspace into sub-buffers.
+    // A32: dq_acc follows D buffer (DQDKDV accumulates FP32 dQ there, then DQ_CONVERT casts).
+    // A16: DQDKDV writes dQ directly to the output buffer; dq_acc is not allocated.
     auto* dBufPtr = workspace;
-    // a32: dq_acc buffer follows D buffer in workspace
-    // a16: no dq_acc buffer (nullptr) — DQDKDV writes dQ directly to user output
+    // A32: dq_acc buffer follows D buffer in workspace.
+    // A16: no dq_acc buffer (nullptr) — DQDKDV writes dQ directly to user output.
     void* dqAccPtr = nullptr;
     if(_params.accumulatorType == AccumulatorType::A32)
     {
@@ -460,7 +470,8 @@ void SdpaBwdPlan::execute(const Handle& handle,
                    + sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
     }
 
-    // 5. Build convenience args struct (mirrors AITER mha_bwd_args)
+    // 5. Build convenience args struct (mirrors AITER mha_bwd_args).
+    // Byte-stride uint32 overflow was already rejected by isApplicable.
     const MhaBwdArgs mhaArgs = buildMhaBwdArgs(
         _params, qPtr, kPtr, vPtr, oPtr, doPtr, lsePtr, dqPtr, dkPtr, dvPtr, dBufPtr, dqAccPtr);
 
@@ -473,7 +484,7 @@ void SdpaBwdPlan::execute(const Handle& handle,
     // 6a. Build args and launch kernel 1: ODO
     auto odoArgs = buildOdoArgs(mhaArgs);
 
-    const unsigned int gdxOdo = (mhaArgs.seqlen_q + K_TS_ODO - 1) / K_TS_ODO;
+    const unsigned int gdxOdo = _params.odoTiles.gridDim(mhaArgs.seqlen_q);
 
     if(!launchKernel("SDPA backward ODO",
                      _odoKernel.function(),
@@ -485,13 +496,36 @@ void SdpaBwdPlan::execute(const Handle& handle,
                      K_BWD_BLOCK_DIM,
                      stream))
     {
-        return;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward ODO");
     }
+    plan_utils::throwOnLaunchPostError("SDPA backward ODO");
 
     // 6b. Build args and launch kernel 2: DQDKDV
-    auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs);
+    auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs, _params.dqdkdvTiles.ts);
 
-    const unsigned int gdxDqdkdv = (mhaArgs.seqlen_k + K_TS_KV - 1) / K_TS_KV;
+    const unsigned int gdxDqdkdv = _params.dqdkdvTiles.gridDim(mhaArgs.seqlen_k);
+
+    // A32: zero dq_acc before DQDKDV. The atomic-accumulator kernel adds per-K-tile
+    // dQ contributions atomically and does not pre-zero; stale residue from a
+    // prior workspace lease would silently corrupt dQ. AITER allocates dq_accum
+    // via torch::zeros (aiter/csrc/py_itfs_cu/asm_mha_bwd.cu:137 at commit 9522048).
+    // A16 writes dQ directly — no accumulator buffer needed, skip the memset.
+    if(_params.accumulatorType == AccumulatorType::A32)
+    {
+        const size_t dqAccBytes = sdpaBwdDqAccBufferSize(
+            _params.batchSize, _params.numHeadsQ, _params.seqLenQ, _params.headDimQk);
+        const hipError_t memsetErr = hipMemsetAsync(dqAccPtr, 0, dqAccBytes, stream);
+        if(memsetErr != hipSuccess)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                std::string("SdpaBwdPlan::execute: failed to zero dq_acc workspace before SDPA "
+                            "backward DQDKDV, error: ")
+                    + hipGetErrorString(memsetErr));
+        }
+    }
 
     if(!launchKernel("SDPA backward DQDKDV",
                      _dqdkdvKernel.function(),
@@ -503,26 +537,35 @@ void SdpaBwdPlan::execute(const Handle& handle,
                      K_BWD_BLOCK_DIM,
                      stream))
     {
-        return;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQDKDV");
     }
+    plan_utils::throwOnLaunchPostError("SDPA backward DQDKDV");
 
-    // 6c. Build args and launch kernel 3: DQ_CONVERT (FP32 → BF16)
-    // Only needed for a32 accumulator — a16 writes dQ directly in BF16.
+    // 6c. DQ_CONVERT (FP32 → BF16) — A32 path only.
+    // A16 wrote dQ directly to the output BF16 buffer in step 6b; no cast needed.
     if(_params.accumulatorType == AccumulatorType::A32)
     {
         auto postArgs = buildPostArgs(mhaArgs);
 
-        const unsigned int gdxPost = (mhaArgs.seqlen_q + K_TS_DQ - 1) / K_TS_DQ;
+        const unsigned int gdxPost = _params.dqConvertTiles.gridDim(mhaArgs.seqlen_q);
 
-        launchKernel("SDPA backward DQ_CONVERT",
-                     _postKernel->function(),
-                     &postArgs,
-                     sizeof(postArgs),
-                     gdxPost,
-                     mhaArgs.nhead_q,
-                     mhaArgs.batch,
-                     K_BWD_BLOCK_DIM,
-                     stream);
+        if(!launchKernel("SDPA backward DQ_CONVERT",
+                         _postKernel->function(),
+                         &postArgs,
+                         sizeof(postArgs),
+                         gdxPost,
+                         mhaArgs.nhead_q,
+                         mhaArgs.batch,
+                         K_BWD_BLOCK_DIM,
+                         stream))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQ_CONVERT");
+        }
+        plan_utils::throwOnLaunchPostError("SDPA backward DQ_CONVERT");
     }
 }
 

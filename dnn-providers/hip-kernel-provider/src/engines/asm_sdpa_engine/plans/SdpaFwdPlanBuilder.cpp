@@ -6,6 +6,7 @@
 #include "asm_fmha_v3_fwd_configs.hpp"
 #include "core/Utils.hpp"
 #include "plans/SdpaFwdPlan.hpp"
+#include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
 #include <hip/hip_runtime.h>
@@ -19,45 +20,6 @@ namespace asm_sdpa_engine
 {
 
 using namespace hip_kernel_provider_common;
-
-static MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    const bool leftAndRightBoundsSet
-        = attrs.left_bound().has_value() && attrs.right_bound().has_value();
-    // No bounds set at all → check deprecated bools, otherwise no mask
-    if(!leftAndRightBoundsSet)
-    {
-        if(attrs.causal_mask()) // Deprecated
-        {
-            return MaskType::TOP_LEFT_CAUSAL;
-        }
-        if(attrs.causal_mask_bottom_right()) // Deprecated
-        {
-            return MaskType::BOTTOM_RIGHT_CAUSAL;
-        }
-        return MaskType::NO_MASK;
-    }
-
-    // -1 == unbound
-    auto left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
-    auto right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
-    // Both unbounded: no mask
-    if(left == -1 && right == -1)
-    {
-        return MaskType::NO_MASK;
-    }
-    // Causal: left unbounded, right = 0 (don't attend past diagonal)
-    if(left == -1 && right == 0)
-    {
-        return attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
-                   ? MaskType::BOTTOM_RIGHT_CAUSAL
-                   : MaskType::TOP_LEFT_CAUSAL;
-    }
-    // Anything else is sliding window
-    return MaskType::WINDOW_GENERIC;
-}
 
 static RoundingMode
     getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
@@ -77,7 +39,7 @@ static std::string getKernelNameKey(const std::string& archId,
                                     const std::string& dataType,
                                     int hdim_q, // NOLINT(readability-identifier-naming)
                                     int hdim_v, // NOLINT(readability-identifier-naming)
-                                    MaskType maskType,
+                                    plan_utils::MaskType maskType,
                                     RoundingMode bf16_cvt, // NOLINT(readability-identifier-naming)
                                     BatchMode mode,
                                     const CFG* cfgs)
@@ -92,7 +54,7 @@ static std::string getKernelNameKey(const std::string& archId,
         }
 
         if(cfg.dtype == dataType && cfg.hdim_q == hdim_q && cfg.hdim_v == hdim_v
-           && static_cast<int>(cfg.mask) == maskType && static_cast<int>(cfg.mode) == mode)
+           && cfg.mask == static_cast<int>(maskType) && static_cast<int>(cfg.mode) == mode)
         {
             if(archId == "gfx950")
             {
@@ -116,12 +78,11 @@ static std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::D
                                          hipdnn_flatbuffers_sdk::data_objects::DataType oType)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
-    if(qType == DataType::BFLOAT16 && kType == DataType::BFLOAT16 && vType == DataType::BFLOAT16
-       && oType == DataType::BFLOAT16)
+    if(plan_utils::allDataTypesEqual(DataType::BFLOAT16, {qType, kType, vType, oType}))
     {
         return "bf16";
     }
-    if(qType == DataType::FP8_E4M3 && kType == DataType::FP8_E4M3 && vType == DataType::FP8_E4M3
+    if(plan_utils::allDataTypesEqual(DataType::FP8_E4M3, {qType, kType, vType})
        && oType == DataType::BFLOAT16)
     {
         return "fp8bf16";
@@ -262,11 +223,24 @@ bool SdpaFwdPlanBuilder::isApplicable(
             + ") and input tensors must have datatype BFLOAT16 or FP8_E4M3 (Actual type: "
             + EnumNameDataType(qTensor->data_type()) + ")");
 
+    // Classify the mask; contradictory mask attributes are an invalid-input
+    // condition the engine declines rather than dispatches.
+    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
+    try
+    {
+        maskType = plan_utils::getMaskType(attrs);
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + e.what());
+        return false;
+    }
+
     auto key = getKernelNameKey(deviceString,
                                 dataTypeId,
                                 static_cast<int>(qTensor->dims()->Get(3)),
                                 static_cast<int>(vTensor->dims()->Get(3)),
-                                getMaskType(attrs),
+                                maskType,
                                 getRoundingMode(attrs),
                                 getBatchMode(attrs),
                                 &cfg_fmha_fwd);
@@ -411,8 +385,8 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.oStrideBatch = oStrideBatch;
     params.attnScale = attnScale;
     params.archString = deviceString;
-    const MaskType maskType = getMaskType(sdpaAttrs);
-    params.noMask = maskType == MaskType::NO_MASK;
+    const plan_utils::MaskType maskType = plan_utils::getMaskType(sdpaAttrs);
+    params.noMask = maskType == plan_utils::MaskType::NO_MASK;
 
     // Find matching kernel to graph
     fmha_v3_fwdConfig config;
