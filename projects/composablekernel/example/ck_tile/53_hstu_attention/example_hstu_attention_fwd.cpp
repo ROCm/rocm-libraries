@@ -1092,6 +1092,7 @@ int main(int argc, char* argv[])
 
     if(num_group > 1)
     {
+#ifdef HSTU_ENABLE_GROUP_MODE
         if(data_type == "fp16")
         {
             return run_group_hstu<ck_tile::half_t>(arg_parser, num_group) ? 0 : -2;
@@ -1100,6 +1101,15 @@ int main(int argc, char* argv[])
         {
             return run_group_hstu<ck_tile::bf16_t>(arg_parser, num_group) ? 0 : -2;
         }
+#else
+        // This is a trimmed jagged-only build: the group-mode forward instances
+        // (hstu_attention_group_forward_{bf16,fp16}) are not compiled in.
+        // Rebuild with -DHSTU_ENABLE_GROUP_MODE to enable num_group > 1.
+        std::cerr << "Group mode (num_group > 1) is not compiled in this build. "
+                     "Rebuild with -DHSTU_ENABLE_GROUP_MODE to enable it."
+                  << std::endl;
+        return -3;
+#endif
     }
     else
     {

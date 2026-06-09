@@ -14,6 +14,7 @@
 #include "hstu_attention_fwd_type_config.hpp"
 #include "hstu_attention_fwd_setting.hpp"
 #include "hstu_attention_params.hpp"
+#include "hstu_attention_tuned_config.hpp"
 #include "hstu_attention_hdim_switch.hpp"
 #include "hstu_attention_pipeline_problem.hpp"
 #include "hstu_attention_traits.hpp"
@@ -29,6 +30,43 @@
 #ifndef HSTU_COMPILE_NO_SPLITKV
 #include "hstu_attention_jagged_forward_splitkv_dispatch.hpp"
 #endif
+
+// No-softmax tile setting with optional kM0/kN0 block-tile overrides for the
+// tuned-config path. KM0/KN0 == 0 means "use the base dim" from
+// HstuAttentionNoSoftmaxFwdBlockTile, in which case this resolves to the exact
+// same HstuAttentionFwdTileSettingClass instantiation as the stock
+// HstuAttentionNoSoftmaxFwdTileSettingW (so existing instances stay
+// byte-identical). A nonzero value pins that tile dim instead: e.g. KN0=32 with
+// MTile=64/MaxK=64 turns the base sequence<192,64,32,64,32,64> into the unified
+// sweep winner sequence<192,32,32,64,32,64> without a new instance file.
+template <ck_tile::index_t MaxK_,
+          ck_tile::index_t MTile_,
+          ck_tile::index_t WarpK_,
+          ck_tile::index_t KM0_,
+          ck_tile::index_t KN0_>
+struct HstuNoSoftmaxFwdTileSettingOverride
+{
+    using BaseBlockTile      = HstuAttentionNoSoftmaxFwdBlockTile<MaxK_, MTile_>;
+    using base_seq           = typename BaseBlockTile::type;
+    static constexpr ck_tile::index_t m0 =
+        (KM0_ != 0) ? KM0_ : base_seq::at(ck_tile::number<0>{});
+    static constexpr ck_tile::index_t n0 =
+        (KN0_ != 0) ? KN0_ : base_seq::at(ck_tile::number<1>{});
+    using over_seq = ck_tile::sequence<m0,
+                                       n0,
+                                       base_seq::at(ck_tile::number<2>{}),
+                                       base_seq::at(ck_tile::number<3>{}),
+                                       base_seq::at(ck_tile::number<4>{}),
+                                       base_seq::at(ck_tile::number<5>{})>;
+    static_assert(over_seq::at(ck_tile::number<4>{}) >= WarpK_,
+                  "BlockTile::kK1 must be >= WarpK for the warp tile to fit one MFMA");
+    using Type = ck_tile::HstuAttentionFwdTileSettingClass<
+        over_seq,
+        typename BaseBlockTile::gemm0_warps,
+        typename HstuChooseWarpTile_16x16<WarpK_>::type,
+        typename BaseBlockTile::gemm1_warps,
+        typename HstuChooseWarpTile_16x16<WarpK_>::type>;
+};
 
 template <typename InOutDataType,
           bool kUseCausal,
@@ -74,7 +112,13 @@ template <typename InOutDataType,
           // Lower values free up VGPR/LDS budget per block (useful
           // for register-pressure-bound shapes); higher values
           // raise theoretical occupancy (useful when LDS-light).
-          ck_tile::index_t Occupancy = -1>
+          ck_tile::index_t Occupancy = -1,
+          // kM0/kN0 block-tile overrides for the tuned-config path. 0 = use the
+          // base dim from HstuAttentionNoSoftmaxFwdBlockTile (existing instances
+          // stay byte-identical); a nonzero value pins that tile dim. KN0=32 with
+          // MTile=64 realizes the unified sweep winner sequence<192,32,32,64,32,64>.
+          ck_tile::index_t KM0 = 0,
+          ck_tile::index_t KN0 = 0>
 struct jagged_forward_causal_softmax_bias_dropout_dispatch
 {
     static_assert(!(kUseAgpr && kUseSoftmax),
@@ -110,7 +154,7 @@ struct jagged_forward_causal_softmax_bias_dropout_dispatch
     using HstuAttentionTileSetting =
         typename std::conditional_t<kUseSoftmax,
                                     HstuAttentionWithSoftmaxFwdTileSetting<MaxK, MTile>,
-                                    HstuAttentionNoSoftmaxFwdTileSettingW<MaxK, MTile, WarpK>>::Type;
+                                    HstuNoSoftmaxFwdTileSettingOverride<MaxK, MTile, WarpK, KM0, KN0>>::Type;
 
     // Round-3 #1 (TrLoad enable): allow the JIT to opt in to the
     // TrLoad pipeline via `kUseTrLoad`, overriding the original
@@ -271,6 +315,57 @@ struct jagged_forward_causal_softmax_bias_dropout_dispatch
     };
 };
 
+// Compiled-instance registry for the tuned-config override path. Given a tile
+// signature decoded from the CSV, launch the matching precompiled kernel and
+// return true; return false when no compiled instance matches (the caller then
+// falls back to the legacy heuristic). Only the no-softmax d=64 deployment path
+// is wired, so `if constexpr` keeps the extra template instantiations out of the
+// softmax / d!=64 instances. Add a new `if`-arm (plus its CSV row) here to
+// register a future tuned shape.
+template <typename InOutDataType,
+          bool kUseCausal,
+          bool kUseSoftmax,
+          bool kHasBias,
+          bool kHasDropout,
+          ck_tile::index_t MaxK>
+bool try_run_tuned_jagged_forward(const ck_tile::hstu_tuned::TileSig& sig,
+                                  HstuAttentionNoGroupFwdParams& param,
+                                  hipStream_t stream)
+{
+    if constexpr(!kUseSoftmax && MaxK == 64)
+    {
+        // Unified deployment winner (B120/B1024 x H4/H8, N16384, d=64):
+        // mtile64, kN0=32 override (kN0Sub/kN1/kK1 = base), no split-KV, std
+        // pipeline, WarpK=16. Effective tile sequence<192,32,32,64,32,64>,
+        // bit-exact to the verified JIT instance `..._mtile64_splitkv0_std_n032...`.
+        if(sig.mtile == 64 && !sig.splitkv && sig.kn0 == 32 && sig.kn0sub == 0 &&
+           sig.kn1 == 0 && sig.kk1 == 0)
+        {
+            jagged_forward_causal_softmax_bias_dropout_dispatch<InOutDataType,
+                                                                kUseCausal,
+                                                                kUseSoftmax,
+                                                                kHasBias,
+                                                                kHasDropout,
+                                                                MaxK,
+                                                                /*MTile=*/64,
+                                                                /*kUseAsyncPipeline=*/false,
+                                                                /*WarpK=*/16,
+                                                                /*kUseAgpr=*/false,
+                                                                /*kUsePingPong=*/false,
+                                                                /*kUseSchedGroup=*/false,
+                                                                /*kUseTrLoad=*/false,
+                                                                /*Occupancy=*/-1,
+                                                                /*KM0=*/0,
+                                                                /*KN0=*/32>::Run(param, stream);
+            return true;
+        }
+    }
+    (void)sig;
+    (void)param;
+    (void)stream;
+    return false;
+}
+
 template <typename InOutDataType,
           bool kUseCausal,
           bool kUseSoftmax,
@@ -280,6 +375,33 @@ template <typename InOutDataType,
 void run_jagged_forward_causal_softmax_bias_dropout_dispatch(HstuAttentionNoGroupFwdParams& param,
                                                              hipStream_t stream)
 {
+    // Tuned-config override: consult the CSV table before the legacy heuristic.
+    // On an exact (dtype,causal,B,H,N,D) match backed by a compiled instance we
+    // launch that kernel; otherwise we fall through unchanged. A missing CSV
+    // makes this a no-op (config().lookup returns nullptr).
+    if constexpr(!kUseSoftmax)
+    {
+        const char* dtype = std::is_same<InOutDataType, ck_tile::bf16_t>::value
+                                ? "bf16"
+                                : (std::is_same<InOutDataType, ck_tile::fp16_t>::value ? "fp16"
+                                                                                       : "");
+        if(const auto* sig = ck_tile::hstu_tuned::config().lookup(dtype,
+                                                                  kUseCausal ? 1 : 0,
+                                                                  param.num_batch,
+                                                                  param.num_head,
+                                                                  param.max_seqlen_q,
+                                                                  param.hdim_qk))
+        {
+            if(try_run_tuned_jagged_forward<InOutDataType,
+                                            kUseCausal,
+                                            kUseSoftmax,
+                                            kHasBias,
+                                            kHasDropout,
+                                            MaxK>(*sig, param, stream))
+                return;
+        }
+    }
+
     auto effective_mtile = [&]() {
         const char* env_p = std::getenv("HSTU_FORCE_MTILE");
         if(env_p != nullptr)

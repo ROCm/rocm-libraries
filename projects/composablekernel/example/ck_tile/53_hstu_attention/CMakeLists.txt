@@ -23,6 +23,14 @@ endif()
 
 target_compile_options(${EXAMPLE_HSTU_ATTENTION} PRIVATE ${EXAMPLE_HSTU_ATTENTION_COMPILE_OPTIONS})
 
+# Ship the tuned-config override table next to the binary so the default
+# (no-env) path resolution finds it. Override at runtime with $HSTU_TUNED_CONFIG.
+add_custom_command(TARGET ${EXAMPLE_HSTU_ATTENTION} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_LIST_DIR}/hstu_tuned.csv
+            $<TARGET_FILE_DIR:${EXAMPLE_HSTU_ATTENTION}>/hstu_tuned.csv
+    COMMENT "Copying hstu_tuned.csv next to ${EXAMPLE_HSTU_ATTENTION}")
+
 # TODO: we have to turn off this global prop, otherwise the progress bar generated
 # by cmake will print too many files, execvp: /bin/sh: Argument list too long
 # however, this property may affect global

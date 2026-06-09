@@ -1,0 +1,23 @@
+# HSTU no-softmax jagged forward tuned-config override table.
+#
+# Consulted before the legacy heuristic (get_hstu_attention_fwd_mtile /
+# shall_use_splitkv). On an exact (dtype,causal,B,H,N,D) match whose tile
+# signature is compiled into the binary, that kernel is launched; on any miss
+# the call falls through to the unchanged heuristic. Delete this file (and leave
+# $HSTU_TUNED_CONFIG unset) to get pure legacy-heuristic behavior.
+#
+# Tile columns use the codegen "0 = base dim" convention. The four rows below
+# pin the MI300X (gfx942) deployment shapes to the unified sweep winner
+# (mtile64, kN0=32, no split-KV) -> effective tile sequence<192,32,32,64,32,64>,
+# ~14-17% faster than the heuristic's mtile128 pick.
+#
+# The N column is Nmin: the row fires when runtime max_seqlen_q >= Nmin. We use
+# 8192 (not 16384) because for the sparse jagged deployment the binary's
+# max_seqlen_q is ~15.5k (= max(uih)+max_target), and 8192 cleanly excludes the
+# nominal-4096 proxy shapes while catching the nominal-16384 deployment shapes.
+#
+# dtype,causal,B,H,Nmin,D,mtile,kn0,kn0sub,kn1,kk1,splitkv
+bf16,1,120,4,8192,64,64,32,0,0,0,0
+bf16,1,120,8,8192,64,64,32,0,0,0,0
+bf16,1,1024,4,8192,64,64,32,0,0,0,0
+bf16,1,1024,8,8192,64,64,32,0,0,0,0
