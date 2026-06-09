@@ -299,14 +299,6 @@ class TestCkTileGemmFusedAQuantStandalone : public ::testing::Test
     {
         static_assert(std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>);
         constexpr bool transpose_c = CodegenGemmTraits::TransposeC;
-        constexpr bool eight_waves =
-#ifdef CK_GFX950_SUPPORT
-            IS_FP8BLOCKSCALE &&
-            (GemmConfig::M_Warp * GemmConfig::N_Warp * GemmConfig::K_Warp == 8) &&
-            GemmConfig::K_Warp_Tile == 128;
-#else
-            false;
-#endif
 
         using GemmPipelineProblem = ck_tile::GemmPipelineProblemBase<ADataType,
                                                                      BDataType,
@@ -315,15 +307,8 @@ class TestCkTileGemmFusedAQuantStandalone : public ::testing::Test
                                                                      CodegenGemmTraits,
                                                                      ComputeDataType>;
 
-        constexpr auto base_gemm_pipeline = []() {
-            if constexpr(eight_waves)
-                return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
-            else if constexpr(PreshuffleB)
-                return ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>{};
-            else
-                return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
-        }();
-        using BaseGemmPipeline = std::decay_t<decltype(base_gemm_pipeline)>;
+        using BaseGemmPipeline =
+            std::decay_t<ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>>;
 
         const ck_tile::index_t K_split =
             ck_tile::integer_least_multiple(args.K, GemmConfig::K_Tile);
@@ -351,13 +336,8 @@ class TestCkTileGemmFusedAQuantStandalone : public ::testing::Test
                                                     has_hot_loop_v,
                                                     tail_number_v>;
 
-            using GemmPipeline = std::conditional_t<
-                eight_waves,
-                ck_tile::ABQuantGemmPipelineAgBgCrEightWaves<PipelineProblem>,
-                std::conditional_t<
-                    PreshuffleB,
-                    ck_tile::WPABQuantBPipelineAgBgCrV2<PipelineProblem>,
-                    ck_tile::FusedAQuantBQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>;
+            using GemmPipeline =
+                ck_tile::FusedAQuantBQuantGemmPipelineAgBgCrCompV3<PipelineProblem>;
 
             using GemmEpilogue = std::conditional_t<
                 TiledMMAPermuteN,
