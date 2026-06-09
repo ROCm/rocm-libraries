@@ -199,6 +199,56 @@ StinkyInstruction* findLiveLoopCounterLCmpUpstream(StinkyInstruction* anchor) {
     return nullptr;
 }
 
+/// True if `inst` is an unconditional self-decrement of the loop counter:
+/// `s_sub_{u32,i32} s[sgprLoopCounterL], s[sgprLoopCounterL], <imm>`. The
+/// destination and first source must both be `s[sgprLoopCounterL]` and the
+/// second source must be a literal immediate. On a match, `*outImm` receives
+/// the decrement amount. `s_subrev_*` is intentionally rejected: its operand
+/// order (`dst = src1 - src0`) does not express `LCL -= imm`.
+bool isLoopCounterLSelfDecrement(const StinkyInstruction& inst, int* outImm) {
+    const auto uOp = inst.getUnifiedOpcode();
+    if (uOp != GFX::s_sub_u32 && uOp != GFX::s_sub_i32) return false;
+    const auto& dsts = inst.getDestRegs();
+    const auto& srcs = inst.getSrcRegs();
+    if (dsts.empty() || srcs.size() < 2) return false;
+    if (dsts[0].getSymbolicName() != kLoopCounterLSymbol) return false;
+    if (srcs[0].getSymbolicName() != kLoopCounterLSymbol) return false;
+    if (srcs[1].dataType != StinkyRegister::Type::LiteralInt) return false;
+    if (outImm != nullptr) *outImm = static_cast<int>(srcs[1].getLiteralInt());
+    return true;
+}
+
+/// Sum the immediate decrements that `s_sub_{u32,i32} s[sgprLoopCounterL],
+/// s[sgprLoopCounterL], <imm>` instructions apply to the loop counter between
+/// \p segmentBegin (inclusive) and \p anchor (exclusive), scanning backward
+/// and stopping at the first segment boundary (label / branch).
+///
+/// Rule 4's drain-iter gate immediates (`pgrValue` for the WAIT, `pgrValue+1`
+/// for the SIGNAL) are calibrated against the loop counter value at segment
+/// entry -- the same value Tensile's own loop-entry guard compares. Different
+/// `ScheduleIterAlg` settings may hoist the per-iteration `s_sub LCL, LCL, 1`
+/// ABOVE the workgroup-wait anchor, so the gate then reads an
+/// already-decremented LCL. To keep the gate firing on the identical absolute
+/// iteration regardless of where the decrement landed, Rule 4 subtracts this
+/// sum from both thresholds. Decrements that remain BELOW the anchor (the
+/// default schedule) are not seen by the backward scan, so the sum is 0 and
+/// the thresholds are left untouched.
+int sumLoopCounterLDecrementsBeforeInSegment(BasicBlock::iterator segmentBegin,
+                                             StinkyInstruction* anchor) {
+    int total = 0;
+    auto it = BasicBlock::iterator(anchor);
+    while (it != segmentBegin) {
+        --it;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isPseudoInst(inst)) continue;
+        if (isSegmentBoundary(*inst)) break;
+        int imm = 0;
+        if (isLoopCounterLSelfDecrement(*inst, &imm)) total += imm;
+    }
+    return total;
+}
+
 /// Marker-bounded forward scan: walk from \p start (inclusive) up to
 /// \p endExclusive and return the first `tensor_load_to_lds` encountered, or
 /// nullptr. Does NOT stop at labels or branches -- Rule 5b's tail-loop search
@@ -551,9 +601,18 @@ void insertLoopCounterLGatedClusterBarrierWaitBefore(
 ///       dropped too). This keeps cluster signal/wait balanced for every
 ///       trip count. The gate predicate (`<= pgr`) matches Tensile's own
 ///       `s_cmp_le_i32 LCL, pgrValue` load-disable cmov.
+///
+/// \p lclPreDecrement is the cumulative `s[sgprLoopCounterL]` decrement that
+/// has already been applied before this anchor within the segment (see
+/// `sumLoopCounterLDecrementsBeforeInSegment`). It is subtracted from both
+/// Fix-B thresholds so the gate fires on the same absolute iteration whether
+/// or not the schedule hoisted the decrement above the anchor. It does not
+/// affect the inherited-SCC mode, whose threshold lives in the cloned
+/// upstream cmp.
 void insertClusterBarrierHandshakeBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
                                          GfxArchID archId, int pgrValue,
-                                         StinkyInstruction* liveLclCmp) {
+                                         StinkyInstruction* liveLclCmp,
+                                         int lclPreDecrement) {
     if (liveLclCmp != nullptr) {
         // SIA=4 inherited-SCC mode: unchanged. Ungated leading wait + a
         // single-iter inherited signal skip.
@@ -569,8 +628,10 @@ void insertClusterBarrierHandshakeBefore(IRBase* anchor, AsmIRBuilder& irBuilder
 
     // Fix B (fresh-gate mode): gate the WAIT at `LCL <= pgr` (drain iters,
     // load disabled) and the SIGNAL at `LCL <= pgr+1` (one stage earlier so
-    // the trailing leftover signal is dropped too).
-    const int waitImm = pgrValue;
+    // the trailing leftover signal is dropped too). Both thresholds drop by
+    // `lclPreDecrement` so the gate keys off the same absolute iteration even
+    // when the schedule decremented LCL before the anchor.
+    const int waitImm = pgrValue - lclPreDecrement;
     const std::string waitImmStr = std::to_string(waitImm);
     insertLoopCounterLGatedClusterBarrierWaitBefore(
         anchor, irBuilder, archId,
@@ -579,7 +640,7 @@ void insertClusterBarrierHandshakeBefore(IRBase* anchor, AsmIRBuilder& irBuilder
         /*cmpComment=*/"drain iter? LoopCounter <= " + waitImmStr,
         /*branchComment=*/"skip cluster wait when LoopCounterL <= " + waitImmStr);
 
-    const int sigImm = pgrValue + 1;
+    const int sigImm = pgrValue + 1 - lclPreDecrement;
     const std::string sigImmStr = std::to_string(sigImm);
     insertLoopCounterLGatedClusterBarrierSignalBefore(
         anchor, irBuilder, archId,
@@ -727,12 +788,14 @@ class InsertClusterBarrierPassImpl : public Pass {
         // distinct waits and each receive their own handshake.
         for (BasicBlock& bb : func) {
             // Tuple: (trigger workgroup wait, anchor iterator next to it,
-            //         live upstream LCL cmp at trigger or nullptr). The third
-            //         element is captured at scan time -- i.e. against the
-            //         pre-mutation IR -- so a later `pending` entry's emission
-            //         cannot influence an earlier one's SCC analysis.
+            //         live upstream LCL cmp at trigger or nullptr, cumulative
+            //         LCL pre-decrement before the trigger). The third and
+            //         fourth elements are captured at scan time -- i.e.
+            //         against the pre-mutation IR -- so a later `pending`
+            //         entry's emission cannot influence an earlier one's SCC
+            //         analysis or decrement count.
             std::vector<std::tuple<StinkyInstruction*, BasicBlock::iterator,
-                                   StinkyInstruction*>>
+                                   StinkyInstruction*, int>>
                 pending;
             std::unordered_set<StinkyInstruction*> seenTriggers;
 
@@ -764,8 +827,13 @@ class InsertClusterBarrierPassImpl : public Pass {
                 // will be mutated later in the same BB sweep.
                 StinkyInstruction* liveLclCmp =
                     findLiveLoopCounterLCmpUpstream(trigger);
-                pending.emplace_back(
-                    trigger, std::next(BasicBlock::iterator(trigger)), liveLclCmp);
+                // Count any `s_sub LCL, LCL, imm` the schedule hoisted above
+                // the anchor so the Fix-B gate thresholds can be compensated.
+                const int lclPreDecrement =
+                    sumLoopCounterLDecrementsBeforeInSegment(segBegin, trigger);
+                pending.emplace_back(trigger,
+                                     std::next(BasicBlock::iterator(trigger)),
+                                     liveLclCmp, lclPreDecrement);
             }
 
             // Rule 1: signal-only handshake immediately AFTER each
@@ -898,7 +966,7 @@ class InsertClusterBarrierPassImpl : public Pass {
             }
             if (setupNewTileExistingWait != nullptr) {
                 bool conflictsWithRule4 = false;
-                for (const auto& [trigger, _next, _live] : pending) {
+                for (const auto& [trigger, _next, _live, _dec] : pending) {
                     if (trigger == setupNewTileExistingWait) {
                         conflictsWithRule4 = true;
                         break;
@@ -957,7 +1025,7 @@ class InsertClusterBarrierPassImpl : public Pass {
             // the same wait).
             if (tailWait != nullptr) {
                 bool conflictsWithRule4 = false;
-                for (const auto& [trigger, _next, _live] : pending) {
+                for (const auto& [trigger, _next, _live, _dec] : pending) {
                     if (trigger == tailWait) {
                         conflictsWithRule4 = true;
                         break;
@@ -974,10 +1042,10 @@ class InsertClusterBarrierPassImpl : public Pass {
                 tailTL == nullptr && tailWait == nullptr)
                 continue;
             AsmIRBuilder irBuilder(bb, archId);
-            for (const auto& [trigger, nextIt, liveLclCmp] : pending) {
+            for (const auto& [trigger, nextIt, liveLclCmp, lclPreDecrement] : pending) {
                 IRBase* anchor = (nextIt != bb.end()) ? nextIt.getNodePtr() : nullptr;
                 insertClusterBarrierHandshakeBefore(anchor, irBuilder, archId, pgrValue_,
-                                                    liveLclCmp);
+                                                    liveLclCmp, lclPreDecrement);
                 (void)trigger;  // queued for ordering only; insertion uses `anchor`
             }
             for (IRBase* anchor : gsu1Anchors) {

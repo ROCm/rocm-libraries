@@ -139,6 +139,18 @@ class Pass;
 ///       count, and the `<= pgr` predicate matches Tensile's own
 ///       `s_cmp_le_i32 LCL, pgrValue` load-disable cmov.
 ///
+///       LCL pre-decrement compensation: the two thresholds are
+///       calibrated against the loop counter value at segment entry.
+///       Some schedules hoist the per-iteration
+///       `s_sub_{u32,i32} LCL, LCL, <imm>` ABOVE the anchor, so the
+///       gate would otherwise read an already-decremented LCL and fire
+///       one iteration too early. The pass therefore sums those
+///       hoisted decrements (backward scan, bounded by the segment) and
+///       subtracts the total from BOTH thresholds, so the gate keys off
+///       the same absolute iteration regardless of where the decrement
+///       landed. When no decrement precedes the anchor (the default
+///       schedule) the sum is 0 and the thresholds are unchanged.
+///
 /// Shape (fresh-gate / Fix B mode shown; inherited-SCC mode keeps an
 /// ungated leading wait, drops the signal gate cmp, and inserts a
 /// `<clone of upstream LCL cmp>` line between the two skip labels):

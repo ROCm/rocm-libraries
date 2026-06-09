@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdlib>
 #include <functional>
 #include <vector>
 
@@ -33,6 +34,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
@@ -85,6 +87,17 @@ const std::vector<PassInfo> availablePasses = {
     {"MemTokenConsistencyCheckPass", []() { return createMemTokenConsistencyCheckPass(); }},
     {"RaiseVgprMsbPass", []() { return createRaiseVgprMsbPass(); }},
     {"InsertVgprMsbPass", []() { return createInsertVgprMsbPass(); }},
+    // InsertClusterBarrierPass. Knobs are read from the environment so the
+    // same binary can target different PGR/PLR/scope without recompiling:
+    //   CB_KERNEL_SCOPE (default 1), CB_PGR (default 1), CB_PLR (default 1).
+    {"InsertClusterBarrierPass", []() {
+         auto geti = [](const char* k, int d) {
+             const char* v = std::getenv(k);
+             return v != nullptr ? std::atoi(v) : d;
+         };
+         return createInsertClusterBarrierPass(geti("CB_KERNEL_SCOPE", 1) != 0,
+                                               geti("CB_PGR", 1), geti("CB_PLR", 1));
+     }},
 };
 
 /**
