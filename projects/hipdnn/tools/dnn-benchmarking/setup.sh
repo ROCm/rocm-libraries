@@ -63,10 +63,10 @@ usage() {
     echo "  --force-build        Build hipDNN and provider plugins from source,"
     echo "                       overwriting artifacts under the selected ROCm prefix."
     echo "  -y                   Skip confirmation prompts."
-    echo "  The installed plugins will be exported as DNN_PLUGIN_DIR:"
-    echo "    <selected-prefix>/lib/hipdnn_plugins/engines/"
-    echo "  The selected prefix lib directory is prepended to LD_LIBRARY_PATH"
-    echo "  by the venv activation script."
+    echo "  The selected ROCm prefix is exported as ROCM_PATH and its"
+    echo "  lib directory is prepended to LD_LIBRARY_PATH by the venv"
+    echo "  activation script. dnn-benchmarking infers plugins from:"
+    echo "    \$ROCM_PATH/lib/hipdnn_plugins/engines/"
 }
 
 require_arg() {
@@ -102,12 +102,12 @@ prepend_ld_library_path() {
 }
 
 write_activation_local() {
-    local plugin_dir="$1"
+    local rocm_prefix="$1"
     local lib_dir="$2"
     {
         printf 'export PYTHONPYCACHEPREFIX=%q\n' "$DNN_BENCH_WORKSPACE/pycache"
         printf 'export DNN_BENCH_WORKSPACE=%q\n' "$DNN_BENCH_WORKSPACE"
-        printf 'export DNN_PLUGIN_DIR=%q\n' "$plugin_dir"
+        printf 'export ROCM_PATH=%q\n' "$rocm_prefix"
         printf 'case ":%s:" in\n' '${LD_LIBRARY_PATH:-}'
         printf '    *:%s:*) ;;\n' "$lib_dir"
         printf '    *) export LD_LIBRARY_PATH=%q${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} ;;\n' "$lib_dir"
@@ -707,10 +707,10 @@ fi
 
 echo ""
 echo "hipDNN plugins installed to: $PLUGIN_DIR/"
-DNN_PLUGIN_DIR="$PLUGIN_DIR"
-export DNN_PLUGIN_DIR
+ROCM_PATH="$BINDING_PREFIX"
+export ROCM_PATH
 prepend_ld_library_path "$BINDING_PREFIX/lib"
-write_activation_local "$DNN_PLUGIN_DIR" "$BINDING_PREFIX/lib"
+write_activation_local "$ROCM_PATH" "$BINDING_PREFIX/lib"
 
 
 # 6. Install hipDNN Python bindings.
@@ -736,6 +736,7 @@ echo "Run benchmarks with:"
 echo "  python -m dnn_benchmarking --graph <graph.json>"
 echo ""
 echo "The activation script sets:"
-echo "  DNN_PLUGIN_DIR=$DNN_PLUGIN_DIR"
+echo "  ROCM_PATH=$ROCM_PATH"
 echo "  LD_LIBRARY_PATH=$BINDING_PREFIX/lib:\${LD_LIBRARY_PATH}"
+echo "dnn-benchmarking infers plugins from \$ROCM_PATH/lib/hipdnn_plugins/engines."
 echo "Pass --plugin-path explicitly only when overriding the setup-installed plugins."

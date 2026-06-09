@@ -22,10 +22,10 @@ from ..validation.reference_provider import ReferenceProviderRegistry
 
 
 def _plugin_paths_from_environment() -> Optional[List[Path]]:
-    plugin_dir = os.environ.get("DNN_PLUGIN_DIR")
-    if not plugin_dir:
+    rocm_path = os.environ.get("ROCM_PATH")
+    if not rocm_path:
         return None
-    return [Path(plugin_dir)]
+    return [Path(rocm_path) / "lib" / "hipdnn_plugins" / "engines"]
 
 
 def _error_graph_result(graph_path: Path, error_message: str) -> GraphResult:

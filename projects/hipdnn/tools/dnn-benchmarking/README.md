@@ -52,8 +52,9 @@ The default `--torch-mode rocm` flow assumes no system ROCm installation:
 6. Installs the hipDNN Python bindings against the selected ROCm SDK libraries
 
 The selected prefix is printed as `Using hipDNN/ROCm prefix: ...`; activation
-sets `DNN_PLUGIN_DIR` to its `lib/hipdnn_plugins/engines` directory and prepends
-its `lib` directory to `LD_LIBRARY_PATH`.
+sets `ROCM_PATH` to that prefix and prepends its `lib` directory to
+`LD_LIBRARY_PATH`. dnn-benchmarking infers plugins from
+`$ROCM_PATH/lib/hipdnn_plugins/engines`.
 If GPU architecture detection is unavailable on the setup host, pass
 `--gpu-arch gfx90a`, `--gpu-arch gfx942`, or `--gpu-arch gfx950`.
 
@@ -144,13 +145,14 @@ Extracted 42 graph(s) from ./Workloads/conv_workloads.tar.gz
 
 ### Engine Comparison
 
-Run multiple engines by passing comma-separated engine IDs. By default, the
-plugin directory from `DNN_PLUGIN_DIR` is used when set by `setup.sh`
+Run multiple engines by passing comma-separated engine IDs. By default,
+dnn-benchmarking infers the plugin directory from
+`$ROCM_PATH/lib/hipdnn_plugins/engines` when `ROCM_PATH` is set by `setup.sh`
 activation. Plugin paths may also be a single shared directory or a
 comma-separated list matching `--engine` order.
 
 ```bash
-# Compare two engines using DNN_PLUGIN_DIR from the activated setup environment
+# Compare two engines using ROCM_PATH from the activated setup environment
 python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
   --engine 1,2
 
@@ -202,7 +204,7 @@ python -m dnn_benchmarking --config sample_configs/config.toml.example --iters 5
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--plugin-path` | Plugin directory, or comma-separated plugin directories matching `--engine` order. Overrides `DNN_PLUGIN_DIR` when set. | `DNN_PLUGIN_DIR` if set, otherwise system default |
+| `--plugin-path` | Plugin directory, or comma-separated plugin directories matching `--engine` order. Overrides the plugin directory inferred from `ROCM_PATH`. | `$ROCM_PATH/lib/hipdnn_plugins/engines` if `ROCM_PATH` is set, otherwise system default |
 
 #### Comparison Options
 
@@ -345,8 +347,8 @@ pytest -m gpu --dnn-plugin-paths /path/to/hipdnn_plugins/engines
 ### GPU Tests
 
 GPU tests require hipDNN Python bindings and ROCm libraries. When using
-`setup.sh`, activate the venv first; activation sets `DNN_PLUGIN_DIR` and
-prepends the selected prefix's `lib` directory to `LD_LIBRARY_PATH`:
+`setup.sh`, activate the venv first; activation sets `ROCM_PATH` and prepends
+the selected prefix's `lib` directory to `LD_LIBRARY_PATH`:
 
 ```bash
 source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activate
