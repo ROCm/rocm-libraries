@@ -587,7 +587,7 @@ struct EpilogueTypeTraits
 {
     using Epilogue = ck_tile::CShuffleEpilogue<Problem>;
 };
-
+#if 0
 template <typename Problem>
 struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V1, Problem>
 {
@@ -599,7 +599,7 @@ struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V2, Problem>
 {
     using Epilogue = ck_tile::TdmEpilogue<Problem>;
 };
-
+#endif
 inline auto create_args()
 {
     ck_tile::ArgParser arg_parser;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-// #define CK_TILE_FORCE_SINGLE_TAIL_HANDLER 1
+#define CK_TILE_FORCE_SINGLE_TAIL_HANDLER 1
 #include "ck/tensor_operation/gpu/device/device_gemm_v2.hpp"
 #include "ck/tensor_operation/gpu/device/device_gemm_mx.hpp"
 #include "ck_tile/core.hpp"
@@ -220,9 +220,9 @@ struct FlatMMInvoker
                                              FlatmmConfig::NumWaveGroups,
                                              false,
                                              1,
-                                             false,
                                              FlatmmConfig::BlockedXDLN_PerWarp,
                                              FlatmmConfig::DoubleSmemBuffer,
+                                             CompuateType,
                                              CompuateType>>;
 
         // ToDo: Will add the codegen part to test different pipeline policies in GEMM.
@@ -533,8 +533,8 @@ struct DeviceGemm_Xdl_CkTileWrap : public
         static constexpr bool TransposeC =
             std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>;
         static constexpr bool UseStructuredSparsity = false;
-        static constexpr bool UseDataCachePrefetch  = false;
-        static constexpr bool DataCachePrefetchToL1 = false;
+        static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchA = ck_tile::DataCachePrefetchKind::None;
+        static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchB = ck_tile::DataCachePrefetchKind::None;;
 
         static constexpr auto Scheduler = PipelineScheduler;
         // COMPUTE_V3 is mapped to BASIC_V2 in universal_gemm_invoker.hpp
