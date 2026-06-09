@@ -9,40 +9,10 @@ Tests:
   function:
     - aux_handle_init_bad_arg: *hpa_half_precision
 
-- name: aux_handle_destroy_bad_arg
-  category: smoke
-  function:
-    - aux_handle_destroy_bad_arg: *hpa_half_precision
-
 - name: aux_handle
   category: smoke
   function:
     - aux_handle: *hpa_half_precision
-
-- name: aux_mat_init_dense_bad_arg
-  category: smoke
-  function:
-    - aux_mat_init_dense_bad_arg: *real_precisions
-
-- name: aux_mat_init_structured_bad_arg
-  category: smoke
-  function:
-    - aux_mat_init_structured_bad_arg: *real_precisions
-
-- name: aux_mat_destroy_bad_arg
-  category: smoke
-  function:
-    - aux_mat_destroy_bad_arg: *real_precisions
-
-- name: aux_mat_set_attr_bad_arg
-  category: smoke
-  function:
-    - aux_mat_set_attr_bad_arg: *real_precisions
-
-- name: aux_mat_get_attr_bad_arg
-  category: smoke
-  function:
-    - aux_mat_get_attr_bad_arg: *real_precisions
 
 - name: aux_mat_dense_init_arg
   category: smoke
@@ -54,104 +24,902 @@ Tests:
   function:
     - aux_mat_structured_init: *real_precisions
 
-- name: aux_mat_assign
-  category: smoke
-  function:
-    - aux_mat_assign: *hpa_int8_precision
-
-- name: aux_mat_set_get_attr
-  category: smoke
-  function:
-    - aux_mat_set_get_attr: *real_precisions
-
-- name: aux_matmul_init_bad_arg
-  category: smoke
-  function:
-    - aux_matmul_init_bad_arg: *real_precisions
-
 - name: aux_matmul_init
   category: smoke
   function:
     - aux_matmul_init: *real_precisions
-
-- name: aux_matmul_assign
-  category: smoke
-  function:
-    - aux_matmul_assign: *hpa_int8_precision
-
-- name: aux_matmul_set_attr_bad_arg
-  category: smoke
-  function:
-    - aux_matmul_set_attr_bad_arg: *real_precisions
-
-- name: aux_matmul_get_attr_bad_arg
-  category: smoke
-  function:
-    - aux_matmul_get_attr_bad_arg: *real_precisions
-
-- name: aux_matmul_set_get_attr
-  category: smoke
-  function:
-    - aux_matmul_set_get_attr: *real_precisions
 
 - name: aux_matmul_set_get_bias_vector
   category: smoke
   function:
     - aux_matmul_set_get_bias_vector: *hpa_int8_precision
 
-- name: aux_matmul_alg_init_bad_arg
-  category: smoke
-  function:
-    - aux_matmul_alg_init_bad_arg: *real_precisions
-
 - name: aux_matmul_alg_init
   category: smoke
   function:
     - aux_matmul_alg_init: *real_precisions
-
-- name: aux_matmul_alg_assign
-  category: smoke
-  function:
-    - aux_matmul_alg_assign: *hpa_int8_precision
-
-- name: aux_matmul_alg_set_attr_bad_arg
-  category: smoke
-  function:
-    - aux_matmul_alg_set_attr_bad_arg: *real_precisions
-
-- name: aux_matmul_alg_get_attr_bad_arg
-  category: smoke
-  function:
-    - aux_matmul_alg_get_attr_bad_arg: *real_precisions
-
-- name: aux_matmul_plan_init_bad_arg
-  category: smoke
-  function:
-    - aux_matmul_plan_init_bad_arg: *real_precisions
 
 - name: aux_matmul_plan_init
   category: smoke
   function:
     - aux_matmul_plan_init: *real_precisions
 
-- name: aux_matmul_plan_destroy_bad_arg
-  category: smoke
-  function:
-    - aux_matmul_plan_destroy_bad_arg: *hpa_half_precision
-
-- name: aux_get_workspace_size_bad_arg
-  category: smoke
-  function:
-    - aux_get_workspace_size_bad_arg: *real_precisions
-
 - name: aux_get_workspace_size
   category: smoke
   function:
     - aux_get_workspace_size: *real_precisions
 
-- name: aux_get_version
+# ---------------------------------------------------------------
+# Individual sub-tests (one check per gtest)
+# ---------------------------------------------------------------
+
+- name: aux_get_version_match
   category: smoke
   function:
-    - aux_get_version: *hpa_half_precision
+    - aux_get_version_match: *hpa_half_precision
+
+- name: aux_get_version_git_rev_null
+  category: smoke
+  function:
+    - aux_get_version_git_rev_null: *hpa_half_precision
+
+- name: aux_handle_destroy_bad_arg_uninit
+  category: smoke
+  function:
+    - aux_handle_destroy_bad_arg_uninit: *hpa_half_precision
+
+- name: aux_handle_destroy_bad_arg_null
+  category: smoke
+  function:
+    - aux_handle_destroy_bad_arg_null: *hpa_half_precision
+
+- name: aux_mat_init_dense_bad_arg_uninit_handle
+  category: smoke
+  function:
+    - aux_mat_init_dense_bad_arg_uninit_handle: *real_precisions
+
+- name: aux_mat_init_dense_bad_arg_null_handle
+  category: smoke
+  function:
+    - aux_mat_init_dense_bad_arg_null_handle: *real_precisions
+
+- name: aux_mat_init_dense_bad_arg_null_descr
+  category: smoke
+  function:
+    - aux_mat_init_dense_bad_arg_null_descr: *real_precisions
+
+- name: aux_mat_init_dense_bad_arg_zero_row
+  category: smoke
+  function:
+    - aux_mat_init_dense_bad_arg_zero_row: *real_precisions
+
+- name: aux_mat_init_dense_bad_arg_zero_col
+  category: smoke
+  function:
+    - aux_mat_init_dense_bad_arg_zero_col: *real_precisions
+
+- name: aux_mat_init_dense_bad_arg_zero_ld
+  category: smoke
+  function:
+    - aux_mat_init_dense_bad_arg_zero_ld: *real_precisions
+
+- name: aux_mat_init_dense_bad_arg_large_ld
+  category: smoke
+  function:
+    - aux_mat_init_dense_bad_arg_large_ld: *real_precisions
+
+- name: aux_mat_init_dense_bad_arg_large_alignment
+  category: smoke
+  function:
+    - aux_mat_init_dense_bad_arg_large_alignment: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_uninit_handle
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_uninit_handle: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_null_handle
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_null_handle: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_null_descr
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_null_descr: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_zero_row
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_zero_row: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_small_row
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_small_row: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_zero_col
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_zero_col: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_small_col
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_small_col: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_zero_ld
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_zero_ld: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_unaligned_ld
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_unaligned_ld: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_unaligned_row
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_unaligned_row: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_unsupported_type
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_unsupported_type: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_large_ld
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_large_ld: *real_precisions
+
+- name: aux_mat_init_structured_bad_arg_large_alignment
+  category: smoke
+  function:
+    - aux_mat_init_structured_bad_arg_large_alignment: *real_precisions
+
+- name: aux_mat_set_get_attr_num_batches
+  category: smoke
+  function:
+    - aux_mat_set_get_attr_num_batches: *real_precisions
+
+- name: aux_mat_set_get_attr_batch_stride
+  category: smoke
+  function:
+    - aux_mat_set_get_attr_batch_stride: *real_precisions
+
+- name: aux_mat_destroy_bad_arg_uninit
+  category: smoke
+  function:
+    - aux_mat_destroy_bad_arg_uninit: *real_precisions
+
+- name: aux_mat_destroy_bad_arg_null
+  category: smoke
+  function:
+    - aux_mat_destroy_bad_arg_null: *real_precisions
+
+- name: aux_mat_assign_copy_value
+  category: smoke
+  function:
+    - aux_mat_assign_copy_value: *hpa_int8_precision
+
+- name: aux_mat_assign_not_reference
+  category: smoke
+  function:
+    - aux_mat_assign_not_reference: *hpa_int8_precision
+
+- name: aux_mat_set_attr_bad_arg_null_handle
+  category: smoke
+  function:
+    - aux_mat_set_attr_bad_arg_null_handle: *real_precisions
+
+- name: aux_mat_set_attr_bad_arg_uninit_handle
+  category: smoke
+  function:
+    - aux_mat_set_attr_bad_arg_uninit_handle: *real_precisions
+
+- name: aux_mat_set_attr_bad_arg_null_descr
+  category: smoke
+  function:
+    - aux_mat_set_attr_bad_arg_null_descr: *real_precisions
+
+- name: aux_mat_set_attr_bad_arg_uninit_descr
+  category: smoke
+  function:
+    - aux_mat_set_attr_bad_arg_uninit_descr: *real_precisions
+
+- name: aux_mat_set_attr_bad_arg_null_data
+  category: smoke
+  function:
+    - aux_mat_set_attr_bad_arg_null_data: *real_precisions
+
+- name: aux_mat_set_attr_bad_arg_zero_batches
+  category: smoke
+  function:
+    - aux_mat_set_attr_bad_arg_zero_batches: *real_precisions
+
+- name: aux_mat_set_attr_bad_arg_wrong_size_batches
+  category: smoke
+  function:
+    - aux_mat_set_attr_bad_arg_wrong_size_batches: *real_precisions
+
+- name: aux_mat_set_attr_bad_arg_null_stride
+  category: smoke
+  function:
+    - aux_mat_set_attr_bad_arg_null_stride: *real_precisions
+
+- name: aux_mat_set_attr_bad_arg_invalid_stride
+  category: smoke
+  function:
+    - aux_mat_set_attr_bad_arg_invalid_stride: *real_precisions
+
+- name: aux_mat_set_attr_bad_arg_wrong_size_stride
+  category: smoke
+  function:
+    - aux_mat_set_attr_bad_arg_wrong_size_stride: *real_precisions
+
+- name: aux_mat_get_attr_bad_arg_null_handle
+  category: smoke
+  function:
+    - aux_mat_get_attr_bad_arg_null_handle: *real_precisions
+
+- name: aux_mat_get_attr_bad_arg_uninit_handle
+  category: smoke
+  function:
+    - aux_mat_get_attr_bad_arg_uninit_handle: *real_precisions
+
+- name: aux_mat_get_attr_bad_arg_null_descr
+  category: smoke
+  function:
+    - aux_mat_get_attr_bad_arg_null_descr: *real_precisions
+
+- name: aux_mat_get_attr_bad_arg_uninit_descr
+  category: smoke
+  function:
+    - aux_mat_get_attr_bad_arg_uninit_descr: *real_precisions
+
+- name: aux_mat_get_attr_bad_arg_null_data
+  category: smoke
+  function:
+    - aux_mat_get_attr_bad_arg_null_data: *real_precisions
+
+- name: aux_mat_get_attr_bad_arg_wrong_size_batches
+  category: smoke
+  function:
+    - aux_mat_get_attr_bad_arg_wrong_size_batches: *real_precisions
+
+- name: aux_mat_get_attr_bad_arg_null_stride
+  category: smoke
+  function:
+    - aux_mat_get_attr_bad_arg_null_stride: *real_precisions
+
+- name: aux_mat_get_attr_bad_arg_wrong_size_stride
+  category: smoke
+  function:
+    - aux_mat_get_attr_bad_arg_wrong_size_stride: *real_precisions
+
+- name: aux_matmul_init_bad_arg_null_handle
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_null_handle: *real_precisions
+
+- name: aux_matmul_init_bad_arg_uninit_handle
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_uninit_handle: *real_precisions
+
+- name: aux_matmul_init_bad_arg_null_descr
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_null_descr: *real_precisions
+
+- name: aux_matmul_init_bad_arg_conj_opA
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_conj_opA: *real_precisions
+
+- name: aux_matmul_init_bad_arg_conj_opB
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_conj_opB: *real_precisions
+
+- name: aux_matmul_init_bad_arg_uninit_matA
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_uninit_matA: *real_precisions
+
+- name: aux_matmul_init_bad_arg_two_sparse
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_two_sparse: *real_precisions
+
+- name: aux_matmul_init_bad_arg_wrong_compute_type
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_wrong_compute_type: *real_precisions
+
+- name: aux_matmul_init_bad_arg_structured_C
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_structured_C: *real_precisions
+
+- name: aux_matmul_init_bad_arg_mismatched_order
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_mismatched_order: *real_precisions
+
+- name: aux_matmul_init_bad_arg_null_matA
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_null_matA: *real_precisions
+
+- name: aux_matmul_init_bad_arg_uninit_matB
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_uninit_matB: *real_precisions
+
+- name: aux_matmul_init_bad_arg_null_matB
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_null_matB: *real_precisions
+
+- name: aux_matmul_init_bad_arg_uninit_matC
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_uninit_matC: *real_precisions
+
+- name: aux_matmul_init_bad_arg_null_matC
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_null_matC: *real_precisions
+
+- name: aux_matmul_init_bad_arg_uninit_matD
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_uninit_matD: *real_precisions
+
+- name: aux_matmul_init_bad_arg_null_matD
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_null_matD: *real_precisions
+
+- name: aux_matmul_init_bad_arg_same_op_int8
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_same_op_int8: *real_precisions
+
+- name: aux_matmul_init_bad_arg_mismatched_K
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_mismatched_K: *real_precisions
+
+- name: aux_matmul_init_bad_arg_mismatched_N
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_mismatched_N: *real_precisions
+
+- name: aux_matmul_init_bad_arg_mismatched_C_dim
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_mismatched_C_dim: *real_precisions
+
+- name: aux_matmul_init_bad_arg_mismatched_D_dim
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_mismatched_D_dim: *real_precisions
+
+- name: aux_matmul_init_bad_arg_unsupported_A_type
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_unsupported_A_type: *real_precisions
+
+- name: aux_matmul_init_bad_arg_mismatched_B_type
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_mismatched_B_type: *real_precisions
+
+- name: aux_matmul_init_bad_arg_mismatched_C_type
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_mismatched_C_type: *real_precisions
+
+- name: aux_matmul_init_bad_arg_mismatched_D_type
+  category: smoke
+  function:
+    - aux_matmul_init_bad_arg_mismatched_D_type: *real_precisions
+
+- name: aux_matmul_assign_copy_value
+  category: smoke
+  function:
+    - aux_matmul_assign_copy_value: *real_precisions
+
+- name: aux_matmul_assign_not_reference
+  category: smoke
+  function:
+    - aux_matmul_assign_not_reference: *real_precisions
+
+- name: aux_matmul_set_attr_bad_arg_null_handle
+  category: smoke
+  function:
+    - aux_matmul_set_attr_bad_arg_null_handle: *real_precisions
+
+- name: aux_matmul_set_attr_bad_arg_uninit_handle
+  category: smoke
+  function:
+    - aux_matmul_set_attr_bad_arg_uninit_handle: *real_precisions
+
+- name: aux_matmul_set_attr_bad_arg_null_matmul
+  category: smoke
+  function:
+    - aux_matmul_set_attr_bad_arg_null_matmul: *real_precisions
+
+- name: aux_matmul_set_attr_bad_arg_uninit_matmul
+  category: smoke
+  function:
+    - aux_matmul_set_attr_bad_arg_uninit_matmul: *real_precisions
+
+- name: aux_matmul_set_attr_bad_arg_null_data
+  category: smoke
+  function:
+    - aux_matmul_set_attr_bad_arg_null_data: *real_precisions
+
+- name: aux_matmul_set_attr_bad_arg_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_set_attr_bad_arg_wrong_size: *real_precisions
+
+- name: aux_matmul_set_attr_bad_arg_relu_upperbound_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_set_attr_bad_arg_relu_upperbound_wrong_size: *real_precisions
+
+- name: aux_matmul_set_attr_bad_arg_sigmoid_int8
+  category: smoke
+  function:
+    - aux_matmul_set_attr_bad_arg_sigmoid_int8: *real_precisions
+
+- name: aux_matmul_set_attr_bad_arg_bias_pointer_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_set_attr_bad_arg_bias_pointer_wrong_size: *real_precisions
+
+- name: aux_matmul_set_attr_bad_arg_bias_stride_invalid
+  category: smoke
+  function:
+    - aux_matmul_set_attr_bad_arg_bias_stride_invalid: *real_precisions
+
+- name: aux_matmul_set_attr_bad_arg_bias_type
+  category: smoke
+  function:
+    - aux_matmul_set_attr_bad_arg_bias_type: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_null_handle
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_null_handle: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_uninit_handle
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_uninit_handle: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_null_matmul
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_null_matmul: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_uninit_matmul
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_uninit_matmul: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_null_data
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_null_data: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_wrong_size: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_relu_upperbound_null
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_relu_upperbound_null: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_relu_upperbound_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_relu_upperbound_wrong_size: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_relu_threshold_null
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_relu_threshold_null: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_relu_threshold_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_relu_threshold_wrong_size: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_leakyrelu_alpha_null
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_leakyrelu_alpha_null: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_leakyrelu_alpha_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_leakyrelu_alpha_wrong_size: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_tanh_alpha_null
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_tanh_alpha_null: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_tanh_alpha_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_tanh_alpha_wrong_size: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_tanh_beta_null
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_tanh_beta_null: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_tanh_beta_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_tanh_beta_wrong_size: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_bias_pointer_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_bias_pointer_wrong_size: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_bias_stride_null
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_bias_stride_null: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_bias_stride_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_bias_stride_wrong_size: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_bias_type_null
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_bias_type_null: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_bias_type_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_bias_type_wrong_size: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_alpha_vector_scaling_null
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_alpha_vector_scaling_null: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_alpha_vector_scaling_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_alpha_vector_scaling_wrong_size: *real_precisions
+
+- name: aux_matmul_get_attr_bad_arg_beta_vector_scaling
+  category: smoke
+  function:
+    - aux_matmul_get_attr_bad_arg_beta_vector_scaling: *real_precisions
+
+- name: aux_matmul_set_get_attr_relu
+  category: smoke
+  function:
+    - aux_matmul_set_get_attr_relu: *real_precisions
+
+- name: aux_matmul_set_get_attr_relu_upperbound
+  category: smoke
+  function:
+    - aux_matmul_set_get_attr_relu_upperbound: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_null_handle
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_null_handle: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_uninit_handle
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_uninit_handle: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_null_alg_sel
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_null_alg_sel: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_uninit_alg_sel
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_uninit_alg_sel: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_config_max_id
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_config_max_id: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_split_k
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_split_k: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_null_data
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_null_data: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_wrong_size: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_config_id_out_of_range
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_config_id_out_of_range: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_search_iterations_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_search_iterations_wrong_size: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_search_iterations_zero
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_search_iterations_zero: *real_precisions
+
+- name: aux_matmul_alg_get_attr_bad_arg_null_handle
+  category: smoke
+  function:
+    - aux_matmul_alg_get_attr_bad_arg_null_handle: *real_precisions
+
+- name: aux_matmul_alg_get_attr_bad_arg_uninit_handle
+  category: smoke
+  function:
+    - aux_matmul_alg_get_attr_bad_arg_uninit_handle: *real_precisions
+
+- name: aux_matmul_alg_get_attr_bad_arg_null_alg_sel
+  category: smoke
+  function:
+    - aux_matmul_alg_get_attr_bad_arg_null_alg_sel: *real_precisions
+
+- name: aux_matmul_alg_get_attr_bad_arg_uninit_alg_sel
+  category: smoke
+  function:
+    - aux_matmul_alg_get_attr_bad_arg_uninit_alg_sel: *real_precisions
+
+- name: aux_matmul_alg_get_attr_bad_arg_null_data
+  category: smoke
+  function:
+    - aux_matmul_alg_get_attr_bad_arg_null_data: *real_precisions
+
+- name: aux_matmul_alg_get_attr_bad_arg_wrong_size
+  category: smoke
+  function:
+    - aux_matmul_alg_get_attr_bad_arg_wrong_size: *real_precisions
+
+- name: aux_get_workspace_size_bad_arg_uninit_plan
+  category: smoke
+  function:
+    - aux_get_workspace_size_bad_arg_uninit_plan: *real_precisions
+
+- name: aux_matmul_alg_init_bad_arg_null_handle
+  category: smoke
+  function:
+    - aux_matmul_alg_init_bad_arg_null_handle: *real_precisions
+
+- name: aux_matmul_alg_init_bad_arg_uninit_handle
+  category: smoke
+  function:
+    - aux_matmul_alg_init_bad_arg_uninit_handle: *real_precisions
+
+- name: aux_matmul_alg_init_bad_arg_null_alg_sel
+  category: smoke
+  function:
+    - aux_matmul_alg_init_bad_arg_null_alg_sel: *real_precisions
+
+- name: aux_matmul_alg_init_bad_arg_null_matmul
+  category: smoke
+  function:
+    - aux_matmul_alg_init_bad_arg_null_matmul: *real_precisions
+
+- name: aux_matmul_alg_init_bad_arg_uninit_matmul
+  category: smoke
+  function:
+    - aux_matmul_alg_init_bad_arg_uninit_matmul: *real_precisions
+
+- name: aux_matmul_alg_assign_copy_value
+  category: smoke
+  function:
+    - aux_matmul_alg_assign_copy_value: *hpa_int8_precision
+
+- name: aux_matmul_alg_assign_not_reference
+  category: smoke
+  function:
+    - aux_matmul_alg_assign_not_reference: *hpa_int8_precision
+
+- name: aux_matmul_plan_destroy_bad_arg_null
+  category: smoke
+  function:
+    - aux_matmul_plan_destroy_bad_arg_null: *hpa_half_precision
+
+- name: aux_matmul_plan_destroy_bad_arg_uninit
+  category: smoke
+  function:
+    - aux_matmul_plan_destroy_bad_arg_uninit: *hpa_half_precision
+
+- name: aux_matmul_plan_init_bad_arg_null_handle
+  category: smoke
+  function:
+    - aux_matmul_plan_init_bad_arg_null_handle: *real_precisions
+
+- name: aux_matmul_plan_init_bad_arg_uninit_handle
+  category: smoke
+  function:
+    - aux_matmul_plan_init_bad_arg_uninit_handle: *real_precisions
+
+- name: aux_matmul_plan_init_bad_arg_null_plan
+  category: smoke
+  function:
+    - aux_matmul_plan_init_bad_arg_null_plan: *real_precisions
+
+- name: aux_matmul_plan_init_bad_arg_null_matmul
+  category: smoke
+  function:
+    - aux_matmul_plan_init_bad_arg_null_matmul: *real_precisions
+
+- name: aux_matmul_plan_init_bad_arg_uninit_matmul
+  category: smoke
+  function:
+    - aux_matmul_plan_init_bad_arg_uninit_matmul: *real_precisions
+
+- name: aux_matmul_plan_init_bad_arg_null_alg_sel
+  category: smoke
+  function:
+    - aux_matmul_plan_init_bad_arg_null_alg_sel: *real_precisions
+
+- name: aux_matmul_plan_init_bad_arg_uninit_alg_sel
+  category: smoke
+  function:
+    - aux_matmul_plan_init_bad_arg_uninit_alg_sel: *real_precisions
+
+- name: aux_matmul_plan_init_bad_arg_mismatched_batches
+  category: smoke
+  function:
+    - aux_matmul_plan_init_bad_arg_mismatched_batches: *real_precisions
+
+- name: aux_get_workspace_size_bad_arg_null_handle
+  category: smoke
+  function:
+    - aux_get_workspace_size_bad_arg_null_handle: *real_precisions
+
+- name: aux_get_workspace_size_bad_arg_uninit_handle
+  category: smoke
+  function:
+    - aux_get_workspace_size_bad_arg_uninit_handle: *real_precisions
+
+- name: aux_get_workspace_size_bad_arg_null_plan
+  category: smoke
+  function:
+    - aux_get_workspace_size_bad_arg_null_plan: *real_precisions
+
+- name: aux_get_workspace_size_bad_arg_null_size
+  category: smoke
+  function:
+    - aux_get_workspace_size_bad_arg_null_size: *real_precisions
+
+# ---------------------------------------------------------------
+# Missing coverage tests identified from API review
+# ---------------------------------------------------------------
+
+- name: aux_get_version_null_handle
+  category: smoke
+  function:
+    - aux_get_version_null_handle: *hpa_half_precision
+
+- name: aux_get_version_null_version
+  category: smoke
+  function:
+    - aux_get_version_null_version: *hpa_half_precision
+
+- name: aux_get_property_null_value
+  category: smoke
+  function:
+    - aux_get_property_null_value: *hpa_half_precision
+
+- name: aux_get_git_revision_uninit_handle
+  category: smoke
+  function:
+    - aux_get_git_revision_uninit_handle: *hpa_half_precision
+
+- name: aux_get_git_revision_valid
+  category: smoke
+  function:
+    - aux_get_git_revision_valid: *hpa_half_precision
+
+- name: aux_get_arch_name
+  category: smoke
+  function:
+    - aux_get_arch_name: *hpa_half_precision
+
+- name: aux_get_arch_name_null
+  category: smoke
+  function:
+    - aux_get_arch_name_null: *hpa_half_precision
+
+- name: aux_matmul_alg_sel_destroy
+  category: smoke
+  function:
+    - aux_matmul_alg_sel_destroy: *real_precisions
+
+- name: aux_matmul_alg_sel_destroy_bad_arg_null
+  category: smoke
+  function:
+    - aux_matmul_alg_sel_destroy_bad_arg_null: *hpa_half_precision
+
+- name: aux_matmul_alg_sel_destroy_bad_arg_uninit
+  category: smoke
+  function:
+    - aux_matmul_alg_sel_destroy_bad_arg_uninit: *hpa_half_precision
+
+- name: aux_mat_dense_init_row_order
+  category: smoke
+  function:
+    - aux_mat_dense_init_row_order: *real_precisions
+
+- name: aux_matmul_init_matB_sparse
+  category: smoke
+  function:
+    - aux_matmul_init_matB_sparse: *real_precisions
+
+- name: aux_matmul_alg_get_attr_max_id
+  category: smoke
+  function:
+    - aux_matmul_alg_get_attr_max_id: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_split_k_mode
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_split_k_mode: *real_precisions
+
+- name: aux_matmul_alg_set_attr_bad_arg_split_k_buffers
+  category: smoke
+  function:
+    - aux_matmul_alg_set_attr_bad_arg_split_k_buffers: *real_precisions
+
+- name: aux_matmul_set_attr_alpha_vector_scaling
+  category: smoke
+  function:
+    - aux_matmul_set_attr_alpha_vector_scaling: *real_precisions
+
+- name: aux_matmul_set_get_attr_gelu
+  category: smoke
+  function:
+    - aux_matmul_set_get_attr_gelu: *real_precisions
+
+- name: aux_matmul_set_get_attr_abs
+  category: smoke
+  function:
+    - aux_matmul_set_get_attr_abs: *real_precisions
+
+- name: aux_matmul_set_get_attr_leakyrelu
+  category: smoke
+  function:
+    - aux_matmul_set_get_attr_leakyrelu: *real_precisions
+
+- name: aux_matmul_set_get_attr_tanh
+  category: smoke
+  function:
+    - aux_matmul_set_get_attr_tanh: *real_precisions
 
 ...
