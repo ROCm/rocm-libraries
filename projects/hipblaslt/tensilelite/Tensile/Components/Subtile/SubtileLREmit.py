@@ -464,6 +464,11 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
 # Subroutine to generate LR offset calculation code
 #
 def lraTileAssignment(writer, kernel):
+  # Optional C++ delegation for the row-major (TLU0) BF16 path; FP8 / FP4 /
+  # TLU1 stay on the legacy inline Python path (default build is unchanged).
+  tileInfoA = writer.states.a.tileInfo
+  if tileInfoA._useCppOffsetAssign():
+    return _lraTileAssignment_cpp(writer, kernel)
   return _lraTileAssignment_legacy(writer, kernel)
 
 def _lraWavePartitioning_legacy(module, writer, kernel):
@@ -567,6 +572,97 @@ def _lraTileAssignment_legacy(writer, kernel):
   _computeLROffset(module, kernel, tileInfoB, colOffset, rowOffset)
   writer.vgprPool.checkIn(tmpVgpr)
   _lraWavePartitioning_legacy(module, writer, kernel)
+  for vgprId in range(len(tileInfoB.sharedVgprLROffset)):
+    module.add(VAddU32(dst=vgpr(tileInfoB.sharedVgprLROffset[vgprId]), src0=writer.ldsStartOffsetB, src1=vgpr(tileInfoB.sharedVgprLROffset[vgprId]), comment="B matrix offset in LDS"))
+  return module
+
+
+# --- C++-plan-driven LR offset assignment (B16 / TLU0) ----------------------
+#
+# Mirror the _legacy helpers above instruction-for-instruction and
+# comment-for-comment, sourcing every derived scalar (blockSize,
+# numRowsPerLDSBanks, MFMA column stride, wave-partition stride/selector) from
+# the C++ ABTileInfoQuery.lrOffsetAssignPlan. Register state
+# (sharedVgprLROffset) and all rocisa construction stay in Python.
+
+def _computeLROffset_cpp(module, tileInfo, plan, colOffset, rowOffset):
+  tc = tileInfo.tc
+  loadWidth = plan.loadWidthLR
+  numMFMACols = plan.numMFMACols
+  blockSize = plan.blockSize
+  module.add(VMovB32(dst=vgpr(tileInfo.sharedVgprLROffset[0]), src=vgpr(colOffset), comment="%s: laneId"%tc))
+  for vgprId in range(1, len(tileInfo.sharedVgprLROffset)):
+    module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId-1]), src1=hex(numMFMACols), comment="%s: colOffset for MFMA %u of subtile"%(tc, vgprId)))
+    module.add(VAndB32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=hex(blockSize-1), comment="%s: colOffset = colOffset %% block_size"%tc))
+  for vgprId in range(0, len(tileInfo.sharedVgprLROffset)):
+    module.add(VLShiftLeftB32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(tileInfo.sharedVgprLROffset[vgprId]), comment="%s: colOffset*loadWidth"%tc))
+    module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=vgpr(rowOffset), comment="%s: row + col"%tc))
+
+def _applyWavePartitionLROffset_cpp(module, writer, kernel, tileInfo, plan):
+  tc = tileInfo.tc
+  if plan.wavePartMode == -1:   # loadRatioGR >= 2.0: no partition
+    return
+  wavesize = kernel["WavefrontSize"]
+  waveId = writer.vgprPool.checkOut(1)
+  module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="waveId"))
+  if plan.wavePartMode == 1:    # loadRatioGR == 1.0
+    mWaves = plan.mWavesM
+    if tc == 'A':
+      module.add(VAndB32(dst=vgpr(waveId), src0=hex(mWaves - 1), src1=vgpr(waveId), comment="%s: waveId %% %d"%(tc, mWaves)))
+    else:
+      module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(mWaves.bit_length()-1), src=vgpr(waveId), comment="%s: waveId / %d"%(tc, mWaves)))
+    sInterval = plan.sInterval
+  elif plan.wavePartMode == 0:  # loadRatioGR == 0.5
+    sInterval = plan.sInterval
+  else:
+    raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(plan.loadRatioGR))
+  if sInterval == 0:
+    writer.vgprPool.checkIn(waveId)
+    return
+  tmpSgpr = writer.sgprPool.checkOut(1)
+  module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(sInterval), comment="%s: interleave stride"%tc))
+  module.add(VMulLOU32(dst=vgpr(waveId), src1=vgpr(waveId), src0=sgpr(tmpSgpr), comment=""))
+  for vgprId in range(len(tileInfo.sharedVgprLROffset)):
+    module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=vgpr(waveId), comment="%s: wave partition LR offset"%tc))
+  writer.vgprPool.checkIn(waveId)
+  writer.sgprPool.checkIn(tmpSgpr)
+
+def _lraWavePartitioning_cpp(module, writer, kernel, planA, planB):
+  tileInfoA = writer.states.a.tileInfo
+  tileInfoB = writer.states.b.tileInfo
+  _applyWavePartitionLROffset_cpp(module, writer, kernel, tileInfoA, planA)
+  _applyWavePartitionLROffset_cpp(module, writer, kernel, tileInfoB, planB)
+
+def _lraTileAssignment_cpp(writer, kernel):
+  module = Module()
+  module.addComment0("LR Offset Calculation for Subtile Based Tiling")
+  tileInfoA = writer.states.a.tileInfo
+  tileInfoB = writer.states.b.tileInfo
+  planA = tileInfoA.lrOffsetAssignPlan(writer, kernel)
+  planB = tileInfoB.lrOffsetAssignPlan(writer, kernel)
+  subIterKBytes = planA.subIterKBytes
+  wavesize = kernel["WavefrontSize"]
+  mi_m = planA.miM
+  numRowsPerLDSBanks = planA.numRowsPerLDSBanks
+  blockSize = planA.blockSize
+  tmpVgpr = writer.vgprPool.checkOut(6)
+  lane16, lane16Group, rotation, rowOffset, colOffset = range(tmpVgpr, tmpVgpr + 5)
+  module.add(VAndB32(dst=vgpr(lane16Group), src0=vgpr("Serial"), src1=wavesize-1, comment="laneId"))
+  module.add(VLShiftRightB32(dst=vgpr(lane16Group), shiftHex=hex(mi_m.bit_length()-1), src=vgpr(lane16Group), comment="lane16Group"))
+  module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="laneId %% 16"))
+  module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
+  module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="(lds_row_id //2 )"))
+  module.add(VLShiftLeftB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="rotation=(lds_row_id //2) * 2"))
+  module.add(VAddU32(dst=vgpr(colOffset), src0=vgpr(rotation), src1=vgpr(lane16Group), comment="colOffset = rotation + lane16Group"))
+  module.add(VAndB32(dst=vgpr(colOffset), src0=vgpr(colOffset), src1=hex(blockSize-1), comment="colOffset = colOffset %% blockSize"))
+  setExecMask(module, writer, 0x33333333, 0x33333333)
+  module.add(VPermlane16SwapB32(dst=vgpr(colOffset), src=vgpr(colOffset), comment="apply swizzling"))
+  setExecMask(module, writer, -1, -1)
+  module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(subIterKBytes.bit_length()-1), src=vgpr(lane16), comment="offsetRow = subIterKBytes*lane16"))
+  _computeLROffset_cpp(module, tileInfoA, planA, colOffset, rowOffset)
+  _computeLROffset_cpp(module, tileInfoB, planB, colOffset, rowOffset)
+  writer.vgprPool.checkIn(tmpVgpr)
+  _lraWavePartitioning_cpp(module, writer, kernel, planA, planB)
   for vgprId in range(len(tileInfoB.sharedVgprLROffset)):
     module.add(VAddU32(dst=vgpr(tileInfoB.sharedVgprLROffset[vgprId]), src0=writer.ldsStartOffsetB, src1=vgpr(tileInfoB.sharedVgprLROffset[vgprId]), comment="B matrix offset in LDS"))
   return module

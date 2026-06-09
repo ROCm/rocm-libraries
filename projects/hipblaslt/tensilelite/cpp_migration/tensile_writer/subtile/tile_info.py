@@ -23,10 +23,16 @@ ABTileInfoQuery = _ti.ABTileInfoQuery
 SingleBufferLoadPlan = _ti.SingleBufferLoadPlan
 SingleDsReadPlan = _ti.SingleDsReadPlan
 DsReadEntry = _ti.DsReadEntry
+# Data-only offset-assignment scalar math for graTileAssignment /
+# lraTileAssignment (B16/TLU0). No rocisa objects, no writer register state.
+GROffsetAssignPlan = _ti.GROffsetAssignPlan
+LROffsetAssignPlan = _ti.LROffsetAssignPlan
 
 __all__ = [
     "ABTileInfoQuery",
     "SingleBufferLoadPlan",
     "SingleDsReadPlan",
     "DsReadEntry",
+    "GROffsetAssignPlan",
+    "LROffsetAssignPlan",
 ]

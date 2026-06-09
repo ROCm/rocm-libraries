@@ -60,6 +60,57 @@ struct SingleDsReadPlan {
 };
 
 // ---------------------------------------------------------------------------
+// GR / LR offset-assignment plans (B16 / TLU0 only).
+//
+// These hold the scalar offset-assignment *math* that the legacy
+// SubtileGREmit.graTileAssignment / SubtileLREmit.lraTileAssignment functions
+// derive inline before emitting the rocisa offset-calculation instructions.
+// The plan carries NO rocisa objects and NO writer register state (VGPR/SGPR
+// pool checkout/checkin and the shared offset registers stay on the Python
+// side). Only integer/derived scalars used as immediates / shift amounts /
+// comment values are computed here.
+//
+// SCOPE: row-major (TLU0) BF16 (bpe == 2). FP8 (bpe == 1, distinct swizzle)
+// and the TLU1 column-major path are intentionally excluded; the Python
+// emitter falls back to its native path for those.
+// ---------------------------------------------------------------------------
+struct GROffsetAssignPlan {
+  long subIterKBytes;        // depthUBytes / localSubtileGrid[1]
+  long loadWidth;            // gr.loadWidth
+  long blockSize;            // subIterKBytes / loadWidth
+  long numRowsPerLDSBanks;   // ldsRowBankSize / subIterKBytes
+  long numRowsPerWave;       // waveSize / blockSize
+  long partitionOffset;      // mmaTileShape[0] * localSubtileGrid[0]
+  // Wave-partition expression selector keyed on loadRatioGR:
+  //   1 -> loadRatioGR == 1.0, 0 -> 0.5, 2 -> 2.0, -1 -> unsupported.
+  int partitionMode;
+  long subtileSizeElems;     // subtileShape[0] * mmaTileShape[0]
+  long grAdvanceOffset;      // ceil(subtileSizeElems * loadRatioGR)
+  long bpeBits;              // int(8 * bpe)
+  long grSubtileRowOffset;   // ceil(numGRPerSubtile * loadRatioGR * subtileSizeElems)
+  long sStride;              // int(grSubtileRowOffset * bpe)
+  long numGRPerSubtile;
+  double loadRatioGR;
+};
+
+struct LROffsetAssignPlan {
+  long subIterKBytes;
+  long loadWidthLR;          // lr.loadWidth
+  long loadWidthGR;          // gr.loadWidth (used by the wave-partition math)
+  long blockSize;            // subIterKBytes / loadWidthLR
+  long numRowsPerLDSBanks;   // ldsRowBankSize / subIterKBytes
+  long miM;                  // mmaTileShape[0]
+  long numMFMACols;          // int(mmaTileShape[1] * bpe) / loadWidthLR
+  long partitionOffset;      // mmaTileShape[0] * localSubtileGrid[0]
+  long sInterval;            // partitionOffset * subIterKBytes
+  long mWavesM;              // MIWaveGroup[0] (supplied by caller)
+  // Wave-partition selector keyed on loadRatioGR:
+  //   -1 -> no partition (>= 2.0), 1 -> 1.0, 0 -> 0.5, -2 -> unsupported.
+  int wavePartMode;
+  double loadRatioGR;
+};
+
+// ---------------------------------------------------------------------------
 // ABTileInfoQuery — read-only snapshot of the AB (ABTilePair) TileInfo state.
 //
 // Built from an *already materialized* ABGRGeometry (subtileCount/subtileStride
@@ -285,6 +336,82 @@ struct ABTileInfoQuery {
       plan.reads.push_back(e);
     }
     return plan;
+  }
+
+  // --- GR / LR offset-assignment math (B16 / TLU0) ---
+
+  // depthUBytes / localSubtileGrid[1] — TileInfo.subIterKBytes for the AB case.
+  long subIterKBytes() const {
+    long depthUBytes = static_cast<long>(static_cast<double>(depthU) * gr.bpe);
+    return depthUBytes / localSubtileGrid.second;
+  }
+
+  // Pure port of the scalar math in SubtileGREmit._graTileAssignment_legacy
+  // (and its _grComputeRowPartition / _grComputeAllOffsets /
+  // _grComputeSubtileOffsets / _grSwizzleColIds helpers) for one tensor.
+  // ldsRowBankSize = archCaps["LDSBankCount"] * archCaps["LDSBankWidth"].
+  GROffsetAssignPlan grOffsetAssignPlan(long ldsRowBankSize) const {
+    GROffsetAssignPlan p;
+    p.subIterKBytes = subIterKBytes();
+    p.loadWidth = gr.loadWidth;
+    p.blockSize = p.subIterKBytes / p.loadWidth;
+    p.numRowsPerLDSBanks = ldsRowBankSize / p.subIterKBytes;
+    p.numRowsPerWave = waveSize / p.blockSize;
+    p.partitionOffset =
+        static_cast<long>(gr.mmaTileShape.first) * localSubtileGrid.first;
+    if (loadRatioGR == 1.0)
+      p.partitionMode = 1;
+    else if (loadRatioGR == 0.5)
+      p.partitionMode = 0;
+    else if (loadRatioGR == 2.0)
+      p.partitionMode = 2;
+    else
+      p.partitionMode = -1;
+    p.subtileSizeElems =
+        static_cast<long>(subtileShape.first) * gr.mmaTileShape.first;
+    p.grAdvanceOffset = static_cast<long>(
+        std::ceil(static_cast<double>(p.subtileSizeElems) * loadRatioGR));
+    p.bpeBits = static_cast<long>(8 * gr.bpe);
+    p.numGRPerSubtile = numGRPerSubtile();
+    p.grSubtileRowOffset = static_cast<long>(std::ceil(
+        static_cast<double>(p.numGRPerSubtile) * loadRatioGR *
+        static_cast<double>(p.subtileSizeElems)));
+    p.sStride = static_cast<long>(
+        static_cast<double>(p.grSubtileRowOffset) * gr.bpe);
+    p.loadRatioGR = loadRatioGR;
+    return p;
+  }
+
+  // Pure port of the scalar math in SubtileLREmit._lraTileAssignment_legacy
+  // (and its _computeLROffset / _applyWavePartitionLROffset helpers) for one
+  // tensor. mWavesM is kernel["MIWaveGroup"][0] (used identically for A and B
+  // by the legacy wave-partition path).
+  LROffsetAssignPlan lrOffsetAssignPlan(long ldsRowBankSize,
+                                        long mWavesM) const {
+    LROffsetAssignPlan p;
+    p.subIterKBytes = subIterKBytes();
+    p.loadWidthLR = lr.loadWidth;
+    p.loadWidthGR = gr.loadWidth;
+    p.blockSize = p.subIterKBytes / p.loadWidthLR;
+    p.numRowsPerLDSBanks = ldsRowBankSize / p.subIterKBytes;
+    p.miM = lr.mmaTileShape.first;
+    p.numMFMACols =
+        static_cast<long>(static_cast<double>(lr.mmaTileShape.second) * lr.bpe) /
+        p.loadWidthLR;
+    p.partitionOffset =
+        static_cast<long>(lr.mmaTileShape.first) * localSubtileGrid.first;
+    p.sInterval = p.partitionOffset * p.subIterKBytes;
+    p.mWavesM = mWavesM;
+    p.loadRatioGR = loadRatioGR;
+    if (loadRatioGR >= 2.0)
+      p.wavePartMode = -1;
+    else if (loadRatioGR == 1.0)
+      p.wavePartMode = 1;
+    else if (loadRatioGR == 0.5)
+      p.wavePartMode = 0;
+    else
+      p.wavePartMode = -2;
+    return p;
   }
 };
 

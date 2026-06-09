@@ -326,6 +326,46 @@ void bind_tile_info(nb::module_& t) {
       .def_ro("numReadsForTile", &SingleDsReadPlan::numReadsForTile)
       .def_ro("reads", &SingleDsReadPlan::reads);
 
+  // -- GR / LR offset-assignment plans (B16 / TLU0) ---------------------
+  nb::class_<GROffsetAssignPlan>(
+      t, "GROffsetAssignPlan",
+      "Data-only scalar math for SubtileGREmit.graTileAssignment (B16/TLU0): "
+      "derived block/row/partition sizes and per-load offset strides. No "
+      "rocisa objects and no writer register state are computed here.")
+      .def_ro("subIterKBytes", &GROffsetAssignPlan::subIterKBytes)
+      .def_ro("loadWidth", &GROffsetAssignPlan::loadWidth)
+      .def_ro("blockSize", &GROffsetAssignPlan::blockSize)
+      .def_ro("numRowsPerLDSBanks", &GROffsetAssignPlan::numRowsPerLDSBanks)
+      .def_ro("numRowsPerWave", &GROffsetAssignPlan::numRowsPerWave)
+      .def_ro("partitionOffset", &GROffsetAssignPlan::partitionOffset)
+      .def_ro("partitionMode", &GROffsetAssignPlan::partitionMode)
+      .def_ro("subtileSizeElems", &GROffsetAssignPlan::subtileSizeElems)
+      .def_ro("grAdvanceOffset", &GROffsetAssignPlan::grAdvanceOffset)
+      .def_ro("bpeBits", &GROffsetAssignPlan::bpeBits)
+      .def_ro("grSubtileRowOffset", &GROffsetAssignPlan::grSubtileRowOffset)
+      .def_ro("sStride", &GROffsetAssignPlan::sStride)
+      .def_ro("numGRPerSubtile", &GROffsetAssignPlan::numGRPerSubtile)
+      .def_ro("loadRatioGR", &GROffsetAssignPlan::loadRatioGR);
+
+  nb::class_<LROffsetAssignPlan>(
+      t, "LROffsetAssignPlan",
+      "Data-only scalar math for SubtileLREmit.lraTileAssignment (B16/TLU0): "
+      "derived block/row sizes, MFMA column stride, and the wave-partition "
+      "selector. No rocisa objects and no writer register state are computed "
+      "here.")
+      .def_ro("subIterKBytes", &LROffsetAssignPlan::subIterKBytes)
+      .def_ro("loadWidthLR", &LROffsetAssignPlan::loadWidthLR)
+      .def_ro("loadWidthGR", &LROffsetAssignPlan::loadWidthGR)
+      .def_ro("blockSize", &LROffsetAssignPlan::blockSize)
+      .def_ro("numRowsPerLDSBanks", &LROffsetAssignPlan::numRowsPerLDSBanks)
+      .def_ro("miM", &LROffsetAssignPlan::miM)
+      .def_ro("numMFMACols", &LROffsetAssignPlan::numMFMACols)
+      .def_ro("partitionOffset", &LROffsetAssignPlan::partitionOffset)
+      .def_ro("sInterval", &LROffsetAssignPlan::sInterval)
+      .def_ro("mWavesM", &LROffsetAssignPlan::mWavesM)
+      .def_ro("wavePartMode", &LROffsetAssignPlan::wavePartMode)
+      .def_ro("loadRatioGR", &LROffsetAssignPlan::loadRatioGR);
+
   nb::class_<ABTileInfoQuery>(t, "ABTileInfoQuery")
       .def(nb::init<const ABGRGeometry&, const ABLRGeometry&, long, long, long,
                     long, long>(),
@@ -392,7 +432,12 @@ void bind_tile_info(nb::module_& t) {
            nb::arg("sId0"), nb::arg("sId1"))
       .def("singleDsReadPlan", &ABTileInfoQuery::singleDsReadPlan,
            nb::arg("sId0"), nb::arg("sId1"), nb::arg("subIterK"),
-           nb::arg("numRegs"));
+           nb::arg("numRegs"))
+      // Offset-assignment scalar math (B16 / TLU0).
+      .def("grOffsetAssignPlan", &ABTileInfoQuery::grOffsetAssignPlan,
+           nb::arg("ldsRowBankSize"))
+      .def("lrOffsetAssignPlan", &ABTileInfoQuery::lrOffsetAssignPlan,
+           nb::arg("ldsRowBankSize"), nb::arg("mWavesM"));
 }
 
 // ---------------------------------------------------------------------------

@@ -785,6 +785,38 @@ class TileInfo:
                            offset=offset, numReadsForTile=numReadsForTile,
                            reads=reads)
 
+  # --- GR/LR offset-assignment math (C++-only; B16/TLU0) ---
+  # The scalar offset-assignment math for graTileAssignment / lraTileAssignment
+  # is computed by the C++ ABTileInfoQuery. There is no Python plan twin: the
+  # plan-driven emit is only entered when delegation is active and the legacy
+  # inline path stays byte-identical for the default (Python) build.
+
+  def _useCppOffsetAssign(self) -> bool:
+    """True when the C++ GR/LR offset-assignment plan should drive emission.
+
+    Restricted to the row-major (TLU0) BF16 (bpe == 2) AB path the C++ plan
+    covers. FP8 (bpe == 1, distinct swizzle), FP4, and the TLU1 column-major
+    path stay on the native Python emit.
+    """
+    if not self._useCppQuery():
+      return False
+    if self.bpe != 2:
+      return False
+    return self.gr is not None and not self.gr.config.tlu
+
+  def grOffsetAssignPlan(self, writer):
+    """C++ GR offset-assignment scalar plan for this tensor (B16/TLU0)."""
+    ldsRowBankSize = (writer.states.archCaps["LDSBankCount"]
+                      * writer.states.archCaps["LDSBankWidth"])
+    return self._cppQuery().grOffsetAssignPlan(ldsRowBankSize)
+
+  def lrOffsetAssignPlan(self, writer, kernel):
+    """C++ LR offset-assignment scalar plan for this tensor (B16/TLU0)."""
+    ldsRowBankSize = (writer.states.archCaps["LDSBankCount"]
+                      * writer.states.archCaps["LDSBankWidth"])
+    mWavesM = kernel["MIWaveGroup"][0]
+    return self._cppQuery().lrOffsetAssignPlan(ldsRowBankSize, mWavesM)
+
   # --- Register allocation ---
 
   def allocOffsetRegisters(self, writer, kernel):

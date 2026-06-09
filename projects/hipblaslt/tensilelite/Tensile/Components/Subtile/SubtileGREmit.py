@@ -655,6 +655,13 @@ def _grComputeAllOffsets(module, writer, tileInfo, colId, rowId, rowOffset):
 # Subroutine to generate GR offset calculation code
 #
 def graTileAssignment(writer, kernel, useSwizzling=True):
+  # Optional C++ delegation: the row-major (TLU0) BF16 offset-assignment math
+  # is computed by the C++ ABTileInfoQuery plan; the rocisa emission stays
+  # here. FP8 / FP4 / TLU1 stay on the legacy inline Python path (the default
+  # build never enters the C++ path, so its asm is byte-identical to before).
+  tileInfoA = writer.states.a.tileInfo
+  if tileInfoA._useCppOffsetAssign():
+    return _graTileAssignment_cpp(writer, kernel, useSwizzling)
   return _graTileAssignment_legacy(writer, kernel, useSwizzling)
 
 # --- Legacy interleaved A+B GR offset (temporary, matches reference exactly) ---
@@ -831,6 +838,153 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   writer.vgprPool.checkIn(tmpVgpr)
   _grComputeSubtileOffsets_legacy(writer, module, tileInfoA)
   _grComputeSubtileOffsets_legacy(writer, module, tileInfoB)
+  return module
+
+# --- C++-plan-driven GR offset assignment (B16 / TLU0) ----------------------
+#
+# These mirror the _legacy helpers above instruction-for-instruction and
+# comment-for-comment, but source every derived scalar (blockSize,
+# numRowsPerLDSBanks, numRowsPerWave, partition stride/mode, advance/rotation
+# offsets, subtile soffset stride) from the C++ ABTileInfoQuery.grOffsetAssignPlan
+# instead of recomputing it inline. The register state (sharedVgprGROffset,
+# localSubtilesRegister) and all rocisa construction stay in Python.
+
+def _grComputeOffset_cpp(module, writer, tileInfo, plan, colId, rowId, output):
+  tc = tileInfo.tc
+  bpeBits = plan.bpeBits
+  tmpVgpr = writer.vgprPool.checkOut(2)
+  colBytes = tmpVgpr + 1
+  loadWidth = plan.loadWidth
+  module.add(VLShiftLeftB32(dst=vgpr(colBytes), shiftHex=hex(loadWidth.bit_length()-1), src=vgpr(colId), comment="scale col_id by load_width"))
+  strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
+  module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=sgpr(strideRef), src1=vgpr(rowId), comment="%s: rowId * stride"%tc))
+  module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(bpeBits.bit_length()-1), src=vgpr(tmpVgpr), comment="%s: rowId*stride*bpe"%tc))
+  module.add(VLShiftRightB32(dst=vgpr(tmpVgpr), shiftHex=hex(3), src=vgpr(tmpVgpr), comment="to bytes"))
+  module.add(VAddU32(dst=vgpr(output), src0=vgpr(colBytes), src1=vgpr(tmpVgpr), comment="%s: GR row_offset"%tc))
+  writer.vgprPool.checkIn(tmpVgpr)
+
+def _grComputeSubtileOffsets_cpp(writer, module, tileInfo, plan):
+  tc = tileInfo.tc
+  strideRef = "StrideA0I" if tc == 'A' else "StrideB1J"
+  rowOffset = plan.grSubtileRowOffset
+  s_stride = plan.sStride
+  for regId in range(len(tileInfo.localSubtilesRegister)):
+    rl = tileInfo.localSubtilesRegister[regId]
+    for i, reg in enumerate(rl):
+      if rl.is_sgpr:
+        module.add(SMulI32(dst=sgpr(reg), src0=hex(s_stride * regId), src1=sgpr(strideRef), comment="%s: %u rows offset, stride %u, %u"%(tc, rowOffset, s_stride, regId)))
+      else:
+        stmp = writer.sgprPool.checkOut(1)
+        module.add(SMulI32(dst=sgpr(stmp), src0=hex(s_stride * regId), src1=sgpr(strideRef), comment="%s: %u rows offset, stride %u, %u"%(tc, rowOffset, s_stride, regId)))
+        module.add(VAddU32(dst=vgpr(reg), src0=vgpr(tileInfo.sharedVgprGROffset[i]), src1=sgpr(stmp)))
+        writer.sgprPool.checkIn(stmp)
+
+def _grComputeRowPartition_cpp(module, writer, tileInfo, plan, waveId, rowOffset):
+  numRowsPerWave = plan.numRowsPerWave
+  tc = tileInfo.tc
+  tmpVgpr = writer.vgprPool.checkOut(2)
+  tmpSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
+  localRow = tmpVgpr
+  partitionRow = tmpVgpr+1
+  partitionOffset = plan.partitionOffset
+  module.add(SMovB32(dst=sgpr(tmpSgpr), src=partitionOffset, comment="%s: row offset"%tc))
+  if plan.partitionMode == 1:
+    module.add(VAndB32(dst=vgpr(localRow), src0=hex(1), src1=vgpr(waveId), comment="%s: waveId %% 2"%tc))
+    module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(1), src=vgpr(waveId), comment="%s: waveId / 2"%tc))
+  elif plan.partitionMode == 0:
+    module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s"%tc))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s"%tc))
+  elif plan.partitionMode == 2:
+    module.add(VMovB32(dst=vgpr(localRow), src=vgpr(waveId), comment="%s"%tc))
+    module.add(VMovB32(dst=vgpr(partitionRow), src=0, comment="%s"%tc))
+  else:
+    raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(plan.loadRatioGR))
+  module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(localRow), comment="%s: local row offset"%tc))
+  module.add(VMulLOU32(dst=vgpr(partitionRow), src0=sgpr(tmpSgpr), src1=vgpr(partitionRow), comment="%s: wave row offset"%tc))
+  module.add(VAddU32(dst=vgpr(rowOffset), src0=vgpr(localRow), src1=vgpr(partitionRow), comment="%s: row offset"%tc))
+  writer.vgprPool.checkIn(tmpVgpr)
+  writer.sgprPool.checkIn(tmpSgpr)
+
+def _grComputeAllOffsets_cpp(module, writer, tileInfo, plan, colId, rowId, rowOffset):
+  module.add(VAddU32(dst=vgpr(rowOffset), src0=vgpr(rowId), src1=vgpr(rowOffset), comment="%s: row offset"%tileInfo.tc))
+  _grComputeOffset_cpp(module, writer, tileInfo, plan, colId, rowOffset, tileInfo.sharedVgprGROffset[0])
+  for i in range(1, len(tileInfo.sharedVgprGROffset)):
+    offset = plan.grAdvanceOffset
+    module.add(VAddU32(dst=vgpr(rowOffset), src0=offset, src1=vgpr(rowOffset), comment="%s: advance row for GR offset %u"%(tileInfo.tc, i)))
+    rotatedcolId = writer.vgprPool.checkOut(1)
+    if plan.loadRatioGR == 0.5:
+      blockSize = plan.blockSize
+      colRotation = blockSize // 2
+      module.add(VAddU32(dst=vgpr(rotatedcolId), src0=colRotation, src1=vgpr(colId), comment="%s: rotate col for GR offset %u"%(tileInfo.tc, i)))
+      module.add(VAndB32(dst=vgpr(rotatedcolId), src0=vgpr(rotatedcolId), src1=hex(blockSize-1), comment="(col + %d) %% block_size"%colRotation))
+    else:
+      module.add(VMovB32(dst=vgpr(rotatedcolId), src=vgpr(colId), comment=""))
+    _grComputeOffset_cpp(module, writer, tileInfo, plan, rotatedcolId, rowOffset, tileInfo.sharedVgprGROffset[i])
+    writer.vgprPool.checkIn(rotatedcolId)
+
+def _grSwizzleColIds_cpp(module, writer, planA, planB, blockSize, numRowsPerLDSBanks,
+                         laneId, colIdA, colIdB, waveId):
+  tmpVgpr = writer.vgprPool.checkOut(3)
+  ldsRowId = tmpVgpr
+  tmp = tmpVgpr + 1
+  waveRotation = tmpVgpr + 2
+  module.addComment0("Swizzling")
+  module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
+  module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(ldsRowId), comment="lds row id"))
+  module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(ldsRowId), src1=hex(1), comment="swap_bit = ldsRowId & 1"))
+  module.add(VCmpXEqU32(dst=VCC(), src0=0, src1=vgpr(tmp), comment="lds row id % 2 == 0 ?"))
+  module.add(VMovB32(dst=vgpr(colIdA), src=vgpr(colIdA), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap colId pairs for swizzling"))
+  module.add(SMovB64(dst=EXEC(), src=-1))
+  module.add(VMovB32(dst=vgpr(colIdB), src=vgpr(colIdA), comment=""))
+  module.addComment0("Rotation within a single wave")
+  module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(ldsRowId), comment=""))
+  module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="(ldsRowId //2) * 2"))
+  module.add(VSubU32(dst=vgpr(tmp), src0=hex(blockSize), src1=vgpr(tmp), comment="rotation offset : blockSize - (ldsRowId//2)*2"))
+  for plan, cId in [(planA, colIdA), (planB, colIdB)]:
+    if plan.loadRatioGR != 0.5:
+      module.addComment0("Rotation per wave")
+      module.add(VAndB32(dst=vgpr(waveRotation), src0=vgpr(waveId), src1=hex(1), comment=""))
+      module.add(VLShiftLeftB32(dst=vgpr(waveRotation), shiftHex=hex((2*numRowsPerLDSBanks).bit_length() - 1), src=vgpr(waveRotation), comment=""))
+      module.add(VSubU32(dst=vgpr(waveRotation), src0=vgpr(tmp), src1=vgpr(waveRotation), comment=""))
+      module.add(VAddU32(dst=vgpr(cId), src0=vgpr(waveRotation), src1=vgpr(cId), comment=""))
+    else:
+      module.add(VAddU32(dst=vgpr(cId), src0=vgpr(tmp), src1=vgpr(cId), comment=""))
+  module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr(colIdA), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
+  module.add(VAndB32(dst=vgpr(colIdB), src0=vgpr(colIdB), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
+  writer.vgprPool.checkIn(tmpVgpr)
+
+def _graTileAssignment_cpp(writer, kernel, useSwizzling=True):
+  module = Module()
+  module.addComment0("GR Offset Calculation for Subtile Based Tiling")
+  tileInfoA = writer.states.a.tileInfo
+  tileInfoB = writer.states.b.tileInfo
+  planA = tileInfoA.grOffsetAssignPlan(writer)
+  planB = tileInfoB.grOffsetAssignPlan(writer)
+  wavesize = kernel["WavefrontSize"]
+  loadWidth = planA.loadWidth
+  blockSize = planA.blockSize
+  numRowsPerLDSBanks = planA.numRowsPerLDSBanks
+  tmpVgpr = writer.vgprPool.checkOut(7)
+  colIdA = tmpVgpr
+  colIdB = tmpVgpr + 1
+  rowId = tmpVgpr + 2
+  rowOffsetA = tmpVgpr + 3
+  rowOffsetB = tmpVgpr + 4
+  waveId = tmpVgpr + 5
+  laneId = tmpVgpr + 6
+  module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
+  module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize-1, comment=""))
+  module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr("Serial"), src1=(blockSize-1), comment="get col_id in wave for %uB load"%loadWidth))
+  module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
+  _grSwizzleColIds_cpp(module, writer, planA, planB, blockSize, numRowsPerLDSBanks,
+                       laneId, colIdA, colIdB, waveId)
+  _grComputeRowPartition_cpp(module, writer, tileInfoA, planA, waveId, rowOffsetA)
+  _grComputeRowPartition_cpp(module, writer, tileInfoB, planB, waveId, rowOffsetB)
+  _grComputeAllOffsets_cpp(module, writer, tileInfoA, planA, colIdA, rowId, rowOffsetA)
+  _grComputeAllOffsets_cpp(module, writer, tileInfoB, planB, colIdB, rowId, rowOffsetB)
+  writer.vgprPool.checkIn(tmpVgpr)
+  _grComputeSubtileOffsets_cpp(writer, module, tileInfoA, planA)
+  _grComputeSubtileOffsets_cpp(writer, module, tileInfoB, planB)
   return module
 
 ##################################################
