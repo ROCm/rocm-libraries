@@ -8,6 +8,10 @@ hipBLASLt is a GEMM library for AMD GPUs built on HIP. The public API (`hipblasL
 
 This directory (`projects/hipblaslt`) is one component of the larger `rocm-libraries` superbuild but is designed to also build standalone — see `CONTRIBUTING.md` for the standalone setup, which is the recommended dev loop.
 
+## PR Quality Skill
+
+When authoring, reviewing, or pre-merge-gating a hipBLASLt pull request, use the `hipblaslt-pr-quality` agent skill at [`skills/hipblaslt-pr-quality/SKILL.md`](skills/hipblaslt-pr-quality/SKILL.md). It is a thin overlay that *tightens* the library-agnostic `rocm-pr-quality` base skill (in `ROCm/TheRock` at `skills/rocm-pr-quality/`) for hipBLASLt — it never relaxes a base rule. The skill is advisory and never posts to GitHub/Jira without explicit human approval.
+
 ## Repository layout (high-level)
 
 | Path | Purpose |
