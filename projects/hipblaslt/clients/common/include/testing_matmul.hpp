@@ -2648,15 +2648,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         hipblaslt_seedrand();
 
         // gfx1250 detection drives the dimk scale swizzle in generateMXInput.
-        bool isGfx1250Arch = false;
-        {
-            hipDeviceProp_t mxDeviceProps{};
-            if(hipGetDeviceProperties(&mxDeviceProps, 0) == hipSuccess)
-            {
-                std::string const archName(mxDeviceProps.gcnArchName);
-                isGfx1250Arch = archName.rfind("gfx1250", 0) == 0;
-            }
-        }
+        bool const isGfx1250Arch = hipblaslt_is_gfx1250();
 
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));
@@ -2666,10 +2658,14 @@ void testing_matmul_with_bias(const Arguments& arg,
             // bit is the scale layout, selected via MXScaleLayout below.
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
-               && arg.initialization != hipblaslt_initialization::uniform_01)
+               && arg.initialization != hipblaslt_initialization::uniform_01
+               && arg.initialization != hipblaslt_initialization::zero
+               && arg.initialization != hipblaslt_initialization::norm_dist
+               && arg.initialization != hipblaslt_initialization::rand_int
+               && arg.initialization != hipblaslt_initialization::uniform_low_precision)
             {
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float "
-                                  "or uniform_01, not "
+                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
+                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
                                << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
             }
@@ -2772,10 +2768,14 @@ void testing_matmul_with_bias(const Arguments& arg,
             // MX B always goes through mxDataGenerator (mirrors the A side above).
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
-               && arg.initialization != hipblaslt_initialization::uniform_01)
+               && arg.initialization != hipblaslt_initialization::uniform_01
+               && arg.initialization != hipblaslt_initialization::zero
+               && arg.initialization != hipblaslt_initialization::norm_dist
+               && arg.initialization != hipblaslt_initialization::rand_int
+               && arg.initialization != hipblaslt_initialization::uniform_low_precision)
             {
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float "
-                                  "or uniform_01, not "
+                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
+                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
                                << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
             }

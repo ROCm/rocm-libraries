@@ -433,6 +433,16 @@ static std::vector<float> generateMXInputCpu(hipDataType            dataType,
         // "hpl" reuses the {-0.5, 0.5} min/max already overridden above; PRNG
         // bytes won't match the legacy random_hpl path, only the distribution.
         opt.initMode = DataInitMode(Bounded{});
+    else if(initMethod == "uniform_low_precision")
+    {
+        // Uniform random in [-6, 6] (full FP4 E2M1 range). UE8M0 scales can
+        // represent the resulting per-block exponents (log2(6) ≈ 2.6 fits
+        // well inside UE8M0's [-127, 127] unbiased-exponent range), so no
+        // scale-dtype guard is needed here.
+        opt.min      = -6.0;
+        opt.max      = 6.0;
+        opt.initMode = DataInitMode(Bounded{});
+    }
     else if(initMethod == "TrigonometricFromFloat" || initMethod == "trig_float")
         opt.initMode = DataInitMode(TrigonometricFromFloat{});
     else if(initMethod == "norm_dist")
@@ -449,6 +459,7 @@ static std::vector<float> generateMXInputCpu(hipDataType            dataType,
             std::string("generateMXInput: unsupported initMethod '")
             + std::string(initMethod)
             + "'. Supported methods: Bounded/uniform_01, hpl, "
+              "uniform_low_precision, "
               "TrigonometricFromFloat/trig_float, norm_dist, rand_int, "
               "Sequential, RowIndex, ColIndex, Checkerboard, ScaledDiagonal, "
               "Identity, Ones, Zeros/zero, Twos, NegOnes, MaxVals, "
@@ -831,6 +842,16 @@ std::vector<float> generateMXInput(hipDataType            dataType,
         // already overridden to {-0.5, 0.5} a few lines above, so this
         // dispatches Bounded over the same range as the legacy random_hpl.
         opt.initMode = DGen::DataInitMode(DGen::Bounded{});
+    else if(initMethod == "uniform_low_precision")
+    {
+        // Uniform random in [-6, 6] (full FP4 E2M1 range). UE8M0 scales can
+        // represent the resulting per-block exponents (log2(6) ≈ 2.6 fits
+        // well inside UE8M0's [-127, 127] unbiased-exponent range), so no
+        // scale-dtype guard is needed here.
+        opt.min      = -6.0;
+        opt.max      = 6.0;
+        opt.initMode = DGen::DataInitMode(DGen::Bounded{});
+    }
     else if(initMethod == "TrigonometricFromFloat" || initMethod == "trig_float")
         opt.initMode = DGen::DataInitMode(DGen::TrigonometricFromFloat{});
     else if(initMethod == "norm_dist")
@@ -850,6 +871,7 @@ std::vector<float> generateMXInput(hipDataType            dataType,
             std::string("generateMXInput (GPU): unsupported initMethod '")
             + std::string(initMethod)
             + "'. Supported methods: Bounded/uniform_01, hpl, "
+              "uniform_low_precision, "
               "TrigonometricFromFloat/trig_float, norm_dist, rand_int, "
               "Sequential, RowIndex, ColIndex, Checkerboard, ScaledDiagonal, "
               "Identity, Ones, Zeros/zero, Twos, NegOnes, MaxVals, "

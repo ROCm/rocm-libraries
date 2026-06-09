@@ -1937,14 +1937,18 @@ namespace TensileLite
             case InitMode::RandomNarrow:
             case InitMode::RandomNegPosLimited:
                 return "Bounded";
-            // Free / Count / UniformLowPrecision have no mxDataGenerator
-            // analogue; throw rather than silently fall through to an
-            // unrelated distribution. (UniformLowPrecision in particular
-            // wants the full representable range of the low-precision type,
-            // not the [-1,1] window generateMXInput is pinned to.)
+            // UniformLowPrecision routes to mxDataGenerator's Bounded with the
+            // hard-coded [-6, 6] window (full FP4 E2M1 range) inside
+            // generateMXInput. No UE8M0 guard is applied here because
+            // initModeToMXMethod takes no runtime dtype; the scaleType-based
+            // rejection lives inside generateMXInput's "uniform_low_precision"
+            // arm.
+            case InitMode::UniformLowPrecision:
+                return "uniform_low_precision";
+            // Free / Count have no mxDataGenerator analogue; throw rather than
+            // silently fall through to an unrelated distribution.
             case InitMode::Free:
             case InitMode::Count:
-            case InitMode::UniformLowPrecision:
                 break;
             }
             throw std::runtime_error(
@@ -1953,7 +1957,7 @@ namespace TensileLite
                   "InitMode (Zero, One, Two, NegOne, Max, DenormMin, DenormMax, "
                   "NaN, Inf, BadInput, BadOutput, Identity, SerialIdx/Dim0/Dim1, "
                   "Trig{Sin,Cos,AbsSin,AbsCos}[Ind], Random, RandomNarrow, "
-                  "RandomNegPosLimited; UniformLowPrecision is unsupported) "
+                  "RandomNegPosLimited, UniformLowPrecision) "
                   "or add a mapping in initModeToMXMethod.");
         }
 

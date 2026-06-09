@@ -366,6 +366,18 @@ int32_t hipblaslt_get_arch_major()
     return stoi(gpu_arch_no_prefix) / 100;
 }
 
+bool hipblaslt_is_gfx1250()
+{
+    int             deviceId = 0;
+    hipDeviceProp_t props{};
+    if(hipGetDevice(&deviceId) != hipSuccess)
+        return false;
+    if(hipGetDeviceProperties(&props, deviceId) != hipSuccess)
+        return false;
+    std::string const archName(props.gcnArchName);
+    return archName.rfind("gfx1250", 0) == 0;
+}
+
 void hipblaslt_print_version()
 {
     int                    version;
