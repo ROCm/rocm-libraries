@@ -154,5 +154,28 @@ public:
     {
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
+
+    // RFC 0007 Section 16: Heuristic policy enumeration
+    hipdnnStatus_t getHeuristicPolicyCount(hipdnnHandle_t /*handle*/,
+                                           size_t* /*numPolicies*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
+    hipdnnStatus_t getHeuristicPolicyInfo(hipdnnHandle_t /*handle*/,
+                                          size_t /*policyIndex*/,
+                                          int64_t* /*policyId*/,
+                                          char* /*policyName*/,
+                                          size_t* /*policyNameLen*/,
+                                          char* /*pluginName*/,
+                                          size_t* /*pluginNameLen*/,
+                                          char* /*pluginVersion*/,
+                                          size_t* /*pluginVersionLen*/,
+                                          char* /*apiVersion*/,
+                                          size_t* /*apiVersionLen*/) override
+    {
+        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+    }
 };
+
 } // namespace hipdnn_frontend::detail
