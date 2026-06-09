@@ -357,9 +357,7 @@ class ConfigureCITest(unittest.TestCase):
         # Test labels only apply to pull requests, not nightly runs
         mock_get_modified.return_value = []
 
-        pr_labels_json = (
-            '{"labels": [{"name": "test:rocblas"}, {"name": "test_type:comprehensive"}]}'
-        )
+        pr_labels_json = '{"labels": [{"name": "test:rocblas"}, {"name": "test_type:comprehensive"}]}'
         projects, test_type = therock_configure_ci.retrieve_projects(
             {"is_nightly": True, "base_ref": "HEAD^", "pr_labels": pr_labels_json}
         )
