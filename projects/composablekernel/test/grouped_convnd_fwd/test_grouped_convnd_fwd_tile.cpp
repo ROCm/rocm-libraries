@@ -76,11 +76,10 @@ class TestGroupedConvndFwdTile : public ::testing::Test
             std::cout << args.make_input_descriptor() << std::endl;
             std::cout << args.make_weight_descriptor() << std::endl;
             std::cout << args.make_output_descriptor() << std::endl;
-            float avg_time;
-            std::string op_name;
-            bool case_passed;
-            std::tie(case_passed, avg_time, op_name) = ckp::run_grouped_conv_forward_tile_algs(
+            [[maybe_unused]] auto&& [case_passed, avg_time, op_name, best_gbs, best_op_name, best_op_index] =
+                ckp::run_grouped_conv_forward_tile_algs(
                 args,
+                instance_index,
                 inputs.get(),
                 outputs.get(),
                 ck_tile::stream_config{nullptr, false /*time_kernel*/});
