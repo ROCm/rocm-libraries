@@ -576,3 +576,188 @@ class TestGetSourceFileStringCustomKernelPath:
             f"Pre-fix code would have raised AttributeError on self.states.regCaps "
             f"before ever reaching this line."
         )
+
+
+# ---------------------------------------------------------------------------
+# TestGetSourceFileStringIncompleteSingletonCaps
+# Regression test for the grouped_gemm_ck KeyError (post-commit a1c968f136c).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not _KWA_AVAILABLE, reason="KernelWriterAssembly requires rocisa")
+class TestGetSourceFileStringIncompleteSingletonCaps:
+    """Regression guard for the grouped_gemm_ck KeyError on gfx942.
+
+    Root cause: grouped_gemm_ck custom kernels call getSourceFileString with a
+    rocisa singleton whose getRegCaps() returns an incomplete dict that lacks
+    "MaxVgpr" (setKernel was never called for this ISA in the ck codegen path).
+    The occupancy block then raises ``KeyError: 'MaxVgpr'``, crashing codegen.
+
+    The fix (this commit): try the live singleton caps; on KeyError/AttributeError
+    fall back to the static hardware table (_arch_caps_for_kernel).  If the static
+    table can supply caps (gfx942 is covered), compute occupancy from there;
+    otherwise (or if asm directives are missing) leave CUOccupancy at -1.
+
+    These tests mock rocIsa.getInstance() so no hardware / amdclang++ is needed.
+    They would have raised KeyError pre-fix and pass post-fix.
+    """
+
+    _ISA = (9, 4, 2)
+    _EXPECTED_OCC = 2   # 256-vgpr gfx942 kernel via static fallback
+
+    def _make_kernel_obj(self, isa=None):
+        k = _KernelObj({
+            "CustomKernelName": "test_incomplete_caps_kernel",
+            "ISA": list(isa or self._ISA),
+            "NumThreads": 256,
+            "KernelLanguage": "Assembly",
+            "CUOccupancy": -1,
+        })
+        k.duplicate = False
+        return k
+
+    def _good_asm(self):
+        """Valid assembly source for a 256-vgpr gfx942 custom kernel (occ=2 via table)."""
+        return _make_asm(next_free_vgpr=256, next_free_sgpr=102,
+                         group_seg_size=32768, accum_offset=128,
+                         kernel_name="test_incomplete_caps_kernel")
+
+    def _make_kwa(self, asm_source):
+        kwa = object.__new__(_KWA)
+        kwa.states = SimpleNamespace()
+        kwa._getCustomKernelSource = lambda k, d: asm_source
+        return kwa
+
+    # ------------------------------------------------------------------
+    # Core regression: KeyError pre-fix, no error post-fix
+    # ------------------------------------------------------------------
+
+    def test_incomplete_singleton_caps_no_raise(self):
+        """Pre-fix: KeyError 'MaxVgpr'; post-fix: no exception raised.
+
+        Mirrors the grouped_gemm_ck failure path exactly: singleton returns
+        empty dicts for both getRegCaps() and getArchCaps(), and the custom
+        kernel has valid assembly directives.
+        """
+        from unittest.mock import MagicMock, patch
+
+        mock_ti = MagicMock()
+        mock_ti.getRegCaps.return_value = {}   # missing MaxVgpr — the failing case
+        mock_ti.getArchCaps.return_value = {}  # missing DeviceLDS etc.
+
+        kwa = self._make_kwa(self._good_asm())
+        kernel = self._make_kernel_obj()
+
+        with patch("Tensile.KernelWriterAssembly.rocIsa") as mock_rocisa:
+            mock_rocisa.getInstance.return_value = mock_ti
+            errcode, code = kwa.getSourceFileString(kernel)
+
+        assert errcode == 0, (
+            f"getSourceFileString must return errcode=0 with incomplete singleton caps; "
+            f"got {errcode}.  Pre-fix code raised KeyError: 'MaxVgpr'."
+        )
+        assert code, "assembly source must be non-empty"
+
+    def test_incomplete_singleton_caps_uses_static_fallback(self):
+        """Incomplete singleton caps → static table (_arch_caps_for_kernel) provides caps.
+
+        For gfx942, _arch_caps_for_kernel returns (512, 800, 65536, 8); combined
+        with 256 VGPRs and 32768 B LDS from the asm source this yields occ=2.
+        """
+        from unittest.mock import MagicMock, patch
+
+        mock_ti = MagicMock()
+        mock_ti.getRegCaps.return_value = {}
+        mock_ti.getArchCaps.return_value = {}
+
+        kwa = self._make_kwa(self._good_asm())
+        kernel = self._make_kernel_obj()
+
+        with patch("Tensile.KernelWriterAssembly.rocIsa") as mock_rocisa:
+            mock_rocisa.getInstance.return_value = mock_ti
+            kwa.getSourceFileString(kernel)
+
+        assert kernel["CUOccupancy"] == self._EXPECTED_OCC, (
+            f"Expected CUOccupancy={self._EXPECTED_OCC} via static table fallback "
+            f"for gfx942 with 256 VGPRs; got {kernel['CUOccupancy']}"
+        )
+
+    def test_incomplete_caps_missing_asm_directives_stays_minus1(self):
+        """Incomplete singleton caps AND missing asm directives → CUOccupancy stays -1.
+
+        Even though the static table has gfx942 caps, compute_occupancy_from_asm_source
+        returns None when the asm lacks the required .amdhsa_ directives.  The
+        caller then leaves CUOccupancy at its default (-1).
+        """
+        from unittest.mock import MagicMock, patch
+
+        mock_ti = MagicMock()
+        mock_ti.getRegCaps.return_value = {}
+        mock_ti.getArchCaps.return_value = {}
+
+        # asm missing all required directives
+        asm_no_directives = ".amdhsa_kernel bad_kernel\n.end_amdhsa_kernel\n"
+        kwa = self._make_kwa(asm_no_directives)
+        kernel = self._make_kernel_obj()
+
+        with patch("Tensile.KernelWriterAssembly.rocIsa") as mock_rocisa:
+            mock_rocisa.getInstance.return_value = mock_ti
+            errcode, _ = kwa.getSourceFileString(kernel)
+
+        assert errcode == 0, f"errcode must be 0, got {errcode}"
+        assert kernel["CUOccupancy"] == -1, (
+            f"CUOccupancy must remain -1 when asm directives are missing; "
+            f"got {kernel['CUOccupancy']}"
+        )
+
+    def test_partial_singleton_caps_missing_only_maxvgpr(self):
+        """Singleton has some keys but not MaxVgpr → KeyError caught, fallback used."""
+        from unittest.mock import MagicMock, patch
+
+        mock_ti = MagicMock()
+        # PhysicalMaxSgpr present but MaxVgpr missing — exactly as in the CI failure
+        mock_ti.getRegCaps.return_value = {"PhysicalMaxSgpr": 800}
+        mock_ti.getArchCaps.return_value = {"DeviceLDS": 65536, "MaxWavesPerSimd": 8}
+
+        kwa = self._make_kwa(self._good_asm())
+        kernel = self._make_kernel_obj()
+
+        with patch("Tensile.KernelWriterAssembly.rocIsa") as mock_rocisa:
+            mock_rocisa.getInstance.return_value = mock_ti
+            errcode, code = kwa.getSourceFileString(kernel)
+
+        assert errcode == 0, f"errcode must be 0, got {errcode}"
+        # Falls back to static table → occ=2
+        assert kernel["CUOccupancy"] == self._EXPECTED_OCC, (
+            f"Expected CUOccupancy={self._EXPECTED_OCC} from static fallback; "
+            f"got {kernel['CUOccupancy']}"
+        )
+
+    def test_complete_singleton_caps_still_compute_correct_occupancy(self):
+        """Complete singleton caps still yield the correct occupancy (no regression).
+
+        When the singleton has MaxVgpr=256 (gfx942 ArchAccUnifiedRegs: phy=512),
+        PhysicalMaxSgpr=800, DeviceLDS=65536, MaxWavesPerSimd=8 — the live path
+        works exactly as before: occ=2 for 256-vgpr kernel.
+        """
+        from unittest.mock import MagicMock, patch
+
+        mock_ti = MagicMock()
+        mock_ti.getRegCaps.return_value = {"MaxVgpr": 256, "PhysicalMaxSgpr": 800}
+        mock_ti.getArchCaps.return_value = {
+            "ArchAccUnifiedRegs": True,
+            "DeviceLDS": 65536,
+            "MaxWavesPerSimd": 8,
+        }
+
+        kwa = self._make_kwa(self._good_asm())
+        kernel = self._make_kernel_obj()
+
+        with patch("Tensile.KernelWriterAssembly.rocIsa") as mock_rocisa:
+            mock_rocisa.getInstance.return_value = mock_ti
+            kwa.getSourceFileString(kernel)
+
+        # MaxVgpr=256, ArchAccUnifiedRegs=True → phy=256*2=512; 512//256=2, LDS ok → occ=2
+        assert kernel["CUOccupancy"] == self._EXPECTED_OCC, (
+            f"Expected CUOccupancy={self._EXPECTED_OCC} from complete singleton caps; "
+            f"got {kernel['CUOccupancy']}"
+        )

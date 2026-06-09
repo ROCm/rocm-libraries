@@ -78,7 +78,7 @@ from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout
-from .OccupancyMeasure import compute_occupancy_from_asm_source
+from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
@@ -194,12 +194,23 @@ class KernelWriterAssembly(KernelWriter):
           _ti = rocIsa.getInstance()
           _regCaps = _ti.getRegCaps()
           _archCaps = _ti.getArchCaps()
-          _rocisa_caps = (
-              _regCaps["MaxVgpr"] * (2 if _archCaps.get("ArchAccUnifiedRegs") else 1),
-              _regCaps["PhysicalMaxSgpr"],
-              _archCaps["DeviceLDS"],
-              _archCaps["MaxWavesPerSimd"],
-          )
+          # Some codegen paths (e.g. grouped_gemm_ck custom kernels) reach here with
+          # a rocisa singleton whose getRegCaps()/getArchCaps() return an incomplete or
+          # empty dict (setKernel was never called for this ISA in that context).
+          # Accessing missing keys would raise KeyError and break codegen.  Guard:
+          # try the live singleton caps first; on any KeyError/AttributeError fall back
+          # to the static hardware table.  If neither source has the caps, skip the
+          # override and leave CUOccupancy at its default (-1).
+          try:
+            _rocisa_caps = (
+                _regCaps["MaxVgpr"] * (2 if _archCaps.get("ArchAccUnifiedRegs") else 1),
+                _regCaps["PhysicalMaxSgpr"],
+                _archCaps["DeviceLDS"],
+                _archCaps["MaxWavesPerSimd"],
+            )
+          except (KeyError, AttributeError):
+            # Singleton caps incomplete: fall back to static table (or None → skip).
+            _rocisa_caps = _arch_caps_for_kernel(kernel)
           occ = compute_occupancy_from_asm_source(kernel, code, arch_caps=_rocisa_caps)
           if occ is not None:
             kernel["CUOccupancy"] = occ
