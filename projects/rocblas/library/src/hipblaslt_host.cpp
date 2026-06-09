@@ -103,6 +103,19 @@ namespace
         }
     }
 
+#define EXPECT_HIPBLAS_STATUS1(STATUS, EXPECT)                                          \
+    do                                                                                  \
+    {                                                                                   \
+        if(STATUS != EXPECT)                                                            \
+        {                                                                               \
+            throw std::runtime_error("rocBLAS error: hipBLASLt API returned "           \
+                                     + std::to_string(STATUS) + " at " + __FILE__ + ":" \
+                                     + std::to_string(__LINE__));                       \
+            \    
+                                                                               \
+        }                                                                               \
+    } while(0)
+
     inline auto hipblaslt_expect_status(hipblasStatus_t status,
                                         hipblasStatus_t expect,
                                         const char*     file,
@@ -116,31 +129,6 @@ namespace
             return rocblas_status_internal_error;
         }
         return rocblas_status_success;
-    }
-
-    void cleanup_hipblaslt_resources(hipblasLtMatmulDesc_t&       matmulDesc,
-                                     hipblasLtMatrixLayout_t&     matA,
-                                     hipblasLtMatrixLayout_t&     matB,
-                                     hipblasLtMatrixLayout_t&     matC,
-                                     hipblasLtMatrixLayout_t&     matD,
-                                     hipblasLtMatmulPreference_t& pref,
-                                     void*                        workspace,
-                                     size_t                       workspaceSize)
-    {
-        EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatmulDescDestroy(matmulDesc), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
-        EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatrixLayoutDestroy(matA), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
-        EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatrixLayoutDestroy(matB), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
-        EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatrixLayoutDestroy(matC), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
-        EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatrixLayoutDestroy(matD), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
-        EXPECT_HIPBLAS_STATUS(
-            hipblasLtMatmulPreferenceDestroy(pref), HIPBLAS_STATUS_SUCCESS, __FILE__, __LINE__);
-        if(workspaceSize > 0)
-            RETURN_IF_HIP_ERROR(hipFree(workspace));
     }
 
 #define EXPECT_HIPBLAS_STATUS(STATUS, EXPECT)                                                \
@@ -157,6 +145,49 @@ namespace
         }                                                                                    \
     } while(0)
 
+    rocblas_status cleanup_hipblaslt_resources(hipblasLtMatmulDesc_t&       matmulDesc,
+                                               hipblasLtMatrixLayout_t&     matA,
+                                               hipblasLtMatrixLayout_t&     matB,
+                                               hipblasLtMatrixLayout_t&     matC,
+                                               hipblasLtMatrixLayout_t&     matD,
+                                               hipblasLtMatmulPreference_t& pref,
+                                               void*                        workspace,
+                                               size_t                       workspaceSize,
+                                               void**                       devicePtrArray_A,
+                                               void**                       devicePtrArray_B,
+                                               void**                       devicePtrArray_C,
+                                               void**                       devicePtrArray_D)
+    {
+        try
+        {
+            EXPECT_HIPBLAS_STATUS1(hipblasLtMatmulDescDestroy(matmulDesc), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_HIPBLAS_STATUS1(hipblasLtMatrixLayoutDestroy(matA), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_HIPBLAS_STATUS1(hipblasLtMatrixLayoutDestroy(matB), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_HIPBLAS_STATUS1(hipblasLtMatrixLayoutDestroy(matC), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_HIPBLAS_STATUS1(hipblasLtMatrixLayoutDestroy(matD), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_HIPBLAS_STATUS1(hipblasLtMatmulPreferenceDestroy(pref), HIPBLAS_STATUS_SUCCESS);
+
+            if(workspaceSize > 0)
+                THROW_IF_HIP_ERROR(hipFree(workspace));
+            if(devicePtrArray_A)
+                THROW_IF_HIP_ERROR(hipFree(devicePtrArray_A));
+            if(devicePtrArray_B)
+                THROW_IF_HIP_ERROR(hipFree(devicePtrArray_B));
+            if(devicePtrArray_C)
+                THROW_IF_HIP_ERROR(hipFree(devicePtrArray_C));
+            if(devicePtrArray_D)
+                THROW_IF_HIP_ERROR(hipFree(devicePtrArray_D));
+        }
+        catch(const std::exception& e)
+        {
+            rocblas_internal_ostream msg;
+            print_if_verbose(msg << "rocBLAS error during hipBLASLt resource cleanup: "
+                                 << e.what());
+            return rocblas_status_internal_error;
+        }
+        return rocblas_status_success;
+    }
+
 #define CHECK_SOLUTION_FOUND(SOL_COUNT)                                                         \
     do                                                                                          \
     {                                                                                           \
@@ -165,9 +196,30 @@ namespace
             rocblas_internal_ostream msg;                                                       \
             print_if_verbose(msg << "rocBLAS warning: No solution found in hipblaslt. Falling " \
                                     "back to Tensile backend.\n");                              \
-            [&matmulDesc, &matA, &matB, &matC, &matD, &pref, &workspace, &workspaceSize]() {    \
-                cleanup_hipblaslt_resources(                                                    \
-                    matmulDesc, matA, matB, matC, matD, pref, workspace, workspaceSize);        \
+            [&matmulDesc,                                                                       \
+             &matA,                                                                             \
+             &matB,                                                                             \
+             &matC,                                                                             \
+             &matD,                                                                             \
+             &pref,                                                                             \
+             &workspace,                                                                        \
+             &workspaceSize,                                                                    \
+             &devicePtrArray_A,                                                                 \
+             &devicePtrArray_B,                                                                 \
+             &devicePtrArray_C,                                                                 \
+             &devicePtrArray_D]() {                                                             \
+                cleanup_hipblaslt_resources(matmulDesc,                                         \
+                                            matA,                                               \
+                                            matB,                                               \
+                                            matC,                                               \
+                                            matD,                                               \
+                                            pref,                                               \
+                                            workspace,                                          \
+                                            workspaceSize,                                      \
+                                            devicePtrArray_A,                                   \
+                                            devicePtrArray_B,                                   \
+                                            devicePtrArray_C,                                   \
+                                            devicePtrArray_D);                                  \
             }();                                                                                \
             return rocblas_status_not_implemented;                                              \
         }                                                                                       \
@@ -181,9 +233,30 @@ namespace
             print_if_verbose(msg << "Returned workspace size (" << WORKSPACE_SIZE << ") is "    \
                                  << "larger than user allocated(" << MAX_WORKSPACE_SIZE << ")!" \
                                  << " at " __FILE__ ":" << __LINE__ << std::endl);              \
-            [&matmulDesc, &matA, &matB, &matC, &matD, &pref, &workspace, &workspaceSize]() {    \
-                cleanup_hipblaslt_resources(                                                    \
-                    matmulDesc, matA, matB, matC, matD, pref, workspace, workspaceSize);        \
+            [&matmulDesc,                                                                       \
+             &matA,                                                                             \
+             &matB,                                                                             \
+             &matC,                                                                             \
+             &matD,                                                                             \
+             &pref,                                                                             \
+             &workspace,                                                                        \
+             &workspaceSize,                                                                    \
+             &devicePtrArray_A,                                                                 \
+             &devicePtrArray_B,                                                                 \
+             &devicePtrArray_C,                                                                 \
+             &devicePtrArray_D]() {                                                             \
+                cleanup_hipblaslt_resources(matmulDesc,                                         \
+                                            matA,                                               \
+                                            matB,                                               \
+                                            matC,                                               \
+                                            matD,                                               \
+                                            pref,                                               \
+                                            workspace,                                          \
+                                            workspaceSize,                                      \
+                                            devicePtrArray_A,                                   \
+                                            devicePtrArray_B,                                   \
+                                            devicePtrArray_C,                                   \
+                                            devicePtrArray_D);                                  \
             }();                                                                                \
             return rocblas_status_internal_error;                                               \
         }                                                                                       \
