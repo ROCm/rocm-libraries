@@ -1200,7 +1200,6 @@ bool ModelSetParams(const std::string& arch,
     case miopen::conv::Direction::Forward: dir = "fwd"; break;
     case miopen::conv::Direction::BackwardData: dir = "bwd"; break;
     case miopen::conv::Direction::BackwardWeights: dir = "wrw"; break;
-    default: return false;
     }
 
     // run decoder to set kernel parameters

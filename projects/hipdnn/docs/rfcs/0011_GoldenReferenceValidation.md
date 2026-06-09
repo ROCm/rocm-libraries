@@ -143,7 +143,7 @@ Provenance and calibration data is stored in a **separate companion file** (`{Na
 }
 ```
 
-The `generator`, `reference_source`, and `reference_strategy` fields are mandatory — the pre-commit bundle verifier rejects bundles without them. Remaining fields are optional. Generator scripts populate the metadata file automatically.
+The `.meta.json` file itself is optional for forward bundles. A bundle without one is valid: it falls back to the per-operation default tolerance (see [Tolerance Framework](#tolerance-framework)) and is never skipped or rejected on that basis — this is the expected state for bundles migrated from the old test system. When a `.meta.json` *is* present, the `generator`, `reference_source`, and `reference_strategy` fields are mandatory and the pre-commit bundle verifier rejects a `.meta.json` missing them. Remaining fields are optional. Generator scripts populate the metadata file automatically. (Backward bundles are the exception: they must include a `.meta.json` with a `forward_source` field — see [Forward-Backward Generation Constraint](#forward-backward-generation-constraint).)
 
 `reference_strategy` records how the reference precision was chosen (see [Generation Pipeline](#generation-pipeline)):
 
