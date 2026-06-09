@@ -913,10 +913,6 @@ target_include_directories(MIOpen SYSTEM PUBLIC $<BUILD_INTERFACE:${HALF_INCLUDE
 target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2)
 miopen_generate_export_header(MIOpen)
 
-if(WIN32)
-    target_link_libraries(MIOpen PRIVATE ntdll)
-endif()
-
 generate_export_header(MIOpen BASE_NAME MIOPEN_INTERNALS EXPORT_FILE_NAME ${CMAKE_BINARY_DIR}/include/miopen/export_internals.h)
 
 if(BUILD_TESTING)

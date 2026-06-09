@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 ARG BUILD_TYPE=prebuilt
+ARG THEROCK_BASE_IMAGE=rocm/miopen:therock
 
 # ============================================================================
 # Common base image with all dependencies
@@ -235,7 +236,7 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
 # REGULAR: Use the pre-built ROCm image from TheRock to build the rest of
 # the MIOpen environment
 #============================================================================
-FROM rocm/miopen:therock AS prebuilt_therock
+FROM ${THEROCK_BASE_IMAGE} AS prebuilt_therock
 
 # ============================================================================
 # Select which build stage to use
