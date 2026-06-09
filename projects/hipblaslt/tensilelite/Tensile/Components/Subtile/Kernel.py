@@ -688,6 +688,7 @@ class TileInfo:
     # only spill to AGPR once the VGPR budget is exhausted. Other MX-scaled
     # kernels keep the AGPR-first behavior below.
     maxVgpr = writer.states.regCaps["MaxVgpr"]
+    maxVgprBeforeAgpr = min(maxVgpr, 256)
     dataTypeA = kernel["ProblemType"].get("DataTypeA", None)
     dataTypeB = kernel["ProblemType"].get("DataTypeB", None)
     def isFloat4Type(dtype):
@@ -703,7 +704,7 @@ class TileInfo:
     if preferVgpr:
       pgrReserve = 12 if int(kernel.get("PrefetchGlobalRead", 0)) == 2 else 0
       vgprReserve = numDword * (int(self.localMMATileGrid[0]) + int(self.localMMATileGrid[1]) + 8 + pgrReserve)
-      vgprAccLimit = max(0, maxVgpr - vgprReserve)
+      vgprAccLimit = max(0, maxVgprBeforeAgpr - vgprReserve)
     else:
       vgprAccLimit = maxVgpr
 
