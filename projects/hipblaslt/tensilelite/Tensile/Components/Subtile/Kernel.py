@@ -470,6 +470,9 @@ class TileInfo:
       # Derived byte-counts for emit logic
       self.depthUBytes   = int(self.depthU * geometry.bpe)
       self.subIterKBytes = self.depthUBytes // self.localSubtileGrid[1]
+      # TDM path. We apply 16 Bytes padding to each row.
+      isTDM = kernel.get("enableTDM%s" % tc, False)
+      self.ldsRowPadBytes = 16 if (isTDM and not writer.states.subtileLdsSwizzle) else 0
 
       # Convenience counts for scheduler / diagram
       self.mmaTileLocalTotalCount = self.localMMATileGrid[0] * self.localMMATileGrid[1]
