@@ -8133,26 +8133,15 @@ class KernelWriterAssembly(KernelWriter):
       module.addComment1("Mapping of Acc register -> C Vgpr register")
       # Subtile D-tile accumulators may use VGPRs before AGPRs, so map each
       # logical MFMA accumulator register to its actual pool/index.
-      spilledVgprBase = None
       accRegMap = None
       if kernel.get("UseSubtileImpl"):
-        accRegMap = {}
-        accIdx = 0
-        for vtile in self.states.d.tileInfo.vgprTiles:
-          isVgpr = vtile.regList.is_vgpr
-          if isVgpr and spilledVgprBase is None:
-            spilledVgprBase = vtile.regList.indices[0]
-          for regIdx in vtile.regList.indices:
-            accRegMap[accIdx] = (isVgpr, regIdx)
-            accIdx += 1
+        accRegMap = accRegMapFromTileInfo(kernel, self.states.d.tileInfo)
       self.codes.accVgprRead = mapAcctoArchRegs(
-          kernel, self.states.maxLimitAgprs, write=False,
-          spilledVgprBase=spilledVgprBase, accRegMap=accRegMap)
+          kernel, self.states.maxLimitAgprs, write=False, accRegMap=accRegMap)
       if (kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0) or \
          ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
         self.codes.accVgprWrite = mapAcctoArchRegs(
-            kernel, self.states.maxLimitAgprs, write=True,
-            spilledVgprBase=spilledVgprBase, accRegMap=accRegMap)
+            kernel, self.states.maxLimitAgprs, write=True, accRegMap=accRegMap)
       if kernel["MIArchVgpr"]:
         module.addComment1("Multiply MI out register with Alpha -> C Vgpr register")
         self.codes.mulAlphaMultipleBuffer = moveMIoutToArch(kernel, self.states.startVgprAlphaTmp)

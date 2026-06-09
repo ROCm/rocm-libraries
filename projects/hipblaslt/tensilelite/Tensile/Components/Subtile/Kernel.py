@@ -690,9 +690,11 @@ class TileInfo:
     maxVgpr = writer.states.regCaps["MaxVgpr"]
     dataTypeA = kernel["ProblemType"].get("DataTypeA", None)
     dataTypeB = kernel["ProblemType"].get("DataTypeB", None)
+    def isFloat4Type(dtype):
+      return dtype is not None and dtype.isFloat4() is True
     preferVgpr = isDTile \
-        and dataTypeA is not None and dataTypeA.isFloat4() \
-        and dataTypeB is not None and dataTypeB.isFloat4()
+        and isFloat4Type(dataTypeA) \
+        and isFloat4Type(dataTypeB)
 
     # Large FP4 subtile tiles can exceed the VGPR accumulator budget.  Do not
     # fill VGPRs to the architectural cap before spilling to AGPRs; the subtile
