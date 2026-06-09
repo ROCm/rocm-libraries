@@ -103,7 +103,7 @@ TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZero)
 
     BatchnormBwdParams params(*attrs, graph.getTensorMap());
     const BatchnormBwdPlan plan(std::move(params));
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 

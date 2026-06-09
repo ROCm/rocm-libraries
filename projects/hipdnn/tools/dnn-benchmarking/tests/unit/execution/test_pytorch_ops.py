@@ -238,3 +238,57 @@ class TestPyTorchOpsSupportsGraph:
         assert "Unknown1" in unsupported
         assert "Unknown2" in unsupported
         assert "ConvolutionFwdAttributes" not in unsupported
+
+
+class TestPyTorchOpsNewHandlers:
+    """Registration and focused correctness checks for hipDNN op references."""
+
+    @pytest.mark.parametrize(
+        "op_type",
+        [
+            "SdpaAttributes",
+        ],
+    )
+    def test_get_handler_returns_handler_for_new_ops(self, op_type: str) -> None:
+        assert callable(pytorch_ops.get_handler(op_type))
+
+    def test_grouped_conv_fwd_matches_torch(self) -> None:
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "ConvolutionFwdAttributes",
+                    "inputs": {"x_tensor_uid": 1, "w_tensor_uid": 2},
+                    "outputs": {"y_tensor_uid": 3},
+                    "parameters": {
+                        "conv_mode": "CROSS_CORRELATION",
+                        "pre_padding": [0, 0],
+                        "post_padding": [0, 0],
+                        "stride": [1, 1],
+                        "dilation": [1, 1],
+                    },
+                }
+            ]
+        }
+        x = torch.arange(64, dtype=torch.float32).reshape(1, 4, 4, 4) / 10
+        w = torch.arange(108, dtype=torch.float32).reshape(6, 2, 3, 3) / 20
+        tensors = {1: x, 2: w}
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        torch.testing.assert_close(
+            tensors[3], torch.nn.functional.conv2d(x, w, groups=2)
+        )
+
+    def test_sdpa_nonzero_dropout_raises(self) -> None:
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
+                    "outputs": {"o_tensor_uid": 4},
+                    "attributes": {"dropout_probability": 0.5},
+                }
+            ]
+        }
+        q = torch.randn(1, 1, 2, 4)
+        with pytest.raises(ValueError, match="Nonzero SDPA dropout"):
+            pytorch_ops.execute_graph(graph_json, {1: q, 2: q, 3: q})

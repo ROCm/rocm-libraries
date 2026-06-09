@@ -65,7 +65,7 @@ rocsparselt_status rocsparselt_init(rocsparselt_handle* handle)
         {
             auto                _handle = reinterpret_cast<_rocsparselt_handle*>(handle);
             _rocsparselt_handle tmpHandle;
-            memcpy(_handle, &tmpHandle, sizeof(_rocsparselt_handle));
+            memcpy((void*)_handle, &tmpHandle, sizeof(_rocsparselt_handle));
             _handle->init();
             log_api(_handle, __func__, "handle[out]", _handle);
         }
@@ -155,7 +155,7 @@ rocsparselt_status rocsparselt_dense_descr_init(const rocsparselt_handle* handle
 
             auto                   _matDescr = reinterpret_cast<_rocsparselt_mat_descr*>(matDescr);
             _rocsparselt_mat_descr tmpMatDescr(_handle);
-            memcpy(_matDescr, &tmpMatDescr, sizeof(_rocsparselt_mat_descr));
+            memcpy((void*)_matDescr, &tmpMatDescr, sizeof(_rocsparselt_mat_descr));
             _matDescr->m_type       = rocsparselt_matrix_type_dense;
             _matDescr->m            = rows;
             _matDescr->n            = cols;
@@ -245,7 +245,7 @@ rocsparselt_status rocsparselt_structured_descr_init(const rocsparselt_handle* h
 
             auto                   _matDescr = reinterpret_cast<_rocsparselt_mat_descr*>(matDescr);
             _rocsparselt_mat_descr tmpMatDescr(_handle);
-            memcpy(_matDescr, &tmpMatDescr, sizeof(_rocsparselt_mat_descr));
+            memcpy((void*)_matDescr, &tmpMatDescr, sizeof(_rocsparselt_mat_descr));
             _matDescr->m_type       = rocsparselt_matrix_type_structured;
             _matDescr->m            = rows;
             _matDescr->n            = cols;
@@ -654,7 +654,7 @@ rocsparselt_status rocsparselt_matmul_descr_init(const rocsparselt_handle*    ha
 
             auto _matmulDescr = reinterpret_cast<_rocsparselt_matmul_descr*>(matmulDescr);
             _rocsparselt_matmul_descr tmpDescr(_handle);
-            memcpy(_matmulDescr, &tmpDescr, sizeof(_rocsparselt_matmul_descr));
+            memcpy((void*)_matmulDescr, &tmpDescr, sizeof(_rocsparselt_matmul_descr));
 
             log_api(_handle,
                     __func__,
@@ -1240,7 +1240,7 @@ rocsparselt_status
                 log_error(_handle, __func__, "There are no solutions for this problem size");
                 return rocsparselt_status_not_implemented;
             }
-            memcpy(_algSelection, &tmpAlgSelection, sizeof(_rocsparselt_matmul_alg_selection));
+            memcpy((void*)_algSelection, &tmpAlgSelection, sizeof(_rocsparselt_matmul_alg_selection));
             _algSelection->alg           = alg;
             _algSelection->config_max_id = config_max_id;
             log_api(_handle,
@@ -1541,7 +1541,7 @@ rocsparselt_status
 
         auto                     _plan = reinterpret_cast<_rocsparselt_matmul_plan*>(plan);
         _rocsparselt_matmul_plan tmpPlan(_handle);
-        memcpy(_plan, &tmpPlan, sizeof(_rocsparselt_matmul_plan));
+        memcpy((void*)_plan, &tmpPlan, sizeof(_rocsparselt_matmul_plan));
 
         _plan->matmul_descr  = new _rocsparselt_matmul_descr(*_matmulDescr);
         _plan->alg_selection = const_cast<_rocsparselt_matmul_alg_selection*>(_algSelection);

@@ -32,6 +32,9 @@ class Pass;
 /// Inserts s_delay_alu instructions to avoid pipeline stalls on dependent
 /// ALU instructions.
 /// Should run after scheduling and waitcnt insertion to see final instruction order.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertDelayAluPass();
+///
+/// \param minWavesPerSimd Skip the pass when the kernel fits fewer than this many
+///        waves per SIMD. Default 2; pass 1 to disable occupancy-based skipping.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertDelayAluPass(int minWavesPerSimd = 2);
 
 }  // namespace stinkytofu

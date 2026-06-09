@@ -9,8 +9,10 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
-#include "HipKernelUtils.hpp"
 #include "RMSnormApplicabilityChecks.hpp"
+#include "core/Utils.hpp"
+
+using namespace hip_kernel_provider::core::utils;
 
 namespace hip_kernel_provider::rmsnorm
 {
@@ -47,7 +49,7 @@ void RMSnormValidator::checkTensorDataTypesSupported(const std::vector<int64_t>&
 
     for(const auto ioTensorId : ioTensorIds)
     {
-        const auto& tensorAttr = hip_kernel_utils::findTensorAttributes(_tensorMap, ioTensorId);
+        const auto& tensorAttr = findTensorAttributes(_tensorMap, ioTensorId);
         validateDataTypeIsSupported(tensorAttr.data_type(),
                                     allowedIOTypes,
                                     "RMSnorm implementation supports only FLOAT, HALF, and "
@@ -87,14 +89,13 @@ void RMSnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& io
             "At least one IO tensor must be provided for RMSnorm.");
     }
 
-    const auto& ioTensorAttr = hip_kernel_utils::findTensorAttributes(_tensorMap, ioTensorIds[0]);
+    const auto& ioTensorAttr = findTensorAttributes(_tensorMap, ioTensorIds[0]);
     const std::vector<int64_t> ioDims(ioTensorAttr.dims()->begin(), ioTensorAttr.dims()->end());
 
     validateConsistentShapes(
         ioTensorIds, ioDims, "All IO tensors for RMSnorm must have the same shape.");
 
-    const auto& affineTensorAttr
-        = hip_kernel_utils::findTensorAttributes(_tensorMap, affineTensorIds[0]);
+    const auto& affineTensorAttr = findTensorAttributes(_tensorMap, affineTensorIds[0]);
     const std::vector<int64_t> affineDims(affineTensorAttr.dims()->begin(),
                                           affineTensorAttr.dims()->end());
     validateConsistentShapes(affineTensorIds,
