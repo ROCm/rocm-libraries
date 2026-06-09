@@ -105,6 +105,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sparse_to_dense_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sparse_to_dense_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_csc.cpp"
