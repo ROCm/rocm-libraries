@@ -356,6 +356,14 @@ globalParameters["StinkyTofuDebugPass"] = ""
 # Note: multiple kernels may overwrite the same file unless you use a unique path per build.
 globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 
+# StinkyTofu optimization remarks (stderr).  Unlike PASS_DEBUG (for compiler
+# developers), remarks are for kernel developers who want to understand generated
+# code quality — e.g. how many regions a loop was split into, what caused the
+# splits, and how many s_nop cycles were wasted.
+globalParameters["StinkyTofuEnableRemarks"] = False
+
+globalParameters["DisableSTWaitCnt"] = True
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)
@@ -391,14 +399,14 @@ defaultBenchmarkCommonParameters = [
     {"InnerUnroll": [1]},
     {"KernelLanguage": ["Assembly"]},
     {"LdsPadA": [-1]},
-    {"LdsPadMXSA": [ 0 ] },
+    {"LdsPadMXSA": [ -1 ] },
     {"LdsPadB": [-1]},
-    {"LdsPadMXSB": [ 0 ] },
+    {"LdsPadMXSB": [ -1 ] },
     {"LdsPadMetadata": [0]},
     {"LdsBlockSizePerPadA": [-1]},
-    {"LdsBlockSizePerPadMXSA": [ 0 ] },
+    {"LdsBlockSizePerPadMXSA": [ -1 ] },
     {"LdsBlockSizePerPadB": [-1]},
-    {"LdsBlockSizePerPadMXSB": [ 0 ] },
+    {"LdsBlockSizePerPadMXSB": [ -1 ] },
     {"LdsBlockSizePerPadMetadata": [0]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
@@ -419,6 +427,7 @@ defaultBenchmarkCommonParameters = [
     {"UnrollLoopSwapGlobalReadOrder": [0]},
     {"PrefetchGlobalRead": [1]},
     {"PrefetchLocalRead": [1]},
+    {"PrefetchGL2": [0]},
     {"ClusterLocalRead": [1]},
     {"SuppressNoLoadLoop": [False]},
     {"ExpandPointerSwap": [True]},
@@ -477,6 +486,26 @@ defaultBenchmarkCommonParameters = [
     {"NonTemporalWS": [0]},
     {"NonTemporalMetadata": [0]},
     {"NonTemporal": [-1]},
+    {"TemporalHint": [-1]},
+    {"TemporalHintE": [0]},
+    {"TemporalHintD": [0]},
+    {"TemporalHintC": [0]},
+    {"TemporalHintA": [0]},
+    {"TemporalHintMXSA": [0]},
+    {"TemporalHintB": [0]},
+    {"TemporalHintMXSB": [0]},
+    {"TemporalHintWS": [0]},
+    {"TemporalHintMetadata": [0]},
+    {"NonVolatile": [-1]},
+    {"NonVolatileE": [0]},
+    {"NonVolatileD": [0]},
+    {"NonVolatileC": [0]},
+    {"NonVolatileA": [0]},
+    {"NonVolatileMXSA": [0]},
+    {"NonVolatileB": [0]},
+    {"NonVolatileMXSB": [0]},
+    {"NonVolatileWS": [0]},
+    {"NonVolatileMetadata": [0]},
     {"PreloadKernArgs": [True]},
     {"CustomKernelName": [""]},
     {"NoReject": [False]},
@@ -492,12 +521,14 @@ defaultBenchmarkCommonParameters = [
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},
+    {"DebugPersistentKernelLoopForever": [False]},
     {"ActivationFused": [True]},
     {"ActivationFuncCall": [True]},
     {"ActivationAlt": [False]},
     {"WorkGroupReduction": [False]},
     {"ConvertAfterDS": [False]},
     {"ForceDisableShadowInit": [False]},
+    {"InitCIterWmma": [-1]},
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
@@ -506,6 +537,7 @@ defaultBenchmarkCommonParameters = [
     {"SFCWGM": [[[1,1],[1,1]]]},
     {"AdaptiveGemm": [0]},
     {"AdaptiveGemmGSUA": [0]},
+    {"AdaptiveGemmNTAB": [0]},
     {"ExtraMiLatencyLeft": [-1]},
     {"ExtraLatencyForLR": [0]},
     {"TailloopInNll": [False]},
@@ -524,8 +556,17 @@ defaultBenchmarkCommonParameters = [
     # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
     # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
     {"SwInstructionPrefetch": [True]},
+    # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
+    # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
+    # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
-    {"HalfPLR": [0]}
+    # ClusterBarrier — True: emit split signal/wait cluster_barrier instructions
+    # so workgroups in a cluster synchronize before/after consuming shared
+    # TDM-multicast data. Requires ClusterDim != [1, 1] and TDMInst != 0;
+    # False: standard per-WG barriers, no inter-WG synchronization.
+    {"ClusterBarrier": [ False ]},
+    {"HalfPLR": [0]},
+    {"TDMIterateMode": [0]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter

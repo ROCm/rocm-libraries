@@ -28,6 +28,7 @@
 #include <limits>
 #include <sstream>
 
+#include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
@@ -215,6 +216,22 @@ inline std::ostream& operator<<(std::ostream& os, const MUBUFModifiers& mubufMod
 }
 
 inline std::ostream& operator<<(std::ostream& os, const CacheScopeModifiers& mod) {
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(mod.scope);
+    }
+    return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const GLOBALModifiers& mod) {
+    if (mod.offset != 0) {
+        os << " offset:" << mod.offset;
+    }
+    // Temporal hint / cache scope for global_prefetch_b8 (gl2-prefetch). Match
+    // rocisa GLOBALModifiers::toString(): emit only non-default fields, temporal
+    // hint first then scope (e.g. " th:TH_LOAD_NT scope:SCOPE_SE").
+    if (hasTemporalHint(mod.th)) {
+        os << " th:" << toString(mod.th);
+    }
     if (mod.scope != MUBUFScope::SCOPE_NONE) {
         os << " scope:" << toString(mod.scope);
     }
@@ -439,6 +456,10 @@ static void emitRegister(std::ostream& os, const StinkyRegister& reg,
 
         case StinkyRegister::Type::LiteralString:
             os << reg.getLiteralString();
+            break;
+
+        case StinkyRegister::Type::HwReg:
+            HwReg::printOperand(os, reg);
             break;
 
         case StinkyRegister::Type::Invalid:
@@ -727,6 +748,7 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
             EMIT_TRAILING_MODIFIER(FLAT, FLAT);
             EMIT_TRAILING_MODIFIER(MUBUF, MUBUF);
             EMIT_TRAILING_MODIFIER(CACHE_SCOPE, CacheScope);
+            EMIT_TRAILING_MODIFIER(GLOBAL, GLOBAL);
             EMIT_TRAILING_MODIFIER(SMEM, SMEM);
             EMIT_TRAILING_MODIFIER(SDWA, SDWA);
             EMIT_TRAILING_MODIFIER(DPP, DPP);
