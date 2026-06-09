@@ -127,7 +127,16 @@ if [ ! -f "tests_to_run.json" ]; then
     echo "SMART_BUILD_MODE=full" > build_mode.env
     exit 1
 fi
-num_tests=$(jq -r '.tests_to_run | length' tests_to_run.json 2>/dev/null || echo "0")
+# A jq parse failure here means tests_to_run.json is present but malformed.
+# Fall back to full (safe) - never let a corrupt selection collapse to `num_tests=0`,
+# which would be read as `none` below and silently skip every test. A valid file
+# reporting 0 is a legitimate "no CK files changed" and still maps to none.
+if ! num_tests=$(jq -r '.tests_to_run | length' tests_to_run.json 2>/dev/null); then
+    echo "Selection file malformed (jq parse failed) - full build"
+    echo "full" > build_targets.txt
+    echo "SMART_BUILD_MODE=full" > build_mode.env
+    exit 1
+fi
 jq -r '.executables[]' tests_to_run.json 2>/dev/null | paste -sd' ' - > selected_targets.txt
 echo "[OK] As-if selection: ${num_tests} tests"
 
