@@ -244,9 +244,6 @@ BWD_WEIGHT_TILES: List[Tuple[int, int, int]] = [
 
 # --- Vector size validation ---
 
-WARP_SIZE = 64
-
-
 def is_valid_vector_size(vec: int) -> bool:
     """AMD GPUs only support vector widths 1, 2, 4, 8, 16."""
     return vec == 1 or vec % 2 == 0
@@ -263,7 +260,7 @@ def check_vectors(vec_a: int, vec_b: int, vec_c: int) -> bool:
 def check_warp_coverage(
     tile_m: int, tile_n: int, tile_k: int,
     vec_a: int, vec_b: int,
-    variant: str = "forward",
+    variant: str = "forward", warp_size: int = 64,
 ) -> bool:
     """Check tile dims don't exceed single-warp vector load coverage.
 
@@ -272,9 +269,57 @@ def check_warp_coverage(
       Backward data:        tile_k is the A-tile dim
     """
     a_tile_dim = tile_k if variant == "bwd_data" else tile_m
-    if a_tile_dim > WARP_SIZE * vec_a:
+    if a_tile_dim > warp_size * vec_a:
         return False
-    if tile_n > WARP_SIZE * vec_b:
+    if tile_n > warp_size * vec_b:
+        return False
+    return True
+
+
+def get_warp_size(gpu_target: str) -> int:
+    """Return warp size for the given GPU target.
+
+    Accepts either a family prefix (gfx9, gfx11, gfx12) or a full arch string
+    (gfx942, gfx950, gfx1201, ...). gfx9xx => 64, everything else => 32.
+    """
+    if gpu_target.startswith("gfx9"):
+        return 64
+    return 32
+
+
+def check_wmma_instance(
+    warp_size: int,
+    k_per_block: int,
+    k_warp: int,
+    k_per_xdl: int,
+    m_per_xdl: int,
+    dtype: str,
+) -> bool:
+    """Check WMMA-specific constraints for warp_size=32 targets (gfx11/gfx12).
+
+    Returns False (skip instance) when any constraint is violated.
+    """
+    if warp_size != 32:
+        return True
+    if k_per_block < 32 and dtype != "float":
+        return False
+    if k_warp * k_per_xdl > k_per_block:
+        return False
+    if m_per_xdl == 32:
+        return False
+    return True
+
+
+def check_wmma_native_warp_tile(warp_size: int, warp_tile: list, dtype: str) -> bool:
+    """Check native instance warp_tile constraints for warp_size=32 targets.
+
+    Returns False (skip instance) when:
+      - warp_tile[0]==32 on a 32-wide warp, or
+      - non-float dtype requires warp_tile[2]==32 (bwd_weight k-tile constraint).
+    """
+    if warp_size == 32 and warp_tile[0] == 32:
+        return False
+    if dtype != "float" and warp_tile[2] != 32:
         return False
     return True
 
@@ -282,10 +327,10 @@ def check_warp_coverage(
 def check_bwd_data_vec_coverage(
     tile_m: int, tile_n: int, tile_k: int,
     warp_m: int, warp_n: int, warp_k: int,
-    vec_a: int, vec_b: int,
+    vec_a: int, vec_b: int, warp_size: int = 64,
 ) -> bool:
     """Bwd_data: vector width must not exceed elements per thread per tile slice."""
-    block_size = WARP_SIZE * warp_m * warp_n * warp_k
+    block_size = warp_size * warp_m * warp_n * warp_k
     if vec_a > (tile_m * tile_k) // block_size:
         return False
     if vec_b > (tile_n * tile_k) // block_size:

@@ -35,7 +35,9 @@ struct StreamKReductionOps
     {
         auto* sk_flags_ptr = static_cast<index_t*>(kargs.workspace_ptr);
         index_t offset     = cta_idx * sizeof(index_t);
-
+#ifdef __gfx1250__
+        sk_flags_ptr[offset] = 1;
+#else
         // Depending on the architecture, the GLC flag will bypass the appropriate
         // cache level(s) to ensure the write is visible to other workgroups. See the
         // appropriate ISA for details about the GLC modifier.
@@ -44,6 +46,7 @@ struct StreamKReductionOps
                      :
                      : "s"(1), "s"(sk_flags_ptr), "s"(offset)
                      : "memory");
+#endif
     }
 
     /**
@@ -61,6 +64,9 @@ struct StreamKReductionOps
 
         do
         {
+#ifdef __gfx1250__
+            result = sk_flags_ptr[offset];
+#else
             // Depending on the architecture, the GLC flag will bypass the
             // appropriate cache level(s) to avoid reading stale flags. See the
             // appropriate ISA for details about the GLC modifier.
@@ -69,6 +75,7 @@ struct StreamKReductionOps
                          : "=s"(result)
                          : "s"(sk_flags_ptr), "s"(offset)
                          : "memory");
+#endif
         } while(result != 1);
     }
 

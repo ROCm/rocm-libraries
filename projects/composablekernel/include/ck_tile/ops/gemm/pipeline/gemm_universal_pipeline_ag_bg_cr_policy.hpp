@@ -108,14 +108,10 @@ struct UniversalGemmBasePolicy
             return false;
         else
         {
-#if defined(__gfx950__)
             using WarpTile                  = typename Problem::BlockGemmShape::WarpTile;
             constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
             constexpr index_t kMaxKWarpTile = (sizeof(ADataType) == 1) ? 64 : 32;
             return kKWarpTile <= kMaxKWarpTile;
-#else
-            return true;
-#endif
         }
     }();
 
@@ -130,14 +126,10 @@ struct UniversalGemmBasePolicy
             return false;
         else
         {
-#if defined(__gfx950__)
             using WarpTile                  = typename Problem::BlockGemmShape::WarpTile;
             constexpr index_t kKWarpTile    = WarpTile::at(number<2>{});
             constexpr index_t kMaxKWarpTile = (sizeof(BLdsDataType) == 1) ? 64 : 32;
             return kKWarpTile <= kMaxKWarpTile;
-#else
-            return true;
-#endif
         }
     }();
 #else

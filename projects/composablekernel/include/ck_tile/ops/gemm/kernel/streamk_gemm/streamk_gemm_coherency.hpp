@@ -16,7 +16,8 @@ template <typename CompilerTarget>
 struct StreamKCoherency<CompilerTarget,
                         core::arch::enable_if_target_id_t<CompilerTarget,
                                                           core::arch::amdgcn_target_id::GFX942,
-                                                          core::arch::amdgcn_target_id::GFX950>>
+                                                          core::arch::amdgcn_target_id::GFX950,
+                                                          core::arch::amdgcn_target_id::GFX1250>>
 {
     static constexpr amd_buffer_coherence_enum BUFFER_COHERENCE =
         amd_buffer_coherence_enum::SYSTEM_NT0;

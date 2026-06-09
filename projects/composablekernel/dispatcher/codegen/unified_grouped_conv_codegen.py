@@ -56,6 +56,9 @@ try:
         check_vectors,
         check_warp_coverage,
         check_bwd_data_vec_coverage,
+        check_wmma_instance,
+        check_wmma_native_warp_tile,
+        get_warp_size,
         is_valid_pipeline_for_variant,
         is_streamk_valid_for_variant,
     )
@@ -185,6 +188,9 @@ class GroupedConvKernelConfig:
     layout: Union[str, GroupedConvLayout] = (
         "nhwgc"  # Data layout (e.g., "nhwgc", "ndhwgc")
     )
+
+    # Data type used for WMMA validation (e.g. "fp16", "bf16", "fp32")
+    datatype: str = "fp16"
 
     # Vector sizes: a=4 for fp16 input (8-byte aligned global loads),
     # b=8 for weight tensor, c=8 for output stores. These match the
@@ -364,6 +370,27 @@ class GroupedConvKernelConfig:
                 f"Rejecting config: tile exceeds warp coverage "
                 f"(tile={t.tile_m}x{t.tile_n}x{t.tile_k}, "
                 f"vec_a={self.vector_size_a}, vec_b={self.vector_size_b})"
+            )
+            return False
+
+        # WMMA constraints for warp_size=32 targets (gfx11/gfx12)
+        warp_size = get_warp_size(target_arch)
+        dtype_str = "float" if self.datatype == "fp32" else self.datatype
+        warp_tile = [t.warp_tile_m, t.warp_tile_n, t.warp_tile_k]
+        if not check_wmma_instance(
+            warp_size, t.tile_k, t.warp_k, t.warp_tile_k, t.warp_tile_m, dtype_str
+        ):
+            log.warning(
+                f"Rejecting config: WMMA constraint violated "
+                f"(warp_size={warp_size}, tile_k={t.tile_k}, "
+                f"warp_k={t.warp_k}, warp_tile_k={t.warp_tile_k}, "
+                f"warp_tile_m={t.warp_tile_m}, dtype={dtype_str})"
+            )
+            return False
+        if not check_wmma_native_warp_tile(warp_size, warp_tile, dtype_str):
+            log.warning(
+                f"Rejecting config: WMMA warp_tile constraint violated "
+                f"(warp_size={warp_size}, warp_tile={warp_tile}, dtype={dtype_str})"
             )
             return False
 
@@ -1955,6 +1982,7 @@ def load_configs_from_json(
             ndim_spatial=ndim_spatial,
             arch=arch,
             layout=layout,
+            datatype=datatype,
             vector_size_a=inst["vector_size_a"],
             vector_size_b=inst["vector_size_b"],
             vector_size_c=inst["vector_size_c"],
@@ -1973,6 +2001,7 @@ def get_default_configs(
     arch: str = "gfx942",
     variants: Optional[List[GroupedConvVariant]] = None,
     ndims: Optional[List[int]] = None,
+    datatype: str = "fp16",
 ) -> List[GroupedConvKernelConfig]:
     """Get default grouped convolution configurations for target architecture.
 
@@ -2089,6 +2118,7 @@ def get_default_configs(
                             variant=variant,
                             ndim_spatial=ndim,
                             arch=arch,
+                            datatype=datatype,
                         )
 
                         if config.is_valid_for_arch():
@@ -2176,6 +2206,7 @@ class UnifiedGroupedConvCodegen:
                 GroupedConvVariant.BACKWARD_WEIGHT,
             ],
             ndims=[self.ndim_spatial],
+            datatype=self.datatype,
         )
 
     def _get_operator_type(
@@ -2758,6 +2789,7 @@ def main():
             else GroupedConvVariant.FORWARD,
             ndim_spatial=args.ndim[0] if args.ndim else 2,
             arch=args.arch,
+            datatype=args.datatype[0] if args.datatype else "fp16",
             vector_size_a=args.vector_a,
             vector_size_b=args.vector_b,
             vector_size_c=args.vector_c,
@@ -2767,7 +2799,8 @@ def main():
     else:
         # Get predefined configurations for target arch with requested variants and ndims
         filtered_configs = get_default_configs(
-            arch=args.arch, variants=requested_variants, ndims=args.ndim
+            arch=args.arch, variants=requested_variants, ndims=args.ndim,
+            datatype=args.datatype[0] if args.datatype else "fp16",
         )
 
     if args.list_configs:

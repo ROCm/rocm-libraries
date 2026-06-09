@@ -16,6 +16,9 @@ from grouped_config_rules import (  # noqa E402
     check_vectors as _shared_check_vectors,
     check_warp_coverage,
     check_bwd_data_vec_coverage,
+    check_wmma_instance,
+    check_wmma_native_warp_tile,
+    get_warp_size,
 )
 
 
@@ -384,7 +387,8 @@ def try_parse_native_instance(instance, instance_id, problem_name):
     return None
 
 
-def parse_fwd_instances(instances, problem_name):
+
+def parse_fwd_instances(instances, problem_name, warp_size=32):
     convs = []
     for instance_id, instance in enumerate(instances):
         if instance.find("#") != -1 or instance.find(";") != -1:
@@ -457,15 +461,17 @@ def parse_fwd_instances(instances, problem_name):
         if pipeline_version == "V5":
             pipeline_version = "V6"
 
+        # WMMA
+        dtype = get_dtype(problem_name)
+
         m_warp = int(m_per_block / (m_per_xdl * m_xdl_per_wave))
         n_warp = int(n_per_block / (n_per_xdl * n_xdl_per_wave))
-        warp_size = 64
         k_warp = int(block_size / (warp_size * m_warp * n_warp))
-        dtype = get_dtype(problem_name)
         k_per_xdl = min(max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl)), k_per_block)
 
         is_two_stage = False
-
+        if not check_wmma_instance(warp_size, k_per_block, k_warp, k_per_xdl, m_per_xdl, dtype):
+            continue
         conv = ConvInstanceTemplateParams(
             spec,
             [m_per_block, n_per_block, k_per_block],
@@ -486,7 +492,7 @@ def parse_fwd_instances(instances, problem_name):
     return convs
 
 
-def parse_bwd_weight_instances(instances, problem_name):
+def parse_bwd_weight_instances(instances, problem_name, warp_size=32):
     convs = []
 
     for instance_id, instance in enumerate(instances):
@@ -502,6 +508,8 @@ def parse_bwd_weight_instances(instances, problem_name):
                 print(
                     f"Skipping instance {instance_id} with streamk, async, float since it's not supported yet."
                 )
+                continue
+            if not check_wmma_native_warp_tile(warp_size, native.warp_tile, get_dtype(problem_name)):
                 continue
             convs.append(native)
             continue
@@ -658,14 +666,17 @@ def parse_bwd_weight_instances(instances, problem_name):
                     f"Not supported pipeline for direct load: pipeline_version={pipeline_version} in instance: {instance}"
                 )
 
+        # WMMA
+        dtype = get_dtype(problem_name)
+
         m_warp = int(m_per_block / (m_per_xdl * m_xdl_per_wave))
         n_warp = int(n_per_block / (n_per_xdl * n_xdl_per_wave))
-        warp_size = 64
         k_warp = int(block_size / (warp_size * m_warp * n_warp))
-        dtype = get_dtype(problem_name)
 
         k_per_xdl = min(max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl)), k_per_block)
 
+        if not check_wmma_instance(warp_size, k_per_block, k_warp, k_per_xdl, m_per_xdl, dtype):
+            continue
         if not check_vectors(
             a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector
         ):
@@ -680,6 +691,7 @@ def parse_bwd_weight_instances(instances, problem_name):
             a_scalar_per_vector,
             b_scalar_per_vector,
             variant="bwd_weight",
+            warp_size=warp_size,
         ):
             print(
                 f"Skipping instance {instance_id} with multiple warps per continous tile dim since it's not supported yet."
@@ -711,7 +723,7 @@ def parse_bwd_weight_instances(instances, problem_name):
     return convs
 
 
-def parse_bwd_data_instances(instances, problem_name):
+def parse_bwd_data_instances(instances, problem_name, warp_size=32):
     convs = []
 
     for instance_id, instance in enumerate(instances):
@@ -811,14 +823,15 @@ def parse_bwd_data_instances(instances, problem_name):
                     f"Not supported pipeline for direct load: pipeline_version={pipeline_version} in instance: {instance}"
                 )
 
-        m_warp = int(m_per_block / (m_per_xdl * m_xdl_per_wave))
-        n_warp = int(n_per_block / (n_per_xdl * n_xdl_per_wave))
-        warp_size = 64
-        k_warp = int(block_size / (warp_size * m_warp * n_warp))
+        # WMMA
         dtype = get_dtype(problem_name)
 
+        m_warp = int(m_per_block / (m_per_xdl * m_xdl_per_wave))
+        n_warp = int(n_per_block / (n_per_xdl * n_xdl_per_wave))
+        k_warp = int(block_size / (warp_size * m_warp * n_warp))
         k_per_xdl = min(max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl)), k_per_block)
-
+        if not check_wmma_instance(warp_size, k_per_block, k_warp, k_per_xdl, m_per_xdl, dtype):
+            continue
         # Skip irregular vector sizes -- no HW vector load instructions for odd widths
         if not check_vectors(
             a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector
@@ -836,6 +849,7 @@ def parse_bwd_data_instances(instances, problem_name):
             a_scalar_per_vector,
             b_scalar_per_vector,
             variant="bwd_data",
+            warp_size=warp_size,
         ):
             print(
                 f"Skipping instance {instance_id} with multiple warps per continous tile dim since it's not supported yet."
@@ -850,6 +864,7 @@ def parse_bwd_data_instances(instances, problem_name):
             k_warp,
             a_scalar_per_vector,
             b_scalar_per_vector,
+            warp_size=warp_size,
         ):
             print(
                 f"Skipping instance {instance_id} because current scalar per vector exceedes tile size"
@@ -888,11 +903,11 @@ def get_signature_base(config):
 
 
 def generate_instances_fwd(
-    instances, problem_name, config, filter_pattern, instances_path
+    instances, problem_name, config, filter_pattern, instances_path, warp_size=32
 ):
     direction = "forward"
     signature_name = f"SIGNATURE_{get_signature_base(config).upper()}_FWD"
-    instances = parse_fwd_instances(instances, problem_name)
+    instances = parse_fwd_instances(instances, problem_name, warp_size)
     generate_calls_inc(instances, problem_name, direction, filter_pattern)
     generate_defs_inc(
         instances, problem_name, signature_name, direction, filter_pattern
@@ -909,11 +924,11 @@ def generate_instances_fwd(
 
 
 def generate_instances_bwd_weight(
-    instances, problem_name, config, filter_pattern, instances_path
+    instances, problem_name, config, filter_pattern, instances_path, warp_size=32
 ):
     direction = "backward_weight"
     signature_name = f"SIGNATURE_{get_signature_base(config).upper()}_BWD_WEIGHT"
-    instances = parse_bwd_weight_instances(instances, problem_name)
+    instances = parse_bwd_weight_instances(instances, problem_name, warp_size)
     generate_calls_inc(instances, problem_name, direction, filter_pattern)
     generate_defs_inc(
         instances, problem_name, signature_name, direction, filter_pattern
@@ -930,11 +945,11 @@ def generate_instances_bwd_weight(
 
 
 def generate_instances_bwd_data(
-    instances, problem_name, config, filter_pattern, instances_path
+    instances, problem_name, config, filter_pattern, instances_path, warp_size=32
 ):
     direction = "backward_data"
     signature_name = f"SIGNATURE_{get_signature_base(config).upper()}_BWD_DATA"
-    instances = parse_bwd_data_instances(instances, problem_name)
+    instances = parse_bwd_data_instances(instances, problem_name, warp_size)
     generate_calls_inc(instances, problem_name, direction, filter_pattern)
     generate_defs_inc(
         instances, problem_name, signature_name, direction, filter_pattern
@@ -951,7 +966,7 @@ def generate_instances_bwd_data(
 
 
 def process_direction(
-    configs, direction, generate_func, configs_prefix, filter_pattern, instances_path
+    configs, direction, generate_func, configs_prefix, filter_pattern, instances_path, warp_size=32
 ):
     """Helper function to process a single direction."""
     for config in configs:
@@ -973,7 +988,7 @@ def process_direction(
         else:
             raise RuntimeError(f"Unknown direction: {direction}")
 
-        generate_func(instances, problem_name, config, filter_pattern, instances_path)
+        generate_func(instances, problem_name, config, filter_pattern, instances_path, warp_size)
 
 
 # ---------------------------------------------------------------------------
@@ -1202,7 +1217,16 @@ if __name__ == "__main__":
         default="../build/experimental/grouped_convolution_tile_instances",
         help="Directory store generated instances.",
     )
+    parser.add_argument(
+        "--gpu_target",
+        choices=["gfx9", "gfx11", "gfx12"],
+        type=str,
+        default="gfx9",
+        help="GPU target architecture. gfx9 uses warp_size=64, gfx11/gfx12 use warp_size=32.",
+    )
     args = parser.parse_args()
+
+    warp_size = get_warp_size(args.gpu_target)
 
     # apply empty filter
     if args.mode == "compilation":
@@ -1225,6 +1249,7 @@ if __name__ == "__main__":
                 configs_prefix,
                 args.filter_pattern,
                 args.instances_dir,
+                warp_size,
             )
             process_depthwise_forward(configs_prefix, args.instances_dir)
         case "backward_weight":
@@ -1235,6 +1260,7 @@ if __name__ == "__main__":
                 configs_prefix,
                 args.filter_pattern,
                 args.instances_dir,
+                warp_size,
             )
         case "backward_data":
             process_direction(
@@ -1244,6 +1270,7 @@ if __name__ == "__main__":
                 configs_prefix,
                 args.filter_pattern,
                 args.instances_dir,
+                warp_size,
             )
         case "all":
             process_direction(
@@ -1253,6 +1280,7 @@ if __name__ == "__main__":
                 configs_prefix,
                 args.filter_pattern,
                 args.instances_dir,
+                warp_size,
             )
             process_depthwise_forward(configs_prefix, args.instances_dir)
             process_direction(
@@ -1262,6 +1290,7 @@ if __name__ == "__main__":
                 configs_prefix,
                 args.filter_pattern,
                 args.instances_dir,
+                warp_size,
             )
             process_direction(
                 bwd_data_configs,
@@ -1270,4 +1299,5 @@ if __name__ == "__main__":
                 configs_prefix,
                 args.filter_pattern,
                 args.instances_dir,
+                warp_size,
             )
