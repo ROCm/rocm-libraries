@@ -250,6 +250,15 @@ TEST(TestLoadGraphAndTensors, ExtractAndClearOutputTensorData)
         GTEST_SKIP();
     }
 
+    auto basePath = filepath;
+    basePath.replace_extension();
+    const std::filesystem::path tensor0Path = basePath.string() + ".tensor0.bin";
+    if(!std::filesystem::exists(tensor0Path))
+    {
+        HIPDNN_SDK_LOG_WARN("Could not find " << tensor0Path.string());
+        GTEST_SKIP();
+    }
+
     auto res = loadGraphAndTensors(filepath);
 
     std::unordered_map<int64_t, std::unique_ptr<ITensor>> savedTensorOutputs;
