@@ -94,26 +94,26 @@ constexpr T nextPow2(T v)
 //// implies CType is always miopenFloat
 //// beta is always 0.0f
 //// input matricies are always row-major
-inline void gemm(const Handle& handle,
-                 bool transA,
-                 bool transB,
-                 int m,
-                 int n,
-                 int k,
-                 int lda,
-                 int ldb,
-                 int ldc,
-                 int batch_count,
-                 long long int strideA,
-                 long long int strideB,
-                 long long int strideC,
-                 float alpha,
-                 miopenDataType_t AType,
-                 ConstData_t A,
-                 miopenDataType_t BType,
-                 ConstData_t B,
-                 Data_t C,
-                 bool deterministic)
+inline void gemm([[maybe_unused]] const Handle& handle,
+                 [[maybe_unused]] bool transA,
+                 [[maybe_unused]] bool transB,
+                 [[maybe_unused]] int m,
+                 [[maybe_unused]] int n,
+                 [[maybe_unused]] int k,
+                 [[maybe_unused]] int lda,
+                 [[maybe_unused]] int ldb,
+                 [[maybe_unused]] int ldc,
+                 [[maybe_unused]] int batch_count,
+                 [[maybe_unused]] long long int strideA,
+                 [[maybe_unused]] long long int strideB,
+                 [[maybe_unused]] long long int strideC,
+                 [[maybe_unused]] float alpha,
+                 [[maybe_unused]] miopenDataType_t AType,
+                 [[maybe_unused]] ConstData_t A,
+                 [[maybe_unused]] miopenDataType_t BType,
+                 [[maybe_unused]] ConstData_t B,
+                 [[maybe_unused]] Data_t C,
+                 [[maybe_unused]] bool deterministic)
 {
 #if MIOPEN_USE_ROCBLAS
     rocblas_atomics_mode cur_mode =
