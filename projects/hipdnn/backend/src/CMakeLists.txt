@@ -43,6 +43,7 @@ add_library(
     descriptors/PointwiseOperationDescriptor.cpp
     descriptors/ResampleFwdOperationDescriptor.cpp
     descriptors/ReductionOperationDescriptor.cpp
+    descriptors/RMSNormBackwardOperationDescriptor.cpp
     descriptors/RMSNormOperationDescriptor.cpp
     descriptors/SdpaBwdOperationDescriptor.cpp
     descriptors/SdpaFwdOperationDescriptor.cpp
@@ -54,6 +55,11 @@ add_library(
     logging/GraphLogger.cpp
     logging/Logging.cpp
     FlatbufferUtilities.cpp
+    heuristics/DeviceProperties.cpp
+    heuristics/BuiltInHeuristics.cpp
+    heuristics/SelectionHeuristic.cpp
+    heuristics/config/ConfigBuiltIn.cpp
+    heuristics/static_ordering/StaticOrderingBuiltIn.cpp
     plugin/EnginePlugin.cpp
     plugin/EnginePluginResourceManager.cpp
     plugin/HeuristicPlugin.cpp

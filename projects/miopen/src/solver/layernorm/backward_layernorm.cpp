@@ -46,18 +46,33 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
-    auto dtype        = problem.GetDYDesc().GetType();
-    auto input_dtype  = miopen::GetDataType(problem.GetDYDesc().GetType());
-    auto output_dtype = miopen::GetDataType(problem.GetDXDesc().GetType());
+    auto dtype     = problem.GetDYDesc().GetType();
+    auto mode      = problem.GetMode();
+    auto data_type = miopen::GetDataType(problem.GetDYDesc().GetType());
 
     auto reqd_work_item_cnt =
         get_reqd_work_item_cnt(context, PerformanceConfigLayernorm::max_parallel_local_size);
 
     {
-        size_t xlocalsize = config.local_size;
-        size_t xgridsize  = problem.outer_size * problem.stride * xlocalsize;
-        size_t ylocalsize = 1;
-        size_t ygridsize  = 1;
+        size_t xlocalsize, xgridsize, ylocalsize, ygridsize;
+        if(config.separate_stride)
+        {
+            xlocalsize = problem.stride <= config.local_size && config.stride_in_local_size
+                             ? config.local_size >> mloLg2(problem.stride)
+                             : config.local_size;
+            xgridsize  = problem.outer_size * xlocalsize;
+            ylocalsize = problem.stride <= config.local_size && config.stride_in_local_size
+                             ? problem.stride
+                             : 1;
+            ygridsize  = problem.stride;
+        }
+        else
+        {
+            xlocalsize = config.local_size;
+            xgridsize  = problem.outer_size * problem.stride * xlocalsize;
+            ylocalsize = 1;
+            ygridsize  = 1;
+        }
         size_t zlocalsize = 1;
         size_t zgridsize  = 1;
 
@@ -70,19 +85,18 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
             {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
             {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-            {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-            {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
+            {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
             {"OUTER_SIZE", problem.outer_size},
             {"INNER_SIZE", problem.inner_size},
             {"STRIDE", problem.stride},
-            {"LOCAL_SIZE", config.local_size},
+            {"LOCAL_SIZE_X", xlocalsize},
+            {"LOCAL_SIZE_Y", ylocalsize},
+            {"MODE", mode},
+            {"VECTORIZED", config.vectorized},
+            {"SEPARATE_STRIDE", config.separate_stride},
             {"PARALLEL_SIZE", 1},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
-            {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
-            {"MIOPEN_WEIGHT_BIAS_FUSED_ADD", 3},
-            {"MIOPEN_ELEMENTWISE_AFFINE_T5", 4},
-            {"MIOPEN_WEIGHT_BIAS_T5", 5},
         };
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
@@ -120,19 +134,18 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                 {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
                 {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
                 {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-                {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-                {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
+                {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
                 {"OUTER_SIZE", problem.outer_size},
                 {"INNER_SIZE", problem.inner_size},
                 {"STRIDE", problem.stride},
                 {"PARALLEL_SIZE", parallelism_size},
-                {"LOCAL_SIZE", config.local_size},
+                {"LOCAL_SIZE_X", xlocalsize},
+                {"LOCAL_SIZE_Y", ylocalsize},
+                {"MODE", mode},
+                {"VECTORIZED", config.vectorized},
+                {"SEPARATE_STRIDE", config.separate_stride},
                 {"MIOPEN_ELEMENTWISE_AFFINE", 0},
                 {"MIOPEN_WEIGHT_BIAS", 1},
-                {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
-                {"MIOPEN_WEIGHT_BIAS_FUSED_ADD", 3},
-                {"MIOPEN_ELEMENTWISE_AFFINE_T5", 4},
-                {"MIOPEN_WEIGHT_BIAS_T5", 5},
             };
 
             kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
@@ -165,19 +178,18 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                 {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
                 {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
                 {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-                {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-                {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
+                {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
                 {"OUTER_SIZE", problem.outer_size},
                 {"INNER_SIZE", problem.inner_size},
                 {"STRIDE", problem.stride},
                 {"PARALLEL_SIZE", parallelism_size},
-                {"LOCAL_SIZE", config.local_size},
+                {"LOCAL_SIZE_X", xlocalsize},
+                {"LOCAL_SIZE_Y", ylocalsize},
+                {"MODE", mode},
+                {"VECTORIZED", config.vectorized},
+                {"SEPARATE_STRIDE", config.separate_stride},
                 {"MIOPEN_ELEMENTWISE_AFFINE", 0},
                 {"MIOPEN_WEIGHT_BIAS", 1},
-                {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
-                {"MIOPEN_WEIGHT_BIAS_FUSED_ADD", 3},
-                {"MIOPEN_ELEMENTWISE_AFFINE_T5", 4},
-                {"MIOPEN_WEIGHT_BIAS_T5", 5},
             };
 
             kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
@@ -211,19 +223,18 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
             {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
             {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-            {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-            {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
+            {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
             {"OUTER_SIZE", problem.outer_size},
             {"INNER_SIZE", problem.inner_size},
             {"STRIDE", problem.stride},
             {"PARALLEL_SIZE", 1},
-            {"LOCAL_SIZE", config.local_size},
+            {"LOCAL_SIZE_X", xlocalsize},
+            {"LOCAL_SIZE_Y", ylocalsize},
+            {"MODE", mode},
+            {"VECTORIZED", config.vectorized},
+            {"SEPARATE_STRIDE", config.separate_stride},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
-            {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
-            {"MIOPEN_WEIGHT_BIAS_FUSED_ADD", 3},
-            {"MIOPEN_ELEMENTWISE_AFFINE_T5", 4},
-            {"MIOPEN_WEIGHT_BIAS_T5", 5},
         };
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
@@ -264,13 +275,7 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                     (void)hipEventRecord(start.get(), handle_.GetStream());
                 }
 
-                kernel(params.dy,
-                       params.x,
-                       params.weight,
-                       params.mean,
-                       params.rstd,
-                       params.dx,
-                       static_cast<int32_t>(params.mode));
+                kernel(params.dy, params.x, params.weight, params.mean, params.rstd, params.dx);
 
                 weight_bias_parallel_kernel(params.dy,
                                             params.x,
@@ -311,13 +316,7 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                     (void)hipEventRecord(start.get(), handle_.GetStream());
                 }
 
-                kernel(params.dy,
-                       params.x,
-                       params.weight,
-                       params.mean,
-                       params.rstd,
-                       params.dx,
-                       static_cast<int32_t>(params.mode));
+                kernel(params.dy, params.x, params.weight, params.mean, params.rstd, params.dx);
 
                 weight_bias_kernel(
                     params.dy, params.x, params.mean, params.rstd, params.dw, params.db);

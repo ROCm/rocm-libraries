@@ -4,6 +4,11 @@
 #pragma once
 #include "dataTypeInfo.hpp"
 
+inline uint8_t signedNaNMaskOcpE4m3Mxfp8(uint sign)
+{
+    return sign ? ocp_e4m3_mxfp8::dataNaNMasks[1] : ocp_e4m3_mxfp8::dataNaNMasks[0];
+}
+
 //return true iff XN = NAN
 template <>
 inline bool isNaN<ocp_e4m3_mxfp8>(uint8_t const* scaleBytes,
@@ -88,7 +93,10 @@ inline double toDouble<ocp_e4m3_mxfp8>(uint8_t const* scaleBytes,
         return std::numeric_limits<double>::quiet_NaN();
 
     if(isZero<ocp_e4m3_mxfp8>(scaleBytes, dataBytes, scaleIndex, dataIndex))
-        return 0.0f;
+    {
+        uint8_t data = *(dataBytes + dataIndex);
+        return std::copysign(0.0, data & ocp_e4m3_mxfp8::signBitMask ? -1.0 : 1.0);
+    }
 
     uint8_t data     = *(dataBytes + dataIndex);
     int     scaleExp = getExponentValue<uint8_t>(*(scaleBytes + scaleIndex),
@@ -117,7 +125,10 @@ inline float toFloat<ocp_e4m3_mxfp8>(uint8_t const* scaleBytes,
         return std::numeric_limits<float>::quiet_NaN();
 
     if(isZero<ocp_e4m3_mxfp8>(scaleBytes, dataBytes, scaleIndex, dataIndex))
-        return 0.0f;
+    {
+        uint8_t data = *(dataBytes + dataIndex);
+        return std::copysign(0.0f, data & ocp_e4m3_mxfp8::signBitMask ? -1.0f : 1.0f);
+    }
 
     uint8_t data     = *(dataBytes + dataIndex);
     int     scaleExp = getExponentValue<uint8_t>(*(scaleBytes + scaleIndex),
@@ -139,9 +150,11 @@ inline float toFloatPacked<ocp_e4m3_mxfp8>(uint8_t const* scaleBytes,
 template <>
 inline bool isSubnorm<ocp_e4m3_mxfp8>(uint8_t const* dataBytes, index_t dataIndex)
 {
-    uint8_t data = *(dataBytes + dataIndex);
-    return isSubNormal<uint16_t>(
+    uint8_t data     = *(dataBytes + dataIndex);
+    uint8_t exponent = getExponentValue<uint8_t>(
         data, ocp_e4m3_mxfp8::dataInfo.mantissaBits, ocp_e4m3_mxfp8::dataInfo.exponentBits);
+    uint8_t mantissa = data & ((1 << ocp_e4m3_mxfp8::dataInfo.mantissaBits) - 1);
+    return exponent == 0 && mantissa != 0;
 }
 
 template <>
@@ -180,14 +193,13 @@ inline void setNaN<ocp_e4m3_mxfp8>(uint8_t* scaleBytes [[maybe_unused]],
     *(dataBytes + dataIndex) = ocp_e4m3_mxfp8::dataNaNMasks[0];
 }
 
-//ocp_e4m3_mxfp8 does not have an infinity representation, method will just return
+// ocp_e4m3_mxfp8 does not have an infinity representation.
 template <>
 inline void setInf<ocp_e4m3_mxfp8>(uint8_t* scaleBytes [[maybe_unused]],
                                    uint8_t* dataBytes [[maybe_unused]],
                                    index_t   scaleIndex [[maybe_unused]],
                                    index_t   dataIndex [[maybe_unused]])
 {
-    return;
 }
 
 template <>
@@ -213,7 +225,7 @@ inline uint64_t satConvertToType<ocp_e4m3_mxfp8>(float value)
     if(std::isnan(value))
     {
 
-        return sign << 15 | ocp_e4m3_mxfp8::dataNaNMasks[0];
+        return signedNaNMaskOcpE4m3Mxfp8(sign);
     }
 
     uint8_t res = convertToType<uint8_t, ocp_e4m3_mxfp8>(value);
@@ -229,7 +241,7 @@ inline uint64_t satConvertToType<ocp_e4m3_mxfp8>(float value)
                          : ocp_e4m3_mxfp8::dataMaxPositiveNormalMask;
 
     if(std::abs(resVal) < ocp_e4m3_mxfp8::dataMinSubnormalNumber)
-        return value < 0 ? ocp_e4m3_mxfp8::negativeZeroMask : ocp_e4m3_mxfp8::positiveZeroMask;
+        return sign ? ocp_e4m3_mxfp8::negativeZeroMask : ocp_e4m3_mxfp8::positiveZeroMask;
 
     return res;
 }
@@ -250,11 +262,12 @@ inline uint64_t nonSatConvertToType<ocp_e4m3_mxfp8>(float value)
     uint sign = t.bRep >> 31;
 
     //std::abs(value) > dataMaxNornal covers inf case as well
-    if(std::abs(resVal) > ocp_e4m3_mxfp8::dataMaxNormalNumber || std::isnan(value))
-        return sign << 15 | ocp_e4m3_mxfp8::dataNaNMasks[0];
+    if(std::abs(resVal) > ocp_e4m3_mxfp8::dataMaxNormalNumber || std::isnan(value)
+       || std::isnan(resVal))
+        return signedNaNMaskOcpE4m3Mxfp8(sign);
 
     if(std::abs(resVal) < ocp_e4m3_mxfp8::dataMinSubnormalNumber)
-        return value < 0 ? ocp_e4m3_mxfp8::negativeZeroMask : ocp_e4m3_mxfp8::positiveZeroMask;
+        return sign ? ocp_e4m3_mxfp8::negativeZeroMask : ocp_e4m3_mxfp8::positiveZeroMask;
 
     return res;
 }
@@ -267,7 +280,7 @@ inline uint64_t satConvertToTypeSR<ocp_e4m3_mxfp8>(float value, uint seed)
     uint sign = t.bRep >> 31;
 
     if(std::isnan(value))
-        return sign << 7 | ocp_e4m3_mxfp8::dataNaNMasks[0];
+        return signedNaNMaskOcpE4m3Mxfp8(sign);
     else if(value > ocp_e4m3_mxfp8::dataMaxRoundedRange)
         return ocp_e4m3_mxfp8::dataMaxPositiveNormalMask;
     else if(value < -ocp_e4m3_mxfp8::dataMaxRoundedRange)
@@ -286,7 +299,7 @@ inline uint64_t satConvertToTypeSR<ocp_e4m3_mxfp8>(float value, uint seed)
                          : ocp_e4m3_mxfp8::dataMaxPositiveNormalMask;
 
     if(std::abs(resVal) < ocp_e4m3_mxfp8::dataMinSubnormalNumber)
-        return value < 0 ? ocp_e4m3_mxfp8::negativeZeroMask : ocp_e4m3_mxfp8::positiveZeroMask;
+        return sign ? ocp_e4m3_mxfp8::negativeZeroMask : ocp_e4m3_mxfp8::positiveZeroMask;
 
     return res;
 }
@@ -300,11 +313,11 @@ inline uint64_t nonSatConvertToTypeSR<ocp_e4m3_mxfp8>(float value, uint seed)
     uint sign = t.bRep >> 31;
 
     if(std::isnan(value))
-        return sign << 7 | ocp_e4m3_mxfp8::dataNaNMasks[0];
+        return signedNaNMaskOcpE4m3Mxfp8(sign);
     else if(value > ocp_e4m3_mxfp8::dataMaxRoundedRange)
-        return ocp_e4m3_mxfp8::dataNaNMasks[0];
+        return signedNaNMaskOcpE4m3Mxfp8(0);
     else if(value < -ocp_e4m3_mxfp8::dataMaxRoundedRange)
-        return ocp_e4m3_mxfp8::dataNaNMasks[0];
+        return signedNaNMaskOcpE4m3Mxfp8(1);
 
     uint8_t res = convertToTypeSR<uint8_t, ocp_e4m3_mxfp8>(value, seed);
 
@@ -314,11 +327,11 @@ inline uint64_t nonSatConvertToTypeSR<ocp_e4m3_mxfp8>(float value, uint seed)
     float resVal = toFloat<ocp_e4m3_mxfp8>(tScale, tData, 0, 0);
 
     //std::abs(value) > dataMaxNornal covers inf case as well
-    if(std::abs(resVal) > ocp_e4m3_mxfp8::dataMaxNormalNumber)
-        return sign << 7 | ocp_e4m3_mxfp8::dataNaNMasks[0];
+    if(std::abs(resVal) > ocp_e4m3_mxfp8::dataMaxNormalNumber || std::isnan(resVal))
+        return signedNaNMaskOcpE4m3Mxfp8(sign);
 
     if(std::abs(resVal) < ocp_e4m3_mxfp8::dataMinSubnormalNumber)
-        return value < 0 ? ocp_e4m3_mxfp8::negativeZeroMask : ocp_e4m3_mxfp8::positiveZeroMask;
+        return sign ? ocp_e4m3_mxfp8::negativeZeroMask : ocp_e4m3_mxfp8::positiveZeroMask;
 
     return res;
 }

@@ -123,6 +123,16 @@ TEST_F(HwInstDescTest, VOP3_VFmaF32) {
     EXPECT_EQ(desc->promotedFormat, MicrocodeFormat::NONE);
 }
 
+// VOP3_2SRC_COMMUTATIVE -> VOP3_2SRC -> VOP3: format .encoding must merge full parent chain (64 b).
+TEST_F(HwInstDescTest, VOP3_2SrcCommutative_Encoding64Bits) {
+    for (const char* m : {"v_add_nc_i32", "v_mul_lo_u32"}) {
+        auto* desc = getDescByMnemonic(m);
+        ASSERT_NE(desc, nullptr) << m;
+        EXPECT_EQ(desc->encoding, 64u) << m;
+        EXPECT_TRUE(desc->has(IF_Commutative)) << m;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // SOP2: s_add_u32 — scalar ALU, 32-bit encoding
 // ---------------------------------------------------------------------------

@@ -6,8 +6,9 @@
 import io
 from pathlib import Path
 
-from dnn_benchmarking.config import ABTestConfig, BenchmarkConfig
+from dnn_benchmarking.config import BenchmarkConfig
 from dnn_benchmarking.reporting import BenchmarkStats, Reporter
+from dnn_benchmarking.reporting.suite_results import GraphResult, ProviderEngineResult
 
 
 class TestReporter:
@@ -123,160 +124,89 @@ class TestReporter:
         assert "ERROR: Something went wrong" in result
 
 
-class TestReporterAB:
-    """Tests for Reporter A/B testing methods."""
+class TestReporterEngineTable:
+    """Tests for the compact per-engine result table."""
 
-    def test_print_ab_header(self) -> None:
-        """Test A/B header output format."""
+    def test_print_graph_result_table_without_comparison_columns(self) -> None:
         output = io.StringIO()
         reporter = Reporter(output=output)
-
-        config = BenchmarkConfig(
-            graph_path=Path("/test/graph.json"),
-            warmup_iters=10,
-            benchmark_iters=100,
+        graph = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[
+                ProviderEngineResult(
+                    provider="engine_1",
+                    engine_id=1,
+                    status="success",
+                    gpu_kernel_stats=BenchmarkStats(
+                        mean_ms=1.0,
+                        median_ms=0.9,
+                        std_ms=0.1,
+                        min_ms=0.8,
+                        max_ms=1.2,
+                        p95_ms=1.1,
+                        p99_ms=1.2,
+                    ),
+                    e2e_stats=BenchmarkStats(
+                        mean_ms=2.0,
+                        median_ms=1.8,
+                        std_ms=0.2,
+                        min_ms=1.6,
+                        max_ms=2.4,
+                        p95_ms=2.2,
+                        p99_ms=2.4,
+                    ),
+                )
+            ],
         )
-        ab_config = ABTestConfig(
-            a_path=Path("/path/to/pluginA"),
-            a_id=1,
-            b_path=Path("/path/to/pluginB"),
-            b_id=2,
-        )
 
-        reporter.print_ab_header(config, ab_config, "test_conv_fwd")
+        reporter.print_graph_result_table(graph)
 
         result = output.getvalue()
-        assert "hipDNN A/B Test: test_conv_fwd" in result
-        assert "/test/graph.json" in result
-        assert "Configuration A:" in result
-        assert "Configuration B:" in result
-        assert "/path/to/pluginA" in result
-        assert "/path/to/pluginB" in result
-        assert "Engine ID:   1" in result
-        assert "Engine ID:   2" in result
+        assert "kernel_mean_ms" in result
+        assert "kernel_median_ms" in result
+        assert "e2e_mean_ms" in result
+        assert "e2e_median_ms" in result
+        assert "delta_pct" not in result
 
-    def test_print_ab_header_default_paths(self) -> None:
-        """Test A/B header with default plugin paths."""
+    def test_print_graph_result_table_with_plugin_path_column(self) -> None:
         output = io.StringIO()
         reporter = Reporter(output=output)
-
-        config = BenchmarkConfig(
-            graph_path=Path("/test/graph.json"),
+        graph = GraphResult(
+            graph_name="g",
+            graph_path="/tmp/g.json",
+            results=[
+                ProviderEngineResult(
+                    provider="engine_2",
+                    engine_id=2,
+                    status="success",
+                    plugin_path="/plugins/b",
+                    gpu_kernel_stats=BenchmarkStats(
+                        mean_ms=1.0,
+                        median_ms=0.9,
+                        std_ms=0.1,
+                        min_ms=0.8,
+                        max_ms=1.2,
+                        p95_ms=1.1,
+                        p99_ms=1.2,
+                    ),
+                    e2e_stats=BenchmarkStats(
+                        mean_ms=2.0,
+                        median_ms=1.8,
+                        std_ms=0.2,
+                        min_ms=1.6,
+                        max_ms=2.4,
+                        p95_ms=2.2,
+                        p99_ms=2.4,
+                    ),
+                )
+            ],
         )
-        ab_config = ABTestConfig(a_id=1, b_id=2)
 
-        reporter.print_ab_header(config, ab_config, "test_conv_fwd")
+        reporter.print_graph_result_table(graph)
 
         result = output.getvalue()
-        assert "(default)" in result
-
-    def test_print_ab_stats(self) -> None:
-        """Test A/B statistics output format."""
-        output = io.StringIO()
-        reporter = Reporter(output=output)
-
-        stats_a = BenchmarkStats(
-            mean_ms=1.234,
-            std_ms=0.045,
-            min_ms=1.156,
-            max_ms=1.456,
-            p95_ms=1.312,
-            p99_ms=1.398,
-        )
-        stats_b = BenchmarkStats(
-            mean_ms=1.100,
-            std_ms=0.035,
-            min_ms=1.050,
-            max_ms=1.200,
-            p95_ms=1.180,
-            p99_ms=1.195,
-        )
-
-        reporter.print_ab_stats(stats_a, stats_b, 45.0, 42.0)
-
-        result = output.getvalue()
-        assert "A" in result
-        assert "B" in result
-        assert "Init Time:" in result
-        assert "Mean:" in result
-        assert "Speedup:" in result
-
-    def test_print_ab_stats_speedup_b_faster(self) -> None:
-        """Test A/B stats shows B is faster."""
-        output = io.StringIO()
-        reporter = Reporter(output=output)
-
-        stats_a = BenchmarkStats(
-            mean_ms=2.0,
-            std_ms=0.1,
-            min_ms=1.9,
-            max_ms=2.1,
-            p95_ms=2.0,
-            p99_ms=2.1,
-        )
-        stats_b = BenchmarkStats(
-            mean_ms=1.0,
-            std_ms=0.1,
-            min_ms=0.9,
-            max_ms=1.1,
-            p95_ms=1.0,
-            p99_ms=1.1,
-        )
-
-        reporter.print_ab_stats(stats_a, stats_b, 45.0, 42.0)
-
-        result = output.getvalue()
-        assert "B is" in result
-        assert "faster" in result
-
-    def test_print_ab_stats_speedup_a_faster(self) -> None:
-        """Test A/B stats shows A is faster."""
-        output = io.StringIO()
-        reporter = Reporter(output=output)
-
-        stats_a = BenchmarkStats(
-            mean_ms=1.0,
-            std_ms=0.1,
-            min_ms=0.9,
-            max_ms=1.1,
-            p95_ms=1.0,
-            p99_ms=1.1,
-        )
-        stats_b = BenchmarkStats(
-            mean_ms=2.0,
-            std_ms=0.1,
-            min_ms=1.9,
-            max_ms=2.1,
-            p95_ms=2.0,
-            p99_ms=2.1,
-        )
-
-        reporter.print_ab_stats(stats_a, stats_b, 45.0, 42.0)
-
-        result = output.getvalue()
-        assert "A is" in result
-        assert "faster" in result
-
-    def test_print_ab_comparison_passed(self) -> None:
-        """Test A/B comparison passed output."""
-        output = io.StringIO()
-        reporter = Reporter(output=output)
-
-        reporter.print_ab_comparison(True, 1e-7, 1e-6, 1e-5, 1e-8)
-
-        result = output.getvalue()
-        assert "PASSED" in result
-        assert "rtol=" in result
-        assert "atol=" in result
-
-    def test_print_ab_comparison_failed(self) -> None:
-        """Test A/B comparison failed output."""
-        output = io.StringIO()
-        reporter = Reporter(output=output)
-
-        reporter.print_ab_comparison(False, 0.1, 0.05, 1e-5, 1e-8)
-
-        result = output.getvalue()
-        assert "FAILED" in result
-        assert "Max abs diff:" in result
-        assert "Max rel diff:" in result
+        assert "plugin_path" in result
+        assert "/plugins/b" in result
+        assert "delta_pct" not in result
+        assert "%" not in result

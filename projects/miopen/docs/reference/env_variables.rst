@@ -268,28 +268,13 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWDGEN``
-        | Controls ConvOclDirectFwdGen direct solution.
-      - | 0: Disable
-        | 1: Enable
-
     * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD``
         | Controls ConvOclDirectFwd direct solution.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW2``
-        | Controls ConvOclBwdWrW2<n> (n={1,2,4,8,16}) and ConvOclBwdWrW2NonTunable solutions.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW53``
-        | Controls ConvOclBwdWrW53 direct solution.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW1X1``
-        | Controls ConvOclBwdWrW1x1 direct solution.
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_HIP_WRW53``
+        | Controls ConvHipBwdWrW53 direct solution.
       - | 0: Disable
         | 1: Enable
 
