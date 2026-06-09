@@ -106,7 +106,11 @@ bool isSwizzleSupported(hipDataType datatype)
 
 bool MXUseRocroller()
 {
-    return hipblaslt_get_arch() != "1250";
+#ifdef HIPBLASLT_USE_ROCROLLER
+    return hipblaslt_get_arch() == 950;
+#else
+    return false;
+#endif
 }
 
 hipblasLtOrder_t orderForDatatype(hipDataType datatype)
@@ -2763,12 +2767,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                         << "Initialization of microscaling data only allows hpl, trig_float "
                            "or uniform_01, not "
                         << hipblaslt_initialization2string(arg.initialization) << std::endl;
-                    throw std::runtime_error("unsupported initialization in for MX");
+                    throw std::runtime_error("unsupported initialization for MX");
                 }
                 if(arg.algo_method == 1)
                 {
                     hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
-                    throw std::runtime_error("unsupported algorithm in for MX");
+                    throw std::runtime_error("unsupported algorithm for MX");
                 }
                 // For MX format, use mxDataGenerator to generate input data
                 // (consists of data part and scale part)
@@ -2903,12 +2907,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                         << "Initialization of microscaling data only allows hpl, trig_float "
                            "or uniform_01, not "
                         << hipblaslt_initialization2string(arg.initialization) << std::endl;
-                    throw std::runtime_error("unsupported initialization in for MX");
+                    throw std::runtime_error("unsupported initialization for MX");
                 }
                 if(arg.algo_method == 1)
                 {
                     hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
-                    throw std::runtime_error("unsupported algorithm in for MX");
+                    throw std::runtime_error("unsupported algorithm for MX");
                 }
                 // For MX format, use mxDataGenerator to generate
                 // input data (consists of data part and scale part)

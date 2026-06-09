@@ -346,7 +346,7 @@ std::vector<void*> benchmark_allocation()
     return ptrs;
 }
 
-std::string hipblaslt_get_arch()
+int32_t hipblaslt_get_arch()
 {
     int             deviceId;
     hipDeviceProp_t deviceProperties;
@@ -363,12 +363,12 @@ std::string hipblaslt_get_arch()
     static_cast<void>(hipGetDevice(&deviceId));
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
     auto gpu_arch_no_prefix = removePrefix(deviceProperties.gcnArchName);
-    return gpu_arch_no_prefix;
+    return stoi(gpu_arch_no_prefix);
 }
 
 int32_t hipblaslt_get_arch_major()
 {
-    return stoi(hipblaslt_get_arch()) / 100;
+    return hipblaslt_get_arch() / 100;
 }
 
 void hipblaslt_print_version()
