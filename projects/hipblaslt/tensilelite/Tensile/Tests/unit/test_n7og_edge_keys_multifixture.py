@@ -322,5 +322,56 @@ def test_shadow_vs_cms_edge_keys_match(isa_infrastructure, kernel_config):
     )
 
 
+# =============================================================================
+# C3h (si5f): symmetric compare_graphs lock-in
+# =============================================================================
+#
+# For each of the three n7og fixtures, assert that compare_graphs returns []
+# in BOTH directions (ref=cms_graph, subj=default_graph) and
+# (ref=default_graph, subj=cms_graph).
+#
+# This is the definitive "validator GREEN for principled reasons" pin for the
+# n7og work: if edge_keys are byte-key symmetric, both directions produce zero
+# failures — not just zero mismatches in the raw set-diff count.
+#
+# The test reuses _build_shadow_cms_pair and _FIXTURES already defined above.
+# _FIXTURES contains no xfail markers (removed in C3d/xxj4), so all three
+# fixtures are expected to pass.
+
+
+@pytest.mark.parametrize("kernel_config", _FIXTURES)
+def test_compare_graphs_symmetric_both_directions(isa_infrastructure, kernel_config):
+    """compare_graphs returns [] in BOTH directions for all three n7og fixtures.
+
+    Forward:  compare_graphs(ref=cms_graph,     subj=default_graph)
+    Reverse:  compare_graphs(ref=default_graph, subj=cms_graph)
+
+    A zero-failure result in both directions confirms that the edge_key tuples
+    are byte-key symmetric — i.e. every edge in one graph has a counterpart
+    with an identical edge_key in the other graph. This is the definitive
+    acceptance criterion for the C3h bead: "validator state GREEN for
+    principled reasons."
+    """
+    from Tensile.Components.CMSValidator import build_dataflow_graph, compare_graphs
+
+    _isa, isaInfoMap, asm = isa_infrastructure
+
+    default_cap, cms_cap = _build_shadow_cms_pair(kernel_config, asm, isaInfoMap)
+
+    default_graph = build_dataflow_graph(default_cap)
+    cms_graph     = build_dataflow_graph(cms_cap)
+
+    # compare_graphs(reference, subject) — positional args only.
+    failures_fwd = compare_graphs(cms_graph,     default_graph)
+    failures_rev = compare_graphs(default_graph, cms_graph)
+
+    assert failures_fwd == [], (
+        f"compare_graphs(cms_graph, default_graph) returned failures: {failures_fwd!r}"
+    )
+    assert failures_rev == [], (
+        f"compare_graphs(default_graph, cms_graph) returned failures: {failures_rev!r}"
+    )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

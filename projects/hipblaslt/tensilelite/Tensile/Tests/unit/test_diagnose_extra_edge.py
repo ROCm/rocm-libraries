@@ -409,3 +409,133 @@ class TestEdgeRoutedDifferentlyFailureFormat:
         assert "no prior writer" in rendered, (
             f"Expected 'no prior writer' phrase when ref_producer is None: {rendered!r}"
         )
+
+
+# =============================================================================
+# C3h (si5f): additional EdgeRoutedDifferentlyFailure classifier coverage
+# =============================================================================
+
+
+class TestDiagnoseExtraEdgeSCCAndPartialMatch:
+    """Two gap tests identified in C3h (si5f) §D:
+
+      1. SCC byte-key path: diagnose_extra_edge handles an SCC-keyed edge via
+         the same generic byte_key code path. Verified here as a non-special
+         code path (SCC clobbers enter the byte-key model at graph-build time;
+         no SCC-specific branch exists inside diagnose_extra_edge).
+
+      2. Partial byte-key miss (Phase 0): subj edge spans 4 vgpr bytes; ref
+         has a writer for only 2 of them. Phase 0 raises CaptureConsistencyError
+         on the first missing byte_key because the "same-instruction-set
+         contract" is violated (ref doesn't know about half of the bytes the
+         subj producer wrote).
+
+    Note on the empty-byte-key edge case: if producer_write_byte_key == (),
+    the Phase 0 loop exits with missing_bks=[], the Phase 1 loop is vacuously
+    True, and UnexplainedExtraEdgeError is raised. This is unreachable from
+    production code (real edges always have non-empty producer_write_byte_key)
+    and is therefore not exercised here.
+    """
+
+    def _build_scc_routed_differently_failure(self):
+        """Build two graphs whose LR producers differ (different LDS offsets),
+        then inject a synthetic SCC byte-key into the subj edge's
+        producer_write_byte_key via a MagicMock.
+
+        We do NOT construct a real SCC-writing instruction here: the purpose
+        is to verify diagnose_extra_edge handles SCC keys through the generic
+        byte_key path (lookup in ref.byte_key_writers) without special-casing.
+        The mock strategy matches Test 4 in this file.
+        """
+        from unittest.mock import MagicMock, patch
+
+        g_subj = _build_graph_lr_swait_mfma(lr_dst_start=8, lr_dst_count=4, lr_lds_offset=64)
+        g_ref  = _build_graph_lr_swait_mfma(lr_dst_start=8, lr_dst_count=4, lr_lds_offset=128)
+
+        # Use the real subj LR→MFMA edge as a base and add an SCC byte-key.
+        real_subj_edge = next(
+            e for e in g_subj.edges
+            if e.edge_kind == "raw_intrawave" and e.producer_write_byte_key
+        )
+
+        # Inject an SCC byte-key alongside the real vgpr byte-keys.
+        scc_key = ("s", "scc")
+        extended_bk = real_subj_edge.producer_write_byte_key + (scc_key,)
+
+        # Ensure the ref graph also has a writer for the SCC key, so Phase 0
+        # doesn't fire a CaptureConsistencyError (we want Phase 1).
+        # byte_key_writers maps keys to list of (GraphNode, unrolled_position) tuples.
+        # Use position 0 so the writer is a "prior" to any consumer position.
+        scc_writer_node = MagicMock()
+        scc_writer_node.unrolled_position = 0
+        g_ref.byte_key_writers[scc_key] = [(scc_writer_node, 0)]
+
+        mock_edge = MagicMock()
+        mock_edge.producer_write_byte_key = extended_bk
+        mock_edge.consumer_read_byte_key  = extended_bk
+        mock_edge.edge_kind               = real_subj_edge.edge_kind
+        mock_edge.intra_operand_byte_offset = real_subj_edge.intra_operand_byte_offset
+        mock_edge.src_operand_slot        = real_subj_edge.src_operand_slot
+        mock_edge.sink_operand_slot       = real_subj_edge.sink_operand_slot
+        mock_edge.producer               = real_subj_edge.producer
+        mock_edge.consumer               = real_subj_edge.consumer
+
+        return mock_edge, g_subj, g_ref
+
+    def test_scc_byte_key_routes_to_edge_routed_differently_failure(self):
+        """An edge whose producer_write_byte_key includes an SCC tuple entry
+        is handled by the generic byte_key lookup in diagnose_extra_edge.
+
+        When ref has a DIFFERENT producer for those byte_keys (different LDS
+        offset → different identity), the result is EdgeRoutedDifferentlyFailure —
+        the same outcome as for any numeric vgpr byte_key with a mismatched producer.
+        The SCC tuple format ('s', 'scc') receives no special treatment inside
+        diagnose_extra_edge.
+        """
+        mock_edge, g_subj, g_ref = self._build_scc_routed_differently_failure()
+
+        result = diagnose_extra_edge(mock_edge, g_subj, g_ref)
+
+        assert len(result) == 1, (
+            f"Expected 1 EdgeRoutedDifferentlyFailure for SCC-keyed edge; "
+            f"got {result!r}"
+        )
+        assert isinstance(result[0], EdgeRoutedDifferentlyFailure), (
+            f"Expected EdgeRoutedDifferentlyFailure; got {type(result[0])}"
+        )
+
+    def test_partial_byte_key_miss_raises_capture_consistency_error(self):
+        """Phase 0 fires CaptureConsistencyError when ref is missing writers for
+        some of the byte_keys in subj's producer_write_byte_key.
+
+        Construction: build a subj graph whose LR covers 4 vgpr bytes ([8..12)).
+        Build a ref graph whose byte_key_writers only covers 2 of those bytes
+        ([8, 9]) — simulating a capture where ref never had a writer for the
+        upper 2 bytes. Phase 0 in diagnose_extra_edge iterates over ALL of
+        subj's byte_keys and raises CaptureConsistencyError on the first one
+        missing from ref.
+        """
+        g_subj = _build_graph_lr_swait_mfma(lr_dst_start=8, lr_dst_count=4, lr_lds_offset=64)
+        g_ref  = _build_graph_lr_swait_mfma(lr_dst_start=8, lr_dst_count=4, lr_lds_offset=64)
+
+        subj_edge = next(
+            e for e in g_subj.edges
+            if e.edge_kind == "raw_intrawave" and e.producer_write_byte_key
+        )
+
+        # Remove the upper 2 byte_keys from ref's byte_key_writers to create
+        # a partial miss: ref knows about bytes ("v", 8) and ("v", 9) but NOT
+        # ("v", 10) and ("v", 11).
+        assert len(subj_edge.producer_write_byte_key) >= 3, (
+            f"Need at least 3 byte_keys for the partial-miss test; "
+            f"got {subj_edge.producer_write_byte_key!r}"
+        )
+        # Remove the last half of the byte_keys from ref.
+        bks = subj_edge.producer_write_byte_key
+        half = len(bks) // 2
+        for bk in bks[half:]:
+            g_ref.byte_key_writers.pop(bk, None)
+
+        from Tensile.Components.ScheduleCapture import CaptureConsistencyError
+        with pytest.raises(CaptureConsistencyError, match="same-instruction-set contract"):
+            diagnose_extra_edge(subj_edge, g_subj, g_ref)
