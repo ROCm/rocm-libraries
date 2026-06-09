@@ -239,6 +239,21 @@ class TestPyTorchOpsSupportsGraph:
         assert "Unknown2" in unsupported
         assert "ConvolutionFwdAttributes" not in unsupported
 
+    @pytest.mark.parametrize(
+        "op_type",
+        [
+            "SdpaBackwardAttributes",
+            "CustomOpAttributes",
+            "BlockScaleDequantizeAttributes",
+            "BlockScaleQuantizeAttributes",
+        ],
+    )
+    def test_intentionally_unsupported_ops_remain_unsupported(self, op_type: str) -> None:
+        graph_json = {"nodes": [{"type": op_type}]}
+
+        assert pytorch_ops.supports_graph(graph_json) is False
+        assert pytorch_ops.get_handler(op_type) is None
+
 
 class TestPyTorchOpsNewHandlers:
     """Registration and focused correctness checks for hipDNN op references."""
@@ -253,6 +268,13 @@ class TestPyTorchOpsNewHandlers:
             "BatchnormInferenceAttributesVarianceExt",
             "BatchnormBackwardAttributes",
             "SdpaAttributes",
+            "LayernormAttributes",
+            "LayerNormAttributes",
+            "RMSNormAttributes",
+            "RmsNormAttributes",
+            "RMSNormBackwardAttributes",
+            "ReductionAttributes",
+            "ResampleFwdAttributes",
         ],
     )
     def test_get_handler_returns_handler_for_new_ops(self, op_type: str) -> None:
@@ -427,6 +449,320 @@ class TestPyTorchOpsNewHandlers:
         torch.testing.assert_close(tensors[7], torch.tensor([[[[2.0]]]]))
         torch.testing.assert_close(tensors[8], torch.tensor([[[[6.0]]]]))
         torch.testing.assert_close(tensors[6], torch.zeros(1, 1, 1, 2))
+
+    def test_layernorm_matches_torch_and_aux_outputs(self) -> None:
+        x = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
+        graph_json = {
+            "tensors": [
+                {"uid": 5, "dims": [2, 3, 4]},
+                {"uid": 6, "dims": [2, 3, 1]},
+                {"uid": 7, "dims": [2, 3, 1]},
+            ],
+            "nodes": [
+                {
+                    "type": "LayernormAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "bias_tensor_uid": 3,
+                        "epsilon_tensor_uid": 4,
+                    },
+                    "outputs": {
+                        "y_tensor_uid": 5,
+                        "mean_tensor_uid": 6,
+                        "inv_variance_tensor_uid": 7,
+                    },
+                    "attributes": {"normalized_dim_count": 1},
+                }
+            ],
+        }
+        tensors = {
+            1: x,
+            2: torch.tensor([1.0, 0.5, 2.0, -1.0]),
+            3: torch.tensor([0.0, 1.0, -0.5, 0.25]),
+            4: torch.tensor([1e-5]),
+        }
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        expected = torch.nn.functional.layer_norm(
+            x, (4,), weight=tensors[2], bias=tensors[3], eps=1e-5
+        )
+        torch.testing.assert_close(tensors[5], expected)
+        torch.testing.assert_close(tensors[6], x.mean(dim=2, keepdim=True))
+        torch.testing.assert_close(
+            tensors[7], torch.rsqrt(x.var(dim=2, unbiased=False, keepdim=True) + 1e-5)
+        )
+
+    def test_rmsnorm_trailing_matches_manual_formula(self) -> None:
+        x = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 10.0
+        scale = torch.tensor([1.0, 0.5, 2.0, -1.0])
+        graph_json = {
+            "tensors": [{"uid": 4, "dims": [2, 3, 4]}],
+            "nodes": [
+                {
+                    "type": "RMSNormAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "epsilon_tensor_uid": 3,
+                    },
+                    "outputs": {"y_tensor_uid": 4},
+                }
+            ],
+        }
+        tensors = {1: x, 2: scale, 3: torch.tensor([1e-5])}
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        inv = torch.rsqrt(x.square().mean(dim=2, keepdim=True) + 1e-5)
+        torch.testing.assert_close(tensors[4], x * inv * scale.reshape(1, 1, 4))
+
+    def test_rmsnorm_channel_bias_and_inv_outputs(self) -> None:
+        x = torch.arange(1, 17, dtype=torch.float32).reshape(1, 2, 2, 4)
+        scale = torch.tensor([[[[2.0]], [[0.5]]]])
+        bias = torch.tensor([[[[0.25]], [[-1.0]]]])
+        graph_json = {
+            "tensors": [
+                {"uid": 5, "dims": [1, 2, 2, 4]},
+                {"uid": 6, "dims": [1, 2, 1, 1]},
+            ],
+            "nodes": [
+                {
+                    "type": "RMSNormAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "epsilon_tensor_uid": 3,
+                        "bias_tensor_uid": 4,
+                    },
+                    "outputs": {"y_tensor_uid": 5, "inv_rms_tensor_uid": 6},
+                }
+            ],
+        }
+        tensors = {1: x, 2: scale, 3: torch.tensor([1e-5]), 4: bias}
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        inv = torch.rsqrt(x.square().mean(dim=(2, 3), keepdim=True) + 1e-5)
+        torch.testing.assert_close(tensors[6], inv)
+        torch.testing.assert_close(tensors[5], x * inv * scale + bias)
+
+    def test_rmsnorm_backward_matches_autograd(self) -> None:
+        x = (torch.arange(24, dtype=torch.float32).reshape(2, 3, 4) / 10).requires_grad_()
+        scale = torch.tensor([1.0, 0.5, 2.0, -1.0], requires_grad=True)
+        dy = torch.linspace(-0.2, 0.3, steps=24).reshape(2, 3, 4)
+        y = x * torch.rsqrt(x.square().mean(dim=2, keepdim=True) + 1e-5) * scale
+        y.backward(dy)
+
+        inv = torch.rsqrt(x.detach().square().mean(dim=2, keepdim=True) + 1e-5)
+        graph_json = {
+            "tensors": [
+                {"uid": 5, "dims": [2, 3, 4]},
+                {"uid": 6, "dims": [4]},
+                {"uid": 7, "dims": [4]},
+            ],
+            "nodes": [
+                {
+                    "type": "RMSNormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 2,
+                        "scale_tensor_uid": 3,
+                        "inv_rms_tensor_uid": 4,
+                    },
+                    "outputs": {
+                        "dx_tensor_uid": 5,
+                        "dscale_tensor_uid": 6,
+                        "dbias_tensor_uid": 7,
+                    },
+                }
+            ],
+        }
+        tensors = {1: dy, 2: x.detach(), 3: scale.detach(), 4: inv}
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        torch.testing.assert_close(tensors[5], x.grad)
+        torch.testing.assert_close(tensors[6], scale.grad)
+        torch.testing.assert_close(tensors[7], dy.sum(dim=(0, 1)))
+
+    @pytest.mark.parametrize(
+        "mode,expected",
+        [
+            ("ADD", torch.tensor([1.0])),
+            ("MUL", torch.tensor([0.0])),
+            ("MIN", torch.tensor([-5.0])),
+            ("MAX", torch.tensor([4.0])),
+            ("AMAX", torch.tensor([5.0])),
+            ("AVG", torch.tensor([1.0 / 6.0])),
+            ("NORM1", torch.tensor([15.0])),
+            ("NORM2", torch.tensor([(55.0) ** 0.5])),
+            ("MUL_NO_ZEROS", torch.tensor([120.0])),
+        ],
+    )
+    def test_reduction_modes_match_torch(self, mode: str, expected: torch.Tensor) -> None:
+        graph_json = {
+            "tensors": [{"uid": 2, "dims": [1]}],
+            "nodes": [
+                {
+                    "type": "ReductionAttributes",
+                    "inputs": {"in_tensor_uid": 1},
+                    "outputs": {"out_tensor_uid": 2},
+                    "attributes": {"mode": mode},
+                }
+            ],
+        }
+        tensors = {1: torch.tensor([[-2.0, 0.0, 3.0], [4.0, -5.0, 1.0]])}
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        torch.testing.assert_close(tensors[2], expected)
+
+    def test_resample_maxpool_matches_torch_and_indices(self) -> None:
+        x = torch.arange(16, dtype=torch.float32).reshape(1, 1, 4, 4)
+        graph_json = {
+            "tensors": [
+                {"uid": 2, "dims": [1, 1, 2, 2]},
+                {"uid": 3, "dims": [1, 1, 2, 2]},
+            ],
+            "nodes": [
+                {
+                    "type": "ResampleFwdAttributes",
+                    "inputs": {"x_tensor_uid": 1},
+                    "outputs": {"y_tensor_uid": 2, "index_tensor_uid": 3},
+                    "attributes": {
+                        "window": [2, 2],
+                        "stride": [2, 2],
+                        "pre_padding": [0, 0],
+                        "post_padding": [0, 0],
+                        "resample_mode": "MAXPOOL",
+                        "padding_mode": "NEG_INF_PAD",
+                    },
+                }
+            ],
+        }
+        tensors = {1: x}
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        expected, indices = torch.nn.functional.max_pool2d(
+            x, kernel_size=(2, 2), stride=(2, 2), return_indices=True
+        )
+        torch.testing.assert_close(tensors[2], expected)
+        torch.testing.assert_close(tensors[3], indices)
+
+    def test_resample_avgpool_asymmetric_exclude_matches_valid_count(self) -> None:
+        x = torch.arange(1, 6, dtype=torch.float32).reshape(1, 1, 5)
+        graph_json = {
+            "tensors": [{"uid": 2, "dims": [1, 1, 2]}],
+            "nodes": [
+                {
+                    "type": "ResampleFwdAttributes",
+                    "inputs": {"x_tensor_uid": 1},
+                    "outputs": {"y_tensor_uid": 2},
+                    "attributes": {
+                        "pre_padding": [1],
+                        "post_padding": [0],
+                        "window": [3],
+                        "stride": [2],
+                        "resample_mode": "AVGPOOL_EXCLUDE_PADDING",
+                        "padding_mode": "ZERO_PAD",
+                    },
+                }
+            ],
+        }
+        tensors = {1: x}
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        torch.testing.assert_close(tensors[2], torch.tensor([[[1.5, 3.0]]]))
+
+    def test_reference_warnings_describe_manual_paths(self) -> None:
+        graph_json = {
+            "tensors": [
+                {"uid": 1, "dims": [2, 3, 4]},
+                {"uid": 2, "dims": [4]},
+                {"uid": 8, "dims": [1, 1, 5]},
+            ],
+            "nodes": [
+                {
+                    "name": "ln",
+                    "type": "LayernormAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "bias_tensor_uid": 2,
+                        "epsilon_tensor_uid": 3,
+                    },
+                    "outputs": {"y_tensor_uid": 4, "mean_tensor_uid": 5},
+                },
+                {
+                    "name": "rms_bwd",
+                    "type": "RMSNormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "inv_rms_tensor_uid": 6,
+                    },
+                    "outputs": {"dx_tensor_uid": 4, "dscale_tensor_uid": 2},
+                },
+                {
+                    "name": "mul_no_zeros",
+                    "type": "ReductionAttributes",
+                    "inputs": {"in_tensor_uid": 1},
+                    "outputs": {"out_tensor_uid": 7},
+                    "attributes": {"mode": "MUL_NO_ZEROS"},
+                },
+                {
+                    "name": "avgpool",
+                    "type": "ResampleFwdAttributes",
+                    "inputs": {"x_tensor_uid": 8},
+                    "outputs": {"y_tensor_uid": 9},
+                    "attributes": {
+                        "pre_padding": [1],
+                        "post_padding": [0],
+                        "window": [3],
+                        "stride": [2],
+                        "resample_mode": "AVGPOOL_EXCLUDE_PADDING",
+                        "padding_mode": "ZERO_PAD",
+                    },
+                },
+            ],
+        }
+
+        warnings = pytorch_ops.get_reference_warnings(graph_json)
+
+        assert len(warnings) == 4
+        assert all("not solely built-in PyTorch operator time" in w for w in warnings)
+        assert any("LayernormAttributes" in w for w in warnings)
+        assert any("RMSNormBackwardAttributes" in w for w in warnings)
+        assert any("MUL_NO_ZEROS" in w for w in warnings)
+        assert any("AVGPOOL_EXCLUDE_PADDING" in w for w in warnings)
+
+    def test_builtin_rmsnorm_reference_has_no_warning_when_available(self) -> None:
+        graph_json = {
+            "tensors": [{"uid": 1, "dims": [2, 3, 4]}, {"uid": 2, "dims": [4]}],
+            "nodes": [
+                {
+                    "type": "RMSNormAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "epsilon_tensor_uid": 3,
+                    },
+                    "outputs": {"y_tensor_uid": 4},
+                }
+            ],
+        }
+
+        warnings = pytorch_ops.get_reference_warnings(graph_json)
+
+        if hasattr(torch.nn.functional, "rms_norm"):
+            assert warnings == []
+        else:
+            assert warnings
 
     def test_sdpa_nonzero_dropout_raises(self) -> None:
         graph_json = {

@@ -298,6 +298,11 @@ class TestPyTorchCudaExecutor:
             "sample_batchnorm_backward.json",
             "sample_sdpa.json",
             "sample_mha_sdpa.json",
+            "sample_layernorm.json",
+            "sample_rmsnorm.json",
+            "sample_rmsnorm_backward.json",
+            "sample_reduction.json",
+            "sample_resample_fwd.json",
         ],
     )
     def test_full_benchmark_new_reference_graphs(self, graph_name):

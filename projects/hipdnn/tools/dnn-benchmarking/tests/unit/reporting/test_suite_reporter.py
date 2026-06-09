@@ -385,6 +385,43 @@ class TestVerboseReporter:
         assert "Engine ID:" not in out
         assert "Reference: timing baseline (no correctness comparison)" in out
 
+    def test_verbose_reference_row_renders_warnings(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = _make_pe_success(engine_id=0, provider="pytorch", correctness=None)
+        pe.role = "reference"
+        pe.warnings = [
+            "RMSNormBackwardAttributes uses a manual formula; "
+            "PyTorch reference timing is not solely built-in PyTorch operator time."
+        ]
+        gr = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+
+        reporter.print_verbose_graph_result(
+            gr, SuiteConfig(reference_provider="pytorch")
+        )
+
+        out = output.getvalue()
+        assert "Warnings:" in out
+        assert "WARNING: RMSNormBackwardAttributes" in out
+        assert "Reference: timing baseline" in out
+
+    def test_graph_result_table_renders_warning_column(self) -> None:
+        output = io.StringIO()
+        reporter = Reporter(output=output)
+        pe = _make_pe_success(engine_id=0, provider="pytorch", correctness=None)
+        pe.role = "reference"
+        pe.warnings = [
+            "manual RMSNorm backward; PyTorch reference timing is not solely "
+            "built-in PyTorch operator time."
+        ]
+        graph = GraphResult(graph_name="g", graph_path="/tmp/g.json", results=[pe])
+
+        reporter.print_graph_result_table(graph)
+
+        out = output.getvalue()
+        assert "warnings" in out
+        assert "manual RMSNorm backward" in out
+
     def test_verbose_profiling_renders_when_always_on_metrics_absent(self) -> None:
         """``--metrics-tier off --pmc basic`` leaves every always-on metric
         field unset but still populates ``extra_metrics``. The profiling

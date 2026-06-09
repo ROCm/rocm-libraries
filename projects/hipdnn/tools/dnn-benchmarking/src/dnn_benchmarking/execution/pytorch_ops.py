@@ -7,7 +7,7 @@ These handlers execute on the device of the input tensors (CPU or CUDA).
 Used by both PyTorchReferenceProvider (CPU) and PyTorchCudaExecutor (CUDA).
 """
 
-from math import sqrt
+from math import prod, sqrt
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import torch
@@ -88,6 +88,86 @@ def get_unsupported_operations(graph_json: Dict[str, Any]) -> List[str]:
         if op_type not in _OP_HANDLERS:
             unsupported.append(op_type)
     return unsupported
+
+
+def get_reference_warnings(graph_json: Dict[str, Any]) -> List[str]:
+    """Describe manual/non-built-in portions of the PyTorch reference graph.
+
+    The timed PyTorch reference row is useful as a baseline only when users can
+    tell whether it is measuring a public PyTorch primitive or local reference
+    glue.  This helper is intentionally static: it only inspects graph metadata
+    and reports paths whose handler is not solely a built-in PyTorch operator.
+    """
+
+    warnings: List[str] = []
+    for node in graph_json.get("nodes", []):
+        op_type = str(node.get("type", ""))
+        name = str(node.get("name") or op_type)
+
+        if op_type in ("LayernormAttributes", "LayerNormAttributes"):
+            if (
+                _node_uid(node, "mean_tensor_uid", ("outputs",), required=False)
+                is not None
+                or _node_uid(
+                    node, "inv_variance_tensor_uid", ("outputs",), required=False
+                )
+                is not None
+            ):
+                warnings.append(
+                    f"{name}: LayernormAttributes uses torch.nn.functional.layer_norm "
+                    "for y but computes requested mean/inv-variance outputs manually; "
+                    "PyTorch reference timing is not solely built-in PyTorch operator time."
+                )
+
+        elif op_type in ("RMSNormAttributes", "RmsNormAttributes"):
+            reasons: List[str] = []
+            if not hasattr(F, "rms_norm"):
+                reasons.append("torch.nn.functional.rms_norm is unavailable")
+            if _node_uid(node, "bias_tensor_uid", ("inputs",), required=False) is not None:
+                reasons.append("optional bias is applied manually")
+            if (
+                _node_uid(node, "inv_rms_tensor_uid", ("outputs",), required=False)
+                is not None
+            ):
+                reasons.append("requested inv_rms output is computed manually")
+            if not _rmsnorm_graph_can_use_builtin(node, graph_json):
+                reasons.append("per-channel layout uses a manual RMSNorm formula")
+            if reasons:
+                warnings.append(
+                    f"{name}: RMSNormAttributes includes manual reference work "
+                    f"({'; '.join(dict.fromkeys(reasons))}); PyTorch reference timing "
+                    "is not solely built-in PyTorch operator time."
+                )
+
+        elif op_type == "RMSNormBackwardAttributes":
+            warnings.append(
+                f"{name}: RMSNormBackwardAttributes uses a manual RMSNorm backward "
+                "formula because PyTorch has no public operator matching hipDNN's "
+                "saved-inv_rms backward node; PyTorch reference timing is not solely "
+                "built-in PyTorch operator time."
+            )
+
+        elif op_type == "ReductionAttributes":
+            if _reduction_mode_name(_node_param(node, "mode", "NOT_SET")) == "MUL_NO_ZEROS":
+                warnings.append(
+                    f"{name}: ReductionAttributes mode MUL_NO_ZEROS uses a manual "
+                    "masked product; PyTorch reference timing is not solely built-in "
+                    "PyTorch operator time."
+                )
+
+        elif op_type == "ResampleFwdAttributes":
+            mode = _resample_mode_name(_node_param(node, "resample_mode", "NOT_SET"))
+            if mode == "AVGPOOL_EXCLUDE_PADDING" and _resample_has_asymmetric_padding(
+                node, graph_json
+            ):
+                warnings.append(
+                    f"{name}: ResampleFwdAttributes AVGPOOL_EXCLUDE_PADDING with "
+                    "asymmetric padding uses manual valid-count correction around "
+                    "torch.nn.functional.avg_pool; PyTorch reference timing is not "
+                    "solely built-in PyTorch operator time."
+                )
+
+    return warnings
 
 
 def execute_graph(
@@ -248,6 +328,376 @@ def _scalar_value(
     if tensor.numel() < 1:
         raise ValueError(f"Scalar tensor UID {uid} is empty")
     return float(tensor.detach().reshape(-1)[0].item())
+
+
+def _numel(shape: Sequence[int]) -> int:
+    return prod(int(dim) for dim in shape)
+
+
+def _stored_tensor_shape(
+    tensors: Dict[int, torch.Tensor], graph_json: Dict[str, Any], uid: int
+) -> Optional[Tuple[int, ...]]:
+    existing = tensors.get(uid)
+    if existing is not None:
+        return tuple(int(dim) for dim in existing.shape)
+    return _tensor_shape(graph_json, uid)
+
+
+def _store_tensor_for_uid(
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+    uid: int,
+    value: torch.Tensor,
+) -> None:
+    shape = _stored_tensor_shape(tensors, graph_json, uid)
+    if shape is not None and tuple(value.shape) != shape:
+        if _numel(shape) != value.numel():
+            raise ValueError(
+                f"Cannot store tensor UID {uid} with shape {tuple(value.shape)} "
+                f"as graph shape {shape}"
+            )
+        value = value.reshape(shape)
+    _store_tensor(tensors, uid, value)
+
+
+def _strip_leading_singletons(shape: Sequence[int]) -> Tuple[int, ...]:
+    values = tuple(int(dim) for dim in shape)
+    index = 0
+    while index < len(values) and values[index] == 1:
+        index += 1
+    return values[index:]
+
+
+def _shape_is_channel_affine(
+    scale_shape: Sequence[int], x_shape: Sequence[int]
+) -> bool:
+    scale = tuple(int(dim) for dim in scale_shape)
+    x = tuple(int(dim) for dim in x_shape)
+    if len(x) < 3 or len(scale) <= 1:
+        return False
+    if _numel(scale) != x[1]:
+        return False
+
+    non_singletons = [idx for idx, dim in enumerate(scale) if dim != 1]
+    if len(non_singletons) != 1:
+        return False
+
+    idx = non_singletons[0]
+    if len(scale) == len(x):
+        return idx == 1
+    if len(scale) == len(x) - 1:
+        return idx == 0
+    return False
+
+
+def _infer_trailing_normalized_count(
+    x: torch.Tensor,
+    *affine_tensors: Optional[torch.Tensor],
+) -> int:
+    for tensor in affine_tensors:
+        if tensor is None:
+            continue
+        stripped = _strip_leading_singletons(tensor.shape)
+        if stripped and len(stripped) <= x.ndim and tuple(x.shape[-len(stripped) :]) == stripped:
+            return len(stripped)
+
+        elements = tensor.numel()
+        for count in range(1, x.ndim + 1):
+            if _numel(x.shape[-count:]) == elements:
+                return count
+
+    raise ValueError("Unable to infer normalized dimensions from affine tensors")
+
+
+def _layernorm_normalized_shape(
+    node: Dict[str, Any],
+    x: torch.Tensor,
+    scale: torch.Tensor,
+    bias: torch.Tensor,
+) -> Tuple[int, ...]:
+    count = int(_node_param(node, "normalized_dim_count", 0) or 0)
+    if count <= 0:
+        count = _infer_trailing_normalized_count(x, scale, bias)
+    if count < 1 or count > x.ndim:
+        raise ValueError(
+            f"Layernorm normalized_dim_count={count} is invalid for rank {x.ndim}"
+        )
+    return tuple(int(dim) for dim in x.shape[-count:])
+
+
+def _reshape_affine_for_normalized_shape(
+    tensor: torch.Tensor,
+    normalized_shape: Sequence[int],
+    x: torch.Tensor,
+    name: str,
+) -> torch.Tensor:
+    shape = tuple(int(dim) for dim in normalized_shape)
+    value = tensor.to(dtype=torch.float32, device=x.device)
+    if tuple(value.shape) == shape:
+        return value
+    if _strip_leading_singletons(value.shape) == shape:
+        return value.reshape(shape)
+    if value.numel() == _numel(shape):
+        return value.reshape(shape)
+    raise ValueError(
+        f"{name} tensor shape {tuple(tensor.shape)} is not compatible with "
+        f"normalized shape {shape}"
+    )
+
+
+def _reshape_affine_for_broadcast(
+    tensor: torch.Tensor,
+    broadcast_shape: Sequence[int],
+    x: torch.Tensor,
+    name: str,
+) -> torch.Tensor:
+    shape = tuple(int(dim) for dim in broadcast_shape)
+    value = tensor.to(dtype=torch.float32, device=x.device)
+    if tuple(value.shape) == shape:
+        return value
+    if value.numel() == _numel(shape):
+        return value.reshape(shape)
+    try:
+        return torch.broadcast_to(value, shape)
+    except RuntimeError as e:
+        raise ValueError(
+            f"{name} tensor shape {tuple(tensor.shape)} is not broadcastable to {shape}"
+        ) from e
+
+
+def _rmsnorm_layout_from_shapes(
+    x_shape: Sequence[int], scale_shape: Sequence[int]
+) -> Tuple[str, Tuple[int, ...], Tuple[int, ...], Optional[Tuple[int, ...]]]:
+    x = tuple(int(dim) for dim in x_shape)
+    scale = tuple(int(dim) for dim in scale_shape)
+
+    if _shape_is_channel_affine(scale, x):
+        broadcast_shape = (1, x[1], *([1] * (len(x) - 2)))
+        reduce_dims = tuple(range(2, len(x)))
+        return "channel", reduce_dims, broadcast_shape, None
+
+    stripped = _strip_leading_singletons(scale)
+    if stripped and len(stripped) <= len(x) and tuple(x[-len(stripped) :]) == stripped:
+        reduce_dims = tuple(range(len(x) - len(stripped), len(x)))
+        broadcast_shape = (*([1] * (len(x) - len(stripped))), *stripped)
+        return "trailing", reduce_dims, broadcast_shape, stripped
+
+    elements = _numel(scale)
+    for count in range(1, len(x) + 1):
+        trailing = x[-count:]
+        if _numel(trailing) == elements:
+            reduce_dims = tuple(range(len(x) - count, len(x)))
+            broadcast_shape = (*([1] * (len(x) - count)), *trailing)
+            return "trailing", reduce_dims, broadcast_shape, trailing
+
+    raise ValueError(
+        f"RMSNorm scale shape {scale} is not compatible with input shape {x}"
+    )
+
+
+def _rmsnorm_graph_can_use_builtin(
+    node: Dict[str, Any], graph_json: Dict[str, Any]
+) -> bool:
+    if not hasattr(F, "rms_norm"):
+        return False
+    x_uid = _node_uid(node, "x_tensor_uid", ("inputs",), required=False)
+    scale_uid = _node_uid(node, "scale_tensor_uid", ("inputs",), required=False)
+    if x_uid is None or scale_uid is None:
+        return False
+    x_shape = _tensor_shape(graph_json, int(x_uid))
+    scale_shape = _tensor_shape(graph_json, int(scale_uid))
+    if x_shape is None or scale_shape is None:
+        return False
+    try:
+        layout, _dims, _broadcast_shape, normalized_shape = _rmsnorm_layout_from_shapes(
+            x_shape, scale_shape
+        )
+    except ValueError:
+        return False
+    return layout == "trailing" and normalized_shape is not None
+
+
+def _rmsnorm_layout(
+    x: torch.Tensor, scale: torch.Tensor
+) -> Tuple[str, Tuple[int, ...], Tuple[int, ...], Optional[Tuple[int, ...]]]:
+    return _rmsnorm_layout_from_shapes(x.shape, scale.shape)
+
+
+def _sum_to_shape(value: torch.Tensor, target_shape: Sequence[int]) -> torch.Tensor:
+    shape = tuple(int(dim) for dim in target_shape)
+    result = value
+    while result.ndim > len(shape):
+        result = result.sum(dim=0)
+
+    if result.ndim != len(shape):
+        raise ValueError(
+            f"Cannot reduce tensor with shape {tuple(value.shape)} to shape {shape}"
+        )
+
+    for dim, target in enumerate(shape):
+        current = int(result.shape[dim])
+        if current == target:
+            continue
+        if target != 1:
+            raise ValueError(
+                f"Cannot reduce tensor with shape {tuple(value.shape)} to shape {shape}"
+            )
+        result = result.sum(dim=dim, keepdim=True)
+
+    return result.reshape(shape)
+
+
+_REDUCTION_MODE_BY_VALUE = {
+    1: "ADD",
+    2: "MUL",
+    3: "MIN",
+    4: "MAX",
+    5: "AMAX",
+    6: "AVG",
+    7: "NORM1",
+    8: "NORM2",
+    9: "MUL_NO_ZEROS",
+}
+
+
+def _reduction_mode_name(value: Any) -> str:
+    if isinstance(value, str):
+        mode = value.upper()
+        return {"MIN_OP": "MIN", "MAX_OP": "MAX"}.get(mode, mode)
+    return _REDUCTION_MODE_BY_VALUE.get(int(value), "NOT_SET")
+
+
+_RESAMPLE_MODE_BY_VALUE = {
+    1: "MAXPOOL",
+    2: "AVGPOOL_EXCLUDE_PADDING",
+    3: "AVGPOOL_INCLUDE_PADDING",
+}
+
+
+def _resample_mode_name(value: Any) -> str:
+    if isinstance(value, str):
+        return value.upper()
+    return _RESAMPLE_MODE_BY_VALUE.get(int(value), "NOT_SET")
+
+
+_PADDING_MODE_BY_VALUE = {
+    1: "NEG_INF_PAD",
+    2: "ZERO_PAD",
+}
+
+
+def _padding_mode_name(value: Any) -> str:
+    if isinstance(value, str):
+        mode = value.upper()
+        return "PADDING_NOT_SET" if mode == "NOT_SET" else mode
+    return _PADDING_MODE_BY_VALUE.get(int(value), "PADDING_NOT_SET")
+
+
+def _spatial_tuple(
+    node: Dict[str, Any],
+    graph_json: Dict[str, Any],
+    x_uid: int,
+    key: str,
+    default_value: int,
+    x_shape_override: Optional[Sequence[int]] = None,
+) -> Tuple[int, ...]:
+    x_shape = (
+        tuple(int(dim) for dim in x_shape_override)
+        if x_shape_override is not None
+        else _tensor_shape(graph_json, x_uid)
+    )
+    if x_shape is None:
+        raise ValueError(f"ResampleFwdAttributes missing input shape for UID {x_uid}")
+    spatial_rank = len(x_shape) - 2
+    if spatial_rank < 1 or spatial_rank > 3:
+        raise ValueError(
+            f"ResampleFwdAttributes supports rank 3/4/5 tensors, got rank {len(x_shape)}"
+        )
+    values = _node_param(node, key, None)
+    if values is None:
+        return (default_value,) * spatial_rank
+    result = tuple(int(v) for v in values)
+    if len(result) != spatial_rank:
+        raise ValueError(
+            f"ResampleFwdAttributes {key} length {len(result)} does not match "
+            f"spatial rank {spatial_rank}"
+        )
+    return result
+
+
+def _resample_has_asymmetric_padding(
+    node: Dict[str, Any], graph_json: Dict[str, Any]
+) -> bool:
+    x_uid = _node_uid(node, "x_tensor_uid", ("inputs",), required=False)
+    if x_uid is None:
+        return False
+    try:
+        pre = _spatial_tuple(node, graph_json, int(x_uid), "pre_padding", 0)
+        post = _spatial_tuple(node, graph_json, int(x_uid), "post_padding", 0)
+    except ValueError:
+        return False
+    return pre != post
+
+
+def _pad_spatial(
+    x: torch.Tensor,
+    pre: Sequence[int],
+    post: Sequence[int],
+    value: float,
+) -> torch.Tensor:
+    if all(v == 0 for v in pre) and all(v == 0 for v in post):
+        return x
+    pad = []
+    for before, after in reversed(tuple(zip(pre, post))):
+        pad.extend([int(before), int(after)])
+    return F.pad(x, tuple(pad), value=value)
+
+
+def _pool_function(mode: str, spatial_rank: int) -> Callable[..., Any]:
+    if mode == "MAXPOOL":
+        return (F.max_pool1d, F.max_pool2d, F.max_pool3d)[spatial_rank - 1]
+    return (F.avg_pool1d, F.avg_pool2d, F.avg_pool3d)[spatial_rank - 1]
+
+
+def _reduce_prod(value: torch.Tensor, dims: Tuple[int, ...], keepdim: bool) -> torch.Tensor:
+    if not dims:
+        return value
+    result = value
+    for dim in sorted(dims, reverse=True):
+        result = result.prod(dim=dim, keepdim=keepdim)
+    return result
+
+
+def _reduction_dims_for_output(
+    x: torch.Tensor,
+    out_shape: Optional[Tuple[int, ...]],
+) -> Tuple[Tuple[int, ...], bool]:
+    if out_shape is None or _numel(out_shape) == 1:
+        return tuple(range(x.ndim)), False
+
+    if len(out_shape) == x.ndim:
+        dims = tuple(
+            dim
+            for dim, (input_extent, output_extent) in enumerate(zip(x.shape, out_shape))
+            if int(output_extent) == 1 and int(input_extent) != 1
+        )
+        return dims, True
+
+    matched = 0
+    dims_list: List[int] = []
+    for dim, input_extent in enumerate(x.shape):
+        if matched < len(out_shape) and int(out_shape[matched]) == int(input_extent):
+            matched += 1
+        else:
+            dims_list.append(dim)
+
+    if matched == len(out_shape):
+        return tuple(dims_list), False
+
+    raise ValueError(
+        f"Reduction output shape {out_shape} is not compatible with input shape "
+        f"{tuple(x.shape)}"
+    )
 
 
 def _validate_cross_correlation(node: Dict[str, Any]) -> None:
@@ -840,6 +1290,328 @@ def handle_batchnorm_backward(
     _store_tensor(tensors, dx_uid, dx)
     _store_channel_tensor(tensors, dscale_uid, dscale.to(dtype=scale.dtype), x.ndim)
     _store_channel_tensor(tensors, dbias_uid, dbias.to(dtype=scale.dtype), x.ndim)
+
+
+@register_handler("LayerNormAttributes")
+@register_handler("LayernormAttributes")
+def handle_layernorm(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+) -> None:
+    """Handle layer normalization over trailing normalized dimensions."""
+    x_uid = _required_input_uid(node, "x_tensor_uid")
+    scale_uid = _required_input_uid(node, "scale_tensor_uid")
+    bias_uid = _required_input_uid(node, "bias_tensor_uid")
+    epsilon_uid = _required_input_uid(node, "epsilon_tensor_uid")
+    y_uid = _required_output_uid(node, "y_tensor_uid")
+
+    x = _tensor(tensors, x_uid, node)
+    x_float = x.to(dtype=torch.float32)
+    scale = _tensor(tensors, scale_uid, node)
+    bias = _tensor(tensors, bias_uid, node)
+    epsilon = _scalar_value(tensors, epsilon_uid, node)
+
+    normalized_shape = _layernorm_normalized_shape(node, x, scale, bias)
+    weight = _reshape_affine_for_normalized_shape(
+        scale, normalized_shape, x, "Layernorm scale"
+    )
+    bias_value = _reshape_affine_for_normalized_shape(
+        bias, normalized_shape, x, "Layernorm bias"
+    )
+
+    y = F.layer_norm(
+        x_float,
+        normalized_shape,
+        weight=weight,
+        bias=bias_value,
+        eps=epsilon,
+    ).to(dtype=x.dtype)
+    _store_tensor_for_uid(tensors, graph_json, y_uid, y)
+
+    reduce_dims = tuple(range(x.ndim - len(normalized_shape), x.ndim))
+    mean_uid = _optional_uid(node, "mean_tensor_uid")
+    inv_uid = _optional_uid(node, "inv_variance_tensor_uid")
+    if mean_uid is not None or inv_uid is not None:
+        mean = x_float.mean(dim=reduce_dims, keepdim=True)
+        variance = x_float.var(dim=reduce_dims, unbiased=False, keepdim=True)
+        if mean_uid is not None:
+            _store_tensor_for_uid(tensors, graph_json, int(mean_uid), mean)
+        if inv_uid is not None:
+            _store_tensor_for_uid(
+                tensors,
+                graph_json,
+                int(inv_uid),
+                torch.rsqrt(variance + epsilon),
+            )
+
+
+@register_handler("RmsNormAttributes")
+@register_handler("RMSNormAttributes")
+def handle_rmsnorm(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+) -> None:
+    """Handle RMSNorm forward with trailing or per-channel affine layout."""
+    x_uid = _required_input_uid(node, "x_tensor_uid")
+    scale_uid = _required_input_uid(node, "scale_tensor_uid")
+    epsilon_uid = _required_input_uid(node, "epsilon_tensor_uid")
+    y_uid = _required_output_uid(node, "y_tensor_uid")
+
+    x = _tensor(tensors, x_uid, node)
+    x_float = x.to(dtype=torch.float32)
+    scale = _tensor(tensors, scale_uid, node)
+    epsilon = _scalar_value(tensors, epsilon_uid, node)
+    layout, reduce_dims, broadcast_shape, normalized_shape = _rmsnorm_layout(x, scale)
+
+    use_builtin = (
+        layout == "trailing"
+        and normalized_shape is not None
+        and hasattr(F, "rms_norm")
+    )
+    if use_builtin:
+        weight = _reshape_affine_for_normalized_shape(
+            scale, normalized_shape, x, "RMSNorm scale"
+        )
+        y_float = F.rms_norm(x_float, normalized_shape, weight=weight, eps=epsilon)
+        inv_rms = None
+    else:
+        scale_b = _reshape_affine_for_broadcast(
+            scale, broadcast_shape, x, "RMSNorm scale"
+        )
+        inv_rms = torch.rsqrt(
+            x_float.square().mean(dim=reduce_dims, keepdim=True) + epsilon
+        )
+        y_float = x_float * inv_rms * scale_b
+
+    bias_uid = _optional_uid(node, "bias_tensor_uid")
+    if bias_uid is not None:
+        bias = _tensor(tensors, int(bias_uid), node)
+        y_float = y_float + _reshape_affine_for_broadcast(
+            bias, broadcast_shape, x, "RMSNorm bias"
+        )
+
+    y = y_float.to(dtype=x.dtype)
+    _store_tensor_for_uid(tensors, graph_json, y_uid, y)
+
+    inv_uid = _optional_uid(node, "inv_rms_tensor_uid")
+    if inv_uid is not None:
+        if inv_rms is None:
+            inv_rms = torch.rsqrt(
+                x_float.square().mean(dim=reduce_dims, keepdim=True) + epsilon
+            )
+        _store_tensor_for_uid(tensors, graph_json, int(inv_uid), inv_rms)
+
+
+@register_handler("RMSNormBackwardAttributes")
+def handle_rmsnorm_backward(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+) -> None:
+    """Handle RMSNorm backward using the saved inverse RMS tensor."""
+    dy_uid = _required_input_uid(node, "dy_tensor_uid")
+    x_uid = _required_input_uid(node, "x_tensor_uid")
+    scale_uid = _required_input_uid(node, "scale_tensor_uid")
+    inv_uid = _required_input_uid(node, "inv_rms_tensor_uid")
+    dx_uid = _required_output_uid(node, "dx_tensor_uid")
+    dscale_uid = _required_output_uid(node, "dscale_tensor_uid")
+
+    dy = _tensor(tensors, dy_uid, node).to(dtype=torch.float32)
+    x = _tensor(tensors, x_uid, node)
+    x_float = x.to(dtype=torch.float32)
+    scale = _tensor(tensors, scale_uid, node)
+    inv_rms = _tensor(tensors, inv_uid, node).to(dtype=torch.float32, device=x.device)
+
+    _layout, reduce_dims, broadcast_shape, _normalized_shape = _rmsnorm_layout(x, scale)
+    scale_b = _reshape_affine_for_broadcast(
+        scale, broadcast_shape, x, "RMSNorm scale"
+    )
+    weighted_dy = dy * scale_b
+    if reduce_dims:
+        dot = (weighted_dy * x_float).sum(dim=reduce_dims, keepdim=True)
+        elements = _numel([x.shape[dim] for dim in reduce_dims])
+    else:
+        dot = weighted_dy * x_float
+        elements = 1
+
+    dx = (
+        weighted_dy * inv_rms
+        - x_float * inv_rms.pow(3) * dot / float(elements)
+    ).to(dtype=x.dtype)
+    _store_tensor_for_uid(tensors, graph_json, dx_uid, dx)
+
+    dscale = _sum_to_shape(dy * x_float * inv_rms, scale.shape).to(dtype=scale.dtype)
+    _store_tensor_for_uid(tensors, graph_json, dscale_uid, dscale)
+
+    dbias_uid = _optional_uid(node, "dbias_tensor_uid")
+    if dbias_uid is not None:
+        dbias_shape = _stored_tensor_shape(tensors, graph_json, int(dbias_uid))
+        if dbias_shape is None:
+            dbias_shape = tuple(int(dim) for dim in scale.shape)
+        dbias = _sum_to_shape(dy, dbias_shape).to(dtype=scale.dtype)
+        _store_tensor_for_uid(tensors, graph_json, int(dbias_uid), dbias)
+
+
+@register_handler("ReductionAttributes")
+def handle_reduction(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+) -> None:
+    """Handle hipDNN reduction attributes with PyTorch reductions."""
+    in_uid = _node_uid(node, "in_tensor_uid", ("inputs",), required=False)
+    if in_uid is None:
+        in_uid = _node_uid(node, "x_tensor_uid", ("inputs",), required=True)
+    out_uid = _node_uid(node, "out_tensor_uid", ("outputs",), required=False)
+    if out_uid is None:
+        out_uid = _node_uid(node, "y_tensor_uid", ("outputs",), required=True)
+
+    x = _tensor(tensors, int(in_uid), node)
+    out_shape = _stored_tensor_shape(tensors, graph_json, int(out_uid))
+    dims, keepdim = _reduction_dims_for_output(x, out_shape)
+    mode = _reduction_mode_name(_node_param(node, "mode", "NOT_SET"))
+
+    if mode == "ADD":
+        result = x.sum(dim=dims, keepdim=keepdim) if dims else x
+    elif mode == "MUL":
+        result = _reduce_prod(x, dims, keepdim)
+    elif mode == "MIN":
+        result = torch.amin(x, dim=dims, keepdim=keepdim) if dims else x
+    elif mode == "MAX":
+        result = torch.amax(x, dim=dims, keepdim=keepdim) if dims else x
+    elif mode == "AMAX":
+        result = torch.amax(torch.abs(x), dim=dims, keepdim=keepdim) if dims else torch.abs(x)
+    elif mode == "AVG":
+        result = x.mean(dim=dims, keepdim=keepdim) if dims else x
+    elif mode == "NORM1":
+        result = torch.abs(x).sum(dim=dims, keepdim=keepdim) if dims else torch.abs(x)
+    elif mode == "NORM2":
+        result = (
+            torch.linalg.vector_norm(x, ord=2, dim=dims, keepdim=keepdim)
+            if dims
+            else torch.abs(x)
+        )
+    elif mode == "MUL_NO_ZEROS":
+        nonzero = torch.where(x == 0, torch.ones((), dtype=x.dtype, device=x.device), x)
+        result = _reduce_prod(nonzero, dims, keepdim)
+    else:
+        raise ValueError(f"Unsupported reduction mode: {mode}")
+
+    _store_tensor_for_uid(tensors, graph_json, int(out_uid), result)
+
+
+@register_handler("ResampleFwdAttributes")
+def handle_resample_fwd(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    graph_json: Dict[str, Any],
+) -> None:
+    """Handle resample forward as max/average pooling."""
+    x_uid = _required_input_uid(node, "x_tensor_uid")
+    y_uid = _required_output_uid(node, "y_tensor_uid")
+    index_uid = _node_uid(node, "index_tensor_uid", ("outputs",), required=False)
+
+    x = _tensor(tensors, x_uid, node)
+    spatial_rank = x.ndim - 2
+    if spatial_rank < 1 or spatial_rank > 3:
+        raise ValueError(
+            f"ResampleFwdAttributes supports rank 3/4/5 tensors, got rank {x.ndim}"
+        )
+
+    pre = _spatial_tuple(node, graph_json, x_uid, "pre_padding", 0, x.shape)
+    post = _spatial_tuple(node, graph_json, x_uid, "post_padding", 0, x.shape)
+    stride = _spatial_tuple(node, graph_json, x_uid, "stride", 1, x.shape)
+    window = _spatial_tuple(node, graph_json, x_uid, "window", 1, x.shape)
+    if any(v <= 0 for v in (*stride, *window)):
+        raise ValueError("ResampleFwdAttributes stride/window values must be positive")
+
+    mode = _resample_mode_name(_node_param(node, "resample_mode", "NOT_SET"))
+    padding_mode = _padding_mode_name(_node_param(node, "padding_mode", "PADDING_NOT_SET"))
+    pool = _pool_function(mode, spatial_rank)
+
+    if mode == "MAXPOOL":
+        return_indices = index_uid is not None
+        use_builtin_padding = pre == post and padding_mode != "ZERO_PAD"
+        if use_builtin_padding:
+            pooled = pool(
+                x,
+                kernel_size=window,
+                stride=stride,
+                padding=pre,
+                return_indices=return_indices,
+            )
+        else:
+            pad_value = 0.0 if padding_mode == "ZERO_PAD" else float("-inf")
+            padded = _pad_spatial(x, pre, post, pad_value)
+            pooled = pool(
+                padded,
+                kernel_size=window,
+                stride=stride,
+                padding=0,
+                return_indices=return_indices,
+            )
+        if return_indices:
+            y, indices = pooled
+            _store_tensor_for_uid(tensors, graph_json, y_uid, y)
+            _store_tensor_for_uid(tensors, graph_json, int(index_uid), indices)
+        else:
+            _store_tensor_for_uid(tensors, graph_json, y_uid, pooled)
+        return
+
+    if mode not in ("AVGPOOL_EXCLUDE_PADDING", "AVGPOOL_INCLUDE_PADDING"):
+        raise ValueError(f"Unsupported resample mode: {mode}")
+    if index_uid is not None:
+        raise ValueError("Average pooling resample does not produce indices")
+    if padding_mode not in ("PADDING_NOT_SET", "ZERO_PAD"):
+        raise ValueError(f"{mode} requires ZERO_PAD padding, got {padding_mode}")
+
+    count_include_pad = mode == "AVGPOOL_INCLUDE_PADDING"
+    if pre == post:
+        y = pool(
+            x,
+            kernel_size=window,
+            stride=stride,
+            padding=pre,
+            count_include_pad=count_include_pad,
+        )
+    else:
+        padded = _pad_spatial(x, pre, post, 0.0)
+        if count_include_pad:
+            y = pool(
+                padded,
+                kernel_size=window,
+                stride=stride,
+                padding=0,
+                count_include_pad=True,
+            )
+        else:
+            window_elements = float(_numel(window))
+            sums = (
+                pool(
+                    padded,
+                    kernel_size=window,
+                    stride=stride,
+                    padding=0,
+                    count_include_pad=True,
+                )
+                * window_elements
+            )
+            mask = torch.ones_like(x, dtype=torch.float32)
+            counts = (
+                pool(
+                    _pad_spatial(mask, pre, post, 0.0),
+                    kernel_size=window,
+                    stride=stride,
+                    padding=0,
+                    count_include_pad=True,
+                )
+                * window_elements
+            )
+            y = sums / counts.clamp_min(1.0).to(dtype=sums.dtype)
+
+    _store_tensor_for_uid(tensors, graph_json, y_uid, y)
 
 
 @register_handler("SdpaAttributes")

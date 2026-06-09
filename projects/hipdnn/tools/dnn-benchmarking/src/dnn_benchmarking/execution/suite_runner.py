@@ -382,6 +382,7 @@ def _run_timed_pytorch_reference(
         try:
             from ..execution.pytorch_buffer_manager import PyTorchCudaBufferManager
             from ..execution.pytorch_executor import PyTorchCudaExecutor
+            from . import pytorch_ops
 
             bench_config = BenchmarkConfig(
                 graph_path=graph_path,
@@ -435,6 +436,9 @@ def _run_timed_pytorch_reference(
                 outputs = _pytorch_reference_outputs_from_buffer(buffer_manager)
 
             result.correctness = _reference_row_correctness(config)
+            warnings = pytorch_ops.get_reference_warnings(graph_json)
+            if warnings:
+                result.warnings = warnings
             result.status = "success"
 
         except Exception as e:
