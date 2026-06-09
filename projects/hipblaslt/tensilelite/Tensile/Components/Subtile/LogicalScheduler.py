@@ -188,17 +188,24 @@ class SchedulerConfig:
     # If no solution exists, we return [total] (single partition).
     @staticmethod
     def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str, mn: int = 1) -> List[int]:
+        # NOTE: use raise (not assert) so validation survives `python -O`, which
+        # disables asserts. The C++ counterpart always throws std::invalid_argument;
+        # raising here keeps parity when TENSILE_WRITER_CPP=1 runs optimized.
         if isinstance(spec, (list, tuple)):
-            assert sum(spec) == total, \
-                f"partition sizes for {dim} must sum to {total}, got {sum(spec)}"
-            assert all(s >= 1 for s in spec), \
-                f"all partition sizes for {dim} must be >= 1"
-            assert all(s % mn == 0 for s in spec), \
-                f"partition sizes for {dim} must be multiples of mn={mn}, got {list(spec)}"
+            if sum(spec) != total:
+                raise ValueError(
+                    f"partition sizes for {dim} must sum to {total}, got {sum(spec)}")
+            if not all(s >= 1 for s in spec):
+                raise ValueError(
+                    f"all partition sizes for {dim} must be >= 1")
+            if not all(s % mn == 0 for s in spec):
+                raise ValueError(
+                    f"partition sizes for {dim} must be multiples of mn={mn}, got {list(spec)}")
             return list(spec)
         s = spec if spec != 0 else total
-        assert 1 <= s <= total, \
-            f"partition size for {dim} must be in [1, {total}], got {s}"
+        if not (1 <= s <= total):
+            raise ValueError(
+                f"partition size for {dim} must be in [1, {total}], got {s}")
         if total % mn != 0:
             return [total]
         s = max(mn, (s // mn) * mn)

@@ -1907,11 +1907,11 @@ class TestNormalizePartitionSizes:
     # ── invalid single-int spec ──────────────────────────────
 
     def test_spec_negative_raises(self):
-        with pytest.raises(AssertionError, match="must be in"):
+        with pytest.raises(ValueError, match="must be in"):
             self.norm(-1, 16, 'N')
 
     def test_spec_larger_than_total_raises(self):
-        with pytest.raises(AssertionError, match="must be in"):
+        with pytest.raises(ValueError, match="must be in"):
             self.norm(20, 16, 'N')
 
     # ── explicit list spec ───────────────────────────────────
@@ -1927,19 +1927,19 @@ class TestNormalizePartitionSizes:
         assert isinstance(result, list)
 
     def test_list_wrong_sum_raises(self):
-        with pytest.raises(AssertionError, match="must sum to 16"):
+        with pytest.raises(ValueError, match="must sum to 16"):
             self.norm([8, 7], 16, 'N')
 
     def test_list_with_zero_raises(self):
-        with pytest.raises(AssertionError, match="must be >= 1"):
+        with pytest.raises(ValueError, match="must be >= 1"):
             self.norm([8, 0, 8], 16, 'N')
 
     def test_list_with_negative_raises(self):
-        with pytest.raises(AssertionError, match="must be >= 1"):
+        with pytest.raises(ValueError, match="must be >= 1"):
             self.norm([10, -2, 8], 16, 'N')
 
     def test_dim_label_in_error(self):
-        with pytest.raises(AssertionError, match="for M"):
+        with pytest.raises(ValueError, match="for M"):
             self.norm([1, 2], 16, 'M')
 
     # ── mn-aware behavior ────────────────────────────────────
@@ -1994,11 +1994,11 @@ class TestNormalizePartitionSizes:
 
     def test_mn_explicit_list_unaligned_raises(self):
         # The [22,1] FP4 case from standalone: 1 is not a multiple of mn=2.
-        with pytest.raises(AssertionError, match="multiples of mn=2"):
+        with pytest.raises(ValueError, match="multiples of mn=2"):
             self.norm([22, 1], 23, 'N', 2)
 
     def test_mn_explicit_list_one_unaligned_element_raises(self):
-        with pytest.raises(AssertionError, match="multiples of mn=4"):
+        with pytest.raises(ValueError, match="multiples of mn=4"):
             self.norm([8, 6, 8], 22, 'N', 4)
 
     def test_mn_monotonic_candidate_sweep(self):
