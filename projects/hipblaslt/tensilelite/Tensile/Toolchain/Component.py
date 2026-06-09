@@ -79,12 +79,12 @@ def _getVersion(executable: str, versionFlag: str, regex: str) -> str:
         raise RuntimeError(f"Failed to get version when calling {args}: {e}")
 
 
-def get_rocm_version() -> str:
+def get_rocm_version() -> SemanticVersion:
     """Compute the ROCm version string.
 
     Reads ROCM_VERSION env var (set by CMake from hip_VERSION) if available,
     otherwise falls back to reading .info/version from ROCM_PATH, HIP_PATH,
-    or /opt/rocm. Avoids calling hipconfig (deprecated; use amdclang++ directly).
+    or /opt/rocm.
 
     Raises:
         RuntimeError: If the version cannot be determined.
