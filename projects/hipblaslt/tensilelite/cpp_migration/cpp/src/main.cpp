@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "tensile_writer/instruction_scheduler.hpp"
 #include "tensile_writer/subtile_geometry.hpp"
 #include "tensile_writer/tile_info.hpp"
 
@@ -351,6 +352,75 @@ void bind_tile_info(nb::module_& t) {
            &ABTileInfoQuery::grRegGroupForSubtileRow, nb::arg("sId0"));
 }
 
+// ---------------------------------------------------------------------------
+// Subtile InstructionScheduler slot-placement algorithm (data-only model).
+// ---------------------------------------------------------------------------
+void bind_instruction_scheduler(nb::module_& s) {
+  using namespace tw::subtile::insched;
+
+  nb::enum_<InstKind>(s, "InstKind",
+                      "Instruction classification used by the scheduler. "
+                      "Mirrors the isinstance() predicates of the Python "
+                      "InstructionScheduler.")
+      .value("Mfma", InstKind::Mfma)
+      .value("LocalRead", InstKind::LocalRead)
+      .value("GlobalRead", InstKind::GlobalRead)
+      .value("WaitCnt", InstKind::WaitCnt)
+      .value("M0Update", InstKind::M0Update)
+      .value("Other", InstKind::Other);
+
+  nb::class_<InstRef>(s, "Instruction",
+                      "Data-only view of one rocisa instruction: its kind plus "
+                      "the waitcnt fields the vmcnt post-pass needs.")
+      .def(nb::init<InstKind, long, bool>(), nb::arg("kind"),
+           nb::arg("vlcnt") = -1, nb::arg("adjustVmcnt") = true)
+      .def_ro("kind", &InstRef::kind)
+      .def_ro("vlcnt", &InstRef::vlcnt)
+      .def_ro("adjustVmcnt", &InstRef::adjustVmcnt);
+
+  nb::class_<ModuleRef>(s, "ModuleRef",
+                        "Data-only view of one LogicalScheduler.EmittedModule.")
+      .def(nb::init<int, std::string, std::optional<int>,
+                    std::vector<InstRef>>(),
+           nb::arg("moduleId"), nb::arg("opType"),
+           nb::arg("before") = nb::none(),
+           nb::arg("instructions") = std::vector<InstRef>{})
+      .def_ro("moduleId", &ModuleRef::moduleId)
+      .def_ro("opType", &ModuleRef::opType)
+      .def_prop_ro("before",
+                   [](const ModuleRef& m) -> nb::object {
+                     if (m.before.has_value()) return nb::cast(*m.before);
+                     return nb::none();
+                   })
+      .def_ro("instructions", &ModuleRef::instructions);
+
+  nb::class_<ScheduleResult>(s, "ScheduleResult",
+                             "Result of the slot-placement algorithm.")
+      // Final emission order as a list of (moduleIndex, instIdx) tuples.
+      .def_prop_ro("order",
+                   [](const ScheduleResult& r) {
+                     nb::list out;
+                     for (const auto& p : r.order)
+                       out.append(nb::make_tuple(p.first, p.second));
+                     return out;
+                   })
+      .def_ro("kinds", &ScheduleResult::kinds)
+      .def_ro("vlcnt", &ScheduleResult::vlcnt)
+      // (orderIndex, delta) pairs the shim applies to live waitcnt objects.
+      .def_prop_ro("vmcntAdjustments", [](const ScheduleResult& r) {
+        nb::list out;
+        for (const auto& p : r.vmcntAdjustments)
+          out.append(nb::make_tuple(p.first, p.second));
+        return out;
+      });
+
+  s.def("schedule", &schedule, nb::arg("modules"),
+        "Run the subtile instruction-scheduling slot-placement algorithm over "
+        "a data-only emitted-module chain and return the final emission order "
+        "plus the vmcnt post-pass result. Raises ValueError on structural "
+        "precondition violations (the caller should fall back to Python).");
+}
+
 }  // namespace
 
 NB_MODULE(_tensile_writer, m) {
@@ -371,4 +441,12 @@ NB_MODULE(_tensile_writer, m) {
                    "ported from Tensile.Components.Subtile.Kernel.TileInfo "
                    "(ABTilePair case).");
   bind_tile_info(tile_info);
+
+  nb::module_ instruction_scheduler = subtile.def_submodule(
+      "instruction_scheduler",
+      "Subtile instruction-scheduling slot-placement algorithm ported from "
+      "Tensile.Components.Subtile.InstructionScheduler. Operates on a "
+      "data-only instruction/module model; a Python shim maps the resulting "
+      "order back onto live rocisa objects.");
+  bind_instruction_scheduler(instruction_scheduler);
 }

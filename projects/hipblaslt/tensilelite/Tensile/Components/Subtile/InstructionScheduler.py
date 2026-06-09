@@ -7,10 +7,40 @@ Interleaves non-MFMA instructions between MFMAs using a slot-based placer
 with pluggable scheduling rules.
 """
 
+import os
 from typing import List, Tuple, Optional
 from rocisa.code import Module
 from rocisa.instruction import SWaitCnt, MFMAInstruction, MXMFMAInstruction, \
     LocalReadInstruction, GlobalReadInstruction, CommonInstruction
+
+
+################################################################################
+# Optional C++ delegation (opt-in, off by default)
+#
+# When the environment variable TENSILE_WRITER_CPP is truthy AND the compiled
+# ``tensile_writer`` nanobind extension is importable, ``instructionSchedule``
+# delegates the slot-placement algorithm to C++
+# (tensile_writer.subtile.instruction_scheduler). The C++ core operates on a
+# data-only instruction model and returns the emission order; the shim maps
+# that order back onto the live rocisa objects. Delegation falls back cleanly
+# to the pure-Python implementation below for any chain the C++ path cannot
+# handle, so behavior with delegation disabled (the default) is unchanged.
+################################################################################
+
+def _resolve_cpp_scheduler():
+    flag = os.environ.get("TENSILE_WRITER_CPP", "").strip().lower()
+    if flag in ("", "0", "false", "no", "off"):
+        return None
+    try:
+        from tensile_writer.subtile import instruction_scheduler as _cppsched
+    except Exception:
+        # Opt-in was requested but the extension is unavailable; fall back to
+        # the pure-Python path rather than failing the import.
+        return None
+    return _cppsched
+
+_CPP = _resolve_cpp_scheduler()
+_USE_CPP = _CPP is not None
 
 
 class _SlotPlacer:
@@ -362,6 +392,23 @@ def extractPathsFromBeforeDeps(emittedModules) -> Tuple[int, List[List[int]], Li
 
 
 def instructionSchedule(emittedModules):
+    """Interleave non-MFMA instructions between MFMAs (slot-based placement).
+
+    Public entry point. When C++ delegation is enabled (opt-in via
+    ``TENSILE_WRITER_CPP``) the slot-placement algorithm runs in C++ and falls
+    back to the pure-Python :func:`_instructionSchedulePython` for any chain the
+    C++ path cannot handle. With delegation disabled (the default) this is a
+    direct call to the Python implementation.
+    """
+    if _USE_CPP and emittedModules:
+        try:
+            return _CPP.instructionSchedule(emittedModules)
+        except _CPP.UnsupportedSchedule:
+            pass  # fall through to the pure-Python path
+    return _instructionSchedulePython(emittedModules)
+
+
+def _instructionSchedulePython(emittedModules):
     """Interleave non-MFMA instructions between MFMAs using 2 slots/interval.
 
     Rules:
