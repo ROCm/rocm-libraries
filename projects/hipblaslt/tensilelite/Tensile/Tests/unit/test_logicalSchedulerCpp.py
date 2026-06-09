@@ -9,12 +9,14 @@ These tests compare the pure-Python data/config primitives in
 extension is importable; otherwise they skip, so the default (Python-only)
 TensileLite build is unaffected.
 
-Scope: this slice ports only the value/config layer (Pass, fmt_mt,
-MFMATileRange, ReadGranularity, SchedulerConfig — including partition
-normalization and candidate generation — plus the placement / op value types).
-The scheduling passes (place_LRs / place_GRs / build / populate_instructions),
+Scope: this ports the value/config layer (Pass, fmt_mt, MFMATileRange,
+ReadGranularity, SchedulerConfig — including partition normalization and
+candidate generation — plus the placement / op value types) and the remaining
+value types: the pass-populated placement fields (deps / preOps / postOps /
+vgpr_tile_map[s]), Dep, SubIterKSlot, EmittedModule, and InlineModuleOp. The
+scheduling passes (place_LRs / place_GRs / build / populate_instructions),
 InstructionEmitter, and rocisa Module emission are NOT ported and remain pure
-Python.
+Python, so the pass-populated fields default to empty (no C++ pass fills them).
 
 The config cases below mirror those exercised by
 ``test_SubtileBasedLogicalScheduler`` and ``test_SubtileBasedSchedulerRef``.
@@ -226,6 +228,14 @@ def test_scheduler_config_parity(name):
     py = _build(ls, spec)
     cpp = _build(cppls, spec)
 
+    # Raw input specs are preserved verbatim (int stays int, list stays list)
+    # for parity with the Python dataclass fields.
+    def _norm_spec(v):
+        return list(v) if isinstance(v, (list, tuple)) else v
+
+    assert _norm_spec(cpp.partitionSizeM) == _norm_spec(py.partitionSizeM)
+    assert _norm_spec(cpp.partitionSizeN) == _norm_spec(py.partitionSizeN)
+
     assert list(cpp.partitionSizesM) == list(py.partitionSizesM)
     assert list(cpp.partitionSizesN) == list(py.partitionSizesN)
     assert cpp.numPartitionsM == py.numPartitionsM
@@ -386,6 +396,156 @@ def test_op_kind_parity():
     ]
     for py, cpp in pairs:
         assert cpp.kind == py.kind
+
+
+# ---------------------------------------------------------------------------
+# InlineModuleOp
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("label", ["inline", "preloop", "tail"])
+def test_inline_module_op_parity(label):
+    assert str(ls.InlineModuleOp(label=label)) == \
+        str(cppls.InlineModuleOp(label=label))
+    assert cppls.InlineModuleOp(label=label).kind == \
+        ls.InlineModuleOp(label=label).kind
+    assert cppls.InlineModuleOp(label=label).label == \
+        ls.InlineModuleOp(label=label).label
+
+
+def test_inline_module_op_default_label():
+    assert str(cppls.InlineModuleOp()) == str(ls.InlineModuleOp())
+    assert cppls.InlineModuleOp().label == ls.InlineModuleOp().label
+
+
+# ---------------------------------------------------------------------------
+# Placement constructors used by the value-type tests below
+# ---------------------------------------------------------------------------
+def _lr(mod, tensor="A", part=0):
+    return mod.LRPlacement(tensor, 0, mod.MFMATileRange(0, 1, 0, 1), 0, part)
+
+
+def _gr(mod, tensor="A", part=0):
+    return mod.GRPlacement(tensor, 0, mod.MFMATileRange(0, 1, 0, 1), 0, part)
+
+
+def _mfma(mod):
+    return mod.MFMAPlacement(0, mod.MFMATileRange(0, 1, 0, 1),
+                             mod.MFMATileRange(0, 1, 0, 1))
+
+
+# ---------------------------------------------------------------------------
+# Pass-populated placement fields: default empty + round-trip
+# ---------------------------------------------------------------------------
+def test_placement_pass_fields_default_empty():
+    for make in (_mfma, _lr, _gr):
+        cpp, py = make(cppls), make(ls)
+        assert list(cpp.deps) == list(py.deps) == []
+        assert list(cpp.preOps) == list(py.preOps) == []
+        assert list(cpp.postOps) == list(py.postOps) == []
+    assert dict(_mfma(cppls).vgpr_tile_maps) == \
+        dict(_mfma(ls).vgpr_tile_maps) == {}
+    assert list(_lr(cppls).vgpr_tile_map) == list(_lr(ls).vgpr_tile_map) == []
+    assert dict(cppls.MaskKOp(3).vgpr_tile_map) == \
+        dict(ls.MaskKOp(3).vgpr_tile_map) == {}
+
+
+def test_placement_pre_post_ops_roundtrip():
+    lr = _lr(cppls)
+    lr.preOps = [cppls.WaitGROp(cppls.WaitGRCounts(1, 0, 0, 0), False, True),
+                 cppls.SyncOp()]
+    lr.postOps = [cppls.LRIncOp("A")]
+    assert [str(o) for o in lr.preOps] == ["wait_gr(A=1)", "sync"]
+    assert [o.kind for o in lr.preOps] == ["wait_gr", "sync"]
+    assert [str(o) for o in lr.postOps] == ["lr_inc(A)"]
+
+
+def test_lr_vgpr_tile_map_roundtrip():
+    lr = _lr(cppls)
+    lr.vgpr_tile_map = [{0: 4, 1: 5}, {2: 6}]
+    assert [dict(d) for d in lr.vgpr_tile_map] == [{0: 4, 1: 5}, {2: 6}]
+
+
+def test_mfma_vgpr_tile_maps_roundtrip():
+    mfma = _mfma(cppls)
+    mfma.vgpr_tile_maps = {"A": [{0: 1}], "B": [{0: 2}, {1: 3}]}
+    got = {k: [dict(d) for d in v] for k, v in mfma.vgpr_tile_maps.items()}
+    assert got == {"A": [{0: 1}], "B": [{0: 2}, {1: 3}]}
+
+
+# ---------------------------------------------------------------------------
+# Dep
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("mt_offset", [0, -1, -2])
+@pytest.mark.parametrize("kind", ["lr", "gr"])
+def test_dep_parity(kind, mt_offset):
+    make = _lr if kind == "lr" else _gr
+    py = ls.Dep(make(ls, "B", 1), mt_offset)
+    cpp = cppls.Dep(make(cppls, "B", 1), mt_offset)
+    assert cpp.mt_offset == py.mt_offset == mt_offset
+    assert cpp.ref.kind == py.ref.kind == kind
+    assert cpp.ref.tensor == py.ref.tensor == "B"
+    assert cpp.ref.partition == py.ref.partition == 1
+
+
+def test_dep_default_mt_offset():
+    assert cppls.Dep(_lr(cppls)).mt_offset == ls.Dep(_lr(ls)).mt_offset == 0
+
+
+def test_placement_deps_roundtrip():
+    gr = _gr(cppls)
+    gr.deps = [cppls.Dep(_lr(cppls, "A"), -1)]
+    assert len(gr.deps) == 1
+    assert gr.deps[0].ref.kind == "lr"
+    assert gr.deps[0].ref.tensor == "A"
+    assert gr.deps[0].mt_offset == -1
+
+
+# ---------------------------------------------------------------------------
+# SubIterKSlot
+# ---------------------------------------------------------------------------
+def test_subiterk_slot_parity():
+    py, cpp = ls.SubIterKSlot(2), cppls.SubIterKSlot(2)
+    assert cpp.subIterK == py.subIterK == 2
+    assert cpp.mfma is None and py.mfma is None
+    assert list(cpp.lrs) == list(py.lrs) == []
+    assert list(cpp.grs) == list(py.grs) == []
+
+    cpp.mfma = _mfma(cppls)
+    cpp.lrs = [_lr(cppls, "A"), _lr(cppls, "B")]
+    cpp.grs = [_gr(cppls, "A")]
+    assert cpp.mfma.kind == "mfma"
+    assert [o.tensor for o in cpp.lrs] == ["A", "B"]
+    assert [o.tensor for o in cpp.grs] == ["A"]
+
+
+# ---------------------------------------------------------------------------
+# EmittedModule
+# ---------------------------------------------------------------------------
+def test_emitted_module_optype_parity():
+    sources = [
+        (_mfma(ls), _mfma(cppls), "mfma"),
+        (_lr(ls), _lr(cppls), "lr"),
+        (_gr(ls), _gr(cppls), "gr"),
+        (ls.WaitGROp(), cppls.WaitGROp(), "wait_gr"),
+        (ls.SyncOp(), cppls.SyncOp(), "sync"),
+        (ls.LRIncOp("A"), cppls.LRIncOp("A"), "lr_inc"),
+        (ls.InlineModuleOp(label="x"), cppls.InlineModuleOp(label="x"),
+         "inline"),
+    ]
+    for py_src, cpp_src, kind in sources:
+        py = ls.EmittedModule(moduleId=7, before=3, source=py_src)
+        cpp = cppls.EmittedModule(moduleId=7, before=3, source=cpp_src)
+        assert cpp.opType == py.opType == kind
+        assert cpp.moduleId == py.moduleId == 7
+        assert cpp.before == py.before == 3
+        assert cpp.source.kind == kind
+
+
+def test_emitted_module_empty_source():
+    py, cpp = ls.EmittedModule(), cppls.EmittedModule()
+    assert cpp.opType == py.opType == ""
+    assert cpp.moduleId == py.moduleId == -1
+    assert cpp.before is None and py.before is None
+    assert cpp.source is None
 
 
 # ---------------------------------------------------------------------------

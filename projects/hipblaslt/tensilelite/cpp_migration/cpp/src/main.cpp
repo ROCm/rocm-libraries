@@ -14,6 +14,7 @@
 // pure-math query methods here (opt-in via TENSILE_WRITER_CPP).
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/map.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
@@ -525,6 +526,12 @@ void bind_logical_scheduler(nb::module_& s) {
       .def_ro("lrSB", &SchedulerConfig::lrSB)
       .def_ro("grSA", &SchedulerConfig::grSA)
       .def_ro("grSB", &SchedulerConfig::grSB)
+      // Raw input partition specs (int or explicit per-partition list),
+      // preserved verbatim like the Python dataclass fields. post_init consumes
+      // them into the derived partitionSizes{M,N}; these stay readable for
+      // parity with the Python SchedulerConfig.
+      .def_ro("partitionSizeM", &SchedulerConfig::partitionSizeM)
+      .def_ro("partitionSizeN", &SchedulerConfig::partitionSizeN)
       .def_ro("pgr", &SchedulerConfig::pgr)
       .def_ro("plr", &SchedulerConfig::plr)
       .def_ro("offsetPartition", &SchedulerConfig::offsetPartition)
@@ -559,6 +566,11 @@ void bind_logical_scheduler(nb::module_& s) {
       .def_ro("subIterK", &MFMAPlacement::subIterK)
       .def_ro("tileA", &MFMAPlacement::tileA)
       .def_ro("tileB", &MFMAPlacement::tileB)
+      // Pass-populated fields (default empty; filled by the Python passes).
+      .def_rw("deps", &MFMAPlacement::deps)
+      .def_rw("preOps", &MFMAPlacement::preOps)
+      .def_rw("postOps", &MFMAPlacement::postOps)
+      .def_rw("vgpr_tile_maps", &MFMAPlacement::vgpr_tile_maps)
       .def_ro("kind", &MFMAPlacement::kind)
       .def("__str__", &MFMAPlacement::str);
 
@@ -573,6 +585,11 @@ void bind_logical_scheduler(nb::module_& s) {
       .def_ro("tiles", &LRPlacement::tiles)
       .def_ro("subIterK_slot", &LRPlacement::subIterK_slot)
       .def_ro("partition", &LRPlacement::partition)
+      // Pass-populated fields (default empty; filled by the Python passes).
+      .def_rw("deps", &LRPlacement::deps)
+      .def_rw("preOps", &LRPlacement::preOps)
+      .def_rw("postOps", &LRPlacement::postOps)
+      .def_rw("vgpr_tile_map", &LRPlacement::vgpr_tile_map)
       .def_ro("kind", &LRPlacement::kind)
       .def("__str__", &LRPlacement::str);
 
@@ -587,6 +604,10 @@ void bind_logical_scheduler(nb::module_& s) {
       .def_ro("tiles", &GRPlacement::tiles)
       .def_ro("subIterK_slot", &GRPlacement::subIterK_slot)
       .def_ro("partition", &GRPlacement::partition)
+      // Pass-populated fields (default empty; filled by the Python passes).
+      .def_rw("deps", &GRPlacement::deps)
+      .def_rw("preOps", &GRPlacement::preOps)
+      .def_rw("postOps", &GRPlacement::postOps)
       .def_ro("kind", &GRPlacement::kind)
       .def("__str__", &GRPlacement::str);
 
@@ -631,6 +652,7 @@ void bind_logical_scheduler(nb::module_& s) {
                       "subIterK group.")
       .def(nb::init<int>(), nb::arg("subIterK") = 0)
       .def_ro("subIterK", &MaskKOp::subIterK)
+      .def_rw("vgpr_tile_map", &MaskKOp::vgpr_tile_map)
       .def_ro("kind", &MaskKOp::kind)
       .def("__str__", &MaskKOp::str);
 
@@ -663,6 +685,46 @@ void bind_logical_scheduler(nb::module_& s) {
       .def_ro("kind", &SkipOp::kind)
       .def_prop_ro("tensor", &SkipOp::tensor)
       .def("__str__", &SkipOp::str);
+
+  nb::class_<InlineModuleOp>(
+      s, "InlineModuleOp",
+      "Inline a writer-built Module at this point in the schedule. The Python "
+      "`build` Callable is not modeled in C++; only label / kind / str() are "
+      "ported.")
+      .def(nb::init<std::string>(), nb::arg("label") = std::string("inline"))
+      .def_rw("label", &InlineModuleOp::label)
+      .def_ro("kind", &InlineModuleOp::kind)
+      .def("__str__", &InlineModuleOp::str);
+
+  // -- Dependency / slot / emitted-module value types ------------------
+  nb::class_<Dep>(s, "Dep",
+                  "Dependency on another placement (annotate_deps output). "
+                  "`ref` is a value copy of the referenced LR/GR placement.")
+      .def(nb::init<std::variant<LRPlacement, GRPlacement>, int>(),
+           nb::arg("ref"), nb::arg("mt_offset") = 0)
+      .def_rw("ref", &Dep::ref)
+      .def_rw("mt_offset", &Dep::mt_offset);
+
+  nb::class_<SubIterKSlot>(s, "SubIterKSlot",
+                           "All operations placed in one subIterK step.")
+      .def(nb::init<int>(), nb::arg("subIterK"))
+      .def_rw("subIterK", &SubIterKSlot::subIterK)
+      .def_rw("mfma", &SubIterKSlot::mfma)
+      .def_rw("lrs", &SubIterKSlot::lrs)
+      .def_rw("grs", &SubIterKSlot::grs);
+
+  nb::class_<EmittedModule>(
+      s, "EmittedModule",
+      "One emitted module with before-link for instruction scheduling. The "
+      "rocisa `instructions` list (filled during Python emission) is not "
+      "modeled here; `opType` derives from the source's kind.")
+      .def(nb::init<int, std::optional<int>, std::optional<Emittable>>(),
+           nb::arg("moduleId") = -1, nb::arg("before") = nb::none(),
+           nb::arg("source") = nb::none())
+      .def_rw("moduleId", &EmittedModule::moduleId)
+      .def_rw("before", &EmittedModule::before)
+      .def_rw("source", &EmittedModule::source)
+      .def_prop_ro("opType", &EmittedModule::opType);
 }
 
 }  // namespace

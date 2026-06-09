@@ -10,7 +10,7 @@
 // names below mirror the Python module so the two implementations can be
 // reasoned about side by side.
 //
-// SCOPE (this slice): the pure data/config layer only —
+// SCOPE: the pure data/config + value-type layer —
 //   Pass                         -> Pass
 //   fmt_mt                       -> fmt_mt
 //   MFMATileRange                -> MFMATileRange
@@ -18,17 +18,23 @@
 //   SchedulerConfig              -> SchedulerConfig (incl. partition
 //                                   normalization + candidate generation)
 //   MFMAPlacement / LRPlacement / GRPlacement / WaitGRCounts and the
-//   before-chain op value types (their identity fields + kind + str()).
+//   before-chain op value types (their identity fields + kind + str()),
+//   plus the remaining value types: the pass-populated list fields on
+//   placements (deps / preOps / postOps / vgpr_tile_map[s]), Dep,
+//   SubIterKSlot, EmittedModule, and InlineModuleOp.
 //
-// NOT ported here (remain Python; populated by the scheduling passes):
-//   place_LRs / place_GRs / annotate_deps / build / populate_instructions,
-//   InstructionEmitter dispatch, rocisa Module emission, and the
-//   pass-populated list fields (deps / preOps / postOps / vgpr_tile_maps),
-//   Dep / SubIterKSlot / EmittedModule / InlineModuleOp.
+// NOT ported here (remain Python): the scheduling passes themselves
+//   (place_LRs / place_GRs / annotate_deps / remove_* / build /
+//   populate_instructions), InstructionEmitter dispatch, rocisa Module
+//   emission, the EmittedModule `instructions` list (rocisa objects), and the
+//   InlineModuleOp `build` Callable. The pass-populated fields above default
+//   to empty: they are ported as structurally faithful value types, not filled
+//   by any C++ pass.
 
 #pragma once
 
 #include <algorithm>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -288,80 +294,15 @@ struct SchedulerConfig {
   }
 };
 
-// ── Schedule operation / placement value types ──────────────
+// ── Schedule operation / before-chain op value types ─────────
 //
-// Only the *identity* fields plus `kind` and `str()` are ported here. The
-// pass-populated list fields (deps / preOps / postOps / vgpr_tile_maps) live in
-// the unported scheduling passes and are deliberately omitted.
+// The op value types are defined before the placement types so the placements
+// can hold their pass-populated before-chains (preOps / postOps) by value.
+// Only the *identity* fields plus `kind` and `str()` are modeled.
 
 inline std::string ljust2(const std::string& s) {
   return s.size() >= 2 ? s : s + std::string(2 - s.size(), ' ');
 }
-
-// MFMA operation consuming data for one subIterK.
-struct MFMAPlacement {
-  int subIterK = 0;
-  MFMATileRange tileA;
-  MFMATileRange tileB;
-  std::string kind = "mfma";
-
-  MFMAPlacement() = default;
-  MFMAPlacement(int sk, MFMATileRange a, MFMATileRange b)
-      : subIterK(sk), tileA(std::move(a)), tileB(std::move(b)) {}
-
-  std::string str() const {
-    return "MFMAs (MT n, subIterK " + std::to_string(subIterK) + "  ) A : " +
-           tileA.fmt_tiles() + " , B : " + tileB.fmt_tiles();
-  }
-};
-
-// Local Read placement for one tensor in one subIterK slot.
-struct LRPlacement {
-  std::string tensor;     // 'A', 'B', 'SA', 'SB'
-  int mtIteration = 0;    // 0 = current MT, 1 = next MT
-  MFMATileRange tiles;
-  int subIterK_slot = 0;
-  int partition = 0;
-  std::string kind = "lr";
-
-  LRPlacement() = default;
-  LRPlacement(std::string t, int mt, MFMATileRange tr, int slot, int part = 0)
-      : tensor(std::move(t)),
-        mtIteration(mt),
-        tiles(std::move(tr)),
-        subIterK_slot(slot),
-        partition(part) {}
-
-  std::string str() const {
-    return "LR " + ljust2(tensor) + " (MT " + fmt_mt(mtIteration) +
-           ", subIterK " + tiles.fmt_k() + ") " + tiles.fmt_tiles();
-  }
-};
-
-// Global Read placement for one tensor in one subIterK slot.
-struct GRPlacement {
-  std::string tensor;     // 'A', 'B', 'SA', 'SB'
-  int mtIteration = 0;    // 0/1/2 MTs ahead
-  MFMATileRange tiles;
-  int subIterK_slot = 0;
-  int partition = 0;
-  std::string kind = "gr";
-
-  GRPlacement() = default;
-  GRPlacement(std::string t, int mt, MFMATileRange tr, int slot, int part = 0)
-      : tensor(std::move(t)),
-        mtIteration(mt),
-        tiles(std::move(tr)),
-        subIterK_slot(slot),
-        partition(part) {}
-
-  std::string str() const {
-    return "GR " + tensor + " (MT " + fmt_mt(mtIteration) + ", subIterK " +
-           tiles.fmt_k() + ") ids " + tiles.fmt_tiles();
-  }
-};
-
-// ── Dependency / before-chain value types ───────────────────
 
 // Per-tensor inflight load counts for the wait_gr preOp.
 struct WaitGRCounts {
@@ -426,6 +367,8 @@ struct SyncOp {
 // Zero A/B vgprs whose K-index >= remaining tail K for one subIterK group.
 struct MaskKOp {
   int subIterK = 0;
+  // {tileId: vgprTileId}; populated by the (Python) emit pass.
+  std::map<int, int> vgpr_tile_map;
   std::string kind = "mask_k";
 
   MaskKOp() = default;
@@ -479,6 +422,167 @@ struct SkipOp {
   }
 
   std::string str() const { return "skip(" + tensor() + ")"; }
+};
+
+// Inline a writer-built Module at this point in the schedule.
+//
+// The Python dataclass also carries a `build` Callable that the emit pass
+// invokes to produce a rocisa Module. That callback is Python/rocisa state and
+// cannot live in this Python-free header, so only the identity fields used for
+// `kind` / `str()` are ported here.
+struct InlineModuleOp {
+  std::string label = "inline";
+  std::string kind = "inline";
+
+  InlineModuleOp() = default;
+  explicit InlineModuleOp(std::string l) : label(std::move(l)) {}
+
+  std::string str() const { return "inline(" + label + ")"; }
+};
+
+// A typed op that can appear in a placement's before-chain (preOps / postOps).
+// Mirrors the Python `BaseOp` subclass hierarchy.
+using BeforeOp = std::variant<WaitGROp, WaitLROp, SyncOp, MaskKOp, LRIncOp,
+                              GRIncOp, SkipOp, InlineModuleOp>;
+
+// ── Placement value types ───────────────────────────────────
+//
+// The identity fields mirror the Python dataclasses. The pass-populated list
+// fields (deps / preOps / postOps / vgpr_tile_map[s]) default to empty: the
+// scheduling passes that fill them remain in Python, but the fields are ported
+// so the value types are structurally faithful and round-trip through bindings.
+
+struct Dep;  // defined below (references an LR/GR placement)
+
+// MFMA operation consuming data for one subIterK.
+struct MFMAPlacement {
+  int subIterK = 0;
+  MFMATileRange tileA;
+  MFMATileRange tileB;
+  std::vector<Dep> deps;          // populated by annotate_deps()
+  std::vector<BeforeOp> preOps;   // populated by remove_cross_deps()
+  std::vector<BeforeOp> postOps;  // populated by insert_gr_lr_inc()
+  // {tensor: [{groupIdx: vgprTileId}]} per unroll iter.
+  std::map<std::string, std::vector<std::map<int, int>>> vgpr_tile_maps;
+  std::string kind = "mfma";
+
+  MFMAPlacement() = default;
+  MFMAPlacement(int sk, MFMATileRange a, MFMATileRange b)
+      : subIterK(sk), tileA(std::move(a)), tileB(std::move(b)) {}
+
+  std::string str() const {
+    return "MFMAs (MT n, subIterK " + std::to_string(subIterK) + "  ) A : " +
+           tileA.fmt_tiles() + " , B : " + tileB.fmt_tiles();
+  }
+};
+
+// Local Read placement for one tensor in one subIterK slot.
+struct LRPlacement {
+  std::string tensor;     // 'A', 'B', 'SA', 'SB'
+  int mtIteration = 0;    // 0 = current MT, 1 = next MT
+  MFMATileRange tiles;
+  int subIterK_slot = 0;
+  int partition = 0;
+  std::vector<Dep> deps;          // populated by annotate_deps()
+  std::vector<BeforeOp> preOps;   // populated by remove_cross_deps()
+  std::vector<BeforeOp> postOps;  // populated by insert_gr_lr_inc()
+  // [{tileId: vgprTileId}] per unroll iter.
+  std::vector<std::map<int, int>> vgpr_tile_map;
+  std::string kind = "lr";
+
+  LRPlacement() = default;
+  LRPlacement(std::string t, int mt, MFMATileRange tr, int slot, int part = 0)
+      : tensor(std::move(t)),
+        mtIteration(mt),
+        tiles(std::move(tr)),
+        subIterK_slot(slot),
+        partition(part) {}
+
+  std::string str() const {
+    return "LR " + ljust2(tensor) + " (MT " + fmt_mt(mtIteration) +
+           ", subIterK " + tiles.fmt_k() + ") " + tiles.fmt_tiles();
+  }
+};
+
+// Global Read placement for one tensor in one subIterK slot.
+struct GRPlacement {
+  std::string tensor;     // 'A', 'B', 'SA', 'SB'
+  int mtIteration = 0;    // 0/1/2 MTs ahead
+  MFMATileRange tiles;
+  int subIterK_slot = 0;
+  int partition = 0;
+  std::vector<Dep> deps;          // populated by annotate_deps()
+  std::vector<BeforeOp> preOps;   // populated by remove_cross_deps()
+  std::vector<BeforeOp> postOps;  // populated by insert_gr_lr_inc()
+  std::string kind = "gr";
+
+  GRPlacement() = default;
+  GRPlacement(std::string t, int mt, MFMATileRange tr, int slot, int part = 0)
+      : tensor(std::move(t)),
+        mtIteration(mt),
+        tiles(std::move(tr)),
+        subIterK_slot(slot),
+        partition(part) {}
+
+  std::string str() const {
+    return "GR " + tensor + " (MT " + fmt_mt(mtIteration) + ", subIterK " +
+           tiles.fmt_k() + ") ids " + tiles.fmt_tiles();
+  }
+};
+
+// ── Dependency / slot / emitted-module value types ──────────
+
+// Dependency on another placement (annotate_deps output). `ref` is a value
+// copy of the referenced LR/GR placement; Python uses an identity reference,
+// the C++ value layer mirrors the data rather than Python object identity.
+struct Dep {
+  std::variant<LRPlacement, GRPlacement> ref;
+  int mt_offset = 0;  // 0 = same MT, -1 = prev MT, -2 = two MTs back, ...
+
+  Dep() = default;
+  Dep(std::variant<LRPlacement, GRPlacement> r, int off = 0)
+      : ref(std::move(r)), mt_offset(off) {}
+};
+
+// All operations placed in one subIterK step.
+struct SubIterKSlot {
+  int subIterK = 0;
+  std::optional<MFMAPlacement> mfma;
+  std::vector<LRPlacement> lrs;
+  std::vector<GRPlacement> grs;
+
+  SubIterKSlot() = default;
+  explicit SubIterKSlot(int sk) : subIterK(sk) {}
+};
+
+// Anything that can be the `source` of an EmittedModule (Python `Emittable`):
+// a placement or a before-chain op.
+using Emittable =
+    std::variant<MFMAPlacement, LRPlacement, GRPlacement, WaitGROp, WaitLROp,
+                 SyncOp, MaskKOp, LRIncOp, GRIncOp, SkipOp, InlineModuleOp>;
+
+inline std::string emittable_kind(const Emittable& e) {
+  return std::visit([](const auto& v) { return v.kind; }, e);
+}
+
+// One emitted module with before-link for instruction scheduling.
+//
+// `instructions` are rocisa objects filled during (Python) emission; they are
+// not modeled in this Python-free header. Only the structural fields and the
+// `opType` accessor are ported. Overlaps insched::ModuleRef by design.
+struct EmittedModule {
+  int moduleId = -1;
+  std::optional<int> before;  // moduleId that must complete before this module
+  std::optional<Emittable> source;
+
+  EmittedModule() = default;
+  EmittedModule(int id, std::optional<int> before_,
+                std::optional<Emittable> src)
+      : moduleId(id), before(std::move(before_)), source(std::move(src)) {}
+
+  std::string opType() const {
+    return source.has_value() ? emittable_kind(*source) : std::string();
+  }
 };
 
 }  // namespace tw::subtile::lsched

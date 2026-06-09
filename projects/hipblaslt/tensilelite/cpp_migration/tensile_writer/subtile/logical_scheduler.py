@@ -12,13 +12,21 @@ submodule. This slice ports only the *data / config* primitives of
 * ``MFMATileRange`` / ``ReadGranularity``
 * ``SchedulerConfig`` (incl. partition normalization + candidate generation)
 * placement value types (``MFMAPlacement`` / ``LRPlacement`` / ``GRPlacement``)
+  including their pass-populated fields (``deps`` / ``preOps`` / ``postOps`` /
+  ``vgpr_tile_map`` [s]), which default to empty
 * before-chain op value types (``WaitGRCounts`` / ``WaitGROp`` / ``WaitLROp`` /
-  ``SyncOp`` / ``MaskKOp`` / ``LRIncOp`` / ``GRIncOp`` / ``SkipOp``)
+  ``SyncOp`` / ``MaskKOp`` / ``LRIncOp`` / ``GRIncOp`` / ``SkipOp`` /
+  ``InlineModuleOp``)
+* dependency / slot / emitted-module value types (``Dep`` / ``SubIterKSlot`` /
+  ``EmittedModule``)
 
 The scheduling passes (place_LRs / place_GRs / annotate_deps / build /
 populate_instructions), InstructionEmitter dispatch, and rocisa Module emission
-are **not** ported here and remain pure Python. The names mirror the Python
-module so it can optionally delegate its pure helpers here.
+are **not** ported here and remain pure Python: the pass-populated fields above
+exist as faithful value types but are not filled by any C++ pass. The
+``InlineModuleOp.build`` Callable and ``EmittedModule.instructions`` (rocisa
+objects) are likewise Python-only. The names mirror the Python module so it can
+optionally delegate its pure helpers here.
 """
 
 from tensile_writer import _tensile_writer as _ext
@@ -48,6 +56,12 @@ MaskKOp = _ls.MaskKOp
 LRIncOp = _ls.LRIncOp
 GRIncOp = _ls.GRIncOp
 SkipOp = _ls.SkipOp
+InlineModuleOp = _ls.InlineModuleOp
+
+# Dependency / slot / emitted-module value types
+Dep = _ls.Dep
+SubIterKSlot = _ls.SubIterKSlot
+EmittedModule = _ls.EmittedModule
 
 
 def get_partition_candidates(tileInfoA, tileInfoB):
@@ -79,5 +93,9 @@ __all__ = [
     "LRIncOp",
     "GRIncOp",
     "SkipOp",
+    "InlineModuleOp",
+    "Dep",
+    "SubIterKSlot",
+    "EmittedModule",
     "get_partition_candidates",
 ]
