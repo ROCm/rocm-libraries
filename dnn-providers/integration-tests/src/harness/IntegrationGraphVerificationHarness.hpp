@@ -386,6 +386,8 @@ protected:
             return static_cast<float>(batchnorm::getToleranceBackward<T>());
         if(dynamic_cast<const fe::MatmulNode*>(&node) != nullptr)
             return static_cast<float>(matmul::getTolerance<T>());
+        if(dynamic_cast<const fe::SdpaFwdNode*>(&node) != nullptr)
+            return static_cast<float>(sdpa::getToleranceFwd<T>());
         if(dynamic_cast<const fe::ReductionNode*>(&node) != nullptr)
             return static_cast<float>(reduction::getTolerance<T>());
         if(dynamic_cast<const fe::RMSNormNode*>(&node) != nullptr)

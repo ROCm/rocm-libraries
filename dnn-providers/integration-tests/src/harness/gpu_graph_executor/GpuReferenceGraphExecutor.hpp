@@ -105,6 +105,9 @@ private:
         case NodeAttrs::ConvolutionFwdAttributes:
             return detail::GpuConvolutionFwdSignatureKey(node, tensorMap, node.compute_data_type());
 
+        case NodeAttrs::SdpaAttributes:
+            return detail::GpuSdpaFwdSignatureKey(node, tensorMap);
+
         // Node types with no GPU plan yet - throw descriptive error
         case NodeAttrs::BatchnormInferenceAttributes:
         case NodeAttrs::BatchnormInferenceAttributesVarianceExt:
@@ -116,7 +119,6 @@ private:
         case NodeAttrs::LayernormAttributes:
         case NodeAttrs::RMSNormAttributes:
         case NodeAttrs::RMSNormBackwardAttributes:
-        case NodeAttrs::SdpaAttributes:
         case NodeAttrs::SdpaBackwardAttributes:
         case NodeAttrs::BlockScaleDequantizeAttributes:
         case NodeAttrs::BlockScaleQuantizeAttributes:

@@ -1,0 +1,200 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn_gpu_ref/detail/HipRtcTypeName.hpp>
+
+#include <cmath>
+#include <cstdint>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace hipdnn_gpu_ref
+{
+
+namespace detail
+{
+
+template <typename QDataType,
+          typename KDataType,
+          typename VDataType,
+          typename ODataType,
+          typename ComputeDataType>
+inline std::vector<std::string> buildSdpaDefines()
+{
+    std::vector<std::string> defines;
+    defines.emplace_back(std::string("-DQ_TYPE=") + HipRtcTypeName<QDataType>::VALUE);
+    defines.emplace_back(std::string("-DK_TYPE=") + HipRtcTypeName<KDataType>::VALUE);
+    defines.emplace_back(std::string("-DV_TYPE=") + HipRtcTypeName<VDataType>::VALUE);
+    defines.emplace_back(std::string("-DO_TYPE=") + HipRtcTypeName<ODataType>::VALUE);
+    defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + HipRtcTypeName<ComputeDataType>::VALUE);
+    // Disable FMA contraction so the GPU reference matches the CPU reference
+    // (which accumulates with discrete multiply/add operations).
+    defines.emplace_back("-ffp-contract=off");
+    return defines;
+}
+
+} // namespace detail
+
+class GpuFpReferenceSdpa
+{
+public:
+    // --- Forward SDPA (fprop): O = softmax(Q @ K^T * scale + mask) @ V ---
+    //
+    // Mirrors the numerical contract of CpuFpReferenceSdpa::forward.
+    // Supports GQA/MQA: numHeads must be divisible by both numHeadsK and numHeadsV.
+    //
+    // Takes non-const references because deviceData() may trigger host→device sync.
+    // attnMask is non-const for the same reason (uploading it needs deviceData()).
+    template <class QDataType,
+              class KDataType = QDataType,
+              class VDataType = QDataType,
+              class ODataType = QDataType,
+              class ComputeDataType = float>
+    static void fprop(hipdnn_data_sdk::utilities::TensorBase<QDataType>& q,
+                      hipdnn_data_sdk::utilities::TensorBase<KDataType>& k,
+                      hipdnn_data_sdk::utilities::TensorBase<VDataType>& v,
+                      hipdnn_data_sdk::utilities::TensorBase<ODataType>& o,
+                      std::optional<float> attnScaleValue = std::nullopt,
+                      hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* attnMask = nullptr,
+                      int64_t leftBound = -1,
+                      int64_t rightBound = -1,
+                      bool topLeftAlignment = true)
+    {
+        validateInput(q.dims(), k.dims(), v.dims(), o.dims());
+
+        const auto batch = q.dims()[0];
+        const auto numHeads = q.dims()[1];
+        const auto seqQ = q.dims()[2];
+        const auto headDim = q.dims()[3];
+        const auto numHeadsK = k.dims()[1];
+        const auto numHeadsV = v.dims()[1];
+        const auto seqKv = k.dims()[2];
+        const auto headDimV = v.dims()[3];
+
+        const float scale = attnScaleValue.has_value()
+                                ? attnScaleValue.value()
+                                : (1.0F / std::sqrt(static_cast<float>(headDim)));
+
+        auto defines = detail::
+            buildSdpaDefines<QDataType, KDataType, VDataType, ODataType, ComputeDataType>();
+
+        const void* maskPtr = nullptr;
+        std::vector<int64_t> maskDims;
+        std::vector<int64_t> maskStrides;
+        if(attnMask != nullptr)
+        {
+            maskPtr = attnMask->memory().deviceData();
+            maskDims = attnMask->dims();
+            maskStrides = attnMask->strides();
+        }
+
+        launchSdpaFwd(q.memory().deviceData(),
+                      k.memory().deviceData(),
+                      v.memory().deviceData(),
+                      maskPtr,
+                      o.memory().deviceData(),
+                      q.strides(),
+                      k.strides(),
+                      v.strides(),
+                      o.strides(),
+                      maskStrides,
+                      maskDims,
+                      batch,
+                      numHeads,
+                      numHeadsK,
+                      numHeadsV,
+                      seqQ,
+                      seqKv,
+                      headDim,
+                      headDimV,
+                      scale,
+                      leftBound,
+                      rightBound,
+                      topLeftAlignment,
+                      defines);
+
+        o.memory().markDeviceModified();
+    }
+
+private:
+    // --- Validation ---
+    // No SDPA param validator exists; perform minimal shape checks only.
+
+    static void validateInput(const std::vector<int64_t>& qDims,
+                              const std::vector<int64_t>& kDims,
+                              const std::vector<int64_t>& vDims,
+                              const std::vector<int64_t>& oDims)
+    {
+        if(qDims.size() != 4 || kDims.size() != 4 || vDims.size() != 4 || oDims.size() != 4)
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: q/k/v/o must all be rank-4 tensors");
+        }
+
+        const auto batch = qDims[0];
+        const auto numHeads = qDims[1];
+        const auto seqQ = qDims[2];
+        const auto headDim = qDims[3];
+        const auto numHeadsK = kDims[1];
+        const auto numHeadsV = vDims[1];
+        const auto seqKv = kDims[2];
+        const auto headDimV = vDims[3];
+
+        if(kDims[0] != batch || vDims[0] != batch || oDims[0] != batch)
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: batch dimension mismatch");
+        }
+        if(kDims[3] != headDim)
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: Q head_dim != K head_dim");
+        }
+        if(vDims[2] != seqKv)
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: K and V sequence lengths must match");
+        }
+        if(numHeadsK == 0 || numHeadsV == 0 || numHeads % numHeadsK != 0
+           || numHeads % numHeadsV != 0)
+        {
+            throw std::invalid_argument(
+                "GpuFpReferenceSdpa: numHeads must be divisible by numHeadsK and numHeadsV");
+        }
+        if(oDims[1] != numHeads || oDims[2] != seqQ || oDims[3] != headDimV)
+        {
+            throw std::invalid_argument("GpuFpReferenceSdpa: output shape must be [B, H, Sq, Dv]");
+        }
+    }
+
+    // --- Kernel launcher (defined in GpuFpReferenceSdpa.cpp) ---
+
+    static void launchSdpaFwd(const void* qPtr,
+                              const void* kPtr,
+                              const void* vPtr,
+                              const void* maskPtr,
+                              void* oPtr,
+                              const std::vector<int64_t>& qTensorStrides,
+                              const std::vector<int64_t>& kTensorStrides,
+                              const std::vector<int64_t>& vTensorStrides,
+                              const std::vector<int64_t>& oTensorStrides,
+                              const std::vector<int64_t>& maskTensorStrides,
+                              const std::vector<int64_t>& maskDims,
+                              int64_t batch,
+                              int64_t numHeads,
+                              int64_t numHeadsK,
+                              int64_t numHeadsV,
+                              int64_t seqQ,
+                              int64_t seqKv,
+                              int64_t headDim,
+                              int64_t headDimV,
+                              float scale,
+                              int64_t leftBound,
+                              int64_t rightBound,
+                              bool topLeftAlignment,
+                              const std::vector<std::string>& defines);
+};
+
+} // namespace hipdnn_gpu_ref
