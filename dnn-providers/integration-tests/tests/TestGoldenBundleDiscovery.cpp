@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <optional>
+
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
 #include "harness/golden/GoldenBundleDiscovery.hpp"
 
@@ -19,24 +22,18 @@ namespace
 class GoldenBundleDiscoveryFixture : public ::testing::Test
 {
 protected:
+    std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
     std::filesystem::path _tempDir;
 
     void SetUp() override
     {
-        _tempDir = std::filesystem::temp_directory_path()
-                   / ("golden_discovery_test_" + std::to_string(::testing::UnitTest::GetInstance()
-                                                                    ->current_test_info()
-                                                                    ->line()));
-        std::filesystem::remove_all(_tempDir);
-        std::filesystem::create_directories(_tempDir);
-    }
-
-    void TearDown() override
-    {
-        if(!_tempDir.empty() && std::filesystem::exists(_tempDir))
-        {
-            std::filesystem::remove_all(_tempDir);
-        }
+        auto path = std::filesystem::temp_directory_path()
+                    / ("golden_discovery_test_" + std::to_string(::testing::UnitTest::GetInstance()
+                                                                     ->current_test_info()
+                                                                     ->line()));
+        std::filesystem::remove_all(path);
+        _scopedDir.emplace(path);
+        _tempDir = _scopedDir->path();
     }
 
     // Writes a minimal but schema-valid batchnorm-inference graph (nchw, fp32).

@@ -8,6 +8,7 @@
 
 #include <hipdnn_data_sdk/utilities/Visitor.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -189,15 +190,16 @@ TEST(TestGoldenVerificationGpuRef, SkipsWhenNoGpuPlanAvailable)
 // ---------------------------------------------------------------------------
 TEST(TestGoldenVerificationRouting, OnlyBatchNormDiscoveredConvAndLayerNormFallThrough)
 {
-    auto tempDir = std::filesystem::temp_directory_path() / "golden_routing_test";
-    std::filesystem::remove_all(tempDir);
+    auto path = std::filesystem::temp_directory_path() / "golden_routing_test";
+    std::filesystem::remove_all(path);
+    const hipdnn_test_sdk::utilities::ScopedDirectory tempDir(path);
 
-    writeMinimalBatchNormBundle(tempDir / "quick" / "Bn" / "q", "q");
-    writeMinimalBatchNormBundle(tempDir / "standard" / "Bn" / "s", "s");
-    writeMinimalBatchNormBundle(tempDir / "comprehensive" / "Bn" / "c", "c");
-    writeMinimalBatchNormBundle(tempDir / "full" / "Bn" / "f", "f");
+    writeMinimalBatchNormBundle(tempDir.path() / "quick" / "Bn" / "q", "q");
+    writeMinimalBatchNormBundle(tempDir.path() / "standard" / "Bn" / "s", "s");
+    writeMinimalBatchNormBundle(tempDir.path() / "comprehensive" / "Bn" / "c", "c");
+    writeMinimalBatchNormBundle(tempDir.path() / "full" / "Bn" / "f", "f");
 
-    const auto bundles = discoverGoldenBundles(tempDir);
+    const auto bundles = discoverGoldenBundles(tempDir.path());
     ASSERT_EQ(bundles.size(), 4u);
 
     for(const auto& b : bundles)
@@ -209,8 +211,6 @@ TEST(TestGoldenVerificationRouting, OnlyBatchNormDiscoveredConvAndLayerNormFallT
         EXPECT_EQ(b.suiteName.find("LayerNorm"), std::string::npos)
             << "LayerNorm should NOT appear — no layer norm golden bundles exist";
     }
-
-    std::filesystem::remove_all(tempDir);
 }
 
 // ---------------------------------------------------------------------------
@@ -223,15 +223,16 @@ TEST(TestGoldenVerificationRouting, OnlyBatchNormDiscoveredConvAndLayerNormFallT
 // ---------------------------------------------------------------------------
 TEST(TestGoldenVerificationRouting, ThreeRunnerSuffixesProduceDistinctSuites)
 {
-    auto tempDir = std::filesystem::temp_directory_path() / "golden_suffix_test";
-    std::filesystem::remove_all(tempDir);
+    auto path = std::filesystem::temp_directory_path() / "golden_suffix_test";
+    std::filesystem::remove_all(path);
+    const hipdnn_test_sdk::utilities::ScopedDirectory tempDir(path);
 
-    writeMinimalBatchNormBundle(tempDir / "quick" / "Bn" / "q", "q");
-    writeMinimalBatchNormBundle(tempDir / "standard" / "Bn" / "s", "s");
-    writeMinimalBatchNormBundle(tempDir / "comprehensive" / "Bn" / "c", "c");
-    writeMinimalBatchNormBundle(tempDir / "full" / "Bn" / "f", "f");
+    writeMinimalBatchNormBundle(tempDir.path() / "quick" / "Bn" / "q", "q");
+    writeMinimalBatchNormBundle(tempDir.path() / "standard" / "Bn" / "s", "s");
+    writeMinimalBatchNormBundle(tempDir.path() / "comprehensive" / "Bn" / "c", "c");
+    writeMinimalBatchNormBundle(tempDir.path() / "full" / "Bn" / "f", "f");
 
-    const auto bundles = discoverGoldenBundles(tempDir);
+    const auto bundles = discoverGoldenBundles(tempDir.path());
     ASSERT_FALSE(bundles.empty());
 
     const auto& bundle = bundles.front();
@@ -247,8 +248,6 @@ TEST(TestGoldenVerificationRouting, ThreeRunnerSuffixesProduceDistinctSuites)
     EXPECT_NE(cpuSuite.find("CpuRef"), std::string::npos);
     EXPECT_NE(gpuSuite.find("GpuRef"), std::string::npos);
     EXPECT_NE(engineSuite.find("Engine"), std::string::npos);
-
-    std::filesystem::remove_all(tempDir);
 }
 
 // NOLINTEND(readability-identifier-naming)
