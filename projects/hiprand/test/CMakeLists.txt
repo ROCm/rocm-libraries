@@ -22,6 +22,27 @@
 
 # Tests
 
+# YAML-driven CTest test categorisation for the *installed* tree only.
+# The shared helper apply_ctest_category_labels(yaml, install_test_file)
+# scans the install-tree CTestTestfile.cmake fragment we hand-roll
+# below for `add_test()` lines and appends explicit
+# set_tests_properties() lines so `ctest -L <tier>` works against the
+# install tree. Build-tree tests are intentionally not labelled here
+# (mirrors the rocWMMA approach).
+set(_HIPRAND_TEST_CATEGORIES_YAML "${CMAKE_SOURCE_DIR}/test_categories.yaml")
+set(_HIPRAND_SHARED_CTEST          "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+if(EXISTS "${_HIPRAND_SHARED_CTEST}" AND EXISTS "${_HIPRAND_TEST_CATEGORIES_YAML}")
+    include("${_HIPRAND_SHARED_CTEST}")
+    message(STATUS "hipRAND: YAML-based CTest categorization enabled (install tree only)")
+else()
+    if(NOT EXISTS "${_HIPRAND_SHARED_CTEST}")
+        message(STATUS "hipRAND: shared/ctest not found at ${_HIPRAND_SHARED_CTEST}; skipping CTest categories")
+    endif()
+    if(NOT EXISTS "${_HIPRAND_TEST_CATEGORIES_YAML}")
+        message(STATUS "hipRAND: ${_HIPRAND_TEST_CATEGORIES_YAML} not found; skipping CTest categories")
+    endif()
+endif()
+
 set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report")
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
 file(WRITE "${INSTALL_TEST_FILE}"
@@ -175,6 +196,22 @@ endif()
 
 # Checks for simple linkage problems
 add_subdirectory(linkage)
+
+# Bake YAML-driven category labels into the install-tree
+# CTestTestfile.cmake fragment so `ctest --test-dir
+# $THEROCK_BIN_DIR/hipRAND -L <tier>` works against the install tree.
+# Passing the install file as the 2nd argument tells the shared helper
+# to scan it for the test names already written via add_test() above
+# and emit explicit set_tests_properties(... LABELS ...) lines (the
+# only form ctest's script interpreter exposes through --print-labels
+# / -L). Must run AFTER add_subdirectory(fortran)/add_subdirectory(linkage)
+# so all add_test() lines have been appended to INSTALL_TEST_FILE.
+if(COMMAND apply_ctest_category_labels)
+    apply_ctest_category_labels(
+        "${_HIPRAND_TEST_CATEGORIES_YAML}"
+        "${INSTALL_TEST_FILE}"
+    )
+endif()
 
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"

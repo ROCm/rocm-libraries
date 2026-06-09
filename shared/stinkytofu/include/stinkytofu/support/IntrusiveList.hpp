@@ -111,7 +111,7 @@ struct IntrusiveListParentStorage {
 };
 template <>
 struct IntrusiveListParentStorage<void> {
-    void* getParent() const {
+    void* getParent() const {  // NOLINT(readability-convert-member-functions-to-static)
         return nullptr;
     }
     void setParent(void*) {}
@@ -135,9 +135,10 @@ class IntrusiveListNode {
     IntrusiveListBase<T, Parent>* parent_list_;
 
    public:
+    // NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
     IntrusiveListNode() : prev_(nullptr), next_(nullptr), parent_list_(nullptr) {}
 
-    // Disable copy constructor and assignment
+    // NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
     IntrusiveListNode(const IntrusiveListNode&) = delete;
     IntrusiveListNode& operator=(const IntrusiveListNode&) = delete;
 

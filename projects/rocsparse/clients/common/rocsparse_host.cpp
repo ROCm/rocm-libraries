@@ -5741,17 +5741,19 @@ void host_bsric0(rocsparse_direction               direction,
                         {
                             if(direction == rocsparse_direction_row)
                             {
-                                local_sum = std::fma(bsr_val[block_dim * block_dim * l
-                                                             + block_dim * local_row_j + m],
-                                                     rocsparse_conj(bsr_val[idx]),
-                                                     local_sum);
+                                local_sum = std::fma(
+                                    bsr_val[idx],
+                                    rocsparse_conj(bsr_val[block_dim * block_dim * l
+                                                           + block_dim * local_row_j + m]),
+                                    local_sum);
                             }
                             else
                             {
-                                local_sum = std::fma(bsr_val[block_dim * block_dim * l
-                                                             + block_dim * m + local_row_j],
-                                                     rocsparse_conj(bsr_val[idx]),
-                                                     local_sum);
+                                local_sum = std::fma(
+                                    bsr_val[idx],
+                                    rocsparse_conj(bsr_val[block_dim * block_dim * l + block_dim * m
+                                                           + local_row_j]),
+                                    local_sum);
                             }
                         }
                     }

@@ -98,6 +98,85 @@ inline MUBUFScope parseMUBUFScope(std::string_view scope) {
     return MUBUFScope::SCOPE_NONE;
 }
 
+// Temporal Hint encoding for gfx1250 memory ops. Mirrors rocisa's TemporalHint
+// enum; values match the ISA TH[2:0] field. LOAD and STORE share encodings but
+// use different assembled names for TH3 and TH7.
+enum class TemporalHint : int8_t {
+    TH_NONE = -1,
+    TH_RT = 0,
+    TH_NT = 1,
+    TH_HT = 2,
+    TH_LU = 3,
+    TH_WB = 3,
+    TH_NT_RT = 4,
+    TH_RT_NT = 5,
+    TH_NT_HT = 6,
+    TH_RESERVED = 7,
+    TH_NT_WB = 7,
+};
+
+inline bool hasTemporalHint(TemporalHint th) {
+    return th != TemporalHint::TH_NONE;
+}
+
+// Emits the "TH_LOAD_*" / "TH_STORE_*" mnemonic. Matches rocisa::toString(TemporalHint,
+// bool). Caller picks isStore because LOAD and STORE share TH[2:0] encodings but differ
+// in the assembled name for TH3 and TH7.
+inline std::string toString(TemporalHint th, bool isStore = false) {
+    const std::string prefix = isStore ? "TH_STORE_" : "TH_LOAD_";
+    switch (th) {
+        case TemporalHint::TH_RT:
+            return prefix + "RT";
+        case TemporalHint::TH_NT:
+            return prefix + "NT";
+        case TemporalHint::TH_HT:
+            return prefix + "HT";
+        case TemporalHint::TH_LU:
+            return isStore ? prefix + "WB" : prefix + "LU";
+        case TemporalHint::TH_NT_RT:
+            return prefix + "NT_RT";
+        case TemporalHint::TH_RT_NT:
+            return prefix + "RT_NT";
+        case TemporalHint::TH_NT_HT:
+            return prefix + "NT_HT";
+        case TemporalHint::TH_RESERVED:
+            return isStore ? prefix + "NT_WB" : prefix + "RESERVED";
+        default:
+            return "";
+    }
+}
+
+// Inverse of toString(): assembly token -> enum. TH3/TH7 use load-only (LU, RESERVED)
+// or store-only (WB, NT_WB) suffixes matching the isStore branch in toString().
+inline TemporalHint parseTemporalHint(std::string_view th) {
+    auto parseSuffix = [](std::string_view suffix, bool isStore) -> TemporalHint {
+        if (suffix == "RT") return TemporalHint::TH_RT;
+        if (suffix == "NT") return TemporalHint::TH_NT;
+        if (suffix == "HT") return TemporalHint::TH_HT;
+        if (suffix == "NT_RT") return TemporalHint::TH_NT_RT;
+        if (suffix == "RT_NT") return TemporalHint::TH_RT_NT;
+        if (suffix == "NT_HT") return TemporalHint::TH_NT_HT;
+        if (isStore) {
+            if (suffix == "WB") return TemporalHint::TH_WB;
+            if (suffix == "NT_WB") return TemporalHint::TH_NT_WB;
+        } else {
+            if (suffix == "LU") return TemporalHint::TH_LU;
+            if (suffix == "RESERVED") return TemporalHint::TH_RESERVED;
+        }
+        return TemporalHint::TH_NONE;
+    };
+
+    constexpr std::string_view loadPrefix = "TH_LOAD_";
+    constexpr std::string_view storePrefix = "TH_STORE_";
+    if (th.size() >= loadPrefix.size() && th.compare(0, loadPrefix.size(), loadPrefix) == 0) {
+        return parseSuffix(th.substr(loadPrefix.size()), /*isStore=*/false);
+    }
+    if (th.size() >= storePrefix.size() && th.compare(0, storePrefix.size(), storePrefix) == 0) {
+        return parseSuffix(th.substr(storePrefix.size()), /*isStore=*/true);
+    }
+    return TemporalHint::TH_NONE;
+}
+
 // 9-bit DPP permutation control selector (matches the hardware dpp_ctrl field).
 // Three encoding shapes:
 //   singleton     — the named value IS the encoding   (e.g. ROW_MIRROR = 0x140)
@@ -171,6 +250,17 @@ enum class DppCtrl : uint16_t {
     // clang-format on
 };
 
+// All asm-form key names for DPP `dpp_ctrl` (no `:N` suffix). Keep in sync with DppCtrl above.
+// clang-format off
+inline constexpr std::array<std::string_view, 13> kDppCtrlKeys{
+    "quad_perm",
+    "row_shl",    "row_shr",    "row_ror",
+    "wave_shl",   "wave_shr",   "wave_rol",   "wave_ror",
+    "row_bcast",  "row_share",  "row_xmask",
+    "row_mirror", "row_half_mirror",
+};
+// clang-format on
+
 // Classify a DppCtrl value into a human-readable assembly string.
 // E.g. DppCtrl(0x113) -> "row_shr:3", DppCtrl(0x140) -> "row_mirror".
 STINKYTOFU_EXPORT std::string dppCtrlToAsmStr(DppCtrl ctrl);
@@ -184,6 +274,7 @@ struct Modifier {
         FLAT,
         GLOBAL,
         MUBUF,
+        CACHE_SCOPE,
         SMEM,
         SDWA,
         DPP,
@@ -237,7 +328,8 @@ struct TypedModifier : public Modifier {
     }
 
    protected:
-    explicit TypedModifier() : Modifier(Derived::Type) {}
+    explicit TypedModifier()  // NOLINT(bugprone-crtp-constructor-accessibility)
+        : Modifier(Derived::Type) {}
 };
 
 struct DSModifiers : public TypedModifier<DSModifiers> {
@@ -281,12 +373,20 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
     uint32_t hasSC0Modifier : 1;
 };
 
+// Modifiers for global_* memory ops. Carries the immediate offset (offset:N)
+// plus the temporal hint and cache scope used by global_prefetch_b8 (gfx1250
+// gl2-prefetch). The hint/scope mirror rocisa's GLOBALModifiers defaults
+// (TH_NONE / SCOPE_NONE are not printed); offset-only ops leave them default.
 struct GLOBALModifiers : public TypedModifier<GLOBALModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::GLOBAL;
 
-    GLOBALModifiers(int offset = 0) : TypedModifier<GLOBALModifiers>(), offset(offset) {}
+    GLOBALModifiers(int offset = 0, TemporalHint th = TemporalHint::TH_NONE,
+                    MUBUFScope scope = MUBUFScope::SCOPE_NONE)
+        : TypedModifier<GLOBALModifiers>(), offset(offset), th(th), scope(scope) {}
 
     int offset;
+    TemporalHint th;
+    MUBUFScope scope;
 };
 
 struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
@@ -319,6 +419,19 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     uint32_t hasMUBUFConst : 1;
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
+    MUBUFScope scope;
+};
+
+// Carries just the cache scope token for SOPP-format memory fences such as
+// global_wb / global_inv on gfx1250+. These instructions are not buffer ops
+// and do not need offen/glc/slc/lds/etc., so they cannot reuse MUBUFModifiers
+// without coupling to fields that may diverge in future MUBUF refactors.
+struct CacheScopeModifiers : public TypedModifier<CacheScopeModifiers> {
+    static constexpr Modifier::Type Type = Modifier::Type::CACHE_SCOPE;
+
+    CacheScopeModifiers(MUBUFScope scope = MUBUFScope::SCOPE_NONE)
+        : TypedModifier<CacheScopeModifiers>(), scope(scope) {}
+
     MUBUFScope scope;
 };
 
@@ -735,17 +848,7 @@ struct SWaitAluData : public TypedModifier<SWaitAluData> {
         uint16_t va_sdst : 3;   // Bits 11-9
         uint16_t va_vdst : 4;   // Bits 15-12
 
-        HwValue& operator=(HwValue const& other) {
-            sa_sdst = other.sa_sdst;
-            va_vcc = other.va_vcc;
-            vm_vsrc = other.vm_vsrc;
-            reserved = other.reserved;
-            hold_cnt = other.hold_cnt;
-            va_ssrc = other.va_ssrc;
-            va_sdst = other.va_sdst;
-            va_vdst = other.va_vdst;
-            return *this;
-        }
+        HwValue& operator=(HwValue const& other) = default;
     };
 
     // Field enumeration

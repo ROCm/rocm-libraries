@@ -62,8 +62,6 @@ namespace TensileLite
                 SubclassMap rv(
                     {Base::template Pair<Predicates::Contraction::Free0SizeMultiple>(),
                      Base::template Pair<Predicates::Contraction::Free1SizeMultiple>(),
-                     Base::template Pair<Predicates::Contraction::Free1SizeDivByValueLowbitGT1>(),
-                     Base::template Pair<Predicates::Contraction::KRingShiftTailWrapOnly>(),
                      Base::template Pair<Predicates::Contraction::BatchSizeMultiple>(),
                      Base::template Pair<Predicates::Contraction::BatchSizeEqual>(),
                      Base::template Pair<Predicates::Contraction::SynchronizerSizeCheck>(),
@@ -136,7 +134,8 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::MXBlockA>(),
                      Base::template Pair<Predicates::Contraction::MXBlockB>(),
                      Base::template Pair<Predicates::Contraction::DataTypeMXSA>(),
-                     Base::template Pair<Predicates::Contraction::DataTypeMXSB>()});
+                     Base::template Pair<Predicates::Contraction::DataTypeMXSB>(),
+                     Base::template Pair<Predicates::Contraction::ClusterDimCheck>()});
 
                 auto gmap = Generic::GetSubclasses();
                 rv.insert(gmap.begin(), gmap.end());
@@ -163,18 +162,6 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::Free1SizeMultiple, IO>
             : public AutoMappingTraits<Predicates::Contraction::Free1SizeMultiple, IO>
-        {
-        };
-
-        template <typename IO>
-        struct MappingTraits<Predicates::Contraction::Free1SizeDivByValueLowbitGT1, IO>
-            : public AutoMappingTraits<Predicates::Contraction::Free1SizeDivByValueLowbitGT1, IO>
-        {
-        };
-
-        template <typename IO>
-        struct MappingTraits<Predicates::Contraction::KRingShiftTailWrapOnly, IO>
-            : public AutoMappingTraits<Predicates::Contraction::KRingShiftTailWrapOnly, IO>
         {
         };
 
@@ -604,6 +591,11 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::DataTypeMXSB, IO>
             : public AutoMappingTraits<Predicates::Contraction::DataTypeMXSB, IO>
+        {
+        };
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::ClusterDimCheck, IO>
+            : public AutoMappingTraits<Predicates::Contraction::ClusterDimCheck, IO>
         {
         };
     } // namespace Serialization
