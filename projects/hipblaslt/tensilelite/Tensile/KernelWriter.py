@@ -5736,9 +5736,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       originalNta = tensorParametersA["NonTemporal"]
       originalNtb = tensorParametersB["NonTemporal"]
 
-      # gfx1250: NonTemporal only selects cache SCOPE; the actual non-temporal
-      # access comes from the TemporalHint (TH_NT) field, read per-load from
-      # kernel["TemporalHint{A,B}"]. Vary it per body alongside NonTemporal.
       hasTH = self.states.asmCaps.get("HasTHModifier", False)
       if hasTH:
         originalThA = kernel["TemporalHintA"]
@@ -5808,7 +5805,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         tensorParametersA["NonTemporal"] = nta
         tensorParametersB["NonTemporal"] = ntb
         if hasTH:
-          # TH_NT(1) for the NT body, TH_RT(0) otherwise.
           kernel["TemporalHintA"] = 1 if nta else 0
           kernel["TemporalHintB"] = 1 if ntb else 0
         _kernelBody(pack, packPre, nta, ntb)

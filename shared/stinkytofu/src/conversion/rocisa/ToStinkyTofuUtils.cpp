@@ -130,6 +130,17 @@ stinkytofu::TemporalHint convertTemporalHint(rocisa::TemporalHint th) {
     }
 }
 
+stinkytofu::NonVolatile convertNonVolatile(rocisa::NonVolatile nv) {
+    switch (nv) {
+        case rocisa::NonVolatile::NV_NONE:
+            return stinkytofu::NonVolatile::NV_NONE;
+        case rocisa::NonVolatile::NV:
+            return stinkytofu::NonVolatile::NV;
+        default:
+            return stinkytofu::NonVolatile::NV_NONE;
+    }
+}
+
 stinkytofu::MUBUFModifiers convertMUBUFModifiers(const rocisa::MUBUFModifiers& rocMod,
                                                  const std::map<std::string, int>& asmCaps) {
     bool hasMUBUFConst = asmCaps.count("HasMUBUFConst") && asmCaps.at("HasMUBUFConst");
@@ -137,9 +148,10 @@ stinkytofu::MUBUFModifiers convertMUBUFModifiers(const rocisa::MUBUFModifiers& r
     bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
     stinkytofu::MUBUFScope scope = convertMUBUFScope(rocMod.scope);
     stinkytofu::TemporalHint th = convertTemporalHint(rocMod.th);
+    stinkytofu::NonVolatile nv = convertNonVolatile(rocMod.nv);
     return stinkytofu::MUBUFModifiers(rocMod.offen, rocMod.offset12, rocMod.glc, rocMod.slc,
                                       rocMod.nt, rocMod.lds, rocMod.isStore, hasMUBUFConst,
-                                      hasGLCModifier, hasSC0Modifier, scope, th);
+                                      hasGLCModifier, hasSC0Modifier, scope, th, nv);
 }
 
 /// Returns true when vaddr is the MUBUF "off" keyword.
@@ -1095,11 +1107,7 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     };
 
     // Auto-detect the loopWithPrefetch region: from the first global read or
-    // tensor load item up to and including the LAST Module("loopBody").
-    // AdaptiveGemmNTAB emits the main loop multiple times (one Module("loopBody")
-    // per NT body); the region must span all of them, not just the first, so the
-    // whole multi-body main loop is scheduled. For non-AGNTAB kernels there is
-    // exactly one "loopBody", so this matches the previous single-body behavior.
+    // tensor load item up to and including Module("loopBody").
     int pgrStartIdx = -1;
     int loopBodyIdx = -1;
     for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
@@ -1109,7 +1117,7 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         }
         if (const auto* subMod = dynamic_cast<const rocisa::Module*>(item.get())) {
             if (subMod->name == "loopBody") {
-                loopBodyIdx = i;  // keep updating: take the last (AGNTAB: N bodies)
+                loopBodyIdx = i;  // keep updating loop bodies
             }
         }
     }
@@ -1176,7 +1184,7 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
 
     // Traverse top-level items, injecting the loopWithPrefetch group name
     // for items in the detected prefetch region [pgrStartIdx, loopBodyIdx]
-    // (spans all AGNTAB main-loop bodies when present).
+    // (spans all main-loop bodies when present).
     for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
         const auto& item = module.itemList[i];
         const bool inPGR = hasPGR && (i >= pgrStartIdx && i <= loopBodyIdx);
