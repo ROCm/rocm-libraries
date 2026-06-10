@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -55,19 +55,6 @@ static std::string transform_type_name(const fft_transform_type transform_type)
     }
 }
 
-static std::string fft_io_name(const fft_io io)
-{
-    switch(io)
-    {
-    case fft_io_in:
-        return "fft_io_in";
-    case fft_io_out:
-        return "fft_io_out";
-    default:
-        return "Invalid fft_io value";
-    }
-}
-
 static std::string fft_result_placement_name(const fft_result_placement placement)
 {
     switch(placement)
@@ -81,7 +68,7 @@ static std::string fft_result_placement_name(const fft_result_placement placemen
     }
 }
 
-static std::string format_name(const int format)
+static std::string format_name(const hipfftXtSubFormat format)
 {
     switch(format)
     {
@@ -102,24 +89,6 @@ static std::string format_name(const int format)
     }
 }
 
-static std::string hipffttype_to_name(const hipfftType txtype)
-{
-    switch(txtype)
-    {
-    case HIPFFT_R2C:
-        return "HIPFFT_R2C";
-    case HIPFFT_C2R:
-        return "HIPFFT_C2R";
-    case HIPFFT_C2C:
-        return "HIPFFT_C2C";
-    case HIPFFT_D2Z:
-        return "HIPFFT_D2Z";
-    case HIPFFT_Z2D:
-        return "HIPFFT_Z2D";
-    case HIPFFT_Z2Z:
-        return "HIPFFT_Z2Z";
-    }
-}
 
 static std::string directionname(const int direction)
 {
@@ -426,7 +395,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
     }
 
     // Host buff printer
-    auto printhostbuf = [](const char*                hostbuf,
+    auto printhostbuf = []<typename bufT>(const bufT*                hostbuf,
                            const bool                 isreal,
                            const std::vector<size_t>& batchlengths,
                            const std::vector<size_t>& hostdiststrides) -> void {
@@ -462,6 +431,8 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
                     }
                     std::cout << "\n";
                 }
+                if(ibatch < batchlengths[0] - 1)
+                    std::cout << "\n";
             }
             break;
         case 4:
@@ -498,6 +469,8 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
                     }
                     std::cout << "\n";
                 }
+                if(ibatch < batchlengths[0] - 1)
+                    std::cout << "\n";
             }
             break;
         default:
@@ -519,7 +492,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
 
     // Labmda for initializing the host buffer.  We do not care about Hermitian symmetry in 2D/3D,
     // as we are just testing data movement, not transforms.
-    auto fillhostbuf = [](std::vector<char>&         hostbuf,
+    auto fillhostbuf = []<typename bufT>(std::vector<bufT>&         hostbuf,
                           const bool                 isreal,
                           const std::vector<size_t>  batchlengths,
                           const std::vector<size_t>& hostdiststrides) -> void {
@@ -653,7 +626,8 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
 
     const size_t      nelem   = hostdiststrides[0] * hostdatabatchlengths[0];
     const size_t      valsize = isreal ? sizeof(double) : sizeof(std::complex<double>);
-    std::vector<char> hostbuf(valsize * nelem);
+    const size_t max_align_t_count = (valsize * nelem + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t);
+    std::vector<std::max_align_t> hostbuf(max_align_t_count);
     fillhostbuf(hostbuf, isreal, hostdatabatchlengths, hostdiststrides);
 
     if(verbose > 4)
@@ -673,7 +647,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
         std::cout << "finished hipfftXtMemcpy\n";
 
     // A host copy of the individual distributed GPU buffers:
-    std::vector<std::vector<char>> hostbufparts(gpus.size());
+    std::vector<std::vector<std::max_align_t>> hostbufparts(gpus.size());
 
     // Copy the individual buffers to the host:
     for(const auto igpu : gpus)

@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -34,7 +34,7 @@
 
 // An array printer with bounds on the number of outputs to show
 template <typename Tvalue>
-void printarraylimit(const std::vector<Tvalue>& vals,
+inline void printarraylimit(const std::vector<Tvalue>& vals,
                      const size_t               Nx,
                      const size_t               Ny,
                      const size_t               printlimit)
@@ -102,10 +102,8 @@ inline void sneakyc2c(std::vector<std::complex<Tfloat>>& cinput,
         throw std::runtime_error("hipfftPlan2d failed");
     if constexpr(std::is_same_v<Tfloat, float>)
         hipfft_rt = hipfftExecC2C(plan, x, x, -direction);
-    else if constexpr(std::is_same_v<Tfloat, double>)
-        hipfft_rt = hipfftExecZ2Z(plan, x, x, -direction);
     else
-        throw std::runtime_error("Unsupported precision");
+        hipfft_rt = hipfftExecZ2Z(plan, x, x, -direction);
 
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftExec failed");
