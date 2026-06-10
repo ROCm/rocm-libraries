@@ -451,6 +451,13 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # --- MFMA MX (wave64), frag lengths only -----------------------------
     "mfma_f32_16x16x128_fp4": _FragInfo(16, 16, 4, 64),
     "mfma_f32_16x16x96_fp6": _FragInfo(12, 12, 4, 64),
+    # Unscaled fp8 K=128 hero atom (lowers through the f8f6f4 scale-MFMA
+    # intrinsic; there is no dense plain fp8 K=128). A/B are 32 fp8 bytes per
+    # lane (<8 x i32> at the intrinsic boundary), accumulator <4 x float> --
+    # same fragment widths as the f8f6f4 sibling below. Registered so the op_id
+    # (already in ir._MMA_C_FRAG_LEN) resolves to correct fragment lengths if
+    # added to the JSON catalog, instead of the zero-length _frag_info fallback.
+    "mfma_f32_16x16x128_fp8": _FragInfo(32, 32, 4, 64),
     "mfma_scale_f32_16x16x128_f8f6f4": _FragInfo(32, 32, 4, 64),
     # --- WMMA f16 / bf16 (wave32, RDNA) ----------------------------------
     "wmma_f32_16x16x16_f16": _FragInfo(
