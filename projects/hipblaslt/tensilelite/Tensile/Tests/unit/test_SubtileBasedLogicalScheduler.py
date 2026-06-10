@@ -1665,6 +1665,39 @@ class TestRemoveCrossDeps:
         assert c.A == 4, (
             f"expected same-partition s0 anchor for LR A: A={c.A} B={c.B}")
 
+    def test_256x256_2part_multi_gr_sk1_wrap_drain(self):
+        """LR B @ pi=1 k=1 with two sk=0 B GRs must fully drain (not B=7)."""
+        kernel = create_kernel(256, 256, fp4=True, depthU=256, miWaveGroup=[2, 2])
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
+        scaleTiA = makeTileInfo('MXSA', kernel)
+        scaleTiB = makeTileInfo('MXSB', kernel)
+        grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        cfg = SchedulerConfig(
+            numMFMATilesM=tiA.localMMATileGrid[0],
+            numMFMATilesN=tiB.localMMATileGrid[0],
+            numSubIterK=tiA.localMMATileGrid[1],
+            lrA=ReadGranularity(mn=1, k=1),
+            lrB=ReadGranularity(mn=1, k=1),
+            grA=grA, grB=grB,
+            lrSA=ReadGranularity(mn=scaleTiA.lrSubtileShape[0],
+                                  k=scaleTiA.lrSubtileShape[1]),
+            lrSB=ReadGranularity(mn=scaleTiB.lrSubtileShape[0],
+                                  k=scaleTiB.lrSubtileShape[1]),
+            grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0],
+                                 k=scaleTiA.localMMATileGrid[1]),
+            grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0],
+                                 k=scaleTiB.localMMATileGrid[1]),
+            partitionSizeM=8, partitionSizeN=4, pgr=1,
+        )
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        em = next(e for e in sched._emitted[1][1] if e.opType == 'wait_gr')
+        c = em.source.wait_gr_counts
+        assert c.A == 0 and c.B == 0, (
+            f"expected full drain for multi-GR sk=1 wrap: A={c.A} B={c.B}")
+
 class TestInsertGrLrInc:
 
     def test_1x1_DU256(self):

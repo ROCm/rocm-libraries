@@ -1909,6 +1909,12 @@ class LogicalScheduler:
                 and dep_flat is not None
                 and consumer_flat == dep_flat + 1
                 and dep_flat % numK == 0):
+            slot0 = self._partitions[consumer_pi][0]
+            same_tensor_grs = [gr for gr in slot0.grs if gr.tensor == tensor]
+            # Multiple tail GRs for one tensor in sk=0 over-count inflight
+            # loads in the one-step walk; assembly needs a full drain instead.
+            if len(same_tensor_grs) > 1:
+                return WaitGRCounts()
             if (numP > 1 and consumer_pi == 0):
                 return WaitGRCounts()
             if (numP == 1 and self.config.numMFMATilesM > 2
@@ -1933,10 +1939,11 @@ class LogicalScheduler:
             for gr in sorted_grs:
                 if is_final and (total_steps == 1 and consumer_slot == 1
                                  and numP > 1):
-                    # sk=1 wait_gr: inflight = A/B GR loads in same-partition sk=0
-                    # since that slot's wait_gr (matches assembly buffer_load window).
+                    # sk=1 wait_gr: inflight = same-tensor A/B GR loads in the
+                    # same-partition sk=0 slot (matches assembly buffer_load window).
+                    # Other-tensor GRs in that slot are unrelated to this wrap-LR.
                     # SA/SB must drain before scale wrap-LR ds_reads.
-                    if gr.tensor in ('A', 'B'):
+                    if gr.tensor == tensor and gr.tensor in ('A', 'B'):
                         atoms = self._count_gr_atoms(gr)
                         cur = getattr(counts, gr.tensor)
                         setattr(counts, gr.tensor, cur + atoms)
