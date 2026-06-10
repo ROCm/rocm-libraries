@@ -639,6 +639,40 @@ class TestCollectLogicalIntegration(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
+class TestDevelopInstructionExports(unittest.TestCase):
+    """Develop-added rocisa instructions must resolve (dummy phase).
+
+    Tensile imports these by name during module load; missing exports
+    fail before any kernel is generated. Real ``toString`` / logicalIR
+    parity is deferred to the instruction vertical-slice batch.
+    """
+
+    _NAMES = (
+        "BufferLoadB16",
+        "BufferLoadU16",
+        "GlobalInv",
+        "GlobalPrefetchB8",
+        "GlobalWb",
+        "SAddU64",
+        "SAtomicInc",
+        "SBfeU32",
+        "SMemAtomicIncInstruction",
+        "SWaitXCnt",
+        "VAddNCU64",
+        "_SAddU64",
+        "_VAddNCU64",
+    )
+
+    def test_all_develop_exports_importable(self):
+        import rocisa_stinkytofu_adaptor.instruction as inst_mod
+
+        for name in self._NAMES:
+            with self.subTest(name=name):
+                cls = getattr(inst_mod, name)
+                obj = cls()
+                self.assertIn("DummyShim", repr(obj))
+
+
 # ===========================================================================
 # End-to-end coverage -- see ``tests/test_emission_consistency.py``.
 # ===========================================================================
