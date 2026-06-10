@@ -332,9 +332,8 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
         return false;
     }
 
-    if(cfg.swizzle_type == SwizzleType::XOR && !xor_config_valid(cfg, par))
+    if(!swizzle_config_valid(cfg, par))
     {
-        LogInfo("Invalid XOR swizzle config: spatial dimension too small for effective swizzle");
         return false;
     }
 

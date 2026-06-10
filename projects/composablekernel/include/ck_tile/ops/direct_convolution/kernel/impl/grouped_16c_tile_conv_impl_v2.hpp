@@ -105,12 +105,8 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
         return false;
     if((par.groups % cfg.waves_per_wg) != 0)
         return false;
-    // XOR swizzle constraint: BLOCK_Q must be a multiple of BLOCK_C8 for
-    // multi-tile spatial decomposition. BLOCK_C8 = waves_per_wg * 2.
-    // BLOCK_Q = 16 is divisible by BLOCK_C8 only when waves_per_wg divides 8
-    // (i.e., waves_per_wg ∈ {1,2,4,8}). For other values, XOR is only valid
-    // when the output fits in a single spatial tile.
-    if(cfg.swizzle_type == SwizzleType::XOR && !xor_config_valid(cfg, par))
+    
+    if(!swizzle_config_valid(cfg, par))
         return false;
 
     const bool padding_needed = par.channels_per_group() != 16 || par.filters_per_group() != 16;

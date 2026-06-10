@@ -153,7 +153,7 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
     if((par.groups % cfg.waves_per_wg) != 0)
         return false;
 
-    if(cfg.swizzle_type == SwizzleType::XOR && !direct_conv::xor_config_valid(cfg, par))
+    if(!direct_conv::swizzle_config_valid(cfg, par))
         return false;
 
     const bool padding_needed = par.channels_per_group() != 8 || par.filters_per_group() != 8;

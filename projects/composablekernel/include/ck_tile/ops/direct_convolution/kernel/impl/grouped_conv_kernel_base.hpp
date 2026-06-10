@@ -25,6 +25,7 @@
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_compute_loop.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
+#include "ck_tile/ops/direct_convolution/utils/logging.hpp"
 #include "ck_tile/ops/direct_convolution/utils/launch_params.hpp"
 #include "ck_tile/ops/direct_convolution/utils/conv_params.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
@@ -393,9 +394,44 @@ LaunchParams get_launch_params_impl(const Config& cfg, const Conv2dParams& par)
 template <typename Config>
 bool xor_config_valid(const Config& cfg, const Conv2dParams& par)
 {
+    // XOR swizzle constraint: BLOCK_Q must be a multiple of BLOCK_C8 for
+    // multi-tile spatial decomposition. BLOCK_C8 = waves_per_wg * 2.
+    // BLOCK_Q = 16 is divisible by BLOCK_C8 only when waves_per_wg divides 8
+    // (i.e., waves_per_wg ∈ {1,2,4,8}). For other values, XOR is only valid
+    // when the output fits in a single spatial tile.
     const int block_c8 = cfg.block_c() / 8;
     const int out_q    = (par.direction == Direction::Dgrad) ? par.w : par.q;
-    return (cfg.block_q() % block_c8 == 0) || (out_q <= cfg.block_q());
+    const bool valid = (cfg.block_q() % block_c8 == 0) || (out_q <= cfg.block_q());
+
+    if (!valid)
+    {
+        LogInfo("Invalid XOR swizzle config: spatial dimension too small for effective swizzle");
+    }
+
+    return valid;
+}
+
+template <typename Config>
+bool cyclic_shift_config_valid(const Config& cfg, const Conv2dParams& par)
+{
+    // TODO: We need a validity check for the cyclic-shift swizzle.
+    return true;
+}
+
+template <typename Config>
+bool swizzle_config_valid(const Config& cfg, const Conv2dParams& par)
+{
+    switch (cfg.swizzle_type)
+    {    
+    case SwizzleType::None:
+        return true;
+    case SwizzleType::XOR:
+        return xor_config_valid(cfg, par);
+    case SwizzleType::CyclicShift:
+        return cyclic_shift_config_valid(cfg, par);
+    default:
+            throw std::runtime_error("Unrecognized swizzle type");
+    }
 }
 
 } // namespace ck_tile::direct_conv

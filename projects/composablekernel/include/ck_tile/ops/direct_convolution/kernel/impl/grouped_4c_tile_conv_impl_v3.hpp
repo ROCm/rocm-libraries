@@ -128,7 +128,7 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
     const int out_q = (par.direction == Direction::Dgrad) ? par.w : par.q;
     if(out_q < cfg.block_q() && cfg.waves_q4 > 1)
         return false;
-    if(cfg.swizzle_type == SwizzleType::XOR && !xor_config_valid(cfg, par))
+    if(!swizzle_config_valid(cfg, par))
         return false;
 
     const bool padding_needed = par.channels_per_group() != 4 || par.filters_per_group() != 4;
