@@ -43,6 +43,10 @@ class GemmKernelBuilder:
         datatype,
         layout,
         config_json=None,
+        max_instances=None,
+        seed=None,
+        tier=None,
+        manifest_path=None,
     ):
         self.kernel_name_prefix = kernel_name_prefix
         self.working_path = Path(working_path)
@@ -50,6 +54,10 @@ class GemmKernelBuilder:
         self.datatype = datatype
         self.layout = layout
         self.config_json = config_json
+        self.max_instances = max_instances
+        self.seed = seed
+        self.tier = tier
+        self.manifest_path = manifest_path
 
         # Create working directory if it doesn't exist
         self.working_path.mkdir(parents=True, exist_ok=True)
@@ -58,6 +66,74 @@ class GemmKernelBuilder:
         if config_json and os.path.exists(config_json):
             with open(config_json, "r") as f:
                 self.config = json.load(f)
+
+    def _apply_sampling(self, kernel_list):
+        """Apply RFC Sobol+LHS+maximin sampling. Returns sampled subset."""
+        if self.max_instances is None or len(kernel_list) <= self.max_instances:
+            return kernel_list
+
+        import sys
+
+        sampling_parent = os.path.join(os.path.dirname(__file__), "..", "..")
+        if sampling_parent not in sys.path:
+            sys.path.insert(0, sampling_parent)
+
+        from sampling.sampler import sample_feasible_set
+        from sampling.seed import make_seed
+        from sampling.feasible_set import GEMM_AXES
+
+        effective_seed = make_seed(
+            self.seed, self.gpu_target, self.datatype, self.layout
+        )
+
+        flat_items = []
+        for k in kernel_list:
+            flat = dict(k["tile_config"])
+            pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = k[
+                "trait_combo"
+            ]
+            flat.update(
+                {
+                    "pipeline": pipeline,
+                    "epilogue": epilogue,
+                    "scheduler": scheduler,
+                    "pad_m": pad_m,
+                    "pad_n": pad_n,
+                    "pad_k": pad_k,
+                    "persistent": persistent,
+                }
+            )
+            flat_items.append(flat)
+
+        selected, method, selected_indices = sample_feasible_set(
+            flat_items,
+            self.max_instances,
+            effective_seed,
+            GEMM_AXES,
+        )
+
+        kernel_list = [kernel_list[i] for i in selected_indices]
+
+        if self.manifest_path:
+            from sampling.manifest import write_manifest
+
+            write_manifest(
+                selected,
+                self.manifest_path,
+                self.kernel_name_prefix,
+                self.datatype,
+                self.layout,
+                self.gpu_target,
+                effective_seed,
+                self.tier or "daily",
+                method,
+            )
+
+        print(
+            f"Sampled {len(kernel_list)} from feasible set "
+            f"(budget={self.max_instances}, seed={effective_seed}, method={method})"
+        )
+        return kernel_list
 
     def _list_kernels(self):
         """Write kernel list to file for CMake to read (with comprehensive validation)"""
@@ -78,6 +154,21 @@ class GemmKernelBuilder:
                     persistent,
                 ) = trait_combo
 
+                # Skip if this tile config is not valid for this specific pipeline
+                if not self._validate_tile_config(
+                    tile_config["tile_m"],
+                    tile_config["tile_n"],
+                    tile_config["tile_k"],
+                    tile_config["warp_m"],
+                    tile_config["warp_n"],
+                    tile_config["warp_k"],
+                    tile_config["warp_tile_m"],
+                    tile_config["warp_tile_n"],
+                    tile_config["warp_tile_k"],
+                    pipeline,
+                ):
+                    continue
+
                 # Create kernel name with proper boolean capitalization
                 kernel_name = f"{self.kernel_name_prefix}_{self.datatype}_{self.layout}_{pipeline}_{epilogue}_{scheduler}_{str(pad_m).capitalize()}_{str(pad_n).capitalize()}_{str(pad_k).capitalize()}_{str(persistent).capitalize()}"
 
@@ -95,6 +186,9 @@ class GemmKernelBuilder:
                         "trait_combo": trait_combo,
                     }
                 )
+
+        # Apply RFC-compliant sampling (Sobol + LHS + maximin)
+        kernel_list = self._apply_sampling(kernel_list)
 
         # Write kernel count
         with open(
@@ -161,15 +255,12 @@ class GemmKernelBuilder:
         warp_tile_k_values = tile_config.get("warp_tile_k").get("values")
 
         # Generate all combinations
-        default_pipeline = ""
-        if self.kernel_name_prefix == "gemm_universal":
-            default_pipeline = "compv4"
-        elif self.kernel_name_prefix == "gemm_multi_d":
-            default_pipeline = "compv4"
-        elif self.kernel_name_prefix == "gemm_preshuffle":
-            default_pipeline = "preshufflev2"
-        elif self.kernel_name_prefix == "grouped_gemm":
-            default_pipeline = "compv4"
+        pipelines = self.config["trait_config"].get("pipeline", {}).get("values", [])
+        if not pipelines:
+            if self.kernel_name_prefix == "gemm_preshuffle":
+                pipelines = ["preshufflev2"]
+            else:
+                pipelines = ["compv4"]
 
         configs = []
         for tile_m in tile_m_values:
@@ -181,18 +272,21 @@ class GemmKernelBuilder:
                                 for warp_tile_m in warp_tile_m_values:
                                     for warp_tile_n in warp_tile_n_values:
                                         for warp_tile_k in warp_tile_k_values:
-                                            # Validate configuration
-                                            if self._validate_tile_config(
-                                                tile_m,
-                                                tile_n,
-                                                tile_k,
-                                                warp_m,
-                                                warp_n,
-                                                warp_k,
-                                                warp_tile_m,
-                                                warp_tile_n,
-                                                warp_tile_k,
-                                                default_pipeline,
+                                            # Accept tile if valid for any pipeline
+                                            if any(
+                                                self._validate_tile_config(
+                                                    tile_m,
+                                                    tile_n,
+                                                    tile_k,
+                                                    warp_m,
+                                                    warp_n,
+                                                    warp_k,
+                                                    warp_tile_m,
+                                                    warp_tile_n,
+                                                    warp_tile_k,
+                                                    pipeline,
+                                                )
+                                                for pipeline in pipelines
                                             ):
                                                 configs.append(
                                                     {

@@ -101,7 +101,7 @@ struct ActivTestCase
         {
             if(i > 0)
             {
-                result += "+";
+                result += '+';
             }
             result += tags[i];
         }

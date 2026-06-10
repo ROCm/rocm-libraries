@@ -16,13 +16,13 @@ SdpaFwdPlan::SdpaFwdPlan(HipModuleGuard kernel, SdpaFwdParams params)
 {
 }
 
-size_t SdpaFwdPlan::getWorkspaceSize(const HipKernelHandle& /*handle*/) const
+size_t SdpaFwdPlan::getWorkspaceSize(const Handle& /*handle*/) const
 {
     // Forward-only kernel requires no workspace (uses 64KB LDS internally)
     return 0;
 }
 
-void SdpaFwdPlan::execute(const HipKernelHandle& handle,
+void SdpaFwdPlan::execute(const Handle& handle,
                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                           uint32_t numDeviceBuffers,
                           void* /*workspace*/) const
@@ -129,14 +129,14 @@ void SdpaFwdPlan::execute(const HipKernelHandle& handle,
     // From AITER: gdx = (S_q + ts_qo - 1) / ts_qo, where ts_qo = 256
     unsigned int gridDimX = (_params.seqLenQ + _params.tileSizeQo - 1) / _params.tileSizeQo;
     unsigned int gridDimY = _params.numHeadsQ;
-    unsigned int gridDimZ = _params.batchSize;
+    const unsigned int gridDimZ = _params.batchSize;
 
     if(_params.headDimQk == 192 && _params.headDimV == 128 && _params.archString == "gfx942")
     {
         std::swap(gridDimX, gridDimY);
     }
 
-    unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
+    const unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
 
     launchKernel("fwd",
                  _kernel.function(),

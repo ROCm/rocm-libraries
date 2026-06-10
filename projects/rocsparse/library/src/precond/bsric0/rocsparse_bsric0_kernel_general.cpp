@@ -191,7 +191,7 @@ namespace rocsparse
                                     }
 
                                     // If a match has been found, do linear combination
-                                    local_sum = rocsparse::fma(vp, rocsparse::conj(vj), local_sum);
+                                    local_sum = rocsparse::fma(vj, rocsparse::conj(vp), local_sum);
                                 }
                             }
                         }
@@ -279,7 +279,7 @@ namespace rocsparse
                             }
 
                             // If a match has been found, do linear combination
-                            local_sum = rocsparse::fma(vk, rocsparse::conj(vj), local_sum);
+                            local_sum = rocsparse::fma(vj, rocsparse::conj(vk), local_sum);
                         }
                     }
 
@@ -301,7 +301,7 @@ namespace rocsparse
                         }
 
                         // If a match has been found, do linear combination
-                        local_sum = rocsparse::fma(vk, rocsparse::conj(vj), local_sum);
+                        local_sum = rocsparse::fma(vj, rocsparse::conj(vk), local_sum);
                     }
 
                     val     = (val - local_sum) / diag_val;
