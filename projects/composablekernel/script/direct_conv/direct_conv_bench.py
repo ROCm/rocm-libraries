@@ -248,7 +248,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     def add_shared(p: argparse.ArgumentParser, *, bin_required: bool) -> None:
         p.add_argument("--bin-path", required=bin_required,
-                       default=None if bin_required else here.parent / "build-gfx950" / "bin",
+                       default=None if bin_required else here.parent.parent / "build-gfx950" / "bin",
                        type=Path,
                        help="Directory containing the ckProfiler executable.")
         p.add_argument("--cases", default=default_cases, type=Path,

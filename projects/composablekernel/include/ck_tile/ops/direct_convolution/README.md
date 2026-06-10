@@ -161,9 +161,9 @@ ninja -j32 ckProfiler
 
 If you have also the implicit GEMM instances enabled, use more threads (64 or 128).
 
-## Performance testing
+## Performance and regression testing
 
-There is a [python CLI](../../../../script/direct_conv_bench.py) that runs a set of fwd/bwd data [cases](../../../../script/direct_conv_cases.txt).
+There is a [python CLI](../../../../script/direct_conv/direct_conv_bench.py) that runs a set of fwd/bwd data [cases](../../../../script/direct_conv/direct_conv_cases.txt).
 It has three subcommands:
 
 - `run` — run every case and print a text summary (smoke / correctness).
@@ -176,8 +176,8 @@ This can be used to verify that all instances produce correct results as well as
 When the coverage of the CK Tile direct convs is expanded, more cases should be added.
 
 ```
-python3 script/direct_conv_bench.py run     --bin-path <build>/bin
-python3 script/direct_conv_bench.py regress --bin-path <build>/bin
+python3 script/direct_conv/direct_conv_bench.py run     --bin-path <build>/bin
+python3 script/direct_conv/direct_conv_bench.py regress --bin-path <build>/bin
 ```
 
 For running the performance script, use the Dispatcher codegen build (`CK_TILE_DISPATCHER=ON`).
