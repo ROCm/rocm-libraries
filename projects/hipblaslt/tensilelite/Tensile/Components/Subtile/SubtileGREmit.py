@@ -655,12 +655,11 @@ def _grComputeAllOffsets(module, writer, tileInfo, colId, rowId, rowOffset):
 # Subroutine to generate GR offset calculation code
 #
 def graTileAssignment(writer, kernel, useSwizzling=True):
-  # Optional C++ delegation: the row-major (TLU0) BF16 offset-assignment math
-  # is computed by the C++ ABTileInfoQuery plan; the rocisa emission stays
-  # here. FP8 / FP4 / TLU1 stay on the legacy inline Python path (the default
-  # build never enters the C++ path, so its asm is byte-identical to before).
+  # The ported row-major (TLU0) BF16 offset-assignment math is computed by the
+  # C++ ABTileInfoQuery plan unconditionally; the rocisa emission stays here.
+  # FP8 / FP4 / TLU1 remain unported and use the native Python legacy path.
   tileInfoA = writer.states.a.tileInfo
-  if tileInfoA._useCppOffsetAssign():
+  if tileInfoA._isPortedB16TLU0OffsetAssign():
     return _graTileAssignment_cpp(writer, kernel, useSwizzling)
   return _graTileAssignment_legacy(writer, kernel, useSwizzling)
 

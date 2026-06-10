@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 import math
-import os
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -99,22 +98,12 @@ from .SubtileGeometry import (
 # C++, and the MX scale / C/D geometries keep their pure-Python out-of-scope
 # paths.
 #
-# A single narrowly-scoped path is still opt-in via ``TENSILE_WRITER_CPP``
-# (``_USE_CPP``): the GR/LR offset-assignment plans (graTileAssignment /
-# lraTileAssignment, B16/TLU0 only). The query layer and the F8F6F4 instType
-# selection no longer consult that switch.
+# The GR/LR offset-assignment plans (graTileAssignment / lraTileAssignment) are
+# also C++-only for the ported row-major BF16 (B16/TLU0) AB path: there is no
+# env switch and no Python scalar-math twin for that case. FP8 / FP4 / TLU1 and
+# the native (non-subtile) paths stay on the Python legacy emit as explicitly
+# unported behavior.
 ################################################################################
-
-def _resolve_cpp_optin():
-  """Return True when TENSILE_WRITER_CPP opts into the still-optional layers.
-
-  The query layer and the F8F6F4 instType selection are unconditionally C++;
-  this flag only gates the GR/LR offset-assignment plans below.
-  """
-  flag = os.environ.get("TENSILE_WRITER_CPP", "").strip().lower()
-  return flag not in ("", "0", "false", "no", "off")
-
-_USE_CPP = _resolve_cpp_optin()
 
 # The query + emit-leaf layers are C++-only (no Python fallback): import the
 # compiled submodules at module load, mirroring SubtileGeometry's hard import.
@@ -714,23 +703,21 @@ class TileInfo:
     """Plan for emitSingleDsRead: DS offset, register stride, per-read map."""
     return self._cppQuery().singleDsReadPlan(sId0, sId1, subIterK, numRegs)
 
-  # --- GR/LR offset-assignment math (opt-in C++; B16/TLU0) ---
+  # --- GR/LR offset-assignment math (C++-only for the ported B16/TLU0 case) ---
   # The scalar offset-assignment math for graTileAssignment / lraTileAssignment
-  # can be computed by the C++ ABTileInfoQuery. There is no Python plan twin:
-  # the plan-driven emit is only entered when the offset-assignment opt-in is
-  # active (TENSILE_WRITER_CPP) and the legacy inline path stays byte-identical
-  # for the default (Python) build.
+  # is computed by the C++ ABTileInfoQuery for the ported row-major BF16
+  # (B16/TLU0) AB path. There is no Python scalar-math twin and no env switch
+  # for that case. FP8 / FP4 / TLU1 remain unported and use the Python legacy
+  # emit; the predicate below selects which path applies.
 
-  def _useCppOffsetAssign(self) -> bool:
-    """True when the C++ GR/LR offset-assignment plan should drive emission.
+  def _isPortedB16TLU0OffsetAssign(self) -> bool:
+    """True for the ported row-major BF16 (B16/TLU0) AB offset-assignment path.
 
-    Offset assignment stays opt-in via ``TENSILE_WRITER_CPP`` (``_USE_CPP``)
-    and is restricted to the row-major (TLU0) BF16 (bpe == 2) AB path the C++
-    plan covers. FP8 (bpe == 1, distinct swizzle), FP4, and the TLU1
-    column-major path stay on the native Python emit.
+    This case always uses the C++ GR/LR offset-assignment scalar plans; it is
+    restricted to the row-major (TLU0) BF16 (bpe == 2) AB geometry the C++ plan
+    covers. FP8 (bpe == 1, distinct swizzle), FP4, and the TLU1 column-major
+    path are explicitly unported and stay on the native Python legacy emit.
     """
-    if not _USE_CPP:
-      return False
     if not isinstance(self.geometry, ABTilePair):
       return False
     if self.bpe != 2:
@@ -738,13 +725,13 @@ class TileInfo:
     return self.gr is not None and not self.gr.config.tlu
 
   def grOffsetAssignPlan(self, writer):
-    """C++ GR offset-assignment scalar plan for this tensor (B16/TLU0)."""
+    """C++ GR offset-assignment scalar plan for this tensor (ported B16/TLU0)."""
     ldsRowBankSize = (writer.states.archCaps["LDSBankCount"]
                       * writer.states.archCaps["LDSBankWidth"])
     return self._cppQuery().grOffsetAssignPlan(ldsRowBankSize)
 
   def lrOffsetAssignPlan(self, writer, kernel):
-    """C++ LR offset-assignment scalar plan for this tensor (B16/TLU0)."""
+    """C++ LR offset-assignment scalar plan for this tensor (ported B16/TLU0)."""
     ldsRowBankSize = (writer.states.archCaps["LDSBankCount"]
                       * writer.states.archCaps["LDSBankWidth"])
     mWavesM = kernel["MIWaveGroup"][0]

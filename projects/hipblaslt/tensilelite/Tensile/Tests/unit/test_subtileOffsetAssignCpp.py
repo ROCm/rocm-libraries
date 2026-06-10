@@ -2,20 +2,24 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Parity tests for the optional C++ (nanobind) subtile GR/LR *offset
-assignment* path (B16 / TLU0).
+"""Regression tests for the C++ (nanobind) subtile GR/LR *offset assignment*
+path, now C++-only for the ported BF16 row-major (B16 / TLU0) case.
 
 ``SubtileGREmit.graTileAssignment`` and ``SubtileLREmit.lraTileAssignment``
 derive the offset-assignment scalar math (block/row/partition sizes, advance
 and rotation strides, the subtile soffset stride) before emitting the rocisa
-offset-calculation instructions. That math is ported to the C++
-``ABTileInfoQuery.grOffsetAssignPlan`` / ``lrOffsetAssignPlan``; the rocisa
+offset-calculation instructions. For the ported B16/TLU0 path that math is
+computed unconditionally by the C++ ``ABTileInfoQuery.grOffsetAssignPlan`` /
+``lrOffsetAssignPlan`` (no env switch, no Python scalar-math twin); the rocisa
 emission stays in Python.
 
-These tests assert that, for the BF16 row-major (TLU0) path, the C++-delegated
-emission is **byte-identical** to the native Python (legacy) emission. They are
-pure-string (no GPU runtime / hip dependency): rocisa is pinned to gfx950 so the
-emitted assembly is deterministic regardless of the host GPU.
+The ported-path tests assert that the C++-driven emission is **byte-identical**
+to the retained native Python ``_legacy`` reference emitter for the BF16
+row-major (TLU0) configs. The unported cases (FP8 / FP4 / TLU1, and the native
+non-subtile paths) are explicitly out of scope for this slice: they stay on the
+Python legacy emit and are documented separately below. They are pure-string
+(no GPU runtime / hip dependency): rocisa is pinned to gfx950 so the emitted
+assembly is deterministic regardless of the host GPU.
 
 GPU functional validation (Tensile/Tests/unit/test_graTileAssignment.py and
 test_lraTileAssignment.py) requires gfx950 hardware and is gated separately.
@@ -43,12 +47,11 @@ cppti = pytest.importorskip("tensile_writer.subtile.tile_info")
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
 
-from Tensile.Components.Subtile import Kernel as krn
 from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
-from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment
-from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment
-
-import contextlib
+from Tensile.Components.Subtile.SubtileGREmit import (
+    graTileAssignment, _graTileAssignment_legacy)
+from Tensile.Components.Subtile.SubtileLREmit import (
+    lraTileAssignment, _lraTileAssignment_legacy)
 
 WAVESIZE = 64
 
@@ -68,22 +71,6 @@ def _init_rocisa_gfx950():
 @pytest.fixture(scope="module", autouse=True)
 def _rocisa_once():
     _init_rocisa_gfx950()
-
-
-@contextlib.contextmanager
-def cpp_delegation():
-    """Temporarily enable the C++ tile_info delegation.
-
-    The geometry layer is always C++; this flips ``Kernel._USE_CPP`` so the
-    TileInfo query layer (which the offset-assignment plans reuse) routes
-    through ``ABTileInfoQuery``.
-    """
-    saved_use = krn._USE_CPP
-    krn._USE_CPP = True
-    try:
-        yield
-    finally:
-        krn._USE_CPP = saved_use
 
 
 def _mock_dtype(num_bytes=2):
@@ -182,36 +169,52 @@ B16_CONFIGS = [
 
 @pytest.mark.parametrize("mt_a,mt_b,depth_u", B16_CONFIGS,
                          ids=lambda c: c if isinstance(c, str) else None)
-def test_gra_tile_assignment_cpp_matches_python(mt_a, mt_b, depth_u):
-    writer, kernel, _, _ = _build_writer(mt_a, mt_b, depth_u)
-    asm_py = str(graTileAssignment(writer, kernel, useSwizzling=True))
-    with cpp_delegation():
-        asm_cpp = str(graTileAssignment(writer, kernel, useSwizzling=True))
-    assert asm_py == asm_cpp, (
+def test_gra_tile_assignment_b16_cpp_matches_legacy(mt_a, mt_b, depth_u):
+    """B16/TLU0 GR offset assignment is C++-driven unconditionally; the emitted
+    asm must stay byte-identical to the retained native Python legacy emitter."""
+    writer, kernel, tiA, _ = _build_writer(mt_a, mt_b, depth_u)
+    assert tiA._isPortedB16TLU0OffsetAssign() is True
+    asm_cpp = str(graTileAssignment(writer, kernel, useSwizzling=True))
+    asm_legacy = str(_graTileAssignment_legacy(writer, kernel, useSwizzling=True))
+    assert asm_cpp == asm_legacy, (
         f"GR offset-assignment asm mismatch for {mt_a}x{mt_b}x{depth_u}:\n"
-        f"PY:\n{asm_py}\nCPP:\n{asm_cpp}"
+        f"CPP:\n{asm_cpp}\nLEGACY:\n{asm_legacy}"
     )
 
 
 @pytest.mark.parametrize("mt_a,mt_b,depth_u", B16_CONFIGS,
                          ids=lambda c: c if isinstance(c, str) else None)
-def test_lra_tile_assignment_cpp_matches_python(mt_a, mt_b, depth_u):
-    writer, kernel, _, _ = _build_writer(mt_a, mt_b, depth_u)
-    asm_py = str(lraTileAssignment(writer, kernel))
-    with cpp_delegation():
-        asm_cpp = str(lraTileAssignment(writer, kernel))
-    assert asm_py == asm_cpp, (
+def test_lra_tile_assignment_b16_cpp_matches_legacy(mt_a, mt_b, depth_u):
+    """B16/TLU0 LR offset assignment is C++-driven unconditionally; the emitted
+    asm must stay byte-identical to the retained native Python legacy emitter."""
+    writer, kernel, tiA, _ = _build_writer(mt_a, mt_b, depth_u)
+    assert tiA._isPortedB16TLU0OffsetAssign() is True
+    asm_cpp = str(lraTileAssignment(writer, kernel))
+    asm_legacy = str(_lraTileAssignment_legacy(writer, kernel))
+    assert asm_cpp == asm_legacy, (
         f"LR offset-assignment asm mismatch for {mt_a}x{mt_b}x{depth_u}:\n"
-        f"PY:\n{asm_py}\nCPP:\n{asm_cpp}"
+        f"CPP:\n{asm_cpp}\nLEGACY:\n{asm_legacy}"
     )
 
 
-def test_fp8_stays_on_python_fallback():
-    """FP8 (bpe == 1) must NOT take the C++ offset-assignment path even with
-    delegation enabled — its swizzle differs and is out of scope for this
-    slice. The gate predicate is what guarantees the documented fallback."""
+def test_fp8_is_unported_native():
+    """FP8 (bpe == 1) is an unported native case, not the ported B16/TLU0 path.
+
+    Its swizzle differs and no C++ offset-assignment plan covers it, so the
+    predicate must report it as unported and ``graTileAssignment`` /
+    ``lraTileAssignment`` must emit via the native Python legacy path. This
+    documents the unported native scope separately from the ported B16/TLU0
+    cutover (it does not merely prove a delegation gate is off)."""
     writer, kernel, tiA, tiB = _build_writer(128, 128, 128,
                                              geometry=AB_B8, inst_k=128, bpe=1)
-    with cpp_delegation():
-        assert tiA._useCppOffsetAssign() is False
-        assert tiB._useCppOffsetAssign() is False
+    assert tiA._isPortedB16TLU0OffsetAssign() is False
+    assert tiB._isPortedB16TLU0OffsetAssign() is False
+
+    # The dispatcher routes FP8 to the native Python legacy emitter.
+    asm_dispatch = str(graTileAssignment(writer, kernel, useSwizzling=True))
+    asm_legacy = str(_graTileAssignment_legacy(writer, kernel, useSwizzling=True))
+    assert asm_dispatch == asm_legacy
+
+    asm_dispatch_lr = str(lraTileAssignment(writer, kernel))
+    asm_legacy_lr = str(_lraTileAssignment_legacy(writer, kernel))
+    assert asm_dispatch_lr == asm_legacy_lr

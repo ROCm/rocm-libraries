@@ -2,11 +2,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""End-to-end parity smoke test for the optional C++ (nanobind) subtile path.
+"""End-to-end smoke test for the C++ (nanobind) subtile path.
 
-This wires the already-ported subtile C++ slices through the *complete* Subtile
+This wires the ported subtile C++ slices through the *complete* Subtile
 mainloop emission for one BF16 case and asserts the generated assembly is
-**byte-identical** to the pure-Python path.
+deterministic and complete. All slices below are now C++-only (no env switch):
 
 Target case (operator priority for the first end-to-end slice):
   gfx950, BF16 (AB_B16, row-major / TLU0), UseSubtileImpl, PGR=1,
@@ -19,8 +19,8 @@ The full pipeline exercised here is:
     LogicalScheduler.populate_instructions()   # -> InstructionEmitter leaves
     LogicalScheduler.emitMainAndExitLoops()     # -> instructionSchedule per group
 
-With C++ delegation enabled every ported slice participates in producing the
-mainloop:
+Every ported slice participates in producing the mainloop, unconditionally
+through the compiled extension:
 
   * SubtileGeometry query math          (tensile_writer.subtile.geometry)
   * ABTileInfoQuery read-only queries   (tensile_writer.subtile.tile_info)
@@ -29,17 +29,10 @@ mainloop:
   * MFMA instType selection             (emit leaves)
   * instruction scheduler               (tensile_writer.subtile.instruction_scheduler)
 
-Byte-identical output is the contract: a default (delegation-off) build is
-unchanged, and the opt-in C++ build emits the same kernel for this case. Cases
-the C++ slices do not cover fall back to Python transparently (the gate
-predicates / try-except in each Subtile module), so this test also pins that
-the default path stays pure-Python.
-
 This is a pure-string test (rocisa pinned to gfx950); no GPU runtime / hip
 dependency. GPU functional validation is gated separately (gfx950 hardware).
 """
 
-import contextlib
 import os
 import sys
 
@@ -52,13 +45,12 @@ sys.path.insert(0, TENSILE_ROOT)
 sys.path.insert(0, SCRIPT_DIR)
 
 # rocisa (ISA emission) and the compiled geometry / tile_info / scheduler layers
-# must all be importable for the delegated path to mean anything.
+# must all be importable for the C++ path to mean anything.
 pytest.importorskip("rocisa")
 pytest.importorskip("tensile_writer.subtile.geometry")
 pytest.importorskip("tensile_writer.subtile.tile_info")
 pytest.importorskip("tensile_writer.subtile.instruction_scheduler")
 
-from Tensile.Components.Subtile import Kernel as _krn
 from Tensile.Components.Subtile.LogicalScheduler import LogicalScheduler
 
 # Reuse the existing pure-string mock-writer harness rather than duplicating it.
@@ -69,36 +61,11 @@ from test_SubtileBasedLogicalScheduler import (
 )
 
 
-@contextlib.contextmanager
-def cpp_delegation():
-    """Enable C++ delegation for the still-optional Subtile Kernel slice.
-
-    Mirrors the real opt-in (``TENSILE_WRITER_CPP=1`` + installed extension) by
-    flipping ``Kernel._USE_CPP``, but scoped to the test so the process default
-    stays pure-Python for that layer. Restores the switch on exit.
-
-    The geometry / TileInfo / emit layers, the instruction scheduler, and the
-    LogicalScheduler value/config helpers are unconditionally C++ (not gated);
-    only the Kernel offset-assignment slice still flips here.
-    """
-    os.environ["TENSILE_WRITER_CPP"] = "1"
-    saved_krn = _krn._USE_CPP
-    try:
-        _krn._USE_CPP = True
-        assert _krn._USE_CPP, (
-            "C++ delegation requested but the extension did not resolve"
-        )
-        yield
-    finally:
-        _krn._USE_CPP = saved_krn
-        os.environ.pop("TENSILE_WRITER_CPP", None)
-
-
 def _emit_bf16_mainloop(MT0, MT1, depthU=64):
     """Generate the full BF16 PGR=1 / NoTailLoop mainloop assembly as a string.
 
     Drives the production Subtile mainloop emission path with a fresh mock
-    writer so register-pool state is deterministic across Python / C++ runs.
+    writer so register-pool state is deterministic across runs.
     """
     kernel = create_kernel(MT0, MT1, fp4=False, depthU=depthU)
     kernel["NoTailLoop"] = True
@@ -134,34 +101,23 @@ BF16_CONFIGS = [
 
 @pytest.mark.parametrize("MT0,MT1,depthU", BF16_CONFIGS,
                          ids=lambda c: c if isinstance(c, str) else None)
-def test_bf16_mainloop_cpp_matches_python(MT0, MT1, depthU):
-    """The complete BF16 PGR=1 / NoTailLoop mainloop is byte-identical whether
-    the ported slices run in Python or delegate to C++."""
-    asm_py = _emit_bf16_mainloop(MT0, MT1, depthU)
-    with cpp_delegation():
-        asm_cpp = _emit_bf16_mainloop(MT0, MT1, depthU)
+def test_bf16_mainloop_cpp_is_deterministic(MT0, MT1, depthU):
+    """The complete BF16 PGR=1 / NoTailLoop mainloop, produced unconditionally
+    through the C++-backed ported slices, is deterministic across fresh runs."""
+    asm_first = _emit_bf16_mainloop(MT0, MT1, depthU)
+    asm_second = _emit_bf16_mainloop(MT0, MT1, depthU)
 
-    assert asm_py == asm_cpp, (
-        f"BF16 mainloop asm mismatch for {MT0}x{MT1}x{depthU}:\n"
-        f"--- PYTHON ---\n{asm_py}\n--- C++ ---\n{asm_cpp}"
+    assert asm_first == asm_second, (
+        f"BF16 mainloop asm not deterministic for {MT0}x{MT1}x{depthU}:\n"
+        f"--- FIRST ---\n{asm_first}\n--- SECOND ---\n{asm_second}"
     )
 
 
 def test_bf16_mainloop_is_nonempty_and_complete():
     """Sanity: the generated mainloop is non-trivial and contains the expected
-    control-flow + the delegated leaf instructions (GR/LR/MFMA)."""
+    control-flow + the C++-driven leaf instructions (GR/LR/MFMA)."""
     asm = _emit_bf16_mainloop(256, 256, 64)
     assert "LoopBeginL:" in asm, "missing mainloop label"
     assert "v_mfma" in asm, "missing MFMA leaves"
     assert "buffer_load" in asm, "missing global-read (GR) leaves"
     assert "ds_read" in asm or "ds_load" in asm, "missing local-read (LR) leaves"
-
-
-def test_default_path_is_python_only():
-    """Without the opt-in, the still-optional Subtile Kernel slice must stay
-    pure-Python so the default build is byte-identical to the pre-C++ behavior.
-
-    (The geometry / TileInfo / emit layers, the instruction scheduler, and the
-    LogicalScheduler value/config helpers are unconditionally C++ and not gated.)
-    """
-    assert _krn._USE_CPP is False

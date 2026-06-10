@@ -464,10 +464,11 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
 # Subroutine to generate LR offset calculation code
 #
 def lraTileAssignment(writer, kernel):
-  # Optional C++ delegation for the row-major (TLU0) BF16 path; FP8 / FP4 /
-  # TLU1 stay on the legacy inline Python path (default build is unchanged).
+  # The ported row-major (TLU0) BF16 path uses the C++ ABTileInfoQuery plan
+  # unconditionally; FP8 / FP4 / TLU1 remain unported and use the native Python
+  # legacy path.
   tileInfoA = writer.states.a.tileInfo
-  if tileInfoA._useCppOffsetAssign():
+  if tileInfoA._isPortedB16TLU0OffsetAssign():
     return _lraTileAssignment_cpp(writer, kernel)
   return _lraTileAssignment_legacy(writer, kernel)
 
