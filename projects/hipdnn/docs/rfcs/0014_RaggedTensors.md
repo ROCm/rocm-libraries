@@ -48,6 +48,10 @@ This RFC adds end-to-end ragged-tensor support:
    `get_ragged_offset` and `set_alignment` / `get_alignment`.
 2. **Flatbuffer schema** gains defaulted `ragged_offset_tensor_uid`
    and `alignment` fields (wire-compatible per RFC 0005).
+   `alignment` is a needed addition in its own right (and is
+   cuDNN-compatible); it is bundled into the same schema change so
+   plugins update once to support both it and ragged tensors,
+   though no logic in this RFC consumes it.
 3. **Backend** propagates the new fields through existing
    get/set-attribute paths; no new C-API entry points; variant pack
    unchanged.
@@ -137,9 +141,7 @@ for this aux tensor.
 ### 2.3 Configurations targeted in this iteration
 
 Both AITER FMHA configurations are uniformly representable. The
-physical buffer is always exactly `ragged_offset[B]` elements
-(modulo per-batch alignment, see
-[§4.2](#42-frontend-tensorattributes-additions)):
+physical buffer is always exactly `ragged_offset[B]` elements:
 
 - **Packed only.** Each batch contributes
   `ragged_offset[b+1] - ragged_offset[b]` rows of valid data; no
@@ -240,7 +242,10 @@ corresponding CPU reference (e.g.
 
 1. **Frontend / flatbuffer / backend** propagate
    `ragged_offset_tensor_uid` and `alignment` per tensor.
-   Declarative only; no new C-API entry points.
+   Declarative only; no new C-API entry points. `alignment` is a
+   needed addition bundled into this change; it is not consumed by
+   any ragged-tensor logic in this RFC (see
+   [§4.2](#42-frontend-tensorattributes-additions)).
 2. **Data SDK** introduces a single new owning type
    `RaggedTensor<T>` and its non-owning peer
    `ShallowRaggedTensor<T>`. Both expose ragged-aware
@@ -271,14 +276,17 @@ auto set_ragged_offset(std::shared_ptr<Tensor_attributes> const& value)
 auto get_ragged_offset() const -> std::shared_ptr<Tensor_attributes>;
 
 auto set_alignment(int64_t alignmentInBytes) -> Tensor_attributes&;
-auto get_alignment() const -> int64_t;   // default 1
+auto get_alignment() const -> int64_t;   // default 16
 ```
 
-`set_alignment` declares a trailing-alignment requirement of the
-physical buffer, in bytes. The default `1` (no alignment)
-matches AITER FMHA's needs. `alignment` affects only how much
-storage is allocated — not how many elements the tensor reports or
-iterates over (see [§4.5](#45-data-sdk-shared-elements)).
+`set_alignment` declares the required byte alignment of the
+*pointer* to the tensor's physical buffer (default `16`). It
+is introduced here only because doing so alongside the
+ragged-tensor schema changes lets plugins add support for both
+at once (see [§4.3](#43-flatbuffer-schema-additions)). Nothing in
+this RFC consumes `alignment`; it is carried through the frontend,
+flatbuffer, and backend but is otherwise unused by the
+ragged-tensor SDK types.
 
 **Frontend validation** (in `validate()`):
 
@@ -302,10 +310,19 @@ fields:
 
 ```
 ragged_offset_tensor_uid: long = null;
-alignment:                long = 1;
+alignment:                long = 16;
 ```
 
-Wire-compatible per RFC 0005. No `seq_lens_tensor_uid` is added
+Wire-compatible per RFC 0005. Only `ragged_offset_tensor_uid` is
+functionally required by *this RFC's* logic. `alignment` is a
+needed addition in its own right (kept consistent with cuDNN, see
+[§4.2](#42-frontend-tensorattributes-additions)); it is appended
+in the same change so that plugins make a single update to support
+both alignment and ragged tensors, rather than going through two
+separate rounds of schema evolution and version bumps. No code in
+this RFC reads it.
+
+No `seq_lens_tensor_uid` is added
 here: ops that consume `seq_lens` reference it through their own
 per-op attribute tables (e.g. `SdpaAttributes` already carries
 `seq_len_q_tensor_uid` / `seq_len_kv_tensor_uid`).
@@ -325,9 +342,11 @@ present.
 ### 4.4 Backend wiring
 
 Backend tensor descriptor mirrors the frontend additions: optional
-`ragged_offset_tensor_uid` and `alignment` (default 1), exposed
+`ragged_offset_tensor_uid` and `alignment` (default 16), exposed
 through existing get/set-attribute paths under new enum values in
-the hipDNN extension range. No new `hipdnnBackend*` entry points,
+the hipDNN extension range. As on the frontend, `alignment` is a
+needed addition bundled into this change and is not otherwise
+consumed here (see [§4.2](#42-frontend-tensorattributes-additions)). No new `hipdnnBackend*` entry points,
 and the variant pack representation is unchanged: at execute time
 the variant pack carries `UID → void*` for every tensor in the
 graph, including ragged primaries, their `ragged_offset`, and any
@@ -397,31 +416,30 @@ These apply to both `RaggedTensor<T>` and
      (int32 or int64 element type — checked once at construction
      so the type-erased `readOffset` helper from item 1 only ever
      encounters supported sizes).
-6. **Two element-count concepts.** The types distinguish:
-   - **`elementSpace()` = `physicalElementCount`**, the size of
-     the allocated buffer including any trailing pad introduced by
-     `alignment`. This is what the bundle / allocator asks for.
-   - **`elementCount()` = `ragged_offset[B]`**, the number of
-     addressable elements across all batches' per-batch ranges
-     (which is what the iterator visits). The trailing
-     alignment-pad region between `ragged_offset[B]` and
-     `align_up(ragged_offset[B], alignment)` belongs to no batch
-     and is never iterated. **`elementCount()` does not account
-     for `seq_lens` limits** — it reports every position the
-     iterator visits, including per-batch padding tails.
-7. **`isPacked()` returns `false`** for both new types. This is
-   consistent with the existing `Tensor<T>` convention
-   `_packed = (elementCount == elementSpace)` — for these types,
-   `elementCount()` (sum of per-batch ranges) generally differs
-   from `elementSpace()` (`physicalElementCount` including any
-   trailing alignment pad). However, a `RaggedTensor` with
-   `alignment = 1` is "packed" in the colloquial sense (no
-   internal gaps within each batch's range). The current
-   `isPacked()` predicate conflates two distinct properties —
-   "elementCount equals elementSpace" vs "buffer is `prod(dims)`
-   elements with regular strides". A follow-up could split these
-   apart, e.g. by introducing a separate predicate like
-   `hasRegularDims()` (see [§7](#future-work)).
+6. **Element-count reporting.** `elementCount()` reports
+   `ragged_offset[B]` — the number of addressable elements across
+   all batches' per-batch ranges, which is what the iterator
+   visits. `elementSpace()` reports `physicalElementCount`, the
+   size of the allocated buffer. The buffer is sized to exactly
+   `ragged_offset[B]` elements, so the two normally coincide.
+   `alignment` does **not** enter either calculation: it
+   constrains the buffer *pointer*, not the buffer *size* (see
+   [§4.2](#42-frontend-tensorattributes-additions)).
+   **`elementCount()` does not account for `seq_lens` limits** — it
+   reports every position the iterator visits, including per-batch
+   padding tails.
+7. **`isPacked()` returns `false`** for both new types. Note this
+   *diverges* from the literal `Tensor<T>` convention
+   `_packed = (elementCount == elementSpace)`: for a ragged tensor
+   those two are equal (both `ragged_offset[B]`, per item 6), yet
+   the buffer is neither `prod(dims)` elements long nor regularly
+   strided, so treating it as a flat dense buffer would be wrong.
+   The current `isPacked()` predicate conflates two distinct
+   properties — "elementCount equals elementSpace" vs "buffer is
+   `prod(dims)` elements with regular strides" — and ragged
+   tensors are the case that pulls them apart. A follow-up could
+   split these, e.g. by introducing a separate `hasRegularDims()`
+   predicate (see [§7](#future-work)).
 
 ### 4.6 Data SDK: `RaggedTensor<T>` (owning, ragged-aware)
 
@@ -438,15 +456,20 @@ template <typename T,
 class RaggedTensor : public TensorBase<T>
 {
 public:
+    // physicalElementCount is optional: when omitted it is inferred
+    // as ragged_offset[B] by reading the aux at construction. Pass
+    // it explicitly to skip that host read of the aux (and the
+    // device->host synchronization it may incur when the aux lives
+    // in device memory).
     RaggedTensor(std::vector<int64_t>     paddedDims,
                  std::vector<int64_t>     strides,
-                 size_t                   physicalElementCount,
-                 std::shared_ptr<ITensor> raggedOffset);
+                 std::shared_ptr<ITensor> raggedOffset,
+                 std::optional<size_t>    physicalElementCount = std::nullopt);
 
     // ITensor / TensorBase<T> overrides:
     //   dims()         -> paddedDims                    (dims()[1] == S_max)
     //   strides()      -> strides
-    //   elementSpace() -> physicalElementCount           (allocation size)
+    //   elementSpace() -> physicalElementCount           (allocation size == ragged_offset[B])
     //   elementCount() -> ragged_offset[B]               (iterated elements)
     //   isPacked()     -> false
     //   begin/end      -> RaggedCompositeIndex via makeIndex()
@@ -503,11 +526,11 @@ unspecified.
 
 #### 4.6.1 User-side construction pattern
 
-Samples build ragged tensors by hand in three steps. There is no
+Samples build ragged tensors by hand in two steps. There is no
 `RaggedTensor::RaggedTensor(const TensorAttributes&)` convenience
-constructor in this iteration — `physicalElementCount` and the
-aux runtime tensor are required ctor inputs and neither is
-derivable from a single `TensorAttributes`.
+constructor in this iteration — the aux runtime tensor is a
+required ctor input and is not derivable from a single
+`TensorAttributes`.
 
 ```cpp
 // 1. Allocate the aux as an ordinary Tensor<IndexType> (either
@@ -518,23 +541,26 @@ auto qRaggedOffset =
     std::make_shared<utilities::Tensor<int32_t>>(/*dims=*/{B + 1});
 qRaggedOffset->fillFromHost(myOffsetsHost);   // user-supplied values
 
-// 2. Compute the physical element count. The user knows
-//    ragged_offset[B] (they just wrote it) and the alignment
-//    declared on the primary's TensorAttributes.
-const auto qPhysicalCount =
-    align_up(static_cast<size_t>(myOffsetsHost.back()),
-             static_cast<size_t>(qAttr->get_alignment()));
-
-// 3. Allocate the ragged primary. The aux is passed as
-//    shared_ptr<ITensor>; the ragged tensor type-erases its
-//    element type at construction (§4.5 item 1).
+// 2. Allocate the ragged primary. The buffer is sized to exactly
+//    ragged_offset[B] elements; alignment plays no part (§4.2).
+//    The aux is passed as shared_ptr<ITensor>; the ragged tensor
+//    type-erases its element type at construction (§4.5 item 1).
+//    Form (a): let the ctor infer the size by reading
+//    ragged_offset[B] from the aux.
 auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
     qAttr->get_dim(),
     qAttr->get_stride(),
-    qPhysicalCount,
     qRaggedOffset);     // implicit upcast Tensor<int32_t> -> ITensor
 
-// 4. Wire into variantPack as today — one entry per primary, one
+//    Form (b): pass physicalElementCount explicitly — the user
+//    already knows ragged_offset[B] (they just wrote it) — to skip
+//    the aux read and any device->host sync it would imply:
+//
+//    auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
+//        qAttr->get_dim(), qAttr->get_stride(), qRaggedOffset,
+//        static_cast<size_t>(myOffsetsHost.back()));
+
+// 3. Wire into variantPack as today — one entry per primary, one
 //    entry per aux. Nothing about variantPack assembly changes
 //    relative to non-ragged tensors.
 variantPack[qAttr      ->get_uid()] = qTensor      ->rawDeviceData();
@@ -557,12 +583,15 @@ template <typename T>
 class ShallowRaggedTensor : public TensorBase<T>
 {
 public:
+    // As with RaggedTensor, physicalElementCount is optional and is
+    // inferred as ragged_offset[B] from the aux when omitted; pass
+    // it to avoid the aux read (and any device->host sync).
     ShallowRaggedTensor(
         void*                    data,
         std::vector<int64_t>     paddedDims,
         std::vector<int64_t>     strides,
-        size_t                   physicalElementCount,
-        std::shared_ptr<ITensor> raggedOffset);
+        std::shared_ptr<ITensor> raggedOffset,
+        std::optional<size_t>    physicalElementCount = std::nullopt);
 
     // Same overrides as RaggedTensor:
     //   dims()/strides() as provided
@@ -663,8 +692,8 @@ executor's virtual-tensor pass (see
 ```
 
 ```cpp
-// Resolve ragged_offset aux from the variant pack first — its
-// host values are needed to size the underlying view.
+// Resolve ragged_offset aux from the variant pack first — the
+// view reads ragged_offset[B] from it to size itself.
 //
 // The aux's element type (int32 or int64) is cached in
 // _params at plan-build time from the flatbuffer aux's
@@ -677,19 +706,15 @@ std::shared_ptr<ITensor> qRaggedOffset = makeShallowITensor(
     variantPack.at(_params.qTensor.raggedOffsetUid),
     /* aux dims/strides: [B + 1], packed */);
 
-// computePhysicalElementCount performs a host-side read of
-// qRaggedOffset (via the same type-erased element-size branch
-// used everywhere else) to obtain ragged_offset[B], then
-// applies the trailing-alignment requirement.
-const auto qPhysicalElementCount =
-    computePhysicalElementCount(*qRaggedOffset,
-                                _params.qTensor.alignment);
-
+// The view's buffer is exactly ragged_offset[B] elements;
+// alignment plays no part in sizing (§4.2). physicalElementCount
+// is left to be inferred from the aux here — a caller that already
+// has ragged_offset[B] on hand could pass it as the trailing
+// optional argument to skip the aux read.
 auto qView = std::make_shared<ShallowRaggedTensor<QType>>(
     variantPack.at(_params.qTensor.uid),
     _params.qTensor.dims,
     _params.qTensor.strides,
-    qPhysicalElementCount,
     qRaggedOffset);
 
 // If the op consumes seq_lens, fetch it as an ordinary input.
@@ -722,10 +747,10 @@ returns an `ITensor`-typed result; per-op plan templates do not
 need an `IndexT` parameter (see
 [§6.3](#63-templating-the-ragged-tensor-types-on-indext)).
 
-Computing `physicalElementCount` per execute (rather than caching
-it at plan-build time) avoids pinning `ragged_offset` values to
-the lifetime of the compiled plan: each execute is free to use
-different `ragged_offset` contents.
+Resolving the buffer size from `ragged_offset` per execute (rather
+than caching it at plan-build time) avoids pinning `ragged_offset`
+values to the lifetime of the compiled plan: each execute is free
+to use different `ragged_offset` contents.
 
 **CPU reference body.** The ragged primary's iterator walks each
 batch's full per-batch range. When the reference also takes a
@@ -783,16 +808,14 @@ The new overload's contract:
   3. Wraps the aux pointer with `makeShallowITensor(auxDataType,
      auxPtr, auxDims, auxStrides)` to obtain a non-owning
      `shared_ptr<ITensor>` over the aux.
-  4. Reads `ragged_offset[B]` via the type-erased `readOffset`
-     helper from [§4.5](#45-data-sdk-shared-elements) item 1,
-     then computes
-     `physicalElementCount = align_up(ragged_offset[B],
-     attribute.alignment())`.
-  5. Single-dispatches on the primary's `attribute.data_type()`
+  4. Single-dispatches on the primary's `attribute.data_type()`
      and allocates
-     `make_unique<RaggedTensor<T>>(dims, strides,
-     physicalElementCount, auxSharedPtr)`.
-  6. Returns `unique_ptr<ITensor>`.
+     `make_unique<RaggedTensor<T>>(dims, strides, auxSharedPtr)`,
+     letting the ctor infer the buffer size as `ragged_offset[B]`
+     from the aux. (`alignment` is not consulted — it does not
+     affect buffer size; see
+     [§4.2](#42-frontend-tensorattributes-additions).)
+  5. Returns `unique_ptr<ITensor>`.
 
 `populateVariantPackWithMissingVirtualTensors` switches to
 calling this new overload for every virtual attribute. Because
@@ -898,36 +921,29 @@ For each `TensorAttributes`:
 - Else: look up the `ragged_offset` UID in the pre-supplied
   bundle to obtain its `shared_ptr<ITensor>` — the strict check
   in [§4.11.1](#4111-pre-supplied-input-bundle) guarantees its
-  presence — read its host values (via the same type-erased
-  element-size branch documented in
-  [§4.5](#45-data-sdk-shared-elements) item 1), compute the
-  physical element count, and allocate
+  presence — and allocate
   `make_shared<RaggedTensor<T>>(dims, strides,
-  physicalElementCount, raggedOffsetSharedPtr)`. The factory
-  does not need to know the aux's element type statically — it
-  is single-dispatched on the primary's `T` only.
+  raggedOffsetSharedPtr)`, letting the ctor infer the buffer size
+  as `ragged_offset[B]`. The factory does not need to know the
+  aux's element type statically — it is single-dispatched on the
+  primary's `T` only.
 
 A single-pass walk suffices because every `ragged_offset` aux a
 primary could reference is, by the strict check, already held by
 the pre-supplied bundle before allocation begins. No auxiliary
 pre-pass over `TensorAttributes` is needed.
 
-The physical element count is:
+The buffer is sized to exactly `ragged_offset[B]` elements:
 
 ```
-physicalElementCount = align_up(ragged_offset[B], attr.get_alignment())
+physicalElementCount = ragged_offset[B]
 ```
 
-For `alignment = 1` this reduces to `ragged_offset[B]` (packed
-valid size). Larger alignment values round the total buffer size
-up to satisfy a trailing-alignment requirement. The plan layer
-re-evaluates this expression at execute time against the current
-variant-pack `ragged_offset` (per
-[§4.10](#410-plan-layer-construction-and-cpu-reference-impact)).
-Note that `elementCount()` on the resulting `RaggedTensor` is
-still `ragged_offset[B]` — alignment expands the allocation, not
-the element space (see
-[§4.5](#45-data-sdk-shared-elements) item 6).
+`alignment` does not enter this calculation — it is a pointer
+alignment requirement, not a sizing parameter (see
+[§4.2](#42-frontend-tensorattributes-additions)). `elementCount()`
+on the resulting `RaggedTensor` is likewise `ragged_offset[B]`
+(see [§4.5](#45-data-sdk-shared-elements) item 6).
 
 #### 4.11.3 Bundle init pass
 
@@ -1018,9 +1034,10 @@ would only skip over validating this one value.
    pre-supplied input bundle. No harness-level helper for "a
    plausible random ragged layout" is in this RFC.
 5. **`isPacked()` is overloaded.** It returns `false` for these
-   types because `elementCount() != elementSpace()` when
-   `alignment > 1`, but a packed-with-`alignment=1` `RaggedTensor`
-   is colloquially "packed". See
+   types even though `elementCount() == elementSpace()` (both
+   `ragged_offset[B]`), because the buffer is neither `prod(dims)`
+   elements long nor regularly strided. This diverges from the
+   literal `elementCount == elementSpace` predicate. See
    [§4.5](#45-data-sdk-shared-elements) item 7 and
    [§7](#future-work) for a possible `hasRegularDims()` split.
 6. **`ragged_offset` element-type checking is runtime, not
