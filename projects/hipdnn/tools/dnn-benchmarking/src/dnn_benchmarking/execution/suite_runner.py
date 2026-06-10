@@ -17,7 +17,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..common.exceptions import ExecutionError, UnsupportedGraphError
-from ..config.benchmark_config import BenchmarkConfig, SuiteConfig
+from ..config.benchmark_config import (
+    BenchmarkConfig,
+    ReferenceProviderName,
+    SuiteConfig,
+)
 from ..execution.buffer_manager import BufferManager, generate_input_data
 from ..execution.executor import Executor
 from ..execution.timing import Timer
@@ -181,7 +185,7 @@ def _get_reference_provider(
         None if validation was not requested (``config.reference_provider``
         is ``"none"``) or if the provider is unavailable/unsupported.
     """
-    if config.reference_provider == "none":
+    if config.reference_provider == ReferenceProviderName.NONE.value:
         return None
 
     try:
@@ -367,7 +371,7 @@ def _run_timed_pytorch_reference(
 ) -> _TimedReferenceRun:
     """Run PyTorch once as a timed validation-provider reference row."""
     result = ProviderEngineResult(
-        provider="pytorch",
+        provider=ReferenceProviderName.PYTORCH.value,
         engine_id=0,
         status="skipped",
         role="reference",
@@ -467,7 +471,7 @@ def run_graph_all_providers(
     graph_name = graph_json.get("name", graph_path.stem)
     graph_json_str = json.dumps(graph_json)
 
-    validation_requested = config.reference_provider != "none"
+    validation_requested = config.reference_provider != ReferenceProviderName.NONE.value
 
     if config.engine_filter is not None:
         # Explicit --engine is a selection, not a post-discovery filter. Keep the
@@ -591,7 +595,10 @@ def run_graph_all_providers(
             warn_once("analytical", f"compute_io_bytes failed for {graph_name}: {e}")
 
     pe_results: List[ProviderEngineResult] = []
-    if ref_provider is not None and config.reference_provider == "pytorch":
+    if (
+        ref_provider is not None
+        and config.reference_provider == ReferenceProviderName.PYTORCH.value
+    ):
         if reporter is not None:
             reporter.print_engine_start("pytorch reference")
         timed_reference = _run_timed_pytorch_reference(
