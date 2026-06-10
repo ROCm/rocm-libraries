@@ -77,18 +77,18 @@ function(generate_embed_source EMBED_NAME EMBED_DIR BASE_DIRECTORY)
             set(LENGTH_SYMBOL "_binary_${SYMBOL}_length")
             if(EMBED_USE STREQUAL "LD")
                 string(APPEND EXTERNS "
-extern const char ${START_SYMBOL}[];
+extern const unsigned char ${START_SYMBOL}[];
 extern const size_t _binary_${SYMBOL}_size;
 const auto ${LENGTH_SYMBOL} = reinterpret_cast<size_t>(&_binary_${SYMBOL}_size);
 ")
             else()
                 string(APPEND EXTERNS "
-extern const char ${START_SYMBOL}[];
+extern const unsigned char ${START_SYMBOL}[];
 extern const size_t ${LENGTH_SYMBOL};
 ")
             endif()
             string(APPEND INIT_KERNELS "
-        { \"${BASE_NAME}\", { ${START_SYMBOL}, ${LENGTH_SYMBOL}} },")
+	    { \"${BASE_NAME}\", { reinterpret_cast<const char*>(${START_SYMBOL}), ${LENGTH_SYMBOL}} },")
         endif()
     endforeach()
     if(EMBED_USE STREQUAL "RC")
@@ -168,7 +168,7 @@ function(embed_file FILE BASE_DIRECTORY)
         string(REGEX REPLACE ", $" "" ARRAY_VALUES ${ARRAY_VALUES})
         file(WRITE "${OUTPUT_FILE}" "
 #include <cstddef>
-extern const char _binary_${OUTPUT_SYMBOL}_start[] = { ${ARRAY_VALUES} };
+extern const unsigned char _binary_${OUTPUT_SYMBOL}_start[] = { ${ARRAY_VALUES} };
 extern const size_t _binary_${OUTPUT_SYMBOL}_length = sizeof(_binary_${OUTPUT_SYMBOL}_start);
 ")
         set(OUTPUT_FILE ${OUTPUT_FILE} PARENT_SCOPE)
