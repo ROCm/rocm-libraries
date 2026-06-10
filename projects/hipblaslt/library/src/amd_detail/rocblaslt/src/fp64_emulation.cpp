@@ -600,9 +600,13 @@ bool fp64EmulationPerformanceCheck(int64_t m, int64_t n, int64_t k, unsigned num
      * Zhi/Zlo intermediate round-trip + read C + write D (8B each)           */
     const double t_accum_kern  = mn * (4.0 * s + 48.0) / HBM_BW;
 
-    /* Kernel launch overhead: 5 fixed custom kernels + n_chunks accum kernels
-     * + 1 preliminary matmul + n_chunks main INT8 matmul batches + 1 memset  */
-    const double t_launch = (5.0 + n_chunks) * LATENCY_KERNEL
+    /* Kernel launch overhead: 6 fixed custom kernels + n_chunks accum kernels
+     * + 1 preliminary matmul + n_chunks main INT8 matmul batches + 1 memset.
+     * Fixed kernels: prelim_reduce, prelim_extract, refine_sftA_partial,
+     *   refine_sftA_apply, refine_sftB, scale (1 pass for typical problem).
+     * LATENCY_MEMSET: row_max async clear; nan_flag memset and Inf/NaN stream
+     *   sync assumed disabled (svmask == 0) and omitted from this estimate.  */
+    const double t_launch = (6.0 + n_chunks) * LATENCY_KERNEL
                           + (1.0 + n_chunks) * LATENCY_MATMUL
                           + LATENCY_MEMSET;
 
@@ -840,93 +844,169 @@ block_reduce_max_i32(int32_t warp_max, int32_t* __restrict__ s_wmax)
 }
 
 /* =========================================================================
- * GPU kernels — accu mode Part 1: preliminary extraction (A and B fused)
+ * GPU kernels — accu mode Part 1a: preliminary shift computation (A and B fused)
  *
- * oz2_accu_prelim_AB_kernel processes both A rows and B columns in a single
- * dispatch.  Grid = dim3(m + n, 1), Block = dim3(256, 1).
- *   blockIdx.x <  m_blocks → A row processing   (row = blockIdx.x)
- *   blockIdx.x >= m_blocks → B column processing (col = blockIdx.x - m_blocks)
+ * oz2_accu_prelim_reduce_kernel<TRANS_A, TRANS_B> computes per-row shifts
+ * sftA[i] and per-col shifts sftB[j] using coalesced memory access for all
+ * transpose configurations.  It does NOT write A8i_high or B8i_high.
  *
- * The branch is scalar-uniform (all threads in a block share blockIdx.x),
- * so there is zero warp divergence and zero EXEC-mask overhead.
- * Combining both dispatches into one reduces kernel-launch overhead by one
- * and gives the GPU scheduler m+n independent blocks simultaneously, which
- * improves utilisation for small problem sizes.
+ *   TRANS_A=true  (opA=T, A is k×m col-major): A branch: one block per row
+ *     (m_blocks=m), threadIdx.x=j (k-fast).  Reads A[row*lda+j] — stride 1 ✓.
+ *     Block reduction for per-row max (same as original fused kernel).
+ *
+ *   TRANS_A=false (opA=N, A is m×k col-major): A branch: one block per 256
+ *     rows (m_blocks=ceil(m/256)), threadIdx.x=i (m-fast).
+ *     Reads A[j*lda+i] — stride 1 ✓.  Per-thread independent max; no
+ *     inter-thread reduction needed since each thread owns exactly one row.
+ *
+ *   TRANS_B=false (opB=N, B is k×n col-major): B branch: one block per col
+ *     (n_blocks=n), threadIdx.x=j (k-fast).  Reads B[j+col*ldb] — stride 1 ✓.
+ *
+ *   TRANS_B=true  (opB=T, B is n×k col-major): B branch: one block per 256
+ *     cols (n_blocks=ceil(n/256)), threadIdx.x=l (n-fast).
+ *     Reads B[j*ldb+l] — stride 1 ✓.  Per-thread independent max.
+ *
+ * GPU kernels — accu mode Part 1b: preliminary extraction (A and B fused)
+ *
+ * oz2_accu_prelim_extract_kernel writes A8i_high in k×m layout and B8i_high
+ * in k×n layout using the sftA/sftB values already computed by the reduce
+ * kernel.  Always k-fast (one block per row for A, one block per col for B)
+ * so the INT8 writes are coalesced.  The preliminary INT8 GEMM then uses the
+ * same opT/opN descriptors as the main batch GEMMs, keeping the layouts
+ * consistent throughout.
  * ========================================================================= */
+/* CHECK_NAN=true:  isfinite() + atomicOr() are compiled in (normal mode).
+ * CHECK_NAN=false: both are compiled OUT entirely (zero overhead when the
+ *   user disables Inf/NaN detection via svmask == 0).                       */
+template <bool TRANS_A, bool TRANS_B, bool CHECK_NAN>
 __global__ static void
-oz2_accu_prelim_AB_kernel(const double* __restrict__ A,
-                          int64_t m, int64_t k, int64_t lda, bool transA,
-                          int8_t*   __restrict__ A8i_high, size_t lda8i,
-                          int16_t*  __restrict__ sftA,
-                          const double* __restrict__ B,
-                          int64_t n, int64_t ldb, bool transB,
-                          int8_t*   __restrict__ B8i_high, size_t ldb8i,
-                          int16_t*  __restrict__ sftB,
-                          uint32_t* __restrict__ nan_flag,
-                          unsigned m_blocks)
+oz2_accu_prelim_reduce_kernel(const double* __restrict__ A,
+                               int64_t m, int64_t k, int64_t lda,
+                               int16_t*  __restrict__ sftA,
+                               const double* __restrict__ B,
+                               int64_t n, int64_t ldb,
+                               int16_t*  __restrict__ sftB,
+                               uint32_t* __restrict__ nan_flag,
+                               unsigned m_blocks)
 {
-    /* Shared memory is reused by both branches (only one executes per block). */
+    /* Shared memory is only used by the k-fast / j-fast block-reduction
+     * branches (TRANS_A=true, TRANS_B=false).  The m-fast / n-fast branches
+     * do not need inter-thread reduction so the compiler elides these via
+     * if constexpr when neither branch references them.                      */
     __shared__ double  s_wmax[8];
     __shared__ int16_t s_sft;
 
     if(blockIdx.x < m_blocks) {
-        /* ── A row processing ──────────────────────────────────────────── */
-        const int64_t row = static_cast<int64_t>(blockIdx.x);
-        /* Guard is redundant (m_blocks == m) but kept for safety. */
-
-        double local_max = 0.0;
-        for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
-            double val = transA ? A[row * lda + j] : A[j * lda + row];
-            if(!isfinite(val))
-                (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
-            double av = fabs(val);
-            if(av > local_max) local_max = av;
-        }
-        local_max = warp_reduce_max_abs_d(local_max);
-        local_max = block_reduce_max_d(local_max, s_wmax);
-
-        if(threadIdx.x == 0) {
+        /* ── A block: compute sftA ─────────────────────────────────────── */
+        if constexpr (TRANS_A) {
+            /* k-fast (opA=T): one block per row, threadIdx.x = j */
+            const int64_t row = static_cast<int64_t>(blockIdx.x);
+            double local_max = 0.0;
+            for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
+                double val = A[row * lda + j];
+                if constexpr (CHECK_NAN)
+                    if(!isfinite(val)) (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
+                double av = fabs(val);
+                if(av > local_max) local_max = av;
+            }
+            local_max = warp_reduce_max_abs_d(local_max);
+            local_max = block_reduce_max_d(local_max, s_wmax);
+            if(threadIdx.x == 0) {
+                if(local_max < 1e-300) local_max = 1.0;
+                int sft = 6 - static_cast<int>(floor(log2(local_max)));
+                s_sft = static_cast<int16_t>(sft);
+                sftA[row] = s_sft;
+            }
+        } else {
+            /* m-fast (opA=N): one block per 256 rows, threadIdx.x = i.
+             * Each thread independently computes its row's max — no inter-
+             * thread reduction.  Reads A[j*lda+i] with i=threadIdx.x:
+             * stride 1 → coalesced across the 256-thread wavefront ✓.       */
+            const int64_t row = static_cast<int64_t>(blockIdx.x) * blockDim.x
+                              + static_cast<int64_t>(threadIdx.x);
+            if(row >= m) return;
+            double local_max = 0.0;
+            for(int64_t j = 0; j < k; ++j) {
+                double val = A[j * lda + row];
+                if constexpr (CHECK_NAN)
+                    if(!isfinite(val)) (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
+                double av = fabs(val);
+                if(av > local_max) local_max = av;
+            }
             if(local_max < 1e-300) local_max = 1.0;
-            /* sft = 6 - floor(log2(amax)): scales amax to ≤64 as INT8.
-             * Negative sft is valid for large amax — see GEMMul8 maxUFP<INT8>=6. */
-            int sft   = 6 - static_cast<int>(floor(log2(local_max)));
-            s_sft     = static_cast<int16_t>(sft);
-            sftA[row] = s_sft;
+            sftA[row] = static_cast<int16_t>(6 - static_cast<int>(floor(log2(local_max))));
         }
-        __syncthreads();
-        const int16_t sft = s_sft;
+    } else {
+        /* ── B block: compute sftB ─────────────────────────────────────── */
+        if constexpr (!TRANS_B) {
+            /* j-fast (opB=N): one block per col, threadIdx.x = j */
+            const int64_t col = static_cast<int64_t>(blockIdx.x - m_blocks);
+            double local_max = 0.0;
+            for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
+                double val = B[j + col * ldb];
+                if constexpr (CHECK_NAN)
+                    if(!isfinite(val)) (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
+                double av = fabs(val);
+                if(av > local_max) local_max = av;
+            }
+            local_max = warp_reduce_max_abs_d(local_max);
+            local_max = block_reduce_max_d(local_max, s_wmax);
+            if(threadIdx.x == 0) {
+                if(local_max < 1e-300) local_max = 1.0;
+                int sft = 6 - static_cast<int>(floor(log2(local_max)));
+                s_sft = static_cast<int16_t>(sft);
+                sftB[col] = s_sft;
+            }
+        } else {
+            /* n-fast (opB=T): one block per 256 cols, threadIdx.x = l.
+             * B is n×k col-major: B[l][j] at B+l+j*ldb → B[j*ldb+l].
+             * Reads B[j*ldb+l] with l=threadIdx.x: stride 1 → coalesced ✓. */
+            const int64_t col = static_cast<int64_t>(blockIdx.x - m_blocks) * blockDim.x
+                              + static_cast<int64_t>(threadIdx.x);
+            if(col >= n) return;
+            double local_max = 0.0;
+            for(int64_t j = 0; j < k; ++j) {
+                double val = B[j * ldb + col];
+                if constexpr (CHECK_NAN)
+                    if(!isfinite(val)) (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
+                double av = fabs(val);
+                if(av > local_max) local_max = av;
+            }
+            if(local_max < 1e-300) local_max = 1.0;
+            sftB[col] = static_cast<int16_t>(6 - static_cast<int>(floor(log2(local_max))));
+        }
+    }
+}
 
+/* oz2_accu_prelim_extract_kernel — write A8i_high (k×m) and B8i_high (k×n)
+ * using the sftA/sftB shifts already computed by oz2_accu_prelim_reduce_kernel.
+ * Always k-fast (one block per row for A, one block per col for B) so the
+ * INT8 writes are coalesced.  Grid = dim3(m + n, 1), Block = dim3(256, 1).  */
+__global__ static void
+oz2_accu_prelim_extract_kernel(const double* __restrict__ A,
+                                int64_t m, int64_t k, int64_t lda, bool transA,
+                                int8_t*        __restrict__ A8i_high, size_t lda8i,
+                                const int16_t* __restrict__ sftA,
+                                const double* __restrict__ B,
+                                int64_t n, int64_t ldb, bool transB,
+                                int8_t*        __restrict__ B8i_high, size_t ldb8i,
+                                const int16_t* __restrict__ sftB,
+                                unsigned m_blocks)
+{
+    if(blockIdx.x < m_blocks) {
+        /* ── A extraction: write A8i_high in k×m layout, j fast → coalesced */
+        const int64_t row = static_cast<int64_t>(blockIdx.x);
+        const int16_t sft = sftA[row];
         for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
             double val    = transA ? A[row * lda + j] : A[j * lda + row];
             double scaled = ceil(ldexp(fabs(val), static_cast<int>(sft)));
             A8i_high[static_cast<size_t>(j) + static_cast<size_t>(row) * lda8i] =
                 static_cast<int8_t>(static_cast<int32_t>(scaled));
         }
-
     } else {
-        /* ── B column processing ───────────────────────────────────────── */
+        /* ── B extraction: write B8i_high in k×n layout, j fast → coalesced */
         const int64_t col = static_cast<int64_t>(blockIdx.x - m_blocks);
-
-        double local_max = 0.0;
-        for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
-            double val = transB ? B[col + j * ldb] : B[j + col * ldb];
-            if(!isfinite(val))
-                (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
-            double av = fabs(val);
-            if(av > local_max) local_max = av;
-        }
-        local_max = warp_reduce_max_abs_d(local_max);
-        local_max = block_reduce_max_d(local_max, s_wmax);
-
-        if(threadIdx.x == 0) {
-            if(local_max < 1e-300) local_max = 1.0;
-            int sft   = 6 - static_cast<int>(floor(log2(local_max)));
-            s_sft     = static_cast<int16_t>(sft);
-            sftB[col] = s_sft;
-        }
-        __syncthreads();
-        const int16_t sft = s_sft;
-
+        const int16_t sft = sftB[col];
         for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
             double val    = transB ? B[col + j * ldb] : B[j + col * ldb];
             double scaled = ceil(ldexp(fabs(val), static_cast<int>(sft)));
@@ -1615,16 +1695,28 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     int32_t*  const C32i       = C32i_batch;
 
     if(_prof) (void)hipEventRecord(_ev_tot, stream);
-    if(hipMemsetAsync(nan_flag, 0, sizeof(uint32_t), stream) != hipSuccess) {
-        (void)hipFreeAsync(ws, stream);
-        return rocblaslt_status_internal_error;
-    }
 
     int8_t* const A8i_high = A8i;
     int8_t* const B8i_high = B8i;
 
     const bool tA = (opA != HIPBLAS_OP_N);
     const bool tB = (opB != HIPBLAS_OP_N);
+
+    /* Resolve svmask before the reduce kernel so we can select the CHECK_NAN
+     * template variant.  When svmask == 0 (user disabled Inf/NaN detection),
+     * CHECK_NAN=false compiles out isfinite() and atomicOr() entirely, giving
+     * zero GPU overhead from the Inf/NaN check.                              */
+    const uint32_t svmask = (settings.sv_mask != ~0u)
+                                ? settings.sv_mask
+                                : fp64EmulationSpecialValuesMask();
+
+    /* Zero nan_flag only when Inf/NaN checking is actually enabled. */
+    if(svmask != 0u) {
+        if(hipMemsetAsync(nan_flag, 0, sizeof(uint32_t), stream) != hipSuccess) {
+            (void)hipFreeAsync(ws, stream);
+            return rocblaslt_status_internal_error;
+        }
+    }
 
     /* hipBLASLt matmul descriptors */
     hipblasLtMatrixLayout_t layoutA  = nullptr;
@@ -1655,19 +1747,39 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     const int32_t one_i  = 1;
     const int32_t zero_i = 0;
 
-    const unsigned m_blks = static_cast<unsigned>(m);
+    /* ------------------------------------------------------------------
+     * Step 1: Reduce — compute sftA/sftB with coalesced reads.
+     *
+     * CHECK_NAN=true  (svmask != 0): isfinite()/atomicOr() compiled in.
+     * CHECK_NAN=false (svmask == 0): both compiled out → zero GPU overhead.
+     * Grid: A blocks = tA ? m : ceil(m/256); B blocks = tB ? ceil(n/256) : n.
+     * ------------------------------------------------------------------ */
+    const unsigned m_blks_reduce = tA ? static_cast<unsigned>(m)
+                                      : static_cast<unsigned>((m + 255) / 256);
+    const unsigned n_blks_reduce = tB ? static_cast<unsigned>((n + 255) / 256)
+                                      : static_cast<unsigned>(n);
     _pstart();
-    hipLaunchKernelGGL(oz2_accu_prelim_AB_kernel,
-                       dim3(m_blks + static_cast<unsigned>(n)), dim3(256), 0, stream,
-                       A, m, k, lda, tA, A8i_high, lda8i, sftA,
-                       B, n, ldb, tB, B8i_high, ldb8i, sftB,
-                       nan_flag, m_blks);
+    /* 8 variants: 4 (tA,tB) combos × 2 CHECK_NAN values */
+#define OZ2_PRELIM_REDUCE(TA, TB, CN) \
+    hipLaunchKernelGGL((oz2_accu_prelim_reduce_kernel<(TA),(TB),(CN)>), \
+                       dim3(m_blks_reduce + n_blks_reduce), dim3(256), 0, stream, \
+                       A, m, k, lda, sftA, B, n, ldb, sftB, nan_flag, m_blks_reduce)
+    if(svmask == 0u) {
+        /* CHECK_NAN=false: isfinite()/atomicOr() compiled out entirely */
+        if(tA && !tB)       OZ2_PRELIM_REDUCE(true,  false, false);
+        else if(!tA && !tB) OZ2_PRELIM_REDUCE(false, false, false);
+        else if(!tA && tB)  OZ2_PRELIM_REDUCE(false, true,  false);
+        else                OZ2_PRELIM_REDUCE(true,  true,  false);
+    } else {
+        /* CHECK_NAN=true: normal Inf/NaN detection */
+        if(tA && !tB)       OZ2_PRELIM_REDUCE(true,  false, true);
+        else if(!tA && !tB) OZ2_PRELIM_REDUCE(false, false, true);
+        else if(!tA && tB)  OZ2_PRELIM_REDUCE(false, true,  true);
+        else                OZ2_PRELIM_REDUCE(true,  true,  true);
+    }
+#undef OZ2_PRELIM_REDUCE
     _pstop(_t_prelim);
 
-    /* Inf/NaN check: use setting if not sentinel, else env var */
-    const uint32_t svmask = (settings.sv_mask != ~0u)
-                                ? settings.sv_mask
-                                : fp64EmulationSpecialValuesMask();
     if(svmask != 0u) {
         if(hipStreamSynchronize(stream) != hipSuccess) {
             (void)hipFreeAsync(ws, stream);
@@ -1684,6 +1796,19 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
             return rocblaslt_status_invalid_value;
         }
     }
+
+    /* ------------------------------------------------------------------
+     * Step 2: Extract — write A8i_high (k×m) and B8i_high (k×n) using
+     * sftA/sftB computed in Step 1.  Always k-fast → coalesced INT8 writes.
+     * The preliminary INT8 GEMM then uses the same opT/opN layout descriptors
+     * as the main batch GEMMs — no separate prelim-specific descriptors needed.
+     * ------------------------------------------------------------------ */
+    const unsigned m_blks = static_cast<unsigned>(m);
+    hipLaunchKernelGGL(oz2_accu_prelim_extract_kernel,
+                       dim3(m_blks + static_cast<unsigned>(n)), dim3(256), 0, stream,
+                       A, m, k, lda, tA, A8i_high, lda8i, sftA,
+                       B, n, ldb, tB, B8i_high, ldb8i, sftB,
+                       m_blks);
 
     _pstart();
     hipblasLtMatmul(settings.handle, matmulDesc,
