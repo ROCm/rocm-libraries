@@ -51,7 +51,7 @@ exclude: |
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
     projects/rocrand/library/.*precomputed\.(cpp|h)|
-    # MIOpen exclusion list 
+    # MIOpen exclusion list
     projects/miopen/.*\.s$|
     projects/miopen/.*\.inc$|
     projects/miopen/.*\.model$
