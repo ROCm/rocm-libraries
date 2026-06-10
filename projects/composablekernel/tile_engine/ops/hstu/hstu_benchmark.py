@@ -39,6 +39,38 @@ def _load_json(path: Path) -> dict:
         return json.load(f)
 
 
+def _inline_prob_cfg(args) -> dict:
+    """Build an in-memory problems config (identical shape to the problem JSON
+    files) from direct CLI shape flags, so no problems JSON is needed.
+
+    Mirrors the deployment config defaults exactly: a single hstu mask
+    (max_attn_len=0, contextual_seq_len=0, target_size=0 in the mask grid),
+    num_targets_fixed=true, and a per-problem target_size from --target-size.
+    Returning the same dict shape as _load_json lets the inline path flow
+    through the identical problem->HstuProblem + mask construction as the file
+    path, so timing/heur/best are the same as a file-based run."""
+    pid = f"b{args.batch}_h{args.num_head}_n{args.seqlen}_d{args.hdim}"
+    return {
+        "description": f"inline shape {pid}",
+        "data_types": [args.dtype],
+        "mask_configs": [
+            {"label": "hstu", "max_attn_len": 0, "contextual_seq_len": 0, "target_size": 0}
+        ],
+        "problems": [
+            {
+                "problem_id": pid,
+                "batch": args.batch,
+                "num_head": args.num_head,
+                "max_seqlen_q": args.seqlen,
+                "hdim_qk": args.hdim,
+                "hdim_v": args.hdim,
+                "target_size": args.target_size,
+                "num_targets_fixed": True,
+            }
+        ],
+    }
+
+
 def _synthetic_lengths(batch: int, max_seqlen: int, sparsity: float) -> List[int]:
     import numpy as np
 
@@ -95,64 +127,6 @@ def _select_problems(
             )
         return [problems_cfg[problem_index]]
     return problems_cfg
-
-
-def _default_reference_path(problems_path: Path) -> Optional[Path]:
-    sibling = problems_path.parent / "deployment_reference_ms.json"
-    return sibling if sibling.exists() else None
-
-
-def _print_reference_comparison(best_rows: List[dict], ref_path: Path) -> None:
-    ref = _load_json(ref_path)
-    entries = ref.get("entries", [])
-    if not entries:
-        return
-    print(f"\n--- Reference comparison ({ref_path.name}) ---")
-    print(
-        f"{'problem':<28} {'B':>5} {'H':>3} {'tgt':>4} "
-        f"{'CK ms':>10} {'best ms':>10} {'vs CK':>8} {'Triton':>10} {'genrec':>8}"
-    )
-    print("-" * 100)
-    for row in best_rows:
-        if row.get("mask") != "hstu":
-            continue
-        tgt = row.get("target_size", 0)
-        ref_row = next(
-            (
-                e
-                for e in entries
-                if e["batch"] == row["batch"]
-                and e["num_head"] == row["num_head"]
-                and e.get("target_size", 0) == tgt
-                and row["max_seqlen_q"] == e.get("max_seqlen_q", row["max_seqlen_q"])
-            ),
-            None,
-        )
-        if ref_row is None and ref.get("match", {}).get("max_seqlen_q"):
-            if row["max_seqlen_q"] != ref["match"]["max_seqlen_q"]:
-                continue
-            ref_row = next(
-                (
-                    e
-                    for e in entries
-                    if e["batch"] == row["batch"]
-                    and e["num_head"] == row["num_head"]
-                    and e.get("target_size", 0) == tgt
-                ),
-                None,
-            )
-        if ref_row is None:
-            continue
-        ck_ms = float(ref_row["ck_amd_ms"])
-        tr_ms = float(ref_row.get("triton_genrec_ms", 0))
-        best_ms = float(row["latency_ms"])
-        vs_ck = (best_ms / ck_ms - 1.0) * 100.0 if ck_ms > 0 else 0.0
-        pid = row.get("problem_id", "")
-        print(
-            f"{pid:<28} {row['batch']:>5} {row['num_head']:>3} {tgt:>4} "
-            f"{ck_ms:>10.3f} {best_ms:>10.3f} {vs_ck:>+7.1f}% "
-            f"{tr_ms:>10.3f} {row['tflops_genrec']:>8.2f}"
-        )
 
 
 # --------------------------------------------------------------------------
@@ -359,7 +333,7 @@ def _pick_kernel_configs(
     filter_file: str,
 ) -> List[HstuKernelConfig]:
     if sweep_path is None:
-        sweep_path = Path(__file__).parent / "configs" / "sweep_trimmed.json"
+        sweep_path = Path(__file__).parent / "configs" / "sweep_fast.json"
     configs = expand_sweep_from_json(sweep_path, arch)
     # Keep any kernel that can serve the smallest hdim_qk in the problem set:
     # max_k must be >= hdim (kernel pads on hdim when max_k > hdim). max_k=0 is
@@ -377,14 +351,45 @@ def main() -> None:
     parser.add_argument(
         "--config",
         type=str,
-        default=str(Path(__file__).parent / "configs" / "sweep_trimmed.json"),
-        help="Kernel sweep JSON (trait_config grid)",
+        default=str(Path(__file__).parent / "configs" / "sweep_fast.json"),
+        help="Kernel sweep JSON (trait_config grid); default sweep_fast.json",
     )
     parser.add_argument(
         "--problems",
         type=str,
         default=str(Path(__file__).parent / "configs" / "fwd.json"),
-        help="Problem/mask JSON (problems, mask_configs, smoke_problems)",
+        help="Problem/mask JSON (problems, mask_configs, smoke_problems). "
+        "Ignored when inline shape flags (--batch ...) are given.",
+    )
+    inline_grp = parser.add_argument_group(
+        "inline shape (no problems JSON needed; pass --batch to enable)"
+    )
+    inline_grp.add_argument(
+        "--batch",
+        type=int,
+        default=None,
+        help="Inline problem batch size. When set, a single problem is built "
+        "from --batch/--num-head/--seqlen/--hdim/--target-size and --problems "
+        "is ignored.",
+    )
+    inline_grp.add_argument("--num-head", type=int, default=None, help="Inline num_head")
+    inline_grp.add_argument(
+        "--seqlen", type=int, default=None, help="Inline max_seqlen_q (UIH+target)"
+    )
+    inline_grp.add_argument(
+        "--hdim", type=int, default=64, help="Inline head dim (hdim_qk == hdim_v)"
+    )
+    inline_grp.add_argument(
+        "--target-size", type=int, default=0, help="Inline per-problem fixed target size"
+    )
+    parser.add_argument(
+        "--dtype", default="bf16", help="Data type for the inline problem (default bf16)"
+    )
+    parser.add_argument(
+        "--causal",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Causal mask (on by default; use --no-causal to disable)",
     )
     parser.add_argument("--arch", default=detect_gpu_arch())
     parser.add_argument("--smoke", action="store_true", help="Use smoke_problems from problems JSON")
@@ -400,13 +405,7 @@ def main() -> None:
         type=str,
         default=None,
         metavar="ID",
-        help="Run one problem by problem_id field (e.g. step3_train_b1024_n16384_h4)",
-    )
-    parser.add_argument(
-        "--reference",
-        type=str,
-        default=None,
-        help="deployment_reference_ms.json for CK/Triton ms comparison (default: auto for deployment_* problems)",
+        help="Run one problem by problem_id field (e.g. train_b1024_n16384_h4)",
     )
     parser.add_argument(
         "--best",
@@ -451,21 +450,25 @@ def main() -> None:
     parser.add_argument("--filter-file", default="")
     args = parser.parse_args()
 
-    problems_path = Path(args.problems)
-    prob_cfg = _load_json(problems_path)
-    problems_cfg = _select_problems(
-        prob_cfg, args.smoke, args.problem_index, args.only_problem
-    )
-    masks = prob_cfg["mask_configs"]
-    ref_path = (
-        Path(args.reference)
-        if args.reference
-        else (
-            _default_reference_path(problems_path)
-            if "deployment" in problems_path.name
-            else None
+    if args.batch is not None:
+        missing = [
+            flag
+            for flag, val in (("--num-head", args.num_head), ("--seqlen", args.seqlen))
+            if val is None
+        ]
+        if missing:
+            raise SystemExit(
+                f"inline shape mode (--batch) also requires {', '.join(missing)}"
+            )
+        prob_cfg = _inline_prob_cfg(args)
+        problems_cfg = prob_cfg["problems"]
+    else:
+        problems_path = Path(args.problems)
+        prob_cfg = _load_json(problems_path)
+        problems_cfg = _select_problems(
+            prob_cfg, args.smoke, args.problem_index, args.only_problem
         )
-    )
+    masks = prob_cfg["mask_configs"]
     dtypes = prob_cfg.get("data_types", ["bf16"])
 
     build_dir = Path(args.build_dir).resolve()
@@ -554,7 +557,6 @@ def main() -> None:
         idx = args.problem_index if args.problem_index is not None else "?"
         print(f"  Single problem: index={idx} id={pid or '(none)'}")
     rows = []
-    best_per_problem: List[dict] = []
     num_cus = _detect_num_cus()
     print(
         f"{'kernel':<52} {'mask':<10} {'B':>5} {'H':>3} {'N':>6} {'D':>3} "
@@ -578,7 +580,7 @@ def main() -> None:
                 max(1, lengths[i] - num_targets[i] - mask.get("contextual_seq_len", 0))
                 for i in range(batch)
             ]
-            use_causal = True
+            use_causal = args.causal
 
             for dt in dtypes:
                 prob, q, k, v, off, nt = build_jagged_problem(
@@ -672,7 +674,6 @@ def main() -> None:
 
                 if args.best and best:
                     print(_format_kernel_row(best, _row_markers(best, best, heur_kernel, heur_approx)))
-                    best_per_problem.append(best)
                 else:
                     for r in group_rows:
                         print(_format_kernel_row(r, _row_markers(r, best, heur_kernel, heur_approx)))
@@ -693,17 +694,6 @@ def main() -> None:
     )
     if args.heur and rows:
         _print_heur_comparison(rows, num_cus)
-
-    if ref_path and best_per_problem:
-        _print_reference_comparison(best_per_problem, ref_path)
-    elif ref_path and rows and args.best is False:
-        # Pick best per (problem_id, mask) from all rows
-        by_key: dict = {}
-        for r in rows:
-            key = (r.get("problem_id"), r["mask"], r["dtype"])
-            if key not in by_key or r["tflops_genrec"] > by_key[key]["tflops_genrec"]:
-                by_key[key] = r
-        _print_reference_comparison(list(by_key.values()), ref_path)
 
 
 if __name__ == "__main__":

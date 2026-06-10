@@ -24,17 +24,24 @@ flag is still defined, keeping the legacy non-splitkv compile path.
 - Codegen: `dispatcher/codegen/hstu/` (`instance_gen.py`, `generate_fallback.py`)
 - Dispatcher: `dispatcher/include/ck_tile/dispatcher/hstu_*.hpp`, `dispatcher/bindings/ctypes/hstu_ctypes_lib.cpp`, `dispatcher/python/hstu_utils.py`
 - Benchmark: `tile_engine/ops/hstu/hstu_benchmark.py`
-- Configs:
-  - `configs/sweep_trimmed.json` — kernel config grid (like FMHA trait_config)
-  - `configs/sweep_d64.json` — deployment d=64 exhaustive bf16 sweep
-    (9 kernels: causal × `max_k ∈ {64, 96, 128}` × `mtile ∈ {64, 128}` ×
-    `splitkv ∈ {false, true}`; splitkv requires `mtile=64`). `max_k > hdim_qk`
-    enables the padded-`max_k` path so the dispatcher can compare native and
-    padded tiles on the same shape.
-  - `configs/fwd.json` — problems, masks, smoke_problems only
-  - `configs/deployment_progression.json` — deployment shapes small→large (one index at a time)
-  - `configs/deployment_hstu_mask.json` — full N=16384 table (4 cells), hstu mask, per-problem targets
-  - `configs/deployment_reference_ms.json` — CK AMD / Triton genrec ms sidecar for `--reference`
+- Configs — exactly two sweep grids (`--config`) plus the problem file:
+  - `configs/sweep_fast.json` — **default `--config`**. Small d=64 grid for quick
+    iteration: `max_k ∈ {64, 96, 128}` × `mtile ∈ {64, 128}` × `splitkv ∈
+    {false, true}` (split-KV needs `mtile=64`) = 9 base-tile kernels, default
+    WarpK. Works for any d=64 shape, no `--filter`.
+  - `configs/sweep_exhaustive.json` — full d=64 block-tile-shape sweep
+    (`sequence<kM0,kN0,kN0Sub,kN1,kK1>` grid, `warp_k=32`, ~90 kernels). Use to
+    find the best tile shape per shape.
+  - `configs/fwd.json` — problems, masks, smoke_problems only (default `--problems`)
+
+Only the axes the codegen actually consumes are kept in the sweep configs
+(`data_type, use_causal, max_k, mtile, use_splitkv, km0/kn0/kn0sub/kn1/kk1,
+warp_k`); silently-ignored knobs (pipeline/agpr/pingpong/trload/occupancy/
+num_splits) are not present.
+
+Deployment/single shapes no longer need a problems JSON — pass the shape
+directly with the inline flags `--batch / --num-head / --seqlen / --hdim /
+--target-size` (see *Deployment reproduction* below).
 
 ## Build
 
@@ -58,12 +65,12 @@ Note: `make python_libs` also builds GEMM/Conv/FMHA; FMHA fallback codegen may f
 ```bash
 export PYTHONPATH=/path/to/composablekernel/dispatcher/python:$PYTHONPATH
 
-# Smoke: compile trimmed sweep + benchmark smoke problems
+# Smoke: compile the default fast sweep + benchmark smoke problems
 python tile_engine/ops/hstu/hstu_benchmark.py --smoke
 
 # Prod fwd.json with best kernel per (shape, mask, dtype)
+# (--config defaults to sweep_fast.json; pass --config sweep_exhaustive.json for the full grid)
 python tile_engine/ops/hstu/hstu_benchmark.py \
-  --config tile_engine/ops/hstu/configs/sweep_trimmed.json \
   --problems tile_engine/ops/hstu/configs/fwd.json \
   --best --csv /tmp/hstu_best.csv
 
@@ -77,58 +84,54 @@ python tile_engine/ops/hstu/hstu_benchmark.py --lib dispatcher/build/examples/li
 ### List expanded kernel configs
 
 ```bash
-python dispatcher/codegen/hstu/instance_gen.py tile_engine/ops/hstu/configs/sweep_trimmed.json --list
+python dispatcher/codegen/hstu/instance_gen.py tile_engine/ops/hstu/configs/sweep_fast.json --list
 ```
 
 ## Deployment reproduction (d=64, N=16384)
 
-Matches the deployment comparison slide: **hstu mask**, fixed targets (train **10**, inference **300** per batch), `tflops_genrec` for mvonstra alignment. Run **one problem at a time** on GPU (small→large).
+Matches the deployment comparison slide: **hstu mask**, fixed targets (train **10**, inference **300** per batch), `tflops_genrec` for mvonstra alignment. Pass the shape **directly on the CLI** with the inline flags — no problems JSON needed. The benchmark synthesizes a single problem (`problem_id` = `b{batch}_h{num_head}_n{seqlen}_d{hdim}`), hstu mask, `num_targets_fixed: true`, `target_size` from `--target-size`.
 
-| Index | `problem_id` | B | H | N (UIH) | target |
-|------|----------------|---|----|---------|--------|
-| 0 | `step0_smoke` | 128 | 4 | 1024 | 10 |
-| 1 | `step1_proxy_b128_n4096` | 128 | 4 | 4096 | 10 |
-| 2 | `step2_infer_proxy_b120_n4096` | 120 | 4 | 4096 | 300 |
-| 3 | `step3_train_b1024_n16384_h4` | 1024 | 4 | 16384 | 10 |
-| 4 | `step4_train_b1024_n16384_h8` | 1024 | 8 | 16384 | 10 |
-| 5 | `step5_infer_b120_n16384_h4` | 120 | 4 | 16384 | 300 |
-| 6 | `step6_infer_b120_n16384_h8` | 120 | 8 | 16384 | 300 |
+| B | H | N (UIH) | target | inline flags |
+|---|----|---------|--------|--------------|
+| 128 | 4 | 4096 | 10 | `--batch 128 --num-head 4 --seqlen 4096 --target-size 10` |
+| 120 | 4 | 4096 | 300 | `--batch 120 --num-head 4 --seqlen 4096 --target-size 300` |
+| 1024 | 4 | 16384 | 10 | `--batch 1024 --num-head 4 --seqlen 16384 --target-size 10` |
+| 1024 | 8 | 16384 | 10 | `--batch 1024 --num-head 8 --seqlen 16384 --target-size 10` |
+| 120 | 4 | 16384 | 300 | `--batch 120 --num-head 4 --seqlen 16384 --target-size 300` |
+| 120 | 8 | 16384 | 300 | `--batch 120 --num-head 8 --seqlen 16384 --target-size 300` |
 
-Reference ms (indices 3–6): see `configs/deployment_reference_ms.json`.
+(`--hdim` defaults to 64 and is used for both `hdim_qk` and `hdim_v`; causal is on by default — use `--no-causal` to disable.)
+
+The benchmark reports best-vs-heur only (the swept fastest kernel vs the legacy
+dispatch heuristic's kernel); it does not load or print any external reference
+(CK/Triton) numbers — just pass the problem size.
 
 ```bash
 export CK=/workspaces/rocm-libraries/projects/composablekernel
 export PYTHONPATH=$CK/dispatcher/python:$PYTHONPATH
 cd $CK
 
-# Compile d=64 sweep once (9 bf16 kernels: causal × maxk {64,96,128} × mtile {64,128}, splitkv mtile=64)
+# Compile the fast sweep once (9 bf16 kernels: maxk {64,96,128} × mtile {64,128} × splitkv, default WarpK)
+# --config defaults to sweep_fast.json, so it can be omitted.
 python tile_engine/ops/hstu/hstu_benchmark.py \
-  --config tile_engine/ops/hstu/configs/sweep_d64.json \
-  --problems tile_engine/ops/hstu/configs/deployment_progression.json \
-  --problem-index 0 --compile-only
+  --batch 128 --num-head 4 --seqlen 4096 --target-size 10 --compile-only
 
-# Step by step on GPU (best kernel + CK table comparison)
-for i in 0 1 2 3 4 5 6; do
-  python tile_engine/ops/hstu/hstu_benchmark.py \
-    --config tile_engine/ops/hstu/configs/sweep_d64.json \
-    --problems tile_engine/ops/hstu/configs/deployment_progression.json \
-    --problem-index $i --best
-done
-
-# Or by label
+# A single deployment shape on GPU (best kernel + heur-vs-best comparison)
 python tile_engine/ops/hstu/hstu_benchmark.py \
-  --config tile_engine/ops/hstu/configs/sweep_d64.json \
-  --problems tile_engine/ops/hstu/configs/deployment_progression.json \
-  --only-problem step3_train_b1024_n16384_h4 --best
+  --batch 120 --num-head 4 --seqlen 16384 --hdim 64 --target-size 300 --best
 
-# Full deployment table only (4 shapes, indices 0–3 in deployment_hstu_mask.json)
+# Walk the deployment shapes small→large (fast sweep, default --config)
+python tile_engine/ops/hstu/hstu_benchmark.py --batch 128  --num-head 4 --seqlen 4096  --target-size 10  --best
+python tile_engine/ops/hstu/hstu_benchmark.py --batch 1024 --num-head 4 --seqlen 16384 --target-size 10  --best
+python tile_engine/ops/hstu/hstu_benchmark.py --batch 120  --num-head 4 --seqlen 16384 --target-size 300 --best
+
+# Exhaustive tile-shape search for one shape (~90 kernels — slower)
 python tile_engine/ops/hstu/hstu_benchmark.py \
-  --config tile_engine/ops/hstu/configs/sweep_d64.json \
-  --problems tile_engine/ops/hstu/configs/deployment_hstu_mask.json \
-  --problem-index 0 --best
+  --config tile_engine/ops/hstu/configs/sweep_exhaustive.json \
+  --batch 120 --num-head 4 --seqlen 16384 --hdim 64 --target-size 300 --best
 ```
 
-Fixed targets: each problem sets `target_size` and `num_targets_fixed: true` (every batch gets exactly that many candidate rows). This matches mvonstra `bench_hstu.py --target-size-fixed`; the benchmark already used a constant per-batch target list (not uniform random).
+Fixed targets: the inline problem sets `target_size` (from `--target-size`) with `num_targets_fixed: true` (every batch gets exactly that many candidate rows). This matches mvonstra `bench_hstu.py --target-size-fixed`; the benchmark already used a constant per-batch target list (not uniform random).
 
 ## TFLOPS columns
 

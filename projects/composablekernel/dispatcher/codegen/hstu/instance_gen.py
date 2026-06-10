@@ -50,8 +50,8 @@ def expand_sweep(
         "mtile": _expand_values(trait.get("mtile", {"values": [64, 128]})),
         "use_splitkv": _expand_values(trait.get("use_splitkv", {"values": [False]})),
         # Block-tile shape axes for sequence<kM0,kN0,kN0Sub,kN1,kK1,...>. Default
-        # [0] == "use the base dim", so configs that omit these (e.g. sweep_d64)
-        # expand to exactly the same kernels/names as before.
+        # [0] == "use the base dim", so configs that omit these (e.g. the base-tile
+        # sweep_fast.json) expand to exactly the same kernels/names as before.
         "km0": _expand_values(trait.get("km0", {"values": [0]})),
         "kn0": _expand_values(trait.get("kn0", {"values": [0]})),
         "kn0sub": _expand_values(trait.get("kn0sub", {"values": [0]})),
@@ -96,14 +96,13 @@ def expand_sweep(
         # split-KV dispatch still uses the fixed ...TileSettingW form, so a
         # split-KV kernel cannot honor a tile override -- skip those combos
         # instead of silently ignoring the requested shape (this matches the
-        # sweep_tileshape config note "splitkv/pingpong off to isolate tile
-        # shape").
+        # sweep_exhaustive config note "splitkv off to isolate tile shape").
         tile_active = any(v for v in (km0, kn0, kn0sub, kn1, kk1))
         if splitkv and tile_active:
             continue
         # Validity gates implied by the block-tile contract
         # (hstu_attention_fwd_setting.hpp:20 "MaxK % N1 == 0, N0 % K1 == 0" and
-        # the sweep_tileshape note "kN0Sub == kK1"). Gates apply only to the
+        # the sweep_exhaustive note "kN0Sub == kK1"). Gates apply only to the
         # active (nonzero) tile dims so base-tile configs are never filtered.
         if kk1 and kn0sub and kn0sub != kk1:
             continue
