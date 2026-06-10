@@ -143,14 +143,23 @@ private:
 class rocfft_rccl_group_t
 {
 public:
+    // opens an RCCL group, throws rocfft_rccl_exception_t if
+    // ncclGroupStart fails
     rocfft_rccl_group_t();
-    ~rocfft_rccl_group_t();
+    ~rocfft_rccl_group_t() noexcept;
+
+    // throws rocfft_rccl_exception_t on ncclGroupEnd failure
+    void end();
 
     // non-copyable, non-movable
     rocfft_rccl_group_t(const rocfft_rccl_group_t&) = delete;
     rocfft_rccl_group_t& operator=(const rocfft_rccl_group_t&) = delete;
     rocfft_rccl_group_t(rocfft_rccl_group_t&&)                 = delete;
     rocfft_rccl_group_t& operator=(rocfft_rccl_group_t&&) = delete;
+
+private:
+    // true between a successful ncclGroupStart and the matching ncclGroupEnd
+    bool needs_ending = false;
 };
 
 #endif // ROCFFT_RCCL_ENABLE

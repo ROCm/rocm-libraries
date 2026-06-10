@@ -126,6 +126,7 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
         // init one communicator per device using ncclCommInitRank,
         // batched inside a group call for single-process efficiency.
         // ranks are assigned in sorted device-id order (std::set).
+        try
         {
             rocfft_rccl_group_t group;
             int                 rank = 0;
@@ -139,6 +140,13 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
                 new_comm.pimpl->device_to_comm[dev] = comm;
                 ++rank;
             }
+
+            group.end();
+        }
+        catch(const rocfft_rccl_exception_t&)
+        {
+            // already logged by rocfft_rccl_group_t; fall back
+            return {};
         }
 
         comm_cache[devices] = std::move(new_comm);
@@ -195,12 +203,49 @@ std::vector<int> rocfft_rccl_comm_t::get_devices() const
 // RAII group wrapper
 rocfft_rccl_group_t::rocfft_rccl_group_t()
 {
-    ncclGroupStart();
+    ncclResult_t result = ncclGroupStart();
+    if(result != ncclSuccess)
+    {
+        log_trace(__func__, "ncclGroupStart failed", result);
+        throw rocfft_rccl_exception_t(std::string("ncclGroupStart failed: ")
+                                      + ncclGetErrorString(result));
+    }
+    needs_ending = true;
 }
 
-rocfft_rccl_group_t::~rocfft_rccl_group_t()
+void rocfft_rccl_group_t::end()
 {
-    ncclGroupEnd();
+    if(!needs_ending)
+        return;
+
+    ncclResult_t result = ncclGroupEnd();
+    // clear before checking the result so a throw here does not make
+    // the destructor retry ncclGroupEnd on the same group
+    needs_ending = false;
+    if(result != ncclSuccess)
+    {
+        log_trace(__func__, "ncclGroupEnd failed", result);
+        throw rocfft_rccl_exception_t(std::string("ncclGroupEnd failed: ")
+                                      + ncclGetErrorString(result));
+    }
+}
+
+rocfft_rccl_group_t::~rocfft_rccl_group_t() noexcept
+{
+    // safety net for early returns / stack unwinding where end() was
+    // not called explicitly
+    try
+    {
+        end();
+    }
+    catch(const rocfft_rccl_exception_t& e)
+    {
+        log_trace(__func__, "ncclGroupEnd failed in destructor", e.what());
+    }
+    catch(...)
+    {
+        log_trace(__func__, "ncclGroupEnd failed in destructor with unexpected exception");
+    }
 }
 
 void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
@@ -226,10 +271,7 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
 
     // batch all per-device calls in a single RCCL group so they
     // actually launch together (NCCL requires per-device calls
-    // inside ncclGroupStart/End for single-process multi-GPU).
-    // the rocfft_rccl_group_t destructor calls ncclGroupEnd even
-    // on exception, so a throw mid-loop won't leave a dangling
-    // open group.
+    // inside ncclGroupStart/End for single-process multi-GPU)
     {
         rocfft_rccl_group_t group;
 
@@ -248,6 +290,8 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
                                               + ncclGetErrorString(result));
             }
         }
+
+        group.end();
     }
 }
 

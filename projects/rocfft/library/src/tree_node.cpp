@@ -772,10 +772,8 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
     if(transfers.empty())
         return;
 
-    // group all send/recv operations into a single RCCL group.
-    // ncclGroupEnd (called by the group destructor at the closing
-    // brace) is what actually enqueues work on the streams, so any
-    // event recording has to happen after this inner scope ends.
+    // batch all send/recv into one RCCL group; group.end() (ncclGroupEnd)
+    // is what enqueues the work, so event recording must happen after it
     {
         rocfft_rccl_group_t group;
 
@@ -818,7 +816,9 @@ void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
                 }
             }
         }
-        // ncclGroupEnd called by group destructor - work is now enqueued
+
+        // close the group explicitly so a launch failure throws before events record
+        group.end();
     }
 
     // record a completion event per local transfer so Wait() can
