@@ -380,14 +380,14 @@ void CpuActivationPackedMultiThread(std::size_t num_items, Ts&&... xs)
     const auto num_async_threads               = num_threads - 1;
 
     auto func_async = [&](unsigned thread_num) {
-        const auto offset = max_num_items_per_thread * thread_num;
-        const auto end    = offset + max_num_items_per_thread;
+        const auto offset = std::min(max_num_items_per_thread * thread_num, num_items);
+        const auto end    = std::min(offset + max_num_items_per_thread, num_items);
         DoCpuActivationPacked<direction, A>(offset, end, xs...);
     };
 
     auto func_remainder = [&]() {
-        const auto offset = max_num_items_per_thread * num_async_threads;
-        const auto end    = offset + remainder;
+        const auto offset = std::min(max_num_items_per_thread * num_async_threads, num_items);
+        const auto end    = std::min(offset + remainder, num_items);
         DoCpuActivationPacked<direction, A>(offset, end, xs...);
     };
 
