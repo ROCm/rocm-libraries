@@ -112,6 +112,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_spsm_csr.cpp
     test_spsv_coo.cpp
     test_spsv_csr.cpp
+    test_spsv_csr_reuse_descr.cpp
     test_spvec_descr.cpp
     test_spvv.cpp
 )
@@ -221,6 +222,7 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_spsm_ex_csr.yaml
     rocm/test_spsv_coo.yaml
     rocm/test_spsv_csr.yaml
+    rocm/test_spsv_csr_reuse_descr.yaml
     rocm/test_spvv.yaml)
 
 if(HIPSPARSE_ENABLE_SPMV_BSR)
