@@ -42,6 +42,7 @@ add_executable(
     IntegrationGraphKnobsDescriptorLifting.cpp
     IntegrationGraphLifting.cpp
     IntegrationGraphSupportCheck.cpp
+    IntegrationHeuristicPolicyEnumeration.cpp
     IntegrationLayerNormDescriptorLifting.cpp
     IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp

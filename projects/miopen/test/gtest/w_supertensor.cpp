@@ -533,14 +533,9 @@ std::ostream& operator<<(std::ostream& os, miopenRNNMode_t param)
     switch(param)
     {
     case miopenRNNRELU: os << "miopenRNNRELU"; break;
-
     case miopenRNNTANH: os << "miopenRNNTANH"; break;
-
     case miopenLSTM: os << "miopenLSTM"; break;
-
     case miopenGRU: os << "miopenGRU"; break;
-
-    default: break;
     }
 
     return os;
@@ -551,10 +546,7 @@ std::ostream& operator<<(std::ostream& os, miopenRNNBiasMode_t param)
     switch(param)
     {
     case miopenRNNNoBias: os << "miopenRNNNoBias"; break;
-
     case miopenRNNwithBias: os << "miopenRNNwithBias"; break;
-
-    default: break;
     }
 
     return os;
@@ -565,10 +557,7 @@ std::ostream& operator<<(std::ostream& os, miopenRNNDirectionMode_t param)
     switch(param)
     {
     case miopenRNNunidirection: os << "miopenRNNunidirection"; break;
-
     case miopenRNNbidirection: os << "miopenRNNbidirection"; break;
-
-    default: break;
     }
 
     return os;
@@ -579,10 +568,7 @@ std::ostream& operator<<(std::ostream& os, miopenRNNInputMode_t param)
     switch(param)
     {
     case miopenRNNlinear: os << "miopenRNNlinear"; break;
-
     case miopenRNNskip: os << "miopenRNNskip"; break;
-
-    default: break;
     }
 
     return os;

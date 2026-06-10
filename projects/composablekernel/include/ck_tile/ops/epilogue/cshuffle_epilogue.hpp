@@ -3,13 +3,15 @@
 
 #pragma once
 
-#include "ck_tile/host/concat.hpp"
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/common/utils.hpp"
-#include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
+#include "ck_tile/host/concat.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 
+#include <algorithm>
+#include <string>
+#include <tuple>
 #include <type_traits>
 
 namespace ck_tile {
@@ -94,32 +96,20 @@ struct CShuffleEpilogue
                                                remove_cvref_t<BsDataType>,
                                                remove_cvref_t<tuple<BsDataType>>>;
 
-    // ADataTypeCompute: compute type from Problem (may be tf32_t for TF32 mode)
-    using ADataTypeCompute = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataTypeTuple>>;
-    using BDataTypeCompute = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataTypeTuple>>;
+    using ADataType = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataTypeTuple>>;
+    using BDataType = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataTypeTuple>>;
 
-    // ADataTypeBuf: buffer/storage type (fp32 when tf32)
-    using ADataTypeBuf = if_select_t<ADataTypeCompute, tf32_t, float, ADataTypeCompute>;
-    using BDataTypeBuf = if_select_t<BDataTypeCompute, tf32_t, float, BDataTypeCompute>;
-
-    // For warp gemm selection: use tf32_t if compute type was tf32_t
     // For pk_int4/pk_fp4: use the other data type
-    using ATypeToUse =
-        std::conditional_t<std::is_same_v<ADataTypeCompute, tf32_t>,
-                           tf32_t,
-                           std::conditional_t<std::is_same_v<ADataTypeBuf, pk_int4_t> ||
-                                                  std::is_same_v<ADataTypeBuf, pk_fp4_t>,
-                                              BDataTypeBuf,
-                                              ADataTypeBuf>>;
+    using ATypeToUse = std::conditional_t<std::is_same_v<ADataType, pk_int4_t> ||
+                                              std::is_same_v<ADataType, pk_fp4_t>,
+                                          BDataType,
+                                          ADataType>;
     // Used for weight-only quantization kernel, B would be dequantized to the same data type as A
-    using BTypeToUse =
-        std::conditional_t<std::is_same_v<BDataTypeCompute, tf32_t>,
-                           tf32_t,
-                           std::conditional_t<std::is_same_v<BDataTypeBuf, pk_int4_t> ||
-                                                  std::is_same_v<BDataTypeBuf, pk_fp4_t> ||
-                                                  sizeof(BDataTypeBuf) < sizeof(ADataTypeBuf),
-                                              ADataTypeBuf,
-                                              BDataTypeBuf>>;
+    using BTypeToUse = std::conditional_t<std::is_same_v<BDataType, pk_int4_t> ||
+                                              std::is_same_v<BDataType, pk_fp4_t> ||
+                                              sizeof(BDataType) < sizeof(ADataType),
+                                          ADataType,
+                                          BDataType>;
 
     using ELayout                          = remove_cvref_t<typename Problem::ELayout>;
     using CDElementwise                    = remove_cvref_t<typename Problem::CDElementwise>;
@@ -511,8 +501,8 @@ struct CShuffleEpilogue
                     // BlockedLayout
                     // this branch is for original a16w4
                     if constexpr(UseBlockedLayout ||
-                                 is_any_of<ADataTypeBuf, pk_int4_t, pk_fp4_t>::value ||
-                                 is_any_of<BDataTypeBuf, pk_int4_t, pk_fp4_t>::value)
+                                 is_any_of<ADataType, pk_int4_t, pk_fp4_t>::value ||
+                                 is_any_of<BDataType, pk_int4_t, pk_fp4_t>::value)
                     {
                         if constexpr(EightWave)
                         {
@@ -561,6 +551,33 @@ struct CShuffleEpilogue
     {
         constexpr auto lds_block_desc = MakeLdsBlockDescriptor<Problem>();
         return lds_block_desc.get_element_space_size() * sizeof(ODataType);
+    }
+
+    /// Number of block_sync_lds() calls in operator().
+    /// Used by RunBarrierStub() to match barrier count for wavelet load waves.
+    /// IMPORTANT: Must be kept in sync with operator(). See RunBarrierStub().
+    CK_TILE_HOST_DEVICE static constexpr index_t GetBarrierCount()
+    {
+        // operator() issues:
+        //   1x s_wait_tensorcnt_barrier()  (counted as 1 barrier)
+        //   num_access iterations x 2 block_sync_lds() each
+        constexpr index_t num_access = SFC::get_num_of_access();
+        return 1 + 2 * num_access;
+    }
+
+    /// Run matching barriers for wavelet load waves that don't participate
+    /// in the epilogue data path. Must issue the same number of barriers
+    /// as operator() to avoid deadlock.
+    CK_TILE_DEVICE static void RunBarrierStub()
+    {
+        constexpr index_t num_access = SFC::get_num_of_access();
+        constexpr index_t count      = GetBarrierCount();
+        // Verify the barrier count formula matches the structural pattern in operator():
+        //   1 x s_wait_tensorcnt_barrier  +  num_access x 2 block_sync_lds
+        static_assert(count == 1 + 2 * num_access,
+                      "RunBarrierStub: barrier count mismatch with operator(). "
+                      "If operator()'s barrier pattern changed, update GetBarrierCount().");
+        static_for<0, count, 1>{}([&](auto) { block_sync_lds(); });
     }
 
     template <index_t iAccess, typename LdsTile, typename ScaleM, typename ScaleN>
@@ -784,6 +801,9 @@ struct CShuffleEpilogue
             }
         }();
 
+        // NOTE: This barrier pattern must match GetBarrierCount().
+        // Total barriers = 1 (s_wait_tensorcnt_barrier) + 2 * num_access (block_sync_lds pairs).
+        // If you add/remove barriers here, update GetBarrierCount() and RunBarrierStub().
         s_wait_tensorcnt_barrier();
 
         static_for<0, num_access, 1>{}([&](auto iAccess) {
