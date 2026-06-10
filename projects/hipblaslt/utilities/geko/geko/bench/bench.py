@@ -502,8 +502,6 @@ def compare(
             dfv.loc[failed_mask, "norm_error"] = 1e6
         dft["error_tuned"] = dft.merge(dfv, on=[c for c in dfv.columns if c != "norm_error"])["norm_error"]
         dft["error_tuned"] = dft["error_tuned"] / dft["batch_count"] # normalized by batch_count
-        
-
 
     df = dfr.merge(dft, on=[c for c in dfr.columns if c.split("_reference")[0] not in UNIQ_COLS])
     df["ratio"] = df["us_reference"] / df["us_tuned"]
