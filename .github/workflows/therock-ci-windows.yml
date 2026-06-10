@@ -5,11 +5,9 @@ on:
     inputs:
       therock_ref:
         type: string
-        required: true
         default: "e442f5a8b174a73cd6f3b6e3c68fe867b13b555a" # users/lpromber/windows_cleanup_add_git_deinit
       rocm_package_version:
         type: string
-        required: true
       cmake_options:
         type: string
       projects_to_test:
