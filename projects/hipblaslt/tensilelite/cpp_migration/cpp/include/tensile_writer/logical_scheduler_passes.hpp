@@ -353,6 +353,18 @@ class LogicalScheduler {
   void emit();
   void build();
 
+  // ── Value-object export (for the Python writer integration) ──
+  //
+  // Materialize the internal pointer-based `partitions` model as the
+  // nanobind-bound value types of the enclosing lsched namespace
+  // (SubIterKSlot / MFMAPlacement / LRPlacement / GRPlacement carrying
+  // value Dep / before-chain ops / vgpr tile maps). Deps are emitted as
+  // value Deps whose `ref` is a coordinate-only copy of the referenced
+  // LR/GR placement: the Python converter re-establishes object identity by
+  // matching those coordinates against its persistent dataclass placements.
+  std::vector<std::vector<tw::subtile::lsched::SubIterKSlot>> value_partitions()
+      const;
+
   // ── Dep / sort helpers ───────────────────────────────────
   static int tensor_order(const std::string& t) {
     if (t == "A") return 0;
@@ -1773,6 +1785,84 @@ inline void LogicalScheduler::emit() {
 inline void LogicalScheduler::build() {
   emit();
   completed.insert(static_cast<int>(Pass::BUILD));
+}
+
+// ════════════════════════════════════════════════════════════
+// value_partitions — export the pass model as bound value types
+// ════════════════════════════════════════════════════════════
+
+// Convert a pass-pipeline Dep (identity pointer to a Placement) into the value
+// Dep of the enclosing namespace, copying only the referenced placement's
+// coordinate/identity fields. Deps only ever reference LR or GR placements.
+inline tw::subtile::lsched::Dep to_value_dep(const Dep& d) {
+  const Placement* r = d.ref;
+  if (r->kind == PKind::LR) {
+    tw::subtile::lsched::LRPlacement lr(r->tensor, r->mtIteration, r->tiles,
+                                        r->subIterK_slot, r->partition);
+    return tw::subtile::lsched::Dep(std::move(lr), d.mt_offset);
+  }
+  tw::subtile::lsched::GRPlacement gr(r->tensor, r->mtIteration, r->tiles,
+                                      r->subIterK_slot, r->partition);
+  return tw::subtile::lsched::Dep(std::move(gr), d.mt_offset);
+}
+
+// Convert a pass-pipeline before-chain Op into the value BeforeOp variant.
+inline tw::subtile::lsched::BeforeOp to_value_op(const Op& o) {
+  using namespace tw::subtile::lsched;
+  if (o.kind == "wait_gr") {
+    std::optional<WaitGRCounts> c;
+    if (o.hasCounts) c = o.counts;
+    return WaitGROp(std::move(c), o.has_sync, o.adjustVmcnt);
+  }
+  if (o.kind == "wait_lr") return WaitLROp(o.has_sync);
+  if (o.kind == "sync") return SyncOp();
+  if (o.kind == "mask_k") return MaskKOp(o.subIterK);
+  if (o.kind == "lr_inc") return LRIncOp(o.tensor);
+  if (o.kind == "gr_inc") return GRIncOp(o.tensor);
+  return SyncOp();  // unreachable for the passes' op set
+}
+
+inline std::vector<std::vector<tw::subtile::lsched::SubIterKSlot>>
+LogicalScheduler::value_partitions() const {
+  using namespace tw::subtile::lsched;
+  std::vector<std::vector<SubIterKSlot>> out;
+  out.reserve(partitions.size());
+  for (const auto& slots : partitions) {
+    std::vector<SubIterKSlot> vslots;
+    vslots.reserve(slots.size());
+    for (const auto& cs : slots) {
+      SubIterKSlot vs(cs.subIterK);
+      if (cs.mfma) {
+        MFMAPlacement m(cs.mfma->subIterK, cs.mfma->tileA, cs.mfma->tileB);
+        for (const auto& d : cs.mfma->deps) m.deps.push_back(to_value_dep(d));
+        for (const auto& o : cs.mfma->preOps) m.preOps.push_back(to_value_op(o));
+        for (const auto& o : cs.mfma->postOps)
+          m.postOps.push_back(to_value_op(o));
+        m.vgpr_tile_maps = cs.mfma->vgpr_tile_maps;
+        vs.mfma = std::move(m);
+      }
+      for (const auto* lr : cs.lrs) {
+        LRPlacement v(lr->tensor, lr->mtIteration, lr->tiles, lr->subIterK_slot,
+                      lr->partition);
+        for (const auto& d : lr->deps) v.deps.push_back(to_value_dep(d));
+        for (const auto& o : lr->preOps) v.preOps.push_back(to_value_op(o));
+        for (const auto& o : lr->postOps) v.postOps.push_back(to_value_op(o));
+        v.vgpr_tile_map = lr->vgpr_tile_map;
+        vs.lrs.push_back(std::move(v));
+      }
+      for (const auto* gr : cs.grs) {
+        GRPlacement v(gr->tensor, gr->mtIteration, gr->tiles, gr->subIterK_slot,
+                      gr->partition);
+        for (const auto& d : gr->deps) v.deps.push_back(to_value_dep(d));
+        for (const auto& o : gr->preOps) v.preOps.push_back(to_value_op(o));
+        for (const auto& o : gr->postOps) v.postOps.push_back(to_value_op(o));
+        vs.grs.push_back(std::move(v));
+      }
+      vslots.push_back(std::move(vs));
+    }
+    out.push_back(std::move(vslots));
+  }
+  return out;
 }
 
 // ════════════════════════════════════════════════════════════

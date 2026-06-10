@@ -20,13 +20,16 @@ submodule. This slice ports only the *data / config* primitives of
 * dependency / slot / emitted-module value types (``Dep`` / ``SubIterKSlot`` /
   ``EmittedModule``)
 
-The scheduling passes (place_LRs / place_GRs / annotate_deps / build /
-populate_instructions), InstructionEmitter dispatch, and rocisa Module emission
-are **not** ported here and remain pure Python: the pass-populated fields above
-exist as faithful value types but are not filled by any C++ pass. The
-``InlineModuleOp.build`` Callable and ``EmittedModule.instructions`` (rocisa
-objects) are likewise Python-only. The names mirror the Python module so it can
-optionally delegate its pure helpers here.
+The writer-free scheduling passes (place_LRs through
+remove_unnecessary_wait_lr_sync, plus assign_vgpr_tiles) are ported in the
+``LogicalScheduler`` class below and are the live implementation: the Python
+``Tensile.Components.Subtile.LogicalScheduler`` delegates those passes to it and
+rebuilds its dataclass partitions from ``LogicalScheduler.value_partitions()``.
+The rocisa writer integration (build / populate_instructions, InstructionEmitter
+dispatch, rocisa Module / Kernel.mainLoop emission), the ``InlineModuleOp.build``
+Callable, and ``EmittedModule.instructions`` (rocisa objects) remain Python-only.
+The value-type pass-populated fields above are filled by the converter from the
+exported schedule.
 """
 
 from tensile_writer import _tensile_writer as _ext

@@ -16,8 +16,11 @@
 // helpers (fmt_mt, SchedulerConfig.get_partition_candidates) are all C++-only —
 // the Python side forwards to them unconditionally with no Python fallback. The
 // GR/LR offset-assignment plans (also on ABTileInfoQuery) remain opt-in via
-// TENSILE_WRITER_CPP. The writer-free LogicalScheduler pass pipeline is exposed
-// here for pass-by-pass parity; the Python writer still owns the live passes.
+// TENSILE_WRITER_CPP. The writer-free LogicalScheduler pass pipeline (place_LRs
+// through remove_unnecessary_wait_lr_sync, plus assign_vgpr_tiles) is now the
+// live implementation: the Python LogicalScheduler delegates those passes here
+// and rebuilds its dataclass partitions from value_partitions(). The rocisa
+// writer integration (emit/build_*/populate_instructions/alloc) stays Python.
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/map.h>
@@ -859,6 +862,12 @@ void bind_logical_scheduler_passes(nb::module_& s) {
            &LS::remove_unnecessary_wait_lr_sync)
       .def("emit", &LS::emit)
       .def("build", &LS::build)
+      .def("value_partitions", &LS::value_partitions,
+           "Materialize the computed schedule as bound value types "
+           "(list[list[SubIterKSlot]]) so the Python writer can rebuild its "
+           "dataclass partitions. Deps carry coordinate-only ref copies; the "
+           "Python converter re-establishes object identity by coordinate "
+           "match.")
       .def_ro("needs_unrolling", &LS::needs_unrolling)
       .def_ro("unroll_factor", &LS::unroll_factor)
       .def_prop_ro("tile_peaks",
