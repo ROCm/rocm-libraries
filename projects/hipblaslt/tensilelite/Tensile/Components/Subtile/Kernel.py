@@ -144,6 +144,8 @@ from .SubtileLREmit import (
 )
 from .SubtileScaleEmit import (
     globalReadDoScaleSubtile, localReadDoScaleSubtile,
+    graTileAssignmentScaleSwizzled, lraTileAssignmentScaleSwizzled,
+    globalReadScaleSwizzledDTLInitCommonSgpr,
 )
 
 class ABGRTile:
