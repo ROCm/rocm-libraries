@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cstdint>
 #include <iostream>
 #include <optional>
 #include <string>

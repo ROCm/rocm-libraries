@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cctype>
 #include <climits>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <iostream>
