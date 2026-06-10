@@ -258,8 +258,35 @@ std::vector<float> generateData(T                           dgen,
 
     if(preSwizzleTile.size() == 3)
     {
-        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {scaleCols, scaleRows});
-        
+          // Determine if the generator's scale layout needs transposing.
+          // When the contiguous (stride-1) dimension is NOT K (i.e., it's M or N),
+          // the generator produces scales in [K/mxBlock, MN] row-major.
+          // preSwizzleScalesGFX950 expects [MN, K/mxBlock] row-major.
+          // This applies to: non-transposed matrixA and transposed matrixB.
+          bool needsTranspose = (isMatrixA && !isTranspose) || (!isMatrixA && isTranspose);
+          if(needsTranspose)
+          {
+              // Generator layout: [K/mxBlock, MN_dim] row-major
+              // (using the aligned scale_id interpretation where
+              //  scale_id = k_block * MN_dim + mn_pos)
+              // PreSwizzle needs: [MN_dim, K/mxBlock] row-major
+              size_t mnDim      = sizes[0];                        // M or N
+              size_t numKBlocks = sizes[1] / elementsPerMXBlock;   // K / mxBlock
+              std::vector<uint8_t> transposed(scaleBytes.size());
+              for(size_t kb = 0; kb < numKBlocks; ++kb)
+                  for(size_t mn = 0; mn < mnDim; ++mn)
+                      transposed[mn * numKBlocks + kb] = scaleBytes[kb * mnDim + mn];
+              scaleBytes = DGen::preSwizzleScalesGFX950(std::move(transposed),
+                                                        {mnDim, numKBlocks});
+          }
+          else
+          {
+              // Contiguous dimension IS K (transposed A or non-transposed B).
+              // Generator naturally produces [MN_dim, K/mxBlock] row-major - no transpose needed.
+              size_t mnDim      = sizes[1];                        // M or N (2nd dim when K is 1st)
+              size_t numKBlocks = sizes[0] / elementsPerMXBlock;   // K / mxBlock
+              scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {mnDim, numKBlocks});
+          }
     }
 
     std::memcpy(scale, scaleBytes.data(), scaleBytes.size() * sizeof(uint8_t));

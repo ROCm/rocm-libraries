@@ -1,0 +1,118 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]  # subtile MX-FP4 is gfx950-only
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  #PrintSolutionRejectionReason: True
+  CpuThreads : 1
+  MXScaleFormat: 1
+  RotatingBufferSize: 0
+
+
+BenchmarkProblems:
+  ########################################
+  # MX-FP4 *NN* layout (TransposeA=0, TransposeB=0)
+  #   NN => TLUA=1 (A column-major, contiguous along M)
+  #         TLUB=0 (B row-major,    contiguous along K)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - # Solution knobs (subtile constraints; layout-independent)
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSubtileImpl: [1]
+        - MatrixInstruction:
+          # 1x1 wave group
+          - [16, 16, 128, 1, 1, 2, 2, 1, 1]  # MT 32x32
+          - [16, 16, 128, 1, 1, 2, 2, 1, 2]
+          # 2x2 wave group — symmetric
+          - [16, 16, 128, 1,  1, 8, 8,   2, 2 ] # MT 256x256
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          # 2x2 wave group — asymmetric
+          - [16, 16, 128, 1,  1, 6, 8,  2, 2]  # MT 192x256
+          - [16, 16, 128, 1,  1, 8, 6,  2, 2]  # MT 256x192
+          - [16, 16, 128, 1,  1, 6, 2,  2, 2]  # MT 192x64
+          - [16, 16, 128, 1,  1, 2, 6,  2, 2]  # MT 64x192
+          - [16, 16, 128, 1,  1, 6, 4,  2, 2]  # MT 192x128
+          # 4x1 wave group
+          #- [16, 16, 128, 1,  1, 2, 2,  4, 1]  # MT 128x32
+          # 1x4 wave group
+          # NOTE: MIWaveGroup[1] (waves_coop) must be <= MI_K / WavefrontSize = 128/64 = 2.
+          # The col-major A DTL GR offset formula computes K_col = c*kCoopCols + laneId,
+          # which requires kCoopCols (= MI_K / waves_coop) >= waveSize (64). When
+          # waves_coop > 2, kCoopCols < 64 and lanes with laneId >= kCoopCols overflow
+          # into adjacent waves' K-ranges (overlapping reads) or beyond MI_K (OOB reads),
+          # corrupting LDS data. Supporting waves_coop > 2 requires splitting laneId
+          # between K and M sub-dimensions in both GR and LR offset formulas.
+          # Example: [16,16,128,1,1,2,6,1,4] has waves_coop=4, kCoopCols=32 < 64 → BROKEN.
+          #- [16, 16, 128, 1,  1, 2, 6,  1, 4]  # MT 32x384
+
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]                  # multiple of 2*MI_K = 256 (required)
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - NonTemporalD: [4]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]    # M, N, batch, K ; full 256x256 tile, K = 1*DepthU
+          - Exact: [512, 256, 1, 256]
+          - Exact: [256, 512, 1, 256]
+          - Exact: [512, 512, 1, 256]
+          # Edge cases: M,N = k*64 (FP4 granularity) but not multiples of macro tile
+          - Exact: [64,  64,  1, 256]   # 1*64, edge for MT >= 96
+          - Exact: [192, 192, 1, 256]   # 3*64, edge for MT=128,256,384
+          - Exact: [320, 320, 1, 256]   # 5*64, edge for MT=128,192,256,384
+          - Exact: [448, 448, 1, 256]   # 7*64, edge for MT=128,192,256,384
+          # Asymmetric edge cases
+          - Exact: [192, 256, 1, 256]   # M edge, N full tile
+          - Exact: [256, 192, 1, 256]   # M full tile, N edge
+
+          ## Non-multiple-of-32 M,N (multiples of 16) NOT WORKING
+          #- Exact: [48,   48, 1, 256]   # 3*16, both M,N non-mult-of-32
+          #- Exact: [112, 176, 1, 256]   # 7*16, 11*16
+          #- Exact: [48,  128, 1, 256]   # M non-mult-of-32, N full tile
+          #- Exact: [128,  48, 1, 256]   # M full tile, N non-mult-of-32
+          #- Exact: [240, 112, 1, 256]   # 15*16, 7*16
+
+

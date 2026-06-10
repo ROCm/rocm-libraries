@@ -698,8 +698,18 @@ namespace TensileLite
         }
 
         if(problemType.mxBlockA)
-            for(size_t i = startStrideAB; i < mxsa.dimensions(); i++)
-                args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSA", i), mxsa.strides()[i]);
+        {
+              auto boundIdxA = problem.boundIndices()[0].a;
+              for(size_t i = startStrideAB; i < mxsa.dimensions(); i++)
+              {
+                  uint32_t stride;
+                  if(i == startStrideAB)
+                      stride = static_cast<uint32_t>(mxsa.sizes()[boundIdxA]);
+                  else
+                      stride = static_cast<uint32_t>(mxsa.strides()[i]);
+                  args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSA", i), stride);
+              }
+        }
 
         for(size_t i = startStrideAB; i < b.dimensions(); i++)
         {
@@ -708,8 +718,18 @@ namespace TensileLite
         }
 
         if(problemType.mxBlockB)
-            for(size_t i = startStrideAB; i < mxsb.dimensions(); i++)
-                args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSB", i), mxsb.strides()[i]);
+        {
+              auto boundIdxB = problem.boundIndices()[0].b;
+              for(size_t i = startStrideAB; i < mxsb.dimensions(); i++)
+              {
+                  uint32_t stride;
+                  if(i == startStrideAB)
+                      stride = static_cast<uint32_t>(mxsb.sizes()[boundIdxB]);
+                  else
+                      stride = static_cast<uint32_t>(mxsb.strides()[i]);
+                  args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSB", i), stride);
+              }
+        }
 
         if(problemType.sparse)
         {

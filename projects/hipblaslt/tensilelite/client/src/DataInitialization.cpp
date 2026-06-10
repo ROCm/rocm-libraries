@@ -1966,8 +1966,16 @@ namespace TensileLite
                         // Scale tensor dimensions from setMXScaleA are already padded
                         // (K/mxBlock to multiple of 8, M to multiple of 32)
                         auto const& mxsaSizes = problem.mxsa().sizes();
-                        size_t scaleRowsA = mxsaSizes[0];
-                        size_t scaleColsA = mxsaSizes[1];
+
+                        // The MXSA tensor inherits dimension order from tensor A.
+                        // Use bound/free indices to correctly identify which element is K/mxBlock
+                        // vs M regardless of transpose.
+                        auto        boundIdxA = problem.boundIndices()[0].a;
+                        auto        freeIdxA  = problem.freeIndicesA()[0].i;
+                        size_t scaleRowsA = mxsaSizes[boundIdxA]; // K/mxBlock (padded to mult of 8)
+                        size_t scaleColsA = mxsaSizes[freeIdxA];  // M (padded to mult of 32)
+
+
                         if(scaleRowsA % tileK == 0 && scaleColsA % swizzleTileMN == 0)
                         {
                             size_t subTileK = MiK / problem.mxBlockA();
@@ -1981,8 +1989,14 @@ namespace TensileLite
                         // Scale tensor dimensions from setMXScaleB are already padded
                         // (K/mxBlock to multiple of 8, N to multiple of 32)
                         auto const& mxsbSizes = problem.mxsb().sizes();
-                        size_t scaleRowsB = mxsbSizes[0];
-                        size_t scaleColsB = mxsbSizes[1];
+
+                        // Same logic for tensor B
+                        auto        boundIdxB = problem.boundIndices()[0].b;
+                        auto        freeIdxB  = problem.freeIndicesB()[0].i;
+                        size_t scaleRowsB = mxsbSizes[boundIdxB]; // K/mxBlock
+                        size_t scaleColsB = mxsbSizes[freeIdxB];  // N
+
+
                         if(scaleRowsB % tileK == 0 && scaleColsB % swizzleTileMN == 0)
                         {
                             size_t subTileK = MiK / problem.mxBlockB();
@@ -2192,6 +2206,7 @@ namespace TensileLite
                                             gpuScaleBytes,
                                             hipMemcpyHostToDevice));
                     m_mxPreswizzledB = true;
+
                 }
             }
             else
@@ -2201,6 +2216,7 @@ namespace TensileLite
                 if(problem.mxBlockB() > 0)
                     initTensorFromDefault(ContractionProblemGemm::TENSOR::MXSB);
             }
+
         }
 #else  // HIPBLASLT_ENABLE_MXDATAGENERATOR
         void DataInitialization::initializeMXData(ContractionProblemGemm const& /*problem*/)

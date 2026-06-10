@@ -24,7 +24,7 @@ from rocisa.container import DPPModifiers, EXEC, MUBUFModifiers, VCC, vgpr, sgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
-    SAddCU32, SAddU32, SMovB32, SMovB64, SMulI32, SNop, SXorB32,
+    SAddCU32, SAddU32, SMovB32, SMovB64, SMulI32, SNop, SXorB32, SSubU32,
     VAddU32, VAndB32, VCmpXEqU32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32,
     VMulLOU32, VReadfirstlaneB32, VSubU32, VXorB32,
@@ -76,8 +76,6 @@ def _emitGRPtrUpdate(tag, tile, ti, writer, kernel):
 # Stubs for tags not yet implemented.
 _stub = lambda tag, tile, ti, writer, kernel: None
 _emitGlobalReadOffset.register(GRTag_TLU1)(_stub)
-_allocGROffsetRegisters.register(GRTag_TLU1)(_stub)
-_deallocGROffsetRegisters.register(GRTag_TLU1)(_stub)
 _emitGlobalRead.register(GRTag_TLU1)(_stub)
 _emitDTLInit.register(GRTag_TLU1)(_stub)
 _emitGRLDSBufferSwap.register(GRTag_TLU1)(_stub)
@@ -340,6 +338,50 @@ def _deallocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
     ti.localSubtilesRegister = []
 
 
+@_allocGROffsetRegisters.register(GRTag_TLU1)
+def _allocGROffsetRegs_TLU1(tag, tile, ti, writer, kernel):
+  """Allocate GR offset registers for column-major (TLU=1) A.
+  Differs from TLU=0 in the perpendicular direction:
+    - sharedVgprGROffset[]: one VGPR per GR load (per-lane M-contiguous byte offset).
+    - localSubtilesRegister[]: one RegList per *K-subtile* (the strided dir is K).
+        K-subtile 0 (base) needs no soffset -> empty RegList.
+        K-subtile j>0 gets 1 SGPR holding j*Ktile*StrideL*bpe (runtime).
+      M-subtiles advance is a compile-time constant folded into soffset at emit
+      time (added/restored around the buffer_load), so they need NO persistent register.
+  """
+  tile.sharedVgprGROffset = []
+  for _ in range(ti.numGRPerSubtile):
+    tile.sharedVgprGROffset.append(writer.vgprPool.checkOut(1))
+  ti.localSubtilesRegister = []
+  numKSubtiles = int(ti.localSubtileGrid[1])          # strided (K) direction for TLU=1
+  sgprLimit = writer.states.regCaps["MaxSgpr"] - 3
+  for k_idx in range(numKSubtiles):
+    useSgpr = writer.sgprPool.size() < sgprLimit
+    rl = RegList(writer.sgprPool, RegisterType.Sgpr) if useSgpr \
+         else RegList(writer.vgprPool, RegisterType.Vgpr)
+    ti.localSubtilesRegister.append(rl)
+    if k_idx == 0:
+      continue                                        # base K-subtile: soffset = 0
+    if useSgpr:
+      rl.alloc(preventOverflow=False)                 # 1 SGPR soffset
+    else:
+      for _ in range(ti.numGRPerSubtile):             # VGPR fallback: bake into per-lane offset
+        rl.alloc(preventOverflow=False)
+
+
+@_deallocGROffsetRegisters.register(GRTag_TLU1)
+def _deallocGROffsetRegs_TLU1(tag, tile, ti, writer, kernel):
+  """Free the column-major (TLU=1) GR offset registers allocated above."""
+  if isinstance(tile.sharedVgprGROffset, list):
+    for voff in tile.sharedVgprGROffset:
+      writer.vgprPool.checkIn(voff)
+    tile.sharedVgprGROffset = []
+  if isinstance(ti.localSubtilesRegister, list):
+    for rl in ti.localSubtilesRegister:
+      rl.dealloc()
+    ti.localSubtilesRegister = []
+
+
 # --- GR load emit (TLU=0) ---------------------------------------------------
 
 @_emitGlobalRead.register(GRTag_1x1)
@@ -499,6 +541,21 @@ def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
              comment=""))
   return module
 
+# --- GR LDS buffer swap (TLU=1) - identical to TLU=0: XOR toggles M0 base ---
+@_emitGRLDSBufferSwap.register(GRTag_TLU1)
+def _emitGRLDSSwap_TLU1(tag, tile, ti, writer, kernel):
+  """Toggle GR DTL write target between double-buffer halves (TLU=1).
+  The XOR-based M0 swap is layout-independent: it toggles the LDS write
+  base between buffer halves regardless of data orientation.
+  """
+  module = Module()
+  tc = ti.tc
+  module.addComment0("Emit code to swap %s GR m0 offsets (col-major)"%tc)
+  module.add(SXorB32(dst=sgpr(f"LocalWriteBaseAddr{tc}"),
+             src0=sgpr(f"LocalWriteBaseAddr{tc}"), src1=sgpr(f"Swap{tc}"),
+             comment=f"{tc}: toggle GR LDS buffer"))
+  return module
+
 
 # --- GR pointer update (TLU=0) ----------------------------------------------
 
@@ -516,6 +573,28 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
              comment=f"{tc}: carry"))
   return module
 
+
+# --- GR pointer update (TLU=1) -----------------------------------------------
+@_emitGRPtrUpdate.register(GRTag_TLU1)
+def _emitGRPtrUpdate_TLU1(tag, tile, ti, writer, kernel):
+  """Advance SRD base pointer for column-major tensor by one depthU in K.
+  For column-major (TLU=1), K is the strided direction. Advancing by DepthU
+  columns requires: SRD += DepthU * bpe * Stride{tc}L  (bytes).
+  DepthU*bpe is compile-time; Stride{tc}L is runtime (SGPR).
+  """
+  module = Module(f"GR Ptr Update TLU1 ({ti.tc})")
+  tc = ti.tc
+  # depthU * bpe is the compile-time coefficient (e.g. 256 * 0.5 = 128)
+  coeff = int(ti.depthU * ti.bpe)
+  stmp = writer.sgprPool.checkOut(1)
+  module.add(SMulI32(dst=sgpr(stmp), src0=hex(coeff), src1=sgpr(f"Stride{tc}L"),
+             comment=f"{tc}: ptr_inc = {coeff} * Stride{tc}L (bytes)"))
+  module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=sgpr(stmp),
+             comment=f"{tc}: SRD.base += ptr_inc"))
+  module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+             comment=f"{tc}: SRD.base carry"))
+  writer.sgprPool.checkIn(stmp)
+  return module
 
 ################################################################################
 # Legacy GR emit functions (moved from SubtileBasedKernel.py)
@@ -719,6 +798,35 @@ def _grComputeRowPartition_legacy(module, kernel, writer, tileInfo, waveId, rowO
   writer.vgprPool.checkIn(tmpVgpr)
   writer.sgprPool.checkIn(tmpSgpr)
 
+
+def _grComputeColMajorSoffsetsA_legacy(writer, module, tileInfo):
+  """Per-K-subtile soffsets for column-major A: soffset(j) = j*Kcols*StrideAL*bpe (bytes).
+  One K-subtile spans subtileShape[1]*mmaTileShape[1] columns; consecutive K columns
+  are StrideAL elements apart (column-major). Kcols*bpe is compile-time, so a single
+  SMulI32 yields the byte soffset - identical structure to the TLU=0 M-soffset.
+  """
+  tc = tileInfo.tc
+  assert tc == 'A', "column-major GR currently implemented for A only"
+  kCols     = int(tileInfo.subtileShape[1] * tileInfo.mmaTileShape[1])   # columns per K-subtile (=128)
+  coeffBpe  = kCols * tileInfo.bpe                                       # 128*0.5 = 64 (must be integral)
+  assert coeffBpe == int(coeffBpe), "Kcols*bpe must be integral"
+  coeffBpe  = int(coeffBpe)
+  for k_idx in range(len(tileInfo.localSubtilesRegister)):
+    rl = tileInfo.localSubtilesRegister[k_idx]
+    if len(rl) == 0:
+      continue                                                          # base K-subtile -> soffset 0
+    if rl.is_sgpr:
+      module.add(SMulI32(dst=rl.ref(0), src0=hex(k_idx * coeffBpe), src1=sgpr(f"Stride{tc}L"),
+                 comment=f"{tc} col-major: K-subtile {k_idx} soffset = {k_idx*coeffBpe}*Stride{tc}L bytes"))
+    else:  # VGPR fallback: bake K advance into each per-lane offset
+      stmp = writer.sgprPool.checkOut(1)
+      for i, reg in enumerate(rl):
+        module.add(SMulI32(dst=sgpr(stmp), src0=hex(k_idx * coeffBpe), src1=sgpr(f"Stride{tc}L"),
+                   comment=f"{tc} col-major: K-subtile {k_idx} soffset"))
+        module.add(VAddU32(dst=vgpr(reg), src0=vgpr(tileInfo.sharedVgprGROffset[i]), src1=sgpr(stmp)))
+      writer.sgprPool.checkIn(stmp)
+
+
 def _grComputeAllOffsets_legacy(module, writer, tileInfo, colId, rowId, rowOffset):
   module.add(VAddU32(dst=vgpr(rowOffset), src0=vgpr(rowId), src1=vgpr(rowOffset), comment="%s: row offset"%tileInfo.tc))
   _grComputeOffset_legacy(module, writer, tileInfo, colId, rowOffset, tileInfo.sharedVgprGROffset[0])
@@ -797,11 +905,129 @@ def _grSwizzleColIds_legacy(module, writer, tileInfoA, tileInfoB, blockSize, num
     module.add(VAndB32(dst=vgpr(colIdB), src0=vgpr(colIdB), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
   writer.vgprPool.checkIn(tmpVgpr)
 
+
+def _grComputeColMajorOffsetsA_legacy(kernel, writer, tileInfo):
+  """Per-lane HBM byte offset for the column-major (TLU=1) FP4 A operand.
+  A[M,K] is column-major (M contiguous). Each lane issues ONE buffer_load_dwordx4
+  (16 B = 32 FP4) gathering 32 contiguous M elements at a SINGLE K column.
+  Within a cooperative group of `waves_coop` waves the 128-column K-tile is split
+  into halves of `kCoopCols` columns; lane Q of coop-wave c reads column
+  c*kCoopCols + Q. The M wave-group g picks the M region. For the BASE subtile:
+      M_base = g * (MacroTileA // waveGroupSize)   (rows; g = waveId % waveGroupSize)
+      K      = c * kCoopCols + laneId              (cols; c = waveId / waveGroupSize)
+      byte   = M_base*bpe  +  K * strideU * bpe
+  strideU is A's UNROLL (K) stride SGPR (== lda), NOT StrideA0I. No swizzle is
+  applied (column-major LDS placement is dense; handled in the LR step).
+  Self-contained: computes its own waveId/laneId so it never depends on the
+  shared blockSize that the TLU0 path derives from A (which is wrong for B).
+  Writes the per-lane offset into tileInfo.sharedVgprGROffset[0].
+  """
+  tc = tileInfo.tc
+  assert tc == 'A', "column-major GR offset path is only defined for A"
+  wavesize      = kernel["WavefrontSize"]                 # 64
+  waveGroupSize = kernel["MIWaveGroup"][0]                # M waves  = 2
+  waves_coop    = kernel["MIWaveGroup"][1]                # N waves cooperating on A = 2
+  bpeBits       = int(8 * tileInfo.bpe)                   # FP4: 4  (== StrideU scale: <<x then >>3)
+  # Compile-time block constants.
+  mGroupRows  = kernel["MacroTileA"] // waveGroupSize     # 256//2 = 128 rows per M-group
+  mGroupBytes = int(mGroupRows * tileInfo.bpe)            # 128*0.5 = 64 bytes
+  kCoopCols   = tileInfo.mmaTileShape[1] // waves_coop    # 128//2 = 64 cols per coop wave
+  assert (waves_coop  & (waves_coop  - 1)) == 0, "waves_coop must be power of 2"
+  # mGroupBytes need not be power of 2; handled by the mGroupBytes conditional shift/mul below
+  assert (kCoopCols   & (kCoopCols   - 1)) == 0, "kCoopCols must be power of 2"
+  # A's summation stride SGPR. For problem Cijk_Ailk_Bljk, A's summation index is "L".
+  # Tensile names strides as "Stride{tensor}{dimChar}", so A's unroll stride = "StrideAL".
+  # Generalized as f"Stride{tc}L" to also support future B TLU=1 (would need "StrideBL").
+  strideU = f"Stride{tc}L"
+  module = Module(f"GR Offset (column-major TLU=1) ({tc})")
+  tmp = writer.vgprPool.checkOut(4)
+  waveId, laneId, kPos, mPos = tmp, tmp + 1, tmp + 2, tmp + 3
+  module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1),
+             src=vgpr("Serial"), comment=f"{tc}: waveId = Serial >> log2(wavesize)"))
+  module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize-1,
+             comment=f"{tc}: laneId = Serial & (wavesize-1)"))
+  # K column = (waveId / waveGroupSize)*kCoopCols + laneId
+  module.add(VLShiftRightB32(dst=vgpr(kPos), shiftHex=hex(waveGroupSize.bit_length()-1),
+             src=vgpr(waveId), comment=f"{tc}: K-coop c = waveId >> log2(mWaves={waveGroupSize})"))
+  module.add(VLShiftLeftB32(dst=vgpr(kPos), shiftHex=hex(kCoopCols.bit_length()-1),
+             src=vgpr(kPos), comment=f"{tc}: c * kCoopCols (={kCoopCols})"))
+  module.add(VAddU32(dst=vgpr(kPos), src0=vgpr(laneId), src1=vgpr(kPos),
+             comment=f"{tc}: K column = c*kCoopCols + laneId"))
+  # K byte offset = K * strideU(elements) * bpe   (bpe scaling: <<(bpeBits.bit_length()-1) then >>3)
+  module.add(VMulLOU32(dst=vgpr(kPos), src0=sgpr(strideU), src1=vgpr(kPos),
+             comment=f"{tc}: K column * unroll-stride (elements)"))
+  module.add(VLShiftLeftB32(dst=vgpr(kPos), shiftHex=hex(bpeBits.bit_length()-1),
+             src=vgpr(kPos), comment=f"{tc}: * bpe (part 1)"))
+  module.add(VLShiftRightB32(dst=vgpr(kPos), shiftHex=hex(3),
+             src=vgpr(kPos), comment=f"{tc}: * bpe (part 2) -> K byte offset"))
+  # M wave-group byte offset = (waveId % waveGroupSize) * mGroupBytes
+  module.add(VAndB32(dst=vgpr(mPos), src0=vgpr(waveId), src1=waveGroupSize-1,
+             comment=f"{tc}: M-group g = waveId & (mWaves-1={waveGroupSize-1})"))
+  if (mGroupBytes & (mGroupBytes - 1)) == 0:
+    module.add(VLShiftLeftB32(dst=vgpr(mPos), shiftHex=hex(mGroupBytes.bit_length()-1),
+               src=vgpr(mPos), comment=f"{tc}: g * mGroupBytes (={mGroupBytes}) [shift]"))
+  else:
+    module.add(VMulLOU32(dst=vgpr(mPos), src0=mGroupBytes, src1=vgpr(mPos),
+               comment=f"{tc}: g * mGroupBytes (={mGroupBytes}) [mul]"))
+
+  module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[0]), src0=vgpr(mPos), src1=vgpr(kPos),
+             comment=f"{tc}: per-lane GR byte offset (column-major, base subtile)"))
+  # When numGRPerSubtile > 1 (loadRatioGR < 1), each additional buffer_load
+  # covers the next waveSize K-columns. Byte stride between consecutive loads:
+  #   perLoadStride = waveSize * StrideAL * bpe
+  #                 = waveSizeScaled * StrideAL  (waveSizeScaled is compile-time)
+  # For FP4 (bpe=0.5): waveSizeScaled = (64 << 2) >> 3 = 32.
+  if tileInfo.numGRPerSubtile > 1:
+    waveSizeScaled = (wavesize << (bpeBits.bit_length() - 1)) >> 3
+    stmp = writer.sgprPool.checkOut(1)
+    module.add(SMulI32(dst=sgpr(stmp), src0=hex(waveSizeScaled), src1=sgpr(strideU),
+               comment=f"{tc}: perLoadStride = {waveSizeScaled} * Stride{tc}L"))
+    for i in range(1, tileInfo.numGRPerSubtile):
+      module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprGROffset[i]),
+                 src0=vgpr(tileInfo.sharedVgprGROffset[i-1]), src1=sgpr(stmp),
+                 comment=f"{tc}: GR offset[{i}] = offset[{i-1}] + perLoadStride"))
+    writer.sgprPool.checkIn(stmp)
+  writer.vgprPool.checkIn(tmp)
+
+  return module
+
+
+def _graRowMajorSingle_legacy(writer, kernel, module, tileInfo, useSwizzling=True):
+  """Row-major (TLU=0) GR offsets for ONE tensor, using ITS OWN blockSize."""
+  wavesize = kernel["WavefrontSize"]
+  ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
+  loadWidth = tileInfo.loadWidthGR
+  blockSize = tileInfo.subIterKBytes // loadWidth
+  numRowsPerLDSBanks = ldsRowBankSize // tileInfo.subIterKBytes
+  tmp = writer.vgprPool.checkOut(4)
+  colId, rowId, waveId, laneId = tmp, tmp+1, tmp+2, tmp+3
+  rowOffset = writer.vgprPool.checkOut(1)
+  module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="waveId"))
+  module.add(VAndB32(dst=vgpr(laneId), src0=vgpr("Serial"), src1=wavesize-1))
+  module.add(VAndB32(dst=vgpr(colId), src0=vgpr("Serial"), src1=(blockSize-1), comment="colId"))
+  module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="rowId"))
+  # single-tensor swizzle: reuse the dual helper passing this tensor for both A and B slots
+  _grSwizzleColIds_legacy(module, writer, tileInfo, tileInfo, blockSize, numRowsPerLDSBanks,
+                          laneId, colId, rowId, waveId)   # rowId scratch is overwritten next; recompute:
+  module.add(VLShiftRightB32(dst=vgpr(rowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="rowId"))
+  _grComputeRowPartition_legacy(module, kernel, writer, tileInfo, waveId, rowOffset)
+  _grComputeAllOffsets_legacy(module, writer, tileInfo, colId, rowId, rowOffset)
+  writer.vgprPool.checkIn(rowOffset); writer.vgprPool.checkIn(tmp)
+  _grComputeSubtileOffsets_legacy(writer, module, tileInfo)
+
+
 def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
   module = Module()
   module.addComment0("GR Offset Calculation for Subtile Based Tiling")
   tileInfoA = writer.states.a.tileInfo
   tileInfoB = writer.states.b.tileInfo
+
+  if getattr(tileInfoA.gr.config, 'tlu', False):          # NN: column-major A, row-major B
+    module.add(_grComputeColMajorOffsetsA_legacy(kernel, writer, tileInfoA))
+    _grComputeColMajorSoffsetsA_legacy(writer, module, tileInfoA)
+    _graRowMajorSingle_legacy(writer, kernel, module, tileInfoB, useSwizzling)
+    return module
+
   subIterKBytes = tileInfoA.subIterKBytes
   wavesize = kernel["WavefrontSize"]
   ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
@@ -882,6 +1108,71 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
   return module
 
 
+def _emitColMajorBufferLoad(tileInfo, kernel, sId0, sId1):
+  """One column-major (TLU=1) direct-to-LDS buffer_load for subtile (sId0, sId1).
+  FIX: On GFX950 the MUBUF offset12 (INST_OFFSET) is added ONLY to the
+  global HBM address, NOT to M0 for the LDS write.  The old code pre-
+  subtracted offsetM from M0, relying on HW to add offset12 back - but
+  the HW does not.  Result: subtile slots sId0>0 land at wrong LDS
+  positions, shifting A data by 1-3 lane widths.
+  Fix: move the M-direction byte advance from offset12 into soffset
+  (soffset also affects only the global address) and set offset12=0.
+    Global = SRD + voff + soffset + 0         (soffset = kSoff + offsetM)
+    LDS    = M0  + lane*16                    (M0 = base + subtileLDSOffset)
+  """
+  module = Module()
+  tc = tileInfo.tc
+  isGlc = bool(kernel["NonTemporal%s"%tc] & 0x1)
+  isSlc = bool(kernel["NonTemporal%s"%tc] & 0x2)
+  isNT  = bool(kernel["NonTemporal%s"%tc] & 0x4)
+  # M-direction byte advance for this subtile row
+  offsetM = int(sId0 * tileInfo.subtileShape[0] * tileInfo.mmaTileShape[0] * tileInfo.bpe)
+  # K-direction scalar offset (SGPR or 0)
+  rl      = tileInfo.localSubtilesRegister[sId1]
+  kSoff   = rl.ref(0) if len(rl) > 0 and rl.is_sgpr else 0
+  subtileLDSOffset = int((sId0 + sId1 * tileInfo.localSubtileGrid[0]) * tileInfo.subtileSize)
+  WriteBaseAddr = "LocalWriteBaseAddr%s" % tc
+  # Combined soffset = kSoff + offsetM
+  needRestore = False
+  if offsetM == 0:
+    soffset = kSoff
+  elif kSoff == 0:
+    soffset = offsetM
+  else:
+    # kSoff is an SGPR; temporarily add offsetM, restore after the load
+    module.add(SAddU32(dst=kSoff, src0=kSoff, src1=offsetM,
+               comment="A col-major: soffset += M-advance %u" % offsetM))
+    soffset = kSoff
+    needRestore = True
+
+  # DTL write footprint: each buffer_load_dwordx4 writes waveSize * 16 bytes to LDS
+  dtlWriteSize = kernel["WavefrontSize"] * 16  # 64*16=1024: one DTL footprint
+  for i in range(tileInfo.numGRPerSubtile):
+    m0val = subtileLDSOffset + i * dtlWriteSize
+    module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=m0val,
+               comment="A col-major m0 = base + LDS(%u,%u) + load_%u*%u" % (sId0, sId1, i, dtlWriteSize)))
+    mubuf = MUBUFModifiers(offen=True, offset12=0, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
+    voff = tileInfo.sharedVgprGROffset[i] if (len(rl) == 0 or rl.is_sgpr) else rl.indices[i]
+    module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4),
+               soffset=soffset, mubuf=mubuf,
+               comment="A col-major GR [%u,%u] load %u" % (sId0, sId1, i)))
+  if needRestore:
+    module.add(SSubU32(dst=kSoff, src0=kSoff, src1=offsetM,
+               comment="A col-major: restore soffset after M-advance"))
+  return module
+
+
+def globalReadDoSubtileColMajor(tc, writer, kernel):
+  """Emit DTL loads for every column-major subtile (M-inner, K-outer)."""
+  module = Module()
+  ti = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
+  for sId1 in range(int(ti.localSubtileGrid[1])):
+    for sId0 in range(int(ti.localSubtileGrid[0])):
+      module.addComment0("col-major GR %s subtile [%u,%u]"%(tc, sId0, sId1))
+      module.add(_emitColMajorBufferLoad(ti, kernel, sId0, sId1))
+  return module
+
+
 def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
   return emitSingleBufferLoad(tileInfo, kernel, subtileId[0], subtileId[1])
@@ -894,6 +1185,9 @@ def globalReadDoSubtile(tc, writer, kernel):
   module = Module()
 
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
+
+  if tileInfo.gr is not None and getattr(tileInfo.gr.config, 'tlu', False):
+    return globalReadDoSubtileColMajor(tc, writer, kernel)
 
   for j in range(tileInfo.localSubtileGrid[1]):
     for i in range(tileInfo.localSubtileGrid[0]):
@@ -908,6 +1202,7 @@ def globalReadDoSubtile(tc, writer, kernel):
 def globalReadDTLInitCommonSgpr(writer, kernel):
   return _globalReadDTLInitCommonSgpr_legacy(writer, kernel)
 
+
 def _globalReadDTLInitCommonSgpr_legacy(writer, kernel):
   module = Module()
   tileInfoA = writer.states.a.tileInfo
@@ -915,26 +1210,94 @@ def _globalReadDTLInitCommonSgpr_legacy(writer, kernel):
   wavesize = kernel["WavefrontSize"]
   vgprWaveId = writer.vgprPool.checkOut(1)
   module.addComment0("Compute shared offsets used by m0 in DTL loads")
-  module.add(VLShiftRightB32(dst=vgpr(vgprWaveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="Wave Id"))
+  module.add(VLShiftRightB32(dst=vgpr(vgprWaveId), shiftHex=hex(wavesize.bit_length()-1),
+             src=vgpr("Serial"), comment="Wave Id"))
   tmpVgpr = writer.vgprPool.checkOut(2)
   rowOffsetA = tmpVgpr
   rowOffsetB = tmpVgpr + 1
-  _grComputeRowPartition_legacy(module, kernel, writer, tileInfoA, vgprWaveId, rowOffsetA)
-  _grComputeRowPartition_legacy(module, kernel, writer, tileInfoB, vgprWaveId, rowOffsetB)
+  # -- Detect col-major (TLU=1) A: needs different LWB_A formula. --
+  isTLU1_A = (tileInfoA.gr is not None
+              and getattr(tileInfoA.gr.config, 'tlu', False))
+  if isTLU1_A:
+    # For col-major A with DTL (Direct-to-LDS), each wave's LDS write base is:
+    #   LWB_A(wave) = mGroup * GROUP_BYTES + kCoop * COOP_BYTES
+    # where:
+    #   mGroup     = waveId % mWaves          (M-direction wave index; low bits)
+    #   kCoop      = waveId // mWaves         (K-cooperative wave index; high bits)
+    #   mWaves     = MIWaveGroup[0]           (number of waves in M-direction)
+    #   GROUP_BYTES = lsg0 * lsg1 * subtileSize (total LDS per M-group)
+    #   COOP_BYTES  = wavesize * tile_m_bytes   (one coop-wave's DTL footprint)
+    #   tile_m_bytes = lrSubtileShape[0] * mmaTileShape[0] * bpe  (M-extent bytes per col)
+    # This produces a DENSE LDS layout:
+    #   LDS[mGroup*GROUP + kCoop*COOP + sub_offset + Q*16]   (Q = lane index)
+    waves_coop = kernel["MIWaveGroup"][1]
+    lsg0       = int(tileInfoA.localSubtileGrid[0])
+    lsg1       = int(tileInfoA.localSubtileGrid[1])
+    GROUP_BYTES  = lsg0 * lsg1 * int(tileInfoA.subtileSize)
+    tile_m_bytes = int(tileInfoA.lrSubtileShape[0] * tileInfoA.mmaTileShape[0] * tileInfoA.bpe)
+    COOP_BYTES   = wavesize * tile_m_bytes
+    tmp1     = writer.vgprPool.checkOut(1)
+    constSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
+    # rowOffsetA = (waveId % mWaves) * GROUP_BYTES   (mGroup * GROUP)
+    mWaves = kernel["MIWaveGroup"][0]
+    module.add(VAndB32(dst=vgpr(rowOffsetA),
+               src0=vgpr(vgprWaveId), src1=hex(mWaves - 1),
+               comment="A TLU1: mGroup = waveId %% %d" % mWaves))
+    module.add(SMovB32(dst=sgpr(constSgpr), src=hex(GROUP_BYTES),
+               comment="A TLU1: GROUP_BYTES = %d" % GROUP_BYTES))
+    module.add(VMulLOU32(dst=vgpr(rowOffsetA), src0=sgpr(constSgpr), src1=vgpr(rowOffsetA),
+               comment="A TLU1: mGroup * GROUP_BYTES"))
+    # tmp1 = (waveId / mWaves) * COOP_BYTES   (kCoop * COOP)
+    module.add(VLShiftRightB32(dst=vgpr(tmp1),
+               shiftHex=hex(int(math.log2(mWaves))), src=vgpr(vgprWaveId),
+               comment="A TLU1: kCoop = waveId / %d" % mWaves))
+    module.add(SMovB32(dst=sgpr(constSgpr), src=hex(COOP_BYTES),
+               comment="A TLU1: COOP_BYTES = %d" % COOP_BYTES))
+    module.add(VMulLOU32(dst=vgpr(tmp1), src0=sgpr(constSgpr), src1=vgpr(tmp1),
+               comment="A TLU1: kCoop * COOP_BYTES"))
+    # rowOffsetA = mGroup*GROUP + kCoop*COOP   (already in BYTES, no extra shift below)
+    module.add(VAddU32(dst=vgpr(rowOffsetA), src0=vgpr(rowOffsetA), src1=vgpr(tmp1),
+               comment="A TLU1: LWB_A = mGroup*GROUP + kCoop*COOP"))
+    writer.vgprPool.checkIn(tmp1)
+    writer.sgprPool.checkIn(constSgpr)
+    # B uses the legacy formula (still TLU=0 row-major)
+    _grComputeRowPartition_legacy(module, kernel, writer, tileInfoB, vgprWaveId, rowOffsetB)
+  else:
+    # Both A and B use the legacy row-major formula
+    _grComputeRowPartition_legacy(module, kernel, writer, tileInfoA, vgprWaveId, rowOffsetA)
+    _grComputeRowPartition_legacy(module, kernel, writer, tileInfoB, vgprWaveId, rowOffsetB)
+
   subIterKBytes = tileInfoA.subIterKBytes
-  module.add(VLShiftLeftB32(dst=vgpr(rowOffsetA), shiftHex=hex((subIterKBytes).bit_length()-1), src=vgpr(rowOffsetA), comment="Apply wave-specific offset for A"))
-  module.add(VLShiftLeftB32(dst=vgpr(rowOffsetB), shiftHex=hex((subIterKBytes).bit_length()-1), src=vgpr(rowOffsetB), comment="Apply wave-specific offset for B"))
+  # The legacy path produces row-counts; multiply by subIterKBytes to get bytes.
+  # The TLU1 path produced bytes directly, so SKIP this shift for A.
+  if not isTLU1_A:
+    module.add(VLShiftLeftB32(dst=vgpr(rowOffsetA), shiftHex=hex((subIterKBytes).bit_length()-1),
+               src=vgpr(rowOffsetA), comment="Apply wave-specific offset for A"))
+  # When A is TLU1 (NN mode), B's LDS row size (subIterKBytes) differs from A's.
+  # The row-to-byte conversion must use B's own subIterKBytes for correct DTL base.
+  subIterKBytesB = tileInfoB.subIterKBytes if isTLU1_A else subIterKBytes
+  module.add(VLShiftLeftB32(dst=vgpr(rowOffsetB), shiftHex=hex((subIterKBytesB).bit_length()-1),
+             src=vgpr(rowOffsetB), comment="Apply wave-specific offset for B"))
+
   module.add(SNop(waitState=0, comment="Wait for VGPR to be ready"))
-  module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddrA"), src=vgpr(rowOffsetA), comment="Store base LDS offset, will be modified"))
-  module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddrB"), src=vgpr(rowOffsetB), comment="Store base LDS offset, will be modified"))
-  module.add(SAddU32(dst=sgpr("LocalWriteBaseAddrB"), src0=sgpr("LocalWriteBaseAddrB"), src1=hex(writer.ldsStartOffsetB), comment=""))
-  module.add(SAddU32(dst=sgpr("SwapA"), src0=sgpr("LocalWriteBaseAddrA"), src1=writer.ldsTotalSize, comment=""))
-  module.add(SXorB32(dst=sgpr("SwapA"), src0=sgpr("LocalWriteBaseAddrA"), src1=sgpr("SwapA"), comment=""))
-  module.add(SAddU32(dst=sgpr("SwapB"), src0=sgpr("LocalWriteBaseAddrB"), src1=writer.ldsTotalSize, comment=""))
-  module.add(SXorB32(dst=sgpr("SwapB"), src0=sgpr("LocalWriteBaseAddrB"), src1=sgpr("SwapB"), comment=""))
+  module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddrA"), src=vgpr(rowOffsetA),
+             comment="Store base LDS offset, will be modified"))
+  module.add(VReadfirstlaneB32(dst=sgpr("LocalWriteBaseAddrB"), src=vgpr(rowOffsetB),
+             comment="Store base LDS offset, will be modified"))
+  module.add(SAddU32(dst=sgpr("LocalWriteBaseAddrB"), src0=sgpr("LocalWriteBaseAddrB"),
+             src1=hex(writer.ldsStartOffsetB), comment=""))
+  module.add(SAddU32(dst=sgpr("SwapA"), src0=sgpr("LocalWriteBaseAddrA"),
+             src1=writer.ldsTotalSize, comment=""))
+  module.add(SXorB32(dst=sgpr("SwapA"), src0=sgpr("LocalWriteBaseAddrA"),
+             src1=sgpr("SwapA"), comment=""))
+  module.add(SAddU32(dst=sgpr("SwapB"), src0=sgpr("LocalWriteBaseAddrB"),
+             src1=writer.ldsTotalSize, comment=""))
+  module.add(SXorB32(dst=sgpr("SwapB"), src0=sgpr("LocalWriteBaseAddrB"),
+             src1=sgpr("SwapB"), comment=""))
   writer.vgprPool.checkIn(vgprWaveId)
   writer.vgprPool.checkIn(tmpVgpr)
   return module
+
 
 ##################################################
 # Subroutine to generate DTL M0 LDS buffer swap
