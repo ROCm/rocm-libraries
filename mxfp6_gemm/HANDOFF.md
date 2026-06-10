@@ -94,6 +94,21 @@ Build & run: `make test_dispatch && ./test_dispatch`
 
 (Absolute numbers vary ±5% run-to-run from the SCLK/1000W power cap; kernel is stable.)
 
+## vs CK (same machine 2026-06-10, K=8192, `tile_example_mx_flatmm`, FP16)
+
+| shape | CK FP8 | CK FP6 | ours FP6 | ours / CK-FP6 | ours / CK-FP8 |
+|---|---|---|---|---|---|
+| 2048×4096 | 1428 | 1019 | 1516 | 1.49× | 1.06× |
+| 2048×8192 | 1566 | 1070 | 2023 | 1.89× | 1.29× |
+| 4096×4096 | 1553 | 1075 | 2095 | 1.95× | 1.35× |
+| 4096×8192 | 1718 | 1099 | 2198 | 2.00× | 1.28× |
+| 8192×8192 | 1804 | 1113 | 2246 | 2.02× | 1.24× |
+
+**Same-precision ~2× CK MXFP6; and our FP6 beats CK's FP8 by 1.06~1.35×.** On this machine CK
+FP8 > FP6 (FP6 pinned by the 1000W power cap + CK's 16×16×128). NOTE: an external 2026-05-04
+table showed CK FP6 (3200) > FP8 (3019) at much higher absolutes — that is a *different
+machine / CK build* (no power cap); do NOT compare its numbers to this machine's.
+
 ## Validation
 - Fresh-alloc 0x5A-poison vs CPU ref, both tile paths (256×256 and 128×256), incl. partial-grid
   / non-square / k_tiles==1. `test_dispatch` runs the end-to-end correctness gate.
