@@ -477,13 +477,13 @@ bool fp64EmulationPerformanceCheck(int64_t m, int64_t n, int64_t k, unsigned num
     const double t_scale_kern  = (mk + kn) * (8.0 + s) / HBM_BW;
     const double t_int8_gemms  = s * 2.0 * mnk / INT8_PEAK;
     const double t_accum_kern  = mn * (4.0 * s + 48.0) / HBM_BW;
-    /* Kernel launch overhead: 6 fixed custom kernels + n_chunks accum kernels
+    /* Kernel launch overhead: 5 fixed custom kernels + n_chunks accum kernels
      * + 1 preliminary matmul + n_chunks main INT8 matmul batches + 1 memset.
-     * Fixed kernels: prelim_reduce, prelim_extract, refine_sftA_partial,
+     * Fixed kernels: prelim_fused (oz2_accu_prelim_kernel), refine_sftA_partial,
      *   refine_sftA_apply, refine_sftB, scale (1 pass for typical problem).
      * LATENCY_MEMSET: row_max async clear; nan_flag memset and Inf/NaN stream
      *   sync assumed disabled (svmask == 0) and omitted from this estimate.  */
-    const double t_launch = (6.0 + n_chunks) * LATENCY_KERNEL
+    const double t_launch = (5.0 + n_chunks) * LATENCY_KERNEL
                           + (1.0 + n_chunks) * LATENCY_MATMUL
                           + LATENCY_MEMSET;
 
@@ -638,123 +638,257 @@ block_reduce_max_i32(int32_t warp_max, int32_t* __restrict__ s_wmax)
 }
 
 /* =========================================================================
- * GPU kernels — accu mode Part 1a/1b: preliminary shift computation + extraction
+ * GPU kernel — fused preliminary shift computation + INT8 extraction
+ *
+ * oz2_accu_prelim_kernel<TRANS_A, TRANS_B, CHECK_NAN>
+ *
+ * Fuses per-row/col shift computation (sftA, sftB) and preliminary INT8
+ * extraction (A8i_high, B8i_high) into a SINGLE kernel dispatch, eliminating
+ * the extra launch overhead of the previous two-kernel approach and achieving
+ * coalesced HBM reads AND writes for all four (TRANS_A, TRANS_B) combinations.
+ *
+ *   TRANS_A=true  (op(A)=A^T, A stored k×m col-major): k-fast (threadIdx.x=j).
+ *     Loop 1: read A[row*lda+j] (COALESCED) → block-reduce → sft.
+ *     Loop 2: read A[row*lda+j] (COALESCED) → scale → write A8i_high[j+row*lda8i] (COALESCED).
+ *
+ *   TRANS_A=false (op(A)=A, A stored m×k col-major): tiled SHMEM.
+ *     One block per TILE-row tile; two passes over k:
+ *       Pass 1: load m-fast tiles into SHMEM (COALESCED), accumulate per-row max → sft.
+ *       Pass 2: load m-fast tiles into SHMEM (COALESCED), scale, write A8i_high k-fast
+ *               from SHMEM via SHMEM transposition (COALESCED).
+ *
+ *   TRANS_B=false / TRANS_B=true: symmetric to TRANS_A=true / TRANS_A=false.
+ *
+ * Grid  = dim3(m_blks + n_blks, 1)
+ *   m_blks = TRANS_A ? m       : ceil(m / OZ2_PRELIM_TILE)
+ *   n_blks = TRANS_B ? ceil(n / OZ2_PRELIM_TILE) : n
+ * Block = dim3(OZ2_PRELIM_TILE * OZ2_PRELIM_TILE, 1) = dim3(256, 1)
  * ========================================================================= */
-/* CHECK_NAN=true:  isfinite() + atomicOr() compiled in.
- * CHECK_NAN=false: both compiled OUT (zero overhead when svmask == 0). */
+static constexpr int OZ2_PRELIM_TILE_K = 64;  /* k-tile size (reduces k-tile loop count) */
+static constexpr int OZ2_PRELIM_TILE_M = 4;   /* rows/cols per tile (= blockDim.x / TILE_K) */
+/* blockDim.x = TILE_K × TILE_M = 256 threads */
+
 template <bool TRANS_A, bool TRANS_B, bool CHECK_NAN>
 __global__ static void
-oz2_accu_prelim_reduce_kernel(const double* __restrict__ A,
-                               int64_t m, int64_t k, int64_t lda,
-                               int16_t*  __restrict__ sftA,
-                               const double* __restrict__ B,
-                               int64_t n, int64_t ldb,
-                               int16_t*  __restrict__ sftB,
-                               uint32_t* __restrict__ nan_flag,
-                               unsigned m_blocks)
+oz2_accu_prelim_kernel(const double* __restrict__ A,
+                        int64_t m, int64_t k, int64_t lda,
+                        int8_t*  __restrict__  A8i_high, size_t lda8i,
+                        int16_t* __restrict__  sftA,
+                        const double* __restrict__ B,
+                        int64_t n, int64_t ldb,
+                        int8_t*  __restrict__  B8i_high, size_t ldb8i,
+                        int16_t* __restrict__  sftB,
+                        uint32_t* __restrict__ nan_flag,
+                        unsigned m_blks)
 {
-    __shared__ double  s_wmax[8];
-    __shared__ int16_t s_sft;
+    static constexpr int TILE_K = OZ2_PRELIM_TILE_K;  /* k-tile size (256/TILE_M iterations) */
+    static constexpr int TILE_M = OZ2_PRELIM_TILE_M;  /* rows/cols per block */
 
-    if(blockIdx.x < m_blocks) {
+    /* Shared memory:
+     *   shmem[TILE_K][TILE_M+1] — FP64 tile (TILE_M+1 padding avoids bank conflicts)
+     *   s_sft[TILE_M]           — per-row/col sft broadcast
+     *   s_wmax[4]               — warp maxes for block_reduce_max_d (4 warps of 64)
+     *
+     * TILE_K=64, TILE_M=4 → 4× fewer k-tile iterations (k/64 vs k/16 for TILE=16),
+     * 4× fewer __syncthreads() in Pass 2, 4× more A/B blocks → better occupancy. */
+    __shared__ double  shmem[TILE_K][TILE_M + 1];
+    __shared__ int16_t s_sft[TILE_M];
+    __shared__ double  s_wmax[4];
+
+    if(blockIdx.x < m_blks) {
+        /* ── A block ────────────────────────────────────────────────────── */
         if constexpr (TRANS_A) {
+            /* k-fast: one block per op(A) row; two k-loops.               */
             const int64_t row = static_cast<int64_t>(blockIdx.x);
-            double local_max = 0.0;
-            for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
-                double val = A[row * lda + j];
-                if constexpr (CHECK_NAN)
-                    if(!isfinite(val)) (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
-                double av = fabs(val);
-                if(av > local_max) local_max = av;
-            }
-            local_max = warp_reduce_max_abs_d(local_max);
-            local_max = block_reduce_max_d(local_max, s_wmax);
-            if(threadIdx.x == 0) {
-                if(local_max < 1e-300) local_max = 1.0;
-                int sft = 6 - static_cast<int>(floor(log2(local_max)));
-                s_sft = static_cast<int16_t>(sft);
-                sftA[row] = s_sft;
-            }
-        } else {
-            const int64_t row = static_cast<int64_t>(blockIdx.x) * blockDim.x
-                              + static_cast<int64_t>(threadIdx.x);
-            if(row >= m) return;
-            double local_max = 0.0;
-            for(int64_t j = 0; j < k; ++j) {
-                double val = A[j * lda + row];
-                if constexpr (CHECK_NAN)
-                    if(!isfinite(val)) (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
-                double av = fabs(val);
-                if(av > local_max) local_max = av;
-            }
-            if(local_max < 1e-300) local_max = 1.0;
-            sftA[row] = static_cast<int16_t>(6 - static_cast<int>(floor(log2(local_max))));
-        }
-    } else {
-        if constexpr (!TRANS_B) {
-            const int64_t col = static_cast<int64_t>(blockIdx.x - m_blocks);
-            double local_max = 0.0;
-            for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
-                double val = B[j + col * ldb];
-                if constexpr (CHECK_NAN)
-                    if(!isfinite(val)) (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
-                double av = fabs(val);
-                if(av > local_max) local_max = av;
-            }
-            local_max = warp_reduce_max_abs_d(local_max);
-            local_max = block_reduce_max_d(local_max, s_wmax);
-            if(threadIdx.x == 0) {
-                if(local_max < 1e-300) local_max = 1.0;
-                int sft = 6 - static_cast<int>(floor(log2(local_max)));
-                s_sft = static_cast<int16_t>(sft);
-                sftB[col] = s_sft;
-            }
-        } else {
-            const int64_t col = static_cast<int64_t>(blockIdx.x - m_blocks) * blockDim.x
-                              + static_cast<int64_t>(threadIdx.x);
-            if(col >= n) return;
-            double local_max = 0.0;
-            for(int64_t j = 0; j < k; ++j) {
-                double val = B[j * ldb + col];
-                if constexpr (CHECK_NAN)
-                    if(!isfinite(val)) (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
-                double av = fabs(val);
-                if(av > local_max) local_max = av;
-            }
-            if(local_max < 1e-300) local_max = 1.0;
-            sftB[col] = static_cast<int16_t>(6 - static_cast<int>(floor(log2(local_max))));
-        }
-    }
-}
 
-__global__ static void
-oz2_accu_prelim_extract_kernel(const double* __restrict__ A,
-                                int64_t m, int64_t k, int64_t lda, bool transA,
-                                int8_t*        __restrict__ A8i_high, size_t lda8i,
-                                const int16_t* __restrict__ sftA,
-                                const double* __restrict__ B,
-                                int64_t n, int64_t ldb, bool transB,
-                                int8_t*        __restrict__ B8i_high, size_t ldb8i,
-                                const int16_t* __restrict__ sftB,
-                                unsigned m_blocks)
-{
-    if(blockIdx.x < m_blocks) {
-        const int64_t row = static_cast<int64_t>(blockIdx.x);
-        const int16_t sft = sftA[row];
-        for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
-            double val    = transA ? A[row * lda + j] : A[j * lda + row];
-            double scaled = ceil(ldexp(fabs(val), static_cast<int>(sft)));
-            A8i_high[static_cast<size_t>(j) + static_cast<size_t>(row) * lda8i] =
-                static_cast<int8_t>(static_cast<int32_t>(scaled));
+            /* Loop 1: compute per-row max */
+            double local_max = 0.0;
+            for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
+                double val = A[row * lda + j];                     /* COALESCED */
+                if constexpr (CHECK_NAN)
+                    if(!isfinite(val)) (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
+                double av = fabs(val);
+                if(av > local_max) local_max = av;
+            }
+            local_max = warp_reduce_max_abs_d(local_max);
+            local_max = block_reduce_max_d(local_max, s_wmax);
+            if(threadIdx.x == 0) {
+                if(local_max < 1e-300) local_max = 1.0;
+                s_sft[0] = static_cast<int16_t>(
+                    6 - static_cast<int>(floor(log2(local_max))));
+                sftA[row] = s_sft[0];
+            }
+            __syncthreads();
+            const int sft = static_cast<int>(s_sft[0]);
+
+            /* Loop 2: scale and write A8i_high */
+            for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
+                double val    = A[row * lda + j];                  /* COALESCED */
+                double scaled = ceil(ldexp(fabs(val), sft));
+                A8i_high[static_cast<size_t>(j)
+                         + static_cast<size_t>(row) * lda8i] =
+                    static_cast<int8_t>(static_cast<int32_t>(scaled));  /* COALESCED */
+            }
+
+        } else {
+            /* Tiled SHMEM: one block per TILE_M-row tile.
+             * Thread t: k_local = t/TILE_M (k-index in tile, 0..TILE_K-1),
+             *           m_local = t%TILE_M (row-index in tile, 0..TILE_M-1).
+             * Adjacent threads (same k_local, consecutive m_local) access
+             * consecutive rows of A → COALESCED loads.  k-tile iterations =
+             * k/TILE_K (e.g. 16 for k=1024, TILE_K=64).                    */
+            const int64_t m_base = static_cast<int64_t>(blockIdx.x) * TILE_M;
+            const int t       = static_cast<int>(threadIdx.x);
+            const int k_local = t / TILE_M;   /* 0..TILE_K-1 */
+            const int m_local = t % TILE_M;   /* 0..TILE_M-1 */
+            const int64_t i   = m_base + m_local;
+
+            /* Pass 1: accumulate per-row max across all k-tiles */
+            double thr_max = 0.0;
+            for(int64_t k_base = 0; k_base < k; k_base += TILE_K) {
+                const int64_t j = k_base + k_local;
+                if(i < m && j < k) {
+                    /* A[i + j*lda]: adjacent i (= m_local, varies) → COALESCED */
+                    double val = A[i + j * lda];
+                    if constexpr (CHECK_NAN)
+                        if(!isfinite(val)) (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
+                    double av = fabs(val);
+                    if(av > thr_max) thr_max = av;
+                }
+            }
+            /* Reduce across k_local dimension (TILE_K=64 values per row) */
+            shmem[k_local][m_local] = thr_max;
+            __syncthreads();
+            if(k_local == 0) {   /* TILE_M=4 threads finalise, one per row */
+                double row_max = 0.0;
+                for(int kl = 0; kl < TILE_K; ++kl)
+                    if(shmem[kl][m_local] > row_max) row_max = shmem[kl][m_local];
+                if(row_max < 1e-300) row_max = 1.0;
+                s_sft[m_local] = static_cast<int16_t>(
+                    6 - static_cast<int>(floor(log2(row_max))));
+                if(i < m) sftA[i] = s_sft[m_local];
+            }
+            __syncthreads();
+            const int sft = static_cast<int>(s_sft[m_local]);  /* row-specific */
+
+            /* Pass 2: coalesced loads (m-fast) → SHMEM → coalesced writes (k-fast)
+             * k_tile iterations = k/TILE_K (32 syncs for k=2048 vs 256 with TILE=16) */
+            for(int64_t k_base = 0; k_base < k; k_base += TILE_K) {
+                const int64_t j = k_base + k_local;
+
+                /* Load: A[i + j*lda], i=m_base+t%TILE_M varies → COALESCED */
+                double scaled = 0.0;
+                if(i < m && j < k)
+                    scaled = ceil(ldexp(fabs(A[i + j * lda]), sft));
+                shmem[k_local][m_local] = scaled;
+                __syncthreads();
+
+                /* Write: k_write = t%TILE_K varies fast → COALESCED */
+                const int k_write = t % TILE_K;
+                const int m_write = t / TILE_K;
+                const int64_t j_out = k_base  + k_write;
+                const int64_t i_out = m_base  + m_write;
+                if(i_out < m && j_out < k)
+                    A8i_high[static_cast<size_t>(j_out)
+                             + static_cast<size_t>(i_out) * lda8i] =
+                        static_cast<int8_t>(static_cast<int32_t>(
+                            shmem[k_write][m_write]));
+                __syncthreads();
+            }
         }
+
     } else {
-        const int64_t col = static_cast<int64_t>(blockIdx.x - m_blocks);
-        const int16_t sft = sftB[col];
-        for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
-            double val    = transB ? B[col + j * ldb] : B[j + col * ldb];
-            double scaled = ceil(ldexp(fabs(val), static_cast<int>(sft)));
-            B8i_high[static_cast<size_t>(j) + static_cast<size_t>(col) * ldb8i] =
-                static_cast<int8_t>(static_cast<int32_t>(scaled));
+        /* ── B block (symmetric to A, with TRANS_B) ─────────────────── */
+        if constexpr (!TRANS_B) {
+            /* j-fast: one block per op(B) col, threadIdx.x = j */
+            const int64_t col = static_cast<int64_t>(blockIdx.x - m_blks);
+
+            /* Loop 1: compute per-col max */
+            double local_max = 0.0;
+            for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
+                double val = B[j + col * ldb];                     /* COALESCED */
+                if constexpr (CHECK_NAN)
+                    if(!isfinite(val)) (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
+                double av = fabs(val);
+                if(av > local_max) local_max = av;
+            }
+            local_max = warp_reduce_max_abs_d(local_max);
+            local_max = block_reduce_max_d(local_max, s_wmax);
+            if(threadIdx.x == 0) {
+                if(local_max < 1e-300) local_max = 1.0;
+                s_sft[0] = static_cast<int16_t>(
+                    6 - static_cast<int>(floor(log2(local_max))));
+                sftB[col] = s_sft[0];
+            }
+            __syncthreads();
+            const int sft = static_cast<int>(s_sft[0]);
+
+            /* Loop 2: scale and write B8i_high */
+            for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
+                double val    = B[j + col * ldb];                  /* COALESCED */
+                double scaled = ceil(ldexp(fabs(val), sft));
+                B8i_high[static_cast<size_t>(j)
+                         + static_cast<size_t>(col) * ldb8i] =
+                    static_cast<int8_t>(static_cast<int32_t>(scaled));  /* COALESCED */
+            }
+
+        } else {
+            /* Tiled SHMEM for TRANS_B=T (B stored n×k, B[col,j]=B[col+j*ldb]).
+             * One block per TILE_M-col tile.                                */
+            const int64_t n_base = static_cast<int64_t>(blockIdx.x - m_blks) * TILE_M;
+            const int t       = static_cast<int>(threadIdx.x);
+            const int k_local = t / TILE_M;   /* 0..TILE_K-1 */
+            const int l_local = t % TILE_M;   /* col-index within tile */
+            const int64_t col = n_base + l_local;
+
+            /* Pass 1: accumulate per-col max */
+            double thr_max = 0.0;
+            for(int64_t k_base = 0; k_base < k; k_base += TILE_K) {
+                const int64_t j = k_base + k_local;
+                if(col < n && j < k) {
+                    /* B[col + j*ldb]: adjacent col (= l_local, varies) → COALESCED */
+                    double val = B[col + j * ldb];
+                    if constexpr (CHECK_NAN)
+                        if(!isfinite(val)) (void)atomicOr(nan_flag, isinf(val) ? 1u : 2u);
+                    double av = fabs(val);
+                    if(av > thr_max) thr_max = av;
+                }
+            }
+            shmem[k_local][l_local] = thr_max;
+            __syncthreads();
+            if(k_local == 0) {
+                double col_max = 0.0;
+                for(int kl = 0; kl < TILE_K; ++kl)
+                    if(shmem[kl][l_local] > col_max) col_max = shmem[kl][l_local];
+                if(col_max < 1e-300) col_max = 1.0;
+                s_sft[l_local] = static_cast<int16_t>(
+                    6 - static_cast<int>(floor(log2(col_max))));
+                if(col < n) sftB[col] = s_sft[l_local];
+            }
+            __syncthreads();
+            const int sft = static_cast<int>(s_sft[l_local]);
+
+            /* Pass 2: coalesced loads (col-fast) → SHMEM → coalesced writes (k-fast) */
+            for(int64_t k_base = 0; k_base < k; k_base += TILE_K) {
+                const int64_t j = k_base + k_local;
+
+                double scaled = 0.0;
+                if(col < n && j < k)
+                    scaled = ceil(ldexp(fabs(B[col + j * ldb]), sft));  /* COALESCED */
+                shmem[k_local][l_local] = scaled;
+                __syncthreads();
+
+                const int k_write = t % TILE_K;
+                const int l_write = t / TILE_K;
+                const int64_t j_out   = k_base  + k_write;
+                const int64_t col_out = n_base  + l_write;
+                if(col_out < n && j_out < k)
+                    B8i_high[static_cast<size_t>(j_out)
+                             + static_cast<size_t>(col_out) * ldb8i] =
+                        static_cast<int8_t>(static_cast<int32_t>(
+                            shmem[k_write][l_write]));
+                __syncthreads();
+            }
         }
     }
 }
@@ -1073,7 +1207,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     const char* const _pf   = oz2_profile_file();
     const bool        _prof = (_pf != nullptr);
     hipEvent_t _ev0{}, _ev1{}, _ev_tot{};
-    float _t_prelim = 0, _t_prelim_gemm = 0, _t_refine = 0,
+    float _t_prelim = 0, _t_prelim_gemm = 0, _t_extract = 0, _t_refine = 0,
           _t_scale  = 0, _t_int8 = 0, _t_accum = 0, _t_finalize = 0, _t_total = 0;
     if(_prof) { (void)hipEventCreate(&_ev0); (void)hipEventCreate(&_ev1); (void)hipEventCreate(&_ev_tot); }
     auto _pstart = [&]() noexcept { if(_prof) (void)hipEventRecord(_ev0, stream); };
@@ -1169,27 +1303,38 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
 
     const int32_t one_i = 1, zero_i = 0;
 
-    /* Step 1: Reduce — compute sftA/sftB with coalesced reads */
-    const unsigned m_blks_reduce = tA ? static_cast<unsigned>(m) : static_cast<unsigned>((m + 255) / 256);
-    const unsigned n_blks_reduce = tB ? static_cast<unsigned>((n + 255) / 256) : static_cast<unsigned>(n);
+    /* Fused preliminary shift + extraction (oz2_accu_prelim_kernel).
+     * Grid adapts to TRANS_A/TRANS_B:
+     *   m_blks = TRANS_A ? m           : ceil(m / OZ2_PRELIM_TILE_M)
+     *   n_blks = TRANS_B ? ceil(n/TM)  : n
+     * Block = OZ2_PRELIM_TILE_K × OZ2_PRELIM_TILE_M = 256 threads.    */
+    const unsigned m_blks_prelim = tA
+        ? static_cast<unsigned>(m)
+        : static_cast<unsigned>((m + OZ2_PRELIM_TILE_M - 1) / OZ2_PRELIM_TILE_M);
+    const unsigned n_blks_prelim = tB
+        ? static_cast<unsigned>((n + OZ2_PRELIM_TILE_M - 1) / OZ2_PRELIM_TILE_M)
+        : static_cast<unsigned>(n);
     _pstart();
-#define OZ2_PRELIM_REDUCE(TA, TB, CN) \
-    hipLaunchKernelGGL((oz2_accu_prelim_reduce_kernel<(TA),(TB),(CN)>), \
-                       dim3(m_blks_reduce + n_blks_reduce), dim3(256), 0, stream, \
-                       A, m, k, lda, sftA, B, n, ldb, sftB, nan_flag, m_blks_reduce)
+#define OZ2_PRELIM(TA, TB, CN) \
+    hipLaunchKernelGGL((oz2_accu_prelim_kernel<(TA),(TB),(CN)>), \
+                       dim3(m_blks_prelim + n_blks_prelim), \
+                       dim3(OZ2_PRELIM_TILE_K * OZ2_PRELIM_TILE_M), 0, stream, \
+                       A, m, k, lda, A8i_high, lda8i, sftA, \
+                       B, n, ldb, B8i_high, ldb8i, sftB, nan_flag, m_blks_prelim)
     if(svmask == 0u) {
-        if(tA && !tB)       OZ2_PRELIM_REDUCE(true,  false, false);
-        else if(!tA && !tB) OZ2_PRELIM_REDUCE(false, false, false);
-        else if(!tA && tB)  OZ2_PRELIM_REDUCE(false, true,  false);
-        else                OZ2_PRELIM_REDUCE(true,  true,  false);
+        if(tA && !tB)       OZ2_PRELIM(true,  false, false);
+        else if(!tA && !tB) OZ2_PRELIM(false, false, false);
+        else if(!tA && tB)  OZ2_PRELIM(false, true,  false);
+        else                OZ2_PRELIM(true,  true,  false);
     } else {
-        if(tA && !tB)       OZ2_PRELIM_REDUCE(true,  false, true);
-        else if(!tA && !tB) OZ2_PRELIM_REDUCE(false, false, true);
-        else if(!tA && tB)  OZ2_PRELIM_REDUCE(false, true,  true);
-        else                OZ2_PRELIM_REDUCE(true,  true,  true);
+        if(tA && !tB)       OZ2_PRELIM(true,  false, true);
+        else if(!tA && !tB) OZ2_PRELIM(false, false, true);
+        else if(!tA && tB)  OZ2_PRELIM(false, true,  true);
+        else                OZ2_PRELIM(true,  true,  true);
     }
-#undef OZ2_PRELIM_REDUCE
+#undef OZ2_PRELIM
     _pstop(_t_prelim);
+    /* _t_extract remains 0: extraction is now fused into _t_prelim */
 
     if(svmask != 0u) {
         if(hipStreamSynchronize(stream) != hipSuccess) {
@@ -1205,13 +1350,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         }
     }
 
-    /* Step 2: Extract — write A8i_high (k×m) and B8i_high (k×n) */
-    const unsigned m_blks = static_cast<unsigned>(m);
-    hipLaunchKernelGGL(oz2_accu_prelim_extract_kernel,
-                       dim3(m_blks + static_cast<unsigned>(n)), dim3(256), 0, stream,
-                       A, m, k, lda, tA, A8i_high, lda8i, sftA,
-                       B, n, ldb, tB, B8i_high, ldb8i, sftB, m_blks);
-
+    /* Preliminary INT8 GEMM: C32i_prelim = A8i_high^T × B8i_high */
     _pstart();
     hipblasLtMatmul(settings.handle, matmulDesc,
                     &one_i, A8i_high, layoutA, B8i_high, layoutB,
@@ -1415,17 +1554,17 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
                 std::fprintf(_f,
                     "m,n,k,num_moduli,scale_chunk_size,gemm_chunk_size,"
                     "workspace_bytes,"
-                    "t_prelim_ms,t_prelim_gemm_ms,t_refine_ms,"
+                    "t_prelim_ms,t_prelim_gemm_ms,t_extract_ms,t_refine_ms,"
                     "t_scale_ms,t_int8_gemm_ms,t_accum_ms,"
                     "t_finalize_ms,t_total_ms\n");
             std::fprintf(_f,
                 "%lld,%lld,%lld,%u,%u,%u,"
                 "%llu,"
-                "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n",
+                "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n",
                 (long long)m, (long long)n, (long long)k,
                 num_moduli, scale_chunk_size, chunk_size,
                 (unsigned long long)wsBytes,
-                _t_prelim, _t_prelim_gemm, _t_refine,
+                _t_prelim, _t_prelim_gemm, _t_extract, _t_refine,
                 _t_scale, _t_int8, _t_accum, _t_finalize, _t_total);
             std::fclose(_f);
         }
