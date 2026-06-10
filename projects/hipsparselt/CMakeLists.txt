@@ -183,10 +183,6 @@ if(HIPSPARSELT_ENABLE_HIP)
         )
     endif()
 
-    # Origami was previously built as a subproject via hipBLASLt's add_subdirectory
-    # fallback, with `set(ORIGAMI_ENABLE_INSTALL OFF)` suppressing its install rules.
-    # hipBLASLt now consumes origami via find_package(origami REQUIRED) in its own
-    # CMakeLists.txt, so the shim is gone and origami is no longer duplicated here.
     add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
     # Hide TensileLite symbols to prevent interposition with hipblaslt's copy
     target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)

@@ -23,7 +23,6 @@ rocm_setup_version(VERSION ${PROJECT_VERSION})
 option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${ORIGAMI_STANDALONE})
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
-option(ORIGAMI_ENABLE_INSTALL "Configure origami installation" ON)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
 find_package(hip REQUIRED)
@@ -136,55 +135,53 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
-if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
-    rocm_install(TARGETS origami)
+rocm_install(TARGETS origami)
 
-    # origami-headers carries the public HEADERS file set, so it must be installed
-    # with its FILE_SET in the same call that adds it to the export (rocm_install's
-    # TARGETS wrapper cannot forward FILE_SET). Done explicitly here, appended to
-    # the same origami-targets export, before rocm_export_targets writes the export.
-    install(TARGETS origami-headers
-        EXPORT origami-targets
-        FILE_SET HEADERS
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-        COMPONENT devel
-    )
+# origami-headers carries the public HEADERS file set, so it must be installed
+# with its FILE_SET in the same call that adds it to the export (rocm_install's
+# TARGETS wrapper cannot forward FILE_SET). Done explicitly here, appended to
+# the same origami-targets export, before rocm_export_targets writes the export.
+install(TARGETS origami-headers
+    EXPORT origami-targets
+    FILE_SET HEADERS
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    COMPONENT devel
+)
 
-    rocm_export_targets(
-        TARGETS
-        roc::origami
-        roc::origami-headers
-        DEPENDS
-        PACKAGE
-        hip
-        NAMESPACE
-        roc::
-    )
+rocm_export_targets(
+    TARGETS
+    roc::origami
+    roc::origami-headers
+    DEPENDS
+    PACKAGE
+    hip
+    NAMESPACE
+    roc::
+)
 
-    if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
-        rocm_install(TARGETS origami-tests COMPONENT tests)
-    endif()
-
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake" @ONLY
-    )
-
-    rocm_install(
-        FILES "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake" DESTINATION
-        "${CMAKE_INSTALL_LIBDIR}/cmake/origami" COMPONENT devel
-    )
-
-    set(BUILD_SHARED_LIBS ${ORIGAMI_BUILD_SHARED_LIBS})
-    set(ORIGAMI_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
-        CACHE PATH "Path placed into ldconfig file"
-    )
-
-    rocm_create_package(
-        NAME origami
-        DESCRIPTION "Origami: Analytical Solution Selection for GEMM"
-        MAINTAINER "Origami Maintainer <origami-maintainer@amd.com>"
-        LDCONFIG
-        LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
-    )
+if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
+    rocm_install(TARGETS origami-tests COMPONENT tests)
 endif()
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake" @ONLY
+)
+
+rocm_install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake" DESTINATION
+    "${CMAKE_INSTALL_LIBDIR}/cmake/origami" COMPONENT devel
+)
+
+set(BUILD_SHARED_LIBS ${ORIGAMI_BUILD_SHARED_LIBS})
+set(ORIGAMI_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
+    CACHE PATH "Path placed into ldconfig file"
+)
+
+rocm_create_package(
+    NAME origami
+    DESCRIPTION "Origami: Analytical Solution Selection for GEMM"
+    MAINTAINER "Origami Maintainer <origami-maintainer@amd.com>"
+    LDCONFIG
+    LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
+)
