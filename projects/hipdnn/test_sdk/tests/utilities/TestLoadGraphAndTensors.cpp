@@ -167,6 +167,7 @@ TEST(TestScanBundleJsonFiles, ExcludesMetaJson)
 
     touchFile(dir.path() / "bundle.json");
     touchFile(dir.path() / "meta.json");
+    touchFile(dir.path() / "bundle.meta.json"); // compound .meta.json extension
 
     auto results = scanBundleJsonFiles(dir.path());
     ASSERT_EQ(results.size(), 1u);
