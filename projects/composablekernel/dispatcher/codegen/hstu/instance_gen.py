@@ -49,22 +49,95 @@ def expand_sweep(
         "max_k": _expand_values(trait.get("max_k", {"values": [128]})),
         "mtile": _expand_values(trait.get("mtile", {"values": [64, 128]})),
         "use_splitkv": _expand_values(trait.get("use_splitkv", {"values": [False]})),
+        # Block-tile shape axes for sequence<kM0,kN0,kN0Sub,kN1,kK1,...>. Default
+        # [0] == "use the base dim", so configs that omit these (e.g. sweep_d64)
+        # expand to exactly the same kernels/names as before.
+        "km0": _expand_values(trait.get("km0", {"values": [0]})),
+        "kn0": _expand_values(trait.get("kn0", {"values": [0]})),
+        "kn0sub": _expand_values(trait.get("kn0sub", {"values": [0]})),
+        "kn1": _expand_values(trait.get("kn1", {"values": [0]})),
+        "kk1": _expand_values(trait.get("kk1", {"values": [0]})),
+        # Warp-K (16x16x{K} bf16 MFMA). Default [0] == dispatch default (WarpK=16);
+        # accepts the config key "warp_k". d=64 needs 32 (16x16x32) to satisfy the
+        # pipeline WarpGemm assertion.
+        "warp_k": _expand_values(trait.get("warp_k", {"values": [0]})),
     }
 
     configs: List[HstuKernelConfig] = []
-    for dt, causal, max_k, mtile, splitkv in itertools.product(
+    for (
+        dt,
+        causal,
+        max_k,
+        mtile,
+        splitkv,
+        km0,
+        kn0,
+        kn0sub,
+        kn1,
+        kk1,
+        warp_k,
+    ) in itertools.product(
         axes["data_type"],
         axes["use_causal"],
         axes["max_k"],
         axes["mtile"],
         axes["use_splitkv"],
+        axes["km0"],
+        axes["kn0"],
+        axes["kn0sub"],
+        axes["kn1"],
+        axes["kk1"],
+        axes["warp_k"],
     ):
         if splitkv and mtile != 64:
+            continue
+        # Tile-shape overrides are wired only through the no-softmax non-splitkv
+        # dispatch (jagged_forward_causal_softmax_bias_dropout_dispatch). The
+        # split-KV dispatch still uses the fixed ...TileSettingW form, so a
+        # split-KV kernel cannot honor a tile override -- skip those combos
+        # instead of silently ignoring the requested shape (this matches the
+        # sweep_tileshape config note "splitkv/pingpong off to isolate tile
+        # shape").
+        tile_active = any(v for v in (km0, kn0, kn0sub, kn1, kk1))
+        if splitkv and tile_active:
+            continue
+        # Validity gates implied by the block-tile contract
+        # (hstu_attention_fwd_setting.hpp:20 "MaxK % N1 == 0, N0 % K1 == 0" and
+        # the sweep_tileshape note "kN0Sub == kK1"). Gates apply only to the
+        # active (nonzero) tile dims so base-tile configs are never filtered.
+        if kk1 and kn0sub and kn0sub != kk1:
+            continue
+        if kk1 and kn0 and (kn0 % kk1) != 0:
+            continue
+        if kn1 and (int(max_k) % kn1) != 0:
+            continue
+        # WarpK must be 16 or 32 (HstuChooseWarpTile_16x16) and BlockTile::kK1 >=
+        # WarpK so the warp tile fits one MFMA (override static_assert). Only
+        # checked when kK1 is explicitly overridden; base kK1 (d=64 -> 32) is
+        # assumed to satisfy it.
+        if warp_k and warp_k not in (16, 32):
+            continue
+        if warp_k and kk1 and kk1 < warp_k:
             continue
         name = (
             f"jagged_{dt}_causal{int(causal)}_maxk{max_k}_mtile{mtile}"
             f"_splitkv{int(splitkv)}"
         )
+        # Append distinguishing tile tokens ONLY for overridden (nonzero) dims so
+        # existing 5-axis configs keep byte-identical kernel names (and JIT cache
+        # identities). A base-tile sweep produces no tokens at all.
+        if km0:
+            name += f"_km0{km0}"
+        if kn0:
+            name += f"_n0{kn0}"
+        if kn0sub:
+            name += f"_n0s{kn0sub}"
+        if kn1:
+            name += f"_n1{kn1}"
+        if kk1:
+            name += f"_k1{kk1}"
+        if warp_k:
+            name += f"_wk{warp_k}"
         configs.append(
             HstuKernelConfig(
                 name=name,
@@ -75,6 +148,12 @@ def expand_sweep(
                 use_splitkv=bool(splitkv),
                 disable_splitkv=not bool(splitkv),
                 gfx_arch=arch,
+                km0=int(km0),
+                kn0=int(kn0),
+                kn0sub=int(kn0sub),
+                kn1=int(kn1),
+                kk1=int(kk1),
+                warp_k=int(warp_k),
             )
         )
     return configs

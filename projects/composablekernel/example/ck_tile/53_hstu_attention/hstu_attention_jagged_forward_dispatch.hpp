@@ -31,19 +31,24 @@
 #include "hstu_attention_jagged_forward_splitkv_dispatch.hpp"
 #endif
 
-// No-softmax tile setting with optional kM0/kN0 block-tile overrides for the
-// tuned-config path. KM0/KN0 == 0 means "use the base dim" from
-// HstuAttentionNoSoftmaxFwdBlockTile, in which case this resolves to the exact
-// same HstuAttentionFwdTileSettingClass instantiation as the stock
-// HstuAttentionNoSoftmaxFwdTileSettingW (so existing instances stay
+// No-softmax tile setting with optional block-tile overrides for the
+// tuned-config / tile-shape-sweep path. Each KM0/KN0/KN0Sub/KN1/KK1 == 0 means
+// "use the base dim" from HstuAttentionNoSoftmaxFwdBlockTile, in which case this
+// resolves to the exact same HstuAttentionFwdTileSettingClass instantiation as
+// the stock HstuAttentionNoSoftmaxFwdTileSettingW (so existing instances stay
 // byte-identical). A nonzero value pins that tile dim instead: e.g. KN0=32 with
 // MTile=64/MaxK=64 turns the base sequence<192,64,32,64,32,64> into the unified
-// sweep winner sequence<192,32,32,64,32,64> without a new instance file.
+// sweep winner sequence<192,32,32,64,32,64> without a new instance file; the
+// remaining KN0Sub/KN1/KK1 overrides let the tile-shape sweep pin positions
+// 2/3/4 (sequence<kM0,kN0,kN0Sub,kN1,kK1,kQKHeaddim>).
 template <ck_tile::index_t MaxK_,
           ck_tile::index_t MTile_,
           ck_tile::index_t WarpK_,
           ck_tile::index_t KM0_,
-          ck_tile::index_t KN0_>
+          ck_tile::index_t KN0_,
+          ck_tile::index_t KN0Sub_ = 0,
+          ck_tile::index_t KN1_    = 0,
+          ck_tile::index_t KK1_    = 0>
 struct HstuNoSoftmaxFwdTileSettingOverride
 {
     using BaseBlockTile      = HstuAttentionNoSoftmaxFwdBlockTile<MaxK_, MTile_>;
@@ -52,11 +57,17 @@ struct HstuNoSoftmaxFwdTileSettingOverride
         (KM0_ != 0) ? KM0_ : base_seq::at(ck_tile::number<0>{});
     static constexpr ck_tile::index_t n0 =
         (KN0_ != 0) ? KN0_ : base_seq::at(ck_tile::number<1>{});
+    static constexpr ck_tile::index_t n0sub =
+        (KN0Sub_ != 0) ? KN0Sub_ : base_seq::at(ck_tile::number<2>{});
+    static constexpr ck_tile::index_t n1 =
+        (KN1_ != 0) ? KN1_ : base_seq::at(ck_tile::number<3>{});
+    static constexpr ck_tile::index_t k1 =
+        (KK1_ != 0) ? KK1_ : base_seq::at(ck_tile::number<4>{});
     using over_seq = ck_tile::sequence<m0,
                                        n0,
-                                       base_seq::at(ck_tile::number<2>{}),
-                                       base_seq::at(ck_tile::number<3>{}),
-                                       base_seq::at(ck_tile::number<4>{}),
+                                       n0sub,
+                                       n1,
+                                       k1,
                                        base_seq::at(ck_tile::number<5>{})>;
     static_assert(over_seq::at(ck_tile::number<4>{}) >= WarpK_,
                   "BlockTile::kK1 must be >= WarpK for the warp tile to fit one MFMA");
@@ -113,12 +124,17 @@ template <typename InOutDataType,
           // for register-pressure-bound shapes); higher values
           // raise theoretical occupancy (useful when LDS-light).
           ck_tile::index_t Occupancy = -1,
-          // kM0/kN0 block-tile overrides for the tuned-config path. 0 = use the
-          // base dim from HstuAttentionNoSoftmaxFwdBlockTile (existing instances
-          // stay byte-identical); a nonzero value pins that tile dim. KN0=32 with
-          // MTile=64 realizes the unified sweep winner sequence<192,32,32,64,32,64>.
-          ck_tile::index_t KM0 = 0,
-          ck_tile::index_t KN0 = 0>
+          // Block-tile overrides for the tuned-config / tile-shape-sweep path.
+          // 0 = use the base dim from HstuAttentionNoSoftmaxFwdBlockTile
+          // (existing instances stay byte-identical); a nonzero value pins that
+          // tile dim of sequence<kM0,kN0,kN0Sub,kN1,kK1,kQKHeaddim>. KN0=32 with
+          // MTile=64 realizes the unified sweep winner sequence<192,32,32,64,32,64>;
+          // KN0Sub/KN1/KK1 let the tile-shape sweep pin positions 2/3/4.
+          ck_tile::index_t KM0    = 0,
+          ck_tile::index_t KN0    = 0,
+          ck_tile::index_t KN0Sub = 0,
+          ck_tile::index_t KN1    = 0,
+          ck_tile::index_t KK1    = 0>
 struct jagged_forward_causal_softmax_bias_dropout_dispatch
 {
     static_assert(!(kUseAgpr && kUseSoftmax),
@@ -152,9 +168,10 @@ struct jagged_forward_causal_softmax_bias_dropout_dispatch
     // softmax path stays on the original 2-arg tile setting (WarpK=16
     // implicit) since the deployment kernels don't go through it.
     using HstuAttentionTileSetting =
-        typename std::conditional_t<kUseSoftmax,
-                                    HstuAttentionWithSoftmaxFwdTileSetting<MaxK, MTile>,
-                                    HstuNoSoftmaxFwdTileSettingOverride<MaxK, MTile, WarpK, KM0, KN0>>::Type;
+        typename std::conditional_t<
+            kUseSoftmax,
+            HstuAttentionWithSoftmaxFwdTileSetting<MaxK, MTile>,
+            HstuNoSoftmaxFwdTileSettingOverride<MaxK, MTile, WarpK, KM0, KN0, KN0Sub, KN1, KK1>>::Type;
 
     // Round-3 #1 (TrLoad enable): allow the JIT to opt in to the
     // TrLoad pipeline via `kUseTrLoad`, overriding the original

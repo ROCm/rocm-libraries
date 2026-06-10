@@ -95,8 +95,35 @@ class HstuKernelConfig:
     use_splitkv: bool = False
     disable_splitkv: int = 1
     gfx_arch: str = "gfx950"
+    # Block-tile shape overrides for sequence<kM0,kN0,kN0Sub,kN1,kK1,kQKHeaddim>.
+    # 0 == "use the base dim" from HstuAttentionNoSoftmaxFwdBlockTile, so a config
+    # that leaves these at 0 generates a kernel byte-identical to the legacy
+    # 5-axis (data_type/use_causal/max_k/mtile/use_splitkv) sweep. A nonzero value
+    # pins that tile dim through the dispatch template overrides.
+    km0: int = 0
+    kn0: int = 0
+    kn0sub: int = 0
+    kn1: int = 0
+    kk1: int = 0
+    # Warp-K of the 16x16x{K} bf16 MFMA family. 0 == "use the dispatch default"
+    # (WarpK=16 -> 16x16x16); a nonzero value pins it (32 -> 16x16x32). Threaded
+    # through the same byte-identical-base discipline as the tile fields.
+    warp_k: int = 0
 
     def to_codegen_json(self) -> str:
+        algorithm = {"mtile": self.mtile}
+        # Only emit tile fields when overridden so the codegen json (and thus the
+        # generated kernel name / cpp) stays identical for base-tile configs.
+        for key, val in (
+            ("km0", self.km0),
+            ("kn0", self.kn0),
+            ("kn0sub", self.kn0sub),
+            ("kn1", self.kn1),
+            ("kk1", self.kk1),
+            ("warp_k", self.warp_k),
+        ):
+            if val:
+                algorithm[key] = val
         return json.dumps(
             {
                 "arch": self.gfx_arch,
@@ -107,7 +134,7 @@ class HstuKernelConfig:
                     "max_k": self.max_k,
                     "use_splitkv": self.use_splitkv,
                 },
-                "algorithm": {"mtile": self.mtile},
+                "algorithm": algorithm,
             }
         )
 

@@ -229,7 +229,13 @@ def _heuristic_kernel_name(
     hdim_v: int,
     num_cus: int,
 ) -> str:
-    """Kernel the legacy C++ heuristic would dispatch for this problem."""
+    """Kernel the legacy C++ heuristic would dispatch for this problem.
+
+    The legacy heuristic always selects the BASE block-tile shape (it predates
+    the tile-shape sweep), so the returned name carries no _km0/_n0/_n0s/_n1/_k1
+    tile tokens. In a sweep that contains the base-tile kernel this resolves
+    exactly; in an all-overridden tile sweep _find_heuristic_row falls back to
+    the closest swept kernel with the same mtile/splitkv."""
     max_k = _heuristic_max_k(hdim_qk, hdim_v)
     mtile = _heuristic_mtile(batch, num_head, max_seqlen_q, num_cus)
     splitkv = mtile == 64 and _heuristic_splitkv(batch, num_head, max_seqlen_q, num_cus)
@@ -248,8 +254,10 @@ def _find_heuristic_row(group_rows: List[dict], heur_name: str) -> Optional[dict
         if r["kernel"] == heur_name:
             return dict(r, approx=False)
     # Fallback: keep the heuristic's mtile/splitkv intent, pick nearest max_k.
+    # split on "_" so trailing tile tokens (_km0.../_n0...) never confuse the
+    # numeric parse even if a tokenized name is ever passed in.
     target_mtile = int(heur_name.split("_mtile")[1].split("_")[0])
-    target_splitkv = int(heur_name.split("_splitkv")[1])
+    target_splitkv = int(heur_name.split("_splitkv")[1].split("_")[0])
     target_maxk = int(heur_name.split("_maxk")[1].split("_")[0])
     cands = [
         r
@@ -634,6 +642,14 @@ def main() -> None:
                         "max_k": kcfg.max_k,
                         "use_splitkv": kcfg.use_splitkv,
                         "use_causal": use_causal,
+                        # Block-tile shape (0 == base dim). Kept so BEST/HEUR
+                        # tagging and the listing still work once kernel names
+                        # can carry _km0/_n0/_n0s/_n1/_k1 tile tokens.
+                        "km0": kcfg.km0,
+                        "kn0": kcfg.kn0,
+                        "kn0sub": kcfg.kn0sub,
+                        "kn1": kcfg.kn1,
+                        "kk1": kcfg.kk1,
                     }
                     rows.append(row)
                     group_rows.append(row)
