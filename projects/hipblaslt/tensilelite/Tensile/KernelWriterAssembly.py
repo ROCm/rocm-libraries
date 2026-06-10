@@ -16428,9 +16428,11 @@ class KernelWriterAssembly(KernelWriter):
     turn    = ceil(kernel["MacroTile%d"%dim] / (divisor * gwvw))
     return turn, divisor
 
-  def getEpilogueGlobalLoadStrideBpe(self, kernel, gwvw, dim):
+  def getEpilogueGlobalLoadStrideBpe(self, kernel, gwvw, dim, bpe=None):
     _, divisor = self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
-    return (divisor * gwvw) * kernel["ProblemType"]["ComputeDataType"].numBytes()
+    if bpe is None:
+      bpe = kernel["ProblemType"]["ComputeDataType"].numBytes()
+    return (divisor * gwvw) * bpe
 
   def getTurn(self, kernel, gwvw, dim):
     """Epilogue vector turn count (global load + LDS staging). GW batch slot spacing uses coordOffset."""
@@ -16445,7 +16447,7 @@ class KernelWriterAssembly(KernelWriter):
     turn, divisor = self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
     addr0         = vgpr(offsetVgpr)
     addr1         = sgpr("Srd%s"%srdName, 4)
-    offset        = self.getEpilogueGlobalLoadStrideBpe(kernel, gwvw, dim)
+    offset        = self.getEpilogueGlobalLoadStrideBpe(kernel, gwvw, dim, bpe)
 
     for i in range(turn):
       if i != 0:
