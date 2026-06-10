@@ -70,6 +70,7 @@ class ModuleBuilder {
     // not installed, instead of silently degrading.
     nb::module_ code = nb::module_::import_("rocisa.code");
     nb::module_ container = nb::module_::import_("rocisa.container");
+    nb::module_ enum_ = nb::module_::import_("rocisa.enum");
     inst_ = nb::module_::import_("rocisa.instruction");
 
     module_cls_ = code.attr("Module");
@@ -77,9 +78,12 @@ class ModuleBuilder {
     label_cls_ = code.attr("Label");
     vgpr_fn_ = container.attr("vgpr");
     sgpr_fn_ = container.attr("sgpr");
+    accvgpr_fn_ = container.attr("accvgpr");
     mgpr_fn_ = container.attr("mgpr");
     ds_modifiers_cls_ = container.attr("DSModifiers");
     mubuf_modifiers_cls_ = container.attr("MUBUFModifiers");
+    vop3p_modifiers_cls_ = container.attr("VOP3PModifiers");
+    inst_type_enum_ = enum_.attr("InstType");
 
     // Instruction classes consumed by the ported GR/LR data-movement leaves.
     sadd_u32_cls_ = inst_.attr("SAddU32");
@@ -92,6 +96,11 @@ class ModuleBuilder {
     // Instruction classes consumed by the ported MX scale GR/LR leaves.
     smov_b32_cls_ = inst_.attr("SMovB32");
     ds_load_b32_cls_ = inst_.attr("DSLoadB32");
+
+    // Instruction classes for MFMA emission.
+    mfma_instruction_cls_ = inst_.attr("MFMAInstruction");
+    mxmfma_instruction_cls_ = inst_.attr("MXMFMAInstruction");
+    swait_cnt_cls_ = inst_.attr("SWaitCnt");
   }
 
   // ---- Module / container factories ------------------------------------
@@ -381,15 +390,142 @@ class ModuleBuilder {
     return mod;
   }
 
+  // ---- MFMA instruction emission (ported from Kernel.emitMfmaInstruction) ---
+  //
+  // Builds one MFMA rocisa Module: MFMAInstruction for BF16 (miK != 128) or
+  // MXMFMAInstruction for the MX FP4/FP8 family (miK == 128).
+  //
+  // Boundary contract: all register indices and boolean flags are resolved by
+  // the Python caller (from writer.vgprPool, kernel dict, and tile pool identity
+  // checks) and passed here as plain ints/booleans. The instTypeName string for
+  // miK==128 cases comes from mfma_f8f6f4_inst_type() (emit_leaves.hpp) — the
+  // Python caller calls that function and passes the resulting string here.
+  // For miK!=128 (BF16), instTypeName should be empty (""); INST_BF16 is used.
+  //
+  // Parameters:
+  //   vgprAStart/opASize   — A tile: base VGPR index and register count
+  //   vgprBStart/opBSize   — B tile: base VGPR index and register count
+  //   vgprCStart/opCSize   — C tile: base VGPR index and register count
+  //   vgprDStart/opDSize   — D tile: base VGPR index and register count
+  //   dIsVgpr/cIsVgpr      — true if D/C tile's pool is vgprPool (not agprPool)
+  //   miArchVgpr           — kernel["MIArchVgpr"]: if true, D/C always use vgpr()
+  //   sourceSwap            — kernel["SourceSwap"]: swap A/B operand positions
+  //   miK                  — kernel["MatrixInstK"]
+  //   instTypeName         — F8/F6/F4 instType member name ("INST_F8" etc.);
+  //                          empty string for BF16 path (miK != 128)
+  //   scaleAVgpr/scaleBVgpr — real scale VGPR indices, or -1 for fallback path
+  //   unitScaleVgpr        — kernel["_subtileUnitScaleVgpr"] for fallback path;
+  //                          only accessed when scaleAVgpr < 0 and miK == 128
+  //   scaleAsel/scaleBsel  — op_sel indices for the VOP3P modifier
+  //   comment              — instruction comment string
+  nb::object emit_mfma(int vgprAStart, int opASize, int vgprBStart, int opBSize,
+                       int vgprCStart, int opCSize, int vgprDStart, int opDSize,
+                       bool dIsVgpr, bool cIsVgpr, bool miArchVgpr, bool sourceSwap,
+                       int miK, const std::string& instTypeName,
+                       int scaleAVgpr = -1, int scaleBVgpr = -1,
+                       int unitScaleVgpr = -1, int scaleAsel = 0, int scaleBsel = 0,
+                       const std::string& comment = "") const {
+    nb::object mod = module();
+
+    // D/C register type: vgpr() when the tile's pool is vgprPool or when
+    // MIArchVgpr forces vgpr-only accumulation.
+    bool useVgprD = dIsVgpr || miArchVgpr;
+    bool useVgprC = cIsVgpr || miArchVgpr;
+
+    // A/B operands: SourceSwap physically exchanges which tile goes in which
+    // operand slot (this is what the Python code does before calling emitMfma).
+    int aStart = sourceSwap ? vgprBStart : vgprAStart;
+    int aSize  = sourceSwap ? opBSize    : opASize;
+    int bStart = sourceSwap ? vgprAStart : vgprBStart;
+    int bSize  = sourceSwap ? opASize    : opBSize;
+
+    nb::object aOp  = vgpr_fn_(aStart, aSize);
+    nb::object bOp  = vgpr_fn_(bStart, bSize);
+    nb::object dReg = useVgprD ? vgpr_fn_(vgprDStart, opDSize)
+                               : accvgpr_fn_(vgprDStart, opDSize);
+    nb::object cReg = useVgprC ? vgpr_fn_(vgprCStart, opCSize)
+                               : accvgpr_fn_(vgprCStart, opCSize);
+
+    nb::object inst_f32 = inst_type_enum_.attr("INST_F32");
+
+    // variant list [M, N, K, batch] — constant for gfx950 subtile.
+    nb::list variant;
+    variant.append(16);
+    variant.append(16);
+    variant.append(miK);
+    variant.append(1);
+
+    if (miK == 128) {
+      // MX FP4/FP8 path: V_MFMA_SCALE_F32_16x16x128_F8F6F4
+      nb::object mxInstType = inst_type_enum_.attr(instTypeName.c_str());
+
+      if (scaleAVgpr >= 0 && scaleBVgpr >= 0) {
+        // Real scale VGPRs supplied — build op_sel / op_sel_hi modifiers.
+        nb::list op_sel, op_sel_hi;
+        op_sel.append(scaleAsel % 2);
+        op_sel.append(scaleBsel % 2);
+        op_sel_hi.append((scaleAsel >> 1) % 2);
+        op_sel_hi.append((scaleBsel >> 1) % 2);
+        nb::object vop3 = vop3p_modifiers_cls_(
+            "op_sel"_a = op_sel, "op_sel_hi"_a = op_sel_hi);
+        add(mod, mxmfma_instruction_cls_(
+                     "instType"_a = mxInstType, "accType"_a = inst_f32,
+                     "variant"_a = variant,
+                     "acc"_a = dReg, "a"_a = aOp, "b"_a = bOp, "acc2"_a = cReg,
+                     "mxsa"_a = vgpr_fn_(scaleAVgpr),
+                     "mxsb"_a = vgpr_fn_(scaleBVgpr),
+                     "vop3"_a = vop3, "comment"_a = comment));
+      } else {
+        // No real scale — use the pre-initialized unit-scale VGPR (0x7f7f7f7f
+        // = scale 1.0 in E8M0).  The caller asserts unitScaleVgpr >= 0.
+        add(mod, mxmfma_instruction_cls_(
+                     "instType"_a = mxInstType, "accType"_a = inst_f32,
+                     "variant"_a = variant,
+                     "acc"_a = dReg, "a"_a = aOp, "b"_a = bOp, "acc2"_a = cReg,
+                     "mxsa"_a = vgpr_fn_(unitScaleVgpr),
+                     "mxsb"_a = vgpr_fn_(unitScaleVgpr),
+                     "comment"_a = comment));
+      }
+    } else {
+      // BF16 path: V_MFMA_F32_16x16x<miK>_BF16
+      add(mod, mfma_instruction_cls_(
+                   "instType"_a = inst_type_enum_.attr("INST_BF16"),
+                   "accType"_a = inst_f32, "variant"_a = variant,
+                   "mfma1k"_a = false,
+                   "acc"_a = dReg, "a"_a = aOp, "b"_a = bOp, "acc2"_a = cReg,
+                   "comment"_a = comment));
+    }
+    return mod;
+  }
+
+  // ---- wait_gr (SWaitCnt for GR completion) --------------------------------
+  //
+  // C++ port of the SWaitCnt construction in InstructionEmitter.emit_wait_gr().
+  // Returns a SWaitCnt with vlcnt=grCnt, vscnt=-1, dscnt=-1, kmcnt=-1.
+  //
+  // The `adjustVmcnt` flag must be set on the returned Python object by the
+  // caller; SWaitCnt is a C++ extension type that does not support dynamic
+  // attributes, so the caller is responsible for wrapping it in a SWaitCntEx
+  // (the Python subclass that adds the adjustVmcnt property) when needed.
+  // This method builds the bare SWaitCnt; the Python emit_wait_gr wrapper
+  // constructs SWaitCntEx from it.
+  nb::object wait_gr_swait(long grCnt, const std::string& comment) const {
+    return swait_cnt_cls_("vlcnt"_a = grCnt, "vscnt"_a = -1, "dscnt"_a = -1,
+                          "kmcnt"_a = -1, "comment"_a = comment);
+  }
+
  private:
   nb::object module_cls_;
   nb::object textblock_cls_;
   nb::object label_cls_;
   nb::object vgpr_fn_;
   nb::object sgpr_fn_;
+  nb::object accvgpr_fn_;
   nb::object mgpr_fn_;
   nb::object ds_modifiers_cls_;
   nb::object mubuf_modifiers_cls_;
+  nb::object vop3p_modifiers_cls_;
+  nb::object inst_type_enum_;
   nb::object sadd_u32_cls_;
   nb::object sadd_cu32_cls_;
   nb::object sxor_b32_cls_;
@@ -398,6 +534,9 @@ class ModuleBuilder {
   nb::object ds_load_b128_cls_;
   nb::object smov_b32_cls_;
   nb::object ds_load_b32_cls_;
+  nb::object mfma_instruction_cls_;
+  nb::object mxmfma_instruction_cls_;
+  nb::object swait_cnt_cls_;
   nb::object inst_;
 };
 

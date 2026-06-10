@@ -109,6 +109,16 @@ from .SubtileGeometry import (
 # compiled submodules at module load, mirroring SubtileGeometry's hard import.
 from tensile_writer.subtile import tile_info as _CPP_TI
 from tensile_writer.subtile import emit as _CPP_EMIT
+from tensile_writer.subtile.module_builder import ModuleBuilder as _ModuleBuilder
+
+# Global singleton — cheap: imports and caches rocisa handles once on first call.
+_MFMA_BUILDER = None
+
+def _mfma_builder():
+    global _MFMA_BUILDER
+    if _MFMA_BUILDER is None:
+        _MFMA_BUILDER = _ModuleBuilder()
+    return _MFMA_BUILDER
 
 ################################################################################
 # Concrete tile classes and pre-defined config instances
@@ -1054,46 +1064,23 @@ def initVgprTilesToZero(writer, kernel, tileInfo):
 #
 # Returns None when DataType{A,B} aren't populated
 # ---------------------------------------------------------------------------
-def _selectF8F6F4InstType(kernel):
-  pt = kernel.get("ProblemType")
-  if pt is None:
-    return None
-
-  aType = pt.get("DataTypeA")
-  bType = pt.get("DataTypeB")
-  if aType is None or bType is None:
-    raise RuntimeError(f"Unsupported data types for MFMA instruction: A = {aType}, B = {bType}\n")
-
-  # Defensive: support MagicMock / minimal stubs that don't define predicates.
-  def _pred(t, name):
-    fn = getattr(t, name, None)
-    return bool(fn()) if callable(fn) else False
-
-  # The instType selection is pure data, ported to C++ (no Python fallback).
-  # SourceSwap is applied inside the C++ mapping (it swaps the A/B operand
-  # formats), so pass the unswapped predicates plus the SourceSwap flag. C++
-  # raises (RuntimeError) for unsupported combinations, mirroring the previous
-  # Python behavior.
-  _name = _CPP_EMIT.mfma_f8f6f4_inst_type(
-      _pred(aType, "isFloat8"), _pred(aType, "isBFloat8"), _pred(aType, "isFloat4"),
-      _pred(bType, "isFloat8"), _pred(bType, "isBFloat8"), _pred(bType, "isFloat4"),
-      bool(kernel.get("SourceSwap", False)))
-  return getattr(InstType, _name)
-
-
 ##################################################
 # Subroutine to generate MMA Instruction
 # Given RegisterTileInfo inputs for A,B,C,D operands
-# emit corresponding mfma instruction
+# emit corresponding mfma instruction.
 #
-def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTileD, scaleAVgpr=-1, scaleBVgpr=-1, scaleAsel=-1, scaleBsel=-1, comment = ""):
-  module = Module()
-
+# This is a thin Python resolver: it extracts primitive register indices and
+# boolean flags from the tile / kernel / writer objects and delegates all rocisa
+# Module construction to the C++ ModuleBuilder (emit_mfma). The instType
+# selection for miK==128 is also done via C++ (mfma_f8f6f4_inst_type).
+#
+def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTileD,
+                        scaleAVgpr=-1, scaleBVgpr=-1, scaleAsel=-1, scaleBsel=-1,
+                        comment=""):
   vgprAStart = vgprTileA.regList.indices[0]
   vgprBStart = vgprTileB.regList.indices[0]
   vgprCStart = vgprTileC.regList.indices[0]
   vgprDStart = vgprTileD.regList.indices[0]
-
   opASize = len(vgprTileA.regList.indices)
   opBSize = len(vgprTileB.regList.indices)
   opCSize = len(vgprTileC.regList.indices)
@@ -1103,51 +1090,42 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
   # pool must use vgpr() in the MFMA operands, not accvgpr().
   dIsVgpr = (vgprTileD.regList.pool == writer.vgprPool)
   cIsVgpr = (vgprTileC.regList.pool == writer.vgprPool)
-  dAccAlias = vgpr if (dIsVgpr or kernel["MIArchVgpr"]) else accvgpr
-  cAccAlias = vgpr if (cIsVgpr or kernel["MIArchVgpr"]) else accvgpr
-
-  aOperand = vgpr(vgprBStart,opBSize) if kernel["SourceSwap"] else vgpr(vgprAStart,opASize)
-  bOperand = vgpr(vgprAStart,opASize) if kernel["SourceSwap"] else vgpr(vgprBStart,opBSize)
 
   miK = kernel["MatrixInstK"]
 
+  # Select instType for the MX FP4/FP8 family (C++ mapping, no Python fallback).
+  instTypeName = ""
   if miK == 128:
-    # MX FP4: 16x16x128
-    mxInstType = _selectF8F6F4InstType(kernel)
-    if scaleAVgpr >= 0 and scaleBVgpr >= 0:
-      # Use actual loaded scale VGPRs
-      module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
-                                   acc=dAccAlias(vgprDStart,opDSize), \
-                                   a=aOperand, \
-                                   b=bOperand, \
-                                   acc2=cAccAlias(vgprCStart,opCSize), \
-                                   mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
-                                   vop3=VOP3PModifiers(op_sel=[scaleAsel%2, scaleBsel%2], op_sel_hi=[(scaleAsel>>1)%2, (scaleBsel>>1)%2]), \
-                                   comment=comment))
-    else:
-      # Fallback: use unit scale VGPR pre-initialized to 0x7f7f7f7f (scale=1.0 E8M0).
-      # Initialized once in mainLoop() before emitAllLoops() — VMovB32 cannot live here
-      # because InstructionScheduler drops non-MFMA instructions from the MFMA module.
-      unitScaleVgpr = kernel.get("_subtileUnitScaleVgpr", -1)
-      assert unitScaleVgpr >= 0, \
-          "emitMfmaInstruction: plain FP8 fallback requires _subtileUnitScaleVgpr in kernel dict"
-      module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
-                                   acc=dAccAlias(vgprDStart,opDSize), \
-                                   a=aOperand, \
-                                   b=bOperand, \
-                                   acc2=cAccAlias(vgprCStart,opCSize), \
-                                   mxsa=vgpr(unitScaleVgpr), mxsb=vgpr(unitScaleVgpr), \
-                                   comment=comment))
-  else:
-    # BF16: 16x16x32
-    module.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[16,16,miK,1], mfma1k=False, \
-                               acc=dAccAlias(vgprDStart,opDSize), \
-                               a=aOperand, \
-                               b=bOperand, \
-                               acc2=cAccAlias(vgprCStart,opCSize), \
-                               comment=comment))
+    pt = kernel.get("ProblemType")
+    aType = pt.get("DataTypeA") if pt else None
+    bType = pt.get("DataTypeB") if pt else None
+    if aType is None or bType is None:
+      raise RuntimeError(
+          f"emitMfmaInstruction: unsupported data types for miK=128: "
+          f"A={aType}, B={bType}")
+    def _pred(t, name):
+      fn = getattr(t, name, None)
+      return bool(fn()) if callable(fn) else False
+    instTypeName = _CPP_EMIT.mfma_f8f6f4_inst_type(
+        _pred(aType, "isFloat8"), _pred(aType, "isBFloat8"), _pred(aType, "isFloat4"),
+        _pred(bType, "isFloat8"), _pred(bType, "isBFloat8"), _pred(bType, "isFloat4"),
+        bool(kernel.get("SourceSwap", False)))
 
-  return module
+  unitScaleVgpr = kernel.get("_subtileUnitScaleVgpr", -1)
+  if miK == 128 and scaleAVgpr < 0:
+    assert unitScaleVgpr >= 0, \
+        "emitMfmaInstruction: plain FP8/FP4 fallback requires _subtileUnitScaleVgpr in kernel dict"
+
+  return _mfma_builder().emit_mfma(
+      vgprAStart, opASize, vgprBStart, opBSize,
+      vgprCStart, opCSize, vgprDStart, opDSize,
+      bool(dIsVgpr), bool(cIsVgpr), bool(kernel["MIArchVgpr"]),
+      bool(kernel.get("SourceSwap", False)),
+      miK, instTypeName,
+      scaleAVgpr, scaleBVgpr, unitScaleVgpr,
+      scaleAsel if scaleAsel >= 0 else 0,
+      scaleBsel if scaleBsel >= 0 else 0,
+      comment)
 
 
 ##################################################

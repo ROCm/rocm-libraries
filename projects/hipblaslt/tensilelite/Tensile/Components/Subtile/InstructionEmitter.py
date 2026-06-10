@@ -5,6 +5,10 @@
 
 Converts the logical schedule (EmittedModule chains) into concrete GPU
 instructions by dispatching each opType to its emit method.
+
+All standard op emit methods (mfma, lr, gr, wait_gr, wait_lr, sync, lr_inc,
+gr_inc) delegate to the C++ ModuleBuilder. The remaining Python logic handles
+ops that need writer-owned state (skip, mask_k, inline).
 """
 
 from __future__ import annotations
@@ -19,18 +23,36 @@ from Tensile.Components.Subtile.SubtileLREmit import (
 from Tensile.Components.Subtile.SubtileScaleEmit import (
     globalReadDoScaleSubtile, globalReadScalePtrUpdates, emitScaleDsRead,
 )
+from tensile_writer.subtile.module_builder import ModuleBuilder
 from rocisa.code import Module
 from rocisa.instruction import (
-    SWaitCnt, SBarrier, SCmpEQU32, SCmpLeU32,
-    SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
+    SWaitCnt, SCmpEQU32, SCmpLeU32,
+    SCBranchSCC1, SMovB32, VAndB32, VCmpGTI32, VCmpLeI32,
     VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32, VSubI32,
 )
 from rocisa.container import vgpr, sgpr, ContinuousRegister
 from rocisa.code import Label
 
+# Global singleton — cheap: imports and caches rocisa handles once on first call.
+_MODULE_BUILDER = None
+
+def _builder():
+    global _MODULE_BUILDER
+    if _MODULE_BUILDER is None:
+        _MODULE_BUILDER = ModuleBuilder()
+    return _MODULE_BUILDER
+
 
 class SWaitCntEx(SWaitCnt):
-    """SWaitCnt with adjustVmcnt flag for the instruction scheduler post-pass."""
+    """SWaitCnt subclass carrying the adjustVmcnt flag for the vmcnt post-pass.
+
+    Externally justified facade: rocisa.SWaitCnt is a C++ extension type that
+    does not support dynamic attributes, so the adjustVmcnt flag (consumed by
+    the InstructionScheduler shim via duck-typing) must live on a Python
+    subclass. C++ owns the post-pass *computation* (instruction_scheduler.hpp);
+    this class is the minimal Python surface required for the shim to read the
+    flag back from live rocisa objects.
+    """
     def __init__(self, adjustVmcnt=True, **kwargs):
         super().__init__(**kwargs)
         self._adjustVmcnt = adjustVmcnt
@@ -194,31 +216,33 @@ class InstructionEmitter:
         return list(module.flatitems())
 
     def emit_wait_gr(self, source):
-        """Emit SWaitCnt for wait_gr from BaseOp with wait_gr_counts."""
+        """Emit SWaitCnt for wait_gr from BaseOp with wait_gr_counts.
+
+        The count arithmetic uses tileInfoA/B.loadRatioGR (Python-side geometry).
+        SWaitCntEx carries the adjustVmcnt flag needed by the InstructionScheduler
+        shim (see SWaitCntEx docstring for why this subclass cannot move to C++).
+        """
         counts = source.wait_gr_counts
         if counts is None:
             return []
-        
-        # TODO. Hardcoded for now, but we should just get this from atomic emit codes (emitSingleBufferLoad, ...)
-        grMap = {'A': max(1,int(1.0/self.tileInfoA.loadRatioGR)),
-                 'B':  max(1,int(1.0/self.tileInfoB.loadRatioGR)),
-                 'SA': 1, 
-                 'SB': 1}  
-        grCnt = (counts.A * grMap['A'] +
-                 counts.B * grMap['B'] +
-                 counts.SA * grMap['SA'] +
-                 counts.SB * grMap['SB'])
-        swait = SWaitCntEx(vlcnt=grCnt, vscnt=-1,
-                           adjustVmcnt=source.adjustVmcnt,
-                           comment=f"Wait GR (per-subIterK): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")
-        return [swait]
+        grMap = {'A': max(1, int(1.0 / self.tileInfoA.loadRatioGR)),
+                 'B': max(1, int(1.0 / self.tileInfoB.loadRatioGR)),
+                 'SA': 1,
+                 'SB': 1}
+        grCnt = (counts.A * grMap['A'] + counts.B * grMap['B'] +
+                 counts.SA * grMap['SA'] + counts.SB * grMap['SB'])
+        return [SWaitCntEx(
+            adjustVmcnt=source.adjustVmcnt, vlcnt=grCnt, vscnt=-1,
+            comment=(f"Wait GR (per-subIterK): "
+                     f"A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}"))]
 
     def emit_wait_lr(self):
-        return [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
-                         comment="Wait for LR to complete")]
+        """Emit SWaitCnt(dscnt=0) — delegated to C++ ModuleBuilder."""
+        return [_builder().wait_lr()]
 
     def emit_sync(self):
-        return [SBarrier(comment="Barrier")]
+        """Emit SBarrier — delegated to C++ ModuleBuilder."""
+        return [_builder().barrier()]
 
     def emit_inline(self, source):
         """Emit a writer-built Module supplied by an InlineModuleOp callback."""

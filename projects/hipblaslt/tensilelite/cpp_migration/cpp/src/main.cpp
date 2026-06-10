@@ -1081,7 +1081,28 @@ void bind_rocisa_module_builder(nb::module_& b) {
       .def("scale_gr_ptr_update", &ModuleBuilder::scale_gr_ptr_update,
            nb::arg("tc"), nb::arg("inc"),
            "C++ port of SubtileScaleEmit.emitScaleGRPtrUpdate: advance "
-           "Srd<tc> by inc bytes with carry.");
+           "Srd<tc> by inc bytes with carry.")
+      .def("emit_mfma", &ModuleBuilder::emit_mfma,
+           nb::arg("vgprAStart"), nb::arg("opASize"),
+           nb::arg("vgprBStart"), nb::arg("opBSize"),
+           nb::arg("vgprCStart"), nb::arg("opCSize"),
+           nb::arg("vgprDStart"), nb::arg("opDSize"),
+           nb::arg("dIsVgpr"), nb::arg("cIsVgpr"), nb::arg("miArchVgpr"),
+           nb::arg("sourceSwap"), nb::arg("miK"), nb::arg("instTypeName"),
+           nb::arg("scaleAVgpr") = -1, nb::arg("scaleBVgpr") = -1,
+           nb::arg("unitScaleVgpr") = -1,
+           nb::arg("scaleAsel") = 0, nb::arg("scaleBsel") = 0,
+           nb::arg("comment") = std::string(""),
+           "C++ port of Kernel.emitMfmaInstruction: build one MFMA rocisa "
+           "Module (MFMAInstruction for BF16, MXMFMAInstruction for MX "
+           "FP4/FP8). All register indices and flags are resolved in Python "
+           "and passed in as plain ints/booleans. instTypeName is the string "
+           "from mfma_f8f6f4_inst_type() for miK==128; empty for BF16.")
+      .def("wait_gr_swait", &ModuleBuilder::wait_gr_swait,
+           nb::arg("grCnt"), nb::arg("comment") = std::string(""),
+           "Build a bare SWaitCnt(vlcnt=grCnt, vscnt=-1) for GR completion. "
+           "The Python emit_wait_gr wrapper is responsible for wrapping the "
+           "result in SWaitCntEx to attach the adjustVmcnt flag.");
 }
 
 }  // namespace
