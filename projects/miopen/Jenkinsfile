@@ -353,7 +353,7 @@ def runBuildAndSingleGtestJob(Map conf=[:])
         withWorkingDir {
             def single_gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4 "
             utils.buildHipClangJob(
-                setup_flags: single_gtest_flags + flags, 
+                setup_flags: single_gtest_flags + flags,
                 build_cmd: "LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check",
                 build_install:true,
                 build_timeout:build_timeout_minutes,

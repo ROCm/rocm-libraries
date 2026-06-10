@@ -264,3 +264,27 @@ def test_e2e_timings_recorded_without_gpu_timing(monkeypatch) -> None:
 
     assert result.e2e_timings == [2.0]
     assert result.kernel_timings is None
+
+
+def test_cpu_only_torch_does_not_synchronize(monkeypatch) -> None:
+    """CPU-only torch must not trigger torch.cuda.synchronize in hipDNN timing."""
+    sync_called = {"value": False}
+
+    class FakeCuda:
+        @staticmethod
+        def is_available() -> bool:
+            return False
+
+        @staticmethod
+        def synchronize() -> None:
+            sync_called["value"] = True
+            raise AssertionError("CPU-only torch must not synchronize CUDA")
+
+    fake_torch = types.SimpleNamespace(cuda=FakeCuda)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    executor = _make_executor("none")
+    result = executor.benchmark(handle=None, variant_pack={})
+
+    assert result.e2e_timings
+    assert sync_called["value"] is False
