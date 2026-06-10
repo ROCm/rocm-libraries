@@ -11057,6 +11057,7 @@ class KernelWriterAssembly(KernelWriter):
         globalIncSgprName = "tdmABGlobalSplitIncs" if numWaves > 1 else f"tdm{tc}GlobalSplitIncs"
         imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), sgpr(ldsIncSgprName)))
         imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(globalIncSgprName)))
+        imod.middle.add(SAddCU32(sgpr(f"tdm{tc}Group0+3"), sgpr(f"tdm{tc}Group0+3"), 0, f"tdm{tc} split carry"))
         imod.middle.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", tdmAGroup2, tdmAGroup3))
       return imod
 
@@ -11103,6 +11104,7 @@ class KernelWriterAssembly(KernelWriter):
           globalIncSgprName = f"tdm{tc}GlobalSplitIncs"
           imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), sgpr(ldsIncSgprName)))
           imod.middle.add(SAddU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(globalIncSgprName)))
+          imod.middle.add(SAddCU32(sgpr(f"tdm{tc}Group0+3"), sgpr(f"tdm{tc}Group0+3"), 0, f"tdm{tc} split carry"))
           imod.middle.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", tdmBGroup2, tdmBGroup3))
       return imod
 
@@ -18643,10 +18645,11 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
                 src1=sgpr(incTmpHi), comment="TDM addr += inc (with wrap, hi)"))
     else:
-      mod.add(comp.incrementGlobalAddr(tdmGroup0, incSgprName))
+      mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
 
     if kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]:
       mod.add(SSubU32(sgpr(f"{tdmGroup0}+2"), sgpr(f"{tdmGroup0}+2"), sgpr(f"tdm{tc}GlobalSplitIncs"), f"tdm{tc} Global Split Incs sub"))
+      mod.add(SSubBU32(sgpr(f"{tdmGroup0}+3"), sgpr(f"{tdmGroup0}+3"), 0, f"tdm{tc} Global Split borrow"))
       mod.add(SSubU32(sgpr(f"{tdmGroup0}+1"), sgpr(f"{tdmGroup0}+1"), sgpr(f"tdm{tc}LdsSplitIncs"), f"tdm{tc} Lds Split Incs sub"))
 
     if (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or \
@@ -18673,7 +18676,7 @@ class KernelWriterAssembly(KernelWriter):
           mod.add(SAddCU32(dst=sgpr("tdmMetadataGroup0+3"), src0=sgpr("tdmMetadataGroup0+3"), \
                   src1=sgpr(incTmpHi), comment="TDM metadata addr += inc (with wrap, hi)"))
       else:
-        mod.add(comp.incrementGlobalAddr("tdmMetadataGroup0", "GlobalReadIncsMetadata"))
+        mod.add(comp.incrementGlobalAddr(self, "tdmMetadataGroup0", "GlobalReadIncsMetadata"))
 
     return mod
 
@@ -18721,10 +18724,11 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
                 src1=sgpr(incTmpHi), comment="TDM addr += inc (with wrap, hi)"))
     else:
-      mod.add(comp.incrementGlobalAddr(tdmGroup0, incSgprName))
+      mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
 
     if kernel["TDMSplit"] and not (("MXS" in tcA) or ("MXS" in tcB)) and not kernel["ProblemType"]["Sparse"]:
       mod.add(SSubU32(sgpr(f"{tdmGroup0}+2"), sgpr(f"{tdmGroup0}+2"), sgpr("tdmABGlobalSplitIncs"), "tdmAB Global Split Incs sub"))
+      mod.add(SSubBU32(sgpr(f"{tdmGroup0}+3"), sgpr(f"{tdmGroup0}+3"), 0, "tdmAB Global Split borrow"))
       mod.add(SSubU32(sgpr(f"{tdmGroup0}+1"), sgpr(f"{tdmGroup0}+1"), sgpr("tdmABLdsSplitIncs"), "tdmAB Lds Split Incs sub"))
 
     if kernel["ProblemType"]["Sparse"] == 1 and tPA["is_sparse"] \
@@ -18754,7 +18758,7 @@ class KernelWriterAssembly(KernelWriter):
           mod.add(SAddCU32(dst=sgpr("tdmMetadataGroup0+3"), src0=sgpr("tdmMetadataGroup0+3"), \
                   src1=sgpr(incTmpHi), comment="TDM metadata addr += inc (with wrap, hi)"))
       else:
-        mod.add(comp.incrementGlobalAddr("tdmMetadataGroup0", "GlobalReadIncsMetadata"))
+        mod.add(comp.incrementGlobalAddr(self, "tdmMetadataGroup0", "GlobalReadIncsMetadata"))
 
     return mod
 

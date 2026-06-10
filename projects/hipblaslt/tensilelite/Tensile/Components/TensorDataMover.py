@@ -73,7 +73,7 @@ class TensorDataMoverLoad(TensorDataMover):
                     mod.add(SMovB32(sgpr(tmpSgprIdx), mt, f"stride = MT({mt})"))
             else:
                 mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"stride * MT({mt}) * bpe({bpe})"))
-            mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), "*= wgId)"))
+            mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), comment="*= wgId"))
             #add wave offset
             if tp['isM']:
                 mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr(vgprThreadIdName), "first tId"))
@@ -89,6 +89,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), round(mt // numWaves * bpe // tdmSplit), "woffset = wId * mt // numWaves * bpe // tdmSplit"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= stride"))
             mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
+            mod.add(SAddCU32(sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx+1), 0, "+= woffset carry"))
             #add GSU offset
             if kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1:
                 gsuOffsetSgprIdx = waveOffsetSgprIdx
@@ -158,7 +159,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), round(mxUnit * mt * bpe), f"wgId * mxUnit({mxUnit}) * MT({mt}) * bpe({bpe})"))
             else:
                 mod.add(SMulI32(sgpr(tmpSgprIdx), tileStride, round(mt * bpe), f"tileStride * MT({mt}) * bpe({bpe})"))
-                mod.add(SMulI32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), "*= wgId)"))
+                mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx), sgpr(sgprWorkgroupName), comment="*= wgId"))
             #add wave offset
             mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr("WaveIdx"), f"wCompId = fTid // wavelen({wavelen}) // 2)"))
             if ("MXS" in tc):
@@ -176,6 +177,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(tile1Size // numComp * bpe // tdmSplit), f"woffset = wCompId * mt // numComp({numComp}) * bpe({bpe}) // tdmSplit({tdmSplit})"))
                 mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tdmSeparateStride, f"woffset *= tdmSeparateStride"))
             mod.add(SAddU32(sgpr(tmpSgprIdx), sgpr(tmpSgprIdx), sgpr(waveOffsetSgprIdx), "+= woffset"))
+            mod.add(SAddCU32(sgpr(tmpSgprIdx+1), sgpr(tmpSgprIdx+1), 0, "+= woffset carry"))
             #add GSU offset
             if kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1:
                 gsuOffsetSgprIdx = waveOffsetSgprIdx
@@ -300,13 +302,11 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(SOrB32(sgpr(f"{group0}+3"), sgpr(f"{group0}+3"), hex(2 << 30), "set type field to 2(image)"))
         return mod
 
-    def incrementGlobalAddr(self, group0: int | str, sgprIncrement: int | str) -> Module:
-        """
-        Handle lower 32-bit only
-        """
+    def incrementGlobalAddr(self, writer: "KernelWriterAssembly", group0: int | str, sgprIncrement: int | str) -> Module:
         mod = Module()
         mod.addComment("TDM increment global addr")
-        mod.add(SAddU32(sgpr(f"{group0}+2"), sgpr(f"{group0}+2"), sgpr(sgprIncrement), "TDM increment"))
+        mod.add(SAddU32(sgpr(f"{group0}+2"), sgpr(f"{group0}+2"), sgpr(sgprIncrement), "TDM increment lo"))
+        mod.add(SAddCU32(sgpr(f"{group0}+3"), sgpr(f"{group0}+3"), 0, "TDM increment hi (carry)"))
         return mod
 
     def setIterationEnabled(self, group1, enabled: bool) -> Module:
