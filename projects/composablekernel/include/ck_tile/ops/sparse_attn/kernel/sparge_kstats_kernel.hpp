@@ -42,6 +42,7 @@ struct SpargeKStatsKernel
 
         void* pooled_k_ptr; // [batch, nhead_k, N_k, D] KDataType (fp16/bf16, matches K dtype)
         void* sim_k_ptr;    // [batch, nhead_k, N_k] uint8
+        void* k_scale_ptr;  // [batch, nhead_k, N_k] fp32; per-K-block quant scale
 
         index_t N_k;
 
@@ -60,6 +61,7 @@ struct SpargeKStatsKernel
                                                  float simthreshd1,
                                                  void* pooled_k_ptr,
                                                  void* sim_k_ptr,
+                                                 void* k_scale_ptr,
                                                  const float* simthreshd1_per_head)
     {
         const index_t N_k = integer_divide_ceil(seqlen_k, kN0);
@@ -73,6 +75,7 @@ struct SpargeKStatsKernel
                      simthreshd1,
                      pooled_k_ptr,
                      sim_k_ptr,
+                     k_scale_ptr,
                      N_k,
                      simthreshd1_per_head};
     }
@@ -113,7 +116,8 @@ struct SpargeKStatsKernel
         const index_t khead_off = (b * kargs.nhead_k + hk) * N_k;
         auto* pooled_k_out =
             reinterpret_cast<KDataType*>(kargs.pooled_k_ptr) + (khead_off + kb) * D;
-        auto* sim_k_out = reinterpret_cast<uint8_t*>(kargs.sim_k_ptr) + (khead_off + kb);
+        auto* sim_k_out   = reinterpret_cast<uint8_t*>(kargs.sim_k_ptr) + (khead_off + kb);
+        auto* k_scale_out = reinterpret_cast<float*>(kargs.k_scale_ptr) + (khead_off + kb);
 
         __shared__ char smem[Pipeline::GetSmemSize()];
 
@@ -125,6 +129,7 @@ struct SpargeKStatsKernel
                    simthreshd1_eff,
                    pooled_k_out,
                    sim_k_out,
+                   k_scale_out,
                    static_cast<void*>(smem));
     }
 };

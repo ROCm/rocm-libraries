@@ -232,8 +232,38 @@ target_compile_options(${SPARGE_BLOCKMAP_INSTANCES} PRIVATE
   -Wno-float-equal
 )
 
+# ============================================================================
+# Sparge Int8 / BLOCKSCALE Instance (hand-written, single specialization)
 # ----------------------------------------------------------------------------
-# Build unified Sparge test: combines blockmap, Jenga, and VSA attention 
+# Enables the kDoFp8StaticQuant=true compile path so the kernel-side scaffold
+# for per-block descale buffers is reachable end-to-end. Pipeline body still
+# (void)-casts the descale ptrs at this milestone — bit-identical to NO_SCALE
+# until the int8 GEMM swap lands.
+# ============================================================================
+set(SPARGE_INT8_INSTANCES "tile_sparge_int8_instances")
+
+add_library(${SPARGE_INT8_INSTANCES} OBJECT EXCLUDE_FROM_ALL
+  ${CMAKE_CURRENT_LIST_DIR}/sparge_int8_inst.cpp
+)
+target_include_directories(${SPARGE_INT8_INSTANCES} PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}
+  ${PROJECT_SOURCE_DIR}/include/ck_tile/ops/sparse_attn
+)
+set_source_files_properties(
+  ${CMAKE_CURRENT_LIST_DIR}/sparge_int8_inst.cpp
+  PROPERTIES LANGUAGE HIP
+)
+set_property(TARGET ${SPARGE_INT8_INSTANCES} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS})
+
+target_compile_options(${SPARGE_INT8_INSTANCES} PRIVATE
+  -DCK_TILE_USE_BUFFER_ADDRESSING_BUILTIN
+  -DCK_TILE_FMHA_FWD_FAST_EXP2
+  -Wno-undefined-func-template
+  -Wno-float-equal
+)
+
+# ----------------------------------------------------------------------------
+# Build unified Sparge test: combines blockmap, Jenga, and VSA attention
 # for end-to-end evaluation and timing in a single executable.
 # ----------------------------------------------------------------------------
 set(EXAMPLE_SPARGE "tile_example_sparge")
@@ -244,12 +274,14 @@ target_link_libraries(${EXAMPLE_SPARGE}
   ${SPARSE_ATTN_VSA_INSTANCES}
   ${SPARSE_ATTN_SPARGE_INSTANCES}
   ${SPARGE_BLOCKMAP_INSTANCES}
+  ${SPARGE_INT8_INSTANCES}
 )
 target_include_directories(${EXAMPLE_SPARGE} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 set_property(TARGET ${EXAMPLE_SPARGE} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS})
 target_compile_options(${EXAMPLE_SPARGE} PRIVATE
   -Wno-undefined-func-template
   -Wno-float-equal
+  -DP2_SCALE_DUMP=1
 )
 
 set_property(GLOBAL PROPERTY RULE_MESSAGES OFF)

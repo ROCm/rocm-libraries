@@ -69,6 +69,10 @@ struct sparge_blockmap_workspace_layout
     size_t pooled_k_bytes;
     size_t sim_k_offset; // bytes from workspace_ptr
     size_t sim_k_bytes;
+    // Per-K-block quant scale LUT (fp32). Filled by KStats absmax reduce;
+    // attention kernel does not read it yet (reserved for int8 GEMM0 wiring).
+    size_t k_scale_offset;
+    size_t k_scale_bytes;
     size_t total_bytes;
 };
 
@@ -124,7 +128,8 @@ auto sparge_blockmap_create_kargs_and_grids(sparge_blockmap_args args,
 template <typename KStatsKernel>
 auto sparge_kstats_create_kargs_and_grids(sparge_blockmap_args args,
                                           void* pooled_k_ws_ptr,
-                                          void* sim_k_ws_ptr)
+                                          void* sim_k_ws_ptr,
+                                          void* k_scale_ws_ptr)
 {
     assert(args.nhead_q % args.nhead_k == 0);
     auto kargs = KStatsKernel::MakeKargs(args.k_ptr,
@@ -137,6 +142,7 @@ auto sparge_kstats_create_kargs_and_grids(sparge_blockmap_args args,
                                          args.simthreshd1,
                                          pooled_k_ws_ptr,
                                          sim_k_ws_ptr,
+                                         k_scale_ws_ptr,
                                          args.simthreshd1_per_head_ptr);
 
     dim3 grids = KStatsKernel::GridSize(args.batch, args.nhead_k, args.seqlen_k);

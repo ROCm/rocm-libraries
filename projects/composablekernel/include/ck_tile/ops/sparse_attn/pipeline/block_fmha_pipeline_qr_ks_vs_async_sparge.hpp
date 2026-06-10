@@ -85,6 +85,16 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
     static constexpr auto BiasEnum          = Problem::BiasEnum;
     static constexpr bool kStoreLSE         = Problem::kStoreLSE;
     static constexpr bool kHasDropout       = Problem::kHasDropout;
+    static constexpr auto QScaleEnum        = Problem::QScaleEnum;
+
+    // P1 plumbing scaffold (perf-neutral). Sage-style per-block quant scale
+    // granularity, kept static-only here so kargs / host can size descale
+    // buffers consistently with sage 49. Only BLOCKSCALE is wired for sparge;
+    // other QScaleEnum values fall back to 128 (matches sage default tile size).
+    // Actual int8 GEMM path is gated by the kDoFp8StaticQuant static_assert in
+    // the kernel wrapper; arithmetic itself lands in P2/P3.
+    static constexpr index_t kBlockScaleSizeQ = kM0;
+    static constexpr index_t kBlockScaleSizeK = kN0;
 
     static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
                   "VSA sparse attention does not support bias.");
@@ -190,8 +200,27 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                const AttentionVariant& variant,
                const AttentionVariantParams& variant_params,
                const BlockIndices& block_indices,
-               void* smem_ptr) const
+               void* smem_ptr,
+               // Descale buffers per sage 49 contract. Used only on the int8
+               // BLOCKSCALE path (Q/K=int8); under fp16 NO_SCALE everything
+               // is no-op (q_descale_value defaults to 1.0f and the
+               // k_descale_ptr load is gated by QDataType=int8_t below).
+               // V is fp16 in S3c2, so v_descale_ptr stays unused.
+               const float* q_descale_ptr             = nullptr,
+               const float* k_descale_ptr             = nullptr,
+               const float* v_descale_ptr             = nullptr,
+               [[maybe_unused]] float q_descale_value = 1.0f) const
     {
+        // q_descale_ptr is consumed kernel-side (scalar q_descale_value already
+        // holds the per-Q-block scalar). k_descale_ptr is read per K-loop iter
+        // under int8 path below. v_descale_ptr stays unused while V is fp16.
+        (void)q_descale_ptr;
+        (void)v_descale_ptr;
+        // k_descale_ptr only matters on the int8 path; silence unused when fp16.
+        if constexpr(!(std::is_same_v<QDataType, int8_t> && std::is_same_v<KDataType, int8_t>))
+        {
+            (void)k_descale_ptr;
+        }
         if constexpr(!kEnablePVSkip)
         {
             (void)pv_threshold; // silence unused-param when PV-skip is compiled out
@@ -248,6 +277,12 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
         constexpr auto gemm_1 = Policy::template GetKVBlockGemm<Problem>();
 
         int seqlen_k_start = kv_block_idx_ptr[0] * kN0;
+        // Sparge LUT-aware absolute K-block index accumulator. Seeded from the
+        // first absolute block (LUT[0]) and bumped by each LUT delta after
+        // every K-side move_tile_window. Used by the int8 per-block dequant
+        // path instead of get_window_origin() to avoid any compiler reorder /
+        // CSE concern when the window origin is read post-move across iters.
+        index_t cur_kv_blk = kv_block_idx_ptr[0];
         auto q_dram_window = make_tile_window(q_dram_block_window_tmp.get_bottom_tensor_view(),
                                               q_dram_block_window_tmp.get_window_lengths(),
                                               q_dram_block_window_tmp.get_window_origin(),
@@ -403,8 +438,37 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
             __builtin_amdgcn_sched_barrier(1);
 
             // STAGE 2, scale_s, mask, softmax (no bias/soft-cap)
+            // Under int8 GEMM0 the s_acc tile is int32; cast to fp32 so
+            // downstream softmax / mask / reduce sees fp32. Under fp16 GEMM0
+            // (NO_SCALE / sparge baseline) SaccBlockTileType is already fp32
+            // and cast_tile is a no-op type conversion.
+            //
+            // Per-block dequant (sage Option A): one fp32 scalar
+            //   combined = q_descale_value * k_descale
+            // multiplies the entire s_acc tile. q_descale_value is loaded
+            // ONCE kernel-side (Q-block id is constant per workgroup);
+            // k_descale is loaded per K-loop iter from k_descale_ptr at the
+            // current K-block boundary. scale_s is kept separate (applied via
+            // the FAST_EXP2 fold below or the !FAST_EXP2 explicit multiply).
+            auto s_acc_fp32 = cast_tile<SMPLComputeDataType>(s_acc);
+            if constexpr(std::is_same_v<QDataType, int8_t> && std::is_same_v<KDataType, int8_t>)
+            {
+                // Sparge K-blocks are picked sparsely (LUT-driven). Use the
+                // explicit cur_kv_blk register accumulator (seeded from
+                // LUT[0], bumped by each LUT delta after K move_tile_window)
+                // rather than reading k_dram_block_window.get_window_origin()
+                // here — defensive against any compiler reorder / CSE of the
+                // window-origin read across iters. cur_kv_blk already holds
+                // the absolute K-block index (kBlockScaleSizeK == kN0, so
+                // the legacy origin/kBlockScaleSizeK divide collapsed to the
+                // block id — no further divide needed here).
+                const index_t kv_idx  = cur_kv_blk;
+                const float k_descale = k_descale_ptr[kv_idx];
+                const float combined  = q_descale_value * k_descale;
+                tile_elementwise_inout([combined](auto& x) { x = x * combined; }, s_acc_fp32);
+            }
 #if !CK_TILE_FMHA_FWD_FAST_EXP2
-            tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
+            tile_elementwise_inout([scale_s](auto& x) { x = x * scale_s; }, s_acc_fp32);
 #endif
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
@@ -417,7 +481,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                 if(need_perpixel_check)
                 {
                     set_tile_if(
-                        s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
+                        s_acc_fp32, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
                             const auto row = q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
                             const auto col = k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
                             return !variant.LogitsMask(variant_params,
@@ -430,8 +494,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                 }
             }
 
-            const auto s = cast_tile<SMPLComputeDataType>(s_acc); // S{j}
-            auto m_local = block_tile_reduce<SMPLComputeDataType>(
+            const auto& s = s_acc_fp32; // S{j}
+            auto m_local  = block_tile_reduce<SMPLComputeDataType>(
                 s,
                 sequence<1>{},
                 f_max,
@@ -724,6 +788,10 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                 // compensation needed (same offset arithmetic as _vsa.hpp).
                 move_tile_window(v_dram_window, {0, kN0 * (block_idx - 1)});
                 move_tile_window(k_dram_block_window, {kN0 * block_idx, 0});
+                // Mirror the LUT delta advance on the per-block-scale index
+                // accumulator so the next iter's dequant sees the correct
+                // absolute K-block id (see comment at decl of cur_kv_blk).
+                cur_kv_blk += block_idx;
                 k_dram_window.set_window_origin(k_dram_block_window.get_window_origin());
 
                 if constexpr(k1_loops >= 2 &&

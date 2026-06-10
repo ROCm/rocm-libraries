@@ -51,6 +51,7 @@ FMHA_FWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
 #include "ck_tile/ops/fmha/block/variants.hpp"
 #include "fmha_fwd_trek.hpp"
 #include "pipeline/block_fmha_pipeline_qr_ks_vs_async_sparge.hpp"
+#include "pipeline/block_fmha_pipeline_qx_ks_vs_sparge_policy.hpp"
 #include "kernel/fmha_fwd_sparge_kernel.hpp"
 
 """
@@ -128,15 +129,15 @@ using fmha_pipeline_problem_{F_idx} = ck_tile::BlockFmhaPipelineProblem<
 //   _pvsb = PV-Skip per-BLOCK (kPerBlock)
 using fmha_pipeline_{F_idx}_pvsf = ck_tile::BlockFmhaPipelineQRKSVSAsyncSparge<
     fmha_pipeline_problem_{F_idx},
-    ck_tile::BlockFmhaPipelineQRKSVSAsyncDefaultPolicy,
+    ck_tile::BlockFmhaPipelineQRKSVSAsyncSpargeDefaultPolicy,
     ck_tile::PVSkipMode::kNone>;
 using fmha_pipeline_{F_idx}_pvst = ck_tile::BlockFmhaPipelineQRKSVSAsyncSparge<
     fmha_pipeline_problem_{F_idx},
-    ck_tile::BlockFmhaPipelineQRKSVSAsyncDefaultPolicy,
+    ck_tile::BlockFmhaPipelineQRKSVSAsyncSpargeDefaultPolicy,
     ck_tile::PVSkipMode::kPerWave>;
 using fmha_pipeline_{F_idx}_pvsb = ck_tile::BlockFmhaPipelineQRKSVSAsyncSparge<
     fmha_pipeline_problem_{F_idx},
-    ck_tile::BlockFmhaPipelineQRKSVSAsyncDefaultPolicy,
+    ck_tile::BlockFmhaPipelineQRKSVSAsyncSpargeDefaultPolicy,
     ck_tile::PVSkipMode::kPerBlock>;
 
 using fmha_epilogue_{F_idx} =

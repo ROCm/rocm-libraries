@@ -110,6 +110,15 @@ struct fmha_jenga_fwd_args
     ck_tile::index_t window_size_right;
     ck_tile::index_t mask_type;
 
+    // P1 plumbing scaffold: optional per-block descale buffers for sage-style
+    // Q/K/V static quant. Currently nullptr in all build configs (codegen
+    // always instantiates QScaleEnum=NO_SCALE, kDoFp8StaticQuant=false). Host
+    // CLI `-qscale=bs` fills unit-scale (= 1.0f) buffers so the scaffold is
+    // exercised end-to-end without arithmetic changes.
+    const void* q_descale_ptr = nullptr;
+    const void* k_descale_ptr = nullptr;
+    const void* v_descale_ptr = nullptr;
+
     // Dropout is not supported for sparse attention; keep args minimal.
 };
 
@@ -151,6 +160,11 @@ struct fmha_vsa_fwd_args
     ck_tile::index_t window_size_right;
     ck_tile::index_t mask_type;
 
+    // P1 plumbing scaffold: see fmha_jenga_fwd_args for semantics.
+    const void* q_descale_ptr = nullptr;
+    const void* k_descale_ptr = nullptr;
+    const void* v_descale_ptr = nullptr;
+
     // Dropout is not supported for sparse attention; keep args minimal.
 };
 
@@ -184,7 +198,11 @@ auto fmha_fwd_create_kargs_and_grids(fmha_jenga_fwd_args args)
                                        args.batch_stride_o,
                                        args.window_size_left,
                                        args.window_size_right,
-                                       args.mask_type);
+                                       args.mask_type,
+                                       // P1 plumbing scaffold: descale ptrs
+                                       args.q_descale_ptr,
+                                       args.k_descale_ptr,
+                                       args.v_descale_ptr);
 
     dim3 grids = FmhaKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_q, args.hdim_v);
     return ck_tile::make_tuple(kargs, grids);
@@ -221,7 +239,11 @@ auto fmha_fwd_create_kargs_and_grids(fmha_vsa_fwd_args args)
                                        args.batch_stride_o,
                                        args.window_size_left,
                                        args.window_size_right,
-                                       args.mask_type);
+                                       args.mask_type,
+                                       // P1 plumbing scaffold: descale ptrs
+                                       args.q_descale_ptr,
+                                       args.k_descale_ptr,
+                                       args.v_descale_ptr);
 
     dim3 grids = FmhaKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_q, args.hdim_v);
     return ck_tile::make_tuple(kargs, grids);
@@ -374,6 +396,11 @@ struct fmha_sparge_fwd_args
     ck_tile::index_t window_size_right;
     ck_tile::index_t mask_type;
 
+    // P1 plumbing scaffold: see fmha_jenga_fwd_args for semantics.
+    const void* q_descale_ptr = nullptr;
+    const void* k_descale_ptr = nullptr;
+    const void* v_descale_ptr = nullptr;
+
     sparge_attn_hyperparam_args hp{};
 };
 
@@ -413,7 +440,11 @@ auto fmha_fwd_create_kargs_and_grids(fmha_sparge_fwd_args args)
                                        // per-head dispatch extras
                                        args.hp.pv_threshold_per_head_ptr,
                                        args.hp.head_remap_ptr,
-                                       args.hp.nhead_in_launch);
+                                       args.hp.nhead_in_launch,
+                                       // P1 plumbing scaffold: descale ptrs
+                                       args.q_descale_ptr,
+                                       args.k_descale_ptr,
+                                       args.v_descale_ptr);
 
     const ck_tile::index_t grid_nhead =
         (args.hp.head_remap_ptr != nullptr && args.hp.nhead_in_launch > 0) ? args.hp.nhead_in_launch
@@ -475,3 +506,12 @@ void fmha_sparge_fwd_oneshot_(const ck_tile::stream_config&, fmha_sparge_fwd_arg
 void fmha_sparge_fwd_oneshot(fmha_sparge_fwd_traits,
                              fmha_sparge_fwd_args,
                              const ck_tile::stream_config&);
+
+// Hand-written BLOCKSCALE (kDoFp8StaticQuant=true) launcher.
+// Single specialization: fp16, hdim=128, bm0=64, PVSkipMode::kPerWave.
+// Pipeline body still (void)-casts the descale ptrs; bit-identical to the
+// matching NO_SCALE codegen variant when descale buffers are 1.0f. Test
+// runner picks this path when the caller wants the BLOCKSCALE instantiation
+// to actually fire on device.
+void fmha_sparge_int8_fwd_oneshot_fp16_d128_bm64(const ck_tile::stream_config&,
+                                                 fmha_sparge_fwd_args);

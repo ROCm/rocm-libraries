@@ -131,14 +131,18 @@ sparge_blockmap_compute_workspace_layout(sparge_blockmap_traits traits, sparge_b
     const int N_k              = (kN0 > 0) ? ck_tile::integer_divide_ceil(args.seqlen_k, kN0) : 0;
     const int D                = traits.hdim_q;
     const size_t element_bytes = dtype_bytes(traits.data_type);
+    const size_t total_blocks  = static_cast<size_t>(args.batch) * args.nhead_k * N_k;
 
     sparge_blockmap_workspace_layout layout{};
     layout.pooled_k_offset = 0;
-    layout.pooled_k_bytes =
-        static_cast<size_t>(args.batch) * args.nhead_k * N_k * D * element_bytes;
-    layout.sim_k_offset = layout.pooled_k_bytes;
-    layout.sim_k_bytes  = static_cast<size_t>(args.batch) * args.nhead_k * N_k * sizeof(uint8_t);
-    layout.total_bytes  = layout.sim_k_offset + layout.sim_k_bytes;
+    layout.pooled_k_bytes  = total_blocks * D * element_bytes;
+    layout.sim_k_offset    = layout.pooled_k_bytes;
+    layout.sim_k_bytes     = total_blocks * sizeof(uint8_t);
+    // k_scale LUT: align to fp32 boundary after sim_k (uint8 stream).
+    const size_t k_scale_unaligned = layout.sim_k_offset + layout.sim_k_bytes;
+    layout.k_scale_offset = (k_scale_unaligned + alignof(float) - 1) & ~(alignof(float) - 1);
+    layout.k_scale_bytes  = total_blocks * sizeof(float);
+    layout.total_bytes    = layout.k_scale_offset + layout.k_scale_bytes;
     return layout;
 }
 
@@ -157,9 +161,10 @@ void launch_kstats_only(sparge_blockmap_traits traits,
     auto* ws_base      = static_cast<char*>(args.workspace_ptr);
     void* pooled_k_ptr = ws_base + layout.pooled_k_offset;
     void* sim_k_ptr    = ws_base + layout.sim_k_offset;
+    void* k_scale_ptr  = ws_base + layout.k_scale_offset;
 
-    auto [kargs, grids] =
-        sparge_kstats_create_kargs_and_grids<KStatsKernel>(args, pooled_k_ptr, sim_k_ptr);
+    auto [kargs, grids] = sparge_kstats_create_kargs_and_grids<KStatsKernel>(
+        args, pooled_k_ptr, sim_k_ptr, k_scale_ptr);
     const dim3 blocks                      = KStatsKernel::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = KStatsKernel::kBlockPerCu;
     ck_tile::make_kernel<kBlockPerCu>(KStatsKernel{}, grids, blocks, 0, kargs)(s);

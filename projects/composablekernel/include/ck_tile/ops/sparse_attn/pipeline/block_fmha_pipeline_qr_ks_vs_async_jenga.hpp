@@ -61,6 +61,11 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
     static constexpr auto BiasEnum          = Problem::BiasEnum;
     static constexpr bool kStoreLSE         = Problem::kStoreLSE;
     static constexpr bool kHasDropout       = Problem::kHasDropout;
+    static constexpr auto QScaleEnum        = Problem::QScaleEnum;
+
+    // P1 plumbing scaffold (perf-neutral). See sparge pipeline for rationale.
+    static constexpr index_t kBlockScaleSizeQ = kM0;
+    static constexpr index_t kBlockScaleSizeK = kN0;
 
     static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
                   "Jenga sparse attention does not support bias.");
@@ -150,8 +155,18 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                const AttentionVariant& variant,
                const AttentionVariantParams& variant_params,
                const BlockIndices& block_indices,
-               void* smem_ptr) const
+               void* smem_ptr,
+               // P1 plumbing scaffold: descale buffers per sage 49 contract.
+               // Unused when QScaleEnum == NO_SCALE (current codegen path);
+               // kernel-side static_assert(!kDoFp8StaticQuant) blocks the
+               // arithmetic path. P2/P3 wires real per-block dequant.
+               const float* q_descale_ptr = nullptr,
+               const float* k_descale_ptr = nullptr,
+               const float* v_descale_ptr = nullptr) const
     {
+        (void)q_descale_ptr;
+        (void)k_descale_ptr;
+        (void)v_descale_ptr;
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
                 std::is_same_v<KDataType, remove_cvref_t<typename KDramBlockWindowTmp::DataType>> &&

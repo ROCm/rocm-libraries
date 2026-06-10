@@ -14,7 +14,10 @@
 #include <string>
 #include <vector>
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-copy-with-user-provided-dtor"
 #include "ck_tile/host.hpp"
+#pragma clang diagnostic pop
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/reference/reference_blocked_attention.hpp"
 #include "ck_tile/core/utility/bit_cast.hpp"
@@ -149,7 +152,17 @@ auto create_args(int argc, char* argv[])
                 "1=independent dense+causal cross-reference of attention output. "
                 "Reuses the 01_fmha-style GEMM+masking+softmax+GEMM chain (different "
                 "code path / formula than the sparge per-block causal pipeline). "
-                "Intended with -mask=t -topk=1.0 (sparge degenerates to dense+causal).");
+                "Intended with -mask=t -topk=1.0 (sparge degenerates to dense+causal).")
+        .insert("qscale",
+                "n",
+                "Quant-plumbing scaffold (sage-style Q/K/V static quant). "
+                "'n' = no descale buffers, ptr=nullptr (default; bit-identical to "
+                "pre-scaffold; -pipeline=vsa goes through codegen NO_SCALE path). "
+                "'bs' = block-scale mode, alloc unit-scale (= 1.0f) buffers and "
+                "pass pointers through Kargs. For -pipeline=vsa + fp16/hdim=128/bm0=64 "
+                "this routes to the hand-written BLOCKSCALE oneshot "
+                "(kDoFp8StaticQuant=true) — pipeline body still (void)-casts the "
+                "descale ptrs, so results stay bit-identical to NO_SCALE.");
 
     bool result = arg_parser.parse(argc, argv);
     return std::make_tuple(result, arg_parser);
@@ -187,6 +200,23 @@ bool run_test(const ck_tile::ArgParser& arg_parser)
     std::string mask_str      = arg_parser.get_str("mask");
     bool attention_sink       = arg_parser.get_bool("attention_sink");
     int cross_ref             = arg_parser.get_int("cross_ref");
+    std::string qscale_str    = arg_parser.get_str("qscale");
+
+    // P1 quant plumbing scaffold dispatch:
+    //   'n'  -> qscale_bs = false, descale ptrs = nullptr (default, bit-identical to pre-scaffold)
+    //   'bs' -> qscale_bs = true,  alloc unit-scale (= 1.0f) buffers and pass pointers
+    // Anything else is a CLI error.
+    bool qscale_bs = false;
+    if(qscale_str == "n")
+        qscale_bs = false;
+    else if(qscale_str == "bs")
+        qscale_bs = true;
+    else
+    {
+        std::cerr << "Unknown -qscale value: '" << qscale_str << "' (expected one of: n, bs)"
+                  << std::endl;
+        return false;
+    }
 
     // --pv_mode -> dispatched int.
     //   none -> 0 (kNone), warp -> 1 (kPerWave), block -> 2 (kPerBlock).
@@ -376,6 +406,60 @@ bool run_test(const ck_tile::ArgParser& arg_parser)
     stream_cfg.cold_niters_ = warmup;
     stream_cfg.nrepeat_     = repeat;
 
+    // Quant-plumbing scaffold: optional unit-scale (= 1.0f) descale buffers.
+    // Per-block granularity matches the pipeline's traits: kBlockScaleSizeQ=kM0 (=BLKQ),
+    // kBlockScaleSizeK=kN0 (=BLKK). Buffer shape is [batch, nhead, ceil(seqlen/blk)] floats.
+    // -qscale=bs + -pipeline=vsa + fp16/hdim=128/bm0=64 routes to the
+    // hand-written BLOCKSCALE oneshot (kDoFp8StaticQuant=true); the pipeline
+    // body still (void)-casts the descale ptrs at this milestone, so the
+    // unit-scale buffers exercise host plumbing + Kargs forwarding only.
+    ck_tile::DeviceMem q_descale_dev;
+    ck_tile::DeviceMem k_descale_dev;
+    ck_tile::DeviceMem v_descale_dev;
+    const void* q_descale_ptr = nullptr;
+    const void* k_descale_ptr = nullptr;
+    const void* v_descale_ptr = nullptr;
+    // Hoisted to function scope so the matched-shape int8 BLOCKSCALE branch
+    // below can refill them from the real fp16 Q/K and re-upload to device.
+    std::vector<float> q_descale_host;
+    std::vector<float> k_descale_host;
+    std::vector<float> v_descale_host;
+    if(qscale_bs)
+    {
+        const ck_tile::index_t num_q_blocks_qs = (seqlen_q + BLKQ - 1) / BLKQ;
+        const ck_tile::index_t num_k_blocks_qs = (seqlen_k + BLKK - 1) / BLKK;
+        const size_t q_elts =
+            static_cast<size_t>(batch) * nhead * static_cast<size_t>(num_q_blocks_qs);
+        const size_t k_elts =
+            static_cast<size_t>(batch) * nhead_k * static_cast<size_t>(num_k_blocks_qs);
+        // V uses K-side blocking (V is sequence-major like K).
+        const size_t v_elts = k_elts;
+
+        // BLOCKSCALE host fill: when -qscale=bs + the matched-shape int8
+        // BLOCKSCALE oneshot is active (fp16/hdim=128/bm0=64), the per-block
+        // descale tensors are populated from the real fp16 Q/K below right
+        // before quantization (so int8 Q/K + per-block scales agree). For
+        // any other shape we fall through to the NO_SCALE codegen path,
+        // which doesn't consume the descale buffers — unit-scale is fine.
+        q_descale_host.assign(q_elts, 1.0f);
+        k_descale_host.assign(k_elts, 1.0f);
+        v_descale_host.assign(v_elts, 1.0f);
+
+        // DeviceMem has no copy/move assignment; use Realloc to populate the
+        // default-constructed instances safely (avoid use-after-free from
+        // implicit assignment of a temporary DeviceMem).
+        q_descale_dev.Realloc(q_elts * sizeof(float));
+        k_descale_dev.Realloc(k_elts * sizeof(float));
+        v_descale_dev.Realloc(v_elts * sizeof(float));
+        q_descale_dev.ToDevice(q_descale_host.data());
+        k_descale_dev.ToDevice(k_descale_host.data());
+        v_descale_dev.ToDevice(v_descale_host.data());
+
+        q_descale_ptr = q_descale_dev.GetDeviceBuffer();
+        k_descale_ptr = k_descale_dev.GetDeviceBuffer();
+        v_descale_ptr = v_descale_dev.GetDeviceBuffer();
+    }
+
     float avg_ms = -1.0f;
 
     if(pipeline == "jenga")
@@ -418,6 +502,10 @@ bool run_test(const ck_tile::ArgParser& arg_parser)
         attn_args.window_size_left          = mask.left;
         attn_args.window_size_right         = mask.right;
         attn_args.mask_type                 = static_cast<ck_tile::index_t>(mask.type);
+        // P1 plumbing scaffold: descale buffers (nullptr unless -qscale=bs).
+        attn_args.q_descale_ptr = q_descale_ptr;
+        attn_args.k_descale_ptr = k_descale_ptr;
+        attn_args.v_descale_ptr = v_descale_ptr;
 
         avg_ms = sparge_jenga_fwd(bmap_traits, bmap_args, attn_traits, attn_args, stream_cfg);
     }
@@ -472,9 +560,155 @@ bool run_test(const ck_tile::ArgParser& arg_parser)
         attn_args.window_size_left  = mask.left;
         attn_args.window_size_right = mask.right;
         attn_args.mask_type         = static_cast<ck_tile::index_t>(mask.type);
+        // P1 plumbing scaffold: descale buffers (nullptr unless -qscale=bs).
+        attn_args.q_descale_ptr = q_descale_ptr;
+        attn_args.k_descale_ptr = k_descale_ptr;
+        attn_args.v_descale_ptr = v_descale_ptr;
 
-        avg_ms =
-            sparge_sparge_fwd_combined(bmap_traits, bmap_args, attn_traits, attn_args, stream_cfg);
+        if(qscale_bs)
+        {
+            // BLOCKSCALE (kDoFp8StaticQuant=true) hand-written variant. Only
+            // fp16 / hdim=128 / bm0=64 (BLKQ) is wired today; if any other
+            // shape is requested the dispatch falls through to the codegen
+            // NO_SCALE path so we don't silently mis-route.
+            const bool fp16_d128_bm64 =
+                std::is_same_v<T, ck_tile::half_t> && hdim_q == 128 && hdim_v == 128;
+            if(!fp16_d128_bm64)
+            {
+                std::cerr << "[test_sparge] -qscale=bs BLOCKSCALE oneshot only supports "
+                             "fp16/hdim=128/bm0=64; falling back to NO_SCALE codegen path."
+                          << std::endl;
+                avg_ms = sparge_sparge_fwd_combined(
+                    bmap_traits, bmap_args, attn_traits, attn_args, stream_cfg);
+            }
+            else
+            {
+                // S3c2: real host-side per-block absmax/127 quantization.
+                // For each (batch, head, q_blk) chunk of BLKQ rows compute
+                //   q_descale[blk] = absmax(fp16_Q[blk]) / 127
+                //   int8_Q[blk]    = clip(round(fp16_Q[blk] / q_descale[blk]), -127, 127)
+                // Same for K with BLKK. The fp16 q_dev/k_dev stay live for
+                // kstats / blockmap / reference paths; int8 buffers are
+                // separate so the int8 kernel reads packed int8 bytes while
+                // the reference path keeps fp16. The kernel uses host-passed
+                // strides (in elements) via reinterpret_cast<QDataType*>, so
+                // an int8 buffer of size batch*nhead*seqlen*hdim bytes packs
+                // naturally with the BHSD layout.
+                const size_t q_int8_bytes = static_cast<size_t>(batch) * nhead * seqlen_q * hdim_q;
+                const size_t k_int8_bytes =
+                    static_cast<size_t>(batch) * nhead_k * seqlen_k * hdim_q;
+                std::vector<int8_t> q_int8_host(q_int8_bytes);
+                std::vector<int8_t> k_int8_host(k_int8_bytes);
+
+                const ck_tile::index_t nqb = (seqlen_q + BLKQ - 1) / BLKQ;
+                const ck_tile::index_t nkb = (seqlen_k + BLKK - 1) / BLKK;
+
+                auto quantize_per_block = [&](const auto& src_host,
+                                              std::vector<int8_t>& dst,
+                                              std::vector<float>& desc,
+                                              ck_tile::index_t nh,
+                                              ck_tile::index_t slen,
+                                              ck_tile::index_t blk,
+                                              ck_tile::index_t nb) {
+                    for(ck_tile::index_t b = 0; b < batch; ++b)
+                    {
+                        for(ck_tile::index_t h = 0; h < nh; ++h)
+                        {
+                            for(ck_tile::index_t kb = 0; kb < nb; ++kb)
+                            {
+                                const ck_tile::index_t s_beg = kb * blk;
+                                const ck_tile::index_t s_end =
+                                    std::min<ck_tile::index_t>(s_beg + blk, slen);
+                                // absmax over this block
+                                float absmax = 0.f;
+                                for(ck_tile::index_t s = s_beg; s < s_end; ++s)
+                                {
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                    {
+                                        const float fv = ck_tile::type_convert<float>(
+                                            i_perm ? src_host(b, h, s, d) : src_host(b, s, h, d));
+                                        const float a = fv < 0.f ? -fv : fv;
+                                        if(a > absmax)
+                                            absmax = a;
+                                    }
+                                }
+                                // Avoid div-by-zero for an all-zero block; use
+                                // descale=1 (encodes int8 = 0 round-trip safely).
+                                const float desc_val = absmax > 0.f ? absmax / 127.0f : 1.0f;
+                                desc[(static_cast<size_t>(b) * nh + h) * nb + kb] = desc_val;
+                                const float inv_desc                              = 1.0f / desc_val;
+                                for(ck_tile::index_t s = s_beg; s < s_end; ++s)
+                                {
+                                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                                    {
+                                        const float fv = ck_tile::type_convert<float>(
+                                            i_perm ? src_host(b, h, s, d) : src_host(b, s, h, d));
+                                        float q = fv * inv_desc;
+                                        // round-half-away-from-zero, clip to [-127,127]
+                                        q = q >= 0.f ? std::floor(q + 0.5f) : std::ceil(q - 0.5f);
+                                        if(q > 127.f)
+                                            q = 127.f;
+                                        if(q < -127.f)
+                                            q = -127.f;
+                                        // Pack to int8 using the same flat-element index the
+                                        // kernel reads (BHSD when i_perm=1, BSHD when 0).
+                                        size_t idx;
+                                        if(i_perm)
+                                            idx = ((static_cast<size_t>(b) * nh + h) * slen + s) *
+                                                      hdim_q +
+                                                  d;
+                                        else
+                                            idx = ((static_cast<size_t>(b) * slen + s) * nh + h) *
+                                                      hdim_q +
+                                                  d;
+                                        dst[idx] = static_cast<int8_t>(static_cast<int>(q));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+
+                quantize_per_block(q_host, q_int8_host, q_descale_host, nhead, seqlen_q, BLKQ, nqb);
+                quantize_per_block(
+                    k_host, k_int8_host, k_descale_host, nhead_k, seqlen_k, BLKK, nkb);
+
+                // Re-upload descale buffers populated from real data
+                // (overrides the unit-scale fill above).
+                q_descale_dev.ToDevice(q_descale_host.data());
+                k_descale_dev.ToDevice(k_descale_host.data());
+
+                ck_tile::DeviceMem q_int8_dev(q_int8_bytes);
+                ck_tile::DeviceMem k_int8_dev(k_int8_bytes);
+                q_int8_dev.ToDevice(q_int8_host.data());
+                k_int8_dev.ToDevice(k_int8_host.data());
+
+                fmha_sparge_fwd_args int8_attn_args = attn_args;
+                int8_attn_args.q_ptr                = q_int8_dev.GetDeviceBuffer();
+                int8_attn_args.k_ptr                = k_int8_dev.GetDeviceBuffer();
+
+                if(stream_cfg.log_level_ > 0)
+                    std::cout << ", sparge_kstats_" << bmap_traits.data_type << "_d"
+                              << bmap_traits.hdim_q << ", sparge_blockmap_" << bmap_traits.data_type
+                              << "_d" << bmap_traits.hdim_q << std::flush;
+                avg_ms = ck_tile::launch_kernel(
+                    stream_cfg,
+                    [=](const ck_tile::stream_config& s_) {
+                        sparge_kstats_fwd_oneshot(bmap_traits, bmap_args, s_);
+                    },
+                    [=](const ck_tile::stream_config& s_) {
+                        sparge_blockmap_only_fwd_oneshot(bmap_traits, bmap_args, s_);
+                    },
+                    [=](const ck_tile::stream_config& s_) {
+                        fmha_sparge_int8_fwd_oneshot_fp16_d128_bm64(s_, int8_attn_args);
+                    });
+            }
+        }
+        else
+        {
+            avg_ms = sparge_sparge_fwd_combined(
+                bmap_traits, bmap_args, attn_traits, attn_args, stream_cfg);
+        }
     }
     else
     {
@@ -497,6 +731,85 @@ bool run_test(const ck_tile::ArgParser& arg_parser)
     // ---- copy results back ----
     o_dev.FromDevice(output_host.data());
     block_map_dev.FromDevice(block_map_host.data());
+
+#ifdef P2_SCALE_DUMP
+    // Task #180 host-side dump of k_scale_lut + pooled_k[0,0,0,:] for cross-check.
+    // Compiled only when -DP2_SCALE_DUMP=1 passed; reverted after measurement.
+    {
+        const auto layout_dump = sparge_blockmap_compute_workspace_layout(bmap_traits, bmap_args);
+        const int kN0_dump     = (hdim_q == 128) ? 128 : ((hdim_q == 64) ? 256 : 0);
+        const int N_k_dump = (kN0_dump > 0) ? ck_tile::integer_divide_ceil(seqlen_k, kN0_dump) : 0;
+        const size_t total_blocks_dump = static_cast<size_t>(batch) * nhead_k * N_k_dump;
+        std::vector<float> k_scale_h(total_blocks_dump, 0.f);
+        std::vector<uint16_t> pooled_first_d(hdim_q, 0);
+        auto* ws_base = static_cast<char*>(kstats_ws_dev.GetDeviceBuffer());
+        (void)hipMemcpy(k_scale_h.data(),
+                        ws_base + layout_dump.k_scale_offset,
+                        total_blocks_dump * sizeof(float),
+                        hipMemcpyDeviceToHost);
+        (void)hipMemcpy(pooled_first_d.data(),
+                        ws_base + layout_dump.pooled_k_offset,
+                        hdim_q * sizeof(uint16_t),
+                        hipMemcpyDeviceToHost);
+
+        float smin   = std::numeric_limits<float>::infinity();
+        float smax   = -std::numeric_limits<float>::infinity();
+        double sum   = 0.0;
+        size_t zeros = 0, infnan = 0;
+        for(size_t i = 0; i < total_blocks_dump; ++i)
+        {
+            float v = k_scale_h[i];
+            if(std::isnan(v) || std::isinf(v))
+            {
+                ++infnan;
+                continue;
+            }
+            if(v == 0.f)
+                ++zeros;
+            if(v < smin)
+                smin = v;
+            if(v > smax)
+                smax = v;
+            sum += v;
+        }
+        float mean = (total_blocks_dump > 0) ? static_cast<float>(sum / total_blocks_dump) : 0.f;
+
+        std::cout << "\n[P2_SCALE_DUMP] prec=" << bmap_traits.data_type << " N_k=" << N_k_dump
+                  << " total=" << total_blocks_dump << " min=" << smin << " max=" << smax
+                  << " mean=" << mean << " zeros=" << zeros << " inf_nan=" << infnan << "\n";
+        std::cout << "[P2_SCALE_DUMP] first8:";
+        for(size_t i = 0; i < std::min<size_t>(8, total_blocks_dump); ++i)
+            std::cout << " " << k_scale_h[i];
+        std::cout << "\n";
+
+        // Host cross-check on block [0,0,0]: absmax(pooled_k_mean[0,0,0,:])/127
+        float pmax = 0.f;
+        for(int d = 0; d < hdim_q; ++d)
+        {
+            float fv;
+            if(bmap_traits.data_type == "fp16")
+            {
+                ck_tile::half_t h;
+                std::memcpy(&h, &pooled_first_d[d], sizeof(uint16_t));
+                fv = ck_tile::type_convert<float>(h);
+            }
+            else
+            {
+                ck_tile::bf16_t b;
+                std::memcpy(&b, &pooled_first_d[d], sizeof(uint16_t));
+                fv = ck_tile::type_convert<float>(b);
+            }
+            float a = fv < 0.f ? -fv : fv;
+            if(a > pmax)
+                pmax = a;
+        }
+        float host_val   = pmax / 127.0f;
+        float kernel_val = k_scale_h[0];
+        std::cout << "[P2_SCALE_DUMP] xcheck block[0,0,0] kernel=" << kernel_val
+                  << " host(pooled_k_mean/127)=" << host_val
+                  << " abs_diff=" << std::abs(kernel_val - host_val) << "\n";
+    }
+#endif
 
     // ---- optional raw output dump (for bit-identical baseline comparison) ----
     if(!dump_o_path.empty())

@@ -16,6 +16,14 @@ Not yet ported (upstream pinned to commit [`ae5b629`](https://github.com/thu-ml/
 - **K smoothing** — pre-pool `k -= km`; required for diffusion / video checkpoints (CogVideoX, Mochi-1, Flux, OpenSora, SD 3.5) ([spas_sage_attn/core.py:L53](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/spas_sage_attn/core.py#L53))
 - **SageAttention-style Q/K int8 quant fusion** — fuses Sage int8 quant into the pool kernel, enables a downstream int8 GEMM0 in the attn kernel (matches `49_sageattention`'s quant recipe) ([spas_sage_attn/utils.py:L371](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/spas_sage_attn/utils.py#L371))
 
+## Performance
+
+![V1 sage-sparge comparison](docs/pv_skip_mode_comparison.png)
+
+*MI300X, b=2 h=16 s=8192 d=128, 5 seeds × 9 sparsity points, `-pv_mode=warp`. Two hlines (`fmha_dense` fp16, `fmha_sage` fp8bf16 BLOCKSCALE) and two sweeps (`sparge_fp16`, `sparge_sage` = V1 sage⊕sparge with int8 BLOCKSCALE Q/K + fp16 V); labels are sparge_sage speedup vs dense.*
+
+V1 (`sparge_sage`) sits +15..+19% above `sparge_fp16` at every sparsity, and crosses the dense baseline near sparsity 0.31 vs sparsity 0.40 for fp16.
+
 ## PV-skip modes
 
 `pv_threshold` per-Q-tile skip in the attention kernel is implemented in three variants, selectable at runtime via `-pv_mode={none|warp|block}`:
@@ -24,11 +32,7 @@ Not yet ported (upstream pinned to commit [`ae5b629`](https://github.com/thu-ml/
 - **`warp`** (per-wavefront) — each wavefront votes locally via `__shfl_xor` butterfly AND; SGPR-resident flag. CK-tile-specific variant, not in upstream.
 - **`block`** (per-block) — block-wide consensus vote via LDS broadcast; aligned with upstream sm80 ([`qk_int_sv_f16_cuda_sm80.cuh:L334`](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/csrc/qattn/qk_int_sv_f16_cuda_sm80.cuh#L334)). V loads stay unconditional in all modes — the guard wraps the PV MMA only, matching upstream and paper Algorithm 1.
 
-![PV-skip mode comparison](docs/pv_skip_mode_comparison.png)
-
-*MI300X, b=2 h=16 s=8192 d=128 fp16, 5 seeds × 9 sparsity points. All three modes dispatch to the `kM0=64 padK=0` tile bucket at this shape.*
-
-On the canonical recipe shape, `none > warp > block` at every measured sparsity, with no crossover. The per-block guard adds +33..+35 VGPR (6..9 spills) on this tile configuration, depressing occupancy. `warp` is +0..+4 VGPR. The default is `-pv_mode=warp`; switch to `none` for the no-skip baseline or `block` to exercise the upstream-aligned variant. A shape sweep is needed before recommending `block` as default — the `kM0=128` path has Δ ≈ 0 VGPR for per-block and is a candidate.
+Default is `-pv_mode=warp`; `none` disables the skip and `block` selects the upstream-aligned block-wide vote. On the `kM0=64` tile bucket of the recipe shape, `warp` wins — `block` adds +33..+35 VGPR which depresses occupancy.
 
 ## Usage
 
