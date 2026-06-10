@@ -88,21 +88,24 @@ Build & run: `make test_dispatch && ./test_dispatch`
 | 4096×5120 | 1570 | 1670 | +6% | 256×256 |
 | 4096×4096 | 1652 | 1976 | +20% | 256×256 |
 | 2048×8192 | 1679 | 1906 | +14% | 256×256 |
-| 2048×4096 | 997 | 1685 | +69% | 128×256 (occ2) |
-| 2048×2048 | 516 | 993 | +92% | 128×256 |
-| 1024×4096 | 678 | 844 | +24% | 128×256 |
+| 2048×4096 | 997 | 1517 | +52% | 128×256 (occ2) |
+| 2048×2048 | 516 | 1014 | +96% | 128×256 (occ2) |
+| 1024×4096 | 678 | 848 | +25% | 128×256 (occ2) |
 
-(Absolute numbers vary ±5% run-to-run from the SCLK/1000W power cap; kernel is stable.)
+(Absolute TFLOPs swing ±10% run-to-run from the SCLK/1000W power cap; ratios/trends are
+stable. The small-M occ2 win is +6~10% measured *same-run* vs occ1, which is partly masked
+in cross-run absolute tables by the ±10% cap swing — so 2048×4096 here (1517) looks close to
+its occ1 value even though occ2 is the faster default.)
 
-## vs CK (same machine 2026-06-10, K=8192, `tile_example_mx_flatmm`, FP16)
+## vs CK (same machine + same run 2026-06-10, K=8192, `tile_example_mx_flatmm`, FP16, occ2 dispatcher)
 
 | shape | CK FP8 | CK FP6 | ours FP6 | ours / CK-FP6 | ours / CK-FP8 |
 |---|---|---|---|---|---|
-| 2048×4096 | 1428 | 1019 | 1516 | 1.49× | 1.06× |
-| 2048×8192 | 1566 | 1070 | 2023 | 1.89× | 1.29× |
-| 4096×4096 | 1553 | 1075 | 2095 | 1.95× | 1.35× |
-| 4096×8192 | 1718 | 1099 | 2198 | 2.00× | 1.28× |
-| 8192×8192 | 1804 | 1113 | 2246 | 2.02× | 1.24× |
+| 2048×4096 | 1443 | 1012 | 1517 | 1.50× | 1.05× |
+| 2048×8192 | 1603 | 1068 | 1994 | 1.87× | 1.24× |
+| 4096×4096 | 1581 | 1071 | 2096 | 1.96× | 1.33× |
+| 4096×8192 | 1703 | 1096 | 2178 | 1.99× | 1.28× |
+| 8192×8192 | 1802 | 1109 | 2238 | 2.02× | 1.24× |
 
 **Same-precision ~2× CK MXFP6; and our FP6 beats CK's FP8 by 1.06~1.35×.** On this machine CK
 FP8 > FP6 (FP6 pinned by the 1000W power cap + CK's 16×16×128). NOTE: an external 2026-05-04
