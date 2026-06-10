@@ -367,8 +367,10 @@ struct SyncOp {
 // Zero A/B vgprs whose K-index >= remaining tail K for one subIterK group.
 struct MaskKOp {
   int subIterK = 0;
-  // {tileId: vgprTileId}; populated by the (Python) emit pass.
-  std::map<int, int> vgpr_tile_map;
+  // {tensor: [{groupKey: vgprTileId}]} — the merged flat tail tile map the tail
+  // loop hands to the mask emit (mirrors the Python MaskKOp.vgpr_tile_map dict,
+  // read as ``vgpr_tile_map.get(tensor, [{}])[0]`` by the InstructionEmitter).
+  std::map<std::string, std::vector<std::map<int, int>>> vgpr_tile_map;
   std::string kind = "mask_k";
 
   MaskKOp() = default;

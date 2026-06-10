@@ -628,15 +628,6 @@ class LogicalScheduler:
         return {'A': (cfg._prefixM[piM], cfg._prefixM[piM + 1]),
                 'B': (cfg._prefixN[piN], cfg._prefixN[piN + 1])}
 
-    def _lr_tensors(self) -> list:
-        """Return list of (tensor_name, ReadGranularity) for all LR tensors."""
-        cfg = self.config
-        tensors = [('A', cfg.lrA), ('B', cfg.lrB)]
-        if cfg.hasScale:
-            tensors.append(('SA', cfg.lrSA))
-            tensors.append(('SB', cfg.lrSB))
-        return tensors
-
     # ── C++ pass-pipeline delegation ──────────────────────
     #
     # place_LRs … remove_unnecessary_wait_lr_sync (and the assign_vgpr_tiles
@@ -872,313 +863,165 @@ class LogicalScheduler:
 
     # ── Loop variant derivation ────────────────────────────
 
-    @staticmethod
-    def _rewire_before(emitted: List[EmittedModule],
-                       removed_ids: set) -> List[EmittedModule]:
-        """Rewire before-links that point to removed modules.
+    # The loop-variant schedule rewrites (NGLL / NLL / preloop / tail-PGR0)
+    # live in the ported C++ passes::LogicalScheduler. The wrappers below run
+    # the corresponding C++ builder and rebuild the Python EmittedModule
+    # dataclasses from the exported value modules; they hold no duplicate
+    # schedule rewrite logic. NGLL/NLL reuse the mainloop placement registry
+    # (coordinate-only sources, like emit()); preloop/tail synthesize fresh
+    # placements, so their value sources carry full placement data.
 
-        If em.before points to a removed module, follow that module's own
-        before link until we find a non-removed module (or None).
+    def _variant_from_cpp(self, cpp_partitions, full: bool):
+        """Rebuild [partition][subIterK][EmittedModule] from C++ value modules.
+
+        ``full=False`` resolves placement sources through the persistent
+        placement registry (NGLL/NLL share the mainloop placements);
+        ``full=True`` rebuilds fresh placement dataclasses from the value
+        source (preloop/tail use synthesized placements with their own vgpr
+        tile maps).
         """
-        id_to_em = {em.moduleId: em for em in emitted}
-        for em in emitted:
-            if em.moduleId in removed_ids:
-                continue
-            b = em.before
-            while b is not None and b in removed_ids:
-                b = id_to_em[b].before
-            em.before = b
-        return [em for em in emitted if em.moduleId not in removed_ids]
+        out = []
+        for pi, partition_emitted in enumerate(cpp_partitions):
+            py_partition = []
+            for k, cpp_mods in enumerate(partition_emitted):
+                emitted = [
+                    EmittedModule(
+                        moduleId=cm.moduleId, before=cm.before,
+                        source=(self._full_source_to_py(cm.source) if full
+                                else self._emit_source_to_py(cm.source, pi, k)))
+                    for cm in cpp_mods
+                ]
+                py_partition.append(emitted)
+            out.append(py_partition)
+        return out
+
+    def _full_source_to_py(self, cpp_src) -> Emittable:
+        """Rebuild a fresh Python source dataclass from a C++ value Emittable.
+
+        Used for the synthesized preloop/tail placements (which are not in the
+        mainloop placement registry): placement vgpr tile maps and op fields are
+        copied straight from the value source. The InlineModuleOp ``build``
+        callback stays None here and is attached by the tail-loop wrapper.
+        """
+        kind = cpp_src.kind
+        if kind == 'mfma':
+            m = MFMAPlacement(subIterK=cpp_src.subIterK,
+                              tileA=_range_to_py(cpp_src.tileA),
+                              tileB=_range_to_py(cpp_src.tileB))
+            m.vgpr_tile_maps = {t: [dict(x) for x in maps]
+                                for t, maps in cpp_src.vgpr_tile_maps.items()}
+            return m
+        if kind == 'lr':
+            lr = LRPlacement(tensor=cpp_src.tensor,
+                             mtIteration=cpp_src.mtIteration,
+                             tiles=_range_to_py(cpp_src.tiles),
+                             subIterK_slot=cpp_src.subIterK_slot,
+                             partition=cpp_src.partition)
+            lr.vgpr_tile_map = [dict(x) for x in cpp_src.vgpr_tile_map]
+            return lr
+        if kind == 'gr':
+            return GRPlacement(tensor=cpp_src.tensor,
+                               mtIteration=cpp_src.mtIteration,
+                               tiles=_range_to_py(cpp_src.tiles),
+                               subIterK_slot=cpp_src.subIterK_slot,
+                               partition=cpp_src.partition)
+        if kind == 'mask_k':
+            op = MaskKOp(subIterK=cpp_src.subIterK)
+            op.vgpr_tile_map = {t: [dict(x) for x in maps]
+                                for t, maps in cpp_src.vgpr_tile_map.items()}
+            return op
+        if kind == 'skip':
+            return SkipOp(compare=cpp_src.compare, value=cpp_src.value,
+                          target=cpp_src.target, rawLabel=cpp_src.rawLabel,
+                          branchComment=cpp_src.branchComment)
+        if kind == 'inline':
+            return InlineModuleOp(label=cpp_src.label)
+        return _op_to_py(cpp_src)
 
     def build_ngll(self) -> List[List[List[EmittedModule]]]:
         """NGLL (No Global Load Loop): mainloop without GR(n+2), GR_INC.
 
         WaitGR inflight counts are zeroed since no new GRs are in flight.
+        The schedule rewrite is performed by the C++ scheduler; this wrapper
+        rebuilds the Python EmittedModule dataclasses from the value modules.
         """
         self._ensure_pass(Pass.EMIT)
-
-        if self.config.pgr in (0, 1):
-            self._ngll_emitted = [[[]]]
-            return self._ngll_emitted
-
-        ngll = []
-        for partition_emitted in self._emitted:
-            part_ngll = []
-            for emitted in partition_emitted:
-                new_emitted = copy.deepcopy(emitted)
-                removed = set()
-                for em in new_emitted:
-                    src = em.source
-                    if em.opType == 'gr' and src.mtIteration == 2:
-                        removed.add(em.moduleId)
-                    elif em.opType == 'wait_gr':
-                        if src.wait_gr_counts is not None:
-                            src.wait_gr_counts = WaitGRCounts()
-                part_ngll.append(self._rewire_before(new_emitted, removed))
-            ngll.append(part_ngll)
-
-        self._ngll_emitted = ngll
-        return ngll
+        cpp = self._ensure_cpp()
+        cpp.build_ngll()
+        self._ngll_emitted = self._variant_from_cpp(cpp.value_ngll(), full=False)
+        return self._ngll_emitted
 
     def build_nll(self) -> List[List[List[EmittedModule]]]:
         """NLL (No Load Loop): mainloop without GR, LR(n+1), GR_INC, LR_INC,
-        WaitGR(n+1)+Sync. Keeps LR(n), MFMAs, WaitGR(n) with zeroed counts."""
+        WaitGR(n+1)+Sync. Keeps LR(n), MFMAs, WaitGR(n) with zeroed counts.
+
+        The schedule rewrite is performed by the C++ scheduler; this wrapper
+        rebuilds the Python EmittedModule dataclasses from the value modules.
+        """
         self._ensure_pass(Pass.EMIT)
-
-        if self.config.pgr == 0:
-            self._nll_emitted = [[[]]]
-            return self._nll_emitted
-
-        nll = []
-        for partition_emitted in self._emitted:
-            part_nll = []
-            for emitted in partition_emitted:
-                new_emitted = copy.deepcopy(emitted)
-                removed = set()
-
-                for em in new_emitted:
-                    src = em.source
-                    if em.opType == 'gr':
-                        removed.add(em.moduleId)
-                    elif em.opType == 'lr' and src.mtIteration == 1:
-                        removed.add(em.moduleId)
-                    elif em.opType == 'gr_inc' and self.config.pgr == 2:
-                        # PGR=2: NGLL already swapped LW via its kept gr_inc,
-                        # so NLL must drop gr_inc to avoid swapping it back.
-                        # PGR=1: keep gr_inc — it advances SRD + swaps LW for
-                        # tail entry (PRELOOP's single GR did neither).
-                        removed.add(em.moduleId)
-
-                # Zero inflight counts on remaining WaitGR.
-                for em in new_emitted:
-                    if em.opType == 'wait_gr' and em.moduleId not in removed:
-                        em.source.wait_gr_counts = WaitGRCounts()
-
-                # Find Sync modules paired with removed wait_gr
-                for em in new_emitted:
-                    if em.opType == 'sync' and em.before is not None \
-                            and em.before in removed:
-                        removed.add(em.moduleId)
-
-                # Remove WaitLR if no LR remains in this subIterK
-                # but keep WaitLR ops that non-removed modules depend on
-                # (e.g. MFMAs waiting for LRs issued in a previous subIterK)
-                has_lr = any(em.opType == 'lr' and em.moduleId not in removed
-                             for em in new_emitted)
-                if not has_lr:
-                    depended_on = {em.before for em in new_emitted
-                                   if em.moduleId not in removed
-                                   and em.before is not None}
-                    for em in new_emitted:
-                        if em.opType == 'wait_lr' \
-                                and em.moduleId not in depended_on:
-                            removed.add(em.moduleId)
-
-                part_nll.append(self._rewire_before(new_emitted, removed))
-            nll.append(part_nll)
-
-        self._nll_emitted = nll
-        return nll
+        cpp = self._ensure_cpp()
+        cpp.build_nll()
+        self._nll_emitted = self._variant_from_cpp(cpp.value_nll(), full=False)
+        return self._nll_emitted
 
     def build_tailloop_pgr0(self) -> List[List[List[EmittedModule]]]:
         """Template for Tailloop based on PGR0 schedule.
 
         Returns [partition][groups] where each group has at most one MFMA.
 
-        The tail loop runs flat (no partitioning): per subIterK we emit one
-        LR pass covering every unique (tensor, tile_range), one boundary
-        mask, then every partition's MFMAs back-to-back. This requires the
-        flat tile-id layout from _compute_flat_tail_tile_state (and the
-        matching vgpr realloc in _realloc_tail_tiles_flat) so each unique
-        partition group has its own vgpr range — the mainloop's per-
-        partition tile budget multiplexes vgprs across pi and cannot hold
-        all partitions' tiles live at once.
-        """
-        cfg = self.config
-        numK = cfg.numSubIterK
+        The tail loop runs flat (no partitioning): per subIterK the C++
+        scheduler emits one LR pass covering every unique (tensor, tile_range),
+        one boundary mask, then every partition's MFMAs back-to-back. This
+        relies on the flat tile-id layout from _compute_flat_tail_tile_state
+        (and the matching vgpr realloc in _realloc_tail_tiles_flat) so each
+        unique partition group has its own vgpr range.
 
-        # Flat tile layout: every unique (tensor, partition_group) gets its
-        # own vgpr tile id. _compute_tail_tile_state's old per-partition
-        # tile_maps would reuse vgprs across pi and break a flat loop.
+        The schedule construction itself is performed in C++; this wrapper
+        feeds it the flat tile layout plus the BF16 / MatrixInstK boundary
+        inputs, rebuilds the Python EmittedModule dataclasses, and attaches the
+        writer-built BF16 boundary-fixup callback (which cannot live in C++).
+        """
+        # Flat tile layout: every unique (tensor, partition_group) gets its own
+        # vgpr tile id. Stays in Python — it is also consumed by getNumVgpr and
+        # _realloc_tail_tiles_flat.
         tile_maps, self._flat_tail_peaks = self._compute_flat_tail_tile_state()
-        # Legacy unused-tile bookkeeping: in the flat path we replace the
-        # vgpr tiles wholesale at tail entry, so nothing here.
+        # Legacy unused-tile bookkeeping: in the flat path we replace the vgpr
+        # tiles wholesale at tail entry, so nothing here.
         self._tail_unused_tile_ids = {'A': set(), 'B': set(),
                                       'SA': set(), 'SB': set()}
 
-        preamble = []
-
-        # GRs entire MT at once for all tensors.
-        all_tiles = {
-            'A': MFMATileRange(0, numK, 0, cfg.numMFMATilesM),
-            'B': MFMATileRange(0, numK, 0, cfg.numMFMATilesN),
-        }
-        preamble.extend(self._make_gr_all_tensors(0, all_tiles))
-        # bf16-only: an OOB dwordx4 load can corrupt the trailing 16-bit
-        # element at the K-boundary (buffer instructions enforce dword
-        # granularity on OOB). We patch it with a 16-bit DTL load. Wider
-        # dtypes (e.g. fp4 read at K=32 granularity) don't have this issue,
-        # so we skip emission entirely for them.
-        if self._kernel["ProblemType"]["DataTypeA"].isBFloat16():
-            # We need to wait for other SIMD before placing the DTL load
-            # (as we'll write twice to this address : OOB Zero then fixup load)
-            preamble.append(SyncOp())
-            preamble.append(InlineModuleOp(
-                build=lambda em: em.writer.tailLoopBoundaryDtlLoadAB(
-                    em.kernel,
-                    em.tensorParametersMap['A'],
-                    em.tensorParametersMap['B']),
-                label="tail_boundary_ab"))
-        preamble.append(WaitGROp(wait_gr_counts=WaitGRCounts()))
-        preamble.append(SyncOp())
-        
-
-        # Flat per-subIterK emission. The K-boundary mask depends only on k,
-        # and with flat tile ids the per-partition tile_maps reference
-        # disjoint vgpr ranges per (tensor, group). So per k we can:
-        #   1. emit each unique (tensor, tile_range) LR exactly once
-        #   2. wait + mask once (single VAnd per unique flat vgpr)
-        #   3. run every partition's MFMA back-to-back
-        # The returned shape is still [partition][group][ops]; we use a
-        # single outer "partition" holding all per-k groups.
+        # bf16-only: an OOB dwordx4 load can corrupt the trailing 16-bit element
+        # at the K-boundary; the C++ builder inserts a sync + boundary
+        # InlineModuleOp placeholder, and we attach the writer callback below.
+        bf16 = bool(self._kernel["ProblemType"]["DataTypeA"].isBFloat16())
         miK = int(self._kernel["MatrixInstK"])
-        groups = [self._to_emitted(preamble)]
 
-        # Build a merged tile_map covering every partition's tiles, used by
-        # MaskKOp to enumerate the live flat vgpr ids.
-        merged_tile_map: dict = {}
-        for pi in range(cfg.numPartitions):
-            for tensor in ('A', 'B', 'SA', 'SB'):
-                src = tile_maps[pi].get(tensor)
-                if not src:
-                    continue
-                dst = merged_tile_map.setdefault(tensor, [{}])
-                while len(dst) < len(src):
-                    dst.append({})
-                for ui, m in enumerate(src):
-                    dst[ui].update(m)
-
-        for k in range(numK):
-            ops = []
-            # Dedup LRs across partitions by tileId range — with flat tile
-            # ids, same range ⇒ same vgprs, so one LR populates all readers.
-            seen_lr = set()
-            for pi in range(cfg.numPartitions):
-                cur = self._partition_tile_range(pi)
-                for tensor, gran in self._lr_tensors():
-                    if k % gran.k != 0:
-                        continue
-                    side_key = 'A' if tensor in ('A', 'SA') else 'B'
-                    tiles = gran.tile_range(k, *cur[side_key])
-                    lr_key = (tensor,
-                              tiles.tileId_start, tiles.tileId_end,
-                              tiles.subIterK_start, tiles.subIterK_end)
-                    if lr_key in seen_lr:
-                        continue
-                    seen_lr.add(lr_key)
-                    lr = LRPlacement(tensor=tensor, mtIteration=0,
-                                     tiles=tiles,
-                                     subIterK_slot=k, partition=pi)
-                    lr.vgpr_tile_map = copy.deepcopy(tile_maps[pi].get(tensor, []))
-                    ops.append(lr)
-            ops.append(WaitLROp())
-            ops.append(MaskKOp(subIterK=k,
-                               vgpr_tile_map=copy.deepcopy(merged_tile_map)))
-            # All partitions' MFMAs for this k, back-to-back.
-            for pi in range(cfg.numPartitions):
-                cur = self._partition_tile_range(pi)
-                mfma_tileA = MFMATileRange(k, k + 1, *cur['A'])
-                mfma_tileB = MFMATileRange(k, k + 1, *cur['B'])
-                mfma = MFMAPlacement(subIterK=k, tileA=mfma_tileA, tileB=mfma_tileB)
-                mfma.vgpr_tile_maps = copy.deepcopy(tile_maps[pi])
-                ops.append(mfma)
-            # Early-exit: after subIterK=k completes for every partition,
-            # skip ahead if no more valid K remains. Omit on the last k.
-            if k != numK - 1:
-                ops.append(SkipOp(
-                    compare='LE', value=miK * (k + 1),
-                    target='SkipTailLoopL', rawLabel=True,
-                    branchComment=f"early-exit tail after subIterK={k} (no valid K left)"))
-            groups.append(self._to_emitted(ops))
-
-        self._tailloop_emitted = [groups]
+        cpp = self._ensure_cpp()
+        cpp.build_tailloop_pgr0(tile_maps, bf16, miK)
+        self._tailloop_emitted = self._variant_from_cpp(
+            cpp.value_tailloop(), full=True)
+        if bf16:
+            self._attach_tail_boundary_build()
         return self._tailloop_emitted
 
-    @staticmethod
-    def _to_emitted(ops) -> List[EmittedModule]:
-        """Wrap Emittable objects (Placements / BaseOps) into EmittedModules."""
-        return [EmittedModule(moduleId=mid, source=op) for mid, op in enumerate(ops)]
+    def _attach_tail_boundary_build(self) -> None:
+        """Attach the writer-built BF16 boundary DTL-load callback to the tail
+        InlineModuleOp emitted by the C++ builder (kind 'inline',
+        label 'tail_boundary_ab'). The callback captures writer state and so
+        stays in Python."""
+        def _boundary_build(em):
+            return em.writer.tailLoopBoundaryDtlLoadAB(
+                em.kernel,
+                em.tensorParametersMap['A'],
+                em.tensorParametersMap['B'])
 
-    def _make_gr_all_tensors(self, mt: int, tiles: dict) -> List[GRPlacement]:
-        """Create GR placements for all tensors at the given MT iteration.
-
-        tiles: {'A': MFMATileRange, 'B': MFMATileRange}
-        """
-        return [GRPlacement(tensor=tensor, mtIteration=mt,
-                            tiles=tiles['A' if tensor in ('A', 'SA') else 'B'],
-                            subIterK_slot=0)
-                for tensor in self.tensors]
-
-    def _make_lr_all_tensors(self, tiles: dict) -> List[LRPlacement]:
-        """Create LR placements for first partition.
-
-        tiles: per-tensor MFMATileRange, e.g. {'A': MFMATileRange(0, k, mn0, mn1), ...}
-
-        Uses the first MFMA's vgpr tile maps (the preloop loads data consumed
-        by the first MFMA, not the next subIterK like mainloop LRs).
-        """
-        first_mfma = self._partitions[0][0].mfma
-
-        placements = []
-        for tensor in self.tensors:
-            lr = LRPlacement(
-                tensor=tensor, mtIteration=0,
-                tiles=tiles[tensor],
-                subIterK_slot=0, partition=0)
-            if tensor in first_mfma.vgpr_tile_maps:
-                lr.vgpr_tile_map = copy.deepcopy(first_mfma.vgpr_tile_maps[tensor])
-            placements.append(lr)
-        return placements
-
-    def _make_depops_all_tensors(self, cls) -> List[BaseOp]:
-        """Create a BaseOp subclass instance for each tensor."""
-        return [cls(tensor=tensor) for tensor in self.tensors]
-
-    def _make_preloop_mt1_grs(self) -> List[GRPlacement]:
-        """Create MT1 GRs for the PGR=2 preloop, ordered to match the mainloop.
-
-        Covers partitions 0..offsetPartition-1 with proper deduplication.
-        Each unique (tensor, tile-range, k-range) appears exactly once.
-        """
-        self._ensure_pass(Pass.LR)
-        cfg = self.config
-
-        seen = set()
-        result = []
-        for pi in range(cfg.offsetPartition):
-            target_range = self._partition_tile_range(pi)
-            for slot in self._partitions[0]:
-                k = slot.mfma.subIterK
-                items = [('A', target_range['A'], cfg.grA),
-                         ('B', target_range['B'], cfg.grB)]
-                if cfg.hasScale:
-                    items.append(('SA', target_range['A'], cfg.grSA))
-                    items.append(('SB', target_range['B'], cfg.grSB))
-                for tensor, (t_start, t_end), gr_gran in items:
-                    tr = gr_gran.tile_range(k, t_start, t_end)
-                    key = (tensor, tr.tileId_start, tr.tileId_end,
-                           tr.subIterK_start, tr.subIterK_end)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    result.append(GRPlacement(
-                        tensor=tensor,
-                        mtIteration=1,
-                        tiles=tr,
-                        subIterK_slot=k,
-                        partition=pi,
-                    ))
-        return result
+        for partition_emitted in self._tailloop_emitted:
+            for group in partition_emitted:
+                for em in group:
+                    src = em.source
+                    if getattr(src, 'kind', None) == 'inline' \
+                            and getattr(src, 'label', None) == 'tail_boundary_ab':
+                        src.build = _boundary_build
 
     def build_preloop(self) -> List[List[List[EmittedModule]]]:
         """Build preloop: pipeline initialization sequence before mainloop.
@@ -1198,47 +1041,15 @@ class LogicalScheduler:
           skip(LE 2, NGLL)
 
         Returns [1 partition][1 subIterK][EmittedModules] to match emit() shape.
+        The schedule construction is performed by the C++ scheduler; this
+        wrapper rebuilds the Python EmittedModule dataclasses from the value
+        modules.
         """
-        if self.config.pgr == 0:
-            self._preloop_emitted = [[[]]]
-            return self._preloop_emitted
-
-        cfg = self.config
-        numK = cfg.numSubIterK
-        part0 = self._partition_tile_range(0)
-        all_tiles = {
-            'A': MFMATileRange(0, numK, 0, cfg.numMFMATilesM),
-            'B': MFMATileRange(0, numK, 0, cfg.numMFMATilesN),
-        }
-        lr_tiles = {
-            'A':  MFMATileRange(0, cfg.lrA.k, *part0['A']),
-            'B':  MFMATileRange(0, cfg.lrB.k, *part0['B']),
-        }
-        if cfg.hasScale:
-            lr_tiles['SA'] = MFMATileRange(0, cfg.lrSA.k, *part0['A'])
-            lr_tiles['SB'] = MFMATileRange(0, cfg.lrSB.k, *part0['B'])
-
-        if cfg.pgr == 1:
-            emitted = self._to_emitted([
-                *self._make_gr_all_tensors(0, all_tiles),
-                WaitGROp(wait_gr_counts=WaitGRCounts()),
-                SyncOp(),
-                *self._make_lr_all_tensors(lr_tiles),
-                SkipOp(compare='LE', value=1, target='NLL'),
-            ])
-        else:
-            emitted = self._to_emitted([
-                *self._make_gr_all_tensors(0, all_tiles),
-                *self._make_depops_all_tensors(GRIncOp),
-                WaitGROp(wait_gr_counts=WaitGRCounts()),
-                SyncOp(),
-                *self._make_lr_all_tensors(lr_tiles),
-                SkipOp(compare='LE', value=1, target='NLL'),
-                *self._make_preloop_mt1_grs(),
-                SkipOp(compare='LE', value=2, target='NGLL'),
-            ])
-
-        self._preloop_emitted = [[emitted]]
+        self._ensure_pass(Pass.EMIT)
+        cpp = self._ensure_cpp()
+        cpp.build_preloop()
+        self._preloop_emitted = self._variant_from_cpp(
+            cpp.value_preloop(), full=True)
         return self._preloop_emitted
 
     def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True):

@@ -34,6 +34,7 @@ add_executable(tensile_writer_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/instruction_scheduler_test.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/logical_scheduler_test.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/logical_scheduler_passes_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/loop_variants_test.cpp"
 )
 
 target_include_directories(tensile_writer_tests PRIVATE

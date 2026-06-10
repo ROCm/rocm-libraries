@@ -346,6 +346,43 @@ class LogicalScheduler {
   void emit();
   void build();
 
+  // ── Loop-variant builders (NGLL / NLL / preloop / tail-PGR0) ─────────
+  //
+  // These port the Python LogicalScheduler.build_ngll / build_nll /
+  // build_preloop / build_tailloop_pgr0 schedule rewrites. NGLL/NLL are pure
+  // transforms over the mainloop `emitted` before-link graph (coordinate-only
+  // sources, like emit()); the Python wrapper rebuilds them via the same
+  // placement registry it uses for emit(). preloop / tail synthesize fresh
+  // placements (and their vgpr tile maps), so their value sources carry full
+  // placement data the Python wrapper rebuilds directly.
+  using ModuleGrid =
+      std::vector<std::vector<std::vector<tw::subtile::lsched::EmittedModule>>>;
+  // {tensor: [{groupKey: flat_tile_id}]} per partition — the flat tail tile
+  // layout computed by the (Python) _compute_flat_tail_tile_state and passed in.
+  using FlatTileMaps =
+      std::vector<std::map<std::string, std::vector<std::map<int, int>>>>;
+
+  static std::vector<tw::subtile::lsched::EmittedModule> rewire_before(
+      std::vector<tw::subtile::lsched::EmittedModule> mods,
+      const std::set<int>& removed);
+
+  void build_ngll();
+  void build_nll();
+  void build_preloop();
+  void build_tailloop_pgr0(const FlatTileMaps& tile_maps, bool bf16, int miK);
+
+  // Loop-variant placement builders (mirror the Python _make_* helpers).
+  std::vector<tw::subtile::lsched::Emittable> make_gr_all_tensors(
+      int mt, const MFMATileRange& tilesA, const MFMATileRange& tilesB) const;
+  std::vector<tw::subtile::lsched::Emittable> make_lr_all_tensors(
+      const std::map<std::string, MFMATileRange>& lr_tiles) const;
+  std::vector<tw::subtile::lsched::Emittable> make_preloop_mt1_grs();
+
+  const ModuleGrid& value_ngll() const { return ngll_emitted; }
+  const ModuleGrid& value_nll() const { return nll_emitted; }
+  const ModuleGrid& value_preloop() const { return preloop_emitted; }
+  const ModuleGrid& value_tailloop() const { return tailloop_emitted; }
+
   // Export the emitted before-link graph as bound value EmittedModules
   // (list[partition][subIterK][EmittedModule]) so the Python writer can rebuild
   // its EmittedModule dataclasses. Each module's `source` is a coordinate-only
@@ -426,6 +463,12 @@ class LogicalScheduler {
   // emit results (value EmittedModules carrying coordinate-only sources)
   std::vector<std::vector<std::vector<tw::subtile::lsched::EmittedModule>>>
       emitted;
+
+  // Loop-variant results ([partition][subIterK/group][EmittedModule]).
+  ModuleGrid ngll_emitted;
+  ModuleGrid nll_emitted;
+  ModuleGrid preloop_emitted;
+  ModuleGrid tailloop_emitted;
 };
 
 // ════════════════════════════════════════════════════════════
@@ -1826,6 +1869,337 @@ inline void LogicalScheduler::emit() {
 inline void LogicalScheduler::build() {
   emit();
   completed.insert(static_cast<int>(Pass::BUILD));
+}
+
+// ════════════════════════════════════════════════════════════
+// Loop-variant builders (NGLL / NLL / preloop / tail-PGR0)
+// ════════════════════════════════════════════════════════════
+
+// Wrap value Emittables (placements / before-chain ops) into EmittedModules,
+// moduleId = list index, before = none. Mirrors Python _to_emitted.
+inline std::vector<tw::subtile::lsched::EmittedModule> to_emitted_value(
+    const std::vector<tw::subtile::lsched::Emittable>& ops) {
+  std::vector<tw::subtile::lsched::EmittedModule> out;
+  out.reserve(ops.size());
+  for (int i = 0; i < (int)ops.size(); ++i) {
+    tw::subtile::lsched::EmittedModule em;
+    em.moduleId = i;
+    em.source = ops[i];
+    out.push_back(std::move(em));
+  }
+  return out;
+}
+
+// A single empty-variant grid ([[[]]]): one partition, one subIterK, no
+// modules — the shape emit() produces for the degenerate PGR cases.
+inline LogicalScheduler::ModuleGrid empty_variant_grid() {
+  return LogicalScheduler::ModuleGrid{
+      {std::vector<tw::subtile::lsched::EmittedModule>{}}};
+}
+
+inline std::vector<tw::subtile::lsched::EmittedModule>
+LogicalScheduler::rewire_before(
+    std::vector<tw::subtile::lsched::EmittedModule> mods,
+    const std::set<int>& removed) {
+  std::map<int, const tw::subtile::lsched::EmittedModule*> id_to_em;
+  for (auto& em : mods) id_to_em[em.moduleId] = &em;
+  for (auto& em : mods) {
+    if (removed.count(em.moduleId)) continue;
+    std::optional<int> b = em.before;
+    while (b.has_value() && removed.count(*b)) b = id_to_em[*b]->before;
+    em.before = b;
+  }
+  std::vector<tw::subtile::lsched::EmittedModule> out;
+  for (auto& em : mods)
+    if (!removed.count(em.moduleId)) out.push_back(std::move(em));
+  return out;
+}
+
+inline void LogicalScheduler::build_ngll() {
+  ensure(Pass::EMIT);
+  ngll_emitted.clear();
+  if (config.pgr == 0 || config.pgr == 1) {
+    ngll_emitted = empty_variant_grid();
+    return;
+  }
+  using tw::subtile::lsched::EmittedModule;
+  using tw::subtile::lsched::GRPlacement;
+  using tw::subtile::lsched::WaitGROp;
+  for (auto& partition_emitted : emitted) {
+    std::vector<std::vector<EmittedModule>> part_ngll;
+    for (auto& em_list : partition_emitted) {
+      std::vector<EmittedModule> mods = em_list;  // copy
+      std::set<int> removed;
+      for (auto& em : mods) {
+        std::string ot = em.opType();
+        if (ot == "gr") {
+          if (std::get<GRPlacement>(*em.source).mtIteration == 2)
+            removed.insert(em.moduleId);
+        } else if (ot == "wait_gr") {
+          auto& wg = std::get<WaitGROp>(*em.source);
+          if (wg.wait_gr_counts.has_value())
+            wg.wait_gr_counts = tw::subtile::lsched::WaitGRCounts();
+        }
+      }
+      part_ngll.push_back(rewire_before(std::move(mods), removed));
+    }
+    ngll_emitted.push_back(std::move(part_ngll));
+  }
+}
+
+inline void LogicalScheduler::build_nll() {
+  ensure(Pass::EMIT);
+  nll_emitted.clear();
+  if (config.pgr == 0) {
+    nll_emitted = empty_variant_grid();
+    return;
+  }
+  using tw::subtile::lsched::EmittedModule;
+  using tw::subtile::lsched::LRPlacement;
+  using tw::subtile::lsched::WaitGROp;
+  for (auto& partition_emitted : emitted) {
+    std::vector<std::vector<EmittedModule>> part_nll;
+    for (auto& em_list : partition_emitted) {
+      std::vector<EmittedModule> mods = em_list;  // copy
+      std::set<int> removed;
+
+      for (auto& em : mods) {
+        std::string ot = em.opType();
+        if (ot == "gr") {
+          removed.insert(em.moduleId);
+        } else if (ot == "lr") {
+          if (std::get<LRPlacement>(*em.source).mtIteration == 1)
+            removed.insert(em.moduleId);
+        } else if (ot == "gr_inc" && config.pgr == 2) {
+          removed.insert(em.moduleId);
+        }
+      }
+
+      // Zero inflight counts on remaining WaitGR.
+      for (auto& em : mods) {
+        if (em.opType() == "wait_gr" && !removed.count(em.moduleId))
+          std::get<WaitGROp>(*em.source).wait_gr_counts =
+              tw::subtile::lsched::WaitGRCounts();
+      }
+
+      // Sync modules paired with a removed wait_gr.
+      for (auto& em : mods) {
+        if (em.opType() == "sync" && em.before.has_value() &&
+            removed.count(*em.before))
+          removed.insert(em.moduleId);
+      }
+
+      // Remove WaitLR if no LR remains, but keep ones a kept module depends on.
+      bool has_lr = false;
+      for (auto& em : mods)
+        if (em.opType() == "lr" && !removed.count(em.moduleId)) has_lr = true;
+      if (!has_lr) {
+        std::set<int> depended_on;
+        for (auto& em : mods)
+          if (!removed.count(em.moduleId) && em.before.has_value())
+            depended_on.insert(*em.before);
+        for (auto& em : mods)
+          if (em.opType() == "wait_lr" && !depended_on.count(em.moduleId))
+            removed.insert(em.moduleId);
+      }
+
+      part_nll.push_back(rewire_before(std::move(mods), removed));
+    }
+    nll_emitted.push_back(std::move(part_nll));
+  }
+}
+
+inline std::vector<tw::subtile::lsched::Emittable>
+LogicalScheduler::make_gr_all_tensors(int mt, const MFMATileRange& tilesA,
+                                      const MFMATileRange& tilesB) const {
+  std::vector<tw::subtile::lsched::Emittable> out;
+  for (const auto& tensor : tensors) {
+    const MFMATileRange& tr =
+        (tensor_side(tensor)[0] == 'A') ? tilesA : tilesB;
+    out.push_back(tw::subtile::lsched::GRPlacement(tensor, mt, tr, 0));
+  }
+  return out;
+}
+
+inline std::vector<tw::subtile::lsched::Emittable>
+LogicalScheduler::make_lr_all_tensors(
+    const std::map<std::string, MFMATileRange>& lr_tiles) const {
+  std::vector<tw::subtile::lsched::Emittable> out;
+  const Placement* first_mfma = partitions[0][0].mfma;
+  for (const auto& tensor : tensors) {
+    tw::subtile::lsched::LRPlacement lr(tensor, 0, lr_tiles.at(tensor), 0, 0);
+    auto it = first_mfma->vgpr_tile_maps.find(tensor);
+    if (it != first_mfma->vgpr_tile_maps.end()) lr.vgpr_tile_map = it->second;
+    out.push_back(std::move(lr));
+  }
+  return out;
+}
+
+inline std::vector<tw::subtile::lsched::Emittable>
+LogicalScheduler::make_preloop_mt1_grs() {
+  ensure(Pass::LR);
+  std::vector<tw::subtile::lsched::Emittable> out;
+  std::set<std::tuple<std::string, int, int, int, int>> seen;
+  for (int pi = 0; pi < config.offsetPartition; ++pi) {
+    PartRange target = partition_tile_range(pi);
+    for (auto& slot : partitions[0]) {
+      int k = slot.mfma->subIterK;
+      struct Item {
+        std::string tensor;
+        std::pair<int, int> tr;
+        ReadGranularity gran;
+      };
+      std::vector<Item> items;
+      items.push_back({"A", target.A, config.grA});
+      items.push_back({"B", target.B, config.grB});
+      if (config.hasScale()) {
+        items.push_back({"SA", target.A, *config.grSA});
+        items.push_back({"SB", target.B, *config.grSB});
+      }
+      for (auto& it : items) {
+        MFMATileRange tr = it.gran.tile_range(k, it.tr.first, it.tr.second);
+        auto key = std::make_tuple(it.tensor, tr.tileId_start, tr.tileId_end,
+                                   tr.subIterK_start, tr.subIterK_end);
+        if (seen.count(key)) continue;
+        seen.insert(key);
+        out.push_back(tw::subtile::lsched::GRPlacement(it.tensor, 1, tr, k, pi));
+      }
+    }
+  }
+  return out;
+}
+
+inline void LogicalScheduler::build_preloop() {
+  using namespace tw::subtile::lsched;
+  // assign_vgpr_tiles populates the first MFMA's vgpr_tile_maps copied into the
+  // entry LRs by make_lr_all_tensors.
+  ensure(Pass::VGPR_TILES);
+  preloop_emitted.clear();
+  if (config.pgr == 0) {
+    preloop_emitted = empty_variant_grid();
+    return;
+  }
+
+  int numK = config.numSubIterK;
+  PartRange part0 = partition_tile_range(0);
+  MFMATileRange all_A(0, numK, 0, config.numMFMATilesM);
+  MFMATileRange all_B(0, numK, 0, config.numMFMATilesN);
+
+  std::map<std::string, MFMATileRange> lr_tiles;
+  lr_tiles["A"] = MFMATileRange(0, config.lrA.k, part0.A.first, part0.A.second);
+  lr_tiles["B"] = MFMATileRange(0, config.lrB.k, part0.B.first, part0.B.second);
+  if (config.hasScale()) {
+    lr_tiles["SA"] =
+        MFMATileRange(0, config.lrSA->k, part0.A.first, part0.A.second);
+    lr_tiles["SB"] =
+        MFMATileRange(0, config.lrSB->k, part0.B.first, part0.B.second);
+  }
+
+  std::vector<Emittable> ops;
+  auto append = [&](std::vector<Emittable> v) {
+    for (auto& e : v) ops.push_back(std::move(e));
+  };
+
+  append(make_gr_all_tensors(0, all_A, all_B));
+  if (config.pgr == 1) {
+    ops.push_back(WaitGROp(WaitGRCounts(), false, true));
+    ops.push_back(SyncOp());
+    append(make_lr_all_tensors(lr_tiles));
+    ops.push_back(SkipOp("LE", 1, "NLL", false, ""));
+  } else {
+    for (const auto& tensor : tensors) ops.push_back(GRIncOp(tensor));
+    ops.push_back(WaitGROp(WaitGRCounts(), false, true));
+    ops.push_back(SyncOp());
+    append(make_lr_all_tensors(lr_tiles));
+    ops.push_back(SkipOp("LE", 1, "NLL", false, ""));
+    append(make_preloop_mt1_grs());
+    ops.push_back(SkipOp("LE", 2, "NGLL", false, ""));
+  }
+
+  preloop_emitted = ModuleGrid{{to_emitted_value(ops)}};
+}
+
+inline void LogicalScheduler::build_tailloop_pgr0(const FlatTileMaps& tile_maps,
+                                                  bool bf16, int miK) {
+  using namespace tw::subtile::lsched;
+  int numK = config.numSubIterK;
+  int numP = config.numPartitions();
+
+  // Preamble: GR all tensors, optional BF16 boundary fixup, wait_gr, sync.
+  std::vector<Emittable> preamble;
+  MFMATileRange all_A(0, numK, 0, config.numMFMATilesM);
+  MFMATileRange all_B(0, numK, 0, config.numMFMATilesN);
+  for (auto& e : make_gr_all_tensors(0, all_A, all_B)) preamble.push_back(e);
+  if (bf16) {
+    preamble.push_back(SyncOp());
+    preamble.push_back(InlineModuleOp("tail_boundary_ab"));
+  }
+  preamble.push_back(WaitGROp(WaitGRCounts(), false, true));
+  preamble.push_back(SyncOp());
+
+  std::vector<std::vector<EmittedModule>> groups;
+  groups.push_back(to_emitted_value(preamble));
+
+  // Merged tile map across partitions for the K-mask op.
+  std::map<std::string, std::vector<std::map<int, int>>> merged_tile_map;
+  for (int pi = 0; pi < numP; ++pi) {
+    for (const char* tname : {"A", "B", "SA", "SB"}) {
+      std::string tensor = tname;
+      auto it = tile_maps[pi].find(tensor);
+      if (it == tile_maps[pi].end() || it->second.empty()) continue;
+      const auto& src = it->second;
+      auto& dst = merged_tile_map[tensor];
+      if (dst.empty()) dst.emplace_back();
+      while (dst.size() < src.size()) dst.emplace_back();
+      for (size_t ui = 0; ui < src.size(); ++ui)
+        for (const auto& kv : src[ui]) dst[ui][kv.first] = kv.second;
+    }
+  }
+
+  auto lrt = lr_tensors();
+  for (int k = 0; k < numK; ++k) {
+    std::vector<Emittable> ops;
+    // Dedup LRs across partitions by (tensor, tile range).
+    std::set<std::tuple<std::string, int, int, int, int>> seen_lr;
+    for (int pi = 0; pi < numP; ++pi) {
+      PartRange cur = partition_tile_range(pi);
+      for (auto& [tensor, gran] : lrt) {
+        if (k % gran.k != 0) continue;
+        const char* side_key = tensor_side(tensor);
+        auto [ts, te] = cur.by_side(side_key);
+        MFMATileRange tiles = gran.tile_range(k, ts, te);
+        auto lr_key = std::make_tuple(tensor, tiles.tileId_start,
+                                      tiles.tileId_end, tiles.subIterK_start,
+                                      tiles.subIterK_end);
+        if (seen_lr.count(lr_key)) continue;
+        seen_lr.insert(lr_key);
+        LRPlacement lr(tensor, 0, tiles, k, pi);
+        auto it = tile_maps[pi].find(tensor);
+        if (it != tile_maps[pi].end()) lr.vgpr_tile_map = it->second;
+        ops.push_back(std::move(lr));
+      }
+    }
+    ops.push_back(WaitLROp(false));
+    MaskKOp mask(k);
+    mask.vgpr_tile_map = merged_tile_map;
+    ops.push_back(mask);
+    // All partitions' MFMAs for this k, back-to-back.
+    for (int pi = 0; pi < numP; ++pi) {
+      PartRange cur = partition_tile_range(pi);
+      MFMAPlacement mfma(k, MFMATileRange(k, k + 1, cur.A.first, cur.A.second),
+                         MFMATileRange(k, k + 1, cur.B.first, cur.B.second));
+      mfma.vgpr_tile_maps = tile_maps[pi];
+      ops.push_back(std::move(mfma));
+    }
+    if (k != numK - 1) {
+      ops.push_back(SkipOp("LE", miK * (k + 1), "SkipTailLoopL", true,
+                           "early-exit tail after subIterK=" +
+                               std::to_string(k) + " (no valid K left)"));
+    }
+    groups.push_back(to_emitted_value(ops));
+  }
+
+  tailloop_emitted = ModuleGrid{std::move(groups)};
 }
 
 // ════════════════════════════════════════════════════════════

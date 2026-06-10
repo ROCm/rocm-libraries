@@ -862,6 +862,37 @@ void bind_logical_scheduler_passes(nb::module_& s) {
            &LS::remove_unnecessary_wait_lr_sync)
       .def("emit", &LS::emit)
       .def("build", &LS::build)
+      .def("build_ngll", &LS::build_ngll,
+           "Build the NGLL (No Global Load Loop) variant by rewriting the "
+           "mainloop emit graph (drop GR(n+2), zero wait_gr counts). Result is "
+           "exposed via value_ngll().")
+      .def("build_nll", &LS::build_nll,
+           "Build the NLL (No Load Loop) variant by rewriting the mainloop "
+           "emit graph (drop GR/LR(n+1)/gr_inc, zero wait_gr counts, prune "
+           "orphan sync/wait_lr). Result is exposed via value_nll().")
+      .def("build_preloop", &LS::build_preloop,
+           "Build the preloop pipeline-priming sequence (fresh GR/LR "
+           "placements + skip guards). Result is exposed via value_preloop().")
+      .def("build_tailloop_pgr0", &LS::build_tailloop_pgr0, nb::arg("tile_maps"),
+           nb::arg("bf16"), nb::arg("miK"),
+           "Build the PGR0-template tail loop from the flat tail tile maps "
+           "(per-partition {tensor: [{group: tileId}]}), the BF16 boundary "
+           "flag, and MatrixInstK. The InlineModuleOp boundary build callback "
+           "is attached by the Python wrapper. Result is exposed via "
+           "value_tailloop().")
+      .def("value_ngll", &LS::value_ngll,
+           "Materialize the NGLL variant as value EmittedModules "
+           "(list[partition][subIterK][EmittedModule]); coordinate-only "
+           "placement sources, like value_emitted().")
+      .def("value_nll", &LS::value_nll,
+           "Materialize the NLL variant as value EmittedModules "
+           "(coordinate-only placement sources, like value_emitted()).")
+      .def("value_preloop", &LS::value_preloop,
+           "Materialize the preloop variant as value EmittedModules; sources "
+           "carry full placement data (incl. LR vgpr tile maps).")
+      .def("value_tailloop", &LS::value_tailloop,
+           "Materialize the tail-loop variant as value EmittedModules; sources "
+           "carry full placement data (vgpr tile maps, mask tile map).")
       .def("value_partitions", &LS::value_partitions,
            "Materialize the computed schedule as bound value types "
            "(list[list[SubIterKSlot]]) so the Python writer can rebuild its "
