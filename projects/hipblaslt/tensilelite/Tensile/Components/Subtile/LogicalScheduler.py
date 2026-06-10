@@ -1902,6 +1902,19 @@ class LogicalScheduler:
                 and dep_flat == consumer_flat):
             return WaitGRCounts()
 
+        # sk=1 wrap-LR on A/B reads the same-partition sk=0 buffer; tail GR
+        # loads there must fully drain before ds_read.
+        if (numK > 1 and consumer_slot == 1 and total_steps == 1
+                and tensor in ('A', 'B')
+                and dep_flat is not None
+                and consumer_flat == dep_flat + 1
+                and dep_flat % numK == 0):
+            if (numP > 1 and consumer_pi == 0):
+                return WaitGRCounts()
+            if (numP == 1 and self.config.numMFMATilesM > 2
+                    and self.config.numMFMATilesN > 2):
+                return WaitGRCounts()
+
         counts = WaitGRCounts()
         pos = consumer_flat
         for step in range(total_steps):

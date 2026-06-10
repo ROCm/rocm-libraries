@@ -428,7 +428,7 @@ MAINLOOP (dependency paths):
       preMFMA path 0:
         [ 3] wait_lr    wait_lr
       path 0:
-        [ 4] wait_gr    wait_gr(B=8)
+        [ 4] wait_gr    wait_gr(0)
         [ 5] sync       sync
         [ 6] lr_inc     lr_inc(A)
         [ 7] lr_inc     lr_inc(B)
@@ -930,7 +930,7 @@ MAINLOOP (dependency paths):
       preMFMA path 0:
         [ 5] wait_lr    wait_lr
       path 0:
-        [ 6] wait_gr    wait_gr(B=8)
+        [ 6] wait_gr    wait_gr(0)
         [ 7] sync       sync
         [ 8] lr_inc     lr_inc(A)
         [ 9] lr_inc     lr_inc(B)
