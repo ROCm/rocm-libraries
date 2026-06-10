@@ -366,7 +366,8 @@ set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVE
 target_include_directories(${PROJECT_NAME}
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/api>"
-        "${ROCM_PATH}/include"
+        "$<BUILD_INTERFACE:${ROCM_PATH}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src/include/cpu"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/include/common"
