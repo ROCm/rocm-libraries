@@ -62,9 +62,10 @@ What it does (real):
 Not yet done (dummy):
     - ``getGlcBitName`` / ``getSlcBitName`` (real; gfx1250 asm caps).
     - Counters: ``count*``, ``find*``, ``getMFMAs``.
-    - Interop hooks: ``isSupportedByStinkyTofu``, ``StinkyAsmModule``,
-      ``toStinkyTofuModule`` — should delegate into compiled stinkytofu
-      bindings once the dummy phase ends.
+    - Interop hooks: ``hasStinkyTofuBackend``, ``isSupportedByStinkyTofu``,
+      ``getRegisteredArchKeys`` — delegate into the standalone
+      ``stinkytofu`` binding (``_stinkytofu.so``).
+    - Interop hooks still dummy: ``StinkyAsmModule``, ``toStinkyTofuModule``.
     - Submodules still all-dummy: ``code``, ``label``,
       ``instruction``, ``functions``, ``asmpass``, ``macro``.
     - ``container``: register-reference layer + ``Container`` ABC,
@@ -277,10 +278,39 @@ countMFMA = make_dummy_func(f"{_P}.countMFMA")
 getMFMAs = make_dummy_func(f"{_P}.getMFMAs")
 findInstCount = make_dummy_func(f"{_P}.findInstCount")
 
-# rocisa <-> stinkytofu interop (see init_stinkytofu in
-# shared/stinkytofu/src/conversion/rocisa/ToStinkyTofuUtils.cpp). These
-# are real logicalIR bridges; once the dummy phase is over they should
-# delegate into the compiled stinkytofu bindings rather than print.
-isSupportedByStinkyTofu = make_dummy_func(f"{_P}.isSupportedByStinkyTofu")
+# rocisa <-> stinkytofu interop
+# ---------------------------------------------------------------------------
+# Architecture probes live on the standalone ``stinkytofu`` binding
+# (``shared/stinkytofu/python_module/src/python_bindings.cpp``), not on
+# ``_rocisa.so``. Mirror native ``hasStinkyTofuBackend`` semantics by
+# checking ``hasattr(stinkytofu, "isSupportedByStinkyTofu")`` instead of
+# ``hasattr(_rocisa, ...)``.
+
+
+def hasStinkyTofuBackend() -> bool:
+    """Return True if the standalone stinkytofu binding exposes arch probes."""
+    try:
+        import stinkytofu
+    except ImportError:
+        return False
+    return hasattr(stinkytofu, "isSupportedByStinkyTofu")
+
+
+def isSupportedByStinkyTofu(isa) -> bool:
+    """Return True if *isa* has a registered StinkyTofu backend pipeline."""
+    import stinkytofu
+
+    return stinkytofu.isSupportedByStinkyTofu(list(_caps.normalize_isa_key(isa)))
+
+
+def getRegisteredArchKeys():
+    """Return arch name strings for all registered StinkyTofu backends."""
+    import stinkytofu
+
+    return stinkytofu.getRegisteredArchKeys()
+
+
+# Path 2 interop (see init_stinkytofu in
+# shared/stinkytofu/src/conversion/rocisa/ToStinkyTofuUtils.cpp) — still dummy.
 StinkyAsmModule = make_dummy_class(f"{_P}.StinkyAsmModule")
 toStinkyTofuModule = make_dummy_func(f"{_P}.toStinkyTofuModule")

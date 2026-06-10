@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 ################################################################################
-"""Tests for ``caps.getCaps`` delegating to ``stinkytofu.getHardwareCaps``."""
+"""Tests for caps and StinkyTofu arch-probe forwarding."""
 
 import os
 import sys
@@ -32,6 +32,7 @@ _PKG_PARENT = os.path.abspath(
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
+import rocisa_stinkytofu_adaptor as rocisa  # noqa: E402
 from rocisa_stinkytofu_adaptor import caps  # noqa: E402
 
 _GFX1250 = (12, 5, 0)
@@ -78,6 +79,29 @@ class TestGetCapsDynamic(unittest.TestCase):
         asm2, _, _, _ = caps.getCaps(_GFX1250)
         asm1["HasSCOPEModifier"] = 0
         self.assertNotEqual(asm1["HasSCOPEModifier"], asm2["HasSCOPEModifier"])
+
+
+@unittest.skipUnless(_stinkytofu_available(), "stinkytofu binding not on PYTHONPATH")
+class TestStinkyTofuArchProbes(unittest.TestCase):
+    def test_has_backend_when_binding_present(self):
+        self.assertTrue(rocisa.hasStinkyTofuBackend())
+
+    def test_gfx1250_supported(self):
+        self.assertTrue(rocisa.isSupportedByStinkyTofu(_GFX1250))
+        self.assertTrue(rocisa.isSupportedByStinkyTofu("gfx1250"))
+
+    def test_matches_stinkytofu_api(self):
+        import stinkytofu
+
+        self.assertEqual(
+            rocisa.isSupportedByStinkyTofu(_GFX1250),
+            stinkytofu.isSupportedByStinkyTofu(list(_GFX1250)),
+        )
+        self.assertEqual(
+            rocisa.getRegisteredArchKeys(),
+            stinkytofu.getRegisteredArchKeys(),
+        )
+        self.assertIn("gfx1250", rocisa.getRegisteredArchKeys())
 
 
 if __name__ == "__main__":
