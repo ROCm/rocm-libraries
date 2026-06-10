@@ -20,9 +20,9 @@ namespace ck_dsl_provider {
 /// extracts) plus the dtype string and group count, which the feature
 /// engine needs but the ck_dsl conv-fwd path treats as fixed (G=1).
 ///
-/// ``dtype`` follows the model's spelling ("bf16" -- the only dtype the
-/// gfx950 conv model was trained on). fp16 / fp32 callers fall back to
-/// the analytic policy because no oracle exists for those.
+/// ``dtype`` follows the model's spelling (e.g. "bf16", "fp16"). The
+/// plan builder selects the oracle whose (dtype, arch) pair matches; if
+/// none exists the analytic policy is used as a fallback.
 ///
 /// The fields here are NOT a separate copy of ``ConvProblem`` --
 /// ``buildSelectionProblem`` derives this struct from a ``ConvProblem``
@@ -55,7 +55,7 @@ struct ConvSelectionProblem {
     std::int32_t dH{1};
     std::int32_t dW{1};
 
-    std::string dtype{"bf16"};  // "bf16" -- only dtype with conv oracle data
+    std::string dtype{"bf16"};
 
     /// Derived output height (mirror of ConvProblem::Ho).
     [[nodiscard]] std::int32_t Ho() const {
@@ -152,19 +152,16 @@ struct ConvSupportsResult {
 /// Top-level knob selection for the plan builder. Picks the best combo
 /// from ``candidates`` (which the caller enumerated for ``problem``):
 ///
-///   * when the scorer's model loaded AND dtype == "bf16" AND arch is
-///     ``gfx950`` -> ML argmax over the candidates, scoring each by
-///     ``scorer.predict(problem, cand)``;
-///   * otherwise (model failed to load OR dtype is fp16/fp32 -- no
-///     oracle -- OR arch is not the trained gfx950 target) -> the
-///     analytic fallback (NOT a trivial first-fit).
+///   * ``scorer != nullptr`` and its model loaded -> ML argmax over the
+///     candidates, scoring each by ``scorer->predict(problem, cand)``;
+///   * ``scorer == nullptr`` (no registry entry for this dtype/arch) OR
+///     model failed to load -> the analytic fallback (NOT a trivial
+///     first-fit).
 ///
-/// The arch gate matters because the scorer's hardware features are
-/// gfx950-baked (256 CUs, 32 XCDs, 64 KB LDS, ...); predicting TFLOPS
-/// for a gfx942/gfx1151 problem under those features yields a number
-/// the booster was never trained to produce. The analytic fallback is
-/// arch-neutral, so it covers the off-target arches without claiming
-/// oracle authority.
+/// The caller (plan builder) is responsible for supplying the scorer
+/// that matches the current (dtype, arch) pair. Passing nullptr is the
+/// correct signal for "no oracle for this combination"; this function
+/// never inspects dtype or arch directly.
 ///
 /// HIP-free: ``ConvImplicitGemmScorer`` wraps LightGBM through a plain
 /// C-API declaration, so this header stays plain CXX. ``candidates``
@@ -172,20 +169,20 @@ struct ConvSupportsResult {
 [[nodiscard]] ConvImplicitGemmPerfKnobs selectPerfKnobs(
     const ConvSelectionProblem& problem,
     const std::vector<ConvImplicitGemmPerfKnobs>& candidates,
-    const ConvImplicitGemmScorer& scorer, std::string_view arch);
+    const ConvImplicitGemmScorer* scorer);
 
 /// Rank all candidates from best to worst under the same scoring rule as
-/// ``selectPerfKnobs`` (ML when the scorer is loaded, dtype == "bf16",
-/// and arch == "gfx950"; analytic-closeness otherwise). Tie-break
-/// matches ``selectArgmax``: equal scores resolve toward the larger MFMA
-/// atom; remaining ties fall to enumeration order. ``selectPerfKnobs``
-/// is equivalent to ``rankPerfKnobs(...).front()`` -- use this overload
-/// when the caller needs to walk the ranking (e.g. the plan builder
-/// falling through to the next-best combo when the DSL rejects the top
-/// pick after the overlay is applied).
+/// ``selectPerfKnobs`` (ML when ``scorer`` is non-null and loaded,
+/// analytic-closeness otherwise). Tie-break matches ``selectArgmax``:
+/// equal scores resolve toward the larger MFMA atom; remaining ties fall
+/// to enumeration order. ``selectPerfKnobs`` is equivalent to
+/// ``rankPerfKnobs(...).front()`` -- use this overload when the caller
+/// needs to walk the ranking (e.g. the plan builder falling through to
+/// the next-best combo when the DSL rejects the top pick after the
+/// overlay is applied).
 [[nodiscard]] std::vector<ConvImplicitGemmPerfKnobs> rankPerfKnobs(
     const ConvSelectionProblem& problem,
     const std::vector<ConvImplicitGemmPerfKnobs>& candidates,
-    const ConvImplicitGemmScorer& scorer, std::string_view arch);
+    const ConvImplicitGemmScorer* scorer);
 
 }  // namespace ck_dsl_provider

@@ -13,8 +13,8 @@ struct ConvSelectionProblem;
 struct ConvImplicitGemmPerfKnobs;
 
 /// Thin RAII wrapper around the LightGBM C API (booster +
-/// PredictForMat), bound to the in-tree grouped-conv-forward 2D/3D
-/// suffix model for bf16 / gfx950.
+/// PredictForMat), bound to a grouped-conv-forward model for a
+/// specific dtype/arch combination.
 ///
 /// **Why an opaque Impl**: unlike ``SdpaScorer``, the conv side has no
 /// CK-dispatcher ``conv_ml_heuristic.hpp`` to wrap (the SDPA scorer's
@@ -24,15 +24,13 @@ struct ConvImplicitGemmPerfKnobs;
 /// ``conv_ml_heuristic.hpp`` (if/when CK adds one) is a one-file change.
 ///
 /// **Lifetime / cost**: constructing a scorer loads the conv LightGBM
-/// model from the path baked in at configure time
-/// (``CK_DSL_GROUPED_CONV_FWD_MODEL_PATH``). Construct it once and reuse
-/// it; the plan builder will hold a function-local ``static const``
-/// instance, mirroring the SDPA path.
+/// model from the supplied path. Construct it once and reuse it; the
+/// plan builder holds two ``static const`` instances (one per
+/// dtype/arch pair), mirroring the SDPA path.
 ///
 /// **Load failure is non-fatal**: a missing / unreadable model leaves
 /// ``isLoaded()`` false. ``selectPerfKnobs`` falls back to the analytic
-/// policy in that case (and also for any non-bf16 dtype, since there is
-/// no oracle there).
+/// policy in that case.
 ///
 /// **Feature extraction**: the model expects 97 features in the exact
 /// order of ``feature_engine_grouped_conv.py::get_feature_names()``.
@@ -46,15 +44,19 @@ struct ConvImplicitGemmPerfKnobs;
 /// the bytes as floats and return garbage).
 class ConvImplicitGemmScorer {
    public:
-    /// Loads the in-tree grouped-conv-forward gfx950 / bf16 model from
+    /// Loads the in-tree grouped-conv-forward bf16/gfx950 model from
     /// the path baked in at configure time
     /// (``CK_DSL_GROUPED_CONV_FWD_MODEL_PATH``, generated into
-    /// ``ckdsl_provider_paths.h``).
+    /// ``ckdsl_provider_paths.h``). Uses gfx950 hardware profile.
     ConvImplicitGemmScorer();
 
-    /// Test seam: load from an explicit path. A bogus path yields a
-    /// scorer with ``isLoaded() == false`` (no throw).
-    explicit ConvImplicitGemmScorer(const std::string& modelPath);
+    /// Load from an explicit path with an arch tag that selects the
+    /// matching hardware profile for feature extraction. Supported arch
+    /// values: ``"gfx950"`` (default, MI300X/gfx950), ``"gfx942"``
+    /// (MI300A). An unrecognised arch falls back to the gfx950 profile.
+    /// A bogus path yields a scorer with ``isLoaded() == false`` (no throw).
+    explicit ConvImplicitGemmScorer(const std::string& modelPath,
+                                    const std::string& arch = "gfx950");
 
     ~ConvImplicitGemmScorer();
 

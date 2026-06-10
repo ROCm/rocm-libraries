@@ -30,13 +30,14 @@ namespace ck_dsl_provider {
 
 namespace {
 
-// Feature count MUST match feature_spec.json for
-// grouped_conv_forward_2d3d_suffix_bf16_gfx950 (97 features).
+// Feature count MUST match feature_spec.json for both conv oracle models
+// (grouped_conv_forward_2d3d_suffix_bf16_gfx950 and
+//  grouped_conv_forward_fp16_gfx942 both use 97 features).
 constexpr int kNumConvFeatures = 97;
 
-// gfx950 / MI300 hardware defaults -- mirror of GroupedConvFeatureEngine
-// __init__ in feature_engine_grouped_conv.py. The model was trained with
-// these constants in the hw_* columns, so we ship the same values.
+// Hardware profile -- mirror of GroupedConvFeatureEngine __init__ in
+// feature_engine_grouped_conv.py. The model was trained with these
+// constants in the hw_* columns, so we ship the same values per arch.
 struct ConvHardwareProfile {
     int num_cus = 256;
     int simds_per_cu = 4;
@@ -53,6 +54,29 @@ struct ConvHardwareProfile {
         return num_cus * simds_per_cu;
     }
 };
+
+// Per-arch hardware profiles matching HW_PROFILES in
+// convert_csv_to_parquet.py (the source of hw_* columns in training data).
+ConvHardwareProfile hardwareProfileForArch(const std::string& arch) {
+    if (arch == "gfx942") {
+        // MI300A: 228 CUs, 28 shader engines, 2100 MHz
+        ConvHardwareProfile p;
+        p.num_cus = 228;
+        p.simds_per_cu = 4;
+        p.shader_engines = 28;
+        p.max_clock_mhz = 2100;
+        p.max_waves_per_cu = 32;
+        p.wavefront_size = 64;
+        p.lds_capacity = 65536;
+        p.l1_cache_kb = 32;
+        p.l2_cache_kb = 4096;
+        p.l3_cache_kb = 262144;
+        p.num_xcd = 8;
+        return p;
+    }
+    // gfx950 (MI300X) -- Python engine defaults.
+    return ConvHardwareProfile{};
+}
 
 // PIPELINE_MAP from feature_engine.py:30. The model treats `pipeline` as
 // a categorical feature, so the encoded integer maps onto the trained
@@ -374,17 +398,14 @@ std::array<double, kNumConvFeatures> extractConvFeatures(const ConvSelectionProb
 }  // namespace
 
 /// Opaque body: owns the LightGBM booster + the hardware profile and a
-/// flag for whether the model declares log-transformed targets (the
-/// grouped-conv forward 2D/3D suffix model does: log_targets = ["tflops"]
-/// in feature_spec.json).
+/// flag for whether the model declares log-transformed targets (both
+/// conv oracle models declare log_targets = ["tflops"] in
+/// feature_spec.json).
 struct ConvImplicitGemmScorer::Impl {
-    explicit Impl(const std::string& modelPath) {
+    Impl(const std::string& modelPath, const ConvHardwareProfile& hwProfile) : hw(hwProfile) {
         int iters = 0;
         if (LGBM_BoosterCreateFromModelfile(modelPath.c_str(), &iters, &booster) != 0 || !booster) {
             std::cerr << "ConvImplicitGemmScorer: failed to load " << modelPath << std::endl;
-            // Mirror MLHeuristic's hint about the .gz fallback -- the
-            // conv models ship gzipped in-tree; configure-time
-            // decompression is expected.
             const std::string gz = modelPath + ".gz";
             std::ifstream check(gz);
             if (check.good()) {
@@ -407,17 +428,16 @@ struct ConvImplicitGemmScorer::Impl {
 
     void* booster{nullptr};
     ConvHardwareProfile hw{};
-    // grouped_conv_forward_2d3d_suffix_bf16_gfx950/feature_spec.json
-    // declares log_targets = ["tflops"], so the raw booster output is
-    // log1p(tflops). expm1 inverts that.
+    // Both conv oracle models declare log_targets = ["tflops"], so the
+    // raw booster output is log1p(tflops). expm1 inverts that.
     bool log_transform{true};
 };
 
 ConvImplicitGemmScorer::ConvImplicitGemmScorer()
-    : ConvImplicitGemmScorer(std::string(kCkDslGroupedConvFwdModelPath)) {}
+    : ConvImplicitGemmScorer(std::string(kCkDslGroupedConvFwdModelPath), "gfx950") {}
 
-ConvImplicitGemmScorer::ConvImplicitGemmScorer(const std::string& modelPath)
-    : impl_(std::make_unique<Impl>(modelPath)) {}
+ConvImplicitGemmScorer::ConvImplicitGemmScorer(const std::string& modelPath, const std::string& arch)
+    : impl_(std::make_unique<Impl>(modelPath, hardwareProfileForArch(arch))) {}
 
 ConvImplicitGemmScorer::~ConvImplicitGemmScorer() = default;
 

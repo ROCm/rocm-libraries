@@ -226,3 +226,50 @@ function(ck_dsl_provider_resolve_grouped_conv_fwd_model)
     message(STATUS
         "CK DSL provider grouped-conv-forward model: ${_resolvedModelPath}")
 endfunction()
+
+# Resolve the absolute path of the in-tree LightGBM model for the
+# fp16/gfx942 implicit-GEMM conv-forward scorer
+# (projects/composablekernel/dispatcher/heuristics/models/
+#  grouped_conv_forward_fp16_gfx942/model_tflops.lgbm).
+#
+# Same walk-up search as the other resolvers. Like the bf16/gfx950
+# model, this model is uncompressed (not gzipped) so it can be loaded
+# directly by the scorer at runtime.
+#
+# Output (set in caller's scope):
+#   CK_DSL_GROUPED_CONV_FWD_FP16_GFX942_MODEL_PATH  absolute path to model_tflops.lgbm
+function(ck_dsl_provider_resolve_grouped_conv_fwd_fp16_gfx942_model)
+    set(_searchDir "${_ckDslProviderPathsCmakeDir}/..")
+    get_filename_component(_searchDir "${_searchDir}" ABSOLUTE)
+
+    set(_modelRelPath
+        "projects/composablekernel/dispatcher/heuristics/models/grouped_conv_forward_fp16_gfx942/model_tflops.lgbm")
+    set(_resolvedModelPath "")
+
+    while(NOT _resolvedModelPath AND NOT _searchDir STREQUAL "/")
+        if(EXISTS "${_searchDir}/${_modelRelPath}")
+            set(_resolvedModelPath "${_searchDir}/${_modelRelPath}")
+            break()
+        endif()
+        get_filename_component(_parent "${_searchDir}" DIRECTORY)
+        if(_parent STREQUAL _searchDir)
+            break()
+        endif()
+        set(_searchDir "${_parent}")
+    endwhile()
+
+    if(NOT _resolvedModelPath OR NOT EXISTS "${_resolvedModelPath}")
+        message(FATAL_ERROR
+            "CK DSL provider: failed to locate the grouped-conv-forward "
+            "fp16/gfx942 LightGBM model. Walked up from "
+            "${CMAKE_CURRENT_LIST_DIR}/.. looking for ${_modelRelPath}. "
+            "The model must exist in-tree (run the fp16/gfx942 training "
+            "pipeline to produce it). Set "
+            "CK_DSL_GROUPED_CONV_FWD_FP16_GFX942_MODEL_PATH explicitly to override the search.")
+    endif()
+
+    set(CK_DSL_GROUPED_CONV_FWD_FP16_GFX942_MODEL_PATH "${_resolvedModelPath}" PARENT_SCOPE)
+
+    message(STATUS
+        "CK DSL provider grouped-conv-forward fp16/gfx942 model: ${_resolvedModelPath}")
+endfunction()

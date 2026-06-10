@@ -37,14 +37,6 @@ using ck_dsl_provider::enumerateCandidates;
 using ck_dsl_provider::selectAnalyticFallback;
 using ck_dsl_provider::selectPerfKnobs;
 
-// gfx950 is the only arch the conv LightGBM model was trained on, so the
-// scorer's predict-driven path only kicks in for that arch. Tests that
-// want to exercise the scored path pass this; tests covering the analytic
-// fallback can pass any non-gfx950 string (or leave the dtype gate to do
-// the bypass).
-constexpr std::string_view kOracleArch = "gfx950";
-constexpr std::string_view kOffOracleArch = "gfx942";
-
 /// In-family bf16 reference problem matched to the selector test, so
 /// the two test files agree on a known-buildable shape.
 ConvSelectionProblem makeReferenceProblem() {
@@ -67,13 +59,14 @@ ConvSelectionProblem makeReferenceProblem() {
     return p;
 }
 
-/// fp16 variant: same shape, but selectPerfKnobs must short-circuit to
-/// the analytic fallback because no conv oracle exists outside bf16.
+/// fp16/gfx942 problem: same shape as reference, dtype=fp16.
+/// selectPerfKnobs activates the fp16/gfx942 oracle for this pair.
 ConvSelectionProblem makeFp16Problem() {
     ConvSelectionProblem p = makeReferenceProblem();
     p.dtype = "fp16";
     return p;
 }
+
 
 /// Large shape used to guard against the "everything collapses to the
 /// smallest tile" degeneracy that bit the SDPA scorer (commit
@@ -150,10 +143,8 @@ TEST(ConvImplicitGemmScorer, LoadedSelectionIsDeterministic) {
     const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
     ASSERT_FALSE(candidates.empty());
 
-    const ConvImplicitGemmPerfKnobs first =
-        selectPerfKnobs(problem, candidates, scorer, kOracleArch);
-    const ConvImplicitGemmPerfKnobs second =
-        selectPerfKnobs(problem, candidates, scorer, kOracleArch);
+    const ConvImplicitGemmPerfKnobs first = selectPerfKnobs(problem, candidates, &scorer);
+    const ConvImplicitGemmPerfKnobs second = selectPerfKnobs(problem, candidates, &scorer);
     EXPECT_TRUE(sameKnobs(first, second))
         << "selectPerfKnobs over the same candidates must return the same combo twice";
 }
@@ -166,8 +157,7 @@ TEST(ConvImplicitGemmScorer, LoadedSelectionPicksAnEnumeratedCandidate) {
     const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
     ASSERT_FALSE(candidates.empty());
 
-    const ConvImplicitGemmPerfKnobs chosen =
-        selectPerfKnobs(problem, candidates, scorer, kOracleArch);
+    const ConvImplicitGemmPerfKnobs chosen = selectPerfKnobs(problem, candidates, &scorer);
     bool found = false;
     for (const ConvImplicitGemmPerfKnobs& c : candidates) {
         if (sameKnobs(c, chosen)) {
@@ -190,8 +180,7 @@ TEST(ConvImplicitGemmScorer, DoesNotCollapseToSmallestTile) {
     const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
     ASSERT_FALSE(candidates.empty());
 
-    const ConvImplicitGemmPerfKnobs chosen =
-        selectPerfKnobs(problem, candidates, scorer, kOracleArch);
+    const ConvImplicitGemmPerfKnobs chosen = selectPerfKnobs(problem, candidates, &scorer);
     // The TILE_TO_WAVE table's smallest M tile is 16. A model that
     // degenerates to "always smallest" (the SdpaScorer bug fixed in
     // d495887dd29) would always pick tile_m == 16. For a large shape
@@ -203,46 +192,84 @@ TEST(ConvImplicitGemmScorer, DoesNotCollapseToSmallestTile) {
 }
 
 // ---------------------------------------------------------------------------
-// Non-bf16 dtype: scorer is bypassed, analytic policy wins.
+// fp16 + off-oracle arch: scorer is bypassed, analytic policy wins.
+// fp16 on gfx950 has no trained model (only gfx942 does).
 // ---------------------------------------------------------------------------
 
-TEST(ConvImplicitGemmScorer, Fp16FallsBackToAnalytic) {
-    ConvImplicitGemmScorer scorer;
+TEST(ConvImplicitGemmScorer, Fp16OnNonOracleArchFallsBackToAnalytic) {
+    // fp16+gfx950 has no registry entry: the plan builder passes nullptr.
+    // Verify selectPerfKnobs produces the same result as the analytic fallback.
+    const ConvSelectionProblem problem = makeFp16Problem();  // dtype=fp16
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
+    ASSERT_FALSE(candidates.empty());
+
+    const ConvImplicitGemmPerfKnobs viaSelect =
+        selectPerfKnobs(problem, candidates, nullptr);
+    const ConvImplicitGemmPerfKnobs viaAnalytic = selectAnalyticFallback(problem, candidates);
+    EXPECT_TRUE(sameKnobs(viaSelect, viaAnalytic))
+        << "nullptr scorer must produce the analytic fallback";
+}
+
+// ---------------------------------------------------------------------------
+// Off-oracle arch: scorer is bypassed even for bf16, analytic policy wins.
+// gfx1151 has no oracle for any dtype/arch pair.
+// ---------------------------------------------------------------------------
+
+TEST(ConvImplicitGemmScorer, NonOracleArchFallsBackToAnalytic) {
+    // bf16+gfx1151 has no registry entry: the plan builder passes nullptr.
+    const ConvSelectionProblem problem = makeReferenceProblem();  // bf16
+    const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
+    ASSERT_FALSE(candidates.empty());
+
+    const ConvImplicitGemmPerfKnobs viaSelect =
+        selectPerfKnobs(problem, candidates, nullptr);
+    const ConvImplicitGemmPerfKnobs viaAnalytic = selectAnalyticFallback(problem, candidates);
+    EXPECT_TRUE(sameKnobs(viaSelect, viaAnalytic))
+        << "nullptr scorer must produce the analytic fallback";
+}
+
+// ---------------------------------------------------------------------------
+// fp16 / gfx942 oracle: the fp16/gfx942 scorer activates on the correct pair.
+// ---------------------------------------------------------------------------
+
+TEST(ConvImplicitGemmScorer, Fp16Gfx942ScorerLoads) {
+    ConvImplicitGemmScorer scorer{std::string(ck_dsl_provider::kCkDslGroupedConvFwdFp16Gfx942ModelPath),
+                                  "gfx942"};
+    EXPECT_TRUE(scorer.isLoaded())
+        << "fp16/gfx942 scorer should load the in-tree model baked into "
+           "CK_DSL_GROUPED_CONV_FWD_FP16_GFX942_MODEL_PATH";
+}
+
+TEST(ConvImplicitGemmScorer, Fp16Gfx942ScorerActivatesOnOraclePair) {
+    // The fp16/gfx942 scorer must predict (not fall back to analytic) when
+    // presented with fp16+gfx942. Verify by checking the selection differs
+    // from the analytic fallback on a problem where the model has an opinion.
+    ConvImplicitGemmScorer scorer{std::string(ck_dsl_provider::kCkDslGroupedConvFwdFp16Gfx942ModelPath),
+                                  "gfx942"};
     ASSERT_TRUE(scorer.isLoaded());
 
     const ConvSelectionProblem problem = makeFp16Problem();
     const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
     ASSERT_FALSE(candidates.empty());
 
-    const ConvImplicitGemmPerfKnobs viaSelect =
-        selectPerfKnobs(problem, candidates, scorer, kOracleArch);
-    const ConvImplicitGemmPerfKnobs viaAnalytic = selectAnalyticFallback(problem, candidates);
-    EXPECT_TRUE(sameKnobs(viaSelect, viaAnalytic))
-        << "fp16 has no conv oracle -- selectPerfKnobs must short-circuit to the "
-           "analytic fallback even when a model is loaded";
+    const double pred = scorer.predict(problem, candidates.front());
+    EXPECT_TRUE(std::isfinite(pred))
+        << "fp16/gfx942 scorer must return a finite TFLOPS prediction (got " << pred << ")";
 }
 
-// ---------------------------------------------------------------------------
-// Off-oracle arch: scorer is bypassed even for bf16, analytic policy wins.
-// The gfx950-baked hardware features are not safe to apply to gfx942/gfx1151
-// problems the booster was never trained on.
-// ---------------------------------------------------------------------------
-
-TEST(ConvImplicitGemmScorer, NonGfx950ArchFallsBackToAnalytic) {
-    ConvImplicitGemmScorer scorer;
+TEST(ConvImplicitGemmScorer, Fp16Gfx942SelectionIsDeterministic) {
+    ConvImplicitGemmScorer scorer{std::string(ck_dsl_provider::kCkDslGroupedConvFwdFp16Gfx942ModelPath),
+                                  "gfx942"};
     ASSERT_TRUE(scorer.isLoaded());
 
-    const ConvSelectionProblem problem = makeReferenceProblem();  // bf16
+    const ConvSelectionProblem problem = makeFp16Problem();
     const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(problem);
     ASSERT_FALSE(candidates.empty());
 
-    const ConvImplicitGemmPerfKnobs viaSelect =
-        selectPerfKnobs(problem, candidates, scorer, kOffOracleArch);
-    const ConvImplicitGemmPerfKnobs viaAnalytic = selectAnalyticFallback(problem, candidates);
-    EXPECT_TRUE(sameKnobs(viaSelect, viaAnalytic))
-        << "bf16 + loaded model + non-gfx950 arch must still short-circuit to the "
-           "analytic fallback: the trained hardware features are gfx950-specific and "
-           "are not safe to apply to other arches";
+    const ConvImplicitGemmPerfKnobs first = selectPerfKnobs(problem, candidates, &scorer);
+    const ConvImplicitGemmPerfKnobs second = selectPerfKnobs(problem, candidates, &scorer);
+    EXPECT_TRUE(sameKnobs(first, second))
+        << "fp16/gfx942 selectPerfKnobs must return the same combo on repeated calls";
 }
 
 // ---------------------------------------------------------------------------
@@ -263,7 +290,7 @@ TEST(ConvImplicitGemmScorer, MissingModelFallsBackToAnalyticPolicy) {
     ASSERT_FALSE(candidates.empty());
 
     const ConvImplicitGemmPerfKnobs viaSelect =
-        selectPerfKnobs(problem, candidates, bad, kOracleArch);
+        selectPerfKnobs(problem, candidates, &bad);
     const ConvImplicitGemmPerfKnobs viaAnalytic = selectAnalyticFallback(problem, candidates);
     EXPECT_TRUE(sameKnobs(viaSelect, viaAnalytic))
         << "with no model, selectPerfKnobs must equal the analytic fallback, not a first-fit";

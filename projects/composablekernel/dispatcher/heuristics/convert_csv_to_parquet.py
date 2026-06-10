@@ -139,44 +139,59 @@ def parse_kernel_name_generic(
 
     # Auto-detect common patterns
 
-    # Pattern 1: grouped_conv_{variant}_{dtype}_{ndim}d_{block}x{m}x{n}_{pipeline}
-    #   [_{wave_mode}] [_dsb] [_si]
-    # Pipeline alternation is explicit so the suffix tokens do not get swallowed
-    # by the [a-z0-9]+ pipeline group.
-    grouped_conv_pattern = (
+    _PIPELINE = r"(basic_v\d+|basic_async_v\d+|comp_async|compv\d+|mem|preshufflev\d+)"
+    _GC_FIELDS = (
+        "op_type", "variant", "dtype", "ndim_spatial",
+        "block_size", "gemm_m_per_block", "gemm_n_per_block",
+        "pipeline", "wave_mode", "has_dsb", "has_si",
+    )
+
+    def _make_gc_result(variant, dtype, ndim, block, m, n, pipe, wave, dsb, si):
+        return {
+            "op_type": "grouped_conv",
+            "variant": variant,
+            "dtype": dtype,
+            "ndim_spatial": int(ndim),
+            "block_size": int(block),
+            "gemm_m_per_block": int(m),
+            "gemm_n_per_block": int(n),
+            "pipeline": pipe,
+            "wave_mode": wave if wave else "intrawave",
+            "has_dsb": 1 if dsb else 0,
+            "has_si": 1 if si else 0,
+        }
+
+    # Pattern 1a: tile engine format — tile dims BEFORE pipeline, no layout/epilogue tokens.
+    # Produced by GroupedConvKernelConfig.name() in grouped_conv_utils.py:
+    #   grouped_conv_{variant}_{dtype}_{ndim}d_{m}x{n}x{k}_{pipeline}_{scheduler}[_dsb][_si]
+    gc_pat_a = (
         r"grouped_conv_([a-z_]+)_([a-z0-9]+)_(\d+)d_(\d+)x(\d+)x(\d+)_"
-        r"(basic_v\d+|basic_async_v\d+|comp_async|compv\d+|mem|preshufflev\d+)"
+        + _PIPELINE +
         r"(?:_(intrawave|interwave))?(_dsb)?(_si)?$"
     )
-    match = re.match(grouped_conv_pattern, kernel_name)
+    match = re.match(gc_pat_a, kernel_name)
     if match:
-        (
-            variant,
-            dtype,
-            ndim,
-            block_size,
-            gemm_m,
-            gemm_n,
-            pipeline,
-            wave_mode,
-            dsb_tok,
-            si_tok,
-        ) = match.groups()
-        result.update(
-            {
-                "op_type": "grouped_conv",
-                "variant": variant,
-                "dtype": dtype,
-                "ndim_spatial": int(ndim),
-                "block_size": int(block_size),
-                "gemm_m_per_block": int(gemm_m),
-                "gemm_n_per_block": int(gemm_n),
-                "pipeline": pipeline,
-                "wave_mode": wave_mode if wave_mode else "intrawave",
-                "has_dsb": 1 if dsb_tok else 0,
-                "has_si": 1 if si_tok else 0,
-            }
-        )
+        variant, dtype, ndim, block, m, n, pipe, wave, dsb, si = match.groups()
+        result.update(_make_gc_result(variant, dtype, ndim, block, m, n, pipe, wave, dsb, si))
+        return result
+
+    # Pattern 1b: ckProfiler Perf: format — pipeline/epilogue BEFORE tile dims, optional
+    # layout token (nhwgc, ndhwgc, …) between dtype and ndim.
+    # Emitted by ckProfiler on Perf: lines:
+    #   grouped_conv_{variant}_{dtype}_{layout}_{ndim}d_{pipeline}_{epilogue}_{scheduler}_{m}x{n}x{k}...
+    gc_pat_b = (
+        r"grouped_conv_([a-z_]+)_([a-z0-9]+)_(?:[a-z]+_)?(\d+)d_"
+        + _PIPELINE +
+        r"(?:_[a-z]+)?_"                        # optional epilogue (cshuffle)
+        r"(?:(intrawave|interwave)_)?"
+        r"(\d+)x(\d+)x(\d+)"
+        r"(?:_(?!dsb$|si$)[^_]+)*"              # remaining suffix tokens
+        r"(_dsb)?(_si)?$"
+    )
+    match = re.match(gc_pat_b, kernel_name)
+    if match:
+        variant, dtype, ndim, pipe, wave, block, m, n, dsb, si = match.groups()
+        result.update(_make_gc_result(variant, dtype, ndim, block, m, n, pipe, wave, dsb, si))
         return result
 
     # Pattern 2: gemm_universal_{dtype}_{layout}_{tiles}_{pipeline}_{scheduler}

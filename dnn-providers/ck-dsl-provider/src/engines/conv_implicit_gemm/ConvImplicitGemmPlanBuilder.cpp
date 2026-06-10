@@ -23,6 +23,7 @@
 #include "../../adapters/conv_implicit_gemm/ConvImplicitGemmPerfKnobs.hpp"
 #include "../../adapters/conv_implicit_gemm/ConvImplicitGemmScorer.hpp"
 #include "../../adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
+#include "ckdsl_provider_paths.h"
 #include "../../graph/GraphSignature.hpp"
 #include "../../python/CompileServiceBridge.hpp"
 #include "../../runtime/DeviceArch.hpp"
@@ -79,6 +80,27 @@ std::optional<ConvImplicitGemmSpec> tryBuildSpec(const flatbuffer_utilities::IGr
         reason = e.what();
         return std::nullopt;
     }
+}
+
+/// Process-wide scorer registry. Returns the scorer for the (dtype, arch)
+/// pair, or nullptr if no oracle model exists for that combination.
+///
+/// Each scorer is a static const -- loaded once, reused across every
+/// buildPlan call. C++11 guarantees thread-safe static init; predict() is
+/// const. CONFIRM LightGBM booster-predict re-entrancy before any
+/// multi-threaded plan-finding (Phase 4) or guard with a mutex.
+///
+/// To add a new oracle pair: add one static scorer + one if-branch here,
+/// one CMake resolver, and one path constant in ckdsl_provider_paths.h.in.
+/// Nothing in the candidate selector or the gate changes.
+const ConvImplicitGemmScorer* scorerForPair(const std::string& dtype, const std::string& arch) {
+    static const ConvImplicitGemmScorer kBf16Gfx950{};
+    static const ConvImplicitGemmScorer kFp16Gfx942{
+        std::string(kCkDslGroupedConvFwdFp16Gfx942ModelPath), "gfx942"};
+
+    if (dtype == "bf16" && arch == "gfx950") return &kBf16Gfx950;
+    if (dtype == "fp16" && arch == "gfx942") return &kFp16Gfx942;
+    return nullptr;
 }
 
 }  // namespace
@@ -202,14 +224,6 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
     // Run BEFORE computeForSpec and the loader: both read spec, and the
     // chosen knobs are folded into the cache key. Mutating spec here
     // keeps the key and the loader's payload in lock-step.
-    //
-    // The adapter today validates fp16-only (DSL build_implicit_gemm_conv
-    // emits f16 atoms/loads/stores end-to-end), and the only trained
-    // model is bf16/gfx950. The two never overlap on this branch, so
-    // selectPerfKnobs short-circuits to the analytic fallback for every
-    // graph that reaches here. Wiring it anyway pins the spec into the
-    // trained-table envelope (vs. the bare dataclass defaults) and means
-    // the scoring path is in place the moment dtype widening lands.
     const ConvSelectionProblem selProblem = buildSelectionProblem(spec, spec.dtype);
     const std::vector<ConvImplicitGemmPerfKnobs> candidates = enumerateCandidates(selProblem);
     if (candidates.empty()) {
@@ -222,12 +236,10 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
                 "have rejected it earlier");
     }
 
-    // Process-wide scorer: the conv LightGBM model is ~46 MB; loading it
-    // once and reusing it across every buildPlan call matches the SDPA
-    // path. C++11 guarantees thread-safe static init; predict() is const.
-    // CONFIRM LightGBM booster-predict re-entrancy before any
-    // multi-threaded plan-finding (Phase 4) or guard with a mutex.
-    static const ConvImplicitGemmScorer kScorer;
+    // Look up the process-wide scorer for (dtype, arch) via the registry.
+    // nullptr means "no oracle for this combination" -- rankPerfKnobs falls
+    // back to the analytic policy.
+    const ConvImplicitGemmScorer* const kScorer = scorerForPair(spec.dtype, arch);
 
     // Rank all candidates (best -> worst) so we can fall through to the
     // next-best combo when the DSL's is_valid_spec rejects the top pick
@@ -239,7 +251,7 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
     // loop below preserves its result for the common case where the top
     // pick is accepted.
     const std::vector<ConvImplicitGemmPerfKnobs> ranked =
-        rankPerfKnobs(selProblem, candidates, kScorer, arch);
+        rankPerfKnobs(selProblem, candidates, kScorer);
 
     // Overlay candidate knobs onto the spec, returning the modified spec.
     // The DSL has no `knobs` sub-struct on ImplicitGemmConvSpec, so the

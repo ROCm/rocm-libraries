@@ -201,9 +201,13 @@ ck_dsl_provider_resolve_fmha_fwd_model()
 
 # Same for the grouped-conv-forward LightGBM model (bf16/gfx950) baked
 # into CK_DSL_GROUPED_CONV_FWD_MODEL_PATH for the ConvImplicitGemmScorer
-# default constructor. The conv models ship gzipped in-tree; the
-# resolver expects the decompressed .lgbm to exist.
+# default constructor.
 ck_dsl_provider_resolve_grouped_conv_fwd_model()
+
+# fp16/gfx942 companion model baked into
+# CK_DSL_GROUPED_CONV_FWD_FP16_GFX942_MODEL_PATH for the second static
+# scorer in ConvImplicitGemmPlanBuilder.
+ck_dsl_provider_resolve_grouped_conv_fwd_fp16_gfx942_model()
 
 set(_ckDslPathsHeader "${CMAKE_CURRENT_BINARY_DIR}/include/ckdsl_provider_paths.h")
 configure_file(

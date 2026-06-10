@@ -120,11 +120,12 @@ ConvSelectionProblem buildSelectionProblem(const ConvImplicitGemmSpec& spec,
 
 ConvSupportsResult supportsImplicitGemm(const ConvSelectionProblem& problem,
                                         const ConvImplicitGemmPerfKnobs& knobs) {
-    // Structural: dtype gate -- the trained envelope is bf16/gfx950. fp16
-    // and fp32 pass through here (the kernel itself may build), but the
-    // scorer-driven path bails to the analytic fallback when dtype != bf16
-    // (selectPerfKnobs). We do NOT reject fp16/fp32 candidates here so
-    // enumeration stays uniform; the scoring step is what discriminates.
+    // Structural: dtype gate -- trained envelopes exist for bf16/gfx950
+    // and fp16/gfx942. fp32 passes through here (the kernel itself may
+    // build), but the scorer-driven path bails to the analytic fallback
+    // for any dtype/arch pair without an oracle (selectPerfKnobs). We do
+    // NOT reject fp32 candidates here so enumeration stays uniform; the
+    // scoring step is what discriminates.
     (void)problem;
 
     // Tile triple must be in the trained TILE_TO_WAVE table.
@@ -159,10 +160,10 @@ ConvSupportsResult supportsImplicitGemm(const ConvSelectionProblem& problem,
                            std::to_string(knobs.tile_m) + "," + std::to_string(knobs.tile_n) +
                            "," + std::to_string(knobs.tile_k) + ")"};
     }
-    // wave_size must be 64 on gfx950 (the only conv-oracle arch).
+    // wave_size must be 64 on all oracle arches (gfx950, gfx942 are CDNA).
     if (knobs.wave_size != 64) {
         return {false, "implicit-GEMM: wave_size=" + std::to_string(knobs.wave_size) +
-                           " unsupported (gfx950 only oracle data: 64)"};
+                           " unsupported (oracle arches gfx950/gfx942 require wave64)"};
     }
     return {true, ""};
 }
@@ -303,23 +304,20 @@ ConvImplicitGemmPerfKnobs selectAnalyticFallback(
 ConvImplicitGemmPerfKnobs selectPerfKnobs(
     const ConvSelectionProblem& problem,
     const std::vector<ConvImplicitGemmPerfKnobs>& candidates,
-    const ConvImplicitGemmScorer& scorer, std::string_view arch) {
-    return rankPerfKnobs(problem, candidates, scorer, arch).front();
+    const ConvImplicitGemmScorer* scorer) {
+    return rankPerfKnobs(problem, candidates, scorer).front();
 }
 
 std::vector<ConvImplicitGemmPerfKnobs> rankPerfKnobs(
     const ConvSelectionProblem& problem,
     const std::vector<ConvImplicitGemmPerfKnobs>& candidates,
-    const ConvImplicitGemmScorer& scorer, std::string_view arch) {
-    // Score function chosen the same way selectPerfKnobs picks its
-    // single winner: ML when an oracle is in scope (bf16 + loaded +
-    // gfx950), the analytic-closeness proxy otherwise. Captured into a
-    // single lambda so the ranking and the single-pick path can never
-    // diverge. The arch gate keeps the gfx950-baked hardware features
-    // from being applied to a gfx942/gfx1151 problem the booster was
-    // never trained on.
-    const bool useScorer =
-        (problem.dtype == "bf16") && scorer.isLoaded() && (arch == "gfx950");
+    const ConvImplicitGemmScorer* scorer) {
+    // Score function: ML when the caller supplied a scorer (non-null) and
+    // its model loaded; analytic-closeness proxy otherwise. The caller
+    // (plan builder registry) is responsible for passing a scorer whose
+    // (dtype, arch) matches the current problem -- passing nullptr is the
+    // correct signal for "no oracle for this combination".
+    const bool useScorer = scorer && scorer->isLoaded();
     const AnalyticTarget analyticTgt = useScorer ? AnalyticTarget{} : analyticTarget(problem);
 
     // Build (score, original-index) pairs so the tie-break can read the
@@ -327,7 +325,7 @@ std::vector<ConvImplicitGemmPerfKnobs> rankPerfKnobs(
     std::vector<std::pair<double, std::size_t>> scored;
     scored.reserve(candidates.size());
     for (std::size_t i = 0; i < candidates.size(); ++i) {
-        const double s = useScorer ? scorer.predict(problem, candidates[i])
+        const double s = useScorer ? scorer->predict(problem, candidates[i])
                                    : analyticCloseness(candidates[i], analyticTgt);
         scored.emplace_back(s, i);
     }
