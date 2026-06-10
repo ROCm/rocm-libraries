@@ -75,13 +75,13 @@ class GlobalWriteBatchComponent(GlobalWriteComponents):
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
     codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion,
-    inter_iter_rowInc: int = 0) -> Module:
+    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0) -> Module:
     return GlobalWriteBatchWriter(kernel, tPA, tPB, activation, ss, batchIdx, applyAlpha, \
       beta, edge, atomic, gwvw, atomicW, \
       batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit, \
       tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, \
       codeAccVgprRead, codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion,
-      inter_iter_rowInc).emit()
+      inter_iter_rowInc, direct_next_rowInc).emit()
 
 class GlobalWriteBatchWriter:
   def __init__(self, kernel: Solution, tPA, tPB, activation: ActivationModule, ss: StoreState, \
@@ -89,7 +89,7 @@ class GlobalWriteBatchWriter:
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
     codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion,
-    inter_iter_rowInc: int = 0):
+    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0):
     self.kernel = kernel
     self.tPA    = tPA
     self.tPB    = tPB
@@ -147,6 +147,7 @@ class GlobalWriteBatchWriter:
     # intra-batch forward scan finds no further emitting elt.
     # 0 means no override (non-CLS / last batch / atomic).
     self.inter_iter_rowInc = inter_iter_rowInc
+    self.direct_next_rowInc = direct_next_rowInc
 
     # Internal state for GlobalWriteBatch
     # 0 for None, 1 for WorkGroupReduction = False, 2 for WorkGroupReduction = True
@@ -215,6 +216,37 @@ class GlobalWriteBatchWriter:
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
       module.add(SBarrier(comment="sync waves before subtile paired stores"))
     self._epilog(module)
+    # CompactLoopStore CLS countdown tail: emit countdown + branch + s_endpgm at
+    # END of the CLS-loop body (= last batch of batchesPerCLSBody). Gated by
+    # CompactLoopStore so non-CLS .s matches baseline (no CLS tail emit).
+    if self.kernel["CompactLoopStore"]:
+      #     updateCoord1 = (edge or multi-packed)
+      if self.direct_next_rowInc != 0 and self.ss.elementAddr:
+        kw = self.parentWriter
+        rowInc = self.direct_next_rowInc
+        bufferStore = self.kernel["BufferStore"]
+        updateCoord1 = self.edge or len(self.kernel["PackedC1IndicesX"]) > 1
+        emit_coord1 = (not bufferStore) or updateCoord1
+        emit_rowptr = (not self.ss.optSrdIncForRow) and bufferStore
+        if emit_coord1 or emit_rowptr:
+          module.addComment0("CLS look-ahead: next batch's row advance at end of this batch")
+          # Reuse the canonical per-element advance helpers (emitCoord1Advance +
+          # emitRowPtrAdvance) on a representative AddrCalculation instead of
+          # re-implementing the coord1 / rowPtr advance inline. The look-ahead is just
+          # the next batch's emitAddressSetupCode row-advance, produced from the same
+          # source. Same spirit as the delayed-primer reuse of incrementToNextRow.
+          addrCalc = self.ss.elementAddr[0]
+        if emit_coord1:
+          module.add(addrCalc.emitCoord1Advance(rowInc, self.tmpS01,
+                     comment="coord1.la: coord1Vgpr += rowInc (look-ahead)",
+                     scomment="rowInc look-ahead"))
+        if emit_rowptr:
+          # Reuse the canonical row-pointer advance (the SAME helper the per-element
+          # advance uses in emitAddressSetupCode) instead of re-implementing the
+          # cinRowPtr/coutRowPtrD adds inline. This also makes the look-ahead cover
+          # coutRowPtrE / coutRowPtrBias / packed-C1 for free (same conditions).
+          module.add(addrCalc.emitRowPtrAdvance(self.kernel, self.ss, self.tmpS01, rowInc, lookahead=True))
+
     return module
 
   def globalStoreWait(self, elementIdx, waitCnter, vlcntTotalIssued, dscntTotalIssued, interleaveStoreVmcnt: bool):
@@ -697,7 +729,9 @@ class GlobalWriteBatchWriter:
       _emitOverrideRows = self._lookaheadRowInc(elementIdx)
 
       tmpInrSgpr = self._epilogScratchSgpr(1)
-      module.add(addrCalc.emitAddressSetupCode(self.kernel, self.tPB, self.ss, self.tmpVgpr, tmpInrSgpr, self.edge, self.beta, self.atomic, elementIdx, addrDVgpr))
+      _skipCrossBatchAdv = (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx > 0)
+      module.add(addrCalc.emitAddressSetupCode(self.kernel, self.tPB, self.ss, self.tmpVgpr, tmpInrSgpr, self.edge, self.beta, self.atomic, elementIdx, addrDVgpr,
+                                               skipCrossBatchAdvance=_skipCrossBatchAdv))
       self._epilogScratchFree(tmpInrSgpr)
 
       if self.edge:

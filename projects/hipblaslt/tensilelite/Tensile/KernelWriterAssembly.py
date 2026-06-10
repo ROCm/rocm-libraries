@@ -15924,13 +15924,14 @@ class KernelWriterAssembly(KernelWriter):
             if next_rowInc_per_batch[_k] != 0:
               _next_firing_rowInc = next_rowInc_per_batch[_k]
               break
+          _direct_next_rowInc = next_rowInc_per_batch[batchIdx] if batchIdx < numBatches else 0
           actLoopModule.add(self.globalWriteBatch(kernel, tPA, tPB, activation, ss, batchIdx, \
               applyAlpha, beta, edge, atomic, gwvw, atomicW, \
               elementsThisBatch, self.vgprs.addrE, self.vgprs.addrD, self.vgprs.addrC, self.vgprs.addrBias, \
               self.vgprs.addrScaleAVec, self.vgprs.addrScaleBVec, self.vgprs.addrScaleAlphaVec, \
               biasLocalBarrierInit, tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, \
               activationTypeStr, elementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, \
-              _next_firing_rowInc))
+              _next_firing_rowInc, _direct_next_rowInc))
           biasLocalBarrierInit = True
 
         ss.resetState()
@@ -16576,7 +16577,7 @@ class KernelWriterAssembly(KernelWriter):
       addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, biasLocalBarrierInit: bool, \
       tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, \
       batchElementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, \
-      inter_iter_rowInc=0) -> Module:
+      inter_iter_rowInc=0, direct_next_rowInc=0) -> Module:
       packdata = Component.PackData.find(self)
       gwriter  = Component.GlobalWriteComponents.find(self)
       return gwriter(kernel, tPA, tPB, activation, ss, \
@@ -16585,7 +16586,7 @@ class KernelWriterAssembly(KernelWriter):
         addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, biasLocalBarrierInit, \
         tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, \
         batchElementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, packdata, self, factorDim, \
-        self.assembler.version, inter_iter_rowInc)
+        self.assembler.version, inter_iter_rowInc, direct_next_rowInc)
 
   ##############################################################################
   def openPrefetchGlobalRead2orMore(self, kernel, idxPgr):
