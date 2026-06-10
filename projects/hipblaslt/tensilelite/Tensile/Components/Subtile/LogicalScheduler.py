@@ -37,7 +37,7 @@ from rocisa.code import Module
 # Debug: emit `s_mov_b32 m0, LoopCounterL; s_ttracedata` at the start of
 # every mainloop iteration so SQTT / trace decoders can identify iterations.
 # Set to False to drop the markers (saves 2 instructions per iter).
-DEBUG_EMIT_MAINLOOP_TRACE_MARKER = True
+DEBUG_EMIT_MAINLOOP_TRACE_MARKER = False
 
 
 class Pass(IntEnum):
@@ -1073,7 +1073,6 @@ class LogicalScheduler:
         for i, (tensor, mt_val, ts, te, ks, ke, last) in enumerate(atoms):
             if cfg.grPlacement == GRPlacementStrategy.BUNCHED:
                 # TDM: pin every GR atom to partition 0, subIterK 0.
-                # tensor_load_to_lds doesn't contend for SIMD issue slots.
                 slot = 0
             else:
                 slot = min(bisect_left(slot_boundaries, i * total_weight + 1),
