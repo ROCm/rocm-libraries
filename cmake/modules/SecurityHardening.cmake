@@ -5,14 +5,15 @@
 #
 # Adds FORTIFY_SOURCE and stack protection compiler flags to the given target.
 # FORTIFY_SOURCE is disabled when building with address sanitizer to avoid conflicts.
-# Stack protection is only enabled in optimized builds to avoid performance overhead.
+# Stack protection (-fstack-protector-strong) is only enabled in optimized builds to avoid
+# performance overhead. MSVC /GS is enabled in all builds (minimal overhead).
 function(apply_security_hardening target)
     if(NOT TARGET ${target})
         message(WARNING "Target '${target}' does not exist. Skipping security hardening.")
         return()
     endif()
 
-    if(NOT BUILD_ADDRESS_SANITIZER AND NOT THEROCK_SANITIZER STREQUAL "ASAN" AND NOT THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    if(NOT (BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"))
         target_compile_definitions(${target} PRIVATE
             $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>:_FORTIFY_SOURCE=2>
         )
@@ -32,9 +33,10 @@ endfunction()
 #
 # Adds FORTIFY_SOURCE and stack protection compiler flags globally.
 # FORTIFY_SOURCE is disabled when building with address sanitizer to avoid conflicts.
-# Stack protection is only enabled in optimized builds to avoid performance overhead.
+# Stack protection (-fstack-protector-strong) is only enabled in optimized builds to avoid
+# performance overhead. MSVC /GS is enabled in all builds (minimal overhead).
 macro(apply_security_hardening_globally)
-    if(NOT BUILD_ADDRESS_SANITIZER AND NOT THEROCK_SANITIZER STREQUAL "ASAN" AND NOT THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+    if(NOT (BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"))
         add_compile_definitions(
             $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>:_FORTIFY_SOURCE=2>
         )

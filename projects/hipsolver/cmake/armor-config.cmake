@@ -37,8 +37,13 @@ macro(add_armor_flags target level)
       )
     endif()
     target_compile_definitions(${target} PRIVATE
-      $<$<NOT:$<BOOL:${BUILD_ADDRESS_SANITIZER}>>:_FORTIFY_SOURCE=2>
       _GLIBCXX_ASSERTIONS
     )
+    # Apply FORTIFY_SOURCE only in optimized builds and when ASAN is not enabled
+    if(NOT (BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"))
+      target_compile_definitions(${target} PRIVATE
+        $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>:_FORTIFY_SOURCE=2>
+      )
+    endif()
   endif()
 endmacro()
