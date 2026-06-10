@@ -41,7 +41,6 @@ cppti = pytest.importorskip("tensile_writer.subtile.tile_info")
 cppgeo = pytest.importorskip("tensile_writer.subtile.geometry")
 
 from Tensile.Common.DataType import DataType
-from Tensile.Components.Subtile import SubtileGeometry as sg
 from Tensile.Components.Subtile import Kernel as krn
 from Tensile.Components.Subtile.Kernel import (
     TileInfo,
@@ -121,23 +120,20 @@ def _rocisa_once():
 
 @contextlib.contextmanager
 def cpp_delegation():
-    """Temporarily enable C++ delegation for geometry + emit leaves.
+    """Temporarily enable C++ delegation for the TileInfo + emit-leaf layers.
 
-    Sets all three switches the delegated paths read: ``sg._USE_CPP`` /
-    ``sg._CPP`` gate the geometry ``_cpp_twin`` (reused by the TileInfo query
-    layer for the buffer-load / ds-read plans) and ``krn._CPP_EMIT`` gates the
-    MFMA instType selection.
+    The geometry layer is always C++. ``krn._USE_CPP`` gates the TileInfo query
+    layer (reused for the buffer-load / ds-read plans) and ``krn._CPP_EMIT``
+    gates the MFMA instType selection.
     """
-    saved_use, saved_cpp = sg._USE_CPP, sg._CPP
+    saved_use = krn._USE_CPP
     saved_emit = krn._CPP_EMIT
-    sg._USE_CPP = True
-    sg._CPP = cppgeo
+    krn._USE_CPP = True
     krn._CPP_EMIT = cppemit
     try:
         yield
     finally:
-        sg._USE_CPP = saved_use
-        sg._CPP = saved_cpp
+        krn._USE_CPP = saved_use
         krn._CPP_EMIT = saved_emit
 
 

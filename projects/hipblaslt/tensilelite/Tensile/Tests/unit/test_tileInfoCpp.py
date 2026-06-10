@@ -9,7 +9,7 @@ compiled ``tensile_writer.subtile.tile_info.ABTileInfoQuery`` value object. They
 run only when the extension is importable; otherwise they skip, so the default
 (Python-only) TensileLite build is unaffected.
 
-Delegation is gated on ``SubtileGeometry._USE_CPP`` (flipped at call time by the
+Delegation is gated on ``Kernel._USE_CPP`` (flipped at call time by the
 ``cpp_delegation`` context manager), so the *same* TileInfo objects are
 exercised through both the Python and the C++ code paths and asserted to
 produce identical results.
@@ -26,7 +26,7 @@ import pytest
 pytest.importorskip("rocisa")
 cppti = pytest.importorskip("tensile_writer.subtile.tile_info")
 
-from Tensile.Components.Subtile import SubtileGeometry as sg
+from Tensile.Components.Subtile import Kernel as krn
 from Tensile.Components.Subtile.Kernel import (
     TileInfo,
     AB_B16,
@@ -72,16 +72,17 @@ AB_PAIRS = {
 
 @contextlib.contextmanager
 def cpp_delegation():
-    """Temporarily enable C++ delegation (drives both geometry and TileInfo)."""
-    import tensile_writer.subtile.geometry as cppgeo
-    saved_use, saved_cpp = sg._USE_CPP, sg._CPP
-    sg._CPP = cppgeo
-    sg._USE_CPP = True
+    """Temporarily enable the C++ TileInfo query layer.
+
+    The geometry layer is always C++; this only flips ``Kernel._USE_CPP`` so the
+    read-only TileInfo queries route through ``ABTileInfoQuery``.
+    """
+    saved_use = krn._USE_CPP
+    krn._USE_CPP = True
     try:
         yield
     finally:
-        sg._USE_CPP = saved_use
-        sg._CPP = saved_cpp
+        krn._USE_CPP = saved_use
 
 
 def _assert_same(py, cpp, ctx=""):
@@ -232,7 +233,6 @@ def test_default_path_is_python_only():
     if os.environ.get("TENSILE_WRITER_CPP", "").strip().lower() not in (
             "", "0", "false", "no", "off"):
         pytest.skip("TENSILE_WRITER_CPP is set; default-off behavior not under test")
-    assert sg._USE_CPP is False
-    assert sg._CPP is None
+    assert krn._USE_CPP is False
     ti = _make_tileinfo(AB_B16, "A")
     assert ti._useCppQuery() is False

@@ -10,8 +10,10 @@
 //     _tensile_writer.subtile.geometry
 //
 // The Python package tensile_writer/ re-exports this, and
-// Tensile/Components/Subtile/SubtileGeometry.py can optionally delegate its
-// pure-math query methods here (opt-in via TENSILE_WRITER_CPP).
+// Tensile/Components/Subtile/SubtileGeometry.py forwards its pure-math
+// value/query methods here unconditionally (the geometry layer is C++-only;
+// there is no Python fallback). Other subtile layers (tile_info, emit,
+// schedulers) remain opt-in via TENSILE_WRITER_CPP.
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/map.h>

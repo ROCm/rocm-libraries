@@ -43,7 +43,7 @@ cppti = pytest.importorskip("tensile_writer.subtile.tile_info")
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType
 
-from Tensile.Components.Subtile import SubtileGeometry as sg
+from Tensile.Components.Subtile import Kernel as krn
 from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
 from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment
 from Tensile.Components.Subtile.SubtileLREmit import lraTileAssignment
@@ -72,19 +72,18 @@ def _rocisa_once():
 
 @contextlib.contextmanager
 def cpp_delegation():
-    """Temporarily enable C++ geometry/tile_info delegation.
+    """Temporarily enable the C++ tile_info delegation.
 
-    Sets the SubtileGeometry switches the TileInfo query layer reads; the
-    offset-assignment plans reuse that same query path.
+    The geometry layer is always C++; this flips ``Kernel._USE_CPP`` so the
+    TileInfo query layer (which the offset-assignment plans reuse) routes
+    through ``ABTileInfoQuery``.
     """
-    saved_use, saved_cpp = sg._USE_CPP, sg._CPP
-    sg._USE_CPP = True
-    sg._CPP = cppgeo
+    saved_use = krn._USE_CPP
+    krn._USE_CPP = True
     try:
         yield
     finally:
-        sg._USE_CPP = saved_use
-        sg._CPP = saved_cpp
+        krn._USE_CPP = saved_use
 
 
 def _mock_dtype(num_bytes=2):

@@ -58,7 +58,7 @@ pytest.importorskip("tensile_writer.subtile.geometry")
 pytest.importorskip("tensile_writer.subtile.tile_info")
 pytest.importorskip("tensile_writer.subtile.instruction_scheduler")
 
-from Tensile.Components.Subtile import SubtileGeometry as _sg
+from Tensile.Components.Subtile import Kernel as _krn
 from Tensile.Components.Subtile import LogicalScheduler as _ls
 from Tensile.Components.Subtile import InstructionScheduler as _isched
 from Tensile.Components.Subtile.LogicalScheduler import LogicalScheduler
@@ -80,23 +80,24 @@ def cpp_delegation():
     process default stays pure-Python. Restores all switches on exit.
     """
     os.environ["TENSILE_WRITER_CPP"] = "1"
+    saved_krn = _krn._USE_CPP
     saved = {
-        _sg: (_sg._USE_CPP, _sg._CPP),
         _ls: (_ls._USE_CPP, _ls._CPP),
         _isched: (_isched._USE_CPP, _isched._CPP),
     }
     try:
-        _sg._CPP = _sg._resolve_cpp_geometry()
-        _sg._USE_CPP = _sg._CPP is not None
+        # Geometry is unconditionally C++; only the still-optional layers flip.
+        _krn._USE_CPP = True
         _ls._CPP = _ls._resolve_cpp_logical_scheduler()
         _ls._USE_CPP = _ls._CPP is not None
         _isched._CPP = _isched._resolve_cpp_scheduler()
         _isched._USE_CPP = _isched._CPP is not None
-        assert _sg._USE_CPP and _ls._USE_CPP and _isched._USE_CPP, (
+        assert _krn._USE_CPP and _ls._USE_CPP and _isched._USE_CPP, (
             "C++ delegation requested but one or more extensions did not resolve"
         )
         yield
     finally:
+        _krn._USE_CPP = saved_krn
         for mod, (use, cpp) in saved.items():
             mod._USE_CPP = use
             mod._CPP = cpp
@@ -167,8 +168,11 @@ def test_bf16_mainloop_is_nonempty_and_complete():
 
 
 def test_default_path_is_python_only():
-    """Without the opt-in, the Subtile slices must stay pure-Python so the
-    default build is byte-identical to the pre-C++ behavior."""
-    assert _sg._USE_CPP is False
+    """Without the opt-in, the still-optional Subtile slices must stay
+    pure-Python so the default build is byte-identical to the pre-C++ behavior.
+
+    (The geometry value/query layer is unconditionally C++ and is not gated.)
+    """
+    assert _krn._USE_CPP is False
     assert _ls._USE_CPP is False
     assert _isched._USE_CPP is False

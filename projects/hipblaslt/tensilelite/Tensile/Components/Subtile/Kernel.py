@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import math
+import os
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -86,15 +87,13 @@ from .SubtileGeometry import (
   MXScaleTilePair,
 )
 
-# Read the optional C++ delegation switch from SubtileGeometry at call time
-# (the parity tests flip ``SubtileGeometry._USE_CPP`` / ``._CPP`` dynamically).
-from . import SubtileGeometry as _sg
-
-
 ################################################################################
 # Optional C++ delegation for the read-only TileInfo query layer (opt-in).
 #
-# When SubtileGeometry's delegation switch is on AND the compiled
+# Unlike the SubtileGeometry value/query layer (which is now C++-only), the
+# TileInfo query layer and the emit-leaf instType selection remain opt-in,
+# gated on the ``TENSILE_WRITER_CPP`` env flag (read once at import; the parity
+# tests flip ``_USE_CPP`` dynamically). When the flag is on AND the compiled
 # ``tensile_writer.subtile.tile_info`` submodule is importable, the read-only
 # TileInfo grid/index query methods for the ABTilePair case delegate to the C++
 # ``ABTileInfoQuery`` value object. The Python TileInfo remains the canonical
@@ -102,6 +101,18 @@ from . import SubtileGeometry as _sg
 # orchestration never cross into C++. With delegation disabled (the default),
 # behavior is byte-identical to the pure-Python path.
 ################################################################################
+
+def _resolve_cpp_optin():
+  """Return True when TENSILE_WRITER_CPP opts into the still-optional layers.
+
+  The geometry value/query layer is unconditionally C++; this flag only gates
+  the TileInfo query layer and the emit-leaf instType selection below.
+  """
+  flag = os.environ.get("TENSILE_WRITER_CPP", "").strip().lower()
+  return flag not in ("", "0", "false", "no", "off")
+
+_USE_CPP = _resolve_cpp_optin()
+
 
 def _resolve_cpp_tileinfo():
   try:
@@ -617,11 +628,11 @@ class TileInfo:
   def _useCppQuery(self) -> bool:
     """True when the C++ ABTileInfoQuery should service read-only queries.
 
-    Gated on SubtileGeometry's delegation switch (read at call time), the
-    tile_info submodule being importable, and the ABTilePair geometry case
-    that the C++ value object covers. MXScale/CD paths stay pure-Python.
+    Gated on the module opt-in switch (read at call time), the tile_info
+    submodule being importable, and the ABTilePair geometry case that the C++
+    value object covers. MXScale/CD paths stay pure-Python.
     """
-    return (_sg._USE_CPP and _CPP_TI is not None
+    return (_USE_CPP and _CPP_TI is not None
             and isinstance(self.geometry, ABTilePair))
 
   def _cppQuery(self):
@@ -1133,11 +1144,11 @@ def _selectF8F6F4InstType(kernel):
   bIsF8  = _pred(bType, "isFloat8")
 
   # Optional C++ delegation: the instType selection is pure data, so when the
-  # SubtileGeometry delegation switch is on AND the compiled emit submodule is
-  # importable, defer the mapping to C++. aType/bType were already swapped above
-  # for SourceSwap, so we pass sourceSwap=False here and fall back to the native
+  # module opt-in switch is on AND the compiled emit submodule is importable,
+  # defer the mapping to C++. aType/bType were already swapped above for
+  # SourceSwap, so we pass sourceSwap=False here and fall back to the native
   # Python branches on any C++ error (e.g. unsupported combination).
-  if _sg._USE_CPP and _CPP_EMIT is not None:
+  if _USE_CPP and _CPP_EMIT is not None:
     try:
       _name = _CPP_EMIT.mfma_f8f6f4_inst_type(
           aIsF8, _pred(aType, "isBFloat8"), _pred(aType, "isFloat4"),

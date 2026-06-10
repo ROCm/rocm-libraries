@@ -7,7 +7,6 @@ Contains layout classes, abstract geometry base classes, and pre-defined instanc
 No emit logic lives here — concrete shape classes with emit implementations are in
 Kernel.py.
 """
-import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from functools import cached_property
@@ -16,46 +15,33 @@ from typing import Optional, Tuple
 from rocisa.container import vgpr, sgpr, accvgpr
 from rocisa.enum import RegisterType
 
+from tensile_writer.subtile import geometry as _cppgeo
+
 
 ################################################################################
-# Optional C++ delegation (opt-in, off by default)
+# C++-backed geometry value/query layer
 #
-# When the environment variable TENSILE_WRITER_CPP is truthy AND the compiled
-# ``tensile_writer`` nanobind extension is importable, the *pure geometry math*
-# query methods below delegate to C++ (tensile_writer.subtile.geometry). The
-# Python dataclasses remain the canonical API objects — tags, ``replace()`` and
-# singledispatch are untouched. This keeps the public API and behavior
-# identical with delegation disabled (the default for normal TensileLite use).
+# The *pure geometry math* query methods below are serviced unconditionally by
+# the compiled ``tensile_writer`` nanobind extension
+# (tensile_writer.subtile.geometry). The Python dataclasses in this module are
+# the public facade: they own the API objects (tags, ``replace()``,
+# singledispatch dispatch) while every ported value/query method forwards to
+# the matching C++ object built on demand. There is no pure-Python fallback —
+# the geometry formulas live in C++ only.
 #
-# Only value/query math is delegated. No writer state, register allocation,
-# rocisa emission, or main-loop logic crosses into C++.
+# Only value/query math crosses into C++. No writer state, register allocation,
+# rocisa emission, or main-loop logic is delegated.
 ################################################################################
-
-def _resolve_cpp_geometry():
-  flag = os.environ.get("TENSILE_WRITER_CPP", "").strip().lower()
-  if flag in ("", "0", "false", "no", "off"):
-    return None
-  try:
-    from tensile_writer.subtile import geometry as _cppgeo
-  except Exception:
-    # Opt-in was requested but the extension is unavailable; fall back to the
-    # pure-Python path rather than failing the import.
-    return None
-  return _cppgeo
-
-_CPP = _resolve_cpp_geometry()
-_USE_CPP = _CPP is not None
-
 
 def _cpp_mma(layout: 'MMALayout'):
-  return _CPP.MMALayout(layout.instM, layout.blocks, layout.vgprs, layout.waveSize)
+  return _cppgeo.MMALayout(layout.instM, layout.blocks, layout.vgprs, layout.waveSize)
 
 def _cpp_scale(layout: 'MMAScaleLayout'):
-  return _CPP.MMAScaleLayout(layout.instM, layout.blocks, layout.vgprs,
-                             layout.mxBlock, layout.waveSize)
+  return _cppgeo.MMAScaleLayout(layout.instM, layout.blocks, layout.vgprs,
+                                layout.mxBlock, layout.waveSize)
 
 def _cpp_loadshape(ls: 'LoadShape'):
-  return _CPP.LoadShape(ls.m, ls.k)
+  return _cppgeo.LoadShape(ls.m, ls.k)
 
 
 ################################################################################
@@ -184,21 +170,15 @@ class MMALayout:
 
   def inputBytesPerLane(self) -> int:
     """Input bytes per lane = vgprs * 4."""
-    if _USE_CPP:
-      return _cpp_mma(self).inputBytesPerLane()
-    return self.vgprs * 4
+    return _cpp_mma(self).inputBytesPerLane()
 
   def tileSizeBytes(self, instK: int, elementBytes: float) -> int:
     """Total tile size in bytes."""
-    if _USE_CPP:
-      return _cpp_mma(self).tileSizeBytes(instK, elementBytes)
-    return int(self.instM * instK * elementBytes)
+    return _cpp_mma(self).tileSizeBytes(instK, elementBytes)
 
   def regsPerTile(self, instK: int, elementBytes: float) -> float:
     """VGPRs per lane (as float), matching TileInfo.mmaTileRegCount."""
-    if _USE_CPP:
-      return _cpp_mma(self).regsPerTile(instK, elementBytes)
-    return self.tileSizeBytes(instK, elementBytes) / self.waveSize / 4
+    return _cpp_mma(self).regsPerTile(instK, elementBytes)
 
 # Pre-defined immutable MMA layouts for gfx950.
 # Name: MFMA_{M}x{N}_{Blocks}B_{Groups}[K|N]_{vgprs}V
@@ -311,25 +291,20 @@ class ABInputGeometry(TileGeometry):
   @cached_property
   def _cpp_twin(self):
     # Concrete subclasses (ABGRGeometry, ABLRGeometry) build the matching
-    # tensile_writer C++ object. A subclass that delegates query math to C++
-    # (_USE_CPP=True) but forgets to override this would otherwise fail with an
-    # opaque AttributeError; surface the contract explicitly instead.
+    # tensile_writer C++ object that services every ported query method. The
+    # abstract base is never instantiated directly; surface the contract
+    # explicitly so a missing override fails loudly rather than with an opaque
+    # AttributeError.
     raise NotImplementedError(
-        f"{type(self).__name__} must override the _cpp_twin property to support "
-        "TENSILE_WRITER_CPP delegation")
+        f"{type(self).__name__} must override the _cpp_twin property")
 
   # --- MMA tile grid queries (no subtile shape dependency) ---
 
   def globalMMATileGrid(self, macroTile: int, depthU: int) -> Tuple[int, int]:
-    if _USE_CPP:
-      return tuple(self._cpp_twin.globalMMATileGrid(macroTile, depthU))
-    return (macroTile // self.mmaTileShape[0], depthU // self.mmaTileShape[1])
+    return tuple(self._cpp_twin.globalMMATileGrid(macroTile, depthU))
 
   def localMMATileGrid(self, macroTile: int, depthU: int, waveGroupSize: int) -> Tuple[int, int]:
-    if _USE_CPP:
-      return tuple(self._cpp_twin.localMMATileGrid(macroTile, depthU, waveGroupSize))
-    glbl = self.globalMMATileGrid(macroTile, depthU)
-    return (glbl[0] // waveGroupSize, glbl[1])
+    return tuple(self._cpp_twin.localMMATileGrid(macroTile, depthU, waveGroupSize))
 
 
 @dataclass(frozen=True)
@@ -356,10 +331,10 @@ class ABGRGeometry(ABInputGeometry):
 
   @cached_property
   def _cpp_twin(self):
-    return _CPP.ABGRGeometry(_cpp_mma(self.mmaLayout), self.instK,
-                             float(self.bpe), _cpp_loadshape(self.loadShape),
-                             tuple(self.subtileShape), self.subtileCount,
-                             self.subtileStride, self.tlu, self.loadWidth)
+    return _cppgeo.ABGRGeometry(_cpp_mma(self.mmaLayout), self.instK,
+                                float(self.bpe), _cpp_loadshape(self.loadShape),
+                                tuple(self.subtileShape), self.subtileCount,
+                                self.subtileStride, self.tlu, self.loadWidth)
 
   def localGRGranularity(self, numWaves: int) -> Tuple[int, int]:
     """Number of localSubtile rows covered by one GR load, as (M, K).
@@ -379,39 +354,21 @@ class ABGRGeometry(ABInputGeometry):
 
     subtileCount/subtileStride must be materialized via for_kernel() before use.
     """
-    if _USE_CPP:
-      return tuple(self._cpp_twin.localGRGranularity(numWaves))
-    bK = int(self.subtileShape[1])
-    bc = int(self.subtileCount) if self.subtileCount is not None else 1
-    if bc > 1:
-      return (1, bK)
-    blocks_per_load = self.bytesPerLoad(numWaves) / self.subtileSizeBytes()
-    if blocks_per_load > 1:
-      return (int(blocks_per_load), bK)
-    return (1, bK)
+    return tuple(self._cpp_twin.localGRGranularity(numWaves))
 
   def globalSubtileGrid(self, macroTile: int, depthU: int) -> Tuple[float, float]:
-    if _USE_CPP:
-      return tuple(self._cpp_twin.globalSubtileGrid(macroTile, depthU))
-    glbl = self.globalMMATileGrid(macroTile, depthU)
-    return (glbl[0] / self.subtileShape[0], glbl[1] / self.subtileShape[1])
+    return tuple(self._cpp_twin.globalSubtileGrid(macroTile, depthU))
 
   def subtileSizeBytes(self) -> float:
     """Bytes in one contiguous strip."""
-    if _USE_CPP:
-      return self._cpp_twin.subtileSizeBytes()
-    return self.subtileShape[0] * self.subtileShape[1] * self.mmaTileSize
+    return self._cpp_twin.subtileSizeBytes()
 
   def bytesPerLoad(self, numWaves: int) -> int:
     """Total bytes loaded cooperatively per load round (all waves, all lanes)."""
-    if _USE_CPP:
-      return self._cpp_twin.bytesPerLoad(numWaves)
-    return int(self.loadShape.m * self.loadShape.k * self.bpe) * self.mmaLayout.waveSize * numWaves
+    return self._cpp_twin.bytesPerLoad(numWaves)
 
   def loadsPerStrip(self, numWaves: int) -> float:
-    if _USE_CPP:
-      return self._cpp_twin.loadsPerStrip(numWaves)
-    return self.subtileSizeBytes() / self.bytesPerLoad(numWaves)
+    return self._cpp_twin.loadsPerStrip(numWaves)
 
   def for_kernel(self, kernel: dict, tc: str) -> 'ABGRGeometry':
     """Return a new frozen instance with subtileCount/subtileStride from kernel config.
@@ -424,21 +381,9 @@ class ABGRGeometry(ABInputGeometry):
     more MMA tiles than the base subtileShape covers.  This eliminates loadRatio > 1
     cases: the effective per-load coverage IS the subtileShape.
     """
-    if _USE_CPP:
-      cpp_fk = self._cpp_twin.for_kernel(kernel, tc)
-      return replace(self, subtileCount=cpp_fk.subtileCount,
-                     subtileStride=cpp_fk.subtileStride)
-
-    wg_idx    = 0 if tc == 'A' else 1
-    wg_m      = kernel["MIWaveGroup"][wg_idx]
-    numWaves  = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
-    waveSize  = kernel["WavefrontSize"]
-    mt_mma    = kernel[f"MacroTile{tc}"] // self.mmaTileShape[0]
-
-    bc      = self.subtileCount if self.subtileCount is not None else wg_m
-    bstride = self.subtileStride if self.subtileStride is not None else mt_mma // bc
-
-    return replace(self, subtileCount=bc, subtileStride=bstride)
+    cpp_fk = self._cpp_twin.for_kernel(kernel, tc)
+    return replace(self, subtileCount=cpp_fk.subtileCount,
+                   subtileStride=cpp_fk.subtileStride)
 
   # --- Subtile query ---
 
@@ -467,33 +412,8 @@ class ABGRGeometry(ABInputGeometry):
     if self.subtileCount is None or self.subtileStride is None:
       raise RuntimeError("subtileForMmaTile requires for_kernel() to be called first")
 
-    if _USE_CPP:
-      sid, bshape, tiles = self._cpp_twin.subtileForMmaTile(r, c)
-      return (tuple(sid), tuple(bshape), [tuple(t) for t in tiles])
-
-    bM, bK = int(self.subtileShape[0]), int(self.subtileShape[1])
-    bc      = int(self.subtileCount)
-    bstr    = int(self.subtileStride)
-
-    subtile_k = c // bK
-    k_cols    = list(range(subtile_k * bK, (subtile_k + 1) * bK))
-
-    if bc == 1 or bstr == 0:
-      subtile_m = r // bM
-      m_rows    = list(range(subtile_m * bM, (subtile_m + 1) * bM))
-    else:
-      bM_per_stride = bstr // bM
-      stride_group  = r // bstr
-      major_group   = stride_group // bc
-      within_major  = (r % bstr) // bM
-      subtile_m     = major_group * bM_per_stride + within_major
-      m_rows = []
-      for i in range(bc):
-        base = (major_group * bc + i) * bstr + within_major * bM
-        m_rows.extend(range(base, base + bM))
-
-    mma_tiles = [(row, col) for row in m_rows for col in k_cols]
-    return (subtile_m, subtile_k), (bM, bK), mma_tiles
+    sid, bshape, tiles = self._cpp_twin.subtileForMmaTile(r, c)
+    return (tuple(sid), tuple(bshape), [tuple(t) for t in tiles])
 
   # --- Emit stubs: GR offset, GR instruction, LW to LDS ---
 
@@ -519,20 +439,15 @@ class ABLRGeometry(ABInputGeometry):
 
   @cached_property
   def _cpp_twin(self):
-    return _CPP.ABLRGeometry(_cpp_mma(self.mmaLayout), self.instK,
-                             float(self.bpe), _cpp_loadshape(self.loadShape),
-                             tuple(self.subtileShape), self.tlu, self.loadWidth)
+    return _cppgeo.ABLRGeometry(_cpp_mma(self.mmaLayout), self.instK,
+                                float(self.bpe), _cpp_loadshape(self.loadShape),
+                                tuple(self.subtileShape), self.tlu, self.loadWidth)
 
   def globalSubtileGrid(self, macroTile: int, depthU: int) -> Tuple[float, float]:
-    if _USE_CPP:
-      return tuple(self._cpp_twin.globalSubtileGrid(macroTile, depthU))
-    glbl = self.globalMMATileGrid(macroTile, depthU)
-    return (glbl[0] / self.subtileShape[0], glbl[1] / self.subtileShape[1])
+    return tuple(self._cpp_twin.globalSubtileGrid(macroTile, depthU))
 
   def subtileSizeBytes(self) -> float:
-    if _USE_CPP:
-      return self._cpp_twin.subtileSizeBytes()
-    return self.subtileShape[0] * self.subtileShape[1] * self.mmaTileSize
+    return self._cpp_twin.subtileSizeBytes()
 
   # --- Emit stubs: LR offset, LR instruction ---
 
@@ -614,42 +529,30 @@ class CDTileGeometry(TileGeometry):
 
   @cached_property
   def _cpp_twin(self):
-    return _CPP.CDTileGeometry(_cpp_mma(self.mmaLayout), float(self.bpe),
-                               _cpp_loadshape(self.storeShape))
+    return _cppgeo.CDTileGeometry(_cpp_mma(self.mmaLayout), float(self.bpe),
+                                  _cpp_loadshape(self.storeShape))
 
   def globalMMATileGrid(self, macroTile0: int, macroTile1: int) -> Tuple[int, int]:
-    if _USE_CPP:
-      return tuple(self._cpp_twin.globalMMATileGrid(macroTile0, macroTile1))
-    instM = self.mmaLayout.instM
-    return (macroTile0 // instM, macroTile1 // instM)
+    return tuple(self._cpp_twin.globalMMATileGrid(macroTile0, macroTile1))
 
   def localMMATileGrid(self, macroTile0: int, macroTile1: int,
                        waveGroup: Tuple[int, int]) -> Tuple[int, int]:
-    if _USE_CPP:
-      return tuple(self._cpp_twin.localMMATileGrid(macroTile0, macroTile1,
-                                                     tuple(waveGroup)))
-    glbl = self.globalMMATileGrid(macroTile0, macroTile1)
-    return (glbl[0] // waveGroup[0], glbl[1] // waveGroup[1])
+    return tuple(self._cpp_twin.localMMATileGrid(macroTile0, macroTile1,
+                                                 tuple(waveGroup)))
 
   def globalSubtileGrid(self, macroTile0: int, macroTile1: int,
                         subtileShape: Tuple[float, float]) -> Tuple[float, float]:
     """Subtile grid over the full macro tile."""
-    if _USE_CPP:
-      return tuple(self._cpp_twin.globalSubtileGrid(macroTile0, macroTile1,
-                                                      tuple(subtileShape)))
-    glbl = self.globalMMATileGrid(macroTile0, macroTile1)
-    return (glbl[0] / subtileShape[0], glbl[1] / subtileShape[1])
+    return tuple(self._cpp_twin.globalSubtileGrid(macroTile0, macroTile1,
+                                                  tuple(subtileShape)))
 
   def localSubtileGrid(self, macroTile0: int, macroTile1: int,
                        waveGroup: Tuple[int, int],
                        subtileShape: Tuple[float, float]) -> Tuple[float, float]:
     """Subtile grid per wave (each wave stores its own chunk)."""
-    if _USE_CPP:
-      return tuple(self._cpp_twin.localSubtileGrid(macroTile0, macroTile1,
-                                                     tuple(waveGroup),
-                                                     tuple(subtileShape)))
-    locl = self.localMMATileGrid(macroTile0, macroTile1, waveGroup)
-    return (locl[0] / subtileShape[0], locl[1] / subtileShape[1])
+    return tuple(self._cpp_twin.localSubtileGrid(macroTile0, macroTile1,
+                                                 tuple(waveGroup),
+                                                 tuple(subtileShape)))
 
   # --- Emit stubs (to be implemented by concrete subclasses) ---
 
@@ -702,18 +605,16 @@ class MXScaleInputGeometry(TileGeometry):
   @cached_property
   def _cpp_twin(self):
     # Concrete subclasses (MXScaleGRGeometry, MXScaleLRGeometry) build the
-    # matching tensile_writer C++ object. A subclass that delegates query math
-    # to C++ (_USE_CPP=True) but forgets to override this would otherwise fail
-    # with an opaque AttributeError; surface the contract explicitly instead.
+    # matching tensile_writer C++ object that services every ported query
+    # method. The abstract base is never instantiated directly; surface the
+    # contract explicitly so a missing override fails loudly rather than with an
+    # opaque AttributeError.
     raise NotImplementedError(
-        f"{type(self).__name__} must override the _cpp_twin property to support "
-        "TENSILE_WRITER_CPP delegation")
+        f"{type(self).__name__} must override the _cpp_twin property")
 
   def globalMMATileGrid(self, macroTile: int, depthU: int) -> Tuple[int, int]:
     # depthU is in data elements; divide by instK (not instKScale) to get scale MMA K tiles.
-    if _USE_CPP:
-      return tuple(self._cpp_twin.globalMMATileGrid(macroTile, depthU))
-    return (macroTile // self.mmaTileShape[0], depthU // self.instK)
+    return tuple(self._cpp_twin.globalMMATileGrid(macroTile, depthU))
 
 
 @dataclass(frozen=True)
@@ -731,19 +632,14 @@ class MXScaleGRGeometry(MXScaleInputGeometry):
   @cached_property
   def _cpp_twin(self):
     shape = tuple(self.subtileShape) if self.subtileShape is not None else None
-    return _CPP.MXScaleGRGeometry(_cpp_scale(self.scaleLayout), self.instK,
-                                  float(self.bpe), self.loadWidth, shape)
+    return _cppgeo.MXScaleGRGeometry(_cpp_scale(self.scaleLayout), self.instK,
+                                     float(self.bpe), self.loadWidth, shape)
 
   def for_kernel(self, kernel: dict, tc: str) -> 'MXScaleGRGeometry':
     if self.subtileShape is not None:
       return self
-    if _USE_CPP:
-      cpp_fk = self._cpp_twin.for_kernel(kernel, tc)
-      return replace(self, subtileShape=tuple(cpp_fk.subtileShape))
-    instM    = self.scaleLayout.instM
-    mt_mma   = kernel[f"MacroTile{tc}"] // instM
-    du_scale = kernel[f"_DepthU{tc}"] // self.instK
-    return replace(self, subtileShape=(mt_mma, du_scale))
+    cpp_fk = self._cpp_twin.for_kernel(kernel, tc)
+    return replace(self, subtileShape=tuple(cpp_fk.subtileShape))
 
   def emitGlobalReadOffset(self, ti: 'TileInfo', writer, kernel) -> 'Module':
     raise NotImplementedError(f"{type(self).__name__}.emitGlobalReadOffset not implemented")
@@ -766,20 +662,15 @@ class MXScaleLRGeometry(MXScaleInputGeometry):
 
   @cached_property
   def _cpp_twin(self):
-    return _CPP.MXScaleLRGeometry(_cpp_scale(self.scaleLayout), self.instK,
-                                  float(self.bpe), self.loadWidth,
-                                  tuple(self.subtileShape))
+    return _cppgeo.MXScaleLRGeometry(_cpp_scale(self.scaleLayout), self.instK,
+                                     float(self.bpe), self.loadWidth,
+                                     tuple(self.subtileShape))
 
   def globalSubtileGrid(self, macroTile: int, depthU: int) -> Tuple[float, float]:
-    if _USE_CPP:
-      return tuple(self._cpp_twin.globalSubtileGrid(macroTile, depthU))
-    glbl = self.globalMMATileGrid(macroTile, depthU)
-    return (glbl[0] / self.subtileShape[0], glbl[1] / self.subtileShape[1])
+    return tuple(self._cpp_twin.globalSubtileGrid(macroTile, depthU))
 
   def subtileSizeBytes(self) -> float:
-    if _USE_CPP:
-      return self._cpp_twin.subtileSizeBytes()
-    return self.subtileShape[0] * self.subtileShape[1] * self.mmaTileSize
+    return self._cpp_twin.subtileSizeBytes()
 
   def emitLocalReadOffset(self, ti: 'TileInfo', writer, kernel) -> 'Module':
     raise NotImplementedError(f"{type(self).__name__}.emitLocalReadOffset not implemented")

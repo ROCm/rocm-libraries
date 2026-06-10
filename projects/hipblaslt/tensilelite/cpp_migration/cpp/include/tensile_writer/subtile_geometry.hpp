@@ -4,6 +4,10 @@
 // Pure C++ port of the geometry value/query layer from
 // Tensile/Components/Subtile/SubtileGeometry.py.
 //
+// This is the single source of truth for the subtile geometry formulas: the
+// Python ``SubtileGeometry`` dataclass facade forwards its value/query methods
+// here unconditionally (there is no pure-Python fallback).
+//
 // This header is intentionally free of any nanobind / Python dependency so the
 // geometry math can be unit-tested and reasoned about as plain C++. The
 // nanobind bindings live in src/subtile_geometry_bindings.cpp.

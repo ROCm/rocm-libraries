@@ -7,8 +7,9 @@ Thin re-export of the ``_tensile_writer.subtile.geometry`` nanobind submodule.
 Everything here is pure geometry math (value classes + query methods); no
 writer state, register allocation, or instruction emission lives in C++.
 
-The names mirror ``Tensile.Components.Subtile.SubtileGeometry`` so the Python
-module can optionally delegate its pure-math methods here.
+The names mirror ``Tensile.Components.Subtile.SubtileGeometry``, whose dataclass
+facade forwards its pure-math value/query methods here unconditionally — this
+module is the single source of truth for the geometry formulas.
 """
 
 from tensile_writer import _tensile_writer as _ext
