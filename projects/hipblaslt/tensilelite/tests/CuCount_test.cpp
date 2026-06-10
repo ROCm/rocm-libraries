@@ -5,6 +5,8 @@
 #include <iostream>
 #include <memory>
 
+#include <hip/hip_runtime.h>
+
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionLibrary.hpp>
@@ -12,6 +14,7 @@
 #include <Tensile/ContractionProblemProperties.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/ExactLogicLibrary.hpp>
+#include <Tensile/hip/HipHardware.hpp>
 
 #include "FallbackTestUtils.hpp"
 
@@ -335,4 +338,150 @@ TEST(StreamK5HybridModeTest, TriStateOnResolvesDynamic)
     problem.setParams().setStreamKTileSchedulingMode(1); // ON -> dynamic (SK4)
     EXPECT_TRUE(solution.streamK5EffectiveDynamic(problem, device))
         << "StreamK=5 ON must resolve to the dynamic (SK4) sub-path";
+}
+
+// ===========================================================================
+// Sk3Sk5OffPartition512Test -- dump and compare host partition state for the
+// Equality MT64x64x16 kernel at 512^3 NN on the live device (MI355X/gfx950).
+// ===========================================================================
+
+namespace
+{
+    struct StreamKHostPack
+    {
+        origami::reduction_t reduction{};
+        size_t               grid{};
+        size_t               tiles{};
+        size_t               itersPerTile{};
+        uint32_t             skTiles{};
+        uint32_t             skItersPerWG{};
+        bool                 effectiveDynamic{};
+    };
+
+    void initEquality512Solution(ContractionSolution& solution, int streamK)
+    {
+        solution.sizeMapping.streamK            = streamK;
+        solution.sizeMapping.macroTile          = TensileLite::dim3(64, 64, 1);
+        solution.sizeMapping.depthU             = 16;
+        solution.sizeMapping.matrixInstruction  = {16, 16, 4, 1};
+        solution.sizeMapping.workGroupMapping   = 1;
+        solution.sizeMapping.CUOccupancy        = -1;
+        solution.sizeMapping.streamKForceDPOnly = 0;
+        solution.sizeMapping.streamKAtomic      = 0;
+    }
+
+    ContractionProblemGemm make512Problem()
+    {
+        auto problem = ContractionProblemGemm::GEMM(
+            false, false, 512, 512, 512, 512, 512, 512, 1.0, false, 1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        return problem;
+    }
+
+    StreamKHostPack computeStreamKHostPack(ContractionSolution const& solution,
+                                           ContractionProblemGemm&    problem,
+                                           Hardware const&            hardware)
+    {
+        StreamKHostPack pack{};
+        pack.tiles = problem.getNumTiles(solution.sizeMapping, 1);
+        pack.itersPerTile
+            = std::max(size_t{1}, problem.getItersPerTile(solution.sizeMapping));
+
+        if(solution.sizeMapping.streamK == 5)
+        {
+            pack.effectiveDynamic = solution.streamK5EffectiveDynamic(problem, hardware);
+            pack.reduction        = pack.effectiveDynamic
+                                        ? origami::reduction_t::tree
+                                        : solution.getSKReduction(problem, hardware);
+        }
+        else
+        {
+            pack.effectiveDynamic = false;
+            pack.reduction        = solution.getSKReduction(problem, hardware);
+        }
+
+        pack.grid = solution.getSKGrid(problem, hardware, pack.tiles, pack.reduction);
+
+        // Mirror the tree (non-parallel) SK3 arg branch used by both native SK3
+        // and the SK5 static sub-path in ContractionSolution.cpp.
+        if(pack.reduction == origami::reduction_t::parallel)
+        {
+            uint32_t skSplit      = static_cast<uint32_t>(pack.grid / pack.tiles);
+            pack.skItersPerWG     = static_cast<uint32_t>(pack.itersPerTile) / skSplit;
+            pack.skTiles          = skSplit;
+        }
+        else
+        {
+            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+            assert(pAMDGPU != nullptr);
+            int  fullTiles   = pAMDGPU->skFullTiles;
+            bool bigEnough   = pack.tiles > pack.grid;
+            bool forceDPOnly = solution.sizeMapping.streamKForceDPOnly != 0;
+            pack.skTiles     = forceDPOnly ? 0u : static_cast<uint32_t>(pack.grid);
+            if(!forceDPOnly && pack.tiles % pack.grid != 0)
+            {
+                pack.skTiles = bigEnough ? pack.grid * fullTiles + pack.tiles % pack.grid
+                                         : pack.tiles;
+                pack.skTiles = std::min(pack.skTiles, static_cast<uint32_t>(pack.tiles));
+            }
+            pack.skItersPerWG
+                = static_cast<uint32_t>(pack.skTiles) * static_cast<uint32_t>(pack.itersPerTile)
+                  / static_cast<uint32_t>(pack.grid);
+        }
+
+        return pack;
+    }
+
+    void printStreamKHostPack(char const* label, StreamKHostPack const& pack)
+    {
+        std::cout << label << ": tiles=" << pack.tiles << " itersPerTile=" << pack.itersPerTile
+                  << " reduction=" << static_cast<int>(pack.reduction)
+                  << " effectiveDynamic=" << (pack.effectiveDynamic ? "true" : "false")
+                  << " grid=" << pack.grid << " skTiles=" << pack.skTiles
+                  << " SKItersPerWG=" << pack.skItersPerWG << std::endl;
+    }
+} // namespace
+
+TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
+{
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount <= 0)
+        GTEST_SKIP() << "No HIP device";
+
+    auto hardware = hip::GetCurrentDevice();
+    ASSERT_NE(hardware, nullptr);
+
+    auto* amdgpu = dynamic_cast<AMDGPU*>(hardware.get());
+    ASSERT_NE(amdgpu, nullptr);
+
+    ContractionSolution sk3Solution;
+    ContractionSolution sk5Solution;
+    initEquality512Solution(sk3Solution, 3);
+    initEquality512Solution(sk5Solution, 5);
+
+    auto problemSk3 = make512Problem();
+    auto problemSk5 = make512Problem();
+    problemSk5.setParams().setStreamKTileSchedulingMode(0); // SK5-off
+
+    auto sk3Pack = computeStreamKHostPack(sk3Solution, problemSk3, *hardware);
+    auto sk5OffPack = computeStreamKHostPack(sk5Solution, problemSk5, *hardware);
+
+    printStreamKHostPack("native SK3", sk3Pack);
+    printStreamKHostPack("SK5-off", sk5OffPack);
+
+    EXPECT_FALSE(sk5OffPack.effectiveDynamic);
+    EXPECT_EQ(sk3Pack.reduction, sk5OffPack.reduction);
+    EXPECT_EQ(sk3Pack.grid, sk5OffPack.grid);
+    EXPECT_EQ(sk3Pack.skTiles, sk5OffPack.skTiles);
+    EXPECT_EQ(sk3Pack.skItersPerWG, sk5OffPack.skItersPerWG);
+
+    // Contrast: SK5-on (dynamic) should diverge at 512^3 when tiles < grid.
+    problemSk5.setParams().setStreamKTileSchedulingMode(1);
+    auto sk5OnPack = computeStreamKHostPack(sk5Solution, problemSk5, *hardware);
+    printStreamKHostPack("SK5-on (contrast)", sk5OnPack);
+    EXPECT_TRUE(sk5OnPack.effectiveDynamic);
+    if(sk3Pack.grid > sk3Pack.tiles)
+        EXPECT_NE(sk3Pack.grid, sk5OnPack.grid)
+            << "512^3 static path oversubscribes; dynamic path should not match";
 }
