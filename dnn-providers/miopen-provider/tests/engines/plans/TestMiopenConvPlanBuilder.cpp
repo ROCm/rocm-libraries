@@ -435,6 +435,7 @@ TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutab
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableWrw)
 {
+    SKIP_IF_ASAN(); // CK/MIOpen convolution hangs under ASAN on gfx942 (xnack+)
     const auto& tc = GetParam();
     auto xStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
     auto dwStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
