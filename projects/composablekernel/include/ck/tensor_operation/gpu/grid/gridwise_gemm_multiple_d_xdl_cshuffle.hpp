@@ -727,10 +727,10 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
                                const EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                    e_grid_desc_mblock_mperblock_nblock_nperblock,
                                const Block2ETileMap& block_2_etile_map,
-                               const index_t k_batch                                      = 1,
-                               const index_t k_idx                                        = 0,
+                               const index_t k_batch                              = 1,
+                               const index_t k_idx                                = 0,
                                const EGridDesc_M_N_Direct& e_grid_desc_m_n_direct = {},
-                               void* __restrict__ p_shared_1 = nullptr)
+                               void* __restrict__ p_shared_1                      = nullptr)
     {
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
@@ -940,21 +940,21 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         else
         {
             gridwise_gemm_pipeline.template Run<HasMainKBlockLoop>(a_grid_desc_ak0_m_ak1,
-                                                               a_block_desc_ak0_m_ak1,
-                                                               a_blockwise_copy,
-                                                               a_grid_buf,
-                                                               a_block_buf,
-                                                               a_block_slice_copy_step,
-                                                               b_grid_desc_bk0_n_bk1,
-                                                               b_block_desc_bk0_n_bk1,
-                                                               b_blockwise_copy,
-                                                               b_grid_buf,
-                                                               b_block_buf,
-                                                               b_block_slice_copy_step,
-                                                               blockwise_gemm,
-                                                               c_thread_buf,
-                                                               num_k_block_main_loop);
-            }
+                                                                   a_block_desc_ak0_m_ak1,
+                                                                   a_blockwise_copy,
+                                                                   a_grid_buf,
+                                                                   a_block_buf,
+                                                                   a_block_slice_copy_step,
+                                                                   b_grid_desc_bk0_n_bk1,
+                                                                   b_block_desc_bk0_n_bk1,
+                                                                   b_blockwise_copy,
+                                                                   b_grid_buf,
+                                                                   b_block_buf,
+                                                                   b_block_slice_copy_step,
+                                                                   blockwise_gemm,
+                                                                   c_thread_buf,
+                                                                   num_k_block_main_loop);
+        }
 
         // Use RunEpilogueNoShuffle from gridwise_common (the base class) for
         // direct VGPR-to-global output when conditions are met:
