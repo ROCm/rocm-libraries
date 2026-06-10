@@ -157,6 +157,7 @@ function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ER
             ${${OUTPUT_VAR}} "${TOOL_NAME}" ${EXPECTED_VERSION} "${VERSION_REGEX}"
             "Found ${TOOL_NAME} version {VERSION} at {PATH}"
         )
+        # checkToolVersion() already warned on mismatch
         if(NOT ${TOOL_NAME}_VERSION_MATCHED AND NOT _CHECK_TOOL_VERSION_ALLOW_MISMATCH)
             message(WARNING "${TOOL_NAME} disabled due to version mismatch "
                 "(expected ${EXPECTED_VERSION}). Update your environment and perform "
