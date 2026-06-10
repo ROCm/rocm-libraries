@@ -4,25 +4,37 @@ A Composable Kernel port of [SpargeAttn](https://github.com/thu-ml/SpargeAttn) f
 
 ## Status vs Upstream
 
-Implemented:
-- per-block mean-pool, cosine similarity, pooled QK
-- top-k / `cdfthreshd` block selection, BlockMap LUT
-- sparse FMHA (both `vsa` and `jenga` backends)
-- per-head `topk` / `simthreshd1` / `cdfthreshd`
-- **is_causal mask in pooled score** (top-left only at block-map grain) ([spas_sage_attn/utils.py:L338](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/spas_sage_attn/utils.py#L338))
-- **attention_sink** — block-map column 0 force-on ([spas_sage_attn/autotune.py:L355](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/spas_sage_attn/autotune.py#L355))
-
 Not yet ported (upstream pinned to commit [`ae5b629`](https://github.com/thu-ml/SpargeAttn/tree/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a)):
 - **K smoothing** — pre-pool `k -= km`; required for diffusion / video checkpoints (CogVideoX, Mochi-1, Flux, OpenSora, SD 3.5) ([spas_sage_attn/core.py:L53](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/spas_sage_attn/core.py#L53))
-- **SageAttention-style Q/K int8 quant fusion** — fuses Sage int8 quant into the pool kernel, enables a downstream int8 GEMM0 in the attn kernel (matches `49_sageattention`'s quant recipe) ([spas_sage_attn/utils.py:L371](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/spas_sage_attn/utils.py#L371))
+- **Fused Q/K int8 quant in the pool kernel** — the int8 BLOCKSCALE GEMM0 path exists (see Performance), but the per-block Q/K quant is still computed host-side; upstream fuses it into the pool kernel ([spas_sage_attn/utils.py:L371](https://github.com/thu-ml/SpargeAttn/blob/ae5b629ebb41e41f86b3ea2ab5a3283f13ac151a/spas_sage_attn/utils.py#L371))
 
 ## Performance
 
-![V1 sage-sparge comparison](docs/pv_skip_mode_comparison.png)
+![SpargeAttn + SageAttn comparison](docs/pv_skip_mode_comparison.png)
 
-*MI300X, b=2 h=16 s=8192 d=128, 5 seeds × 9 sparsity points, `-pv_mode=warp`. Two hlines (`fmha_dense` fp16, `fmha_sage` fp8bf16 BLOCKSCALE) and two sweeps (`sparge_fp16`, `sparge_sage` = V1 sage⊕sparge with int8 BLOCKSCALE Q/K + fp16 V); labels are sparge_sage speedup vs dense.*
+*MI300X, b=2 h=16 s=8192 d=128, 5 seeds × 9 sparsity points, `-pv_mode=warp`. Two baselines (Dense FP16, Dense + SageAttn FP8 BLOCKSCALE) and two sparse sweeps: SpargeAttn (sparse + FP16) and SpargeAttn + SageAttn (sparse + INT8 BLOCKSCALE Q/K, FP16 V). Point labels are the SpargeAttn + SageAttn speedup vs Dense FP16.*
 
-V1 (`sparge_sage`) sits +15..+19% above `sparge_fp16` at every sparsity, and crosses the dense baseline near sparsity 0.31 vs sparsity 0.40 for fp16.
+SpargeAttn + SageAttn (int8 Q/K) sits +15..+19% above the FP16-only sparse sweep at every sparsity, and crosses the dense baseline near sparsity 0.31 vs sparsity 0.40 for FP16.
+
+### Reproducing the chart
+
+Scripts live in [`docs/`](docs/). Two steps — measure, then plot:
+
+```bash
+# 1. sweep on an MI300-class GPU (needs rocprof; ~30 min for the full 5-seed sweep)
+python3 docs/run_bench.py --bin-dir build/bin --csv docs/sparge_bench.csv
+
+# 2. render the figure from the CSV (no GPU needed; needs matplotlib)
+python3 docs/plot.py --csv docs/sparge_bench.csv \
+        --out docs/pv_skip_mode_comparison.png
+```
+
+`docs/sparge_bench.csv` ships with the measured data behind the published
+figure, so step 2 alone reproduces the chart. Re-run step 1 to regenerate the
+numbers on your own hardware. `run_bench.py --smoke` does a single-sparsity
+quick check; `--launcher "srun --jobid=<id> --overlap"` wraps each run for
+schedulers like SLURM. Data uses random tensors (uniform [-0.5, 0.5]), so the
+measured sparsity per point varies slightly with `--seeds`.
 
 ## PV-skip modes
 

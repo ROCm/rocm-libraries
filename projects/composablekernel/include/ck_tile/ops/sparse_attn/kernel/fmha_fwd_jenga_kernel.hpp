@@ -52,9 +52,8 @@ struct FmhaFwdJengaKernel
     static constexpr auto BiasEnum          = FmhaPipeline::BiasEnum;
     static constexpr bool kStoreLSE         = FmhaPipeline::kStoreLSE;
     static constexpr bool kHasDropout       = FmhaPipeline::kHasDropout;
-    static constexpr auto QScaleEnum        = FmhaPipeline::Problem::QScaleEnum;
     static constexpr bool kDoFp8StaticQuant =
-        (QScaleEnum != ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE);
+        (FmhaPipeline::Problem::QScaleEnum != ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE);
     static_assert(!FmhaPipeline::kIsGroupMode,
                   "Jenga sparse attention currently supports batch mode only.");
     static_assert(BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
@@ -62,10 +61,8 @@ struct FmhaFwdJengaKernel
     static_assert(!kStoreLSE, "Jenga sparse attention does not support LSE output.");
     static_assert(!kHasDropout, "Jenga sparse attention does not support dropout.");
     static_assert(!kHasLogitsSoftCap, "Jenga sparse attention does not support logits soft-cap.");
-    // P1 plumbing scaffold: scale-buffer Kargs + pipeline param are wired below
-    // but the actual int8 GEMM arithmetic is gated until P2/P3 lands.
     static_assert(!kDoFp8StaticQuant,
-                  "jenga: FP8 static quant not supported yet (P1 scaffold only)");
+                  "Jenga sparse attention does not support FP8 static quantization yet.");
 
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
@@ -118,23 +115,9 @@ struct FmhaFwdJengaKernel
         ck_tile::GenericAttentionMaskEnum mask_type;
     };
 
-    // P1 plumbing scaffold (perf-neutral): descale pointers + per-block scale
-    // sizes mirror the sage 49 contract. When QScaleEnum == NO_SCALE (current
-    // codegen path) this base is replaced by FmhaFwdEmptyKargs<2>, so no ABI
-    // change vs the pre-scaffold layout.
-    struct FmhaFwdQuantKargs
-    {
-        const void* q_descale_ptr           = nullptr;
-        const void* k_descale_ptr           = nullptr;
-        const void* v_descale_ptr           = nullptr;
-        ck_tile::index_t block_scale_size_q = ck_tile::index_t{FmhaPipeline::kBlockScaleSizeQ};
-        ck_tile::index_t block_scale_size_k = ck_tile::index_t{FmhaPipeline::kBlockScaleSizeK};
-    };
-
     struct FmhaFwdBatchModeKargs
         : FmhaFwdCommonKargs,
-          std::conditional_t<kHasMask, FmhaFwdMaskKargs, FmhaFwdEmptyKargs<1>>,
-          std::conditional_t<kDoFp8StaticQuant, FmhaFwdQuantKargs, FmhaFwdEmptyKargs<2>>
+          std::conditional_t<kHasMask, FmhaFwdMaskKargs, FmhaFwdEmptyKargs<1>>
     {
         ck_tile::index_t batch_stride_q;
         ck_tile::index_t batch_stride_k;
@@ -179,12 +162,7 @@ struct FmhaFwdJengaKernel
                                         ck_tile::index_t batch_stride_o,
                                         ck_tile::index_t window_size_left,
                                         ck_tile::index_t window_size_right,
-                                        ck_tile::index_t mask_type,
-                                        // P1 plumbing scaffold: descale buffers.
-                                        // Defaults preserve NO_SCALE callers.
-                                        const void* q_descale_ptr = nullptr,
-                                        const void* k_descale_ptr = nullptr,
-                                        const void* v_descale_ptr = nullptr)
+                                        ck_tile::index_t mask_type)
     {
         // 256-bool LDS staging caps N_k <= 256 per Q-tile.
         // For kN0=64 this means seqlen_k <= 16384.
@@ -216,7 +194,6 @@ struct FmhaFwdJengaKernel
                      nhead_stride_v,
                      nhead_stride_o}, // FmhaFwdCommonKargs
                     {},               // FmhaFwdMaskKargs or FmhaFwdEmptyKargs<1>
-                    {},               // FmhaFwdQuantKargs or FmhaFwdEmptyKargs<2> (P1 scaffold)
                     batch_stride_q,
                     batch_stride_k,
                     batch_stride_v,
@@ -227,21 +204,6 @@ struct FmhaFwdJengaKernel
             kargs.window_size_left  = window_size_left;
             kargs.window_size_right = window_size_right;
             kargs.mask_type         = static_cast<ck_tile::GenericAttentionMaskEnum>(mask_type);
-        }
-        if constexpr(kDoFp8StaticQuant)
-        {
-            // P1 scaffold: kernel-side static_assert above currently blocks
-            // this branch from being instantiated. P2/P3 will remove the
-            // assert and start consuming the descale buffers.
-            kargs.q_descale_ptr = q_descale_ptr;
-            kargs.k_descale_ptr = k_descale_ptr;
-            kargs.v_descale_ptr = v_descale_ptr;
-        }
-        else
-        {
-            (void)q_descale_ptr;
-            (void)k_descale_ptr;
-            (void)v_descale_ptr;
         }
         return kargs;
     }
@@ -458,18 +420,6 @@ struct FmhaFwdJengaKernel
 
         BlockIndices block_indices{i_batch, i_nhead, i_nhead / kargs.nhead_ratio_qk};
 
-        // P1 plumbing scaffold: forward optional descale ptrs when present.
-        // For NO_SCALE (current codegen) the pipeline sees nullptr and the
-        // (void)-cast pattern drops them — no codegen / perf delta.
-        const float* q_desc_fwd = nullptr;
-        const float* k_desc_fwd = nullptr;
-        const float* v_desc_fwd = nullptr;
-        if constexpr(kDoFp8StaticQuant)
-        {
-            q_desc_fwd = reinterpret_cast<const float*>(kargs.q_descale_ptr);
-            k_desc_fwd = reinterpret_cast<const float*>(kargs.k_descale_ptr);
-            v_desc_fwd = reinterpret_cast<const float*>(kargs.v_descale_ptr);
-        }
         auto o_acc_tile = FmhaPipeline{}(q_dram_window,
                                          k_dram_window,
                                          v_dram_window,
@@ -479,10 +429,7 @@ struct FmhaFwdJengaKernel
                                          variant,
                                          variant_params,
                                          block_indices,
-                                         smem_ptr,
-                                         q_desc_fwd,
-                                         k_desc_fwd,
-                                         v_desc_fwd);
+                                         smem_ptr);
 
         // O DRAM and O DRAM window
         auto o_dram = [&]() {

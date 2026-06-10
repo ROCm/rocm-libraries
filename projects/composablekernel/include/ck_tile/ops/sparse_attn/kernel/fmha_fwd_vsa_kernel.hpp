@@ -60,9 +60,8 @@ struct FmhaFwdVSAKernel
     static_assert(!kStoreLSE, "VSA sparse attention does not support LSE output.");
     static_assert(!kHasDropout, "VSA sparse attention does not support dropout.");
     static_assert(!kHasLogitsSoftCap, "VSA sparse attention does not support logits soft-cap.");
-    // P1 plumbing scaffold: scale-buffer Kargs + pipeline param are wired below
-    // but the actual int8 GEMM arithmetic is gated until P2/P3 lands.
-    static_assert(!kDoFp8StaticQuant, "vsa: FP8 static quant not supported yet (P1 scaffold only)");
+    static_assert(!kDoFp8StaticQuant,
+                  "VSA sparse attention does not support FP8 static quantization yet.");
 
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
@@ -116,23 +115,9 @@ struct FmhaFwdVSAKernel
         ck_tile::GenericAttentionMaskEnum mask_type;
     };
 
-    // P1 plumbing scaffold (perf-neutral): descale pointers + per-block scale
-    // sizes mirror the sage 49 contract. When QScaleEnum == NO_SCALE (current
-    // codegen path) this base is replaced by FmhaFwdEmptyKargs<2>, so no ABI
-    // change vs the pre-scaffold layout.
-    struct FmhaFwdQuantKargs
-    {
-        const void* q_descale_ptr           = nullptr;
-        const void* k_descale_ptr           = nullptr;
-        const void* v_descale_ptr           = nullptr;
-        ck_tile::index_t block_scale_size_q = ck_tile::index_t{FmhaPipeline::kBlockScaleSizeQ};
-        ck_tile::index_t block_scale_size_k = ck_tile::index_t{FmhaPipeline::kBlockScaleSizeK};
-    };
-
     struct FmhaFwdBatchModeKargs
         : FmhaFwdCommonKargs,
-          std::conditional_t<kHasMask, FmhaFwdMaskKargs, FmhaFwdEmptyKargs<1>>,
-          std::conditional_t<kDoFp8StaticQuant, FmhaFwdQuantKargs, FmhaFwdEmptyKargs<2>>
+          std::conditional_t<kHasMask, FmhaFwdMaskKargs, FmhaFwdEmptyKargs<1>>
     {
         ck_tile::index_t batch_stride_q;
         ck_tile::index_t batch_stride_k;
@@ -177,12 +162,7 @@ struct FmhaFwdVSAKernel
                                                   ck_tile::index_t batch_stride_o,
                                                   ck_tile::index_t window_size_left,
                                                   ck_tile::index_t window_size_right,
-                                                  ck_tile::index_t mask_type,
-                                                  // P1 plumbing scaffold: descale buffers.
-                                                  // Defaults preserve NO_SCALE callers.
-                                                  const void* q_descale_ptr = nullptr,
-                                                  const void* k_descale_ptr = nullptr,
-                                                  const void* v_descale_ptr = nullptr)
+                                                  ck_tile::index_t mask_type)
     {
         Kargs kargs{{q_ptr,
                      k_ptr,
@@ -210,7 +190,6 @@ struct FmhaFwdVSAKernel
                      nhead_stride_v,
                      nhead_stride_o}, // FmhaFwdCommonKargs
                     {},               // FmhaFwdMaskKargs or FmhaFwdEmptyKargs<1>
-                    {},               // FmhaFwdQuantKargs or FmhaFwdEmptyKargs<2> (P1 scaffold)
                     batch_stride_q,
                     batch_stride_k,
                     batch_stride_v,
@@ -221,21 +200,6 @@ struct FmhaFwdVSAKernel
             kargs.window_size_left  = window_size_left;
             kargs.window_size_right = window_size_right;
             kargs.mask_type         = static_cast<ck_tile::GenericAttentionMaskEnum>(mask_type);
-        }
-        if constexpr(kDoFp8StaticQuant)
-        {
-            // P1 scaffold: kernel-side static_assert above currently blocks
-            // this branch from being instantiated. P2/P3 will remove the
-            // assert and start consuming the descale buffers.
-            kargs.q_descale_ptr = q_descale_ptr;
-            kargs.k_descale_ptr = k_descale_ptr;
-            kargs.v_descale_ptr = v_descale_ptr;
-        }
-        else
-        {
-            (void)q_descale_ptr;
-            (void)k_descale_ptr;
-            (void)v_descale_ptr;
         }
         return kargs;
     }
@@ -287,7 +251,8 @@ struct FmhaFwdVSAKernel
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         // allocate LDS
-        __shared__ char smem_ptr[GetSmemSize()];
+        // Extra LDS for staging block_relation_onehot (256 bools); keep 4B alignment for LDS loads.
+        __shared__ char smem_ptr[GetSmemSize() + 256 * sizeof(int)];
 
         // divide problem
         const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
@@ -434,18 +399,6 @@ struct FmhaFwdVSAKernel
 
         BlockIndices block_indices{i_batch, i_nhead, i_nhead / kargs.nhead_ratio_qk};
 
-        // P1 plumbing scaffold: forward optional descale ptrs when present.
-        // For NO_SCALE (current codegen) the pipeline sees nullptr and the
-        // (void)-cast pattern drops them — no codegen / perf delta.
-        const float* q_desc_fwd = nullptr;
-        const float* k_desc_fwd = nullptr;
-        const float* v_desc_fwd = nullptr;
-        if constexpr(kDoFp8StaticQuant)
-        {
-            q_desc_fwd = reinterpret_cast<const float*>(kargs.q_descale_ptr);
-            k_desc_fwd = reinterpret_cast<const float*>(kargs.k_descale_ptr);
-            v_desc_fwd = reinterpret_cast<const float*>(kargs.v_descale_ptr);
-        }
         auto o_acc_tile = FmhaPipeline{}(q_dram_window,
                                          k_dram_window,
                                          v_dram_window,
@@ -456,10 +409,7 @@ struct FmhaFwdVSAKernel
                                          variant,
                                          variant_params,
                                          block_indices,
-                                         smem_ptr,
-                                         q_desc_fwd,
-                                         k_desc_fwd,
-                                         v_desc_fwd);
+                                         smem_ptr);
 
         // O DRAM and O DRAM window
         auto o_dram = [&]() {

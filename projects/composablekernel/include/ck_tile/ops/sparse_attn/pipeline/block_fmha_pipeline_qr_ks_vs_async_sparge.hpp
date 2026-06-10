@@ -87,12 +87,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
     static constexpr bool kHasDropout       = Problem::kHasDropout;
     static constexpr auto QScaleEnum        = Problem::QScaleEnum;
 
-    // P1 plumbing scaffold (perf-neutral). Sage-style per-block quant scale
-    // granularity, kept static-only here so kargs / host can size descale
-    // buffers consistently with sage 49. Only BLOCKSCALE is wired for sparge;
-    // other QScaleEnum values fall back to 128 (matches sage default tile size).
-    // Actual int8 GEMM path is gated by the kDoFp8StaticQuant static_assert in
-    // the kernel wrapper; arithmetic itself lands in P2/P3.
+    // Sage-style per-block quant scale granularity (per-Q-block / per-K-block),
+    // so host and kargs size the descale buffers consistently with sage 49.
     static constexpr index_t kBlockScaleSizeQ = kM0;
     static constexpr index_t kBlockScaleSizeK = kN0;
 
@@ -205,7 +201,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                // BLOCKSCALE path (Q/K=int8); under fp16 NO_SCALE everything
                // is no-op (q_descale_value defaults to 1.0f and the
                // k_descale_ptr load is gated by QDataType=int8_t below).
-               // V is fp16 in S3c2, so v_descale_ptr stays unused.
+               // V is fp16, so v_descale_ptr stays unused.
                const float* q_descale_ptr             = nullptr,
                const float* k_descale_ptr             = nullptr,
                const float* v_descale_ptr             = nullptr,

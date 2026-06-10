@@ -7,8 +7,7 @@
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
-// PVSkipMode enum lives in the sparge pipeline header; pull it in so the
-// kernel template arg can name it (3-way enum: kNone / kPerWave / kPerBlock).
+// PVSkipMode enum is defined here.
 #include "ck_tile/ops/sparse_attn/pipeline/block_fmha_pipeline_qr_ks_vs_async_sparge.hpp"
 
 #include <string>
@@ -36,8 +35,7 @@ struct FmhaFwdSpargeKernel
     static_assert(kBlockPerCu > 0);
     static constexpr ck_tile::index_t kBlockPerCuInput = FmhaPipeline::Problem::kBlockPerCu;
     static constexpr PVSkipMode kPVSkipMode            = kPVSkipMode_;
-    // Legacy alias preserved: any non-kNone mode is "PV-skip enabled".
-    static constexpr bool kEnablePVSkip = (kPVSkipMode_ != PVSkipMode::kNone);
+    static constexpr bool kEnablePVSkip                = (kPVSkipMode_ != PVSkipMode::kNone);
 
     using QDataType    = ck_tile::remove_cvref_t<typename FmhaPipeline::QDataType>;
     using KDataType    = ck_tile::remove_cvref_t<typename FmhaPipeline::KDataType>;
@@ -68,13 +66,9 @@ struct FmhaFwdSpargeKernel
     static_assert(!kStoreLSE, "Sparge sparse attention does not support LSE output.");
     static_assert(!kHasDropout, "Sparge sparse attention does not support dropout.");
     static_assert(!kHasLogitsSoftCap, "Sparge sparse attention does not support logits soft-cap.");
-    // Only NO_SCALE and BLOCKSCALE QScaleEnum are wired for sparge. BLOCKSCALE
-    // matches sage 49 granularity (per-Q-block, per-K-block scalar descale);
-    // other enum values (PERTENSOR / KV_BLOCKSCALE / MX) intentionally stay
-    // unsupported so an unintended scale layout fails fast at compile time
-    // rather than silently picking up the wrong contract. The pipeline body
-    // currently (void)-casts the descale ptrs, so BLOCKSCALE instantiations
-    // are bit-identical to NO_SCALE until the int8 GEMM swap lands.
+    // BLOCKSCALE matches sage 49 granularity (per-Q-block, per-K-block scalar
+    // descale); other enum values (PERTENSOR / KV_BLOCKSCALE / MX) fail fast at
+    // compile time rather than silently picking up the wrong scale contract.
     static_assert(QScaleEnum == ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE ||
                       QScaleEnum == ck_tile::BlockAttentionQuantScaleEnum::BLOCKSCALE,
                   "sparge: only NO_SCALE and BLOCKSCALE QScaleEnum are supported.");
@@ -141,10 +135,8 @@ struct FmhaFwdSpargeKernel
         ck_tile::GenericAttentionMaskEnum mask_type;
     };
 
-    // P1 plumbing scaffold (perf-neutral): descale pointers + per-block scale
-    // sizes mirror the sage 49 contract. When QScaleEnum == NO_SCALE (current
-    // codegen path) this base is replaced by FmhaFwdEmptyKargs<2>, so no ABI
-    // change vs the pre-scaffold layout.
+    // Descale pointers + per-block scale sizes mirror the sage 49 contract.
+    // When QScaleEnum == NO_SCALE this base is replaced by FmhaFwdEmptyKargs<2>.
     struct FmhaFwdQuantKargs
     {
         const void* q_descale_ptr           = nullptr;
@@ -209,8 +201,7 @@ struct FmhaFwdSpargeKernel
                                                   const float* pv_threshold_per_head = nullptr,
                                                   const int* head_remap_ptr          = nullptr,
                                                   ck_tile::index_t nhead_in_launch   = 0,
-                                                  // P1 plumbing scaffold: descale buffers.
-                                                  // Defaults preserve NO_SCALE callers.
+                                                  // descale buffers; default-null for NO_SCALE
                                                   const void* q_descale_ptr = nullptr,
                                                   const void* k_descale_ptr = nullptr,
                                                   const void* v_descale_ptr = nullptr)
@@ -245,7 +236,7 @@ struct FmhaFwdSpargeKernel
                      nhead_stride_v,
                      nhead_stride_o}, // FmhaFwdCommonKargs
                     {},               // FmhaFwdMaskKargs or FmhaFwdEmptyKargs<1>
-                    {},               // FmhaFwdQuantKargs or FmhaFwdEmptyKargs<2> (P1 scaffold)
+                    {},               // FmhaFwdQuantKargs or FmhaFwdEmptyKargs<2>
                     batch_stride_q,
                     batch_stride_k,
                     batch_stride_v,
@@ -259,8 +250,6 @@ struct FmhaFwdSpargeKernel
         }
         if constexpr(kDoFp8StaticQuant)
         {
-            // BLOCKSCALE compile-path is live; pipeline still no-ops on the
-            // descale buffers until the int8 GEMM swap lands.
             kargs.q_descale_ptr = q_descale_ptr;
             kargs.k_descale_ptr = k_descale_ptr;
             kargs.v_descale_ptr = v_descale_ptr;

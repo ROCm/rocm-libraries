@@ -6,11 +6,9 @@
 //
 // Scope:
 //   - Q and K are int8_t (GEMM0 fires mfma_i32_32x32x16_i8); V/P/O stay fp16.
-//   - Dequant is stubbed: pipeline applies cast(s_acc, fp32) * scale_s only;
-//     q_descale / k_descale buffers are uploaded as unit-scale (1.0f) by the
-//     runner, so MaxDiff vs the fp16 reference is expected to be HUGE. This
-//     milestone (S3c1) proves the int8 GEMM0 path compiles, launches, fires
-//     mfma_i32 and the VGPR drops; real per-block dequant lands in S3c2.
+//   - Per-block dequant: pipeline rescales the int32 s_acc tile by
+//     q_descale * k_descale (per-Q-block / per-K-block scalars from the runner)
+//     before softmax. GEMM1 (P*V) runs in fp16.
 //
 // Tile shape mirrors the codegen entry for sparge bm0=64, hdim=128 (the entry
 // selected by the test_sparge.cpp BLKQ=64 path):
@@ -70,9 +68,8 @@ using sint8_trait = ck_tile::TileFmhaTraits<true,  // kPadSeqLenQ
                                             false>; // kIsVRowMajorSkip
 
 using sint8_variant = ck_tile::ComposedAttention<0, CK_TILE_FMHA_FWD_FAST_EXP2>;
-// Smoke recipe default is -mask=0 (no_mask). Locking to NoMask keeps the
-// scaffold's launch path single-binary; the codegen dispatcher handles other
-// mask shapes when -qscale=n is used.
+// Locked to NoMask (recipe default -mask=0) to keep this a single binary; the
+// codegen dispatcher handles other mask shapes on the -qscale=n path.
 using sint8_mask = ck_tile::GenericAttentionMask<false>;
 
 using sint8_problem = ck_tile::BlockFmhaPipelineProblem<

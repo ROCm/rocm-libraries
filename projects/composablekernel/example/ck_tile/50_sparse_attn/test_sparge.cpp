@@ -155,14 +155,11 @@ auto create_args(int argc, char* argv[])
                 "Intended with -mask=t -topk=1.0 (sparge degenerates to dense+causal).")
         .insert("qscale",
                 "n",
-                "Quant-plumbing scaffold (sage-style Q/K/V static quant). "
-                "'n' = no descale buffers, ptr=nullptr (default; bit-identical to "
-                "pre-scaffold; -pipeline=vsa goes through codegen NO_SCALE path). "
-                "'bs' = block-scale mode, alloc unit-scale (= 1.0f) buffers and "
-                "pass pointers through Kargs. For -pipeline=vsa + fp16/hdim=128/bm0=64 "
-                "this routes to the hand-written BLOCKSCALE oneshot "
-                "(kDoFp8StaticQuant=true) — pipeline body still (void)-casts the "
-                "descale ptrs, so results stay bit-identical to NO_SCALE.");
+                "sage-style Q/K static quant. "
+                "'n' = fp16, no descale (default; -pipeline=vsa uses the NO_SCALE path). "
+                "'bs' = int8 BLOCKSCALE. For -pipeline=vsa + fp16/hdim=128/bm0=64 this "
+                "routes to the hand-written int8 oneshot (Q/K int8 + per-block dequant, "
+                "V fp16); other shapes fall back to the NO_SCALE path.");
 
     bool result = arg_parser.parse(argc, argv);
     return std::make_tuple(result, arg_parser);
@@ -202,10 +199,9 @@ bool run_test(const ck_tile::ArgParser& arg_parser)
     int cross_ref             = arg_parser.get_int("cross_ref");
     std::string qscale_str    = arg_parser.get_str("qscale");
 
-    // P1 quant plumbing scaffold dispatch:
-    //   'n'  -> qscale_bs = false, descale ptrs = nullptr (default, bit-identical to pre-scaffold)
-    //   'bs' -> qscale_bs = true,  alloc unit-scale (= 1.0f) buffers and pass pointers
-    // Anything else is a CLI error.
+    // -qscale dispatch:
+    //   'n'  -> fp16, no descale (descale ptrs stay nullptr)
+    //   'bs' -> int8 BLOCKSCALE, alloc per-block descale buffers and pass pointers
     bool qscale_bs = false;
     if(qscale_str == "n")
         qscale_bs = false;
@@ -406,13 +402,11 @@ bool run_test(const ck_tile::ArgParser& arg_parser)
     stream_cfg.cold_niters_ = warmup;
     stream_cfg.nrepeat_     = repeat;
 
-    // Quant-plumbing scaffold: optional unit-scale (= 1.0f) descale buffers.
-    // Per-block granularity matches the pipeline's traits: kBlockScaleSizeQ=kM0 (=BLKQ),
-    // kBlockScaleSizeK=kN0 (=BLKK). Buffer shape is [batch, nhead, ceil(seqlen/blk)] floats.
-    // -qscale=bs + -pipeline=vsa + fp16/hdim=128/bm0=64 routes to the
-    // hand-written BLOCKSCALE oneshot (kDoFp8StaticQuant=true); the pipeline
-    // body still (void)-casts the descale ptrs at this milestone, so the
-    // unit-scale buffers exercise host plumbing + Kargs forwarding only.
+    // Per-block descale buffers (only allocated under -qscale=bs). Granularity
+    // matches the pipeline traits: kBlockScaleSizeQ=kM0 (=BLKQ), kBlockScaleSizeK=kN0
+    // (=BLKK); buffer shape [batch, nhead, ceil(seqlen/blk)] floats. -qscale=bs +
+    // -pipeline=vsa + fp16/hdim=128/bm0=64 routes to the hand-written int8
+    // BLOCKSCALE oneshot, which consumes these scales for per-block dequant.
     ck_tile::DeviceMem q_descale_dev;
     ck_tile::DeviceMem k_descale_dev;
     ck_tile::DeviceMem v_descale_dev;
@@ -502,10 +496,6 @@ bool run_test(const ck_tile::ArgParser& arg_parser)
         attn_args.window_size_left          = mask.left;
         attn_args.window_size_right         = mask.right;
         attn_args.mask_type                 = static_cast<ck_tile::index_t>(mask.type);
-        // P1 plumbing scaffold: descale buffers (nullptr unless -qscale=bs).
-        attn_args.q_descale_ptr = q_descale_ptr;
-        attn_args.k_descale_ptr = k_descale_ptr;
-        attn_args.v_descale_ptr = v_descale_ptr;
 
         avg_ms = sparge_jenga_fwd(bmap_traits, bmap_args, attn_traits, attn_args, stream_cfg);
     }
@@ -560,7 +550,7 @@ bool run_test(const ck_tile::ArgParser& arg_parser)
         attn_args.window_size_left  = mask.left;
         attn_args.window_size_right = mask.right;
         attn_args.mask_type         = static_cast<ck_tile::index_t>(mask.type);
-        // P1 plumbing scaffold: descale buffers (nullptr unless -qscale=bs).
+        // descale buffers (nullptr unless -qscale=bs)
         attn_args.q_descale_ptr = q_descale_ptr;
         attn_args.k_descale_ptr = k_descale_ptr;
         attn_args.v_descale_ptr = v_descale_ptr;
@@ -583,7 +573,7 @@ bool run_test(const ck_tile::ArgParser& arg_parser)
             }
             else
             {
-                // S3c2: real host-side per-block absmax/127 quantization.
+                // Real host-side per-block absmax/127 quantization.
                 // For each (batch, head, q_blk) chunk of BLKQ rows compute
                 //   q_descale[blk] = absmax(fp16_Q[blk]) / 127
                 //   int8_Q[blk]    = clip(round(fp16_Q[blk] / q_descale[blk]), -127, 127)
@@ -731,85 +721,6 @@ bool run_test(const ck_tile::ArgParser& arg_parser)
     // ---- copy results back ----
     o_dev.FromDevice(output_host.data());
     block_map_dev.FromDevice(block_map_host.data());
-
-#ifdef P2_SCALE_DUMP
-    // Task #180 host-side dump of k_scale_lut + pooled_k[0,0,0,:] for cross-check.
-    // Compiled only when -DP2_SCALE_DUMP=1 passed; reverted after measurement.
-    {
-        const auto layout_dump = sparge_blockmap_compute_workspace_layout(bmap_traits, bmap_args);
-        const int kN0_dump     = (hdim_q == 128) ? 128 : ((hdim_q == 64) ? 256 : 0);
-        const int N_k_dump = (kN0_dump > 0) ? ck_tile::integer_divide_ceil(seqlen_k, kN0_dump) : 0;
-        const size_t total_blocks_dump = static_cast<size_t>(batch) * nhead_k * N_k_dump;
-        std::vector<float> k_scale_h(total_blocks_dump, 0.f);
-        std::vector<uint16_t> pooled_first_d(hdim_q, 0);
-        auto* ws_base = static_cast<char*>(kstats_ws_dev.GetDeviceBuffer());
-        (void)hipMemcpy(k_scale_h.data(),
-                        ws_base + layout_dump.k_scale_offset,
-                        total_blocks_dump * sizeof(float),
-                        hipMemcpyDeviceToHost);
-        (void)hipMemcpy(pooled_first_d.data(),
-                        ws_base + layout_dump.pooled_k_offset,
-                        hdim_q * sizeof(uint16_t),
-                        hipMemcpyDeviceToHost);
-
-        float smin   = std::numeric_limits<float>::infinity();
-        float smax   = -std::numeric_limits<float>::infinity();
-        double sum   = 0.0;
-        size_t zeros = 0, infnan = 0;
-        for(size_t i = 0; i < total_blocks_dump; ++i)
-        {
-            float v = k_scale_h[i];
-            if(std::isnan(v) || std::isinf(v))
-            {
-                ++infnan;
-                continue;
-            }
-            if(v == 0.f)
-                ++zeros;
-            if(v < smin)
-                smin = v;
-            if(v > smax)
-                smax = v;
-            sum += v;
-        }
-        float mean = (total_blocks_dump > 0) ? static_cast<float>(sum / total_blocks_dump) : 0.f;
-
-        std::cout << "\n[P2_SCALE_DUMP] prec=" << bmap_traits.data_type << " N_k=" << N_k_dump
-                  << " total=" << total_blocks_dump << " min=" << smin << " max=" << smax
-                  << " mean=" << mean << " zeros=" << zeros << " inf_nan=" << infnan << "\n";
-        std::cout << "[P2_SCALE_DUMP] first8:";
-        for(size_t i = 0; i < std::min<size_t>(8, total_blocks_dump); ++i)
-            std::cout << " " << k_scale_h[i];
-        std::cout << "\n";
-
-        // Host cross-check on block [0,0,0]: absmax(pooled_k_mean[0,0,0,:])/127
-        float pmax = 0.f;
-        for(int d = 0; d < hdim_q; ++d)
-        {
-            float fv;
-            if(bmap_traits.data_type == "fp16")
-            {
-                ck_tile::half_t h;
-                std::memcpy(&h, &pooled_first_d[d], sizeof(uint16_t));
-                fv = ck_tile::type_convert<float>(h);
-            }
-            else
-            {
-                ck_tile::bf16_t b;
-                std::memcpy(&b, &pooled_first_d[d], sizeof(uint16_t));
-                fv = ck_tile::type_convert<float>(b);
-            }
-            float a = fv < 0.f ? -fv : fv;
-            if(a > pmax)
-                pmax = a;
-        }
-        float host_val   = pmax / 127.0f;
-        float kernel_val = k_scale_h[0];
-        std::cout << "[P2_SCALE_DUMP] xcheck block[0,0,0] kernel=" << kernel_val
-                  << " host(pooled_k_mean/127)=" << host_val
-                  << " abs_diff=" << std::abs(kernel_val - host_val) << "\n";
-    }
-#endif
 
     // ---- optional raw output dump (for bit-identical baseline comparison) ----
     if(!dump_o_path.empty())
