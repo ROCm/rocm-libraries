@@ -34,6 +34,17 @@ test_hybrid: test_hybrid.cpp $(HEADERS) mxfp6_lds_hybrid.hpp
 test_hybrid_grid: test_hybrid_grid.cpp $(HEADERS) mxfp6_lds_hybrid.hpp
 	$(HIPCC) $(HIPFLAGS) $< -o $@
 
+# drip-A variant: A's 9 buffer_loads dripped across the MFMA window (vs bursted after the
+# barrier) — removes the top ATT stall (A buffer_load backpressure). +5.5% over no-drip
+# hybrid, +21.9% over pure-LDS baseline @8192^3. HARD_WAIT=1 = wait_vmcnt(0) before each
+# DB barrier (hard A-landing guarantee, also de-pollutes the shared vmcnt -> faster).
+test_dripA: test_dripA.cpp $(HEADERS) mxfp6_lds_hybrid.hpp
+	$(HIPCC) $(HIPFLAGS) $< -o $@
+
+# single-dispatch profiling driver for the hybrid kernel (PMC/ATT/RCV capture).
+profile_hybrid: profile_hybrid.cpp $(HEADERS) mxfp6_lds_hybrid.hpp
+	$(HIPCC) $(HIPFLAGS) $< -o $@
+
 # occ2 compile-gate + bench driver (Phase 1). Instantiates the production lds_gemm_db
 # with MIN_OCC=2 + 8-acc tile (128x256). Does NOT touch test_lds.cpp / mxfp6_lds.hpp.
 test_lds_occ2: test_lds_occ2.cpp $(HEADERS)
