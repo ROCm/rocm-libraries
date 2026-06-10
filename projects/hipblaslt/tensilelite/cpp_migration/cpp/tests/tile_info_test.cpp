@@ -154,3 +154,101 @@ TEST(TileInfoAbsolute, AbB16AKnownValues) {
       {1, 0}, {1, 1}, {5, 0}, {5, 1}, {9, 0}, {9, 1}, {13, 0}, {13, 1}};
   EXPECT_EQ(q.globalMmaTilesForSubtile(1, 0), expected);
 }
+
+// ---------------------------------------------------------------------------
+// GR / LR offset-assignment plans (now C++-only for every AB geometry).
+//
+// These pin the scalar offset-assignment math the Python emitter consumes
+// (SubtileGREmit.graTileAssignment / SubtileLREmit.lraTileAssignment) for
+// BF16, FP4, FP8, the 2x2 tile-shape variants, and the column-major TLU1
+// shapes — the geometries the deleted Python ``_legacy`` planners covered.
+// The emitted rocisa strings for these same plans are locked end-to-end by
+// Tensile/Tests/unit/test_subtileOffsetAssignCpp.py against a golden snapshot.
+// ---------------------------------------------------------------------------
+
+// gfx950 LDS row bank size = archCaps["LDSBankCount"](64) * LDSBankWidth(4).
+static constexpr long kLdsRowBankSize = 256;
+
+TEST(TileInfoOffsetAssignPlan, GrLrPlansMatchReference) {
+  for (const auto& np : query_pairs()) {
+    for (const std::string tc : {"A", "B"}) {
+      ABTileInfoQuery q = make_query(np.pair, tc, np.kernel);
+      SCOPED_TRACE(np.name + "." + tc);
+      const long subK = q.subIterKBytes();
+      if (subK <= 0) continue;  // degenerate K-tiling; offset assign undefined
+      const long mWavesM = np.kernel.miWaveGroup[0];
+
+      // GR divides waveSize by blockSize, so guard a positive blockSize.
+      if (subK / q.gr.loadWidth > 0) {
+        GROffsetAssignPlan g = q.grOffsetAssignPlan(kLdsRowBankSize);
+        RefGRPlan r = ref_gr_offset_assign_plan(q, kLdsRowBankSize);
+        EXPECT_EQ(g.subIterKBytes, r.subIterKBytes);
+        EXPECT_EQ(g.loadWidth, r.loadWidth);
+        EXPECT_EQ(g.blockSize, r.blockSize);
+        EXPECT_EQ(g.numRowsPerLDSBanks, r.numRowsPerLDSBanks);
+        EXPECT_EQ(g.numRowsPerWave, r.numRowsPerWave);
+        EXPECT_EQ(g.partitionOffset, r.partitionOffset);
+        EXPECT_EQ(g.partitionMode, r.partitionMode);
+        EXPECT_EQ(g.subtileSizeElems, r.subtileSizeElems);
+        EXPECT_EQ(g.grAdvanceOffset, r.grAdvanceOffset);
+        EXPECT_EQ(g.bpeBits, r.bpeBits);
+        EXPECT_EQ(g.grSubtileRowOffset, r.grSubtileRowOffset);
+        EXPECT_EQ(g.sStride, r.sStride);
+        EXPECT_EQ(g.numGRPerSubtile, r.numGRPerSubtile);
+        EXPECT_DOUBLE_EQ(g.loadRatioGR, r.loadRatioGR);
+        EXPECT_EQ(g.isFp8, r.isFp8);
+      }
+
+      LROffsetAssignPlan l = q.lrOffsetAssignPlan(kLdsRowBankSize, mWavesM);
+      RefLRPlan rl = ref_lr_offset_assign_plan(q, kLdsRowBankSize, mWavesM);
+      EXPECT_EQ(l.subIterKBytes, rl.subIterKBytes);
+      EXPECT_EQ(l.loadWidthLR, rl.loadWidthLR);
+      EXPECT_EQ(l.loadWidthGR, rl.loadWidthGR);
+      EXPECT_EQ(l.blockSize, rl.blockSize);
+      EXPECT_EQ(l.numRowsPerLDSBanks, rl.numRowsPerLDSBanks);
+      EXPECT_EQ(l.miM, rl.miM);
+      EXPECT_EQ(l.numMFMACols, rl.numMFMACols);
+      EXPECT_EQ(l.partitionOffset, rl.partitionOffset);
+      EXPECT_EQ(l.sInterval, rl.sInterval);
+      EXPECT_EQ(l.mWavesM, rl.mWavesM);
+      EXPECT_EQ(l.wavePartMode, rl.wavePartMode);
+      EXPECT_DOUBLE_EQ(l.loadRatioGR, rl.loadRatioGR);
+      EXPECT_EQ(l.isFp8, rl.isFp8);
+    }
+  }
+}
+
+// BF16 (bpe 2): row-major DPP pair-swap path; not the FP8 swizzle.
+TEST(TileInfoOffsetAssignPlan, Bf16Selectors) {
+  ABTileInfoQuery q = make_query(AB_B16(), "A", make_kernel(256, 128, 128));
+  GROffsetAssignPlan g = q.grOffsetAssignPlan(kLdsRowBankSize);
+  EXPECT_FALSE(g.isFp8);
+  EXPECT_EQ(g.bpeBits, 16);            // int(8 * 2)
+  EXPECT_EQ(g.partitionMode, 0);       // loadRatioGR == 0.5
+  EXPECT_EQ(g.numGRPerSubtile, 2);     // ceil(1 / 0.5)
+  EXPECT_EQ(q.lrOffsetAssignPlan(kLdsRowBankSize, 4).wavePartMode, 0);
+  EXPECT_FALSE(q.lrOffsetAssignPlan(kLdsRowBankSize, 4).isFp8);
+}
+
+// FP4 (bpe 0.5): shares the BF16 swizzle. Regression guard for the
+// depthUBytes = int(depthU * bpe) rounding (truncating bpe to 0 before the
+// multiply zeroed subIterKBytes and caused a downstream divide-by-zero).
+TEST(TileInfoOffsetAssignPlan, Fp4SubIterKBytesAndSelectors) {
+  ABTileInfoQuery q = make_query(AB_B4(), "A", make_kernel(256, 128, 256));
+  EXPECT_GT(q.subIterKBytes(), 0);
+  GROffsetAssignPlan g = q.grOffsetAssignPlan(kLdsRowBankSize);
+  EXPECT_GT(g.subIterKBytes, 0);
+  EXPECT_FALSE(g.isFp8);               // fp4 is not the fp8 path
+  EXPECT_EQ(g.bpeBits, 4);             // int(8 * 0.5)
+  EXPECT_FALSE(q.lrOffsetAssignPlan(kLdsRowBankSize, 4).isFp8);
+}
+
+// FP8 (bpe 1): the plan selects the distinct block-swap swizzle / wave-rotation
+// path for both GR and LR.
+TEST(TileInfoOffsetAssignPlan, Fp8SelectorSet) {
+  ABTileInfoQuery q = make_query(AB_B8(), "A", make_kernel(256, 128, 128));
+  GROffsetAssignPlan g = q.grOffsetAssignPlan(kLdsRowBankSize);
+  EXPECT_TRUE(g.isFp8);
+  EXPECT_EQ(g.bpeBits, 8);             // int(8 * 1)
+  EXPECT_TRUE(q.lrOffsetAssignPlan(kLdsRowBankSize, 4).isFp8);
+}

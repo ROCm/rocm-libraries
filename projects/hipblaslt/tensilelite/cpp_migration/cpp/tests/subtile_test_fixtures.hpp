@@ -264,4 +264,87 @@ inline RefDsReadPlan ref_single_ds_read_plan(const ABTileInfoQuery& q, long s0,
   return p;
 }
 
+// ---------------------------------------------------------------------------
+// Reference GR / LR offset-assignment plans — independent re-derivation of the
+// documented scalar math (SubtileGREmit/SubtileLREmit legacy emit) from the
+// query's primitive construction state. Locks grOffsetAssignPlan /
+// lrOffsetAssignPlan against the formula, not against themselves. depthUBytes
+// uses int(depthU * bpe) so fp4 (bpe 0.5) rounds the product rather than
+// truncating bpe to 0 before the multiply.
+// ---------------------------------------------------------------------------
+struct RefGRPlan {
+  long subIterKBytes, loadWidth, blockSize, numRowsPerLDSBanks, numRowsPerWave;
+  long partitionOffset;
+  int partitionMode;
+  long subtileSizeElems, grAdvanceOffset, bpeBits, grSubtileRowOffset, sStride,
+      numGRPerSubtile;
+  double loadRatioGR;
+  bool isFp8;
+};
+
+inline RefGRPlan ref_gr_offset_assign_plan(const ABTileInfoQuery& q, long lds) {
+  RefGRPlan p;
+  long depthUBytes = static_cast<long>(q.depthU * q.gr.bpe);
+  p.subIterKBytes = depthUBytes / q.localSubtileGrid.second;
+  p.loadWidth = q.gr.loadWidth;
+  p.blockSize = p.subIterKBytes / p.loadWidth;
+  p.numRowsPerLDSBanks = lds / p.subIterKBytes;
+  p.numRowsPerWave = q.waveSize / p.blockSize;
+  p.partitionOffset =
+      static_cast<long>(q.gr.mmaTileShape.first) * q.localSubtileGrid.first;
+  p.partitionMode = q.loadRatioGR == 1.0   ? 1
+                    : q.loadRatioGR == 0.5 ? 0
+                    : q.loadRatioGR == 2.0 ? 2
+                                           : -1;
+  p.subtileSizeElems =
+      static_cast<long>(q.subtileShape.first) * q.gr.mmaTileShape.first;
+  p.grAdvanceOffset = static_cast<long>(
+      std::ceil(static_cast<double>(p.subtileSizeElems) * q.loadRatioGR));
+  p.bpeBits = static_cast<long>(8 * q.gr.bpe);
+  p.numGRPerSubtile = q.numGRPerSubtile();
+  p.grSubtileRowOffset = static_cast<long>(
+      std::ceil(static_cast<double>(p.numGRPerSubtile) * q.loadRatioGR *
+                static_cast<double>(p.subtileSizeElems)));
+  p.sStride =
+      static_cast<long>(static_cast<double>(p.grSubtileRowOffset) * q.gr.bpe);
+  p.loadRatioGR = q.loadRatioGR;
+  p.isFp8 = (q.gr.bpe == 1.0);
+  return p;
+}
+
+struct RefLRPlan {
+  long subIterKBytes, loadWidthLR, loadWidthGR, blockSize, numRowsPerLDSBanks;
+  long miM, numMFMACols, partitionOffset, sInterval, mWavesM;
+  int wavePartMode;
+  double loadRatioGR;
+  bool isFp8;
+};
+
+inline RefLRPlan ref_lr_offset_assign_plan(const ABTileInfoQuery& q, long lds,
+                                           long mWavesM) {
+  RefLRPlan p;
+  long depthUBytes = static_cast<long>(q.depthU * q.gr.bpe);
+  p.subIterKBytes = depthUBytes / q.localSubtileGrid.second;
+  p.loadWidthLR = q.lr.loadWidth;
+  p.loadWidthGR = q.gr.loadWidth;
+  p.blockSize = p.subIterKBytes / p.loadWidthLR;
+  p.numRowsPerLDSBanks = lds / p.subIterKBytes;
+  p.miM = q.lr.mmaTileShape.first;
+  p.numMFMACols =
+      static_cast<long>(static_cast<double>(q.lr.mmaTileShape.second) *
+                        q.lr.bpe) /
+      p.loadWidthLR;
+  p.partitionOffset =
+      static_cast<long>(q.lr.mmaTileShape.first) * q.localSubtileGrid.first;
+  p.sInterval = p.partitionOffset * p.subIterKBytes;
+  p.mWavesM = mWavesM;
+  p.loadRatioGR = q.loadRatioGR;
+  p.wavePartMode = q.loadRatioGR >= 2.0   ? -1
+                   : q.loadRatioGR == 1.0 ? 1
+                   : q.loadRatioGR == 0.5 ? 0
+                                          : -2;
+  p.isFp8 = (q.lr.bpe == 1.0);
+  return p;
+}
+
 }  // namespace tw_test

@@ -70,9 +70,12 @@ struct SingleDsReadPlan {
 // side). Only integer/derived scalars used as immediates / shift amounts /
 // comment values are computed here.
 //
-// SCOPE: row-major (TLU0) BF16 (bpe == 2). FP8 (bpe == 1, distinct swizzle)
-// and the TLU1 column-major path are intentionally excluded; the Python
-// emitter falls back to its native path for those.
+// SCOPE: all AB (ABTilePair) offset-assignment geometries the Python legacy
+// emitter covered — row-major (TLU0) BF16 (bpe == 2), FP4 (bpe == 0.5, shares
+// the BF16 swizzle), FP8 (bpe == 1, distinct block-swap swizzle), and the
+// column-major TLU1 BF16 variants (which route through the same row-major
+// scalar math). ``isFp8`` selects the FP8 swizzle/rotation branch in the
+// Python emitter; everything else uses the shared row-major branch.
 // ---------------------------------------------------------------------------
 struct GROffsetAssignPlan {
   long subIterKBytes;        // depthUBytes / localSubtileGrid[1]
@@ -91,6 +94,10 @@ struct GROffsetAssignPlan {
   long sStride;              // int(grSubtileRowOffset * bpe)
   long numGRPerSubtile;
   double loadRatioGR;
+  // FP8 (bpe == 1) uses a distinct block-swap + wave-K_group-rotation swizzle
+  // and a K_group rotation in the per-load advance; bf16/fp4 share the
+  // row-major DPP pair-swap path.
+  bool isFp8;
 };
 
 struct LROffsetAssignPlan {
@@ -108,6 +115,9 @@ struct LROffsetAssignPlan {
   //   -1 -> no partition (>= 2.0), 1 -> 1.0, 0 -> 0.5, -2 -> unsupported.
   int wavePartMode;
   double loadRatioGR;
+  // FP8 (bpe == 1) uses the block-swap + wave-de-rotation LR routine
+  // (_lraTileAssignment_fp8); bf16/fp4 use the permlane16 de-swizzle path.
+  bool isFp8;
 };
 
 // ---------------------------------------------------------------------------
@@ -341,8 +351,10 @@ struct ABTileInfoQuery {
   // --- GR / LR offset-assignment math (B16 / TLU0) ---
 
   // depthUBytes / localSubtileGrid[1] — TileInfo.subIterKBytes for the AB case.
+  // Python: depthUBytes = int(depthU * bpe) (fp4 bpe == 0.5 must round the
+  // product, not truncate bpe to 0 before multiplying).
   long subIterKBytes() const {
-    long depthUBytes = depthU * static_cast<long>(gr.bpe);
+    long depthUBytes = static_cast<long>(depthU * gr.bpe);
     return depthUBytes / localSubtileGrid.second;
   }
 
@@ -379,6 +391,7 @@ struct ABTileInfoQuery {
     p.sStride = static_cast<long>(
         static_cast<double>(p.grSubtileRowOffset) * gr.bpe);
     p.loadRatioGR = loadRatioGR;
+    p.isFp8 = (gr.bpe == 1.0);
     return p;
   }
 
@@ -411,6 +424,7 @@ struct ABTileInfoQuery {
       p.wavePartMode = 0;
     else
       p.wavePartMode = -2;
+    p.isFp8 = (lr.bpe == 1.0);
     return p;
   }
 };

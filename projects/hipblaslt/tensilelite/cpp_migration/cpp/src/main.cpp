@@ -350,7 +350,8 @@ void bind_tile_info(nb::module_& t) {
       .def_ro("grSubtileRowOffset", &GROffsetAssignPlan::grSubtileRowOffset)
       .def_ro("sStride", &GROffsetAssignPlan::sStride)
       .def_ro("numGRPerSubtile", &GROffsetAssignPlan::numGRPerSubtile)
-      .def_ro("loadRatioGR", &GROffsetAssignPlan::loadRatioGR);
+      .def_ro("loadRatioGR", &GROffsetAssignPlan::loadRatioGR)
+      .def_ro("isFp8", &GROffsetAssignPlan::isFp8);
 
   nb::class_<LROffsetAssignPlan>(
       t, "LROffsetAssignPlan",
@@ -369,7 +370,8 @@ void bind_tile_info(nb::module_& t) {
       .def_ro("sInterval", &LROffsetAssignPlan::sInterval)
       .def_ro("mWavesM", &LROffsetAssignPlan::mWavesM)
       .def_ro("wavePartMode", &LROffsetAssignPlan::wavePartMode)
-      .def_ro("loadRatioGR", &LROffsetAssignPlan::loadRatioGR);
+      .def_ro("loadRatioGR", &LROffsetAssignPlan::loadRatioGR)
+      .def_ro("isFp8", &LROffsetAssignPlan::isFp8);
 
   nb::class_<ABTileInfoQuery>(t, "ABTileInfoQuery")
       .def(nb::init<const ABGRGeometry&, const ABLRGeometry&, long, long, long,

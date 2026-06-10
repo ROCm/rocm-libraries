@@ -703,35 +703,21 @@ class TileInfo:
     """Plan for emitSingleDsRead: DS offset, register stride, per-read map."""
     return self._cppQuery().singleDsReadPlan(sId0, sId1, subIterK, numRegs)
 
-  # --- GR/LR offset-assignment math (C++-only for the ported B16/TLU0 case) ---
+  # --- GR/LR offset-assignment math (C++-only for all AB geometries) ---
   # The scalar offset-assignment math for graTileAssignment / lraTileAssignment
-  # is computed by the C++ ABTileInfoQuery for the ported row-major BF16
-  # (B16/TLU0) AB path. There is no Python scalar-math twin and no env switch
-  # for that case. FP8 / FP4 / TLU1 remain unported and use the Python legacy
-  # emit; the predicate below selects which path applies.
-
-  def _isPortedB16TLU0OffsetAssign(self) -> bool:
-    """True for the ported row-major BF16 (B16/TLU0) AB offset-assignment path.
-
-    This case always uses the C++ GR/LR offset-assignment scalar plans; it is
-    restricted to the row-major (TLU0) BF16 (bpe == 2) AB geometry the C++ plan
-    covers. FP8 (bpe == 1, distinct swizzle), FP4, and the TLU1 column-major
-    path are explicitly unported and stay on the native Python legacy emit.
-    """
-    if not isinstance(self.geometry, ABTilePair):
-      return False
-    if self.bpe != 2:
-      return False
-    return self.gr is not None and not self.gr.config.tlu
+  # is computed by the C++ ABTileInfoQuery for every AB (ABTilePair) geometry —
+  # BF16/B16, FP4/B4, FP8/B8 (FP8 swizzle selected by the plan's isFp8 flag),
+  # and the column-major TLU1 BF16 variants. There is no Python scalar-math twin
+  # and no env switch; the rocisa emission stays in SubtileGREmit/SubtileLREmit.
 
   def grOffsetAssignPlan(self, writer):
-    """C++ GR offset-assignment scalar plan for this tensor (ported B16/TLU0)."""
+    """C++ GR offset-assignment scalar plan for this tensor (all AB geometries)."""
     ldsRowBankSize = (writer.states.archCaps["LDSBankCount"]
                       * writer.states.archCaps["LDSBankWidth"])
     return self._cppQuery().grOffsetAssignPlan(ldsRowBankSize)
 
   def lrOffsetAssignPlan(self, writer, kernel):
-    """C++ LR offset-assignment scalar plan for this tensor (ported B16/TLU0)."""
+    """C++ LR offset-assignment scalar plan for this tensor (all AB geometries)."""
     ldsRowBankSize = (writer.states.archCaps["LDSBankCount"]
                       * writer.states.archCaps["LDSBankWidth"])
     mWavesM = kernel["MIWaveGroup"][0]
