@@ -24,7 +24,7 @@ Examples:
 
     # Explicit variant + full sweep config on 4 GPUs:
     python gemm_full_benchmark.py --variant gemm_universal \
-        gemm_universal/configs/default_config.json --devices 4 --csv out.csv
+        configs/default_config.json --devices 4 --csv out.csv
 
 When no config is given the driver uses the chosen variant's
 ``configs/default_ci_config.json`` (a small CI-sized sweep);
@@ -51,13 +51,14 @@ sys.path.insert(0, str(_THIS_DIR))
 
 from gemm_utils import setup_multiple_gemm_dispatchers, expand_sweep  # noqa: E402
 
-# Per-variant config layout. Each variant owns a ``configs/`` directory holding
-# default_ci_config.json (small CI sweep), default_config.json (full sweep) and
-# user_provided_config.json. The bridge currently exercises gemm_universal; the
-# other variants are registered so the driver organizes by variant and is ready
-# to wire them as their bridge paths land.
+# Config layout. The bridged regular-GEMM path (gemm_universal) keeps its sweep
+# configs in this op's flat ``configs/`` directory (matching the fmha/grouped_conv
+# bridge convention): default_ci_config.json (small CI sweep), default_config.json
+# (full sweep), user_provided_config.json, example_problems.json. The other,
+# not-yet-bridged variants still live in their own per-variant ``configs/`` dirs;
+# they are registered so ``--variant`` can select them once their bridge lands.
 VARIANT_CONFIGS = {
-    "gemm_universal": "gemm_universal/configs",
+    "gemm_universal": "configs",
     "gemm_multi_d": "gemm_multi_d/configs",
     "gemm_preshuffle": "gemm_preshuffle/configs",
     "grouped_gemm": "grouped_gemm/configs",
