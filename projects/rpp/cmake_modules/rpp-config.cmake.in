@@ -1,0 +1,63 @@
+# - Config file for the rpp package
+# It defines the following variables
+#  use rpp_INCLUDE_DIR   - include directory for rpp
+#  use rpp_LIB_DIR       - library directory for rpp
+#  use rpp_LIBRARY       - library to link against
+#  use rpp_LIBRARIES     - library to link against
+#  use rpp_BACKEND_TYPE               - "HIP" or "CPU"
+#  use rpp_AUDIO_AUGMENTATIONS_SUPPORT - ON or OFF
+
+# compute paths
+get_filename_component(@PROJECT_NAME@_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+
+# version
+include(${CMAKE_CURRENT_LIST_DIR}/@PROJECT_NAME@-config-version.cmake)
+set(@PROJECT_NAME@_VERSION ${PACKAGE_VERSION})
+set(@PROJECT_NAME@_BACKEND_TYPE "@RPP_PACKAGE_BACKEND_TYPE@")
+set(@PROJECT_NAME@_AUDIO_AUGMENTATIONS_SUPPORT "@RPP_PACKAGE_AUDIO_AUGMENTATIONS_SUPPORT@")
+
+# Ensure transitive dependencies of rpp::rpp are available before rpp-targets.cmake is included
+include(CMakeFindDependencyMacro)
+if("@RPP_PACKAGE_BACKEND_TYPE@" STREQUAL "HIP")
+    find_dependency(HIP)
+endif()
+
+# targets
+include(${CMAKE_CURRENT_LIST_DIR}/@PROJECT_NAME@-targets.cmake)
+
+@PACKAGE_INIT@
+
+set(LIB_TYPE so)
+if(APPLE)
+  set(LIB_TYPE dylib)
+endif()
+
+set_and_check(@PROJECT_NAME@_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(@PROJECT_NAME@_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+set_and_check(@PROJECT_NAME@_LIBRARY "@PACKAGE_LIB_INSTALL_DIR@/lib@PROJECT_NAME@.${LIB_TYPE}")
+set_and_check(@PROJECT_NAME@_LIBRARIES "@PACKAGE_LIB_INSTALL_DIR@/lib@PROJECT_NAME@.${LIB_TYPE}")
+
+# If install(EXPORT) fragments (rpp-targets-*.cmake) are missing, the above include
+# does not define @PROJECT_NAME@::@PROJECT_NAME@. This fallback must still expose the
+# same usage requirements as the exported target, or target_link_libraries will not
+# get include directories or other interface properties.
+if(NOT TARGET @PROJECT_NAME@::@PROJECT_NAME@)
+  add_library(@PROJECT_NAME@::@PROJECT_NAME@ INTERFACE IMPORTED)
+  set_target_properties(@PROJECT_NAME@::@PROJECT_NAME@ PROPERTIES
+    INTERFACE_LINK_LIBRARIES "${@PROJECT_NAME@_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${@PROJECT_NAME@_INCLUDE_DIR}"
+  )
+  if("@RPP_PACKAGE_BACKEND_TYPE@" STREQUAL "HIP" AND TARGET hip::host)
+    set_property(TARGET @PROJECT_NAME@::@PROJECT_NAME@ APPEND PROPERTY
+      INTERFACE_LINK_LIBRARIES hip::host)
+  endif()
+endif ()
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(
+    @PROJECT_NAME@
+    FOUND_VAR @PROJECT_NAME@_FOUND
+    REQUIRED_VARS @PROJECT_NAME@_INCLUDE_DIR @PROJECT_NAME@_LIB_DIR @PROJECT_NAME@_LIBRARY @PROJECT_NAME@_LIBRARIES
+    VERSION_VAR @PROJECT_NAME@_VERSION
+    HANDLE_COMPONENTS)
+
