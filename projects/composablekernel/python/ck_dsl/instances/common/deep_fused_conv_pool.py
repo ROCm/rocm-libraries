@@ -27,10 +27,12 @@ so it stays a pure perf optimization that naturally disables itself for WMMA.
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
 
 from ...core.ir import F16, I32, IRBuilder, PtrType, Value
+from ...runtime.hip_module import Runtime
 from ...helpers.distribution import (
     LoadStoreTraits,
     make_static_distributed_tensor,
@@ -52,6 +54,7 @@ from .conv_implicit_gemm import (
     _apply_accumulator_epilogue,
     _resolve_conv_op,
 )
+from .manifest_runner.utils import as_u8_buffer, nbytes, require_numpy
 
 __all__ = [
     "FusedConvPoolProblem",
@@ -60,6 +63,7 @@ __all__ = [
     "is_valid_spec",
     "deep_fused_conv_pool_signature",
     "deep_fused_conv_pool_grid",
+    "run_deep_fused_conv_pool_fp16_manifest_problem",
     "build_deep_fused_conv_pool",
 ]
 
@@ -542,7 +546,6 @@ def _load_conv0_a_tile_specialized(
     c_c = b.const_i32(c.C)
     c_sc = b.const_i32(c.S * c.C)  # 24 for the target shape.
     c_k_gemm = b.const_i32(c.K_gemm)
-    c_oob = b.const_i32((1 << 31) - 1)
 
     h_base = b.mul(b.block_id_y(), b.const_i32(spec.pool_tile_h * p.pool_stride_h))
     w_base = b.mul(b.block_id_z(), b.const_i32(spec.pool_tile_w * p.pool_stride_w))
@@ -576,7 +579,9 @@ def _load_conv0_a_tile_specialized(
 
         hi = b_.sub(b_.add(b_.add(h_base, local_oh), r), b_.const_i32(c.pH))
         wi = b_.sub(b_.add(b_.add(w_base, local_ow), s_col), b_.const_i32(c.pW))
-        h_ok = b_.land(b_.cmp_ge(hi, b_.const_i32(0)), b_.cmp_lt(hi, b_.const_i32(c.Hi)))
+        h_ok = b_.land(
+            b_.cmp_ge(hi, b_.const_i32(0)), b_.cmp_lt(hi, b_.const_i32(c.Hi))
+        )
         w_ok = b_.land(b_.cmp_ge(wi, b_.const_i32(0)), b_.cmp_lt(wi, c_wi))
         kg_ok = b_.cmp_lt(kg, c_k_gemm)
         valid = b_.land(kg_ok, b_.land(h_ok, w_ok))
@@ -1038,7 +1043,9 @@ def _maxpool_is_intra_lane(spec: DeepFusedConvPoolSpec, grid: WarpGrid) -> bool:
     )
 
 
-def _maxpool_is_intra_lane_wmma(spec: DeepFusedConvPoolSpec, grid: WarpGrid, op) -> bool:
+def _maxpool_is_intra_lane_wmma(
+    spec: DeepFusedConvPoolSpec, grid: WarpGrid, op
+) -> bool:
     """WMMA analogue of :func:`_maxpool_is_intra_lane`: can the conv1->maxpool
     handoff stay register-resident on RDNA4 (wave32, 16x16x16)?
 
@@ -1097,7 +1104,7 @@ def _emit_wmma_maxpool_from_registers(
     out_k = p.conv1_channels
     mfmas_n = grid.mfmas_per_warp_n
 
-    col = b.mod(grid.lane, b.const_i32(16))   # channel within an n-atom
+    col = b.mod(grid.lane, b.const_i32(16))  # channel within an n-atom
     half = b.div(grid.lane, b.const_i32(16))  # which 8-col half of the conv row
     block_pool_h = b.mul(b.block_id_y(), b.const_i32(spec.pool_tile_h))
     block_pool_w = b.mul(b.block_id_z(), b.const_i32(spec.pool_tile_w))
@@ -1202,9 +1209,7 @@ def _emit_inline_maxpool_from_registers(
             b.buffer_store_f16(y_rsrc, safe_off, b.const_i32(0), y_h)
 
 
-def build_deep_fused_conv_pool(
-    spec: DeepFusedConvPoolSpec, arch: str = "gfx950"
-):
+def build_deep_fused_conv_pool(spec: DeepFusedConvPoolSpec, arch: str = "gfx950"):
     """Build the one-CTA conv0 -> conv1 -> maxpool fused kernel for ``arch``."""
 
     ok, why = is_valid_spec(spec, arch=arch)
@@ -1364,9 +1369,7 @@ def build_deep_fused_conv_pool(
                 b, spec, conv1_accs, y_rsrc, grid, op, epilogue=deferred_epi
             )
         else:
-            conv1_smem = _stage_accumulators_to_cshuffle_lds(
-                b, op, conv1_accs, grid
-            )
+            conv1_smem = _stage_accumulators_to_cshuffle_lds(b, op, conv1_accs, grid)
             _emit_inline_maxpool_from_cshuffle(
                 b, spec, conv1_smem, y_rsrc, grid, epilogue=deferred_epi
             )
@@ -1396,3 +1399,96 @@ def build_deep_fused_conv_pool(
         else None,
         epilogue_override=epilogue_override,
     )
+
+
+def run_deep_fused_conv_pool_fp16_manifest_problem(
+    manifest: dict, _shape: Optional[Tuple[int, int, int]], verify: bool
+) -> tuple:
+    """Manifest-runner problem for the fp16 fused conv0->conv1->pool kernel."""
+    np = require_numpy()
+    cv = [int(x) for x in manifest["conv"]]
+    if len(cv) < 13:
+        raise ValueError("conv manifest needs [N,H,W,C,K,R,S,sH,sW,pH,pW,dH,dW]")
+    N, Hi, Wi, C, K, R, S, sH, sW, pH, pW, dH, dW = cv[:13]
+    pool = [int(x) for x in manifest["pool"]]
+    pool_y, pool_x, pool_sh, pool_sw = pool[:4]
+    K1 = int(manifest["conv1"]["K1"])
+    _, pool_ho, pool_wo, _ = [int(x) for x in manifest["pool_output_shape"]]
+
+    Ho = (Hi + 2 * pH - dH * (R - 1) - 1) // sH + 1
+    Wo = (Wi + 2 * pW - dW * (S - 1) - 1) // sW + 1
+
+    seed = int(manifest.get("seed", 123))
+    rng = np.random.default_rng(seed)
+    A = (rng.standard_normal((N, Hi, Wi, C)).astype(np.float32) * 0.25).astype(
+        np.float16
+    )
+    B0 = (rng.standard_normal((K, R, S, C)).astype(np.float32) * 0.25).astype(
+        np.float16
+    )
+    W1 = (rng.standard_normal((K1, K)).astype(np.float32) * 0.25).astype(np.float16)
+    Y = np.zeros((N, pool_ho, pool_wo, K1), dtype=np.float16)
+
+    gx, gy, gz = [int(x) for x in manifest["grid_explicit"]]
+    grid = (gx, gy, gz)
+    block = (int(manifest["threads_per_block"]), 1, 1)
+    conv0_flop = N * Ho * Wo * K * R * S * C
+    conv1_flop = N * Ho * Wo * K1 * K
+    flop = 2.0 * (conv0_flop + conv1_flop)
+    bytes_xfer = 2.0 * (A.size + B0.size + W1.size + Y.size)
+
+    def make_args(rt: Runtime):
+        A_dev = rt.alloc(nbytes(A))
+        B_dev = rt.alloc(nbytes(B0))
+        Y_dev = rt.alloc(nbytes(Y))
+        W1_dev = rt.alloc(nbytes(W1))
+        rt.memcpy_h2d(A_dev, as_u8_buffer(A), nbytes(A))
+        rt.memcpy_h2d(B_dev, as_u8_buffer(B0), nbytes(B0))
+        rt.memcpy_h2d(W1_dev, as_u8_buffer(W1), nbytes(W1))
+        rt.memset(Y_dev, 0, nbytes(Y))
+        args = struct.pack(
+            "<QQQQiiii",
+            A_dev,
+            B_dev,
+            Y_dev,
+            W1_dev,
+            nbytes(W1),
+            nbytes(A),
+            nbytes(B0),
+            nbytes(Y),
+        )
+        return args, (A_dev, B_dev, Y_dev, W1_dev)
+
+    def check(rt: Runtime, ptrs):
+        if not verify:
+            return 0.0, 0, Y.size
+        rt.memcpy_d2h(as_u8_buffer(Y), ptrs[2], nbytes(Y))
+        Ap = np.pad(A, ((0, 0), (pH, pH), (pW, pW), (0, 0)))
+        C0 = np.zeros((N, Ho, Wo, K), dtype=np.float32)
+        for r in range(R):
+            for s in range(S):
+                row_start = r * dH
+                col_start = s * dW
+                x = Ap[
+                    :,
+                    row_start : row_start + Ho * sH : sH,
+                    col_start : col_start + Wo * sW : sW,
+                    :,
+                ].astype(np.float32)
+                w = B0[:, r, s, :].astype(np.float32)
+                C0 += np.einsum("nhwc,kc->nhwk", x, w, optimize=True)
+        C0 = np.maximum(C0, 0.0).astype(np.float16).astype(np.float32)
+        C1 = np.einsum("nhwk,ok->nhwo", C0, W1.astype(np.float32), optimize=True)
+        C1 = np.maximum(C1, 0.0).astype(np.float16).astype(np.float32)
+        ref = np.empty((N, pool_ho, pool_wo, K1), dtype=np.float32)
+        for ho in range(pool_ho):
+            for wo in range(pool_wo):
+                h0 = ho * pool_sh
+                w0 = wo * pool_sw
+                patch = C1[:, h0 : h0 + pool_y, w0 : w0 + pool_x, :]
+                ref[:, ho, wo, :] = patch.max(axis=(1, 2))
+        ref_h = ref.astype(np.float16)
+        diff = np.abs(Y.astype(np.float32) - ref_h.astype(np.float32))
+        return float(diff.max()), int(np.count_nonzero(diff > 1e-2)), Y.size
+
+    return make_args, grid, block, flop, bytes_xfer, check
