@@ -4825,14 +4825,10 @@ class Solution(collections.abc.Mapping):
     # Calcualte the correct LDS usages
     def calcEpilogueTurns(factorDims: List) -> int:
       maxTurn = 0
-      if state.get("UseSubtileImpl"):
-        for d in factorDims:
-          maxTurn = max(maxTurn, state["MIWaveTile"][d])
-      else:
-        divisor = state["SubGroup0"] * state["SubGroup1"]
-        for d in range(len(factorDims)):
-          turn = math.ceil(state["MacroTile%d"%d] / divisor)
-          maxTurn = max(maxTurn, turn)
+      divisor = state["SubGroup0"] * state["SubGroup1"]
+      for d in factorDims:
+        turn = math.ceil(state["MacroTile%d"%d] / divisor)
+        maxTurn = max(maxTurn, turn)
       return maxTurn
 
     # Calc the required LDS

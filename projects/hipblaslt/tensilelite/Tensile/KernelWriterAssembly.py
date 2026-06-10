@@ -16422,27 +16422,30 @@ class KernelWriterAssembly(KernelWriter):
       lanesPerIdx = ws // (mi if kernel["SourceSwap"] else mn)
     return lanesPerIdx * ovw * bpe
 
-  def getTurn(self, kernel, gwvw, dim):
+  def getEpilogueGlobalLoadTurn(self, kernel, gwvw, dim):
+    """Macro-tile coverage turns for epilogue vector global loads and LDS staging."""
     divisor = kernel["SubGroup0"] * kernel["SubGroup1"]
-    if kernel.get("UseSubtileImpl"):
-      turn = kernel["MIWaveTile"][dim]
-      return turn, divisor
     turn    = ceil(kernel["MacroTile%d"%dim] / (divisor * gwvw))
     return turn, divisor
 
-  def getVectorLdsTurnStrideBpe(self, kernel, gwvw, dim):
-    if kernel.get("UseSubtileImpl"):
-      return self.getSubtileVectorLdsSlotStrideBpe(kernel, dim)
-    _, divisor = self.getTurn(kernel, gwvw, dim)
+  def getEpilogueGlobalLoadStrideBpe(self, kernel, gwvw, dim):
+    _, divisor = self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
     return (divisor * gwvw) * kernel["ProblemType"]["ComputeDataType"].numBytes()
+
+  def getTurn(self, kernel, gwvw, dim):
+    """Epilogue vector turn count (global load + LDS staging). GW batch slot spacing uses coordOffset."""
+    return self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
+
+  def getVectorLdsTurnStrideBpe(self, kernel, gwvw, dim):
+    return self.getEpilogueGlobalLoadStrideBpe(kernel, gwvw, dim)
 
   def addVectorGlobalLoad(self, kernel, srdName: str, offsetVgpr, shiftOffset, dataType, bpe, gwvw, tmpVgpr1Res: ContinuousRegister, dstOffset, dim):
     module        = Module("")
     tmpVgpr1      = tmpVgpr1Res.idx + dstOffset
-    turn, divisor = self.getTurn(kernel, gwvw, dim)
+    turn, divisor = self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
     addr0         = vgpr(offsetVgpr)
     addr1         = sgpr("Srd%s"%srdName, 4)
-    offset        = self.getVectorLdsTurnStrideBpe(kernel, gwvw, dim)
+    offset        = self.getEpilogueGlobalLoadStrideBpe(kernel, gwvw, dim)
 
     for i in range(turn):
       if i != 0:
@@ -16455,8 +16458,8 @@ class KernelWriterAssembly(KernelWriter):
   def addVectorLocalStore(self, kernel, addressStr: str, offsetVgpr, shiftOffset, dataType, gwvw, tmpVgpr1Res: ContinuousRegister, srcOffset, subGroupOffset, dim, setToOne=False, comment=""):
     module        = Module("")
     tmpVgpr1      = tmpVgpr1Res.idx + srcOffset
-    turn, divisor = self.getTurn(kernel, gwvw, dim)
-    offset        = self.getVectorLdsTurnStrideBpe(kernel, gwvw, dim)
+    turn, divisor = self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
+    offset        = self.getEpilogueGlobalLoadStrideBpe(kernel, gwvw, dim)
 
     if setToOne:
       module.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
