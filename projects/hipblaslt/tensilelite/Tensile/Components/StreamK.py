@@ -3139,13 +3139,12 @@ class StreamKDynamic(StreamK):
         # If work item index is not valid, skip to end of kernel
         module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
 
-        # Calculate total tiles
-        sTotalTiles = writer.sgprPool.checkOut(1, "TotalTiles")
-        module.add(SMulI32(dst=sgpr(sTotalTiles), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="Total tiles"))
-
-        # Check if work item is a full tile
+        # Check if work item is a full tile. The full-tile work-item count
+        # spans all batches (as TotalItems does), so it must use the
+        # batch-inclusive total tile count (nWG0 * nWG1 * batchCount).
         sFullTile = writer.sgprPool.checkOut(1, "fullTile")
-        module.add(SSubU32(dst=sgpr(sFullTile), src0=sgpr(sTotalTiles), src1=sgpr("skTiles"), comment="Get number of full-tile work items"))
+        module.add(self.computeTotalTiles(writer, kernel, sFullTile))
+        module.add(SSubU32(dst=sgpr(sFullTile), src0=sgpr(sFullTile), src1=sgpr("skTiles"), comment="Get number of full-tile work items (across all batches)"))
         module.add(SCmpLtU32(src0=sgpr(sWorkItemIdx), src1=sgpr(sFullTile), comment="Check if work item is a full tile"))
         module.add(SCBranchSCC0(labelName=skPartialTile.getLabelName(), comment="Work item is a partial tile"))
 
@@ -3179,7 +3178,11 @@ class StreamKDynamic(StreamK):
         tmpVgpr = writer.vgprPool.checkOut(2, "div")
         tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
         sRemainder = writer.sgprPool.checkOut(1, "StreamKTileIdxRemainder")
-        module.add(scalarUInt32DivideAndRemainder(qReg="WorkGroup2", dReg="StreamKTileIdx", divReg=sTotalTiles, rReg=sRemainder, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="TileID // nWG0*nWG1"))
+        # Per-batch tile count (NOT batch-inclusive): splits the global tile
+        # index into batch (WorkGroup2) and the in-batch tile.
+        sTilesPerBatch = writer.sgprPool.checkOut(1, "TilesPerBatch")
+        module.add(SMulI32(dst=sgpr(sTilesPerBatch), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="tiles per batch = nWG0 * nWG1"))
+        module.add(scalarUInt32DivideAndRemainder(qReg="WorkGroup2", dReg="StreamKTileIdx", divReg=sTilesPerBatch, rReg=sRemainder, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="TileID // nWG0*nWG1"))
         # Store tileID for use later in general WGM algo
         # if kernel["SpaceFillingAlgo"]:
         #     module.add(SNop(waitState=4, comment=""))
@@ -3190,7 +3193,7 @@ class StreamKDynamic(StreamK):
         writer.sgprPool.checkIn(sRemainder)
         module.addSpaceLine()
 
-        writer.sgprPool.checkIn(sTotalTiles)
+        writer.sgprPool.checkIn(sTilesPerBatch)
 
         # Map SK index to WG
         # module.add(self.skIndexToWG(writer, kernel, sTmp))
