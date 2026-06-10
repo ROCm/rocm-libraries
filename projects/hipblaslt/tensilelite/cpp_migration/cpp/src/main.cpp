@@ -12,11 +12,11 @@
 // The Python package tensile_writer/ re-exports this. The geometry value/query
 // layer, the read-only TileInfo query layer (tile_info), the MFMA F8F6F4
 // instType selection (emit), the subtile instruction-scheduling slot-placement
-// algorithm (instruction_scheduler) and the LogicalScheduler value/config
-// helpers (fmt_mt, SchedulerConfig.get_partition_candidates) are all C++-only —
-// the Python side forwards to them unconditionally with no Python fallback. The
-// GR/LR offset-assignment plans (also on ABTileInfoQuery) remain opt-in via
-// TENSILE_WRITER_CPP. The writer-free LogicalScheduler pass pipeline (place_LRs
+// algorithm (instruction_scheduler), the LogicalScheduler value/config
+// helpers (fmt_mt, SchedulerConfig.get_partition_candidates) and the GR/LR
+// offset-assignment plans (on ABTileInfoQuery) are all C++-only — the Python
+// side forwards to them unconditionally with no Python fallback. The
+// writer-free LogicalScheduler pass pipeline (place_LRs
 // through remove_unnecessary_wait_lr_sync, plus assign_vgpr_tiles) is now the
 // live implementation: the Python LogicalScheduler delegates those passes here
 // and rebuilds its dataclass partitions from value_partitions(). The rocisa

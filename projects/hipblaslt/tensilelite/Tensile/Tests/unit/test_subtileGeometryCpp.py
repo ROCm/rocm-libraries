@@ -78,7 +78,7 @@ MT_DU = [(256, 128), (128, 64), (512, 256), (64, 32)]
 # ---------------------------------------------------------------------------
 # Helpers: build an independent tensile_writer C++ twin from a facade object's
 # public fields. This mirrors (but does not import) the facade's private
-# ``_cpp_twin`` construction so the comparison is a genuine pass-through check.
+# ``_cpp`` construction so the comparison is a genuine pass-through check.
 # ---------------------------------------------------------------------------
 def _assert_same(facade, cpp, ctx=""):
     """Recursively assert facade and C++ results match (float-tolerant)."""

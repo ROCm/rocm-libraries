@@ -609,8 +609,8 @@ class TileInfo:
           f"got {type(self.geometry).__name__} (tc={self.tc})")
     q = getattr(self, '_cppQueryCache', None)
     if q is None:
-      cpp_gr = self.gr.config._cpp_twin
-      cpp_lr = self.lr.config._cpp_twin
+      cpp_gr = self.gr.config._cpp
+      cpp_lr = self.lr.config._cpp
       q = _CPP_TI.ABTileInfoQuery(cpp_gr, cpp_lr, self.macroTile, self.depthU,
                                   self.waveGroupSize, self.waveSize, self.numWaves)
       self._cppQueryCache = q
