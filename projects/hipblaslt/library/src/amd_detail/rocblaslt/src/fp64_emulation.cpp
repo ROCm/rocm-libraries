@@ -471,18 +471,13 @@ bool fp64EmulationPerformanceCheck(int64_t m, int64_t n, int64_t k, unsigned num
     const double chunk_sz = std::max(1.0, std::min(s, CHUNK_BYTES_D / (mn * 4.0)));
     const double n_chunks = std::ceil(s / chunk_sz);
 
-    const double t_prelim_gemm = 2.0 * mnk / INT8_PEAK;
-    const double t_prelim_kern = (mk + kn) * 17.0 / HBM_BW;
-    const double t_refine_kern = mn * 8.0 / HBM_BW;
-    const double t_scale_kern  = (mk + kn) * (8.0 + s) / HBM_BW;
-    const double t_int8_gemms  = s * 2.0 * mnk / INT8_PEAK;
-    const double t_accum_kern  = mn * (4.0 * s + 48.0) / HBM_BW;
-    /* Kernel launch overhead: 5 fixed custom kernels + n_chunks accum kernels
-     * + 1 preliminary matmul + n_chunks main INT8 matmul batches + 1 memset.
-     * Fixed kernels: prelim_fused (oz2_accu_prelim_kernel), refine_sftA_partial,
-     *   refine_sftA_apply, refine_sftB, scale (1 pass for typical problem).
-     * LATENCY_MEMSET: row_max async clear; nan_flag memset and Inf/NaN stream
-     *   sync assumed disabled (svmask == 0) and omitted from this estimate.  */
+    const double t_int8_gemm_bw = (mk + kn + 4.0 * mn) / HBM_BW;
+    const double t_prelim_gemm  = std::max(2.0 * mnk / INT8_PEAK, t_int8_gemm_bw);
+    const double t_prelim_kern  = (mk + kn) * 17.0 / HBM_BW;
+    const double t_refine_kern  = mn * 8.0 / HBM_BW;
+    const double t_scale_kern   = (mk + kn) * (8.0 + s) / HBM_BW;
+    const double t_int8_gemms   = s * std::max(2.0 * mnk / INT8_PEAK, t_int8_gemm_bw);
+    const double t_accum_kern  = mn * (4.0 * s + 32.0 * n_chunks - 16.0) / HBM_BW;
     const double t_launch = (5.0 + n_chunks) * LATENCY_KERNEL
                           + (1.0 + n_chunks) * LATENCY_MATMUL
                           + LATENCY_MEMSET;
