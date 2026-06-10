@@ -22,21 +22,25 @@
  * ************************************************************************ */
 
 #include "test.hpp"
-#include "testing_spmv_bsr.hpp"
+#include "testing_spmm_bsr.hpp"
 
-#if defined(HIPSPARSE_WITH_SPMV_BSR) && !defined(CUDART_VERSION)
-TEST_ROUTINE_WITH_CONFIG(spmv_bsr,
+#if(!defined(CUDART_VERSION))
+TEST_ROUTINE_WITH_CONFIG(spmm_bsr,
                          generic,
-                         hipsparse_test_config_ijabct_spmv,
+                         hipsparse_test_config_ijt,
                          arg.M,
                          arg.N,
+                         arg.K,
                          arg.alpha,
                          arg.alphai,
                          arg.beta,
                          arg.betai,
                          arg.transA,
+                         arg.transB,
+                         arg.orderB,
+                         arg.orderC,
                          arg.baseA,
-                         arg.spmv_alg,
+                         arg.spmm_alg,
                          arg.block_dim,
                          arg.dirA);
 #endif
