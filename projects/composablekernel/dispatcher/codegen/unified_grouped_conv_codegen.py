@@ -454,22 +454,22 @@ _DIRECT_ENUM_FIELD_NS = {
 
 @dataclass
 class DirectConvKernelConfig:
-    """Direct (hipconv-ported) convolution kernel configuration.
+    """Direct convolution kernel configuration.
 
     A direct-conv instance is described entirely by the JSON config payload:
     the channel family + impl + version select the kernel wrapper, and the
     numeric `config` dict provides the full Config struct VALUE (designated
     initializers) that is passed as the `auto Cfg` non-type template parameter.
     The generator emits a thin Launcher that wraps the existing
-    Direct{Hip,Tile}Conv{Forward,BwdData}{N}C[Dense]Kernel wrapper.
+    DirectTileConv{Forward,BwdData}{N}C[Dense]Kernel wrapper.
     Fields:
       channel_family: channel family (4, 8, 16, or 32)
-      impl:           "hip" | "tile_grouped" | "tile_dense"
-      version:        "v2" | "v3" | None  (None for hip; dense is always v3)
+      impl:           "tile_grouped" | "tile_dense"
+      version:        "v2" | "v3"  (dense is always v3)
       id:             unique instance id (running counter shared with implicit GEMM)
       config:         dict of family-specific Config fields (numeric/enum)
       variant:        forward | bwd_data
-      datatype:       "fp16" | "bf16" | "fp32"  (hip is fp16-only)
+      datatype:       "fp16" | "bf16" | "fp32"
     """
 
     channel_family: int
@@ -490,7 +490,7 @@ class DirectConvKernelConfig:
         }[self.variant]
 
     def _impl_token(self) -> str:
-        """Impl token for the filename stem: hip | tile-grouped | tile-dense.
+        """Impl token for the filename stem: tile-grouped | tile-dense.
 
         Uses a hyphen so that the compound name remains a single
         underscore-delimited field in the stem, e.g.
@@ -499,7 +499,6 @@ class DirectConvKernelConfig:
         stem trivially parseable by registration_codegen.py.
         """
         return {
-            "hip": "hip",
             "tile_grouped": "tile-grouped",
             "tile_dense": "tile-dense",
         }[self.impl]
@@ -511,8 +510,6 @@ class DirectConvKernelConfig:
     def kernel_class(self) -> str:
         """Fully-qualified direct-conv kernel wrapper class name."""
         d = self._dir_token()
-        if self.impl == "hip":
-            return f"ck_tile::direct_conv::DirectHipConv{d}{self.channel_family}CFp16Kernel"
         if self.impl == "tile_dense":
             return f"ck_tile::direct_conv::DirectTileConv{d}32CDenseKernel"
         return f"ck_tile::direct_conv::DirectTileConv{d}{self.channel_family}CKernel"
@@ -520,9 +517,6 @@ class DirectConvKernelConfig:
     def _config_type(self) -> str:
         """Fully-qualified Config type for this instance (the NTTP type)."""
         dt_enum = "ck_tile::direct_conv::DataType::" + self.datatype
-        if self.impl == "hip":
-            # hip Config is NOT DataType-templated.
-            return f"ck_tile::direct_hip_conv::grouped_{self.channel_family}c::Config"
         if self.impl == "tile_dense":
             return f"ck_tile::direct_conv::conv_32c_tile::v3::Config<{dt_enum}>"
         return (
@@ -547,11 +541,9 @@ class DirectConvKernelConfig:
         return f"{self._config_type()}{{{inits}}}"
 
     def kernel_template(self) -> str:
-        """Full templated kernel type: Kernel<Cfg[, Version::vN[, DataType::DT]]>."""
+        """Full templated kernel type: Kernel<Cfg, Version::vN[, DataType::DT]>."""
         cfg = self.cfg_value_expr()
         cls = self.kernel_class()
-        if self.impl == "hip":
-            return f"{cls}<{cfg}>"
         ver = f"ck_tile::direct_conv::Version::{self.version}"
         if self.datatype == "fp16":
             return f"{cls}<{cfg}, {ver}>"

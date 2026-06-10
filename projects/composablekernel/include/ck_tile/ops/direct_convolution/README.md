@@ -96,18 +96,13 @@ Here's a rough project structure
 
 ```
 kernel/                                  — kernel implementations
-  grouped_4c_fp16_hip_conv_impl.hpp      — 4-channel grouped fp16 kernel (MFMA 4x4x4 batch-16) using pure HIP.
   grouped_4c_tile_conv_impl_v3.hpp  — 4-channel grouped fp16/bf16 kernel (MFMA 4x4x4 batch-16) using CK Tile abstractions.
-  grouped_8c_fp16_hip_conv_impl.hpp      — 8-channel grouped fp16 kernel (MFMA 16x16x32 for Toeplitz matrix and S-loop fusion) using pure HIP.
   grouped_8c_tile_conv_impl_v2.hpp  — 8-channel grouped fp16/bf16 kernel (MFMA 16x16x32 for Toeplitz matrix and S-loop fusion) using CK Tile abstractions.
-  grouped_16c_fp16_hip_conv_impl.hpp     — 16-channel grouped fp16 kernel (MFMA 16x16x16) using pure HIP.
   grouped_16c_tile_conv_impl_v2.hpp — 16-channel grouped fp16/bf16 kernel (MFMA 16x16x16) using CK Tile abstractions.
-  grouped_32c_fp16_hip_conv_impl.hpp     — 32-channel grouped fp16 kernel (MFMA 16x16x32) using pure HIP.
   grouped_32c_tile_conv_impl_v2.hpp — 32-channel grouped fp16/bf16 kernel (MFMA 16x16x32) using CK Tile abstractions.
 utils/                                   — utilities for kernel implementations
   conv_params.hpp                        — Conv2dParams, SizeView, Direction/DataType enums
   types.hpp                              — fp16/bf16/fp32/fp8 type aliases and mapping
-  mathutil.hpp                           — maximum(), divup() constexpr helpers
   launch_params.hpp                      — LaunchParams (grid, block, shared memory)
   kernel_variant.hpp                     — KernelVariant dispatch interface
   matrix_layout.hpp                      — MFMA register layout mapping

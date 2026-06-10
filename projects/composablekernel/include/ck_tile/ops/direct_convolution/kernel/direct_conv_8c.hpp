@@ -8,7 +8,6 @@
 
 // 8-channel kernel impls
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_8c_tile_conv_impl_v2.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_8c_fp16_hip_conv_impl.hpp"
 
 namespace ck_tile::direct_conv {
 
@@ -37,25 +36,6 @@ struct TileConvVariant8c<Version::v2, DT>
     static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
                               const void* in, const void* wei, void* out, hipStream_t stream)
     { grouped_8c_tile::v2::launch_kernel<Cfg, DT>(lp, par, in, wei, out, stream); }
-};
-
-struct HipConvVariant8c
-{
-    static bool is_applicable(const Conv2dParams& par)
-    { return ck_tile::direct_hip_conv::grouped_8c::is_applicable(par); }
-
-    template <auto Cfg>
-    static bool is_config_compatible(const Conv2dParams& par)
-    { return ck_tile::direct_hip_conv::grouped_8c::is_valid_config(par, Cfg); }
-
-    template <auto Cfg>
-    static LaunchParams get_launch_params(const Conv2dParams& par)
-    { return ck_tile::direct_hip_conv::grouped_8c::get_launch_params<Cfg>(par); }
-
-    template <auto Cfg>
-    static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
-                              const void* in, const void* wei, void* out, hipStream_t stream)
-    { ck_tile::direct_hip_conv::grouped_8c::launch_kernel<Cfg>(lp, par, in, wei, out, stream); }
 };
 
 // ============================================================================
@@ -92,26 +72,6 @@ struct DirectTileConvBwdData8CKernel
         else
             return "direct_tile_conv_fp16_bwd_data_";
     }
-};
-
-template <auto Cfg>
-struct DirectHipConvForward8CFp16Kernel
-    : DirectConvKernel<DirectHipConvForward8CFp16Kernel<Cfg>, Cfg>
-{
-    using V = HipConvVariant8c;
-    static constexpr bool kIsFprop = true;
-    static constexpr DataType kDataType = DataType::fp16;
-    static std::string GetNamePrefix() { return "direct_hip_conv_fp16_fwd_"; }
-};
-
-template <auto Cfg>
-struct DirectHipConvBwdData8CFp16Kernel
-    : DirectConvKernel<DirectHipConvBwdData8CFp16Kernel<Cfg>, Cfg>
-{
-    using V = HipConvVariant8c;
-    static constexpr bool kIsFprop = false;
-    static constexpr DataType kDataType = DataType::fp16;
-    static std::string GetNamePrefix() { return "direct_hip_conv_fp16_bwd_data_"; }
 };
 
 } // namespace ck_tile::direct_conv
