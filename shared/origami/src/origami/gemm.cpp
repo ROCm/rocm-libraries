@@ -59,7 +59,7 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
 
   // Launch parameters
   auto [reduction, wgs, cus, timesteps, split] =
-      compute_launch_parameters(problem, hardware, config, config.grid_selection, N_CU);
+      compute_launch_parameters(problem, hardware, config, config.grid_selection, 0);
   reduction_strategy = reduction;
   num_wgs            = wgs;
   num_timesteps      = timesteps;

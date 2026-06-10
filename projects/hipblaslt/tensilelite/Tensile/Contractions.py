@@ -586,6 +586,14 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
+        valuepredicates = []
+        valuepredicates.append(state["MacroTile0"])
+        valuepredicates.append(state["MacroTile1"])
+        valuepredicates.append(state["GlobalSplitU"])
+        valuepredicates.append(state["ClusterDim"][0])
+        valuepredicates.append(state["ClusterDim"][1])
+        rv += [cls('ClusterDimCheck', value=valuepredicates)]
+
         return rv
 
     @classmethod
@@ -617,6 +625,7 @@ class SizeMapping:
                  'packBatchDims',
                  'magicDivAlg',
                  'streamK',
+                 'streamKForceDPOnly',
                  'streamKAtomic',
                  'sourceKernel',
                  'globalAccumulation',
@@ -635,6 +644,7 @@ class SizeMapping:
                  'synchronizerSizePerWG',
                  'nonTemporalA',
                  'nonTemporalB',
+                 'adaptiveGemmNTAB',
                  'customMainLoopScheduling',
                  'NonTemporalD',
                  'WaveSeparateGlobalReadA',
@@ -650,6 +660,8 @@ class SizeMapping:
                  'LocalSplitU',
                  'DirectToLdsA',
                  'DirectToLdsB',
+                 'ExpertSchedulingMode',
+                 'clusterDim'
                  ]
 
     @classmethod
@@ -705,6 +717,7 @@ class SizeMapping:
                    staggerStrideShift       = d['_staggerStrideShift'] if '_staggerStrideShift' in d else 0,
                    packBatchDims            = 0,
                    streamK                  = d['StreamK'] if 'StreamK' in d else 0,
+                   streamKForceDPOnly       = d.get('StreamKForceDPOnly', 0),
                    streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
                    magicDivAlg              = d.get('MagicDivAlg', 1),
                    sourceKernel             = d['KernelLanguage'] == 'Source',
@@ -724,6 +737,7 @@ class SizeMapping:
                    synchronizerSizePerWG    = synchronizerSizePerWG,
                    nonTemporalA             = d['NonTemporalA'],
                    nonTemporalB             = d['NonTemporalB'],
+                   adaptiveGemmNTAB         = d['AdaptiveGemmNTAB'] if 'AdaptiveGemmNTAB' in d else 0,
                    customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
                    NonTemporalD             = d['NonTemporalD'],
                    WaveSeparateGlobalReadA  = d['WaveSeparateGlobalReadA'],
@@ -739,6 +753,8 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
+                   ExpertSchedulingMode     = d['ExpertSchedulingMode'],
+                   clusterDim               = d['ClusterDim']
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):

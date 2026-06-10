@@ -147,9 +147,18 @@ bool serializeVisit(const FLATModifiers& mod, std::ostream& os) {
     return true;
 }
 
-// GLOBALModifiers
+// GLOBALModifiers — offset plus the temporal hint / cache scope used by
+// global_prefetch_b8 (gl2-prefetch). Serialized so the .stir IR roundtrip
+// preserves the hint/scope; TH_NONE / SCOPE_NONE are omitted.
 bool serializeVisit(const GLOBALModifiers& mod, std::ostream& os) {
-    os << ", mod.global = { offset = " << mod.offset << " }";
+    os << ", mod.global = { offset = " << mod.offset;
+    if (hasTemporalHint(mod.th)) {
+        os << ", th = \"" << toString(mod.th) << "\"";
+    }
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << ", scope = \"" << toString(mod.scope) << "\"";
+    }
+    os << " }";
     return true;
 }
 
@@ -161,6 +170,19 @@ bool serializeVisit(const MUBUFModifiers& mod, std::ostream& os) {
        << ", nt = " << (mod.nt ? "true" : "false") << ", lds = " << (mod.lds ? "true" : "false");
     if (mod.scope != MUBUFScope::SCOPE_NONE) {
         os << ", scope = \"" << toString(mod.scope) << "\"";
+    }
+    os << " }";
+    return true;
+}
+
+// CacheScopeModifiers — dedicated cache-scope carrier for SOPP-format memory
+// fences (global_wb / global_inv on gfx1250+). Serialized so the .stir IR
+// roundtrip preserves the scope token; otherwise a fence written out and
+// reparsed would silently lose its scope (worst-case fence-scope demotion).
+bool serializeVisit(const CacheScopeModifiers& mod, std::ostream& os) {
+    os << ", mod.cache_scope = {";
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope = \"" << toString(mod.scope) << "\"";
     }
     os << " }";
     return true;
@@ -390,10 +412,10 @@ bool serializeVisit(const Modifier& mod, std::ostream& os) {
 
 bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
     return serializeVisit<DSModifiers, FLATModifiers, GLOBALModifiers, MUBUFModifiers,
-                          SMEMModifiers, SDWAModifiers, DPPModifiers, VOP3Modifiers, VOP3PModifiers,
-                          True16Modifiers, EXEC, VCC, SWaitCntData, SWaitTensorCntData,
-                          SWaitStoreCntData, SDelayAluData, SWaitAluData, MFMAModifiers,
-                          MatrixFmtModifiers, MemTokenData>(mod, os);
+                          CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
+                          VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
+                          SWaitTensorCntData, SWaitStoreCntData, SDelayAluData, SWaitAluData,
+                          MFMAModifiers, MatrixFmtModifiers, MemTokenData>(mod, os);
 }
 
 /*
@@ -415,7 +437,9 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             FLATModifiers(getInt(fields, "offset12", 0), getBool(fields, "glc", false),
                           getBool(fields, "slc", false), getBool(fields, "lds", false)));
     } else if (attrKey == "mod.global") {
-        inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0)));
+        inst->addModifier(GLOBALModifiers(getInt(fields, "offset", 0),
+                                          parseTemporalHint(getStr(fields, "th", "")),
+                                          parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.mubuf") {
         MUBUFScope scope = parseMUBUFScope(getStr(fields, "scope", ""));
         inst->addModifier(
@@ -423,6 +447,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
                            getBool(fields, "glc", false), getBool(fields, "slc", false),
                            getBool(fields, "nt", false), getBool(fields, "lds", false), false,
                            false, false, false, scope));
+    } else if (attrKey == "mod.cache_scope") {
+        inst->addModifier(CacheScopeModifiers(parseMUBUFScope(getStr(fields, "scope", ""))));
     } else if (attrKey == "mod.smem") {
         inst->addModifier(SMEMModifiers(getBool(fields, "glc", false), getBool(fields, "nv", false),
                                         getInt(fields, "offset", 0)));

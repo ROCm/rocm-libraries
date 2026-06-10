@@ -6,6 +6,8 @@
 #include "ck_tile/core.hpp"
 #include "warp_gemm_params.hpp"
 
+#include <type_traits>
+
 namespace ck_tile {
 
 // TODO: refactor warp-gemm
@@ -201,8 +203,8 @@ struct WarpGemmAttributeMfmaImplF32F32F32M32N32K16Tf32Gfx950
 {
     static constexpr WGAttrCtlEnum Ctrl = Ctrl_;
 
-    using ADataType = float;
-    using BDataType = float;
+    using ADataType = tf32_t;
+    using BDataType = tf32_t;
     using CDataType = float;
 
     // Input: 8 floats for K=16 (each lane holds 8 elements, kABKPerLane=8)
@@ -264,8 +266,8 @@ struct WarpGemmAttributeMfmaImplF32F32F32M16N16K32Tf32Gfx950
 {
     static constexpr WGAttrCtlEnum Ctrl = Ctrl_;
 
-    using ADataType = float;
-    using BDataType = float;
+    using ADataType = tf32_t;
+    using BDataType = tf32_t;
     using CDataType = float;
 
     // Input: 8 floats for K=32 (each lane holds 8 elements, kABKPerLane=8)
@@ -1680,6 +1682,9 @@ using WarpGemmAttributeMfmaImpl_f32_16x16x32_fp8_bf8 =
 template <WGAttrCtlEnum Ctrl_ = WGAttrCtlEnum::Default_>
 using WarpGemmAttributeMfmaImpl_f32_16x16x32_bf8_bf8 =
     WarpGemmAttributeMfmaImpl_f32_16x16x32_f8_base<bf8_t, bf8_t, Ctrl_>;
+template <WGAttrCtlEnum Ctrl_ = WGAttrCtlEnum::Default_>
+using WarpGemmAttributeMfmaImpl_f32_16x16x32_bf8_fp8 =
+    WarpGemmAttributeMfmaImpl_f32_16x16x32_f8_base<bf8_t, fp8_t, Ctrl_>;
 
 template <WGAttrCtlEnum Ctrl_ = WGAttrCtlEnum::Default_>
 using WarpGemmAttributeMfmaImpl_f32_32x32x16_bf8_fp8 =
