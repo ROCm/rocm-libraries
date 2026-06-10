@@ -165,8 +165,7 @@ def build_client(
             cmake_cmd.append("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
         if export_compile_commands:
             cmake_cmd.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
-        if bundle_python_deps:
-            cmake_cmd.append("-DHIPBLASLT_BUNDLE_PYTHON_DEPS=ON")
+        cmake_cmd.append(f"-DHIPBLASLT_BUNDLE_PYTHON_DEPS={_cmake_bool(bundle_python_deps)}")
 
         c.run(shlex.join(cmake_cmd))
 
