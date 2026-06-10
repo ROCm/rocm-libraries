@@ -24,7 +24,7 @@ import pytest
 pytest.importorskip("rocisa")
 cppsched = pytest.importorskip("tensile_writer.subtile.instruction_scheduler")
 
-from rocisa.code import Label, Module
+from rocisa.code import Label
 from rocisa.container import RegisterContainer, sgpr, vgpr
 from rocisa.enum import InstType
 from rocisa.instruction import (
