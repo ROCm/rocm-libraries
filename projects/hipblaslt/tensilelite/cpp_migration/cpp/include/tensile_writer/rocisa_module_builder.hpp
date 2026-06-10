@@ -498,22 +498,6 @@ class ModuleBuilder {
     return mod;
   }
 
-  // ---- wait_gr (SWaitCnt for GR completion) --------------------------------
-  //
-  // C++ port of the SWaitCnt construction in InstructionEmitter.emit_wait_gr().
-  // Returns a SWaitCnt with vlcnt=grCnt, vscnt=-1, dscnt=-1, kmcnt=-1.
-  //
-  // The `adjustVmcnt` flag must be set on the returned Python object by the
-  // caller; SWaitCnt is a C++ extension type that does not support dynamic
-  // attributes, so the caller is responsible for wrapping it in a SWaitCntEx
-  // (the Python subclass that adds the adjustVmcnt property) when needed.
-  // This method builds the bare SWaitCnt; the Python emit_wait_gr wrapper
-  // constructs SWaitCntEx from it.
-  nb::object wait_gr_swait(long grCnt, const std::string& comment) const {
-    return swait_cnt_cls_("vlcnt"_a = grCnt, "vscnt"_a = -1, "dscnt"_a = -1,
-                          "kmcnt"_a = -1, "comment"_a = comment);
-  }
-
  private:
   nb::object module_cls_;
   nb::object textblock_cls_;

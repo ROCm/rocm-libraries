@@ -1098,11 +1098,7 @@ void bind_rocisa_module_builder(nb::module_& b) {
            "FP4/FP8). All register indices and flags are resolved in Python "
            "and passed in as plain ints/booleans. instTypeName is the string "
            "from mfma_f8f6f4_inst_type() for miK==128; empty for BF16.")
-      .def("wait_gr_swait", &ModuleBuilder::wait_gr_swait,
-           nb::arg("grCnt"), nb::arg("comment") = std::string(""),
-           "Build a bare SWaitCnt(vlcnt=grCnt, vscnt=-1) for GR completion. "
-           "The Python emit_wait_gr wrapper is responsible for wrapping the "
-           "result in SWaitCntEx to attach the adjustVmcnt flag.");
+      ;
 }
 
 }  // namespace

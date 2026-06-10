@@ -221,6 +221,12 @@ class InstructionEmitter:
         The count arithmetic uses tileInfoA/B.loadRatioGR (Python-side geometry).
         SWaitCntEx carries the adjustVmcnt flag needed by the InstructionScheduler
         shim (see SWaitCntEx docstring for why this subclass cannot move to C++).
+
+        Note: a C++ ModuleBuilder::wait_gr_swait() helper was considered but
+        removed (sio). SWaitCntEx must remain a Python-only subclass because
+        rocisa.SWaitCnt is a C++ extension type that does not support dynamic
+        attributes; constructing SWaitCntEx directly here is both correct and
+        avoids an unnecessary intermediate allocation.
         """
         counts = source.wait_gr_counts
         if counts is None:
@@ -567,12 +573,13 @@ class InstructionEmitter:
             self._tail_boundaryMask = None
         return []
 
-    def populate(self, emitted, unroll_iter=0):
-        """Walk emitted partitions and fill em.instructions."""
-        for partition_emitted in emitted:
-            for emitted_group in partition_emitted:
-                for em in emitted_group:
-                    handler = self._dispatch.get(em.opType)
-                    if handler:
-                        em.instructions = handler(em, unroll_iter)
+    def emit_module(self, em, unroll_iter=0):
+        """Emit instructions for one EmittedModule, returning a list.
+
+        On-demand replacement for the old ``populate()`` adapter.  The caller
+        is responsible for ordering and scheduling the returned instruction list;
+        nothing is stored on ``em.instructions``.
+        """
+        handler = self._dispatch.get(em.opType)
+        return handler(em, unroll_iter) if handler else []
 
