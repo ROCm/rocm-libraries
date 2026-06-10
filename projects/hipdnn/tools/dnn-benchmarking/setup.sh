@@ -5,11 +5,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HIPDNN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "$HIPDNN_ROOT/../.." && pwd)"
 
+DEFAULT_DNN_BENCH_WORKSPACE="$SCRIPT_DIR/.workspace"
+if [ -d /workspace ] && [ -w /workspace ]; then
+    DEFAULT_DNN_BENCH_WORKSPACE="/workspace"
+fi
+
 BUILD_DIR="$HIPDNN_ROOT/build"
-INSTALL_DIR="/opt/rocm"
-DNN_BENCH_WORKSPACE="${DNN_BENCH_WORKSPACE:-/workspace}"
-mkdir -p "$DNN_BENCH_WORKSPACE"
-export DNN_BENCH_WORKSPACE
+DEFAULT_ROCM_PREFIX="/opt/rocm"
+DNN_BENCH_WORKSPACE="${DNN_BENCH_WORKSPACE:-$DEFAULT_DNN_BENCH_WORKSPACE}"
 VENV_DIR="$DNN_BENCH_WORKSPACE/.venv"
 MIOPEN_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/miopen-provider"
 MIOPEN_BUILD_DIR="$MIOPEN_PROVIDER_DIR/build"
@@ -20,24 +23,128 @@ HIPBLASLT_BUILD_DIR="$HIPBLASLT_PROVIDER_DIR/build"
 
 FORCE_BUILD=0
 AUTO_YES=0
+REUSE_VENV=0
+TORCH_MODE="${DNN_BENCH_TORCH_MODE:-rocm}"
+ROCM_PREFIX="${DNN_BENCH_ROCM_PREFIX:-}"
+GPU_ARCH_OVERRIDE="${DNN_BENCH_GPU_ARCH:-}"
+TORCH_INDEX_URL="${DNN_BENCH_TORCH_INDEX_URL:-}"
+RESOLVED_TORCH_INDEX_URL=""
+INSTALLED_TORCH_MODE="missing"
+
 usage() {
-    echo "Usage: $0 [--force-build] [--install-dir <path>] [-y]"
+    echo "Usage: $0 [options]"
     echo ""
-    echo "  --force-build        Force rebuild of hipDNN and provider plugins,"
-    echo "                           overwriting existing artifacts."
-    echo "  --install-dir <path> Install prefix for hipDNN and provider plugins."
-    echo "                           Default: $INSTALL_DIR"
+    echo "  Requires Python 3.12 or newer."
+    echo ""
+    echo "  --torch-mode <rocm|cpu|existing|none>"
+    echo "                       Select how torch is provided. Default: $TORCH_MODE"
+    echo "                         rocm: install ROCm torch nightly, use ROCm"
+    echo "                               libraries/toolchain from the torch wheel's"
+    echo "                               bundled ROCm SDK packages, and build local"
+    echo "                               hipDNN/provider artifacts when absent."
+    echo "                         cpu:  install CPU-only torch and build bindings"
+    echo "                               against installed ROCm/hipDNN."
+    echo "                         existing:"
+    echo "                               reuse torch already present in $VENV_DIR."
+    echo "                               ROCm torch uses its bundled SDK libraries;"
+    echo "                               CPU/non-ROCm torch uses installed ROCm/hipDNN."
+    echo "                         none: leave torch uninstalled and build bindings"
+    echo "                               against installed ROCm/hipDNN."
+    echo "  --reuse-venv         Reuse an existing $VENV_DIR instead of deleting it."
+    echo "  --workspace <path>  Workspace root for the venv, Python bytecode cache,"
+    echo "                       and runtime benchmark caches. Default: $DNN_BENCH_WORKSPACE"
+    echo "                       The virtual environment is <path>/.venv."
+    echo "  --torch-index-url <url>"
+    echo "                       Override the pip index URL used for torch."
+    echo "  --gpu-arch <gfx*>    Override GPU architecture detection for ROCm torch"
+    echo "                       nightly selection. Supported: gfx90a, gfx942, gfx950."
+    echo "  --rocm-prefix <path> Explicit ROCm/hipDNN prefix for binding/provider"
+    echo "                       builds. Takes precedence over venv discovery."
+    echo "  --force-build        Build hipDNN and provider plugins from source,"
+    echo "                       overwriting artifacts under the selected ROCm prefix."
     echo "  -y                   Skip confirmation prompts."
-    echo ""
-    echo "  The installed plugins will be at:"
-    echo "    <install-dir>/lib/hipdnn_plugins/engines/"
-    echo "  Pass that path to --plugin-path when benchmarking."
+    echo "  The selected ROCm prefix is exported as ROCM_PATH and its"
+    echo "  lib directory is prepended to LD_LIBRARY_PATH by the venv"
+    echo "  activation script. dnn-benchmarking infers plugins from:"
+    echo "    \$ROCM_PATH/lib/hipdnn_plugins/engines/"
+}
+
+require_arg() {
+    local option="$1"
+    local value="${2:-}"
+    if [ -z "$value" ] || [[ "$value" == -* ]]; then
+        echo "ERROR: $option requires a value." >&2
+        usage
+        exit 1
+    fi
+}
+
+require_python_version() {
+    python3 - <<'PY'
+import sys
+
+required = (3, 12)
+if sys.version_info < required:
+    version = ".".join(str(part) for part in sys.version_info[:3])
+    raise SystemExit(
+        f"ERROR: setup.sh requires Python >= 3.12, but python3 is {version}. "
+        "Run setup with a Python 3.12+ environment."
+    )
+PY
+}
+
+prepend_ld_library_path() {
+    local lib_dir="$1"
+    case ":${LD_LIBRARY_PATH:-}:" in
+        *":$lib_dir:"*) ;;
+        *) export LD_LIBRARY_PATH="$lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
+    esac
+}
+
+write_activation_local() {
+    local rocm_prefix="$1"
+    local lib_dir="$2"
+    {
+        printf 'export PYTHONPYCACHEPREFIX=%q\n' "$DNN_BENCH_WORKSPACE/pycache"
+        printf 'export DNN_BENCH_WORKSPACE=%q\n' "$DNN_BENCH_WORKSPACE"
+        printf 'export ROCM_PATH=%q\n' "$rocm_prefix"
+        printf 'case ":%s:" in\n' '${LD_LIBRARY_PATH:-}'
+        printf '    *:%s:*) ;;\n' "$lib_dir"
+        printf '    *) export LD_LIBRARY_PATH=%q${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} ;;\n' "$lib_dir"
+        printf 'esac\n'
+    } > "$ACTIVATE_LOCAL"
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force-build) FORCE_BUILD=1 ;;
-        --install-dir) shift; INSTALL_DIR="$1" ;;
+        --rocm-prefix)
+            require_arg "$1" "${2:-}"
+            shift
+            ROCM_PREFIX="$1"
+            ;;
+        --torch-mode)
+            require_arg "$1" "${2:-}"
+            shift
+            TORCH_MODE="$1"
+            ;;
+        --reuse-venv) REUSE_VENV=1 ;;
+        --workspace)
+            require_arg "$1" "${2:-}"
+            shift
+            DNN_BENCH_WORKSPACE="$1"
+            VENV_DIR="$DNN_BENCH_WORKSPACE/.venv"
+            ;;
+        --torch-index-url)
+            require_arg "$1" "${2:-}"
+            shift
+            TORCH_INDEX_URL="$1"
+            ;;
+        --gpu-arch)
+            require_arg "$1" "${2:-}"
+            shift
+            GPU_ARCH_OVERRIDE="$1"
+            ;;
         -y) AUTO_YES=1 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown argument: $1"; usage; exit 1 ;;
@@ -45,32 +152,554 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-HIPDNN_CONFIG="$INSTALL_DIR/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
-PLUGIN_DIR="$INSTALL_DIR/lib/hipdnn_plugins/engines"
-MIOPEN_PLUGIN="$PLUGIN_DIR/libmiopen_plugin.so"
-HIP_KERNEL_PLUGIN="$PLUGIN_DIR/libhip_kernel_provider.so"
-HIPBLASLT_PLUGIN="$PLUGIN_DIR/libhipblaslt_plugin.so"
 
-needs_install() {
-    [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$1" ]
+case "$TORCH_MODE" in
+    rocm|cpu|existing|none) ;;
+    *)
+        echo "ERROR: --torch-mode must be one of: rocm, cpu, existing, none" >&2
+        exit 1
+        ;;
+esac
+
+if [ "$TORCH_MODE" = "existing" ]; then
+    REUSE_VENV=1
+fi
+
+require_python_version
+mkdir -p "$DNN_BENCH_WORKSPACE"
+export DNN_BENCH_WORKSPACE
+
+
+hipdnn_config_path() {
+    local prefix="$1"
+    echo "$prefix/lib/cmake/hipdnn_frontend/hipdnn_frontendConfig.cmake"
 }
 
-if { needs_install "$HIPDNN_CONFIG" || needs_install "$MIOPEN_PLUGIN" \
-    || needs_install "$HIP_KERNEL_PLUGIN" || needs_install "$HIPBLASLT_PLUGIN"; } \
-    && [ "$AUTO_YES" -eq 0 ]; then
-    read -r -p "This will install hipDNN to $INSTALL_DIR. Continue? [Y/n] " confirm
+hipdnn_backend_config_path() {
+    local prefix="$1"
+    echo "$prefix/lib/cmake/hipdnn_backend/hipdnn_backendConfig.cmake"
+}
+
+prefix_has_hipdnn() {
+    local prefix="$1"
+    [ -f "$(hipdnn_config_path "$prefix")" ] && [ -f "$(hipdnn_backend_config_path "$prefix")" ]
+}
+
+find_rocm_wheel_prefix() {
+    local kind="$1"
+    python - "$kind" <<'PY'
+from pathlib import Path
+import sys
+import sysconfig
+
+kind = sys.argv[1]
+venv_root = Path(sys.prefix).resolve()
+
+roots = []
+for key in ("purelib", "platlib"):
+    value = sysconfig.get_path(key)
+    if value:
+        path = Path(value).resolve()
+        if path == venv_root or venv_root in path.parents:
+            roots.append(path)
+
+matches = {}
+for root in roots:
+    if not root.is_dir():
+        continue
+    for child in root.iterdir():
+        if not child.is_dir():
+            continue
+        if kind == "libraries":
+            if not child.name.startswith("_rocm_sdk_libraries_"):
+                continue
+            lib_dir = child.joinpath("lib")
+            if not lib_dir.is_dir() or not any(lib_dir.glob("libMIOpen.so*")):
+                continue
+        elif kind == "devel":
+            if not child.name.startswith("_rocm_sdk_devel"):
+                continue
+            if not (
+                child.joinpath("lib/llvm/bin/clang").is_file()
+                and child.joinpath("lib/llvm/bin/clang++").is_file()
+                and child.joinpath("lib/cmake/hip/hip-config.cmake").is_file()
+            ):
+                continue
+        elif kind == "core":
+            if not child.name.startswith("_rocm_sdk_core"):
+                continue
+            amd_smi_dir = child.joinpath("share/amd_smi")
+            if not (
+                child.joinpath("lib").is_dir()
+                and any(child.joinpath("lib").glob("libamd_smi.so*"))
+                and amd_smi_dir.is_dir()
+                and (
+                    amd_smi_dir.joinpath("setup.py").is_file()
+                    or amd_smi_dir.joinpath("pyproject.toml").is_file()
+                )
+            ):
+                continue
+        else:
+            print(f"ERROR: unknown ROCm wheel prefix kind: {kind}", file=sys.stderr)
+            sys.exit(2)
+        matches[child.resolve()] = child
+
+if len(matches) == 1:
+    print(next(iter(matches.values())))
+    sys.exit(0)
+if len(matches) > 1:
+    print(f"ERROR: multiple usable ROCm SDK {kind} prefixes found:", file=sys.stderr)
+    for path in sorted(matches.values()):
+        print(f"  {path}", file=sys.stderr)
+    print("Use a clean workspace/venv so setup cannot mix ROCm SDK packages.", file=sys.stderr)
+    sys.exit(2)
+sys.exit(1)
+PY
+}
+
+discover_rocm_wheel_libraries_prefix() {
+    find_rocm_wheel_prefix libraries
+}
+
+discover_rocm_wheel_devel_prefix() {
+    find_rocm_wheel_prefix devel
+}
+
+discover_rocm_wheel_core_prefix() {
+    find_rocm_wheel_prefix core
+}
+expand_rocm_sdk_devel() {
+    python - <<'PY'
+import importlib.util
+import subprocess
+import sys
+
+if importlib.util.find_spec("rocm_sdk_devel") is None:
+    sys.exit(1)
+
+subprocess.run([sys.executable, "-m", "rocm_sdk", "init"], check=True)
+PY
+}
+
+require_rocm_wheel_libraries_prefix() {
+    local prefix status
+    if prefix=$(discover_rocm_wheel_libraries_prefix); then
+        echo "$prefix"
+        return
+    else
+        status=$?
+    fi
+    if [ "$status" -ne 1 ]; then
+        exit 1
+    fi
+    echo "ERROR: no usable ROCm SDK libraries package found in this venv." >&2
+    echo "Expected exactly one _rocm_sdk_libraries_* package containing MIOpen libraries." >&2
+    echo "Use a ROCm torch wheel that includes ROCm SDK libraries, pass --rocm-prefix explicitly, or pass --force-build." >&2
+    exit 1
+}
+
+ensure_rocm_wheel_devel_prefix() {
+    local index_url="$1"
+    local prefix status
+    if prefix=$(discover_rocm_wheel_devel_prefix); then
+        echo "$prefix"
+        return
+    else
+        status=$?
+    fi
+    if [ "$status" -ne 1 ]; then
+        exit 1
+    fi
+
+    if expand_rocm_sdk_devel >&2; then
+        if prefix=$(discover_rocm_wheel_devel_prefix); then
+            echo "$prefix"
+            return
+        else
+            status=$?
+        fi
+        if [ "$status" -ne 1 ]; then
+            exit 1
+        fi
+    fi
+
+    if [ -z "$index_url" ]; then
+        echo "ERROR: no ROCm SDK compiler/toolchain prefix found in this venv." >&2
+        echo "Expected exactly one _rocm_sdk_devel package with lib/llvm/bin/clang++ and hip CMake configs." >&2
+        echo "Install rocm-sdk-devel from the same ROCm torch index, or pass --rocm-prefix." >&2
+        exit 1
+    fi
+
+    echo "ROCm SDK compiler/toolchain prefix not found; installing rocm-sdk-devel from $index_url..." >&2
+    pip install --pre rocm-sdk-devel --index-url "$index_url" >&2
+
+    if ! expand_rocm_sdk_devel >&2; then
+        echo "ERROR: rocm-sdk-devel installed, but its devel payload could not be expanded." >&2
+        exit 1
+    fi
+
+    if prefix=$(discover_rocm_wheel_devel_prefix); then
+        echo "$prefix"
+        return
+    else
+        status=$?
+    fi
+    if [ "$status" -ne 1 ]; then
+        exit 1
+    fi
+    echo "ERROR: rocm-sdk-devel installed, but no usable ROCm SDK compiler/toolchain prefix was found." >&2
+    echo "Expected lib/llvm/bin/clang, lib/llvm/bin/clang++, and hip CMake configs under _rocm_sdk_devel." >&2
+    exit 1
+}
+amdsmi_importable() {
+    python - <<'PY'
+import sys
+
+try:
+    import amdsmi  # noqa: F401
+except Exception:
+    sys.exit(1)
+PY
+}
+
+maybe_install_amdsmi() {
+    if amdsmi_importable; then
+        return
+    fi
+
+    local prefix candidate status seen
+    local -a candidates=()
+
+    if prefix=$(discover_rocm_wheel_core_prefix); then
+        candidate="$prefix/share/amd_smi"
+        candidates+=("$candidate")
+    else
+        status=$?
+        if [ "$status" -ne 1 ]; then
+            echo "Warning: ROCm SDK core discovery failed; skipping SDK amdsmi candidate." >&2
+        fi
+    fi
+
+    for prefix in "$@"; do
+        if [ -z "$prefix" ]; then
+            continue
+        fi
+        candidate="$prefix/share/amd_smi"
+        if [ -d "$candidate" ] && { [ -f "$candidate/setup.py" ] || [ -f "$candidate/pyproject.toml" ]; }; then
+            candidates+=("$candidate")
+        fi
+    done
+
+    seen="|"
+    for candidate in "${candidates[@]}"; do
+        case "$seen" in
+            *"|$candidate|"*) continue ;;
+        esac
+        seen="$seen$candidate|"
+
+        if [ ! -d "$candidate" ] || { [ ! -f "$candidate/setup.py" ] && [ ! -f "$candidate/pyproject.toml" ]; }; then
+            continue
+        fi
+
+        echo "Installing amdsmi Python bindings from $candidate..."
+        if pip install -e "$candidate" && amdsmi_importable; then
+            return
+        fi
+        echo "Warning: amdsmi install from $candidate failed; trying next candidate." >&2
+    done
+
+    echo "Warning: amdsmi Python bindings were not installed; GPU SMI snapshot will be disabled." >&2
+}
+
+
+detect_gpu_arch() {
+    local arch
+    if [ -n "$GPU_ARCH_OVERRIDE" ]; then
+        echo "$GPU_ARCH_OVERRIDE"
+        return
+    fi
+    if command -v rocm_agent_enumerator &>/dev/null; then
+        arch=$(rocm_agent_enumerator | grep -m1 'gfx9' || true)
+        if [ -n "$arch" ]; then
+            echo "$arch"
+            return
+        fi
+    fi
+    if command -v rocminfo &>/dev/null; then
+        arch=$(rocminfo | grep -oP 'gfx\d+[a-z0-9]*' | head -1 || true)
+        if [ -n "$arch" ]; then
+            echo "$arch"
+            return
+        fi
+    fi
+    echo ""
+}
+
+get_torch_mode() {
+    python - <<'PY'
+try:
+    import torch
+except Exception:
+    print("missing")
+else:
+    print("rocm" if getattr(torch.version, "hip", None) else "cpu")
+PY
+}
+
+require_torch_mode() {
+    local expected="$1"
+    local status
+    status="${INSTALLED_TORCH_MODE:-$(get_torch_mode)}"
+    if [ "$status" != "$expected" ]; then
+        echo "ERROR: --torch-mode $expected requested, but $VENV_DIR contains torch mode '$status'." >&2
+        echo "Use a clean workspace or remove the existing virtual environment before changing torch modes." >&2
+        exit 1
+    fi
+}
+
+
+resolve_installed_rocm_prefix() {
+    if [ -n "$ROCM_PREFIX" ]; then
+        echo "$ROCM_PREFIX"
+        return
+    fi
+    if [ -n "${ROCM_PATH:-}" ]; then
+        echo "$ROCM_PATH"
+        return
+    fi
+    echo "$DEFAULT_ROCM_PREFIX"
+}
+
+install_torch() {
+    case "$TORCH_MODE" in
+        none)
+            echo "Leaving torch uninstalled."
+            return
+            ;;
+        existing)
+            if [ "$INSTALLED_TORCH_MODE" = "missing" ]; then
+                echo "ERROR: --torch-mode existing requires torch to already be installed in $VENV_DIR." >&2
+                echo "Use --torch-mode rocm or --torch-mode cpu to install torch automatically." >&2
+                exit 1
+            fi
+            echo "Using existing PyTorch in $VENV_DIR."
+            return
+            ;;
+        cpu)
+            local index_url="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
+            if [ "$INSTALLED_TORCH_MODE" != "missing" ]; then
+                require_torch_mode cpu
+                echo "Using existing CPU-only PyTorch in $VENV_DIR."
+                return
+            fi
+            echo "Installing CPU-only PyTorch from $index_url"
+            pip install torch --index-url "$index_url"
+            INSTALLED_TORCH_MODE=$(get_torch_mode)
+            require_torch_mode cpu
+            ;;
+        rocm)
+            local index_url="$TORCH_INDEX_URL"
+            if [ -z "$index_url" ]; then
+                local gpu_arch index_arch
+                gpu_arch=$(detect_gpu_arch)
+                case "$gpu_arch" in
+                    gfx90a) index_arch="gfx90X" ;;
+                    gfx942) index_arch="gfx94X" ;;
+                    gfx950) index_arch="gfx950" ;;
+                    *)
+                        echo "ERROR: Unsupported GPU architecture '${gpu_arch:-none}'." >&2
+                        echo "Supported: gfx90a (MI200/MI210/MI250), gfx942 (MI300X/MI300A), gfx950 (MI350)" >&2
+                        echo "Pass --gpu-arch or --torch-index-url to override detection." >&2
+                        exit 1
+                        ;;
+                esac
+                index_url="https://rocm.nightlies.amd.com/v2-staging/${index_arch}-dcgpu/"
+                echo "Detected GPU: $gpu_arch"
+            fi
+            RESOLVED_TORCH_INDEX_URL="$index_url"
+            if [ "$INSTALLED_TORCH_MODE" != "missing" ]; then
+                require_torch_mode rocm
+                echo "Using existing ROCm PyTorch in $VENV_DIR."
+                return
+            fi
+            echo "Installing ROCm PyTorch from $index_url"
+            pip install --pre torch --index-url "$index_url"
+            INSTALLED_TORCH_MODE=$(get_torch_mode)
+            require_torch_mode rocm
+            ;;
+    esac
+}
+
+select_binding_prefix() {
+    if [ "$FORCE_BUILD" -eq 1 ] || [ -n "$ROCM_PREFIX" ]; then
+        resolve_installed_rocm_prefix
+        return
+    fi
+
+    case "$TORCH_MODE" in
+        rocm)
+            require_rocm_wheel_libraries_prefix
+            ;;
+        existing)
+            if [ "$INSTALLED_TORCH_MODE" = "rocm" ]; then
+                require_rocm_wheel_libraries_prefix
+                return
+            fi
+            resolve_installed_rocm_prefix
+            ;;
+        cpu|none)
+            resolve_installed_rocm_prefix
+            ;;
+    esac
+}
+
+select_provider_toolchain_prefix() {
+    if [ "$FORCE_BUILD" -eq 1 ] || [ -n "$ROCM_PREFIX" ]; then
+        resolve_installed_rocm_prefix
+        return
+    fi
+
+    case "$TORCH_MODE" in
+        rocm)
+            ensure_rocm_wheel_devel_prefix "$RESOLVED_TORCH_INDEX_URL"
+            ;;
+        existing)
+            if [ "$INSTALLED_TORCH_MODE" = "rocm" ]; then
+                ensure_rocm_wheel_devel_prefix ""
+                return
+            fi
+            resolve_installed_rocm_prefix
+            ;;
+        cpu|none)
+            resolve_installed_rocm_prefix
+            ;;
+    esac
+}
+
+
+build_hipdnn() {
+    local install_prefix="$1"
+    local toolchain_prefix="$2"
+    local cmake_prefix_path="$install_prefix"
+    local cmake_program_path="$toolchain_prefix/bin;$toolchain_prefix/lib/llvm/bin"
+
+    if [ "$toolchain_prefix" != "$install_prefix" ]; then
+        cmake_prefix_path="$install_prefix;$toolchain_prefix"
+    fi
+
+    echo "Building and installing hipDNN to $install_prefix..."
+    echo "Using ROCm compiler/devel prefix: $toolchain_prefix"
+    rm -rf "$BUILD_DIR"
+    cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="$install_prefix" \
+        -DCMAKE_PREFIX_PATH="$cmake_prefix_path" \
+        -DCMAKE_PROGRAM_PATH="$cmake_program_path" \
+        -DROCM_PATH="$toolchain_prefix" \
+        -DHIPDNN_SKIP_TESTS=ON \
+        -DHIPDNN_ENABLE_SDPA=ON \
+        -DENABLE_CLANG_FORMAT=OFF \
+        -DENABLE_CLANG_TIDY=OFF
+    cmake --build "$BUILD_DIR"
+    cmake --install "$BUILD_DIR"
+}
+
+build_provider() {
+    local name="$1"
+    local provider_dir="$2"
+    local build_dir="$3"
+    local install_prefix="$4"
+    local toolchain_prefix="$5"
+    shift 5
+
+    local cmake_prefix_path="$install_prefix"
+    local cmake_program_path="$toolchain_prefix/bin;$toolchain_prefix/lib/llvm/bin"
+
+    if [ "$toolchain_prefix" != "$install_prefix" ]; then
+        cmake_prefix_path="$install_prefix;$toolchain_prefix"
+    fi
+
+    if [ ! -d "$provider_dir" ]; then
+        echo "Error: $name not found at $provider_dir" >&2
+        exit 1
+    fi
+
+    echo "Building and installing $name to $install_prefix..."
+    echo "Using ROCm compiler/devel prefix: $toolchain_prefix"
+    rm -rf "$build_dir"
+    cmake -S "$provider_dir" -B "$build_dir" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="$install_prefix" \
+        -DCMAKE_PREFIX_PATH="$cmake_prefix_path" \
+        -DCMAKE_PROGRAM_PATH="$cmake_program_path" \
+        -DROCM_PATH="$toolchain_prefix" \
+        -DENABLE_CLANG_FORMAT=OFF \
+        -DENABLE_CLANG_TIDY=OFF \
+        "$@"
+    cmake --build "$build_dir"
+    cmake --install "$build_dir"
+}
+
+build_miopen_provider() {
+    build_provider \
+        "MIOpen provider" \
+        "$MIOPEN_PROVIDER_DIR" \
+        "$MIOPEN_BUILD_DIR" \
+        "$1" \
+        "$2" \
+        -DMIOPENPROVIDER_SKIP_TESTS=ON
+    echo ""
+    echo "MIOpen plugin installed to: $1/lib/hipdnn_plugins/engines/"
+}
+
+build_hipblaslt_provider() {
+    build_provider \
+        "hipBLASLt provider" \
+        "$HIPBLASLT_PROVIDER_DIR" \
+        "$HIPBLASLT_BUILD_DIR" \
+        "$1" \
+        "$2" \
+        -DHIPDNN_SKIP_TESTS=ON
+}
+
+build_hip_kernel_provider() {
+    build_provider \
+        "hip-kernel-provider" \
+        "$HIP_KERNEL_PROVIDER_DIR" \
+        "$HIP_KERNEL_BUILD_DIR" \
+        "$1" \
+        "$2" \
+        -DHIPKERNELPROVIDER_ENABLE_TESTS=OFF \
+        -DENABLE_ASM_SDPA_ENGINE=ON
+}
+
+FORCE_BUILD_PREFIX=$(resolve_installed_rocm_prefix)
+
+if [ "$FORCE_BUILD" -eq 1 ] && [ "$AUTO_YES" -eq 0 ]; then
+    read -r -p "This will build and install hipDNN to $FORCE_BUILD_PREFIX. Continue? [Y/n] " confirm
     case "$confirm" in
         [nN]) echo "Aborted."; exit 0 ;;
     esac
 fi
 
 # 1. Create or activate venv
-if [ -d "$VENV_DIR" ]; then
-    echo "Removing existing virtual environment at $VENV_DIR..."
-    rm -rf "$VENV_DIR"
+if [ "$TORCH_MODE" = "existing" ] && [ ! -d "$VENV_DIR" ]; then
+    echo "ERROR: --torch-mode existing requires an existing virtual environment at $VENV_DIR." >&2
+    echo "Use --torch-mode rocm or --torch-mode cpu to create one and install torch automatically." >&2
+    exit 1
 fi
-echo "Creating virtual environment at $VENV_DIR..."
-python3 -m venv "$VENV_DIR"
+if [ -d "$VENV_DIR" ]; then
+    if [ "$REUSE_VENV" -eq 1 ]; then
+        echo "Reusing existing virtual environment at $VENV_DIR..."
+    else
+        echo "Removing existing virtual environment at $VENV_DIR..."
+        rm -rf "$VENV_DIR"
+    fi
+fi
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating virtual environment at $VENV_DIR..."
+    python3 -m venv "$VENV_DIR"
+fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
@@ -80,12 +709,11 @@ source "$VENV_DIR/bin/activate"
 # activate script so it's set before the interpreter starts (setting it in
 # Python code is too late for that process's own imports).
 ACTIVATE_LOCAL="$VENV_DIR/bin/activate.local"
-if [ ! -f "$ACTIVATE_LOCAL" ] || ! grep -q PYTHONPYCACHEPREFIX "$ACTIVATE_LOCAL"; then
-    {
-        echo "export PYTHONPYCACHEPREFIX=$DNN_BENCH_WORKSPACE/pycache"
-        echo "export DNN_BENCH_WORKSPACE=$DNN_BENCH_WORKSPACE"
-    } >> "$ACTIVATE_LOCAL"
-fi
+{
+    printf 'export PYTHONPYCACHEPREFIX=%q\n' "$DNN_BENCH_WORKSPACE/pycache"
+    printf 'export DNN_BENCH_WORKSPACE=%q\n' "$DNN_BENCH_WORKSPACE"
+} > "$ACTIVATE_LOCAL"
+INSTALLED_TORCH_MODE=$(get_torch_mode)
 if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
     # shellcheck disable=SC2016
     echo 'source "$(dirname "${BASH_SOURCE[0]}")/activate.local" 2>/dev/null || true' \
@@ -93,152 +721,101 @@ if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
 fi
 export PYTHONPYCACHEPREFIX="$DNN_BENCH_WORKSPACE/pycache"
 
-# 2. Detect GPU architecture and install ROCm PyTorch from the matching nightly index.
-detect_gpu_arch() {
-    local arch
-    if command -v rocm_agent_enumerator &>/dev/null; then
-        arch=$(rocm_agent_enumerator | grep -m1 'gfx9')
-    elif command -v rocminfo &>/dev/null; then
-        arch=$(rocminfo | grep -oP 'gfx\d+' | head -1)
-    fi
-    echo "${arch:-}"
-}
+echo "Torch mode: $TORCH_MODE"
 
-GPU_ARCH=$(detect_gpu_arch)
-case "$GPU_ARCH" in
-    gfx90*) INDEX_ARCH="gfx90X" ;;
-    gfx94*) INDEX_ARCH="gfx94X" ;;
-    *)
-        echo "ERROR: Unsupported GPU architecture '${GPU_ARCH:-none}'."
-        echo "Supported: gfx90a (MI200/MI210/MI250), gfx942 (MI300X/MI300A)"
-        exit 1 ;;
-esac
-
-INDEX_URL="https://rocm.nightlies.amd.com/v2-staging/${INDEX_ARCH}-dcgpu/"
-echo "Detected GPU: $GPU_ARCH → installing PyTorch from $INDEX_URL"
-
-# Install ROCm torch first from its dedicated index. Then editable-install the
-# package; pyproject.toml omits torch (so pip won't touch the already-installed
-# ROCm build) and lists the rest (numpy, pytest, pytest-cov) which resolve
-# cleanly from PyPI.
-pip install --pre torch --index-url "$INDEX_URL"
+# 2. Install torch, then editable-install the benchmark package. pyproject.toml
+# intentionally omits torch so pip never replaces the selected torch wheel.
+install_torch
 pip install -e "$SCRIPT_DIR"
 
-# 2b. Install amdsmi Python bindings if present in the ROCm install.
-# amdsmi is not on PyPI — it ships under /opt/rocm/share/amd_smi/. The
-# always-on GPU snapshot in metrics/gpu_smi.py uses it; if absent the
-# snapshot fields stay None (warn-once), so this install is best-effort.
-AMDSMI_DIR="$INSTALL_DIR/share/amd_smi"
-if ! python -c "import amdsmi" >/dev/null 2>&1; then
-    if [ -f "$AMDSMI_DIR/setup.py" ] || [ -f "$AMDSMI_DIR/pyproject.toml" ]; then
-        echo "Installing amdsmi Python bindings from $AMDSMI_DIR..."
-        if ! pip install "$AMDSMI_DIR"; then
-            echo "Warning: amdsmi install failed; GPU SMI snapshot will be disabled." >&2
-        fi
-    else
-        echo "Warning: amdsmi not found at $AMDSMI_DIR; GPU SMI snapshot will be disabled." >&2
-    fi
-fi
+# 3. Select the hipDNN/ROCm prefix used by Python bindings and provider builds.
+BINDING_PREFIX=$(select_binding_prefix)
+echo "Using hipDNN/ROCm prefix: $BINDING_PREFIX"
 
-# 3. Build and install hipDNN + provider plugins
-# The installed cmake configs use install-tree paths; pointing CMAKE_PREFIX_PATH at
-# the raw build dir causes "non-existent path" errors in hipdnn_data_sdkConfig.cmake.
-require_provider_dir() {
-    local name="$1"
-    local dir="$2"
-    if [ ! -d "$dir" ]; then
-        echo "Error: $name not found at $dir"
-        exit 1
-    fi
-}
+PROVIDER_TOOLCHAIN_PREFIX=""
+if [ "$FORCE_BUILD" -eq 1 ] || ! prefix_has_hipdnn "$BINDING_PREFIX"; then
+    PROVIDER_TOOLCHAIN_PREFIX=$(select_provider_toolchain_prefix)
+fi
 
 BUILT_HIPDNN=0
-if needs_install "$HIPDNN_CONFIG"; then
-    echo "Building and installing hipDNN..."
-    cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-        -DHIPDNN_SKIP_TESTS=ON \
-        -DHIPDNN_ENABLE_SDPA=ON \
-        -DENABLE_CLANG_FORMAT=OFF \
-        -DENABLE_CLANG_TIDY=OFF
-    cmake --build "$BUILD_DIR"
-    cmake --install "$BUILD_DIR"
+if [ "$FORCE_BUILD" -eq 1 ]; then
+    build_hipdnn "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
     BUILT_HIPDNN=1
+elif ! prefix_has_hipdnn "$BINDING_PREFIX"; then
+    if [ "$TORCH_MODE" = "rocm" ] || { [ "$TORCH_MODE" = "existing" ] && [ "$INSTALLED_TORCH_MODE" = "rocm" ]; }; then
+        build_hipdnn "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+        BUILT_HIPDNN=1
+    else
+        echo "ERROR: hipDNN CMake configs were not found under $BINDING_PREFIX." >&2
+        echo "Expected:" >&2
+        echo "  $(hipdnn_config_path "$BINDING_PREFIX")" >&2
+        echo "  $(hipdnn_backend_config_path "$BINDING_PREFIX")" >&2
+        echo "Install ROCm/hipDNN artifacts there, use --rocm-prefix, or pass --force-build." >&2
+        exit 1
+    fi
 fi
 
-if [ "$BUILT_HIPDNN" -eq 1 ] || needs_install "$MIOPEN_PLUGIN"; then
-    require_provider_dir "miopen-provider" "$MIOPEN_PROVIDER_DIR"
-    echo "Building and installing MIOpen provider..."
-    rm -rf "$MIOPEN_BUILD_DIR"
-    cmake -S "$MIOPEN_PROVIDER_DIR" -B "$MIOPEN_BUILD_DIR" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-        -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
-        -DMIOPENPROVIDER_SKIP_TESTS=ON \
-        -DENABLE_CLANG_FORMAT=OFF \
-        -DENABLE_CLANG_TIDY=OFF
-    cmake --build "$MIOPEN_BUILD_DIR"
-    cmake --install "$MIOPEN_BUILD_DIR"
+
+# 4. Build/install provider plugins if the selected prefix does not already
+# contain the specific plugin artifacts. This keeps the ROCm torch wheel flow
+# self-contained: torch supplies ROCm libraries, setup.sh adds local hipDNN and
+# provider artifacts when needed.
+PLUGIN_DIR="$BINDING_PREFIX/lib/hipdnn_plugins/engines"
+MIOPEN_PLUGIN="$PLUGIN_DIR/libmiopen_plugin.so"
+HIPBLASLT_PLUGIN="$PLUGIN_DIR/libhipblaslt_plugin.so"
+HIP_KERNEL_PLUGIN="$PLUGIN_DIR/libhip_kernel_provider.so"
+if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || \
+    [ ! -f "$MIOPEN_PLUGIN" ] || [ ! -f "$HIPBLASLT_PLUGIN" ] || \
+    [ ! -f "$HIP_KERNEL_PLUGIN" ]; then
+    if [ -z "$PROVIDER_TOOLCHAIN_PREFIX" ]; then
+        PROVIDER_TOOLCHAIN_PREFIX=$(select_provider_toolchain_prefix)
+    fi
 fi
 
-if [ "$BUILT_HIPDNN" -eq 1 ] || needs_install "$HIPBLASLT_PLUGIN"; then
-    require_provider_dir "hipblaslt-provider" "$HIPBLASLT_PROVIDER_DIR"
-    echo "Building and installing hipBLASLt provider..."
-    rm -rf "$HIPBLASLT_BUILD_DIR"
-    cmake -S "$HIPBLASLT_PROVIDER_DIR" -B "$HIPBLASLT_BUILD_DIR" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-        -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
-        -DHIPDNN_SKIP_TESTS=ON \
-        -DENABLE_CLANG_FORMAT=OFF \
-        -DENABLE_CLANG_TIDY=OFF
-    cmake --build "$HIPBLASLT_BUILD_DIR"
-    cmake --install "$HIPBLASLT_BUILD_DIR"
+if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || [ ! -f "$MIOPEN_PLUGIN" ]; then
+    build_miopen_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
 fi
-
-if [ "$BUILT_HIPDNN" -eq 1 ] || needs_install "$HIP_KERNEL_PLUGIN"; then
-    require_provider_dir "hip-kernel-provider" "$HIP_KERNEL_PROVIDER_DIR"
-    echo "Building and installing hip-kernel-provider..."
-    rm -rf "$HIP_KERNEL_BUILD_DIR"
-    cmake -S "$HIP_KERNEL_PROVIDER_DIR" -B "$HIP_KERNEL_BUILD_DIR" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-        -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
-        -DHIPKERNELPROVIDER_ENABLE_TESTS=OFF \
-        -DENABLE_CLANG_FORMAT=OFF \
-        -DENABLE_CLANG_TIDY=OFF \
-        -DENABLE_ASM_SDPA_ENGINE=ON
-    cmake --build "$HIP_KERNEL_BUILD_DIR"
-    cmake --install "$HIP_KERNEL_BUILD_DIR"
+if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || [ ! -f "$HIPBLASLT_PLUGIN" ]; then
+    build_hipblaslt_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
+fi
+if [ "$FORCE_BUILD" -eq 1 ] || [ "$BUILT_HIPDNN" -eq 1 ] || [ ! -f "$HIP_KERNEL_PLUGIN" ]; then
+    build_hip_kernel_provider "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX"
 fi
 
 echo ""
 echo "hipDNN plugins installed to: $PLUGIN_DIR/"
+ROCM_PATH="$BINDING_PREFIX"
+export ROCM_PATH
+prepend_ld_library_path "$BINDING_PREFIX/lib"
+write_activation_local "$ROCM_PATH" "$BINDING_PREFIX/lib"
 
-# 5. Install hipdnn Python bindings
+
+# 6. Install hipDNN Python bindings.
 # Wipe any stale cmake build cache (can reference deleted pip temp envs).
+if [ -z "$PROVIDER_TOOLCHAIN_PREFIX" ]; then
+    PROVIDER_TOOLCHAIN_PREFIX=$(select_provider_toolchain_prefix)
+fi
+maybe_install_amdsmi "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX" "${ROCM_PREFIX:-}" "$DEFAULT_ROCM_PREFIX"
+
+PY_BINDING_CMAKE_PREFIX_PATH="$BINDING_PREFIX"
+if [ "$PROVIDER_TOOLCHAIN_PREFIX" != "$BINDING_PREFIX" ]; then
+    PY_BINDING_CMAKE_PREFIX_PATH="$BINDING_PREFIX;$PROVIDER_TOOLCHAIN_PREFIX"
+fi
 rm -rf "$HIPDNN_ROOT/python/build"
-CMAKE_PREFIX_PATH="$INSTALL_DIR" \
+ROCM_PATH="$PROVIDER_TOOLCHAIN_PREFIX" \
+    CMAKE_PREFIX_PATH="$PY_BINDING_CMAKE_PREFIX_PATH" \
     pip install -e "$HIPDNN_ROOT/python"
 
-# 6. Patch the ROCm PyTorch wheel's bundled libhipdnn_backend.so
-# The rocm_sdk wheel preloads its own copy of libhipdnn_backend.so with
-# RTLD_GLOBAL before hipdnn_frontend can load the system copy. Replace
-# the wheel's stale copy with the freshly built one so both torch and
-# hipdnn_frontend use the same library.
-WHEEL_BACKEND=$(find "$VENV_DIR" -path '*/_rocm_sdk_libraries_*/lib/libhipdnn_backend.so' 2>/dev/null | head -1)
-if [ -n "$WHEEL_BACKEND" ] && [ -f "$INSTALL_DIR/lib/libhipdnn_backend.so" ]; then
-    echo "Patching PyTorch wheel's bundled libhipdnn_backend.so..."
-    cp "$INSTALL_DIR/lib/libhipdnn_backend.so" "$WHEEL_BACKEND"
-fi
 
 echo ""
 echo "Setup complete. Activate the virtual environment with:"
 echo "  source $VENV_DIR/bin/activate"
-if [ "$FORCE_BUILD" -eq 1 ]; then
-    echo ""
-    echo "Run benchmarks with:"
-    echo "  python -m dnn_benchmarking --graph <graph.json> \\"
-    echo "    --plugin-path $INSTALL_DIR/lib/hipdnn_plugins/engines"
-fi
+echo ""
+echo "Run benchmarks with:"
+echo "  python -m dnn_benchmarking --graph <graph.json>"
+echo ""
+echo "The activation script sets:"
+echo "  ROCM_PATH=$ROCM_PATH"
+echo "  LD_LIBRARY_PATH=$BINDING_PREFIX/lib:\${LD_LIBRARY_PATH}"
+echo "dnn-benchmarking infers plugins from \$ROCM_PATH/lib/hipdnn_plugins/engines."
+echo "Pass --plugin-path explicitly only when overriding the setup-installed plugins."
