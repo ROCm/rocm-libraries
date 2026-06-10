@@ -3977,6 +3977,20 @@
         "vector_size": 8
       },
       "id": 291
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Dgrad",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 292
     }
   ]
 }
