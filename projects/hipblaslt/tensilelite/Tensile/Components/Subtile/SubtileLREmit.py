@@ -694,7 +694,7 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile):
   numRegs = len(dstTile.regList.indices)
 
   # Instruction-shape plan (DS offset, register stride, per-read map) computed
-  # by TileInfo — pure data, optionally delegated to C++. The destination VGPR
+  # by the C++ ABTileInfoQuery via TileInfo — pure data. The destination VGPR
   # base and the sharedVgprLROffset registers stay Python-side.
   plan = tileInfo.singleDsReadPlan(sId0, sId1, subIterK, numRegs)
 
@@ -716,7 +716,7 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
   sId1 = subtileId[1]
 
   # Emit one ds_read group per K-direction MMA tile in the subtile. Each group
-  # is built by emitSingleDsRead from the (optionally C++-delegated) plan; with
+  # is built by emitSingleDsRead from the C++ ABTileInfoQuery plan; with
   # subtileShape[0]==1 the per-du address indices are contiguous, matching the
   # previous flat lrOffsetIdx walk byte-for-byte.
   for du in range(tileInfo.subtileShape[1]):

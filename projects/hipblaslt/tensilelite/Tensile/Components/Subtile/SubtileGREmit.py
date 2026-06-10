@@ -1004,7 +1004,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
   module = Module()
 
   # Instruction-shape plan (skip predicate, MUBUF offsetK, per-load m0 offsets)
-  # computed by TileInfo — pure data, optionally delegated to C++. Register
+  # computed by the C++ ABTileInfoQuery via TileInfo — pure data. Register
   # state (soffset/voff) below stays Python-side.
   plan = tileInfo.singleBufferLoadPlan(sId0, sId1)
   if plan.skip:

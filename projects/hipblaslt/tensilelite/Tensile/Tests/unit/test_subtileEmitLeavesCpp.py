@@ -2,28 +2,29 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Parity tests for the optional C++ (nanobind) subtile *emit-leaf* path.
+"""Regression tests for the C++ (nanobind) subtile *emit-leaf* path.
 
-These tests cover the smallest rocisa-adjacent emit leaves ported to the
-``tensile_writer.subtile`` extension:
+These cover the smallest rocisa-adjacent emit leaves now backed unconditionally
+by the ``tensile_writer.subtile`` extension for the supported AB cases:
 
-  * ``Kernel.emitMfmaInstruction`` — the MFMA F8F6F4 instType selection
-    (``tensile_writer.subtile.emit.mfma_f8f6f4_inst_type``).
+  * ``Kernel._selectF8F6F4InstType`` / ``Kernel.emitMfmaInstruction`` — the MFMA
+    F8F6F4 instType selection (``tensile_writer.subtile.emit.mfma_f8f6f4_inst_type``).
   * ``SubtileGREmit.emitSingleBufferLoad`` — the buffer-load instruction-shape
     plan (``ABTileInfoQuery.singleBufferLoadPlan``).
   * ``SubtileLREmit.emitSingleDsRead`` — the ds_read instruction-shape plan
     (``ABTileInfoQuery.singleDsReadPlan``).
 
-They run only when the compiled extension is importable; otherwise they skip,
-so the default (Python-only) TensileLite build is unaffected. The C++ path is
-exercised by flipping the SubtileGeometry delegation switch at call time, so the
-*same* inputs are run through both code paths and asserted equivalent.
+There is no longer a parallel Python formula for these ported AB cases, so the
+tests lock the produced *values* against the documented reference math (golden
+oracle) and assert the MFMA emission stays well-formed. They run only when the
+compiled extension is importable (it is a hard dependency of Kernel.py);
+otherwise they skip.
 
 PR creation for this slice is human-only: a ``human:pr`` task is filed for
 Bryant Nelson only after review says merge-ready. Agents never open PRs.
 """
 
-import contextlib
+import math
 import os
 import sys
 from types import SimpleNamespace
@@ -40,11 +41,13 @@ cppemit = pytest.importorskip("tensile_writer.subtile.emit")
 cppti = pytest.importorskip("tensile_writer.subtile.tile_info")
 cppgeo = pytest.importorskip("tensile_writer.subtile.geometry")
 
+from rocisa.enum import InstType
+
 from Tensile.Common.DataType import DataType
-from Tensile.Components.Subtile import Kernel as krn
 from Tensile.Components.Subtile.Kernel import (
     TileInfo,
     emitMfmaInstruction,
+    _selectF8F6F4InstType,
     AB_B16,
     AB_B8,
     AB_B4,
@@ -69,9 +72,9 @@ def _init_rocisa_gfx950():
     ri.setKernel(isa, 64)
 
 
-# Plan-parity geometries with a (MatrixInstK, DepthU) that builds a valid
-# TileInfo for the 128x128 / MIWaveGroup=[2,2] kernel below. DepthU is chosen
-# per layout so depthU == subtileShape[1] * mmaK * globalSubtileGrid[1] (the
+# Plan geometries with a (MatrixInstK, DepthU) that builds a valid TileInfo for
+# the 128x128 / MIWaveGroup=[2,2] kernel below. DepthU is chosen per layout so
+# depthU == subtileShape[1] * mmaK * globalSubtileGrid[1] (the
 # TileInfo._check_dim coverage constraint): bf16 (instK=32) -> 64, fp8
 # (instK=128) -> 128, fp4 (instK=128, bpe=0.5) -> 256.
 PLAN_GEOMS = {
@@ -118,27 +121,8 @@ def _rocisa_once():
     _init_rocisa_gfx950()
 
 
-@contextlib.contextmanager
-def cpp_delegation():
-    """Temporarily enable C++ delegation for the TileInfo + emit-leaf layers.
-
-    The geometry layer is always C++. ``krn._USE_CPP`` gates the TileInfo query
-    layer (reused for the buffer-load / ds-read plans) and ``krn._CPP_EMIT``
-    gates the MFMA instType selection.
-    """
-    saved_use = krn._USE_CPP
-    saved_emit = krn._CPP_EMIT
-    krn._USE_CPP = True
-    krn._CPP_EMIT = cppemit
-    try:
-        yield
-    finally:
-        krn._USE_CPP = saved_use
-        krn._CPP_EMIT = saved_emit
-
-
 # ---------------------------------------------------------------------------
-# emitMfmaInstruction — instType selection delegated to C++.
+# emitMfmaInstruction — instType selection (now C++-only).
 # ---------------------------------------------------------------------------
 class _StubPool:
     def __init__(self):
@@ -190,11 +174,40 @@ MFMA_CASES = [
     ("F4", "B8", True),
 ]
 
+# Golden reference for the F8F6F4 instType mapping (matches the C++ port and the
+# prior pure-Python branches). SourceSwap swaps the operand formats first.
+_FMT = {"F8": "f8", "B8": "bf8", "F4": "f4"}
+_INST_TABLE = {
+    ("f8", "f8"): "INST_F8",
+    ("bf8", "bf8"): "INST_BF8",
+    ("f4", "f4"): "INST_F4",
+    ("f8", "bf8"): "INST_F8_BF8",
+    ("bf8", "f8"): "INST_BF8_F8",
+    ("f8", "f4"): "INST_F8_F4",
+    ("f4", "f8"): "INST_F4_F8",
+    ("bf8", "f4"): "INST_B8_F4",
+    ("f4", "bf8"): "INST_F4_B8",
+}
+
+
+def _expected_inst_type(dA, dB, swap):
+    a, b = _FMT[dA], _FMT[dB]
+    if swap:
+        a, b = b, a
+    return getattr(InstType, _INST_TABLE[(a, b)])
+
 
 @pytest.mark.parametrize("dA,dB,swap", MFMA_CASES)
-def test_emitMfmaInstruction_cpp_matches_python(dA, dB, swap):
-    """The C++-delegated instType selection must produce byte-identical MFMA
-    assembly to the native Python path for all covered F8/F6/F4 cases."""
+def test_select_f8f6f4_inst_type(dA, dB, swap):
+    """The C++-backed instType selection must return the golden InstType."""
+    kernel = _mkKernel(dA, dB, miK=128, sourceSwap=swap)
+    assert _selectF8F6F4InstType(kernel) == _expected_inst_type(dA, dB, swap)
+
+
+@pytest.mark.parametrize("dA,dB,swap", MFMA_CASES)
+def test_emitMfmaInstruction_emits_asm(dA, dB, swap):
+    """emitMfmaInstruction renders a non-empty MFMA module for each covered
+    F8/F6/F4 case using the C++-backed instType selection."""
     writer = SimpleNamespace(vgprPool=_StubPool(), agprPool=_StubPool())
     aWidth = 8 if dA in ("F8", "B8") else 4
     bWidth = 8 if dB in ("F8", "B8") else 4
@@ -204,27 +217,24 @@ def test_emitMfmaInstruction_cpp_matches_python(dA, dB, swap):
     tC = _mkTile(32, 4, writer.vgprPool)
     tD = _mkTile(64, 4, writer.vgprPool)
 
-    args = (writer, kernel, tA, tB, tC, tD)
-    kwargs = dict(scaleAVgpr=100, scaleBVgpr=101, scaleAsel=2, scaleBsel=1)
-
-    asm_py = str(emitMfmaInstruction(*args, **kwargs))
-    with cpp_delegation():
-        asm_cpp = str(emitMfmaInstruction(*args, **kwargs))
-    assert asm_py == asm_cpp, (
-        f"MFMA asm mismatch for A={dA} B={dB} swap={swap}:\n"
-        f"PY:\n{asm_py}\nCPP:\n{asm_cpp}"
-    )
+    asm = str(emitMfmaInstruction(
+        writer, kernel, tA, tB, tC, tD,
+        scaleAVgpr=100, scaleBVgpr=101, scaleAsel=2, scaleBsel=1))
+    assert asm.strip(), f"empty MFMA asm for A={dA} B={dB} swap={swap}"
+    assert "mfma" in asm.lower(), f"no mfma mnemonic for A={dA} B={dB} swap={swap}"
 
 
 def test_mfma_inst_type_unsupported_raises():
-    """Unsupported predicate combinations raise (so the Python caller can fall
-    back), e.g. all-false predicates."""
+    """Unsupported predicate combinations raise, e.g. all-false predicates."""
     with pytest.raises(Exception):
         cppemit.mfma_f8f6f4_inst_type(False, False, False, False, False, False, False)
 
 
 # ---------------------------------------------------------------------------
-# emitSingleBufferLoad / emitSingleDsRead — instruction-shape plan parity.
+# emitSingleBufferLoad / emitSingleDsRead — instruction-shape plan values.
+#
+# The plans are computed by ABTileInfoQuery (no Python twin); lock them against
+# the documented reference math derived from the Python TileInfo state.
 # ---------------------------------------------------------------------------
 def _iter_subtiles(ti):
     for s0 in range(int(ti.localSubtileGrid[0])):
@@ -232,31 +242,61 @@ def _iter_subtiles(ti):
             yield s0, s1
 
 
+def _ref_single_buffer_load_plan(ti, s0, s1):
+    """Reference buffer-load plan (skip flag, offsetK, m0 offsets)."""
+    linearId = s1 * ti.localSubtileGrid[0] + s0
+    grBaseId = int(math.floor(linearId / ti.loadRatioGR)) if ti.loadRatioGR else 0
+    if ti.loadRatioGR > 1:
+        firstInGroup = int(grBaseId * ti.loadRatioGR)
+        if linearId != firstInGroup:
+            return SimpleNamespace(skip=True, grBaseId=grBaseId, offsetK=0, m0Offsets=[])
+    offsetK = s1 * int(ti.mmaTileShape[1] * ti.subtileShape[1] * ti.bpe)
+    subtileOffset = int(math.ceil(ti.loadRatioGR * ti.subtileSize))
+    m0Offsets = [
+        int(i * subtileOffset
+            + (s0 + s1 * ti.globalSubtileGrid[0]) * ti.subtileSize)
+        for i in range(ti.numGRPerSubtile)
+    ]
+    return SimpleNamespace(skip=False, grBaseId=grBaseId, offsetK=offsetK, m0Offsets=m0Offsets)
+
+
+def _ref_single_ds_read_plan(ti, s0, s1, subIterK, numRegs):
+    """Reference ds_read plan (DS offset, register stride, per-read map)."""
+    regsPerDsRead = ti.loadWidthLR // 4
+    mfmaId = ti.getSubtileShapeLinearId(subIterK, 0)
+    offsetStride = int(ti.subtileSize)
+    offset = s0 * offsetStride + s1 * int(ti.globalSubtileGrid[0]) * offsetStride
+    numReadsForTile = numRegs // regsPerDsRead
+    reads = [(r * regsPerDsRead, mfmaId * numReadsForTile + r)
+             for r in range(numReadsForTile)]
+    return SimpleNamespace(regsPerDsRead=regsPerDsRead, mfmaId=mfmaId,
+                           offset=offset, numReadsForTile=numReadsForTile, reads=reads)
+
+
 @pytest.mark.parametrize("name", list(PLAN_GEOMS))
-def test_single_buffer_load_plan_parity(name):
-    """ABTileInfoQuery.singleBufferLoadPlan must match the Python TileInfo plan
+def test_single_buffer_load_plan_values(name):
+    """ABTileInfoQuery.singleBufferLoadPlan must match the reference plan
     (skip flag, offsetK, m0 offsets) for every local subtile."""
     geom, inst_k, depth_u = PLAN_GEOMS[name]
     kernel = _mk_plan_kernel(inst_k, depth_u)
     for tc in ("A", "B"):
         ti = TileInfo(geom, tc, None, kernel)
         for s0, s1 in _iter_subtiles(ti):
-            py = ti.singleBufferLoadPlan(s0, s1)
-            with cpp_delegation():
-                cpp = ti.singleBufferLoadPlan(s0, s1)
+            got = ti.singleBufferLoadPlan(s0, s1)
+            ref = _ref_single_buffer_load_plan(ti, s0, s1)
             ctx = f"{name}/{tc} subtile ({s0},{s1})"
-            assert py.skip == cpp.skip, f"{ctx}: skip {py.skip} vs {cpp.skip}"
-            if py.skip:
+            assert got.skip == ref.skip, f"{ctx}: skip {got.skip} vs {ref.skip}"
+            if ref.skip:
                 continue
-            assert py.grBaseId == cpp.grBaseId, f"{ctx}: grBaseId"
-            assert py.offsetK == cpp.offsetK, f"{ctx}: offsetK"
-            assert list(py.m0Offsets) == list(cpp.m0Offsets), f"{ctx}: m0Offsets"
+            assert got.grBaseId == ref.grBaseId, f"{ctx}: grBaseId"
+            assert got.offsetK == ref.offsetK, f"{ctx}: offsetK"
+            assert list(got.m0Offsets) == list(ref.m0Offsets), f"{ctx}: m0Offsets"
 
 
 @pytest.mark.parametrize("name", list(PLAN_GEOMS))
 @pytest.mark.parametrize("numRegs", [4, 8])
-def test_single_ds_read_plan_parity(name, numRegs):
-    """ABTileInfoQuery.singleDsReadPlan must match the Python TileInfo plan
+def test_single_ds_read_plan_values(name, numRegs):
+    """ABTileInfoQuery.singleDsReadPlan must match the reference plan
     (DS offset, register stride, per-read map) for every subtile / subIterK."""
     geom, inst_k, depth_u = PLAN_GEOMS[name]
     kernel = _mk_plan_kernel(inst_k, depth_u)
@@ -264,14 +304,12 @@ def test_single_ds_read_plan_parity(name, numRegs):
         ti = TileInfo(geom, tc, None, kernel)
         for s0, s1 in _iter_subtiles(ti):
             for subIterK in range(int(ti.lrSubtileShape[1])):
-                py = ti.singleDsReadPlan(s0, s1, subIterK, numRegs)
-                with cpp_delegation():
-                    cpp = ti.singleDsReadPlan(s0, s1, subIterK, numRegs)
+                got = ti.singleDsReadPlan(s0, s1, subIterK, numRegs)
+                ref = _ref_single_ds_read_plan(ti, s0, s1, subIterK, numRegs)
                 ctx = f"{name}/{tc} ({s0},{s1}) k={subIterK} nr={numRegs}"
-                assert py.regsPerDsRead == cpp.regsPerDsRead, f"{ctx}: regsPerDsRead"
-                assert py.mfmaId == cpp.mfmaId, f"{ctx}: mfmaId"
-                assert py.offset == cpp.offset, f"{ctx}: offset"
-                assert py.numReadsForTile == cpp.numReadsForTile, f"{ctx}: numReads"
-                py_reads = [(r.dstRegOffset, r.addrIdx) for r in py.reads]
-                cpp_reads = [(r.dstRegOffset, r.addrIdx) for r in cpp.reads]
-                assert py_reads == cpp_reads, f"{ctx}: reads {py_reads} vs {cpp_reads}"
+                assert got.regsPerDsRead == ref.regsPerDsRead, f"{ctx}: regsPerDsRead"
+                assert got.mfmaId == ref.mfmaId, f"{ctx}: mfmaId"
+                assert got.offset == ref.offset, f"{ctx}: offset"
+                assert got.numReadsForTile == ref.numReadsForTile, f"{ctx}: numReads"
+                got_reads = [(r.dstRegOffset, r.addrIdx) for r in got.reads]
+                assert got_reads == ref.reads, f"{ctx}: reads {got_reads} vs {ref.reads}"

@@ -13,10 +13,11 @@
 // instruction objects. Instead it computes the *plan* — the instruction-shape
 // decisions (which MFMA instType to emit; the per-load m0 / DS offsets and
 // register strides) — and the Python emit functions build the actual rocisa
-// Module from that plan. When delegation is disabled or a case is unsupported
-// (MX scale offsets, TLU column-major GR/LR, tail masks, …) the Python side
-// keeps its native fall-back path. No GR/LR offset assignment, scale swizzle,
-// InstructionEmitter.populate, or mainLoop control flow is modeled here.
+// Module from that plan. The supported AB cases use this C++ mapping
+// unconditionally (no Python fall-back); genuinely out-of-scope cases (MX
+// scale offsets, TLU column-major GR/LR, tail masks, …) stay on the Python
+// side. No GR/LR offset assignment, scale swizzle, InstructionEmitter.populate,
+// or mainLoop control flow is modeled here.
 //
 // The single-buffer-load / single-ds-read plan structs are computed as methods
 // on ABTileInfoQuery (tile_info.hpp), reusing the already-ported read-only
@@ -40,9 +41,10 @@ namespace tw::subtile::emit {
 // Python code) is applied here for a self-contained, testable mapping.
 //
 // Returns the rocisa InstType *member name* (e.g. "INST_F8"); the Python
-// caller maps it back to ``rocisa.enum.InstType``. Throws std::runtime_error
-// for unsupported combinations, mirroring Python's RuntimeError (the caller
-// then falls back to / surfaces the Python behavior).
+// caller (Kernel._selectF8F6F4InstType) maps it back to
+// ``rocisa.enum.InstType``. Throws std::runtime_error for unsupported
+// combinations, which surfaces to the caller as a RuntimeError (matching the
+// previous pure-Python behavior).
 // ---------------------------------------------------------------------------
 inline std::string mfma_f8f6f4_inst_type(bool aIsF8, bool aIsBF8, bool aIsF4,
                                          bool bIsF8, bool bIsBF8, bool bIsF4,

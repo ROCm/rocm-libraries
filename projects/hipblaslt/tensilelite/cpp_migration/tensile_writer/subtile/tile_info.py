@@ -9,8 +9,10 @@ Everything here is the read-only TileInfo construction + grid/index query layer
 allocation, or instruction emission lives in C++.
 
 The names mirror the ABTilePair branch of
-``Tensile.Components.Subtile.Kernel.TileInfo`` so the Python module can
-optionally delegate its read-only query methods here.
+``Tensile.Components.Subtile.Kernel.TileInfo``, which delegates its read-only
+query methods and emit-leaf plans here unconditionally for the AB case (no
+parallel Python formula). The opt-in GR/LR offset-assignment plans
+(``grOffsetAssignPlan`` / ``lrOffsetAssignPlan``) are also exposed here.
 """
 
 from tensile_writer import _tensile_writer as _ext

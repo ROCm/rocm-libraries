@@ -9,11 +9,12 @@
 //
 //     _tensile_writer.subtile.geometry
 //
-// The Python package tensile_writer/ re-exports this, and
-// Tensile/Components/Subtile/SubtileGeometry.py forwards its pure-math
-// value/query methods here unconditionally (the geometry layer is C++-only;
-// there is no Python fallback). Other subtile layers (tile_info, emit,
-// schedulers) remain opt-in via TENSILE_WRITER_CPP.
+// The Python package tensile_writer/ re-exports this. The geometry value/query
+// layer, the read-only TileInfo query layer (tile_info) and the MFMA F8F6F4
+// instType selection (emit) are all C++-only for the supported AB cases — the
+// Python side forwards to them unconditionally with no Python fallback. The
+// GR/LR offset-assignment plans (also on ABTileInfoQuery) and the scheduler
+// ports remain opt-in via TENSILE_WRITER_CPP.
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/map.h>
@@ -448,8 +449,9 @@ void bind_emit(nb::module_& e) {
         nb::arg("bIsBF8"), nb::arg("bIsF4"), nb::arg("sourceSwap") = false,
         "Select the rocisa InstType member name for the "
         "V_MFMA_SCALE_F32_16x16x128_F8F6F4 family from per-operand 8-bit/4-bit "
-        "float predicates. Mirrors Kernel._selectF8F6F4InstType; raises on "
-        "unsupported combinations so the caller falls back to Python.");
+        "float predicates. Backs Kernel._selectF8F6F4InstType (called "
+        "unconditionally); raises on unsupported combinations (surfaced as a "
+        "RuntimeError).");
 }
 
 // ---------------------------------------------------------------------------

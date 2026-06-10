@@ -8,7 +8,6 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import singledispatch
-from types import SimpleNamespace
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from Tensile.Components.Subtile.LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
@@ -88,58 +87,39 @@ from .SubtileGeometry import (
 )
 
 ################################################################################
-# Optional C++ delegation for the read-only TileInfo query layer (opt-in).
+# C++-backed TileInfo query layer and emit-leaf decisions.
 #
-# Unlike the SubtileGeometry value/query layer (which is now C++-only), the
-# TileInfo query layer and the emit-leaf instType selection remain opt-in,
-# gated on the ``TENSILE_WRITER_CPP`` env flag (read once at import; the parity
-# tests flip ``_USE_CPP`` dynamically). When the flag is on AND the compiled
-# ``tensile_writer.subtile.tile_info`` submodule is importable, the read-only
-# TileInfo grid/index query methods for the ABTilePair case delegate to the C++
-# ``ABTileInfoQuery`` value object. The Python TileInfo remains the canonical
-# object: register allocation, rocisa emission, scale/CD paths, and main-loop
-# orchestration never cross into C++. With delegation disabled (the default),
-# behavior is byte-identical to the pure-Python path.
+# Like the SubtileGeometry value/query layer (already C++-only), the read-only
+# TileInfo grid/index query methods and the single buffer-load / ds-read
+# emit-leaf plans for the ABTilePair case are serviced unconditionally by the
+# compiled ``tensile_writer.subtile`` nanobind extension (the ``tile_info`` and
+# ``emit`` submodules). There is no parallel Python formula for these ported AB
+# cases. The Python TileInfo remains the canonical object: register allocation,
+# rocisa emission, scale/CD paths, and main-loop orchestration never cross into
+# C++, and the MX scale / C/D geometries keep their pure-Python out-of-scope
+# paths.
+#
+# A single narrowly-scoped path is still opt-in via ``TENSILE_WRITER_CPP``
+# (``_USE_CPP``): the GR/LR offset-assignment plans (graTileAssignment /
+# lraTileAssignment, B16/TLU0 only). The query layer and the F8F6F4 instType
+# selection no longer consult that switch.
 ################################################################################
 
 def _resolve_cpp_optin():
   """Return True when TENSILE_WRITER_CPP opts into the still-optional layers.
 
-  The geometry value/query layer is unconditionally C++; this flag only gates
-  the TileInfo query layer and the emit-leaf instType selection below.
+  The query layer and the F8F6F4 instType selection are unconditionally C++;
+  this flag only gates the GR/LR offset-assignment plans below.
   """
   flag = os.environ.get("TENSILE_WRITER_CPP", "").strip().lower()
   return flag not in ("", "0", "false", "no", "off")
 
 _USE_CPP = _resolve_cpp_optin()
 
-
-def _resolve_cpp_tileinfo():
-  try:
-    from tensile_writer.subtile import tile_info as _cpp_ti
-  except Exception:
-    # Opt-in may be requested but the extension is unavailable; fall back to
-    # the pure-Python path rather than failing the import.
-    return None
-  return _cpp_ti
-
-_CPP_TI = _resolve_cpp_tileinfo()
-
-
-def _resolve_cpp_emit():
-  """Import the optional C++ emit-leaf decision submodule, or return None.
-
-  Mirrors ``_resolve_cpp_tileinfo``: opt-in delegation is requested via
-  SubtileGeometry's switch, but if the compiled extension is unavailable we
-  fall back to the pure-Python emit path rather than failing the import.
-  """
-  try:
-    from tensile_writer.subtile import emit as _cpp_emit
-  except Exception:
-    return None
-  return _cpp_emit
-
-_CPP_EMIT = _resolve_cpp_emit()
+# The query + emit-leaf layers are C++-only (no Python fallback): import the
+# compiled submodules at module load, mirroring SubtileGeometry's hard import.
+from tensile_writer.subtile import tile_info as _CPP_TI
+from tensile_writer.subtile import emit as _CPP_EMIT
 
 ################################################################################
 # Concrete tile classes and pre-defined config instances
@@ -623,25 +603,21 @@ class TileInfo:
         f"Minimum {label} = subtile_span({subtile_span}) x waveGroupSize({wg_size}) = {subtile_span * wg_size}."
       )
 
-  # --- Optional C++ delegation for the read-only query layer ---
-
-  def _useCppQuery(self) -> bool:
-    """True when the C++ ABTileInfoQuery should service read-only queries.
-
-    Gated on the module opt-in switch (read at call time), the tile_info
-    submodule being importable, and the ABTilePair geometry case that the C++
-    value object covers. MXScale/CD paths stay pure-Python.
-    """
-    return (_USE_CPP and _CPP_TI is not None
-            and isinstance(self.geometry, ABTilePair))
+  # --- C++-backed read-only query layer (AB case only) ---
 
   def _cppQuery(self):
     """Build (and cache) the C++ ABTileInfoQuery twin for this TileInfo.
 
-    The twin is constructed from the already-materialized GR/LR configs plus
-    the kernel-derived scalar fields, reusing the C++ geometry surface rather
-    than duplicating any geometry formula.
+    The AB (ABTilePair) query layer is C++-only: the twin is constructed from
+    the already-materialized GR/LR configs plus the kernel-derived scalar
+    fields, reusing the C++ geometry surface rather than duplicating any
+    geometry formula. MX scale and C/D geometries are out of scope for the C++
+    query layer and must not call this.
     """
+    if not isinstance(self.geometry, ABTilePair):
+      raise NotImplementedError(
+          "TileInfo C++ query layer covers the ABTilePair case only; "
+          f"got {type(self.geometry).__name__} (tc={self.tc})")
     q = getattr(self, '_cppQueryCache', None)
     if q is None:
       cpp_gr = self.gr.config._cpp_twin
@@ -654,9 +630,7 @@ class TileInfo:
   # --- Grid utility methods ---
 
   def getLocalSubtileLinearId(self, sId0, sId1):
-    if self._useCppQuery():
-      return self._cppQuery().getLocalSubtileLinearId(sId0, sId1)
-    return sId1 * self.localSubtileGrid[0] + sId0
+    return self._cppQuery().getLocalSubtileLinearId(sId0, sId1)
 
   def getLocalSubtileIdFromLinearId(self, linearId):
     sId0 = linearId % self.localSubtileGrid[0]
@@ -684,11 +658,7 @@ class TileInfo:
     GR load (they are serviced by the same buffer_load instruction).
     loadIdx selects among the numGRPerSubtile loads within that subtile.
     """
-    if self._useCppQuery():
-      return self._cppQuery().grLoadIndexForSubtile(sId0, sId1, loadIdx)
-    linearId = self.getLocalSubtileLinearId(sId0, sId1)
-    baseGR = int(linearId // self.loadRatioGR) if self.loadRatioGR else 0
-    return baseGR + loadIdx
+    return self._cppQuery().grLoadIndexForSubtile(sId0, sId1, loadIdx)
 
   def lrTileIndexForSubtile(self, sId0, sId1, mfmaId=0):
     """Return the local-read vgprTile index for subtile (sId0, sId1).
@@ -702,11 +672,7 @@ class TileInfo:
     Uses lrLocalSubtileGrid for linearization — for AB this equals
     localSubtileGrid; for scale it is derived from lrSubtileShape.
     """
-    if self._useCppQuery():
-      return self._cppQuery().lrTileIndexForSubtile(sId0, sId1, mfmaId)
-    linearId = sId1 * self.lrLocalSubtileGrid[0] + sId0
-    tilesPerSubtile = int(self.lrSubtileShape[0]) * int(self.lrSubtileShape[1])
-    return linearId * tilesPerSubtile + mfmaId
+    return self._cppQuery().lrTileIndexForSubtile(sId0, sId1, mfmaId)
 
   def globalMmaTilesForSubtile(self, sId0, sId1):
     """Return all global MMA tile coordinates belonging to subtile (sId0, sId1).
@@ -714,13 +680,7 @@ class TileInfo:
     Uses gr_cfg.subtileForMmaTile to account for subtileCount/subtileStride.
     The returned list is in geometric order (M-outer, K-inner).
     """
-    if self._useCppQuery():
-      return [tuple(t) for t in self._cppQuery().globalMmaTilesForSubtile(sId0, sId1)]
-    st = self.subtileShape
-    baseRow = sId0 * int(st[0])
-    baseCol = sId1 * int(st[1])
-    _, _, mma_tiles = self.gr.config.subtileForMmaTile(baseRow, baseCol)
-    return mma_tiles
+    return [tuple(t) for t in self._cppQuery().globalMmaTilesForSubtile(sId0, sId1)]
 
   def waveMmaTilesForSubtile(self, sId0, sId1):
     """Return the local MMA tile coordinates this wave uses from subtile (sId0, sId1).
@@ -728,14 +688,7 @@ class TileInfo:
     Each wave covers localMMATileGrid rows; within that, subtile (sId0, sId1)
     spans subtileShape[0] rows x subtileShape[1] columns of MMA tiles.
     """
-    if self._useCppQuery():
-      return [tuple(t) for t in self._cppQuery().waveMmaTilesForSubtile(sId0, sId1)]
-    st = self.subtileShape
-    baseRow = sId0 * int(st[0])
-    baseCol = sId1 * int(st[1])
-    return [(baseRow + m, baseCol + k)
-            for m in range(int(st[0]))
-            for k in range(int(st[1]))]
+    return [tuple(t) for t in self._cppQuery().waveMmaTilesForSubtile(sId0, sId1)]
 
   def grRegGroupForSubtileRow(self, sId0):
     """Return the GR offset-register group index for subtile row sId0.
@@ -744,72 +697,41 @@ class TileInfo:
     grouped by load.  When loadRatioGR >= 2, multiple subtile rows share
     the same buffer_load and therefore the same register group.
     """
-    if self._useCppQuery():
-      return self._cppQuery().grRegGroupForSubtileRow(sId0)
-    if self.loadRatioGR >= 2.0:
-      return int(sId0 // self.loadRatioGR)
-    return sId0
+    return self._cppQuery().grRegGroupForSubtileRow(sId0)
 
   # --- Emit-leaf plans (instruction shape only) ---
   # These compute the pure-data decisions for the buffer-load / ds-read emit
   # leaves (skip predicate, m0/DS offsets, per-instruction loop structure).
   # The emit functions in SubtileGREmit / SubtileLREmit build the rocisa Module
-  # from the returned plan. Both delegate to the C++ ABTileInfoQuery when the
-  # read-only query layer is active, falling back to byte-identical Python math.
+  # from the returned plan. For the AB case the plans are computed by the C++
+  # ABTileInfoQuery (no parallel Python formula).
 
   def singleBufferLoadPlan(self, sId0, sId1):
     """Plan for emitSingleBufferLoad: skip flag, MUBUF offsetK, m0 offsets."""
-    if self._useCppQuery():
-      return self._cppQuery().singleBufferLoadPlan(sId0, sId1)
-    linearId = self.getLocalSubtileLinearId(sId0, sId1)
-    grBaseId = int(math.floor(linearId / self.loadRatioGR)) if self.loadRatioGR else 0
-    if self.loadRatioGR > 1:
-      firstInGroup = int(grBaseId * self.loadRatioGR)
-      if linearId != firstInGroup:
-        return SimpleNamespace(skip=True, grBaseId=grBaseId, offsetK=0,
-                               m0Offsets=[])
-    offsetK = sId1 * int(self.mmaTileShape[1] * self.subtileShape[1] * self.bpe)
-    subtileOffset = int(math.ceil(self.loadRatioGR * self.subtileSize))
-    m0Offsets = []
-    for i in range(self.numGRPerSubtile):
-      m0Offsets.append(int(i * subtileOffset
-                           + (sId0 + sId1 * self.globalSubtileGrid[0])
-                           * self.subtileSize))
-    return SimpleNamespace(skip=False, grBaseId=grBaseId, offsetK=offsetK,
-                           m0Offsets=m0Offsets)
+    return self._cppQuery().singleBufferLoadPlan(sId0, sId1)
 
   def singleDsReadPlan(self, sId0, sId1, subIterK, numRegs):
     """Plan for emitSingleDsRead: DS offset, register stride, per-read map."""
-    if self._useCppQuery():
-      return self._cppQuery().singleDsReadPlan(sId0, sId1, subIterK, numRegs)
-    regsPerDsRead = self.loadWidthLR // 4
-    mfmaId = self.getSubtileShapeLinearId(subIterK, 0)
-    offsetStride = int(self.subtileSize)
-    offset = sId0 * offsetStride \
-        + sId1 * int(self.globalSubtileGrid[0]) * offsetStride
-    numReadsForTile = numRegs // regsPerDsRead
-    reads = []
-    for readIdx in range(numReadsForTile):
-      reads.append(SimpleNamespace(dstRegOffset=readIdx * regsPerDsRead,
-                                   addrIdx=mfmaId * numReadsForTile + readIdx))
-    return SimpleNamespace(regsPerDsRead=regsPerDsRead, mfmaId=mfmaId,
-                           offset=offset, numReadsForTile=numReadsForTile,
-                           reads=reads)
+    return self._cppQuery().singleDsReadPlan(sId0, sId1, subIterK, numRegs)
 
-  # --- GR/LR offset-assignment math (C++-only; B16/TLU0) ---
+  # --- GR/LR offset-assignment math (opt-in C++; B16/TLU0) ---
   # The scalar offset-assignment math for graTileAssignment / lraTileAssignment
-  # is computed by the C++ ABTileInfoQuery. There is no Python plan twin: the
-  # plan-driven emit is only entered when delegation is active and the legacy
-  # inline path stays byte-identical for the default (Python) build.
+  # can be computed by the C++ ABTileInfoQuery. There is no Python plan twin:
+  # the plan-driven emit is only entered when the offset-assignment opt-in is
+  # active (TENSILE_WRITER_CPP) and the legacy inline path stays byte-identical
+  # for the default (Python) build.
 
   def _useCppOffsetAssign(self) -> bool:
     """True when the C++ GR/LR offset-assignment plan should drive emission.
 
-    Restricted to the row-major (TLU0) BF16 (bpe == 2) AB path the C++ plan
-    covers. FP8 (bpe == 1, distinct swizzle), FP4, and the TLU1 column-major
-    path stay on the native Python emit.
+    Offset assignment stays opt-in via ``TENSILE_WRITER_CPP`` (``_USE_CPP``)
+    and is restricted to the row-major (TLU0) BF16 (bpe == 2) AB path the C++
+    plan covers. FP8 (bpe == 1, distinct swizzle), FP4, and the TLU1
+    column-major path stay on the native Python emit.
     """
-    if not self._useCppQuery():
+    if not _USE_CPP:
+      return False
+    if not isinstance(self.geometry, ABTilePair):
       return False
     if self.bpe != 2:
       return False
@@ -1130,69 +1052,21 @@ def _selectF8F6F4InstType(kernel):
   if aType is None or bType is None:
     raise RuntimeError(f"Unsupported data types for MFMA instruction: A = {aType}, B = {bType}\n")
 
-  sourceSwap = bool(kernel.get("SourceSwap", False))
-  if sourceSwap:
-    aType, bType = bType, aType
-
   # Defensive: support MagicMock / minimal stubs that don't define predicates.
   def _pred(t, name):
     fn = getattr(t, name, None)
     return bool(fn()) if callable(fn) else False
 
-  # Pure types
-  aIsF8  = _pred(aType, "isFloat8")
-  bIsF8  = _pred(bType, "isFloat8")
-
-  # Optional C++ delegation: the instType selection is pure data, so when the
-  # module opt-in switch is on AND the compiled emit submodule is importable,
-  # defer the mapping to C++. aType/bType were already swapped above for
-  # SourceSwap, so we pass sourceSwap=False here and fall back to the native
-  # Python branches on any C++ error (e.g. unsupported combination).
-  if _USE_CPP and _CPP_EMIT is not None:
-    try:
-      _name = _CPP_EMIT.mfma_f8f6f4_inst_type(
-          aIsF8, _pred(aType, "isBFloat8"), _pred(aType, "isFloat4"),
-          bIsF8, _pred(bType, "isBFloat8"), _pred(bType, "isFloat4"),
-          False)
-      return getattr(InstType, _name)
-    except Exception:
-      pass
-
-  if aIsF8 and bIsF8:
-    return InstType.INST_F8
-
-  aIsBF8 = _pred(aType, "isBFloat8")
-  bIsBF8 = _pred(bType, "isBFloat8")
-  if aIsBF8 and bIsBF8:
-    return InstType.INST_BF8
-
-  aIsF4  = _pred(aType, "isFloat4")
-  bIsF4  = _pred(bType, "isFloat4")
-  if aIsF4 and bIsF4:
-    return InstType.INST_F4
-
-  # Mixed FP8/BF8 (8-bit only)
-  if aIsF8 and bIsBF8:
-    return InstType.INST_F8_BF8
-
-  if aIsBF8 and bIsF8:
-    return InstType.INST_BF8_F8
-
-  # Mixed F8 and F4
-  if aIsF8 and bIsF4:
-    return InstType.INST_F8_F4
-
-  if aIsF4 and bIsF8:
-    return InstType.INST_F4_F8
-
-  # Mixed BF8 and F4
-  if aIsBF8 and bIsF4:
-    return InstType.INST_B8_F4
-
-  if aIsF4 and bIsBF8:
-    return InstType.INST_F4_B8
-
-  raise RuntimeError(f"Unsupported data types for MFMA instruction: A = {aType}, B = {bType}\n")
+  # The instType selection is pure data, ported to C++ (no Python fallback).
+  # SourceSwap is applied inside the C++ mapping (it swaps the A/B operand
+  # formats), so pass the unswapped predicates plus the SourceSwap flag. C++
+  # raises (RuntimeError) for unsupported combinations, mirroring the previous
+  # Python behavior.
+  _name = _CPP_EMIT.mfma_f8f6f4_inst_type(
+      _pred(aType, "isFloat8"), _pred(aType, "isBFloat8"), _pred(aType, "isFloat4"),
+      _pred(bType, "isFloat8"), _pred(bType, "isBFloat8"), _pred(bType, "isFloat4"),
+      bool(kernel.get("SourceSwap", False)))
+  return getattr(InstType, _name)
 
 
 ##################################################
