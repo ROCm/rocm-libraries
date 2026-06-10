@@ -15,8 +15,8 @@ re-invokes ``python -m dnn_benchmarking`` with the
 ``--internal-profiling-run`` sub-mode and a single
 (graph, engine) pair. All profiling flags are stripped from the inner
 argv to prevent infinite recursion. The sub-mode short-circuits engine
-discovery, Reporter output, and gpu_check; it just runs warmup +
-benchmark for the given engine and exits.
+discovery and Reporter output; it just runs warmup + benchmark for the
+given engine and exits.
 
 Failures of individual sources never raise — each module returns a dict
 slice with a ``skipped`` / ``error_tail`` / ``warnings`` key, and a

@@ -10,9 +10,9 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "BatchnormCommon.hpp"
-#include "BatchnormHipKernelCompileOptions.hpp"
-#include "HipKernelUtils.hpp"
-#include "hip/IKernelCompiler.hpp"
+#include "BatchnormKernelCompileOptions.hpp"
+#include "compilation/IKernelCompiler.hpp"
+#include "core/Utils.hpp"
 
 namespace hip_kernel_provider::batchnorm
 {
@@ -72,7 +72,7 @@ static ProblemDims extractProblemDims(const BatchnormBwdParams& params)
     dims.inNhw = static_cast<unsigned int>(dims.n) * dims.inCstride;
     dims.inChw = static_cast<unsigned int>(dims.c) * dims.inCstride;
     dims.inNchw = static_cast<unsigned int>(dims.n) * dims.inChw;
-    dims.isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(params.x());
+    dims.isLayoutNHWC = isChannelLastLayout(params.x());
     return dims;
 }
 
@@ -81,22 +81,21 @@ BatchnormBwdParams::BatchnormBwdParams(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(&hip_kernel_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid()))
-    , _dy(&hip_kernel_utils::findTensorAttributes(tensorMap, attributes.dy_tensor_uid()))
-    , _dx(&hip_kernel_utils::findTensorAttributes(tensorMap, attributes.dx_tensor_uid()))
-    , _scale(&hip_kernel_utils::findTensorAttributes(tensorMap, attributes.scale_tensor_uid()))
-    , _dscale(&hip_kernel_utils::findTensorAttributes(tensorMap, attributes.dscale_tensor_uid()))
-    , _dbias(&hip_kernel_utils::findTensorAttributes(tensorMap, attributes.dbias_tensor_uid()))
+    : _x(&findTensorAttributes(tensorMap, attributes.x_tensor_uid()))
+    , _dy(&findTensorAttributes(tensorMap, attributes.dy_tensor_uid()))
+    , _dx(&findTensorAttributes(tensorMap, attributes.dx_tensor_uid()))
+    , _scale(&findTensorAttributes(tensorMap, attributes.scale_tensor_uid()))
+    , _dscale(&findTensorAttributes(tensorMap, attributes.dscale_tensor_uid()))
+    , _dbias(&findTensorAttributes(tensorMap, attributes.dbias_tensor_uid()))
 {
     if(attributes.mean_tensor_uid().has_value())
     {
-        _savedMean = &hip_kernel_utils::findTensorAttributes(tensorMap,
-                                                             attributes.mean_tensor_uid().value());
+        _savedMean = &findTensorAttributes(tensorMap, attributes.mean_tensor_uid().value());
     }
     if(attributes.inv_variance_tensor_uid().has_value())
     {
-        _savedInvVariance = &hip_kernel_utils::findTensorAttributes(
-            tensorMap, attributes.inv_variance_tensor_uid().value());
+        _savedInvVariance
+            = &findTensorAttributes(tensorMap, attributes.inv_variance_tensor_uid().value());
     }
 }
 
@@ -109,29 +108,23 @@ BatchnormBwdParams::BatchnormBwdParams(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
-    : _x(&hip_kernel_utils::findTensorAttributes(tensorMap,
-                                                 batchnormBackwardAttributes.x_tensor_uid()))
-    , _dy(&hip_kernel_utils::findTensorAttributes(tensorMap, pointwiseAttributes.in_0_tensor_uid()))
-    , _dx(&hip_kernel_utils::findTensorAttributes(tensorMap,
-                                                  batchnormBackwardAttributes.dx_tensor_uid()))
-    , _scale(&hip_kernel_utils::findTensorAttributes(
-          tensorMap, batchnormBackwardAttributes.scale_tensor_uid()))
-    , _dscale(&hip_kernel_utils::findTensorAttributes(
-          tensorMap, batchnormBackwardAttributes.dscale_tensor_uid()))
-    , _dbias(&hip_kernel_utils::findTensorAttributes(
-          tensorMap, batchnormBackwardAttributes.dbias_tensor_uid()))
-    , _optActivation(hip_kernel_utils::parseActivation(pointwiseAttributes))
-    , _bias(&hip_kernel_utils::findTensorAttributes(tensorMap,
-                                                    batchnormInferenceAttributes.bias_tensor_uid()))
+    : _x(&findTensorAttributes(tensorMap, batchnormBackwardAttributes.x_tensor_uid()))
+    , _dy(&findTensorAttributes(tensorMap, pointwiseAttributes.in_0_tensor_uid()))
+    , _dx(&findTensorAttributes(tensorMap, batchnormBackwardAttributes.dx_tensor_uid()))
+    , _scale(&findTensorAttributes(tensorMap, batchnormBackwardAttributes.scale_tensor_uid()))
+    , _dscale(&findTensorAttributes(tensorMap, batchnormBackwardAttributes.dscale_tensor_uid()))
+    , _dbias(&findTensorAttributes(tensorMap, batchnormBackwardAttributes.dbias_tensor_uid()))
+    , _optActivation(parseActivation(pointwiseAttributes))
+    , _bias(&findTensorAttributes(tensorMap, batchnormInferenceAttributes.bias_tensor_uid()))
 {
     if(batchnormBackwardAttributes.mean_tensor_uid().has_value())
     {
-        _savedMean = &hip_kernel_utils::findTensorAttributes(
-            tensorMap, batchnormBackwardAttributes.mean_tensor_uid().value());
+        _savedMean = &findTensorAttributes(tensorMap,
+                                           batchnormBackwardAttributes.mean_tensor_uid().value());
     }
     if(batchnormBackwardAttributes.inv_variance_tensor_uid().has_value())
     {
-        _savedInvVariance = &hip_kernel_utils::findTensorAttributes(
+        _savedInvVariance = &findTensorAttributes(
             tensorMap, batchnormBackwardAttributes.inv_variance_tensor_uid().value());
     }
 }
@@ -173,7 +166,7 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
 {
     return _savedInvVariance;
 }
-const std::optional<hip_kernel_utils::ActivationParams>& BatchnormBwdParams::optActivation() const
+const std::optional<ActivationParams>& BatchnormBwdParams::optActivation() const
 {
     return _optActivation;
 }
@@ -189,7 +182,7 @@ BatchnormBwdPlan::BatchnormBwdPlan(BatchnormBwdParams&& params)
 {
 }
 
-size_t BatchnormBwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& handle) const
+size_t BatchnormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
     return 0;
 }
@@ -264,13 +257,13 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     unsigned int ldsSize = 0;
 
     // Get activation mode
-    auto activationMode = hip_kernel_utils::ActivationMode::PASTHRU;
+    auto activationMode = ActivationMode::PASTHRU;
     if(_params.optActivation().has_value())
     {
         activationMode = (*_params.optActivation()).mode;
     }
 
-    BatchnormHipKernelCompileOptions options(_params.x(), deviceProperties, activationMode);
+    BatchnormKernelCompileOptions options(_params.x(), deviceProperties, activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", dims.useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", dims.useBfp16Mix);
     // Not using FP16 and BFP16 paths due to affine data type requirements
@@ -396,7 +389,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 }
 
-void BatchnormBwdPlan::execute(const HipKernelHandle& handle,
+void BatchnormBwdPlan::execute(const Handle& handle,
                                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                uint32_t numDeviceBuffers,
                                [[maybe_unused]] void* workspace) const
@@ -407,38 +400,28 @@ void BatchnormBwdPlan::execute(const HipKernelHandle& handle,
             HIPDNN_PLUGIN_STATUS_BAD_PARAM, "BatchnormBwdPlan::execute() called before compile()");
     }
 
-    auto xBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dyBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.dy()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dxBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.dx()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dscaleBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.dscale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto dbiasBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.dbias()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer = findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dyBuffer = findDeviceBuffer(_params.dy()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dxBuffer = findDeviceBuffer(_params.dx()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = findDeviceBuffer(_params.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dscaleBuffer = findDeviceBuffer(_params.dscale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto dbiasBuffer = findDeviceBuffer(_params.dbias()->uid(), deviceBuffers, numDeviceBuffers);
 
     void* biasPtr = nullptr;
     if(_params.bias() != nullptr)
     {
-        biasPtr = hip_kernel_utils::findDeviceBuffer(
-                      _params.bias()->uid(), deviceBuffers, numDeviceBuffers)
-                      .ptr;
+        biasPtr = findDeviceBuffer(_params.bias()->uid(), deviceBuffers, numDeviceBuffers).ptr;
     }
 
     void* savedMeanPtr = nullptr;
     void* savedInvVariancePtr = nullptr;
     if(_usesSavedStats)
     {
-        savedMeanPtr = hip_kernel_utils::findDeviceBuffer(
-                           _params.savedMean()->uid(), deviceBuffers, numDeviceBuffers)
-                           .ptr;
-        savedInvVariancePtr = hip_kernel_utils::findDeviceBuffer(_params.savedInvVariance()->uid(),
-                                                                 deviceBuffers,
-                                                                 numDeviceBuffers)
-                                  .ptr;
+        savedMeanPtr
+            = findDeviceBuffer(_params.savedMean()->uid(), deviceBuffers, numDeviceBuffers).ptr;
+        savedInvVariancePtr
+            = findDeviceBuffer(_params.savedInvVariance()->uid(), deviceBuffers, numDeviceBuffers)
+                  .ptr;
     }
 
     if(_kernelVariant != 2)

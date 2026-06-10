@@ -409,6 +409,14 @@ DEF_T(SClauseInst, "s_clause", .format = SOPP, .flags = {HasSideEffect}, .logica
 DEF_T(GlobalWbInst, "global_wb", .format = VGLOBAL, .flags = {HasSideEffect}, .logical = "GlobalWb")
 DEF_T(GlobalInvInst, "global_inv", .format = VGLOBAL, .flags = {HasSideEffect}, .logical = "GlobalInv")
 
+// Global data prefetch - used by gfx1250 PrefetchGL2 to prefetch data from global memory
+// to L2 cache; no destination register. Not marked HasSideEffect: it is only a cache hint,
+// so reordering it affects performance but not correctness.
+// Support null saddr + 64-bit vaddr or 64-bit saddr + 32-bit vaddr.
+// temporal hint / cache scope (e.g."th:TH_LOAD_NT scope:SCOPE_SE") are carried as GLOBALModifiers.
+DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .logical = "GlobalPrefetchB8",
+    .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
+
 // Scalar ALU — SOPK
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SSetRegIMM32B32",
     .operand_fields = { {D0, simm16, hwreg, 16}, {S0, literal, simm32, 32} })
@@ -566,6 +574,8 @@ DEF_BATCH(.format = VOP2_COMMUTATIVE,
     VAddF64Inst, "v_add_f64", .logical = "VAddF64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     VAddNcU32Inst, "v_add_nc_u32", .logical = "VAddU32",
+    VAddNcU64Inst, "v_add_nc_u64", .logical = {"VAddNCU64", "_VAddNCU64"},
+        .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     VAndB32Inst, "v_and_b32", .logical = "VAndB32",
 )
 

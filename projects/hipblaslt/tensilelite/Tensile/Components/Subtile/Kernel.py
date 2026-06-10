@@ -108,6 +108,7 @@ from .SubtileGREmit import (
     graInitPointer, graTileAssignment,
     emitSingleBufferLoad, emitSubtileBufferLoad, globalReadDoSubtile,
     globalReadDTLInitCommonSgpr, globalReadLDSBufferSwap, globalReadPtrUpdates,
+    tdmGlobalOffsetSubtile, initTDMDescriptorSubtile, tdmApplyStreamKOffsetSubtile,
 )
 from .SubtileLREmit import (
     _emitLocalReadOffset, _emitLocalRead,
@@ -284,6 +285,14 @@ AB_B16 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_1x2(), **_B16, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)),   # 128-bit GR: 8 bf16 along K
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B16, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)), # 128-bit LR: 8 bf16 along K
 )
+
+# Wave32 bf16: 8 VGPRs per operand (WMMA V3 gfx1250)
+_B16_W32 = dict(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), instK=32, bpe=2, supportedTypes=('bf16', 'fp16'))
+AB_B16_W32 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_1x2(), **_B16_W32, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)),
+    lr=ABLRGeometry(tag=LRTag_1x2(), **_B16_W32, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)),
+)
+
 AB_B4 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),   # 128-bit GR: 32 fp4 along K
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)), # 128-bit LR: 32 fp4 along K
@@ -325,6 +334,8 @@ MXSB_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXSc
 
 # C/D output: 128-bit store = 4 f32 elements along N
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
+# Wave32 f32 output: 8 VGPRs per lane (WMMA V3 gfx1250)
+CD_F32_W32 = CDTile_1x1(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=8))
 
 def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
   """Return the MXScaleTilePair for scale tensor tc ('MXSA' or 'MXSB')."""
@@ -345,6 +356,7 @@ AB_GEOMETRY_MAP = {
   "AB_B8":       AB_B8,
   "AB_B16_TLU1": AB_B16_TLU1,
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
+  "AB_B16_W32":  AB_B16_W32,
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
@@ -355,6 +367,8 @@ def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
 
 def selectDGeometry(kernel: dict) -> CDTileGeometry:
   """Return the CDTileGeometry for the D (output/accumulator) tile."""
+  if kernel["WavefrontSize"] == 32:
+    return CD_F32_W32
   return CD_F32
 
 
@@ -885,27 +899,39 @@ class RegisterTileInfo:
 
 
 def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
-  """Zero a contiguous register range using MFMA for blocks of 16, scalar writes for remainder."""
-  tileAlias = accvgpr if isAgpr else vgpr
-  tileCopyInst = VAccvgprWrite if isAgpr else VMovB32
-  regsPerMfma = 16
-  numMfma = totalRegs // regsPerMfma
+  """Zero a contiguous register range using MFMA (16/inst) or WMMA (8/inst)."""
+  useWmma = writer.states.asmCaps.get("HasWMMA_AccImmZero", False)
+  tileAlias = vgpr if useWmma else (accvgpr if isAgpr else vgpr)
+  tileCopyInst = VMovB32 if useWmma else (VAccvgprWrite if isAgpr else VMovB32)
 
-  if numMfma > 0:
+  if useWmma:
+    regsPerInst = 8
+    instType, accType = InstType.INST_F32, InstType.INST_F32
+    variant = [16, 16, 4, 1]
+    acc2_kwargs = {"acc2_imm": 0}
+  else:
+    regsPerInst = 16
+    instType, accType = InstType.INST_I8, InstType.INST_I32
+    variant = [32, 32, 16, 1]
+    acc2_kwargs = {"acc2": 0}
+
+  numInst = totalRegs // regsPerInst
+
+  if numInst > 0:
     tmpVgpr = writer.vgprPool.checkOutAligned(2, 2)
-    module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment=""))
-    module.add(SNop(waitState=1, comment="wait for vgpr to be ready before MFMA"))
-    for i in range(numMfma):
-      r = firstReg + i * regsPerMfma
-      module.add(MFMAInstruction(instType=InstType.INST_I8, accType=InstType.INST_I32,
-                                 variant=[32, 32, 16, 1], mfma1k=False,
-                                 acc=tileAlias(r, regsPerMfma),
+    module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment="zero A/B"))
+    module.add(SNop(waitState=1, comment="wait for vgpr before matrix inst"))
+    for i in range(numInst):
+      r = firstReg + i * regsPerInst
+      module.add(MFMAInstruction(instType=instType, accType=accType,
+                                 variant=variant, mfma1k=False,
+                                 acc=tileAlias(r, regsPerInst),
                                  a=vgpr(tmpVgpr, 2), b=vgpr(tmpVgpr, 2),
-                                 acc2=0,
-                                 comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerMfma - 1)))
+                                 **acc2_kwargs,
+                                 comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerInst - 1)))
     writer.vgprPool.checkIn(tmpVgpr)
 
-  for i in range(numMfma * regsPerMfma, totalRegs):
+  for i in range(numInst * regsPerInst, totalRegs):
     module.add(tileCopyInst(dst=tileAlias(firstReg + i), src=0, comment="init%s"%(tileInfo.tc)))
 
 def initVgprTilesToZero(writer, kernel, tileInfo):
@@ -1204,11 +1230,13 @@ def preLoop(writer, kernel):
 # Subroutine entry point for main loop
 #
 #
-def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
+def mainLoop(writer, kernel):
   module = Module()
+  tensorParametersA = writer.tPA
+  tensorParametersB = writer.tPB
+
   pgr = kernel["PrefetchGlobalRead"]
   assert pgr in (0, 1, 2), "SubtileBasedKernel only supports PGR=0, PGR=1, and PGR=2, got PGR=%d" % pgr
-
 
   tiA = writer.states.a.tileInfo
   tiB = writer.states.b.tileInfo
@@ -1219,8 +1247,15 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
   lrBGran = ReadGranularity(mn=1, k=1)
   grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1]
   grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1]
-  grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
-  grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
+  # TDM: one tensor_load_to_lds covers the full localMMATileGrid.
+  if kernel.get("enableTDMA", False):
+    grAGran = ReadGranularity(mn=tiA.localMMATileGrid[0], k=tiA.localMMATileGrid[1])
+  else:
+    grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
+  if kernel.get("enableTDMB", False):
+    grBGran = ReadGranularity(mn=tiB.localMMATileGrid[0], k=tiB.localMMATileGrid[1])
+  else:
+    grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
   lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=scaleTiA.lrSubtileShape[1]) if scaleTiA else None
   lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=scaleTiB.lrSubtileShape[1]) if scaleTiB else None
   grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
@@ -1251,7 +1286,7 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
           partitionSizeN=partSizeN,
           pgr=schedulerPgr
       )
-      
+
       scheduler = LogicalScheduler(cfg)
       scheduler.build()
 
@@ -1260,6 +1295,7 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
           break
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+
   dtileInfo = writer.states.d.tileInfo
 
   # For plain FP8 (miK=128, no MX scale): allocate a unit scale VGPR and initialize

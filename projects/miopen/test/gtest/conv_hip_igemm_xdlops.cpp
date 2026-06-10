@@ -54,6 +54,7 @@ void Run2dDriver(miopenDataType_t prec)
     switch(prec)
     {
     case miopenInt8: params = GPU_ConvHipIgemmXdlops_I8::GetParam(); break;
+
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenHalf:
@@ -66,8 +67,6 @@ void Run2dDriver(miopenDataType_t prec)
                   "miopenDouble data "
                   "type not supported by "
                   "test_conv_hip_igemm_xdlops test";
-
-    default: params = GPU_ConvHipIgemmXdlops_I8::GetParam();
     }
 
     for(const auto& test_value : params)

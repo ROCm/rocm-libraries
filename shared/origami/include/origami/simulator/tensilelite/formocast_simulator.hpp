@@ -10,6 +10,7 @@
 #include <vector>
 #include <array>
 #include <queue>
+#include <tuple>
 #include <iostream>
 #include <unordered_map>
 #include <origami/simulator/tensilelite/formocast.hpp>
@@ -80,36 +81,113 @@ namespace origami
         };
 
         /**
+         * @brief L2 cache hit rates for matrix operands
+         */
+         struct L2CacheHitRate
+         {
+             double tile0HitRate          = 0.0;
+             double tile1HitRate          = 0.0;
+             double totalHitRate          = 0.0;
+         };
+
+         /** @brief L1 cache hit rates, inherits structure from L2CacheHitRate */
+         struct L1CacheHitRate : public L2CacheHitRate{};
+
+         /** @brief L3 cache hit rates, inherits structure from L2CacheHitRate */
+         struct L3CacheHitRate : public L2CacheHitRate{};
+
+         /**
+          * @brief Bank conflict analysis results for LDS (Local Data Share) accesses
+          */
+         struct BankConflictResult {
+             double ratioA = 1.0;  ///< Bank conflict ratio for matrix A (1.0 = no conflicts)
+             double ratioB = 1.0;  ///< Bank conflict ratio for matrix B (1.0 = no conflicts)
+         };
+
+        /**
+         * @brief Cache hit rates for all cache levels and both matrix operands
+         */
+         struct CacheHitRates
+         {
+             L1CacheHitRate L1_hit;
+             L2CacheHitRate L2_hit;
+             L3CacheHitRate L3_hit;
+         };
+
+        /**
+         * @brief Memory access costs at different cache levels
+         *
+         * Stores the calculated cost (in cycles) for memory accesses at each level
+         * of the memory hierarchy, used for overall performance prediction.
+         */
+         struct MemoryAccessCosts
+         {
+             double mem_l1_req;
+             double mem_l2_req;
+             double mem_l3_req;
+             double mem_hbm_req;
+             double mem_loop_l1_req;
+             double mem_loop_l2_req;
+             double mem_loop_l3_req;
+             double mem_loop_hbm_req;
+             double l1_hit;
+             double l2_hit;
+             double l3_hit;
+             double mem_overall;
+             //for debug
+             double A_mem_l1_req;
+             double B_mem_l1_req;
+             double tcc_ea0_coalscedA;
+             double tcc_ea0_coalscedB;
+             double MT_A_L1_req;
+             double MT_B_L1_req;
+             double MT_A_L2_req;
+             double MT_B_L2_req;
+             double MT_A_L3_req;
+             double MT_B_L3_req;
+             double MT_A_hbm_req;
+             double MT_B_hbm_req;
+
+             CacheHitRates cache_hits;
+
+             // for == compare, can remove this if we are using MinTieBreakerInfo
+             bool operator==(MemoryAccessCosts const &rhs) const
+             {
+                 return std::tie(mem_l1_req, mem_l2_req, mem_l3_req, mem_hbm_req, l1_hit, l2_hit, l3_hit, mem_overall, MT_A_L1_req, MT_B_L1_req, MT_A_L2_req, MT_B_L2_req) ==
+                        std::tie(rhs.mem_l1_req, rhs.mem_l2_req, rhs.mem_l3_req, rhs.mem_hbm_req, rhs.l1_hit, rhs.l2_hit, rhs.l3_hit, rhs.mem_overall, rhs.MT_A_L1_req, rhs.MT_B_L1_req, rhs.MT_A_L2_req, rhs.MT_B_L2_req);
+             };
+         };
+
+        /**
          * @brief Predicted performance results for a GEMM configuration
          */
         struct PredictedPerformance
         {
             double   microSeconds = 0.0;  ///< Predicted execution time in microseconds
             double   hitRate      = 0.0;  ///< Overall L2 cache hit rate
-        };
+            double   MT0               = 0.0;
+            double   MT1               = 0.0;
+            double   PGR               = 0.0;
+            double   depthU            = 0.0;
+            double   NumCUs            = 0.0;
+            double   WorkGroupMapping  = 0.0;
+            double   CUOccupancy       = 0.0;
+            double   GlobalSplitU      = 0.0;
+            double   LocalSplitU       = 0.0;
+            double   loopCnt           = 0.0;
 
-        /**
-         * @brief L2 cache hit rates for matrix operands
-         */
-        struct L2CacheHitRate
-        {
-            double tile0HitRate          = 0.0;
-            double tile1HitRate          = 0.0;
-            double totalHitRate          = 0.0;
-        };
-
-        /** @brief L1 cache hit rates, inherits structure from L2CacheHitRate */
-        struct L1CacheHitRate : public L2CacheHitRate{};
-
-        /** @brief L3 cache hit rates, inherits structure from L2CacheHitRate */
-        struct L3CacheHitRate : public L2CacheHitRate{};
-
-        /**
-         * @brief Bank conflict analysis results for LDS (Local Data Share) accesses
-         */
-        struct BankConflictResult {
-            double ratioA = 1.0;  ///< Bank conflict ratio for matrix A (1.0 = no conflicts)
-            double ratioB = 1.0;  ///< Bank conflict ratio for matrix B (1.0 = no conflicts)
+            double   init         = 0.0;
+            double   preloop      = 0.0;
+            double   loop         = 0.0;
+            double   math_overall = 0.0;
+            double   mem_overall  = 0.0;
+            MemoryAccessCosts memCosts;
+            double   tail         = 0.0;
+            double   store        = 0.0;
+            double   gsu          = 0.0;
+            double   lsu          = 0.0;
+            double   num_tiles    = 0.0;
+            double   perf         = 0.0;
         };
 
         /**
@@ -189,51 +267,6 @@ namespace origami
                 std::cout << "  LocalReadConflictMultiplierB128: " << LocalReadConflictMultiplierB128 << std::endl;
                 std::cout << "  LocalReadConflictMultiplierB64: " << LocalReadConflictMultiplierB64 << std::endl;
                 std::cout << "  LocalReadConflictMultiplierB32: " << LocalReadConflictMultiplierB32 << std::endl;
-            };
-        };
-
-        /**
-         * @brief Cache hit rates for all cache levels and both matrix operands
-         */
-        struct CacheHitRates
-        {
-            double A_L1_hit;
-            double B_L1_hit;
-            double A_L2_hit;
-            double B_L2_hit;
-            double A_L3_hit;
-            double B_L3_hit;
-            double totalL2HitRate;
-            double totalL3HitRate; // Added for clarity
-        };
-
-        /**
-         * @brief Memory access costs at different cache levels
-         *
-         * Stores the calculated cost (in cycles) for memory accesses at each level
-         * of the memory hierarchy, used for overall performance prediction.
-         */
-        struct MemoryAccessCosts
-        {
-            double mem_l1;
-            double mem_l2;
-            double mem_l3;
-            double mem_hbm;
-            double l1_hit;
-            double l2_hit;
-            double l3_hit;
-            double mem_overall;
-            //for debug
-            double A_L1_req;
-            double B_L1_req;
-            double A_L2_req;
-            double B_L2_req;
-
-            // for == compare, can remove this if we are using MinTieBreakerInfo
-            bool operator==(MemoryAccessCosts const &rhs) const
-            {
-                return std::tie(mem_l1, mem_l2, mem_l3, mem_hbm, l1_hit, l2_hit, l3_hit, mem_overall, A_L1_req, B_L1_req, A_L2_req, B_L2_req) ==
-                       std::tie(rhs.mem_l1, rhs.mem_l2, rhs.mem_l3, rhs.mem_hbm, rhs.l1_hit, rhs.l2_hit, rhs.l3_hit, rhs.mem_overall, rhs.A_L1_req, rhs.B_L1_req, rhs.A_L2_req, rhs.B_L2_req);
             };
         };
 
@@ -371,6 +404,7 @@ namespace origami
          * @brief Calculate store (write-back) performance for matrix output
          * @param M Matrix dimension M
          * @param N Matrix dimension N
+         * @param num_tiles Number of tiles
          * @param NumBatches Number of batches
          * @param MT0 Macro tile dimension 0 (M dimension)
          * @param MT1 Macro tile dimension 1 (N dimension)
@@ -382,8 +416,9 @@ namespace origami
          * @param store Output parameter for store cost
          * @param store_edge Output parameter for edge case store cost
          */
-        void calculateStorePerformance(double M,
+         double calculateStorePerformance(double M,
                                        double N,
+                                       double num_tiles,
                                        double NumBatches,
                                        double MT0,
                                        double MT1,
@@ -405,6 +440,8 @@ namespace origami
          * @param gsuMethod Global Split U method (2=MultiBuffer, 3=MultiBufferSingleKernel)
          * @param problem Problem specification
          * @param hw_consts Hardware constants
+         * @param num_tiles Number of tiles
+         * @param CUOccupancy Target CU occupancy
          * @param WGs_per_tile Workgroups per tile
          * @param WGs_per_tile_XCD Workgroups per tile per XCD
          * @param MT0 Macro tile dimension 0
@@ -418,6 +455,7 @@ namespace origami
                                     double NumBatches, double GlobalSplitU,
                                     uint32_t gsuMethod, ProblemInfo problem,
                                     const HardwareConstants& hw_consts,
+                                    uint32_t num_tiles, uint32_t CUOccupancy,
                                     uint32_t WGs_per_tile, uint32_t WGs_per_tile_XCD,
                                     double MT0, double MT1, uint32_t numWGs, double vgprCheck,
                                     double storeGSU) const;
@@ -460,14 +498,24 @@ namespace origami
          * @return MemoryAccessCosts structure with costs at each cache level
          */
         MemoryAccessCosts
-        calculateMemoryAccessCosts(double MT0, double MT1,
+        calculateMTMemoryAccessCosts(double M, double N, double K_AfterGSU,
+                                   double MT0, double MT1,
                                    const HardwareConstants& hw,
-                                   const CacheHitRates& hr,
-                                   double L2BandWidthPerCU, double L3BandWidthPerCU, double HBMBandWidthPerCU,
+                                   uint32_t WGs_per_tile_XCD_full, uint32_t WGs_per_tile_last, uint32_t WGs_per_tile_XCD_last,
                                    bool isSwizzleA, bool isSwizzleB,
-                                   double A_L1_req, double B_L1_req,
-                                   double A_L2_req, double A_L3_req, double A_hbm_req,
-                                   double B_L2_req, double B_L3_req, double B_hbm_req) const;
+                                   uint32_t bpeA, uint32_t bpeB,
+                                   uint32_t depthU,
+                                   uint32_t GRVWA, uint32_t GRVWB,
+                                   bool DTVA, bool DTVB,
+                                   uint32_t VWA, uint32_t VWB,
+                                   bool transA, bool transB,
+                                   int NLCA, int NLCB,
+                                   uint32_t NumThreads, uint32_t NumWave0, uint32_t NumWave1,
+                                   uint32_t XCC, uint32_t XCCG,
+                                   uint32_t GlobalSplitU, int32_t WGM, double NumBatches,
+                                   bool isGSUWGMRR,
+                                   uint32_t N_WGs_total, uint32_t M_WGs_total,
+                                   uint32_t N_WGs_per_tile, uint32_t M_WGs_per_tile, uint32_t num_tiles) const;
 
         /**
          * @brief Calculate overall loop performance combining memory and compute costs
@@ -477,7 +525,9 @@ namespace origami
          * @param pgr Prefetch global read parameter
          * @return Overall loop performance cost in cycles
          */
-        double getLoopOverall(const MemoryAccessCosts& mem, double math, uint32_t loopCnt, double pgr) const;
+        double getLoop_time(MemoryAccessCosts& mem, double math, uint32_t loopCnt, double pgr, uint32_t num_tiles, bool large) const;
+
+        double calculateInitialCost(double num_tiles) const;
 
         /**
          * @brief Predict overall performance for the configured problem and solution
@@ -516,7 +566,7 @@ namespace origami
          */
         L1CacheHitRate
         computeL1CacheHitRate(const HardwareConstants& hw,
-                            double MT0, double MT1, uint32_t bpeA, uint32_t bpeB,
+                            double MT0, double MT1, uint32_t depthU, uint32_t bpeA, uint32_t bpeB,
                             int NTA, int NTB, uint32_t GRVWA, uint32_t GRVWB,
                             bool DTVA, bool DTVB, bool isSwizzleA, bool isSwizzleB,
                             uint32_t VWA, uint32_t VWB, bool transA, bool transB,
@@ -529,6 +579,8 @@ namespace origami
          * @param N Matrix dimension N
          * @param K Matrix dimension K
          * @param hw Hardware constants
+         * @param workgroup mapping xcc
+         * @param workgroup mapping xcc group
          * @param gsu Global Split U factor
          * @param wgm Workgroup mapping strategy
          * @param batches Number of batches
@@ -543,6 +595,7 @@ namespace origami
                                              uint32_t N,
                                              uint32_t K,
                                              const HardwareConstants& hw,
+                                             uint32_t XCC, uint32_t XCCG,
                                              uint32_t gsu,
                                              int32_t  wgm,
                                              uint32_t batches,
@@ -584,7 +637,7 @@ namespace origami
          * @param CUOccupancy Target CU occupancy
          * @return Resolved occupancy value
          */
-        double resolveOccupancy(const HardwareConstants& hw, double perf, double prefetch, double mathCost, double storeCost, uint32_t num_tiles, uint32_t CUOccupancy) const;
+        double resolveOccupancy(const HardwareConstants& hw, double perf, double prefetch, double mathCost, double storeCost, uint32_t num_tiles, uint32_t CUOccupancy, uint32_t loopCnt) const;
 
         /**
          * @brief Compare if current configuration is better than previous solution

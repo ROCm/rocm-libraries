@@ -332,14 +332,20 @@ bool RunKTNGeneric(ConfigType& config,
                    const miopen::ExecutionContext& ctx,
                    const miopen::conv::ProblemDescription& problem)
 {
-    switch(problem.GetInDataType())
+    if(problem.GetInDataType() == miopenFloat)
     {
-    case miopenFloat: return config.template RunParameterPredictionModelKTN<float>(ctx, problem);
-    case miopenBFloat16:
-        return config.template RunParameterPredictionModelKTN<BFloat16Tag>(ctx, problem);
-    case miopenHalf: return config.template RunParameterPredictionModelKTN<HalfTag>(ctx, problem);
-    default: return false;
+        return config.template RunParameterPredictionModelKTN<float>(ctx, problem);
     }
+    else if(problem.GetInDataType() == miopenBFloat16)
+    {
+        return config.template RunParameterPredictionModelKTN<BFloat16Tag>(ctx, problem);
+    }
+    else if(problem.GetInDataType() == miopenHalf)
+    {
+        return config.template RunParameterPredictionModelKTN<HalfTag>(ctx, problem);
+    }
+
+    return false;
 }
 
 /**
