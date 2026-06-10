@@ -310,6 +310,18 @@ here: ops that consume `seq_lens` reference it through their own
 per-op attribute tables (e.g. `SdpaAttributes` already carries
 `seq_len_q_tensor_uid` / `seq_len_kv_tensor_uid`).
 
+To ensure that only plugins that have appropriately handled
+ragged tensors process graphs with them present, this also
+requires an `is_ragged_tensor_enabled` boolean to be added to
+the graph, and `computeMinimumPluginApiVersion` to be updated
+to map that boolean to the appropriate version.
+
+This also requires an update to the TensorAttributes and Graph
+json serialization/deserialization to output these values, and
+set appropriate defaults on older graphs where they aren't
+present.
+
+
 ### 4.4 Backend wiring
 
 Backend tensor descriptor mirrors the frontend additions: optional
@@ -491,8 +503,7 @@ unspecified.
 
 #### 4.6.1 User-side construction pattern
 
-Samples (Flow 1 — see `RaggedTensorsTensorFlows.md` §1.2) build
-ragged tensors by hand in three steps. There is no
+Samples build ragged tensors by hand in three steps. There is no
 `RaggedTensor::RaggedTensor(const TensorAttributes&)` convenience
 constructor in this iteration — `physicalElementCount` and the
 aux runtime tensor are required ctor inputs and neither is
