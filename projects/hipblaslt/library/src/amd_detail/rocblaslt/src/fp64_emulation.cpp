@@ -952,64 +952,171 @@ oz2_refine_sftB_kernel(const int32_t* __restrict__ C32i,
 /* =========================================================================
  * GPU kernels — Part 1f: full multi-modulus scaling (A and B fused)
  *
- * oz2_scaleAB_kernel<T_COUNT>: compile-time template.
+ * oz2_scaleAB_kernel<T_COUNT, TRANS_A, TRANS_B>: compile-time template.
  *
  * Both A and B branches apply the same 2-pass symmetric modular reduction
  * (FP64 pass + 1 FP32 refinement pass), matching the GEMMul8 reference.
  * With OZ2_S_MAX=18 there is no need for a 3rd FP32 pass or a runtime-
  * fallback kernel.
  *
- * Grid = dim3(ceil(k/64), ceil(m/4) + ceil(n/4)), Block = dim3(64, 4).
+ * For TRANS_A=true / TRANS_B=false (coalesced reads):
+ *   j = t%TILE_K varies fast within warp → stride-1 HBM reads (COALESCED).
+ *
+ * For TRANS_A=false / TRANS_B=true (non-coalesced reads):
+ *   Tiled SHMEM transposition (same structure as oz2_accu_prelim_kernel):
+ *     Load:  k_local=t/TILE_M, m_local=t%TILE_M → A[i+j*lda] (m_local fast → COALESCED)
+ *     Store raw val in shmem[k_local][m_local]; store per-row sft in s_sft[m_local].
+ *     __syncthreads()
+ *     Write: k_write=t%TILE_K, m_write=t/TILE_K → shmem transposed read
+ *            → A8i[j_out + i_out*lda8i + t_local*stride]  (k_write fast → COALESCED)
+ *
+ * Grid  = dim3(ceil(k/TILE_K), ceil(m/TILE_M) + ceil(n/TILE_M))  [unchanged]
+ * Block = dim3(TILE_K × TILE_M) = dim3(256)                      [was dim3(64,4)]
  *   blockIdx.y <  m_y_blocks → A scaling
  *   blockIdx.y >= m_y_blocks → B scaling
  * ========================================================================= */
-template <unsigned T_COUNT>
+static constexpr unsigned OZ2_SCALE_TILE_K = 64;
+static constexpr unsigned OZ2_SCALE_TILE_M = 4;
+
+template <unsigned T_COUNT, bool TRANS_A, bool TRANS_B>
 __global__ static void
 oz2_scaleAB_kernel(const double* __restrict__ A,
-                   int64_t m, int64_t lda, bool transA,
+                   int64_t m, int64_t lda,
                    int8_t*  __restrict__       A8i, size_t lda8i, size_t cola8i,
                    const int16_t* __restrict__ sftA,
                    const double* __restrict__ B,
-                   int64_t n, int64_t ldb, bool transB,
+                   int64_t n, int64_t ldb,
                    int8_t*  __restrict__       B8i, size_t ldb8i,
                    const int16_t* __restrict__ sftB,
                    int64_t k, unsigned t_start, unsigned m_y_blocks)
 {
-    const int64_t j = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    static constexpr int TILE_K = static_cast<int>(OZ2_SCALE_TILE_K);
+    static constexpr int TILE_M = static_cast<int>(OZ2_SCALE_TILE_M);
 
-    if(blockIdx.y < m_y_blocks) {
-        const int64_t i = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
-        if(i >= m || j >= k) return;
-        const double val  = transA ? A[i * lda + j] : A[j * lda + i];
-        const int16_t sft = sftA[i];
-        const double ival = trunc(ldexp(val, static_cast<int>(sft)));
-        const size_t stride = lda8i * cola8i;
-        const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(i) * lda8i;
-        #pragma unroll
-        for(unsigned t_local = 0; t_local < T_COUNT; ++t_local) {
-            const unsigned t = t_start + t_local;
-            const double  r  = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
-            const float   rf = static_cast<float>(r);
-            const float  rf2 = fmaf(rintf(rf * cInvModF[t]), static_cast<float>(cNegMod[t]), rf);
-            __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
-                                        A8i + t_local * stride + offset);
+    /* SHMEM used only in non-coalesced paths (TRANS_A=false / TRANS_B=true).
+     * Declared unconditionally; coalesced paths skip it via if constexpr.   */
+    __shared__ double  shmem[TILE_K][TILE_M + 1];  /* +1 avoids bank conflicts */
+    __shared__ int16_t s_sft[TILE_M];
+
+    const int t = static_cast<int>(threadIdx.x);
+
+    if(static_cast<unsigned>(blockIdx.y) < m_y_blocks) {
+        /* ── A block ─────────────────────────────────────────────────────── */
+        const int64_t m_base = static_cast<int64_t>(blockIdx.y) * TILE_M;
+
+        if constexpr (TRANS_A) {
+            /* Coalesced: A stored k×m, A[i,j] = A[j + i*lda].
+             * j = t%TILE_K varies fast within warp → stride-1 reads.       */
+            const int64_t j = static_cast<int64_t>(blockIdx.x) * TILE_K + (t % TILE_K);
+            const int64_t i = m_base + (t / TILE_K);
+            if(i >= m || j >= k) return;
+            const double val  = A[i * lda + j];                         /* COALESCED */
+            const double ival = trunc(ldexp(val, static_cast<int>(sftA[i])));
+            const size_t stride = lda8i * cola8i;
+            const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(i) * lda8i;
+            #pragma unroll
+            for(unsigned t_local = 0; t_local < T_COUNT; ++t_local) {
+                const unsigned tidx = t_start + t_local;
+                const double  r  = fma(cNegMod[tidx], rint(ival * cInvMod[tidx]), ival);
+                const float   rf = static_cast<float>(r);
+                const float  rf2 = fmaf(rintf(rf * cInvModF[tidx]),
+                                        static_cast<float>(cNegMod[tidx]), rf);
+                __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
+                                            A8i + t_local * stride + offset);
+            }
+        } else {
+            /* Non-coalesced load: A stored m×k, A[i,j] = A[i + j*lda].
+             * Use SHMEM transposition for coalesced reads AND writes.       */
+            const int k_local = t / TILE_M;   /* 0..TILE_K-1 */
+            const int m_local = t % TILE_M;   /* 0..TILE_M-1 */
+            const int64_t j = static_cast<int64_t>(blockIdx.x) * TILE_K + k_local;
+            const int64_t i = m_base + m_local;
+
+            /* Load raw val (m_local varies fast → COALESCED) */
+            shmem[k_local][m_local] = (i < m && j < k) ? A[i + j * lda] : 0.0;
+            if(k_local == 0 && i < m) s_sft[m_local] = sftA[i];
+            __syncthreads();
+
+            /* Write: k_write varies fast → COALESCED writes */
+            const int k_write = t % TILE_K;
+            const int m_write = t / TILE_K;
+            const int64_t j_out = static_cast<int64_t>(blockIdx.x) * TILE_K + k_write;
+            const int64_t i_out = m_base + m_write;
+            if(i_out < m && j_out < k) {
+                const double val  = shmem[k_write][m_write];
+                const double ival = trunc(ldexp(val, static_cast<int>(s_sft[m_write])));
+                const size_t stride = lda8i * cola8i;
+                const size_t offset = static_cast<size_t>(j_out) + static_cast<size_t>(i_out) * lda8i;
+                #pragma unroll
+                for(unsigned t_local = 0; t_local < T_COUNT; ++t_local) {
+                    const unsigned tidx = t_start + t_local;
+                    const double  r  = fma(cNegMod[tidx], rint(ival * cInvMod[tidx]), ival);
+                    const float   rf = static_cast<float>(r);
+                    const float  rf2 = fmaf(rintf(rf * cInvModF[tidx]),
+                                            static_cast<float>(cNegMod[tidx]), rf);
+                    __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
+                                                A8i + t_local * stride + offset);
+                }
+            }
         }
     } else {
-        const int64_t l = static_cast<int64_t>(blockIdx.y - m_y_blocks) * blockDim.y + threadIdx.y;
-        if(l >= n || j >= k) return;
-        const double val  = transB ? B[j * ldb + l] : B[l * ldb + j];
-        const int16_t sft = sftB[l];
-        const double ival = trunc(ldexp(val, static_cast<int>(sft)));
-        const size_t stride = ldb8i * static_cast<size_t>(n);
-        const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(l) * ldb8i;
-        #pragma unroll
-        for(unsigned t_local = 0; t_local < T_COUNT; ++t_local) {
-            const unsigned t = t_start + t_local;
-            const double  r  = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
-            const float   rf = static_cast<float>(r);
-            const float  rf2 = fmaf(rintf(rf * cInvModF[t]), static_cast<float>(cNegMod[t]), rf);
-            __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
-                                        B8i + t_local * stride + offset);
+        /* ── B block (symmetric to A, with TRANS_B) ─────────────────────── */
+        const int64_t n_base = static_cast<int64_t>(blockIdx.y - m_y_blocks) * TILE_M;
+
+        if constexpr (!TRANS_B) {
+            /* Coalesced: B stored k×n, B[l,j] = B[j + l*ldb].
+             * j = t%TILE_K varies fast → stride-1 reads.                   */
+            const int64_t j   = static_cast<int64_t>(blockIdx.x) * TILE_K + (t % TILE_K);
+            const int64_t col = n_base + (t / TILE_K);
+            if(col >= n || j >= k) return;
+            const double val  = B[col * ldb + j];                       /* COALESCED */
+            const double ival = trunc(ldexp(val, static_cast<int>(sftB[col])));
+            const size_t stride = ldb8i * static_cast<size_t>(n);
+            const size_t offset = static_cast<size_t>(j) + static_cast<size_t>(col) * ldb8i;
+            #pragma unroll
+            for(unsigned t_local = 0; t_local < T_COUNT; ++t_local) {
+                const unsigned tidx = t_start + t_local;
+                const double  r  = fma(cNegMod[tidx], rint(ival * cInvMod[tidx]), ival);
+                const float   rf = static_cast<float>(r);
+                const float  rf2 = fmaf(rintf(rf * cInvModF[tidx]),
+                                        static_cast<float>(cNegMod[tidx]), rf);
+                __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
+                                            B8i + t_local * stride + offset);
+            }
+        } else {
+            /* Non-coalesced: B stored n×k, B[l,j] = B[l + j*ldb].
+             * Use SHMEM transposition.                                       */
+            const int k_local = t / TILE_M;
+            const int l_local = t % TILE_M;
+            const int64_t j   = static_cast<int64_t>(blockIdx.x) * TILE_K + k_local;
+            const int64_t col = n_base + l_local;
+
+            /* Load raw val (l_local varies fast → COALESCED) */
+            shmem[k_local][l_local] = (col < n && j < k) ? B[col + j * ldb] : 0.0;
+            if(k_local == 0 && col < n) s_sft[l_local] = sftB[col];
+            __syncthreads();
+
+            /* Write: k_write varies fast → COALESCED writes */
+            const int k_write = t % TILE_K;
+            const int l_write = t / TILE_K;
+            const int64_t j_out   = static_cast<int64_t>(blockIdx.x) * TILE_K + k_write;
+            const int64_t col_out = n_base + l_write;
+            if(col_out < n && j_out < k) {
+                const double val  = shmem[k_write][l_write];
+                const double ival = trunc(ldexp(val, static_cast<int>(s_sft[l_write])));
+                const size_t stride = ldb8i * static_cast<size_t>(n);
+                const size_t offset = static_cast<size_t>(j_out) + static_cast<size_t>(col_out) * ldb8i;
+                #pragma unroll
+                for(unsigned t_local = 0; t_local < T_COUNT; ++t_local) {
+                    const unsigned tidx = t_start + t_local;
+                    const double  r  = fma(cNegMod[tidx], rint(ival * cInvMod[tidx]), ival);
+                    const float   rf = static_cast<float>(r);
+                    const float  rf2 = fmaf(rintf(rf * cInvModF[tidx]),
+                                            static_cast<float>(cNegMod[tidx]), rf);
+                    __builtin_nontemporal_store(static_cast<int8_t>(static_cast<int32_t>(rf2)),
+                                                B8i + t_local * stride + offset);
+                }
+            }
         }
     }
 }
@@ -1370,10 +1477,11 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
                        C32i, m, n, ldc32i, sftB, accu_log2P);
     _pstop(_t_refine);
 
-    const dim3 blk_scale(64u, 4u);
-    const unsigned m_y_blks = static_cast<unsigned>((m + 3) / 4);
-    const unsigned n_y_blks = static_cast<unsigned>((n + 3) / 4);
-    const dim3 gAB_scale(static_cast<unsigned>((k + 63) / 64), m_y_blks + n_y_blks);
+    const dim3 blk_scale(OZ2_SCALE_TILE_K * OZ2_SCALE_TILE_M);   /* dim3(256) */
+    const unsigned m_y_blks = static_cast<unsigned>((m + OZ2_SCALE_TILE_M - 1) / OZ2_SCALE_TILE_M);
+    const unsigned n_y_blks = static_cast<unsigned>((n + OZ2_SCALE_TILE_M - 1) / OZ2_SCALE_TILE_M);
+    const dim3 gAB_scale(static_cast<unsigned>((k + OZ2_SCALE_TILE_K - 1) / OZ2_SCALE_TILE_K),
+                         m_y_blks + n_y_blks);
     const dim3 blk_acc(64, 8);
     const dim3 grid_acc((m + 63) / 64, (n + 7) / 8);
     const size_t strideA8i = lda8i * cola8i;
@@ -1402,32 +1510,39 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
                                       ? scale_chunk_size : (num_moduli - scale_start);
         _pstart();
         /* Scale kernel: OZ2_S_MAX=18, so actual_scale <= 18 always.
-         * No runtime fallback needed — switch covers all cases.            */
-#define OZ2_SCALE_LAUNCH(TC) \
-        hipLaunchKernelGGL((oz2_scaleAB_kernel<(TC)>), gAB_scale, blk_scale, 0, stream, \
-                           A, m, lda, tA, A8i, lda8i, cola8i, sftA, \
-                           B, n, ldb, tB, B8i, ldb8i, sftB, k, scale_start, m_y_blks)
-        switch(actual_scale) {
-            case  1: OZ2_SCALE_LAUNCH( 1); break;
-            case  2: OZ2_SCALE_LAUNCH( 2); break;
-            case  3: OZ2_SCALE_LAUNCH( 3); break;
-            case  4: OZ2_SCALE_LAUNCH( 4); break;
-            case  5: OZ2_SCALE_LAUNCH( 5); break;
-            case  6: OZ2_SCALE_LAUNCH( 6); break;
-            case  7: OZ2_SCALE_LAUNCH( 7); break;
-            case  8: OZ2_SCALE_LAUNCH( 8); break;
-            case  9: OZ2_SCALE_LAUNCH( 9); break;
-            case 10: OZ2_SCALE_LAUNCH(10); break;
-            case 11: OZ2_SCALE_LAUNCH(11); break;
-            case 12: OZ2_SCALE_LAUNCH(12); break;
-            case 13: OZ2_SCALE_LAUNCH(13); break;
-            case 14: OZ2_SCALE_LAUNCH(14); break;
-            case 15: OZ2_SCALE_LAUNCH(15); break;
-            case 16: OZ2_SCALE_LAUNCH(16); break;
-            case 17: OZ2_SCALE_LAUNCH(17); break;
-            case 18: OZ2_SCALE_LAUNCH(18); break;
-            default: break;  /* unreachable with OZ2_S_MAX=18 */
+         * TRANS_A/TRANS_B are compile-time template params for branch-free
+         * coalesced vs SHMEM-transposed paths.  No runtime fallback needed. */
+#define OZ2_SCALE_LAUNCH(TC, TA, TB) \
+        hipLaunchKernelGGL((oz2_scaleAB_kernel<(TC),(TA),(TB)>), gAB_scale, blk_scale, 0, stream, \
+                           A, m, lda, A8i, lda8i, cola8i, sftA, \
+                           B, n, ldb, B8i, ldb8i, sftB, k, scale_start, m_y_blks)
+#define OZ2_SCALE_DISPATCH(TA, TB) \
+        switch(actual_scale) { \
+            case  1: OZ2_SCALE_LAUNCH( 1,(TA),(TB)); break; \
+            case  2: OZ2_SCALE_LAUNCH( 2,(TA),(TB)); break; \
+            case  3: OZ2_SCALE_LAUNCH( 3,(TA),(TB)); break; \
+            case  4: OZ2_SCALE_LAUNCH( 4,(TA),(TB)); break; \
+            case  5: OZ2_SCALE_LAUNCH( 5,(TA),(TB)); break; \
+            case  6: OZ2_SCALE_LAUNCH( 6,(TA),(TB)); break; \
+            case  7: OZ2_SCALE_LAUNCH( 7,(TA),(TB)); break; \
+            case  8: OZ2_SCALE_LAUNCH( 8,(TA),(TB)); break; \
+            case  9: OZ2_SCALE_LAUNCH( 9,(TA),(TB)); break; \
+            case 10: OZ2_SCALE_LAUNCH(10,(TA),(TB)); break; \
+            case 11: OZ2_SCALE_LAUNCH(11,(TA),(TB)); break; \
+            case 12: OZ2_SCALE_LAUNCH(12,(TA),(TB)); break; \
+            case 13: OZ2_SCALE_LAUNCH(13,(TA),(TB)); break; \
+            case 14: OZ2_SCALE_LAUNCH(14,(TA),(TB)); break; \
+            case 15: OZ2_SCALE_LAUNCH(15,(TA),(TB)); break; \
+            case 16: OZ2_SCALE_LAUNCH(16,(TA),(TB)); break; \
+            case 17: OZ2_SCALE_LAUNCH(17,(TA),(TB)); break; \
+            case 18: OZ2_SCALE_LAUNCH(18,(TA),(TB)); break; \
+            default: break; /* unreachable with OZ2_S_MAX=18 */ \
         }
+        if(tA && !tB)       { OZ2_SCALE_DISPATCH(true,  false) }
+        else if(!tA && !tB) { OZ2_SCALE_DISPATCH(false, false) }
+        else if(!tA && tB)  { OZ2_SCALE_DISPATCH(false, true)  }
+        else                { OZ2_SCALE_DISPATCH(true,  true)  }
+#undef OZ2_SCALE_DISPATCH
 #undef OZ2_SCALE_LAUNCH
         _pstop(_t_scale);
 
