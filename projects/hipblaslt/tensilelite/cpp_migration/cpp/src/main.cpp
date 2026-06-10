@@ -147,10 +147,6 @@ void bind_geometry(nb::module_& g) {
             int wg_idx = (tc == "A") ? 0 : 1;
             auto wg = nb::cast<std::vector<int>>(kernel[nb::str("MIWaveGroup")]);
             int wg_m = wg.at(wg_idx);
-            // Parity reads: Python reads these even though the derived result
-            // depends only on wg_m and mt_mma.
-            (void)(wg.at(0) * wg.at(1));
-            (void)kernel_int(kernel, "WavefrontSize");
             long mt = kernel_int(kernel, "MacroTile" + tc);
             long mt_mma = floordiv(mt, self.mmaTileShape.first);
             return self.forKernel(wg_m, mt_mma);
