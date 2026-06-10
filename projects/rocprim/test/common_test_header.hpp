@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,6 +50,37 @@
     #define HAS_VALGRIND_H 1
 #else
     #define HAS_VALGRIND_H 0
+#endif
+
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    #define USES_ASAN 1
+#else
+    #define USES_ASAN 0
+#endif
+
+#if HAS_VALGRIND_H
+    #define GTEST_SKIP_VALGRIND()                               \
+        do                                                      \
+        {                                                       \
+            if(RUNNING_ON_VALGRIND)                             \
+            {                                                   \
+                GTEST_SKIP() << "Skipping test under Valgrind"; \
+            }                                                   \
+        }                                                       \
+        while(0)
+#else
+    #define GTEST_SKIP_VALGRIND()
+#endif
+
+#if defined(__SANITIZE_ADDRESS__)
+    #define GTEST_SKIP_ASAN()                           \
+        do                                              \
+        {                                               \
+            GTEST_SKIP() << "Skipping test under ASan"; \
+        }                                               \
+        while(0)
+#else
+    #define GTEST_SKIP_ASAN()
 #endif
 
 #define HIP_CHECK_MEMORY(condition)                                                         \
