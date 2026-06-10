@@ -100,38 +100,35 @@ struct FmhaBwdDQDKDVTypes
                                               K.has_bias_grad, // kHasBiasGrad
                                               K.block_per_cu>; // kBlockPerCu
 
-    // Guard: wave64 (gfx9) only. The tile configs currently populated in
-    // getTileConfig() assume wavefrontSize=64. On wave32 targets (gfx10/11/12)
-    // the block_size arithmetic and warp-level intrinsics would be wrong.
+    // Guard: the selected GPU target must match the compiler wavefront mode.
     //
     // Toolchain compatibility for the wavefront-size predefine:
     //   - clang <=22 exposes __AMDGCN_WAVEFRONT_SIZE (and, during the
     //     transition, also the double-underscore __AMDGCN_WAVEFRONT_SIZE__);
-    //   - clang >=23 dropped both predefines, so fall back to the gfx9 arch
-    //     macro -- gfx9 (CDNA) is wave64 by construction. wave32 targets
-    //     (gfx10/11/12) define __GFX10__/__GFX11__/__GFX12__ instead and hit
-    //     the #else, rejecting the bridge as intended.
+    //   - clang >=23 dropped both predefines, so fall back to arch macros.
 #if defined(__AMDGCN_WAVEFRONT_SIZE__)
-    static_assert(__AMDGCN_WAVEFRONT_SIZE__ == 64,
-                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). "
-                  "Add GFX11/GFX12 tile configs to enable wave32 targets.");
+    static_assert(wavefrontSize(K.target) == __AMDGCN_WAVEFRONT_SIZE__,
+                  "FmhaBwdDQDKDV bridge wavefront size must match GpuTarget.");
 #elif defined(__AMDGCN_WAVEFRONT_SIZE)
-    static_assert(__AMDGCN_WAVEFRONT_SIZE == 64,
-                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). "
-                  "Add GFX11/GFX12 tile configs to enable wave32 targets.");
+    static_assert(wavefrontSize(K.target) == __AMDGCN_WAVEFRONT_SIZE,
+                  "FmhaBwdDQDKDV bridge wavefront size must match GpuTarget.");
 #elif defined(__GFX9__)
-    // gfx9 is wave64 by construction; no value to assert.
+    static_assert(wavefrontSize(K.target) == 64,
+                  "FmhaBwdDQDKDV bridge wavefront size must match GpuTarget (gfx9 = wave64).");
+#elif defined(__GFX11__) || defined(__GFX12__)
+    static_assert(wavefrontSize(K.target) == 32,
+                  "FmhaBwdDQDKDV bridge wavefront size must match GpuTarget (gfx11/12 = wave32).");
 #else
     static_assert(false,
-                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9): target is not "
-                  "gfx9 and no __AMDGCN_WAVEFRONT_SIZE predefine is available.");
+                  "FmhaBwdDQDKDV bridge: cannot determine wavefront size -- "
+                  "no __AMDGCN_WAVEFRONT_SIZE predefine or arch macro available.");
 #endif
 
     // --- Tile shape (from consteval lookup table) ---
     // getTileConfig() returns the architecture-specific tile geometry for
-    // the given (hdim_q, hdim_v, dtype). The device bridge reads plain
+    // the given (hdim_q, hdim_v, dtype, target). The device bridge reads plain
     // integer fields and converts them to CK Tile sequence<> types.
-    static constexpr auto kTile = getTileConfig(K.hdim_q, K.hdim_v, K.dtype, GpuTarget::gfx942);
+    static constexpr auto kTile = getTileConfig(K.hdim_q, K.hdim_v, K.dtype, K.target);
 
     using BlockTile = ck_tile::sequence<kTile.bm0,
                                         kTile.bn0,

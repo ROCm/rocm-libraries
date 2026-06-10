@@ -24,6 +24,8 @@ using ::rocm_ck::FmhaBwdDQDKDVConfig;
 using ::rocm_ck::FmhaBwdDQDKDVSpec;
 using ::rocm_ck::FmhaMaskType;
 using ::rocm_ck::FmhaMode;
+using ::rocm_ck::getTileConfig;
+using ::rocm_ck::GpuTarget;
 using ::rocm_ck::makeSpec;
 using ::rocm_ck::usesBatchSizeSlot;
 namespace S = ::rocm_ck::fmha_bwd_dqdkdv_slots;
@@ -227,4 +229,94 @@ TEST(FmhaBwdConsteval, MaskedSpec_BF16_WithMaskAndDeterministic)
     EXPECT_NE(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_TRUE(k.is_deterministic);
     EXPECT_EQ(S::requiredScalars(k), 12);
+}
+
+// ============================================================================
+// getTileConfig: architecture dispatch
+// ============================================================================
+
+TEST(TileConfig, GFX950_ReusesGFX9NonTrloadTiles)
+{
+    constexpr auto gfx9   = getTileConfig(128, 128, DataType::FP16, GpuTarget::gfx942);
+    constexpr auto gfx950 = getTileConfig(128, 128, DataType::FP16, GpuTarget::gfx950);
+
+    EXPECT_EQ(gfx950.bm0, gfx9.bm0);
+    EXPECT_EQ(gfx950.bn0, gfx9.bn0);
+    EXPECT_EQ(gfx950.wk0, 32);
+    EXPECT_EQ(gfx950.block_size(GpuTarget::gfx950), 256);
+}
+
+TEST(TileConfig, GFX11_FP16_D64_UsesWave32Tile)
+{
+    constexpr auto t    = getTileConfig(64, 64, DataType::FP16, GpuTarget::gfx1100);
+    constexpr auto bf16 = getTileConfig(64, 64, DataType::BF16, GpuTarget::gfx1100);
+
+    EXPECT_EQ(t.bn0, 64);
+    EXPECT_EQ(bf16.bn0, t.bn0);
+    EXPECT_EQ(t.wk0, 16);
+    EXPECT_EQ(t.rm2, 2);
+    EXPECT_EQ(t.rn2, 2);
+    EXPECT_EQ(t.block_size(GpuTarget::gfx1100), 128);
+}
+
+TEST(TileConfig, GFX12_FP16_D64_UsesGFX12Gemm4Split)
+{
+    constexpr auto gfx11 = getTileConfig(64, 64, DataType::FP16, GpuTarget::gfx1100);
+    constexpr auto gfx12 = getTileConfig(64, 64, DataType::FP16, GpuTarget::gfx1200);
+
+    EXPECT_EQ(gfx12.bn0, 64);
+    EXPECT_EQ(gfx12.wk0, 16);
+    EXPECT_EQ(gfx11.rm2, 2);
+    EXPECT_EQ(gfx11.rn2, 2);
+    EXPECT_EQ(gfx12.rm2, 1);
+    EXPECT_EQ(gfx12.rn2, 4);
+    EXPECT_EQ(gfx12.block_size(GpuTarget::gfx1200), 128);
+}
+
+TEST(TileConfig, MakeSpec_D32_BlockSize)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 32, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.target, GpuTarget::gfx942);
+}
+
+TEST(TileConfig, MakeSpec_ArchDispatch)
+{
+    constexpr auto gfx950 =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 128,
+                                                   .hdim_v = 128,
+                                                   .mode   = FmhaMode::BATCH,
+                                                   .target = GpuTarget::gfx950},
+                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto gfx11 =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 64,
+                                                   .hdim_v = 64,
+                                                   .mode   = FmhaMode::BATCH,
+                                                   .target = GpuTarget::gfx1100},
+                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto gfx12 =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 64,
+                                                   .hdim_v = 64,
+                                                   .mode   = FmhaMode::BATCH,
+                                                   .target = GpuTarget::gfx1200},
+                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(gfx950.target, GpuTarget::gfx950);
+    EXPECT_EQ(gfx950.block_size, 256);
+    EXPECT_EQ(gfx950.block_n0, 128);
+    EXPECT_EQ(gfx11.target, GpuTarget::gfx1100);
+    EXPECT_EQ(gfx11.block_size, 128);
+    EXPECT_EQ(gfx11.block_n0, 64);
+    EXPECT_EQ(gfx11.block_per_cu, -1);
+    EXPECT_EQ(gfx12.target, GpuTarget::gfx1200);
+    EXPECT_EQ(gfx12.block_size, 128);
+    EXPECT_EQ(gfx12.block_n0, 64);
+    EXPECT_EQ(gfx12.block_per_cu, -1);
 }
