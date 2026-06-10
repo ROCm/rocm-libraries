@@ -492,10 +492,18 @@ def compare(
     dft = pd.concat(tuned, ignore_index=True).reset_index(drop=True)
     if len(error) > 0: # if verify is true, we will have error.
         dfv = pd.concat(error, ignore_index=True).reset_index(drop=True)
-        dfv = dfv[list(GEMM_FIELDS) + ["norm_error"]]
+        dfv = dfv[list(GEMM_FIELDS) + ["norm_error", "atol", "rtol"]]
+        failed_mask = (dfv["atol"] == "failed") | (dfv["rtol"] == "failed")
+        if failed_mask.any():
+            logger.warning(
+                f"{failed_mask.sum()} cases failed verification (atol or rtol); "
+                f"setting error_pr to 1e6 for these cases"
+            )
+            dfv.loc[failed_mask, "norm_error"] = 1e6
         dft["error_tuned"] = dft.merge(dfv, on=[c for c in dfv.columns if c != "norm_error"])["norm_error"]
-        dft["error_tuned"].fillna(1e6)
         dft["error_tuned"] = dft["error_tuned"] / dft["batch_count"] # normalized by batch_count
+        
+
 
     df = dfr.merge(dft, on=[c for c in dfr.columns if c.split("_reference")[0] not in UNIQ_COLS])
     df["ratio"] = df["us_reference"] / df["us_tuned"]
