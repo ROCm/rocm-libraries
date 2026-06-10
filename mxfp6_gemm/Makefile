@@ -24,6 +24,16 @@ test_pipeline_v17: test_pipeline_v17.cpp $(filter-out mxfp6_lds.hpp, $(HEADERS))
 test_lds: test_lds.cpp $(HEADERS)
 	$(HIPCC) $(HIPFLAGS) $< -o $@
 
+# HYBRID experiment: A-LDS deep-K + B streamed direct HBM->reg (coalesced preshuffle_B,
+# register ring double-buffer). Beats the pure-LDS baseline +16~24% @8192^3 (B's LDS
+# round-trip + sub-head ds_read stall removed). test_hybrid = correctness + bench sweep;
+# test_hybrid_grid = partial-grid / non-square / odd-K correctness gate.
+test_hybrid: test_hybrid.cpp $(HEADERS) mxfp6_lds_hybrid.hpp
+	$(HIPCC) $(HIPFLAGS) $< -o $@
+
+test_hybrid_grid: test_hybrid_grid.cpp $(HEADERS) mxfp6_lds_hybrid.hpp
+	$(HIPCC) $(HIPFLAGS) $< -o $@
+
 # occ2 compile-gate + bench driver (Phase 1). Instantiates the production lds_gemm_db
 # with MIN_OCC=2 + 8-acc tile (128x256). Does NOT touch test_lds.cpp / mxfp6_lds.hpp.
 test_lds_occ2: test_lds_occ2.cpp $(HEADERS)

@@ -13,6 +13,8 @@
 test_pipeline_v18
 test_pipeline_v17
 test_lds
+test_hybrid
+test_hybrid_grid
 test_ws
 test_pp8
 test_reference
