@@ -435,8 +435,8 @@ if( ROCFFT_MPI_ENABLE )
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 endif()
 
-# RCCL: activate RCCL code paths (no-op stubs when undefined).
-if( rccl_FOUND )
+# RCCL: activate RCCL code paths
+if( ROCFFT_RCCL_ENABLE )
   target_compile_definitions(rocfft PRIVATE ROCFFT_RCCL_ENABLE)
 endif()
 
