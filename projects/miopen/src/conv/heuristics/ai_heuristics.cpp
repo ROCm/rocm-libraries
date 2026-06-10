@@ -1049,7 +1049,7 @@ protected:
         const bool isFwd = problem.GetDirection() == conv::Direction::Forward;
 
         std::vector<float> features = {};
-        if(problem.Is2d() && (device_name == "gfx950"))
+        if(problem.Is2d() && (device_name == "gfx950" || device_name == "gfx942"))
         {
             features = ExtractTunaNetND2dFeatures(problem, isFwd, metadata);
         }

@@ -95,8 +95,15 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
 
     if(metadata.contains("decodings") && metadata["decodings"].contains("outputs"))
     {
-        sequence_decodings_ = metadata["decodings"]["outputs"]
-                                  .get<std::map<std::string, std::map<std::string, std::string>>>();
+        // Decoding values may be serialized as numbers (e.g. NumGroupsToMerge: {"0": 1, ...}) or
+        // strings. Coerce every value to string so a numeric JSON value does not fail the parse.
+        for(const auto& [param_name, value_map] : metadata["decodings"]["outputs"].items())
+        {
+            std::map<std::string, std::string> decoded;
+            for(const auto& [key, value] : value_map.items())
+                decoded[key] = value.is_string() ? value.get<std::string>() : value.dump();
+            sequence_decodings_[param_name] = std::move(decoded);
+        }
     }
     else
     {
@@ -776,10 +783,90 @@ const CandidateSelectionModel& GetCandidateSelectionModel(const std::string& arc
     }
 }
 
+// WRW grouped kernels whose CK type-string has a variable number of params, so the static
+// kernel_str_mapping cannot locate NumGroupsToMerge / SplitK and (for Wavelet) the packed
+// TileLoadMathThreadGroupSize token. Mirrors WRW_CONDITIONAL_NUM_GROUPS_KERNELS in the MIOpenFF
+// preprocessor (miopenff/benchmarking/preproc_maps.py:401-455) -- keep these two lists in sync.
+//
+//  - NumGroupsToMerge is emitted by CK (at base type-string index 14, i.e. candidate index 15) only
+//    when > 1, so its presence is data-dependent.
+//  - SplitK is NOT inside the CK angle brackets: MIOpen appends it as a "+<int>" suffix after the
+//    closing '>'. The C++ tokenizer (GetKernelAsTokens) drops that suffix, and SplitK is instead
+//    re-attached as the last candidate token by ExpandKernelParamsWithSplitK when use_split_k is
+//    set. Thus within one EncodeKernelParams call, "SplitK present" == use_split_k.
+//  - Wavelet only: type-string index 0 packs two numbers as "{load}l+{math}m"; it is split into the
+//    TileLoadThreadGroupSize / TileMathThreadGroupSize features.
+constexpr size_t kWrwCkBaseParamCount = 15; // CK type-string params before the conditional tail
+
+inline bool IsWrwConditionalNumGroupsKernel(const std::string& kernel_name)
+{
+    return kernel_name == "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3" ||
+           kernel_name == "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad_MergedGroups";
+}
+
+// Resolve the candidate-vector index for NumGroupsToMerge / SplitK on a conditional WRW kernel.
+// candidate_len includes kernel_name at [0] and the optional trailing split_k token. Returns
+// std::nullopt when the param is absent for this candidate. Mirrors resolve_ck_param_index()
+// (preproc_maps.py), reframed for the C++ candidate layout (Python list index + 1 == candidate
+// idx).
+inline std::optional<size_t>
+ResolveConditionalParamIndex(const std::string& param_name, size_t candidate_len, bool use_split_k)
+{
+    // candidate index of NumGroupsToMerge when present (Python list index 15 -> candidate 16).
+    const size_t num_groups_candidate_idx = kWrwCkBaseParamCount + 1;
+    // Base candidate length (kernel_name + 15 type-string params), no NGM, no SplitK.
+    const size_t base_len = kWrwCkBaseParamCount + 1;
+
+    if(param_name == "NumGroupsToMerge")
+    {
+        // Present iff candidate carries an extra inline token beyond base (+1 for trailing SplitK).
+        const size_t needed = base_len + 1 + (use_split_k ? 1 : 0);
+        if(candidate_len >= needed)
+            return num_groups_candidate_idx;
+        return std::nullopt;
+    }
+
+    if(param_name == "SplitK")
+    {
+        if(!use_split_k || candidate_len < base_len + 1)
+            return std::nullopt;
+        return candidate_len - 1; // always the appended last token when present
+    }
+
+    return std::nullopt;
+}
+
+// Split the Wavelet packed token "{load}l+{math}m" (e.g. "128l+256m") into (load, math) strings.
+// Returns std::nullopt if the token does not match. Mirrors the ^(\d+)l\+ / \+(\d+)m$ regex split
+// in preproc.py:746-752.
+inline std::optional<std::pair<std::string, std::string>>
+SplitTileLoadMathToken(const std::string& token)
+{
+    const auto l_pos = token.find("l+");
+    if(l_pos == std::string::npos || l_pos == 0)
+        return std::nullopt;
+    if(token.empty() || token.back() != 'm')
+        return std::nullopt;
+
+    const std::string load = token.substr(0, l_pos);
+    const std::string math =
+        token.substr(l_pos + 2, token.size() - (l_pos + 2) - 1); // drop "l+","m"
+
+    const auto all_digits = [](const std::string& s) {
+        return !s.empty() &&
+               std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isdigit(c); });
+    };
+    if(!all_digits(load) || !all_digits(math))
+        return std::nullopt;
+
+    return std::make_pair(load, math);
+}
+
 MIOPEN_INTERNALS_EXPORT
 std::vector<std::vector<float>>
 EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_params,
-                   const CandidateSelectionMetadata& metadata)
+                   const CandidateSelectionMetadata& metadata,
+                   bool use_split_k)
 {
     std::vector<std::vector<float>> encoded_candidates;
     const auto& output_params          = metadata.output_params();
@@ -827,6 +914,8 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
             continue; // Skip to next candidate
         }
 
+        const bool is_conditional_kernel = IsWrwConditionalNumGroupsKernel(kernel_name);
+
         // Build a map from param_name to value for this candidate
         std::map<std::string, std::string> param_value_map;
         bool mapping_valid = true;
@@ -834,6 +923,13 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
         {
             try
             {
+                // For conditional WRW kernels the static index for NumGroupsToMerge / SplitK is
+                // only valid when the candidate carries the full param tail. Skip them here and
+                // resolve their (data-dependent) positions in the override block below.
+                if(is_conditional_kernel && (ParamNameEndsWith(kv.second, "NumGroupsToMerge") ||
+                                             ParamNameEndsWith(kv.second, "SplitK")))
+                    continue;
+
                 // Use std::stoull for unsigned long long, then validate range
                 unsigned long long ull_idx = std::stoull(kv.first);
                 size_t idx                 = static_cast<size_t>(ull_idx);
@@ -876,6 +972,53 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
                          << ", Candidate: " << invalid_candidate_str.str()
                          << ", Total mappings: " << kernel_str_mapping.size());
             continue; // Continue to the next candidate
+        }
+
+        // Conditional WRW kernels: the static kernel_str_mapping cannot express the data-dependent
+        // positions of NumGroupsToMerge / SplitK, nor (for Wavelet) the packed first token. Fill
+        // the affected output params here from raw candidate indices; the encode loop below then
+        // applies the normal categorical/numeric encoding (or skips them when declared constant).
+        if(is_conditional_kernel)
+        {
+            // Wavelet only: split the packed "{load}l+{math}m" token at type-string index 0
+            // (candidate index 1) into the two threadgroup-size features.
+            if(kernel_name == "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3" &&
+               candidate.size() > 1)
+            {
+                if(const auto split = SplitTileLoadMathToken(candidate[1]))
+                {
+                    for(const auto& param_name : output_params)
+                    {
+                        if(ParamNameEndsWith(param_name, "TileLoadThreadGroupSize"))
+                            param_value_map[param_name] = split->first;
+                        else if(ParamNameEndsWith(param_name, "TileMathThreadGroupSize"))
+                            param_value_map[param_name] = split->second;
+                    }
+                }
+                else
+                {
+                    MIOPEN_LOG_W("Wavelet TileLoadMathThreadGroupSize token '"
+                                 << candidate[1] << "' did not match '{load}l+{math}m'");
+                }
+            }
+
+            // Resolve NumGroupsToMerge / SplitK against the actual candidate length. Absent params
+            // are left out of param_value_map, so the encode loop emits the missing-value token.
+            for(const auto& param_name : output_params)
+            {
+                const bool is_ngm    = ParamNameEndsWith(param_name, "NumGroupsToMerge");
+                const bool is_splitk = ParamNameEndsWith(param_name, "SplitK");
+                if(!is_ngm && !is_splitk)
+                    continue;
+
+                const std::string base = is_ngm ? "NumGroupsToMerge" : "SplitK";
+                if(const auto idx =
+                       ResolveConditionalParamIndex(base, candidate.size(), use_split_k))
+                {
+                    if(*idx < candidate.size())
+                        param_value_map[param_name] = candidate[*idx];
+                }
+            }
         }
 
         std::vector<float> encoded;
@@ -1025,7 +1168,8 @@ ModelSelectBestCandidate(const std::string& arch,
                 mapping_pairs.emplace_back(heuristic_index, 1); // Default split_k of 1
             }
         }
-        const auto& encoded_candidates = EncodeKernelParams(expanded_params, model.metadata());
+        const auto& encoded_candidates =
+            EncodeKernelParams(expanded_params, model.metadata(), use_split_k);
 
         if(encoded_candidates.empty())
         {

@@ -139,7 +139,8 @@ GetCandidateSelectionModel(const std::string& arch, const std::string& solver);
 
 MIOPEN_INTERNALS_EXPORT std::vector<std::vector<float>>
 EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_params,
-                   const CandidateSelectionMetadata& metadata);
+                   const CandidateSelectionMetadata& metadata,
+                   bool use_split_k);
 
 struct MIOPEN_INTERNALS_EXPORT CandidateSelectionResult
 {

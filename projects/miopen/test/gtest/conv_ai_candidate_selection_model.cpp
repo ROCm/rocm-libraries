@@ -273,7 +273,7 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeKernelParamsBadValueThrows_Test)
 
     // The function should not throw, but should return empty result due to invalid mapping
     std::vector<std::vector<float>> result;
-    EXPECT_NO_THROW(result = EncodeKernelParams(bad_params, meta));
+    EXPECT_NO_THROW(result = EncodeKernelParams(bad_params, meta, /*use_split_k=*/false));
 
     // Verify that the invalid candidate was skipped (empty result)
     EXPECT_TRUE(result.empty())
@@ -290,7 +290,7 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateValid_Test)
         features[name] = 1.0f;
     auto encoded_features    = model.EncodeInputFeatures(features);
     auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
-    auto encoded_candidates  = EncodeKernelParams(valid_kernel_params, meta);
+    auto encoded_candidates  = EncodeKernelParams(valid_kernel_params, meta, /*use_split_k=*/false);
     auto encoded_configs     = model.EncodeKernelConfigs(encoded_candidates);
     std::vector<std::pair<int, float>> ids =
         model.SelectBestCandidateIndices(encoded_features, encoded_configs);
@@ -384,6 +384,146 @@ TEST_P(GPU_CandidateSelection_FP32, ExpandKernelParamsWithSplitKFunctionality_Te
         ASSERT_EQ(expanded[i][2], std::to_string(split_ks[i]));
         ASSERT_EQ(mapping[i].first, 0);
         ASSERT_EQ(mapping[i].second, split_ks[i]);
+    }
+}
+
+// === Wavelet / conditional-kernel decode tests ===
+//
+// The Wavelet WRW kernel (DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3) has a variable
+// type-string length and a packed first token "{load}l+{math}m". These tests exercise the
+// special-case decode in EncodeKernelParams (see ai_candidate_selection.cpp). They only run on the
+// WRW solvers whose metadata actually contains the Wavelet kernel.
+//
+// Candidate layout (0-based, kernel_name prepended at [0]):
+//   [0] kernel_name
+//   [1] "{load}l+{math}m"  (CK type-string index 0)
+//   [2..15] 14 remaining base params (CK indices 1..14)  -> 15 base tokens total, base len 16
+//   [16] NumGroupsToMerge  (CK index 15, present only when > 1)
+//   [last] SplitK          (appended by ExpandKernelParamsWithSplitK when use_split_k)
+
+namespace {
+constexpr const char* kWaveletKernel = "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3";
+
+bool MetadataHasKernel(const CandidateSelectionMetadata& meta, const std::string& kernel_name)
+{
+    try
+    {
+        meta.GetKernelStrMapping(kernel_name);
+        return true;
+    }
+    catch(const std::exception&)
+    {
+        return false;
+    }
+}
+
+// Find the slot of an output param (by suffix) within the *encoded* vector, i.e. the index after
+// constant output params have been dropped. Returns -1 if absent or constant.
+int EncodedSlotForSuffix(const CandidateSelectionMetadata& meta, const std::string& suffix)
+{
+    int slot = 0;
+    for(const auto& param_name : meta.output_params())
+    {
+        if(meta.GetOutputConstant(param_name).has_value())
+            continue; // constant params are skipped in the encoded vector
+        if(param_name.size() >= suffix.size() &&
+           param_name.compare(param_name.size() - suffix.size(), suffix.size(), suffix) == 0)
+            return slot;
+        ++slot;
+    }
+    return -1;
+}
+
+// Build a Wavelet candidate. Base form (no NGM, no SplitK) has length 16: kernel_name + packed
+// token + 14 numeric base params. include_num_groups appends NumGroupsToMerge at [16] (length 17).
+std::vector<std::string> MakeWaveletCandidate(bool include_num_groups, const std::string& ngm = "2")
+{
+    std::vector<std::string> c;
+    c.push_back(kWaveletKernel); // [0]
+    c.push_back("128l+256m");    // [1] packed TileLoadMath token
+    for(int i = 0; i < 14; ++i)  // [2..15] remaining 14 base params
+        c.push_back("1");
+    if(include_num_groups)
+        c.push_back(ngm); // [16] NumGroupsToMerge (CK emits only when > 1)
+    return c;
+}
+} // namespace
+
+TEST_P(GPU_CandidateSelection_FP32, WaveletSplitTileLoadMath_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    if(!MetadataHasKernel(meta, kWaveletKernel))
+        GTEST_SKIP() << "Wavelet kernel not present in metadata for " << params.solver;
+
+    auto candidate = MakeWaveletCandidate(/*include_num_groups=*/false); // length 16
+    std::vector<std::vector<std::string>> kparams{candidate};
+
+    auto encoded = EncodeKernelParams(kparams, meta, /*use_split_k=*/false);
+    ASSERT_EQ(encoded.size(), 1u) << "Wavelet candidate was unexpectedly skipped";
+
+    // TileMathThreadGroupSize is a live numeric feature (TileLoad is constant in metadata).
+    const int math_slot = EncodedSlotForSuffix(meta, "TileMathThreadGroupSize");
+    ASSERT_GE(math_slot, 0) << "TileMathThreadGroupSize not found as a live encoded feature";
+    EXPECT_FLOAT_EQ(encoded[0][math_slot], 256.0f) << "math part of '128l+256m' not decoded to 256";
+}
+
+TEST_P(GPU_CandidateSelection_FP32, WaveletNumGroupsConditional_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    if(!MetadataHasKernel(meta, kWaveletKernel))
+        GTEST_SKIP() << "Wavelet kernel not present in metadata for " << params.solver;
+
+    const int ngm_slot = EncodedSlotForSuffix(meta, "NumGroupsToMerge");
+    ASSERT_GE(ngm_slot, 0);
+    const float missing = meta.GetMissingValueToken();
+
+    // Present: NumGroupsToMerge="2" (candidate length 17) -> decoded (not missing).
+    {
+        auto candidate = MakeWaveletCandidate(/*include_num_groups=*/true, "2");
+        auto encoded   = EncodeKernelParams({candidate}, meta, /*use_split_k=*/false);
+        ASSERT_EQ(encoded.size(), 1u);
+        EXPECT_NE(encoded[0][ngm_slot], missing)
+            << "NumGroupsToMerge present but decoded as missing";
+    }
+    // Absent: base candidate (length 16) -> NumGroupsToMerge resolves to the missing token.
+    {
+        auto candidate = MakeWaveletCandidate(/*include_num_groups=*/false);
+        auto encoded   = EncodeKernelParams({candidate}, meta, /*use_split_k=*/false);
+        ASSERT_EQ(encoded.size(), 1u);
+        EXPECT_FLOAT_EQ(encoded[0][ngm_slot], missing)
+            << "NumGroupsToMerge absent but not decoded as missing token";
+    }
+}
+
+TEST_P(GPU_CandidateSelection_FP32, WaveletSplitKResolution_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    if(!MetadataHasKernel(meta, kWaveletKernel))
+        GTEST_SKIP() << "Wavelet kernel not present in metadata for " << params.solver;
+
+    const int splitk_slot = EncodedSlotForSuffix(meta, "SplitK");
+    ASSERT_GE(splitk_slot, 0);
+    const float missing = meta.GetMissingValueToken();
+
+    // With use_split_k: SplitK is the appended last token (NGM present + appended splitk -> len
+    // 18).
+    {
+        auto candidate = MakeWaveletCandidate(/*include_num_groups=*/true, "2");
+        candidate.push_back("8"); // appended SplitK (mirrors ExpandKernelParamsWithSplitK)
+        auto encoded = EncodeKernelParams({candidate}, meta, /*use_split_k=*/true);
+        ASSERT_EQ(encoded.size(), 1u);
+        EXPECT_FLOAT_EQ(encoded[0][splitk_slot], 8.0f) << "appended SplitK not decoded to 8";
+    }
+    // Without use_split_k: SplitK must resolve to the missing token.
+    {
+        auto candidate = MakeWaveletCandidate(/*include_num_groups=*/true, "2");
+        auto encoded   = EncodeKernelParams({candidate}, meta, /*use_split_k=*/false);
+        ASSERT_EQ(encoded.size(), 1u);
+        EXPECT_FLOAT_EQ(encoded[0][splitk_slot], missing)
+            << "SplitK decoded as present when use_split_k is false";
     }
 }
 
