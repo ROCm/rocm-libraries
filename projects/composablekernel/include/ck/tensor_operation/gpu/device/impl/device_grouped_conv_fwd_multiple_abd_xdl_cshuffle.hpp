@@ -228,6 +228,7 @@ __launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
                 block_2_ctile_map,
                 k_batch,
                 k_idx,
+                {},
                 p_shared_1);
         }
     }
