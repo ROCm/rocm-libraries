@@ -209,7 +209,7 @@ bool check_is_init_matmul_descr(const _rocsparselt_matmul_descr* matmul)
 
 bool check_is_init_matmul_alg_selection(const _rocsparselt_matmul_alg_selection* alg_selection)
 {
-    return alg_selection->is_init != 0
+    return alg_selection != nullptr && alg_selection->is_init != 0
            && alg_selection->is_init == (uintptr_t)alg_selection->handle;
 }
 

@@ -219,6 +219,30 @@ def _parse_plugin_paths(raw_paths: str) -> List[Path]:
     return paths
 
 
+def _venv_rocm_sdk_plugin_dirs() -> list[Path]:
+    """Return ROCm SDK wheel plugin directories from the active venv only."""
+    import sys
+    import sysconfig
+
+    venv_root = Path(sys.prefix).resolve()
+    dirs: list[Path] = []
+    for key in ("purelib", "platlib"):
+        value = sysconfig.get_path(key)
+        if not value:
+            continue
+        site_dir = Path(value).resolve()
+        if site_dir != venv_root and venv_root not in site_dir.parents:
+            continue
+        if not site_dir.is_dir():
+            continue
+        dirs.extend(
+            child / "lib" / "hipdnn_plugins" / "engines"
+            for child in site_dir.iterdir()
+            if child.is_dir() and child.name.startswith("_rocm_sdk_libraries_")
+        )
+    return dirs
+
+
 def _find_plugin_paths(pytestconfig) -> Optional[List[str]]:
     """Find hipDNN engine plugin directories.
 
@@ -239,6 +263,7 @@ def _find_plugin_paths(pytestconfig) -> Optional[List[str]]:
         / "lib"
         / "hipdnn_plugins"
         / "engines",
+        *_venv_rocm_sdk_plugin_dirs(),
         # System install
         Path("/opt/rocm/lib/hipdnn_plugins/engines"),
     ]
