@@ -44,9 +44,12 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
             PRIVATE ${CK_TILE_BATCHED_GEMM_F8_COMPILE_OPTIONS})
         target_compile_options(test_ck_tile_batched_gemm_bf8
             PRIVATE ${CK_TILE_BATCHED_GEMM_F8_COMPILE_OPTIONS})
-        add_dependencies(test_ck_tile_batched_gemm
-            test_ck_tile_batched_gemm_f8
-            test_ck_tile_batched_gemm_bf8)
+        if(TARGET test_ck_tile_batched_gemm_f8)
+            add_dependencies(test_ck_tile_batched_gemm test_ck_tile_batched_gemm_f8)
+        endif()
+        if(TARGET test_ck_tile_batched_gemm_bf8)
+            add_dependencies(test_ck_tile_batched_gemm test_ck_tile_batched_gemm_bf8)
+        endif()
     endif()
 
     # INT8 batched GEMM relies on the int32 MFMA / WMMA paths.
@@ -57,6 +60,8 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
     # test_ck_tile_gemm_pipeline_compv3 INT8 cases are restricted to gfx94|gfx95).
     if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx11|gfx12")
         add_gtest_executable(test_ck_tile_batched_gemm_int8 test_batched_gemm_int8.cpp)
-        add_dependencies(test_ck_tile_batched_gemm test_ck_tile_batched_gemm_int8)
+        if(TARGET test_ck_tile_batched_gemm_int8)
+            add_dependencies(test_ck_tile_batched_gemm test_ck_tile_batched_gemm_int8)
+        endif()
     endif()
 endif()

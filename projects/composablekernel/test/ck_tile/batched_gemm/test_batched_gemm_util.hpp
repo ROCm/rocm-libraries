@@ -5,6 +5,7 @@
 #include <cmath>
 #include <numeric>
 #include <sstream>
+#include <type_traits>
 #include <gtest/gtest.h>
 
 #include "ck_tile/core.hpp"
@@ -277,7 +278,7 @@ class TestCkTileBatchedGemm : public ::testing::Test
         const auto rtol = ck_tile::get_relative_threshold<ComputeType, CDataType, AccDataType>(
             ck_tile::integer_divide_ceil(K, kbatch));
         const auto atol = ck_tile::get_absolute_threshold<ComputeType, CDataType, AccDataType>(
-            static_cast<double>(max_accumulated_value) / kbatch,
+            static_cast<double>(max_accumulated_value > 0 ? max_accumulated_value : 1.0f) / kbatch,
             ck_tile::integer_divide_ceil(K, kbatch));
 
         pass = ck_tile::check_err(
