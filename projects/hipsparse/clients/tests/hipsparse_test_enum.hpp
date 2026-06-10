@@ -127,6 +127,7 @@ static constexpr std::size_t countof2(T (&)[N])
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_batched_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_batched_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_bell) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_bsr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmm_csr) \
