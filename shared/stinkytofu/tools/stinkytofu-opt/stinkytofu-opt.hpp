@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdlib>
 #include <functional>
 #include <vector>
 
@@ -33,6 +34,7 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
@@ -85,6 +87,20 @@ const std::vector<PassInfo> availablePasses = {
     {"MemTokenConsistencyCheckPass", []() { return createMemTokenConsistencyCheckPass(); }},
     {"RaiseVgprMsbPass", []() { return createRaiseVgprMsbPass(); }},
     {"InsertVgprMsbPass", []() { return createInsertVgprMsbPass(); }},
+    // InsertClusterBarrierPass. PrefetchGlobalRead/PrefetchLocalRead are read
+    // from the environment so the same binary can target different prefetch
+    // configs without recompiling:
+    //   PrefetchGlobalRead (default 1), PrefetchLocalRead (default 1). Kernel
+    //   scope is always enabled to match the Gfx1250 backend pipeline.
+    {"InsertClusterBarrierPass", []() {
+         auto geti = [](const char* k, int d) {
+             const char* v = std::getenv(k);
+             return v != nullptr ? std::atoi(v) : d;
+         };
+         return createInsertClusterBarrierPass(/*isKernelScope=*/true,
+                                               geti("PrefetchGlobalRead", 1),
+                                               geti("PrefetchLocalRead", 1));
+     }},
 };
 
 /**
