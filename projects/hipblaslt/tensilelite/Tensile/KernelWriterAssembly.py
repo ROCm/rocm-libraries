@@ -88,7 +88,7 @@ from Tensile.KernelWriter import KernelWriter, ABMatrixInfo
 from Tensile.SolutionStructs.Naming import getKernelFileBase
 from Tensile.Toolchain.Component import Assembler
 
-from math import ceil, floor, log, prod
+from math import ceil, floor, gcd, log, prod
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -5569,12 +5569,21 @@ class KernelWriterAssembly(KernelWriter):
       module.add(vectorMultiplyBpe(finalVgpr, finalVgpr, tP["bpeDS"]))
 
       # LdsBlockSizePerPad: add padding
-      if kernel["LdsBlockSizePerPad%s"%tc] != 0 and kernel["LdsPad%s"%tc] !=0:
+      # fp6 TDM iterate uses a byte-domain orbit pad (LdsPad=0): a fixed 16B per
+      # LBSPP-sized orbit block. Dividing the full byte address by LBSPP and
+      # multiplying by 16 reconstructs BOTH the nIdx and waveM M-row pad terms
+      # in a single divide (LBSPP=768 is not power-of-2, so vectorStaticDivide's
+      # general path is required, not a shift).
+      is6bitIter = (tc in ("A", "B")
+                    and kernel["ProblemType"]["DataType%s" % tc].is6bitFloat()
+                    and kernel.get("_TDMIterateMode%s" % tc, False))
+      ldsPadBytes = 16 if is6bitIter else int(kernel["LdsPad%s"%tc] * tP["bpeDS"])
+      if kernel["LdsBlockSizePerPad%s"%tc] != 0 and ldsPadBytes != 0:
         module.add(vectorStaticDivide(rReg, "LocalReadAddr%s"%tc, kernel["LdsBlockSizePerPad%s"%tc], tmpVgprRes, \
-          "Final Offset: padding %u per block %u" % (int(kernel["LdsPad%s"%tc] * tP["bpeDS"]), kernel["LdsBlockSizePerPad%s"%tc])))
+          "Final Offset: padding %u per block %u" % (ldsPadBytes, kernel["LdsBlockSizePerPad%s"%tc])))
         with self.allocTmpSgpr(1) as tmpSgprInfo:
-          module.add(vectorStaticMultiplyAdd(vgpr("LocalReadAddr%s"%tc), vgpr(rReg), int(kernel["LdsPad%s"%tc] * tP["bpeDS"]), vgpr("LocalReadAddr%s"%tc), tmpSgprInfo, \
-                                       "Final Offset: padding %u per block %u" % (int(kernel["LdsPad%s"%tc] * tP["bpeDS"]), kernel["LdsBlockSizePerPad%s"%tc])))
+          module.add(vectorStaticMultiplyAdd(vgpr("LocalReadAddr%s"%tc), vgpr(rReg), ldsPadBytes, vgpr("LocalReadAddr%s"%tc), tmpSgprInfo, \
+                                       "Final Offset: padding %u per block %u" % (ldsPadBytes, kernel["LdsBlockSizePerPad%s"%tc])))
 
       # release resources
       self.vgprPool.checkIn(tmpVgpr)
@@ -18118,7 +18127,14 @@ class KernelWriterAssembly(KernelWriter):
     bpe = dtype.numBytes()
     dss = TensorDataMoverLoad.dataSizeShift(dtype)
     lbspp = kernel["LdsBlockSizePerPad%s" % tc]
-    pad_bytes = int(round(kernel["LdsPad%s" % tc] * bpe))
+    is6bit = dtype.is6bitFloat()
+    # fp6: byte-domain pad = a fixed 16 bytes per LBSPP (orbit) block (LdsPad=0,
+    # because 16B / 0.75bpe is not an integer element count). The pad MUST stay
+    # 16 (a multiple of 16) so every N-row start keeps 16-byte alignment for
+    # ds_load_b128/b64; VW>1 conflict-freedom is handled by the orbit block size
+    # dim1=VW (LBSPP=VW*per_row), NOT by shrinking the pad. Other dtypes use the
+    # element-domain LdsPad * bpe.
+    pad_bytes = 16 if is6bit else int(round(kernel["LdsPad%s" % tc] * bpe))
 
     tile_dim1 = self._tdmIterTileDim1(kernel, tc, du, dtype)
     rows_per_il = mt // perIssueLoadRowDivisor
@@ -18142,6 +18158,12 @@ class KernelWriterAssembly(KernelWriter):
       if dtype.isFloat4():
         mod.add(SLShiftRightB32(sgpr(sGInc), 1, sgpr(sGInc),
                                 "fp4 sub-byte: bytes = elements / 2"))
+      elif is6bit:
+        # fp6 sub-byte: bytes = elements * 3 / 4 (= >>2 then *3).
+        mod.add(SLShiftRightB32(sgpr(sGInc), 2, sgpr(sGInc),
+                                "fp6 sub-byte: elements / 4"))
+        mod.add(SMulI32(sgpr(sGInc), sgpr(sGInc), 3,
+                        "fp6 sub-byte: * 3 = bytes per iter"))
       mod.add(comp.setIterationEnabled(descSgprName(1), True))
       mod.add(comp.setIterationIncrements(descSgprName(2), lds_inc, sGInc))
       mod.add(SMovB32(sgpr(sIter), hex(iter_count - 1),
@@ -18211,6 +18233,11 @@ class KernelWriterAssembly(KernelWriter):
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       dataBytes = mt // numWaves * du * int(bpe * 4) // (4 * dim1Divisor)
+      if dtype.is6bitFloat() and kernel.get("_TDMIterateMode%s" % tc, False):
+        # fp6 pad: fixed 16B per LBSPP block, folded into the per-wave stride
+        # (compile-time constant; LBSPP is not power-of-2 so a shift-based divide
+        # cannot be used here).
+        dataBytes += (dataBytes // ldsBlockSizePerPad) * 16
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), dataBytes, f"woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
         mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \
@@ -18369,6 +18396,10 @@ class KernelWriterAssembly(KernelWriter):
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr("WaveIdx"), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
+      if dtype.is6bitFloat() and kernel.get("_TDMIterateMode%s" % tc, False):
+        # fp6 pad: fixed 16B per LBSPP block, folded into the per-wave stride
+        # (compile-time constant; LBSPP is not power-of-2).
+        dataBytes += (dataBytes // ldsBlockSizePerPad) * 16
       mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wId * (mt // numComp * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
         mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \

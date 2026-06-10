@@ -2542,16 +2542,58 @@ class Solution(collections.abc.Mapping):
         state["_DepthUMXSB"] = depthUB // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
 
-      # fp6 doesn't support LDS padding yet.
+      # fp6 LDS pad: the element-domain LdsPad cannot represent fp6's byte-domain
+      # orbit pad (16B / 0.75bpe = 21.33 is non-integer), so an explicit positive
+      # LdsPad is rejected. LdsBlockSizePerPad (byte domain) IS allowed and is
+      # auto-resolved to the orbit block size for fp6 TDM iterate mode below.
       for tc in ["A", "B"]:
-        if state["ProblemType"]["MacDataType%s" % tc].is6bitFloat() and (
-            state["LdsPad%s" % tc] != 0 or state["LdsBlockSizePerPad%s" % tc] != 0):
+        if state["ProblemType"]["MacDataType%s" % tc].is6bitFloat() and state["LdsPad%s" % tc] > 0:
           reject(state, printRejectionReason,
-                 f"fp6 MacDataType{tc}: LdsPad{tc} and LdsBlockSizePerPad{tc} must be 0")
+                 f"fp6 MacDataType{tc}: LdsPad{tc} must be 0 (byte-domain pad uses LdsBlockSizePerPad{tc})")
           return
 
       iterModeMask = state["TDMIterateMode"]
       if state["TDMInst"] and state["EnableMatrixInstruction"] and not state["ProblemType"]["Sparse"]:
+        def _f6IterDim(tc):
+          """fp6 TDM iterate block size dim1 (a fixed 16B pad is inserted every
+          dim1 N-rows). VW=1 -> orbit size (best LDS); VW>1 -> VW. With a fixed
+          16B pad this is bank-conflict-free AND 16B-aligned for any VW (the
+          per-lane bank stride VW*per_row+16 always has gcd(.,64)=4)."""
+          per_row = int(state["_DepthU%s" % tc] * 3 // 4)
+          vw = state["VectorWidth%s" % tc]
+          mt = state["MacroTile0"] if tc == "A" else state["MacroTile1"]
+          if vw == 1:
+            shift = (per_row // 4) % 64
+            d = 1 if shift == 0 else 64 // math.gcd(shift, 64)
+            return min(d, mt)
+          return vw
+
+        def _f6IterFormable(tc):
+          """True if a valid fp6 iterate descriptor exists: the block dim1 must
+          divide rows-per-issue-load and iter_count must be in HW range [1,256]
+          (mirrors _emitTdmIterateInit). The VW *value* is never the limiter
+          (any VW is conflict-free); only this config divisibility is."""
+          if not state["UnrollMajorLDS%s" % tc]:
+            return False
+          dim1 = _f6IterDim(tc)
+          mt = state["MacroTile0"] if tc == "A" else state["MacroTile1"]
+          numWaves = state["MIWaveGroup"][0] * state["MIWaveGroup"][1]
+          ws = numWaves > 1   # isTdmWaveSeparated: both A,B are TDM for fp6
+          dim1Divisor = 2 if state["TDMSplit"] else 1
+          rowDiv = (numWaves // 2 if ws else numWaves) * dim1Divisor
+          if rowDiv <= 0 or dim1 <= 0:
+            return False
+          rows_per_il = mt // rowDiv
+          return rows_per_il > 0 and rows_per_il % dim1 == 0 and 1 <= rows_per_il // dim1 <= 256
+
+        def _f6Explicit0(tc):
+          """User explicitly disabled LDS padding (LdsPad=0 AND
+          LdsBlockSizePerPad=0). This is the opt-out: run plain non-iterate fp6
+          regardless of TDMIterateMode, never reject. (-1 'auto' does NOT count
+          as explicit 0.) These are the YAML input values; LBSPP/LdsPad are not
+          auto-resolved until later (calcLdsBlockSizePerPad / calcLdsPad)."""
+          return state["LdsPad%s" % tc] == 0 and state["LdsBlockSizePerPad%s" % tc] == 0
+
         # Stage 1: decide iterate-mode per tensor.
         if iterModeMask == -1:
           state.pop("_TDMIterateModeA", None)
@@ -2560,6 +2602,19 @@ class Solution(collections.abc.Mapping):
             if not state["UnrollMajorLDS%s" % tc]:
               continue
             vw = state["VectorWidth%s" % tc]
+            # fp6 TDM is iterate-mode-only (non-iterate fp6 is not supported).
+            # The element-domain LBSPP>1024 threshold doesn't apply (0.75bpe rows
+            # are never power-of-2). Enable iterate whenever a valid iterate
+            # descriptor can be formed; the VW value itself is never the limiter
+            # (any VW is bank-conflict-free + 16B-aligned), only config
+            # divisibility is. If it can't be formed, the post-loop rejects
+            # (never silently emits a non-iterate fp6 kernel).
+            if state["ProblemType"]["MacDataType%s" % tc].is6bitFloat():
+              # Explicit LdsPad=0 & LdsBlockSizePerPad=0 = opt out of iterate ->
+              # leave it non-iterate (handled/allowed in the post-loop).
+              if not _f6Explicit0(tc) and _f6IterFormable(tc):
+                state["_TDMIterateMode%s" % tc] = True
+              continue
             bpe_tc = state["ProblemType"]["MacDataType%s" % tc].numBytes()
             lbspp = roundUpToNearestMultiple(int(state["_DepthU%s" % tc] * bpe_tc * vw), 256)
             if lbspp > 1024:
@@ -2579,6 +2634,37 @@ class Solution(collections.abc.Mapping):
               reject(state, printRejectionReason, "TDMIterateMode bit for B set but UnrollMajorLDSB is False")
               return
             state["_TDMIterateModeB"] = True
+
+        # fp6 + TDM is iterate-mode-only: never silently emit a non-iterate fp6
+        # kernel. Reject if iterate is not enabled (e.g. UnrollMajorLDS False, or
+        # TDMIterateMode explicitly 0) or if the config cannot form a valid
+        # iterate descriptor (block dim1 must divide rows-per-issue-load and
+        # iter_count must be in [1,256]). This catches both the -1 (not enabled)
+        # and explicit-mask (enabled but not formable) cases.
+        for tc in ["A", "B"]:
+          if not state["ProblemType"]["MacDataType%s" % tc].is6bitFloat():
+            continue
+          # Explicit LdsPad=0 & LdsBlockSizePerPad=0 = opt out of iterate: run
+          # plain non-iterate fp6 (any TDMIterateMode), never reject. Force the
+          # iterate flag off so all downstream codegen takes the non-iterate path.
+          if _f6Explicit0(tc):
+            state.pop("_TDMIterateMode%s" % tc, None)
+            continue
+          if not (state.get("_TDMIterateMode%s" % tc, False) and _f6IterFormable(tc)):
+            reject(state, printRejectionReason,
+                   f"fp6 MacDataType{tc} + TDM is iterate-mode-only and this config cannot use it "
+                   f"(needs UnrollMajorLDS{tc}=True and MacroTile{tc} divisible by waves*dim1Divisor*dim1, "
+                   f"or set LdsPad{tc}=0 and LdsBlockSizePerPad{tc}=0 to run plain non-iterate).")
+            return
+
+        # Normalize TDMIterateMode (kernel-name token) to the *actual* per-tensor
+        # iterate flags. This keeps the name consistent for the explicit-mask path
+        # after an explicit LdsPad=0/LdsBlockSizePerPad=0 opt-out forced a tensor
+        # back to non-iterate (so e.g. TDMIterateMode=3 + pad0/block0 collapses to
+        # the same non-iterate kernel as TDMIterateMode=0, rather than a mislabeled
+        # TDMIM3 duplicate). Idempotent for the -1 path.
+        state["TDMIterateMode"] = (1 if state.get("_TDMIterateModeA", False) else 0) | \
+                                  (2 if state.get("_TDMIterateModeB", False) else 0)
 
         # Stage 2: for non-iterate tensors, halve auto-derived VW until LBSPP
         # fits the pad_interval 1024 B limit.
@@ -2683,6 +2769,12 @@ class Solution(collections.abc.Mapping):
           ldstr     = state.get(f"enableLDSTr{tc}", False)
           macDtype  = state["ProblemType"][f"MacDataType{tc}"]
           tlu       = state["ProblemType"][f"TLU{tc}"]
+
+          # fp6 cannot use element-domain LdsPad (0.75 bpe). fp6 TDM iterate mode
+          # injects its pad in the byte domain (LdsBlockSizePerPad orbit block +
+          # literal 16B); keep LdsPad at 0.
+          if macDtype.is6bitFloat():
+            return 0
 
           ldsPad = 0
           if not state[f"UnrollMajorLDS{tc}"]:
@@ -2843,6 +2935,32 @@ class Solution(collections.abc.Mapping):
           return calcMXSLdsBlockSizePerPad(tc, lrvw)
         mt = state["MacroTile0"] if ("A" in tc) else state["MacroTile1"]
         LdsBlockSizePerPad = state["LdsBlockSizePerPad%s"%tc]
+        # fp6 TDM iterate mode: byte-domain orbit block = dim1 * per_row, where
+        # per_row = DepthU * 3/4 bytes. This is the LDS data block between two
+        # 16B orbit pads (the pad itself is injected by the byte-domain codegen,
+        # not via element-domain LdsPad which is 0).
+        # The pad is always a fixed 16 bytes (16B-aligned). Conflict-freedom is
+        # achieved by the block size dim1 (16B pad every dim1 N-rows):
+        #   - VW=1 (any MIWaveTile): dim1 = orbit size (best LDS, ~2%). A lane
+        #     reads row nIdx, and every per-load M-row offset (tile jump =
+        #     tiIdx*16, vIdx = MIWaveGroupShape = 16*MIWaveGroup) is a multiple
+        #     of the orbit, so the per-load pad composes with the base pad.
+        #   - VW>1: dim1 = VW.  A lane reads row nIdx*VW, so the per-lane bank
+        #     stride is VW*per_row+16; dim1=VW gives gcd(stride,64)=4 (16
+        #     distinct banks per ds_load half-wave) AND keeps every row
+        #     16B-aligned (pad=16). A larger orbit dim1 is not used for VW>1
+        #     because per-load offsets are not guaranteed multiples of it.
+        if (state["ProblemType"]["MacDataType%s"%tc].is6bitFloat()
+            and state.get("_TDMIterateMode%s" % tc, False)):
+          per_row = int(state["_DepthU%s"%tc] * 3 // 4)
+          vw = state["VectorWidth%s" % tc]
+          if vw == 1:
+            shift = (per_row // 4) % 64
+            dim1 = 1 if shift == 0 else 64 // math.gcd(shift, 64)
+            dim1 = min(dim1, mt)
+          else:
+            dim1 = vw
+          return dim1 * per_row
         tmpBpe = getLdsBpe(tc)
         multiple = 256 if wmmaV3 else 128
         if LdsBlockSizePerPad == -1:
@@ -2918,8 +3036,16 @@ class Solution(collections.abc.Mapping):
           ldsNumBytes = int(state["_DepthU%s"%mxTc] * (state["MacroTile%s"%mxTc] + ldsPad) * bpe)
         padInterval = LdsBlockSizePerPad
 
+        # fp6 TDM iterate mode: byte-domain pad = a fixed 16 bytes per LBSPP
+        # block (LdsPad=0), not ldsPad * bpe. The pad stays 16 (16B-aligned);
+        # VW>1 conflict-freedom comes from the block size dim1=VW, not the pad.
+        is6bitIter = (("MXS" not in mxTc)
+                      and state["ProblemType"]["MacDataType%s"%tc].is6bitFloat()
+                      and state.get("_TDMIterateMode%s" % tc, False))
+        padBytesPerBlock = 16 if is6bitIter else (ldsPad * bpe)
+
         if padInterval != 0:
-          ldsNumBytes = int((state["_DepthU%s"%mxTc] * state["MacroTile%s"%mxTc] * bpe) / padInterval * (padInterval + ldsPad * bpe))
+          ldsNumBytes = int((state["_DepthU%s"%mxTc] * state["MacroTile%s"%mxTc] * bpe) / padInterval * (padInterval + padBytesPerBlock))
         ldsNumBytesAligned = roundUpToNearestMultiple(ldsNumBytes, ldsAlign)
 
         if state["DirectToVgpr%s"%mxTc]:
@@ -4346,6 +4472,12 @@ class Solution(collections.abc.Mapping):
     # set ldsbspp = 0 for ldspad = 0
     for tc in ['A', 'B']:
       if state["LdsPad%s"%tc] == 0:
+        # fp6 TDM iterate mode decouples the two: LdsPad=0 (element-domain pad
+        # is not representable for 0.75 bpe) but LdsBlockSizePerPad holds the
+        # byte-domain orbit block size. Keep it.
+        if (state["ProblemType"]["MacDataType%s"%tc].is6bitFloat()
+            and state.get("_TDMIterateMode%s" % tc, False)):
+          continue
         state["LdsBlockSizePerPad%s"%tc] = 0
 
     if state["TDMInst"]:

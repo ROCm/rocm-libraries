@@ -1547,6 +1547,7 @@ class LocalReadMFMA(LocalRead):
                             # gfx1250 LDS offset formula shared by XF32 and BF16/Half/FP8/etc paths.
                             # The WMMA V3 LDS layout uses a *2 factor on the unroll stride.
                             def calcGfx1250LdsOffset():
+                                f6_pad = 0
                                 if "MXS" in tc:
                                     # rIdx walks the K-scales packed into one MFMA-K sub-iter.
                                     # Step is UnrollStride, which equals mxUnit for K-major LDS
@@ -1556,12 +1557,28 @@ class LocalReadMFMA(LocalRead):
                                     incOffset = rIdx * numElementPerRead * UnrollStride
                                 elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
                                     incOffset = rIdx * numElementPerRead * UnrollStride * 2
-                                    incOffset += tiIdx * matrixInstTO * vectorWidth * tileStride
+                                    mTileOffset = tiIdx * matrixInstTO * vectorWidth * tileStride
+                                    incOffset += mTileOffset
+                                    # fp6 TDM iterate: this load's M-row component (the M-tile
+                                    # jump + offset_val, both scaled by tileStride = one N-row)
+                                    # crosses orbit boundaries that carry a 16B pad each. The
+                                    # rIdx K term stays within a single N-row so it is excluded.
+                                    # Pad = (M-row bytes // LBSPP) * 16. With per-row LBSPP
+                                    # (dim1=1, used for MIWaveTile>1 / VW>1) the pad is linear
+                                    # per row, so it composes with the runtime base pad for any
+                                    # M-row value; with orbit LBSPP=768 (VW=1, MIWaveTile=1) the
+                                    # M-row deltas are 0 here so this is a no-op.
+                                    if (tc in ("A", "B")
+                                        and kernel["ProblemType"]["DataType%s" % tc].is6bitFloat()
+                                        and kernel.get("_TDMIterateMode%s" % tc, False)):
+                                        lbsppF6 = kernel["LdsBlockSizePerPad%s" % tc]
+                                        mRowByte = int((mTileOffset + offset_val) * tP["bpeDS"])
+                                        f6_pad = (mRowByte // lbsppF6) * 16
                                 else:
                                     vw = kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]
                                     incOffset = (rIdx // vw) * UnrollStride * vw
                                     incOffset += rIdx * numElementPerRead * UnrollStride
-                                return int((incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
+                                return int((incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"]) + f6_pad
 
                             for oIdx in range(0, numOffsets):
                                 if perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0:
