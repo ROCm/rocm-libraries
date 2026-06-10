@@ -4610,10 +4610,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
-    # Allocate registers for VGPR tiles (PGR=2 delegates to SubtileBasedScheduler)
-    pgr = kernel["PrefetchGlobalRead"]
-    
-
     dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
 
     module.add(initVgprTilesToZero(self, kernel, dtileInfo))
@@ -4625,7 +4621,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.do["executeToPrefetchEnd"]:
       module.add(self.functionEnd(kernel, addLabel=False))
 
-    #module.add(preLoop(self, kernel))
     module.add(mainLoop(self, kernel, tensorParametersA, tensorParametersB))
 
     # Deallocate offset registers
