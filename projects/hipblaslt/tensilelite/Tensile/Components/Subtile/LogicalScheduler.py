@@ -1045,7 +1045,7 @@ class LogicalScheduler:
         wrapper rebuilds the Python EmittedModule dataclasses from the value
         modules.
         """
-        self._ensure_pass(Pass.EMIT)
+        self._ensure_pass(Pass.VGPR_TILES)
         cpp = self._ensure_cpp()
         cpp.build_preloop()
         self._preloop_emitted = self._variant_from_cpp(
