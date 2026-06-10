@@ -41,6 +41,7 @@ set(CPPCHECK_BUILD_DIR ${CMAKE_BINARY_DIR}/cppcheck-build)
 file(MAKE_DIRECTORY ${CPPCHECK_BUILD_DIR})
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_MAKE_CLEAN_FILES ${CPPCHECK_BUILD_DIR})
 
+# Configure cppcheck and create the miopen-cppcheck analyzer target.
 macro(enable_cppcheck)
     set(options FORCE)
     set(oneValueArgs)
@@ -133,6 +134,6 @@ macro(enable_cppcheck)
     mark_as_analyzer(miopen-cppcheck)
 
     if(NOT ROCM_LIBS_SUPERBUILD)
-        add_custom_target(cppcheck DEPENDS miopen-cppcheck)
+        add_custom_target(cppcheck DEPENDS miopen-cppcheck COMMENT "Back-compat alias for miopen-cppcheck")
     endif()
 endmacro()

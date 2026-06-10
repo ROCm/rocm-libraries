@@ -38,6 +38,7 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     list(APPEND SKIP_TESTS unit_conv_solver_ConvWinoRageRxS.cpp)
 endif()
 
+# Append a pattern to the accumulated gtest negative (exclusion) filter.
 function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
     set (TMP_FILTER ${MIOPEN_GTEST_FILTER_NEGATIVE})
 
@@ -51,7 +52,9 @@ function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
     set (MIOPEN_GTEST_FILTER_NEGATIVE ${TMP_FILTER} PARENT_SCOPE)
 endfunction()
 
+# Build a gtest executable and register its (optionally sharded) ctest entries.
 function(add_gtest TEST_NAME TEST_CPP)
+  # cmake-lint: disable=R0912,R0915
   message("Adding Test: " ${TEST_NAME} " : " ${TEST_CPP})
   add_executable(${TEST_NAME} ${TEST_CPP})
   if(WIN32)
@@ -154,7 +157,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if (NOT MIOPEN_TEST_DEEPBENCH)
         add_gtest_negative_filter("*DeepBench*")
     endif()
-    
+
     if (NOT MIOPEN_TEST_CONV)
         add_gtest_negative_filter("*MIOpenTestConv*")
     endif()
@@ -162,7 +165,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if(MIOPEN_NO_GPU)
         add_gtest_negative_filter("*GPU*")
     endif()
-    
+
     if(MIOPEN_TEST_GFX115X)
         add_gtest_negative_filter("Full/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("Full/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
@@ -179,6 +182,7 @@ function(add_gtest TEST_NAME TEST_CPP)
 
     message(STATUS "MIOPEN_GTEST_FILTER ${MIOPEN_GTEST_FILTER}")
 
+    # cmake-lint: disable=E1120
     foreach(i RANGE 1 ${GTEST_PARALLEL_LEVEL})
       add_test(NAME ${TEST_NAME}_shard${i}
         COMMAND ${TEST_NAME} --gtest_filter=${MIOPEN_GTEST_FILTER}
@@ -263,6 +267,7 @@ else()
   add_custom_target(
     miopen_gtest_check
     DEPENDS test_list
+    COMMENT "Checking gtest test names"
   )
 
   if( NOT ENABLE_ASAN_PACKAGING )
@@ -303,4 +308,3 @@ if( NOT ENABLE_ASAN_PACKAGING )
       RENAME "CTestTestfile.cmake"
   )
 endif()
-

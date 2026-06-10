@@ -12,6 +12,7 @@ add_custom_target(
     check_format
     COMMAND  find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|h.in\\|hpp.in\\|cpp.in\\|cl\\)" -exec ${CLANG_FORMAT_BINARY} --dry-run --Werror --verbose {} +
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    COMMENT "clang-format: Checking C/C++ source formatting"
     VERBATIM
 )
 
@@ -19,5 +20,6 @@ add_custom_target(
     format
     COMMAND  find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|h.in\\|hpp.in\\|cpp.in\\|cl\\)" -exec ${CLANG_FORMAT_BINARY} --verbose -i {} +
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    COMMENT "clang-format: Reformatting C/C++ sources in place"
     VERBATIM
 )

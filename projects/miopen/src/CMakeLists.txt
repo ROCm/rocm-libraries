@@ -34,6 +34,7 @@ endif()
 # This is incremented when the ABI to the library changes
 set( MIOpen_SOVERSION 1.0 )
 
+# Generate source that embeds the given kernel files as initializer data.
 function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
     set(INIT_KERNELS_LIST)
     set(INSERT_KERNELS_LIST)
@@ -360,7 +361,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
     file(GLOB_RECURSE GPU_BATCHED_TRANSPOSE_KERNEL_HIP "kernels/gpu_batched_transpose_kernel/*.cpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_INCLUDE "kernels/gpu_general_tensor_reorder_kernel/*.hpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE "kernels/gpu_general_tensor_reorder_kernel/*.cpp")
-
 
     set(MIOPEN_KERNEL_INCLUDES
         ${STATIC_COMPOSABLE_KERNEL_INCLUDE}
@@ -772,6 +772,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
     set(KERNELS_SRC_BATCH_FACTOR 50 CACHE STRING "Amount of kernel source files to inline to a single object file.")
     set(KERNELS_BATCH_ID 0)
 
+    # Batch kernel sources into grouped object files to reduce object count.
     function(inline_kernels_src BATCH_FACTOR KERNELS KERNEL_INCLUDES EXTRA_OPTIONS MESSAGE_SUFFIX)
         set(KERNELS_BATCH)
         set(KERNELS_BATCH_SIZE 0)
@@ -884,6 +885,7 @@ if(zstd_FOUND)
     target_link_libraries(MIOpen PRIVATE $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>)
 endif()
 
+# Link the given libraries into TARGET for both build and interface usage.
 function(target_internal_library TARGET)
     target_link_libraries(${TARGET} PRIVATE ${ARGN})
     target_link_libraries(${TARGET} INTERFACE $<BUILD_INTERFACE:${ARGN}>)
