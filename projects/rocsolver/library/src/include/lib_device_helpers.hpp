@@ -928,7 +928,7 @@ ROCSOLVER_KERNEL void init_ident(const rocblas_int m,
 }
 
 template <typename I, typename J>
-inline I reset_info_nblocks(const I n, const J nthreads_per_block)
+inline I calculate_nblocks(const I n, const J nthreads_per_block)
 {
     auto const min_threads = static_cast<I>(32);
     auto const max_threads = static_cast<I>(1024);

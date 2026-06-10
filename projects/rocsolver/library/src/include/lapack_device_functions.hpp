@@ -3722,7 +3722,7 @@ rocblas_status rocsolver_lacn2_template(rocblas_handle handle,
     if(*h_kase == 0)
     {
         // initialize x = (1/n, ..., 1/n)
-        rocblas_int blocks = reset_info_nblocks(n, static_cast<I>(LACN2_BLOCKSIZE));
+        rocblas_int blocks = calculate_nblocks(n, static_cast<I>(LACN2_BLOCKSIZE));
 
         ROCSOLVER_LAUNCH_KERNEL((reset_info<T, I, T>), dim3(blocks), dim3(LACN2_BLOCKSIZE), 0,
                                 stream, *x, n, T(1) / T(n));
