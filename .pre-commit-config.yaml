@@ -103,7 +103,10 @@ repos:
     rev: v0.6.10
     hooks:
       - id: cmake-lint
-        exclude: ^projects/miopen/CMakeLists\.txt$
+        exclude: |
+          (?x)
+          ^projects/miopen/CMakeLists\.txt$|
+          ^projects/miopen/src/CMakeLists\.txt$
       # cmake-format is disabled due to undesirable formatting.
       # We can investigate changing the configuration before re-enabling or using an alternative tool.
       # - id: cmake-format
