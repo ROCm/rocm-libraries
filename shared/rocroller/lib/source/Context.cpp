@@ -96,9 +96,15 @@ namespace rocRoller
                 break;
             }
             case Register::Type::Vector:
-                rv->m_allocators[i]
-                    = std::make_shared<Register::Allocator>(regType, kernelOpts->maxVGPRs);
+            {
+                // TODO: Should be capability check then get for each arch
+                // e.g. rv->m_targetArch.target().GetCapability(GPUCapability::MaxVGPRs)
+                auto const maxVGPRs = rv->m_targetArch.HasCapability(GPUCapability::HasVGPRIndexing)
+                                          ? 1024
+                                          : kernelOpts->maxVGPRs;
+                rv->m_allocators[i] = std::make_shared<Register::Allocator>(regType, maxVGPRs);
                 break;
+            }
             case Register::Type::Scalar:
                 rv->m_allocators[i]
                     = std::make_shared<Register::Allocator>(regType, kernelOpts->maxSGPRs);
@@ -210,6 +216,12 @@ namespace rocRoller
         }
     }
 
+    Register::ValuePtr Context::getTTMP6()
+    {
+        return std::make_shared<Register::Value>(
+            shared_from_this(), Register::Type::TTMP6, DataType::UInt32, 1);
+    }
+
     Register::ValuePtr Context::getTTMP7()
     {
         return std::make_shared<Register::Value>(
@@ -244,6 +256,8 @@ namespace rocRoller
         case Type::EXEC_LO:
         case Type::EXEC_HI:
             return getEXEC();
+        case Type::TTMP6:
+            return getTTMP6();
         case Type::TTMP7:
             return getTTMP7();
         case Type::TTMP9:
