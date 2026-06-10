@@ -85,7 +85,22 @@ python gemm_full_benchmark.py --variant gemm_universal \
 # Specific GPU ids and a custom problem file:
 python gemm_full_benchmark.py --devices 0,2,5 \
     --problems configs/example_problems.json
+
+# Correctness mode: check every kernel against an fp32 numpy reference.
+python gemm_full_benchmark.py --verify --max-kernels 8
 ```
+
+### Liveness vs correctness (`--verify`)
+
+By default a measurement is reported `OK` purely on **liveness** — the kernel
+ran and produced a non-zero output (`ZERO` otherwise). It is *not* a correctness
+check: a numerically wrong but non-zero result still reads `OK`. Pass `--verify`
+to have each worker compare its output against an fp32 numpy reference
+(`A @ B`) using the global relative metric `max|out - ref| / max|ref|`. With
+`--verify`, results read `VERIFY` (within `--verify-tol`, default `2e-2`) or
+`MISMATCH` (counted as a failure), and the `max_rel` / `verified` columns are
+populated in the CSV. This gives self-contained per-kernel confidence; the
+broader numeric parity against native Tile Engine remains a separate task.
 
 ### Multi-GPU parallelism
 

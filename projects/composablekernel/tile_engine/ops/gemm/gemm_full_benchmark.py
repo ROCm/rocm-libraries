@@ -169,7 +169,9 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
         {"so_path": str(lib), "problem": prob_dict, "kernel_name": cfg.name}
         for _, cfg, lib in batch
     ]
-    payload = json.dumps({"items": items})
+    payload = json.dumps(
+        {"items": items, "verify": args.verify, "verify_tol": args.verify_tol}
+    )
 
     env = base_env.copy()
     env["HIP_VISIBLE_DEVICES"] = str(device_id)
@@ -204,9 +206,19 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
             reported.add(bidx)
             if result.get("ok", False):
                 status = "OK" if result.get("non_zero", 0) > 0 else "ZERO"
+                mismatch = False
+                if args.verify and "verified" in result:
+                    if result["verified"]:
+                        status = "VERIFY"
+                    else:
+                        status = "MISMATCH"
+                        mismatch = True
+                extra = (
+                    f" rel={result['max_rel']:.2e}" if "max_rel" in result else ""
+                )
                 lines.append(
                     f"  [gpu{device_id}] {cfg.name:<58} {result['ms']:>10.3f} "
-                    f"{result['tflops']:>10.2f} {status:>8}"
+                    f"{result['tflops']:>10.2f} {status:>8}{extra}"
                 )
                 rows.append(
                     {
@@ -219,8 +231,12 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
                         "latency_ms": result["ms"],
                         "tflops": result["tflops"],
                         "non_zero": result.get("non_zero", 0),
+                        "max_rel": result.get("max_rel", ""),
+                        "verified": result.get("verified", ""),
                     }
                 )
+                if mismatch:
+                    n_fail += 1
             else:
                 lines.append(f"  [gpu{device_id}] {cfg.name:<58} FAILED")
                 lines.append(f"    Error: {result.get('error', 'unknown')[:100]}")
@@ -301,6 +317,18 @@ def main():
     )
     parser.add_argument(
         "--max-kernels", type=int, default=0, help="Limit to first N kernels (0=all)"
+    )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Check each kernel's output against an fp32 numpy reference "
+        "(global max|out-ref|/max|ref|); a mismatch counts as a failure",
+    )
+    parser.add_argument(
+        "--verify-tol",
+        type=float,
+        default=2e-2,
+        help="Relative tolerance for --verify (default 2e-2, suits fp16)",
     )
     args = parser.parse_args()
 
@@ -396,6 +424,8 @@ def main():
         "latency_ms",
         "tflops",
         "non_zero",
+        "max_rel",
+        "verified",
     ]
     csv_file = open(csv_path, "w", newline="")
     writer = csv.DictWriter(csv_file, fieldnames=csv_fields)
