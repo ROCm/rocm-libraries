@@ -18,8 +18,10 @@ needed dedicated 18/20-acc mixed tiles — the hybrid paradigm wins those outrig
 Tile routing (`choose_tile`):
 - **256×256** (16-acc arithmetic-intensity sweet spot) — workhorse for every shape whose
   256×256 grid fills the machine (WG ≥ #CU).
-- **128×256** (8-acc) — ONLY for WG-starved small-M shapes (256×256 grid < #CU); halves the
-  M-tile to double WG count and fill idle CUs (+20~98% there). Same kernel, different tile args.
+- **128×256** (8-acc, **occ2**) — ONLY for WG-starved small-M shapes (256×256 grid < #CU);
+  halves the M-tile to fill CUs, AND runs at occ2 (MIN_OCC=2 → 251 VGPR, 2 waves/SIMD, 0 spill)
+  for WG-boundary pipelining (one WG's epilogue HBM drain overlaps the next WG's compute):
+  +0.6~9.7% over occ1, biggest at 256-WG shapes (2048×4096). Same kernel, different tile args.
 
 ---
 
@@ -86,7 +88,7 @@ Build & run: `make test_dispatch && ./test_dispatch`
 | 4096×5120 | 1570 | 1670 | +6% | 256×256 |
 | 4096×4096 | 1652 | 1976 | +20% | 256×256 |
 | 2048×8192 | 1679 | 1906 | +14% | 256×256 |
-| 2048×4096 | 997 | 1601 | +61% | 128×256 |
+| 2048×4096 | 997 | 1685 | +69% | 128×256 (occ2) |
 | 2048×2048 | 516 | 993 | +92% | 128×256 |
 | 1024×4096 | 678 | 844 | +24% | 128×256 |
 
@@ -98,9 +100,11 @@ Build & run: `make test_dispatch && ./test_dispatch`
 - ⚠️ `k_tiles==1` needs `wait_vmcnt(0)` in the odd-tail (no compute-window margin) — present.
 
 ## Dead ends — do NOT re-try without a new idea
-- **occ2 / smaller acc tile:** −14~30%. occ gate is discrete (≤256 VGPR for occ2); even 8-acc
-  stays occ1 (B-ring eats ~135 arch VGPR), and filling CUs via smaller tiles loses more to
-  strength than it gains. The 256-AGPR tile is the whole point.
+- **occ2 by shrinking acc (16→≤6):** −14~30% (strength collapse, latency→bandwidth wall). The
+  256×256 16-acc workhorse is occ1-locked (507 VGPR) and must stay so. BUT — occ2 is NOT a
+  blanket dead end: the 8-acc **128×256 small-M tile DOES win at occ2** (forced via MIN_OCC=2 →
+  251 VGPR, 0 spill; WG-boundary pipelining, +0.6~9.7%) and is now the default for that path.
+  Rule: occ2 helps exactly when it costs no arithmetic strength.
 - **split-K for small-M:** atomic崩 (298); deterministic (partial buffer + reduce) only +6% —
   the reduce + short-K fixed-overhead eat the fill-CU gain. 128×256 (+25%) beats it.
 - **persistent / epilogue-overlap:** the epilogue store drain shares the HW vmcnt with B-direct's
