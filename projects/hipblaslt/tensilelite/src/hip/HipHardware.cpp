@@ -100,13 +100,18 @@ namespace TensileLite
                 return std::make_shared<HipAMDGPU>(prop, deviceId);
             }
 
+#if HIP_VERSION >= 70100000
             int        pciChipId = 0;
             hipError_t chipIdResult
                 = hipDeviceGetAttribute(&pciChipId, hipDeviceAttributePciChipId, deviceId);
 
-            // Check hip runtime support for PCI Chip ID attribute
-            if(chipIdResult == hipErrorInvalidValue)
-                throw std::runtime_error(pciChipIdUnsupportedErrorMessage(prop));
+            // Check hip runtime support for PCI Chip ID attribute.
+            // Fall back gracefully when the runtime predates this attribute
+            // (hipErrorInvalidValue on ROCm < 7.1 or hipErrorNotSupported on
+            // some builds) rather than crashing with a fatal error.
+            if(chipIdResult == hipErrorInvalidValue
+               || chipIdResult == hipErrorNotSupported)
+                return std::make_shared<HipAMDGPU>(prop, deviceId);
 
             // For any other error, use standard error checking
             HIP_CHECK_EXC(chipIdResult);
@@ -115,6 +120,9 @@ namespace TensileLite
                 logUnregisteredPciChipIdWarningOnce(prop, pciChipId);
 
             return std::make_shared<HipAMDGPU>(prop, deviceId, std::make_optional(pciChipId));
+#else
+            return std::make_shared<HipAMDGPU>(prop, deviceId);
+#endif
         }
     } // namespace hip
 } // namespace TensileLite

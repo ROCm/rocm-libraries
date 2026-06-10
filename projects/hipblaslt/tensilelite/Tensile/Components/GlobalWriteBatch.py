@@ -43,6 +43,7 @@ from rocisa.functions import vectorStaticMultiply
 from rocisa.macro import PseudoRandomGeneratorModule
 
 from ..Common import DataDirection, SemanticVersion
+from .GlobalWriteBatchUtils import _can_bypass_valu_c
 from ..Common.DataType import DataType
 from ..Component import GlobalWriteComponents
 from ..Component import Component
@@ -54,6 +55,7 @@ from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackD
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 
 from math import ceil, log2
+
 
 class GlobalWriteBatchComponent(GlobalWriteComponents):
   kernel = {"ProblemType": {"OperationType": "GEMM" }}
@@ -113,6 +115,7 @@ class GlobalWriteBatchWriter:
     self.storesIssued = 0
     self.factorDim = factorDim
     self.amdClangVersion = amdClangVersion
+    self.valuCSourceMap = {} if _can_bypass_valu_c(kernel, edge, atomic, parentWriter.states.useBias, beta=beta) else None
 
     # Stateful tracking for N-group OOB guard deduplication (_emitSubtileOobGuard).
     # The outer loop iterates N-outer / M-inner, so all M elements within a fixed N
@@ -133,6 +136,24 @@ class GlobalWriteBatchWriter:
       self.kernel["ProblemType"]["BiasSrc"] == "D":
       self.storeBiasD = 1
 
+  def _ensureValuCSourceMap(self):
+    if self.valuCSourceMap is not None:
+      return
+    self.valuCSourceMap = {}
+
+  def _directVgprFromAccReadInst(self, accReadInst):
+    if self.valuCSourceMap is None or not isinstance(accReadInst, VMovB32):
+      return None
+    if len(accReadInst.srcs) != 1:
+      return None
+    src = accReadInst.srcs[0]
+    if getattr(src, "regType", None) != "v":
+      return None
+    if getattr(src, "regName", None) is not None:
+      return None
+    regIdx = getattr(src, "regIdx", None)
+    return regIdx if isinstance(regIdx, int) else None
+
 
 
   @property
@@ -150,6 +171,29 @@ class GlobalWriteBatchWriter:
   @property
   def tmpS23(self):
     return self.tmpS01 + self.laneSGPRC
+
+  def _directValuCVgpr(self, valuCOffset, width=1):
+    self._ensureValuCSourceMap()
+    if not self.valuCSourceMap:
+      return None
+    regs = [self.valuCSourceMap.get(valuCOffset + i) for i in range(width)]
+    if any(reg is None for reg in regs):
+      return None
+    base = regs[0]
+    if any(reg != base + i for i, reg in enumerate(regs)):
+      return None
+    return base
+
+  def _valuCVgpr(self, valuCOffset, width=1):
+    direct = self._directValuCVgpr(valuCOffset, width)
+    return vgpr(direct, width) if direct is not None else vgpr("ValuC+%u" % valuCOffset, width)
+
+  def _valuCVgprFromSumIdx(self, sumIdx, width=1):
+    return self._valuCVgpr(sumIdx - self.parentWriter.states.c.startVgprValu, width)
+
+  def _storeSumIdx(self, sumIdx, width=1):
+    direct = self._directValuCVgpr(sumIdx - self.parentWriter.states.c.startVgprValu, width)
+    return direct if direct is not None else sumIdx
 
   @property
   def debugConfig(self):
@@ -672,7 +716,13 @@ class GlobalWriteBatchWriter:
         for vi in range(self.gwvw):
           # loop over registers within one scalar
           for rIdx in range(0, regsPerScalar):
-            module.add(replaceHolder(self.codeAccVgprRead.popFirstItem(), self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - self.parentWriter.states.c.startVgprValu))
+            valuCOffset = self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - self.parentWriter.states.c.startVgprValu
+            accReadInst = self.codeAccVgprRead.popFirstItem()
+            directVgpr = self._directVgprFromAccReadInst(accReadInst)
+            if directVgpr is None:
+              module.add(replaceHolder(accReadInst, valuCOffset))
+            else:
+              self.valuCSourceMap[valuCOffset] = directVgpr
 
       if self.kernel["MIArchVgpr"] and self.kernel["LocalSplitU"] > 1:
         self.parentWriter.states.c.startVgprValu = tmpStartVgprValuC
@@ -1018,8 +1068,12 @@ class GlobalWriteBatchWriter:
               (self.kernel["ProblemType"]["DataType"].isInt8() and self.kernel["ProblemType"]["DestDataType"].isHalf()) or \
               (self.kernel["ProblemType"]["DataType"].isInt8() and self.kernel["ProblemType"]["DestDataType"].isBFloat16())) and \
             self.kernel["ProblemType"]["ComputeDataType"].isSingle():
-            module.add(convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_I32_to_F32, \
-                                        inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu))
+            cvtMod = Module("ConvertDataBypass")
+            for vi in range(self.gwvw):
+              sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
+              vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
+              cvtMod.add(VCvtI32toF32(dst=self._valuCVgpr(vgprIdx), src=self._valuCVgpr(vgprIdx), comment=" convert to fp32"))
+            module.add(cvtMod)
 
         if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
           maskConst = 1.0
@@ -1046,22 +1100,22 @@ class GlobalWriteBatchWriter:
             vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
             # Generate single f32 code if edge is detected.
             if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              vecModule.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= %sVMul"%addressStr ))
+              vecModule.add(VMulF32(dst=self._valuCVgpr(vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=self._valuCVgpr(vgprIdx), comment="*= %sVMul"%addressStr ))
             # Original packed route
             elif vi%2 == 1:
               assert (self.gwvw % 2 == 0)
             else:
-              vecModule.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr(inputScaleVecVgpr, 2), src1=vgpr("ValuC+%d"%vgprIdx, 2), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleVec,vi)))
+              vecModule.add(VMulPKF32(dst=self._valuCVgpr(vgprIdx, 2), src0=vgpr(inputScaleVecVgpr, 2), src1=self._valuCVgpr(vgprIdx, 2), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleVec,vi)))
           elif self.kernel["ProblemType"]["ComputeDataType"].isInt32():
             vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
             # Generate single i32 code if edge is detected.
             if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= %sVMul"%addressStr ))
+              vecModule.add(VMulLOU32(dst=self._valuCVgpr(vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=self._valuCVgpr(vgprIdx), comment="*= %sVMul"%addressStr ))
             elif vi%2 == 1:
               assert (self.gwvw % 2 == 0)
             else:
-              vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleAlphaVec,vi)))
-              vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%(vgprIdx+1)), src0=vgpr(inputScaleVecVgpr+1), src1=vgpr("ValuC+%d"%(vgprIdx+1)), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleAlphaVec,vi)))
+              vecModule.add(VMulLOU32(dst=self._valuCVgpr(vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=self._valuCVgpr(vgprIdx), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleAlphaVec,vi)))
+              vecModule.add(VMulLOU32(dst=self._valuCVgpr(vgprIdx+1), src0=vgpr(inputScaleVecVgpr+1), src1=self._valuCVgpr(vgprIdx+1), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleAlphaVec,vi)))
           else:
             raise RuntimeError("Unsupported %s compute data type %s."%(addressStr, str(self.kernel["ProblemType"]["ComputeDataType"])))
 
@@ -1460,7 +1514,7 @@ class GlobalWriteBatchWriter:
             self._emitAlign8ExecMask(storeCodeModule, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
                                      mGuardOffset=1, rowScaleShift=2)
             storeCodeModule.add(SMovB64(dst=EXEC(), src=sgpr(self.tmpS01, 2), comment="apply exec mask"))
-          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store D")
+          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, self._storeSumIdx(sumIdx), self.tmpS01, self.edge, comment="store D")
           storeCodeModule.add(tmpStoreCode)
           if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
             storeCodeModule.add(SMovB64(dst=EXEC(), src=-1, comment="restore exec"))
@@ -1860,7 +1914,7 @@ class GlobalWriteBatchWriter:
     # Pack sba=1 subtile: ValuC+sumIdx1+{0,1} → vPack+2; ValuC+sumIdx1+{2,3} → vPack+3
     def vc(sumIdx, vi):
       idx = sumIdx + vi - prefixOffset
-      return vgpr("ValuC+" + str(idx))
+      return self._valuCVgpr(idx)
 
     def packF32pair(dst, src0, src1, comment):
       """Pack two f32 VGPRs into one dword of two 16bit values."""
@@ -1986,7 +2040,7 @@ class GlobalWriteBatchWriter:
 
     def vc(vi):
       idx = sumIdx0 + vi - prefixOffset
-      return vgpr("ValuC+" + str(idx))
+      return self._valuCVgpr(idx)
 
     # Derive the D-stride sgpr name (e.g. "StrideDJ") the same way incrementToNextRow does.
     packedC1  = self.kernel["PackedC1IndicesX"]
@@ -2428,16 +2482,16 @@ class GlobalWriteBatchWriter:
           # Use pk if possible
           if usePK or gwvw > 1:
             if newSumIdx % 2 == 0:
-              module.add(VMulPKF32(dst=vgpr("ValuC+%u"%newSumIdx, 2), src0=sgpr("Alpha",2), src1=vgpr("ValuC+%u"%newSumIdx,2), vop3=VOP3PModifiers(op_sel_hi=[0,1,1]), comment="*= alpha (pk)"))
+              module.add(VMulPKF32(dst=self._valuCVgpr(newSumIdx, 2), src0=sgpr("Alpha",2), src1=self._valuCVgpr(newSumIdx,2), vop3=VOP3PModifiers(op_sel_hi=[0,1,1]), comment="*= alpha (pk)"))
           else:
-            module.add(VMulF32(dst=vgpr("ValuC+%u"%newSumIdx), src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%newSumIdx), comment="*= alpha" ))
+            module.add(VMulF32(dst=self._valuCVgpr(newSumIdx), src0=sgpr("Alpha"), src1=self._valuCVgpr(newSumIdx), comment="*= alpha" ))
           if self.parentWriter.db["ForceExpectedValue"]:
-            module.add(VMovB32(dst=vgpr("ValuC+%u"%newSumIdx), src=self.parentWriter.db["ValueCExpectedValue"], comment="force expected value" ))
+            module.add(VMovB32(dst=self._valuCVgpr(newSumIdx), src=self.parentWriter.db["ValueCExpectedValue"], comment="force expected value" ))
           if self.parentWriter.db["ForceVSerial"]:
-            module.add(VMovB32(dst=vgpr("ValuC+%u"%newSumIdx), src=vgpr("Serial"), comment="force expected value to serial" ))
+            module.add(VMovB32(dst=self._valuCVgpr(newSumIdx), src=vgpr("Serial"), comment="force expected value to serial" ))
           if self.parentWriter.db["CheckValueC"]:
             module.add(SMovB32(dst=sgpr(tmpS01), src=self.parentWriter.db["ValueCExpectedValue"], comment="Move expected value"))
-            module.add(self.parentWriter.getCmpAssert(self.parentWriter.asmAssert.eq, vgpr("ValuC+%u"%newSumIdx), sgpr(tmpS01)))
+            module.add(self.parentWriter.getCmpAssert(self.parentWriter.asmAssert.eq, self._valuCVgpr(newSumIdx), sgpr(tmpS01)))
 
         # dgemm
         elif kernel["ProblemType"]["ComputeDataType"].isDouble():
@@ -2545,7 +2599,7 @@ class GlobalWriteBatchWriter:
               comment="finalSum = sum*alpha + C*beta"))
       elif kernel["ProblemType"]["DestDataType"].isSingle():
         newSumIdxV = sumIdxV - self.parentWriter.states.c.startVgprValu
-        module.add(VMacF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(dataV+0), src1=sgpr("Beta"), \
+        module.add(VMacF32(dst=self._valuCVgpr(newSumIdxV), src0=vgpr(dataV+0), src1=sgpr("Beta"), \
             comment="finalSum = sum*alpha + C*beta"))
 
       elif kernel["ProblemType"]["DestDataType"].isInt8():

@@ -269,7 +269,7 @@ def make_example_granularities_1():
     )
 
 
-def make_writer_and_tileinfos(kernel, fp4=False):
+def make_writer_and_tileinfos(kernel, fp4=False, max_vgpr=256, physical_max_vgpr=512):
     """Create writer with register pools and TileInfos for integration tests."""
     from types import SimpleNamespace
     from rocisa import rocIsa
@@ -294,7 +294,7 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     writer.agprPool = RegisterPool(0, RegisterType.Accvgpr, False)
     writer.sgprPool = RegisterPool(0, RegisterType.Sgpr, False)
     writer.states = SimpleNamespace(
-        regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
+        regCaps={"MaxSgpr": 106, "MaxVgpr": max_vgpr, "PhysicalMaxVgpr": physical_max_vgpr},
         unrollIdx=0,
         laneSGPRCount=2,
     )
@@ -2079,15 +2079,28 @@ class TestGetNumVgpr:
 
 
 def test_large_fp4_accumulators_spill_to_agpr_with_vgpr_headroom():
-    kernel = create_kernel(320, 192, fp4=True)
+    kernel = create_kernel(512, 256, fp4=True)
+    writer, _, _, _, _, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+    vgpr_tiles = [tile for tile in dTileInfo.vgprTiles if tile.regList.is_vgpr]
+    agpr_tiles = [tile for tile in dTileInfo.vgprTiles if not tile.regList.is_vgpr]
+    vgpr_regs = [reg for tile in vgpr_tiles for reg in tile]
+
+    assert vgpr_tiles
+    assert agpr_tiles
+    assert max(vgpr_regs) < 256
+
+
+def test_large_fp4_accumulators_use_all_vgpr_before_agpr_boundary():
+    kernel = create_kernel(320, 128, fp4=True)
     writer, _, _, _, _, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
 
     vgpr_tiles = [tile for tile in dTileInfo.vgprTiles if tile.regList.is_vgpr]
     agpr_tiles = [tile for tile in dTileInfo.vgprTiles if not tile.regList.is_vgpr]
 
     assert vgpr_tiles
-    assert agpr_tiles
-    assert writer.vgprPool.size() < writer.states.regCaps["MaxVgpr"]
+    assert not agpr_tiles
+    assert writer.vgprPool.size() <= writer.states.regCaps["MaxVgpr"]
 
 
 def test_mixed_fp4_d_init_zeros_vgpr_and_agpr_accumulators():
