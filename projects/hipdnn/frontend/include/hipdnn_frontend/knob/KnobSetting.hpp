@@ -101,6 +101,17 @@ public:
         _value = value;
     }
 
+    /// Equality: same knob ID and same value
+    bool operator==(const KnobSetting& other) const
+    {
+        return _knobId == other._knobId && _value == other._value;
+    }
+
+    bool operator!=(const KnobSetting& other) const
+    {
+        return !(*this == other);
+    }
+
     /**
      * @brief Get a string representation of this KnobSetting
      * @return Human-readable string describing the setting
