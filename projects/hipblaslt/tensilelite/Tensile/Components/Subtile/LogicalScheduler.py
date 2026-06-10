@@ -2190,7 +2190,10 @@ class LogicalScheduler:
         # granularity on OOB). We patch it with a 16-bit DTL load. Wider
         # dtypes (e.g. fp4 read at K=32 granularity) don't have this issue,
         # so we skip emission entirely for them.
-        if self._kernel["ProblemType"]["DataTypeA"].isBFloat16():
+        # TDM uses tensor_load_to_lds, not buffer instructions, so the
+        # dword-granularity OOB corruption does not apply.
+        hasTDM = self._kernel.get("enableTDMA") and self._kernel.get("enableTDMB")
+        if self._kernel["ProblemType"]["DataTypeA"].isBFloat16() and not hasTDM:
             # We need to wait for other SIMD before placing the DTL load
             # (as we'll write twice to this address : OOB Zero then fixup load)
             preamble.append(SyncOp())
