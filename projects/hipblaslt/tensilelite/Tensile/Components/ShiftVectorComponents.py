@@ -33,17 +33,8 @@ from rocisa.instruction import DSBPermuteB32, SBranch, SCBranchVCCNZ, \
                                 VLShiftRightB32, VSubU32, VMinI32
 from rocisa.functions import vectorStaticRemainder, vectorStaticDivide, vectorStaticMultiply
 from ..Common import log2
+from ..Component import ShiftVectorComponents
 from ..KernelWriterModules import *
-
-import abc
-
-class Component(abc.ABC):
-    """Minimal Component base class to avoid circular import."""
-    kernel = {}
-
-class ShiftVectorComponents(Component):
-    """Shift vector components block."""
-    pass
 
 class ShiftVectorComponentsVALU(ShiftVectorComponents):
     kernel = {"EnableMatrixInstruction": False}
