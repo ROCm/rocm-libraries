@@ -102,7 +102,7 @@ void TestConceptRequirements_impl()
 
 TEST(ScaleMMATrait, TestConceptRequirements)
 {
-#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER && 0
+#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
     TestConceptRequirements_impl<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u>();
     TestConceptRequirements_impl<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u>();
     TestConceptRequirements_impl<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u>();

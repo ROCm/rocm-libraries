@@ -247,24 +247,13 @@ CK_TILE_HOST_DEVICE constexpr const char* to_string(Unsupported) { return "Unsup
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
 /**
- * @concept HasExecSignature
- * @brief  Helper concept for exec signature check.
- */
-template <typename MmaOp, typename... ExecArgs>
-concept HasExecSignature = requires {
-    {
-        MmaOp::exec(typename MmaOp::AVecType{},
-                    typename MmaOp::BVecType{},
-                    typename MmaOp::CVecType{},
-                    std::declval<ExecArgs>()...)
-    } -> std::convertible_to<typename MmaOp::CVecType>;
-};
-
-/**
  * @concept MmaOpI
  * @brief  Expresses the meta-data interface required for each MmaOp policy.
  */
 // TODO: Make sure this actually matches amdgcn_mma.
+// NOTE: It is no longer possible to perform a check on the exec() function, since it is now
+// templated over the variadic WarpGemmParams template pack for intrinsic flags. It seems like
+// concepts do not work for templated device functions.
 template <typename MmaOp>
 concept MmaOpI = requires(MmaOp op) {
     // Requires an op context
@@ -287,7 +276,7 @@ concept MmaOpI = requires(MmaOp op) {
     { MmaOp::kCMPerLane } -> std::convertible_to<unsigned int>;
     { MmaOp::kCMNumAccess } -> std::convertible_to<unsigned int>;
     { MmaOp::kCompressionRatio } -> std::convertible_to<unsigned int>;
-} && (HasExecSignature<MmaOp> || HasExecSignature<MmaOp, int> || HasExecSignature<MmaOp, int, int>);
+};
 
 #endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
