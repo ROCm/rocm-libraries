@@ -676,15 +676,21 @@ OutElemOp GetOutElementOp(const miopen::fusion::ActivationOpInvokeParam& activat
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto activationMode = activationOp.activMode;
-    switch(activationMode)
+    if(activationMode == miopenActivationRELU)
     {
-    case miopenActivationRELU: return OutElemOp{0, ck::NumericLimits<DataType>::Max()};
-    case miopenActivationCLIPPEDRELU: return OutElemOp{0, activationOp.activAlpha};
-    case miopenActivationCLAMP: return OutElemOp{activationOp.activAlpha, activationOp.activBeta};
-    default:
-        MIOPEN_THROW(miopenStatusInternalError,
-                     "Unsupported activation type: " + std::to_string(activationMode));
+        return OutElemOp{0, ck::NumericLimits<DataType>::Max()};
     }
+    else if(activationMode == miopenActivationCLIPPEDRELU)
+    {
+        return OutElemOp{0, activationOp.activAlpha};
+    }
+    else if(activationMode == miopenActivationCLAMP)
+    {
+        return OutElemOp{activationOp.activAlpha, activationOp.activBeta};
+    }
+
+    MIOPEN_THROW(miopenStatusInternalError,
+                 "Unsupported activation type: " + std::to_string(activationMode));
 #else
     (void)activationOp;
     MIOPEN_THROW(miopenStatusNotImplemented, "Not implemented without ck enabled");
@@ -1047,6 +1053,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
     };
 #else
     (void)ctx;
+    (void)problem;
     (void)kernel_id;
     (void)input1_op;
     (void)input2_op;
@@ -1305,7 +1312,6 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
         case miopenDouble:
         case miopenFloat8_fnuz:
         case miopenBFloat8_fnuz:
-        default:
             MIOPEN_THROW(miopenStatusInternalError,
                          "3DGroupConvolutionImplicitGemmXdlops operation not implemented for this "
                          "data type");
@@ -1328,7 +1334,6 @@ MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& 
         case miopenDouble:
         case miopenFloat8_fnuz:
         case miopenBFloat8_fnuz:
-        default:
             MIOPEN_THROW(miopenStatusInternalError,
                          "3DGroupConvolutionImplicitGemmXdlops operation not implemented for this "
                          "data type");

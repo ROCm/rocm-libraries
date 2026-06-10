@@ -180,14 +180,10 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         MIOPEN_LOG_I2("Step 1: Attempting index override with value: " << idx_override);
 
         use_tf32 = false;
-        switch(problem.GetInDataType())
+        if(problem.GetInDataType() == miopenHalf || problem.GetInDataType() == miopenBFloat16)
         {
-        case miopenHalf:
-        case miopenBFloat16:
             valid_kernels = loader.FillValidKernels(
                 CKSolverType::GrpConv3dFwd, problem, problem.GetInDataType(), false);
-            break;
-        default: break;
         }
 
         if(idx_override < valid_kernels.size())
@@ -465,7 +461,12 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::IsValid(
         use_tf32 = false;
         return loader.IsArgsSupported(
             CKSolverType::GrpConv3dFwd, problem, kernel_id, miopenBFloat16, false);
-    default: return false;
+
+    case miopenInt32:
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt64: return false;
     }
 }
 
