@@ -2523,6 +2523,14 @@ std::vector<size_t> rocfft_plan_t::GlobalTranspose(const field_view_t&        in
                     << "GlobalTransposeRCCL could not be used, falling back to P2P/A2A: "
                     << e.what() << std::endl;
         }
+        catch(...)
+        {
+            if(LOG_PLAN_ENABLED())
+                *LogSingleton::GetInstance().GetPlanOS()
+                    << "Unexpected exception type thrown by GlobalTransposeRCCL, "
+                       "falling back to P2P/A2A"
+                    << std::endl;
+        }
     }
 #endif
 
@@ -2878,13 +2886,13 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
             rcclGrouped->AddTransfer<rccl_op::send>(outBrick.location,
                                                     inBrick.location,
                                                     BufferPtr::temp(pack.data()),
-                                                    0,
+                                                    0 /* offset */,
                                                     count,
                                                     local_comm_rank);
             rcclGrouped->AddTransfer<rccl_op::recv>(inBrick.location,
                                                     outBrick.location,
                                                     BufferPtr::temp(recv.data()),
-                                                    0,
+                                                    0 /* offset */,
                                                     count,
                                                     local_comm_rank);
 

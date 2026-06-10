@@ -207,8 +207,7 @@ rocfft_rccl_group_t::rocfft_rccl_group_t()
     if(result != ncclSuccess)
     {
         log_trace(__func__, "ncclGroupStart failed", result);
-        throw rocfft_rccl_exception_t(std::string("ncclGroupStart failed: ")
-                                      + ncclGetErrorString(result));
+        throw rocfft_rccl_exception_t("ncclGroupStart failed", result);
     }
     needs_ending = true;
 }
@@ -225,8 +224,7 @@ void rocfft_rccl_group_t::end()
     if(result != ncclSuccess)
     {
         log_trace(__func__, "ncclGroupEnd failed", result);
-        throw rocfft_rccl_exception_t(std::string("ncclGroupEnd failed: ")
-                                      + ncclGetErrorString(result));
+        throw rocfft_rccl_exception_t("ncclGroupEnd failed", result);
     }
 }
 
@@ -285,9 +283,8 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
             if(result != ncclSuccess)
             {
                 log_trace(__func__, "ncclAllToAll failed", result);
-                throw rocfft_rccl_exception_t("ncclAllToAll failed on device "
-                                              + std::to_string(devices[r]) + ": "
-                                              + ncclGetErrorString(result));
+                throw rocfft_rccl_exception_t(
+                    "ncclAllToAll failed on device " + std::to_string(devices[r]), result);
             }
         }
 
@@ -316,8 +313,8 @@ void rocfft_rccl_comm_t::send(const void*       sendbuf,
     {
         log_trace(__func__, "ncclSend failed", result);
         throw rocfft_rccl_exception_t("ncclSend failed on device " + std::to_string(device_id)
-                                      + " to peer " + std::to_string(peer_rank) + ": "
-                                      + ncclGetErrorString(result));
+                                          + " to peer " + std::to_string(peer_rank),
+                                      result);
     }
 }
 
@@ -342,8 +339,8 @@ void rocfft_rccl_comm_t::recv(void*             recvbuf,
     {
         log_trace(__func__, "ncclRecv failed", result);
         throw rocfft_rccl_exception_t("ncclRecv failed on device " + std::to_string(device_id)
-                                      + " from peer " + std::to_string(peer_rank) + ": "
-                                      + ncclGetErrorString(result));
+                                          + " from peer " + std::to_string(peer_rank),
+                                      result);
     }
 }
 

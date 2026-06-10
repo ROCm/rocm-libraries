@@ -39,10 +39,25 @@
 // thrown by rocfft_rccl_comm_t communication primitives when the
 // underlying RCCL call fails.  the distinct type lets callers
 // recognize and handle RCCL failures specifically while still
-// being catchable via std::runtime_error / std::exception.
+// being catchable via std::runtime_error / std::exception.  carries
+// the originating ncclResult_t and appends its string form to what()
 struct rocfft_rccl_exception_t : std::runtime_error
 {
-    using std::runtime_error::runtime_error;
+    rocfft_rccl_exception_t(std::string message, ncclResult_t code)
+        : std::runtime_error(message)
+        , error(code)
+    {
+        what_message = std::move(message) + " (" + ncclGetErrorString(error) + ")";
+    }
+
+    const char* what() const noexcept override
+    {
+        return what_message.c_str();
+    }
+
+private:
+    const ncclResult_t error;
+    std::string        what_message;
 };
 
 // value-semantic handle to an RCCL communicator set for single-process
