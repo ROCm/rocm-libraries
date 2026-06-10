@@ -395,7 +395,8 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     MUBUFModifiers(bool offen = false, int offset12 = 0, bool glc = false, bool slc = false,
                    bool nt = false, bool lds = false, bool isStore = false,
                    bool hasMUBUFConst = false, bool hasGLCModifier = false,
-                   bool hasSC0Modifier = false, MUBUFScope scope = MUBUFScope::SCOPE_NONE)
+                   bool hasSC0Modifier = false, MUBUFScope scope = MUBUFScope::SCOPE_NONE,
+                   TemporalHint th = TemporalHint::TH_NONE)
         : TypedModifier<MUBUFModifiers>(),
           offset12(offset12),
           offen(offen),
@@ -407,7 +408,8 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
           hasMUBUFConst(hasMUBUFConst),
           hasGLCModifier(hasGLCModifier),
           hasSC0Modifier(hasSC0Modifier),
-          scope(scope) {}
+          scope(scope),
+          th(th) {}
 
     int offset12;
     uint32_t offen : 1;
@@ -420,6 +422,7 @@ struct MUBUFModifiers : public TypedModifier<MUBUFModifiers> {
     uint32_t hasGLCModifier : 1;
     uint32_t hasSC0Modifier : 1;
     MUBUFScope scope;
+    TemporalHint th;
 };
 
 // Carries just the cache scope token for SOPP-format memory fences such as
