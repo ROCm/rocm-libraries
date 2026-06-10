@@ -10,6 +10,7 @@ import pytest
 
 from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
 from dnn_benchmarking.execution import pytorch_ops
+from dnn_benchmarking.execution.buffer_manager import generate_input_data
 from dnn_benchmarking.execution.pytorch_buffer_manager import PyTorchCudaBufferManager
 from dnn_benchmarking.execution.pytorch_executor import (
     PyTorchCudaExecutor,
@@ -61,6 +62,7 @@ class TestPyTorchOps:
         assert "ConvolutionFwdAttributes" in supported
         assert "MatmulAttributes" in supported
         assert "PointwiseAttributes" in supported
+        assert "SdpaAttributes" in supported
 
     def test_supports_graph(self, sample_conv_graph):
         """Test graph support checking."""
@@ -127,6 +129,25 @@ class TestPyTorchCudaBufferManager:
         for uid in data1:
             if data1[uid] is not None and data2[uid] is not None:
                 assert np.allclose(data1[uid], data2[uid])
+
+    def test_load_input_data_uses_shared_input_map(self, sample_conv_graph):
+        """Pre-generated inputs can be loaded without regenerating per run."""
+        if not _is_torch_available():
+            pytest.skip("PyTorch GPU not available")
+
+        graph_json, _ = sample_conv_graph
+        loader = GraphLoader()
+        tensor_infos = loader.extract_tensor_info(graph_json)
+        input_data = generate_input_data(tensor_infos, seed=123)
+
+        with PyTorchCudaBufferManager(tensor_infos) as buffer_manager:
+            buffer_manager.allocate_all()
+            buffer_manager.load_input_data(input_data)
+
+            for uid, expected in input_data.items():
+                actual = buffer_manager.get_input_data(uid)
+                if actual is not None:
+                    assert actual.shape == expected.shape
 
 
 class TestPyTorchCudaExecutor:
@@ -245,6 +266,42 @@ class TestPyTorchCudaExecutor:
             result = executor.benchmark(tensors, graph_name="test_relu")
 
             assert len(result.e2e_timings) == 5
+
+    @pytest.mark.parametrize(
+        "graph_name",
+        [
+            "sample_matmul_batched.json",
+            "sample_matmul_broadcast.json",
+            "sample_sdpa.json",
+            "sample_mha_sdpa.json",
+        ],
+    )
+    def test_full_benchmark_new_reference_graphs(self, graph_name):
+        """Test PyTorch benchmark workflow for newly covered reference graphs."""
+        if not _is_torch_available():
+            pytest.skip("PyTorch GPU not available")
+
+        graph_path = Path(__file__).parent.parent.parent / "graphs" / graph_name
+        loader = GraphLoader()
+        graph_json = loader.load_json(graph_path)
+        tensor_infos = loader.extract_tensor_info(graph_json)
+        config = BenchmarkConfig(
+            graph_path=graph_path, warmup_iters=1, benchmark_iters=1
+        )
+
+        executor = PyTorchCudaExecutor(graph_json, config)
+        executor.prepare()
+
+        with PyTorchCudaBufferManager(tensor_infos) as buffer_manager:
+            buffer_manager.allocate_all()
+            buffer_manager.fill_inputs_random(seed=42)
+            buffer_manager.zero_outputs()
+            tensors = buffer_manager.get_tensors()
+
+            executor.warmup(tensors)
+            result = executor.benchmark(tensors, graph_name=graph_name)
+
+        assert len(result.e2e_timings) == 1
 
     def test_json_export(self, sample_conv_graph, tmp_path):
         """Test that benchmark results can be exported to JSON."""

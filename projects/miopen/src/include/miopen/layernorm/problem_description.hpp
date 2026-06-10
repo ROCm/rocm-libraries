@@ -358,17 +358,11 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
     template <class Self>
     static void Visit(Self&& self, std::function<void(int64_t, std::string)> f)
     {
-        // The column names match the driver command line argument names
         f(static_cast<uint64_t>(self.direction), "direction");
-        f(self.GetBatchSize(), "in_n");
-        f(self.GetChannel(), "in_c");
-        f(self.GetDepth(), "in_d");
-        f(self.GetHeight(), "in_h");
-        f(self.GetWidth(), "in_w");
-        f(self.normalized_dim, "normalized_dim");
-        f(static_cast<uint64_t>(self.mode), "mode");
-
+        f(self.outer_size, "outer_size");
+        f(self.inner_size, "inner_size");
         f(self.stride, "stride");
+        f(static_cast<uint64_t>(self.mode), "mode");
     }
 
     template <class Self>
