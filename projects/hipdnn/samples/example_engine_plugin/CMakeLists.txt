@@ -30,6 +30,9 @@ if(BUILD_ADDRESS_SANITIZER AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_compile_definitions(ADDRESS_SANITIZER)
 endif()
 
+# Optional test environment variables. Pass -DTEST_ENVIRONMENT="VAR1=val1;VAR2=val2".
+set(TEST_ENVIRONMENT "" CACHE STRING "Environment variables to set when running tests")
+
 # =============================================================================
 # Output directories
 # =============================================================================

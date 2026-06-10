@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
@@ -23,6 +24,7 @@ class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::
 {
 protected:
     hipdnn_test_sdk::utilities::GraphAndTensorMap _graphAndTensors;
+    std::optional<hipdnn_test_sdk::utilities::BundleMetadata> _bundleMetadata;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
         _referenceOutputTensors;
 
@@ -37,6 +39,11 @@ protected:
             HIPDNN_SDK_LOG_WARN("Reference not found for Cpu golden reference test");
             GTEST_SKIP();
         }
+
+        // Load bundle metadata if a .meta.json companion file exists.
+        // CPU harness has no device-specific guards (no VRAM, no arch).
+        // Future: add CPU-relevant checks here (e.g., minimum RAM).
+        _bundleMetadata = hipdnn_test_sdk::utilities::loadBundleMetadata(path);
 
         _graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(path);
         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();

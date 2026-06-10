@@ -25,6 +25,7 @@ from rocisa.instruction import (
     SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
     VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32, VSubI32,
 )
+from rocisa.instruction import SWaitTensorcnt
 from rocisa.container import vgpr, sgpr, DSModifiers, ContinuousRegister
 from rocisa.code import Label
 
@@ -158,8 +159,9 @@ class InstructionEmitter:
                     subtileK = k // self.subtileShapeK
                     subIterK_within = k % self.subtileShapeK
                     dstTile = vgprTiles[tile_map[tileId]]
+                    swizzled = self.writer.states.subtileLdsSwizzle
                     module.add(emitSingleDsRead(
-                        ti, tileId, subtileK, subIterK_within, dstTile))
+                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]
@@ -201,6 +203,11 @@ class InstructionEmitter:
         if counts is None:
             return []
         
+        if self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False):
+            tdmCnt = counts.A + counts.B + counts.SA + counts.SB
+            return [SWaitTensorcnt(tensorcnt=tdmCnt,
+                                   comment=f"Wait TDM (tensor_load_to_lds): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
+
         # TODO. Hardcoded for now, but we should just get this from atomic emit codes (emitSingleBufferLoad, ...)
         grMap = {'A': max(1,int(1.0/self.tileInfoA.loadRatioGR)),
                  'B':  max(1,int(1.0/self.tileInfoB.loadRatioGR)),
@@ -553,4 +560,3 @@ class InstructionEmitter:
                     handler = self._dispatch.get(em.opType)
                     if handler:
                         em.instructions = handler(em, unroll_iter)
-

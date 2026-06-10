@@ -174,6 +174,31 @@ class TestProviderEngineResult:
         assert d["plugin_path"] == "/plugins/a"
         assert "comparison_to_baseline" not in d
 
+    def test_reference_role_serializes_and_is_not_legacy_baseline(self):
+        stats = BenchmarkStats(
+            mean_ms=1.0,
+            std_ms=0.1,
+            min_ms=0.5,
+            max_ms=1.5,
+            p95_ms=1.4,
+            p99_ms=1.49,
+            median_ms=0.9,
+        )
+        pe = ProviderEngineResult(
+            provider="pytorch",
+            engine_id=0,
+            status="success",
+            role="reference",
+            e2e_stats=stats,
+            gpu_kernel_stats=stats,
+        )
+
+        d = pe.to_dict()
+
+        assert d["role"] == "reference"
+        assert d["provider"] == "pytorch"
+        assert "comparison_to_baseline" not in d
+
     def test_error_serializes_without_timing(self):
         """ProviderEngineResult with status='error' serializes with
         status, error_message, no timing data."""
@@ -331,6 +356,23 @@ class TestGraphResult:
         )
         gr = GraphResult(graph_name="g", graph_path="/p.json", results=[pe])
         counts = gr.count_by_status()
+        assert counts == StatusCounts(passed=1, failed=0, skipped=0, errored=0)
+
+    def test_count_by_status_excludes_reference_rows(self):
+        """Timed reference rows are reported but not counted as engine passes."""
+        reference = ProviderEngineResult(
+            provider="pytorch",
+            engine_id=0,
+            status="success",
+            role="reference",
+        )
+        engine = ProviderEngineResult(provider="miopen", engine_id=1, status="success")
+        gr = GraphResult(
+            graph_name="g", graph_path="/p.json", results=[reference, engine]
+        )
+
+        counts = gr.count_by_status()
+
         assert counts == StatusCounts(passed=1, failed=0, skipped=0, errored=0)
 
     def test_count_by_status_empty_results(self):
