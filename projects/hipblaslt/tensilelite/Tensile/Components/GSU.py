@@ -109,7 +109,7 @@ class GSU(Component):
         if kernel["_GlobalAccumulation"] == "MultipleBuffer" or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
             gsuLabel = Label(label=writer.labels.getNameInc("GSU"), comment="")
             with writer.allocTmpSgpr(1) as tmpSgprGSU:
-                module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
                 module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
             # GSU algorithm 2: adjust output buffer address to per GSU buffer
@@ -192,6 +192,14 @@ class GSU(Component):
 
     @abc.abstractmethod
     def reductionBranches(self, writer, kernel, tPB, vectorWidths, elements, tmpVgpr, cvtVgprStruct, vectorDataTypes, factorDims, reductionEndLabel, endLabel):
+        pass
+    
+    @abc.abstractmethod
+    def initializeSrd(self, writer, ArgTypeCheckLabel, GeneralBatchedGemmSrdInitiation_End, kernel, ch):
+        pass
+
+    @abc.abstractmethod
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, multipleBufferChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
         pass
 
 class GSUOff(GSU):
@@ -300,6 +308,14 @@ class GSUOff(GSU):
         module = Module("GSU Off writeBiasToGlobal")
         return module
 
+    def initializeSrd(self, writer, ArgTypeCheckLabel, GeneralBatchedGemmSrdInitiation_End, kernel, ch):
+        module = Module("GSU Off initializeSrd")
+        return module
+
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, multipleBufferChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
+        module = Module("GSU Off routeToGeneralBatchedOrStridedBatched")
+        return module
+        
 class GSUOn(GSU):
     kernel = {"GlobalSplitUAlgorithm": ["MultipleBuffer", "MultipleBufferSingleKernel"]}
     # if GSU <= gsuThreshold, last wg does the reduction and no R/W to WS
@@ -319,7 +335,7 @@ class GSUOn(GSU):
         gsuLabel    = Label(label=writer.labels.getNameInc("GSU"), comment="")
         gsuLabelEnd = Label(label=writer.labels.getNameInc("GSU_End"), comment="")
         with writer.allocTmpSgpr(1) as tmpSgprGSU:
-            module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+            module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
             module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
 
@@ -348,7 +364,7 @@ class GSUOn(GSU):
             module.add(SCBranchSCC1(labelName=gsuwgmrrLabel.getLabelName(), comment="branch if GSUWGMRR == 1"))
             # wg1       = wg1 / GSU
             # gsuSumIdx = wg1 % GSU
-            module.add(SAndB32(dst=sgpr(tmpSgprInfo.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+            module.add(SAndB32(dst=sgpr(tmpSgprInfo.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(scalarUInt32DivideAndRemainder("WorkGroup1", "WorkGroup1", tmpSgprInfo.idx, "GSUSumIdx", tmpVgprRes, kernel["WavefrontSize"]))
             module.add(SBranch(gsuwgmrrLabelEnd.getLabelName()))
             module.add(gsuwgmrrLabel)
@@ -444,7 +460,7 @@ class GSUOn(GSU):
                 gsuSgpr = tmpSgpr + 2
                 du = kernel["_DepthU%s"%tc]
                 duBpe = int(du * tP["bpeGR"])
-                module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(tmpSgpr), src1=duBpe, comment="GSU*DepthU*Bpe"))
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
                 module.add(SCMovB32(dst=sgpr(gsuSgpr), src=duBpe, comment="DepthU*Bpe if GSUC = 1"))
@@ -481,7 +497,7 @@ class GSUOn(GSU):
 
                 du = kernel["_DepthU%s"%tc]
                 duBpe = int(du * tP["bpeGR"]) * mi_dim
-                module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
 
                 # MX scale GSU SRD increment, gated by MXScaleFormat:
                 #   - Swizzled (HostPreSwizzle/InMemorySwizzle): the K-block is
@@ -521,7 +537,7 @@ class GSUOn(GSU):
 
         with writer.allocTmpSgpr(1) as tmpSgprInfo:
             gsuSgpr = tmpSgprInfo.idx
-            module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+            module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=kernel["DepthU"]))
             module.add(SMulI32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), \
                                src1=sgpr(gsuSgpr), comment="=loopCounterName*DepthU"))
@@ -534,7 +550,7 @@ class GSUOn(GSU):
         tmpSgpr = tmpSgprInfo.idx
         # if GSU numIter++ if gsuSumIdx < remainder
         gsuLabel = Label(label=writer.labels.getNameInc("GSU"), comment="")
-        module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+        module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
         module.add(SCmpEQU32(src0=sgpr(tmpSgpr), src1=1, comment="GSU == 1 ?"))
         module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
         module.add(writer.calculateLoopNumIterGsu(kernel, loopCounterName, tmpSgprInfo))
@@ -580,7 +596,7 @@ class GSUOn(GSU):
     def calculateIncrementMetadata(self, writer, kernel, sgprOut):
         module = Module("GSU On calculateLoopNumIter")
         with writer.allocTmpSgpr(1) as tmpSgprGSU:
-            module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+            module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(SMulI32(dst=sgpr(sgprOut), src0=kernel["DepthU"], src1=sgpr(tmpSgprGSU.idx), comment="IncsMetadata = GSU*DepthU"))
             module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
         module.add(SCMovB32(dst=sgpr(sgprOut), src=kernel["DepthU"], comment="IncsMetadata = DepthU if GSUC == 1"))
@@ -600,7 +616,7 @@ class GSUOn(GSU):
         NLLnum = 2 if needSecondNLL else 1
         gsuLabel = Label(label=writer.labels.getNameInc("GSU"), comment="")
         with writer.allocTmpSgpr(1) as tmpSgprGSU:
-            module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+            module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
         noLoadLoopModules = None
         acclen = 0
@@ -674,7 +690,7 @@ class GSUOn(GSU):
             tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
             module.add(SLShiftRightB32(dst=sgpr(tmpSgpr+1), src=sgpr("SizesSum"), shiftHex=log2(kernel["DepthU"]), \
                                             comment="s%s = s[sgprSizesSum] / %s"%(tmpSgpr+1,kernel["DepthU"])))
-            module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+            module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(scalarUInt32DivideAndRemainder(tmpSgpr, tmpSgpr+1, tmpSgpr+2, remainder, tmpVgprRes, kernel["WavefrontSize"]))
             module.add(SSubU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+2), src1=1, comment="GSU-1"))
             writer.vgprPool.checkIn(tmpVgpr)
@@ -701,7 +717,7 @@ class GSUOn(GSU):
             gsuLabel    = Label(label=writer.labels.getNameInc("GSU"), comment="")
             gsuLabelEnd = Label(label=writer.labels.getNameInc("GSU_End"), comment="")
             with writer.allocTmpSgpr(1) as tmpSgprGSU:
-                module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
             module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
             module.addComment1("global read addresses: increments a")
@@ -771,7 +787,7 @@ class GSUOn(GSU):
                 module.add(SAddCU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+1), src1=sgpr(tmpSgpr+3), comment="sum tensor size"))
             # SingleBuffer works on the same work space for every gsu
             if kernel["_GlobalAccumulation"] == "MultipleBuffer":
-                module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgpr+0), sgpr(tmpSgpr+1), sgpr(tmpSgpr+2), \
                                 sgpr(tmpSgpr+0), comment="Recalculate gsu stride (size * gsu)"))
                 module.add(SMovB32(dst=sgpr(tmpSgpr+2), src=sgpr("GSUSumIdx"), comment="Init tensor size"))
@@ -1038,7 +1054,7 @@ class GSUOn(GSU):
 
                 module.add(SWaitCnt(vlcnt=0, comment="wait for buffer_load to finish"))
                 if kernel["MbskPrefetchMethod"] == 0:
-                    module.add(SAndB32(dst=sgpr(tmpSgpr.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                    module.add(SAndB32(dst=sgpr(tmpSgpr.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                     module.add(SCmpGtI32(src0=sgpr(tmpSgpr.idx), src1=self.gsuThreshold, comment="GSU > %u ?" % self.gsuThreshold))
                     module.add(SCBranchSCC1(labelName=reductionEndLabel.getLabelName(), comment="branch if true"))
                     module.addComment("GSU > %u, no need to reset synchronizer" % self.gsuThreshold)
@@ -1079,7 +1095,7 @@ class GSUOn(GSU):
 
         if kernel["MbskPrefetchMethod"] == 0:
             module.addSpaceLine()
-            module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+            module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(SCmpGtI32(src0=sgpr(tmpS02), src1=self.gsuThreshold, comment="GSU > %u ?" % self.gsuThreshold))
             module.add(SCBranchSCC1(labelName=partialWriteLabel.getLabelName(), comment="branch if true"))
             module.addComment("GSU <= %u, last gsu wg do the reduction" % self.gsuThreshold)
@@ -1335,7 +1351,7 @@ class GSUOn(GSU):
                                               endLabel, sumIdxGSUSYNC, addrCalc.addrDVgpr, reductionBodyLabel))
             module.addComment("synchronizer store end")
             if kernel["MbskPrefetchMethod"] == 0:
-                module.add(SAndB32(dst=sgpr(tmpSgpr.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SAndB32(dst=sgpr(tmpSgpr.idx), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SCmpGtI32(src0=sgpr(tmpSgpr.idx), src1=self.gsuThreshold, comment="GSU > %u ?" % self.gsuThreshold))
                 module.add(SCBranchSCC1(labelName=accvgprWriteLabel.getLabelName(), comment="branch if true"))
                 module.addComment("GSU <= %u, do accvgpr_read for the last gsu wg" % self.gsuThreshold)
@@ -1414,7 +1430,7 @@ class GSUOn(GSU):
         # WS address calculation
         module.addComment("calculate the starting WG index of GSU WGs")
         module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr("NumWorkGroups0"), src1=sgpr("WorkGroup1"), comment="NumWorkGroups0*wg1"))
-        module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+        module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
         module.add(SAddU32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=sgpr("WorkGroup0"), comment="NumWorkGroups0*wg1+wg0"))
         module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1=sgpr(tmpS02), comment="(NumWorkGroups0*wg1+wg0)*GSU"))
         module.add(SMulI32(dst=sgpr("GSUStartWGIdx"), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="NumWgPerBatch"))
@@ -1461,11 +1477,11 @@ class GSUOn(GSU):
             # wait for write to ws and do atomic dec to synchronizer
             module.addComment("check done start")
             module.add(SWaitCnt(waitAll=True, comment="wait store done before synchronizer start load and add"))
-            module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+            module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             module.add(SSubU32(dst=sgpr(tmpS02), src0=sgpr(tmpS02), src1=1, comment=""))
             module.add(SAtomicDec(dst=sgpr(tmpS02), base=sgpr("SrdSync", 2), smem=SMEMModifiers(glc=True)))
             if kernel["MbskPrefetchMethod"] == 0:
-                module.add(SAndB32(dst=sgpr(tmpS01), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SAndB32(dst=sgpr(tmpS01), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SCmpGtI32(src0=sgpr(tmpS01), src1=self.gsuThreshold, comment="GSU > %u ?" % self.gsuThreshold))
                 module.add(SCBranchSCC0(labelName=reductionSkipLabel.getLabelName(), comment="branch if false"))
                 module.addComment("GSU > %u, atomic_dec selects the gsu wg to do the reduction" % self.gsuThreshold)
@@ -1495,7 +1511,7 @@ class GSUOn(GSU):
             module.add(SMovB64(sgpr(tmpS06+2, 2), sgpr("SrdD+2", 2), ""))
 
             # for GSU < self.gsuThreshold, GSU-1 is passed to the reduction body
-            module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+            module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
             if kernel["MbskPrefetchMethod"] == 0:
                 module.add(SCmpGtI32(src0=sgpr(tmpS02), src1=self.gsuThreshold, comment="GSU > %u ?" % self.gsuThreshold))
                 module.add(SCBranchSCC1(labelName=reductionAllGsuWgLabel.getLabelName(), comment="branch if true"))
@@ -1982,4 +1998,46 @@ class GSUOn(GSU):
 
         module.addSpaceLine()
 
+        return module
+
+    def initializeSrd(self, writer, ArgTypeCheckLabel, GeneralBatchedGemmSrdInitiation_End, kernel, ch):
+        module = Module("initializeSrd")
+        # Special handling for "MultipleBuffer" and "MultipleBufferSingleKernel" for General Batched GEMM
+        # ArgType == 3 (General Batched GEMM) but GSU == 1, then SrdC/D will be initialized to correct batch matrix address from pointer array (AddressC/D)
+        # ArgType == 3 (General Batched GEMM) but GSU > 1, then SrdC/D will be initialized with workspace.
+        # "MultipleBuffer" means both SrdC and SrdD are workspace pointers
+        # "MultipleBufferSingleKernel" means only SrdD will be workspace pointer while SrdC will be initialized to correct batch matrix address from pointer array (AddressC)      
+        if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel')):
+            with writer.allocTmpSgpr(1) as tmpSgprGSU:
+                module.add(SAndB32(dst=sgpr(tmpSgprGSU.idx), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SCmpEQU32(src0=sgpr(tmpSgprGSU.idx), src1=1, comment="GSU == 1 ?"))
+                module.add(SCBranchSCC1(labelName=ArgTypeCheckLabel.getLabelName(), comment="Handling General Batched GEMM SRD initialization"))
+                if((kernel["_GlobalAccumulation"] == 'MultipleBuffer') or (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and ch == "D")):
+                    module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%ch, 2), comment="init SRD base address" )) 
+                    module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation_End.getLabelName(), comment="End of handling General Batched GEMM SRD initialization"))
+                module.add(ArgTypeCheckLabel)
+        return module
+
+    # GSU = 1, then all C and D will have pointer to device memory holding pointer array to batch matrices. 
+    # So we need logic to get the correct batch matrix address into Srd.
+    # GSU > 1, then AddressA/B will be pointer to device memory holding pointer array to batch matrices but AddressC/D will further depend on the following:
+    # a) MultiBuffer case: AddressC/D will be pointer to workspace and will be handled similar to Strided Batched case.
+    # b) MultiBufferSingleKernel case: AddressC will be pointer to device memory holding pointer array to batch matrices while AddressD will be pointer to workspace.
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, argTypeChecks, generalBatchedGemmLoad, mat, kernel, tmpS1):
+        module = Module("routeToGeneralBatchedOrStridedBatched")
+        module.add(SCmpEQU32(src0=sgpr(tmpS1), src1=1, comment="GSU == 1 ?"))
+        if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
+            module.add(SCBranchSCC0(labelName=argTypeChecks.getLabelName()))
+        else:
+            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName()))
+        if kernel["ProblemType"]["SupportUserArgs"]:
+            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+            module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName())) 
+        if(kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel' and mat == "C"):
+            module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))
+            module.add(argTypeChecks)
+            if kernel["ProblemType"]["SupportUserArgs"]:
+                module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))   
+                module.add(SCBranchSCC1(labelName=generalBatchedGemmLoad.getLabelName()))
+                module.add(SBranch(labelName=stridedBatchedGemmLoad.getLabelName()))  
         return module

@@ -299,14 +299,22 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
 
     if(TARGET hipdnn_integration_tests)
         add_external_integration_test_target(
-            TARGET_NAME   ${PROJECT_NAME}-external-integration-check
-            PLUGIN_TARGET miopen_plugin
-            ENGINE_NAME   MIOPEN_ENGINE
-            TEST_CONFIG   ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
+            TARGET_NAME    ${PROJECT_NAME}-external-integration-check
+            PLUGIN_TARGET  miopen_plugin
+            ENGINE_NAME    MIOPEN_ENGINE
+            INSTALL_SUBDIR miopen_plugin
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
+    endif()
+
+    # For standalone builds we need to install the ctest files. Must run
+    # AFTER add_external_integration_test_target so the staged install-tree
+    # snippet for the cross-provider test is included.
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        install_provider_ctest_files("miopen_plugin")
     endif()
 endif()
 

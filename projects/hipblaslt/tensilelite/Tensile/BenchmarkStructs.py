@@ -64,6 +64,51 @@ def separateParameters(paramSetList):
     return singleVaules, multiValues
 
 
+def _isValidParameterValue(name, value):
+    """Return True if value is a scalar valid value for name."""
+    if name not in validParameters:
+        return False
+    validValues = validParameters[name]
+    return validValues == -1 or value in validValues
+
+
+def _groupedParameterValueOptions(name, value):
+    """Return scalar choices for one parameter inside a group entry."""
+    if not isinstance(value, list):
+        return [value]
+    if len(value) == 0:
+        printExit("You must specify value(s) for parameter \"{}\" in Groups".format(name))
+    if name == "MatrixInstruction" and all(not isinstance(v, list) for v in value):
+        return [value]
+    if name in validParameters and validParameters[name] != -1 and _isValidParameterValue(name, value):
+        return [value]
+    return value
+
+
+def _expandGroupedParameters(paramGroups):
+    """Expand list-valued entries inside Groups into scalar group entries.
+
+    Groups historically contained scalar dictionaries.  Keep list-valued scalar
+    parameters such as MatrixInstruction intact, but allow list-valued entries
+    like NonTemporalA: [0, 1] to expand within that group entry.
+    """
+    expandedParamGroups = []
+    for paramGroup in paramGroups:
+        expandedParamGroup = []
+        for groupEntry in paramGroup:
+            names = []
+            valueOptions = []
+            for name, value in groupEntry.items():
+                names.append(name)
+                valueOptions.append(_groupedParameterValueOptions(name, value))
+
+            for values in itertools.product(*valueOptions):
+                expandedParamGroup.append(dict(zip(names, values)))
+        expandedParamGroups.append(expandedParamGroup)
+
+    return expandedParamGroups
+
+
 def checkCDBufferAndStrides(problemType, problemSizes, isCEqualD):
     """Ensures ldd == ldc when CEqualD"""
     if isCEqualD and problemType["OperationType"] == "GEMM":
@@ -134,7 +179,7 @@ class BenchmarkProcess:
                 for x in getNonNoneFromConfig("BenchmarkCommonParameters", [])]))
         forkParams = dict(itertools.chain(*[x.items() \
                 for x in getNonNoneFromConfig("ForkParameters", [])]))
-        self.paramGroups = forkParams.pop("Groups") if "Groups" in forkParams else []
+        self.paramGroups = _expandGroupedParameters(forkParams.pop("Groups")) if "Groups" in forkParams else []
         self.customKernels = getNonNoneFromConfig("CustomKernels", [])
         self.internalSupportParams = getNonNoneFromConfig("InternalSupportParams", {})
         if self.customKernels == [] and self.internalSupportParams != {}:
@@ -251,11 +296,16 @@ class BenchmarkProcess:
 
 class constructForkPermutations():
     def __init__(self, forkParams, paramGroups):
-        totalPermutations = 1
-        for values in forkParams.values():
-            totalPermutations *= len(values)
-        for group in paramGroups:
-            totalPermutations *= len(group)
+        totalPermutations = 0
+        for groups in itertools.product(*paramGroups):
+            group = set()
+            for g in groups:
+                group.update(g.keys())
+            groupPermutations = 1
+            for name, values in forkParams.items():
+                if name not in group:
+                    groupPermutations *= len(values)
+            totalPermutations += groupPermutations
 
         self.forkParams = forkParams
         self.paramGroups = paramGroups
@@ -277,23 +327,21 @@ class constructForkPermutations():
 def constructLazyForkPermutations(forkParams, paramGroups):
     """Constructs cartesian product of parameter values in forkParams and paramGroups"""
 
-    params_list = []
-    for name, values in forkParams.items():
-        params_list.append((name, values, False))
+    for groups in itertools.product(*paramGroups):
+        group = {}
+        for g in groups:
+            group.update(g)
+        params_list = list(forkParams)
+        for name in group:
+            if name not in forkParams:
+                params_list.append(name)
+        values = []
+        for name in params_list:
+            values.append([group[name]] if name in group else forkParams[name])
+        for combination in itertools.product(*reversed(values)):
+            permutation = dict(zip(params_list, reversed(combination)))
+            yield permutation
 
-    for i, group in enumerate(paramGroups):
-        params_list.append((f"_group{i}", group, True))
-
-    params_list_reversed = list(reversed(params_list))
-    values_reversed = [values for _, values, _ in params_list_reversed]
-    for combination in itertools.product(*values_reversed):
-        permutation = {}
-        for (name, _, isgroup), value in zip(params_list, reversed(combination)):
-            if isgroup:
-                permutation.update(value)
-            else:
-                permutation[name] = value
-        yield permutation
 
 class BenchmarkStep:
     """A single benchmark step which consists of constant and fork parameters and a set of sizes"""
