@@ -249,7 +249,7 @@ def getDockerImageName(dockerArgs)
     }
     return image
 }
- 
+
 // Builds rocm/miopen:therock-<shortHash> from source; returns {image, fullHash, shortHash, skip}.
 // Skips if :therock already carries this hash; reuses the hash-tagged image if it exists.
 def buildTheRockDockerImage(Map conf=[:])
