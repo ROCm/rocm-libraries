@@ -578,7 +578,7 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    I blocks = reset_info_nblocks(batch_count, static_cast<I>(256));
+    I blocks = calculate_nblocks(batch_count, static_cast<I>(256));
     dim3 grid(blocks, 1, 1);
     dim3 threads(256, 1, 1);
     I dim = std::min(m, n); // total number of pivots

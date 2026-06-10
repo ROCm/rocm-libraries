@@ -196,7 +196,7 @@ rocblas_status rocsolver_sygv_hegv_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    rocblas_int blocksReset = reset_info_nblocks(batch_count, BS1);
+    rocblas_int blocksReset = calculate_nblocks(batch_count, BS1);
     dim3 gridReset(blocksReset, 1, 1);
     dim3 threads(BS1, 1, 1);
 
