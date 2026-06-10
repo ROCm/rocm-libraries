@@ -87,15 +87,24 @@ regression values. They reach into internal Subtile modules deliberately and
 **must not** be treated as a stable external API. They may need updating when
 internals move to C++, and that is expected.
 
+> **Writer-free parity moved to native C++.** The geometry, TileInfo query, and
+> emit-leaf instType/load-plan golden cases that previously lived in
+> `test_subtileGeometryCpp.py`, `test_tileInfoCpp.py`, and the writer-free
+> portion of `test_subtileEmitLeavesCpp.py` are now native gtest under
+> `cpp_migration/cpp/tests/` (`subtile_geometry_test.cpp`, `tile_info_test.cpp`,
+> `emit_leaves_test.cpp`). Those Python files were deleted because they only
+> compared the Python facade against the (now sole) C++ implementation. The one
+> retained case — `emitMfmaInstruction` rendering a real rocisa MFMA module — is
+> genuine KernelWriter/rocisa integration and lives in
+> `test_subtileEmitMfmaRocisa.py`, not C++ parity.
+
 | Test file | Subtile module(s) imported |
 |---|---|
 | `test_instructionSchedulerCpp.py` | `InstructionScheduler.instructionSchedule` |
-| `test_subtileGeometryCpp.py` | `SubtileGeometry`, `Kernel` (geometry config instances) |
 | `test_subtileMainloopE2ECpp.py` | `LogicalScheduler.LogicalScheduler` (+ helpers from `test_SubtileBasedLogicalScheduler`) |
 | `test_subtileOffsetAssignCpp.py` | `Kernel` (`TileInfo`, `AB_B16`, `AB_B8`), `SubtileGREmit`, `SubtileLREmit` |
 | `test_logicalSchedulerCpp.py` | `LogicalScheduler` |
-| `test_tileInfoCpp.py` | `Kernel` (`TileInfo` + configs) |
-| `test_subtileEmitLeavesCpp.py` | `Kernel` (`emitMfmaInstruction`, `_selectF8F6F4InstType`, …) |
+| `test_subtileEmitMfmaRocisa.py` | `Kernel.emitMfmaInstruction` (rocisa integration — see note below) |
 | `test_SubtileBasedLogicalScheduler.py` | `Kernel`, `LogicalScheduler`, `InstructionScheduler.instructionSchedule`, `LogicalScheduler.WaitGROp` |
 | `test_SubtileBasedSchedulerRef.py` | `Kernel`, `LogicalScheduler` |
 | `test_gr_offset.py` | `SubtileGREmit.graTileAssignment` |
