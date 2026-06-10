@@ -85,18 +85,50 @@ def _mma_family(target: ArchTarget) -> str:
     return "wmma" if target.wave_size == 32 else "mma"
 
 
-def _lds_bytes(q: GemmSupportQuery) -> int:
+_DTYPE_BYTES = {
+    "fp16": 2,
+    "f16": 2,
+    "bf16": 2,
+    "fp8": 1,
+    "f8": 1,
+    "bf8": 1,
+    "fp8e4m3": 1,
+    "bf8e5m2": 1,
+    "i8": 1,
+    "fp32": 4,
+    "f32": 4,
+    "i32": 4,
+}
+
+
+def _dtype_bytes(dtype: str) -> float:
+    d = normalize_dtype(dtype)
+    try:
+        return _DTYPE_BYTES[d]
+    except KeyError as exc:
+        raise ValueError(f"unknown GEMM dtype {dtype!r} for LDS sizing") from exc
+
+
+# Per-pipeline LDS budget, mirrored from the canonical codegen validator
+# (``dispatcher/codegen/arch_filter.py`` ``LDS_CAPACITY_LIMITS``). compv4 and
+# preshuffle pipelines reserve part of LDS, so their usable budget is smaller
+# than the hardware capacity.
+_LDS_CAPACITY_LIMITS = {"compv4": 32768, "preshufflev2": 32768, "default": 65536}
+
+
+def _lds_bytes(q: GemmSupportQuery) -> float:
+    # Mirror dispatcher/codegen/arch_filter.py::_validate_lds_capacity: a single
+    # A-tile + B-tile staged in LDS. The canonical validator (final source of
+    # truth) intentionally does NOT add double-buffer or C-shuffle bytes here,
+    # so we don't either -- the previous DSL estimate was strictly more gating.
     tm, tn, tk = q.cta_tile
-    bytes_per_elem = 2
-    ab_single = ((tm * tk) + (tn * tk)) * bytes_per_elem
-    # Match the current UniversalGemm emitter policy closely enough for
-    # dispatcher filtering. The instance-level validator remains the final
-    # source of truth for detailed emitter-specific rules.
-    db = q.pipeline == "compv4" and q.epilogue != "cshuffle" and not q.direct_to_lds
-    two_ab = bool(q.dtl_prefetch) or db
-    ab_bytes = ab_single * (2 if two_ab else 1)
-    c_bytes = tm * tn * bytes_per_elem if q.epilogue == "cshuffle" else 0
-    return ab_bytes + c_bytes
+    matrix_a = tm * tk * _dtype_bytes(q.dtype_a)
+    matrix_b = tn * tk * _dtype_bytes(q.dtype_b)
+    return matrix_a + matrix_b
+
+
+def _lds_capacity(q: GemmSupportQuery) -> int:
+    return _LDS_CAPACITY_LIMITS.get(q.pipeline, _LDS_CAPACITY_LIMITS["default"])
 
 
 def gemm_config_supported(q: GemmSupportQuery) -> Tuple[bool, str]:
@@ -190,10 +222,12 @@ def gemm_config_supported(q: GemmSupportQuery) -> Tuple[bool, str]:
             if flag:
                 return False, f"WMMA path does not support {label} on {q.arch}"
 
-    if not target.fits_lds(_lds_bytes(q)):
+    lds_used = _lds_bytes(q)
+    lds_cap = min(_lds_capacity(q), target.lds_capacity_bytes)
+    if lds_used > lds_cap:
         return (
             False,
-            f"LDS budget {_lds_bytes(q)} > {target.lds_capacity_bytes} cap on {q.arch}",
+            f"LDS budget {lds_used} > {lds_cap} cap on {q.arch}",
         )
 
     if tm * tk < q.block_size or tn * tk < q.block_size:

@@ -209,7 +209,6 @@ def _make_candidate(
         priority=priority,
         supports=support,
         select_spec=select,
-        build=lambda spec: build_universal_gemm(spec),
         signature=lambda _spec: gemm_args_signature(),
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),

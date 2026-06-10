@@ -20,7 +20,6 @@ def _dummy_candidate(name: str, family: str = "dummy") -> KernelCandidate:
         priority=0,
         supports=lambda _req: (True, "ok"),
         select_spec=lambda _req: object(),
-        build=lambda _spec: None,
         signature=lambda _spec: (),
         grid=lambda _spec, _req: (1, 1, 1),
         block=lambda _spec: (1, 1, 1),

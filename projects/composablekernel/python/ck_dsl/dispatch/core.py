@@ -15,8 +15,6 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Iterable, Mapping, Sequence, Tuple
 
-from ..core.ir import KernelDef
-
 
 def stable_json_hash(payload: Mapping[str, Any], *, n: int = 16) -> str:
     """Stable short SHA256 over JSON-serializable dispatcher payloads."""
@@ -75,7 +73,6 @@ class KernelCandidate:
     priority: int
     supports: Callable[[OperatorRequest], Tuple[bool, str]]
     select_spec: Callable[[OperatorRequest], Any]
-    build: Callable[[Any], KernelDef]
     signature: Callable[[Any], Sequence[dict]]
     grid: Callable[[Any, OperatorRequest], Tuple[int, int, int]]
     block: Callable[[Any], Tuple[int, int, int]]
@@ -87,7 +84,6 @@ Ranker = Callable[
 ]
 
 
-@dataclass
 class CandidateRegistry:
     """Simple in-process candidate registry.
 
@@ -95,9 +91,6 @@ class CandidateRegistry:
     once, then filtered by support predicates and selected by explicit
     ``algorithm`` / ``spec_id`` request fields or by priority for ``auto``.
     """
-
-    family: str
-    _candidates: dict[str, KernelCandidate]
 
     def __init__(self, family: str):
         self.family = family

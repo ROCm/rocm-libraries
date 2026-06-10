@@ -321,15 +321,22 @@ def compile_sweep_variants(
 def _parse_perf(
     stdout: str,
 ) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    """Parse the structured ``PerfJSON:`` line emitted by ``run_manifest``.
+
+    Both ends live in this package, so we parse the machine-readable line
+    rather than the human ``Perf:`` string. Returns ``(None, None, None)`` only
+    when the line is absent or malformed; the caller treats that as a failure.
+    """
     for line in stdout.splitlines():
-        if not line.startswith("Perf:"):
+        if not line.startswith("PerfJSON:"):
             continue
-        parts = [p.strip() for p in line.removeprefix("Perf:").split(",")]
         try:
-            ms = float(parts[0].removesuffix(" ms").strip())
-            tf = float(parts[1].removesuffix(" TFlops").strip())
-            gb = float(parts[2].removesuffix(" GB/s").strip())
-            return ms, tf, gb
+            payload = json.loads(line.removeprefix("PerfJSON:").strip())
+            return (
+                float(payload["ms"]),
+                float(payload["tflops"]),
+                float(payload["gbps"]),
+            )
         except Exception:
             return None, None, None
     return None, None, None
@@ -371,17 +378,25 @@ def run_build_record(
         env=env,
     )
     ms, tflops, gbps = _parse_perf(proc.stdout or "")
+    metrics_ok = ms is not None and tflops is not None and gbps is not None
+    ok = proc.returncode == 0 and metrics_ok
+    if proc.returncode != 0:
+        error = f"run_manifest rc={proc.returncode}"
+    elif not metrics_ok:
+        error = "run_manifest exited 0 but no parseable PerfJSON metrics found"
+    else:
+        error = ""
     return GemmRunRecord(
         cache_key=record.cache_key,
         shape=variant.shape,
-        ok=proc.returncode == 0,
+        ok=ok,
         verify=variant.shape.verify,
         stdout=proc.stdout or "",
         stderr=proc.stderr or "",
         ms=ms,
         tflops=tflops,
         gbps=gbps,
-        error="" if proc.returncode == 0 else f"run_manifest rc={proc.returncode}",
+        error=error,
     )
 
 
@@ -425,6 +440,15 @@ def write_sweep_json(
 
 
 def write_sweep_csv(path: Path, runs: Sequence[GemmRunRecord]) -> None:
+    """Write a flat per-run CSV for quick inspection / debugging.
+
+    This is evidence output, not training data: it carries shape + measured
+    perf but no kernel-config feature columns (tile/pipeline/warp/etc.), which
+    live only in the JSON ``spec``. It is not the heuristics training-data
+    emitter (canonical schema in
+    ``projects/composablekernel/dispatcher/heuristics/DATA_GENERATION.md``);
+    feeding that pipeline would require the per-spec feature columns.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(
