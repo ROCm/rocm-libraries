@@ -78,7 +78,7 @@ RUN mkdir -p /etc/apt/keyrings && \
 RUN apt-get remove --purge -y python3-pyparsing python3-cryptography python3-jwt
 
 # Add requirements files
-ADD miopen/docs/sphinx/requirements.txt /doc-requirements.txt
+ADD docs/sphinx/requirements.txt /doc-requirements.txt
 
 # Install doc requirements
 RUN pip3 install --break-system-packages -r /doc-requirements.txt && \
@@ -228,9 +228,9 @@ ENV ROCM_PATH=/opt/rocm
 ARG USE_FIN="OFF"
 
 # Add requirements files
-ADD miopen/rbuild.ini /rbuild.ini
-ADD miopen/requirements.txt /requirements.txt
-ADD miopen/dev-requirements.txt /dev-requirements.txt
+ADD rbuild.ini /rbuild.ini
+ADD requirements.txt /requirements.txt
+ADD dev-requirements.txt /dev-requirements.txt
 
 # rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
 # Remove components that are already built by TheRock (including CK).
