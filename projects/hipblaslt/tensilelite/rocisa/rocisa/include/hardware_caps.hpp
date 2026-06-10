@@ -312,6 +312,7 @@ inline std::map<std::string, int>
     rv["s_add_u64"]
         = tryAssembler(isaVersion, assemblerPath, "s_add_u64 s[0:1], s[0:1], s[2:3]", isDebug);
     rv["v_add_nc_u64"] = tryAssembler(isaVersion, assemblerPath, "v_add_nc_u64 v[0:1], v[2:3], v[4:5]", isDebug);
+
     rv["HasBF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_f32_bf16 v0, v1", isDebug);
 
     rv["HasPkF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_pk_f16_f32 v0, v1, v2", isDebug);
