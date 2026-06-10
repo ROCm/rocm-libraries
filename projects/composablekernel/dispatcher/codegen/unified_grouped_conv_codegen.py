@@ -387,7 +387,7 @@ class GroupedConvKernelConfig:
                 f"warp_tile_m={t.warp_tile_m}, dtype={dtype_str})"
             )
             return False
-        if not check_wmma_native_warp_tile(warp_size, warp_tile, dtype_str):
+        if not check_wmma_native_warp_tile(warp_size, tr.streamk_config.streamk_enabled):
             log.warning(
                 f"Rejecting config: WMMA warp_tile constraint violated "
                 f"(warp_size={warp_size}, warp_tile={warp_tile}, dtype={dtype_str})"

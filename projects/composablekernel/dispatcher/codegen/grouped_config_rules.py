@@ -301,7 +301,7 @@ def check_wmma_instance(
     """
     if warp_size != 32:
         return True
-    if k_per_block < 32 and dtype != "float":
+    if k_per_xdl < 32 and dtype != "float":
         return False
     if k_warp * k_per_xdl > k_per_block:
         return False
@@ -310,16 +310,12 @@ def check_wmma_instance(
     return True
 
 
-def check_wmma_native_warp_tile(warp_size: int, warp_tile: list, dtype: str) -> bool:
+def check_wmma_native_warp_tile(warp_size: int, streamk_enabled: bool) -> bool:
     """Check native instance warp_tile constraints for warp_size=32 targets.
 
-    Returns False (skip instance) when:
-      - warp_tile[0]==32 on a 32-wide warp, or
-      - non-float dtype requires warp_tile[2]==32 (bwd_weight k-tile constraint).
+    Returns False (skip instance) when streamk is enabled.
     """
-    if warp_size == 32 and warp_tile[0] == 32:
-        return False
-    if dtype != "float" and warp_tile[2] != 32:
+    if warp_size == 32 and streamk_enabled:
         return False
     return True
 

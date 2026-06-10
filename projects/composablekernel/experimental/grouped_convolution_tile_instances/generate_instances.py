@@ -553,7 +553,9 @@ def parse_bwd_weight_instances(instances, problem_name, warp_size=32):
                     f"Skipping instance {instance_id} with streamk, async, float since it's not supported yet."
                 )
                 continue
-            if not check_wmma_native_warp_tile(warp_size, native.warp_tile, get_dtype(problem_name)):
+            if not check_wmma_native_warp_tile(warp_size, native.streamk_enabled):
+                continue
+            if not check_wmma_instance(warp_size, native.tile_size[2], native.warps[2], native.warp_tile[2], native.warp_tile[0], get_dtype(problem_name)):
                 continue
             convs.append(native)
             continue
