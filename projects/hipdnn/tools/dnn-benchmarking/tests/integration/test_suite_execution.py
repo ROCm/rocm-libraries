@@ -538,10 +538,10 @@ class TestSuiteCLIIntegration:
             cwd=project_root,
         )
 
-        assert result.returncode in (
-            0,
-            1,
-        ), f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
+        assert result.returncode == 0, (
+            f"Unexpected exit code {result.returncode}. "
+            f"stdout: {result.stdout} stderr: {result.stderr}"
+        )
         # The PyTorch backend shares the suite wrapper for command parity.
         assert "hipDNN Benchmark Suite" in result.stdout
         # The hipDNN handle is never constructed for the PyTorch backend.
@@ -582,13 +582,19 @@ class TestSuiteCLIIntegration:
             cwd=project_root,
         )
 
-        assert result.returncode in (
-            0,
-            1,
-        ), f"Unexpected exit code {result.returncode}. stderr: {result.stderr}"
+        assert result.returncode == 0, (
+            f"Unexpected exit code {result.returncode}. "
+            f"stdout: {result.stdout} stderr: {result.stderr}"
+        )
         assert output_file.exists(), result.stdout
         data = json.loads(output_file.read_text())
         assert len(data["graphs"]) == 2
         for graph in data["graphs"]:
             providers = {r["provider"] for r in graph["results"]}
             assert providers == {"pytorch"}
+            for row in graph["results"]:
+                assert row["status"] == "success", row
+                assert row["e2e_stats"], row
+                # "auto" timing yields HIP events on ROCm and torch.cuda
+                # events on CUDA, so kernel stats exist on both.
+                assert row["gpu_kernel_stats"], row

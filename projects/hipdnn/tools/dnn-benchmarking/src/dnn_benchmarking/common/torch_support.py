@@ -9,10 +9,15 @@ HIP, hipDNN, or the host has a usable GPU through any non-PyTorch runtime.
 
 
 def module_available() -> bool:
-    """Return True when the torch Python module can be imported."""
+    """Return True when the torch Python module can be imported.
+
+    Broken installs commonly fail import with OSError/RuntimeError from
+    missing shared libraries, not ImportError, so any import-time failure
+    means "not available".
+    """
     try:
         import torch  # noqa: F401
-    except ImportError:
+    except Exception:
         return False
     return True
 

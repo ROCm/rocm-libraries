@@ -1325,8 +1325,11 @@ class TestRunGraphPytorchBackend:
         assert [r.provider for r in result.results] == ["pytorch"]
         assert result.results[0].status == "success"
 
+    @patch("dnn_benchmarking.execution.suite_runner.generate_input_data")
     @patch("dnn_benchmarking.execution.suite_runner._run_timed_pytorch_row")
-    def test_unsupported_operations_skip_row(self, mock_timed_row, monkeypatch):
+    def test_unsupported_operations_skip_row(
+        self, mock_timed_row, mock_gen, monkeypatch
+    ):
         import sys
         import types
 
@@ -1348,6 +1351,8 @@ class TestRunGraphPytorchBackend:
         )
 
         mock_timed_row.assert_not_called()
+        # Unsupported graphs must be skipped before any input allocation.
+        mock_gen.assert_not_called()
         row = result.results[0]
         assert row.status == "skipped"
         assert "unsupported operations" in (row.skip_reason or "")

@@ -778,6 +778,14 @@ ACTIVATE_LOCAL="$VENV_DIR/bin/activate.local"
     printf 'export DNN_BENCH_WORKSPACE=%q\n' "$DNN_BENCH_WORKSPACE"
 } > "$ACTIVATE_LOCAL"
 INSTALLED_TORCH_MODE=$(get_torch_mode)
+# An existing venv with CUDA torch reaches the CUDA skip path below even when
+# --torch-mode existing was passed; building hipDNN there would silently be
+# skipped, so reject the build request as early as possible.
+if [ "$INSTALLED_TORCH_MODE" = "cuda" ] && [ "$FORCE_BUILD" -eq 1 ]; then
+    echo "ERROR: --force-build is not supported with an existing CUDA torch venv;" >&2
+    echo "building hipDNN requires a ROCm toolchain. Remove $VENV_DIR or use a ROCm torch mode." >&2
+    exit 1
+fi
 if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
     # shellcheck disable=SC2016
     echo 'source "$(dirname "${BASH_SOURCE[0]}")/activate.local" 2>/dev/null || true' \

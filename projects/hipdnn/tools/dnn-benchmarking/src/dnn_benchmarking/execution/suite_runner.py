@@ -762,31 +762,13 @@ def run_graph_pytorch_backend(
     provider = ReferenceProviderName.PYTORCH.value
     rtol, atol = _fallback_tolerance_for_config(config)
 
-    try:
-        graph_input_data = generate_input_data(tensor_infos, config.seed)
-    except (ValueError, RuntimeError, OSError, TypeError, OverflowError) as e:
-        msg = f"Input data generation failed: {e}"
-        return GraphResult(
-            graph_name=graph_name,
-            graph_path=str(graph_path),
-            results=[
-                ProviderEngineResult(
-                    provider=provider,
-                    engine_id=0,
-                    status="error",
-                    error_message=msg,
-                    correctness=CorrectnessResult.failed(
-                        rtol=rtol, atol=atol, error_message=msg
-                    ),
-                )
-            ],
-            engine_ids=[0],
-        )
-
     # Unsupported operations are an unsupported-graph signal (mirrors the
-    # hipDNN UnsupportedGraphError path), not an execution error. A torch
-    # import failure here is deliberately ignored: the timed row below will
-    # surface it as a proper engine error.
+    # hipDNN UnsupportedGraphError path), not an execution error. Checked
+    # before input generation: the check is a static graph inspection, so
+    # unsupported graphs are skipped without allocating inputs (and without
+    # misreporting an input-generation failure as an error). A torch import
+    # failure here is deliberately ignored: the timed row below will surface
+    # it as a proper engine error.
     unsupported: List[str] = []
     try:
         from ..execution import pytorch_ops
@@ -812,6 +794,27 @@ def run_graph_pytorch_backend(
             graph_name=graph_name,
             graph_path=str(graph_path),
             results=[skipped],
+            engine_ids=[0],
+        )
+
+    try:
+        graph_input_data = generate_input_data(tensor_infos, config.seed)
+    except (ValueError, RuntimeError, OSError, TypeError, OverflowError) as e:
+        msg = f"Input data generation failed: {e}"
+        return GraphResult(
+            graph_name=graph_name,
+            graph_path=str(graph_path),
+            results=[
+                ProviderEngineResult(
+                    provider=provider,
+                    engine_id=0,
+                    status="error",
+                    error_message=msg,
+                    correctness=CorrectnessResult.failed(
+                        rtol=rtol, atol=atol, error_message=msg
+                    ),
+                )
+            ],
             engine_ids=[0],
         )
 

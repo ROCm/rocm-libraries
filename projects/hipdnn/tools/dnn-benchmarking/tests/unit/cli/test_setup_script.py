@@ -45,6 +45,36 @@ def test_setup_script_rejects_force_build_with_cuda_mode() -> None:
     assert "--force-build is not supported with --torch-mode cuda" in result.stderr
 
 
+def test_setup_script_rejects_force_build_with_existing_cuda_venv(tmp_path) -> None:
+    """--torch-mode existing + --force-build must fail when the venv has CUDA torch."""
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    # Fake activate puts the stub python on PATH; the stub reports CUDA torch.
+    (venv_bin / "activate").write_text(f'export PATH="{venv_bin}:$PATH"\n')
+    stub_python = venv_bin / "python"
+    stub_python.write_text("#!/bin/sh\ncat > /dev/null\necho cuda\n")
+    stub_python.chmod(0o755)
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(SETUP_SCRIPT),
+            "--torch-mode",
+            "existing",
+            "--force-build",
+            "-y",
+            "--workspace",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1, result.stderr
+    assert "existing CUDA torch venv" in result.stderr
+
+
 def test_setup_script_rejects_unknown_torch_mode() -> None:
     result = subprocess.run(
         ["bash", str(SETUP_SCRIPT), "--torch-mode", "bogus"],

@@ -121,8 +121,9 @@ python -m dnn_benchmarking --graph 'graphs/*.json' --backend pytorch -o cuda_res
 ```
 
 On CUDA, kernel timing uses `torch.cuda` events and the ROCm-specific metadata
-fields (`rocm_version`, gfx arch, amdsmi GPU snapshot) are simply `None` in the
-JSON; the timing statistics and graph structure are identical to a ROCm run.
+fields (`rocm_version`, amdsmi GPU snapshot) are `None` in the JSON, while
+`gpu_arch` is the sentinel `"unknown"` (no ROCm gfx target is detectable); the
+timing statistics and graph structure are identical to a ROCm run.
 
 ### Other Non-ROCm PyTorch (CPU)
 
@@ -250,11 +251,13 @@ dnn-benchmark --graph 'graphs/*.json' --backend pytorch -o rocm_pytorch_results.
 dnn-benchmark --graph 'graphs/*.json' --backend pytorch -o cuda_pytorch_results.json
 ```
 
-Each JSON file is a full `SuiteResult`: graphs are keyed by name, and each
-result row carries E2E and kernel timing statistics plus whatever machine
-metadata the host could provide (ROCm fields are `None` on CUDA, and vice
-versa). Graphs match across files by `graph_name`, so the artifacts can be
-diffed offline. (An offline comparison helper is planned but not yet included.)
+Each JSON file is a full `SuiteResult`: `graphs` is a list of graph entries,
+each carrying its `graph_name` plus result rows with E2E and kernel timing
+statistics and whatever machine metadata the host could provide
+(`rocm_version` and the amdsmi snapshot are `None` on CUDA, and `gpu_arch` is
+`"unknown"`). Graphs match across files by `graph_name`, so the artifacts can
+be diffed offline. (An offline comparison helper is planned but not yet
+included.)
 
 ### Config Files
 
