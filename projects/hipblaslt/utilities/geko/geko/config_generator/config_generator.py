@@ -165,7 +165,6 @@ def _run_per_gemm_type(
         cur_working_dir,
         GEMM_type,
         hipblaslt_path,
-        is_ga=config['GA'],
         client_path=client_path,
         write_shell_scripts=write_shell_scripts,
     )

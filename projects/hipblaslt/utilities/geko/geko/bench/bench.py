@@ -500,7 +500,7 @@ def compare(
                 f"setting error_pr to 1e6 for these cases"
             )
             dfv.loc[failed_mask, "norm_error"] = 1e6
-        dft["error_tuned"] = dft.merge(dfv, on=[c for c in dfv.columns if c != "norm_error"])["norm_error"]
+        dft["error_tuned"] = dft.merge(dfv, on=[c for c in dfv.columns if c not in ["norm_error", "atol", "rtol"]])["norm_error"]
         dft["error_tuned"] = dft["error_tuned"] / dft["batch_count"] # normalized by batch_count
 
     df = dfr.merge(dft, on=[c for c in dfr.columns if c.split("_reference")[0] not in UNIQ_COLS])

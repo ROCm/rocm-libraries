@@ -295,16 +295,14 @@ def write_run_script(
     filepath: str | Path,
     entity_name: str,
     hipblaslt_path: str | Path,
-    is_ga: bool = False,
     client_path: Optional[str | Path] = None,
 ) -> None:
-    """Write an executable bash script that runs Tensile or Ductile for one YAML.
-
+    """Write an executable bash script that runs Tensile for one YAML.
+    
     Args:
         filepath: Path for the ``.sh`` file (created with mode ``0o755``).
         entity_name: Base name matching ``{entity_name}.yaml`` in the working directory.
         hipblaslt_path: Root of the hipBLASLt checkout (for ``tensilelite`` paths).
-        is_ga: If True, invoke Ductile; otherwise Tensile's ``Tensile`` driver.
         client_path: Optional path passed as ``--prebuilt-client`` when set.
     """
     hip_s = str(Path(hipblaslt_path).resolve())
@@ -312,19 +310,11 @@ def write_run_script(
     if client_path:
         client_path_str = f'--prebuilt-client {Path(client_path).resolve()}'
 
-    if is_ga:
-        root = os.path.dirname(__file__).split('TuningDriver')[0]
-        run_command = (
-            f'PYTHONPATH={hip_s}/tensilelite/ '
-            f'{root}/TuningDriver/Ductile/bin/Ductile '
-            f'$YAML $WORK_DIR {client_path_str} 2>&1 | tee $OUT'
-        )
-    else:
-        run_command = (
-            f'PYTHONPATH={hip_s}/tensilelite/  '
-            f'{hip_s}/tensilelite/Tensile/bin/Tensile '
-            f'$YAML $WORK_DIR {client_path_str} 2>&1 | tee $OUT'
-        )
+    run_command = (
+        f'PYTHONPATH={hip_s}/tensilelite/ '
+        f'{hip_s}/tensilelite/Tensile/bin/Tensile '
+        f'$YAML $WORK_DIR {client_path_str} 2>&1 | tee $OUT'
+    )
 
     content = _RUN_SCRIPT_TEMPLATE.format(
         entity_name=entity_name,
@@ -408,7 +398,6 @@ class EntityOutputWriter:
         gemm_type: str,
         hipblaslt_path: str | Path,
         *,
-        is_ga: bool = False,
         client_path: Optional[str | Path] = None,
         write_shell_scripts: bool = True,
     ) -> None:
@@ -418,14 +407,12 @@ class EntityOutputWriter:
             output_dir: Directory for YAML and ``.sh`` files (and ``run_<gemm_type>_all.sh``).
             gemm_type: GEMM string used in run-all and config log basenames.
             hipblaslt_path: hipBLASLt root for per-entity run scripts.
-            is_ga: Whether outputs use Ductile (GA) vs Tensile.
             client_path: Optional prebuilt Tensile client for run scripts.
             write_shell_scripts: If false, skip ``.sh`` and ``run_*_all.sh`` (YAML and log only).
         """
         self._output_dir = Path(output_dir)
         self._gemm_type = gemm_type
         self._hipblaslt_path = Path(hipblaslt_path)
-        self._is_ga = is_ga
         self._client_path = Path(client_path) if client_path is not None else None
         self._write_shell_scripts = write_shell_scripts
         self._tuning_writer = TuningConfigWriter()
@@ -463,7 +450,6 @@ class EntityOutputWriter:
                 script_path,
                 entity_name,
                 self._hipblaslt_path,
-                self._is_ga,
                 self._client_path,
             )
 

@@ -91,7 +91,7 @@ def configure(
     """Generate benchmarking configurations for each input GEMM.
 
     Creates YAML and shell script configuration files for tuning a specific
-    GEMM operation type using the TuningDriver framework.
+    GEMM operation type using the config generator framework.
 
     Args:
         df (DataFrame): DataFrame containing the GEMMs to benchmark.
