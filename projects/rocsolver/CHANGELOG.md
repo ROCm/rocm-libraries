@@ -9,6 +9,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Changed
 ### Removed
 ### Optimized
+* Replaced remaining compile-time `WarpSize` assumptions in GPU reduction paths with runtime `warpSize` handling, and updated shared-memory warp accumulator sizing helpers accordingly.
 ### Resolved issues
 ### Known issues
 ### Upcoming changes
