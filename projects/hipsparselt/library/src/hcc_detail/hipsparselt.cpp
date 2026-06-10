@@ -520,6 +520,20 @@ catch(...)
     return exception_to_hipsparselt_status();
 }
 
+hipsparseStatus_t hipsparseLtMatmulAlgSelectionDestroy(const hipsparseLtMatmulAlgSelection_t* algSelection)
+try
+{
+    rocsparselt::Debug::Instance().markerStart("hipsparseLtMatmulAlgSelectionDestroy");
+    auto status = RocSparseLtStatusToHIPStatus(
+        rocsparselt_matmul_alg_selection_destroy((const rocsparselt_matmul_alg_selection*)algSelection));
+    rocsparselt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipsparselt_status();
+}
+
 hipsparseStatus_t hipsparseLtMatmulAlgSetAttribute(const hipsparseLtHandle_t*       handle,
                                                    hipsparseLtMatmulAlgSelection_t* algSelection,
                                                    hipsparseLtMatmulAlgAttribute_t  attribute,
