@@ -27,6 +27,7 @@ from gpu_test_helpers import (
     assemble_and_run,
     generate_kernel_asm,
     generate_load_params,
+    requires_gpu,
 )
 
 from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment
@@ -319,7 +320,7 @@ def verify_gr_output(output_bytes, ti, kernel, dest_vgprs, mt, stride, debug=Fal
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
+@requires_gpu
 class TestGrOffset:
 
     @pytest.fixture(params=CONFIGS, ids=lambda c: c.label)
