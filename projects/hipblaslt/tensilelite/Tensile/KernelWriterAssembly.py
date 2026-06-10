@@ -2546,6 +2546,16 @@ class KernelWriterAssembly(KernelWriter):
 
           maskB = (1 << kernel["ClusterDim"][0]) - 1
 
+          if kernel["enableTDMMetadata"]:
+            if kernel["ProblemType"]["Sparse"] == 1:
+              moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskMetadata"), shiftHex=sgpr(sgprWgX), src=hex(maskA),\
+                                                comment="Setting metadata mask (follows sparse A)"))
+            elif kernel["ProblemType"]["Sparse"] == 2:
+              moduleRegInit.add(SMulI32(dst=sgpr(sTmp+4), src0=sgpr(sgprWgY), src1=sgpr(sgprNWgX),\
+                                        comment="Shift factor: wg_y * nwg_x (metadata)"))
+              moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskMetadata"), shiftHex=sgpr(sTmp+4), src=hex(maskB),\
+                                                comment="Setting metadata mask (follows sparse B)"))
+
           if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1:
             setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
             setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
@@ -2573,7 +2583,6 @@ class KernelWriterAssembly(KernelWriter):
                                       comment="Shift factor: wg_y * nwg_x"))
             moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskB"), shiftHex=sgpr(sgprWgY), src=hex(maskB),\
                                               comment="Setting maskB"))
-
       # SrdD can be used as temp sgprs for a bit
       if self.states.doShadowInit and kernel["BufferStore"]:
         self.addSgprVarToPool("SrdD")
