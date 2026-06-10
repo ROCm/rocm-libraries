@@ -26,16 +26,16 @@ add_custom_target(
 if(PRE_COMMIT_BINARY)
     # pre-commit exits 1 when it modifies files (expected); only fail on higher codes.
     add_custom_target(
-        trim_whitespace
+        pre_commit_checks
         COMMAND sh -c "${PRE_COMMIT_BINARY} run --files $(git ls-files projects/miopen); rc=$?; [ $rc -le 1 ] || exit $rc"
         WORKING_DIRECTORY ${REPO_ROOT}
         VERBATIM
     )
 else()
-    message(WARNING "pre-commit not found; trim_whitespace target will not be available and pre-commit checks are skipped in format")
+    message(WARNING "pre-commit not found; pre_commit_checks target will not be available and pre-commit checks are skipped in format")
 
     add_custom_target(
-        trim_whitespace
+        pre_commit_checks
         COMMAND ${CMAKE_COMMAND} -E echo "pre-commit not found, skipping pre-commit checks"
     )
 endif()
@@ -46,4 +46,4 @@ add_custom_target(
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     VERBATIM
 )
-add_dependencies(format trim_whitespace)
+add_dependencies(format pre_commit_checks)
