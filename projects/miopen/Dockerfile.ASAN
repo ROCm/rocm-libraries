@@ -170,7 +170,7 @@ ENV ROCM_PATH=/opt/rocm
 WORKDIR /TheRock
 
 RUN . /opt/venv/bin/activate && \
-    python ./build_tools/fetch_sources.py
+    python ./build_tools/fetch_sources.py --depth 1
 
 RUN . /opt/venv/bin/activate && \
     THEROCK_PKG_VERSION=$(python -c "import json; v=json.load(open('version.json'))['rocm-version']; print(v+'.dev0')") && \
