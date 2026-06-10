@@ -163,9 +163,22 @@ If you have also the implicit GEMM instances enabled, use more threads (64 or 12
 
 ## Performance testing
 
-There is a [python script](../../../../script/test_direct_conv.py) that runs a set of fwd/bwd data [cases](../../../../script/direct_conv_test_cases.txt).
-This can be used to verify that all instances produce correct results as wel as for testing performance regresion/improvement after refactoring. 
+There is a [python CLI](../../../../script/direct_conv_bench.py) that runs a set of fwd/bwd data [cases](../../../../script/direct_conv_cases.txt).
+It has three subcommands:
+
+- `run` — run every case and print a text summary (smoke / correctness).
+- `regress` — compare best TFLOPS against per-arch expected values (10% tolerance)
+  and write a markdown report; exits nonzero on a regression.
+- `compare` — compare implicit-GEMM vs direct-conv performance (markdown table,
+  optional `--plot` PNG; needs an implicit-GEMM-enabled build).
+
+This can be used to verify that all instances produce correct results as well as for testing performance regresion/improvement after refactoring.
 When the coverage of the CK Tile direct convs is expanded, more cases should be added.
+
+```
+python3 script/direct_conv_bench.py run     --bin-path <build>/bin
+python3 script/direct_conv_bench.py regress --bin-path <build>/bin
+```
 
 For running the performance script, use the Dispatcher codegen build (`CK_TILE_DISPATCHER=ON`).
 To focus on direct convolution only, add `-D DISABLE_IMPLICIT_GEMM_INSTANCES=ON` to the

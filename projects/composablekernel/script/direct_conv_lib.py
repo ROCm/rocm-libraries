@@ -1,0 +1,637 @@
+#!/usr/bin/env python3
+"""Shared library for direct-convolution profiler tooling.
+
+This module consolidates the case-file parsing, GPU-architecture detection,
+profiler invocation, output parsing, and reporting. 
+It is consumed by the ``direct_conv_bench.py`` CLI.
+
+Sections:
+  - cases    : sectioned case-file parser (FWD / BWD-data -> binary), optional
+               ``| key=val …`` per-arch expected suffix.
+  - arch     : ``detect_arch`` + per-arch expected-value selection.
+  - profiler : single ``run_profiler`` subprocess runner.
+  - parse    : ``parse_best_perf`` (best-config block), ``parse_valid_perf``
+               (per-instance ``[Valid]`` lines), ``parse_failed_instances``.
+  - report   : ``Result`` dataclass + verdict logic, text/markdown renderers,
+               and a lazily-imported matplotlib comparison plot.
+"""
+
+import enum
+import re
+import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+# ===========================================================================
+# arch
+# ===========================================================================
+
+# Default tolerance: a case fails only if it is more than this fraction *below*
+# its expected value. Performance improvements above expected are accepted.
+DEFAULT_TOLERANCE = 0.075
+
+# Architecture key used when the GPU cannot be detected or no per-arch value
+# matches. Falls back to the original reference values.
+DEFAULT_ARCH = "mi355"
+
+# Bare "expected=<v>" tokens are stored under this key as an
+# architecture-independent fallback.
+_FALLBACK_KEY = "expected"
+
+# Known AMD Instinct marketing names mapped to the short keys used in the cases
+# file. Matching is done case-insensitively against the detected product name.
+_ARCH_PATTERNS = [
+    ("mi355", re.compile(r"mi355", re.IGNORECASE)),
+    ("mi350", re.compile(r"mi350", re.IGNORECASE)),
+]
+
+
+def detect_arch() -> tuple[str | None, str]:
+    """Detect the GPU architecture key (e.g. "mi350").
+
+    Returns a ``(arch_key, source)`` tuple. ``arch_key`` is ``None`` if no
+    known architecture could be matched; ``source`` is a human-readable
+    description of how the detection was made (for the report).
+    """
+    probes = [
+        (["rocminfo"], r"Marketing Name:\s*(.+)"),
+        (["rocm-smi", "--showproductname"], r"Card Series:\s*(.+)"),
+    ]
+    for cmd, pat in probes:
+        try:
+            proc = subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, timeout=30,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+        for m in re.finditer(pat, proc.stdout):
+            name = m.group(1).strip()
+            for key, rx in _ARCH_PATTERNS:
+                if rx.search(name):
+                    return key, f"{cmd[0]} -> '{name}'"
+    return None, "auto-detect failed"
+
+
+# ===========================================================================
+# cases
+# ===========================================================================
+
+_SECTION_BINARY = {
+    "fwd": "grouped_conv_fwd_tile",
+    "bwd_data": "grouped_conv_bwd_data_tile",
+}
+
+_SECTION_TITLE = {"fwd": "FWD", "bwd_data": "BWD data"}
+
+
+@dataclass
+class Case:
+    section: str            # "fwd" or "bwd_data"
+    binary: str             # profiler subcommand
+    args: str               # space-separated argument string
+    expected: float | None  # expected TFLOPS for the selected arch, or None
+    expected_by_arch: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def data_type(self) -> str:
+        """First argument token: "1" (FP16) or "2" (BF16)."""
+        toks = self.args.split()
+        return toks[0] if toks else ""
+
+
+def _parse_expected_suffix(suffix: str) -> dict[str, float]:
+    """Parse "mi355=573 mi350=488" or legacy "expected=573" into a dict."""
+    values: dict[str, float] = {}
+    for token in suffix.split():
+        if "=" not in token:
+            continue
+        key, _, val = token.partition("=")
+        try:
+            values[key.strip().lower()] = float(val)
+        except ValueError:
+            continue
+    return values
+
+
+def _select_expected(values: dict[str, float], arch: str | None) -> float | None:
+    """Pick the expected value for ``arch`` with sensible fallbacks."""
+    if not values:
+        return None
+    if arch is not None and arch in values:
+        return values[arch]
+    if _FALLBACK_KEY in values:
+        return values[_FALLBACK_KEY]
+    if DEFAULT_ARCH in values:
+        return values[DEFAULT_ARCH]
+    return None
+
+
+def parse_cases(path: Path, arch: str | None) -> list[Case]:
+    """Parse the sectioned case file.
+
+    Format:
+      - ``#`` comments and blank lines are ignored.
+      - A non-digit-first line is a section header ("FWD" / "BWD data") or a
+        column-header line inside a section (ignored).
+      - A digit-first line is a case row; its tokens are passed verbatim to the
+        profiler. An optional ``| key=val …`` suffix gives expected TFLOPS.
+    """
+    cases: list[Case] = []
+    section: str | None = None
+
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        lower = line.lower()
+        if not line[0].isdigit():
+            if "bwd" in lower and "data" in lower:
+                section = "bwd_data"
+            elif "fwd" in lower:
+                section = "fwd"
+            # else: a column-header line inside a section -> ignore
+            continue
+
+        if section is None:
+            continue
+
+        # Split optional "| <key>=<val> ..." suffix.
+        expected_by_arch: dict[str, float] = {}
+        body = line
+        if "|" in line:
+            body, _, suffix = line.partition("|")
+            body = body.strip()
+            expected_by_arch = _parse_expected_suffix(suffix.strip())
+
+        cases.append(
+            Case(
+                section=section,
+                binary=_SECTION_BINARY[section],
+                args=" ".join(body.split()),
+                expected=_select_expected(expected_by_arch, arch),
+                expected_by_arch=expected_by_arch,
+            )
+        )
+
+    return cases
+
+
+# ===========================================================================
+# profiler
+# ===========================================================================
+
+def run_profiler(
+    bin_path: Path, binary: str, args: str, timeout: float | None = None
+) -> tuple[str, str, int]:
+    """Run ``ckProfiler <binary> <args>`` and return (stdout, stderr, returncode).
+
+    On timeout, returns ("TIMEOUT", "", 1). If the executable is missing,
+    returns ("", <message>, 127).
+    """
+    exe = bin_path / "ckProfiler"
+    cmd = [str(exe), binary] + args.split()
+    try:
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+        )
+        return proc.stdout, proc.stderr, proc.returncode
+    except FileNotFoundError:
+        return "", f"executable not found: {exe}", 127
+    except subprocess.TimeoutExpired:
+        return "TIMEOUT", "", 1
+
+
+# ===========================================================================
+# parse
+# ===========================================================================
+
+# Matches the "Best configuration parameters:" block.
+_BEST_NAME_RE = re.compile(r"^\s*name:\s*(.+)$")
+_BEST_TIME_RE = re.compile(r"^\s*avg_time:\s*([\d.]+)ms$")
+_BEST_TFLOPS_RE = re.compile(r"^\s*tflops:\s*([\d.]+)$")
+_BEST_GBS_RE = re.compile(r"^\s*GB/s:\s*([\d.]+)$")
+
+
+def parse_best_perf(stdout: str) -> tuple[str, float, float, float]:
+    """Return (name, avg_time_ms, tflops, gb_s) from the profiler best-config block."""
+    in_best = False
+    name = ""
+    avg_time = 0.0
+    tflops = 0.0
+    gb_s = 0.0
+
+    for line in stdout.splitlines():
+        if "Best configuration parameters:" in line:
+            in_best = True
+            continue
+        if not in_best:
+            continue
+        m = _BEST_NAME_RE.match(line)
+        if m:
+            name = m.group(1).strip()
+            continue
+        m = _BEST_TIME_RE.match(line)
+        if m:
+            avg_time = float(m.group(1))
+            continue
+        m = _BEST_TFLOPS_RE.match(line)
+        if m:
+            tflops = float(m.group(1))
+            continue
+        m = _BEST_GBS_RE.match(line)
+        if m:
+            gb_s = float(m.group(1))
+            continue
+
+    return name, avg_time, tflops, gb_s
+
+
+# Extracts TFLOPS and instance name from a "[Valid] Perf:" line.
+_PERF_NAME_RE = re.compile(
+    r"\[Valid\]\s+Perf:\s+[\d.]+ ms,\s+([\d.]+) TFlops,\s+[\d.]+ GB/s,\s+(\S+)"
+)
+
+
+def parse_valid_perf(
+    stdout: str, prefix: str
+) -> tuple[float, str] | tuple[None, None]:
+    """Return (best_tflops, kernel_name) over ``[Valid]`` lines matching ``prefix``."""
+    best_val: float | None = None
+    best_name: str | None = None
+
+    for line in stdout.splitlines():
+        if "[Valid]" not in line or prefix not in line:
+            continue
+        m = _PERF_NAME_RE.search(line)
+        if m:
+            val = float(m.group(1))
+            name = m.group(2)
+            if best_val is None or val > best_val:
+                best_val = val
+                best_name = name
+
+    return best_val, best_name
+
+
+# The profiler tags each instance on stdout with a status marker. Instances that
+# fail verification are reported as "[Error] <name>, SplitK N"; "[Invalid]" is
+# used for the same purpose by some profiler ops. We extract the kernel name so
+# failures name the offending instance instead of dumping the raw mismatch diff.
+_FAILED_INSTANCE_RE = re.compile(r"^\[(?:Error|Invalid)\]\s+(.+)$")
+_SPLITK_SUFFIX_RE = re.compile(r",\s*SplitK\s+\S+\s*$")
+
+
+def parse_failed_instances(stdout: str) -> list[str]:
+    """Return the names of instances the profiler flagged as Error/Invalid."""
+    names: list[str] = []
+    for line in stdout.splitlines():
+        m = _FAILED_INSTANCE_RE.match(line.strip())
+        if not m:
+            continue
+        name = _SPLITK_SUFFIX_RE.sub("", m.group(1).strip()).strip()
+        if name:
+            names.append(name)
+    return names
+
+
+# ===========================================================================
+# report
+# ===========================================================================
+
+@dataclass
+class Result:
+    case: Case
+    ran: bool
+    best_instance: str = ""
+    avg_time_ms: float = 0.0
+    tflops: float = 0.0
+    gb_s: float = 0.0
+    error: str = ""
+    failed_instances: list[str] = field(default_factory=list)
+
+    @property
+    def delta_pct(self) -> float | None:
+        if self.case.expected is None or self.case.expected == 0:
+            return None
+        return (self.tflops - self.case.expected) / self.case.expected * 100.0
+
+    def verdict(self, tolerance: float) -> str:
+        if not self.ran:
+            return "FAIL"
+        if self.case.expected is None:
+            return "INFO"
+        # Accept if within -tolerance of expected (improvements always pass).
+        if self.tflops >= self.case.expected * (1.0 - tolerance):
+            return "PASS"
+        return "FAIL"
+
+
+def run_case(bin_path: Path, case: Case, verbose: bool = False) -> Result:
+    """Run a single case and classify the result."""
+    if verbose:
+        print(f"  $ ckProfiler {case.binary} {case.args}")
+
+    stdout, stderr, returncode = run_profiler(bin_path, case.binary, case.args)
+    stderr = stderr.strip()
+    name, avg_time, tflops, gb_s = parse_best_perf(stdout)
+    failed = parse_failed_instances(stdout)
+
+    if verbose and stdout:
+        for ln in stdout.splitlines():
+            print(f"    {ln}")
+
+    if returncode == 127:
+        return Result(case=case, ran=False, error=stderr or "executable not found")
+
+    # A case "ran" if we found a best configuration and there was no stderr noise.
+    ran = bool(name) and len(stderr) == 0
+
+    # Build a concise error string. Prefer naming the offending instance(s) over
+    # dumping the raw verification diff that the profiler writes to stderr.
+    error = ""
+    if not ran:
+        if failed:
+            error = "failing instance(s): " + ", ".join(failed)
+        elif stderr:
+            error = stderr.splitlines()[0].strip()
+        elif not name:
+            error = "no best configuration found"
+
+    return Result(
+        case=case,
+        ran=ran,
+        best_instance=name,
+        avg_time_ms=avg_time,
+        tflops=tflops,
+        gb_s=gb_s,
+        error=error,
+        failed_instances=failed,
+    )
+
+
+def print_summary(results: list[Result]) -> None:
+    """Print a plain-text per-section summary (smoke / ``run`` output)."""
+    total = len(results)
+    passed = sum(1 for r in results if r.ran)
+    failed = total - passed
+
+    print()
+    print("=" * 80)
+    print("SUMMARY")
+    print("=" * 80)
+
+    for section in ("fwd", "bwd_data"):
+        sec = [r for r in results if r.case.section == section]
+        if not sec:
+            continue
+        print(f"\n[{_SECTION_TITLE[section]}]")
+        print(f"  {'#':<4} {'Status':<6}  {'Time(ms)':>10}  {'TFlops':>8}  {'GB/s':>8}  Args")
+        print(f"  {'-'*4}  {'-'*6}  {'-'*10}  {'-'*8}  {'-'*8}  {'-'*30}")
+        for i, r in enumerate(sec, 1):
+            status = "PASS" if r.ran else "FAIL"
+            if r.ran and r.best_instance:
+                print(
+                    f"  {i:<4} {status:<6}  {r.avg_time_ms:>10.3f}  {r.tflops:>8.2f}"
+                    f"  {r.gb_s:>8.1f}  {r.case.args}"
+                )
+                print(f"       {'':6}  best: {r.best_instance}")
+            else:
+                print(f"  {i:<4} {status:<6}  {'N/A':>10}  {'N/A':>8}  {'N/A':>8}  {r.case.args}")
+                if r.error:
+                    print(f"       error: {r.error}")
+
+    print()
+    print(f"Result: {passed}/{total} ran cleanly", end="")
+    if failed:
+        print(f", {failed} FAILED")
+    else:
+        print(" (all passed)")
+    print("=" * 80)
+
+
+def render_markdown(results: list[Result], tolerance: float, meta: dict) -> str:
+    """Render the regression report as markdown."""
+    lines: list[str] = []
+    lines.append("# Direct convolution regression report")
+    lines.append("")
+    for k, v in meta.items():
+        lines.append(f"- **{k}**: {v}")
+    lines.append(f"- **tolerance**: {tolerance * 100:.0f}% below expected")
+    lines.append("")
+
+    passed = sum(1 for r in results if r.verdict(tolerance) == "PASS")
+    failed = sum(1 for r in results if r.verdict(tolerance) == "FAIL")
+    info = sum(1 for r in results if r.verdict(tolerance) == "INFO")
+    lines.append(
+        f"**Result: {passed} passed, {failed} failed, {info} report-only "
+        f"({len(results)} total)**"
+    )
+    lines.append("")
+
+    for section in ("fwd", "bwd_data"):
+        sec_results = [r for r in results if r.case.section == section]
+        if not sec_results:
+            continue
+        lines.append(f"## {_SECTION_TITLE[section]} cases")
+        lines.append("")
+        lines.append(
+            "| # | Verdict | TFLOPS | Expected | Delta% | Time(ms) | GB/s | "
+            "Best instance | Args |"
+        )
+        lines.append(
+            "|---|---------|--------|----------|--------|----------|------|"
+            "---------------|------|"
+        )
+        for i, r in enumerate(sec_results, 1):
+            exp = "-" if r.case.expected is None else f"{r.case.expected:.0f}"
+            dp = r.delta_pct
+            delta = "-" if dp is None else f"{dp:+.1f}"
+            if r.ran:
+                tflops = f"{r.tflops:.2f}"
+                time = f"{r.avg_time_ms:.4f}"
+                gbs = f"{r.gb_s:.1f}"
+                inst = r.best_instance
+            else:
+                tflops = time = gbs = "N/A"
+                if r.failed_instances:
+                    inst = "; ".join(r.failed_instances)
+                else:
+                    inst = r.error or "did not run"
+            lines.append(
+                f"| {i} | {r.verdict(tolerance)} | {tflops} | {exp} | {delta} "
+                f"| {time} | {gbs} | `{inst}` | `{r.case.args}` |"
+            )
+        lines.append("")
+
+    # Consolidated list of every instance the profiler flagged as incorrect,
+    # de-duplicated across cases, so buggy instances are easy to copy/blacklist.
+    failing = sorted({fi for r in results for fi in r.failed_instances})
+    if failing:
+        lines.append("## Failing instances")
+        lines.append("")
+        lines.append(
+            "Instances flagged `[Error]`/`[Invalid]` by the profiler "
+            "(incorrect results):"
+        )
+        lines.append("")
+        for fi in failing:
+            lines.append(f"- `{fi}`")
+        lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# compare: iGEMM vs direct conv
+# ---------------------------------------------------------------------------
+
+class DirectConvStatus(enum.Enum):
+    OK = "ok"
+    INCORRECT = "incorrect"     # stderr was non-empty -> wrong results
+    NO_INSTANCE = "no_instance"  # ran cleanly but no applicable direct conv kernel
+
+
+def direct_conv_status(
+    stderr: str, dc_tflops: float | None
+) -> DirectConvStatus:
+    """Classify the direct conv outcome for a single run.
+
+    Priority:
+      1. Non-empty stderr -> profiler reported incorrect results.
+      2. No [Valid] direct conv line in stdout -> no applicable instance.
+      3. Otherwise -> OK.
+    """
+    if stderr.strip():
+        return DirectConvStatus.INCORRECT
+    if dc_tflops is None:
+        return DirectConvStatus.NO_INSTANCE
+    return DirectConvStatus.OK
+
+
+def compare_label(case: Case) -> str:
+    """Short human-readable label for a comparison case from its arguments.
+
+    Column order (no profiler subcommand in args):
+      data_type layout indexing_type verify init_type print time_kernel nDims
+      G N K C Y X Hi Wi ...
+    """
+    args = case.args.split()
+    try:
+        g, n, k, c, y, x, hi, wi = args[8:16]
+        return f"G{g}N{n}K{k}C{c}_{y}x{x}_{hi}x{wi}"
+    except (IndexError, ValueError):
+        return case.args
+
+
+def render_compare_markdown(
+    labels: list[str],
+    igemm_best: list[float | None],
+    igemm_names: list[str | None],
+    direct_best: list[float | None],
+    direct_names: list[str | None],
+    direct_statuses: list[DirectConvStatus],
+) -> str:
+    """Render the iGEMM-vs-direct comparison table as markdown."""
+    header = (
+        "| Test case | iGEMM (TFlops) | Best iGEMM kernel"
+        " | Direct Conv (TFlops) | Best Direct kernel | Direct status | Improvement |\n"
+        "|-----------|---------------:|-------------------|"
+        "---------------------:|--------------------|---------------|------------:|"
+    )
+    rows = [header]
+    for label, ig, ig_name, dc, dc_name, dc_status in zip(
+        labels, igemm_best, igemm_names, direct_best, direct_names, direct_statuses
+    ):
+        ig_str = f"{ig:.4f}" if ig else "FAIL"
+        dc_str = f"{dc:.4f}" if dc else "—"
+        ig_name_str = f"`{ig_name}`" if ig_name else "—"
+        dc_name_str = f"`{dc_name}`" if dc_name else "—"
+        status_str = {
+            DirectConvStatus.OK: "✓ ok",
+            DirectConvStatus.INCORRECT: "✗ incorrect",
+            DirectConvStatus.NO_INSTANCE: "— no instance",
+        }[dc_status]
+        improvement_str = f"{dc/ig:.3f}x" if ig and dc else "N/A"
+        rows.append(
+            f"| {label} | {ig_str} | {ig_name_str} | {dc_str} | {dc_name_str} "
+            f"| {status_str} | {improvement_str} |"
+        )
+
+    return "# CK Profiler: iGEMM vs Direct Conv\n\n" + "\n".join(rows) + "\n"
+
+
+def make_figure(
+    labels: list[str],
+    igemm_values: list[float | None],
+    direct_values: list[float | None],
+    direct_statuses: list[DirectConvStatus],
+    output_path: Path,
+) -> None:
+    """Save a grouped bar chart comparing iGEMM vs Direct Conv TFLOPS.
+
+    matplotlib / numpy are imported lazily so that ``run`` / ``regress`` (which
+    never call this) do not require them.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    n = len(labels)
+    x = np.arange(n)
+    width = 0.35
+
+    igemm_vals = [v if v is not None else 0.0 for v in igemm_values]
+    direct_vals = [v if v is not None else 0.0 for v in direct_values]
+    igemm_failed = [v is None for v in igemm_values]
+
+    fig, ax = plt.subplots(figsize=(max(10, n * 0.8), 6))
+
+    bars_igemm = ax.bar(x - width / 2, igemm_vals, width, label="iGEMM", color="steelblue")
+    bars_direct = ax.bar(x + width / 2, direct_vals, width, label="Direct Conv", color="darkorange")
+
+    # Mark failed iGEMM bars.
+    for bar, failed in zip(bars_igemm, igemm_failed):
+        if failed:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2, 0.5, "FAIL",
+                ha="center", va="bottom", fontsize=7, color="red", rotation=90,
+            )
+
+    # Mark direct conv bars by status, and annotate relative perf on OK bars.
+    _status_label = {
+        DirectConvStatus.INCORRECT: ("INCORRECT", "red"),
+        DirectConvStatus.NO_INSTANCE: ("N/A", "gray"),
+    }
+    for bar, status, ig, dc in zip(bars_direct, direct_statuses, igemm_values, direct_values):
+        if status in _status_label:
+            text, color = _status_label[status]
+            ax.text(
+                bar.get_x() + bar.get_width() / 2, 0.5, text,
+                ha="center", va="bottom", fontsize=7, color=color, rotation=90,
+            )
+        elif status == DirectConvStatus.OK and ig and dc:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                f"{dc / ig:.2f}x",
+                ha="center", va="bottom", fontsize=7, color="black",
+            )
+
+    ax.set_xlabel("Test case")
+    ax.set_ylabel("Best TFLOPS")
+    ax.set_title("iGEMM vs Direct Conv — Best TFLOPS per test case")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
+    ax.legend()
+    ax.grid(axis="y", linestyle="--", alpha=0.5)
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    print(f"Figure saved to {output_path}")
