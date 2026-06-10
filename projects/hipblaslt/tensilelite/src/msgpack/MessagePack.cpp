@@ -28,7 +28,10 @@
 
 #include <Tensile/msgpack/Loading.hpp>
 
+#include <filesystem>
 #include <fstream>
+
+#include <zlib.h>
 
 namespace TensileLite
 {
@@ -67,12 +70,73 @@ namespace TensileLite
         }
     }
 
+    static bool readCompressedMsgObject(std::string const&     gz_filename,
+                                         msgpack::object_handle& result)
+    {
+        std::ifstream in(gz_filename, std::ios::binary | std::ios::ate);
+        if(!in.is_open())
+            return false;
+
+        auto compressed_size = static_cast<size_t>(in.tellg());
+        in.seekg(0);
+        std::vector<uint8_t> compressed(compressed_size);
+        in.read(reinterpret_cast<char*>(compressed.data()), compressed_size);
+        if(!in)
+            return false;
+
+        // zlib inflate with unknown output size — grow buffer until done
+        z_stream strm{};
+        if(inflateInit(&strm) != Z_OK)
+            return false;
+
+        strm.next_in  = compressed.data();
+        strm.avail_in = static_cast<uInt>(compressed_size);
+
+        std::vector<uint8_t> decompressed(compressed_size * 4);
+        strm.next_out  = decompressed.data();
+        strm.avail_out = static_cast<uInt>(decompressed.size());
+
+        int ret;
+        do
+        {
+            ret = inflate(&strm, Z_NO_FLUSH);
+            if(ret == Z_OK && strm.avail_out == 0)
+            {
+                size_t used = decompressed.size();
+                decompressed.resize(used * 2);
+                strm.next_out  = decompressed.data() + used;
+                strm.avail_out = static_cast<uInt>(decompressed.size() - used);
+            }
+        } while(ret == Z_OK);
+
+        size_t decompressed_size = strm.total_out;
+        inflateEnd(&strm);
+
+        if(ret != Z_STREAM_END)
+            return false;
+
+        result = msgpack::unpack(reinterpret_cast<const char*>(decompressed.data()),
+                                 decompressed_size);
+        return true;
+    }
+
     inline bool fileToMsgObject(std::string const& filename, msgpack::object_handle& result)
     {
-        // parse file into a msgpack::object_handle
-
         try
         {
+            // Probe for a zlib-compressed variant first
+            std::string gz_filename = filename + ".gz";
+            if(std::filesystem::exists(gz_filename))
+            {
+                if(readCompressedMsgObject(gz_filename, result))
+                    return true;
+
+                if(Debug::Instance().printDataInit())
+                    std::cout << "Warning: failed to decompress " << gz_filename
+                              << ", falling back to uncompressed" << std::endl;
+            }
+
+            // Fall back to uncompressed file
             std::ifstream in(filename, std::ios::in | std::ios::binary);
             if(!in.is_open())
             {
@@ -91,7 +155,7 @@ namespace TensileLite
                 unp.reserve_buffer(buffer_size);
                 in.read(unp.buffer(), buffer_size);
                 unp.buffer_consumed(in.gcount());
-                finished_parsing = unp.next(result); // may throw msgpack::parse_error
+                finished_parsing = unp.next(result);
             } while(!finished_parsing && !in.fail());
 
             if(!finished_parsing)
