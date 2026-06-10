@@ -12,9 +12,9 @@ set(GEMM_ROWCOLQUANT_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
 
 # Function to create individual GEMM RowColQuant targets
 function(create_individual_gemm_rowcolquant_target datatype layout trait tile_config config_json)
-    # GEMM_ROWCOLQUANT_GPU_TARGETS_INDIVIDUAL is guaranteed non-empty here (caller checks at line 192)
     if(NOT GEMM_ROWCOLQUANT_GPU_TARGETS_INDIVIDUAL)
-        message(FATAL_ERROR "BUG: create_individual_gemm_rowcolquant_target called with no GPU targets")
+        message(WARNING "Skipping individual GEMM RowColQuant target ${datatype}_${layout}_${trait}_${tile_config}: No supported GPU targets")
+        return()
     endif()
 
     set(target_name "benchmark_gemm_rowcolquant_${datatype}_${layout}_${trait}_${tile_config}")

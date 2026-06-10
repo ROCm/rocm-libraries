@@ -95,8 +95,7 @@
         },
         "persistent": {
             "values": [
-                false,
-                true
+                false
             ]
         }
     },

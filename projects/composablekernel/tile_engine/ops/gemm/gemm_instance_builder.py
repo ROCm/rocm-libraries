@@ -321,7 +321,7 @@ class GemmKernelBuilder:
                 pipelines = ["comp_async"]
             elif self.kernel_name_prefix in ["grouped_gemm_rowcolquant", "grouped_gemm_tensorquant", "gemm_rowcolquant", "gemm_tensor_quant"]:
                 pipelines = ["compv3"]
-            elif self.kernel_name_prefix in ["gemm_universal", "gemm_multi_d", "gemm_multi_abd", "grouped_gemm", "batched_contraction", "batched_gemm"]
+            elif self.kernel_name_prefix in ["gemm_universal", "gemm_multi_d", "gemm_multi_abd", "grouped_gemm", "batched_contraction", "batched_gemm"]:
                 pipelines = ["compv4"]
 
         configs = []

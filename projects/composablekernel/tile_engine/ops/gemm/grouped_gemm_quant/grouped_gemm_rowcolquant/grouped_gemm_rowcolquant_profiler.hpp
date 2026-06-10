@@ -165,7 +165,9 @@ class GroupedRowColQuantGemmProfiler
             const void* p_aq = aq_dev_bufs[i]->GetDeviceBuffer();
             const void* p_bq = bq_dev_bufs[i]->GetDeviceBuffer();
 
-            // RowColQuant: QK_A=1, QK_B=1 (placeholder), stride_AQ=0, stride_BQ=0
+            // RowColQuant: QK_A and QK_B are not used by the RowColQuant kernel code path
+            // (the kernel ignores them and uses M/N directly for the per-row/col scale tensors).
+            // stride_AQ=0 and stride_BQ=0 broadcast the 1-D scale vectors across all columns/rows.
             gemm_descs.push_back({p_a,
                                   p_b,
                                   p_c,
@@ -175,8 +177,8 @@ class GroupedRowColQuantGemmProfiler
                                   M,
                                   N,
                                   K,
-                                  1, // QK_A placeholder
-                                  1, // QK_B placeholder
+                                  1, // QK_A: unused by RowColQuant
+                                  1, // QK_B: unused by RowColQuant
                                   problem.stride_As_[i],
                                   problem.stride_Bs_[i],
                                   problem.stride_Cs_[i],
