@@ -72,7 +72,7 @@ jobs:
         components: ${{ fromJSON(needs.configure_test_matrix.outputs.components) }}
     uses: './.github/workflows/therock-test-component.yml'
     with:
-      artifact_run_id: ${{  github.run_id }}
+      artifact_run_id: "27263978252"  # some good run https://github.com/ROCm/rocm-libraries/actions/runs/27263978252
       therock_ref: ${{ inputs.therock_ref }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
