@@ -1495,15 +1495,15 @@ class TestRemoveCrossDeps:
 
         # LR A @s1: wait_gr_sync with counts
         lr_a1 = _get_lr(s1, 'A')
-        assert _preop_kinds(lr_a1) == [('wait_gr', True, {'A': 8, 'B': 9, 'SA': 1, 'SB': 1})]
+        assert _preop_kinds(lr_a1) == [('wait_gr', True, {'A': 8, 'B': 9, 'SA': 0, 'SB': 0})]
 
         # LR B @s1: wait_gr with has_sync
         lr_b1 = _get_lr(s1, 'B')
-        assert _preop_kinds(lr_b1) == [('wait_gr', True, {'A': 8, 'B': 1, 'SA': 1, 'SB': 1})]
+        assert _preop_kinds(lr_b1) == [('wait_gr', True, {'A': 8, 'B': 1, 'SA': 0, 'SB': 0})]
 
         # LR SA @s1
         lr_sa1 = _get_lr(s1, 'SA')
-        assert _preop_kinds(lr_sa1) == [('wait_gr', True, {'A': 8, 'B': 1, 'SA': 0, 'SB': 1})]
+        assert _preop_kinds(lr_sa1) == [('wait_gr', True, {'A': 8, 'B': 1, 'SA': 0, 'SB': 0})]
 
         # LR SB @s1
         lr_sb1 = _get_lr(s1, 'SB')
@@ -1838,7 +1838,7 @@ class TestComputeInflightLoads:
         lr_b1 = _get_lr(s1, 'B')
         assert lr_b1.preOps[0].wait_gr_counts.A == 8
         assert lr_b1.preOps[0].wait_gr_counts.B == 1
-        assert lr_b1.preOps[0].wait_gr_counts.SA == 1
+        assert lr_b1.preOps[0].wait_gr_counts.SA == 0
 
         # LR SA @s1: counts
         lr_sa1 = _get_lr(s1, 'SA')
@@ -1849,8 +1849,8 @@ class TestComputeInflightLoads:
         lr_a1 = _get_lr(s1, 'A')
         assert lr_a1.preOps[0].wait_gr_counts.A == 8
         assert lr_a1.preOps[0].wait_gr_counts.B == 9
-        assert lr_a1.preOps[0].wait_gr_counts.SA == 1
-        assert lr_a1.preOps[0].wait_gr_counts.SB == 1
+        assert lr_a1.preOps[0].wait_gr_counts.SA == 0
+        assert lr_a1.preOps[0].wait_gr_counts.SB == 0
 
     def test_fp8_DU128_asymmetric_A_lt_B(self):
         """FP8 DU=128, MT=128x192, waveGroup=(2,2), PGR=2.

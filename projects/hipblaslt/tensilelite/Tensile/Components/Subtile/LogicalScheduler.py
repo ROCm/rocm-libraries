@@ -1769,18 +1769,20 @@ class LogicalScheduler:
 
         subIterK==1: anchor on this partition's slot-0 GR (one-slot walk).
         subIterK==0: when the tile dep is still in the future, anchor on the
-        immediately preceding schedule slot (typically previous partition sk=1),
-        or same-partition slot-0 at pi=0 sk=0 (zero inflight after prologue).
+        immediately preceding schedule slot (typically previous partition sk=1,
+        or sk=1 on the prior body-iter ring when pi=0 sk=0), not slot-0 GRs
+        from the same subIterK (which leaves the producer tail in the inflight
+        window).
         """
-        if len(self._partitions) <= 1:
-            return dep
+        numP = len(self._partitions)
+        numK = len(self._partitions[0])
         gr = dep.ref
         if not isinstance(gr, GRPlacement):
             return dep
 
-        numK = len(self._partitions[0])
-
         if lr.subIterK_slot == 1:
+            if numP <= 1:
+                return dep
             slot0 = self._partitions[lr.partition][0]
             if gr.partition == lr.partition and gr.subIterK_slot == 0:
                 anchor_gr = gr
@@ -1788,6 +1790,17 @@ class LogicalScheduler:
                 anchor_gr = self._anchor_gr_in_slot(slot0, gr.tensor, gr.unrollId)
             if anchor_gr is not None:
                 return Dep(ref=anchor_gr, mt_offset=0)
+
+        if numP <= 1 and numK > 1 and lr.subIterK_slot == 0:
+            if not self._gr_precedes_lr(gr, lr):
+                anchor_gr = self._anchor_gr_in_slot(
+                    self._partitions[0][numK - 1], gr.tensor, gr.unrollId)
+                if anchor_gr is not None:
+                    return Dep(ref=anchor_gr, mt_offset=0)
+            return dep
+
+        if numP <= 1:
+            return dep
 
         if self._gr_precedes_lr(gr, lr):
             return dep
@@ -1797,14 +1810,13 @@ class LogicalScheduler:
             return anchor
 
         lr_flat = lr.partition * numK + lr.subIterK_slot
-        if lr_flat > 0:
-            prev_flat = lr_flat - 1
-            prev_pi = prev_flat // numK
-            prev_k = prev_flat % numK
-            anchor_gr = self._anchor_gr_in_slot(
-                self._partitions[prev_pi][prev_k], gr.tensor, gr.unrollId)
-            if anchor_gr is not None:
-                return Dep(ref=anchor_gr, mt_offset=0)
+        prev_flat = lr_flat - 1 if lr_flat > 0 else (numP * numK - 1)
+        prev_pi = prev_flat // numK
+        prev_k = prev_flat % numK
+        anchor_gr = self._anchor_gr_in_slot(
+            self._partitions[prev_pi][prev_k], gr.tensor, gr.unrollId)
+        if anchor_gr is not None:
+            return Dep(ref=anchor_gr, mt_offset=0)
 
         slot0 = self._partitions[lr.partition][0]
         anchor_gr = self._anchor_gr_in_slot(slot0, gr.tensor, gr.unrollId)
@@ -1882,6 +1894,14 @@ class LogicalScheduler:
             )
             return WaitGRCounts()
 
+        # sk=0 wrap consume at a body-iter boundary: the tile dep GR shares the
+        # consumer's flat slot (mt_offset ring).  The backward walk counts GR
+        # atoms issued after that dep in the slot as permissible inflight ops,
+        # but they are the producer tail for the buffer the wrap-LR reads.
+        if (numK > 1 and consumer_slot == 0 and wraps_needed > 0
+                and dep_flat == consumer_flat):
+            return WaitGRCounts()
+
         counts = WaitGRCounts()
         pos = consumer_flat
         for step in range(total_steps):
@@ -1900,11 +1920,13 @@ class LogicalScheduler:
             for gr in sorted_grs:
                 if is_final and (total_steps == 1 and consumer_slot == 1
                                  and numP > 1):
-                    # sk=1 wait_gr: inflight = all GR loads in same-partition sk=0
+                    # sk=1 wait_gr: inflight = A/B GR loads in same-partition sk=0
                     # since that slot's wait_gr (matches assembly buffer_load window).
-                    atoms = self._count_gr_atoms(gr)
-                    cur = getattr(counts, gr.tensor)
-                    setattr(counts, gr.tensor, cur + atoms)
+                    # SA/SB must drain before scale wrap-LR ds_reads.
+                    if gr.tensor in ('A', 'B'):
+                        atoms = self._count_gr_atoms(gr)
+                        cur = getattr(counts, gr.tensor)
+                        setattr(counts, gr.tensor, cur + atoms)
                     continue
                 if is_final and gr.tensor == tensor and gr is dep_ref.ref:
                     # Cross-subIterK: include the dep GR's loads when the backward
@@ -1918,6 +1940,9 @@ class LogicalScheduler:
                             atoms = self._count_gr_atoms(gr)
                             setattr(counts, gr.tensor, cur + atoms)
                     return counts
+                # sk=1 wrap-LR scale reads consume SA/SB from sk=0 tail GRs.
+                if consumer_slot == 1 and gr.tensor in ('SA', 'SB'):
+                    continue
                 atoms = self._count_gr_atoms(gr)
                 cur = getattr(counts, gr.tensor)
                 setattr(counts, gr.tensor, cur + atoms)
@@ -2110,6 +2135,7 @@ class LogicalScheduler:
         report a non-zero count for that tensor.  Zero on an LR's own tensor
         means "not waiting on this tensor" and must not erase another LR's
         non-zero requirement (e.g. LR A wait_gr B=8 must survive LR B B=0).
+        Lower emitted vlcnt is a stricter drain (vmcnt(0) waits for all loads).
         """
         wait_gr_by_lr = []
         has_wait_gr_sync = False
