@@ -96,14 +96,16 @@ RUN pip3 install --break-system-packages -r /doc-requirements.txt && \
 RUN git config --global user.email "docker@build.local" && \
     git config --global user.name "Docker Build"
 
-RUN git clone https://github.com/ROCm/TheRock.git
+# Clone TheRock — shallow at the specific commit if provided, else tip of default branch
+RUN if [ "$THEROCK_GIT_HASH" != "default" ]; then \
+        git clone --filter=blob:none --no-checkout https://github.com/ROCm/TheRock.git && \
+        git -C TheRock fetch --depth=1 origin "$THEROCK_GIT_HASH" && \
+        git -C TheRock checkout FETCH_HEAD; \
+    else \
+        git clone --depth=1 https://github.com/ROCm/TheRock.git; \
+    fi
 
 WORKDIR /TheRock
-
-RUN if [ "$THEROCK_GIT_HASH" != "default" ]; then \
-        git fetch; \
-        git checkout $THEROCK_GIT_HASH; \
-    fi
 
 RUN if [ "$ROCM_LIBRARIES_REF" != "default" ]; then \
         git submodule update --init rocm-libraries && \
@@ -240,26 +242,6 @@ RUN cd / && \
         rbuild prepare -s develop -d ${PREFIX} -DGPU_ARCHS="${GPU_ARCHS}"; \
     fi
 
-# ASAN runtime environment — must match what the instrumented binaries expect
-ENV PATH="${ROCM_PATH}/bin:${PATH}"
-ENV HIP_PATH=${ROCM_PATH}
-ENV HIP_DEVICE_LIB_PATH="${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
-ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib/clang/22/lib/linux:${LD_LIBRARY_PATH}"
-ENV LIBRARY_PATH="${ROCM_PATH}/lib:${LIBRARY_PATH}"
-ENV ROCM_DEVICE_LIB_PATH="${HIP_DEVICE_LIB_PATH}"
-ENV CPLUS_INCLUDE_PATH="${ROCM_PATH}/include:${CPLUS_INCLUDE_PATH}"
-ENV CPATH="${ROCM_PATH}/include:${CPATH}"
-ENV ASAN_SYMBOLIZER_PATH="${ROCM_PATH}/llvm/bin/llvm-symbolizer"
-ENV ASAN_OPTIONS=detect_odr_violation=0:quarantine_size_mb=600
-ENV HSA_XNACK=1
-ENV AMD_LOG_LEVEL=1
-# Expose artifact dir for test runner compatibility with TheRock's fetch_test_configurations
-ENV OUTPUT_ARTIFACTS_DIR=${ROCM_PATH}
-ENV THEROCK_BIN_DIR="${ROCM_PATH}/bin"
-ENV AMDGPU_FAMILIES=${AMDGPU_FAMILIES}
-ENV TEST_TYPE=full
-ENV HIP_PLATFORM=amd
-
 # ============================================================================
 # Build Composable Kernel with ASAN instrumentation
 #
@@ -268,7 +250,6 @@ ENV HIP_PLATFORM=amd
 # toolchain injection we pass THEROCK_SANITIZER=ASAN and explicit sanitizer
 # compiler/linker flags manually.
 # ============================================================================
-FROM miopen_deps AS build_ck_asan
 # xnack+ is required for device-side ASAN; must match ASAN_GPU_TARGETS
 ARG ASAN_GPU_TARGETS="gfx942:xnack+"
 
@@ -301,5 +282,35 @@ RUN set -x && \
         -D CMAKE_SHARED_LINKER_FLAGS="-fsanitize=address" \
         .. && \
     ninja -j ${num_threads} install
+
+# ============================================================================
+# Final lean runtime image — only /opt/rocm and /opt/venv copied in
+# ============================================================================
+FROM base AS final
+COPY --from=miopen_deps /opt/rocm /opt/rocm
+COPY --from=miopen_deps /opt/venv /opt/venv
+
+ARG AMDGPU_FAMILIES=gfx94X-dcgpu
+
+# ASAN runtime environment — must match what the instrumented binaries expect
+ENV ROCM_PATH=/opt/rocm
+ENV PATH="${ROCM_PATH}/bin:${PATH}"
+ENV HIP_PATH=${ROCM_PATH}
+ENV HIP_DEVICE_LIB_PATH="${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
+ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib/clang/22/lib/linux:${LD_LIBRARY_PATH}"
+ENV LIBRARY_PATH="${ROCM_PATH}/lib:${LIBRARY_PATH}"
+ENV ROCM_DEVICE_LIB_PATH="${HIP_DEVICE_LIB_PATH}"
+ENV CPLUS_INCLUDE_PATH="${ROCM_PATH}/include:${CPLUS_INCLUDE_PATH}"
+ENV CPATH="${ROCM_PATH}/include:${CPATH}"
+ENV ASAN_SYMBOLIZER_PATH="${ROCM_PATH}/llvm/bin/llvm-symbolizer"
+ENV ASAN_OPTIONS=detect_odr_violation=0:quarantine_size_mb=600
+ENV HSA_XNACK=1
+ENV AMD_LOG_LEVEL=1
+# Expose artifact dir for test runner compatibility with TheRock's fetch_test_configurations
+ENV OUTPUT_ARTIFACTS_DIR=${ROCM_PATH}
+ENV THEROCK_BIN_DIR="${ROCM_PATH}/bin"
+ENV AMDGPU_FAMILIES=${AMDGPU_FAMILIES}
+ENV TEST_TYPE=full
+ENV HIP_PLATFORM=amd
 
 WORKDIR /workspace
