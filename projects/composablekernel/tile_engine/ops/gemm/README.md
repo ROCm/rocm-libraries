@@ -94,6 +94,27 @@ auto-detected (`HIP_VISIBLE_DEVICES`, then `rocm-smi`/`amd-smi`); override with
 | dtype | `fp16` (bf16 follows in #8190) |
 | layout | `rcr` (rrr/crr/ccr follow in #8191; row-major C only — ck_tile rejects column-major C at build) |
 
+### Variant scope
+
+The bridge is **one shared, variant-aware driver** (`gemm_full_benchmark.py` +
+`run_one_gemm_kernel.py`), not a per-variant copy of the driver. `--variant`
+selects the per-variant `configs/` directory, mirroring the existing Tile Engine
+layout where each variant (`gemm_universal/`, `gemm_multi_d/`,
+`gemm_preshuffle/`, `grouped_gemm/`) owns its own subdirectory.
+
+What that means for this PR:
+
+- **Only `gemm_universal` is wired and validated through the bridge here.** It is
+  the foundation variant; the dispatcher codegen path is exercised and parity-
+  checked for it alone.
+- The `gemm_multi_d/`, `gemm_preshuffle/`, and `grouped_gemm/` `configs/`
+  directories are **scaffolding** that follows the per-variant convention so the
+  layout is ready. `--variant` will select them, but the bridge does **not** yet
+  produce correct kernels for those variants on this PR — do not treat their
+  presence as working support.
+- Grouped GEMM and stream-K go through **separate bridge efforts** (stream-K in
+  #8136, grouped GEMM on its own branch), not this PR.
+
 ### Deprecation note
 
 The per-variant `*_instance_builder.py` scripts (e.g.
