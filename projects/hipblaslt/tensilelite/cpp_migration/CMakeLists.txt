@@ -31,3 +31,33 @@ target_include_directories(_tensile_writer PRIVATE
 # Install the compiled extension into the tensile_writer package directory in
 # the wheel (the pure-Python package files are picked up by wheel.packages).
 install(TARGETS _tensile_writer LIBRARY DESTINATION tensile_writer)
+
+# ---------------------------------------------------------------------------
+# C++ unit tests (cpp/tests) — intentionally NOT wired in here.
+#
+# The gtest target under cpp/tests/ (cpp/tests/CMakeLists.txt) is a deliberately
+# standalone build: the subtile geometry / tile_info / emit_leaves headers are
+# pure integer/float math with no nanobind, Python, HIP, or rocisa dependency,
+# so the tests only need a C++20 compiler and GTest. We do NOT add it via
+# add_subdirectory() here on purpose:
+#
+#   * This CMakeLists is the scikit-build-core wheel-build entry point (driven by
+#     pip / pyproject.toml), so it requires Python + nanobind. Pulling the gtest
+#     target into it would (a) drag GTest into the wheel/pip build surface and
+#     (b) couple the dependency-light test build to the nanobind extension build
+#     — exactly what the standalone test layout was designed to avoid.
+#   * The wheel build never enables a test flag, so an add_subdirectory guard
+#     would not actually surface the tests to CI anyway.
+#
+# The tests are therefore an explicit, opt-in build. Run them directly (verified
+# in hipblaslt-dev:latest, no GPU required):
+#
+#   cd projects/hipblaslt/tensilelite/cpp_migration
+#   cmake -S cpp/tests -B build_tests -G Ninja
+#   cmake --build build_tests
+#   ctest --test-dir build_tests --output-on-failure
+#
+# CI / new C++ test wiring: add new gtest sources to cpp/tests/CMakeLists.txt and
+# invoke the standalone build above; do not expect them to be picked up through
+# this wheel-build CMakeLists.
+# ---------------------------------------------------------------------------
