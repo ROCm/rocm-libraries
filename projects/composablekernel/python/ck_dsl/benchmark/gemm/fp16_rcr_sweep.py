@@ -439,51 +439,141 @@ def write_sweep_json(
     path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
 
 
-def write_sweep_csv(path: Path, runs: Sequence[GemmRunRecord]) -> None:
-    """Write a flat per-run CSV for quick inspection / debugging.
+_CSV_KERNEL_KEY_COLUMNS = (
+    "candidate",
+    "algorithm",
+    "spec_id",
+    "arch",
+    "abi_version",
+    "spec_hash",
+    "request_hash",
+)
 
-    This is evidence output, not training data: it carries shape + measured
-    perf but no kernel-config feature columns (tile/pipeline/warp/etc.), which
-    live only in the JSON ``spec``. It is not the heuristics training-data
-    emitter (canonical schema in
-    ``projects/composablekernel/dispatcher/heuristics/DATA_GENERATION.md``);
-    feeding that pipeline would require the per-spec feature columns.
+_CSV_CONFIG_COLUMNS = (
+    "dtype_a",
+    "dtype_b",
+    "dtype_c",
+    "dtype_acc",
+    "layout",
+    "tile_m",
+    "tile_n",
+    "tile_k",
+    "warp_m",
+    "warp_n",
+    "warp_k",
+    "warp_tile_m",
+    "warp_tile_n",
+    "warp_tile_k",
+    "pipeline",
+    "scheduler",
+    "epilogue",
+    "pad_m",
+    "pad_n",
+    "pad_k",
+    "persistent",
+    "block_size",
+    "wave_size",
+)
+
+
+def _variant_kernel_columns(variant: GemmSweepVariant) -> dict:
+    """Flatten a variant's kernel identity + config into CSV cells.
+
+    This is what lets a measured ``tflops`` row map back to a specific kernel
+    without the JSON sidecar: ``cache_key`` is the unique key, and the kernel
+    identity (``KernelId`` fields) plus the spec knobs (tile/warp/pipeline/...)
+    are the features a heuristic would train on.
+    """
+    kid = variant.kernel_id
+    spec = variant.spec
+    tile = spec.get("tile", {})
+    trait = spec.get("trait", {})
+    data = spec.get("data", {})
+    cols = {col: kid.get(col, "") for col in _CSV_KERNEL_KEY_COLUMNS}
+    cols.update(
+        {
+            "dtype_a": data.get("dtype_a", ""),
+            "dtype_b": data.get("dtype_b", ""),
+            "dtype_c": data.get("dtype_c", ""),
+            "dtype_acc": data.get("dtype_acc", ""),
+            "layout": data.get("layout", ""),
+            "tile_m": tile.get("tile_m", ""),
+            "tile_n": tile.get("tile_n", ""),
+            "tile_k": tile.get("tile_k", ""),
+            "warp_m": tile.get("warp_m", ""),
+            "warp_n": tile.get("warp_n", ""),
+            "warp_k": tile.get("warp_k", ""),
+            "warp_tile_m": tile.get("warp_tile_m", ""),
+            "warp_tile_n": tile.get("warp_tile_n", ""),
+            "warp_tile_k": tile.get("warp_tile_k", ""),
+            "pipeline": trait.get("pipeline", ""),
+            "scheduler": trait.get("scheduler", ""),
+            "epilogue": trait.get("epilogue", ""),
+            "pad_m": trait.get("pad_m", ""),
+            "pad_n": trait.get("pad_n", ""),
+            "pad_k": trait.get("pad_k", ""),
+            "persistent": trait.get("persistent", ""),
+            "block_size": spec.get("block_size", ""),
+            "wave_size": spec.get("wave_size", ""),
+        }
+    )
+    return cols
+
+
+def write_sweep_csv(
+    path: Path,
+    runs: Sequence[GemmRunRecord],
+    *,
+    plan: Optional[GemmSweepPlan] = None,
+) -> None:
+    """Write a flat per-run CSV joining measured perf to the kernel config.
+
+    Each row is keyed by ``cache_key`` (the dispatcher ``KernelId.cache_key``)
+    and carries the kernel identity + config columns (tile/warp/pipeline/dtype/
+    ...) alongside the measured ``ms``/``tflops``/``gbps``. That makes the CSV
+    self-contained: a measured number maps back to a unique kernel without the
+    JSON sidecar. ``plan`` supplies the per-variant config; if omitted, the
+    config columns are left blank (perf-only output).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    variant_by_key = {v.cache_key: v for v in plan.variants} if plan else {}
+    base_columns = [
+        "cache_key",
+        "M",
+        "N",
+        "K",
+        "label",
+        "ok",
+        "verify",
+        "ms",
+        "tflops",
+        "gbps",
+        "error",
+    ]
+    fieldnames = (
+        base_columns + list(_CSV_KERNEL_KEY_COLUMNS) + list(_CSV_CONFIG_COLUMNS)
+    )
     with path.open("w", newline="") as f:
-        writer = csv.DictWriter(
-            f,
-            fieldnames=[
-                "cache_key",
-                "M",
-                "N",
-                "K",
-                "label",
-                "ok",
-                "verify",
-                "ms",
-                "tflops",
-                "gbps",
-                "error",
-            ],
-        )
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for r in runs:
-            writer.writerow(
-                {
-                    "cache_key": r.cache_key,
-                    "M": r.shape.M,
-                    "N": r.shape.N,
-                    "K": r.shape.K,
-                    "label": r.shape.label,
-                    "ok": r.ok,
-                    "verify": r.verify,
-                    "ms": r.ms,
-                    "tflops": r.tflops,
-                    "gbps": r.gbps,
-                    "error": r.error,
-                }
-            )
+            row = {
+                "cache_key": r.cache_key,
+                "M": r.shape.M,
+                "N": r.shape.N,
+                "K": r.shape.K,
+                "label": r.shape.label,
+                "ok": r.ok,
+                "verify": r.verify,
+                "ms": r.ms,
+                "tflops": r.tflops,
+                "gbps": r.gbps,
+                "error": r.error,
+            }
+            variant = variant_by_key.get(r.cache_key)
+            if variant is not None:
+                row.update(_variant_kernel_columns(variant))
+            writer.writerow(row)
 
 
 def _safe_dir_name(cache_key: str) -> str:
@@ -557,7 +647,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     json_path = args.json or (args.output_dir / "gemm_fp16_rcr_sweep.json")
     write_sweep_json(json_path, plan, builds=builds, runs=runs)
     if args.csv or runs:
-        write_sweep_csv(args.csv or (args.output_dir / "gemm_fp16_rcr_sweep.csv"), runs)
+        write_sweep_csv(
+            args.csv or (args.output_dir / "gemm_fp16_rcr_sweep.csv"),
+            runs,
+            plan=plan,
+        )
     print(
         f"expanded {len(plan.variants)} variants, filtered {len(plan.filtered)}, "
         f"builds {len(builds)}, runs {len(runs)}"
