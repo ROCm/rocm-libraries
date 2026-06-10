@@ -342,7 +342,7 @@ struct ABTileInfoQuery {
 
   // depthUBytes / localSubtileGrid[1] — TileInfo.subIterKBytes for the AB case.
   long subIterKBytes() const {
-    long depthUBytes = static_cast<long>(static_cast<double>(depthU) * gr.bpe);
+    long depthUBytes = depthU * static_cast<long>(gr.bpe);
     return depthUBytes / localSubtileGrid.second;
   }
 
