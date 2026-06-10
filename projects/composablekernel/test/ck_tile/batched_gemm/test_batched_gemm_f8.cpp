@@ -23,9 +23,10 @@ using KernelTypes = ::testing::Types<
     std::tuple<    Col,         Row,         Row,       F8,          F8,          F32,            F16>,
     std::tuple<    Row,         Col,         Row,       F8,          F8,          F32,            F16>,
     std::tuple<    Col,         Col,         Row,       F8,          F8,          F32,            F16>,
-    // BF16 output — retain f8->bf16 epilogue coverage
-    std::tuple<    Row,         Col,         Row,       F8,          F8,          F32,           BF16>,
-    std::tuple<    Col,         Col,         Row,       F8,          F8,          F32,           BF16>
+    std::tuple<    Row,         Row,         Row,       F8,          F8,          F32,            BF16>,
+    std::tuple<    Col,         Row,         Row,       F8,          F8,          F32,            BF16>,
+    std::tuple<    Row,         Col,         Row,       F8,          F8,          F32,            BF16>,
+    std::tuple<    Col,         Col,         Row,       F8,          F8,          F32,            BF16>
     >;
 // clang-format on
 
