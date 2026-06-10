@@ -31,7 +31,6 @@ from .internal_profiling import run_internal_profiling
 from .parser import create_parser
 from .pytorch_runner_cli import run_pytorch_cli
 from .suite_runner_cli import run_suite_cli
-from .gpu_check import gpu_is_available
 
 
 def _resolve_graphs(args, reporter: Reporter):
@@ -67,20 +66,17 @@ def main() -> int:
         apply_config_file(args)
     except ValueError as e:
         parser.error(str(e))
-    # Hidden re-exec sub-mode for the profiling orchestrator. Skips
-    # gpu_check / Reporter / engine discovery and runs a single
-    # (graph, engine) workload as quietly as possible.
+
+    # Backend-specific startup is the authoritative GPU availability check:
+    # PyTorch mode requires GPU-enabled torch, while hipDNN mode creates a real
+    # hipdnn_frontend.Handle after applying any configured plugin paths. Do not
+    # gate here on telemetry tools such as rocm-smi/amdsmi; they are optional
+    # and can be absent even when execution is valid.
     if getattr(args, "internal_profiling_run", False):
         return run_internal_profiling(args)
     if not args.graph:
         parser.error("--graph is required unless --config provides graphs")
     reporter = Reporter()
-
-    if not gpu_is_available():
-        reporter.print_error(
-            "No GPU detected. A GPU with ROCm or CUDA support is required."
-        )
-        return 1
 
     tmpdirs, resolved_files, tarball_source = _resolve_graphs(args, reporter)
     if resolved_files is None:

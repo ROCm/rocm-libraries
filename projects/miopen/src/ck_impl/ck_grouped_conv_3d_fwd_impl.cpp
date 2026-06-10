@@ -442,10 +442,13 @@ std::vector<std::string> FillValidKernelsByAlphaBeta(const ProblemDescription& p
     case SCALE:
         return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdScalePtrs<DataType, ComputeType>,
                                                    CKArgs<DataType, ComputeType>>(problem);
-    default:
+    case DEFAULT:
+    case ERROR_STATE:
         return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<DataType, ComputeType>,
                                                    CKArgs<DataType, ComputeType>>(problem);
     }
+
+    MIOPEN_THROW(miopenStatusInternalError, "Unhandled miopenAlphaBetaCase_t");
 }
 
 template <typename DataType, typename ComputeType>
@@ -459,10 +462,13 @@ bool CheckCKApplicabilityByAlphaBeta(const ProblemDescription& problem)
     case SCALE:
         return miopen::solver::IsCKApplicable<DeviceOpGFwdScalePtrs<DataType, ComputeType>,
                                               CKArgs<DataType, ComputeType>>(problem);
-    default:
+    case DEFAULT:
+    case ERROR_STATE:
         return miopen::solver::IsCKApplicable<DeviceOpGFwdDefaultPtrs<DataType, ComputeType>,
                                               CKArgs<DataType, ComputeType>>(problem);
     }
+
+    MIOPEN_THROW(miopenStatusInternalError, "Unhandled miopenAlphaBetaCase_t");
 }
 
 template <typename DataType, typename ComputeType>
@@ -476,10 +482,13 @@ bool CheckIsArgSupportedByAlphaBeta(const ProblemDescription& problem, const std
     case SCALE:
         return miopen::solver::IsCKArgsSupported<DeviceOpGFwdScalePtrs<DataType, ComputeType>,
                                                  CKArgs<DataType, ComputeType>>(problem, kernel_id);
-    default:
+    case DEFAULT:
+    case ERROR_STATE:
         return miopen::solver::IsCKArgsSupported<DeviceOpGFwdDefaultPtrs<DataType, ComputeType>,
                                                  CKArgs<DataType, ComputeType>>(problem, kernel_id);
     }
+
+    MIOPEN_THROW(miopenStatusInternalError, "Unhandled miopenAlphaBetaCase_t");
 }
 
 // ---------------------------------------------------------------------------
@@ -660,7 +669,9 @@ ck_impl_3d_fwd_get_solution(const miopen::ExecutionContext* ctx,
                                                      CKArgs<T, TCompute>,
                                                      miopen::conv::DataInvokeParams>(
                         *ctx, *problem, kid);
-                default:
+
+                case DEFAULT:
+                case ERROR_STATE:
                     return InitInvokerFactoryFwdNCHW<3,
                                                      false,
                                                      DeviceOpGFwdDefaultPtrs<T, TCompute>,
@@ -668,6 +679,8 @@ ck_impl_3d_fwd_get_solution(const miopen::ExecutionContext* ctx,
                                                      miopen::conv::DataInvokeParams>(
                         *ctx, *problem, kid);
                 }
+
+                MIOPEN_THROW(miopenStatusInternalError, "Unhandled miopenAlphaBetaCase_t");
             },
             [&](auto data_type_val, auto compute_type_val) {
                 using T        = decltype(data_type_val);
@@ -686,13 +699,17 @@ ck_impl_3d_fwd_get_solution(const miopen::ExecutionContext* ctx,
                                                   CKArgs<T, TCompute>,
                                                   miopen::conv::DataInvokeParams>(
                         *ctx, *problem, kid);
-                default:
+
+                case DEFAULT:
+                case ERROR_STATE:
                     return InitInvokerFactoryNHWC<false,
                                                   DeviceOpGFwdDefaultPtrs<T, TCompute>,
                                                   CKArgs<T, TCompute>,
                                                   miopen::conv::DataInvokeParams>(
                         *ctx, *problem, kid);
                 }
+
+                MIOPEN_THROW(miopenStatusInternalError, "Unhandled miopenAlphaBetaCase_t");
             },
             use_tf32);
 
