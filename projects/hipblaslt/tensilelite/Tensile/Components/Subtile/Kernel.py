@@ -143,7 +143,6 @@ from .SubtileLREmit import (
     emitSingleDsRead, emitSubtileDsRead, setExecMask,
 )
 from .SubtileScaleEmit import (
-    emitScaleGROffset, emitScaleLROffset,
     emitScaleGRLoad, emitScaleLRLoad,
     emitScaleGRPtrUpdate, emitScaleGRLDSSwap, emitScaleLRLDSSwap,
     graTileAssignmentScaleSwizzled, lraTileAssignmentScaleSwizzled,
@@ -501,6 +500,10 @@ class TileInfo:
       lr_cfg = geometry.lr
       self.gr = None
       self.lr = None
+      # Materialized GR/LR configs retained for the C++ scale offset-assignment
+      # query layer (_cppScaleQuery); GR is kernel-materialized (subtileShape).
+      self._scaleGrCfg = gr_cfg
+      self._scaleLrCfg = lr_cfg
       self.globalMMATileGrid   = list(gr_cfg.globalMMATileGrid(self.macroTile, self.depthU))
       self.localMMATileGrid    = [self.globalMMATileGrid[0] // self.waveGroupSize, self.globalMMATileGrid[1]]
       self.subtileShape          = list(gr_cfg.subtileShape)
@@ -722,6 +725,45 @@ class TileInfo:
                       * writer.states.archCaps["LDSBankWidth"])
     mWavesM = kernel["MIWaveGroup"][0]
     return self._cppQuery().lrOffsetAssignPlan(ldsRowBankSize, mWavesM)
+
+  # --- MX scale offset-assignment math (C++-only for MXScaleTilePair) ---
+  # The swizzled-scale GR/LR offset-assignment scalar math for
+  # graTileAssignmentScaleSwizzled / lraTileAssignmentScaleSwizzled is computed
+  # by the C++ MXScaleTileInfoQuery for the gfx950 scale geometries (MXFP4 /
+  # MXFP8). There is no Python scalar-math twin; the rocisa emission stays in
+  # SubtileScaleEmit.
+
+  def _cppScaleQuery(self):
+    """Build (and cache) the C++ MXScaleTileInfoQuery twin for this scale TileInfo.
+
+    The MX scale (MXScaleTilePair) offset-assignment query layer is C++-only:
+    the twin is constructed from the already-materialized GR/LR scale configs
+    plus the kernel-derived scalar fields, reusing the C++ geometry surface.
+    AB and C/D geometries are out of scope and must not call this.
+    """
+    if not isinstance(self.geometry, MXScaleTilePair):
+      raise NotImplementedError(
+          "TileInfo C++ scale query layer covers the MXScaleTilePair case "
+          f"only; got {type(self.geometry).__name__} (tc={self.tc})")
+    q = getattr(self, '_cppScaleQueryCache', None)
+    if q is None:
+      cpp_gr = self._scaleGrCfg._cpp
+      cpp_lr = self._scaleLrCfg._cpp
+      q = _CPP_TI.MXScaleTileInfoQuery(cpp_gr, cpp_lr, self.macroTile,
+                                       self.depthU, self.waveGroupSize,
+                                       self.waveSize, self.numWaves)
+      self._cppScaleQueryCache = q
+    return q
+
+  def scaleGrOffsetAssignPlan(self):
+    """C++ swizzled-scale GR offset-assignment scalar plan for this tensor."""
+    return self._cppScaleQuery().scaleGrOffsetAssignPlan()
+
+  def scaleLrOffsetAssignPlan(self, kernel):
+    """C++ swizzled-scale LR offset-assignment scalar plan for this tensor."""
+    mWavesM = kernel["MIWaveGroup"][0]
+    return self._cppScaleQuery().scaleLrOffsetAssignPlan(mWavesM,
+                                                         self.tc == 'MXSA')
 
   # --- Register allocation ---
 

@@ -373,6 +373,29 @@ void bind_tile_info(nb::module_& t) {
       .def_ro("loadRatioGR", &LROffsetAssignPlan::loadRatioGR)
       .def_ro("isFp8", &LROffsetAssignPlan::isFp8);
 
+  // -- MX scale GR / LR offset-assignment plans (swizzled scale) --------
+  nb::class_<ScaleGROffsetAssignPlan>(
+      t, "ScaleGROffsetAssignPlan",
+      "Data-only scalar math for SubtileScaleEmit.graTileAssignmentScaleSwizzled: "
+      "the scale GR load width, threads-per-scale-group, and scale element "
+      "bytes. Integer-typed so the swizzled-scale GR offset emit produces valid "
+      "immediates (the deleted Python legacy derived these from the float "
+      "lrSubtileSize and crashed). No rocisa objects, no writer register state.")
+      .def_ro("loadWidth", &ScaleGROffsetAssignPlan::loadWidth)
+      .def_ro("numThreadsPerGroup",
+              &ScaleGROffsetAssignPlan::numThreadsPerGroup)
+      .def_ro("bpe", &ScaleGROffsetAssignPlan::bpe);
+
+  nb::class_<ScaleLROffsetAssignPlan>(
+      t, "ScaleLROffsetAssignPlan",
+      "Data-only scalar math for SubtileScaleEmit.lraTileAssignmentScaleSwizzled: "
+      "the per-wave-partition byte stride (totalScaleBytes), the M-wave count "
+      "(mWavesM), and the MXSA-vs-MXSB partition-axis selector (isA). No rocisa "
+      "objects and no writer register state are computed here.")
+      .def_ro("totalScaleBytes", &ScaleLROffsetAssignPlan::totalScaleBytes)
+      .def_ro("mWavesM", &ScaleLROffsetAssignPlan::mWavesM)
+      .def_ro("isA", &ScaleLROffsetAssignPlan::isA);
+
   nb::class_<ABTileInfoQuery>(t, "ABTileInfoQuery")
       .def(nb::init<const ABGRGeometry&, const ABLRGeometry&, long, long, long,
                     long, long>(),
@@ -445,6 +468,32 @@ void bind_tile_info(nb::module_& t) {
            nb::arg("ldsRowBankSize"))
       .def("lrOffsetAssignPlan", &ABTileInfoQuery::lrOffsetAssignPlan,
            nb::arg("ldsRowBankSize"), nb::arg("mWavesM"));
+
+  // -- MXScaleTileInfoQuery (swizzled-scale offset-assignment plans) ----
+  nb::class_<MXScaleTileInfoQuery>(t, "MXScaleTileInfoQuery")
+      .def(nb::init<const MXScaleGRGeometry&, const MXScaleLRGeometry&, long,
+                    long, long, long, long>(),
+           nb::arg("gr"), nb::arg("lr"), nb::arg("macroTile"),
+           nb::arg("depthU"), nb::arg("waveGroupSize"), nb::arg("waveSize"),
+           nb::arg("numWaves"))
+      // Inputs
+      .def_ro("gr", &MXScaleTileInfoQuery::gr)
+      .def_ro("lr", &MXScaleTileInfoQuery::lr)
+      .def_ro("macroTile", &MXScaleTileInfoQuery::macroTile)
+      .def_ro("depthU", &MXScaleTileInfoQuery::depthU)
+      .def_ro("waveGroupSize", &MXScaleTileInfoQuery::waveGroupSize)
+      .def_ro("waveSize", &MXScaleTileInfoQuery::waveSize)
+      .def_ro("numWaves", &MXScaleTileInfoQuery::numWaves)
+      // Derived LR grid / size
+      .def_ro("lrSubtileSize", &MXScaleTileInfoQuery::lrSubtileSize)
+      .def_ro("lrGlobalSubtileGrid",
+              &MXScaleTileInfoQuery::lrGlobalSubtileGrid)
+      // Offset-assignment scalar plans (swizzled scale).
+      .def("scaleGrOffsetAssignPlan",
+           &MXScaleTileInfoQuery::scaleGrOffsetAssignPlan)
+      .def("scaleLrOffsetAssignPlan",
+           &MXScaleTileInfoQuery::scaleLrOffsetAssignPlan, nb::arg("mWavesM"),
+           nb::arg("isA"));
 }
 
 // ---------------------------------------------------------------------------

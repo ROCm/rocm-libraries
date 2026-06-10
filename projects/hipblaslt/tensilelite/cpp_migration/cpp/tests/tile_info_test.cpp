@@ -252,3 +252,103 @@ TEST(TileInfoOffsetAssignPlan, Fp8SelectorSet) {
   EXPECT_EQ(g.bpeBits, 8);             // int(8 * 1)
   EXPECT_TRUE(q.lrOffsetAssignPlan(kLdsRowBankSize, 4).isFp8);
 }
+
+// ---------------------------------------------------------------------------
+// MX scale GR / LR offset-assignment plans (swizzled scale path).
+//
+// These pin the scalar offset-assignment math the Python scale emitter consumes
+// (SubtileScaleEmit.graTileAssignmentScaleSwizzled /
+// lraTileAssignmentScaleSwizzled) for the gfx950 MXFP4 / MXFP8 geometries. The
+// emitted rocisa strings for these same plans are locked end-to-end by
+// Tensile/Tests/unit/test_subtileScaleOffsetAssignCpp.py against a golden
+// snapshot.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct NamedScalePair {
+  std::string name;
+  MXPair pair;
+  Kernel kernel;
+};
+
+std::vector<NamedScalePair> scale_query_pairs() {
+  // MacroTile divisible by 32 and data depthU divisible by 256 so the (2,2) LR
+  // scale subtile tiles the grid cleanly for both wave groupings.
+  return {
+      {"MXS_B4_2x2", MXS_B4(), make_kernel(256, 256, 256, {2, 2})},
+      {"MXS_B8_2x2", MXS_B8(), make_kernel(256, 256, 256, {2, 2})},
+      {"MXS_B4_4x1", MXS_B4(), make_kernel(512, 256, 256, {4, 1})},
+  };
+}
+
+}  // namespace
+
+TEST(ScaleOffsetAssignPlan, GrLrPlansMatchReference) {
+  for (const auto& np : scale_query_pairs()) {
+    for (const std::string tc : {"MXSA", "MXSB"}) {
+      MXScaleTileInfoQuery q = make_scale_query(np.pair, tc, np.kernel);
+      SCOPED_TRACE(np.name + "." + tc);
+      const bool isA = (tc == "MXSA");
+      const long mWavesM = np.kernel.miWaveGroup[0];
+
+      ScaleGROffsetAssignPlan g = q.scaleGrOffsetAssignPlan();
+      RefScaleGRPlan rg = ref_scale_gr_offset_assign_plan(q);
+      EXPECT_EQ(g.loadWidth, rg.loadWidth);
+      EXPECT_EQ(g.numThreadsPerGroup, rg.numThreadsPerGroup);
+      EXPECT_EQ(g.bpe, rg.bpe);
+      // The GR shift amount must be a valid integer log2 (not a float crash).
+      EXPECT_GT(g.numThreadsPerGroup, 0);
+
+      ScaleLROffsetAssignPlan l = q.scaleLrOffsetAssignPlan(mWavesM, isA);
+      RefScaleLRPlan rl = ref_scale_lr_offset_assign_plan(q, mWavesM, isA);
+      EXPECT_EQ(l.totalScaleBytes, rl.totalScaleBytes);
+      EXPECT_EQ(l.mWavesM, rl.mWavesM);
+      EXPECT_EQ(l.isA, rl.isA);
+      EXPECT_GT(l.totalScaleBytes, 0);
+    }
+  }
+}
+
+// Absolute-value pins for MXFP4 at MacroTile 256x256, data depthU 256,
+// waveGroup [2,2]. Scale LR subtile (2,2) -> lrSubtileSize 256B;
+// globalMMATileGrid (16,2) -> lrGlobalSubtileGrid (8,1).
+TEST(ScaleOffsetAssignPlan, Mxfp4KnownValues) {
+  MXScaleTileInfoQuery qa =
+      make_scale_query(MXS_B4(), "MXSA", make_kernel(256, 256, 256, {2, 2}));
+  EXPECT_DOUBLE_EQ(qa.lrSubtileSize, 256.0);
+  EXPECT_DOUBLE_EQ(qa.lrGlobalSubtileGrid.first, 8.0);
+  EXPECT_DOUBLE_EQ(qa.lrGlobalSubtileGrid.second, 1.0);
+
+  ScaleGROffsetAssignPlan g = qa.scaleGrOffsetAssignPlan();
+  EXPECT_EQ(g.loadWidth, 16);
+  EXPECT_EQ(g.numThreadsPerGroup, 16);  // int(256) * 1 / 16
+  EXPECT_EQ(g.bpe, 1);
+
+  // MXSA: divisor = waveGroupSize = MIWaveGroup[0] = 2 -> (8/2)*1*256 = 1024.
+  ScaleLROffsetAssignPlan la = qa.scaleLrOffsetAssignPlan(2, true);
+  EXPECT_EQ(la.totalScaleBytes, 1024);
+  EXPECT_EQ(la.mWavesM, 2);
+  EXPECT_TRUE(la.isA);
+
+  // MXSB: divisor = waveGroupSize = MIWaveGroup[1] = 2 -> (8/2)*1*256 = 1024.
+  MXScaleTileInfoQuery qb =
+      make_scale_query(MXS_B4(), "MXSB", make_kernel(256, 256, 256, {2, 2}));
+  ScaleLROffsetAssignPlan lb = qb.scaleLrOffsetAssignPlan(2, false);
+  EXPECT_EQ(lb.totalScaleBytes, 1024);
+  EXPECT_FALSE(lb.isA);
+}
+
+// MXFP8 shares the scale access pattern (scale bpe == 1, same layout), so its
+// plans equal the MXFP4 plans for the same kernel config.
+TEST(ScaleOffsetAssignPlan, Mxfp8MatchesMxfp4) {
+  Kernel k = make_kernel(256, 256, 256, {2, 2});
+  MXScaleTileInfoQuery q4 = make_scale_query(MXS_B4(), "MXSA", k);
+  MXScaleTileInfoQuery q8 = make_scale_query(MXS_B8(), "MXSA", k);
+  ScaleGROffsetAssignPlan g4 = q4.scaleGrOffsetAssignPlan();
+  ScaleGROffsetAssignPlan g8 = q8.scaleGrOffsetAssignPlan();
+  EXPECT_EQ(g4.numThreadsPerGroup, g8.numThreadsPerGroup);
+  EXPECT_EQ(g4.loadWidth, g8.loadWidth);
+  EXPECT_EQ(g4.bpe, g8.bpe);
+  EXPECT_EQ(q4.scaleLrOffsetAssignPlan(2, true).totalScaleBytes,
+            q8.scaleLrOffsetAssignPlan(2, true).totalScaleBytes);
+}

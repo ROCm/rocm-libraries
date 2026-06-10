@@ -31,6 +31,13 @@ DsReadEntry = _ti.DsReadEntry
 # state.
 GROffsetAssignPlan = _ti.GROffsetAssignPlan
 LROffsetAssignPlan = _ti.LROffsetAssignPlan
+# MX scale (MXScaleTilePair) read-only query layer + swizzled-scale GR/LR
+# offset-assignment scalar plans. Drive SubtileScaleEmit's scale offset emit
+# unconditionally (no parallel Python scalar formula). No rocisa objects, no
+# writer register state.
+MXScaleTileInfoQuery = _ti.MXScaleTileInfoQuery
+ScaleGROffsetAssignPlan = _ti.ScaleGROffsetAssignPlan
+ScaleLROffsetAssignPlan = _ti.ScaleLROffsetAssignPlan
 
 __all__ = [
     "ABTileInfoQuery",
@@ -39,4 +46,7 @@ __all__ = [
     "DsReadEntry",
     "GROffsetAssignPlan",
     "LROffsetAssignPlan",
+    "MXScaleTileInfoQuery",
+    "ScaleGROffsetAssignPlan",
+    "ScaleLROffsetAssignPlan",
 ]

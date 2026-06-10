@@ -121,6 +121,49 @@ struct LROffsetAssignPlan {
 };
 
 // ---------------------------------------------------------------------------
+// MX scale GR / LR offset-assignment plans (swizzled scale path).
+//
+// These hold the scalar offset-assignment *math* that the legacy
+// SubtileScaleEmit.graTileAssignmentScaleSwizzled /
+// lraTileAssignmentScaleSwizzled functions derive inline before emitting the
+// rocisa scale offset-calculation instructions. The plan carries NO rocisa
+// objects and NO writer register state (VGPR/SGPR pool checkout/checkin, the
+// shared scale offset registers, and the writer-owned LDS base/total offsets
+// stay on the Python side). Only the integer/derived scalars used as
+// immediates / shift amounts / comment values are computed here.
+//
+// SCOPE: MX scale operands (MXSA / MXSB) for the gfx950 swizzled-scale Subtile
+// geometries — MXFP4 (data bpe 0.5, scale bpe 1) and MXFP8 (data bpe 1, scale
+// bpe 1). The scale access pattern is dtype-independent (the scale element is
+// always 1 byte), so a single plan shape covers both.
+//
+// IMPORTANT: every derived scalar is integer-typed here. The deleted Python
+// legacy emitter derived ``numThreadsPerGroup`` from the float
+// ``lrSubtileSize`` and then fed it to ``hex(... - 1)`` / shift amounts, which
+// raised ``TypeError: 'float' object cannot be interpreted as an integer`` for
+// every gfx950 scale geometry (the swizzled-scale GR offset path never ran).
+// Truncating to ``long`` here is the fix that makes the path functional.
+// ---------------------------------------------------------------------------
+struct ScaleGROffsetAssignPlan {
+  long loadWidth;           // gr.loadWidth (scale GR load width in bytes)
+  // numThreadsPerGroup = int(lrSubtileSize) * int(lrGlobalSubtileGrid[1]) /
+  //                      loadWidth — threads cooperating on one scale column.
+  long numThreadsPerGroup;
+  long bpe;                 // int(bpe) — scale element bytes (1 for E8M0)
+};
+
+struct ScaleLROffsetAssignPlan {
+  // totalScaleBytes = (int(lrGlobalSubtileGrid[0]) / waveGroupSize) *
+  //                   int(lrGlobalSubtileGrid[1]) * int(lrSubtileSize)
+  // — bytes per wave partition in LDS for this scale tensor.
+  long totalScaleBytes;
+  long mWavesM;             // MIWaveGroup[0] (supplied by caller)
+  // MXSA partitions by waveId % mWavesM (M-direction); MXSB partitions by
+  // waveId / mWavesM (N-direction). Selects the AND vs shift branch.
+  bool isA;
+};
+
+// ---------------------------------------------------------------------------
 // ABTileInfoQuery — read-only snapshot of the AB (ABTilePair) TileInfo state.
 //
 // Built from an *already materialized* ABGRGeometry (subtileCount/subtileStride
@@ -425,6 +468,86 @@ struct ABTileInfoQuery {
     else
       p.wavePartMode = -2;
     p.isFp8 = (lr.bpe == 1.0);
+    return p;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// MXScaleTileInfoQuery — read-only snapshot of the MX scale (MXScaleTilePair)
+// TileInfo state needed by the swizzled-scale GR/LR offset-assignment plans.
+//
+// Built from an *already materialized* MXScaleGRGeometry (its kernel-derived
+// subtileShape set via forKernel) and its MXScaleLRGeometry partner, plus the
+// kernel-derived scalar fields TileInfo extracts for the MXScaleTilePair
+// branch: macroTile, depthU (data DepthU, not scale DepthU), waveGroupSize,
+// waveSize, numWaves.
+//
+// Mirrors the LR-grid extraction in TileInfo.__init__ (lrSubtileSize,
+// lrGlobalSubtileGrid) and exposes the two offset-assignment plans. Only the
+// scale-offset scalar math is ported; the buffer_load / ds_read instruction
+// shape and the writer-owned LDS layout stay on the Python side.
+// ---------------------------------------------------------------------------
+struct MXScaleTileInfoQuery {
+  // Inputs
+  MXScaleGRGeometry gr;
+  MXScaleLRGeometry lr;
+  long macroTile;
+  long depthU;
+  long waveGroupSize;
+  long waveSize;
+  long numWaves;
+
+  // Derived LR grid / size (mirror TileInfo.__init__ MXScaleTilePair branch).
+  double lrSubtileSize;
+  std::pair<double, double> lrGlobalSubtileGrid;
+
+  MXScaleTileInfoQuery(const MXScaleGRGeometry& gr_,
+                       const MXScaleLRGeometry& lr_, long macroTile_,
+                       long depthU_, long waveGroupSize_, long waveSize_,
+                       long numWaves_)
+      : gr(gr_),
+        lr(lr_),
+        macroTile(macroTile_),
+        depthU(depthU_),
+        waveGroupSize(waveGroupSize_),
+        waveSize(waveSize_),
+        numWaves(numWaves_) {
+    lrSubtileSize = lr.subtileSizeBytes();
+    lrGlobalSubtileGrid = lr.globalSubtileGrid(macroTile, depthU);
+  }
+
+  // Pure port of the scalar math in
+  // SubtileScaleEmit._graTileAssignmentScaleSwizzledCommon. Integer-typed (see
+  // ScaleGROffsetAssignPlan note) so the swizzled-scale GR offset path is
+  // functional rather than raising on a float immediate.
+  ScaleGROffsetAssignPlan scaleGrOffsetAssignPlan() const {
+    ScaleGROffsetAssignPlan p;
+    p.loadWidth = gr.loadWidth;
+    long scaleGroupSize = static_cast<long>(lrSubtileSize);
+    long kGrid = static_cast<long>(lrGlobalSubtileGrid.second);
+    p.numThreadsPerGroup =
+        p.loadWidth != 0 ? scaleGroupSize * kGrid / p.loadWidth : 0;
+    p.bpe = static_cast<long>(gr.bpe);
+    return p;
+  }
+
+  // Pure port of the scalar math in
+  // SubtileScaleEmit._applyScaleWavePartitionLROffset. The totalScaleBytes
+  // divisor is this tensor's own waveGroupSize (MIWaveGroup[0] for MXSA,
+  // MIWaveGroup[1] for MXSB), matching the legacy ``MIWaveGroup[index]``.
+  // mWavesM is MIWaveGroup[0] (used for the AND/shift wave-index reduction on
+  // both tensors); isA selects the MXSA (AND) vs MXSB (shift) branch.
+  ScaleLROffsetAssignPlan scaleLrOffsetAssignPlan(long mWavesM,
+                                                  bool isA) const {
+    ScaleLROffsetAssignPlan p;
+    long mGrid = static_cast<long>(lrGlobalSubtileGrid.first);
+    long kGrid = static_cast<long>(lrGlobalSubtileGrid.second);
+    long subtileBytes = static_cast<long>(lrSubtileSize);
+    p.totalScaleBytes = waveGroupSize != 0
+                            ? (mGrid / waveGroupSize) * kGrid * subtileBytes
+                            : 0;
+    p.mWavesM = mWavesM;
+    p.isA = isA;
     return p;
   }
 };

@@ -1,0 +1,117 @@
+===GR MXFP4:256x256x256:wg2x2===
+// Computing GR Offset for MXSA
+v_lshrrev_b32 v7, 0x4, v[vgprSerial]               // MXSA: grOffset = serial / 16
+s_lshl_b32 s12, s[sgprStridesMXSA], 0              // *= bpe (1)
+v_mul_lo_u32 v7, s12, v7                           // Apply scaleMXSA stride to each group
+v_and_b32 v1, 0xf, v[vgprSerial]                   // MXSA: grOffset = serial % 16
+v_lshlrev_b32 v1, 0x4, v1                          // Scale by load width for each thread in group
+v_add_u32 v1, v1, v7                               // Final offset calc
+// Computing GR Offset for MXSB
+v_lshrrev_b32 v7, 0x4, v[vgprSerial]               // MXSB: grOffset = serial / 16
+s_lshl_b32 s12, s[sgprStridesMXSB], 0              // *= bpe (1)
+v_mul_lo_u32 v7, s12, v7                           // Apply scaleMXSB stride to each group
+v_and_b32 v4, 0xf, v[vgprSerial]                   // MXSB: grOffset = serial % 16
+v_lshlrev_b32 v4, 0x4, v4                          // Scale by load width for each thread in group
+v_add_u32 v4, v4, v7                               // Final offset calc
+
+===LR MXFP4:256x256x256:wg2x2===
+/* LR Offset Calculation for Scale Tensors */
+v_lshrrev_b32 v7, 0x6, v[vgprSerial]               // scale: waveId
+v_and_b32 v8, 1, v7                                // scaleMXSA: waveId % 2
+s_mov_b32 s12, 1024                                // scaleMXSA: scale region
+v_mul_lo_u32 v2, s12, v8                           // scaleMXSA: partition offset
+v_lshrrev_b32 v8, 1, v7                            // scaleMXSB: waveId / numWavesM
+s_mov_b32 s12, 1024                                // scaleMXSB: scale region
+v_mul_lo_u32 v5, s12, v8                           // scaleMXSB: partition offset
+v_and_b32 v7, v[vgprSerial], 63                    // scale: laneId
+v_lshlrev_b32 v7, 0x2, v7                          // scale: laneId * 4
+v_add_u32 v2, v7, v2                               // scaleA: lrOffset = laneId * 4
+v_add_u32 v5, v7, v5                               // scaleB: lrOffset = laneId * 4
+s_mov_b32 s12, 0x1000                              // scale: LDS offset for A scale
+v_add_u32 v2, v2, s12                              // scaleA: +=LDS offset
+s_mov_b32 s12, 0x1400                              // scale: LDS offset for B scale
+v_add_u32 v5, v5, s12                              // scaleB: +=LDS offset
+s_mov_b32 s12, 8192                                // scale: total LDS size for swap
+v_add_u32 v3, v2, s12                              // scaleMXSA: LR swap
+v_xor_b32 v3, v2, v3                               // scaleMXSA: LR swap
+v_add_u32 v6, v5, s12                              // scaleMXSB: LR swap
+v_xor_b32 v6, v5, v6                               // scaleMXSB: LR swap
+
+===GR MXFP8:256x256x256:wg2x2===
+// Computing GR Offset for MXSA
+v_lshrrev_b32 v7, 0x4, v[vgprSerial]               // MXSA: grOffset = serial / 16
+s_lshl_b32 s12, s[sgprStridesMXSA], 0              // *= bpe (1)
+v_mul_lo_u32 v7, s12, v7                           // Apply scaleMXSA stride to each group
+v_and_b32 v1, 0xf, v[vgprSerial]                   // MXSA: grOffset = serial % 16
+v_lshlrev_b32 v1, 0x4, v1                          // Scale by load width for each thread in group
+v_add_u32 v1, v1, v7                               // Final offset calc
+// Computing GR Offset for MXSB
+v_lshrrev_b32 v7, 0x4, v[vgprSerial]               // MXSB: grOffset = serial / 16
+s_lshl_b32 s12, s[sgprStridesMXSB], 0              // *= bpe (1)
+v_mul_lo_u32 v7, s12, v7                           // Apply scaleMXSB stride to each group
+v_and_b32 v4, 0xf, v[vgprSerial]                   // MXSB: grOffset = serial % 16
+v_lshlrev_b32 v4, 0x4, v4                          // Scale by load width for each thread in group
+v_add_u32 v4, v4, v7                               // Final offset calc
+
+===LR MXFP8:256x256x256:wg2x2===
+/* LR Offset Calculation for Scale Tensors */
+v_lshrrev_b32 v7, 0x6, v[vgprSerial]               // scale: waveId
+v_and_b32 v8, 1, v7                                // scaleMXSA: waveId % 2
+s_mov_b32 s12, 1024                                // scaleMXSA: scale region
+v_mul_lo_u32 v2, s12, v8                           // scaleMXSA: partition offset
+v_lshrrev_b32 v8, 1, v7                            // scaleMXSB: waveId / numWavesM
+s_mov_b32 s12, 1024                                // scaleMXSB: scale region
+v_mul_lo_u32 v5, s12, v8                           // scaleMXSB: partition offset
+v_and_b32 v7, v[vgprSerial], 63                    // scale: laneId
+v_lshlrev_b32 v7, 0x2, v7                          // scale: laneId * 4
+v_add_u32 v2, v7, v2                               // scaleA: lrOffset = laneId * 4
+v_add_u32 v5, v7, v5                               // scaleB: lrOffset = laneId * 4
+s_mov_b32 s12, 0x1000                              // scale: LDS offset for A scale
+v_add_u32 v2, v2, s12                              // scaleA: +=LDS offset
+s_mov_b32 s12, 0x1400                              // scale: LDS offset for B scale
+v_add_u32 v5, v5, s12                              // scaleB: +=LDS offset
+s_mov_b32 s12, 8192                                // scale: total LDS size for swap
+v_add_u32 v3, v2, s12                              // scaleMXSA: LR swap
+v_xor_b32 v3, v2, v3                               // scaleMXSA: LR swap
+v_add_u32 v6, v5, s12                              // scaleMXSB: LR swap
+v_xor_b32 v6, v5, v6                               // scaleMXSB: LR swap
+
+===GR MXFP4:512x256x256:wg4x1===
+// Computing GR Offset for MXSA
+v_lshrrev_b32 v7, 0x4, v[vgprSerial]               // MXSA: grOffset = serial / 16
+s_lshl_b32 s12, s[sgprStridesMXSA], 0              // *= bpe (1)
+v_mul_lo_u32 v7, s12, v7                           // Apply scaleMXSA stride to each group
+v_and_b32 v1, 0xf, v[vgprSerial]                   // MXSA: grOffset = serial % 16
+v_lshlrev_b32 v1, 0x4, v1                          // Scale by load width for each thread in group
+v_add_u32 v1, v1, v7                               // Final offset calc
+// Computing GR Offset for MXSB
+v_lshrrev_b32 v7, 0x4, v[vgprSerial]               // MXSB: grOffset = serial / 16
+s_lshl_b32 s12, s[sgprStridesMXSB], 0              // *= bpe (1)
+v_mul_lo_u32 v7, s12, v7                           // Apply scaleMXSB stride to each group
+v_and_b32 v4, 0xf, v[vgprSerial]                   // MXSB: grOffset = serial % 16
+v_lshlrev_b32 v4, 0x4, v4                          // Scale by load width for each thread in group
+v_add_u32 v4, v4, v7                               // Final offset calc
+
+===LR MXFP4:512x256x256:wg4x1===
+/* LR Offset Calculation for Scale Tensors */
+v_lshrrev_b32 v7, 0x6, v[vgprSerial]               // scale: waveId
+v_and_b32 v8, 3, v7                                // scaleMXSA: waveId % 4
+s_mov_b32 s12, 1024                                // scaleMXSA: scale region
+v_mul_lo_u32 v2, s12, v8                           // scaleMXSA: partition offset
+v_lshrrev_b32 v8, 2, v7                            // scaleMXSB: waveId / numWavesM
+s_mov_b32 s12, 2048                                // scaleMXSB: scale region
+v_mul_lo_u32 v5, s12, v8                           // scaleMXSB: partition offset
+v_and_b32 v7, v[vgprSerial], 63                    // scale: laneId
+v_lshlrev_b32 v7, 0x2, v7                          // scale: laneId * 4
+v_add_u32 v2, v7, v2                               // scaleA: lrOffset = laneId * 4
+v_add_u32 v5, v7, v5                               // scaleB: lrOffset = laneId * 4
+s_mov_b32 s12, 0x1000                              // scale: LDS offset for A scale
+v_add_u32 v2, v2, s12                              // scaleA: +=LDS offset
+s_mov_b32 s12, 0x1400                              // scale: LDS offset for B scale
+v_add_u32 v5, v5, s12                              // scaleB: +=LDS offset
+s_mov_b32 s12, 8192                                // scale: total LDS size for swap
+v_add_u32 v3, v2, s12                              // scaleMXSA: LR swap
+v_xor_b32 v3, v2, v3                               // scaleMXSA: LR swap
+v_add_u32 v6, v5, s12                              // scaleMXSB: LR swap
+v_xor_b32 v6, v5, v6                               // scaleMXSB: LR swap
+

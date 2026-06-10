@@ -151,6 +151,25 @@ inline ABTileInfoQuery make_query(const ABPair& pair, const std::string& tc,
                          waveSize, numWaves);
 }
 
+// Build the C++ MXScaleTileInfoQuery for one scale tensor (MXSA/MXSB),
+// mirroring TileInfo.__init__ MXScaleTilePair scalar extraction + gr.for_kernel
+// materialization. depthU is the *data* DepthU (Kernel::depthU); macroTile and
+// waveGroupSize follow the tensor's data axis (A -> [0], B -> [1]).
+inline MXScaleTileInfoQuery make_scale_query(const MXPair& pair,
+                                             const std::string& tc,
+                                             const Kernel& k) {
+  bool isA = (tc == "MXSA");
+  long macroTile = isA ? k.macroTileA : k.macroTileB;
+  long depthU = k.depthU;
+  long waveGroupSize = isA ? k.miWaveGroup[0] : k.miWaveGroup[1];
+  long waveSize = k.waveSize;
+  long numWaves = k.miWaveGroup[0] * k.miWaveGroup[1];
+
+  MXScaleGRGeometry gr_cfg = pair.gr.forKernel(macroTile, depthU);
+  return MXScaleTileInfoQuery(gr_cfg, pair.lr, macroTile, depthU, waveGroupSize,
+                              waveSize, numWaves);
+}
+
 // ---------------------------------------------------------------------------
 // Reference formulas — the documented math the C++ query/plan layer implements.
 // Computed from the query's exposed construction state, mirroring the Python
@@ -344,6 +363,49 @@ inline RefLRPlan ref_lr_offset_assign_plan(const ABTileInfoQuery& q, long lds,
                    : q.loadRatioGR == 0.5 ? 0
                                           : -2;
   p.isFp8 = (q.lr.bpe == 1.0);
+  return p;
+}
+
+// ---------------------------------------------------------------------------
+// Reference MX scale GR / LR offset-assignment plans — independent
+// re-derivation of the documented swizzled-scale scalar math
+// (SubtileScaleEmit.graTileAssignmentScaleSwizzled /
+// lraTileAssignmentScaleSwizzled) from the query's primitive LR-grid state.
+// Integer-typed: int(lrSubtileSize) and int(lrGlobalSubtileGrid[k]) match the
+// Python int(...) truncation (the fix for the legacy float-immediate crash).
+// ---------------------------------------------------------------------------
+struct RefScaleGRPlan {
+  long loadWidth, numThreadsPerGroup, bpe;
+};
+
+inline RefScaleGRPlan ref_scale_gr_offset_assign_plan(
+    const MXScaleTileInfoQuery& q) {
+  RefScaleGRPlan p;
+  p.loadWidth = q.gr.loadWidth;
+  long scaleGroupSize = static_cast<long>(q.lrSubtileSize);
+  long kGrid = static_cast<long>(q.lrGlobalSubtileGrid.second);
+  p.numThreadsPerGroup =
+      p.loadWidth != 0 ? scaleGroupSize * kGrid / p.loadWidth : 0;
+  p.bpe = static_cast<long>(q.gr.bpe);
+  return p;
+}
+
+struct RefScaleLRPlan {
+  long totalScaleBytes, mWavesM;
+  bool isA;
+};
+
+inline RefScaleLRPlan ref_scale_lr_offset_assign_plan(
+    const MXScaleTileInfoQuery& q, long mWavesM, bool isA) {
+  RefScaleLRPlan p;
+  long mGrid = static_cast<long>(q.lrGlobalSubtileGrid.first);
+  long kGrid = static_cast<long>(q.lrGlobalSubtileGrid.second);
+  long subtileBytes = static_cast<long>(q.lrSubtileSize);
+  p.totalScaleBytes = q.waveGroupSize != 0
+                          ? (mGrid / q.waveGroupSize) * kGrid * subtileBytes
+                          : 0;
+  p.mWavesM = mWavesM;
+  p.isA = isA;
   return p;
 }
 
