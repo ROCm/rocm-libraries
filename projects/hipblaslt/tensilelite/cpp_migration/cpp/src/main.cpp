@@ -38,6 +38,7 @@
 #include "tensile_writer/instruction_scheduler.hpp"
 #include "tensile_writer/logical_scheduler.hpp"
 #include "tensile_writer/logical_scheduler_passes.hpp"
+#include "tensile_writer/rocisa_module_builder.hpp"
 #include "tensile_writer/subtile_geometry.hpp"
 #include "tensile_writer/tile_info.hpp"
 
@@ -971,6 +972,70 @@ void bind_logical_scheduler_passes(nb::module_& s) {
       .def("print_emit", &LS::print_emit);
 }
 
+// ---------------------------------------------------------------------------
+// rocisa module-builder foundation. Unlike every binding above (which is pure
+// data-only math), this layer constructs real rocisa Module objects from C++ by
+// driving the rocisa Python API. It is the foundation for moving the subtile
+// emit loops (InstructionEmitter / SubtileGREmit / SubtileLREmit /
+// SubtileScaleEmit) into C++ in later slices. Writer-owned state crosses the
+// boundary as plain ints/strings (see rocisa_module_builder.hpp).
+// ---------------------------------------------------------------------------
+void bind_rocisa_module_builder(nb::module_& b) {
+  using tw::subtile::rocisa_builder::ModuleBuilder;
+
+  nb::class_<ModuleBuilder>(
+      b, "ModuleBuilder",
+      "C++ facade that constructs genuine rocisa Module objects by driving the "
+      "rocisa Python API (rocisa.code / .instruction / .container). Holds no "
+      "writer state: register indices, sgpr/label names, and writer.states "
+      "scalars are resolved in Python and passed in as ints/strings. Returns "
+      "real rocisa objects (as Python objects) that flow back through the "
+      "existing rocisa pass pipeline unchanged.")
+      .def(nb::init<>(),
+           "Import and cache the rocisa construction handles. Raises "
+           "ImportError if rocisa is not installed.")
+      .def("module", &ModuleBuilder::module, nb::arg("name") = "",
+           "Fresh rocisa Code.Module.")
+      .def("text_block", &ModuleBuilder::text_block, nb::arg("text"),
+           "rocisa Code.TextBlock (raw text).")
+      .def("label", &ModuleBuilder::label, nb::arg("label_name"),
+           nb::arg("comment") = "", nb::arg("alignment") = 1,
+           "rocisa Code.Label; label_name is the writer-minted label string.")
+      .def("vgpr", &ModuleBuilder::vgpr, nb::arg("reg"), nb::arg("size") = 1,
+           "rocisa container.vgpr(reg, size); reg index/name comes from the "
+           "writer's register pool on the Python side.")
+      .def("sgpr", &ModuleBuilder::sgpr, nb::arg("reg"), nb::arg("size") = 1,
+           "rocisa container.sgpr(reg, size).")
+      .def("ds_modifiers", &ModuleBuilder::ds_modifiers, nb::arg("offset") = 0,
+           "rocisa container.DSModifiers(offset=...).")
+      .def("instruction", &ModuleBuilder::instruction,
+           "instruction(class_name, *args, **kwargs): construct "
+           "rocisa.instruction.<class_name>(*args, **kwargs). The open-ended "
+           "hook for building any instruction from C++-supplied "
+           "operands/immediates.")
+      .def("add", &ModuleBuilder::add, nb::arg("module"), nb::arg("item"),
+           "Append a rocisa Item to a module (rocisa Module.add); returns the "
+           "added item.")
+      .def("add_comment", &ModuleBuilder::add_comment, nb::arg("module"),
+           nb::arg("comment"))
+      .def("add_comment_align", &ModuleBuilder::add_comment_align,
+           nb::arg("module"), nb::arg("comment"))
+      .def("flatitems", &ModuleBuilder::flatitems, nb::arg("module"),
+           "rocisa Module.flatitems() — the flattened leaf-item list the "
+           "subtile emit leaves return.")
+      .def("barrier", &ModuleBuilder::barrier,
+           nb::arg("comment") = std::string("Barrier"),
+           "C++ port of InstructionEmitter.emit_sync(): a standalone "
+           "SBarrier.")
+      .def("wait_lr", &ModuleBuilder::wait_lr,
+           nb::arg("comment") = std::string("Wait for LR to complete"),
+           "C++ port of InstructionEmitter.emit_wait_lr(): SWaitCnt(dscnt=0).")
+      .def("single_item_module", &ModuleBuilder::single_item_module,
+           nb::arg("item"), nb::arg("name") = "",
+           "Build a Module wrapping a single item (the common single-"
+           "instruction emit-leaf shape).");
+}
+
 }  // namespace
 
 NB_MODULE(_tensile_writer, m) {
@@ -1016,4 +1081,13 @@ NB_MODULE(_tensile_writer, m) {
       "selection). No rocisa objects are built in C++; the Python emit "
       "functions construct the rocisa Module from these decisions.");
   bind_emit(emit);
+
+  nb::module_ rocisa_builder = subtile.def_submodule(
+      "rocisa_builder",
+      "rocisa module-builder foundation: a C++ facade (ModuleBuilder) that "
+      "constructs genuine rocisa Module objects through the rocisa Python API. "
+      "Foundation for moving the subtile emit loops into C++ without "
+      "re-implementing rocisa. Unlike the other submodules here it is NOT "
+      "data-only — it builds and returns real rocisa objects.");
+  bind_rocisa_module_builder(rocisa_builder);
 }
