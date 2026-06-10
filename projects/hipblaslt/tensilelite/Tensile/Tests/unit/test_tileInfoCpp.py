@@ -218,6 +218,11 @@ class TestAbsoluteValues:
         # baseGR = floor(linearId / 0.5) = linearId*2.
         assert ti.grLoadIndexForSubtile(3, 1) == 14
         assert ti.grLoadIndexForSubtile(3, 1, 1) == 15
-        # globalMmaTilesForSubtile is well-formed and covers the subtile.
+        # globalMmaTilesForSubtile exact pin for subtile (1,0): subtileShape
+        # (1,2) with subtileCount=4/subtileStride=4 (waveGroup 4, mt_mma 16)
+        # scatters row 1 across the 4 wave-group strides (rows 1,5,9,13) and
+        # spans both K columns (0,1). This closes the correctness loop the
+        # removed cpp-parity test covered.
         tiles = [tuple(t) for t in ti.globalMmaTilesForSubtile(1, 0)]
-        assert tiles
+        assert tiles == [(1, 0), (1, 1), (5, 0), (5, 1),
+                         (9, 0), (9, 1), (13, 0), (13, 1)]
