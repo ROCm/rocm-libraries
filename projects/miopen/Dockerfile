@@ -59,8 +59,8 @@ RUN apt-get update && apt-get install -y --allow-unauthenticated \
     unzip \
     vim \
     wget \
-    xxd 
-    
+    xxd
+
 # Install DVC
 RUN mkdir -p /etc/apt/keyrings && \
     wget -qO - https://dvc.org/deb/iterative.asc | sudo gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
@@ -68,7 +68,7 @@ RUN mkdir -p /etc/apt/keyrings && \
     chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
     apt-get update && apt-get install -y dvc && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* 
+    rm -rf /var/lib/apt/lists/*
 
 # Install an init system
 RUN wget -O /tmp/ccache.tar.gz https://github.com/ccache/ccache/archive/${CCACHE_COMMIT}.tar.gz && \
@@ -76,7 +76,7 @@ RUN wget -O /tmp/ccache.tar.gz https://github.com/ccache/ccache/archive/${CCACHE
     cd /tmp/ccache-${CCACHE_COMMIT}/build && \
     cmake -DZSTD_FROM_INTERNET=ON -DHIREDIS_FROM_INTERNET=ON .. && make -j install && rm -rf /tmp/* && \
     ccache -s && \
-    cd / 
+    cd /
 
 # Purge packages conflicting with doc-requirements
 RUN apt-get remove --purge -y python3-pyparsing python3-cryptography python3-jwt
@@ -92,6 +92,8 @@ RUN pip3 install --break-system-packages -r /doc-requirements.txt && \
 # Install cget && rbuild
     pip3 install --break-system-packages https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz && \
     pip3 install --break-system-packages https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz && \
+# Install pre-commit
+    pip3 install --break-system-packages pre-commit && \
 # groupadd render && video
     groupadd -f render && \
     groupadd -f video && \
@@ -258,7 +260,7 @@ ADD miopen/requirements.txt /requirements.txt
 ADD miopen/dev-requirements.txt /dev-requirements.txt
 
 # rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
-# Composable Kernel install separated from rbuild 
+# Composable Kernel install separated from rbuild
 # Remove components that are already built by TheRock.
 RUN cd / && \
     sed -i '/composablekernel/d; /half/d; /nlohmann/d' /requirements.txt && \
@@ -350,7 +352,7 @@ RUN set -x && \
     -D GPU_TARGETS="${THEROCK_ASIC}" \
     -D MIOPEN_REQ_LIBS_ONLY=ON \
     -D HIPTENSOR_REQ_LIBS_ONLY=OFF \
-    -D CMAKE_CXX_FLAGS=" -O3 " .. && \    
+    -D CMAKE_CXX_FLAGS=" -O3 " .. && \
     ninja -j ${num_threads} install && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
         sccache -s; \
@@ -367,7 +369,7 @@ COPY --from=build_ck /usr/local /usr/local
 # Install explicit version of tools that are supported for miopen development
 # (clang-format, clang-tidy)
 RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add - && \
-    echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list 
+    echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list
 
 RUN apt-get update && apt-get install -y \
     clang-format-18 \
@@ -383,7 +385,7 @@ RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/cl
 RUN update-alternatives --install /opt/rocm/llvm/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-21 100
 RUN update-alternatives --set clang-tidy /usr/bin/clang-tidy-21
 
-# Ensure the dynamic linker can find ROCm libraries by adding /opt/rocm/lib to the linker cache. 
+# Ensure the dynamic linker can find ROCm libraries by adding /opt/rocm/lib to the linker cache.
 RUN printf '%s\n' /opt/rocm/lib > /etc/ld.so.conf.d/rocm.conf && ldconfig
 
 ENV HIP_PLATFORM=amd
