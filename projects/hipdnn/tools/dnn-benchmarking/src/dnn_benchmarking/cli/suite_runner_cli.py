@@ -4,11 +4,12 @@
 """Suite benchmark CLI runner."""
 
 import argparse
+import os
 from pathlib import Path
 from typing import Any, List, Optional
 
 from ..common.exceptions import ExecutionError, GraphLoadError
-from ..config.benchmark_config import MetricsConfig, SuiteConfig
+from ..config.benchmark_config import MetricsConfig, ReferenceProviderName, SuiteConfig
 from ..execution.suite_runner import run_graph_all_providers, set_plugin_path
 from ..graph.loader import GraphLoader
 from ..reporting.reporter import Reporter
@@ -18,6 +19,13 @@ from ..reporting.suite_results import (
     SuiteResult,
 )
 from ..validation.reference_provider import ReferenceProviderRegistry
+
+
+def _plugin_paths_from_environment() -> Optional[List[Path]]:
+    rocm_path = os.environ.get("ROCM_PATH")
+    if not rocm_path:
+        return None
+    return [Path(rocm_path) / "lib" / "hipdnn_plugins" / "engines"]
 
 
 def _error_graph_result(graph_path: Path, error_message: str) -> GraphResult:
@@ -78,7 +86,7 @@ def run_suite_benchmark(
     """
     total = len(graph_paths)
 
-    if config.reference_provider != "none":
+    if config.reference_provider != ReferenceProviderName.NONE.value:
         try:
             ref = ReferenceProviderRegistry.get_provider(config.reference_provider)
         except ValueError:
@@ -107,6 +115,9 @@ def run_suite_benchmark(
     )
 
     reporter.print_hipdnn_init_start()
+    # hipDNN handle creation is the authoritative GPU/runtime check for this
+    # backend. Apply plugin paths before constructing the handle; do not depend
+    # on optional telemetry tools such as rocm-smi or amdsmi.
     try:
         import hipdnn_frontend as hipdnn
 
@@ -191,7 +202,7 @@ def run_suite_cli(
                 "source requested (--pmc, --emit-trace, --perf, "
                 "--roofline); the directory will not be written to"
             )
-        plugin_paths = args.plugin_path
+        plugin_paths = args.plugin_path or _plugin_paths_from_environment()
         config = SuiteConfig(
             warmup_iters=args.warmup,
             benchmark_iters=args.iters,

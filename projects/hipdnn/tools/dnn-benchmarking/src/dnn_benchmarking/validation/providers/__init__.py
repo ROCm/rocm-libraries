@@ -12,11 +12,6 @@ provider is actually requested from the registry.
 from ..reference_provider import ReferenceProviderRegistry
 
 ReferenceProviderRegistry.register_lazy(
-    "cpu_plugin",
-    "dnn_benchmarking.validation.providers.cpu_plugin_provider",
-    "CPUPluginReferenceProvider",
-)
-ReferenceProviderRegistry.register_lazy(
     "pytorch",
     "dnn_benchmarking.validation.providers.pytorch_provider",
     "PyTorchReferenceProvider",
