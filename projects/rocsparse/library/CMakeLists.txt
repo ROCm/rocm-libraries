@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,7 @@ if (rocblas_FOUND)
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
 endif()
 
+set(ROCSPARSE_WITH_HANDLE_CREATE ${ROCSPARSE_ENABLE_HANDLE_CREATE})
 # Configure a header file to pass the rocSPARSE version
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
                "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h"

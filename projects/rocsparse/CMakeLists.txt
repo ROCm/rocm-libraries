@@ -87,6 +87,7 @@ option(BUILD_WITH_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
 option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
+option(ROCSPARSE_ENABLE_HANDLE_CREATE "Build the non-blocking rocsparse_handle_create/destroy API" ON)
 
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )

@@ -577,7 +577,11 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, handle);
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
     *handle = new _rocsparse_handle(static_cast<hipStream_t>(0));
+#else
+    *handle = new _rocsparse_handle();
+#endif
     rocsparse::log_trace(*handle, "rocsparse_create_handle");
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -588,6 +592,7 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 /********************************************************************************
  * \brief rocsparse_handle_create creates the rocsparse library context on a
  * user-defined stream. All device memory allocation and stream-ordered setup
@@ -635,6 +640,7 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
+#endif // ROCSPARSE_WITH_HANDLE_CREATE
 
 /********************************************************************************
  * \brief destroy handle

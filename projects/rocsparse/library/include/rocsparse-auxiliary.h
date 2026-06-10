@@ -29,6 +29,7 @@
 #define ROCSPARSE_AUXILIARY_H
 
 #include "rocsparse-types.h"
+#include "rocsparse-version.h"
 #include "rocsparse/rocsparse-export.h"
 
 #ifdef __cplusplus
@@ -54,6 +55,7 @@ extern "C" {
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
 
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 /*! \ingroup aux_module
  *  \brief Create a rocSPARSE handle on a user-defined stream.
  *
@@ -93,6 +95,7 @@ rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
 ROCSPARSE_EXPORT
 rocsparse_status
     rocsparse_handle_create(rocsparse_handle* handle, hipStream_t stream, rocsparse_error* p_error);
+#endif
 
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE handle.
@@ -111,6 +114,7 @@ rocsparse_status
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle);
 
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE handle.
  *
@@ -128,6 +132,7 @@ rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle);
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_handle_destroy(rocsparse_handle handle, rocsparse_error* p_error);
+#endif
 
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE error descriptor.

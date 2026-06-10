@@ -35,6 +35,7 @@
 // rocsparse_handle_create / rocsparse_handle_destroy Tests
 // =============================================================================
 
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
 TEST(auxiliary_pre_checkin, HandleCreateWithStreamCreateDestroy)
 {
     hipStream_t      stream;
@@ -65,7 +66,9 @@ TEST(auxiliary_pre_checkin, HandleCreateWithStreamDefaultStream)
 
 TEST(auxiliary_pre_checkin, HandleDestroyWithNullHandle)
 {
-    ASSERT_EQ(rocsparse_handle_destroy(nullptr, nullptr), rocsparse_status_invalid_handle);
+    // rocsparse_handle_destroy accepts a null handle as a no-op (matching
+    // free/delete semantics) and returns success rather than an error.
+    ASSERT_EQ(rocsparse_handle_destroy(nullptr, nullptr), rocsparse_status_success);
 }
 
 TEST(auxiliary_pre_checkin, HandleCreateWithStreamSetStream)
@@ -83,6 +86,7 @@ TEST(auxiliary_pre_checkin, HandleCreateWithStreamSetStream)
     ASSERT_EQ(hipStreamDestroy(stream_create), hipSuccess);
     ASSERT_EQ(hipStreamDestroy(stream_use), hipSuccess);
 }
+#endif // ROCSPARSE_WITH_HANDLE_CREATE
 
 TEST(auxiliary_pre_checkin, HandleCreateDestroy)
 {
