@@ -10,6 +10,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Removed
 ### Optimized
 ### Resolved issues
+* Fixed an out-of-bounds read in `bdsqr_lower2upper`.
 ### Known issues
 ### Upcoming changes
 
