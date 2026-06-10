@@ -4,7 +4,7 @@ description: "Single source of truth for shared CI constants (TheRock ref, Docke
 outputs:
   therock-ref:
     description: "TheRock commit hash to use"
-    value: "e442f5a8b174a73cd6f3b6e3c68fe867b13b555a" # users/lpromber/windows_cleanup_add_git_deinit
+    value: "536aefdaff242e16557656fe924df1af54ab425b" # users/lpromber/windows_cleanup_add_git_deinit
   docker-image:
     description: "Docker container image for Linux builds"
     value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2"
