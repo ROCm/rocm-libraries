@@ -21,11 +21,20 @@ template <ck_tile::index_t MNPack      = 2,
           ck_tile::index_t XdlKThread  = 4>
 auto pack_mx_scales_mn_x_k(const ck_tile::HostTensor<ck_tile::e8m0_t>& src, bool k_last)
 {
-    auto src_lengths                    = src.get_lengths();
-    const ck_tile::index_t mn           = k_last ? src_lengths[0] : src_lengths[1];
-    const ck_tile::index_t k_scale      = k_last ? src_lengths[1] : src_lengths[0];
-    const ck_tile::index_t mn_packed    = mn / MNPack;
-    const ck_tile::index_t k_packed     = k_scale / KPack;
+    auto src_lengths               = src.get_lengths();
+    const ck_tile::index_t mn      = k_last ? src_lengths[0] : src_lengths[1];
+    const ck_tile::index_t k_scale = k_last ? src_lengths[1] : src_lengths[0];
+
+    if(mn % MNPack != 0 || k_scale % KPack != 0)
+        throw std::runtime_error("MX scale packing requires mn and k_scale divisible by MNPack/KPack");
+
+    const ck_tile::index_t mn_packed = mn / MNPack;
+    const ck_tile::index_t k_packed  = k_scale / KPack;
+
+    if(mn_packed % XdlMNThread != 0 || k_packed % XdlKThread != 0)
+        throw std::runtime_error(
+            "MX scale packing requires mn_packed and k_packed divisible by XdlMNThread/XdlKThread");
+
     const ck_tile::index_t total_packed = mn_packed * k_packed;
 
     std::vector<int32_t> packed(total_packed);
