@@ -8,6 +8,11 @@ best-configuration performance from the profiler output, compares against the
 expected TFLOPS for each case (10% tolerance, improvements always accepted), and
 writes a markdown report under the build directory.
 
+Expected TFLOPS are architecture-specific: the cases file may carry per-arch
+values (e.g. ``mi355=573 mi350=488``). The GPU architecture is auto-detected
+from ``rocminfo`` / ``rocm-smi`` (override with ``--arch``) and the matching
+value is selected.
+
 Use this after each refactoring stage to detect correctness or performance
 regressions:
 
@@ -23,9 +28,10 @@ Parsing of the profiler "Best configuration parameters" block is reused from
 
 import argparse
 import datetime
+import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # Reuse the profiler-output parser from the sibling script.
@@ -36,6 +42,53 @@ from test_direct_conv import parse_best_perf  # noqa: E402
 # Default tolerance: a case fails only if it is more than this fraction *below*
 # its expected value. Performance improvements above expected are accepted.
 DEFAULT_TOLERANCE = 0.10
+
+# Architecture key used when the GPU cannot be detected or no per-arch value
+# matches. Falls back to the original reference values.
+DEFAULT_ARCH = "mi355"
+
+# Bare "expected=<v>" tokens are stored under this key as an
+# architecture-independent fallback.
+_FALLBACK_KEY = "expected"
+
+
+# ---------------------------------------------------------------------------
+# Architecture detection
+# ---------------------------------------------------------------------------
+
+# Known AMD Instinct marketing names mapped to the short keys used in the cases
+# file. Matching is done case-insensitively against the detected product name.
+_ARCH_PATTERNS = [
+    ("mi355", re.compile(r"mi355", re.IGNORECASE)),
+    ("mi350", re.compile(r"mi350", re.IGNORECASE)),
+]
+
+
+def detect_arch() -> tuple[str | None, str]:
+    """Detect the GPU architecture key (e.g. "mi350").
+
+    Returns a ``(arch_key, source)`` tuple. ``arch_key`` is ``None`` if no
+    known architecture could be matched; ``source`` is a human-readable
+    description of how the detection was made (for the report).
+    """
+    probes = [
+        (["rocminfo"], r"Marketing Name:\s*(.+)"),
+        (["rocm-smi", "--showproductname"], r"Card Series:\s*(.+)"),
+    ]
+    for cmd, pat in probes:
+        try:
+            proc = subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, timeout=30,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+        for m in re.finditer(pat, proc.stdout):
+            name = m.group(1).strip()
+            for key, rx in _ARCH_PATTERNS:
+                if rx.search(name):
+                    return key, f"{cmd[0]} -> '{name}'"
+    return None, "auto-detect failed"
 
 
 # ---------------------------------------------------------------------------
@@ -53,10 +106,38 @@ class Case:
     section: str          # "fwd" or "bwd_data"
     binary: str           # profiler subcommand
     args: str             # space-separated argument string
-    expected: float | None  # expected TFLOPS, or None for report-only
+    expected: float | None  # expected TFLOPS for the selected arch, or None
+    expected_by_arch: dict[str, float] = field(default_factory=dict)
 
 
-def parse_cases(path: Path) -> list[Case]:
+def _parse_expected_suffix(suffix: str) -> dict[str, float]:
+    """Parse "mi355=573 mi350=488" or legacy "expected=573" into a dict."""
+    values: dict[str, float] = {}
+    for token in suffix.split():
+        if "=" not in token:
+            continue
+        key, _, val = token.partition("=")
+        try:
+            values[key.strip().lower()] = float(val)
+        except ValueError:
+            continue
+    return values
+
+
+def _select_expected(values: dict[str, float], arch: str | None) -> float | None:
+    """Pick the expected value for ``arch`` with sensible fallbacks."""
+    if not values:
+        return None
+    if arch is not None and arch in values:
+        return values[arch]
+    if _FALLBACK_KEY in values:
+        return values[_FALLBACK_KEY]
+    if DEFAULT_ARCH in values:
+        return values[DEFAULT_ARCH]
+    return None
+
+
+def parse_cases(path: Path, arch: str | None) -> list[Case]:
     cases: list[Case] = []
     section: str | None = None
 
@@ -77,22 +158,21 @@ def parse_cases(path: Path) -> list[Case]:
         if section is None:
             continue
 
-        # Split optional "| expected=<val>" suffix.
-        expected: float | None = None
+        # Split optional "| <key>=<val> ..." suffix.
+        expected_by_arch: dict[str, float] = {}
         body = line
         if "|" in line:
             body, _, suffix = line.partition("|")
             body = body.strip()
-            suffix = suffix.strip()
-            if suffix.startswith("expected="):
-                expected = float(suffix[len("expected="):])
+            expected_by_arch = _parse_expected_suffix(suffix.strip())
 
         cases.append(
             Case(
                 section=section,
                 binary=_SECTION_BINARY[section],
                 args=" ".join(body.split()),
-                expected=expected,
+                expected=_select_expected(expected_by_arch, arch),
+                expected_by_arch=expected_by_arch,
             )
         )
 
@@ -262,6 +342,12 @@ def main() -> int:
         action="store_true",
         help="Also write the report as direct_conv_regression_baseline.md.",
     )
+    parser.add_argument(
+        "--arch",
+        default=None,
+        help="GPU architecture key for expected-value selection "
+        "(e.g. mi355, mi350). Default: auto-detect from rocminfo/rocm-smi.",
+    )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -273,12 +359,23 @@ def main() -> int:
     report_dir = args.report_dir or bin_path.parent
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    cases = parse_cases(args.cases)
+    # Resolve which architecture's expected values to use.
+    if args.arch:
+        arch = args.arch.strip().lower()
+        arch_source = "--arch override"
+    else:
+        arch, arch_source = detect_arch()
+        if arch is None:
+            arch = DEFAULT_ARCH
+            arch_source = f"auto-detect failed, defaulting to '{DEFAULT_ARCH}'"
+
+    cases = parse_cases(args.cases, arch)
     if not cases:
         print(f"ERROR: no cases parsed from '{args.cases}'.", file=sys.stderr)
         return 1
 
     print(f"Running {len(cases)} regression case(s) from '{args.cases}'")
+    print(f"Architecture: {arch}  ({arch_source})")
     print(f"Binary path: {bin_path}\n")
 
     results: list[Result] = []
@@ -297,6 +394,7 @@ def main() -> int:
 
     meta = {
         "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        "arch": f"{arch} ({arch_source})",
         "bin_path": str(bin_path),
         "cases_file": str(args.cases),
     }
