@@ -98,7 +98,34 @@ def expand_sweep(
         # instead of silently ignoring the requested shape (this matches the
         # sweep_exhaustive config note "splitkv off to isolate tile shape").
         tile_active = any(v for v in (km0, kn0, kn0sub, kn1, kk1))
+        n_tile_active = sum(1 for v in (km0, kn0, kn0sub, kn1, kk1) if v)
         if splitkv and tile_active:
+            continue
+        # Tile dims are all-or-nothing: a partial override (some of km0/kn0/
+        # kn0sub/kn1/kk1 set, the rest left at base 0) is not a well-formed
+        # sequence<kM0,kN0,kN0Sub,kN1,kK1,...>. Skipping mixed combos lets a sweep
+        # express a tile family as {0, X} per dim and collapse to base-tile +
+        # full-tile kernels only (no nonsensical partial tiles).
+        if n_tile_active not in (0, 5):
+            continue
+        # warp_k <-> tile coupling (d=64). A tile override is VALID at the
+        # dispatch-default WarpK (warp_k 0 -> 16, 16x16x16): the deployed example
+        # binary instantiates exactly sequence<192,32,32,64,32,64> with
+        # /*WarpK=*/16, /*KN0=*/32 (hstu_attention_jagged_forward_dispatch.hpp
+        # try_run_tuned_jagged_forward, ~line 358-376), so the prior
+        # "WarpK=16/16x16x16 fails to compile" claim was false. WarpK=32
+        # (16x16x32) is also a valid tile variant, so a tile override may be
+        # emitted at warp_k in {0/default(16), 16, 32}. Only the converse still
+        # holds: pinning WarpK=32 on a base-tile kernel breaks it (maxk128+wk32
+        # fails to compile, maxk96+wk32 is ~5x slower), so warp_k==32 REQUIRES a
+        # tile override. Base-tile kernels keep the dispatch-default WarpK.
+        if warp_k == 32 and not tile_active:
+            continue
+        # Tile-shape overrides are only wired/validated for the native d=64 path
+        # (max_k == 64). Padded max_k (96/128) with a tile override is unsupported
+        # for the light fast sweep and unneeded by the exhaustive grid (max_k=64
+        # pinned). Base-tile kernels keep every max_k value.
+        if tile_active and int(max_k) != 64:
             continue
         # Validity gates implied by the block-tile contract
         # (hstu_attention_fwd_setting.hpp:20 "MaxK % N1 == 0, N0 % K1 == 0" and

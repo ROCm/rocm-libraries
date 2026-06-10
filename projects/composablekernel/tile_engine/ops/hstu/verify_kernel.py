@@ -62,8 +62,38 @@ def _lookup_kernel(name: str, config_path: Path, arch: str) -> HstuKernelConfig:
                      f"({config_path.name} + exhaustive fallback)")
 
 
+def _inline_prob_cfg(batch: int, num_head: int, seqlen: int, hdim: int,
+                     target_size: int, dtype: str) -> dict:
+    """In-memory problems config from direct shape flags (mirrors
+    hstu_benchmark.py:_inline_prob_cfg) so the inline path flows through the
+    identical problem->HstuProblem + mask construction as the file path."""
+    pid = f"b{batch}_h{num_head}_n{seqlen}_d{hdim}"
+    return {
+        "description": f"inline shape {pid}",
+        "data_types": [dtype],
+        "mask_configs": [
+            {"label": "hstu", "max_attn_len": 0, "contextual_seq_len": 0, "target_size": 0}
+        ],
+        "problems": [
+            {
+                "problem_id": pid,
+                "batch": batch,
+                "num_head": num_head,
+                "max_seqlen_q": seqlen,
+                "hdim_qk": hdim,
+                "hdim_v": hdim,
+                "target_size": target_size,
+                "num_targets_fixed": True,
+            }
+        ],
+    }
+
+
 def _build_problem(problems_path: Path, problem_index: int):
-    prob_cfg = _load_json(problems_path)
+    return _build_problem_from_cfg(_load_json(problems_path), problem_index)
+
+
+def _build_problem_from_cfg(prob_cfg: dict, problem_index: int):
     problems = prob_cfg["problems"]
     if problem_index < 0 or problem_index >= len(problems):
         raise SystemExit(f"--problem-index {problem_index} out of range [0, {len(problems) - 1}]")
@@ -204,7 +234,24 @@ def main() -> int:
     ap.add_argument("--from-summary", default=None, metavar="PATH",
                     help="Read best_kernel from .summary.json")
     ap.add_argument("--problem-index", type=int, default=0)
-    ap.add_argument("--problems", default=str(_OPS / "configs" / "fwd.json"))
+    ap.add_argument("--problems", default=str(_OPS / "configs" / "fwd.json"),
+                    help="Problem/mask JSON. Ignored when --batch (inline mode) is given.")
+    inline_grp = ap.add_argument_group(
+        "inline shape (no problems JSON needed; pass --batch to enable)"
+    )
+    inline_grp.add_argument(
+        "--batch", type=int, default=None,
+        help="Inline problem batch size. When set, a single problem is built from "
+        "--batch/--num-head/--seqlen/--hdim/--target-size and --problems is ignored.")
+    inline_grp.add_argument("--num-head", type=int, default=None, help="Inline num_head")
+    inline_grp.add_argument("--seqlen", type=int, default=None,
+                            help="Inline max_seqlen_q (UIH+target)")
+    inline_grp.add_argument("--hdim", type=int, default=64,
+                            help="Inline head dim (hdim_qk == hdim_v)")
+    inline_grp.add_argument("--target-size", type=int, default=0,
+                            help="Inline per-problem fixed target size")
+    ap.add_argument("--dtype", default="bf16",
+                    help="Data type for the inline problem (default bf16)")
     ap.add_argument("--config", default=str(_OPS / "configs" / "sweep_fast.json"))
     ap.add_argument("--build-dir", default=str(_OPS / "build"))
     ap.add_argument("--reference-kernel", default=_DEFAULT_REF)
@@ -241,7 +288,19 @@ def main() -> int:
 
     cand_cfg = _lookup_kernel(kernel, config_path, arch)
     ref_cfg = _lookup_kernel(args.reference_kernel, config_path, arch)
-    p, prob, q, k, v, off, nt = _build_problem(Path(args.problems), args.problem_index)
+    if args.batch is not None:
+        missing = [
+            flag for flag, val in (("--num-head", args.num_head), ("--seqlen", args.seqlen))
+            if val is None
+        ]
+        if missing:
+            ap.error(f"inline shape mode (--batch) also requires {', '.join(missing)}")
+        prob_cfg = _inline_prob_cfg(
+            args.batch, args.num_head, args.seqlen, args.hdim, args.target_size, args.dtype,
+        )
+        p, prob, q, k, v, off, nt = _build_problem_from_cfg(prob_cfg, 0)
+    else:
+        p, prob, q, k, v, off, nt = _build_problem(Path(args.problems), args.problem_index)
 
     print("=" * 72)
     print("HSTU kernel correctness verifier")

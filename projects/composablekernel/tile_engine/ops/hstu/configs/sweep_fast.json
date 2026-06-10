@@ -1,11 +1,17 @@
 {
-  "description": "FAST d=64 sweep (bf16, hstu) — small, shape-agnostic, no --filter needed. Sweeps only the levers the codegen actually consumes (dispatcher/codegen/hstu/instance_gen.py expand_sweep reads exactly: data_type, use_causal, max_k, mtile, use_splitkv, km0/kn0/kn0sub/kn1/kk1, warp_k). Grid: max_k {64,96,128} (64 = native d=64; 96/128 = padded-max_k paths so the dispatcher can compare native vs padded and the same config covers d up to 128) x mtile {64,128} x use_splitkv {false,true} (split-KV requires mtile=64, so it only applies to the mtile=64 rows) = 9 base-tile kernels. warp_k is left at the dispatch default (16): a base-tile d=64 kernel compiles and runs at the default WarpK, and pinning warp_k=32 here breaks the grid (maxk128+wk32 fails to compile and maxk96+wk32 runs ~5x slower) — warp_k=32 is only needed for the tile-overridden kernels in sweep_exhaustive.json. DROPPED because expand_sweep never reads them (they were silently ignored): pipeline, agpr, pingpong, trload, occupancy, num_splits. For the best tile shape per shape use sweep_exhaustive.json. Pass the shape inline, e.g. --batch 120 --num-head 4 --seqlen 16384 --hdim 64 --target-size 300.",
+  "description": "FAST d=64 sweep (bf16, hstu) — small, shape-agnostic, no --filter needed, everything compiles for d=64. Two families collapsed from one axis product by the instance_gen gates: (1) BASE-TILE: max_k {64,96,128} x mtile {64,128} x use_splitkv {false,true} (split-KV needs mtile=64) at the dispatch-default WarpK = 9 kernels, incl. the HEUR baseline jagged_bf16_causal1_maxk64_mtile128_splitkv0; (2) a LIGHT TILE-SHAPE family pinned to the proven d=64 winner sequence<192,32,32,64,32,64> (km0=192,kn0=32,kn0sub=32,kn1=64,kk1=32) at the dispatch-default WarpK=16 (warp_k=0, 16x16x16 — the geometry the deployed example binary launches via try_run_tuned_jagged_forward /*WarpK=*/16 /*KN0=*/32, verified BIT-EXACT vs the maxk128 reference), max_k=64, non-splitkv, crossed with mtile {64,128} = 2 kernels, incl. the WINNER jagged_bf16_causal1_maxk64_mtile64_splitkv0_km0192_n032_n0s32_n164_k132. NOTE: warp_k=32 (16x16x32, the `_wk32` variant) is intentionally EXCLUDED here — it is faster but numerically BROKEN (149 sign-flip mismatches vs the maxk128 reference), so it must never be labeled BEST. The tile axes are {0,X} per dim; instance_gen gates make this honest and all-compiling: tile dims are all-or-nothing, warp_k=32 REQUIRES a tile (so base kernels keep default WarpK), tile overrides are restricted to max_k=64, and the existing tile-consistency gates apply (kn0sub==kk1, kn0%kk1==0, max_k%kn1==0, kk1>=warp_k). expand_sweep reads only data_type/use_causal/max_k/mtile/use_splitkv/km0/kn0/kn0sub/kn1/kk1/warp_k; silently-ignored knobs (pipeline/agpr/pingpong/trload/occupancy/num_splits) are not present. Expands to 11 kernels. For the full tile grid use sweep_exhaustive.json. Pass the shape inline, e.g. --batch 120 --num-head 4 --seqlen 16384 --hdim 64 --target-size 300.",
   "variant": "jagged_fwd",
   "trait_config": {
     "data_type": {"values": ["bf16"]},
     "use_causal": {"values": [true]},
     "max_k": {"values": [64, 96, 128]},
     "mtile": {"values": [64, 128]},
-    "use_splitkv": {"values": [false, true]}
+    "use_splitkv": {"values": [false, true]},
+    "warp_k": {"values": [0]},
+    "km0": {"values": [0, 192]},
+    "kn0": {"values": [0, 32]},
+    "kn0sub": {"values": [0, 32]},
+    "kn1": {"values": [0, 64]},
+    "kk1": {"values": [0, 32]}
   }
 }
