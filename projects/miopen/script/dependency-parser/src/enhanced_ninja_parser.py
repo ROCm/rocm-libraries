@@ -17,6 +17,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
+
 class EnhancedNinjaDependencyParser:
     def __init__(self, build_file_path, ninja_executable="ninja"):
         self.build_file_path = build_file_path
@@ -25,8 +26,8 @@ class EnhancedNinjaDependencyParser:
 
         # Core data structures
         self.executable_to_objects = {}  # exe -> [object_files]
-        self.object_to_source = {}       # object -> primary_source
-        self.object_to_all_deps = {}     # object -> [all_dependencies]
+        self.object_to_source = {}  # object -> primary_source
+        self.object_to_all_deps = {}  # object -> [all_dependencies]
         self.file_to_executables = defaultdict(set)  # file -> {executables}
 
         # Thread safety
@@ -51,24 +52,28 @@ class EnhancedNinjaDependencyParser:
         """Parse the ninja build file to extract executable -> object mappings."""
         print("Parsing ninja build file...")
 
-        with open(self.build_file_path, 'r') as f:
+        with open(self.build_file_path, "r") as f:
             content = f.read()
-          # Parse executable build rules
-        exe_pattern = r'^build (bin/[^:]+):\s+\S+\s+([^|]+)'
-        obj_pattern = r'^build ([^:]+\.(?:cpp|cu|hip)\.o):\s+\S+\s+([^\s|]+)'
+        # Parse executable build rules
+        exe_pattern = r"^build (bin/[^:]+):\s+\S+\s+([^|]+)"
+        obj_pattern = r"^build ([^:]+\.(?:cpp|cu|hip)\.o):\s+\S+\s+([^\s|]+)"
 
-        lines = content.split('\n')
+        lines = content.split("\n")
 
         for line in lines:
             # Match executable rules
             exe_match = re.match(exe_pattern, line)
-            if exe_match and ('EXECUTABLE' in line or 'test_' in exe_match.group(1) or 'example_' in exe_match.group(1)):
+            if exe_match and (
+                "EXECUTABLE" in line
+                or "test_" in exe_match.group(1)
+                or "example_" in exe_match.group(1)
+            ):
                 exe = exe_match.group(1)
                 deps_part = exe_match.group(2).strip()
 
                 object_files = []
                 for dep in deps_part.split():
-                    if dep.endswith('.o') and not dep.startswith('/'):
+                    if dep.endswith(".o") and not dep.startswith("/"):
                         object_files.append(dep)
 
                 self.executable_to_objects[exe] = object_files
@@ -87,7 +92,7 @@ class EnhancedNinjaDependencyParser:
     def _extract_object_dependencies(self):
         """Extract detailed dependencies for all object files using ninja -t deps."""
         object_files = list(self.object_to_source.keys())
-          # Process object files in parallel for better performance
+        # Process object files in parallel for better performance
         if not object_files:
             print("No object files found - skipping dependency extraction")
             return
@@ -100,7 +105,7 @@ class EnhancedNinjaDependencyParser:
                 executor.submit(self._get_object_dependencies, obj): obj
                 for obj in object_files
             }
-              # Process completed futures
+            # Process completed futures
             completed = 0
             for future in as_completed(future_to_obj):
                 obj_file = future_to_obj[future]
@@ -110,11 +115,15 @@ class EnhancedNinjaDependencyParser:
                         self.object_to_all_deps[obj_file] = dependencies
                         completed += 1
                         if completed % 100 == 0:
-                            print(f"Processed {completed}/{len(object_files)} object files...")
+                            print(
+                                f"Processed {completed}/{len(object_files)} object files..."
+                            )
                 except Exception as e:
                     print(f"Error processing {obj_file}: {e}")
 
-        print(f"Completed dependency extraction for {len(self.object_to_all_deps)} object files")
+        print(
+            f"Completed dependency extraction for {len(self.object_to_all_deps)} object files"
+        )
 
     def _get_object_dependencies(self, object_file):
         """Get all dependencies for a single object file using ninja -t deps."""
@@ -122,28 +131,24 @@ class EnhancedNinjaDependencyParser:
             # Run ninja -t deps for this object file
             cmd = [self.ninja_executable, "-t", "deps", object_file]
             result = subprocess.run(
-                cmd,
-                cwd=self.build_dir,
-                capture_output=True,
-                text=True,
-                timeout=30
+                cmd, cwd=self.build_dir, capture_output=True, text=True, timeout=30
             )
 
             if result.returncode != 0:
                 return []
 
             dependencies = []
-            lines = result.stdout.strip().split('\n')
+            lines = result.stdout.strip().split("\n")
 
             for line in lines[1:]:  # Skip first line with metadata
                 line = line.strip()
-                if line and not line.startswith('#'):
+                if line and not line.startswith("#"):
                     # Convert absolute paths to relative paths from workspace root
                     dep_file = line
                     ws_root = getattr(self, "workspace_root", "..")
                     ws_prefix = ws_root.rstrip("/") + "/"
                     if dep_file.startswith(ws_prefix):
-                        dep_file = dep_file[len(ws_prefix):]
+                        dep_file = dep_file[len(ws_prefix) :]
                     dependencies.append(dep_file)
 
             return dependencies
@@ -168,7 +173,9 @@ class EnhancedNinjaDependencyParser:
         print(f"Built mapping for {len(self.file_to_executables)} files")
 
         # Show statistics
-        multi_exe_files = {f: exes for f, exes in self.file_to_executables.items() if len(exes) > 1}
+        multi_exe_files = {
+            f: exes for f, exes in self.file_to_executables.items() if len(exes) > 1
+        }
         print(f"Files used by multiple executables: {len(multi_exe_files)}")
 
         if multi_exe_files:
@@ -179,20 +186,30 @@ class EnhancedNinjaDependencyParser:
     def _is_project_file(self, file_path):
         """Determine if a file is part of the project (not system files)."""
         # Include files that are clearly part of the project
-        if any(file_path.startswith(prefix) for prefix in [
-            'addkernels/', 'driver/', 'include/', 'samples/',
-            'speedtests/', 'test/', 'src/', 'tools/'
-        ]):
+        if any(
+            file_path.startswith(prefix)
+            for prefix in [
+                "addkernels/",
+                "driver/",
+                "include/",
+                "samples/",
+                "speedtests/",
+                "test/",
+                "src/",
+                "tools/",
+            ]
+        ):
             return True
 
         # Exclude system files
-        if any(file_path.startswith(prefix) for prefix in [
-            '/usr/', '/opt/rocm', '/lib/', '/system/'
-        ]):
+        if any(
+            file_path.startswith(prefix)
+            for prefix in ["/usr/", "/opt/rocm", "/lib/", "/system/"]
+        ):
             return False
 
         # Include files with common source/header extensions
-        if file_path.endswith(('.cpp', '.hpp', '.h')):
+        if file_path.endswith((".cpp", ".hpp", ".h")):
             return True
 
         return False
@@ -201,12 +218,12 @@ class EnhancedNinjaDependencyParser:
         """Export the file-to-executable mapping to CSV with proper comma separation."""
         print(f"Exporting mapping to {output_file}")
 
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             f.write("source_file,executables\n")
             for file_path in sorted(self.file_to_executables.keys()):
                 executables = sorted(self.file_to_executables[file_path])
                 # Use semicolon to separate multiple executables within the field
-                exe_list = ';'.join(executables)
+                exe_list = ";".join(executables)
                 f.write(f'"{file_path}","{exe_list}"\n')
 
     def export_to_json(self, output_file):
@@ -220,21 +237,24 @@ class EnhancedNinjaDependencyParser:
                 exe_to_files[exe].add(file_path)
 
         mapping_data = {
-            'file_to_executables': {
-                file_path: list(exes) for file_path, exes in self.file_to_executables.items()
+            "file_to_executables": {
+                file_path: list(exes)
+                for file_path, exes in self.file_to_executables.items()
             },
-            'executable_to_files': {
+            "executable_to_files": {
                 exe: sorted(files) for exe, files in exe_to_files.items()
             },
-            'statistics': {
-                'total_files': len(self.file_to_executables),
-                'total_executables': len(self.executable_to_objects),
-                'total_object_files': len(self.object_to_source),
-                'files_with_multiple_executables': len([f for f, exes in self.file_to_executables.items() if len(exes) > 1])
-            }
+            "statistics": {
+                "total_files": len(self.file_to_executables),
+                "total_executables": len(self.executable_to_objects),
+                "total_object_files": len(self.object_to_source),
+                "files_with_multiple_executables": len(
+                    [f for f, exes in self.file_to_executables.items() if len(exes) > 1]
+                ),
+            },
         }
 
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             json.dump(mapping_data, f, indent=2)
 
     def print_summary(self):
@@ -245,9 +265,13 @@ class EnhancedNinjaDependencyParser:
         print(f"Total object files processed: {len(self.object_to_all_deps)}")
 
         # Files by type
-        cpp_files = sum(1 for f in self.file_to_executables.keys() if f.endswith('.cpp'))
-        hpp_files = sum(1 for f in self.file_to_executables.keys() if f.endswith('.hpp'))
-        h_files = sum(1 for f in self.file_to_executables.keys() if f.endswith('.h'))
+        cpp_files = sum(
+            1 for f in self.file_to_executables.keys() if f.endswith(".cpp")
+        )
+        hpp_files = sum(
+            1 for f in self.file_to_executables.keys() if f.endswith(".hpp")
+        )
+        h_files = sum(1 for f in self.file_to_executables.keys() if f.endswith(".h"))
 
         print(f"\nFile types:")
         print(f"  .cpp files: {cpp_files}")
@@ -255,14 +279,19 @@ class EnhancedNinjaDependencyParser:
         print(f"  .h files: {h_files}")
 
         # Multi-executable files
-        multi_exe_files = {f: exes for f, exes in self.file_to_executables.items() if len(exes) > 1}
+        multi_exe_files = {
+            f: exes for f, exes in self.file_to_executables.items() if len(exes) > 1
+        }
         print(f"\nFiles used by multiple executables: {len(multi_exe_files)}")
 
         if multi_exe_files:
             print("\nTop files with most dependencies:")
-            sorted_multi = sorted(multi_exe_files.items(), key=lambda x: len(x[1]), reverse=True)
+            sorted_multi = sorted(
+                multi_exe_files.items(), key=lambda x: len(x[1]), reverse=True
+            )
             for file_path, exes in sorted_multi[:10]:
                 print(f"  {file_path}: {len(exes)} executables")
+
 
 def main():
     # Accept: build_file, ninja_path, workspace_root
@@ -301,8 +330,8 @@ def main():
 
     # Export results
     output_dir = os.path.dirname(build_file)
-    csv_file = os.path.join(output_dir, 'enhanced_file_executable_mapping.csv')
-    json_file = os.path.join(output_dir, 'enhanced_dependency_mapping.json')
+    csv_file = os.path.join(output_dir, "enhanced_file_executable_mapping.csv")
+    json_file = os.path.join(output_dir, "enhanced_dependency_mapping.json")
 
     parser.export_to_csv(csv_file)
     parser.export_to_json(json_file)
@@ -310,6 +339,7 @@ def main():
     print(f"\nResults exported to:")
     print(f"  CSV: {csv_file}")
     print(f"  JSON: {json_file}")
+
 
 if __name__ == "__main__":
     main()
