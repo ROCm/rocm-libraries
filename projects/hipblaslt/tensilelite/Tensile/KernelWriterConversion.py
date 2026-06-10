@@ -192,11 +192,6 @@ class KernelWriterConversion(KernelWriterBase):
     if enableFactorDim:
       kStr += "  unsigned int factorDim;%s" % (self.endLine)
 
-    # Batch offsets for General Batched GEMM
-    if not self.state["ProblemType"]["GroupedGemm"]:
-      kStr += "  int64_t batchOffsetD;" + self.endLine
-      kStr += "  int64_t batchOffsetC;" + self.endLine
-
     # argument structure end
     kStr += "};" + self.endLine
 
@@ -219,6 +214,7 @@ class KernelWriterConversion(KernelWriterBase):
       # Additional argument batch_mode is added to distinguish between Strided Batch and General Batched GEMM
       # batch_mode will dictate how the GLOBAL_C and GLOBAL_D macros are defined and used in the kernel body
       # since the index calculation for Strided Batch and General Batch GEMM are different.
+      # Also, batchOffsetD and batchOffsetC arguments added at the end.
       kStr += "  argument_%s arg, uint32_t batch_mode, uint32_t additionalPaddingPerBatch, int64_t batchOffsetD, int64_t batchOffsetC)" % ( self.kernelName ) + self.endLine
 
     return kStr
