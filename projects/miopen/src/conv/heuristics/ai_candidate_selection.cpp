@@ -149,6 +149,66 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
     {
         split_k_values_ = {1}; // Default to 1 if not specified
     }
+
+    // Optional: declarative descriptors for kernels with variable type-string layouts. Mirrors
+    // CK_CONDITIONAL_LAYOUTS in the MIOpenFF preprocessor; absence => all kernels are static.
+    if(metadata.contains("conditional_layouts"))
+    {
+        for(const auto& [kernel_name, layout_json] : metadata["conditional_layouts"].items())
+        {
+            ConditionalLayout layout;
+            layout.base_param_count = layout_json.value("base_param_count", std::size_t{0});
+
+            // Note: iterate the actual sub-object (not a .value(...) temporary -- items() over an
+            // rvalue json throws invalid_iterator.214).
+            if(layout_json.contains("conditional_params"))
+            {
+                for(const auto& [param_name, spec] : layout_json["conditional_params"].items())
+                {
+                    const std::string kind = spec.at("kind").get<std::string>();
+                    ConditionalLayout::ConditionalParam cp;
+                    if(kind == "present_if_gt_one")
+                    {
+                        cp.kind       = ConditionalLayout::ConditionalKind::present_if_gt_one;
+                        cp.base_index = spec.value("base_index", std::size_t{0});
+                    }
+                    else if(kind == "appended_suffix")
+                    {
+                        cp.kind = ConditionalLayout::ConditionalKind::appended_suffix;
+                    }
+                    else
+                    {
+                        MIOPEN_THROW("Unknown conditional param kind '" + kind + "' for '" +
+                                     param_name + "' in conditional_layouts[" + kernel_name + "]");
+                    }
+                    layout.conditional_params.emplace(param_name, cp);
+                }
+            }
+
+            if(layout_json.contains("packed_params"))
+            {
+                for(const auto& [param_name, spec] : layout_json["packed_params"].items())
+                {
+                    const std::string codec = spec.at("codec").get<std::string>();
+                    ConditionalLayout::PackedParam pp;
+                    pp.index   = spec.value("index", std::size_t{0});
+                    pp.outputs = spec.value("outputs", std::vector<std::string>{});
+                    if(codec == "tile_load_math_lm")
+                    {
+                        pp.codec = ConditionalLayout::PackedCodec::tile_load_math_lm;
+                    }
+                    else
+                    {
+                        MIOPEN_THROW("Unknown packed-param codec '" + codec + "' for '" +
+                                     param_name + "' in conditional_layouts[" + kernel_name + "]");
+                    }
+                    layout.packed_params.emplace(param_name, std::move(pp));
+                }
+            }
+
+            conditional_layouts_.emplace(kernel_name, std::move(layout));
+        }
+    }
 }
 
 MIOPEN_INTERNALS_EXPORT
@@ -251,6 +311,14 @@ std::size_t CandidateSelectionMetadata::GetInputEncodingClassCount(const std::st
 {
     const auto it = feature_encodings_.find(name);
     return it == feature_encodings_.end() ? 0 : it->second.size();
+}
+
+MIOPEN_INTERNALS_EXPORT
+const ConditionalLayout*
+CandidateSelectionMetadata::GetConditionalLayout(const std::string& kernel_name) const
+{
+    const auto it = conditional_layouts_.find(kernel_name);
+    return it == conditional_layouts_.end() ? nullptr : &it->second;
 }
 
 // --- Input feature engineering ----------------------------------------------
@@ -825,83 +893,85 @@ const CandidateSelectionModel& GetCandidateSelectionModel(const std::string& arc
     }
 }
 
-// WRW grouped kernels whose CK type-string has a variable number of params, so the static
-// kernel_str_mapping cannot locate NumGroupsToMerge / SplitK and (for Wavelet) the packed
-// TileLoadMathThreadGroupSize token. Mirrors WRW_CONDITIONAL_NUM_GROUPS_KERNELS in the MIOpenFF
-// preprocessor (miopenff/benchmarking/preproc_maps.py:401-455) -- keep these two lists in sync.
+// Conditional/packed kernel layouts are described declaratively in the metadata's
+// "conditional_layouts" section (parsed into ConditionalLayout). This is the single source of
+// truth, authored in the MIOpenFF preprocessor (miopenff/benchmarking/preproc_maps.py:
+// CK_CONDITIONAL_LAYOUTS) and exported into the model metadata, so adding/changing a conditional
+// kernel needs no C++ change.
 //
-//  - NumGroupsToMerge is emitted by CK (at base type-string index 14, i.e. candidate index 15) only
-//    when > 1, so its presence is data-dependent.
-//  - SplitK is NOT inside the CK angle brackets: MIOpen appends it as a "+<int>" suffix after the
-//    closing '>'. The C++ tokenizer (GetKernelAsTokens) drops that suffix, and SplitK is instead
-//    re-attached as the last candidate token by ExpandKernelParamsWithSplitK when use_split_k is
-//    set. Thus within one EncodeKernelParams call, "SplitK present" == use_split_k.
-//  - Wavelet only: type-string index 0 packs two numbers as "{load}l+{math}m"; it is split into the
-//    TileLoadThreadGroupSize / TileMathThreadGroupSize features.
-constexpr size_t kWrwCkBaseParamCount = 15; // CK type-string params before the conditional tail
+//  - "present_if_gt_one": CK emits the param only when its value > 1, at base_index; its presence
+//  is
+//    data-dependent (e.g. NumGroupsToMerge).
+//  - "appended_suffix": MIOpen appends the param after the closing '>' as "+<int>". The C++
+//  tokenizer
+//    (GetKernelAsTokens) drops that suffix, and it is re-attached as the last candidate token by
+//    ExpandKernelParamsWithSplitK when use_split_k is set. Thus within one EncodeKernelParams call,
+//    "appended param present" == use_split_k (e.g. SplitK).
+//  - packed codec: a single type-string token unpacks into several features (e.g. Wavelet's
+//    "{load}l+{math}m" -> TileLoad/TileMathThreadGroupSize via codec "tile_load_math_lm").
 
-inline bool IsWrwConditionalNumGroupsKernel(const std::string& kernel_name)
-{
-    return kernel_name == "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3" ||
-           kernel_name == "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad_MergedGroups";
-}
-
-// Resolve the candidate-vector index for NumGroupsToMerge / SplitK on a conditional WRW kernel.
-// candidate_len includes kernel_name at [0] and the optional trailing split_k token. Returns
+// Resolve the candidate-vector index for a conditional param given the layout. candidate_len
+// includes kernel_name at [0] and the optional trailing appended (split_k) token. Returns
 // std::nullopt when the param is absent for this candidate. Mirrors resolve_ck_param_index()
 // (preproc_maps.py), reframed for the C++ candidate layout (Python list index + 1 == candidate
 // idx).
 inline std::optional<size_t>
-ResolveConditionalParamIndex(const std::string& param_name, size_t candidate_len, bool use_split_k)
+ResolveConditionalParamIndex(const ConditionalLayout::ConditionalParam& spec,
+                             size_t base_param_count,
+                             size_t candidate_len,
+                             bool use_split_k)
 {
-    // candidate index of NumGroupsToMerge when present (Python list index 15 -> candidate 16).
-    const size_t num_groups_candidate_idx = kWrwCkBaseParamCount + 1;
-    // Base candidate length (kernel_name + 15 type-string params), no NGM, no SplitK.
-    const size_t base_len = kWrwCkBaseParamCount + 1;
+    // Base candidate length (kernel_name + base_param_count type-string params), no tail.
+    const size_t base_len = base_param_count + 1;
 
-    if(param_name == "NumGroupsToMerge")
+    switch(spec.kind)
     {
-        // Present iff candidate carries an extra inline token beyond base (+1 for trailing SplitK).
+    case ConditionalLayout::ConditionalKind::present_if_gt_one: {
+        // Present iff candidate carries an extra inline token beyond base (+1 for appended suffix).
         const size_t needed = base_len + 1 + (use_split_k ? 1 : 0);
         if(candidate_len >= needed)
-            return num_groups_candidate_idx;
+            return spec.base_index + 1; // Python list index -> candidate index (+1 for kernel_name)
         return std::nullopt;
     }
-
-    if(param_name == "SplitK")
-    {
+    case ConditionalLayout::ConditionalKind::appended_suffix:
         if(!use_split_k || candidate_len < base_len + 1)
             return std::nullopt;
         return candidate_len - 1; // always the appended last token when present
     }
-
     return std::nullopt;
 }
 
-// Split the Wavelet packed token "{load}l+{math}m" (e.g. "128l+256m") into (load, math) strings.
-// Returns std::nullopt if the token does not match. Mirrors the ^(\d+)l\+ / \+(\d+)m$ regex split
-// in preproc.py:746-752.
-inline std::optional<std::pair<std::string, std::string>>
-SplitTileLoadMathToken(const std::string& token)
+// Decode a packed token into its constituent feature values per `codec`, aligned with the
+// descriptor's output order. Returns std::nullopt if the token does not match. Mirrors
+// split_packed_param() (preproc_maps.py); keep the codecs in sync.
+inline std::optional<std::vector<std::string>>
+DecodePackedParam(ConditionalLayout::PackedCodec codec, const std::string& token)
 {
-    const auto l_pos = token.find("l+");
-    if(l_pos == std::string::npos || l_pos == 0)
-        return std::nullopt;
-    if(token.empty() || token.back() != 'm')
-        return std::nullopt;
+    switch(codec)
+    {
+    case ConditionalLayout::PackedCodec::tile_load_math_lm: {
+        // "{load}l+{math}m" (e.g. "128l+256m") -> {load, math}.
+        const auto l_pos = token.find("l+");
+        if(l_pos == std::string::npos || l_pos == 0)
+            return std::nullopt;
+        if(token.empty() || token.back() != 'm')
+            return std::nullopt;
 
-    const std::string load = token.substr(0, l_pos);
-    const std::string math =
-        token.substr(l_pos + 2, token.size() - (l_pos + 2) - 1); // drop "l+","m"
+        const std::string load = token.substr(0, l_pos);
+        const std::string math =
+            token.substr(l_pos + 2, token.size() - (l_pos + 2) - 1); // drop "l+","m"
 
-    const auto all_digits = [](const std::string& s) {
-        return !s.empty() &&
-               std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isdigit(c); });
-    };
-    if(!all_digits(load) || !all_digits(math))
-        return std::nullopt;
+        const auto all_digits = [](const std::string& s) {
+            return !s.empty() &&
+                   std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isdigit(c); });
+        };
+        if(!all_digits(load) || !all_digits(math))
+            return std::nullopt;
 
-    return std::make_pair(load, math);
+        return std::vector<std::string>{load, math};
+    }
+    }
+    return std::nullopt;
 }
 
 MIOPEN_INTERNALS_EXPORT
@@ -956,7 +1026,21 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
             continue; // Skip to next candidate
         }
 
-        const bool is_conditional_kernel = IsWrwConditionalNumGroupsKernel(kernel_name);
+        const ConditionalLayout* conditional_layout = metadata.GetConditionalLayout(kernel_name);
+
+        // For conditional kernels, the static kernel_str_mapping index is only valid when the
+        // candidate carries the full param tail; collect those param names to skip below.
+        const auto is_conditional_param = [&](const std::string& mapped_name) {
+            if(conditional_layout == nullptr)
+                return false;
+            for(const auto& [cond_name, spec] : conditional_layout->conditional_params)
+            {
+                (void)spec;
+                if(ParamNameEndsWith(mapped_name, cond_name))
+                    return true;
+            }
+            return false;
+        };
 
         // Build a map from param_name to value for this candidate
         std::map<std::string, std::string> param_value_map;
@@ -965,11 +1049,8 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
         {
             try
             {
-                // For conditional WRW kernels the static index for NumGroupsToMerge / SplitK is
-                // only valid when the candidate carries the full param tail. Skip them here and
-                // resolve their (data-dependent) positions in the override block below.
-                if(is_conditional_kernel && (ParamNameEndsWith(kv.second, "NumGroupsToMerge") ||
-                                             ParamNameEndsWith(kv.second, "SplitK")))
+                // Skip conditional params here; resolve their data-dependent positions below.
+                if(is_conditional_param(kv.second))
                     continue;
 
                 // Use std::stoull for unsigned long long, then validate range
@@ -1016,48 +1097,50 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
             continue; // Continue to the next candidate
         }
 
-        // Conditional WRW kernels: the static kernel_str_mapping cannot express the data-dependent
-        // positions of NumGroupsToMerge / SplitK, nor (for Wavelet) the packed first token. Fill
-        // the affected output params here from raw candidate indices; the encode loop below then
-        // applies the normal categorical/numeric encoding (or skips them when declared constant).
-        if(is_conditional_kernel)
+        // Conditional kernels: the static kernel_str_mapping cannot express data-dependent param
+        // positions, nor packed tokens. Fill the affected output params here from raw candidate
+        // indices per the metadata descriptor; the encode loop below then applies the normal
+        // categorical/numeric encoding (or skips them when declared constant).
+        if(conditional_layout != nullptr)
         {
-            // Wavelet only: split the packed "{load}l+{math}m" token at type-string index 0
-            // (candidate index 1) into the two threadgroup-size features.
-            if(kernel_name == "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3" &&
-               candidate.size() > 1)
+            // Packed tokens: decode the token at descriptor index into its named output features.
+            for(const auto& [packed_name, packed] : conditional_layout->packed_params)
             {
-                if(const auto split = SplitTileLoadMathToken(candidate[1]))
+                const size_t token_idx = packed.index + 1; // +1 for candidate[0]=kernel_name
+                if(token_idx >= candidate.size())
+                    continue;
+                const auto decoded = DecodePackedParam(packed.codec, candidate[token_idx]);
+                if(!decoded)
                 {
+                    MIOPEN_LOG_W("Packed param '"
+                                 << packed_name << "' token '" << candidate[token_idx]
+                                 << "' did not match its codec for kernel " << kernel_name);
+                    continue;
+                }
+                for(size_t out_pos = 0;
+                    out_pos < packed.outputs.size() && out_pos < decoded->size();
+                    ++out_pos)
+                {
+                    const std::string& out_name = packed.outputs[out_pos];
                     for(const auto& param_name : output_params)
                     {
-                        if(ParamNameEndsWith(param_name, "TileLoadThreadGroupSize"))
-                            param_value_map[param_name] = split->first;
-                        else if(ParamNameEndsWith(param_name, "TileMathThreadGroupSize"))
-                            param_value_map[param_name] = split->second;
+                        if(ParamNameEndsWith(param_name, out_name))
+                            param_value_map[param_name] = (*decoded)[out_pos];
                     }
-                }
-                else
-                {
-                    MIOPEN_LOG_W("Wavelet TileLoadMathThreadGroupSize token '"
-                                 << candidate[1] << "' did not match '{load}l+{math}m'");
                 }
             }
 
-            // Resolve NumGroupsToMerge / SplitK against the actual candidate length. Absent params
-            // are left out of param_value_map, so the encode loop emits the missing-value token.
-            for(const auto& param_name : output_params)
+            // Conditional params: resolve position against the actual candidate length. Absent
+            // params are left out of param_value_map, so the encode loop emits the missing token.
+            for(const auto& [cond_name, spec] : conditional_layout->conditional_params)
             {
-                const bool is_ngm    = ParamNameEndsWith(param_name, "NumGroupsToMerge");
-                const bool is_splitk = ParamNameEndsWith(param_name, "SplitK");
-                if(!is_ngm && !is_splitk)
+                const auto idx = ResolveConditionalParamIndex(
+                    spec, conditional_layout->base_param_count, candidate.size(), use_split_k);
+                if(!idx || *idx >= candidate.size())
                     continue;
-
-                const std::string base = is_ngm ? "NumGroupsToMerge" : "SplitK";
-                if(const auto idx =
-                       ResolveConditionalParamIndex(base, candidate.size(), use_split_k))
+                for(const auto& param_name : output_params)
                 {
-                    if(*idx < candidate.size())
+                    if(ParamNameEndsWith(param_name, cond_name))
                         param_value_map[param_name] = candidate[*idx];
                 }
             }

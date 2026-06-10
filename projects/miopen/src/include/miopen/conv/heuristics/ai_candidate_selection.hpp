@@ -40,6 +40,39 @@ namespace candidate_selection {
 
 class CandidateSelectionMetadata;
 
+// Declarative description of a CK kernel whose type-string layout is variable, mirroring
+// CK_CONDITIONAL_LAYOUTS in the MIOpenFF preprocessor (miopenff/benchmarking/preproc_maps.py).
+// Loaded from the "conditional_layouts" metadata section; absence means the kernel is fully static.
+struct ConditionalLayout
+{
+    // Kind of a data-dependent (conditional) parameter.
+    enum class ConditionalKind
+    {
+        present_if_gt_one, // CK emits it only when value > 1, at base_index
+        appended_suffix,   // appended after '>' as "+<int>"; last token when present
+    };
+    struct ConditionalParam
+    {
+        ConditionalKind kind;
+        std::size_t base_index = 0; // meaningful for present_if_gt_one
+    };
+    // Codec for a packed token that unpacks into several features.
+    enum class PackedCodec
+    {
+        tile_load_math_lm, // "{load}l+{math}m" -> two numeric features
+    };
+    struct PackedParam
+    {
+        std::size_t index = 0; // type-string index of the packed token
+        PackedCodec codec;
+        std::vector<std::string> outputs; // produced feature names, in order
+    };
+
+    std::size_t base_param_count = 0;
+    std::map<std::string, ConditionalParam> conditional_params; // by param name (e.g. "SplitK")
+    std::map<std::string, PackedParam> packed_params;           // by packed param name
+};
+
 // Forward declarations for the helpers implemented in ai_heuristics.cpp
 std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& features,
                                                 const std::string& arch,
@@ -101,6 +134,10 @@ public:
     // Number of one-hot classes for an input feature (e.g. "precision"), from the metadata's
     // input encodings. Returns 0 when the feature has no encoding (i.e. is not categorical).
     MIOPEN_INTERNALS_EXPORT std::size_t GetInputEncodingClassCount(const std::string& name) const;
+    // Conditional/packed layout for a kernel, or nullptr when the kernel is fully static (the
+    // common case). Loaded from the metadata's "conditional_layouts" section.
+    MIOPEN_INTERNALS_EXPORT const ConditionalLayout*
+    GetConditionalLayout(const std::string& kernel_name) const;
 
 private:
     // Internal mappings and encodings
@@ -116,6 +153,7 @@ private:
     std::map<std::string, std::map<std::string, std::string>> kernel_str_mapping_;
     float missing_value_token_;
     std::vector<int> split_k_values_;
+    std::map<std::string, ConditionalLayout> conditional_layouts_;
 };
 
 class CandidateSelectionModel

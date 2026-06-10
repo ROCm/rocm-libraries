@@ -527,6 +527,48 @@ TEST_P(GPU_CandidateSelection_FP32, WaveletSplitKResolution_Test)
     }
 }
 
+// The conditional-layout descriptor is loaded from metadata: present for the Wavelet kernel,
+// absent for a fully static kernel (which then decodes via the plain kernel_str_mapping path).
+TEST_P(GPU_CandidateSelection_FP32, ConditionalLayoutDescriptorPresence_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+
+    // Static kernel (used as the common test kernel) must have no conditional layout.
+    EXPECT_EQ(meta.GetConditionalLayout("DeviceGroupedConvBwdWeight_Xdl_CShuffle"), nullptr);
+
+    if(MetadataHasKernel(meta, kWaveletKernel))
+    {
+        const auto* layout = meta.GetConditionalLayout(kWaveletKernel);
+        ASSERT_NE(layout, nullptr) << "Wavelet metadata present but conditional layout missing";
+        EXPECT_EQ(layout->base_param_count, 15u);
+        EXPECT_TRUE(layout->conditional_params.count("NumGroupsToMerge") == 1);
+        EXPECT_TRUE(layout->conditional_params.count("SplitK") == 1);
+        EXPECT_TRUE(layout->packed_params.count("TileLoadMathThreadGroupSize") == 1);
+    }
+}
+
+// A fully static kernel decodes via the plain path (no conditional descriptor needed).
+TEST_P(GPU_CandidateSelection_FP32, StaticKernelDecodes_Test)
+{
+    const auto& params        = GetParam();
+    const std::string& kernel = params.kernel_name; // the per-solver static kernel
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    if(!MetadataHasKernel(meta, kernel))
+        GTEST_SKIP() << "Kernel not present in metadata for " << params.solver;
+
+    ASSERT_EQ(meta.GetConditionalLayout(kernel), nullptr)
+        << "test kernel is expected to be static (no conditional layout)";
+
+    // Build a candidate from the static mapping (all numeric "1"s), as GenerateValidKernelParams
+    // does.
+    auto candidates = GenerateValidKernelParams(meta, kernel, 1);
+    auto encoded    = EncodeKernelParams(candidates, meta, /*use_split_k=*/false);
+    ASSERT_EQ(encoded.size(), 1u) << "static kernel candidate was unexpectedly skipped";
+    EXPECT_EQ(encoded[0].size(),
+              meta.output_params().size() - meta.GetConstantOutputIndices().size());
+}
+
 // === INSTANTIATION ===
 
 // Helper function to generate test parameters for both 2D and 3D solvers

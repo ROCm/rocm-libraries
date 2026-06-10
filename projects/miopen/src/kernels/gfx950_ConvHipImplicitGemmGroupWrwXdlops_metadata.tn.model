@@ -401,5 +401,41 @@
             "023_TileLoadThreadGroupSize": "256"
         }
     },
-    "missing_value_token": -1.0
+    "missing_value_token": -1.0,
+    "conditional_layouts": {
+        "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3": {
+            "base_param_count": 15,
+            "conditional_params": {
+                "NumGroupsToMerge": {
+                    "kind": "present_if_gt_one",
+                    "base_index": 15
+                },
+                "SplitK": {
+                    "kind": "appended_suffix"
+                }
+            },
+            "packed_params": {
+                "TileLoadMathThreadGroupSize": {
+                    "index": 0,
+                    "codec": "tile_load_math_lm",
+                    "outputs": [
+                        "TileLoadThreadGroupSize",
+                        "TileMathThreadGroupSize"
+                    ]
+                }
+            }
+        },
+        "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad_MergedGroups": {
+            "base_param_count": 15,
+            "conditional_params": {
+                "NumGroupsToMerge": {
+                    "kind": "present_if_gt_one",
+                    "base_index": 15
+                },
+                "SplitK": {
+                    "kind": "appended_suffix"
+                }
+            }
+        }
+    }
 }
