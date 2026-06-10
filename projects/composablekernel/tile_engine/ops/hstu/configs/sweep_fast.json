@@ -1,0 +1,11 @@
+{
+  "description": "FAST d=64 sweep (bf16, hstu) — small, shape-agnostic, no --filter needed. Sweeps only the levers the codegen actually consumes (dispatcher/codegen/hstu/instance_gen.py expand_sweep reads exactly: data_type, use_causal, max_k, mtile, use_splitkv, km0/kn0/kn0sub/kn1/kk1, warp_k). Grid: max_k {64,96,128} (64 = native d=64; 96/128 = padded-max_k paths so the dispatcher can compare native vs padded and the same config covers d up to 128) x mtile {64,128} x use_splitkv {false,true} (split-KV requires mtile=64, so it only applies to the mtile=64 rows) = 9 base-tile kernels. warp_k is left at the dispatch default (16): a base-tile d=64 kernel compiles and runs at the default WarpK, and pinning warp_k=32 here breaks the grid (maxk128+wk32 fails to compile and maxk96+wk32 runs ~5x slower) — warp_k=32 is only needed for the tile-overridden kernels in sweep_exhaustive.json. DROPPED because expand_sweep never reads them (they were silently ignored): pipeline, agpr, pingpong, trload, occupancy, num_splits. For the best tile shape per shape use sweep_exhaustive.json. Pass the shape inline, e.g. --batch 120 --num-head 4 --seqlen 16384 --hdim 64 --target-size 300.",
+  "variant": "jagged_fwd",
+  "trait_config": {
+    "data_type": {"values": ["bf16"]},
+    "use_causal": {"values": [true]},
+    "max_k": {"values": [64, 96, 128]},
+    "mtile": {"values": [64, 128]},
+    "use_splitkv": {"values": [false, true]}
+  }
+}

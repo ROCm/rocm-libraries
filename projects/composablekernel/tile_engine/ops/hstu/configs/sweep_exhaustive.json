@@ -1,0 +1,23 @@
+{
+  "description": "EXHAUSTIVE d=64 tile-shape sweep (bf16, hstu). The full block-tile grid over sequence<kM0,kN0,kN0Sub,kN1,kK1,MaxK>: M=km0 {64,128,192}, N=kn0 {32,64,128}, K-stream=kn0sub+kk1 (must be equal; sweep kk1 {32,64}, kn0sub auto-matched in the instance_gen gate), V head tile kn1 {16,32,64}. warp_k FORCED to 32 (16x16x32 MFMA): a tile-overridden d=64 kernel needs WarpK=32 to satisfy the pipeline WarpGemm assertion (WarpK=16/16x16x16 fails to compile), and kK1>=WarpK so kk1=16 is pruned by the instance_gen gate. Invalid combos are skipped by instance_gen (kN0Sub==kK1, kN0%kK1==0, MaxK%kN1==0, kK1>=WarpK). splitkv is off because the split-KV dispatch cannot honor tile-shape overrides. Kernel names get _km0NNN _n0NNN _n0sNNN _n1NNN _k1NNN _wkNN tokens when overridden. ~90 kernels — for finding the best tile shape per d=64 shape, not for quick iteration (use sweep_fast.json for that). Pass the shape inline, e.g. --batch 120 --num-head 4 --seqlen 16384 --hdim 64 --target-size 300.",
+  "variant": "jagged_fwd",
+  "trait_config": {
+    "data_type": {"values": ["bf16"]},
+    "use_causal": {"values": [true]},
+    "max_k": {"values": [64]},
+    "mtile": {"values": [64, 128]},
+    "use_splitkv": {"values": [false]},
+    "pipeline": {"values": ["std"]},
+    "warp_k": {"values": [32]},
+    "agpr": {"values": [false]},
+    "pingpong": {"values": [false]},
+    "trload": {"values": [false]},
+    "occupancy": {"values": [-1]},
+    "num_splits": {"values": [0]},
+    "km0": {"values": [64, 128, 192]},
+    "kn0": {"values": [32, 64, 128]},
+    "kn0sub": {"values": [16, 32, 64]},
+    "kn1": {"values": [16, 32, 64]},
+    "kk1": {"values": [16, 32, 64]}
+  }
+}
