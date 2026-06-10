@@ -107,6 +107,10 @@ function(add_hipdnn_sample_test TARGET_NAME)
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME} --verify-cpu)
     set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "sample_test")
 
+    if(TEST_ENVIRONMENT)
+        set_tests_properties(${TARGET_NAME} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+    endif()
+
     set_target_properties(
         ${TARGET_NAME}
         PROPERTIES
@@ -154,6 +158,22 @@ install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BI
 
 # Umbrella target for superbuild dependency tracking
 add_custom_target(hipdnn_samples COMMENT "Building all hipDNN samples" DEPENDS ${HIPDNN_ALL_SAMPLES})
+
+# Disable convolution samples under ASAN — known driver-level failures in MIOpen/CK
+# and Tensile that are unrelated to hipDNN can cause test hangs. Re-enable when
+# underlying issues are resolved. (SKIP_IF_ASAN())
+if(BUILD_ADDRESS_SANITIZER)
+    set_tests_properties(
+        hipdnn_sample_conv_fprop
+        hipdnn_sample_conv_dgrad
+        hipdnn_sample_conv_wgrad
+        hipdnn_sample_fused_conv_fprop_activ
+        hipdnn_sample_fused_conv_fprop_bias_activ
+        hipdnn_sample_conv_fprop_deterministic
+        hipdnn_sample_serialization_roundtrip
+        PROPERTIES DISABLED TRUE
+    )
+endif()
 
 # Install the generated CTestTestfile.cmake to HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH
 install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH}
@@ -241,6 +261,7 @@ ExternalProject_Add(example_engine_plugin
         "-Dflatbuffers_DIR:PATH=${flatbuffers_DIR}"
         "-Dnlohmann_json_DIR:PATH=${nlohmann_json_DIR}"
         "-DBUILD_ADDRESS_SANITIZER:BOOL=${BUILD_ADDRESS_SANITIZER}"
+        "-DTEST_ENVIRONMENT:STRING=${TEST_ENVIRONMENT}"
         "-DEXAMPLEPROVIDER_ENABLE_CLANG_TIDY:BOOL=${EXAMPLEPROVIDER_ENABLE_CLANG_TIDY}"
         ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS}
     CMAKE_ARGS
@@ -278,4 +299,9 @@ block(SCOPE_FOR VARIABLES)
         COMMAND ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/hipdnn_example_provider_sample
     )
     set_tests_properties(hipdnn_example_provider_sample PROPERTIES LABELS "sample_test")
+
+    if(TEST_ENVIRONMENT)
+        set_tests_properties(hipdnn_example_provider_unit_tests hipdnn_example_provider_sample
+            PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+    endif()
 endblock()
