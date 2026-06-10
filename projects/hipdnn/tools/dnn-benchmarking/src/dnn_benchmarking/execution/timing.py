@@ -43,6 +43,7 @@ def _require_hip_runtime() -> Any:
         raise RuntimeError("HIP GPU timing not available: no HIP devices are visible")
     return hipdnn
 
+
 from ..common import torch_support
 
 
