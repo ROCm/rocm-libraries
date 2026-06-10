@@ -12,10 +12,13 @@ Status (first milestone): for the CDNA targets wired up today (gfx942 / gfx950)
 the datalayout, triple, and the ``s_waitcnt`` *layout* are identical — this is
 hardware-verified for the base f16 GEMM path on both MI300X and MI350X. The
 backend therefore selects the same shared constants for both, while exposing
-distinct classes (``Gfx950Backend`` vs ``Gfx9MfmaBackend``) and the
-``arch.vmcnt_bits`` fact so genuinely divergent codegen (e.g. gfx908, or a
-gfx942 ``compv4`` partial-waitcnt that needs the 4-bit VMCNT field) plugs in
-here without touching ``_Lowerer``. See
+distinct classes (``Gfx950Backend`` vs ``Gfx9MfmaBackend``). The
+``arch.vmcnt_bits`` fact is load-bearing: :meth:`ISABackend.encode_waitcnt`
+asserts it against the encoder's representable field width
+(:data:`ISABackend._VMCNT_ENCODER_BITS`), so genuinely divergent codegen (e.g.
+gfx908, or a future target whose VMCNT field is wider than the current 6-bit
+encoders emit) fails loudly here instead of silently truncating a partial wait
+into a full VMEM drain. See
 ``dsl_docs/architecture/multi_arch_data_layout.md`` ("ISA Backend").
 
 This module imports only from ``core/arch`` at module load; the shared LLVM
@@ -25,7 +28,7 @@ import cycle (``lower_llvm`` imports :func:`backend_for` at module top).
 
 from __future__ import annotations
 
-from typing import Callable, Dict, Union
+from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
 
@@ -72,14 +75,40 @@ class ISABackend:
         return 0x00027000
 
     # --- s_waitcnt -------------------------------------------------------
+    #
+    # Widest VMCNT field this backend's encoder can physically represent. The
+    # gfx9/10 split layout (VMCNT across ``[3:0]`` and ``[15:14]``) emits a
+    # 6-bit value; the RDNA contiguous layout (``[15:10]``) is also 6-bit. This
+    # is the *encoder capability*, distinct from any one arch's declared
+    # ``vmcnt_bits`` -- e.g. gfx942 declares a 4-bit field but is lowered
+    # through this 6-bit-capable encoder (HW-verified on MI300X). The guard in
+    # :meth:`encode_waitcnt` consults ``arch.vmcnt_bits`` so a future target
+    # whose field is *wider* than the encoder can emit fails loudly instead of
+    # silently truncating a wait into a full VMEM drain.
+    _VMCNT_ENCODER_BITS: int = 6
+
     def encode_waitcnt(self, vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
-        """Encode an ``s_waitcnt`` immediate. The gfx9/gfx10 split layout
-        (VMCNT across ``[3:0]`` and ``[15:14]``) is shared across the CDNA
-        targets we lower today; ``arch.vmcnt_bits`` records the field width
-        for future divergence."""
+        """Encode an ``s_waitcnt`` immediate.
+
+        The gfx9/gfx10 split layout (VMCNT across ``[3:0]`` and ``[15:14]``) is
+        shared across the CDNA targets we lower today. ``arch.vmcnt_bits`` is
+        asserted against :data:`_VMCNT_ENCODER_BITS` (the field width this
+        encoder produces) so divergence -- a target declaring a wider VMCNT than
+        the encoder emits -- is caught here rather than miscompiled.
+        """
+        self._check_vmcnt_width()
         from ..lower_llvm import _encode_waitcnt_gfx9_10
 
         return _encode_waitcnt_gfx9_10(vmcnt, expcnt, lgkmcnt)
+
+    def _check_vmcnt_width(self) -> None:
+        if self.arch.vmcnt_bits > self._VMCNT_ENCODER_BITS:
+            raise NotImplementedError(
+                f"{self.arch.gfx} declares a {self.arch.vmcnt_bits}-bit VMCNT "
+                f"field but {type(self).__name__}.encode_waitcnt emits only "
+                f"{self._VMCNT_ENCODER_BITS} bits; a wider s_waitcnt encoder is "
+                f"needed before this target can lower correctly"
+            )
 
     # --- matrix ops ------------------------------------------------------
     def emit_mma(self, lowerer, op) -> None:
@@ -306,7 +335,9 @@ class Gfx11RdnaBackend(ISABackend):
         # split the base encodes: contiguous expcnt[2:0] / lgkmcnt[9:4] /
         # vmcnt[15:10] (no split VMCNT, 6-bit LGKMCNT). The layout was read
         # off the ROCm 7.0.2 AMDGPU assembler on a gfx1151 node; see
-        # _encode_waitcnt_gfx11 for the empirical encodings.
+        # _encode_waitcnt_gfx11 for the empirical encodings. Also a 6-bit VMCNT
+        # field, so the base _VMCNT_ENCODER_BITS guard applies unchanged.
+        self._check_vmcnt_width()
         from ..lower_llvm import _encode_waitcnt_gfx11
 
         return _encode_waitcnt_gfx11(vmcnt, expcnt, lgkmcnt)
@@ -354,6 +385,14 @@ class Gfx12RdnaBackend(Gfx11RdnaBackend):
 
 # gfx -> backend class. Adding a CDNA gfx is one row here plus, when its codegen
 # actually diverges, a new subclass.
+#
+# Some rows are forward-declarations: the backend class is wired here before the
+# matching ``core/arch/data/arch_specs.json`` row exists (gfx908 / gfx90a reuse
+# ``Gfx9MfmaBackend`` and are kept for upcoming enablement). ``backend_for``
+# resolves the :class:`ArchTarget` first, so such a row reports a clean
+# "metadata not yet present" error from this layer rather than a raw arch-layer
+# ``KeyError``. ``wired_arches()`` returns only the rows that have arch metadata
+# and can actually build a backend today.
 BACKEND_REGISTRY: Dict[str, Callable[[ArchTarget], ISABackend]] = {
     "gfx908": Gfx9MfmaBackend,
     "gfx90a": Gfx9MfmaBackend,
@@ -365,9 +404,42 @@ BACKEND_REGISTRY: Dict[str, Callable[[ArchTarget], ISABackend]] = {
 }
 
 
+def wired_arches() -> Tuple[str, ...]:
+    """gfx targets that have BOTH a backend row and arch metadata today.
+
+    A backend row may be a forward-declaration (registered before its
+    ``arch_specs.json`` row lands); those are excluded here because
+    :func:`backend_for` cannot construct them yet.
+    """
+    from ..arch import known_arches
+
+    known = set(known_arches())
+    return tuple(sorted(g for g in BACKEND_REGISTRY if g in known))
+
+
 def backend_for(arch: Union[str, ArchTarget]) -> ISABackend:
     """Resolve a gfx string or :class:`ArchTarget` to its ISA backend."""
-    target = arch if isinstance(arch, ArchTarget) else ArchTarget.from_gfx(arch)
+    if isinstance(arch, ArchTarget):
+        target = arch
+    else:
+        cls = BACKEND_REGISTRY.get(arch)
+        if cls is None:
+            raise KeyError(
+                f"no ISA backend registered for {arch!r}; "
+                f"known: {sorted(BACKEND_REGISTRY)}"
+            )
+        try:
+            target = ArchTarget.from_gfx(arch)
+        except KeyError as exc:
+            # Backend row exists but the arch metadata does not: a
+            # forward-declared target (e.g. gfx908 / gfx90a) that is not yet
+            # buildable. Report it as such instead of leaking the arch-layer
+            # "unknown gfx target" message.
+            raise KeyError(
+                f"ISA backend for {arch!r} is forward-declared but has no "
+                f"arch_specs.json metadata yet; buildable now: "
+                f"{list(wired_arches())}"
+            ) from exc
     cls = BACKEND_REGISTRY.get(target.gfx)
     if cls is None:
         raise KeyError(
