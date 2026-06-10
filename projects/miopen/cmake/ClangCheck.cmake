@@ -24,17 +24,11 @@ add_custom_target(
 )
 
 if(PRE_COMMIT_BINARY)
-    # Write a script so CMake VERBATIM can be used while still allowing shell $(git ls-files ...) expansion.
-    file(WRITE "${CMAKE_BINARY_DIR}/trim_whitespace.sh"
-        "#!/bin/sh\n"
-        "set -e\n"
-        "cd \"${REPO_ROOT}\"\n"
-        "${PRE_COMMIT_BINARY} run trailing-whitespace --files $(git ls-files projects/miopen)\n"
-    )
-
+    # pre-commit exits 1 when it modifies files (expected); only fail on higher codes.
     add_custom_target(
         trim_whitespace
-        COMMAND sh "${CMAKE_BINARY_DIR}/trim_whitespace.sh"
+        COMMAND sh -c "${PRE_COMMIT_BINARY} run trailing-whitespace --files $(git ls-files projects/miopen); rc=$?; [ $rc -le 1 ] || exit $rc"
+        WORKING_DIRECTORY ${REPO_ROOT}
         VERBATIM
     )
 else()
