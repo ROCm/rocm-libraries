@@ -236,7 +236,7 @@ def getDockerImageName(dockerArgs)
         | md5sum \
         | awk '{print \$1}' >> "${env.WORKSPACE}/factors.txt"
     """
-    
+
     sh "cd ${env.WORKSPACE}/${env.MIOPEN_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
     def docker_hash = sh(script: "cd ${env.WORKSPACE} && md5sum factors.txt | awk '{print \$1}' | head -c 6", returnStdout: true)
     sh "rm ${env.WORKSPACE}/factors.txt"
@@ -249,7 +249,7 @@ def getDockerImageName(dockerArgs)
     }
     return image
 }
-
+ 
 // Builds rocm/miopen:therock-<shortHash> from source; returns {image, fullHash, shortHash, skip}.
 // Skips if :therock already carries this hash; reuses the hash-tagged image if it exists.
 def buildTheRockDockerImage(Map conf=[:])
