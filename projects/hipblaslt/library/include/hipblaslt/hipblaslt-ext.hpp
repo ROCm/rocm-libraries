@@ -79,11 +79,37 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
         /*! \ingroup library_module
+         *  \brief Opt in to the dynamic persistent tile (work-stealing
+         *  StreamK) scheduler.
+         *
+         *  \details
+         *  Exposed via the ``hipblaslt_ext`` namespace because it controls a
+         *  hipBLASLt-internal scheduler with no equivalent in the base
+         *  ``hipblasLt`` C API. When ``enabled`` is ``true`` and the chosen
+         *  kernel supports the feature, hipBLASLt launches a persistent grid
+         *  that uses the dynamic work-stealing StreamK scheduler; otherwise
+         *  the library default scheduler is used.
+         *
+         *  See ``hipblasLtSetSmCountTarget`` (non-ext) for the analogous
+         *  cuBLAS-compatible hint on the number of compute units to target.
+         *
+         *  @param[in]
+         *  enabled  ``true`` to request the dynamic persistent tile path.
+         */
+        HIPBLASLT_EXPORT void setDynPersistentTileEnabled(bool enabled);
+
+        /*! \ingroup library_module
          *  \brief This function returns the maximum workspace size that was set.
          *
          *  \retval size_t Returns the set max workspace size.
          */
         HIPBLASLT_EXPORT const size_t getMaxWorkspaceBytes() const;
+
+        /*! \ingroup library_module
+         *  \brief Return whether the dynamic persistent tile scheduler has
+         *  been requested via ``setDynPersistentTileEnabled``.
+         */
+        HIPBLASLT_EXPORT bool getDynPersistentTileEnabled() const;
 
     private:
         friend GemmInstance;
@@ -1199,4 +1225,46 @@ namespace hipblaslt_ext
                       hipblasLtMatrixLayout_t Bdesc,
                       hipblasLtMatrixLayout_t Cdesc,
                       hipblasLtMatrixLayout_t Ddesc);
+
+    /*! \ingroup library_module
+     *  \brief Check if a solution is supported for the given heuristic result.
+     *
+     *  @param[in]
+     *  heuristicResultsArray Array of heuristic results to check.
+     *  @param[in]
+     *  handle The hipBLASLt context handle.
+     *  @param[in]
+     *  matmulDesc Handle to a previously created matrix multiplication descriptor.
+     *  @param[in]
+     *  alpha Pointer to the alpha scalar.
+     *  @param[in]
+     *  matA Handle to the matrix A layout descriptor.
+     *  @param[in]
+     *  matB Handle to the matrix B layout descriptor.
+     *  @param[in]
+     *  beta Pointer to the beta scalar.
+     *  @param[in]
+     *  matC Handle to the matrix C layout descriptor.
+     *  @param[in]
+     *  matD Handle to the matrix D layout descriptor.
+     *  @param[out]
+     *  workspaceSize Pointer to receive the required workspace size in bytes.
+     *  @param[in,out]
+     *  returnAlgoCount Pointer to the algorithm count, incremented if solution is supported.
+     *
+     *  \retval HIPBLAS_STATUS_SUCCESS If the operation completed successfully.
+     *  \retval HIPBLAS_STATUS_INVALID_VALUE If the algorithm is not supported.
+     */
+    HIPBLASLT_EXPORT
+    hipblasStatus_t isSolutionSupported(hipblasLtMatmulHeuristicResult_t* heuristicResultsArray,
+                                         hipblasLtHandle_t                  handle,
+                                         hipblasLtMatmulDesc_t              matmulDesc,
+                                         const void*                        alpha,
+                                         hipblasLtMatrixLayout_t            matA,
+                                         hipblasLtMatrixLayout_t            matB,
+                                         const void*                        beta,
+                                         hipblasLtMatrixLayout_t            matC,
+                                         hipblasLtMatrixLayout_t            matD,
+                                         size_t*                            workspaceSize,
+                                         int*                               returnAlgoCount);                      
 } // End of namespace hipblasltext

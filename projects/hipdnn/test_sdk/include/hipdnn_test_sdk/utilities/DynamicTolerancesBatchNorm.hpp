@@ -397,7 +397,7 @@ float calculateBatchnormInferenceTolerance(double xMin,
  * @param xMax            Maximum value in input tensor x
  * @param meanMin         Minimum value in mean tensor
  * @param meanMax         Maximum value in mean tensor
- * @param varianceMin     Minimum value in variance tensor
+ * @param varianceMax     Maximum value in variance tensor (unused — bound depends only on varianceMin)
  * @param varianceMax     Maximum value in variance tensor
  * @param scaleMin        Minimum value in scale tensor
  * @param scaleMax        Maximum value in scale tensor
@@ -469,6 +469,243 @@ float calculateBatchnormInferenceWithVarianceTolerance(double xMin,
     validateToleranceRange<OutputType>(totalTolerance);
 
     return static_cast<float>(totalTolerance);
+}
+
+/**
+ * @brief Calculates expected tolerance for Batch Norm Backward dbias output.
+ *
+ * dbias[c] = sum_{n,h,w} dy — pure summation of NHW terms.
+ *
+ * Error sources:
+ * 1. Summation of NHW terms: gamma_NHW * max|dy| (Higham bound)
+ * 2. Input casting: per-element cast of dy before accumulation
+ * 3. Output casting: final downcast of accumulated result
+ *
+ * No division by NHW (unlike mean), no variance computation.
+ *
+ * @tparam OutputType  Data type of dbias output tensor
+ * @tparam InputType   Data type of dy input tensor
+ * @tparam ComputeType Data type for intermediate computation (default: float)
+ * @param dyMin                Minimum value in gradient tensor dy
+ * @param dyMax                Maximum value in gradient tensor dy
+ * @param nElementsPerChannel  Number of elements per channel: N * H * W
+ * @return Calculated tolerance value as float
+ */
+template <typename OutputType, typename InputType, typename ComputeType = float>
+float calculateBatchnormBackwardDbiasTolerance(double dyMin,
+                                               double dyMax,
+                                               int64_t nElementsPerChannel)
+{
+    validateComputeType<ComputeType>();
+
+    if(nElementsPerChannel < 1)
+    {
+        throw std::invalid_argument("nElementsPerChannel must be at least 1.");
+    }
+
+    const double maxAbsDy = std::max(std::abs(dyMin), std::abs(dyMax));
+    const auto nhw = static_cast<uint64_t>(nElementsPerChannel);
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+
+    const double gammaNHW = computeGamma(nhw, epsilon);
+    validateGamma(gammaNHW);
+
+    // dbias = sum dy: Higham accumulation bound
+    const double signalBound = static_cast<double>(nhw) * maxAbsDy;
+    double tolerance = gammaNHW * maxAbsDy;
+
+    // Input casting error (single tensor, factor 1).
+    tolerance += computeInputCastingError<InputType, ComputeType>(signalBound, 1);
+
+    // Output casting error: max output magnitude ~ NHW * max|dy|.
+    tolerance += computeOutputCastingError<OutputType, ComputeType>(signalBound);
+
+    validateToleranceRange<OutputType>(tolerance);
+
+    return static_cast<float>(tolerance);
+}
+
+/**
+ * @brief Calculates expected tolerance for Batch Norm Backward dscale output.
+ *
+ * dscale[c] = sum_{n,h,w}(xHat * dy) — dot-product accumulation.
+ *
+ * Error sources:
+ * 1. Per-element product rounding: fl(xHat_i * dy_i), adding u per term
+ * 2. Summation of NHW products: (gamma_NHW + u) * maxAbsXHat * max|dy|
+ * 3. Input casting: per-element cast of inputs
+ * 4. Output casting: final downcast of accumulated result
+ *
+ * @tparam OutputType  Data type of dscale output tensor
+ * @tparam InputType   Data type of x/dy input tensors
+ * @tparam ComputeType Data type for intermediate computation (default: float)
+ * @param dyMin                Minimum value in gradient tensor dy
+ * @param dyMax                Maximum value in gradient tensor dy
+ * @param xMin                 Minimum value in input tensor x
+ * @param xMax                 Maximum value in input tensor x
+ * @param nElementsPerChannel  Number of elements per channel: N * H * W
+ * @param epsilonBn            Batch norm epsilon (added to variance before sqrt)
+ * @return Calculated tolerance value as float
+ */
+template <typename OutputType, typename InputType, typename ComputeType = float>
+float calculateBatchnormBackwardDscaleTolerance(double dyMin,
+                                                double dyMax,
+                                                double xMin,
+                                                double xMax,
+                                                int64_t nElementsPerChannel,
+                                                double epsilonBn = 1e-5)
+{
+    validateComputeType<ComputeType>();
+
+    if(nElementsPerChannel < 1)
+    {
+        throw std::invalid_argument("nElementsPerChannel must be at least 1.");
+    }
+
+    if(epsilonBn <= 0.0)
+    {
+        throw std::invalid_argument("epsilonBn must be positive.");
+    }
+
+    const double maxAbsDy = std::max(std::abs(dyMin), std::abs(dyMax));
+    const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
+    const auto nhw = static_cast<uint64_t>(nElementsPerChannel);
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+
+    const double gammaNHW = computeGamma(nhw, epsilon);
+    validateGamma(gammaNHW);
+
+    if(maxAbsDy == 0.0)
+    {
+        return 0.0f;
+    }
+
+    // Estimate xHat magnitude: xHat = (x - mean) * invVar
+    const double varEstimate = std::max(maxAbsX * maxAbsX, epsilonBn);
+    const double invVarEstimate = 1.0 / std::sqrt(varEstimate + epsilonBn);
+    const double maxAbsXHat = maxAbsX * invVarEstimate;
+
+    // dscale = sum(xHat * dy)
+    // Accumulation: (gamma + u) * maxAbsXHat * max|dy|
+    //   The +u accounts for per-element product rounding fl(xHat_i * dy_i)
+    const double signalBound = static_cast<double>(nhw) * maxAbsXHat * maxAbsDy;
+    double tolerance = (gammaNHW + epsilon) * maxAbsXHat * maxAbsDy;
+
+    // Input casting error (two operands xHat and dy, factor 2).
+    tolerance += computeInputCastingError<InputType, ComputeType>(signalBound, 2);
+
+    // Output casting error.
+    tolerance += computeOutputCastingError<OutputType, ComputeType>(signalBound);
+
+    validateToleranceRange<OutputType>(tolerance);
+
+    return static_cast<float>(tolerance);
+}
+
+/**
+ * @brief Calculates expected tolerance for Batch Norm Backward dx output.
+ *
+ * dx = scale * invVar * (dy - meanDy - xHat * meanDyXhat)
+ *
+ * Error sources:
+ * 1. meanDy accumulation: (gamma_NHW + u) * max|dy|
+ * 2. meanDyXhat accumulation: (gamma_NHW + 2u) * maxAbsXHat * max|dy|
+ * 3. Element-wise ops (sub, mul, sub): 3 * u * maxAbsE
+ * 4. Scalar multiplications (scale, invVar): 2 * u * scalarCoef * maxAbsE
+ * 5. Input casting: per-element cast of inputs
+ * 6. Output casting: final downcast
+ *
+ * @tparam OutputType  Data type of dx output tensor
+ * @tparam InputType   Data type of x/dy input tensors
+ * @tparam ComputeType Data type for intermediate computation (default: float)
+ * @param dyMin                Minimum value in gradient tensor dy
+ * @param dyMax                Maximum value in gradient tensor dy
+ * @param xMin                 Minimum value in input tensor x
+ * @param xMax                 Maximum value in input tensor x
+ * @param scaleMin             Minimum value in scale tensor
+ * @param scaleMax             Maximum value in scale tensor
+ * @param nElementsPerChannel  Number of elements per channel: N * H * W
+ * @param epsilonBn            Batch norm epsilon (added to variance before sqrt)
+ * @return Calculated tolerance value as float
+ */
+template <typename OutputType, typename InputType, typename ComputeType = float>
+float calculateBatchnormBackwardDxTolerance(double dyMin,
+                                            double dyMax,
+                                            double xMin,
+                                            double xMax,
+                                            double scaleMin,
+                                            double scaleMax,
+                                            int64_t nElementsPerChannel,
+                                            double epsilonBn = 1e-5)
+{
+    validateComputeType<ComputeType>();
+
+    if(nElementsPerChannel < 1)
+    {
+        throw std::invalid_argument("nElementsPerChannel must be at least 1.");
+    }
+
+    if(epsilonBn <= 0.0)
+    {
+        throw std::invalid_argument("epsilonBn must be positive.");
+    }
+
+    const double maxAbsDy = std::max(std::abs(dyMin), std::abs(dyMax));
+    const double maxAbsX = std::max(std::abs(xMin), std::abs(xMax));
+    const double maxAbsScale = std::max(std::abs(scaleMin), std::abs(scaleMax));
+    const auto nhw = static_cast<uint64_t>(nElementsPerChannel);
+    const auto epsilon = static_cast<double>(std::numeric_limits<ComputeType>::epsilon());
+
+    const double gammaNHW = computeGamma(nhw, epsilon);
+    validateGamma(gammaNHW);
+
+    if(maxAbsDy == 0.0)
+    {
+        return 0.0f;
+    }
+
+    // Estimate xHat magnitude
+    const double varEstimate = std::max(maxAbsX * maxAbsX, epsilonBn);
+    const double invVarEstimate = 1.0 / std::sqrt(varEstimate + epsilonBn);
+    const double maxAbsXHat = maxAbsX * invVarEstimate;
+
+    // scalarCoef = |scale| * invVar
+    const double scalarCoef = maxAbsScale * invVarEstimate;
+
+    // Accumulation errors for the two reductions
+    const double deltaMeanDy = (gammaNHW + epsilon) * maxAbsDy;
+    const double deltaMeanDyXhat = (gammaNHW + 2.0 * epsilon) * maxAbsXHat * maxAbsDy;
+
+    // Max element magnitude: |E| = |dy - meanDy - xHat * meanDyXhat|
+    //   <= |dy| + |meanDy| + |xHat * meanDyXhat|
+    //   <= max|dy| + max|dy| + maxAbsXHat^2 * max|dy|
+    //   = (2 + maxAbsXHat^2) * max|dy|
+    const double maxAbsE = (2.0 + maxAbsXHat * maxAbsXHat) * maxAbsDy;
+
+    // Element-wise ops in the parenthesized expression: sub, mul, sub = 3
+    constexpr double ELEM_OPS = 3.0;
+    // Scalar multiplications: mul(scale), mul(invVar) = 2
+    constexpr double SCALE_OPS = 2.0;
+
+    // Total tolerance:
+    //   scalarCoef * (deltaMeanDy + maxAbsXHat * deltaMeanDyXhat + ELEM_OPS * u * maxAbsE)
+    //   + SCALE_OPS * u * scalarCoef * maxAbsE
+    double tolerance
+        = scalarCoef * (deltaMeanDy + maxAbsXHat * deltaMeanDyXhat + ELEM_OPS * epsilon * maxAbsE)
+          + SCALE_OPS * epsilon * scalarCoef * maxAbsE;
+
+    // maxAbsDx for casting bounds
+    const double maxAbsDx = scalarCoef * maxAbsE;
+
+    // Input casting error (two inputs: dy and x, factor 2).
+    tolerance += computeInputCastingError<InputType, ComputeType>(maxAbsDx, 2);
+
+    // Output casting error.
+    tolerance += computeOutputCastingError<OutputType, ComputeType>(maxAbsDx);
+
+    validateToleranceRange<OutputType>(tolerance);
+
+    return static_cast<float>(tolerance);
 }
 
 } // namespace hipdnn_test_sdk::utilities::batchnorm

@@ -15,6 +15,10 @@
 
 #include "gtest/gtest.h"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-invalidation"
+#endif
 using FP32 = float;
 using FP16 = ck::half_t;
 using BF16 = ck::bhalf_t;
@@ -237,3 +241,6 @@ int main(int argc, char** argv)
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

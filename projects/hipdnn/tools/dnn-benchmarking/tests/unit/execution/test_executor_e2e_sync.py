@@ -59,6 +59,83 @@ def _make_executor(gpu_backend: str) -> executor_module.Executor:
     return executor
 
 
+def test_warmup_synchronizes_once_after_untimed_iterations(monkeypatch) -> None:
+    """hipDNN warmup work is drained before the measured loop starts."""
+    calls: list[str] = []
+
+    class TrackingGraph:
+        def execute(
+            self, handle: Any, variant_pack: Dict[int, int], workspace_ptr: int
+        ) -> DummyResult:
+            calls.append("execute")
+            return DummyResult()
+
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            synchronize=lambda: calls.append("sync"),
+        )
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=3, benchmark_iters=1)
+    executor = executor_module.Executor("{}", config, gpu_backend="none")
+    executor._graph = TrackingGraph()
+    executor._workspace_ptr = 0
+
+    executor.warmup(handle=None, variant_pack={})
+
+    assert calls == ["execute", "execute", "execute", "sync"]
+
+
+def test_warmup_zero_iterations_does_not_synchronize(monkeypatch) -> None:
+    """No warmup iterations means no extra pre-benchmark synchronization."""
+    calls: list[str] = []
+
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            synchronize=lambda: calls.append("sync"),
+        )
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    executor = _make_executor("none")
+    executor.warmup(handle=None, variant_pack={})
+
+    assert calls == []
+
+
+def test_benchmark_synchronizes_each_measured_iteration(monkeypatch) -> None:
+    """Each timed hipDNN iteration executes once and then synchronizes once."""
+    calls: list[str] = []
+
+    class TrackingGraph:
+        def execute(
+            self, handle: Any, variant_pack: Dict[int, int], workspace_ptr: int
+        ) -> DummyResult:
+            calls.append("execute")
+            return DummyResult()
+
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            synchronize=lambda: calls.append("sync"),
+        )
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    config = BenchmarkConfig(graph_path="dummy.json", warmup_iters=0, benchmark_iters=3)
+    executor = executor_module.Executor("{}", config, gpu_backend="none")
+    executor._graph = TrackingGraph()
+    executor._workspace_ptr = 0
+
+    result = executor.benchmark(handle=None, variant_pack={})
+
+    assert calls == ["execute", "sync", "execute", "sync", "execute", "sync"]
+    assert len(result.e2e_timings) == 3
+
+
 def test_gpu_timer_start_stop_inside_timed_region(monkeypatch) -> None:
     """Ensure GPU timer start/stop are invoked within the Timer context.
 
@@ -187,3 +264,27 @@ def test_e2e_timings_recorded_without_gpu_timing(monkeypatch) -> None:
 
     assert result.e2e_timings == [2.0]
     assert result.kernel_timings is None
+
+
+def test_cpu_only_torch_does_not_synchronize(monkeypatch) -> None:
+    """CPU-only torch must not trigger torch.cuda.synchronize in hipDNN timing."""
+    sync_called = {"value": False}
+
+    class FakeCuda:
+        @staticmethod
+        def is_available() -> bool:
+            return False
+
+        @staticmethod
+        def synchronize() -> None:
+            sync_called["value"] = True
+            raise AssertionError("CPU-only torch must not synchronize CUDA")
+
+    fake_torch = types.SimpleNamespace(cuda=FakeCuda)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    executor = _make_executor("none")
+    result = executor.benchmark(handle=None, variant_pack={})
+
+    assert result.e2e_timings
+    assert sync_called["value"] is False

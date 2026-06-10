@@ -7,10 +7,12 @@ from typing import Any, Dict, List, Optional
 
 import torch
 
+from ..common import torch_support
+
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from . import pytorch_ops
-from .timing import Timer, TorchGpuTimer, _is_torch_available
+from .timing import Timer, TorchGpuTimer
 
 
 class PyTorchExecutionError(Exception):
@@ -45,7 +47,7 @@ class PyTorchCudaExecutor:
         Raises:
             PyTorchExecutionError: If PyTorch GPU is not available.
         """
-        if not _is_torch_available():
+        if not torch_support.gpu_available():
             raise PyTorchExecutionError(
                 "PyTorch GPU not available. Install PyTorch with CUDA or ROCm support."
             )
@@ -93,6 +95,18 @@ class PyTorchCudaExecutor:
         for _ in range(self._config.warmup_iters):
             self._execute_graph(tensors)
             torch.cuda.synchronize()
+
+    def execute_once(self, tensors: Dict[int, torch.Tensor]) -> None:
+        """Execute the graph once and synchronize.
+
+        Used after timed loops to collect clean reference outputs without
+        including output zeroing or extraction in benchmark timings.
+        """
+        if not self._prepared:
+            raise PyTorchExecutionError("Executor not prepared. Call prepare() first.")
+
+        self._execute_graph(tensors)
+        torch.cuda.synchronize()
 
     def benchmark(
         self,

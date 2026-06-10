@@ -130,7 +130,7 @@ function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
   )
   if(AMDGPU_TEST_TARGETS)
     foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)
-      add_relative_test("${AMDGPU_TARGET}-${TEST_NAME}" ${TEST_TARGET})
+      add_relative_test("${AMDGPU_TARGET}-${TEST_NAME}" ${TEST_TARGET} ${AMDGPU_TARGET})
       set_tests_properties("${AMDGPU_TARGET}-${TEST_NAME}"
           PROPERTIES
               RESOURCE_GROUPS "1,${AMDGPU_TARGET}:1"
@@ -138,9 +138,10 @@ function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
       )
     endforeach()
   else()
-      add_relative_test(${TEST_NAME} ${TEST_TARGET})
+      add_relative_test(${TEST_NAME} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
       set_tests_properties(${TEST_NAME}
           PROPERTIES
+              RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
               LABELS "hip"
       )
   endif()
