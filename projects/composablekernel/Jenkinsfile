@@ -24,19 +24,15 @@
 // Benefits: PR builds 5h -> 30min (typical), nightly builds unchanged
 // See: script/dependency-parser/README.md for details
 //
-ck = null
-
 def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
 }
 
 def loadCk() {
-    if (ck == null) {
-        checkout scm
-        dir("projects/composablekernel") {
-            ck = load "vars/ck.groovy"
-        }
-    }
+    def branch = (params.USE_CURRENT_BRANCH_FOR_CK_GROOVY
+        ? (env.CHANGE_BRANCH ?: env.BRANCH_NAME)
+        : 'develop')
+    library("ck@${branch}")
 }
 
 //launch develop branch daily jobs
@@ -260,6 +256,10 @@ pipeline {
             name: "FORCE_CI",
             defaultValue: false,
             description: "Force CI to run even when only non-relevant files are changed (default: OFF)")
+        booleanParam(
+            name: 'USE_CURRENT_BRANCH_FOR_CK_GROOVY',
+            defaultValue: false,
+            description: 'Load ck.groovy from the current branch instead of develop. Enable when testing pipeline changes (default: OFF).')
     }
     environment{
         dbuser = "${dbuser}"
@@ -331,6 +331,24 @@ pipeline {
                     steps{
                         deleteDir()
                         script { loadCk(); ck.runClangFormat() }
+                        cleanWs()
+                    }
+                }
+                stage('ASCII Only Check') {
+                    agent{ label rocmnode("nogpu") }
+                    environment{
+                        setup_args = "NO_CK_BUILD"
+                        execute_cmd = """cd .. && \
+                                find . -type f \\( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.h.in' -o -name '*.hpp.in' -o -name '*.cpp.in' -o -name '*.inc' -o -name '*.cl' \\) \
+                                -not -path '*/build/*' -not -path '*/include/rapidjson/*' \
+                                -print0 | xargs -0 -P 8 -n 64 script/check_ascii_only.sh"""
+                    }
+                    steps{
+                        deleteDir()
+                        script {
+                            loadCk();
+                            ck.buildAndTest(setup_args:setup_args, setup_cmd: "", build_cmd: "", execute_cmd: execute_cmd)
+                        }
                         cleanWs()
                     }
                 }
@@ -513,7 +531,7 @@ pipeline {
                         deleteDir()
                         script {
                             loadCk()
-                            ck.buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
+                            ck.buildAndTest(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         }
                         cleanWs()
                     }
@@ -533,7 +551,7 @@ pipeline {
                         deleteDir()
                         script {
                             loadCk()
-                            ck.buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
+                            ck.buildAndTest(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         }
                         cleanWs()
                     }
@@ -553,7 +571,7 @@ pipeline {
                         deleteDir()
                         script {
                             loadCk()
-                            ck.buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
+                            ck.buildAndTest(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         }
                         cleanWs()
                     }
@@ -573,7 +591,7 @@ pipeline {
                         deleteDir()
                         script {
                             loadCk()
-                            ck.buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
+                            ck.buildAndTest(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
                         }
                         cleanWs()
                     }
