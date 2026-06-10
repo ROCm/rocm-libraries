@@ -50,6 +50,7 @@ __all__ = [
     "classifyInstruction",
     "buildModuleRefs",
     "instructionSchedule",
+    "instructionScheduleFromLists",
 ]
 
 
@@ -123,6 +124,39 @@ def instructionSchedule(emittedModules):
 
     # Apply the vmcnt post-pass to the live waitcnt objects, exactly as the
     # original post-pass does (`inst.vlcnt += bufLoadCount`).
+    for orderIdx, delta in result.vmcntAdjustments:
+        if delta:
+            ordered[orderIdx].vlcnt += delta
+
+    out = Module()
+    for inst in ordered:
+        out.add(inst)
+    return out
+
+
+def instructionScheduleFromLists(emittedModules, instruction_lists):
+    """C++-backed scheduler driven by caller-supplied instruction lists.
+
+    Like ``instructionSchedule`` but the instruction lists are provided
+    externally rather than read from ``em.instructions``.  Use this when
+    instructions are emitted on-demand (no pre-population step).
+
+    ``instruction_lists[i]`` is the flat list of rocisa instruction objects
+    for ``emittedModules[i]``.
+    """
+    from rocisa.code import Module
+
+    if not emittedModules:
+        return Module()
+
+    modules = [
+        ModuleRef(em.moduleId, em.opType, em.before,
+                  [classifyInstruction(inst) for inst in insts])
+        for em, insts in zip(emittedModules, instruction_lists)
+    ]
+    result = schedule(modules)
+
+    ordered = [instruction_lists[mid][idx] for (mid, idx) in result.order]
     for orderIdx, delta in result.vmcntAdjustments:
         if delta:
             ordered[orderIdx].vlcnt += delta

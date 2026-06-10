@@ -2093,6 +2093,103 @@ class TestGetNumVgpr:
         assert vgpr_1x2 >= vgpr_1x4
 
 
+class TestComputeFlatTailPeaks:
+    """Tests for C++ compute_flat_tail_peaks() and the delegated getNumVgpr."""
+
+    def test_single_partition_flat_equals_groups(self):
+        """Single-partition: flat peaks == tile_peaks / num_sets (one pingpong set)."""
+        import math
+        kernel = create_kernel(256, 256)
+        cfg = make_cfg_bf16(256, 256)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        cpp = sched._ensure_cpp()
+        flat = cpp.compute_flat_tail_peaks()
+
+        # flat_A = numMFMATilesM / lrA.mn, tile_peaks_A = 2 * flat_A
+        expected_A = cfg.numMFMATilesM // cfg.lrA.mn
+        expected_B = cfg.numMFMATilesN // cfg.lrB.mn
+        assert flat.get('A', 0) == expected_A, f"flat A: {flat}"
+        assert flat.get('B', 0) == expected_B, f"flat B: {flat}"
+
+    def test_multi_partition_flat_covers_all_tiles(self):
+        """Multi-partition: flat peak = global unique groups (all partitions merged)."""
+        kernel = create_kernel(256, 256, fp4=True)
+        cfg = make_cfg_256x256_fp4(partSizeN=4)
+        sched = LogicalScheduler(cfg)
+        sched.assign_vgpr_tiles()
+
+        cpp = sched._ensure_cpp()
+        flat = cpp.compute_flat_tail_peaks()
+
+        # Flat covers ALL N-tiles globally → flat_B = numMFMATilesN / lrB.mn
+        expected_B = cfg.numMFMATilesN // cfg.lrB.mn
+        assert flat.get('B', 0) == expected_B, f"flat B: {flat}"
+
+    def test_get_num_vgpr_cpp_matches_python_single_partition(self):
+        """C++ get_num_vgpr == Python getNumVgpr for a single-partition BF16 config."""
+        import math
+        kernel = create_kernel(256, 256)
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
+        cfg = make_cfg_bf16(256, 256)
+        sched = LogicalScheduler(cfg)
+        sched.build()
+
+        result = sched.getNumVgpr(tiA, tiB)
+
+        # For no partitioning, mainloop total should equal what the C++ computes:
+        # max(mainloop_total, flat_tail_total) = mainloop_total since mainloop >= flat.
+        vgpr_per_A = int(math.ceil(tiA.mmaTileRegCount * cfg.lrA.k * cfg.lrA.mn))
+        vgpr_per_B = int(math.ceil(tiB.mmaTileRegCount * cfg.lrB.k * cfg.lrB.mn))
+        expected = (sched.tile_peaks.get('A', 0) * vgpr_per_A
+                    + sched.tile_peaks.get('B', 0) * vgpr_per_B)
+        assert result == expected, f"got {result}, expected {expected}"
+
+    def test_get_num_vgpr_cpp_with_scale(self):
+        """C++ get_num_vgpr includes SA/SB when scale tile infos are provided."""
+        kernel = create_kernel(256, 256, fp4=True)
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
+        scaleTiA = makeTileInfo('MXSA', kernel)
+        scaleTiB = makeTileInfo('MXSB', kernel)
+
+        cfg = make_cfg_256x256_fp4()
+        sched = LogicalScheduler(cfg)
+        sched.build()
+
+        total_with = sched.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
+        total_without = sched.getNumVgpr(tiA, tiB)
+        assert total_with > total_without, \
+            "Including scale tensors must increase VGPR count"
+
+    def test_get_num_vgpr_flat_tail_dominates_multi_partition(self):
+        """For a 4-partition config with single k-chunk, flat tail may drive the budget."""
+        kernel = create_kernel(256, 256, fp4=True)
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
+        scaleTiA = makeTileInfo('MXSA', kernel)
+        scaleTiB = makeTileInfo('MXSB', kernel)
+
+        # Use a config where more partitions don't reduce the budget due to
+        # use_global_pos=True (triggered when any tensor has single k-chunk).
+        cfg_1x1 = make_cfg_256x256_fp4(partSizeN=0)
+        cfg_1x4 = make_cfg_256x256_fp4(partSizeN=2)
+
+        sched_1x1 = LogicalScheduler(cfg_1x1)
+        sched_1x1.build()
+        sched_1x4 = LogicalScheduler(cfg_1x4)
+        sched_1x4.build()
+
+        v_1x1 = sched_1x1.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
+        v_1x4 = sched_1x4.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
+
+        # More partitions should not increase VGPR count.
+        assert v_1x4 <= v_1x1, \
+            f"More partitions should not increase budget: 1x1={v_1x1}, 1x4={v_1x4}"
+
+
 # ══════════════════════════════════════════════════════════════
 # Integration tests
 # ══════════════════════════════════════════════════════════════
@@ -2100,8 +2197,8 @@ class TestGetNumVgpr:
 class TestIntegration:
 
     def test_populate_instructions_256x256_fp4(self):
-        """Full pipeline: emit → populate_instructions → instructionSchedule."""
-        from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
+        """Full pipeline: emit → populate_instructions → emit_module on-demand."""
+        from Tensile.Components.Subtile.InstructionScheduler import instructionScheduleFromLists
 
         kernel = create_kernel(256, 256, fp4=True)
         writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
@@ -2120,18 +2217,18 @@ class TestIntegration:
                 scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
             )
 
-            assert len(sched._emitted_per_unroll) == sched.unroll_factor
-            assert len(sched._ngll_per_unroll) == sched.unroll_factor
-            assert len(sched._nll_per_unroll) == sched.unroll_factor
+            assert sched._emitter is not None
 
-            # All modules have instructions
-            for pi, partition_emitted in enumerate(sched._emitted_per_unroll[0]):
+            # All modules emit non-empty instruction lists on demand (no
+            # pre-populated em.instructions since grc.115 removed the populate loop).
+            for pi, partition_emitted in enumerate(sched._emitted):
                 for k, emitted in enumerate(partition_emitted):
                     for em in emitted:
-                        assert len(em.instructions) > 0, \
+                        insts = sched._emitter.emit_module(em, unroll_iter=0)
+                        assert len(insts) > 0, \
                             f"P{pi} k={k} [{em.moduleId}] {em.opType}: no instructions"
 
-            # MFMA/LR VGPR disjoint
+            # MFMA/LR VGPR disjoint (checked at tile-map level, not instruction level)
             for pi, slots in enumerate(sched._partitions):
                 for slot in slots:
                     if slot.mfma and slot.lrs:
@@ -2142,10 +2239,11 @@ class TestIntegration:
                                     assert set(mfma_map[0].values()).isdisjoint(
                                         set(lr.vgpr_tile_map[0].values()))
 
-            # instructionSchedule succeeds
-            for pi, partition_emitted in enumerate(sched._emitted_per_unroll[0]):
+            # instructionScheduleFromLists succeeds and produces non-empty output
+            for pi, partition_emitted in enumerate(sched._emitted):
                 for k, emitted in enumerate(partition_emitted):
-                    scheduled = instructionSchedule(emitted)
+                    inst_lists = [sched._emitter.emit_module(em, 0) for em in emitted]
+                    scheduled = instructionScheduleFromLists(emitted, inst_lists)
                     assert len(list(scheduled.flatitems())) > 0
 
         finally:
@@ -2171,38 +2269,41 @@ class TestIntegration:
             )
 
             uf = sched.unroll_factor
-            asm = str(sched.emitMainAndExitLoops(writer, kernel)) \
-                + str(sched.emitTailLoop(writer, kernel))
+            asm_main = str(sched.emitMainAndExitLoops(writer, kernel))
 
-            assert "LoopBeginL:" in asm
-            assert "SkipToNGLL:" in asm
+            assert "LoopBeginL:" in asm_main
+            assert "SkipToNGLL:" in asm_main
 
             if uf > 1:
                 for ui in range(uf):
-                    assert f"MAINLOOP_C{ui}" in asm
-                    assert f"NGLL_C{ui}" in asm
-                    assert f"NLL_C{ui}" in asm
-                assert "SkipToEnd:" in asm
-                assert "SkipToNLL:" in asm
+                    assert f"MAINLOOP_C{ui}" in asm_main
+                    assert f"NGLL_C{ui}" in asm_main
+                    assert f"NLL_C{ui}" in asm_main
+                assert "SkipToEnd:" in asm_main
+                assert "SkipToNLL:" in asm_main
 
-                def get_mfma_vgprs(emitted_3d):
+                def get_mfma_vgprs(emitted_3d, unroll_iter):
                     vgprs = set()
                     for partition in emitted_3d:
                         for group in partition:
                             for em in group:
                                 if em.opType == 'mfma':
-                                    for inst in em.instructions:
+                                    for inst in sched._emitter.emit_module(em, unroll_iter):
                                         vgprs.add(str(inst))
                     return vgprs
 
-                vgprs_0 = get_mfma_vgprs(sched._emitted_per_unroll[0])
-                vgprs_1 = get_mfma_vgprs(sched._emitted_per_unroll[1])
+                # Check per-unroll VGPR differences BEFORE emitTailLoop swaps tiles.
+                vgprs_0 = get_mfma_vgprs(sched._emitted, 0)
+                vgprs_1 = get_mfma_vgprs(sched._emitted, 1)
                 assert vgprs_0 != vgprs_1, \
                     "Per-unroll copies should differ in MFMA instructions"
             else:
-                assert "MAINLOOP" in asm
-                assert "NGLL" in asm
-                assert "NLL" in asm
+                assert "MAINLOOP" in asm_main
+                assert "NGLL" in asm_main
+                assert "NLL" in asm_main
+
+            asm_tail = str(sched.emitTailLoop(writer, kernel))
+            assert "TAILLOOP" in asm_tail, "emitTailLoop should emit the TAILLOOP body"
 
         finally:
             sched.deallocVgprTiles(writer)
@@ -2317,14 +2418,14 @@ class TestIntegration:
             if uf < 2:
                 pytest.skip("unroll_factor < 2, no multi-copy NLL to test")
 
-            def get_scale_vgprs(emitted_3d):
+            def get_scale_vgprs(emitted_3d, unroll_iter):
                 sa_vgprs = set()
                 sb_vgprs = set()
                 for partition in emitted_3d:
                     for group in partition:
                         for em in group:
                             if em.opType == 'mfma':
-                                for inst in em.instructions:
+                                for inst in sched._emitter.emit_module(em, unroll_iter):
                                     if isinstance(inst, MXMFMAInstruction):
                                         sa_vgprs.add(str(inst.mxsa))
                                         sb_vgprs.add(str(inst.mxsb))
@@ -2332,7 +2433,7 @@ class TestIntegration:
 
             nll_scales = []
             for ui in range(uf):
-                nll_scales.append(get_scale_vgprs(sched._nll_per_unroll[ui]))
+                nll_scales.append(get_scale_vgprs(sched._nll_emitted, ui))
 
             for ui in range(uf):
                 for uj in range(ui + 1, uf):
@@ -2489,14 +2590,14 @@ if __name__ == "__main__":
     if args.pgr >= 1:
         loop_sections = [
             ("PRELOOP",  sched._preloop_emitted, False),
-            ("MAINLOOP", sched._emitted_per_unroll[0]),
-            ("NGLL",     sched._ngll_per_unroll[0]),
-            ("NLL",      sched._nll_per_unroll[0]),
+            ("MAINLOOP", sched._emitted),
+            ("NGLL",     sched._ngll_emitted),
+            ("NLL",      sched._nll_emitted),
             ("TAILLOOP", sched._tailloop_emitted, False),
         ]
     else:
         loop_sections = [
-            ("MAINLOOP", sched._emitted_per_unroll[0]),
+            ("MAINLOOP", sched._emitted),
             ("TAILLOOP", sched._tailloop_emitted, False),
         ]
 
@@ -2562,9 +2663,9 @@ if __name__ == "__main__":
 
     for section in [
         ("PRELOOP",  sched._preloop_emitted, False),
-        ("MAINLOOP", sched._emitted_per_unroll[0]),
-        ("NGLL",     sched._ngll_per_unroll[0]),
-        ("NLL",      sched._nll_per_unroll[0]),
+        ("MAINLOOP", sched._emitted),
+        ("NGLL",     sched._ngll_emitted),
+        ("NLL",      sched._nll_emitted),
     ]:
         label, emitted_3d = section[0], section[1]
         schedule = section[2] if len(section) > 2 else True
@@ -2878,9 +2979,7 @@ class TestBuildTailloopPGR0:
             )
 
             print("FP4 256x256 tailloop assembly:")
-            module = sched._emitLoop(writer, kernel, "TAILLOOP",
-                                      sched._tailloop_emitted,
-                                      schedule=False)
+            module = sched.emitTailLoop(writer, kernel)
             for inst in module.flatitems():
                 print(f"  {str(inst).rstrip()}")
 
@@ -2912,12 +3011,12 @@ class TestBuildTailloopPGR0:
                 writer, kernel,
                 tileInfoA=tiA, tileInfoB=tiB,
                 dtileInfo=dTileInfo,
+                tensorParametersA=MagicMock(),
+                tensorParametersB=MagicMock(),
             )
 
             print("BF16 320x320 1x5 tailloop assembly:")
-            module = sched._emitLoop(writer, kernel, "TAILLOOP",
-                                      sched._tailloop_emitted,
-                                      schedule=False)
+            module = sched.emitTailLoop(writer, kernel)
             for inst in module.flatitems():
                 print(f"  {str(inst).rstrip()}")
 

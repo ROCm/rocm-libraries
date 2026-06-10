@@ -15,7 +15,7 @@ The schedule is built in these passes:
   remove_unnecessary_lr_deps — remove redundant GR→LR deps covered by MFMA syncs
   remove_cross_deps        — replace cross-subIterK deps with wait preOps
   insert_gr_lr_inc         — insert lr_inc/gr_inc preOps at MT transitions
-  group                    — serialize and group (produce paths for instructionSchedule)
+  group                    — serialize and group (produce paths for instructionScheduleFromLists)
   remove_wait_lr_sync      — remove redundant wait_lr_sync after grouping
   emit                     — produce List[EmittedModule] with before-link chains
 
@@ -26,7 +26,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Callable, Dict, List, Optional, Union
-import copy
 import io
 import math
 
@@ -497,7 +496,7 @@ class Dep:
 class EmittedModule:
     """One emitted module with before-link for instruction scheduling.
 
-    Compatible with SubtileBasedInstructionScheduler.instructionSchedule().
+    Compatible with SubtileBasedInstructionScheduler.instructionScheduleFromLists().
     Instructions are left empty at the logical level — filled during emission.
     """
     moduleId: int = -1
@@ -1052,15 +1051,21 @@ class LogicalScheduler:
             cpp.value_preloop(), full=True)
         return self._preloop_emitted
 
-    def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True):
+    def _emitLoop(self, writer, kernel, label, emitted_3d, unroll_iter=0,
+                  schedule=True):
         """Emit a loop section from a 3D emitted structure.
 
         emitted_3d: [partition][subIterK][EmittedModule]
 
-        When schedule=True and a group has MFMAs, calls instructionSchedule
-        for interleaving. When schedule=False, emits instructions sequentially.
+        When schedule=True and a group has MFMAs, calls
+        instructionScheduleFromLists for interleaving with on-demand per-module
+        emission (no pre-populated em.instructions required).
+        When schedule=False, emits instructions sequentially.
+        Both paths dispatch through self._emitter.emit_module.
         """
-        from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
+        from Tensile.Components.Subtile.InstructionScheduler import (
+            instructionScheduleFromLists,
+        )
         from rocisa.code import Module
 
         module = Module(label)
@@ -1069,11 +1074,15 @@ class LogicalScheduler:
             for k, em_list in enumerate(partition_emitted):
                 module.addComment0(f"partition={pi} subIterK={k}")
                 if schedule and em_list:
-                    scheduled = instructionSchedule(em_list)
+                    inst_lists = [
+                        self._emitter.emit_module(em, unroll_iter)
+                        for em in em_list
+                    ]
+                    scheduled = instructionScheduleFromLists(em_list, inst_lists)
                     module.add(scheduled)
                 else:
                     for em in em_list:
-                        for inst in em.instructions:
+                        for inst in self._emitter.emit_module(em, unroll_iter):
                             module.add(inst)
         module.addComment0(f"{label} end")
         return module
@@ -1109,7 +1118,8 @@ class LogicalScheduler:
 
         # ── Preloop ──
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
-                                  self._preloop_emitted, schedule=False))
+                                  self._preloop_emitted, unroll_iter=0,
+                                  schedule=False))
 
         # ── Mainloop ──
         module.addComment0("MAINLOOP")
@@ -1121,7 +1131,7 @@ class LogicalScheduler:
         module.add(loopBegin)
         for ui in range(uf):
             module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
-                                      self._emitted_per_unroll[ui]))
+                                      self._emitted, unroll_iter=ui))
             module.add(SSubU32(dst=sgpr("LoopCounterL"),
                                src0=sgpr("LoopCounterL"), src1=1,
                                comment=f"dec counterL (copy {ui})"))
@@ -1142,10 +1152,9 @@ class LogicalScheduler:
         if hasNGLL:
             module.add(Label("SkipToNGLL", ""))
 
-        # _per_unroll[i] has tiles for unroll_iter=i.
         # After mainloop C{ui}, data in LDS/vgprs corresponds to
         # unroll_iter = (ui + pgr) % uf for NLL, (ui + 1) % uf for NGLL.
-        # NLLEarly (preloop skip) needs unroll_iter=0, i.e. _nll_per_unroll[0].
+        # NLLEarly (preloop skip) needs unroll_iter=0, i.e. NLL with index 0.
         # We place SkipToNLL before whichever NLL block uses index 0.
         pgr = self.config.pgr
         last = uf - 1
@@ -1155,12 +1164,14 @@ class LogicalScheduler:
         if hasNGLL:
             module.addComment0(f"NGLL_C{last}")
             module.add(self._emitLoop(writer, kernel, f"NGLL_C{last}",
-                                      self._ngll_per_unroll[(last + 1) % uf]))
+                                      self._ngll_emitted,
+                                      unroll_iter=(last + 1) % uf))
         if nll_ft == 0:
             module.add(Label("SkipToNLL", ""))
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
-                                  self._nll_per_unroll[nll_ft]))
+                                  self._nll_emitted,
+                                  unroll_iter=nll_ft))
         module.add(SBranch(labelName=endLabel.getLabelName(),
                            comment="skip other exit paths"))
 
@@ -1170,12 +1181,14 @@ class LogicalScheduler:
             if hasNGLL:
                 module.addComment0(f"NGLL_C{ui}")
                 module.add(self._emitLoop(writer, kernel, f"NGLL_C{ui}",
-                                          self._ngll_per_unroll[(ui + 1) % uf]))
+                                          self._ngll_emitted,
+                                          unroll_iter=(ui + 1) % uf))
             if nll_idx == 0:
                 module.add(Label("SkipToNLL", ""))
             module.addComment0(f"NLL_C{ui}")
             module.add(self._emitLoop(writer, kernel, f"NLL_C{ui}",
-                                      self._nll_per_unroll[nll_idx]))
+                                      self._nll_emitted,
+                                      unroll_iter=nll_idx))
             if ui < uf - 2:
                 module.add(SBranch(labelName=endLabel.getLabelName(),
                                    comment="skip other exit paths"))
@@ -1206,13 +1219,13 @@ class LogicalScheduler:
         # sized by _compute_flat_tail_tile_state (already invoked by
         # build_tailloop_pgr0; peaks stashed on self._flat_tail_peaks).
         self._realloc_tail_tiles_flat(writer, self._flat_tail_peaks)
-        # init must run before populate so each MaskKOp in the body can read
+        # init must run before the loop body so each MaskKOp can read
         # the mask vgprs (kReg, vDiff, …) that init allocates.
         for inst in self._emitter.emit_mask_k_init():
             module.add(inst)
-        self._emitter.populate(self._tailloop_emitted, unroll_iter=0)
         module.add(self._emitLoop(writer, kernel, "TAILLOOP",
                                   self._tailloop_emitted,
+                                  unroll_iter=0,
                                   schedule=False))
         for inst in self._emitter.emit_mask_k_done():
             module.add(inst)
@@ -1222,34 +1235,23 @@ class LogicalScheduler:
 
     def getNumVgpr(self, tileInfoA, tileInfoB,
                         scaleTileInfoA=None, scaleTileInfoB=None) -> int:
-        """Return the total number of VGPRs needed across all tensors (A, B, SA, SB)
-        without performing any allocation.
+        """Return the total number of VGPRs needed across all tensors (A, B, SA, SB).
 
-        Returns max(mainloop_peak, flat_tail_peak) — the two layouts don't
-        coexist (the tail frees and reallocates at entry), so the kernel
-        budget is the larger of them.
+        Delegates to C++ passes::LogicalScheduler.get_num_vgpr which computes
+        max(mainloop_peak_vgprs, flat_tail_peak_vgprs).  The two layouts
+        never coexist (the tail loop frees and reallocates at entry) so the
+        kernel VGPR budget is the larger of the two peaks.
 
-        Must be called after scheduling is complete.
+        Must be called after scheduling is complete (assign_vgpr_tiles).
         """
         self._ensure_pass(Pass.VGPR_TILES)
-
-        cfg = self.config
-
-        def _tile_vgpr_count(tileInfo, lrGran):
-            return int(math.ceil(tileInfo.mmaTileRegCount * lrGran.k * lrGran.mn))
-
-        def _total_for(peaks):
-            t = peaks.get('A', 0) * _tile_vgpr_count(tileInfoA, cfg.lrA) \
-              + peaks.get('B', 0) * _tile_vgpr_count(tileInfoB, cfg.lrB)
-            if cfg.hasScale and scaleTileInfoA and scaleTileInfoB:
-                t += peaks.get('SA', 0) * _tile_vgpr_count(scaleTileInfoA, cfg.lrSA) \
-                   + peaks.get('SB', 0) * _tile_vgpr_count(scaleTileInfoB, cfg.lrSB)
-            return t
-
-        mainloop_total = _total_for(self.tile_peaks)
-        _, flat_peaks = self._compute_flat_tail_tile_state()
-        tail_total = _total_for(flat_peaks)
-        return max(mainloop_total, tail_total)
+        cpp = self._ensure_cpp()
+        return cpp.get_num_vgpr(
+            tileInfoA.mmaTileRegCount,
+            tileInfoB.mmaTileRegCount,
+            scaleTileInfoA.mmaTileRegCount if scaleTileInfoA else 0.0,
+            scaleTileInfoB.mmaTileRegCount if scaleTileInfoB else 0.0,
+        )
 
     def allocVgprTiles(self, writer, tileInfoA, tileInfoB,
                        scaleTileInfoA=None, scaleTileInfoB=None):
@@ -1498,10 +1500,12 @@ class LogicalScheduler:
                               scaleTileInfoA=None, scaleTileInfoB=None,
                               tensorParametersA=None,
                               tensorParametersB=None) -> None:
-        """Populate EmittedModule.instructions from placements and preOps.
+        """Create the InstructionEmitter used during loop emission.
 
-        Uses per-tensor VGPR tile lists (vgprTilesA/B/SA/SB) indexed by
-        vgprTileId from placement tile maps.
+        Rebuilds all loop-variant EmittedModule graphs (preloop, NGLL, NLL,
+        tail) so they reflect the latest vgpr_tile_maps from assign_vgpr_tiles.
+        Instructions are emitted on demand during _emitLoop via
+        InstructionEmitter.emit_module — no deep-copy or pre-population loop.
         """
         if self._preloop_emitted is None or self._ngll_emitted is None \
                 or self._nll_emitted is None:
@@ -1528,24 +1532,6 @@ class LogicalScheduler:
         self.build_ngll()
         self.build_nll()
         self.build_tailloop_pgr0()
-
-        emitter.populate(self._preloop_emitted, unroll_iter=0)
-
-        self._emitted_per_unroll = []
-        self._ngll_per_unroll = []
-        self._nll_per_unroll = []
-        for ui in range(self.unroll_factor):
-            em_copy = copy.deepcopy(self._emitted)
-            emitter.populate(em_copy, unroll_iter=ui)
-            self._emitted_per_unroll.append(em_copy)
-
-            ngll_copy = copy.deepcopy(self._ngll_emitted)
-            emitter.populate(ngll_copy, unroll_iter=ui)
-            self._ngll_per_unroll.append(ngll_copy)
-
-            nll_copy = copy.deepcopy(self._nll_emitted)
-            emitter.populate(nll_copy, unroll_iter=ui)
-            self._nll_per_unroll.append(nll_copy)
 
         self._emitter = emitter
         self._completed.add(Pass.POPULATE)

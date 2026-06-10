@@ -112,6 +112,13 @@ def extractPathsFromBeforeDeps(emittedModules) -> Tuple[int, List[List[int]], Li
 def instructionSchedule(emittedModules):
     """Interleave non-MFMA instructions between MFMAs (slot-based placement).
 
+    .. deprecated::
+        Prefer ``instructionScheduleFromLists`` for new callers.
+        ``LogicalScheduler.populate_instructions`` populates instruction lists
+        on-demand and calls ``instructionScheduleFromLists`` directly; this
+        entry point remains only for legacy call sites that still build
+        ``EmittedModule.instructions`` in-place.
+
     Thin adapter over the C++ slot-placement algorithm. Converts the live
     rocisa emitted-module objects to the data-only C++ model, runs the C++
     scheduler, and returns a rocisa ``Module`` in the resulting emission order
@@ -130,3 +137,13 @@ def instructionSchedule(emittedModules):
         early as possible.
     """
     return _cppsched.instructionSchedule(emittedModules)
+
+
+def instructionScheduleFromLists(emittedModules, instruction_lists):
+    """C++-backed scheduler driven by caller-supplied instruction lists.
+
+    Like ``instructionSchedule`` but instructions are provided externally
+    (on-demand emission) instead of reading from ``em.instructions``.
+    Thin adapter over the C++ slot-placement algorithm.
+    """
+    return _cppsched.instructionScheduleFromLists(emittedModules, instruction_lists)

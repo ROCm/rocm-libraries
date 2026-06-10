@@ -433,6 +433,24 @@ class LogicalScheduler {
     return {same, cross};
   }
 
+  // ── VGPR count helpers ───────────────────────────────────
+  //
+  // compute_flat_tail_peaks — mirrors Python _compute_flat_tail_tile_state:
+  //   for each partition and tensor, collects all unique group_key
+  //   = (t // gran.mn) * gran.mn in the tile range and assigns sequential
+  //   flat tile ids.  Returns {tensor: flat_tile_count}.  Pure config math;
+  //   does not require any pass to have run.
+  std::map<std::string, int> compute_flat_tail_peaks() const;
+
+  // get_num_vgpr — mirrors Python getNumVgpr:
+  //   total = max(mainloop_peak_vgprs, flat_tail_peak_vgprs) where each
+  //   tensor's contribution is peak * ceil(mmaTileRegCount * lrGran.k * lrGran.mn).
+  //   mmaTileRegCount values come from TileInfo; pass 0 for scale tensors when
+  //   scale is not present.  Requires assign_vgpr_tiles() to have run first.
+  int get_num_vgpr(double mmaTileRegCountA, double mmaTileRegCountB,
+                   double mmaTileRegCountSA = 0,
+                   double mmaTileRegCountSB = 0);
+
   // ── Print helpers (byte-identical to Python) ─────────────
   std::string print_lr() const;
   std::string print_vgpr() const;
@@ -2457,6 +2475,84 @@ inline std::string LogicalScheduler::print_remove_deps() const {
 
 inline std::string LogicalScheduler::print_group_lr_gr() const {
   return print_remove_deps();  // identical body in Python
+}
+
+// ════════════════════════════════════════════════════════════
+// compute_flat_tail_peaks — mirrors Python _compute_flat_tail_tile_state
+// ════════════════════════════════════════════════════════════
+
+inline std::map<std::string, int>
+LogicalScheduler::compute_flat_tail_peaks() const {
+  int numP = config.numPartitions();
+  std::map<std::string, ReadGranularity> lr_grans;
+  lr_grans["A"] = config.lrA;
+  lr_grans["B"] = config.lrB;
+  if (config.hasScale()) {
+    lr_grans["SA"] = *config.lrSA;
+    lr_grans["SB"] = *config.lrSB;
+  }
+
+  std::vector<PartRange> part_ranges;
+  for (int pi = 0; pi < numP; ++pi)
+    part_ranges.push_back(partition_tile_range(pi));
+
+  // group_id[tensor][group_key] = incrementing flat tile id (insertion order)
+  std::map<std::string, std::map<int, int>> group_id;
+  for (auto& [tensor, gran] : lr_grans) group_id[tensor] = {};
+
+  for (int pi = 0; pi < numP; ++pi) {
+    for (auto& [tensor, gran] : lr_grans) {
+      const char* side = tensor_side(tensor);
+      auto [start, end] = part_ranges[pi].by_side(side);
+      std::set<int> groups;
+      for (int t = start; t < end; ++t)
+        groups.insert((t / gran.mn) * gran.mn);
+      for (int g : groups) {
+        if (!group_id[tensor].count(g))
+          group_id[tensor][g] = (int)group_id[tensor].size();
+      }
+    }
+  }
+
+  std::map<std::string, int> peaks;
+  for (auto& [tensor, gid] : group_id) peaks[tensor] = (int)gid.size();
+  return peaks;
+}
+
+// ════════════════════════════════════════════════════════════
+// get_num_vgpr — mirrors Python getNumVgpr
+// ════════════════════════════════════════════════════════════
+
+inline int LogicalScheduler::get_num_vgpr(double mmaTileRegCountA,
+                                          double mmaTileRegCountB,
+                                          double mmaTileRegCountSA,
+                                          double mmaTileRegCountSB) {
+  ensure(Pass::VGPR_TILES);
+
+  bool hasScale = (mmaTileRegCountSA > 0 && mmaTileRegCountSB > 0
+                   && config.hasScale());
+
+  // VGPR count for one tile of tensor t: ceil(mmaTileRegCount * gran.k * gran.mn)
+  auto tile_vgpr_count = [](double regCount, const ReadGranularity& gran) {
+    return static_cast<int>(
+        std::ceil(regCount * static_cast<double>(gran.k * gran.mn)));
+  };
+
+  auto total_for = [&](const std::map<std::string, int>& peaks) -> int {
+    int t = 0;
+    if (peaks.count("A")) t += peaks.at("A") * tile_vgpr_count(mmaTileRegCountA, config.lrA);
+    if (peaks.count("B")) t += peaks.at("B") * tile_vgpr_count(mmaTileRegCountB, config.lrB);
+    if (hasScale) {
+      if (peaks.count("SA")) t += peaks.at("SA") * tile_vgpr_count(mmaTileRegCountSA, *config.lrSA);
+      if (peaks.count("SB")) t += peaks.at("SB") * tile_vgpr_count(mmaTileRegCountSB, *config.lrSB);
+    }
+    return t;
+  };
+
+  int mainloop_total = total_for(tile_peaks);
+  auto flat_peaks = compute_flat_tail_peaks();
+  int tail_total = total_for(flat_peaks);
+  return std::max(mainloop_total, tail_total);
 }
 
 inline std::string LogicalScheduler::print_emit() const {

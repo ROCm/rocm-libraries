@@ -969,7 +969,19 @@ void bind_logical_scheduler_passes(nb::module_& s) {
       .def("print_deps", &LS::print_deps)
       .def("print_remove_deps", &LS::print_remove_deps)
       .def("print_group_lr_gr", &LS::print_group_lr_gr)
-      .def("print_emit", &LS::print_emit);
+      .def("print_emit", &LS::print_emit)
+      .def("compute_flat_tail_peaks", &LS::compute_flat_tail_peaks,
+           "Return {tensor: flat_tail_tile_count} — the VGPR tile peak for the "
+           "flat (non-partitioned) tail loop.  Pure config math; no pass "
+           "prerequisites.")
+      .def("get_num_vgpr", &LS::get_num_vgpr,
+           nb::arg("mmaTileRegCountA"), nb::arg("mmaTileRegCountB"),
+           nb::arg("mmaTileRegCountSA") = 0.0,
+           nb::arg("mmaTileRegCountSB") = 0.0,
+           "Return total VGPR count = max(mainloop_peak, flat_tail_peak) across "
+           "all tensors (A, B, SA, SB).  Each tensor contributes "
+           "peak * ceil(mmaTileRegCount * lrGran.k * lrGran.mn) VGPRs.  Pass 0 "
+           "for SA/SB when scale is not used.  Requires assign_vgpr_tiles().");
 }
 
 // ---------------------------------------------------------------------------
