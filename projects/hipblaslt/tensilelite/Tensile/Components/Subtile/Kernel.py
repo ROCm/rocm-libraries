@@ -1006,8 +1006,8 @@ def initVgprTilesToZero(writer, kernel, tileInfo):
   """Initialize vgprTiles to zero using MFMA for blocks of 16, scalar writes for remainder.
 
   Delegates rocisa instruction construction to the C++ loop_orchestrator.
-  Python resolves pool identity (AGPR vs VGPR) and pre-allocates the tmpVgpr
-  pairs needed for the MFMA zero-init path; C++ uses the indices but does not
+  Python resolves pool identity (AGPR vs VGPR) and allocates a single tmpVgpr
+  pair shared across all MFMA-eligible groups; C++ uses the index but does not
   call checkOut/checkIn.  Returns the rocisa Module from C++ directly.
   """
   from tensile_writer.subtile.loop_orchestrator import init_vgpr_tiles_to_zero
@@ -1038,21 +1038,22 @@ def initVgprTilesToZero(writer, kernel, tileInfo):
       totalRegs += numRegs
   groups.append((firstReg, totalRegs, curPool == writer.agprPool))
 
-  # Pre-allocate tmpVgpr pairs for groups that will use MFMA zero-init
-  # (groups with totalRegs >= 16).
-  reg_groups = []
-  tmp_vgprs = []
-  for firstReg, totalRegs, isAgpr in groups:
-    if totalRegs >= 16:
-      tmpVgpr = writer.vgprPool.checkOutAligned(2, 2)
-      tmp_vgprs.append(tmpVgpr)
-    else:
-      tmpVgpr = -1
-    reg_groups.append((firstReg, totalRegs, isAgpr, tmpVgpr))
+  # Allocate a single tmpVgpr pair shared across all MFMA-eligible groups.
+  # zero_reg_range re-zeroes tmpVgpr at the start of each group (vmov_b64),
+  # so one pair suffices regardless of the number of groups.  Allocating one
+  # pair (vs one per group) keeps peak VGPR liveness equivalent to the old
+  # per-group checkOut/checkIn pattern.
+  needs_mfma = any(totalRegs >= 16 for _, totalRegs, _ in groups)
+  tmpVgpr = writer.vgprPool.checkOutAligned(2, 2) if needs_mfma else -1
+
+  reg_groups = [
+      (firstReg, totalRegs, isAgpr, tmpVgpr if totalRegs >= 16 else -1)
+      for firstReg, totalRegs, isAgpr in groups
+  ]
 
   result = init_vgpr_tiles_to_zero(builder, tileInfo.tc, reg_groups)
 
-  for tmpVgpr in tmp_vgprs:
+  if tmpVgpr >= 0:
     writer.vgprPool.checkIn(tmpVgpr)
 
   return result
