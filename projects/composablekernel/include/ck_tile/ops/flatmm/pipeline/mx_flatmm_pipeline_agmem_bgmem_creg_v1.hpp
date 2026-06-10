@@ -580,16 +580,10 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         // __builtin_amdgcn_sched_barrier(0);
     }
 
-    // Compile-time-templated entry point. Caller picks (HasHotLoop, TailNum)
-    // explicitly; defaults come from the class-static members (which in turn
-    // come from Problem) for backward compat with callers that bake those
-    // values into Problem template params.
-    //
-    // The AElementFunction argument is currently unused in the MX Run_ data
-    // path (Run_ does not transform A elements pre-bit_cast). It exists here
-    // to disambiguate this overload from the runtime-dispatching overload
-    // below, mirroring the same trick used by the non-MX
-    // FlatmmPipelineAGmemBGmemCRegV1 (lines 536-545 vs 1024-1043).
+    // Compile-time-templated entry point: caller picks (HasHotLoop, TailNum)
+    // explicitly; defaults fall back to the class-static members.
+    // AElementFunction is retained only for signature parity with the non-MX
+    // pipelines; it is unused here because MX does not transform A pre-bit_cast.
     template <bool HasHotLoop_             = HasHotLoop,
               ck_tile::TailNumber TailNum_ = TailNum,
               typename ADramBlockWindowTmp,
@@ -629,14 +623,10 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
         return c_block_tile;
     }
 
-    // Runtime-dispatching entry point. Mirrors the non-MX pattern at
-    // FlatmmPipelineAGmemBGmemCRegV1 (lines 1024-1043 of
-    // flatmm_pipeline_agmem_bgmem_creg_v1.hpp). Computes (has_hot_loop,
-    // tail_num) at runtime from num_loop and uses Underlying::TailHandler
-    // (inherited transitively from BaseFlatmmPipelineAGmemBGmemCRegV1) to
-    // dispatch into the compile-time-templated operator() above. All 4
-    // (HasHotLoop, TailNum) variants of Run_ are compiled into the kernel
-    // binary; the right one is selected per tile.
+    // Runtime-dispatching entry point: computes (has_hot_loop, tail_num) from
+    // num_loop and dispatches into the compile-time-templated operator() above
+    // via TailHandler. All 4 (HasHotLoop, TailNum) variants are compiled in and
+    // the right one is selected per tile.
     template <typename ADramBlockWindowTmp,
               typename BFlatBlockWindowTmp,
               typename ScaleADramBlockWindowTmp,

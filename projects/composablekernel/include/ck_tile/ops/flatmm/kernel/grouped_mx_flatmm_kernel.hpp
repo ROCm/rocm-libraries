@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <iostream>
+#include <stdexcept>
 #include <string>
 
 #include "ck_tile/core.hpp"
@@ -49,29 +49,35 @@ struct GroupedMXFlatmmKernel
     }
 
     template <class ScaleM, class ScaleN, index_t NumDTensor_ = 0>
-    CK_TILE_HOST_DEVICE static auto
+    CK_TILE_HOST static auto
     GridSize(const GroupedFlatmmHostArgs<ScaleM, ScaleN, NumDTensor_>& kernelArgs)
     {
         hipDeviceProp_t prop;
         int deviceId = 0;
 
-        const int block_size = UnderlyingGemmKernel::BlockSize().x;
-        int dync_smem_size   = 0;
-        int maxActiveBlocksPerCU;
+        const int block_size     = UnderlyingGemmKernel::BlockSize().x;
+        int dyn_smem_size        = 0;
+        int maxActiveBlocksPerCU = 0;
 
-        [[maybe_unused]] auto e = hipGetDeviceProperties(&prop, deviceId);
+        if(hipGetDeviceProperties(&prop, deviceId) != hipSuccess)
+            throw std::runtime_error(std::string("hipGetDeviceProperties failed: ") +
+                                     hipGetErrorName(hipGetLastError()));
 
-        e = hipOccupancyMaxActiveBlocksPerMultiprocessor(
-            &maxActiveBlocksPerCU,
-            reinterpret_cast<void*>(kentry<1,
-                                           GroupedMXFlatmmKernel,
-                                           GroupedFlatmmHostArgs<ScaleM, ScaleN, NumDTensor_>>),
-            block_size,
-            dync_smem_size);
+        if(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+               &maxActiveBlocksPerCU,
+               reinterpret_cast<void*>(kentry<1,
+                                              GroupedMXFlatmmKernel,
+                                              GroupedFlatmmHostArgs<ScaleM, ScaleN, NumDTensor_>>),
+               block_size,
+               dyn_smem_size) != hipSuccess)
+            throw std::runtime_error(
+                std::string("hipOccupancyMaxActiveBlocksPerMultiprocessor failed: ") +
+                hipGetErrorName(hipGetLastError()));
 
         const int persistent_block_size = prop.multiProcessorCount * maxActiveBlocksPerCU;
 
-        assert(kernelArgs.k_batch == 1);
+        if(kernelArgs.k_batch != 1)
+            throw std::runtime_error("Wrong! k_batch != 1 not supported in persistent kernel");
         return dim3(persistent_block_size, 1, kernelArgs.k_batch);
     }
 
@@ -84,9 +90,9 @@ struct GroupedMXFlatmmKernel
     template <class ScaleM, class ScaleN, index_t NumDTensor_ = 0>
     CK_TILE_DEVICE void operator()(GroupedFlatmmHostArgs<ScaleM, ScaleN, NumDTensor_> kargs) const
     {
-        int group_idx        = 0;
-        int block_linear_idx = blockIdx.x;
-        int total_block_cnt  = gridDim.x;
+        index_t group_idx        = 0;
+        index_t block_linear_idx = blockIdx.x;
+        index_t total_block_cnt  = gridDim.x;
 
         UnderlyingGemmKernel underlying_kernel{};
         for(; group_idx < kargs.group_count; ++group_idx)
@@ -97,19 +103,13 @@ struct GroupedMXFlatmmKernel
 
             while(block_linear_idx < group_block_cnt)
             {
-                // Drain the prior tile's in-flight LDS reads (notably the
-                // CShuffleEpilogue's final `ds_read` of the C-shuffle tile)
-                // before the next tile's MXFlatmmPipeline::Run_ issues
-                // `async_load_tile_` (buffer_load_lds) writes into the same
-                // per-CTA `__shared__ smem_ptr` region. On gfx1250 the async
-                // writes are tracked by `asynccnt` which is not ordered
-                // against in-flight `ds_read`s on `dscnt`, so without this
-                // barrier the leading wave's prefetch races and clobbers
-                // bytes that a lagging wave's last `iAccess` is still
-                // reading. The corruption manifests at the last SFC
-                // iteration's output position (e.g. row 120/col 32 in the
-                // grouped-flatmm MX tests). Mirrors the same fix at
-                // universal_gemm_kernel.hpp:1316 (commit b664f4b6).
+                // Drain the prior tile's in-flight LDS reads (the epilogue's
+                // final `ds_read`) before the next tile's pipeline issues
+                // `async_load_tile_` writes into the same shared smem. On
+                // gfx1250 async writes (`asynccnt`) are not ordered against
+                // in-flight `ds_read`s (`dscnt`), so without this barrier the
+                // next tile's prefetch races and clobbers bytes a lagging wave
+                // is still reading.
                 block_sync_lds();
                 FlatmmKernelArgs<ScaleM, ScaleN, NumDTensor_> impl_kargs{
                     kargs.a_ptr[group_idx],

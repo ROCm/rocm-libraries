@@ -6,10 +6,9 @@
 #include "test_grouped_gemm_mx_flatmm_common.hpp"
 
 // clang-format off
-// Compile-time arch dispatch via GetCurrentTargetId() (mirrors the
-// single-problem tests, e.g. test_mx_flatmm_fp4fp4.cpp). Selecting one arch's
-// list -- rather than concatenating both -- keeps multiarch (gfx950+gfx1250)
-// builds compiling: only the selected arch's kernels are instantiated.
+// Compile-time arch dispatch via GetCurrentTargetId(). Selecting one arch's
+// list rather than concatenating both keeps multiarch (gfx950+gfx1250) builds
+// compiling: only the selected arch's kernels are instantiated.
 using KernelTypes = std::conditional_t<
     GetCurrentTargetId() == ck_tile::core::arch::TargetId::GFX1250,
     ::testing::Types<

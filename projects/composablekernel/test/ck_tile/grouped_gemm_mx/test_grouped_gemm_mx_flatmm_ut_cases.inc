@@ -32,45 +32,65 @@
 //   K must be a multiple of K_Tile = 256 and >= 256 (smallest non-trivial size).
 // =================================================================================
 
-constexpr int init_method = 1;
+// init_method: 1 = constant init (exact-integer oracle, near-exact tolerance),
+//              0 = random init (uniform values, 1e-2 tolerance). Each case is
+// run in both regimes; the constant variant pins exact K accumulation while the
+// random variant exercises realistic value distributions.
+constexpr int init_const  = 1;
+constexpr int init_random = 0;
 
 TYPED_TEST(TestGroupedGemmMXFlatmm, Basic_4Groups)
 {
     // K values hit one class each: 256 (A), 512 (B), 768 (C), 1024 (D).
-    this->Run({128, 256, 384, 512}, {512, 1024, 512, 1024}, {256, 512, 768, 1024}, 4, init_method);
+    this->Run({128, 256, 384, 512}, {512, 1024, 512, 1024}, {256, 512, 768, 1024}, 4, init_const);
+}
+
+TYPED_TEST(TestGroupedGemmMXFlatmm, Basic_4Groups_Random)
+{
+    this->Run({128, 256, 384, 512}, {512, 1024, 512, 1024}, {256, 512, 768, 1024}, 4, init_random);
 }
 
 TYPED_TEST(TestGroupedGemmMXFlatmm, Single_Group)
 {
     // K=512 (Class B), smallest non-trivial size.
-    this->Run({128}, {512}, {512}, 1, init_method);
+    this->Run({128}, {512}, {512}, 1, init_const);
+}
+
+TYPED_TEST(TestGroupedGemmMXFlatmm, Single_Group_Random)
+{
+    this->Run({128}, {512}, {512}, 1, init_random);
 }
 
 TYPED_TEST(TestGroupedGemmMXFlatmm, Two_Groups_Same_Size)
 {
-    // K=256 (Class A) -- this was Fix B's worst-case 4x overshoot before
-    // runtime dispatch was added to the pipeline. Passing confirms the
-    // runtime dispatch picks (HasHotLoop=false, TailNum=Odd) correctly.
-    this->Run({128, 128}, {512, 512}, {256, 256}, 2, init_method);
+    // K=256 (Class A): confirms runtime dispatch selects
+    // (HasHotLoop=false, TailNum=Odd) for the single-loop case.
+    this->Run({128, 128}, {512, 512}, {256, 256}, 2, init_const);
+}
+
+TYPED_TEST(TestGroupedGemmMXFlatmm, Two_Groups_Same_Size_Random)
+{
+    this->Run({128, 128}, {512, 512}, {256, 256}, 2, init_random);
 }
 
 TYPED_TEST(TestGroupedGemmMXFlatmm, Eight_Groups)
 {
     // K cycling through {256, 512, 768, 1024, 1280, 1536, 1792, 2048} -- every
-    // class hit, deeply mixed. Exercises per-tile runtime dispatch across all
-    // 4 (HasHotLoop, TailNum) variants within a single kernel launch.
-    //
-    // Per-group M/N sized so total tile count (~64 for non-TDM/non-FP4,
-    // proportional for other configs) exceeds the persistent grid size
-    // (~48 blocks), forcing some CTAs to process multiple tiles across
-    // group boundaries. This validates the inter-tile LDS-sync fix in
-    // GroupedMXFlatmmKernel (grouped_mx_flatmm_kernel.hpp `block_sync_lds()`
-    // at the top of the persistence loop body): without that barrier, the
-    // CShuffleEpilogue's last `ds_read` races the next tile's pipeline
-    // `async_load_tile_` write to the shared per-CTA `smem_ptr` on gfx1250.
+    // class hit, deeply mixed. Exercises per-tile runtime dispatch across all 4
+    // (HasHotLoop, TailNum) variants in one launch, validating grouped-GEMM-MX
+    // correctness when groups of different K classes coexist.
     this->Run({128, 256, 384, 512, 128, 256, 384, 512},
               {512, 1024, 512, 1024, 512, 1024, 512, 1024},
               {256, 512, 768, 1024, 1280, 1536, 1792, 2048},
               8,
-              init_method);
+              init_const);
+}
+
+TYPED_TEST(TestGroupedGemmMXFlatmm, Eight_Groups_Random)
+{
+    this->Run({128, 256, 384, 512, 128, 256, 384, 512},
+              {512, 1024, 512, 1024, 512, 1024, 512, 1024},
+              {256, 512, 768, 1024, 1280, 1536, 1792, 2048},
+              8,
+              init_random);
 }

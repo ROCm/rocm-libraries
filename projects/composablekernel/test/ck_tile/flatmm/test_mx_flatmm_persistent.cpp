@@ -1,39 +1,22 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Regression test for "Risk 1" -- the latent multi-tile-per-CTA LDS race in
-// `MXFlatmmKernel::operator()`'s persistent path (line 395-424 of
-// include/ck_tile/ops/flatmm/kernel/mx_flatmm_kernel.hpp).
+// Regression test for the multi-tile-per-workgroup LDS race in MXFlatmmKernel's
+// persistent path.
 //
-// The kernel allocates `__shared__ char smem_ptr[Underlying::GetSmemSize()]`
-// once per CTA, then iterates over tiles via the
-// `do { ... } while(UsePersistentKernel && partition_idx < total_work_tile_cnt);`
-// loop. The first iteration's CShuffleEpilogue exits with `ds_read`s still in
-// flight (no terminal `block_sync_lds()`); the second iteration's pipeline
-// `Run_` immediately issues `async_load_tile_` (buffer_load_lds) writes into
-// the same LDS region. On gfx1250 these are tracked by separate counters
-// (`asynccnt` vs `dscnt`), so without a CTA-wide barrier between iterations a
-// leading wave's async write clobbers bytes a lagging wave's `ds_read` is
-// still targeting.
+// The kernel allocates its shared smem once per workgroup, then loops over
+// tiles. The epilogue exits with `ds_read`s still in flight while the next
+// iteration's pipeline issues `async_load_tile_` writes into the same LDS. On
+// gfx1250 these use separate counters (`asynccnt` vs `dscnt`), so without a
+// barrier between iterations the async write clobbers bytes a lagging wave's
+// `ds_read` is still targeting.
 //
-// To trigger the bug we need:
-//   1. UsePersistentKernel = true on the underlying kernel.
-//   2. total_tiles > persistent grid size (so each CTA processes >1 tile).
+// To trigger the bug the kernel must be persistent and total_tiles must exceed
+// the persistent grid size so a workgroup processes >1 tile. On the FFM gfx1250
+// simulator the grid is 48 blocks; FP8xFP8 at M=512, N=4096 yields 64 tiles.
 //
-// On the FFM gfx1250 simulator the persistent grid is reported as 48 blocks.
-// FP8xFP8 with MXFlatmmConfigBase16 (M_Tile=128, N_Tile=256, K_Tile=256) at
-// M=512, N=4096 gives 4*16 = 64 tiles > 48 -- some CTAs get 2 tiles, which
-// exercises the multi-tile-per-CTA path that exhibits the bug.
-//
-// The test is run under two init regimes:
-//   init_method=1 (constants A=2.0, B=0.5, scale_a=0.5, scale_b=2.0):
-//     expected per-element output = K. The bug surfaces as ~2.2% of elements
-//     returning a constant ~2.125 -- diagnostic.
-//   init_method=0 (random uniform): no closed-form expected value, validated
-//     entirely via `reference_mx_gemm` -- representative of real workloads
-//     and proves the bug is detectable without contrived inputs.
-//
-// Both regimes share the same `reference_mx_gemm` correctness oracle.
+// Both init regimes (constant and random) validate against reference_mx_gemm;
+// the constant regime additionally has a closed-form expected output of K.
 
 #include "ck_tile/host.hpp"
 #include <gtest/gtest.h>
@@ -49,10 +32,9 @@
 
 namespace {
 
-// Inlined from test_mx_flatmm_base.hpp:22-60 to avoid pulling in
-// mx_flatmm.hpp's forward declaration of mx_flatmm_calc (which expects the
-// pre-compiled instance object library that we deliberately do not link to,
-// because this test builds its kernel inline).
+// Inlined to avoid pulling in mx_flatmm.hpp, which expects the pre-compiled
+// instance object library that this test deliberately does not link (it builds
+// its kernel inline).
 template <ck_tile::index_t NLane, typename dtype>
 auto preShuffleWeight(ck_tile::HostTensor<dtype>& src)
 {
@@ -116,7 +98,8 @@ using ScaleB = ck_tile::FlatmmScalePointer<ScaleGranularityN, ScaleGranularityK,
 void run_persistent_test(ck_tile::index_t M,
                          ck_tile::index_t N,
                          ck_tile::index_t K,
-                         int init_method)
+                         int init_method,
+                         bool expect_multi_tile = false)
 {
     constexpr bool a_row_major = true;
     constexpr bool b_row_major = false; // BLayout is ColumnMajor
@@ -220,8 +203,7 @@ void run_persistent_test(ck_tile::index_t M,
                                                       scale_a_dev_ptr,
                                                       scale_b_dev_ptr};
 
-    // --- Kernel type tower (Persistent=true is the key knob that triggers the
-    //     do-while persistence loop inside MXFlatmmKernel::operator()) ---
+    // --- Kernel type tower (Persistent=true enables the persistence loop) ---
     using FlatmmShape = ck_tile::TileGemmShape<
         ck_tile::sequence<FlatmmConfig::M_Tile, FlatmmConfig::N_Tile, FlatmmConfig::K_Tile>,
         ck_tile::sequence<FlatmmConfig::M_Warp, FlatmmConfig::N_Warp, FlatmmConfig::K_Warp>,
@@ -300,6 +282,14 @@ void run_persistent_test(ck_tile::index_t M,
               << ", multi_tile_per_block=" << (total_tiles > static_cast<int>(grids.x))
               << ", init_method=" << init_method << std::endl;
 
+    // Guard the multi-tile-per-workgroup trigger: GridSize scales with the GPU,
+    // so on a larger device the "multi-tile" cases can silently degrade into
+    // trivial cases.
+    if(expect_multi_tile)
+        ASSERT_GT(total_tiles, static_cast<int>(grids.x))
+            << "Test expected to exercise the multi-tile-per-workgroup path, but grid covers all "
+               "tiles";
+
     auto s          = ck_tile::stream_config{nullptr, false, 0, 0, 1};
     ck_tile::ignore = ck_tile::launch_kernel(
         s, ck_tile::make_kernel<FlatmmConfig::kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
@@ -314,38 +304,43 @@ void run_persistent_test(ck_tile::index_t M,
     ck_tile::reference_mx_gemm<ADataType, BDataType, ScaleType, ScaleType, AccDataType, CDataType>(
         a_host, b_origin_host, c_ref, scale_a, scale_b);
 
-    const float rtol = 1e-2f;
-    const float atol = 1e-2f;
+    // Constant init (init_method==1) produces an exact integer K result; use
+    // near-exact tolerance so a dropped/double-counted K-tile cannot hide inside
+    // the K-scaled relative slack. Random init keeps 1e-2.
+    const float rtol = (init_method == 1) ? 0.f : 1e-2f;
+    const float atol = (init_method == 1) ? 1.f : 1e-2f;
     EXPECT_TRUE(
         ck_tile::check_err(c_host, c_ref, "MX persistent flatmm result mismatch", rtol, atol));
 }
 
 } // namespace
 
-// ---- Sanity controls: total_tiles=1 means each CTA processes <=1 tile, so
-//      the multi-tile-per-CTA path is NOT exercised. These should pass even
-//      with the bug present, confirming the test harness is sound. ----
+// ---- Sanity controls: single-tile, so the multi-tile path is not exercised;
+//      these pass even with the bug present. ----
 
 TEST(MXFlatmmPersistent, Single_Tile_Sanity_Const)
 {
-    run_persistent_test(/*M=*/128, /*N=*/256, /*K=*/256, /*init_method=*/1);
+    run_persistent_test(
+        /*M=*/128, /*N=*/256, /*K=*/256, /*init_method=*/1, /*expect_multi_tile=*/false);
 }
 
 TEST(MXFlatmmPersistent, Single_Tile_Sanity_Random)
 {
-    run_persistent_test(/*M=*/128, /*N=*/256, /*K=*/256, /*init_method=*/0);
+    run_persistent_test(
+        /*M=*/128, /*N=*/256, /*K=*/256, /*init_method=*/0, /*expect_multi_tile=*/false);
 }
 
-// ---- Risk 1 trigger: total_tiles=64 > 48 persistent blocks on FFM gfx1250,
-//      so some CTAs process 2 tiles. Both init regimes should FAIL before the
-//      fix and PASS after the fix. ----
+// ---- Multi-tile trigger: 64 tiles > 48 blocks on FFM gfx1250, so some
+//      workgroups process 2 tiles. Fails before the LDS-sync fix, passes after. ----
 
 TEST(MXFlatmmPersistent, Multi_Tile_Per_Block_Const)
 {
-    run_persistent_test(/*M=*/512, /*N=*/4096, /*K=*/256, /*init_method=*/1);
+    run_persistent_test(
+        /*M=*/512, /*N=*/4096, /*K=*/256, /*init_method=*/1, /*expect_multi_tile=*/true);
 }
 
 TEST(MXFlatmmPersistent, Multi_Tile_Per_Block_Random)
 {
-    run_persistent_test(/*M=*/512, /*N=*/4096, /*K=*/256, /*init_method=*/0);
+    run_persistent_test(
+        /*M=*/512, /*N=*/4096, /*K=*/256, /*init_method=*/0, /*expect_multi_tile=*/true);
 }

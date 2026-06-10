@@ -68,8 +68,7 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
             hipDeviceProp_t prop;
             int deviceId = 0; // default device
 
-            // `BlockSize()` calls runtime `is_wave32()` so `constexpr` is
-            // invalid here; mirrors the same fix at grouped_mx_flatmm_kernel.hpp.
+            // `BlockSize()` calls runtime `is_wave32()`, so it cannot be constexpr.
             const int block_size     = MXFlatmmKernel::BlockSize().x;
             int dync_smem_size       = 0;
             int maxActiveBlocksPerCU = 0;
@@ -396,21 +395,13 @@ struct MXFlatmmKernel : FlatmmKernel<TilePartitioner_, MXFlatmmPipeline_, Epilog
 
         do
         {
-            // Drain the prior tile's in-flight LDS reads (notably the
-            // CShuffleEpilogue's final `ds_read` of the C-shuffle tile)
-            // before the next tile's MXFlatmmPipeline::Run_ issues
-            // `async_load_tile_` (buffer_load_lds) writes into the same
-            // per-CTA `__shared__ smem_ptr` region. On gfx1250 the async
-            // writes are tracked by `asynccnt` which is not ordered against
-            // in-flight `ds_read`s on `dscnt`, so without this barrier the
-            // leading wave's prefetch races and clobbers bytes that a lagging
-            // wave's last `iAccess` is still reading. The corruption manifests
-            // at the last SFC iteration's output position with deterministic
-            // constant 2.125 under init_method=1, or random garbage under
-            // init_method=0 (detected via reference_mx_gemm). The first-iter
-            // barrier is a no-op (fresh CTA, no prior LDS activity). Mirrors
-            // the same fix at grouped_mx_flatmm_kernel.hpp and
-            // universal_gemm_kernel.hpp:1316 (commit b664f4b6).
+            // Drain the prior tile's in-flight LDS reads (the epilogue's final
+            // `ds_read`) before the next tile's pipeline issues
+            // `async_load_tile_` writes into the same shared smem. On gfx1250
+            // async writes (`asynccnt`) are not ordered against in-flight
+            // `ds_read`s (`dscnt`), so without this barrier the next tile's
+            // prefetch races and clobbers bytes a lagging wave is still reading.
+            // The first iteration's barrier is a harmless no-op.
             block_sync_lds();
             const auto [iM, iN] =
                 TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(partition_idx);

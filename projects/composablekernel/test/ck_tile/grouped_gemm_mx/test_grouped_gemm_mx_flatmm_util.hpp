@@ -224,11 +224,14 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
 
             if(init_method == 0)
             {
-                // Random tensor and scale values
-                ck_tile::FillUniformDistribution<>{0.0f, 1.0f}(a_init);
-                ck_tile::FillUniformDistribution<>{-2.f, 2.f}(scale_a);
-                ck_tile::FillUniformDistribution<>{-.5f, .5f}(b_init);
-                ck_tile::FillUniformDistribution<>{-2.f, 2.f}(scale_b);
+                // Random tensor and scale values. Give each group a distinct seed
+                // so same-dim groups are not bitwise-identical.
+                const uint32_t base_seed = 11939;
+                const uint32_t seed      = base_seed + static_cast<uint32_t>(i);
+                ck_tile::FillUniformDistribution<>{0.0f, 1.0f, seed}(a_init);
+                ck_tile::FillUniformDistribution<>{-2.f, 2.f, seed}(scale_a);
+                ck_tile::FillUniformDistribution<>{-.5f, .5f, seed}(b_init);
+                ck_tile::FillUniformDistribution<>{-2.f, 2.f, seed}(scale_b);
             }
             else if(init_method == 1)
             {
@@ -321,13 +324,10 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
 
         // --- Instantiate and launch the GroupedMXFlatmmKernel ---
         //
-        // The MX FLATMM non-TDM pipeline (MXFlatmmPipelineAGmemBGmemCRegV1)
-        // and the TDM pipeline both dispatch (HasHotLoop, TailNum) at runtime
-        // inside the pipeline body based on num_loop, so the (HasHotLoop,
-        // TailNum) template args we bake into MXFlatmmPipelineProblem below
-        // are not load-bearing - they are kept at the library defaults
-        // (true, TailNumber::Full) and the pipeline picks the right variant
-        // per tile. Groups within a single call may use any mix of K values.
+        // Both MX FLATMM pipelines dispatch (HasHotLoop, TailNum) at runtime
+        // based on num_loop, so the values baked into the pipeline problem below
+        // are not load-bearing (kept at library defaults). Groups within a
+        // single call may use any mix of K values.
         using FlatmmShape = ck_tile::TileGemmShape<
             ck_tile::sequence<FlatmmConfig::M_Tile, FlatmmConfig::N_Tile, FlatmmConfig::K_Tile>,
             ck_tile::sequence<FlatmmConfig::M_Warp, FlatmmConfig::N_Warp, FlatmmConfig::K_Warp>,
@@ -426,8 +426,11 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
                                        CDataType>(
                 a_tensors[i], b_origin_tensors[i], c_ref, scale_a_tensors[i], scale_b_tensors[i]);
 
-            const float rtol = 1e-2f;
-            const float atol = 1e-2f;
+            // Constant init (init_method==1) produces an exact integer K result;
+            // use near-exact tolerance so a dropped/double-counted K-tile cannot
+            // hide inside the K-scaled relative slack. Random init keeps 1e-2.
+            const float rtol = (init_method == 1) ? 0.f : 1e-2f;
+            const float atol = (init_method == 1) ? 1.f : 1e-2f;
             bool group_pass =
                 ck_tile::check_err(c_tensors[i],
                                    c_ref,
