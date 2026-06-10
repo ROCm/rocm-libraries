@@ -50,6 +50,44 @@ __global__ void reduce_compensated_kernel(const float* __restrict__ partials,
     C[idx] = sum;
 }
 
+__global__ void reduce_twosum_kernel(const float* __restrict__ partials,
+                                     float* __restrict__ C,
+                                     int MN,
+                                     int num_tiles)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx >= MN)
+        return;
+    float sum = 0.0f;
+    float err = 0.0f;
+    for(int t = 0; t < num_tiles; ++t)
+    {
+        float delta = partials[t * MN + idx];
+        float s     = sum + delta;
+        float v     = s - sum;
+        err += (sum - (s - v)) + (delta - v);
+        sum = s;
+    }
+    C[idx] = sum + err;
+}
+
+__global__ void reduce_pairwise_kernel(const float* __restrict__ partials,
+                                       float* __restrict__ C,
+                                       int MN,
+                                       int num_tiles)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx >= MN)
+        return;
+    float vals[16];
+    for(int t = 0; t < num_tiles; ++t)
+        vals[t] = partials[t * MN + idx];
+    for(int stride = 1; stride < num_tiles; stride *= 2)
+        for(int i = 0; i + stride < num_tiles; i += stride * 2)
+            vals[i] += vals[i + stride];
+    C[idx] = vals[0];
+}
+
 __global__ void reduce_fp64_kernel(const float* __restrict__ partials,
                                    float* __restrict__ C,
                                    int MN,
@@ -81,6 +119,12 @@ void launch_reduce(ReduceStrategy strategy,
         break;
     case ReduceStrategy::CompensatedSum:
         reduce_compensated_kernel<<<grid, kBlock, 0, stream>>>(partials, C, MN, num_tiles);
+        break;
+    case ReduceStrategy::TwoSumReduce:
+        reduce_twosum_kernel<<<grid, kBlock, 0, stream>>>(partials, C, MN, num_tiles);
+        break;
+    case ReduceStrategy::PairwiseSum:
+        reduce_pairwise_kernel<<<grid, kBlock, 0, stream>>>(partials, C, MN, num_tiles);
         break;
     case ReduceStrategy::FP64Sum:
         reduce_fp64_kernel<<<grid, kBlock, 0, stream>>>(partials, C, MN, num_tiles);

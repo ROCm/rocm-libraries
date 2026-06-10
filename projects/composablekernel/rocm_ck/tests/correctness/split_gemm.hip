@@ -130,6 +130,11 @@ static void launch_tile_gemm(const float* A,
             launch_mfma_tile_gemm_veltkamp_k4(
                 A, B, partial, M, N, K, k_offset, k_tile_len, stream);
         }
+        else if(accum_policy == AccumKLoopPolicy::VeltkampNaiveK4)
+        {
+            launch_mfma_tile_gemm_veltkamp_naive_k4(
+                A, B, partial, M, N, K, k_offset, k_tile_len, stream);
+        }
         else if(is_k4_policy(accum_policy))
         {
             launch_mfma_tile_gemm_k4(

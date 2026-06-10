@@ -448,11 +448,13 @@ struct BlockGemmASmemBSmemCRegV1AccumK4
 // =========================================================================
 
 template <typename Problem_,
-          typename Policy_       = ck_tile::BlockGemmASmemBSmemCRegV1DefaultPolicy>
+          typename Policy_       = ck_tile::BlockGemmASmemBSmemCRegV1DefaultPolicy,
+          typename AccumPolicy_  = AccumTwoSum>
 struct BlockGemmASmemBSmemCRegV1VeltkampK4
 {
     using Problem        = ck_tile::remove_cvref_t<Problem_>;
     using Policy         = ck_tile::remove_cvref_t<Policy_>;
+    using AccumPolicy    = ck_tile::remove_cvref_t<AccumPolicy_>;
     using ADataType      = ck_tile::remove_cvref_t<typename Problem::ADataType>;
     using BDataType      = ck_tile::remove_cvref_t<typename Problem::BDataType>;
     using CDataType      = ck_tile::remove_cvref_t<typename Problem::CDataType>;
@@ -626,7 +628,7 @@ struct BlockGemmASmemBSmemCRegV1VeltkampK4
                     });
                 }
 
-                // TwoSum-merge (s, e) into running accumulator (c, err)
+                // Merge (s, e) into running accumulator (c, err) via AccumPolicy
                 CWarpTensor c_warp_tensor;
                 c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
                     merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
@@ -637,20 +639,16 @@ struct BlockGemmASmemBSmemCRegV1VeltkampK4
                     merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
                     merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
+                // Add cross-product error into err accumulator before merge
                 {
-                    auto& c_buf   = c_warp_tensor.get_thread_buffer();
                     auto& err_buf = err_warp_tensor.get_thread_buffer();
-                    auto& s_buf   = s_warp.get_thread_buffer();
                     auto& e_buf   = e_warp.get_thread_buffer();
-
                     static_for<0, CWarpTensor::get_thread_buffer_size(), 1>{}([&](auto i) {
-                        float new_s = c_buf(i) + s_buf(i);
-                        float v     = new_s - c_buf(i);
-                        float merge_e = (c_buf(i) - (new_s - v)) + (s_buf(i) - v);
-                        c_buf(i)   = new_s;
-                        err_buf(i) += merge_e + e_buf(i);
+                        err_buf(i) += e_buf(i);
                     });
                 }
+
+                AccumPolicy::merge(c_warp_tensor, err_warp_tensor, s_warp);
 
                 c_block_tensor.set_y_sliced_thread_data(
                     merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
@@ -667,7 +665,7 @@ struct BlockGemmASmemBSmemCRegV1VeltkampK4
 
     CK_TILE_DEVICE static constexpr auto MakeCBlockTile()
     {
-        return BlockGemmASmemBSmemCRegV1Accum<Problem_, Policy_, AccumTwoSum>::MakeCBlockTile();
+        return BlockGemmASmemBSmemCRegV1Accum<Problem_, Policy_, AccumPolicy_>::MakeCBlockTile();
     }
 };
 

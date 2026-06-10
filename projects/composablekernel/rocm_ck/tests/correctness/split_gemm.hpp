@@ -25,6 +25,8 @@ enum class ReduceStrategy
 {
     NaiveSum,       // FP32 sequential sum of partials
     CompensatedSum, // Kahan compensated FP32 summation
+    TwoSumReduce,   // TwoSum compensated FP32 summation
+    PairwiseSum,    // Binary-tree reduction of partials
     FP64Sum,        // FP64 accumulation, cast back to FP32
 };
 

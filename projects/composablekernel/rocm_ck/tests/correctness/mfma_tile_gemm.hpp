@@ -18,6 +18,7 @@ enum class AccumKLoopPolicy
     TwoSumK4,
     KahanK4,
     VeltkampK4,
+    VeltkampNaiveK4,
 };
 
 void launch_mfma_tile_gemm(const float* A,
@@ -42,6 +43,17 @@ void launch_mfma_tile_gemm_veltkamp_k4(const float* A,
                                        int K_tile,
                                        hipStream_t stream,
                                        float* err_out = nullptr);
+
+void launch_mfma_tile_gemm_veltkamp_naive_k4(const float* A,
+                                             const float* B,
+                                             float* partial,
+                                             int M,
+                                             int N,
+                                             int K_full,
+                                             int k_offset,
+                                             int K_tile,
+                                             hipStream_t stream,
+                                             float* err_out = nullptr);
 
 void launch_mfma_tile_gemm_k4(const float* A,
                               const float* B,

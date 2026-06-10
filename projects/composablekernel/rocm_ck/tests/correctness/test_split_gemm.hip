@@ -48,19 +48,22 @@ struct ReduceCase
 
 // Product × IntraTile × MergePolicy (see Hierarchy_Gemm.md)
 const AccumCase kAccumCases[] = {
-    {rocm_ck::test::AccumKLoopPolicy::Naive,     "Standard/HWChain/Naive"},
-    {rocm_ck::test::AccumKLoopPolicy::TwoSum,     "Standard/HWChain/TwoSum"},
-    {rocm_ck::test::AccumKLoopPolicy::Kahan,      "Standard/HWChain/Kahan"},
-    {rocm_ck::test::AccumKLoopPolicy::NaiveK4,    "Standard/Decomposed/Naive"},
-    {rocm_ck::test::AccumKLoopPolicy::TwoSumK4,   "Standard/Decomposed/TwoSum"},
-    {rocm_ck::test::AccumKLoopPolicy::KahanK4,    "Standard/Decomposed/Kahan"},
-    {rocm_ck::test::AccumKLoopPolicy::VeltkampK4, "Veltkamp/Decomposed/TwoSum"},
+    {rocm_ck::test::AccumKLoopPolicy::Naive,           "Standard/HWChain/Naive"},
+    {rocm_ck::test::AccumKLoopPolicy::TwoSum,           "Standard/HWChain/TwoSum"},
+    {rocm_ck::test::AccumKLoopPolicy::Kahan,            "Standard/HWChain/Kahan"},
+    {rocm_ck::test::AccumKLoopPolicy::NaiveK4,          "Standard/Decomposed/Naive"},
+    {rocm_ck::test::AccumKLoopPolicy::TwoSumK4,         "Standard/Decomposed/TwoSum"},
+    {rocm_ck::test::AccumKLoopPolicy::KahanK4,          "Standard/Decomposed/Kahan"},
+    {rocm_ck::test::AccumKLoopPolicy::VeltkampK4,       "Veltkamp/Decomposed/TwoSum"},
+    {rocm_ck::test::AccumKLoopPolicy::VeltkampNaiveK4,  "Veltkamp/Decomposed/Naive"},
 };
 
 // Inter-tile reduce — pure FP32 only (no FP64Sum)
 const ReduceCase kReduceCases[] = {
     {rocm_ck::test::ReduceStrategy::NaiveSum,       "NaiveSum"},
     {rocm_ck::test::ReduceStrategy::CompensatedSum, "Kahan"},
+    {rocm_ck::test::ReduceStrategy::TwoSumReduce,   "TwoSum"},
+    {rocm_ck::test::ReduceStrategy::PairwiseSum,    "PairwiseSum"},
 };
 
 // ---- Helpers ----
@@ -317,6 +320,13 @@ TEST_P(SplitGemmTest, CorrectnessVsCpuFp64)
             if(ac.policy == rocm_ck::test::AccumKLoopPolicy::VeltkampK4)
             {
                 rocm_ck::test::launch_mfma_tile_gemm_veltkamp_k4(
+                    ws_->d_A, ws_->d_B, ws_->d_C,
+                    cfg.M, cfg.N, cfg.K, 0, cfg.K,
+                    nullptr, ws_->err_buf);
+            }
+            else if(ac.policy == rocm_ck::test::AccumKLoopPolicy::VeltkampNaiveK4)
+            {
+                rocm_ck::test::launch_mfma_tile_gemm_veltkamp_naive_k4(
                     ws_->d_A, ws_->d_B, ws_->d_C,
                     cfg.M, cfg.N, cfg.K, 0, cfg.K,
                     nullptr, ws_->err_buf);

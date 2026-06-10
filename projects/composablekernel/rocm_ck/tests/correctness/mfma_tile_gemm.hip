@@ -335,6 +335,7 @@ void launch_mfma_tile_gemm(const float* A,
     case AccumKLoopPolicy::TwoSumK4:
     case AccumKLoopPolicy::KahanK4:
     case AccumKLoopPolicy::VeltkampK4:
+    case AccumKLoopPolicy::VeltkampNaiveK4:
         break;
     }
 }
@@ -369,14 +370,16 @@ void launch_mfma_tile_gemm_k4(const float* A,
     case AccumKLoopPolicy::TwoSum:
     case AccumKLoopPolicy::Kahan:
     case AccumKLoopPolicy::VeltkampK4:
+    case AccumKLoopPolicy::VeltkampNaiveK4:
         break;
     }
 }
 
 // =========================================================================
-// Veltkamp K4 kernel — exact products + TwoSum accumulation
+// Veltkamp K4 kernel — exact products + pluggable accumulation
 // =========================================================================
 
+template <typename AccumPolicy>
 __global__ void
 #if CK_TILE_WORKAROUND_LAUNCH_BOUND
     __launch_bounds__(kMfmaBlockSize)
@@ -432,7 +435,7 @@ __global__ void
     auto b_lds_gemm_window = make_tile_window(
         b_lds, make_tuple(number<kMfmaBlockN>{}, number<kMfmaBlockK>{}), {0, 0});
 
-    MfmaBlockGemmVeltkampK4 block_gemm;
+    MfmaBlockGemmVeltkampK4<AccumPolicy> block_gemm;
     auto c_block = decltype(block_gemm)::MakeCBlockTile();
     auto err_block = decltype(c_block){};
     tile_elementwise_inout([](auto& c) { c = 0.0f; }, c_block);
@@ -475,11 +478,32 @@ __global__ void
     }
     else
     {
-        AccumTwoSum::finalize(c_block, err_block);
+        AccumPolicy::finalize(c_block, err_block);
         const auto c_out = tile_elementwise_in(
             [](const auto& acc) { return ck_tile::type_convert<float>(acc); }, c_block);
         store_tile(c_window, c_out);
     }
+}
+
+template <typename AccumPolicy>
+static void launch_mfma_tile_gemm_veltkamp_k4_impl(const float* A,
+                                                    const float* B,
+                                                    float* partial,
+                                                    int M,
+                                                    int N,
+                                                    int K_full,
+                                                    int k_offset,
+                                                    int K_tile,
+                                                    hipStream_t stream,
+                                                    float* err_out)
+{
+    int num_tile_m = M / kMfmaBlockM;
+    int num_tile_n = N / kMfmaBlockN;
+    int grid       = num_tile_m * num_tile_n;
+
+    tile_gemm_mfma_veltkamp_k4_kernel<AccumPolicy><<<grid, kMfmaBlockSize, 0, stream>>>(
+        A, B, partial, err_out, M, N, K_full, k_offset, K_tile, num_tile_n);
+    HIP_CHECK_ERROR(hipGetLastError());
 }
 
 void launch_mfma_tile_gemm_veltkamp_k4(const float* A,
@@ -493,13 +517,23 @@ void launch_mfma_tile_gemm_veltkamp_k4(const float* A,
                                        hipStream_t stream,
                                        float* err_out)
 {
-    int num_tile_m = M / kMfmaBlockM;
-    int num_tile_n = N / kMfmaBlockN;
-    int grid       = num_tile_m * num_tile_n;
+    launch_mfma_tile_gemm_veltkamp_k4_impl<AccumTwoSum>(
+        A, B, partial, M, N, K_full, k_offset, K_tile, stream, err_out);
+}
 
-    tile_gemm_mfma_veltkamp_k4_kernel<<<grid, kMfmaBlockSize, 0, stream>>>(
-        A, B, partial, err_out, M, N, K_full, k_offset, K_tile, num_tile_n);
-    HIP_CHECK_ERROR(hipGetLastError());
+void launch_mfma_tile_gemm_veltkamp_naive_k4(const float* A,
+                                             const float* B,
+                                             float* partial,
+                                             int M,
+                                             int N,
+                                             int K_full,
+                                             int k_offset,
+                                             int K_tile,
+                                             hipStream_t stream,
+                                             float* err_out)
+{
+    launch_mfma_tile_gemm_veltkamp_k4_impl<AccumNaive>(
+        A, B, partial, M, N, K_full, k_offset, K_tile, stream, err_out);
 }
 
 bool can_use_mfma(int M, int N, int K_tile)
