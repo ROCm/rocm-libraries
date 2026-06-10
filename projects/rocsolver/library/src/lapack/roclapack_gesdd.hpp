@@ -366,7 +366,7 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
     // Quick return
     if(m == 0 || n == 0)
     {
-        rocblas_int blocksReset = reset_info_nblocks(batch_count, BS1);
+        rocblas_int blocksReset = calculate_nblocks(batch_count, BS1);
         dim3 gridReset(blocksReset, 1, 1);
         dim3 threadsReset(BS1, 1, 1);
 
