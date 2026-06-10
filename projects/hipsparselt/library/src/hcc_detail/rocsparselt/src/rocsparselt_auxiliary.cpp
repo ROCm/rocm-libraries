@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1052,7 +1052,9 @@ rocsparselt_status
             case rocsparselt_matmul_activation_tanh_beta:
                 retrive_data(_matmulDescr->activation_tanh_beta);
                 break;
-
+            case rocsparselt_matmul_activation_gelu_scaling:
+                retrive_data(_matmulDescr->activation_gelu_scaling);
+                break;
             case rocsparselt_matmul_bias_pointer:
                 if((status = validateGetAttributeDataSize<void*>(dataSize))
                    != rocsparselt_status_success)
