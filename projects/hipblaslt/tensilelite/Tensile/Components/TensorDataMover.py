@@ -46,7 +46,7 @@ class TensorDataMoverLoad(TensorDataMover):
         sgprWorkgroupName: str = f"WorkGroup{tIdx}"
         vgprThreadIdName: str = "Serial"
         #TODO: temp hack
-        numWaves: int = prod(kernel["MIWaveGroup"])
+        numWaves: int = kernel["NumWaves"]
         wavelen: int = kernel["WavefrontSize"]
         mt: int = kernel["MacroTile0"] if tc == "A" else kernel["MacroTile1"]
         tdmSplit: int = 2 if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]) else 1
@@ -129,7 +129,7 @@ class TensorDataMoverLoad(TensorDataMover):
         sgprWorkgroupName: str = f"WorkGroup{tIdx}"
         vgprThreadIdName: str = "Serial"
         #TODO: temp hack
-        numWaves: int = prod(kernel["MIWaveGroup"])
+        numWaves: int = kernel["NumWaves"]
         assert numWaves > 1
         wavelen: int = kernel["WavefrontSize"]
         mt: int = kernel["MacroTile0"] if tc.endswith("A") else kernel["MacroTile1"]
