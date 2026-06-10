@@ -31,6 +31,9 @@ add_executable(tensile_writer_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/subtile_geometry_test.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/tile_info_test.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/emit_leaves_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/instruction_scheduler_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/logical_scheduler_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/logical_scheduler_passes_test.cpp"
 )
 
 target_include_directories(tensile_writer_tests PRIVATE
@@ -41,3 +44,16 @@ target_include_directories(tensile_writer_tests PRIVATE
 target_link_libraries(tensile_writer_tests PRIVATE GTest::gtest GTest::gtest_main)
 
 gtest_discover_tests(tensile_writer_tests)
+
+# Developer tool (not a test): regenerates the pass-pipeline golden snapshots
+# consumed by logical_scheduler_passes_test.cpp. See gen_scheduler_goldens.cpp.
+add_executable(gen_scheduler_goldens
+    "${CMAKE_CURRENT_SOURCE_DIR}/gen_scheduler_goldens.cpp"
+)
+target_include_directories(gen_scheduler_goldens PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+)
+# Excluded from the default build so a normal `cmake --build` does not require
+# it; build explicitly with `--target gen_scheduler_goldens` to regenerate.
+set_target_properties(gen_scheduler_goldens PROPERTIES EXCLUDE_FROM_ALL TRUE)

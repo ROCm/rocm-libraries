@@ -98,15 +98,25 @@ internals move to C++, and that is expected.
 > genuine KernelWriter/rocisa integration and lives in
 > `test_subtileEmitMfmaRocisa.py`, not C++ parity.
 
+> **Scheduler parity moved to native C++.** The LogicalScheduler value/config
+> types and writer-free pass pipeline, and the InstructionScheduler slot
+> placement / vmcnt golden cases, that previously lived in
+> `test_logicalSchedulerCpp.py`, `test_instructionSchedulerCpp.py`, and the emit
+> snapshot regressions in `test_SubtileBasedSchedulerRef.py` are now native
+> gtest under `cpp_migration/cpp/tests/` (`logical_scheduler_test.cpp`,
+> `logical_scheduler_passes_test.cpp`, `instruction_scheduler_test.cpp`). Those
+> Python files were deleted because they only compared the Python facade against
+> the (now sole) C++ implementation or duplicated emit snapshots. The genuine
+> writer/rocisa integration — the Python LogicalScheduler driving the C++ pass
+> pipeline through `populate_instructions`, VGPR allocation, and main/tail-loop
+> rocisa emission — is retained in `test_SubtileBasedLogicalScheduler.py`.
+
 | Test file | Subtile module(s) imported |
 |---|---|
-| `test_instructionSchedulerCpp.py` | `InstructionScheduler.instructionSchedule` |
 | `test_subtileMainloopE2ECpp.py` | `LogicalScheduler.LogicalScheduler` (+ helpers from `test_SubtileBasedLogicalScheduler`) |
 | `test_subtileOffsetAssignCpp.py` | `Kernel` (`TileInfo`, `AB_B16`, `AB_B8`), `SubtileGREmit`, `SubtileLREmit` |
-| `test_logicalSchedulerCpp.py` | `LogicalScheduler` |
 | `test_subtileEmitMfmaRocisa.py` | `Kernel.emitMfmaInstruction` (rocisa integration — see note below) |
-| `test_SubtileBasedLogicalScheduler.py` | `Kernel`, `LogicalScheduler`, `InstructionScheduler.instructionSchedule`, `LogicalScheduler.WaitGROp` |
-| `test_SubtileBasedSchedulerRef.py` | `Kernel`, `LogicalScheduler` |
+| `test_SubtileBasedLogicalScheduler.py` | `Kernel`, `LogicalScheduler`, `InstructionScheduler.instructionSchedule`, `LogicalScheduler.WaitGROp` (writer/rocisa integration) |
 | `test_gr_offset.py` | `SubtileGREmit.graTileAssignment` |
 | `test_emitMfmaInstruction.py` | `Kernel.emitMfmaInstruction` |
 | `test_selectMXScaleGeometry.py` | `Kernel` (MX scale selectors/configs) |

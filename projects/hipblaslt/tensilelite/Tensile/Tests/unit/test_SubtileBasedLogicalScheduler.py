@@ -1,4 +1,22 @@
-"""Tests for LogicalScheduler — validates each scheduling pass.
+"""Writer / rocisa integration tests for the subtile LogicalScheduler.
+
+SCOPE: this file is retained for the Python *writer / rocisa integration*
+layer — the Python LogicalScheduler driving the compiled C++ pass pipeline
+(``tensile_writer.subtile.logical_scheduler``) and producing rocisa output:
+populate_instructions, allocVgprTiles / VGPR-pool allocation, build_preloop /
+build_ngll / build_nll loop-variant construction, and main/tail-loop rocisa
+emission. The pure value/config layer and the writer-free pass pipeline are now
+covered by the native C++ gtest suite
+(``cpp_migration/cpp/tests/logical_scheduler_test.cpp``,
+``logical_scheduler_passes_test.cpp``, ``instruction_scheduler_test.cpp``);
+the per-pass cases below exercise the Python↔C++ binding glue (``_sync_from_cpp``
+round-trip) that those writer paths depend on, and stay here until the writer
+paths themselves move to C++.
+
+The byte-identical Python↔C++ pass-pipeline parity tests (test_logicalSchedulerCpp.py),
+the C++ instruction-scheduler parity tests (test_instructionSchedulerCpp.py), and
+the redundant emit/preloop snapshot regressions (test_SubtileBasedSchedulerRef.py)
+have been removed; that coverage now lives in the C++ gtest suite above.
 
 Organized by pass:
   1. PlaceLRs        — MFMA + Local Read placement
