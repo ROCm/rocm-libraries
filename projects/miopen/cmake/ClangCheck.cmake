@@ -12,7 +12,7 @@ find_program(PRE_COMMIT_BINARY pre-commit)
 get_filename_component(REPO_ROOT "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
 
 if(NOT EXISTS "${REPO_ROOT}/.pre-commit-config.yaml")
-    message(WARNING "Expected .pre-commit-config.yaml not found at ${REPO_ROOT}; trailing whitespace removal via pre-commit will be skipped")
+    message(WARNING "Expected .pre-commit-config.yaml not found at ${REPO_ROOT}; pre-commit checks will be skipped")
     set(PRE_COMMIT_BINARY "")
 endif()
 
@@ -27,16 +27,16 @@ if(PRE_COMMIT_BINARY)
     # pre-commit exits 1 when it modifies files (expected); only fail on higher codes.
     add_custom_target(
         trim_whitespace
-        COMMAND sh -c "${PRE_COMMIT_BINARY} run trailing-whitespace --files $(git ls-files projects/miopen); rc=$?; [ $rc -le 1 ] || exit $rc"
+        COMMAND sh -c "${PRE_COMMIT_BINARY} run --files $(git ls-files projects/miopen); rc=$?; [ $rc -le 1 ] || exit $rc"
         WORKING_DIRECTORY ${REPO_ROOT}
         VERBATIM
     )
 else()
-    message(WARNING "pre-commit not found; trim_whitespace target will not be available and trailing whitespace removal is skipped in format")
+    message(WARNING "pre-commit not found; trim_whitespace target will not be available and pre-commit checks are skipped in format")
 
     add_custom_target(
         trim_whitespace
-        COMMAND ${CMAKE_COMMAND} -E echo "pre-commit not found, skipping trailing whitespace removal"
+        COMMAND ${CMAKE_COMMAND} -E echo "pre-commit not found, skipping pre-commit checks"
     )
 endif()
 
