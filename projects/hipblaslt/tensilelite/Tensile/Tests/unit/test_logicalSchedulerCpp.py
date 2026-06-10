@@ -1,13 +1,17 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Parity tests for the optional C++ (nanobind) LogicalScheduler primitives.
+"""Parity tests for the C++ (nanobind) LogicalScheduler primitives.
 
-These tests compare the pure-Python data/config primitives in
+These tests compare the data/config primitives in
 ``Tensile.Components.Subtile.LogicalScheduler`` against the compiled
-``tensile_writer.subtile.logical_scheduler`` extension. They run only when the
-extension is importable; otherwise they skip, so the default (Python-only)
-TensileLite build is unaffected.
+``tensile_writer.subtile.logical_scheduler`` extension. The value/config
+helpers ``fmt_mt`` and ``SchedulerConfig.get_partition_candidates`` now delegate
+to C++ unconditionally (no opt-in flag); the remaining Python value types
+(MFMATileRange, ReadGranularity, the placement/op dataclasses) and the Python
+scheduling passes are still compared pass-by-pass against their C++ twins. The
+suite uses ``importorskip`` so it is skipped only where the extension is not
+built.
 
 Scope: this covers the value/config layer (Pass, fmt_mt, MFMATileRange,
 ReadGranularity, SchedulerConfig — including partition normalization and
@@ -28,8 +32,6 @@ The config cases below mirror those exercised by
 PR creation for this slice is human-only: a ``human:pr`` task is filed for
 Bryant Nelson only after review says merge-ready. Agents never open PRs.
 """
-
-import contextlib
 
 import pytest
 
@@ -62,19 +64,6 @@ class _FakeTileInfo:
 
     def __init__(self, m):
         self.localMMATileGrid = (m, 0)
-
-
-@contextlib.contextmanager
-def cpp_delegation():
-    """Temporarily enable C++ delegation in LogicalScheduler."""
-    saved_use, saved_cpp = ls._USE_CPP, ls._CPP
-    ls._CPP = cppls
-    ls._USE_CPP = True
-    try:
-        yield
-    finally:
-        ls._USE_CPP = saved_use
-        ls._CPP = saved_cpp
 
 
 # Representative config cases mirroring the existing scheduler tests. Each maps
@@ -178,13 +167,11 @@ def test_pass_enum_values_match():
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("mt", [0, 1, 2, 3, 7, 15])
 def test_fmt_mt_match(mt):
-    assert cppls.fmt_mt(mt) == ls.fmt_mt(mt)
-
-
-def test_fmt_mt_delegation():
-    with cpp_delegation():
-        assert ls.fmt_mt(0) == "n"
-        assert ls.fmt_mt(2) == "n+2"
+    # ls.fmt_mt now delegates unconditionally to the C++ extension; pin the
+    # output against an explicit golden as well as the C++ helper.
+    expected = "n" if mt == 0 else f"n+{mt}"
+    assert ls.fmt_mt(mt) == expected
+    assert cppls.fmt_mt(mt) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -322,16 +309,14 @@ def test_get_partition_candidates(M, N):
 
 
 @pytest.mark.parametrize("M,N", [(4, 8), (8, 4), (10, 1)])
-def test_get_partition_candidates_shim_and_delegation(M, N):
+def test_get_partition_candidates_shim(M, N):
+    # ls.SchedulerConfig.get_partition_candidates now delegates unconditionally
+    # to the C++ shim, which takes the same tileInfo objects.
     tiA, tiB = _FakeTileInfo(M), _FakeTileInfo(N)
-    py = [tuple(c) for c in
-          ls.SchedulerConfig.get_partition_candidates(tiA, tiB)]
-    shim = cppls.get_partition_candidates(tiA, tiB)
-    assert shim == py
-    with cpp_delegation():
-        delegated = [tuple(c) for c in
-                     ls.SchedulerConfig.get_partition_candidates(tiA, tiB)]
-    assert delegated == py
+    delegated = [tuple(c) for c in
+                 ls.SchedulerConfig.get_partition_candidates(tiA, tiB)]
+    shim = [tuple(c) for c in cppls.get_partition_candidates(tiA, tiB)]
+    assert delegated == shim
 
 
 # ---------------------------------------------------------------------------
@@ -550,19 +535,6 @@ def test_emitted_module_empty_source():
     assert cpp.moduleId == py.moduleId == -1
     assert cpp.before is None and py.before is None
     assert cpp.source is None
-
-
-# ---------------------------------------------------------------------------
-# Default-off behavior
-# ---------------------------------------------------------------------------
-def test_default_path_is_python_only():
-    """With the env flag unset, delegation must be disabled by default."""
-    import os
-    if os.environ.get("TENSILE_WRITER_CPP", "").strip().lower() not in (
-            "", "0", "false", "no", "off"):
-        pytest.skip("TENSILE_WRITER_CPP is set; default-off behavior not under test")
-    assert ls._USE_CPP is False
-    assert ls._CPP is None
 
 
 # ===========================================================================

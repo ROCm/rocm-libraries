@@ -59,7 +59,6 @@ pytest.importorskip("tensile_writer.subtile.tile_info")
 pytest.importorskip("tensile_writer.subtile.instruction_scheduler")
 
 from Tensile.Components.Subtile import Kernel as _krn
-from Tensile.Components.Subtile import LogicalScheduler as _ls
 from Tensile.Components.Subtile.LogicalScheduler import LogicalScheduler
 
 # Reuse the existing pure-string mock-writer harness rather than duplicating it.
@@ -72,35 +71,26 @@ from test_SubtileBasedLogicalScheduler import (
 
 @contextlib.contextmanager
 def cpp_delegation():
-    """Enable C++ delegation across the still-optional Subtile slices.
+    """Enable C++ delegation for the still-optional Subtile Kernel slice.
 
     Mirrors the real opt-in (``TENSILE_WRITER_CPP=1`` + installed extension) by
-    re-resolving each module's ``_CPP`` handle, but scoped to the test so the
-    process default stays pure-Python for those layers. Restores all switches on
-    exit.
+    flipping ``Kernel._USE_CPP``, but scoped to the test so the process default
+    stays pure-Python for that layer. Restores the switch on exit.
 
-    The geometry / TileInfo / emit layers and the instruction scheduler are
-    unconditionally C++ (not gated); only the Kernel and LogicalScheduler-pass
-    slices still flip here.
+    The geometry / TileInfo / emit layers, the instruction scheduler, and the
+    LogicalScheduler value/config helpers are unconditionally C++ (not gated);
+    only the Kernel offset-assignment slice still flips here.
     """
     os.environ["TENSILE_WRITER_CPP"] = "1"
     saved_krn = _krn._USE_CPP
-    saved = {
-        _ls: (_ls._USE_CPP, _ls._CPP),
-    }
     try:
         _krn._USE_CPP = True
-        _ls._CPP = _ls._resolve_cpp_logical_scheduler()
-        _ls._USE_CPP = _ls._CPP is not None
-        assert _krn._USE_CPP and _ls._USE_CPP, (
-            "C++ delegation requested but one or more extensions did not resolve"
+        assert _krn._USE_CPP, (
+            "C++ delegation requested but the extension did not resolve"
         )
         yield
     finally:
         _krn._USE_CPP = saved_krn
-        for mod, (use, cpp) in saved.items():
-            mod._USE_CPP = use
-            mod._CPP = cpp
         os.environ.pop("TENSILE_WRITER_CPP", None)
 
 
@@ -168,11 +158,10 @@ def test_bf16_mainloop_is_nonempty_and_complete():
 
 
 def test_default_path_is_python_only():
-    """Without the opt-in, the still-optional Subtile slices must stay
+    """Without the opt-in, the still-optional Subtile Kernel slice must stay
     pure-Python so the default build is byte-identical to the pre-C++ behavior.
 
-    (The geometry / TileInfo / emit layers and the instruction scheduler are
-    unconditionally C++ and are not gated.)
+    (The geometry / TileInfo / emit layers, the instruction scheduler, and the
+    LogicalScheduler value/config helpers are unconditionally C++ and not gated.)
     """
     assert _krn._USE_CPP is False
-    assert _ls._USE_CPP is False

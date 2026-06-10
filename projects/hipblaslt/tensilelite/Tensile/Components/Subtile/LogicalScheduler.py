@@ -30,38 +30,23 @@ from bisect import bisect_left
 import copy
 import io
 import math
-import os
 
 from rocisa.code import Module
 
 
 ################################################################################
-# Optional C++ delegation (opt-in, off by default)
+# C++-backed value/config helpers
 #
-# When the environment variable TENSILE_WRITER_CPP is truthy AND the compiled
-# ``tensile_writer`` nanobind extension is importable, the *pure data/config*
-# helpers below (fmt_mt and SchedulerConfig.get_partition_candidates) delegate
-# to C++ (tensile_writer.subtile.logical_scheduler). The Python dataclasses
-# remain the canonical scheduler objects and every scheduling pass stays in
-# Python — only value/config math is delegated. With delegation disabled (the
-# default for normal TensileLite use) the public API and behavior are
-# identical.
+# The pure data/config helpers below (``fmt_mt`` and
+# ``SchedulerConfig.get_partition_candidates``) delegate unconditionally to the
+# compiled ``tensile_writer.subtile.logical_scheduler`` nanobind extension,
+# mirroring SubtileGeometry / TileInfo / InstructionScheduler. There is no
+# opt-in flag and no Python mirror of this ported value/config math. The Python
+# dataclasses remain the canonical scheduler objects and the scheduling passes
+# stay in Python; only the ported value/config math lives in C++.
 ################################################################################
 
-def _resolve_cpp_logical_scheduler():
-    flag = os.environ.get("TENSILE_WRITER_CPP", "").strip().lower()
-    if flag in ("", "0", "false", "no", "off"):
-        return None
-    try:
-        from tensile_writer.subtile import logical_scheduler as _cppls
-    except Exception:
-        # Opt-in requested but the extension is unavailable; fall back to the
-        # pure-Python path rather than failing the import.
-        return None
-    return _cppls
-
-_CPP = _resolve_cpp_logical_scheduler()
-_USE_CPP = _CPP is not None
+from tensile_writer.subtile import logical_scheduler as _cppls
 
 
 class Pass(IntEnum):
@@ -107,9 +92,7 @@ TENSOR_SIDE = {'A': 'A', 'B': 'B', 'SA': 'A', 'SB': 'B'}
 
 def fmt_mt(mt: int) -> str:
     """Format MT iteration integer as display string: 0 → 'n', 1 → 'n+1', 2 → 'n+2'."""
-    if _USE_CPP:
-        return _CPP.fmt_mt(mt)
-    return "n" if mt == 0 else f"n+{mt}"
+    return _cppls.fmt_mt(mt)
 
 # ── Core primitives ─────────────────────────────────────────
 
@@ -190,7 +173,7 @@ class SchedulerConfig:
     def _normalize_partition_sizes(spec: Union[int, List[int]], total: int, dim: str, mn: int = 1) -> List[int]:
         # NOTE: use raise (not assert) so validation survives `python -O`, which
         # disables asserts. The C++ counterpart always throws std::invalid_argument;
-        # raising here keeps parity when TENSILE_WRITER_CPP=1 runs optimized.
+        # raising here keeps parity with the ported value layer under `python -O`.
         if isinstance(spec, (list, tuple)):
             if sum(spec) != total:
                 raise ValueError(
@@ -275,23 +258,7 @@ class SchedulerConfig:
         For the larger dimension, starts at full size then jumps to divUp(dim,2)
         and decrements from there, skipping unbalanced 2-partition sizes.
         """
-        if _USE_CPP:
-            return _CPP.get_partition_candidates(tileInfoA, tileInfoB)
-        M = tileInfoA.localMMATileGrid[0]
-        N = tileInfoB.localMMATileGrid[0]
-
-        def divUp(n, d):
-            return (n + d - 1) // d
-
-        def partitionSizes(dim):
-            return [dim] + list(range(divUp(dim, 2), 0, -1))
-
-        if N >= M:
-            candidates = [(M, s) for s in partitionSizes(N)]
-        else:
-            candidates = [(s, N) for s in partitionSizes(M)]
-
-        return candidates
+        return _cppls.get_partition_candidates(tileInfoA, tileInfoB)
 
 
 

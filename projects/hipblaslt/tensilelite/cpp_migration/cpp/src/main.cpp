@@ -11,11 +11,13 @@
 //
 // The Python package tensile_writer/ re-exports this. The geometry value/query
 // layer, the read-only TileInfo query layer (tile_info), the MFMA F8F6F4
-// instType selection (emit) and the subtile instruction-scheduling
-// slot-placement algorithm (instruction_scheduler) are all C++-only — the
-// Python side forwards to them unconditionally with no Python fallback. The
-// GR/LR offset-assignment plans (also on ABTileInfoQuery) and the
-// LogicalScheduler pass pipeline remain opt-in via TENSILE_WRITER_CPP.
+// instType selection (emit), the subtile instruction-scheduling slot-placement
+// algorithm (instruction_scheduler) and the LogicalScheduler value/config
+// helpers (fmt_mt, SchedulerConfig.get_partition_candidates) are all C++-only —
+// the Python side forwards to them unconditionally with no Python fallback. The
+// GR/LR offset-assignment plans (also on ABTileInfoQuery) remain opt-in via
+// TENSILE_WRITER_CPP. The writer-free LogicalScheduler pass pipeline is exposed
+// here for pass-by-pass parity; the Python writer still owns the live passes.
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/map.h>
