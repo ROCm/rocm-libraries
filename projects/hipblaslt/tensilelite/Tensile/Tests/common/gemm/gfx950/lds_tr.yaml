@@ -11,8 +11,8 @@ GlobalParameters:
   DataInitTypeA: 12
   DataInitTypeB: 13
   NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   KeepBuildTmp: True
   PrintSolutionRejectionReason: True
@@ -74,7 +74,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -136,7 +136,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -198,7 +198,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -260,7 +260,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -323,7 +323,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -387,7 +387,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -451,7 +451,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -515,7 +515,7 @@ BenchmarkProblems:
         - LDSTrInst: [True]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -579,7 +579,7 @@ BenchmarkProblems:
 #        - LDSTrInst: [True]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -642,7 +642,7 @@ BenchmarkProblems:
 #        - LDSTrInst: [True]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -705,7 +705,7 @@ BenchmarkProblems:
 #        - LDSTrInst: [True]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -768,7 +768,7 @@ BenchmarkProblems:
 #        - LDSTrInst: [True]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -803,7 +803,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 16, 1, 1, 5, 3, 2, 2 ]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
@@ -819,8 +819,8 @@ BenchmarkProblems:
         - StaggerU: [0]
         - StaggerUStride: [64]
         - 1LDSBuffer: [0]
-        - LDSTrInst: [1] 
-        - SourceSwap: [1]
+        - LDSTrInst: [true]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -851,20 +851,20 @@ BenchmarkProblems:
       - 1LDSBuffer: [1] # Default Value: [0] # Range: [-1, 0, 1]
       - ClusterLocalRead: [1] # Default Value: [1] # Range: [0, 1]
       - DepthU: [128] # Default Value: [-1] # Range: [-1, 2, ... ,1023, 1024]
-      - DirectToVgprA: [0] # Default Value: [False] # Range: [False, True]
-      - DirectToVgprB: [0] # Default Value: [False] # Range: [False, True]
+      - DirectToVgprA: [false] # Default Value: [False] # Range: [False, True]
+      - DirectToVgprB: [false] # Default Value: [False] # Range: [False, True]
       - GlobalReadVectorWidthA: [8] # Default Value: [-1] # Range: [-2, -1, ... ,8, 16]
       - GlobalReadVectorWidthB: [8] # Default Value: [-1] # Range: [-2, -1, ... ,8, 16]
       - GlobalSplitUAlgorithm: ["MultipleBuffer"] # Default Value: [MultipleBuffer] # Range: [SingleBuffer, MultipleBuffer, MultipleBufferSingleKernel]
       - LocalReadVectorWidth: [-1] # Default Value: [-1] # Range: [-1, 1, ... ,8, 16]
-      - MIArchVgpr: [1] # Default Value: [False] # Range: [False, True]
+      - MIArchVgpr: [true] # Default Value: [False] # Range: [False, True]
       - NonTemporalA: [0] # Default Value: [0] # Range: [0, 1, ... ,6, 7]
       - NumElementsPerBatchStore: [16] # Default Value: [0] # Range: [-1, 0, ... ,254, 255]
       - PrefetchGlobalRead: [2] # Default Value: [1] # Range: [0, 1, 2]
       - PrefetchLocalRead: [1] # Default Value: [1] # Range: [0, 1, ... ,127, 128]
-      - SourceSwap: [1] # Default Value: [False] # Range: [False, True]
+      - SourceSwap: [true] # Default Value: [False] # Range: [False, True]
       - StaggerU: [8] # Default Value: [32] # Range: [0, 2, ... ,32, 64]
-      - StorePriorityOpt: [1] # Default Value: [False] # Range: [False, True]
+      - StorePriorityOpt: [true] # Default Value: [False] # Range: [False, True]
       - StoreSyncOpt: [4] # Default Value: [0] # Range: [0, 1, ... ,254, 255]
       - StreamK: [3] # Default Value: [0] # Range: [0, 1, ... ,2, 3]
       - StreamKXCCMapping: [8] # Default Value: [0] # Range: [0, 2, ... ,7, 8]
@@ -879,9 +879,9 @@ BenchmarkProblems:
         - - NonTemporalC: 4 # Default Value: [0] # Range: [0, 1, ... ,6, 7]
             NonTemporalD: 4 # Default Value: [0] # Range: [0, 1, ... ,6, 7]
         - - MatrixInstruction: [32, 32, 16, 1, 1, 5, 2, 2, 2] #MT 320x128 - TT 5x64   - WG 64x4   - MIBlockM  1 -- sizes [[(40960, 192, 1, 256)]]
-            MIArchVgpr: 0 # Default Value: [False] # Range: [False, True]
+            MIArchVgpr: false # Default Value: [False] # Range: [False, True]
         - - ClusterLocalRead: 0 # Default Value: [1] # Range: [0, 1]
-            LDSTrInst: 1 # Default Value: [False] # Range: [False, True]
+            LDSTrInst: true # Default Value: [False] # Range: [False, True]
               #- ClusterLocalRead: 1 # Default Value: [1] # Range: [0, 1]
               #LDSTrInst: 0 # Default Value: [False] # Range: [False, True]
       BenchmarkJoinParameters: 

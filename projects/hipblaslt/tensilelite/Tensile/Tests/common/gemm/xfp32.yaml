@@ -44,7 +44,7 @@ BenchmarkProblems:
         - VectorWidthA: [1,2,4]
         - VectorWidthB: [1,2,4]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [0,1]
+        - SourceSwap: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -76,7 +76,7 @@ BenchmarkProblems:
         - VectorWidthA: [1,2,4]
         - VectorWidthB: [1,2,4]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [0,1]
+        - SourceSwap: [false, true]
         - LocalReadVectorWidth: [1,2,4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
