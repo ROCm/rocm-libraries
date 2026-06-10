@@ -32,7 +32,7 @@ namespace ck_tile::core::arch::mma {
  * @tparam WaveTileN       Mma WaveTile N dimension
  * @tparam WaveTileK       Mma WaveTile K dimension
  * @tparam AccumPolicy     The fragment order of the accum. registers (row or col major frag order)
- * @tparam CTranspose      Swaps A and B input vectors and interprets C with transposed layout.
+ * @tparam CTranspose_     Swaps A and B input vectors and interprets C with transposed layout.
  * @tparam SwizzleFactor   Swizzlefactor for Tile Distribution Encoding calculation.
  * @tparam AttrNumAccessAV Extra unmerge factor for vector dimension for A vec, see amdgcn_mma.hpp.
  * @tparam AttrNumAccessBV Extra unmerge factor for vector dimension for B vec, see amdgcn_mma.hpp.
@@ -47,7 +47,7 @@ template <typename ADataType_,
           uint32_t WaveTileN,
           uint32_t WaveTileK,
           MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR,
-          bool CTranspose            = false,
+          bool CTranspose_           = false,
           index_t SwizzleFactor      = 1,
           index_t AttrNumAccessAV    = 1,
           index_t AttrNumAccessBV    = AttrNumAccessAV,
@@ -67,12 +67,13 @@ template <typename ADataType_,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp_, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), ScaleMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>
+struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose_, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>
 {
-    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), ScaleMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>;
+    using Base = MmaPipelineBase<ScaleMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose_, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
 
-    using MmaOp = MmaOp_; // Expose the selected MmaOp
+    using MmaOp                      = MmaOp_; // Expose the selected MmaOp
+    static constexpr bool CTranspose = CTranspose_;
 
     using ADataType = typename MmaOp::ADataType;
     using BDataType = typename MmaOp::BDataType;
