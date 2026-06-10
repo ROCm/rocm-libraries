@@ -183,8 +183,8 @@ static std::vector<BarrierTokenEntry> collectBarrierTokens(IRList::iterator regi
 //  (2) DS / VGPR latency — block WMMA until modeled ds_load latency for WMMA
 //      src VGPRs has decayed; seed from the BB prefix before each region.
 //  (3) VALU is only gated by the co-issue window.
-//  (4) Adaptive DS distribution — soft hint to spread ds_loads across WMMAs;
-//      prefer issuing ds_loads before WMMA when under the per-WMMA milestone.
+//  (4) Per-WMMA-window DS cap — at most floor((wmmaLatency - issueCycles) / 2)
+//      ds_loads per WMMA window, because back-to-back ds_load issue cost doubles.
 //  (5) Loop tail vs head — defer first WMMA in the loop header BB until
 //      non-WMMA queues drain once. Cross-BB via LoopDetection.
 //
@@ -206,15 +206,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int coIssueCyclePos_ = 0;
     int activeWmmaLatency_ = 0;
 
-    // --- Adaptive DS distribution ---
-    int totalDsRemaining_ = 0;
-    int totalWmmaRemaining_ = 0;
-    int minDsPerWmma_ = 0;
+    // --- Per-WMMA-window DS cap ---
+    // ds_load issue cost doubles when issued back-to-back, so the real cap
+    // per window is floor((wmmaLatency - issueCycles) / 2).
+    int maxDsPerWmmaWindow_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
-
-    // --- DS burst limiter ---
-    static constexpr int kMaxConsecutiveDs = 4;
-    int consecutiveDsCount_ = 0;
 
     // Per VGPR index: remaining modeled latency until ds_load result is safe for WMMA src.
     std::map<int, int> wmmaRegisterLatencyCounters;
@@ -325,7 +321,6 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     if (pickKind == kGlobalRead) {
         globalReadQueue.erase(node);
         globalReadCounter++;
-        consecutiveDsCount_ = 0;
     } else if (pickKind == kLocalRead) {
         localReadQueue.erase(node);
         for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
@@ -334,18 +329,11 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
                 wmmaRegisterLatencyCounters[dstReg.reg.idx + off] = node->inst->latencyCycles;
         }
         dsInsertedSinceLastWmma_++;
-        totalDsRemaining_--;
-        minDsPerWmma_ = (totalWmmaRemaining_ > 0)
-                            ? (int)std::ceil((float)totalDsRemaining_ / totalWmmaRemaining_)
-                            : 0;
-        consecutiveDsCount_++;
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
-        consecutiveDsCount_ = 0;
     } else {
         assert(pickKind == kValu);
         valuQueue.erase(node);
-        consecutiveDsCount_ = 0;
     }
     updateWMMAStatus(node);
     if (deferHeadBalanceThisRegion_) deferFirstHeadWmmaActive_ = false;
@@ -409,11 +397,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     wmmaIssuedCountThisRegion_++;
 
     dsInsertedSinceLastWmma_ = 0;
-    consecutiveDsCount_ = 0;
-    totalWmmaRemaining_--;
-    minDsPerWmma_ = (totalWmmaRemaining_ > 0)
-                        ? (int)std::ceil((float)totalDsRemaining_ / totalWmmaRemaining_)
-                        : 0;
+    maxDsPerWmmaWindow_ = (node->inst->latencyCycles - node->inst->issueCycles) / 2;
 
     globalReadCounter = 0;
     return node;
@@ -429,13 +413,13 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     DAGNode* best = nullptr;
     int kind = -1;
 
-    bool dsBurstOk = consecutiveDsCount_ < kMaxConsecutiveDs;
+    bool dsWindowOk = pickedDS && dsInsertedSinceLastWmma_ < maxDsPerWmmaWindow_;
 
     if (!globalReadQueue.empty() && (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
         best = globalReadQueue.top();
         kind = kGlobalRead;
     }
-    if (pickedDS && dsBurstOk) {
+    if (dsWindowOk) {
         if (!best || pickedDS->id < best->id) {
             best = pickedDS;
             kind = kLocalRead;
@@ -450,8 +434,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     }
     if (!valuQueue.empty() && isValuPickable()) {
         DAGNode* t = valuQueue.top();
-        bool dsAvailable = pickedDS != nullptr && dsBurstOk;
-        if (!dsAvailable && (!best || t->id < best->id)) {
+        if (!dsWindowOk && (!best || t->id < best->id)) {
             best = t;
             kind = kValu;
         }
@@ -641,7 +624,7 @@ std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBefor
 
 // Main scheduling orchestration:
 //   Phase A: forced barrier — when wmmaIssuedCountThisRegion_ reaches a per-barrier threshold.
-//   Phase B: WMMA if DS latency gate (rule 2) passed, DS distribution hint (rule 4) met,
+//   Phase B: WMMA if DS latency gate (rule 2) passed, DS window cap (rule 4) respected,
 //            loop head balance (rule 5) ok, and program order (rule 1) allows.
 //   Phase C: inside WMMA latency window — fill with non-WMMA work.
 //   Phase D: outside WMMA latency — pick smallest-id from any non-WMMA queue.
@@ -856,7 +839,7 @@ void CDNA5ReadyQueue::onFinishBB() {
         getAnalysisCache()->store(currentBB_, {0, wmmaRegisterLatencyCounters});
 }
 
-// Per scheduling region. Rule (4): count ds_loads and WMMAs for adaptive distribution.
+// Per scheduling region. Rule (4): per-WMMA-window DS cap (computed in pickOneFromWMMA).
 // Rule (2): seedWmmaDsLatencyFromPrefix. Rule (5): head balance.
 // Barrier thresholds: computeBarrierAfterThresholds / computeBarrierBeforeThresholds.
 void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd,
@@ -875,27 +858,17 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                                 crossBBDsResiduals_);
 
     wmmaIssueConfig.issuedCount = 0;
-    totalDsRemaining_ = 0;
-    totalWmmaRemaining_ = 0;
-    consecutiveDsCount_ = 0;
     hasWMMAInRegion_ = false;
     for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
         auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (!instPtr) continue;
         StinkyInstruction& inst = *instPtr;
 
-        if (isDSRead(inst)) totalDsRemaining_++;
-
         if (isMatrixInstruction(inst)) {
             wmmaIssueConfig.issuedCount++;
-            totalWmmaRemaining_++;
             hasWMMAInRegion_ = true;
         }
     }
-
-    minDsPerWmma_ = (totalWmmaRemaining_ > 0)
-                        ? (int)std::ceil((float)totalDsRemaining_ / totalWmmaRemaining_)
-                        : 0;
 
     barrierWmmaThresholds_.clear();
     if (hasWMMAInRegion_) {
