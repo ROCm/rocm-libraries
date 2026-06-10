@@ -189,7 +189,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // Whole-kernel reuse on final instruction order (O0 and O1+; after scheduler + VGPR MSB).
     pm.addPass(createSetMatrixReusePass());
     if (moduleOptions.EnableSwInstructionPrefetchRelStatic) {
-        pm.addPass(createSwInstructionPrefetchRelStaticPass(module));
+        // pm.addPass(createSwInstructionPrefetchRelStaticPass(module));
         pm.addPass(createSwInstructionPrefetchRelDynamicPass(module));
     }
     // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction + summary) to

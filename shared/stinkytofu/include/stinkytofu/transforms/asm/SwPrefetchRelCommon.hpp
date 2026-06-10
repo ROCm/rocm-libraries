@@ -85,4 +85,14 @@ STINKYTOFU_EXPORT void computeSwPrefetchRelPhase1Accum(
     SwPrefetchRelPhase1Accum& out, std::ostream* dbgOut = nullptr,
     const char* debugPassTag = "SwInstructionPrefetchRelDynamicPass");
 
+/// CFG-gated grid walk (dual gate §2.3): emit `s_prefetch_inst_pc_rel` when `cfgGate` holds.
+/// \p bbEntryAccum is Phase-1 `accumByte[bb]`. \p kNextIn is usually 0 (per-BB sweep §4.3).
+/// Returns number of prefetches inserted in this BB.
+STINKYTOFU_EXPORT int insertSwPrefetchLabelsDynamic(
+    BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t kNextIn,
+    GfxArchID archId, std::ostream* dbgOut,
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols,
+    bool allowSwPrefetchInsertion = true,
+    const char* debugPassTag = "SwInstructionPrefetchRelDynamicPass");
+
 }  // namespace stinkytofu

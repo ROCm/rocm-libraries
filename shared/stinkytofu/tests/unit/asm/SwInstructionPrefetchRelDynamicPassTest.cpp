@@ -1,11 +1,12 @@
 /* ************************************************************************
  * Copyright (C) 2026 Advanced Micro Devices, Inc.
  *
- * Unit tests for SwInstructionPrefetchRelDynamicPass (P1 stub).
+ * Unit tests for SwInstructionPrefetchRelDynamicPass (Phase 1 + Phase 2).
  * ************************************************************************ */
 
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -17,6 +18,7 @@
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/transforms/asm/InstructionSizeCosting.hpp"
@@ -28,6 +30,46 @@ using stinkytofu::test::createVAddInBlock;
 using stinkytofu::test::setFunctionArch;
 
 namespace {
+void appendAlignDirective(BasicBlock* bb, int64_t alignBytes) {
+    AsmDirective* d = IRBase::createIR<AsmDirective>();
+    d->kind = AsmDirectiveKind::ALIGN;
+    d->name = ".align";
+    d->symbol = std::to_string(alignBytes);
+    d->intValue = alignBytes;
+    bb->appendIR(d);
+}
+
+StinkyInstruction* createVWmmaBf16InBlock(BasicBlock* bb, GfxArchID arch) {
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x32_bf16, arch));
+    inst->addDestReg(StinkyRegister("a", 0, 8));
+    inst->addSrcReg(StinkyRegister("v", 8, 8));
+    inst->addSrcReg(StinkyRegister("v", 16, 8));
+    inst->addSrcReg(StinkyRegister("a", 0, 8));
+    return inst;
+}
+
+/// Mirror sw_instruction_prefetch_rel_static.stir @at_p0_k0_wmma layout: P(0) inside 8 B WMMA.
+/// Pre-insert total is exactly P(0)=32640 (pass no-op threshold).
+void buildAtP0WmmaExactEndKernel(BasicBlock* bb, GfxArchID arch) {
+    createVAddInBlock(bb, arch, 0, 1, 2);
+    appendAlignDirective(bb, 32632);
+    createVWmmaBf16InBlock(bb, arch);
+}
+
+/// Same anchor as @at_p0_k0_wmma but totalLayoutBytes > P(0) so Phase 2 runs.
+void buildAboveP0WmmaKernel(BasicBlock* bb, GfxArchID arch) {
+    buildAtP0WmmaExactEndKernel(bb, arch);
+    createVAddInBlock(bb, arch, 3, 4, 5);
+}
+
+int parsePlanInsertCount(const std::string& text) {
+    const std::string key = "PLAN_INSERT=";
+    const auto pos = text.find(key);
+    if (pos == std::string::npos) return -1;
+    return std::atoi(text.c_str() + pos + key.size());
+}
+
 int countPrefetchInstPcRel(const BasicBlock& bb) {
     int c = 0;
     for (auto it = bb.begin(); it != bb.end(); ++it) {
@@ -141,4 +183,79 @@ TEST_F(SwInstructionPrefetchRelDynamicPassTest, Phase1Accum_LayoutGlobalPerInstr
         EXPECT_EQ(found->second, expectedOffset);
         expectedOffset += getEffectiveBaseSizeInBytes(inst);
     }
+}
+
+TEST_F(SwInstructionPrefetchRelDynamicPassTest, ExactP0End_NoPrefetchInserted) {
+    buildAtP0WmmaExactEndKernel(bb, arch);
+
+    SwPrefetchRelPhase1Accum phase1;
+    computeSwPrefetchRelPhase1Accum(*func, nullptr, phase1);
+    EXPECT_EQ(phase1.totalLayoutBytes, kSwPrefetchFirstGlobalByte);
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(gemmConfig);
+    pm.addPass(createSwInstructionPrefetchRelDynamicPass(std::string{}));
+    pm.run(*func);
+
+    EXPECT_EQ(countPrefetchInstPcRel(*bb), 0);
+}
+
+TEST_F(SwInstructionPrefetchRelDynamicPassTest, AboveP0Wmma_InsertsOnePrefetch) {
+    buildAboveP0WmmaKernel(bb, arch);
+
+    EXPECT_EQ(countPrefetchInstPcRel(*bb), 0);
+
+    PassManager pm;
+    registerAllAnalyses(pm.getAnalysisManager());
+    pm.setGemmTileConfig(gemmConfig);
+    pm.addPass(createSwInstructionPrefetchRelDynamicPass(std::string{}));
+    pm.run(*func);
+
+    EXPECT_EQ(countPrefetchInstPcRel(*bb), 1);
+}
+
+TEST_F(SwInstructionPrefetchRelDynamicPassTest, AboveP0Wmma_PlanInsertMatchesIrCount) {
+    buildAboveP0WmmaKernel(bb, arch);
+
+    std::random_device rd;
+    const std::filesystem::path outPath =
+        std::filesystem::path(::testing::TempDir()) /
+        ("st_sw_prefetch_dynamic_plan_" + std::to_string(rd()) + ".txt");
+
+    {
+        PassManager pm;
+        registerAllAnalyses(pm.getAnalysisManager());
+        pm.setGemmTileConfig(gemmConfig);
+        pm.addPass(createSwInstructionPrefetchRelDynamicPass(outPath.string()));
+        pm.run(*func);
+    }
+
+    std::ifstream in(outPath);
+    ASSERT_TRUE(in) << "expected debug file at " << outPath;
+    std::stringstream buf;
+    buf << in.rdbuf();
+    const std::string text = buf.str();
+    std::error_code ec;
+    std::filesystem::remove(outPath, ec);
+
+    const int planInsert = parsePlanInsertCount(text);
+    ASSERT_GE(planInsert, 0) << "missing PLAN_INSERT= in debug output";
+    EXPECT_EQ(countPrefetchInstPcRel(*bb), planInsert);
+    EXPECT_EQ(planInsert, 1);
+    EXPECT_NE(text.find("Phase 2 complete"), std::string::npos);
+    EXPECT_NE(text.find("totalPrefetchInserted=1"), std::string::npos);
+}
+
+TEST_F(SwInstructionPrefetchRelDynamicPassTest,
+       InsertSwPrefetchLabelsDynamic_BelowThreshold_ReturnsZero) {
+    for (int i = 0; i < 8; ++i) createVAddInBlock(bb, arch, 0, 1, 2);
+
+    SwPrefetchRelPhase1Accum phase1;
+    computeSwPrefetchRelPhase1Accum(*func, nullptr, phase1);
+
+    const int inserted = insertSwPrefetchLabelsDynamic(
+        *bb, phase1.layoutStart.at(bb), phase1.accumByte.at(bb), 0, arch, nullptr, nullptr, true);
+    EXPECT_EQ(inserted, 0);
+    EXPECT_EQ(countPrefetchInstPcRel(*bb), 0);
 }

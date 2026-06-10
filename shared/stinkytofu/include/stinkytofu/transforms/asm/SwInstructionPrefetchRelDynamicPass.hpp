@@ -31,8 +31,9 @@ namespace stinkytofu {
 class Pass;
 class StinkyAsmModule;
 
-/// CFG-aware PC-rel SW prefetch (stub in P1). Gated at P(0) = 32640; no IR mutation
-/// until P2/P3. Shares enable with static pass (`EnableSwInstructionPrefetchRelStatic`).
+/// CFG-aware PC-rel SW prefetch: Phase 1 accumulate + Phase 2 CFG-gated insert.
+/// Gated at P(0) = 32640. Shares enable with static pass
+/// (`EnableSwInstructionPrefetchRelStatic`).
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createSwInstructionPrefetchRelDynamicPass(
     const std::string& debugOutputPath);
 

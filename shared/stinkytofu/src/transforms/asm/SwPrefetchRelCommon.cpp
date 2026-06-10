@@ -23,6 +23,7 @@
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
 
 #include <algorithm>
+#include <memory>
 #include <ostream>
 #include <string>
 #include <unordered_map>
@@ -383,24 +384,42 @@ void debugPrintInsertSiteInsnContext(std::ostream& os, int64_t /*layoutBefore*/,
        << " accumExit=" << (bbEntryAccum + postCpCumulAfter);
 }
 
-/// Dry-run grid walk (phase 2 preview): CFG-interval anchor + dual gate (§2.3).
-int64_t debugPlanInsertSitesInBlock(BasicBlock& bb, int64_t blockGlobalByteOffset,
-                                    int64_t bbEntryAccum, int64_t kNextIn,
-                                    const std::unordered_map<std::string, int64_t>& labelOff,
-                                    const std::unordered_map<std::string, int64_t>* asmSetSymbols,
-                                    std::ostream& os, int& outPlanInsert, int& outSkip) {
-    int64_t kNext = kNextIn;
-    while (swPrefetchGridOffset(kNext) <= blockGlobalByteOffset) ++kNext;
+void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, AsmIRBuilder& builder,
+                               std::unordered_map<std::string, int64_t>* labelOff,
+                               int64_t blockGlobalByteOffset, int64_t& totalBytes,
+                               const std::unordered_map<std::string, int64_t>* asmSetSymbols);
 
-    std::unordered_map<std::string, int64_t> localLabelOff = labelOff;
+struct SwPrefetchGridWalkResult {
+    int64_t kNext = 0;
+    int insertCount = 0;
+    int planInsert = 0;
+    int skipCount = 0;
+};
+
+/// Shared CFG-gated grid walk (plan preview and/or IR insert).
+SwPrefetchGridWalkResult walkSwPrefetchRelGridInBlock(
+    BasicBlock& bb, int64_t blockGlobalByteOffset, int64_t bbEntryAccum, int64_t kNextIn,
+    std::unordered_map<std::string, int64_t>& labelOff,
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols, GfxArchID archId,
+    bool allowMutate, bool allowSwPrefetchInsertion, std::ostream* planOs,
+    std::ostream* insertDbgOut, const char* debugPassTag) {
+    SwPrefetchGridWalkResult result;
+    result.kNext = kNextIn;
+    while (swPrefetchGridOffset(result.kNext) <= blockGlobalByteOffset) ++result.kNext;
+
+    std::unique_ptr<AsmIRBuilder> builder;
+    if (allowMutate) builder = std::make_unique<AsmIRBuilder>(bb, archId);
+
     int64_t totalBytes = 0;
     int64_t postCpCumul = 0;
     unsigned getpcPcRelChainGuardRemaining = 0;
+    int64_t totalBytesAtGetpcStart = 0;
+    int64_t nextPrefetchBlockOffsetBeforeGetpc = 0;
     std::vector<IRList::iterator> getpcWindowIters;
 
     for (IRList::iterator it = bb.begin(); it != bb.end(); ++it) {
         IRBase* node = it.getNodePtr();
-        addAlignmentPaddingFromDirectiveNode(node, blockGlobalByteOffset, totalBytes, nullptr);
+        addAlignmentPaddingFromDirectiveNode(node, blockGlobalByteOffset, totalBytes, insertDbgOut);
         if (node->getType() == IRBase::IRType::StinkyAsmDirective) continue;
         if (node->getType() != IRBase::IRType::StinkyTofu) continue;
 
@@ -409,8 +428,8 @@ int64_t debugPlanInsertSitesInBlock(BasicBlock& bb, int64_t blockGlobalByteOffse
         if (inst.getUnifiedOpcode() == GFX::LABEL) {
             if (const LabelData* ld = inst.getModifier<LabelData>()) {
                 addAlignmentPaddingForLabelInstruction(inst, blockGlobalByteOffset, totalBytes,
-                                                       nullptr);
-                localLabelOff[ld->label] = blockGlobalByteOffset + totalBytes;
+                                                       insertDbgOut);
+                labelOff[ld->label] = blockGlobalByteOffset + totalBytes;
             }
             continue;
         }
@@ -419,6 +438,8 @@ int64_t debugPlanInsertSitesInBlock(BasicBlock& bb, int64_t blockGlobalByteOffse
         if (isGetpc) {
             getpcWindowIters.clear();
             getpcWindowIters.push_back(it);
+            totalBytesAtGetpcStart = totalBytes;
+            nextPrefetchBlockOffsetBeforeGetpc = totalBytesAtGetpcStart;
             getpcPcRelChainGuardRemaining = kSwPrefetchForwardWindowInsnsAfterGetpc;
         } else if (!getpcWindowIters.empty() && getpcPcRelChainGuardRemaining > 0u) {
             if (getpcWindowIters.size() <
@@ -426,10 +447,11 @@ int64_t debugPlanInsertSitesInBlock(BasicBlock& bb, int64_t blockGlobalByteOffse
                 getpcWindowIters.push_back(it);
         }
 
+        const int64_t walkOffsetAtInstStart = totalBytes;
         const int64_t globalPcBefore = blockGlobalByteOffset + totalBytes;
         const int baseSize = getEffectiveBaseSizeInBytes(inst);
         const int literalExtra =
-            getLiteralExtraBytes(inst, &localLabelOff, globalPcBefore, asmSetSymbols);
+            getLiteralExtraBytes(inst, &labelOff, globalPcBefore, asmSetSymbols);
         const int instBytes = baseSize + literalExtra;
         const int64_t globalPcAfter = globalPcBefore + instBytes;
         const int64_t postCpInsn = postCpBytesForInstructionSpan(globalPcBefore, instBytes);
@@ -440,20 +462,18 @@ int64_t debugPlanInsertSitesInBlock(BasicBlock& bb, int64_t blockGlobalByteOffse
         cfgGateIntervalBounds(globalPcBefore, globalPcAfter, bbEntryAccum, postCpCumulBefore,
                               postCpCumulAfter, gateBefore, gateAfter);
 
+        bool redirectRewalkAbsorbedCurrentInstSizes = false;
         for (;;) {
-            const int64_t P = swPrefetchGridOffset(kNext);
+            const int64_t P = swPrefetchGridOffset(result.kNext);
             if (P <= blockGlobalByteOffset) {
-                ++kNext;
+                ++result.kNext;
                 continue;
             }
             if (P > gateAfter) break;
-            // Do not `break` when `P <= gateBefore`: P may equal gateBefore (log SKIP, ++kNext).
-            // `break` without ++kNext would permanently skip grid index k (e.g. k=0 at P(0)).
             if (P < gateBefore) {
-                ++kNext;
+                ++result.kNext;
                 continue;
             }
-            // if (P <= gateBefore) break;
 
             const bool layoutGate = P >= kSwPrefetchFirstGlobalByte;
             const bool cfgGate =
@@ -464,41 +484,67 @@ int64_t debugPlanInsertSitesInBlock(BasicBlock& bb, int64_t blockGlobalByteOffse
                 getpcPcRelChainGuardRemaining > 0u && !getpcWindowIters.empty();
             const bool pathEntered = cfgPathEnteredPostCp(globalPcBefore, instBytes);
 
-            os << "  [insert-site k=" << kNext << " P=" << P << " label=label_SWprefetch_" << kNext
-               << " BB=\"" << bb.getLabel()
-               << "\" insertPoint=" << (getpcRedirect ? "before_getpc_redirect" : "before_insn")
-               << " layoutGate=" << (layoutGate ? "yes" : "no")
-               << " cfgGate=" << (cfgGate ? "yes" : "no")
-               << " pathEntered=" << (pathEntered ? "yes" : "no")
-               << " action=" << (wouldInsert ? "PLAN_INSERT" : "SKIP")
-               << " gateBefore=" << gateBefore << " gateAfter=" << gateAfter
-               << " layoutBefore=" << globalPcBefore << " layoutAfter=" << globalPcAfter << " ";
-            debugPrintCfgAccumGlobals(os, bbEntryAccum, postCpCumulBefore, postCpCumulAfter);
-            os << " ";
-            debugPrintInsertSiteInsnContext(os, globalPcBefore, baseSize, literalExtra, instBytes,
-                                            globalPcAfter, totalBytes + instBytes, postCpInsn,
-                                            postCpCumulAfter, bbEntryAccum);
-            os << " ";
-            if (getpcRedirect) {
-                os << "insertBefore=";
-                debugDumpInsnRef(os, getStinkyInst(getpcWindowIters.front()));
-            } else {
-                os << "insertBefore=";
-                debugDumpInsnRef(os, inst);
+            if (planOs != nullptr) {
+                *planOs << "  [insert-site k=" << result.kNext << " P=" << P
+                        << " label=label_SWprefetch_" << result.kNext << " BB=\"" << bb.getLabel()
+                        << "\" insertPoint="
+                        << (getpcRedirect ? "before_getpc_redirect" : "before_insn")
+                        << " layoutGate=" << (layoutGate ? "yes" : "no")
+                        << " cfgGate=" << (cfgGate ? "yes" : "no")
+                        << " pathEntered=" << (pathEntered ? "yes" : "no")
+                        << " action=" << (wouldInsert ? "PLAN_INSERT" : "SKIP")
+                        << " gateBefore=" << gateBefore << " gateAfter=" << gateAfter
+                        << " layoutBefore=" << globalPcBefore << " layoutAfter=" << globalPcAfter
+                        << " ";
+                debugPrintCfgAccumGlobals(*planOs, bbEntryAccum, postCpCumulBefore,
+                                          postCpCumulAfter);
+                *planOs << " ";
+                debugPrintInsertSiteInsnContext(*planOs, globalPcBefore, baseSize, literalExtra,
+                                                instBytes, globalPcAfter, totalBytes + instBytes,
+                                                postCpInsn, postCpCumulAfter, bbEntryAccum);
+                *planOs << " ";
+                if (getpcRedirect) {
+                    *planOs << "insertBefore=";
+                    debugDumpInsnRef(*planOs, getStinkyInst(getpcWindowIters.front()));
+                } else {
+                    *planOs << "insertBefore=";
+                    debugDumpInsnRef(*planOs, inst);
+                }
+                *planOs << " anchor=";
+                debugDumpInsnRef(*planOs, inst);
+                *planOs << "\n";
             }
-            os << " anchor=";
-            debugDumpInsnRef(os, inst);
-            os << "\n";
 
-            if (wouldInsert)
-                ++outPlanInsert;
-            else
-                ++outSkip;
-            ++kNext;
+            if (wouldInsert) {
+                if (planOs != nullptr) ++result.planInsert;
+                if (allowMutate && allowSwPrefetchInsertion && builder != nullptr) {
+                    const std::string name =
+                        std::string("label_SWprefetch_") + std::to_string(result.kNext);
+                    if (!swPrefetchLabelNameExists(bb, name)) {
+                        labelOff[name] = globalPcAfter;
+                        if (getpcRedirect) {
+                            insertPrefetchBeforeGetpcAndRewalkWindow(
+                                bb, getpcWindowIters.front(), getpcWindowIters,
+                                totalBytesAtGetpcStart, nextPrefetchBlockOffsetBeforeGetpc,
+                                blockGlobalByteOffset, archId, *builder, labelOff, totalBytes,
+                                insertDbgOut, debugPassTag, asmSetSymbols);
+                            redirectRewalkAbsorbedCurrentInstSizes = true;
+                        } else {
+                            (void)insertSwPrefetchInstPcRelBefore(
+                                bb, it, archId, *builder, &labelOff, blockGlobalByteOffset,
+                                walkOffsetAtInstStart, totalBytes, asmSetSymbols);
+                        }
+                        ++result.insertCount;
+                    }
+                }
+            } else if (planOs != nullptr) {
+                ++result.skipCount;
+            }
+            ++result.kNext;
         }
 
+        if (!redirectRewalkAbsorbedCurrentInstSizes) totalBytes += instBytes;
         postCpCumul = postCpCumulAfter;
-        totalBytes += instBytes;
 
         if (!isGetpc && getpcPcRelChainGuardRemaining > 0u) {
             --getpcPcRelChainGuardRemaining;
@@ -510,9 +556,9 @@ int64_t debugPlanInsertSitesInBlock(BasicBlock& bb, int64_t blockGlobalByteOffse
     const int64_t blockEndGlobal = blockGlobalByteOffset + totalBytes;
     const int64_t accumAfterGlobalEnd = cfgAccumAfterGlobal(bbEntryAccum, postCpCumul);
     for (;;) {
-        const int64_t P = swPrefetchGridOffset(kNext);
+        const int64_t P = swPrefetchGridOffset(result.kNext);
         if (P < blockGlobalByteOffset) {
-            ++kNext;
+            ++result.kNext;
             continue;
         }
         if (P > blockEndGlobal) break;
@@ -523,25 +569,77 @@ int64_t debugPlanInsertSitesInBlock(BasicBlock& bb, int64_t blockGlobalByteOffse
         const bool cfgGate = pathEntered && tailInterval;
         const bool wouldInsert = layoutGate && cfgGate;
 
-        os << "  [insert-site k=" << kNext << " P=" << P << " label=label_SWprefetch_" << kNext
-           << " BB=\"" << bb.getLabel() << "\" insertPoint=bb_end_append"
-           << " layoutGate=" << (layoutGate ? "yes" : "no")
-           << " cfgGate=" << (cfgGate ? "yes" : "no")
-           << " pathEntered=" << (pathEntered ? "yes" : "no")
-           << " action=" << (wouldInsert ? "PLAN_INSERT" : "SKIP")
-           << " gateBefore=" << accumAfterGlobalEnd << " gateAfter=" << blockEndGlobal
-           << " layoutBefore=" << blockEndGlobal << " layoutAfter=" << blockEndGlobal << " ";
-        debugPrintCfgAccumGlobals(os, bbEntryAccum, postCpCumul, postCpCumul);
-        os << " anchorLayoutGlobal=" << blockEndGlobal << "]\n";
+        if (planOs != nullptr) {
+            *planOs << "  [insert-site k=" << result.kNext << " P=" << P
+                    << " label=label_SWprefetch_" << result.kNext << " BB=\"" << bb.getLabel()
+                    << "\" insertPoint=bb_end_append"
+                    << " layoutGate=" << (layoutGate ? "yes" : "no")
+                    << " cfgGate=" << (cfgGate ? "yes" : "no")
+                    << " pathEntered=" << (pathEntered ? "yes" : "no")
+                    << " action=" << (wouldInsert ? "PLAN_INSERT" : "SKIP")
+                    << " gateBefore=" << accumAfterGlobalEnd << " gateAfter=" << blockEndGlobal
+                    << " layoutBefore=" << blockEndGlobal << " layoutAfter=" << blockEndGlobal
+                    << " ";
+            debugPrintCfgAccumGlobals(*planOs, bbEntryAccum, postCpCumul, postCpCumul);
+            *planOs << " anchorLayoutGlobal=" << blockEndGlobal << "]\n";
+        }
 
-        if (wouldInsert)
-            ++outPlanInsert;
-        else
-            ++outSkip;
-        ++kNext;
+        if (wouldInsert) {
+            if (planOs != nullptr) ++result.planInsert;
+            if (allowMutate && allowSwPrefetchInsertion && builder != nullptr) {
+                const std::string name =
+                    std::string("label_SWprefetch_") + std::to_string(result.kNext);
+                if (!swPrefetchLabelNameExists(bb, name)) {
+                    labelOff[name] = blockEndGlobal;
+                    appendSwPrefetchInstPcRel(bb, archId, *builder, &labelOff,
+                                              blockGlobalByteOffset, totalBytes, asmSetSymbols);
+                    ++result.insertCount;
+                }
+            }
+            ++result.kNext;
+            while (true) {
+                const int64_t Pcoalesced = swPrefetchGridOffset(result.kNext);
+                if (Pcoalesced > blockEndGlobal) break;
+                if (Pcoalesced <= accumAfterGlobalEnd) break;
+                if (planOs != nullptr) {
+                    *planOs << "  [insert-site k=" << result.kNext << " P=" << Pcoalesced
+                            << " BB=\"" << bb.getLabel()
+                            << "\" insertPoint=bb_end_append action=SKIP tail_coalesced"
+                            << " (first tail PLAN_INSERT at blockEnd=" << blockEndGlobal << ")]\n";
+                }
+                ++result.skipCount;
+                ++result.kNext;
+            }
+            break;
+        }
+        if (planOs != nullptr) ++result.skipCount;
+        ++result.kNext;
     }
 
-    return kNext;
+    return result;
+}
+
+GfxArchID gfxArchFromBasicBlock(const BasicBlock& bb) {
+    const Function* func = bb.getParentFunc();
+    if (func == nullptr) return getGfxArchID(12, 5, 0);
+    const auto& archArr = func->getGemmTileConfig().arch;
+    return getGfxArchID(static_cast<uint32_t>(archArr[0]), static_cast<uint32_t>(archArr[1]),
+                        static_cast<uint32_t>(archArr[2]));
+}
+
+/// Dry-run grid walk (phase 2 preview): CFG-interval anchor + dual gate (§2.3).
+int64_t debugPlanInsertSitesInBlock(BasicBlock& bb, int64_t blockGlobalByteOffset,
+                                    int64_t bbEntryAccum, int64_t kNextIn,
+                                    const std::unordered_map<std::string, int64_t>& labelOff,
+                                    const std::unordered_map<std::string, int64_t>* asmSetSymbols,
+                                    std::ostream& os, int& outPlanInsert, int& outSkip) {
+    std::unordered_map<std::string, int64_t> localLabelOff = labelOff;
+    const SwPrefetchGridWalkResult result = walkSwPrefetchRelGridInBlock(
+        bb, blockGlobalByteOffset, bbEntryAccum, kNextIn, localLabelOff, asmSetSymbols,
+        gfxArchFromBasicBlock(bb), false, true, &os, nullptr, nullptr);
+    outPlanInsert += result.planInsert;
+    outSkip += result.skipCount;
+    return result.kNext;
 }
 
 void debugPrintPhase1PlannedInsertSites(
@@ -561,16 +659,15 @@ void debugPrintPhase1PlannedInsertSites(
 
     int planInsert = 0;
     int skip = 0;
-    int64_t kNextGlobal = 0;
     for (BasicBlock& bb : func) {
         BasicBlock* bp = &bb;
-        kNextGlobal =
-            debugPlanInsertSitesInBlock(bb, phase1.layoutStart.at(bp), phase1.accumByte.at(bp),
-                                        kNextGlobal, labelOff, asmSetSymbols, os, planInsert, skip);
+        // Per-BB kNextIn=0: same P(k) may PLAN_INSERT in multiple branch BBs (§4.3 / §4.6).
+        (void)debugPlanInsertSitesInBlock(bb, phase1.layoutStart.at(bp), phase1.accumByte.at(bp), 0,
+                                          labelOff, asmSetSymbols, os, planInsert, skip);
     }
 
     os << "[" << tag << "] Phase 1 planned insert sites summary: PLAN_INSERT=" << planInsert
-       << " SKIP=" << skip << " kNextGlobal=" << kNextGlobal << "\n";
+       << " SKIP=" << skip << " (per-BB kNextIn=0 multi-arm sweep)\n";
 }
 
 void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, AsmIRBuilder& builder,
@@ -788,6 +885,9 @@ void insertSwPrefetchLabels(BasicBlock& bb, int64_t blockGlobalByteOffset, GfxAr
                 labelOff[name] = blockEndGlobal;
                 appendSwPrefetchInstPcRel(bb, archId, builder, &labelOff, blockGlobalByteOffset,
                                           totalBytes, asmSetSymbols);
+                ++kNext;
+                while (swPrefetchGridOffset(kNext) <= blockEndGlobal) ++kNext;
+                break;
             }
         }
         ++kNext;
@@ -824,6 +924,18 @@ void debugPrintSwPrefetchGrid(std::ostream& os, const std::string& bbLabel,
            << " local_P=" << (P - blockGlobalStart)
            << " (see accumulate dump: insn with total=" << P << ")]\n";
     }
+}
+
+int insertSwPrefetchLabelsDynamic(BasicBlock& bb, int64_t blockGlobalByteOffset,
+                                  int64_t bbEntryAccum, int64_t kNextIn, GfxArchID archId,
+                                  std::ostream* dbgOut,
+                                  const std::unordered_map<std::string, int64_t>* asmSetSymbols,
+                                  bool allowSwPrefetchInsertion, const char* debugPassTag) {
+    std::unordered_map<std::string, int64_t> labelOff;
+    const SwPrefetchGridWalkResult result = walkSwPrefetchRelGridInBlock(
+        bb, blockGlobalByteOffset, bbEntryAccum, kNextIn, labelOff, asmSetSymbols, archId,
+        allowSwPrefetchInsertion, allowSwPrefetchInsertion, nullptr, dbgOut, debugPassTag);
+    return result.insertCount;
 }
 
 void computeSwPrefetchRelPhase1Accum(Function& func,
