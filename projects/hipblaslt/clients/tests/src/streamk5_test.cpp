@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -372,23 +373,38 @@ namespace
         (void)hipblasLtDestroy(handle);
 
         ASSERT_EQ(outStatic.size(), outDynamic.size());
-        // The two paths inside an SK5 hybrid kernel share the same
-        // partial-tile fixup and final-store sequence, so the IEEE 754
-        // bit patterns must be identical (no reduction-ordering
-        // differences between modes).
-        const auto byteSize = outStatic.size() * sizeof(float);
-        if(std::memcmp(outStatic.data(), outDynamic.data(), byteSize) != 0)
+        // The static (SK3) and dynamic (SK4) sub-paths can select different
+        // work partitioning for the same shape (for example when tiles < grid
+        // in the static path), so reduction ordering may differ. Validate
+        // numerical equivalence with tight FP32 tolerances instead of memcmp.
+        constexpr float absTol = 5.0e-5f;
+        constexpr float relTol = 1.0e-5f;
+
+        size_t firstMismatch = outStatic.size();
+        float  maxAbsDiff    = 0.0f;
+        float  maxRelDiff    = 0.0f;
+        for(size_t i = 0; i < outStatic.size(); ++i)
         {
-            for(size_t i = 0; i < outStatic.size(); ++i)
+            const float a       = outStatic[i];
+            const float b       = outDynamic[i];
+            const float absDiff = std::fabs(a - b);
+            const float denom   = std::max(std::fabs(a), std::fabs(b));
+            const float relDiff = denom > 0.0f ? (absDiff / denom) : absDiff;
+
+            maxAbsDiff = std::max(maxAbsDiff, absDiff);
+            maxRelDiff = std::max(maxRelDiff, relDiff);
+
+            if(absDiff > absTol && relDiff > relTol)
             {
-                uint32_t a = 0, b = 0;
-                std::memcpy(&a, &outStatic[i], sizeof(a));
-                std::memcpy(&b, &outDynamic[i], sizeof(b));
-                ASSERT_EQ(a, b) << "Bit mismatch at idx " << i << ": static=0x"
-                                << std::hex << a << " dynamic=0x" << b;
+                firstMismatch = i;
+                break;
             }
-            FAIL() << "memcmp mismatch with no per-element diff -- size " << byteSize;
         }
+
+        ASSERT_EQ(firstMismatch, outStatic.size())
+            << "Mismatch at idx " << firstMismatch << ": static=" << outStatic[firstMismatch]
+            << " dynamic=" << outDynamic[firstMismatch]
+            << " maxAbsDiff=" << maxAbsDiff << " maxRelDiff=" << maxRelDiff;
     }
 
     INSTANTIATE_TEST_SUITE_P(
