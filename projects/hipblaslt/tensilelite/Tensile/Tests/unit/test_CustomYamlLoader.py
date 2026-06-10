@@ -134,32 +134,34 @@ class TestParseScalarQuoting:
 class TestLoadYamlStream:
     def test_nested_mapping_and_sequence(self, tmp_path):
         text = (
-            "Name: gfx942\n"
-            "Count: 8\n"
-            "Ratio: 1.5\n"
-            "Enabled: true\n"
-            "Disabled: false\n"
-            "Empty:\n"
-            "Quoted: \"null\"\n"
-            "Sub:\n"
-            "  Inner: 1\n"
-            "  Flag: false\n"
-            "Nested:\n"
+            "MinimumRequiredVersion: 5.0.0\n"
+            "ArchitectureName: gfx942\n"
+            "DataType: 7\n"
+            "GlobalReadPerMfma: 1.5\n"
+            "UseBeta: true\n"
+            "Activation: false\n"
+            "RangeLogic: null\n"
+            "ScheduleName: \"null\"\n"
+            "DefaultSolution:\n"
+            "  GlobalSplitU: 1\n"
+            "  BufferLoad: false\n"
+            "MixedTypes:\n"
             "  - 1\n"
-            "  - foo\n"
+            "  - gfx942\n"
             "  - true\n"
         )
         result = load_yaml_stream(_write_yaml(tmp_path, text), DEFAULT_YAML_LOADER)
         assert result == {
-            "Name": "gfx942",
-            "Count": 8,
-            "Ratio": 1.5,
-            "Enabled": True,
-            "Disabled": False,
-            "Empty": None,
-            "Quoted": "null",
-            "Sub": {"Inner": 1, "Flag": False},
-            "Nested": [1, "foo", True],
+            "MinimumRequiredVersion": "5.0.0",
+            "ArchitectureName": "gfx942",
+            "DataType": 7,
+            "GlobalReadPerMfma": 1.5,
+            "UseBeta": True,
+            "Activation": False,
+            "RangeLogic": None,
+            "ScheduleName": "null",
+            "DefaultSolution": {"GlobalSplitU": 1, "BufferLoad": False},
+            "MixedTypes": [1, "gfx942", True],
         }
 
     def test_sequence_root(self, tmp_path):
@@ -229,7 +231,33 @@ class TestLoadLogicGfxArch:
 
 
 class TestValidAnchorResolution:
-    """Anchors and aliases resolve within one document."""
+    def test_mapping_anchor_resolves_to_full_dict(self, tmp_path):
+        text = (
+            "DefaultSolution: &id001\n"
+            "  GlobalSplitU: 1\n"
+            "  StaggerU: 32\n"
+            "  DepthU: -1\n"
+            "Snapshot: *id001\n"
+        )
+        data = load_yaml_stream(_write_yaml(tmp_path, text), DEFAULT_YAML_LOADER)
+        expected = {"GlobalSplitU": 1, "StaggerU": 32, "DepthU": -1}
+        assert data["DefaultSolution"] == expected
+        assert data["Snapshot"] == expected
+        assert data["Snapshot"] is data["DefaultSolution"]
+
+    def test_alias_as_sequence_element_resolves(self, tmp_path):
+        text = (
+            "IndexOrder: &id001 [2, 3, 0, 1]\n"
+            "Solutions:\n"
+            "  - SolutionIndex: 0\n"
+            "    IndexOrder: *id001\n"
+            "  - *id001\n"
+        )
+        data = load_yaml_stream(_write_yaml(tmp_path, text), DEFAULT_YAML_LOADER)
+        assert data["IndexOrder"] == [2, 3, 0, 1]
+        assert data["Solutions"][0]["IndexOrder"] == [2, 3, 0, 1]
+        assert data["Solutions"][1] == [2, 3, 0, 1]
+        assert data["Solutions"][1] is data["IndexOrder"]
 
     def test_load_yaml_stream_resolves_mapping_aliases(self, tmp_path):
         text = (

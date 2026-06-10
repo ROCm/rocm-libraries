@@ -18,7 +18,8 @@ def parse_general(loader: yaml.Loader, anchors: dict):
     elif loader.check_event(yaml.ScalarEvent):
         return parse_scalar(loader)
     elif loader.check_event(yaml.AliasEvent):
-        return loader.get_event().anchor
+        alias = loader.get_event().anchor
+        return anchors[alias] if alias in anchors else alias
 
 def parse_sequence(loader: yaml.Loader, anchors: dict):
     ret = []
@@ -43,16 +44,13 @@ def parse_mapping(loader: yaml.Loader, anchors: dict):
             k = parse_scalar(loader)
         elif v is None:
             v = parse_general(loader, anchors)
-            if evt.anchor:
-                anchors[evt.anchor] = v
-            # if v is an alias, replace with the anchored value
-            if isinstance(v, str) and v in anchors:
-                v = anchors[v]
             ret[k] = v
             k, v = None, None
 
     # pop mapping end event
     loader.get_event()
+    if evt.anchor:
+        anchors[evt.anchor] = ret
     return ret
 
 def is_float(value):

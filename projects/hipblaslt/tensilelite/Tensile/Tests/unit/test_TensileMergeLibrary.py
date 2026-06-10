@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -188,6 +188,7 @@ Solutions:
   MacroTile1: 16
   WorkGroup: [16, 2, 1]
 - SolutionIndex: 1
+  GlobalSplitU: 4
   SolutionNameMin: Sol_gfx1250_1
   KernelNameMin: Kernel_gfx1250_1
   BaseName: Base_gfx1250_1
@@ -329,6 +330,10 @@ class TestDataAccessorWithFixtures:
             assert logic[0][0] == [10240, 384, 1, 8192]
         else:
             assert logic[0][0] == [129, 129, 1, 129]
+
+    def test_set_unknown_list_key_raises(self, gfx950_accessor):
+        with pytest.raises(ValueError, match="Invalid key"):
+            gfx950_accessor.set("InvalidKey", "value")
 
     @pytest.mark.parametrize(
         "fixture_name, expected",

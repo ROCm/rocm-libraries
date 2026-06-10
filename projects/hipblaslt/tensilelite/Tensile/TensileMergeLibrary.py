@@ -71,7 +71,19 @@ class DataAccessor:
         return not self._isDict
 
     def get(self, key):
-        """Get value by string key."""
+        """Get a field by logical name from list- or dict-format logic data.
+
+        Args:
+            key: Logical field name (e.g. ``"Solutions"``, ``"ExactLogic"``).
+                For list format, names are mapped via ``KEY_TO_INDEX``.
+
+        Returns:
+            Any | None: Field value, or None when the key is unknown or the
+            list index is out of range.
+
+        Raises:
+            None.
+        """
         if self._isDict:
             return self.data.get(key)
         else:
@@ -81,7 +93,19 @@ class DataAccessor:
             return None
 
     def set(self, key, value):
-        """Set value by string key."""
+        """Set a field by logical name on list- or dict-format logic data.
+
+        Args:
+            key: Logical field name. For list format, must appear in
+                ``KEY_TO_INDEX``.
+            value: Value to store at that field.
+
+        Returns:
+            None.
+
+        Raises:
+            ValueError: On list format when *key* is not in ``KEY_TO_INDEX``.
+        """
         if self._isDict:
             self.data[key] = value
         else:
@@ -91,6 +115,11 @@ class DataAccessor:
                 while len(self.data) <= idx:
                     self.data.append(None)
                 self.data[idx] = value
+            else:
+                raise ValueError(
+                    f"Invalid key {key!r}; "
+                    f"valid keys: {sorted(self.KEY_TO_INDEX)}"
+                )
 
     def getRaw(self):
         """Return the underlying raw data."""
@@ -121,8 +150,27 @@ class DataAccessor:
         self.set("ProblemType", problemType)
 
     def getLibraryType(self):
-        """Get library matching category (Matching, FreeSize, or Prediction)."""
-        return self.get("LibraryType")
+        """Get library matching category (Matching, FreeSize, or Prediction).
+
+        Dict-based logic stores this in ``LibraryType``. Legacy list format
+        overloads index 11 with Equality/GridBased (distance); those map to
+        Matching. FreeSize and Prediction are stored directly at index 11.
+
+        Returns:
+            str | None: ``"Matching"``, ``"FreeSize"``, ``"Prediction"``, or
+            None when unset.
+
+        Raises:
+            None.
+        """
+        if self._isDict:
+            return self.get("LibraryType")
+        legacy = self.get("LibraryType")
+        if legacy in ("Equality", "GridBased"):
+            return "Matching"
+        if legacy in ("FreeSize", "Prediction"):
+            return legacy
+        return None
 
     def getLibraryDistance(self):
         """Get library distance mode (Equality or GridBased) for merge folder checks.
@@ -244,7 +292,18 @@ def addKernel(solutionPool, solDict, solution):
 
 # update dependant parameters if StaggerU == 0
 def sanitizeSolutions(accessor):
-    """Unified sanitize solutions using DataAccessor."""
+    """Clear StaggerU-dependent fields when StaggerU is zero.
+
+    Args:
+        accessor: DataAccessor wrapping logic data whose Solutions list is
+            updated in place.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
     solList = accessor.getSolutions()
     for sol in solList:
         if sol.get("StaggerU") == 0:
@@ -256,7 +315,23 @@ from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Common import assignParameterWithDefault
 
 def reNameSolutions(accessor):
-    """Unified rename solutions using DataAccessor."""
+    """Assign SolutionNameMin/KernelNameMin on every solution in logic data.
+
+    Fills missing solution parameters from ``defaultSolution``, attaches
+    ProblemType for naming, then removes temporary naming-only fields. On
+    dict-format data with DefaultSolution, default GlobalSplitU is stripped
+    unless the solution has a CustomKernelName.
+
+    Args:
+        accessor: DataAccessor wrapping logic data whose Solutions list is
+            updated in place.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+    """
     solList = accessor.getSolutions()
     problemType = accessor.getProblemType()
 
@@ -268,15 +343,18 @@ def reNameSolutions(accessor):
 
         # For dict format (gfx1250), also set GlobalSplitU
         if accessor.isDict and accessor.hasDefaultSolution():
-            sol["GlobalSplitU"] = accessor.getDefaultSolution()["GlobalSplitU"]
+            if not sol.get("GlobalSplitU"):
+                sol["GlobalSplitU"] = accessor.getDefaultSolution()["GlobalSplitU"]
 
         sol["SolutionNameMin"] = getSolutionNameMin(sol, splitGSU=False)
         sol["KernelNameMin"] = getKernelNameMin(sol, splitGSU=False)
         del sol["ProblemType"]
 
         # For dict format (gfx1250), also delete GlobalSplitU
-        if accessor.isDict and "GlobalSplitU" in sol:
-            del sol["GlobalSplitU"]
+        if accessor.isDict and accessor.hasDefaultSolution():
+            default_gsu = accessor.getDefaultSolution().get("GlobalSplitU")
+            if sol.get("GlobalSplitU") == default_gsu and not sol.get("CustomKernelName"):
+                del sol["GlobalSplitU"]
 
 def removeUnusedSolutions(accessor, prefix=""):
     """Unified remove unused solutions using DataAccessor."""
@@ -314,7 +392,7 @@ def removeUnusedSolutions(accessor, prefix=""):
     numInvalidRemoved = origNumSolutions - len(solutions)
     return accessor.getRaw(), numInvalidRemoved
 
-def removeDuplicatedSolutions(accessor, prefix=""):
+def removeDuplicatedSolutions(accessor):
     """Unified remove duplicated solutions using DataAccessor."""
     solutions = accessor.getSolutions()
     exactLogic = accessor.getExactLogic()
@@ -372,6 +450,18 @@ def reorderSolutionsParams(data: dict[str, Any]) -> None:
 
 def convertToDict(data: list | dict, filename: str) -> dict:
     """Convert list-format library logic data to dict format.
+
+    Args:
+        data: Loaded logic as a legacy list or already-converted dict.
+        filename: Source path passed through to ``parseLibraryLogicList`` for
+            error messages.
+
+    Returns:
+        dict: Dict-format logic; unchanged when *data* is already a dict.
+
+    Raises:
+        None: Errors from ``parseLibraryLogicList`` propagate via
+            ``printExit``.
     """
     if isinstance(data, list):
         rv = LibraryIO.parseLibraryLogicList(data, filename)
@@ -398,11 +488,16 @@ def loadData(filename: str) -> list[Any]:
         filename: Path to YAML logic file.
 
     Returns:
-        list: ``[filename, data, migrated]`` where *migrated* is True when a
-        legacy list file was converted to dict format (caller should persist).
+        list[Any]: ``[filename, data, migrated]`` where *data* is the loaded
+        (and possibly converted) logic, and *migrated* is True when a legacy
+        list file was converted to dict format for a dict-based architecture
+        (caller should persist the converted form).
 
     Raises:
-        None.
+        AssertionError: When the YAML stream/document structure is invalid.
+        RuntimeError: When the root element is not a sequence or mapping.
+        SystemExit: When ``parseLibraryLogicList`` rejects the file via
+            ``printExit``.
     """
     data = load_yaml_stream(filename, yaml.CSafeLoader)
     migrated = False

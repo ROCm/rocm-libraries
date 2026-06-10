@@ -135,7 +135,6 @@ elif ArchitectureName == 'gfx90a':
     DeviceNames = ["Device 0050", "Device 0051", "Device 0052", "Device 0054", "Device 0062", "Device 7400", "Device 740c"]
     ScheduleName = "aldebaran"
 elif ArchitectureName == 'gfx950':
-    print("Inside gfx950")
     XCC = 1 if XCC is None else int(XCC)
     DeviceNames = ["Device 75a8"]
     ScheduleName = "gfx950"
