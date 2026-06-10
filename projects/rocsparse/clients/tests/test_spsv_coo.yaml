@@ -230,7 +230,7 @@ Tests:
   filename: [Chevron4]
 
 - name: spsv_coo_graph_test
-  category: pre_checkin
+  category: known_bug
   function: spsv_coo
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real

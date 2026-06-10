@@ -140,9 +140,9 @@ namespace rocisa
         return createGPR("s", idx, regNum);
     }
 
-    std::shared_ptr<RegisterContainer> sgpr(const std::string& name, float regNum, bool isMacro)
+    std::shared_ptr<RegisterContainer> sgpr(const std::string& name, float regNum, bool isMacro, bool isOff)
     {
-        return createGPR("s", name, regNum, isMacro);
+        return createGPR("s", name, regNum, isMacro, false, isOff);
     }
 
     std::shared_ptr<RegisterContainer> accvgpr(const Holder& holder, float regNum)
@@ -206,10 +206,11 @@ void init_containers(nb::module_ m)
               nb::arg("idx"),
               nb::arg("regNum") = 1.f);
     m_con.def("sgpr",
-              nb::overload_cast<const std::string&, float, bool>(&rocisa::sgpr),
+              nb::overload_cast<const std::string&, float, bool, bool>(&rocisa::sgpr),
               nb::arg("name"),
               nb::arg("regNum")  = 1.f,
-              nb::arg("isMacro") = false);
+              nb::arg("isMacro") = false,
+              nb::arg("isOff")   = false);
 
     m_con.def("accvgpr",
               nb::overload_cast<const rocisa::Holder&, float>(&rocisa::accvgpr),
@@ -280,14 +281,29 @@ void init_containers(nb::module_ m)
                 std::get<0>(t), std::get<1>(t), std::get<2>(t), std::get<3>(t), std::get<4>(t));
         });
     nb::class_<rocisa::FLATModifiers, rocisa::Container>(m_con, "FLATModifiers")
-        .def(nb::init<int, bool, bool, bool, rocisa::CacheScope, bool, bool>(),
+        .def("__init__",
+             [](rocisa::FLATModifiers* self,
+                int                    offset12,
+                bool                   glc,
+                bool                   slc,
+                bool                   dlc,
+                bool                   lds,
+                bool                   isStore,
+                rocisa::CacheScope     scope,
+                rocisa::TemporalHint   th,
+                rocisa::NonVolatile    nv) {
+                 new(self) rocisa::FLATModifiers(
+                     offset12, glc, slc, dlc, lds, isStore, scope, th, nv);
+             },
              nb::arg("offset12") = 0,
              nb::arg("glc")      = false,
              nb::arg("slc")      = false,
              nb::arg("dlc")      = false,
-             nb::arg("scope")    = 0,
              nb::arg("lds")      = false,
-             nb::arg("isStore")  = false)
+             nb::arg("isStore")  = false,
+             nb::arg("scope")    = 0,
+             nb::arg("th")       = -1,
+             nb::arg("nv")       = 0)
         .def_rw("isStore", &rocisa::FLATModifiers::isStore)
         .def("__str__", &rocisa::FLATModifiers::toString)
         .def("__deepcopy__",
@@ -300,25 +316,39 @@ void init_containers(nb::module_ m)
                                         self.glc,
                                         self.slc,
                                         self.dlc,
-                                        self.scope,
                                         self.lds,
-                                        self.isStore);
+                                        self.isStore,
+                                        self.scope,
+                                        self.th,
+                                        self.nv);
              })
         .def("__setstate__",
-             [](rocisa::FLATModifiers&                                            self,
-                std::tuple<int, bool, bool, bool, rocisa::CacheScope, bool, bool> t) {
+             [](rocisa::FLATModifiers& self,
+                std::tuple<int,
+                           bool,
+                           bool,
+                           bool,
+                           bool,
+                           bool,
+                           rocisa::CacheScope,
+                           rocisa::TemporalHint,
+                           rocisa::NonVolatile> t) {
                  new(&self) rocisa::FLATModifiers(std::get<0>(t),
                                                   std::get<1>(t),
                                                   std::get<2>(t),
                                                   std::get<3>(t),
                                                   std::get<4>(t),
                                                   std::get<5>(t),
-                                                  std::get<6>(t));
+                                                  std::get<6>(t),
+                                                  std::get<7>(t),
+                                                  std::get<8>(t));
              });
 
     nb::class_<rocisa::GLOBALModifiers, rocisa::Container>(m_con, "GLOBALModifiers")
-        .def(nb::init<int>(),
-             nb::arg("offset") = 0)
+        .def(nb::init<int, const rocisa::TemporalHint, const rocisa::CacheScope>(),
+             nb::arg("offset") = 0,
+             nb::arg("th")     = -1,
+             nb::arg("scope")  = 0)
         .def("__str__", &rocisa::GLOBALModifiers::toString)
         .def("__deepcopy__",
              [](const rocisa::GLOBALModifiers& self, nb::dict mamo) {
@@ -326,25 +356,43 @@ void init_containers(nb::module_ m)
              })
         .def("__getstate__",
              [](const rocisa::GLOBALModifiers& self) {
-                 return std::make_tuple(self.offset);
+                 return std::make_tuple(self.offset, self.th, self.scope);
              })
         .def("__setstate__",
-             [](rocisa::GLOBALModifiers& self, std::tuple<int> t) {
+             [](rocisa::GLOBALModifiers&                                            self,
+                std::tuple<int, const rocisa::TemporalHint, const rocisa::CacheScope> t) {
                  new(&self) rocisa::GLOBALModifiers(
-                     std::get<0>(t));
+                     std::get<0>(t), std::get<1>(t), std::get<2>(t));
              });
 
     nb::class_<rocisa::MUBUFModifiers, rocisa::Container>(m_con, "MUBUFModifiers")
-        .def(nb::init<bool, int, bool, bool, bool, rocisa::CacheScope, bool, bool, bool>(),
+        .def("__init__",
+             [](rocisa::MUBUFModifiers* self,
+                bool                    offen,
+                int                     offset12,
+                bool                    glc,
+                bool                    slc,
+                bool                    dlc,
+                bool                    nt,
+                bool                    lds,
+                bool                    isStore,
+                rocisa::CacheScope      scope,
+                rocisa::TemporalHint    th,
+                rocisa::NonVolatile     nv) {
+                 new(self) rocisa::MUBUFModifiers(
+                     offen, offset12, glc, slc, dlc, nt, lds, isStore, scope, th, nv);
+             },
              nb::arg("offen")    = false,
              nb::arg("offset12") = 0,
              nb::arg("glc")      = false,
              nb::arg("slc")      = false,
              nb::arg("dlc")      = false,
-             nb::arg("scope")    = 0,
              nb::arg("nt")       = false,
              nb::arg("lds")      = false,
-             nb::arg("isStore")  = false)
+             nb::arg("isStore")  = false,
+             nb::arg("scope")    = 0,
+             nb::arg("th")       = -1,
+             nb::arg("nv")       = 0)
         .def_rw("isStore", &rocisa::MUBUFModifiers::isStore)
         .def("__str__", &rocisa::MUBUFModifiers::toString)
         .def("__deepcopy__",
@@ -358,14 +406,26 @@ void init_containers(nb::module_ m)
                                         self.glc,
                                         self.slc,
                                         self.dlc,
-                                        self.scope,
                                         self.nt,
                                         self.lds,
-                                        self.isStore);
+                                        self.isStore,
+                                        self.scope,
+                                        self.th,
+                                        self.nv);
              })
         .def("__setstate__",
-             [](rocisa::MUBUFModifiers&                                                       self,
-                std::tuple<bool, int, bool, bool, bool, rocisa::CacheScope, bool, bool, bool> t) {
+             [](rocisa::MUBUFModifiers& self,
+                std::tuple<bool,
+                           int,
+                           bool,
+                           bool,
+                           bool,
+                           bool,
+                           bool,
+                           bool,
+                           rocisa::CacheScope,
+                           rocisa::TemporalHint,
+                           rocisa::NonVolatile> t) {
                  new(&self) rocisa::MUBUFModifiers(std::get<0>(t),
                                                    std::get<1>(t),
                                                    std::get<2>(t),
@@ -374,16 +434,31 @@ void init_containers(nb::module_ m)
                                                    std::get<5>(t),
                                                    std::get<6>(t),
                                                    std::get<7>(t),
-                                                   std::get<8>(t));
+                                                   std::get<8>(t),
+                                                   std::get<9>(t),
+                                                   std::get<10>(t));
              });
 
     nb::class_<rocisa::SMEMModifiers, rocisa::Container>(m_con, "SMEMModifiers")
-        .def(nb::init<bool, bool, rocisa::CacheScope, bool, int>(),
-             nb::arg("glc")    = false,
-             nb::arg("dlc")    = false,
-             nb::arg("scope")  = 0,
-             nb::arg("nv")     = false,
-             nb::arg("offset") = 0)
+        .def("__init__",
+             [](rocisa::SMEMModifiers* self,
+                bool                   glc,
+                bool                   dlc,
+                int                    offset,
+                bool                   isStore,
+                rocisa::CacheScope     scope,
+                rocisa::TemporalHint   th,
+                rocisa::NonVolatile    nv) {
+                 new(self) rocisa::SMEMModifiers(glc, dlc, offset, isStore, scope, th, nv);
+             },
+             nb::arg("glc")     = false,
+             nb::arg("dlc")     = false,
+             nb::arg("offset")  = 0,
+             nb::arg("isStore") = false,
+             nb::arg("scope")   = 0,
+             nb::arg("th")      = -1,
+             nb::arg("nv")      = 0)
+        .def_rw("isStore", &rocisa::SMEMModifiers::isStore)
         .def("__str__", &rocisa::SMEMModifiers::toString)
         .def("__deepcopy__",
              [](const rocisa::SMEMModifiers& self, nb::dict&) {
@@ -391,15 +466,26 @@ void init_containers(nb::module_ m)
              })
         .def("__getstate__",
              [](const rocisa::SMEMModifiers& self) {
-                 return std::make_tuple(self.glc, self.dlc, self.scope, self.nv, self.offset);
+                 return std::make_tuple(self.glc,
+                                        self.dlc,
+                                        self.offset,
+                                        self.isStore,
+                                        self.scope,
+                                        self.th,
+                                        self.nv);
              })
-        .def(
-            "__setstate__",
-            [](rocisa::SMEMModifiers&                                self,
-               std::tuple<bool, bool, rocisa::CacheScope, bool, int> t) {
-                new(&self) rocisa::SMEMModifiers(
-                    std::get<0>(t), std::get<1>(t), std::get<2>(t), std::get<3>(t), std::get<4>(t));
-            });
+        .def("__setstate__",
+             [](rocisa::SMEMModifiers& self,
+                std::tuple<bool, bool, int, bool, rocisa::CacheScope, rocisa::TemporalHint, rocisa::NonVolatile>
+                    t) {
+                 new(&self) rocisa::SMEMModifiers(std::get<0>(t),
+                                                  std::get<1>(t),
+                                                  std::get<2>(t),
+                                                  std::get<3>(t),
+                                                  std::get<4>(t),
+                                                  std::get<5>(t),
+                                                  std::get<6>(t));
+             });
 
     nb::class_<rocisa::SDWAModifiers, rocisa::Container>(m_con, "SDWAModifiers")
         .def(nb::init<rocisa::SelectBit, rocisa::UnusedBit, rocisa::SelectBit, rocisa::SelectBit>(),
@@ -428,10 +514,11 @@ void init_containers(nb::module_ m)
             });
 
     nb::class_<rocisa::DPPModifiers, rocisa::Container>(m_con, "DPPModifiers")
-        .def(nb::init<int, int, int>(),
+        .def(nb::init<int, int, int, const std::vector<int>&>(),
              nb::arg("row_shr")    = -1,
              nb::arg("row_bcast")  = -1,
-             nb::arg("bound_ctrl") = -1)
+             nb::arg("bound_ctrl") = -1,
+             nb::arg("quad_perm")  = std::vector<int>{})
         .def("__str__", &rocisa::DPPModifiers::toString);
 
     nb::class_<rocisa::VOP3PModifiers, rocisa::Container>(m_con, "VOP3PModifiers")
@@ -466,7 +553,7 @@ void init_containers(nb::module_ m)
         .def("__setstate__", [](rocisa::True16Modifiers& self, std::tuple<const rocisa::HighBitSel> t) {
             new(&self) rocisa::True16Modifiers(std::get<0>(t));
         });
-
+    
     nb::class_<rocisa::EXEC, rocisa::Container>(m_con, "EXEC")
         .def(nb::init<bool>(), nb::arg("setHi") = false)
         .def("__str__", &rocisa::EXEC::toString)
@@ -475,6 +562,20 @@ void init_containers(nb::module_ m)
         .def("__setstate__", [](rocisa::EXEC& self, std::tuple<bool> t) {
             new(&self) rocisa::EXEC(std::get<0>(t));
         });
+
+    nb::class_<rocisa::EXECLO, rocisa::Container>(m_con, "EXECLO")
+        .def(nb::init<>())
+        .def("__str__", &rocisa::EXECLO::toString)
+        .def("__deepcopy__", [](const rocisa::EXECLO& self, nb::dict&) { return rocisa::EXECLO(self); })
+        .def("__getstate__", [](const rocisa::EXECLO&) { return std::make_tuple(); })
+        .def("__setstate__", [](rocisa::EXECLO& self, std::tuple<> t) { new(&self) rocisa::EXECLO(); });
+
+    nb::class_<rocisa::EXECHI, rocisa::Container>(m_con, "EXECHI")
+        .def(nb::init<>())
+        .def("__str__", &rocisa::EXECHI::toString)
+        .def("__deepcopy__", [](const rocisa::EXECHI& self, nb::dict&) { return rocisa::EXECHI(self); })
+        .def("__getstate__", [](const rocisa::EXECHI&) { return std::make_tuple(); })
+        .def("__setstate__", [](rocisa::EXECHI& self, std::tuple<> t) { new(&self) rocisa::EXECHI(); });
 
     nb::class_<rocisa::VCC, rocisa::Container>(m_con, "VCC")
         .def(nb::init<bool>(), nb::arg("setHi") = false)

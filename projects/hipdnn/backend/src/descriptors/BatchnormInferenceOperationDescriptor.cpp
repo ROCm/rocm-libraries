@@ -260,7 +260,7 @@ std::string BatchnormInferenceOperationDescriptor::toString() const
     str += ", y_uid=" + std::to_string(_data.y_tensor_uid);
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

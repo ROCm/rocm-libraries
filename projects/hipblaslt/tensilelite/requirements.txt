@@ -8,3 +8,5 @@ orjson
 yappi
 tox
 invoke
+numpy
+hip-python

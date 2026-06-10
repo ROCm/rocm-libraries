@@ -9,6 +9,7 @@
 
 #include <MiopenPlugin.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include <hipdnn_data_sdk/utilities/LoadGraphAndTensors.hpp>
@@ -83,13 +84,6 @@ protected:
     }
 };
 
-auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
-{
-    return testing::ValuesIn(
-        hipdnn_test_sdk::utilities::filesInDirectoryWithExtReturnEmptyPathOnThrow(
-            hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
-                / "../lib/hipdnn_reference_data" / subDirectory,
-            ".json"));
-}
+using hipdnn_test_sdk::utilities::getGoldenReferenceParams;
 
 }
