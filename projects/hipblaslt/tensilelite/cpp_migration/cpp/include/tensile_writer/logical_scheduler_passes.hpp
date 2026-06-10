@@ -32,6 +32,7 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -1819,7 +1820,8 @@ inline tw::subtile::lsched::BeforeOp to_value_op(const Op& o) {
   if (o.kind == "mask_k") return MaskKOp(o.subIterK);
   if (o.kind == "lr_inc") return LRIncOp(o.tensor);
   if (o.kind == "gr_inc") return GRIncOp(o.tensor);
-  return SyncOp();  // unreachable for the passes' op set
+  throw std::runtime_error("unexpected C++ before-chain op kind: '" + o.kind +
+                           "'");
 }
 
 inline std::vector<std::vector<tw::subtile::lsched::SubIterKSlot>>
