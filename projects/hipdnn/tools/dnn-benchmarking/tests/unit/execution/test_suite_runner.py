@@ -11,10 +11,11 @@ import pytest
 
 from dnn_benchmarking.execution.suite_runner import (
     run_graph_all_providers,
+    run_graph_pytorch_backend,
     _resolve_engine_name,
     _get_reference_provider,
     _check_correctness,
-    _run_timed_pytorch_reference,
+    _run_timed_pytorch_row,
     set_plugin_path,
 )
 from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
@@ -812,7 +813,7 @@ class TestCorrectnessChecking:
         assert r.correctness.execution_success is False
         assert r.correctness.tolerance_match is None
 
-    @patch("dnn_benchmarking.execution.suite_runner._run_timed_pytorch_reference")
+    @patch("dnn_benchmarking.execution.suite_runner._run_timed_pytorch_row")
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner._check_correctness")
@@ -870,7 +871,7 @@ class TestCorrectnessChecking:
         ref_provider.compute_reference.assert_not_called()
         assert mock_check_corr.call_args.args[3] is ref_outputs
 
-    @patch("dnn_benchmarking.execution.suite_runner._run_timed_pytorch_reference")
+    @patch("dnn_benchmarking.execution.suite_runner._run_timed_pytorch_row")
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner._check_correctness")
@@ -949,7 +950,7 @@ class TestCorrectnessChecking:
         buffer_manager.get_output_tensors.return_value = []
         mock_buffer_manager_cls.return_value = buffer_manager
 
-        result = _run_timed_pytorch_reference(
+        result = _run_timed_pytorch_row(
             graph_path=Path("test.json"),
             graph_json=_make_graph_json(),
             graph_name="test_graph",
@@ -1297,3 +1298,161 @@ class TestProfilingPassInvocation:
             "bm_exit",
             "orch",
         ], f"profiling must run after BufferManager teardown; got {order}"
+
+
+class TestRunGraphPytorchBackend:
+    """run_graph_pytorch_backend emits one provider='pytorch' engine row."""
+
+    @patch("dnn_benchmarking.execution.suite_runner._run_timed_pytorch_row")
+    def test_single_engine_row(self, mock_timed_row):
+        row = ProviderEngineResult(
+            provider="pytorch",
+            engine_id=0,
+            status="success",
+            e2e_stats=BenchmarkStats.from_timings([2.0]),
+        )
+        mock_timed_row.return_value = MagicMock(result=row, outputs=None)
+
+        result = run_graph_pytorch_backend(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(),
+        )
+
+        assert mock_timed_row.call_args.kwargs["role"] == "engine"
+        assert result.engine_ids == [0]
+        assert [r.provider for r in result.results] == ["pytorch"]
+        assert result.results[0].status == "success"
+
+    @patch("dnn_benchmarking.execution.suite_runner._run_timed_pytorch_row")
+    def test_unsupported_operations_skip_row(self, mock_timed_row, monkeypatch):
+        import sys
+        import types
+
+        import dnn_benchmarking.execution as execution_pkg
+
+        fake_ops = types.SimpleNamespace(
+            get_unsupported_operations=lambda graph_json: ["FooAttributes"]
+        )
+        monkeypatch.setattr(execution_pkg, "pytorch_ops", fake_ops, raising=False)
+        monkeypatch.setitem(
+            sys.modules, "dnn_benchmarking.execution.pytorch_ops", fake_ops
+        )
+
+        result = run_graph_pytorch_backend(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(),
+        )
+
+        mock_timed_row.assert_not_called()
+        row = result.results[0]
+        assert row.status == "skipped"
+        assert "unsupported operations" in (row.skip_reason or "")
+        assert result.engine_ids == [0]
+
+    @patch("dnn_benchmarking.execution.suite_runner.generate_input_data")
+    def test_input_generation_failure_is_error_row(self, mock_gen):
+        mock_gen.side_effect = ValueError("boom")
+
+        result = run_graph_pytorch_backend(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(),
+        )
+
+        row = result.results[0]
+        assert row.status == "error"
+        assert "Input data generation failed" in (row.error_message or "")
+
+
+class TestTimedPytorchRowEngineRole:
+    """Engine-role rows report failures as errors, not skips."""
+
+    @patch("dnn_benchmarking.execution.pytorch_executor.PyTorchCudaExecutor")
+    @patch("dnn_benchmarking.execution.pytorch_buffer_manager.PyTorchCudaBufferManager")
+    def test_engine_role_success_has_no_reference_correctness(
+        self,
+        mock_buffer_manager_cls,
+        mock_pytorch_executor_cls,
+    ):
+        executor = MagicMock()
+        executor.init_time_ms = 0.5
+        bench_result = MagicMock()
+        bench_result.e2e_timings = [1.0, 2.0]
+        bench_result.kernel_timings = None
+        bench_result.has_kernel_timings = False
+        executor.benchmark.return_value = bench_result
+        mock_pytorch_executor_cls.return_value = executor
+
+        buffer_manager = _make_bm_mock()
+        buffer_manager.get_tensors.return_value = {}
+        buffer_manager.get_output_tensors.return_value = []
+        mock_buffer_manager_cls.return_value = buffer_manager
+
+        row = _run_timed_pytorch_row(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            graph_name="test_graph",
+            tensor_infos=[],
+            config=_make_config(metrics=MetricsConfig(tier="off")),
+            input_data={},
+            analytical_flops=None,
+            analytical_flops_partial=False,
+            analytical_io_bytes=None,
+            role="engine",
+        )
+
+        assert row.result.status == "success"
+        assert row.result.role == "engine"
+        assert row.outputs is None
+        # Engine rows never run the extra reference-output extraction pass.
+        executor.execute_once.assert_not_called()
+        assert row.result.correctness is not None
+        assert row.result.correctness.tolerance_match is None
+        assert "No reference provider requested" in (
+            row.result.correctness.error_message or ""
+        )
+
+    @patch("dnn_benchmarking.execution.pytorch_executor.PyTorchCudaExecutor")
+    def test_engine_role_failure_is_error(self, mock_pytorch_executor_cls):
+        mock_pytorch_executor_cls.side_effect = RuntimeError("no GPU")
+
+        row = _run_timed_pytorch_row(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            graph_name="test_graph",
+            tensor_infos=[],
+            config=_make_config(metrics=MetricsConfig(tier="off")),
+            input_data={},
+            analytical_flops=None,
+            analytical_flops_partial=False,
+            analytical_io_bytes=None,
+            role="engine",
+        )
+
+        assert row.result.status == "error"
+        assert "no GPU" in (row.result.error_message or "")
+
+    @patch("dnn_benchmarking.execution.pytorch_executor.PyTorchCudaExecutor")
+    def test_reference_role_failure_is_skip(self, mock_pytorch_executor_cls):
+        mock_pytorch_executor_cls.side_effect = RuntimeError("no GPU")
+
+        row = _run_timed_pytorch_row(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            graph_name="test_graph",
+            tensor_infos=[],
+            config=_make_config(metrics=MetricsConfig(tier="off")),
+            input_data={},
+            analytical_flops=None,
+            analytical_flops_partial=False,
+            analytical_io_bytes=None,
+            role="reference",
+        )
+
+        assert row.result.status == "skipped"
+        assert "no GPU" in (row.result.skip_reason or "")

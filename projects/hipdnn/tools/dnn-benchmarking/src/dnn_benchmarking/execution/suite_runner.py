@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from ..common.exceptions import ExecutionError, UnsupportedGraphError
 from ..config.benchmark_config import (
@@ -57,8 +57,8 @@ _DEFAULT_ATOL = 1e-6
 
 
 @dataclass
-class _TimedReferenceRun:
-    """Timed validation-provider row plus reusable reference outputs."""
+class _TimedPytorchRow:
+    """Timed PyTorch row plus reference outputs (reference role only)."""
 
     result: ProviderEngineResult
     outputs: Optional[Dict[int, ReferenceOutput]]
@@ -358,7 +358,37 @@ def _pytorch_reference_outputs_from_buffer(
     return outputs
 
 
-def _run_timed_pytorch_reference(
+def _compute_graph_analytical_metrics(
+    graph_json: Dict[str, Any],
+    tensor_infos: list,
+    config: SuiteConfig,
+    graph_name: str,
+) -> tuple[Optional[int], bool, Optional[int]]:
+    """Compute per-graph analytical FLOPs/IO once.
+
+    These are a function of the graph shape only and don't change across
+    engines, so they're computed once per graph and propagated onto every
+    row. Failures route through warn_once and yield None.
+
+    Returns:
+        (analytical_flops, analytical_flops_partial, analytical_io_bytes)
+    """
+    analytical_flops: Optional[int] = None
+    analytical_flops_partial = False
+    analytical_io_bytes: Optional[int] = None
+    if config.metrics.basic_enabled:
+        try:
+            analytical_flops, analytical_flops_partial = compute_flops(graph_json)
+        except Exception as e:
+            warn_once("analytical", f"compute_flops failed for {graph_name}: {e}")
+        try:
+            analytical_io_bytes = compute_io_bytes(tensor_infos)
+        except Exception as e:
+            warn_once("analytical", f"compute_io_bytes failed for {graph_name}: {e}")
+    return analytical_flops, analytical_flops_partial, analytical_io_bytes
+
+
+def _run_timed_pytorch_row(
     graph_path: Path,
     graph_json: Dict[str, Any],
     graph_name: str,
@@ -368,13 +398,21 @@ def _run_timed_pytorch_reference(
     analytical_flops: Optional[int],
     analytical_flops_partial: bool,
     analytical_io_bytes: Optional[int],
-) -> _TimedReferenceRun:
-    """Run PyTorch once as a timed validation-provider reference row."""
+    role: Literal["engine", "reference"] = "reference",
+) -> _TimedPytorchRow:
+    """Run PyTorch once as a timed suite row.
+
+    With ``role="reference"`` this is the timed validation-provider row: it
+    additionally extracts reference outputs for engine comparison, and any
+    failure downgrades the row to "skipped". With ``role="engine"`` (the
+    ``--backend pytorch`` path) no outputs are extracted and failures are
+    reported as engine errors.
+    """
     result = ProviderEngineResult(
         provider=ReferenceProviderName.PYTORCH.value,
         engine_id=0,
         status="skipped",
-        role="reference",
+        role=role,
     )
     outputs: Optional[Dict[int, ReferenceOutput]] = None
 
@@ -430,18 +468,38 @@ def _run_timed_pytorch_reference(
                         analytical_io_bytes=analytical_io_bytes,
                     )
 
-                buffer_manager.zero_outputs()
-                executor.execute_once(tensors)
-                outputs = _pytorch_reference_outputs_from_buffer(buffer_manager)
+                if role == "reference":
+                    buffer_manager.zero_outputs()
+                    executor.execute_once(tensors)
+                    outputs = _pytorch_reference_outputs_from_buffer(buffer_manager)
 
-            result.correctness = _reference_row_correctness(config)
+            if role == "reference":
+                result.correctness = _reference_row_correctness(config)
+            else:
+                rtol, atol = _fallback_tolerance_for_config(config)
+                result.correctness = CorrectnessResult(
+                    execution_success=True,
+                    tolerance_match=None,
+                    rtol=rtol,
+                    atol=atol,
+                    error_message="No reference provider requested",
+                )
             result.status = "success"
 
         except Exception as e:
-            result.skip_reason = str(e)
+            if role == "engine":
+                msg = str(e)
+                rtol, atol = _fallback_tolerance_for_config(config)
+                result.status = "error"
+                result.error_message = msg
+                result.correctness = CorrectnessResult.failed(
+                    rtol=rtol, atol=atol, error_message=msg
+                )
+            else:
+                result.skip_reason = str(e)
 
     result.elapsed_time_ms = elapsed_timer.elapsed_ms
-    return _TimedReferenceRun(result=result, outputs=outputs)
+    return _TimedPytorchRow(result=result, outputs=outputs)
 
 
 def run_graph_all_providers(
@@ -579,22 +637,11 @@ def run_graph_all_providers(
     reference_outputs: Optional[Dict[int, ReferenceOutput]] = None
     reference_error: Optional[str] = None
 
-    # Compute analytical metrics once per graph — they're a function of
-    # the graph shape only and don't change across engines. Both calls
-    # are pure-Python and microsecond-cheap, but no point repeating
-    # them per engine. Failures route through warn_once and yield None.
-    analytical_flops: Optional[int] = None
-    analytical_flops_partial = False
-    analytical_io_bytes: Optional[int] = None
-    if config.metrics.basic_enabled:
-        try:
-            analytical_flops, analytical_flops_partial = compute_flops(graph_json)
-        except Exception as e:
-            warn_once("analytical", f"compute_flops failed for {graph_name}: {e}")
-        try:
-            analytical_io_bytes = compute_io_bytes(tensor_infos)
-        except Exception as e:
-            warn_once("analytical", f"compute_io_bytes failed for {graph_name}: {e}")
+    (
+        analytical_flops,
+        analytical_flops_partial,
+        analytical_io_bytes,
+    ) = _compute_graph_analytical_metrics(graph_json, tensor_infos, config, graph_name)
 
     pe_results: List[ProviderEngineResult] = []
     if (
@@ -603,7 +650,7 @@ def run_graph_all_providers(
     ):
         if reporter is not None:
             reporter.print_engine_start("pytorch reference")
-        timed_reference = _run_timed_pytorch_reference(
+        timed_reference = _run_timed_pytorch_row(
             graph_path=graph_path,
             graph_json=graph_json,
             graph_name=graph_name,
@@ -693,6 +740,109 @@ def run_graph_all_providers(
         graph_path=str(graph_path),
         results=pe_results,
         engine_ids=engine_ids,
+    )
+
+
+def run_graph_pytorch_backend(
+    graph_path: Path,
+    graph_json: Dict[str, Any],
+    tensor_infos: list,
+    config: SuiteConfig,
+    reporter: Optional[Reporter] = None,
+) -> GraphResult:
+    """Run a single graph through the PyTorch executor as the sole engine row.
+
+    The ``--backend pytorch`` counterpart of :func:`run_graph_all_providers`:
+    no hipDNN engine discovery, plugins, or reference validation — one
+    ``provider="pytorch"`` engine row per graph, so suite console output and
+    JSON artifacts share one schema across execution backends and hosts
+    (ROCm and CUDA).
+    """
+    graph_name = graph_json.get("name", graph_path.stem)
+    provider = ReferenceProviderName.PYTORCH.value
+    rtol, atol = _fallback_tolerance_for_config(config)
+
+    try:
+        graph_input_data = generate_input_data(tensor_infos, config.seed)
+    except (ValueError, RuntimeError, OSError, TypeError, OverflowError) as e:
+        msg = f"Input data generation failed: {e}"
+        return GraphResult(
+            graph_name=graph_name,
+            graph_path=str(graph_path),
+            results=[
+                ProviderEngineResult(
+                    provider=provider,
+                    engine_id=0,
+                    status="error",
+                    error_message=msg,
+                    correctness=CorrectnessResult.failed(
+                        rtol=rtol, atol=atol, error_message=msg
+                    ),
+                )
+            ],
+            engine_ids=[0],
+        )
+
+    # Unsupported operations are an unsupported-graph signal (mirrors the
+    # hipDNN UnsupportedGraphError path), not an execution error. A torch
+    # import failure here is deliberately ignored: the timed row below will
+    # surface it as a proper engine error.
+    unsupported: List[str] = []
+    try:
+        from ..execution import pytorch_ops
+
+        unsupported = sorted(pytorch_ops.get_unsupported_operations(graph_json))
+    except Exception:
+        pass
+    if unsupported:
+        msg = f"Graph contains unsupported operations: {unsupported}"
+        skipped = ProviderEngineResult(
+            provider=provider,
+            engine_id=0,
+            status="skipped",
+            skip_reason=msg,
+            correctness=CorrectnessResult.failed(
+                rtol=rtol, atol=atol, error_message=msg
+            ),
+        )
+        if reporter is not None:
+            reporter.print_engine_start(provider)
+            reporter.print_engine_result(skipped)
+        return GraphResult(
+            graph_name=graph_name,
+            graph_path=str(graph_path),
+            results=[skipped],
+            engine_ids=[0],
+        )
+
+    (
+        analytical_flops,
+        analytical_flops_partial,
+        analytical_io_bytes,
+    ) = _compute_graph_analytical_metrics(graph_json, tensor_infos, config, graph_name)
+
+    if reporter is not None:
+        reporter.print_engine_start(provider)
+    row = _run_timed_pytorch_row(
+        graph_path=graph_path,
+        graph_json=graph_json,
+        graph_name=graph_name,
+        tensor_infos=tensor_infos,
+        config=config,
+        input_data=graph_input_data,
+        analytical_flops=analytical_flops,
+        analytical_flops_partial=analytical_flops_partial,
+        analytical_io_bytes=analytical_io_bytes,
+        role="engine",
+    ).result
+    if reporter is not None:
+        reporter.print_engine_result(row)
+
+    return GraphResult(
+        graph_name=graph_name,
+        graph_path=str(graph_path),
+        results=[row],
+        engine_ids=[0],
     )
 
 

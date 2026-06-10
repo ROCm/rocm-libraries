@@ -326,15 +326,13 @@ class TestMainRouting:
         reporter.print_error.assert_called_once()
         assert "entry count" in reporter.print_error.call_args[0][0]
 
-    @patch("dnn_benchmarking.cli.main.run_pytorch_cli")
     @patch("dnn_benchmarking.cli.main.run_suite_cli")
-    def test_pytorch_backend_single_file_uses_pytorch_path(
+    def test_pytorch_backend_single_file_routes_to_suite(
         self,
         mock_orchestrate: MagicMock,
-        mock_run_pytorch: MagicMock,
     ) -> None:
-        """--backend pytorch on single file goes to run_pytorch_cli, not unified."""
-        mock_run_pytorch.return_value = 0
+        """--backend pytorch on a single file shares the suite execution path."""
+        mock_orchestrate.return_value = 0
 
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = self._create_graph_files(Path(tmpdir), 1)
@@ -347,12 +345,19 @@ class TestMainRouting:
             ):
                 result = main()
 
-            mock_run_pytorch.assert_called_once()
-            mock_orchestrate.assert_not_called()
+            mock_orchestrate.assert_called_once()
+            args = mock_orchestrate.call_args.args[0]
+            assert args.backend == "pytorch"
             assert result == 0
 
-    def test_pytorch_backend_multi_file_rejected(self) -> None:
-        """--backend pytorch with a glob exits 1 (suite not supported)."""
+    @patch("dnn_benchmarking.cli.main.run_suite_cli")
+    def test_pytorch_backend_multi_file_routes_to_suite(
+        self,
+        mock_orchestrate: MagicMock,
+    ) -> None:
+        """--backend pytorch with a glob runs the full suite (command parity)."""
+        mock_orchestrate.return_value = 0
+
         with tempfile.TemporaryDirectory() as tmpdir:
             self._create_graph_files(Path(tmpdir), 3)
             glob_pattern = os.path.join(tmpdir, "*.json")
@@ -365,7 +370,15 @@ class TestMainRouting:
             ):
                 result = main()
 
-            assert result == 1
+            mock_orchestrate.assert_called_once()
+            call_args = mock_orchestrate.call_args
+            graph_paths = (
+                call_args.args[1]
+                if len(call_args.args) > 1
+                else call_args.kwargs["graph_paths"]
+            )
+            assert len(graph_paths) == 3
+            assert result == 0
 
     @patch("dnn_benchmarking.cli.main.run_suite_cli")
     def test_recursive_glob_matches_nested_directories(
@@ -792,12 +805,8 @@ class TestBackendEngineRouting:
                 result = main()
         assert result == 1
 
-    @patch("dnn_benchmarking.cli.pytorch_runner_cli.run_pytorch_benchmark")
-    def test_single_engine_with_pytorch_backend_accepted(
-        self, mock_run_pytorch: MagicMock
-    ) -> None:
-        """A single --engine ID is fine with --backend pytorch."""
-        mock_run_pytorch.return_value = 0
+    def test_single_engine_with_pytorch_backend_rejected(self) -> None:
+        """--engine has no meaning for the PyTorch backend and is rejected."""
         from dnn_benchmarking.cli.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -815,10 +824,31 @@ class TestBackendEngineRouting:
                 ],
             ):
                 result = main()
-        assert result == 0
-        mock_run_pytorch.assert_called_once()
-        cfg = mock_run_pytorch.call_args.args[0]
-        assert cfg.engine_id == 3
+        assert result == 1
+
+    def _run_main_with_args(self, graph: Path, extra: list) -> int:
+        from dnn_benchmarking.cli.main import main
+
+        with patch(
+            "sys.argv",
+            ["dnn-benchmark", "--graph", str(graph), "--backend", "pytorch"] + extra,
+        ):
+            return main()
+
+    def test_plugin_path_with_pytorch_backend_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = self._create_graph(Path(tmpdir))
+            assert self._run_main_with_args(graph, ["--plugin-path", "/plugins"]) == 1
+
+    def test_validate_pytorch_with_pytorch_backend_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = self._create_graph(Path(tmpdir))
+            assert self._run_main_with_args(graph, ["--validate", "pytorch"]) == 1
+
+    def test_profiling_flags_with_pytorch_backend_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = self._create_graph(Path(tmpdir))
+            assert self._run_main_with_args(graph, ["--pmc", "basic"]) == 1
 
 
 class TestValidationStartupGate:

@@ -197,3 +197,20 @@ class TestValidationConfig:
         """Test that negative atol raises ValueError."""
         with pytest.raises(ValueError, match="atol must be non-negative"):
             ValidationConfig(atol=-1e-8)
+
+
+class TestSuiteConfigBackend:
+    """SuiteConfig execution backend validation."""
+
+    def test_default_backend_is_hipdnn(self) -> None:
+        assert SuiteConfig().backend == "hipdnn"
+
+    def test_pytorch_backend_accepted(self) -> None:
+        assert SuiteConfig(backend="pytorch").backend == "pytorch"
+
+    def test_unknown_backend_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Invalid backend"):
+            SuiteConfig(backend="tensorflow")
+
+    def test_torch_timing_backend_accepted(self) -> None:
+        assert SuiteConfig(timing_backend="torch").timing_backend == "torch"

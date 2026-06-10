@@ -12,7 +12,14 @@ from ..common import torch_support
 from ..config.benchmark_config import BenchmarkConfig
 from ..reporting.statistics import BenchmarkMetadata, BenchmarkResult
 from . import pytorch_ops
-from .timing import HipGpuTimer, Timer, _is_torch_available, create_gpu_timer
+from .timing import (
+    GpuTimerInterface,
+    HipGpuTimer,
+    Timer,
+    _is_hip_available,
+    _is_torch_available,
+    create_gpu_timer,
+)
 
 
 class PyTorchExecutionError(Exception):
@@ -27,7 +34,8 @@ class PyTorchCudaExecutor:
     This class handles:
     - Validating graph operations are supported
     - Running warmup iterations
-    - Running timed benchmark iterations with direct HIP event timing
+    - Running timed benchmark iterations with GPU event timing
+      (HIP events on ROCm, torch.cuda events on CUDA)
     - Returning BenchmarkResult with E2E and kernel timings
     """
 
@@ -36,7 +44,7 @@ class PyTorchCudaExecutor:
         graph_json: Dict[str, Any],
         config: BenchmarkConfig,
         device: str = "cuda:0",
-        timing_backend: Optional[Literal["hip", "auto", "none"]] = "auto",
+        timing_backend: Optional[Literal["hip", "torch", "auto", "none"]] = "auto",
     ) -> None:
         """Initialize executor with graph JSON and configuration.
 
@@ -46,7 +54,8 @@ class PyTorchCudaExecutor:
             device: CUDA/ROCm device to use (e.g., "cuda:0").
             timing_backend: GPU timer backend to use:
                 - "hip": Force direct HIP event timing
-                - "auto": Auto-detect direct HIP timing
+                - "torch": Force torch.cuda event timing
+                - "auto": Prefer direct HIP timing, fall back to torch timing
                 - "none": Disable GPU kernel timing, use synchronized E2E timing
 
         Raises:
@@ -59,7 +68,7 @@ class PyTorchCudaExecutor:
 
         if timing_backend is None:
             timing_backend = "auto"
-        valid_timing_backends = {"hip", "auto", "none"}
+        valid_timing_backends = {"hip", "torch", "auto", "none"}
         if timing_backend not in valid_timing_backends:
             raise ValueError(
                 f"Invalid timing_backend: '{timing_backend}'. "
@@ -90,15 +99,20 @@ class PyTorchCudaExecutor:
                     f"Supported: {list(pytorch_ops.get_supported_operations())}"
                 )
 
-            # Pin all PyTorch graph execution to one stream, then synchronize
-            # that stream through HIP events instead of using torch.cuda APIs.
+            # Pin all PyTorch graph execution to one stream. On ROCm the
+            # stream is synchronized through HIP events instead of torch.cuda
+            # APIs; on CUDA (or with explicit torch timing) synchronization
+            # goes through the torch stream itself.
             with torch.cuda.device(self._device):
                 torch.cuda.init()
                 self._stream = torch.cuda.default_stream(self._device)
-                try:
-                    self._stream_sync_timer = HipGpuTimer(stream=self._timing_stream())
-                except RuntimeError as e:
-                    raise PyTorchExecutionError(str(e)) from e
+                if self._hip_sync_selected():
+                    try:
+                        self._stream_sync_timer = HipGpuTimer(
+                            stream=self._timing_stream()
+                        )
+                    except RuntimeError as e:
+                        raise PyTorchExecutionError(str(e)) from e
             self._prepared = True
 
         self._init_time_ms = t.elapsed_ms
@@ -160,16 +174,20 @@ class PyTorchCudaExecutor:
 
         e2e_timings: List[float] = []
         kernel_timings: Optional[List[float]] = None
-        gpu_timer: Optional[HipGpuTimer] = None
+        gpu_timer: Optional[GpuTimerInterface] = None
         timing_backend_name = ""
         with torch.cuda.device(self._device):
             if self._timing_backend != "none":
                 try:
                     requested_backend = (
-                        "hip" if self._timing_backend == "hip" else "auto"
+                        self._timing_backend
+                        if self._timing_backend in ("hip", "torch")
+                        else "auto"
                     )
                     gpu_timer = create_gpu_timer(
-                        requested_backend, stream=self._timing_stream()
+                        requested_backend,
+                        stream=self._timing_stream(),
+                        torch_stream=self._get_stream(),
                     )
                 except RuntimeError as e:
                     raise PyTorchExecutionError(str(e)) from e
@@ -213,6 +231,20 @@ class PyTorchCudaExecutor:
             metadata=metadata,
         )
 
+    def _hip_sync_selected(self) -> bool:
+        """Return True when stream synchronization should use HIP events.
+
+        Explicit "hip" timing requires HIP sync (and surfaces an error when
+        the bindings are unavailable); explicit "torch" timing never uses
+        it; "auto" and "none" use HIP events only when they are available,
+        falling back to torch stream synchronization otherwise.
+        """
+        if self._timing_backend == "hip":
+            return True
+        if self._timing_backend == "torch":
+            return False
+        return _is_hip_available()
+
     def _get_stream(self) -> Any:
         """Return the PyTorch stream used by all graph execution."""
         if self._stream is None:
@@ -220,14 +252,19 @@ class PyTorchCudaExecutor:
         return self._stream
 
     def _synchronize_stream(self) -> None:
-        """Synchronize the PyTorch graph stream through a HIP event."""
+        """Synchronize the PyTorch graph stream.
+
+        Uses a HIP event when HIP sync was selected at prepare() time,
+        otherwise synchronizes the torch stream directly.
+        """
         with torch.cuda.device(self._device):
-            try:
-                if self._stream_sync_timer is None:
-                    self._stream_sync_timer = HipGpuTimer(stream=self._timing_stream())
-                self._stream_sync_timer.synchronize_stream()
-            except RuntimeError as e:
-                raise PyTorchExecutionError(str(e)) from e
+            if self._stream_sync_timer is not None:
+                try:
+                    self._stream_sync_timer.synchronize_stream()
+                except RuntimeError as e:
+                    raise PyTorchExecutionError(str(e)) from e
+            else:
+                self._get_stream().synchronize()
 
     def _timing_stream(self) -> int:
         """Return the PyTorch graph stream pointer for HIP events."""

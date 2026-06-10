@@ -262,11 +262,15 @@ class SuiteConfig:
             used for both. If neither is set, validation uses dtype-aware
             defaults.
         atol: Optional absolute tolerance override for correctness comparison.
-        timing_backend: GPU timer backend to use ("hip", "auto", "none").
+        timing_backend: GPU timer backend to use ("hip", "torch", "auto",
+            "none"). "torch" applies only to the PyTorch execution backend.
         reference_provider: Reference provider name for correctness checking.
         verbose: If True, print rich per-engine block per graph instead of summary.
         metrics: Metric collection configuration. Defaults to ``basic`` tier
             (always-on probes, no extra runs).
+        backend: Execution backend ("hipdnn" runs discovered engine plugins,
+            "pytorch" runs the graph through the PyTorch executor as a single
+            engine row per graph).
     """
 
     warmup_iters: int = 10
@@ -280,6 +284,7 @@ class SuiteConfig:
     verbose: bool = False
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     plugin_paths: Optional[List[Path]] = None
+    backend: str = "hipdnn"
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
@@ -309,7 +314,7 @@ class SuiteConfig:
                     raise ValueError(
                         "--plugin-path entry count must be 1 or match --engine count"
                     )
-        valid_timing_backends = {"hip", "auto", "none"}
+        valid_timing_backends = {"hip", "torch", "auto", "none"}
         if self.timing_backend not in valid_timing_backends:
             raise ValueError(
                 f"Invalid timing_backend: '{self.timing_backend}'. "
@@ -319,6 +324,12 @@ class SuiteConfig:
             raise ValueError(
                 f"Invalid reference_provider: '{self.reference_provider}'. "
                 f"Valid options: {REFERENCE_PROVIDER_CHOICES}"
+            )
+        valid_backends = {"hipdnn", "pytorch"}
+        if self.backend not in valid_backends:
+            raise ValueError(
+                f"Invalid backend: '{self.backend}'. "
+                f"Valid options: {valid_backends}"
             )
 
     @property

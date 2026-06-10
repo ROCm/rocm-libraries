@@ -8,9 +8,14 @@ import os
 from pathlib import Path
 from typing import Any, List, Optional
 
+from ..common import torch_support
 from ..common.exceptions import ExecutionError, GraphLoadError
 from ..config.benchmark_config import MetricsConfig, ReferenceProviderName, SuiteConfig
-from ..execution.suite_runner import run_graph_all_providers, set_plugin_path
+from ..execution.suite_runner import (
+    run_graph_all_providers,
+    run_graph_pytorch_backend,
+    set_plugin_path,
+)
 from ..graph.loader import GraphLoader
 from ..reporting.reporter import Reporter
 from ..reporting.suite_results import (
@@ -53,9 +58,14 @@ def _run_one_graph(
         graph_json = loader.load_json(graph_path)
         loader.validate(graph_json)
         tensor_infos = loader.extract_tensor_info(graph_json)
-        result = run_graph_all_providers(
-            graph_path, graph_json, tensor_infos, config, handle, reporter=reporter
-        )
+        if config.backend == "pytorch":
+            result = run_graph_pytorch_backend(
+                graph_path, graph_json, tensor_infos, config, reporter=reporter
+            )
+        else:
+            result = run_graph_all_providers(
+                graph_path, graph_json, tensor_infos, config, handle, reporter=reporter
+            )
         if len(result.results) == 0:
             return _error_graph_result(
                 graph_path, "No provider/engine combinations matched filters"
@@ -107,33 +117,48 @@ def run_suite_benchmark(
         extra_profiling_runs=config.metrics.extra_runs_per_engine,
     )
 
-    reporter.print_hipdnn_init_start()
-    # hipDNN handle creation is the authoritative GPU/runtime check for this
-    # backend. Apply plugin paths before constructing the handle; do not depend
-    # on optional telemetry tools such as rocm-smi or amdsmi.
-    try:
-        import hipdnn_frontend as hipdnn
+    handle = None
+    if config.backend == "pytorch":
+        # PyTorch availability is the authoritative GPU/runtime check for
+        # this backend: CPU-only torch cannot execute these GPU benchmarks
+        # even if ROCm management tools can see a device.
+        if not torch_support.module_available():
+            reporter.print_error(
+                "PyTorch not available. Install with: pip install torch"
+            )
+            return 1
+        if not torch_support.gpu_available():
+            reporter.print_error(
+                "PyTorch GPU not available. "
+                "Install PyTorch with CUDA or ROCm support."
+            )
+            return 1
+    else:
+        reporter.print_hipdnn_init_start()
+        # hipDNN handle creation is the authoritative GPU/runtime check for
+        # this backend. Apply plugin paths before constructing the handle; do
+        # not depend on optional telemetry tools such as rocm-smi or amdsmi.
+        try:
+            import hipdnn_frontend as hipdnn
 
-        plugin_paths = config.plugin_paths
-        per_engine_plugin_paths = plugin_paths is not None and len(plugin_paths) > 1
+            plugin_paths = config.plugin_paths
+            per_engine_plugin_paths = plugin_paths is not None and len(plugin_paths) > 1
 
-        if not per_engine_plugin_paths:
-            set_plugin_path(hipdnn, config.plugin_path)
-            handle = hipdnn.Handle()
-        else:
-            handle = None
-    except ImportError:
-        reporter.print_hipdnn_init_newline()
-        reporter.print_error(
-            "hipdnn_frontend not available. Install hipDNN Python bindings first."
-        )
-        return 1
-    except RuntimeError as e:
-        reporter.print_hipdnn_init_newline()
-        reporter.print_error(f"Failed to create hipDNN handle: {e}")
-        return 1
+            if not per_engine_plugin_paths:
+                set_plugin_path(hipdnn, config.plugin_path)
+                handle = hipdnn.Handle()
+        except ImportError:
+            reporter.print_hipdnn_init_newline()
+            reporter.print_error(
+                "hipdnn_frontend not available. Install hipDNN Python bindings first."
+            )
+            return 1
+        except RuntimeError as e:
+            reporter.print_hipdnn_init_newline()
+            reporter.print_error(f"Failed to create hipDNN handle: {e}")
+            return 1
 
-    reporter.print_hipdnn_init_done()
+        reporter.print_hipdnn_init_done()
     reporter.print_running_benchmark(total)
 
     graph_results: List[GraphResult] = []
@@ -182,6 +207,27 @@ def run_suite_cli(
             profiling_output_dir=args.profiling_output_dir,
             profiling_timeout_s=args.profiling_timeout,
         )
+        if args.backend == "pytorch":
+            if args.engine:
+                reporter.print_error("--engine is not supported with --backend pytorch")
+                return 1
+            if args.plugin_path:
+                reporter.print_error(
+                    "--plugin-path is not supported with --backend pytorch"
+                )
+                return 1
+            if args.validate == ReferenceProviderName.PYTORCH.value:
+                reporter.print_error(
+                    "--validate pytorch is not supported with --backend pytorch "
+                    "(the backend would validate against itself)"
+                )
+                return 1
+            if metrics_config.opt_in_pass_requested:
+                reporter.print_error(
+                    "Profiling options (--pmc, --emit-trace, --perf, "
+                    "--roofline) are not supported with --backend pytorch"
+                )
+                return 1
         # --profiling-output-dir is only meaningful when at least one
         # opt-in profiling source fires. Passing it solo is a silent
         # no-op today; surface that as a soft warning so the user
@@ -195,7 +241,9 @@ def run_suite_cli(
                 "source requested (--pmc, --emit-trace, --perf, "
                 "--roofline); the directory will not be written to"
             )
-        plugin_paths = args.plugin_path or _plugin_paths_from_environment()
+        plugin_paths = None
+        if args.backend != "pytorch":
+            plugin_paths = args.plugin_path or _plugin_paths_from_environment()
         config = SuiteConfig(
             warmup_iters=args.warmup,
             benchmark_iters=args.iters,
@@ -208,6 +256,7 @@ def run_suite_cli(
             verbose=args.verbose,
             metrics=metrics_config,
             plugin_paths=plugin_paths,
+            backend=args.backend,
         )
     except ValueError as e:
         reporter.print_error(f"Suite configuration error: {e}")

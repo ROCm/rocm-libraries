@@ -25,3 +25,25 @@ def gpu_available() -> bool:
         return bool(torch.cuda.is_available())
     except Exception:
         return False
+
+
+def is_rocm_build() -> bool:
+    """Return True when the installed torch is a ROCm/HIP build."""
+    try:
+        import torch
+
+        return bool(getattr(torch.version, "hip", None))
+    except Exception:
+        return False
+
+
+def is_cuda_build() -> bool:
+    """Return True when the installed torch is a CUDA (non-ROCm) build."""
+    try:
+        import torch
+
+        return bool(getattr(torch.version, "cuda", None)) and not bool(
+            getattr(torch.version, "hip", None)
+        )
+    except Exception:
+        return False
