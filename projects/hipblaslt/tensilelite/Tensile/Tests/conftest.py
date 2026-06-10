@@ -45,6 +45,20 @@ def pytest_addoption(parser):
     parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
+    parser.addoption("--gpu-targets", default=None,
+        help="Semicolon-separated GPU targets (e.g. gfx942). "
+             "Overrides hardware auto-detection.")
+    parser.addoption("--build-only", action="store_true", default=False,
+        help="Run only the build phase (no benchmarking). "
+             "Requires --artifact-dir.")
+    parser.addoption("--use-cache", action="store_true", default=False,
+        help="Run using previously built cache. "
+             "Requires --artifact-dir.")
+    parser.addoption("--artifact-dir", default=None,
+        help="Directory for cross-machine test artifacts. "
+             "With --build-only: compressed build outputs are written here. "
+             "With --use-cache: previously built artifacts are read from here. "
+             "Required when either --build-only or --use-cache is set.")
 
 @pytest.fixture(scope="session")
 def timing_path(pytestconfig, tmpdir_factory):
@@ -167,6 +181,11 @@ def tensile_args(pytestconfig, builddir, worker_lock_path):
     if not pytestconfig.getoption("--no-common-build"):
         if pytestconfig.getoption("--prebuilt-client"):
             rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
+
+    # Forward --gpu-targets to Tensile. Do NOT forward --build-only or
+    # --use-cache here — those are hardcoded in each test function's args.
+    if pytestconfig.getoption("--gpu-targets"):
+        rv += ["--gpu-targets", pytestconfig.getoption("--gpu-targets")]
 
     return rv
 

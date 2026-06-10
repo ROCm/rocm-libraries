@@ -17,9 +17,9 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
 ]
-# torch is intentionally not listed here — it must come from the ROCm or CUDA
-# nightly index (see requirements-{rocm,cuda}.txt) which pip cannot express
-# in pyproject.toml. Everything else resolves cleanly from PyPI.
+# torch is intentionally not listed here — setup.sh selects either CPU-only
+# torch for CI/testing or ROCm torch nightlies for benchmarking, and pip cannot
+# express those mutually exclusive indices in pyproject.toml.
 dependencies = [
     "numpy>=1.19.0",
     "pytest>=7.0.0",
