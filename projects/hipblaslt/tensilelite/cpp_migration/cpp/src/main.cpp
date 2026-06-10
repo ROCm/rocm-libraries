@@ -1065,7 +1065,23 @@ void bind_rocisa_module_builder(nb::module_& b) {
            nb::arg("tc"), nb::arg("voffs"), nb::arg("vswaps"),
            "C++ port of SubtileLREmit._emitLRLDSSwap_1x2: XOR each "
            "sharedVgprLROffset with its swap VGPR. Index lists resolved in "
-           "Python.");
+           "Python.")
+      .def("scale_gr_load", &ModuleBuilder::scale_gr_load, nb::arg("tc"),
+           nb::arg("is_glc"), nb::arg("is_slc"), nb::arg("is_nt"),
+           nb::arg("voff"),
+           "C++ port of SubtileScaleEmit.globalReadDoScaleSubtile: set M0 to "
+           "the scale LDS base then emit the direct-to-LDS BufferLoadB128. "
+           "sharedVgprGROffset[0] index is resolved in Python.")
+      .def("scale_ds_read", &ModuleBuilder::scale_ds_read, nb::arg("tc"),
+           nb::arg("vdst"), nb::arg("addrVgpr"), nb::arg("dsOffset"),
+           nb::arg("scaleGroupIdx"), nb::arg("k") = -1,
+           "C++ port of SubtileScaleEmit.emitSubtileScaleDsRead: one "
+           "DSLoadB32 (4B) for a scale group. Destination/address VGPR indices "
+           "are resolved in Python; k<0 omits the K index from the comment.")
+      .def("scale_gr_ptr_update", &ModuleBuilder::scale_gr_ptr_update,
+           nb::arg("tc"), nb::arg("inc"),
+           "C++ port of SubtileScaleEmit.emitScaleGRPtrUpdate: advance "
+           "Srd<tc> by inc bytes with carry.");
 }
 
 }  // namespace

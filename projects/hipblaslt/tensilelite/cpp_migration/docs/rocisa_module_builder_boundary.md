@@ -113,9 +113,37 @@ support the `//`-style comment the swap leaves emit. `ds_modifiers` gained the
 `na` parameter (the grc.107 review's `fk8` note) so dual-address DS leaves can
 be expressed; the AB ds_read path uses the `na=1` default.
 
-The MX-scale GR/LR swap/ptr-update paths (`MXSA`/`MXSB`) and the GR/LR
-*offset-assignment* math (`graTileAssignment` / `lraTileAssignment`, already
-C++-plan-driven) are out of scope for this slice and unchanged.
+The GR/LR *offset-assignment* math (`graTileAssignment` / `lraTileAssignment`,
+already C++-plan-driven) is out of scope for this slice and unchanged. The
+MX-scale GR/LR data-movement leaves are ported in the follow-up `grc.111` slice
+(see the section below).
+
+## MX scale GR / LR data-movement leaves (grc.111)
+
+`hipblaslt_incremental_refactor-grc.111` ports the MX scale-factor (`MXSA` /
+`MXSB`) GR/LR *data-movement* emit leaves onto the builder, following the same
+boundary pattern as the AB leaves. `SubtileScaleEmit.py` is reduced to a thin
+boundary facade: the data-movement functions resolve writer register state and
+delegate the rocisa construction to C++.
+
+| Builder method | Python leaf it replaces | Writer state resolved in Python |
+|---|---|---|
+| `scale_gr_load(tc, is_glc, is_slc, is_nt, voff)` | `SubtileScaleEmit.globalReadDoScaleSubtile` | `sharedVgprGROffset[0]` VGPR index; `NonTemporal<tc>` flags |
+| `scale_ds_read(tc, vdst, addrVgpr, dsOffset, scaleGroupIdx, k)` | `SubtileScaleEmit.emitSubtileScaleDsRead` (+ the `InstructionEmitter.emit_lr` scale inline) | destination tile VGPR, `sharedVgprLROffset[0]` address index, DS offset; `k<0` omits the K index from the comment (PGR=0 path) |
+| `scale_gr_ptr_update(tc, inc)` | `SubtileScaleEmit.emitScaleGRPtrUpdate` | `inc` = `lrSubtileSize * lrGlobalSubtileGrid[1]` |
+| `gr_lds_buffer_swap(tc)` (reused) | `SubtileScaleEmit.emitScaleGRLDSSwap` | none (byte-identical to the AB leaf with `tc` = `MXSA`/`MXSB`) |
+| `lr_lds_buffer_swap(tc, voffs, vswaps)` (reused) | `SubtileScaleEmit.emitScaleLRLDSSwap` | `sharedVgprLROffset` / `sharedVgprLROffsetSwap` VGPR indices |
+
+The MX scale GR/LR LDS-swap leaves are byte-identical to the AB swap leaves, so
+they reuse `gr_lds_buffer_swap` / `lr_lds_buffer_swap` with the scale component
+tag rather than adding new methods. The `MXBlockA`/`MXBlockB` guard and the
+duplicate-load suppression stay in Python (the leaf returns an empty `Module`).
+
+The scale *offset-assignment* emission (`graTileAssignmentScaleSwizzled` /
+`lraTileAssignmentScaleSwizzled` / `globalReadScaleSwizzledDTLInitCommonSgpr`)
+stays in Python because it allocates from the writer's register pools; it
+already sources its scalar math from the C++ `MXScaleTileInfoQuery`
+offset-assign plans (grc.105) and is unchanged by this slice.
 
 ## Verification
 
@@ -129,10 +157,11 @@ helpers against a `DSLoadB32` built both ways.
 
 ## Non-goals for the foundation slice (grc.107)
 
-- The foundation slice itself moved no subtile emit loop to C++; the GR/LR
-  data-movement leaves were ported in the follow-up `grc.109` slice (see the
-  section above). The GR/LR/scale *offset-assignment* loops and the MX-scale
-  emit leaves remain Python (rocisa construction driven by C++ data plans).
+- The foundation slice itself moved no subtile emit loop to C++; the AB GR/LR
+  data-movement leaves were ported in the follow-up `grc.109` slice and the MX
+  scale GR/LR data-movement leaves in `grc.111` (see the sections above). The
+  GR/LR/scale *offset-assignment* loops remain Python (rocisa construction
+  driven by C++ data plans).
 - No parallel production path / env-var switch (`TENSILE_WRITER_CPP` and
   dual-path patterns are explicitly forbidden). The builder is additive
   infrastructure; nothing selects it in production yet.

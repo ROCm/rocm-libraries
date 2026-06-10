@@ -88,6 +88,10 @@ class ModuleBuilder {
     vxor_b32_cls_ = inst_.attr("VXorB32");
     buffer_load_b128_cls_ = inst_.attr("BufferLoadB128");
     ds_load_b128_cls_ = inst_.attr("DSLoadB128");
+
+    // Instruction classes consumed by the ported MX scale GR/LR leaves.
+    smov_b32_cls_ = inst_.attr("SMovB32");
+    ds_load_b32_cls_ = inst_.attr("DSLoadB32");
   }
 
   // ---- Module / container factories ------------------------------------
@@ -306,6 +310,77 @@ class ModuleBuilder {
     return mod;
   }
 
+  // ---- MX scale GR / LR data-movement emit leaves (ported from Python) -----
+  //
+  // These reproduce the rocisa construction of the MX scale-factor (MXSA/MXSB)
+  // GR/LR data-movement leaves (SubtileScaleEmit.globalReadDoScaleSubtile /
+  // emitSubtileScaleDsRead / emitScaleGRPtrUpdate). Scale factors use a simpler
+  // access pattern than data tiles: GR is a single direct-to-LDS buffer_load
+  // per wave, LR is a ds_read_b32 per scale group. The GR/LR LDS-swap leaves are
+  // byte-identical to the AB leaves above and reuse gr_lds_buffer_swap /
+  // lr_lds_buffer_swap with the MXSA/MXSB component tag. Register state
+  // (sharedVgprGROffset / sharedVgprLROffset, destination tile VGPRs) and the
+  // MXBlock guard stay authoritative in Python and cross the boundary here as
+  // primitive ints / strings.
+
+  // == SubtileScaleEmit.globalReadDoScaleSubtile ==
+  // Set M0 to the scale LDS base then emit the direct-to-LDS buffer_load_b128
+  // (vaddr serves as both the global read offset and the LDS write offset).
+  // `tc` is the full scale component name ("MXSA" / "MXSB"); `voff` is the
+  // (Python-resolved) sharedVgprGROffset[0] index.
+  nb::object scale_gr_load(const std::string& tc, bool is_glc, bool is_slc,
+                           bool is_nt, int voff) const {
+    nb::object mod = module();
+    add_comment0(mod, "Scale GR: " + tc + " (DTL: BufferLoadB128 -> LDS)");
+    add(mod, smov_b32_cls_(
+                 "dst"_a = mgpr_fn_(0),
+                 "src"_a = sgpr_fn_(std::string("LocalWriteBaseAddr") + tc),
+                 "comment"_a = "scale" + tc + ": M0 = scaleLdsBase"));
+    nb::object mubuf = mubuf_modifiers_cls_(
+        "offen"_a = true, "offset12"_a = 0, "glc"_a = is_glc, "slc"_a = is_slc,
+        "nt"_a = is_nt, "lds"_a = true);
+    add(mod, buffer_load_b128_cls_(
+                 "dst"_a = nb::none(), "vaddr"_a = vgpr_fn_(voff),
+                 "saddr"_a = sgpr_fn_(std::string("Srd") + tc, 4),
+                 "soffset"_a = 0, "mubuf"_a = mubuf,
+                 "comment"_a = "scale" + tc + ": DTL b128 load"));
+    return mod;
+  }
+
+  // == SubtileScaleEmit.emitSubtileScaleDsRead ==
+  // Emit one ds_read_b32 (4 bytes = 4 E8M0 scale values) into one VGPR for a
+  // single scale group. `vdst` is the destination tile VGPR index; `addrVgpr`
+  // is the sharedVgprLROffset[0] address index. When `k >= 0` the comment
+  // carries the K index (scheduler emit path); k < 0 omits it (PGR=0 path).
+  nb::object scale_ds_read(const std::string& tc, int vdst, int addrVgpr,
+                           long dsOffset, long scaleGroupIdx,
+                           long k = -1) const {
+    nb::object mod = module();
+    std::string comment =
+        "scale" + tc + "[group" + std::to_string(scaleGroupIdx);
+    if (k >= 0) comment += ",K=" + std::to_string(k);
+    comment += "]: load 4B from LDS";
+    add(mod, ds_load_b32_cls_("dst"_a = vgpr_fn_(vdst),
+                              "src"_a = vgpr_fn_(addrVgpr),
+                              "ds"_a = ds_modifiers(dsOffset, 1),
+                              "comment"_a = comment));
+    return mod;
+  }
+
+  // == SubtileScaleEmit.emitScaleGRPtrUpdate ==
+  // Advance the scale SRD base pointer by one depthU iteration (`inc` bytes),
+  // with carry into Srd<tc>+1.
+  nb::object scale_gr_ptr_update(const std::string& tc, long inc) const {
+    nb::object mod = module();
+    add_comment0(mod, "Scale SRD update: " + tc + " += " + std::to_string(inc));
+    std::string srd = std::string("Srd") + tc;
+    add(mod, sadd_u32_cls_("dst"_a = sgpr_fn_(srd), "src0"_a = sgpr_fn_(srd),
+                           "src1"_a = inc));
+    add(mod, sadd_cu32_cls_("dst"_a = sgpr_fn_(srd + "+1"),
+                            "src0"_a = sgpr_fn_(srd + "+1"), "src1"_a = 0));
+    return mod;
+  }
+
  private:
   nb::object module_cls_;
   nb::object textblock_cls_;
@@ -321,6 +396,8 @@ class ModuleBuilder {
   nb::object vxor_b32_cls_;
   nb::object buffer_load_b128_cls_;
   nb::object ds_load_b128_cls_;
+  nb::object smov_b32_cls_;
+  nb::object ds_load_b32_cls_;
   nb::object inst_;
 };
 

@@ -143,12 +143,7 @@ from .SubtileLREmit import (
     emitSingleDsRead, emitSubtileDsRead, setExecMask,
 )
 from .SubtileScaleEmit import (
-    emitScaleGRLoad, emitScaleLRLoad,
-    emitScaleGRPtrUpdate, emitScaleGRLDSSwap, emitScaleLRLDSSwap,
-    graTileAssignmentScaleSwizzled, lraTileAssignmentScaleSwizzled,
     globalReadDoScaleSubtile, localReadDoScaleSubtile,
-    globalReadScalePtrUpdates, globalReadScaleSwizzledDTLInitCommonSgpr,
-    emitSubtileScaleDsRead,
 )
 
 class ABGRTile:

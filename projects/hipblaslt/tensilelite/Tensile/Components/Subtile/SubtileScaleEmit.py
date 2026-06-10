@@ -8,116 +8,142 @@
 #   GR: DTL with linear offset (serial * loadWidth), one buffer_load per wave
 #   LR: ds_read_b32 per scale group (2 M-adjacent subtiles per group)
 #
-# Each function operates on a single tensor component (MXSA or MXSB),
-# called once per scale operand.
+# This module is now a minimal boundary facade. The rocisa construction of the
+# scale GR/LR *data-movement* leaves (DTL buffer_load, ds_read_b32, scale SRD
+# pointer update, GR/LR LDS swap) lives in the C++ ModuleBuilder
+# (cpp/include/tensile_writer/rocisa_module_builder.hpp); the functions below
+# resolve writer-owned register state (sharedVgprGROffset / sharedVgprLROffset,
+# destination tile VGPRs) and the MXBlock guard, then delegate construction to
+# C++. See cpp_migration/docs/rocisa_module_builder_boundary.md.
 #
-# Uses ti.sharedVgprGROffset / ti.sharedVgprLROffset (compat properties)
-# since MXScaleTilePair has gr=None, lr=None.
+# The scale *offset-assignment* emission (graTileAssignmentScaleSwizzled /
+# lraTileAssignmentScaleSwizzled / globalReadScaleSwizzledDTLInitCommonSgpr)
+# stays in Python because it allocates from the writer's register pools, which
+# the boundary contract keeps authoritative in Python. Those functions already
+# source their scalar math from the C++ MXScaleTileInfoQuery offset-assign plans
+# (TileInfo.scaleGrOffsetAssignPlan / scaleLrOffsetAssignPlan).
 ################################################################################
 
 import math
 
 from rocisa.code import Module
-from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr
+from rocisa.container import vgpr, sgpr
 from rocisa.instruction import (
-    BufferLoadB128,
-    DSLoadB32,
-    SAddCU32, SAddU32, SLShiftLeftB32, SMovB32, SNop, SXorB32,
+    SAddU32, SLShiftLeftB32, SMovB32, SNop, SXorB32,
     VAddU32, VAndB32, VMulLOU32, VReadfirstlaneB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
 )
 
+from tensile_writer.subtile.module_builder import ModuleBuilder
 
-# ---------------------------------------------------------------------------
-# Scale GR load (DTL)
-# ---------------------------------------------------------------------------
+# Single cached C++ rocisa module-builder. The builder owns no writer state; it
+# only assembles rocisa Items from primitive ints/strings the boundary functions
+# below resolve from the writer's register pools. See
+# cpp_migration/docs/rocisa_module_builder_boundary.md.
+_MODULE_BUILDER = None
 
-def emitScaleGRLoad(ti, writer, kernel):
-  """Emit buffer_load_b128 DTL for scale data (global -> LDS)."""
-  module = Module(f"Scale GR Load ({ti.tc})")
-  tc = ti.tc
 
-  isGlc = bool(kernel.get(f"NonTemporal{tc}", 0) & 0x1)
-  isSlc = bool(kernel.get(f"NonTemporal{tc}", 0) & 0x2)
-  isNT  = bool(kernel.get(f"NonTemporal{tc}", 0) & 0x4)
-
-  module.add(SMovB32(dst=mgpr(0), src=sgpr(f"LocalWriteBaseAddr{tc}"),
-             comment=f"scale{tc}: M0 = scaleLdsBase"))
-
-  mubuf = MUBUFModifiers(offen=True, offset12=0, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
-  module.add(BufferLoadB128(dst=None, vaddr=vgpr(ti.sharedVgprGROffset[0]),
-             saddr=sgpr(f"Srd{tc}", 4), soffset=0, mubuf=mubuf,
-             comment=f"scale{tc}: DTL b128 load"))
-
-  return module
+def _builder():
+  global _MODULE_BUILDER
+  if _MODULE_BUILDER is None:
+    _MODULE_BUILDER = ModuleBuilder()
+  return _MODULE_BUILDER
 
 
 # ---------------------------------------------------------------------------
-# Scale LR load
+# Scale GR/LR data-movement boundary leaves (rocisa construction in C++)
 # ---------------------------------------------------------------------------
 
-def emitScaleLRLoad(ti, writer, kernel):
-  """Emit ds_read_b32 for all scale groups."""
-  module = Module(f"Scale LR Load ({ti.tc})")
-  tc = ti.tc
+def globalReadDoScaleSubtile(tc, writer, kernel):
+  """Scale GR: load scale bytes global -> LDS via DTL BufferLoadB128.
 
-  if ti.mxBlock == 0:
+  Boundary call: M0 is set to the scale LDS base and sharedVgprGROffset[0]
+  serves as both the global read offset (from SRD) and the LDS write offset
+  (from M0). The rocisa construction lives in the C++ ModuleBuilder.
+  """
+  if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
+    return Module()
+
+  tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
+
+  isGlc = bool(kernel["NonTemporal%s"%tc] & 0x1)
+  isSlc = bool(kernel["NonTemporal%s"%tc] & 0x2)
+  isNT  = bool(kernel["NonTemporal%s"%tc] & 0x4)
+
+  assert len(tileInfo.sharedVgprGROffset) > 0, "Scale GR requires at least 1 GR offset VGPR"
+
+  return _builder().scale_gr_load(tc, isGlc, isSlc, isNT, tileInfo.sharedVgprGROffset[0])
+
+
+def emitScaleDsRead(tc, vdst, addrVgpr, dsOffset, scaleGroupIdx, k=-1):
+  """Scale LR: read 4 scale bytes (one E8M0 group) from LDS via ds_read_b32.
+
+  Boundary call: the destination tile VGPR (vdst), the sharedVgprLROffset[0]
+  address VGPR (addrVgpr), and the constant DS offset are writer-resolved; the
+  rocisa construction lives in the C++ ModuleBuilder. ``k`` carries the K index
+  into the comment for the scheduler emit path (k<0 omits it for the PGR=0
+  path).
+  """
+  return _builder().scale_ds_read(tc, vdst, addrVgpr, dsOffset, scaleGroupIdx, k)
+
+
+def localReadDoScaleSubtile(tc, writer, kernel):
+  """Emit scale ds_reads for all scale groups (PGR=0 path)."""
+  module = Module()
+
+  if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
     return module
 
-  numScaleGroups = (int(ti.lrGlobalSubtileGrid[0]) // ti.waveGroupSize) * int(ti.lrGlobalSubtileGrid[1])
-  groupStride = int(ti.lrSubtileSize)
+  tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
+  if tileInfo.mxBlock == 0:
+    return module
 
+  # TileInfo LR subtile (2,2) already spans 2 M-adjacent tiles -> stride = lrSubtileSize.
+  # Legacy TileInfo subtile (1,2) spans 1 M-tile -> stride = 2 * subtileSize.
+  if hasattr(tileInfo, 'lrSubtileSize'):
+    groupStride = int(tileInfo.lrSubtileSize)
+  else:
+    groupStride = 2 * tileInfo.subtileSize
+
+  # Iterate over scale groups: one ds_read per 2 M-adjacent subtiles
+  numScaleGroups = math.ceil(tileInfo.localSubtileGrid[0] / 2) * tileInfo.localSubtileGrid[1]
   for gid in range(numScaleGroups):
     dsOffset = groupStride * gid
-    vdst = ti.vgprTiles[4 * gid].regList.indices[0]
-    module.add(DSLoadB32(dst=vgpr(vdst),
-               src=vgpr(ti.sharedVgprLROffset[0]),
-               ds=DSModifiers(offset=dsOffset),
-               comment=f"scale{tc}[group{gid}]: 4B from LDS"))
+    vdst = tileInfo.vgprTiles[4 * gid].regList.indices[0]
+    module.add(emitScaleDsRead(tc, vdst, tileInfo.sharedVgprLROffset[0], dsOffset, gid))
 
   return module
 
 
-# ---------------------------------------------------------------------------
-# Scale GR ptr update
-# ---------------------------------------------------------------------------
+def globalReadScalePtrUpdates(tc, writer, kernel):
+  """Advance scale SRD base pointer by one depthU iteration.
 
-def emitScaleGRPtrUpdate(ti, writer, kernel):
-  """Advance scale SRD base pointer by one depthU iteration."""
-  module = Module()
-  tc = ti.tc
+  Boundary call: the byte increment is a writer-resolved scalar; the rocisa
+  SAddU32/SAddCU32 construction lives in the C++ ModuleBuilder.
+  """
+  ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
+  inc = int(ti_.lrSubtileSize * ti_.lrGlobalSubtileGrid[1])
+  return _builder().scale_gr_ptr_update(tc, inc)
 
-  inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
-  module.addComment0("Scale SRD update: %s += %u" % (tc, inc))
-  module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc))
-  module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0))
-  return module
-
-
-# ---------------------------------------------------------------------------
-# Scale LDS buffer swaps
-# ---------------------------------------------------------------------------
 
 def emitScaleGRLDSSwap(ti, writer, kernel):
-  """Toggle scale GR DTL write target between double-buffer halves."""
-  module = Module()
-  tc = ti.tc
-  module.addComment0("Emit code to swap %s GR m0 offsets"%tc)
-  module.add(SXorB32(dst=sgpr(f"LocalWriteBaseAddr{tc}"),
-             src0=sgpr(f"LocalWriteBaseAddr{tc}"), src1=sgpr(f"Swap{tc}"),
-             comment=""))
-  return module
+  """Toggle scale GR DTL write target between double-buffer halves.
+
+  Byte-identical to the AB GR LDS swap; reuses the C++ gr_lds_buffer_swap leaf
+  with the MXSA/MXSB component tag.
+  """
+  return _builder().gr_lds_buffer_swap(ti.tc)
 
 
 def emitScaleLRLDSSwap(ti, writer, kernel):
-  """Toggle scale LR read offsets between double-buffer halves."""
-  module = Module()
-  module.addComment0("Emit code to swap %s LR vgpr offsets"%ti.tc)
-  for i in range(len(ti.sharedVgprLROffset)):
-    vOff  = ti.sharedVgprLROffset[i]
-    vSwap = ti.sharedVgprLROffsetSwap[i]
-    module.add(VXorB32(dst=vgpr(vOff), src0=vgpr(vOff), src1=vgpr(vSwap), comment=""))
-  return module
+  """Toggle scale LR read offsets between double-buffer halves.
+
+  Byte-identical to the AB LR LDS swap; reuses the C++ lr_lds_buffer_swap leaf.
+  The sharedVgprLROffset / sharedVgprLROffsetSwap index lists are writer-owned
+  register state, resolved here.
+  """
+  return _builder().lr_lds_buffer_swap(
+      ti.tc, list(ti.sharedVgprLROffset), list(ti.sharedVgprLROffsetSwap))
 
 
 # =========================================================================
@@ -127,10 +153,11 @@ def emitScaleLRLDSSwap(ti, writer, kernel):
 # count) is computed by the C++ MXScaleTileInfoQuery via
 # TileInfo.scaleGrOffsetAssignPlan / scaleLrOffsetAssignPlan for the gfx950
 # scale geometries (MXFP4 / MXFP8). There is no Python scalar-math twin; the
-# rocisa emission stays here. The plan is integer-typed, which also fixes the
-# legacy float-immediate crash (numThreadsPerGroup derived from the float
-# lrSubtileSize was fed to hex(... - 1) and raised TypeError, so the legacy
-# swizzled-scale GR offset path never actually ran).
+# rocisa emission stays here because it allocates from the writer's register
+# pools. The plan is integer-typed, which also fixes the legacy float-immediate
+# crash (numThreadsPerGroup derived from the float lrSubtileSize was fed to
+# hex(... - 1) and raised TypeError, so the legacy swizzled-scale GR offset path
+# never actually ran).
 # =========================================================================
 
 ##################################################
@@ -296,96 +323,6 @@ def lraTileAssignmentScaleSwizzled(writer, kernel):
       module.add(VXorB32(dst=vgpr(vgprSwapId), src0=vgpr(vgprId), src1=vgpr(vgprSwapId), comment="scale%s: LR swap"%ti_.tc))
   writer.sgprPool.checkIn(tmpSgpr)
   return module
-
-##################################################
-# Scale GR: Load scale bytes from global memory directly to LDS (DTL).
-#
-# Uses BufferLoadB128 with lds=True. M0 is set to scaleLdsBase, and
-# sharedVgprGROffset[0] = serial * scaleLoadWidth serves as both the
-# global read offset (from SRD) and the LDS write offset (from M0).
-def globalReadDoScaleSubtile(tc, writer, kernel):
-  module = Module()
-
-  if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
-    return module
-
-  tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
-
-  isGlc = bool(kernel["NonTemporal%s"%tc] & 0x1)
-  isSlc = bool(kernel["NonTemporal%s"%tc] & 0x2)
-  isNT  = bool(kernel["NonTemporal%s"%tc] & 0x4)
-
-  assert len(tileInfo.sharedVgprGROffset) > 0, "Scale GR requires at least 1 GR offset VGPR"
-
-  module.addComment0("Scale GR: %s (DTL: BufferLoadB128 -> LDS)" % tc)
-
-  # Set M0 to scale LDS base address for DTL write destination
-  module.add(SMovB32(dst=mgpr(0), src=sgpr("LocalWriteBaseAddr%s"%tc),
-                     comment="scale%s: M0 = scaleLdsBase" % tc))
-
-  # DTL load: data goes directly from global memory to LDS (no intermediate VGPR)
-  mubuf = MUBUFModifiers(offen=True, offset12=0, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
-  module.add(BufferLoadB128(dst=None, vaddr=vgpr(tileInfo.sharedVgprGROffset[0]),
-                            saddr=sgpr("Srd%s" % tc, 4), soffset=0, mubuf=mubuf,
-                            comment="scale%s: DTL b128 load" % tc))
-
-  return module
-
-##################################################
-# Scale LR: Read scale data from LDS into scale VGPRs (DSLoadB32).
-#
-# Each lane reads 4 bytes from LDS using ds_read_b32. The base address
-# is sharedVgprLROffset[0] (computed by lraTileAssignmentScaleSwizzled).
-# MMA tile and subtile selection is done via constant ds_offset at emit time.
-#
-# Each 32-bit VGPR holds 4 E8M0 scale bytes; opsel/opsel_hi selects
-# the correct byte per MFMA invocation.
-#
-def emitSubtileScaleDsRead(tc, writer, kernel, scaleGroupIdx):
-  """Emit a single DSLoadB32 for a scale group (2 M-adjacent [1,2] subtiles).
-  Each ds_read_b32 loads 4 bytes = 4 E8M0 scale values into one VGPR."""
-  module = Module()
-  tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
-
-  if tileInfo.mxBlock == 0:
-    return module
-
-  # TileInfo LR subtile (2,2) already spans 2 M-adjacent tiles -> stride = lrSubtileSize.
-  # Legacy TileInfo subtile (1,2) spans 1 M-tile -> stride = 2 * subtileSize.
-  if hasattr(tileInfo, 'lrSubtileSize'):
-    groupStride = int(tileInfo.lrSubtileSize)
-  else:
-    groupStride = 2 * tileInfo.subtileSize
-  dsOffset = groupStride * scaleGroupIdx
-  vdst = tileInfo.vgprTiles[4 * scaleGroupIdx].regList.indices[0]
-  module.add(DSLoadB32(dst=vgpr(vdst),
-                       src=vgpr(tileInfo.sharedVgprLROffset[0]),
-                       ds=DSModifiers(offset=dsOffset),
-                       comment="scale%s[group%u]: load 4B from LDS" % (tc, scaleGroupIdx)))
-  return module
-
-def localReadDoScaleSubtile(tc, writer, kernel):
-  """Emit scale ds_reads for all scale groups (PGR=0 path)."""
-  module = Module()
-
-  if not kernel["ProblemType"].get("MXBlockA", 0) and not kernel["ProblemType"].get("MXBlockB", 0):
-    return module
-
-  tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
-
-  # Iterate over scale groups: one ds_read per 2 M-adjacent subtiles
-  numScaleGroups = math.ceil(tileInfo.localSubtileGrid[0] / 2) * tileInfo.localSubtileGrid[1]
-  for gid in range(numScaleGroups):
-    module.add(emitSubtileScaleDsRead(tc, writer, kernel, gid))
-
-  return module
-
-##################################################
-# Scale SRD pointer update: advance scale SRD by scaleDepthU * scaleBpe bytes.
-#
-def globalReadScalePtrUpdates(tc, writer, kernel):
-  ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
-  return emitScaleGRPtrUpdate(ti_, writer, kernel)
 
 ##################################################
 # Subroutine to generate DTL M0 LDS buffer swap

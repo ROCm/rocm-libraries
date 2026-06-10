@@ -17,15 +17,15 @@ from Tensile.Components.Subtile.SubtileLREmit import (
     emitSingleDsRead, localReadLDSBufferSwap,
 )
 from Tensile.Components.Subtile.SubtileScaleEmit import (
-    globalReadDoScaleSubtile, globalReadScalePtrUpdates,
+    globalReadDoScaleSubtile, globalReadScalePtrUpdates, emitScaleDsRead,
 )
 from rocisa.code import Module
 from rocisa.instruction import (
-    SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32,
+    SWaitCnt, SBarrier, SCmpEQU32, SCmpLeU32,
     SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
     VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32, VSubI32,
 )
-from rocisa.container import vgpr, sgpr, DSModifiers, ContinuousRegister
+from rocisa.container import vgpr, sgpr, ContinuousRegister
 from rocisa.code import Label
 
 
@@ -172,11 +172,9 @@ class InstructionEmitter:
                 numKGroups = ti.lrLocalSubtileGrid[1]
                 dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
-                module.add(DSLoadB32(
-                    dst=vgpr(vdst),
-                    src=vgpr(ti.sharedVgprLROffset[0]),
-                    ds=DSModifiers(offset=dsOffset),
-                    comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
+                module.add(emitScaleDsRead(
+                    tc, vdst, ti.sharedVgprLROffset[0], dsOffset, scaleGroupIdx,
+                    placement.tiles.subIterK_start))
         return list(module.flatitems())
 
     def emit_gr(self, placement):
