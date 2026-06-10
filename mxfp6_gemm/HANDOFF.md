@@ -18,10 +18,9 @@ needed dedicated 18/20-acc mixed tiles — the hybrid paradigm wins those outrig
 Tile routing (`choose_tile`):
 - **256×256** (16-acc arithmetic-intensity sweet spot) — workhorse for every shape whose
   256×256 grid fills the machine (WG ≥ #CU).
-- **128×256** (8-acc, **occ2**) — ONLY for WG-starved small-M shapes (256×256 grid < #CU);
-  halves the M-tile to fill CUs, AND runs at occ2 (MIN_OCC=2 → 251 VGPR, 2 waves/SIMD, 0 spill)
-  for WG-boundary pipelining (one WG's epilogue HBM drain overlaps the next WG's compute):
-  +0.6~9.7% over occ1, biggest at 256-WG shapes (2048×4096). Same kernel, different tile args.
+- **128×256** (8-acc) — ONLY for WG-starved small-M shapes (256×256 grid < #CU); halves the
+  M-tile to double WG count and fill idle CUs. Same kernel, different tile args. (occ1 — an
+  occ2 variant was tried and is steady-state-neutral; see dead-ends.)
 
 ---
 
@@ -77,6 +76,10 @@ Build & run: `make test_dispatch && ./test_dispatch`
 
 ## Performance (FP16, vs v18 best-per-shape, same machine 2026-06-10)
 
+⚠️ The hybrid column below is from the original 12-shape sweep where small-M shapes ran first
+on a still-ramping GPU (cold-biased). Steady-state re-measurement (see vs-CK table) is higher
+for those, e.g. 2048×4096 = 1686 steady vs 1517 swept. Trends/ratios hold either way.
+
 | shape | v18 best | hybrid | Δ | tile |
 |---|---|---|---|---|
 | 8192×8192 | 1835 | 2231 | +22% | 256×256 |
@@ -88,26 +91,27 @@ Build & run: `make test_dispatch && ./test_dispatch`
 | 4096×5120 | 1570 | 1670 | +6% | 256×256 |
 | 4096×4096 | 1652 | 1976 | +20% | 256×256 |
 | 2048×8192 | 1679 | 1906 | +14% | 256×256 |
-| 2048×4096 | 997 | 1517 | +52% | 128×256 (occ2) |
-| 2048×2048 | 516 | 1014 | +96% | 128×256 (occ2) |
-| 1024×4096 | 678 | 848 | +25% | 128×256 (occ2) |
+| 2048×4096 | 997 | 1517† | +52% | 128×256 |
+| 2048×2048 | 516 | 1014† | +96% | 128×256 |
+| 1024×4096 | 678 | 848† | +25% | 128×256 |
 
-(Absolute TFLOPs swing ±10% run-to-run from the SCLK/1000W power cap; ratios/trends are
-stable. The small-M occ2 win is +6~10% measured *same-run* vs occ1, which is partly masked
-in cross-run absolute tables by the ±10% cap swing — so 2048×4096 here (1517) looks close to
-its occ1 value even though occ2 is the faster default.)
+† cold-biased swept value; steady-state is higher (2048×4096 ≈ 1686, 2048×2048 ≈ 1047).
+Absolute TFLOPs also swing ±10% run-to-run from the SCLK/1000W power cap; warm up to steady
+state before comparing. The vs-CK table below is all steady-state.
 
-## vs CK (same machine + same run 2026-06-10, K=8192, `tile_example_mx_flatmm`, FP16, occ2 dispatcher)
+## vs CK (same machine 2026-06-10, K=8192, `tile_example_mx_flatmm`, FP16, **steady-state**, all warmed)
 
 | shape | CK FP8 | CK FP6 | ours FP6 | ours / CK-FP6 | ours / CK-FP8 |
 |---|---|---|---|---|---|
-| 2048×4096 | 1443 | 1012 | 1517 | 1.50× | 1.05× |
-| 2048×8192 | 1603 | 1068 | 1994 | 1.87× | 1.24× |
-| 4096×4096 | 1581 | 1071 | 2096 | 1.96× | 1.33× |
-| 4096×8192 | 1703 | 1096 | 2178 | 1.99× | 1.28× |
-| 8192×8192 | 1802 | 1109 | 2238 | 2.02× | 1.24× |
+| 2048×4096 | 1608 | 1019 | 1686 | 1.66× | 1.05× |
+| 2048×8192 | 1757 | 1079 | 2053 | 1.90× | 1.17× |
+| 4096×4096 | 1759 | 1079 | 2185 | 2.03× | 1.24× |
+| 4096×8192 | 1820 | 1097 | 2214 | 2.02× | 1.22× |
+| 8192×8192 | 1843 | 1109 | 2234 | 2.21× | 1.21× |
 
-**Same-precision ~2× CK MXFP6; and our FP6 beats CK's FP8 by 1.06~1.35×.** On this machine CK
+(ours = median of 25 windows after 120 warm iters; CK = warmup=100 repeat=100.)
+
+**Same-precision 1.66~2.21× CK MXFP6; and our FP6 beats CK's FP8 by 1.05~1.24×.** On this machine CK
 FP8 > FP6 (FP6 pinned by the 1000W power cap + CK's 16×16×128). NOTE: an external 2026-05-04
 table showed CK FP6 (3200) > FP8 (3019) at much higher absolutes — that is a *different
 machine / CK build* (no power cap); do NOT compare its numbers to this machine's.
@@ -118,11 +122,12 @@ machine / CK build* (no power cap); do NOT compare its numbers to this machine's
 - ⚠️ `k_tiles==1` needs `wait_vmcnt(0)` in the odd-tail (no compute-window margin) — present.
 
 ## Dead ends — do NOT re-try without a new idea
-- **occ2 by shrinking acc (16→≤6):** −14~30% (strength collapse, latency→bandwidth wall). The
-  256×256 16-acc workhorse is occ1-locked (507 VGPR) and must stay so. BUT — occ2 is NOT a
-  blanket dead end: the 8-acc **128×256 small-M tile DOES win at occ2** (forced via MIN_OCC=2 →
-  251 VGPR, 0 spill; WG-boundary pipelining, +0.6~9.7%) and is now the default for that path.
-  Rule: occ2 helps exactly when it costs no arithmetic strength.
+- **occ2, both ways:** (a) by shrinking acc (16→≤6): −14~30% (strength collapse, latency→
+  bandwidth wall). (b) the 8-acc 128×256 small-M tile CAN be forced to occ2 (MIN_OCC=2 → 251
+  VGPR, 0 spill) without losing strength — but **steady-state it's ~0%** (a 256-WG shape has no
+  2nd WG to fill the occ2 slot). An earlier "+6~10%" was a warm-up artifact (always timing occ1
+  first on a ramping GPU). Reverted to occ1. The 256×256 workhorse is occ1-locked anyway (507
+  VGPR). Lesson: warm to steady state AND alternate A/B/A/B before trusting an occ delta.
 - **split-K for small-M:** atomic崩 (298); deterministic (partial buffer + reduce) only +6% —
   the reduce + short-K fixed-overhead eat the fill-CU gain. 128×256 (+25%) beats it.
 - **persistent / epilogue-overlap:** the epilogue store drain shares the HW vmcnt with B-direct's
