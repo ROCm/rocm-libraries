@@ -51,6 +51,11 @@ from grouped_conv.grouped_config_rules_full import (
     is_valid_pipeline_for_variant,
     is_streamk_valid_for_variant,
 )
+from grouped_conv.grouped_config_rules_default import (
+    check_wmma_instance,
+    check_wmma_native_warp_tile,
+    get_warp_size,
+)
 
 
 # ============================================================================
@@ -352,6 +357,27 @@ class GroupedConvKernelConfig:
                 return False
         except ImportError:
             pass  # Allow if arch_specs not available
+
+        warp_size = get_warp_size(target_arch)
+        t = self.tile
+
+        # WMMA-specific constraints for warp_size=32 targets (gfx11/gfx12)
+        if not check_wmma_instance(
+            warp_size=warp_size,
+            k_per_block=t.tile_k,
+            k_warp=t.warp_k,
+            k_per_xdl=t.warp_tile_k,
+            m_per_xdl=t.warp_tile_m,
+            dtype=self.datatype if self.datatype is not None else "float",
+        ):
+            return False
+
+        # Native warp-tile constraint: stream-K unsupported on warp_size=32
+        if not check_wmma_native_warp_tile(
+            warp_size=warp_size,
+            streamk_enabled=tr.streamk_config.streamk_enabled,
+        ):
+            return False
 
         return True
 
@@ -2318,7 +2344,7 @@ def main():
         "-a",
         type=str,
         default="gfx942",
-        choices=["gfx90a", "gfx942", "gfx950", "gfx1201"],
+        choices=["gfx90a", "gfx942", "gfx950", "gfx1201", "gfx1250"],
         help="Target GPU architecture",
     )
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
