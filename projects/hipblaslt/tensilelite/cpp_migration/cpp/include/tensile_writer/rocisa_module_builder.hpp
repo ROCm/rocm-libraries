@@ -45,6 +45,7 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
+#include <cassert>
 #include <optional>
 #include <string>
 #include <vector>
@@ -292,6 +293,8 @@ class ModuleBuilder {
   nb::object lr_lds_buffer_swap(const std::string& tc,
                                 const std::vector<int>& voffs,
                                 const std::vector<int>& vswaps) const {
+    assert(voffs.size() == vswaps.size() &&
+           "lr_lds_buffer_swap requires voffs and vswaps to have equal length");
     nb::object mod = module();
     add_comment0(mod, "Emit code to swap " + tc + " LR vgpr offsets");
     for (size_t i = 0; i < voffs.size(); ++i) {
