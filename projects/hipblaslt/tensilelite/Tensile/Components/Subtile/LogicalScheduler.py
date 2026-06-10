@@ -1057,35 +1057,20 @@ class LogicalScheduler:
 
         emitted_3d: [partition][subIterK][EmittedModule]
 
-        When schedule=True and a group has MFMAs, calls
-        instructionScheduleFromLists for interleaving with on-demand per-module
-        emission (no pre-populated em.instructions required).
-        When schedule=False, emits instructions sequentially.
-        Both paths dispatch through self._emitter.emit_module.
+        Delegates to the C++ loop_orchestrator.emit_loop, which iterates the
+        3D structure and calls self._emitter.emit_module per EmittedModule,
+        routing through instructionScheduleFromLists when schedule=True.
         """
         from Tensile.Components.Subtile.InstructionScheduler import (
             instructionScheduleFromLists,
         )
-        from rocisa.code import Module
+        from tensile_writer.subtile.loop_orchestrator import emit_loop
+        from tensile_writer.subtile.module_builder import ModuleBuilder
 
-        module = Module(label)
-        module.addComment0(f"{label} start")
-        for pi, partition_emitted in enumerate(emitted_3d):
-            for k, em_list in enumerate(partition_emitted):
-                module.addComment0(f"partition={pi} subIterK={k}")
-                if schedule and em_list:
-                    inst_lists = [
-                        self._emitter.emit_module(em, unroll_iter)
-                        for em in em_list
-                    ]
-                    scheduled = instructionScheduleFromLists(em_list, inst_lists)
-                    module.add(scheduled)
-                else:
-                    for em in em_list:
-                        for inst in self._emitter.emit_module(em, unroll_iter):
-                            module.add(inst)
-        module.addComment0(f"{label} end")
-        return module
+        builder = ModuleBuilder()
+        return emit_loop(
+            builder, self._emitter.emit_module, instructionScheduleFromLists,
+            emitted_3d, label, unroll_iter, schedule)
 
     def emitMainAndExitLoops(self, writer, kernel):
         """Emit preloop + mainloop + NGLL + NLL exit paths (no tail).
@@ -1096,106 +1081,33 @@ class LogicalScheduler:
         NGLL→NLL pair. The tail loop is emitted separately by emitTailLoop()
         so the orchestrator (Subtile.Kernel.mainLoop) can wrap it with the
         runtime K%DU counter setup and skip branch.
+
+        Delegates structural control flow to the C++ loop_orchestrator.
         """
-        from rocisa.code import Module, Label
-        from rocisa.instruction import (SSubU32, SCmpEQU32, SCBranchSCC0,
-                                        SCBranchSCC1, SBranch)
-        from rocisa.container import sgpr
+        from Tensile.Components.Subtile.InstructionScheduler import (
+            instructionScheduleFromLists,
+        )
+        from tensile_writer.subtile.loop_orchestrator import (
+            emit_main_and_exit_loops,
+        )
+        from tensile_writer.subtile.module_builder import ModuleBuilder
 
         assert Pass.POPULATE in self._completed, \
             "populate_instructions() must be called before emitMainAndExitLoops()"
 
-        module = Module("MainAndExitLoops")
-        uf = self.unroll_factor
-
-        # ── Skip preloop/mainloop/NGLL/NLL when K < DepthU ──
-        endLabel = Label("SkipToEnd", "")
-        if not kernel["NoTailLoop"]:
-            module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
-                                 comment="K < DepthU? skip to tail loop"))
-            module.add(SCBranchSCC1(labelName=endLabel.getLabelName(),
-                                    comment="K < DepthU: only tail loop runs"))
-
-        # ── Preloop ──
-        module.add(self._emitLoop(writer, kernel, "PRELOOP",
-                                  self._preloop_emitted, unroll_iter=0,
-                                  schedule=False))
-
-        # ── Mainloop ──
-        module.addComment0("MAINLOOP")
-        loopBegin = Label("LoopBeginL", "")
-
-        exitValue = self.config.pgr
-
-        exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
-        module.add(loopBegin)
-        for ui in range(uf):
-            module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
-                                      self._emitted, unroll_iter=ui))
-            module.add(SSubU32(dst=sgpr("LoopCounterL"),
-                               src0=sgpr("LoopCounterL"), src1=1,
-                               comment=f"dec counterL (copy {ui})"))
-            module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
-                                 comment=f"counterL == {exitValue}? (copy {ui} exit)"))
-            if ui < uf - 1:
-                module.add(SCBranchSCC1(
-                    labelName=exitLabels[ui].getLabelName(),
-                    comment=f"copy {ui} exit → NGLL_C{ui}"))
-            else:
-                module.add(SCBranchSCC0(
-                    labelName=loopBegin.getLabelName(),
-                    comment="restart mainloop"))
-
-        # ── NGLL + NLL exit paths ──
-        hasNGLL = self.config.pgr >= 2
-        module.add(Label("SkipMainloop", ""))
-        if hasNGLL:
-            module.add(Label("SkipToNGLL", ""))
-
-        # After mainloop C{ui}, data in LDS/vgprs corresponds to
-        # unroll_iter = (ui + pgr) % uf for NLL, (ui + 1) % uf for NGLL.
-        # NLLEarly (preloop skip) needs unroll_iter=0, i.e. NLL with index 0.
-        # We place SkipToNLL before whichever NLL block uses index 0.
-        pgr = self.config.pgr
-        last = uf - 1
-
-        # Fall-through from last mainloop copy
-        nll_ft = (last + pgr) % uf
-        if hasNGLL:
-            module.addComment0(f"NGLL_C{last}")
-            module.add(self._emitLoop(writer, kernel, f"NGLL_C{last}",
-                                      self._ngll_emitted,
-                                      unroll_iter=(last + 1) % uf))
-        if nll_ft == 0:
-            module.add(Label("SkipToNLL", ""))
-        module.addComment0(f"NLL_C{last}")
-        module.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
-                                  self._nll_emitted,
-                                  unroll_iter=nll_ft))
-        module.add(SBranch(labelName=endLabel.getLabelName(),
-                           comment="skip other exit paths"))
-
-        for ui in range(uf - 1):
-            nll_idx = (ui + pgr) % uf
-            module.add(exitLabels[ui])
-            if hasNGLL:
-                module.addComment0(f"NGLL_C{ui}")
-                module.add(self._emitLoop(writer, kernel, f"NGLL_C{ui}",
-                                          self._ngll_emitted,
-                                          unroll_iter=(ui + 1) % uf))
-            if nll_idx == 0:
-                module.add(Label("SkipToNLL", ""))
-            module.addComment0(f"NLL_C{ui}")
-            module.add(self._emitLoop(writer, kernel, f"NLL_C{ui}",
-                                      self._nll_emitted,
-                                      unroll_iter=nll_idx))
-            if ui < uf - 2:
-                module.add(SBranch(labelName=endLabel.getLabelName(),
-                                   comment="skip other exit paths"))
-
-        module.add(endLabel)
-
-        return module
+        builder = ModuleBuilder()
+        return emit_main_and_exit_loops(
+            builder,
+            self._emitter.emit_module,
+            instructionScheduleFromLists,
+            self._preloop_emitted,
+            self._emitted,
+            self._ngll_emitted,
+            self._nll_emitted,
+            bool(kernel["NoTailLoop"]),
+            self.config.pgr,
+            self.unroll_factor,
+        )
 
     def emitTailLoop(self, writer, kernel):
         """Emit the tail loop body only (no counter setup, no skip branch).
@@ -1204,32 +1116,46 @@ class LogicalScheduler:
         responsible for emitting calculateLoopNumIter(-1) before this and
         closeLoop(emitEndLabelOnly=True) after, mirroring the legacy
         KernelWriter pattern.
+
+        Delegates structural emission to the C++ loop_orchestrator.
         """
+        from rocisa.code import Module
+        from tensile_writer.subtile.loop_orchestrator import emit_tail_loop
+        from tensile_writer.subtile.module_builder import ModuleBuilder
+
         assert Pass.POPULATE in self._completed, \
             "populate_instructions() must be called before emitTailLoop()"
 
-        module = Module("TailLoop")
-
         if kernel["NoTailLoop"]:
-            return module
+            return Module("TailLoop")
 
-        module.addComment0("TAILLOOP")
         # Swap to the flat tail vgpr tile layout. Frees the mainloop's
         # per-partition tiles back to the pool and reallocates a flat set
         # sized by _compute_flat_tail_tile_state (already invoked by
         # build_tailloop_pgr0; peaks stashed on self._flat_tail_peaks).
         self._realloc_tail_tiles_flat(writer, self._flat_tail_peaks)
-        # init must run before the loop body so each MaskKOp can read
-        # the mask vgprs (kReg, vDiff, …) that init allocates.
-        for inst in self._emitter.emit_mask_k_init():
-            module.add(inst)
-        module.add(self._emitLoop(writer, kernel, "TAILLOOP",
-                                  self._tailloop_emitted,
-                                  unroll_iter=0,
-                                  schedule=False))
-        for inst in self._emitter.emit_mask_k_done():
-            module.add(inst)
-        return module
+
+        # emit_mask_k_init allocates the mask VGPRs (_tail_vDiff etc.) and
+        # yields instructions that load per-lane invariants.  These VGPRs
+        # must stay live through the loop body (emit_loop calls emit_module
+        # for each MaskKOp which reads _tail_vDiff).
+        # emit_mask_k_done always returns [] but frees those VGPRs; it MUST
+        # run AFTER the loop body, not before.
+        mask_k_init_items = list(self._emitter.emit_mask_k_init())
+
+        builder = ModuleBuilder()
+        result = emit_tail_loop(
+            builder,
+            self._emitter.emit_module,
+            self._tailloop_emitted,
+            mask_k_init_items,
+            [],  # emit_mask_k_done always returns [] — cleanup runs below
+        )
+
+        # Release the tail-loop mask VGPRs after the loop body has used them.
+        self._emitter.emit_mask_k_done()
+
+        return result
 
     # ── VGPR tile allocation ──────────────────────────────
 

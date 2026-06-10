@@ -1002,39 +1002,26 @@ class RegisterTileInfo:
     return str(self.regList)
 
 
-def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
-  """Zero a contiguous register range using MFMA for blocks of 16, scalar writes for remainder."""
-  tileAlias = accvgpr if isAgpr else vgpr
-  tileCopyInst = VAccvgprWrite if isAgpr else VMovB32
-  regsPerMfma = 16
-  numMfma = totalRegs // regsPerMfma
-
-  if numMfma > 0:
-    tmpVgpr = writer.vgprPool.checkOutAligned(2, 2)
-    module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment=""))
-    module.add(SNop(waitState=1, comment="wait for vgpr to be ready before MFMA"))
-    for i in range(numMfma):
-      r = firstReg + i * regsPerMfma
-      module.add(MFMAInstruction(instType=InstType.INST_I8, accType=InstType.INST_I32,
-                                 variant=[32, 32, 16, 1], mfma1k=False,
-                                 acc=tileAlias(r, regsPerMfma),
-                                 a=vgpr(tmpVgpr, 2), b=vgpr(tmpVgpr, 2),
-                                 acc2=0,
-                                 comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerMfma - 1)))
-    writer.vgprPool.checkIn(tmpVgpr)
-
-  for i in range(numMfma * regsPerMfma, totalRegs):
-    module.add(tileCopyInst(dst=tileAlias(firstReg + i), src=0, comment="init%s"%(tileInfo.tc)))
-
 def initVgprTilesToZero(writer, kernel, tileInfo):
-  """Initialize vgprTiles to zero using MFMA for blocks of 16, scalar writes for remainder."""
-  module = Module()
-  module.addComment0("Init %s vgprTiles to zero"%(tileInfo.tc))
+  """Initialize vgprTiles to zero using MFMA for blocks of 16, scalar writes for remainder.
+
+  Delegates rocisa instruction construction to the C++ loop_orchestrator.
+  Python resolves pool identity (AGPR vs VGPR) and pre-allocates the tmpVgpr
+  pairs needed for the MFMA zero-init path; C++ uses the indices but does not
+  call checkOut/checkIn.  Returns the rocisa Module from C++ directly.
+  """
+  from tensile_writer.subtile.loop_orchestrator import init_vgpr_tiles_to_zero
+  from tensile_writer.subtile.module_builder import ModuleBuilder
+
+  builder = ModuleBuilder()
 
   if not tileInfo.vgprTiles:
-    return module
+    return init_vgpr_tiles_to_zero(builder, tileInfo.tc, [])
 
-  # Group contiguous tiles by pool type (agpr vs vgpr) since D tiles can use both
+  # Group contiguous vgprTiles by pool type (agpr vs vgpr); D tiles can use both.
+  # Python resolves pool identity here; C++ receives plain
+  # (firstReg, totalRegs, isAgpr, tmpVgpr) tuples.
+  groups = []
   firstReg = tileInfo.vgprTiles[0].regList.indices[0]
   totalRegs = 0
   curPool = tileInfo.vgprTiles[0].regList.pool
@@ -1043,16 +1030,32 @@ def initVgprTilesToZero(writer, kernel, tileInfo):
     pool = tile.regList.pool
     numRegs = len(tile.regList.indices)
     if pool != curPool:
-      _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool)
+      groups.append((firstReg, totalRegs, curPool == writer.agprPool))
       firstReg = tile.regList.indices[0]
       totalRegs = numRegs
       curPool = pool
     else:
       totalRegs += numRegs
+  groups.append((firstReg, totalRegs, curPool == writer.agprPool))
 
-  _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool)
+  # Pre-allocate tmpVgpr pairs for groups that will use MFMA zero-init
+  # (groups with totalRegs >= 16).
+  reg_groups = []
+  tmp_vgprs = []
+  for firstReg, totalRegs, isAgpr in groups:
+    if totalRegs >= 16:
+      tmpVgpr = writer.vgprPool.checkOutAligned(2, 2)
+      tmp_vgprs.append(tmpVgpr)
+    else:
+      tmpVgpr = -1
+    reg_groups.append((firstReg, totalRegs, isAgpr, tmpVgpr))
 
-  return module
+  result = init_vgpr_tiles_to_zero(builder, tileInfo.tc, reg_groups)
+
+  for tmpVgpr in tmp_vgprs:
+    writer.vgprPool.checkIn(tmpVgpr)
+
+  return result
 
 # ---------------------------------------------------------------------------
 # Pick the MXMFMAInstruction instType for the V_MFMA_SCALE_F32_<MxNxK>_F8F6F4

@@ -7,6 +7,7 @@ from . import emit  # noqa: F401
 from . import geometry  # noqa: F401
 from . import instruction_scheduler  # noqa: F401
 from . import logical_scheduler  # noqa: F401
+from . import loop_orchestrator  # noqa: F401
 from . import module_builder  # noqa: F401
 from . import tile_info  # noqa: F401
 
@@ -15,6 +16,7 @@ __all__ = [
     "geometry",
     "instruction_scheduler",
     "logical_scheduler",
+    "loop_orchestrator",
     "module_builder",
     "tile_info",
 ]

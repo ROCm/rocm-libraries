@@ -27,17 +27,20 @@
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
 #include <nanobind/stl/variant.h>
 #include <nanobind/stl/vector.h>
 
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "tensile_writer/emit_leaves.hpp"
 #include "tensile_writer/instruction_scheduler.hpp"
 #include "tensile_writer/logical_scheduler.hpp"
 #include "tensile_writer/logical_scheduler_passes.hpp"
+#include "tensile_writer/loop_orchestrator.hpp"
 #include "tensile_writer/rocisa_module_builder.hpp"
 #include "tensile_writer/subtile_geometry.hpp"
 #include "tensile_writer/tile_info.hpp"
@@ -1113,6 +1116,93 @@ void bind_rocisa_module_builder(nb::module_& b) {
       ;
 }
 
+// ---------------------------------------------------------------------------
+// Loop orchestrator bindings (emit_loop, emit_main_and_exit_loops,
+// emit_tail_loop, init_vgpr_tiles_to_zero).
+//
+// Ports the structural loop-emission layer from LogicalScheduler.py
+// (_emitLoop, emitMainAndExitLoops, emitTailLoop) and the VGPR tile
+// zero-init utility from Kernel.py (initVgprTilesToZero + _zeroRegRange)
+// to C++.  Each binding creates a temporary LoopOrchestrator, calls the
+// requested method, and returns the resulting rocisa Module.  Per-leaf
+// instruction emission (InstructionEmitter.emit_module) and scheduling
+// (instructionScheduleFromLists) remain Python callables passed in from
+// the LogicalScheduler wrapper.
+// ---------------------------------------------------------------------------
+void bind_loop_orchestrator(nb::module_& b) {
+  using LO = tw::subtile::loop_orch::LoopOrchestrator;
+  using MB = tw::subtile::rocisa_builder::ModuleBuilder;
+  using RegGroups = std::vector<std::tuple<int, int, bool, int>>;
+
+  b.def(
+      "emit_loop",
+      [](MB& builder, nb::object emit_fn, nb::object schedule_fn,
+         nb::object emitted_3d, const std::string& label, int unroll_iter,
+         bool schedule) -> nb::object {
+        LO orch(builder, emit_fn, schedule_fn);
+        return orch.emit_loop(emitted_3d, label, unroll_iter, schedule);
+      },
+      nb::arg("builder"), nb::arg("emit_fn"), nb::arg("schedule_fn"),
+      nb::arg("emitted_3d"), nb::arg("label"), nb::arg("unroll_iter") = 0,
+      nb::arg("schedule") = true,
+      "C++ port of LogicalScheduler._emitLoop: emit a loop section from a "
+      "3D [partition][subIterK][EmittedModule] Python list structure. "
+      "emit_fn is InstructionEmitter.emit_module; schedule_fn is "
+      "instructionScheduleFromLists. Returns a rocisa Module.");
+
+  b.def(
+      "emit_main_and_exit_loops",
+      [](MB& builder, nb::object emit_fn, nb::object schedule_fn,
+         nb::object preloop_emitted, nb::object emitted,
+         nb::object ngll_emitted, nb::object nll_emitted, bool no_tail_loop,
+         int pgr, int unroll_factor) -> nb::object {
+        LO orch(builder, emit_fn, schedule_fn);
+        return orch.emit_main_and_exit_loops(preloop_emitted, emitted,
+                                              ngll_emitted, nll_emitted,
+                                              no_tail_loop, pgr, unroll_factor);
+      },
+      nb::arg("builder"), nb::arg("emit_fn"), nb::arg("schedule_fn"),
+      nb::arg("preloop_emitted"), nb::arg("emitted"), nb::arg("ngll_emitted"),
+      nb::arg("nll_emitted"), nb::arg("no_tail_loop"), nb::arg("pgr"),
+      nb::arg("unroll_factor"),
+      "C++ port of LogicalScheduler.emitMainAndExitLoops: optional K<DepthU "
+      "skip, PRELOOP, MAINLOOP (with optional unrolling), NGLL (pgr>=2), and "
+      "NLL exit paths. Tail loop is emitted separately. Returns a rocisa "
+      "Module named 'MainAndExitLoops'.");
+
+  b.def(
+      "emit_tail_loop",
+      [](MB& builder, nb::object emit_fn, nb::object tailloop_emitted,
+         nb::object mask_k_init_items,
+         nb::object mask_k_done_items) -> nb::object {
+        LO orch(builder, emit_fn, nb::none());
+        return orch.emit_tail_loop(tailloop_emitted, mask_k_init_items,
+                                    mask_k_done_items);
+      },
+      nb::arg("builder"), nb::arg("emit_fn"), nb::arg("tailloop_emitted"),
+      nb::arg("mask_k_init_items"), nb::arg("mask_k_done_items"),
+      "C++ port of the structural part of LogicalScheduler.emitTailLoop: "
+      "TAILLOOP comment, mask_k_init instructions, the TAILLOOP body "
+      "(unscheduled), and mask_k_done instructions. Caller is responsible "
+      "for the NoTailLoop guard, _realloc_tail_tiles_flat, and collecting "
+      "the init/done item lists from the Python InstructionEmitter. Returns "
+      "a rocisa Module named 'TailLoop'.");
+
+  b.def(
+      "init_vgpr_tiles_to_zero",
+      [](MB& builder, const std::string& tc,
+         const RegGroups& reg_groups) -> nb::object {
+        LO orch(builder, nb::none(), nb::none());
+        return orch.init_vgpr_tiles_to_zero(tc, reg_groups);
+      },
+      nb::arg("builder"), nb::arg("tc"), nb::arg("reg_groups"),
+      "C++ port of Kernel.initVgprTilesToZero + _zeroRegRange: zero vgpr/agpr "
+      "tile registers using MFMA I8 (blocks of 16) and scalar VMovB32 / "
+      "VAccvgprWrite (remainder). reg_groups is a list of "
+      "(firstReg, totalRegs, isAgpr, tmpVgpr) tuples; tmpVgpr=-1 forces the "
+      "scalar-only path for that group. Returns a rocisa Module.");
+}
+
 }  // namespace
 
 NB_MODULE(_tensile_writer, m) {
@@ -1167,4 +1257,15 @@ NB_MODULE(_tensile_writer, m) {
       "re-implementing rocisa. Unlike the other submodules here it is NOT "
       "data-only — it builds and returns real rocisa objects.");
   bind_rocisa_module_builder(rocisa_builder);
+
+  nb::module_ loop_orchestrator = subtile.def_submodule(
+      "loop_orchestrator",
+      "C++ port of the structural loop-emission layer from "
+      "LogicalScheduler.py (_emitLoop, emitMainAndExitLoops, emitTailLoop) "
+      "and the VGPR tile zero-init utility from Kernel.py "
+      "(initVgprTilesToZero + _zeroRegRange). Per-leaf instruction emission "
+      "remains in Python (InstructionEmitter.emit_module); only the control-"
+      "flow structure (labels, branches, loop counter management) and the "
+      "register-zero pattern move to C++.");
+  bind_loop_orchestrator(loop_orchestrator);
 }
