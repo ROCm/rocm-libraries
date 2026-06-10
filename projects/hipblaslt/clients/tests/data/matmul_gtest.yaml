@@ -2902,7 +2902,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
   threads_streams: *common_threads_streams
-  gpu_arch: '9(50|42)'
+  gpu_arch: '9(42|50)'
 
 # Subtile MXFP4 tests (gfx950)
 # All use preswizzled scales (scaleA/B: 1001 = Block_32_UE8M0_32_8_EXT)
