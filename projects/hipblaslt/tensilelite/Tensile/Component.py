@@ -246,6 +246,11 @@ class SumUnroll(Component):
     def storeSumLDS(self, writer, kernel, tP):
         pass
 
+class ShiftVectorComponents(Component):
+    """
+    Shift vector components block.
+    """
+
 class ComputeStoreVgprs(Component):
     """
     Compute store vgprs block.
