@@ -63,8 +63,22 @@ __device__ __forceinline__ void issue_A_chunks(uint32_t lds_base, int row_stride
 // cooperative buffer_loads for the NEXT tile are dripped across THIS tile's MFMA quartets
 // instead of bursted. HARD_WAIT=true puts wait_vmcnt(0) before each DB barrier (hard RAW
 // guarantee for the dripped A; cheap because A is issued early). SHUF is forced true.
+// A-drip schedule knob (LINEAR): which MFMA quartet issues which A chunks.
+//   ADRIP_START : first quartet that issues A chunks (skip the sub-head-stall quartets)
+//   ADRIP_STRIDE: quartets between successive issuing quartets (1 = consecutive)
+//   ADRIP_PER   : A chunks issued per issuing-quartet (>=2 finishes A earlier => more RAW
+//                 margin, but MORE issue backpressure/point -- measured NET LOSS, keep =1)
+//   ADRIP_STOP  : last quartet (exclusive) allowed to issue (<=0 => NB; tail protection)
+// issue_A_chunks(...,a0,a1) with a0==a1 emits nothing; all predicates fold to constants
+// (p is the #pragma-unroll index) => branch-free, zero runtime/register cost.
+//
+// DEFAULTS are the tuned best @8192^3 (~2290 TFLOPs, +24% vs pure-LDS baseline):
+//   PFD=5 (B-ring sweet spot), ADRIP_START=1 (skip the p=0 sub-head 302cyc/hit hotspot),
+//   STRIDE=1, PER=1, STOP=NB. ADRIP_START=0 reproduces the original front-loaded schedule;
+//   batching (PER>=2) was swept and lost. swz0 stays best for drip-A (swz32 did not help).
 template <int M_TILE, int N_TILE, int K_TILE, int WAVES_M, int WAVES_N, int MIN_OCC = 1,
-          int SWZ = 0, bool DB = true, typename OutT = float, int PFD = 6, bool HARD_WAIT = true>
+          int SWZ = 0, bool DB = true, typename OutT = float, int PFD = 5, bool HARD_WAIT = true,
+          int ADRIP_START = 1, int ADRIP_STRIDE = 1, int ADRIP_PER = 1, int ADRIP_STOP = 0>
 __global__ void __launch_bounds__(256, MIN_OCC)
     lds_gemm_hybrid_dripA(const void* __restrict__ A, const void* __restrict__ B,
                           const uint8_t* __restrict__ sA, const uint8_t* __restrict__ sB,
@@ -150,9 +164,18 @@ __global__ void __launch_bounds__(256, MIN_OCC)
                 bring[(p + PFD) % PFD] = load_b_shuf(reinterpret_cast<const char*>(B), k_iters, wg_n * N_BLKS + nblk, kt_cur * K64_PER_TILE + ns, lane);
                 sbring[(p + PFD) % PFD] = (sb[ns][nn / 4] >> (8 * (nn % 4))) & 0xff;
             }
-            // DRIP A: one chunk per quartet for the first ISSUES_A quartets (early => margin)
-            if (adrip && p < ISSUES_A)
-                issue_A_chunks<ROW_CHUNKS>(nxt_base, A_row_bytes, kb_nxt, wave, lane, arsrc, p, p + 1);
+            // DRIP A (tunable LINEAR schedule; default = 1 chunk/quartet front-loaded)
+            if (adrip) {
+                constexpr int STOP = (ADRIP_STOP > 0 && ADRIP_STOP <= NB) ? ADRIP_STOP : NB;
+                if (p >= ADRIP_START && p < STOP && ((p - ADRIP_START) % ADRIP_STRIDE) == 0) {
+                    int slot = (p - ADRIP_START) / ADRIP_STRIDE;     // 0,1,2,... issuing-quartet idx
+                    int a0 = slot * ADRIP_PER, a1 = a0 + ADRIP_PER;
+                    a0 = a0 < ISSUES_A ? a0 : ISSUES_A;             // clamp to chunk count (folds)
+                    a1 = a1 < ISSUES_A ? a1 : ISSUES_A;
+                    if (a0 < a1)
+                        issue_A_chunks<ROW_CHUNKS>(nxt_base, A_row_bytes, kb_nxt, wave, lane, arsrc, a0, a1);
+                }
+            }
 #pragma unroll
             for (int mi = 0; mi < M_PW; mi++)
                 mfma_scale_f32_32x32x64_fp6<0>(acc[mi][ni], a[mi], b_cur, sav[mi], sbv_cur);
