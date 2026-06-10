@@ -504,8 +504,10 @@ namespace hipsparse
             return rocsparse_spmv_alg_csr_rowsplit;
         case HIPSPARSE_SPMV_SELL_ALG1:
             return rocsparse_spmv_alg_sell;
+#ifdef HIPSPARSE_WITH_SPMV_BSR
         case HIPSPARSE_SPMV_BSR_ALG1:
             return rocsparse_spmv_alg_bsr;
+#endif
         default:
             throw "Non existent hipsparseSpMVAlg_t";
         }
@@ -536,6 +538,8 @@ namespace hipsparse
             return rocsparse_spmm_alg_csr;
         case HIPSPARSE_SPMM_BLOCKED_ELL_ALG1:
             return rocsparse_spmm_alg_bell;
+        case HIPSPARSE_SPMM_BSR_ALG1:
+            return rocsparse_spmm_alg_bsr;
         default:
             throw "Non existent hipsparseSpMMAlg_t";
         }
@@ -654,8 +658,10 @@ namespace hipsparse
             return rocsparse_format_bell;
         case HIPSPARSE_FORMAT_SLICED_ELL:
             return rocsparse_format_sell;
+#ifdef HIPSPARSE_WITH_SPMV_BSR
         case HIPSPARSE_FORMAT_BSR:
             return rocsparse_format_bsr;
+#endif
         default:
             throw "Non existent hipsparseFormat_t";
         }
@@ -677,8 +683,10 @@ namespace hipsparse
             return HIPSPARSE_FORMAT_BLOCKED_ELL;
         case rocsparse_format_sell:
             return HIPSPARSE_FORMAT_SLICED_ELL;
+#ifdef HIPSPARSE_WITH_SPMV_BSR
         case rocsparse_format_bsr:
             return HIPSPARSE_FORMAT_BSR;
+#endif
         default:
             throw "Non existent rocsparse_format";
         }

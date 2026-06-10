@@ -1,17 +1,26 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <limits>
+#include <numeric>
 #include <string>
 #include <vector>
 
-#include "pooling_common.hpp"
+#include <gtest/gtest.h>
+#include <half/half.hpp>
+
+#include <miopen/logger.hpp>
+#include <numeric>
+#include <miopen/tensor_layout.hpp>
+
+#include "pooling2d_common.hpp"
+#include "pooling_gtest_common.hpp"
 
 namespace {
 
-using PoolingTestCase = pooling_gtest::PoolingTestCase;
+using PoolingTestCase = pooling2d_gtest::PoolingTestCase;
 
 std::vector<PoolingTestCase> GetPooling3dTestCases()
 {
@@ -53,22 +62,24 @@ std::vector<PoolingTestCase> GetPooling3dTestCases()
 
     for(const auto& in_shape : dataset0_inputs)
     {
-        pooling_gtest::AddTestCasesForInput(in_shape,
-                                            dataset0_lens,
-                                            dataset0_strides,
-                                            dataset0_pads,
-                                            dataset0_index_types,
-                                            modes,
-                                            wsidx_values,
-                                            test_cases,
-                                            num_uint16_case,
-                                            num_uint32_case,
-                                            num_uint32_case_imgidx,
-                                            num_uint64_case,
-                                            num_uint64_case_imgidx,
-                                            true,
-                                            false,
-                                            "NCDHW");
+        pooling2d_gtest::AddTestCasesForInput(in_shape,
+                                              dataset0_lens,
+                                              dataset0_strides,
+                                              dataset0_pads,
+                                              dataset0_index_types,
+                                              modes,
+                                              wsidx_values,
+                                              test_cases,
+                                              num_uint16_case,
+                                              num_uint32_case,
+                                              num_uint32_case_imgidx,
+                                              num_uint64_case,
+                                              num_uint64_case_imgidx,
+                                              false,
+                                              true,
+                                              false,
+                                              "NCDHW",
+                                              "NCDHW");
     }
 
     // Cache the results
@@ -106,7 +117,7 @@ void RunPooling3dTestWithIndexType(const PoolingTestCase& test_case)
 
     // Run forward pooling
     std::vector<Index> indices;
-    pooling_gtest::verify_forward_pooling<3> forward_verifier;
+    verify_forward_pooling<3> forward_verifier;
     auto forward_result     = forward_verifier.cpu(input, filter, indices);
     auto forward_gpu_result = forward_verifier.gpu(input, filter, indices);
 
@@ -131,7 +142,7 @@ void RunPooling3dTestWithIndexType(const PoolingTestCase& test_case)
         GTEST_FAIL() << "Indices not populated for max pooling backward";
     }
 
-    pooling_gtest::verify_backward_pooling<3> backward_verifier;
+    verify_backward_pooling<3> backward_verifier;
     auto backward_result = backward_verifier.cpu(
         input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
     auto backward_gpu_result = backward_verifier.gpu(
@@ -154,27 +165,13 @@ void RunPooling3dTest(const PoolingTestCase& test_case)
         // Dispatch to the appropriate index type template
         switch(test_case.index_type)
         {
-        case miopenIndexUint8: {
-            RunPooling3dTestWithIndexType<T, uint8_t>(test_case);
-            break;
+        case miopenIndexUint8: return RunPooling3dTestWithIndexType<T, uint8_t>(test_case);
+        case miopenIndexUint16: return RunPooling3dTestWithIndexType<T, uint16_t>(test_case);
+        case miopenIndexUint32: return RunPooling3dTestWithIndexType<T, uint32_t>(test_case);
+        case miopenIndexUint64: return RunPooling3dTestWithIndexType<T, uint64_t>(test_case);
         }
-        case miopenIndexUint16: {
-            RunPooling3dTestWithIndexType<T, uint16_t>(test_case);
-            break;
-        }
-        case miopenIndexUint32: {
-            RunPooling3dTestWithIndexType<T, uint32_t>(test_case);
-            break;
-        }
-        case miopenIndexUint64: {
-            RunPooling3dTestWithIndexType<T, uint64_t>(test_case);
-            break;
-        }
-        default: {
-            GTEST_FAIL() << "Unsupported index type: " << test_case.index_type;
-            break;
-        }
-        }
+
+        GTEST_FAIL() << "Unsupported index type: " << test_case.index_type;
     }
     catch(const std::exception& e)
     {
@@ -220,14 +217,14 @@ TEST_P(GPU_Pooling3d_BFP16, Test) { RunPooling3dTest<bfloat16>(GetParam()); }
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Pooling3d_FP32,
                          testing::ValuesIn(GetPooling3dTestCases()),
-                         pooling_gtest::GetPoolingTestCaseName);
+                         pooling2d_gtest::GetPoolingTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Pooling3d_FP16,
                          testing::ValuesIn(GetPooling3dTestCases()),
-                         pooling_gtest::GetPoolingTestCaseName);
+                         pooling2d_gtest::GetPoolingTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Pooling3d_BFP16,
                          testing::ValuesIn(GetPooling3dTestCases()),
-                         pooling_gtest::GetPoolingTestCaseName);
+                         pooling2d_gtest::GetPoolingTestCaseName);
