@@ -110,14 +110,19 @@ class TestStreamK5DualPathLabels:
             "expected SLShiftRightB32(... StreamKHybridMode ... MagicShiftItersPerTile ... 31) in StreamKHybrid"
 
     def test_streamk_hybrid_masks_magic_shift(self):
-        """The static path inside the SK5 kernel must mask off bit 31
-        of MagicShiftItersPerTile before using it as a shift count."""
+        """The static path inside the SK5 kernel must mask
+        MagicShiftItersPerTile to {magic-add bit 31 | 5-bit shift},
+        dropping only the mode bit (bit 30), before feeding it to the
+        magic-division divide. The divide (sMagicDiv2) consumes both the
+        bit-31 "add" indicator and the bits-0..4 shift, so a plain 0x1F
+        mask would corrupt non-power-of-two tile divides -> mask 0x8000001F.
+        """
         src = _read(_STREAMK_PY)
         # Match the SK5-gated mask, not the unrelated 0x1FFFFFF mask in SK3.
         pattern = (r'kernel\["StreamK"\]\s*==\s*5[\s\S]{0,400}?'
-                   r'SAndB32\([\s\S]{0,200}?0x1[Ff]\b')
+                   r'SAndB32\([\s\S]{0,200}?0x8000001[Ff]\b')
         assert re.search(pattern, src), \
-            "expected SK5-gated SAndB32(..., 0x1F) on MagicShiftItersPerTile"
+            "expected SK5-gated SAndB32(..., 0x8000001F) on MagicShiftItersPerTile"
 
     def test_streamk_hybrid_unique_labels(self):
         """When SK5 inlines both static and dynamic paths, conflicting
@@ -224,13 +229,18 @@ class TestStreamK5SixArgCollapse:
     # ---- StreamK.py: mode-bit mask after extraction ----
     def test_mode_extraction_masks_high_bit(self):
         body = _streamk_hybrid_body(_read(_STREAMK_PY))
-        pattern = (r'SLShiftRightB32\([\s\S]*?StreamKHybridMode[\s\S]*?\b31\b'
+        # The mode bit lives in bit 30, not bit 31: magicNumberAlg2 reserves
+        # bit 31 as the magic-division "add" indicator. So extraction shifts
+        # right by 30 and the in-place clear drops only bit 30 while keeping
+        # bit 31 (and the bits-0..4 shift) -> mask 0xBFFFFFFF.
+        pattern = (r'SLShiftRightB32\([\s\S]*?StreamKHybridMode[\s\S]*?\b30\b'
                    r'[\s\S]{0,400}?'
                    r'SAndB32\([\s\S]*?MagicShiftItersPerTile'
-                   r'[\s\S]*?0x7[Ff]{7}\b')
+                   r'[\s\S]*?0x[Bb][Ff]{7}\b')
         assert re.search(pattern, body), (
-            "expected SAndB32(MagicShiftItersPerTile, 0x7FFFFFFF) right "
-            "after the mode-bit extraction in _emitModeExtraction"
+            "expected SAndB32(MagicShiftItersPerTile, 0xBFFFFFFF) right "
+            "after the mode-bit extraction in _emitModeExtraction "
+            "(clears bit 30 mode, keeps bit 31 magic-add)"
         )
 
 
