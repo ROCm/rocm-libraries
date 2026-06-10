@@ -5,6 +5,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <omp.h>
 #include <thread>
+#include <unistd.h>
 
 #include "SimpleTest.hpp"
 #include "common/SourceMatcher.hpp"
