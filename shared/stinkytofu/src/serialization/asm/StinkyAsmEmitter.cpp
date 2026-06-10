@@ -206,7 +206,11 @@ inline std::ostream& operator<<(std::ostream& os, const MUBUFModifiers& mubufMod
     if (mubufMod.scope != MUBUFScope::SCOPE_NONE) {
         os << " scope:" << toString(mubufMod.scope);
     }
-    if (mubufMod.nt) {
+    // Match rocisa MUBUFModifiers::toString(): gfx1250+ temporal hints replace the
+    // legacy nt token when both are present in the modifier bag.
+    if (hasTemporalHint(mubufMod.th)) {
+        os << " th:" << toString(mubufMod.th, mubufMod.isStore);
+    } else if (mubufMod.nt) {
         os << " nt";
     }
     if (mubufMod.lds) {

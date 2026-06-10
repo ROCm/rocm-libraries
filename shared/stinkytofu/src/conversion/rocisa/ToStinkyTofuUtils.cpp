@@ -130,9 +130,10 @@ stinkytofu::MUBUFModifiers convertMUBUFModifiers(const rocisa::MUBUFModifiers& r
     bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
     bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
     stinkytofu::MUBUFScope scope = convertMUBUFScope(rocMod.scope);
+    stinkytofu::TemporalHint th = convertTemporalHint(rocMod.th);
     return stinkytofu::MUBUFModifiers(rocMod.offen, rocMod.offset12, rocMod.glc, rocMod.slc,
                                       rocMod.nt, rocMod.lds, rocMod.isStore, hasMUBUFConst,
-                                      hasGLCModifier, hasSC0Modifier, scope);
+                                      hasGLCModifier, hasSC0Modifier, scope, th);
 }
 
 /// Returns true when vaddr is the MUBUF "off" keyword.
