@@ -75,7 +75,7 @@ class XCCMappingOn(XCCMapping):
             sqTmp = writer.sgprPool.checkOut(1, "sqTmp")
             divisor = kernel["StreamKXCCMapping"]
             if ((divisor & (divisor - 1)) != 0): # Need temp registers if not power of 2
-                sTmp = writer.sgprPool.checkOutAligned(2, 2, "sTmp")
+                sTmp = writer.sgprPool.checkOutAligned(2, 2, "sTmp", preventOverflow=not kernel.get("UseSubtileImpl", False))
                 sTmpRes  = ContinuousRegister(idx=sTmp, size=2)
 
             # sGridC = ceil(grid / xccm)
@@ -445,6 +445,8 @@ class StreamK(Component):
 
     def computeStoreSrdStartCommon(self, writer, kernel):
         module = Module("StreamK Common computeStoreSrdStart")
+        if kernel["StreamKForceDPOnly"]:
+            return module
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
         # Check for parallel reduction
@@ -618,8 +620,8 @@ class StreamK(Component):
     def storeBranchesCommon(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct):
         module = Module("StreamK Common storeBranches")
 
-        # No branches for atomic mode
-        if kernel["StreamKAtomic"]:
+        # No branches when no StreamK partial/fixup path can be reached.
+        if kernel["StreamKAtomic"] or kernel["StreamKForceDPOnly"]:
             return module
 
         memOrder = Component.StreamKMemoryOrdering.find(writer)
@@ -925,8 +927,8 @@ class StreamK(Component):
     def writePartialsCommon(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK Common writePartials")
 
-        # No partials for atomic mode
-        if kernel["StreamKAtomic"]:
+        # No partial writes for atomic or DP-only StreamK.
+        if kernel["StreamKAtomic"] or kernel["StreamKForceDPOnly"]:
             return module
 
         module.add(skPartialsLabel)
@@ -2184,6 +2186,26 @@ class StreamK(Component):
         #         self.preLoopVmcntDict[self.currPreLoopVmcntCase] += storesIssued
 
         return module
+    
+    def stridedBatchOrGeneralBatch(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK stridedBatchOrGeneralBatch")
+        if kernel["ProblemType"]["SupportUserArgs"]:
+            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
+            # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
+            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
+            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D is dereferenced as pointer array                   
+            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+            module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))
+        return module
+
+    @abc.abstractmethod
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        pass
+
+    @abc.abstractmethod
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        pass
 
     @abc.abstractmethod
     def kernelEnd(self, writer, kernel):
@@ -2256,7 +2278,7 @@ class StreamKOff(StreamK):
                                        comment="select loopcounter (0 if summation is multiple of %u)"%maxUnit))
             if kernel["GlobalSplitU"] != 0:
                 # skip tailloopInNll code if GSU>1
-                module.add(SAndB32(dst=sgpr(tmpSgpr+1), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SAndB32(dst=sgpr(tmpSgpr+1), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
                 module.add(SCmpGtU32(src0=sgpr(tmpSgpr+1), src1=1, comment="GSU > 1 ?"))
                 module.add(SCMovB32(dst=sgpr(tmpSgpr), src=0, comment="do not increment loopcounter if GSU > 1"))
             module.add(SAddU32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), \
@@ -2271,6 +2293,15 @@ class StreamKOff(StreamK):
 
     def writePartials(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK Off writePartials")
+        return module
+
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        module = Module("StreamK Off initializeSrdAddressFlagsCheck")
+        module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="General Batched GEMM, Srd initialized to 0"))
+        return module
+
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK Off routeToGeneralBatchedOrStridedBatched")
         return module
 
     def kernelEnd(self, writer, kernel):
@@ -2322,7 +2353,7 @@ class StreamKBasic(StreamK):
         module = Module("StreamK Basic graWorkGroup")
 
         # StreamK workgroup mapping
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp")
+        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=not kernel.get("UseSubtileImpl", False))
 
         module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
 
@@ -2374,6 +2405,17 @@ class StreamKBasic(StreamK):
     def writePartials(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK Basic writePartials")
         module.add(self.writePartialsCommon(writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel))
+        return module
+
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        module = Module("StreamK Basic initializeSrdAddressFlagsCheck")
+        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+        module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
+        return module
+
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK Basic routeToGeneralBatchedOrStridedBatched")
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
         return module
 
     def kernelEnd(self, writer, kernel):
@@ -2451,7 +2493,7 @@ class StreamKTwoTileOriginal(StreamK):
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
         # StreamK workgroup mapping
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp")
+        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=not kernel.get("UseSubtileImpl", False))
 
         module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
 
@@ -2542,6 +2584,17 @@ class StreamKTwoTileOriginal(StreamK):
         module.add(self.writePartialsCommon(writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel))
         return module
 
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        module = Module("StreamK TwoTileOriginal initializeSrdAddressFlagsCheck")
+        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+        module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
+        return module
+
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK TwoTileOriginal routeToGeneralBatchedOrStridedBatched")
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
+        return module
+
     def kernelEnd(self, writer, kernel):
         module = Module("StreamK TwoTileOriginal kernelEnd")
         return module
@@ -2568,6 +2621,25 @@ class StreamKTwoTileDPFirst(StreamK):
         else:
             module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"),
                                comment="Save original StreamK index"))
+
+        if kernel["StreamKForceDPOnly"]:
+            sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
+            sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+            if skConstsInVgprs:
+                module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
+                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+            module.add(SMulI32(dst=sgpr("StreamKIter"), src0=sgpr(sIdx), src1=sgpr(sIpt), comment="DP starting iteration"))
+            writer.releaseStreamKConstSgpr(sIdx)
+            with writer.allocTmpSgpr(1, tag="TotalIters") as sTmpRes:
+                sTmp = sTmpRes.idx
+                module.add(self.computeTotalTiles(writer, kernel, sTmp))
+                module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=sgpr(sIpt), comment="totalIters = totalTiles * itersPerTile"))
+                module.add(SMovB32(dst=sgpr("StreamKIterEnd"), src=sgpr(sTmp), comment="DP ending iteration"))
+                module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp), comment="Make sure there's work to do"))
+            writer.releaseStreamKConstSgpr(sIpt)
+            module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
+            return module
+
         # Two-tile SK (DP first)
         # Do DP tiles before SK
         skInitDone = Label("SK_InitDone", "")
@@ -2736,7 +2808,47 @@ class StreamKTwoTileDPFirst(StreamK):
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
         # StreamK workgroup mapping
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp")
+        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=not kernel.get("UseSubtileImpl", False))
+
+        if kernel["StreamKForceDPOnly"]:
+            sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+            if skConstsInVgprs:
+                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+            module.add(self.computeTotalTiles(writer, kernel, sTmp+3))
+            module.add(SMulI32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=sgpr(sIpt), comment="dpSectionSize = totalTiles * ItersPerTile"))
+            module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp+3), comment="Make sure there's DP work to do"))
+            module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
+            writer.releaseStreamKConstSgpr(sIpt)
+
+            module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
+
+            sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+            sGrid = writer.acquireStreamKConstSgpr(kernel, "skGrid")
+            if skConstsInVgprs:
+                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+                module.add(VReadfirstlaneB32(dst=sgpr(sGrid), src=vgpr(writer.states.skConstVgprs["skGrid"])))
+            module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr(sGrid), src1=sgpr(sIpt), comment="DP iterations shift"))
+            writer.releaseStreamKConstSgpr(sGrid)
+            writer.releaseStreamKConstSgpr(sIpt)
+            module.add(SAddU32(dst=sgpr(sTmp+1), src0=sgpr(sTmp+1), src1=sgpr("StreamKIter"), comment="Add DP shift"))
+            module.add(SMovB32(dst=sgpr("StreamKIter"), src=sgpr(sTmp+1), comment="Store next DP iteration"))
+
+            module.add(self.skIndexToWG(writer, kernel, sTmp))
+
+            alphaLabel = Label("SKAlphaCheck", "")
+            module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel))
+            module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
+            skCloseLoopLabel = Label("SK_CloseLoop", "")
+            module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
+            sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+            if writer.isStreamKConstantsToVgprEnabled(kernel):
+                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+            module.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr(sIpt), comment="Skip iterations"))
+            writer.releaseStreamKConstSgpr(sIpt)
+            module.add(alphaLabel)
+
+            writer.sgprPool.checkIn(sTmp)
+            return module
 
         module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
 
@@ -2882,6 +2994,17 @@ class StreamKTwoTileDPFirst(StreamK):
     def writePartials(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK TwoTileDPFirst writePartials")
         module.add(self.writePartialsCommon(writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel))
+        return module
+
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        module = Module("StreamK TwoTileDPFirst initializeSrdAddressFlagsCheck")
+        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+        module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
+        return module        
+
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK TwoTileDPFirst routeToGeneralBatchedOrStridedBatched")
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
         return module
 
     def kernelEnd(self, writer, kernel):
@@ -3246,7 +3369,18 @@ class StreamKDynamic(StreamK):
             module.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements, False, False, edge, tmpVgpr, cvtVgprStruct, endLabel))
 
         return module
+        
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        module = Module("StreamK Dynamic initializeSrdAddressFlagsCheck")
+        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+        module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
+        return module        
 
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK Dynamic routeToGeneralBatchedOrStridedBatched")
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
+        return module
+        
     def kernelEnd(self, writer, kernel):
         module = Module("StreamK Dynamic kernelEnd")
 
@@ -3256,3 +3390,4 @@ class StreamKDynamic(StreamK):
         # Remaining reset can be done if workitem = grid + total - 1
 
         return module
+        

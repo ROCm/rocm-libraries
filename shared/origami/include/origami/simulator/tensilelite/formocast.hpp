@@ -8,6 +8,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <cmath>
 
 namespace origami
 {
@@ -35,7 +36,7 @@ namespace origami
          * @param tcc_ea0_coalesced Output parameter for TCC EA0 coalesced value
          * @return The calculated load request value
          */
-        double getLoadRequest(double   MTX,
+        double getL1LoadRequest(double   MTX,
                              double   DU,
                              double   L1CacheLineSize,
                              uint32_t grvw,
@@ -48,6 +49,17 @@ namespace origami
                              int      NumLoadsCoalesced,
                              uint32_t numWaveX,
                              double&  tcc_ea0_coalesced);
+
+        inline double getL2LoadRequest(double   L1_req,
+                                       double   L1_hit,
+                                       double   tcc_ea0_coalsced) { return L1_req * (1 - L1_hit) / (tcc_ea0_coalsced >= 1 ? 1 : 2); }
+
+        inline double getL3LoadRequest(double   L2_req,
+                                       double   L2_hit,
+                                       double   tcc_ea0_coalsced) { return L2_req * (1 - L2_hit) / std::ceil(tcc_ea0_coalsced); }
+
+        inline double getHBMLoadRequest(double   L3_req,
+                             double   L3_hit) { return L3_req * (1 - L3_hit); }
 
         // GSU overhead calculation functions
 
@@ -75,7 +87,7 @@ namespace origami
          */
         double getMultipleBufferOverhead(double M, double N, double GlobalSplitU, double NumBatches,
                             uint32_t bpeCompute, uint32_t bpeD, double hbmBandWidth,
-                            double L1CacheLineSize, double NumCUs, double boost_frequency,
+                            double L1CacheLineSize, double NumCUs, uint32_t num_tiles, uint32_t CUOccupancy, double boost_frequency,
                             double mem_frequency, double L2WriteArbEff, double L2ReadArbEff,
                             double L3BandWidth, double L1BusWidthPerCU, double L2BusWidthPerCU,
                             double L1WriteBusWidthPerCU, double L2WriteBusWidthPerCU);
@@ -88,6 +100,8 @@ namespace origami
          * @param bpeCompute Bytes per element for computation
          * @param NumCUs Number of compute units
          * @param numWGs Total number of workgroups
+         * @param num_tiles Number of tiles
+         * @param CUOccupancy Target CU occupancy
          * @param boost_frequency Boost frequency in MHz
          * @param L2ReadArbEff L2 read arbitration efficiency
          * @param L1BusWidthPerCU L1 bus width per compute unit
@@ -96,7 +110,7 @@ namespace origami
          * @return The calculated overhead for MBSK (Multiple Buffer Single Kernel) approach
          */
         double getMultipleBufferSingleKernelOverhead(double GlobalSplitU, double MT0, double MT1, uint32_t bpeCompute,
-                              double NumCUs, uint32_t numWGs, double boost_frequency,
+                              double NumCUs, uint32_t numWGs, uint32_t num_tiles, uint32_t CUOccupancy, double boost_frequency,
                               double L2ReadArbEff, double L1BusWidthPerCU, double L2BusWidthPerCU,
                               double storeGSU);
 
@@ -168,7 +182,7 @@ namespace origami
          * @return L1CacheHitRate structure containing hit rates for both tiles
          */
         L1CacheHitRate computeL1CacheHitRate(double L1CacheCapacity, double L1CacheLineSize,
-                                             double L1BusWidthPerCU, double MT0, double MT1,
+                                             double L1BusWidthPerCU, double MT0, double MT1, uint32_t depthU,
                                              uint32_t bpeA, uint32_t bpeB, int NTA, int NTB,
                                              uint32_t GRVWA, uint32_t GRVWB, bool DTVA, bool DTVB,
                                              bool isSwizzleA, bool isSwizzleB, uint32_t VWA, uint32_t VWB,
