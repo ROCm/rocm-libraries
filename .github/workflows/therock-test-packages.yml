@@ -28,15 +28,11 @@ jobs:
     outputs:
       components: ${{ steps.configure.outputs.components }}
     steps:
-      - name: Load CI environment
-        id: ci-env
-        uses: ./.github/actions/ci-env
-
       - name: "Fetch 'build_tools' from repository"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: build_tools
-          ref: ${{ steps.ci-env.outputs.therock-ref }}
+          ref: "e442f5a8b174a73cd6f3b6e3c68fe867b13b555a" # users/lpromber/windows_cleanup_add_git_deinit
           path: "prejob"
           repository: "ROCm/TheRock"
 
