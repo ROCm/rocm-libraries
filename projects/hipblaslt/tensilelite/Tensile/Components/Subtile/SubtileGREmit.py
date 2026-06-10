@@ -24,17 +24,25 @@ from rocisa.container import DPPModifiers, EXEC, MUBUFModifiers, VCC, vgpr, sgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
-    SAddCU32, SAddU32, SMovB32, SMovB64, SMulI32, SNop, SXorB32,
+    SAddCU32, SAddU32, SAddU64, SAndB32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SXorB32,
+    SCBranchSCC1, SCmpEQU32, SEndpgm,
+    SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpXEqU32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32,
-    VMulLOU32, VReadfirstlaneB32, VSubU32,
+    TensorLoadToLds,
+    VMulLOU32, VReadfirstlaneB32, VSubU32, VXorB32,
 )
 
 from .SubtileGeometry import (
     RegList,
-    GRTag_1x2, GRTag_2x2, GRTag_TLU1,
+    GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
 )
 from .SubtileScaleEmit import emitScaleGRLDSSwap
+
+from math import ceil, log, log2, prod
+from rocisa.code import Label
+from ...Common import INDEX_CHARS
+from ...Common.DataType import DataType
 
 
 ################################################################################
@@ -82,7 +90,7 @@ _emitGlobalRead.register(GRTag_TLU1)(_stub)
 _emitDTLInit.register(GRTag_TLU1)(_stub)
 _emitGRLDSBufferSwap.register(GRTag_TLU1)(_stub)
 _emitGRPtrUpdate.register(GRTag_TLU1)(_stub)
-for _tag in (GRTag_1x2, GRTag_2x2, GRTag_TLU1):
+for _tag in (GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1):
   _emitLocalWrite.register(_tag)(_stub)
 
 
@@ -90,6 +98,7 @@ for _tag in (GRTag_1x2, GRTag_2x2, GRTag_TLU1):
 # 2. Implementations — TLU=0 (shared by GRTag_1x2 and GRTag_2x2)
 ################################################################################
 
+@_emitGlobalReadOffset.register(GRTag_1x1)
 @_emitGlobalReadOffset.register(GRTag_1x2)
 @_emitGlobalReadOffset.register(GRTag_2x2)
 def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
@@ -262,6 +271,7 @@ def _emitGROffset_TLU0(tag, tile, ti, writer, kernel):
   return module
 
 
+@_allocGROffsetRegisters.register(GRTag_1x1)
 @_allocGROffsetRegisters.register(GRTag_1x2)
 @_allocGROffsetRegisters.register(GRTag_2x2)
 def _allocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
@@ -285,6 +295,13 @@ def _allocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
        - numGRPerSubtile VGPRs (fallback when SGPRs exhausted): each VGPR
          has the shared offset + row offset baked in, replacing soffset.
   """
+  # TDM handles global reads without per-lane VGPRs
+  hasTDM = kernel.get("enableTDMA", False) and kernel.get("enableTDMB", False)
+  if hasTDM:
+    tile.sharedVgprGROffset = []
+    ti.localSubtilesRegister = []
+    return
+
   # Per-lane byte offsets: one VGPR per GR load within a subtile
   tile.sharedVgprGROffset = []
   for i in range(ti.numGRPerSubtile):
@@ -323,6 +340,7 @@ def _allocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
         rl.alloc(preventOverflow=False)
 
 
+@_deallocGROffsetRegisters.register(GRTag_1x1)
 @_deallocGROffsetRegisters.register(GRTag_1x2)
 @_deallocGROffsetRegisters.register(GRTag_2x2)
 def _deallocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
@@ -339,6 +357,7 @@ def _deallocGROffsetRegs_TLU0(tag, tile, ti, writer, kernel):
 
 # --- GR load emit (TLU=0) ---------------------------------------------------
 
+@_emitGlobalRead.register(GRTag_1x1)
 @_emitGlobalRead.register(GRTag_1x2)
 @_emitGlobalRead.register(GRTag_2x2)
 def _emitGR_TLU0(tag, tile, ti, writer, kernel):
@@ -409,6 +428,7 @@ def _emitGR_TLU0(tag, tile, ti, writer, kernel):
 
 # --- DTL init (TLU=0) -------------------------------------------------------
 
+@_emitDTLInit.register(GRTag_1x1)
 @_emitDTLInit.register(GRTag_1x2)
 @_emitDTLInit.register(GRTag_2x2)
 def _emitDTLInit_TLU0(tag, tile, ti, writer, kernel):
@@ -478,6 +498,7 @@ def _emitDTLInit_TLU0(tag, tile, ti, writer, kernel):
 
 # --- GR LDS buffer swap (TLU=0) ---------------------------------------------
 
+@_emitGRLDSBufferSwap.register(GRTag_1x1)
 @_emitGRLDSBufferSwap.register(GRTag_1x2)
 @_emitGRLDSBufferSwap.register(GRTag_2x2)
 def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
@@ -496,12 +517,24 @@ def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
 
 # --- GR pointer update (TLU=0) ----------------------------------------------
 
+@_emitGRPtrUpdate.register(GRTag_1x1)
 @_emitGRPtrUpdate.register(GRTag_1x2)
 @_emitGRPtrUpdate.register(GRTag_2x2)
 def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
   """Advance SRD base pointer by one depthU iteration (depthU * bpe bytes)."""
-  module = Module(f"GR Ptr Update ({ti.tc})")
   tc = ti.tc
+  # TDM path: advance Address{tc} and sync the TDM descriptor instead of SRD.
+  if kernel.get("enableTDM%s" % tc, False):
+    module = Module(f"TDM GR Ptr Update ({tc})")
+    inc = int(ti.depthUBytes)
+    module.addComment0("TDM addr update: %s += %u" % (tc, inc))
+    module.add(SAddU64(dst=sgpr("Address%s" % tc, 2), src0=sgpr("Address%s" % tc, 2), src1=inc))
+    group0 = "tdm%sGroup0" % tc
+    module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("Address%s" % tc, 2), comment="sync descriptor global addr"))
+    module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0), src1=hex(2 << 30), comment="restore type field"))
+    return module
+
+  module = Module(f"GR Ptr Update ({tc})")
   inc = int(ti.depthUBytes)
   module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
              comment=f"{tc}: advance SRD by {inc} bytes"))
@@ -722,10 +755,19 @@ def _grComputeAllOffsets_legacy(module, writer, tileInfo, colId, rowId, rowOffse
     rotatedcolId = writer.vgprPool.checkOut(1)
     loadWidth = tileInfo.loadWidthGR
     if tileInfo.loadRatioGR == 0.5:
-      blockSize = tileInfo.subIterKBytes // loadWidth
-      colRotation = blockSize // 2
-      module.add(VAddU32(dst=vgpr(rotatedcolId), src0=colRotation, src1=vgpr(colId), comment="%s: rotate col for GR offset %u"%(tileInfo.tc, i)))
-      module.add(VAndB32(dst=vgpr(rotatedcolId), src0=vgpr(rotatedcolId), src1=hex(blockSize-1), comment="(col + %d) %% block_size"%colRotation))
+      if tileInfo.bpe == 1:  # FP8: intra-block K_group +2 rotation, preserving block bit
+        tmpBlock = writer.vgprPool.checkOut(1)
+        module.add(VAndB32(dst=vgpr(tmpBlock), src0=vgpr(colId), src1=hex(4), comment="%s: block_bit = colId & 4"%tileInfo.tc))
+        module.add(VAndB32(dst=vgpr(rotatedcolId), src0=vgpr(colId), src1=hex(3), comment="%s: K_group = colId & 3"%tileInfo.tc))
+        module.add(VAddU32(dst=vgpr(rotatedcolId), src0=vgpr(rotatedcolId), src1=hex(2), comment="%s: K_group + 2"%tileInfo.tc))
+        module.add(VAndB32(dst=vgpr(rotatedcolId), src0=vgpr(rotatedcolId), src1=hex(3), comment="%s: (K_group+2) %% 4"%tileInfo.tc))
+        module.add(VAddU32(dst=vgpr(rotatedcolId), src0=vgpr(rotatedcolId), src1=vgpr(tmpBlock), comment="%s: K_group_rot + block_bit"%tileInfo.tc))
+        writer.vgprPool.checkIn(tmpBlock)
+      else:  # FP4/FP16: half-block rotation
+        blockSize = tileInfo.subIterKBytes // loadWidth
+        colRotation = blockSize // 2
+        module.add(VAddU32(dst=vgpr(rotatedcolId), src0=colRotation, src1=vgpr(colId), comment="%s: rotate col for GR offset %u"%(tileInfo.tc, i)))
+        module.add(VAndB32(dst=vgpr(rotatedcolId), src0=vgpr(rotatedcolId), src1=hex(blockSize-1), comment="(col + %d) %% block_size"%colRotation))
     else:
       module.add(VMovB32(dst=vgpr(rotatedcolId), src=vgpr(colId), comment=""))
     _grComputeOffset_legacy(module, writer, tileInfo, rotatedcolId, rowOffset, tileInfo.sharedVgprGROffset[i])
@@ -733,37 +775,52 @@ def _grComputeAllOffsets_legacy(module, writer, tileInfo, colId, rowId, rowOffse
 
 def _grSwizzleColIds_legacy(module, writer, tileInfoA, tileInfoB, blockSize, numRowsPerLDSBanks,
                             laneId, colIdA, colIdB, waveId):
-  tmpVgpr = writer.vgprPool.checkOut(2)
+  tmpVgpr = writer.vgprPool.checkOut(3)
   ldsRowId = tmpVgpr
   tmp = tmpVgpr + 1
+  waveRotation = tmpVgpr + 2
+  half = blockSize // 2
   module.addComment0("Swizzling")
   module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(blockSize.bit_length()-1), src=vgpr(laneId), comment="row id within wave"))
   module.add(VLShiftRightB32(dst=vgpr(ldsRowId), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(ldsRowId), comment="lds row id"))
-  module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(ldsRowId), src1=hex(1), comment="lds row id % 2"))
-  module.add(VCmpXEqU32(dst=VCC(), src0=0, src1=vgpr(tmp), comment="lds row id % 2 == 0 ?"))
-  module.add(VMovB32(dst=vgpr(colIdA), src=vgpr(colIdA), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap colId pairs for swizzling"))
-  module.add(SMovB64(dst=EXEC(), src=-1))
-  module.add(VMovB32(dst=vgpr(colIdB), src=vgpr(colIdA), comment=""))
-  module.addComment0("Rotation within a single wave")
-  module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(ldsRowId), comment=""))
-  module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="(ldsRowId //2) * 2"))
-  module.add(VSubU32(dst=vgpr(tmp), src0=hex(blockSize), src1=vgpr(tmp), comment="rotation offset : blockSize - (ldsRowId//2)*2"))
-  needWaveRotation = any(t.loadRatioGR != 0.5 for t, _ in [(tileInfoA, colIdA), (tileInfoB, colIdB)])
-  if needWaveRotation:
-    waveRotation = writer.vgprPool.checkOut(1)
-  for tInfo, cId in [(tileInfoA, colIdA), (tileInfoB, colIdB)]:
-    if tInfo.loadRatioGR != 0.5:
-      module.addComment0("Rotation per wave")
-      module.add(VAndB32(dst=vgpr(waveRotation), src0=vgpr(waveId), src1=hex(1), comment=""))
-      module.add(VLShiftLeftB32(dst=vgpr(waveRotation), shiftHex=hex((2*numRowsPerLDSBanks).bit_length() - 1), src=vgpr(waveRotation), comment=""))
-      module.add(VSubU32(dst=vgpr(waveRotation), src0=vgpr(tmp), src1=vgpr(waveRotation), comment=""))
-      module.add(VAddU32(dst=vgpr(cId), src0=vgpr(waveRotation), src1=vgpr(cId), comment=""))
-    else:
-      module.add(VAddU32(dst=vgpr(cId), src0=vgpr(tmp), src1=vgpr(cId), comment=""))
-  if needWaveRotation:
-    writer.vgprPool.checkIn(waveRotation)
-  module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr(colIdA), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
-  module.add(VAndB32(dst=vgpr(colIdB), src0=vgpr(colIdB), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
+  module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(ldsRowId), src1=hex(1), comment="swap_bit = ldsRowId & 1"))
+  if tileInfoA.bpe == 1:  # FP8: step1=block-swap, step2=wave K_group rotation
+    # Step 1: block-swap (XOR blockSize//2 for odd ldsRowId)
+    module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(int(math.log2(half))), src=vgpr(tmp),
+               comment=f"swap_bit * {half}"))
+    module.add(VXorB32(dst=vgpr(colIdA), src0=vgpr(colIdA), src1=vgpr(tmp),
+               comment="FP8 step1: block-swap colIdA"))
+    module.add(VMovB32(dst=vgpr(colIdB), src=vgpr(colIdA), comment="colIdB = colIdA"))
+    # Step 2: K_group rotation = (waveId & 1) * 2 (only for loadRatioGR != 0.5)
+    module.add(VAndB32(dst=vgpr(tmp), src0=vgpr(waveId), src1=hex(1), comment="wave_half = waveId & 1"))
+    module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="rotation = wave_half * 2"))
+    for tInfo, cId in [(tileInfoA, colIdA), (tileInfoB, colIdB)]:
+      if tInfo.loadRatioGR != 0.5:
+        module.add(VAndB32(dst=vgpr(waveRotation), src0=vgpr(cId), src1=hex(4), comment="FP8 step2: block_bit = colId & 4"))
+        module.add(VAndB32(dst=vgpr(cId), src0=vgpr(cId), src1=hex(3), comment="K_group = colId & 3"))
+        module.add(VAddU32(dst=vgpr(cId), src0=vgpr(cId), src1=vgpr(tmp), comment="K_group + rotation"))
+        module.add(VAndB32(dst=vgpr(cId), src0=vgpr(cId), src1=hex(3), comment="(K_group+rotation) % 4"))
+        module.add(VAddU32(dst=vgpr(cId), src0=vgpr(cId), src1=vgpr(waveRotation), comment="K_group_rot + block_bit"))
+  else:  # FP4/FP16: pair-swap (even ldsRowId) + intra/inter-wave rotation
+    module.add(VCmpXEqU32(dst=VCC(), src0=0, src1=vgpr(tmp), comment="lds row id % 2 == 0 ?"))
+    module.add(VMovB32(dst=vgpr(colIdA), src=vgpr(colIdA), dpp=DPPModifiers(quad_perm=[1,0,3,2]), comment="swap colId pairs for swizzling"))
+    module.add(SMovB64(dst=EXEC(), src=-1))
+    module.add(VMovB32(dst=vgpr(colIdB), src=vgpr(colIdA), comment=""))
+    module.addComment0("Rotation within a single wave")
+    module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(ldsRowId), comment=""))
+    module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(tmp), comment="(ldsRowId //2) * 2"))
+    module.add(VSubU32(dst=vgpr(tmp), src0=hex(blockSize), src1=vgpr(tmp), comment="rotation offset : blockSize - (ldsRowId//2)*2"))
+    for tInfo, cId in [(tileInfoA, colIdA), (tileInfoB, colIdB)]:
+      if tInfo.loadRatioGR != 0.5:
+        module.addComment0("Rotation per wave")
+        module.add(VAndB32(dst=vgpr(waveRotation), src0=vgpr(waveId), src1=hex(1), comment=""))
+        module.add(VLShiftLeftB32(dst=vgpr(waveRotation), shiftHex=hex((2*numRowsPerLDSBanks).bit_length() - 1), src=vgpr(waveRotation), comment=""))
+        module.add(VSubU32(dst=vgpr(waveRotation), src0=vgpr(tmp), src1=vgpr(waveRotation), comment=""))
+        module.add(VAddU32(dst=vgpr(cId), src0=vgpr(waveRotation), src1=vgpr(cId), comment=""))
+      else:
+        module.add(VAddU32(dst=vgpr(cId), src0=vgpr(tmp), src1=vgpr(cId), comment=""))
+    module.add(VAndB32(dst=vgpr(colIdA), src0=vgpr(colIdA), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
+    module.add(VAndB32(dst=vgpr(colIdB), src0=vgpr(colIdB), src1=hex(blockSize-1), comment="(col + offset) % block_size"))
   writer.vgprPool.checkIn(tmpVgpr)
 
 def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
@@ -817,6 +874,16 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
       sId1:     Subtile column index (K-dimension)
   """
   module = Module()
+
+  # TDM path: emit one tensor_load_to_lds per tensor, skip all per-subtile DTL loads
+  if kernel.get("enableTDM%s" % tileInfo.tc[0], False):
+    if sId0 == 0 and sId1 == 0:
+      tc = tileInfo.tc
+      group0 = "tdm%sGroup0" % tc
+      group1 = "tdm%sGroup1" % tc
+      module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), None, None,
+                                 comment="TDM: global->LDS for %s" % tc))
+    return module
 
   linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
   grBaseId = int(math.floor(linearId / tileInfo.loadRatioGR))
@@ -911,10 +978,200 @@ def _globalReadDTLInitCommonSgpr_legacy(writer, kernel):
 def globalReadLDSBufferSwap(tc, writer, kernel):
   if tc in ['A', 'B']:
     ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
+    if kernel.get("enableTDM%s" % tc, False):
+      ldsAddrSgpr = "tdmLdsAddr%s" % tc
+      swapSgpr = "tdmLdsSwapMask%s" % tc
+      module = Module()
+      module.addComment0("TDM: swap %s LDS buffer (XOR with per-tensor swap mask)" % tc)
+      module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
+      group0 = "tdm%sGroup0" % tc
+      module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr(ldsAddrSgpr), comment="sync descriptor LDS addr"))
+      return module
     return ti_.emitGRLDSBufferSwap(writer, kernel)
   else:
     ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
     return emitScaleGRLDSSwap(ti_, writer, kernel)
+
+
+
+################################################################################
+# TDM subtile functions (global offset, descriptor init, StreamK offset)
+################################################################################
+
+def tdmGlobalOffsetSubtile(writer, kernel, tP):
+  """Axis-aware per-wave global address for subtile TDM."""
+  tc = tP["tensorChar"]
+  ti = tP["idx"]
+  bpe = tP["bpeGR"]
+  tlu = tP["tlu"]
+  mt = kernel[f"MacroTile{ti}"]
+  wavelen = kernel["WavefrontSize"]
+  wgM, wgN = kernel["MIWaveGroup"]
+  numWavesThisAxis = wgM if ti == 0 else wgN
+  mod = Module(f"TDM Global Offset Subtile {tc}")
+
+  with writer.allocTmpSgpr(3) as tmpSgprRes:
+    tmp = tmpSgprRes.idx
+    waveOff = tmpSgprRes.idx + 2
+
+    tileStride = writer.strideRef(tc, ti)
+    mod.add(SMulI32(dst=sgpr(tmp), src0=tileStride, src1=int(mt * bpe),
+                     comment=f"stride * MT({mt}) * bpe({bpe})"))
+    mod.add(SMulI32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(f"WorkGroup{ti}"),
+                     comment="*= wgId"))
+
+    if numWavesThisAxis > 1:
+      mod.add(VReadfirstlaneB32(dst=sgpr(waveOff), src=vgpr("Serial"), comment="first tId"))
+      mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
+                               shiftHex=hex(int(ceil(log2(wavelen)))), comment=f"wId = tId / {wavelen}"))
+      if ti == 0 and wgN > 1:
+        mod.add(SAndB32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=wgM - 1,
+                         comment=f"waveIdM = waveId %% {wgM}"))
+      elif ti == 1 and wgM > 1:
+        mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
+                                 shiftHex=hex(int(ceil(log2(wgM)))), comment=f"waveIdN = waveId / {wgM}"))
+      tileStrideSep = writer.strideRef(tc, 3) if tlu else writer.strideRef(tc, ti)
+      mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=int(mt // numWavesThisAxis * bpe),
+                       comment=f"waveOff = waveId_axis * {mt // numWavesThisAxis} * {bpe}"))
+      mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=tileStrideSep,
+                       comment="waveOff *= stride"))
+      mod.add(SAddU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(waveOff), comment="+= waveOff"))
+
+    mod.add(SAddU32(dst=sgpr(f"Address{tc}"), src0=sgpr(f"Address{tc}"), src1=sgpr(tmp),
+                     comment=f"+= offset(lo)"))
+    mod.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(f"Address{tc}+1"), src1=0,
+                      comment=f"+= offset(hi)"))
+
+    if kernel["ProblemType"]["Batched"] and kernel["ProblemType"]["StridedBatched"]:
+      ia = tP["ia"]
+      batchStrideName = f"Stride{tc}{writer.states.indexChars[ia[2]]}"
+      mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmp), sgpr(tmp+1),
+                                                     sgpr(batchStrideName), sgpr("WorkGroup2"),
+                                                     comment="Batch: Stride*WG"))
+      mod.add(SLShiftLeftB64(dst=sgpr(tmp, 2), src=sgpr(tmp, 2),
+                              shiftHex=int(log2(bpe)), comment="scale by bpe"))
+      mod.add(SAddU64(dst=sgpr(f"Address{tc}", 2), src0=sgpr(tmp, 2), src1=sgpr(f"Address{tc}", 2),
+                       comment="+= batch"))
+
+  return mod
+
+
+def initTDMDescriptorSubtile(writer, kernel, tP):
+  """Subtile variant of initTDMDescriptor()."""
+  from ...Components.TensorDataMover import TensorDataMoverLoad
+  comp = TensorDataMoverLoad.find(writer)
+  tc = tP['tensorChar']
+  ti = tP["idx"]
+  tileChar = tP["tileChar"]
+  mod = Module(f"Init TDM Descriptor Subtile {tc}")
+
+  def descSgprName(idx):
+    assert idx < 2
+    return f"tdm{tc}Group{idx}"
+
+  def strideRefName():
+    return f"Stride{tc}{tileChar}"
+
+  def sizeRefName(idx):
+    idxChar = INDEX_CHARS[idx]
+    return f"Size{idxChar}"
+
+  dtype = kernel["ProblemType"][f"DataType{tc}"]
+  mt = kernel[f"MacroTile{ti}"]
+  du = kernel["DepthU"]
+  bpe = tP["bpeGR"]
+  numWaves = prod(kernel["MIWaveGroup"])
+  wavelen = kernel["WavefrontSize"]
+  wgM, wgN = kernel["MIWaveGroup"]
+  numWavesThisAxis = wgM if ti == 0 else wgN
+
+  # Use subtile LDS offsets from writer state (not kernel["LdsOffset{tc}"])
+  ldsOffsetMap = {
+    'A': writer.ldsStartOffsetA,
+    'B': writer.ldsStartOffsetB,
+  }
+  ldsConstOffset = ldsOffsetMap.get(tc, 0)
+
+  sizeTile0, sizeTile1 = du, mt
+  ldsBlockSizePerPad = kernel[f"LdsBlockSizePerPad{tc}"]
+  ldsPadSize = int(kernel[f"LdsPad{tc}"] * bpe)
+  # TDM hardware padding not yet validated for subtile; assert until enabled in calcLdsPad.
+  assert ldsPadSize == 0, f"Subtile TDM padding not yet supported (LdsPad{tc}={kernel[f'LdsPad{tc}']})"
+
+  mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
+  mod.add(comp.setDataType(dtype, descSgprName(1)))
+  mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
+
+  with writer.allocTmpSgpr(1) as tmpSgprRes:
+    waveOffsetSgprIdx = tmpSgprRes.idx
+    mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
+    mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
+    # Decompose wave ID to axis component for multi-wave
+    if numWavesThisAxis < numWaves:
+      if ti == 0 and wgN > 1:
+        mod.add(SAndB32(dst=sgpr(waveOffsetSgprIdx), src0=sgpr(waveOffsetSgprIdx), src1=wgM - 1,
+                         comment=f"waveIdM = waveId %% {wgM}"))
+      elif ti == 1 and wgM > 1:
+        mod.add(SLShiftRightB32(dst=sgpr(waveOffsetSgprIdx), src=sgpr(waveOffsetSgprIdx),
+                                 shiftHex=hex(int(ceil(log2(wgM)))), comment=f"waveIdN = waveId / {wgM}"))
+    if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
+      tileBytes = round(mt // numWavesThisAxis * du * bpe)
+      padBytes = tileBytes // ldsBlockSizePerPad * ldsPadSize
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tileBytes + padBytes,
+              f"woffset = wId * ({tileBytes}+{padBytes})"))
+    else:
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWavesThisAxis * du * bpe),
+              "woffset = wId * (mt // numWaves * du * bpe)"))
+    mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
+            f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
+    mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+    # Save LDS offset to tracking SGPR for runtime double-buffer swap
+    ldsTrackSgpr = f"tdmLdsAddr{tc}"
+    mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx), comment=f"init {ldsTrackSgpr} for buffer tracking"))
+    # Compute swap mask: swapMask = addr XOR (addr + ldsTotalSize)
+    # Used by globalReadLDSBufferSwap to toggle between buffer 0 and buffer 1.
+    swapMaskSgpr = f"tdmLdsSwapMask{tc}"
+    ldsTotalSize = writer.ldsTotalSize
+    mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=ldsTotalSize, comment=f"addr + ldsTotalSize({ldsTotalSize})"))
+    mod.add(SXorB32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=sgpr(swapMaskSgpr), comment=f"swapMask = addr XOR (addr + ldsTotalSize)"))
+  sizeShifter = 1 if dtype.isFloat4() else 0
+  sizeShifterDim = sizeShifter
+
+  mod.add(comp.setIterationEnabled(descSgprName(1), False))
+  mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
+  mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), writer, sizeShifterDim))
+  mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), writer))
+
+  sizeShifterTile = sizeShifter
+  mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, writer, sizeShifterTile))
+  mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWavesThisAxis, writer))
+  mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifterTile))
+  return mod
+
+
+def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
+  """Assert StreamKLocalStart == 0 for subtile TDM path.
+
+  StreamK=3 (Two-Tile) aligns WG iteration ranges to tile boundaries,
+  so StreamKLocalStart is always 0.  The TDM descriptor is already
+  initialized with the correct Address{tc} and does not need updating.
+
+  If a future StreamK mode breaks this invariant, Address{tc} would need
+  to be offset and the TDM descriptor synced (s_mov_b64 + s_or_b32).
+  """
+  tc = tP["tensorChar"]
+  mod = Module(f"TDM StreamK K-offset subtile {tc}")
+  # Assert StreamKLocalStart == 0 at runtime
+  mod.addComment0(f"Assert: StreamKLocalStart == 0 (subtile TDM {tc})")
+  mod.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0,
+                    comment="subtile TDM requires tile-aligned WG starts"))
+  assertLabel = Label(f"SK_Assert_OK_{tc}", "")
+  mod.add(SCBranchSCC1(labelName=assertLabel.getLabelName(),
+                       comment="OK: StreamKLocalStart == 0"))
+  # Trap if invariant violated
+  mod.add(SEndpgm(comment=f"FATAL: StreamKLocalStart != 0 for subtile TDM {tc}"))
+  mod.add(assertLabel)
+  return mod
 
 ##################################################
 # Subroutine to update ptrs

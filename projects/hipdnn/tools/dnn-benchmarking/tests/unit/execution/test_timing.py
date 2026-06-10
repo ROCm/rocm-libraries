@@ -3,7 +3,9 @@
 
 """Tests for Timer and GPU timing utilities."""
 
+import sys
 import time
+import types
 
 import pytest
 
@@ -107,15 +109,27 @@ class TestBackendDetection:
 
     def test_get_available_backends_only_valid_values(self, monkeypatch) -> None:
         """Test that only valid backend names are returned."""
-        monkeypatch.setattr(timing_module, "_is_torch_available", lambda: True)
+        monkeypatch.setattr(timing_module.torch_support, "gpu_available", lambda: True)
         backends = get_available_backends()
         assert backends == ["torch"]
 
     def test_is_gpu_timing_available_matches_backends(self, monkeypatch) -> None:
         """Test consistency between availability functions."""
-        monkeypatch.setattr(timing_module, "_is_torch_available", lambda: True)
+        monkeypatch.setattr(timing_module.torch_support, "gpu_available", lambda: True)
         backends = get_available_backends()
         assert is_gpu_timing_available() == (len(backends) > 0)
+
+    def test_cpu_only_torch_does_not_enable_gpu_timing(self, monkeypatch) -> None:
+        """CPU-only torch is importable but must not enable GPU timers."""
+        fake_torch = types.SimpleNamespace(
+            cuda=types.SimpleNamespace(is_available=lambda: False)
+        )
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+        assert timing_module.torch_support.module_available() is True
+        assert timing_module.torch_support.gpu_available() is False
+        assert get_available_backends() == []
+        assert is_gpu_timing_available() is False
 
 
 class TestFactoryFunction:
@@ -128,18 +142,18 @@ class TestFactoryFunction:
 
     def test_torch_backend_unavailable_raises_error(self, monkeypatch) -> None:
         """Test that requesting unavailable torch backend raises RuntimeError."""
-        monkeypatch.setattr(timing_module, "_is_torch_available", lambda: False)
+        monkeypatch.setattr(timing_module.torch_support, "gpu_available", lambda: False)
         with pytest.raises(RuntimeError, match="PyTorch GPU not available"):
             create_gpu_timer("torch")
 
     def test_auto_no_backend_returns_none(self, monkeypatch) -> None:
         """Test that auto with no backends returns None (graceful fallback)."""
-        monkeypatch.setattr(timing_module, "_is_torch_available", lambda: False)
+        monkeypatch.setattr(timing_module.torch_support, "gpu_available", lambda: False)
         assert create_gpu_timer("auto") is None
 
     def test_auto_creates_timer_when_available(self, monkeypatch) -> None:
         """Test auto-detection creates a timer when available."""
-        monkeypatch.setattr(timing_module, "_is_torch_available", lambda: True)
+        monkeypatch.setattr(timing_module.torch_support, "gpu_available", lambda: True)
         monkeypatch.setattr(timing_module, "TorchGpuTimer", DummyTorchTimer)
         timer = create_gpu_timer("auto")
         assert isinstance(timer, GpuTimerInterface)
