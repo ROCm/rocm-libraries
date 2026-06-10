@@ -57,6 +57,12 @@ repos:
     rev: v3.2.0
     hooks:
       - id: trailing-whitespace
+        exclude: |
+          (?x)
+            ^projects/miopen/.*\.s$|
+            ^projects/miopen/.*\.inc$|
+            ^projects/miopen/.*\.ktn\.model$|
+            ^projects/miopen/src/kernels/dynamic_igemm/
       - id: end-of-file-fixer
       - id: check-yaml
         exclude: |
