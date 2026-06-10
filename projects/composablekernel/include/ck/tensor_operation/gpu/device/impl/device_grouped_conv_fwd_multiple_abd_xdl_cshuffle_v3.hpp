@@ -1734,7 +1734,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
         {
             if(!arg.conv_to_gemm_transformer_.AreDescriptorsSmallerThan2GB())
             {
-                ck::LogInfo("[conv_to_gemm_transformer_] One of the descriptors is bigger than 2GB!");
+                ck::LogInfo(
+                    "[conv_to_gemm_transformer_] One of the descriptors is bigger than 2GB!");
                 return false;
             }
         }
