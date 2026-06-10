@@ -1035,7 +1035,37 @@ void bind_rocisa_module_builder(nb::module_& b) {
       .def("single_item_module", &ModuleBuilder::single_item_module,
            nb::arg("item"), nb::arg("name") = "",
            "Build a Module wrapping a single item (the common single-"
-           "instruction emit-leaf shape).");
+           "instruction emit-leaf shape).")
+      .def("add_comment0", &ModuleBuilder::add_comment0, nb::arg("module"),
+           nb::arg("comment"),
+           "rocisa Module.addComment0 (the '//<comment>' form used by the "
+           "GR/LR LDS-swap leaves).")
+      .def("single_buffer_load", &ModuleBuilder::single_buffer_load,
+           nb::arg("tc"), nb::arg("is_glc"), nb::arg("is_slc"),
+           nb::arg("is_nt"), nb::arg("offsetK"), nb::arg("grBaseId"),
+           nb::arg("m0Offsets"), nb::arg("soffset"), nb::arg("voffs"),
+           "C++ port of SubtileGREmit.emitSingleBufferLoad: SAddU32(m0) + "
+           "direct-to-LDS BufferLoadB128 per m0 offset. Register state "
+           "(soffset object, voff indices) is resolved in Python.")
+      .def("single_ds_read", &ModuleBuilder::single_ds_read, nb::arg("tc"),
+           nb::arg("sId0"), nb::arg("sId1"), nb::arg("subIterK"),
+           nb::arg("dstVgpr"), nb::arg("regsPerDsRead"), nb::arg("offset"),
+           nb::arg("dstRegOffsets"), nb::arg("addrVgprs"),
+           "C++ port of SubtileLREmit.emitSingleDsRead: one DSLoadB128 per read "
+           "entry. Destination/address VGPR indices are resolved in Python.")
+      .def("gr_ptr_update", &ModuleBuilder::gr_ptr_update, nb::arg("tc"),
+           nb::arg("inc"),
+           "C++ port of SubtileGREmit._emitGRPtrUpdate_TLU0: advance Srd<tc> by "
+           "inc bytes with carry.")
+      .def("gr_lds_buffer_swap", &ModuleBuilder::gr_lds_buffer_swap,
+           nb::arg("tc"),
+           "C++ port of SubtileGREmit._emitGRLDSSwap_TLU0: "
+           "LocalWriteBaseAddr<tc> ^= Swap<tc>.")
+      .def("lr_lds_buffer_swap", &ModuleBuilder::lr_lds_buffer_swap,
+           nb::arg("tc"), nb::arg("voffs"), nb::arg("vswaps"),
+           "C++ port of SubtileLREmit._emitLRLDSSwap_1x2: XOR each "
+           "sharedVgprLROffset with its swap VGPR. Index lists resolved in "
+           "Python.");
 }
 
 }  // namespace

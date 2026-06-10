@@ -30,6 +30,19 @@ from .SubtileGeometry import (
 )
 from .SubtileScaleEmit import emitScaleLRLDSSwap
 
+from tensile_writer.subtile.module_builder import ModuleBuilder
+
+# Single cached C++ rocisa module-builder (owns no writer state). See
+# cpp_migration/docs/rocisa_module_builder_boundary.md.
+_MODULE_BUILDER = None
+
+
+def _builder():
+  global _MODULE_BUILDER
+  if _MODULE_BUILDER is None:
+    _MODULE_BUILDER = ModuleBuilder()
+  return _MODULE_BUILDER
+
 
 ################################################################################
 # 1. Dispatch bases
@@ -381,14 +394,11 @@ def _emitLRLDSSwap_1x2(tag, tile, ti, writer, kernel):
   """Toggle LR read offsets between double-buffer halves.
 
   XOR each sharedVgprLROffset with its swap mask to flip to the other buffer.
+  Boundary call: the per-offset VGPR index lists are writer-owned register
+  state; the rocisa construction lives in the C++ ModuleBuilder.
   """
-  module = Module()
-  module.addComment0("Emit code to swap %s LR vgpr offsets"%ti.tc)
-  for i in range(len(tile.sharedVgprLROffset)):
-    vOff  = tile.sharedVgprLROffset[i]
-    vSwap = tile.sharedVgprLROffsetSwap[i]
-    module.add(VXorB32(dst=vgpr(vOff), src0=vgpr(vOff), src1=vgpr(vSwap), comment=""))
-  return module
+  return _builder().lr_lds_buffer_swap(
+      ti.tc, list(tile.sharedVgprLROffset), list(tile.sharedVgprLROffsetSwap))
 
 
 ##################################################
@@ -587,18 +597,15 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile):
 
   # Instruction-shape plan (DS offset, register stride, per-read map) computed
   # by the C++ ABTileInfoQuery via TileInfo — pure data. The destination VGPR
-  # base and the sharedVgprLROffset registers stay Python-side.
+  # base and the sharedVgprLROffset registers are writer-owned register state,
+  # resolved here and passed to the C++ ModuleBuilder which does the rocisa
+  # construction.
   plan = tileInfo.singleDsReadPlan(sId0, sId1, subIterK, numRegs)
-
-  module = Module()
-  for readIdx, rd in enumerate(plan.reads):
-    addrVgpr = tileInfo.sharedVgprLROffset[rd.addrIdx]
-    module.add(DSLoadB128(
-        dst=vgpr(dstVgpr + rd.dstRegOffset, plan.regsPerDsRead),
-        src=vgpr(addrVgpr),
-        ds=DSModifiers(offset=plan.offset),
-        comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx)))
-  return module
+  dstRegOffsets = [rd.dstRegOffset for rd in plan.reads]
+  addrVgprs = [tileInfo.sharedVgprLROffset[rd.addrIdx] for rd in plan.reads]
+  return _builder().single_ds_read(
+      tileInfo.tc, sId0, sId1, subIterK, dstVgpr, plan.regsPerDsRead,
+      plan.offset, dstRegOffsets, addrVgprs)
 
 
 def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):

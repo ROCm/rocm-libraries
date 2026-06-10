@@ -24,7 +24,7 @@ from rocisa.container import DPPModifiers, EXEC, MUBUFModifiers, VCC, vgpr, sgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
-    SAddCU32, SAddU32, SMovB32, SMovB64, SMulI32, SNop, SXorB32,
+    SAddU32, SMovB32, SMovB64, SMulI32, SNop, SXorB32,
     VAddU32, VAndB32, VCmpXEqU32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32,
     VMulLOU32, VReadfirstlaneB32, VSubU32, VXorB32,
@@ -35,6 +35,21 @@ from .SubtileGeometry import (
     GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
 )
 from .SubtileScaleEmit import emitScaleGRLDSSwap
+
+from tensile_writer.subtile.module_builder import ModuleBuilder
+
+# Single cached C++ rocisa module-builder. The builder owns no writer state; it
+# only assembles rocisa Items from primitive ints/strings/operand objects that
+# the boundary functions below resolve from the writer's register pools. See
+# cpp_migration/docs/rocisa_module_builder_boundary.md.
+_MODULE_BUILDER = None
+
+
+def _builder():
+  global _MODULE_BUILDER
+  if _MODULE_BUILDER is None:
+    _MODULE_BUILDER = ModuleBuilder()
+  return _MODULE_BUILDER
 
 
 ################################################################################
@@ -489,15 +504,10 @@ def _emitDTLInit_TLU0(tag, tile, ti, writer, kernel):
 def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
   """Toggle GR DTL write target between double-buffer halves.
 
-  XOR LocalWriteBaseAddr with Swap to flip to the other LDS buffer.
+  XOR LocalWriteBaseAddr with Swap to flip to the other LDS buffer. Boundary
+  call: the rocisa construction lives in the C++ ModuleBuilder.
   """
-  module = Module()
-  tc = ti.tc
-  module.addComment0("Emit code to swap %s GR m0 offsets"%tc)
-  module.add(SXorB32(dst=sgpr(f"LocalWriteBaseAddr{tc}"),
-             src0=sgpr(f"LocalWriteBaseAddr{tc}"), src1=sgpr(f"Swap{tc}"),
-             comment=""))
-  return module
+  return _builder().gr_lds_buffer_swap(ti.tc)
 
 
 # --- GR pointer update (TLU=0) ----------------------------------------------
@@ -506,15 +516,12 @@ def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
 @_emitGRPtrUpdate.register(GRTag_1x2)
 @_emitGRPtrUpdate.register(GRTag_2x2)
 def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
-  """Advance SRD base pointer by one depthU iteration (depthU * bpe bytes)."""
-  module = Module(f"GR Ptr Update ({ti.tc})")
-  tc = ti.tc
-  inc = int(ti.depthUBytes)
-  module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
-             comment=f"{tc}: advance SRD by {inc} bytes"))
-  module.add(SAddCU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
-             comment=f"{tc}: carry"))
-  return module
+  """Advance SRD base pointer by one depthU iteration (depthU * bpe bytes).
+
+  Boundary call: the depthU byte increment is a writer-resolved scalar; the
+  rocisa SAddU32/SAddCU32 construction lives in the C++ ModuleBuilder.
+  """
+  return _builder().gr_ptr_update(ti.tc, int(ti.depthUBytes))
 
 
 ################################################################################
@@ -745,14 +752,13 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
       sId0:     Subtile row index
       sId1:     Subtile column index (K-dimension)
   """
-  module = Module()
-
   # Instruction-shape plan (skip predicate, MUBUF offsetK, per-load m0 offsets)
   # computed by the C++ ABTileInfoQuery via TileInfo — pure data. Register
-  # state (soffset/voff) below stays Python-side.
+  # state (soffset/voff) is resolved here (writer-owned) and the rocisa
+  # construction is done by the C++ ModuleBuilder.
   plan = tileInfo.singleBufferLoadPlan(sId0, sId1)
   if plan.skip:
-    return module
+    return Module()
 
   tc = tileInfo.tc
   isGlc = bool(kernel["NonTemporal%s"%tc] & 0x1)
@@ -763,17 +769,17 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
   regList = tileInfo.localSubtilesRegister[regListIdx]
   useSgpr = regList.is_sgpr
 
-  offsetK = plan.offsetK
-  WriteBaseAddr = "LocalWriteBaseAddr%s"%tc
-  for i, m0Offset in enumerate(plan.m0Offsets):
-    module.add(SAddU32(dst=mgpr(0), src0=sgpr(WriteBaseAddr), src1=(m0Offset - offsetK)))
-    mubuf = MUBUFModifiers(offen=True, offset12=offsetK, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
-
-    soffset = regList.ref(0) if len(regList) > 0 and useSgpr else 0
-    voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.indices[i]
-    module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(plan.grBaseId , i)))
-
-  return module
+  # soffset is constant across loads; voff is per-load. Both are resolved from
+  # the writer's register state and passed to the builder as operand objects.
+  soffset = regList.ref(0) if len(regList) > 0 and useSgpr else 0
+  voffs = [
+      (tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0
+       else regList.indices[i])
+      for i in range(len(plan.m0Offsets))
+  ]
+  return _builder().single_buffer_load(
+      tc, isGlc, isSlc, isNT, plan.offsetK, plan.grBaseId,
+      list(plan.m0Offsets), soffset, voffs)
 
 
 def emitSubtileBufferLoad(tc, writer, kernel, subtileId):

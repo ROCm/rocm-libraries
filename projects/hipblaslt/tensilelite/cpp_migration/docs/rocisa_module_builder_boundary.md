@@ -90,6 +90,33 @@ These two leaves were chosen first because they consume **no** writer state —
 the simplest possible boundary — so the foundation can prove byte-identical
 rocisa output before any register-carrying leaf is ported.
 
+## GR / LR data-movement leaves (grc.109)
+
+`hipblaslt_incremental_refactor-grc.109` ports the subtile GR/LR
+*data-movement* emit leaves onto the builder. The rocisa construction now lives
+in C++; the Python `SubtileGREmit` / `SubtileLREmit` functions are reduced to
+thin boundary calls that get the data-only C++ plan, resolve writer register
+state, and delegate to the builder:
+
+| Builder method | Python leaf it replaces | Writer state resolved in Python |
+|---|---|---|
+| `single_buffer_load(tc, is_glc, is_slc, is_nt, offsetK, grBaseId, m0Offsets, soffset, voffs)` | `SubtileGREmit.emitSingleBufferLoad` | `soffset` (shared SGPR ref object or int 0) and per-load `voffs` VGPR indices (from `localSubtilesRegister` / `sharedVgprGROffset`) |
+| `single_ds_read(tc, sId0, sId1, subIterK, dstVgpr, regsPerDsRead, offset, dstRegOffsets, addrVgprs)` | `SubtileLREmit.emitSingleDsRead` | destination tile base VGPR and per-read `sharedVgprLROffset` address indices |
+| `gr_ptr_update(tc, inc)` | `SubtileGREmit._emitGRPtrUpdate_TLU0` | `inc` = `tileInfo.depthUBytes` |
+| `gr_lds_buffer_swap(tc)` | `SubtileGREmit._emitGRLDSSwap_TLU0` | none (uses fixed `Srd`/`Swap` sgpr names) |
+| `lr_lds_buffer_swap(tc, voffs, vswaps)` | `SubtileLREmit._emitLRLDSSwap_1x2` | `sharedVgprLROffset` / `sharedVgprLROffsetSwap` VGPR indices |
+
+The `skip` predicate of `single_buffer_load` (loadRatioGR>1 duplicate-load
+suppression) stays in Python: the leaf returns an empty `Module` and never calls
+the builder for skipped subtiles. `add_comment0(module, comment)` was added to
+support the `//`-style comment the swap leaves emit. `ds_modifiers` gained the
+`na` parameter (the grc.107 review's `fk8` note) so dual-address DS leaves can
+be expressed; the AB ds_read path uses the `na=1` default.
+
+The MX-scale GR/LR swap/ptr-update paths (`MXSA`/`MXSB`) and the GR/LR
+*offset-assignment* math (`graTileAssignment` / `lraTileAssignment`, already
+C++-plan-driven) are out of scope for this slice and unchanged.
+
 ## Verification
 
 `Tensile/Tests/unit/test_subtileRocisaModuleBuilderCpp.py` is the smoke parity
@@ -100,10 +127,12 @@ the Python emit path performs today). It also exercises the generic
 `instruction(...)` hook and the `vgpr`/`sgpr`/`ds_modifiers`/`flatitems`
 helpers against a `DSLoadB32` built both ways.
 
-## Non-goals for this slice
+## Non-goals for the foundation slice (grc.107)
 
-- No subtile emit loop is moved to C++ yet (that is dependent work); the large
-  Python emit functions are unchanged.
+- The foundation slice itself moved no subtile emit loop to C++; the GR/LR
+  data-movement leaves were ported in the follow-up `grc.109` slice (see the
+  section above). The GR/LR/scale *offset-assignment* loops and the MX-scale
+  emit leaves remain Python (rocisa construction driven by C++ data plans).
 - No parallel production path / env-var switch (`TENSILE_WRITER_CPP` and
   dual-path patterns are explicitly forbidden). The builder is additive
   infrastructure; nothing selects it in production yet.
