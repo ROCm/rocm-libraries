@@ -24,7 +24,7 @@
  *
  *   Comparisons:
  *     1. hipBLASLt native DGEMM  (HIPBLAS_COMPUTE_64F, emulation disabled)
- *     2. FP64 emulation with num_moduli = min_s .. max_s  (default 2..20)
+ *     2. FP64 emulation with num_moduli = min_s .. max_s  (default 2..18)
  *     3. FP64 emulation adaptive-s (library default settings)
  *
  * This file must be compiled as HIP (it contains __global__ kernels).
@@ -500,10 +500,10 @@ static double run_and_time(Fn fn, unsigned num_warmup, unsigned num_runs,
 }
 
 /* =========================================================================
- * CRT bit capacity for num_moduli = 2..20
- * Indexed directly by s: CRT_BITS[s], s in {2, ..., 20}.
+ * CRT bit capacity for num_moduli = 2..18
+ * Indexed directly by s: CRT_BITS[s], s in {2, ..., 18}.
  * ========================================================================= */
-static constexpr double CRT_BITS[21] = {
+static constexpr double CRT_BITS[19] = {
     0.0,    /* s=0  (unused) */
     0.0,    /* s=1  (unused) */
     15.994, /* s=2  */
@@ -523,8 +523,6 @@ static constexpr double CRT_BITS[21] = {
    125.374, /* s=16 */
    132.949, /* s=17 */
    140.448, /* s=18 */
-   147.931, /* s=19 */
-   155.365, /* s=20 */
 };
 
 /**
@@ -534,11 +532,12 @@ static constexpr double CRT_BITS[21] = {
  * The library picks the minimum s' such that CRT_BITS[s'] >= maxBits.
  * To select exactly s, we need:
  *   CRT_BITS[s-1] < maxBits <= CRT_BITS[s]
- * Using maxBits = (int)CRT_BITS[s-1] + 1 satisfies this for s=2..20.
+ * Using maxBits = (int)CRT_BITS[s-1] + 1 satisfies this for s=2..18.
  */
 static int bits_for_moduli(unsigned s)
 {
-    if(s < 2u) s = 2u;
+    if(s < 2u)  s = 2u;
+    if(s > 18u) s = 18u;
     return static_cast<int>(CRT_BITS[s - 1]) + 1;
 }
 
@@ -549,7 +548,7 @@ struct Config {
     size_t              N            = 512;
     unsigned            num_runs     = 30;
     unsigned            min_s        = 2;
-    unsigned            max_s        = 20;
+    unsigned            max_s        = 18;
     std::vector<double> phi_list     = {0.5, 1.0, 2.0, 4.0};
     /* Each entry is {transa, transb} where each char is 'N' or 'T'. */
     std::vector<std::pair<char,char>> trans_list = {{'N','N'},{'N','T'},{'T','N'},{'T','T'}};
@@ -564,7 +563,7 @@ static void print_usage(const char* prog)
         "  -n N           Square matrix size M=N=K (default: 512)\n"
         "  --num-runs R   Timed iterations per config (default: 30)\n"
         "  --min-s S      Minimum num_moduli for emulation (default: 2)\n"
-        "  --max-s S      Maximum num_moduli for emulation (default: 20)\n"
+        "  --max-s S      Maximum num_moduli for emulation (default: 18)\n"
         "  --phi-list P   Comma-separated phi values\n"
         "                 (default: 0.5,1,2,4  — same as GEMMul8)\n"
         "  --trans T      Comma-separated transpose combinations to run\n"
@@ -652,7 +651,7 @@ static Config parse_args(int argc, char** argv)
     }
 
     if(cfg.min_s < 2u)  cfg.min_s = 2u;
-    if(cfg.max_s > 20u) cfg.max_s = 20u;
+    if(cfg.max_s > 18u) cfg.max_s = 18u;
     if(cfg.min_s > cfg.max_s) std::swap(cfg.min_s, cfg.max_s);
 
     if(cfg.N == 0) {

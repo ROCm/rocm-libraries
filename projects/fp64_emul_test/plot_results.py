@@ -38,10 +38,10 @@ matplotlib.rcParams.update({
 EPS_FP64 = 2.220446049250313e-16
 
 # ── Representative s values to show in "accuracy vs N" and TFlop/s plots ────
-HIGHLIGHT_S = [2, 4, 7, 10, 14, 16, 20]
+HIGHLIGHT_S = [2, 4, 7, 10, 14, 16, 18]
 
-# ── Colours for num_moduli (2..20) ───────────────────────────────────────────
-S_MAX = 20
+# ── Colours for num_moduli (2..18) ───────────────────────────────────────────
+S_MAX = 18
 S_CMAP = cm.get_cmap("plasma", S_MAX + 1)
 
 def s_color(s):
