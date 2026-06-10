@@ -222,11 +222,11 @@ TEST_CASE("Logger: CSV output from GEMM evaluation contains expected columns", "
 
   auto hardware = make_hardware(942);
   auto problem  = make_problem(4096, 4096, 2048);
-  auto config   = make_config(128, 128, 64, 16, 16, 16, false, 1);
+  auto config   = make_config(256, 256, 64, 16, 16, 16, false, 1);
 
   origami::compute_total_latency(problem, hardware, config, hardware.N_CU);
 
-  auto problem2 = make_problem(1024, 1024, 512);
+  auto problem2 = make_problem(256, 256, 16384);
   origami::compute_total_latency(problem2, hardware, config, hardware.N_CU);
 
   origami::Logger::instance().flush();
@@ -236,6 +236,7 @@ TEST_CASE("Logger: CSV output from GEMM evaluation contains expected columns", "
   REQUIRE(contents.find("total_latency") != std::string::npos);
   REQUIRE(contents.find("L_mem") != std::string::npos);
   REQUIRE(contents.find("L_compute") != std::string::npos);
+  REQUIRE(contents.find("L_parallel_reduce") != std::string::npos);
   REQUIRE(count_occurrences(contents, "\n") >= 3);
 
   std::remove(csv_path.c_str());
