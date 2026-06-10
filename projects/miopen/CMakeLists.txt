@@ -845,9 +845,12 @@ enable_cppcheck(
         *:*src/sqlite/*.cpp
         *:*.cl
         *:*src/kernels/*.h
-        # MIOpenConvFwd_LxL_11.cpp is a HIP kernel file compiled at runtime with -D defines;
-        # cppcheck evaluates undefined macros as 0, causing false array-size errors.
+        # These are HIP kernel files compiled at runtime with -D defines; cppcheck
+        # evaluates undefined macros as 0, causing false array-size errors and
+        # division/modulo-by-zero in #if preprocessor conditions.
         *:*src/kernels/MIOpenConvFwd_LxL_11.cpp
+        *:*src/kernels/MIOpenConvDirBatchNormActivHip.cpp
+        *:*src/kernels/MIOpenConvDirUniHip.cpp
         knownConditionTrueFalse:*src/kernels/static_composable_kernel/*/*
         redundantAssignment:*src/kernels/static_composable_kernel/*/*
         unreadVariable:*src/kernels/static_composable_kernel/*/*
