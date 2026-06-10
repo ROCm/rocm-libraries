@@ -1,17 +1,17 @@
-// End-to-end test of the unified hybrid dispatcher: choose_tile routing + host tiled-scale
-// (per chosen MPW/NPW) + dispatch_gemm launch. Correctness (fresh-alloc + CPU ref) through
-// the real dispatch path, then perf across the 12 v18 shapes (prints tile pick + TFLOPs).
+// End-to-end test of libmxfp6gemm through its PUBLIC API (mxfp6/gemm.hpp): choose_tile
+// routing + host tiled-scale (mxfp6/preprocess.hpp) + mxfp6::gemm() launch. Correctness
+// (fresh-alloc + CPU ref) on both tile paths, then an indicative perf sweep over 12 shapes.
+// (For precise numbers warm to steady state — see HANDOFF; this is a functional gate.)
 #include <cmath>
 #include <cstdio>
 #include <random>
 #include <vector>
-#include "mxfp6_asm_utils.hpp"
-#include "mxfp6_preprocess.hpp"
-#include "mxfp6_reference.hpp"
-#include "mxfp6_types.hpp"
-#include "mxfp6_lds.hpp"
-#include "mxfp6_lds_hybrid.hpp"
-#include "mxfp6_dispatch.hpp"
+#include <hip/hip_runtime.h>
+#include <hip/hip_fp16.h>
+#include "mxfp6/gemm.hpp"
+#include "mxfp6/preprocess.hpp"
+#include "mxfp6/reference.hpp"
+#include "mxfp6/types.hpp"
 using namespace mxfp6;
 static constexpr int KT=192;
 
@@ -46,7 +46,7 @@ static bool verify(int M,int N,int K){
   TileChoice tc=choose_tile(M,N); Dev x=setup(M,N,K,tc);
   std::vector<float> Dref((size_t)M*N);mxfp6_gemm_ref(x.Aq,x.Bq,Dref.data(),M,x.Kp,N);
   float*dD;hipMalloc(&dD,(size_t)M*N*4);hipMemset(dD,0x5A,(size_t)M*N*4);
-  dispatch_gemm<float>(M,N,x.Kp,x.dA,x.dBsh,x.dsA,x.dsB,dD,x.Ar,x.Br);hipDeviceSynchronize();
+  gemm(OutType::F32,M,N,x.Kp,x.dA,x.dBsh,x.dsA,x.dsB,dD,x.Ar,x.Br);hipDeviceSynchronize();
   std::vector<float> Dg((size_t)M*N);hipMemcpy(Dg.data(),dD,(size_t)M*N*4,hipMemcpyDeviceToHost);hipFree(dD);
   float er=0,mx=0;for(size_t i=0;i<(size_t)M*N;i++){er=fmaxf(er,fabsf(Dg[i]-Dref[i]));mx=fmaxf(mx,fabsf(Dref[i]));}
   bool ok=er<2e-2f*fmaxf(1.f,mx);
@@ -56,19 +56,20 @@ static bool verify(int M,int N,int K){
 static void perf(int M,int N,int K){
   TileChoice tc=choose_tile(M,N); Dev x=setup(M,N,K,tc);
   __half*dD;hipMalloc(&dD,(size_t)M*N*2);
-  auto run=[&]{dispatch_gemm<__half>(M,N,x.Kp,x.dA,x.dBsh,x.dsA,x.dsB,dD,x.Ar,x.Br);};
+  auto run=[&]{gemm(OutType::F16,M,N,x.Kp,x.dA,x.dBsh,x.dsA,x.dsB,dD,x.Ar,x.Br);};
   double ms=bench(run);int wg=(M/256)*(N/256);
   printf("  %5dx%5dx%5d wg256=%4d -> %3dx%3d : %.0f TFLOPs\n",M,N,K,wg,tc.MT,tc.NT,tf(M,N,K,ms));
   hipFree(dD);teardown(x);
 }
 int main(){
-  printf("=== dispatcher correctness (end-to-end, CPU ref) ===\n");
+  printf("=== libmxfp6gemm correctness (end-to-end, CPU ref) ===\n");
   int f=0;
   f+=!verify(512,512,768);      // -> 128x256 path (wg256<CU)
   f+=!verify(768,1280,960);     // -> 128x256, non-square
   f+=!verify(4096,4096,768);    // -> 256x256 path (wg256=256), small K for fast ref
-  if(f)printf("  CORRECTNESS FAILED\n"); else printf("  all OK\n");
-  printf("\n=== dispatcher perf (12 shapes), FP16 ===\n");
+  if(f){printf("  CORRECTNESS FAILED\n");return 1;}
+  printf("  all OK\n");
+  printf("\n=== indicative perf (12 shapes), FP16 ===\n");
   int sh[][3]={{8192,8192,8192},{8192,4096,8192},{4096,8192,8192},{8192,9216,8192},
     {8192,7680,8192},{8192,5120,8192},{4096,5120,8192},{4096,4096,8192},{2048,8192,8192},
     {2048,4096,8192},{2048,2048,8192},{1024,4096,4096}};

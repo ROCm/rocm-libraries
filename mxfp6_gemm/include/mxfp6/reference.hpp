@@ -1,6 +1,6 @@
 #pragma once
-#include "mxfp6_types.hpp"
-#include "mxfp6_preprocess.hpp"
+#include "mxfp6/types.hpp"
+#include "mxfp6/preprocess.hpp"
 #include <vector>
 #include <cassert>
 

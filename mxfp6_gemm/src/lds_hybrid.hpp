@@ -13,7 +13,7 @@
 // and read_op read LDS[(blk*32+lane%32)*KT_BYTES + sub*48 + (lane>>5)*24], i.e. 24
 // contiguous bytes within row m. So the SAME 24 bytes live in global at:
 //   Bg + (blk*32 + lane%32)*B_row_bytes + kt*KT_BYTES + sub*48 + (lane>>5)*24
-#include "mxfp6_lds.hpp"
+#include "lds.hpp"
 namespace mxfp6 {
 
 // Coalesced B operand load from a PRESHUFFLED B (preshuffle_B layout): per 32x64 tile,

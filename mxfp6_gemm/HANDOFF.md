@@ -59,18 +59,26 @@ backpressure (real work) 24% + epilogue store drain ~10%. No single reclaimable 
 
 ## Files
 
+Built as a library (`libmxfp6gemm`) with a device-free public header; the test links it and
+drives it through the public API. Layout:
+
 | File | What |
 |---|---|
-| `mxfp6_dispatch.hpp` | **`choose_tile` + `dispatch_gemm`** — the unified shape→tile router |
-| `mxfp6_lds_hybrid.hpp` | **`lds_gemm_hybrid_dripA`** (tile-general) + `load_b_shuf` + `issue_A_chunks` |
-| `mxfp6_lds.hpp` | shared device helpers (`read_op`, `asm_load_dwordxN_nowait`) + host `tile_scale` |
-| `mxfp6_asm_utils.hpp` | MFMA wrappers, `ds_read_fp6x32_plain`, `store_acc_t`, wait/M0 helpers |
-| `mxfp6_preprocess.hpp` | `quantize_to_mxfp6`, `preprocess_B`, `preprocess_scale`, `preshuffle_B` |
-| `mxfp6_types.hpp` / `mxfp6_reference.hpp` | types / CPU reference GEMM |
-| `test_dispatch.cpp` | end-to-end correctness (fresh-alloc + CPU ref) + 12-shape benchmark |
+| `include/mxfp6/gemm.hpp` | **public API** — `mxfp6::gemm(OutType,…)` + `choose_tile` (device-free; host TUs can include it) |
+| `include/mxfp6/preprocess.hpp` | host: `quantize_to_mxfp6` / `preprocess_B` / `preshuffle_B` / `preprocess_scale` / `tile_scale` |
+| `include/mxfp6/{types,reference}.hpp` | data types / CPU reference GEMM |
+| `src/gemm.cpp` | library impl (HIP): `gemm()` + `choose_tile()`, instantiates F32/F16/BF16 |
+| `src/dispatch.hpp` | internal `detail::dispatch_gemm<OutT>` (shape→tile launch) |
+| `src/lds_hybrid.hpp` | **`lds_gemm_hybrid_dripA`** kernel + `load_b_shuf` + `issue_A_chunks` |
+| `src/lds.hpp` · `src/asm_utils.hpp` | device helpers (`read_op`, `asm_load*`) · MFMA/store/wait |
+| `tests/test_dispatch.cpp` | end-to-end correctness (fresh-alloc + CPU ref) + perf, via the public API |
+| `CMakeLists.txt` | HIP build: static lib `mxfp6gemm` + `ctest` |
 | `profile_out/` | RCV traces + annotated ASM of the hybrid paradigm (analysis artifacts) |
 
-Build & run: `make test_dispatch && ./test_dispatch`
+Build & test: `cmake -S . -B build -DCMAKE_HIP_ARCHITECTURES=gfx950 && cmake --build build -j && ctest --test-dir build`
+
+Use the library: include `<mxfp6/gemm.hpp>`, link `mxfp6gemm`, then
+`choose_tile(M,N)` → host preprocess (tile scales with the returned MPW/NPW) → `gemm(OutType, …)`.
 
 ---
 
@@ -137,7 +145,7 @@ machine / CK build* (no power cap); do NOT compare its numbers to this machine's
 
 ## Repro
 ```bash
-make test_dispatch && ./test_dispatch
+cmake -S . -B build -DCMAKE_HIP_ARCHITECTURES=gfx950 && cmake --build build -j && ctest --test-dir build
 # CK reference (same machine): /home/AMD/zhewan/ck-bench-6732acf/bin/tile_example_mx_flatmm
 ```
 NFS backup: source mirrored to `/home/AMD/zhewan/rocm-libraries-ck/mxfp6_gemm/`.

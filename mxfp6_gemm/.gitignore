@@ -1,39 +1,15 @@
-# build artifacts
-*.bin
+# build
+build/
 *.o
-*.s
 *.out
+*.s
+*.bin
 *.hipfb
-*.build.log
 *.bc
-*.hipi
-*.out.resolution.txt
-*.0.hipv4-*
-*.0.host-*
-test_pipeline_v18
-test_pipeline_v17
-test_lds
-test_hybrid
-test_hybrid_grid
-test_dripA
-profile_hybrid
-test_ws
-test_pp8
-test_reference
-probe_glds
-exp_sgb
-exp_interleave*
-tp_builtin
-tl_sf
-profile_v17
-profile_lds
-profile_v17.0.host-*
-profile_v17.*.hipv4-*
-*-host-x86_64-unknown-linux-gnu.s
-# profiler / tooling output
-prof_out*/
-.rocprofv3/
 compile_commands.json
 .vscode/
+# profiler / tooling output
+.rocprofv3/
+prof_out*/
 # large profiler trace archive (regenerable; kept on NFS, not in git)
 profile_out/*.tar.gz

@@ -1,5 +1,5 @@
 #pragma once
-#include "mxfp6_types.hpp"
+#include "mxfp6/types.hpp"
 #include <vector>
 #include <cmath>
 #include <cstring>
@@ -210,6 +210,29 @@ inline CoalescedScale preshuffle_scale(const PreprocessedScale& ps, int group) {
         }
     }
     return cs;
+}
+
+// Tile-grouped scale layout (host): a wave's `group` consecutive 32-blocks AND its `subs`
+// k64 sub-slabs of one K-tile become contiguous per lane, so the kernel fetches a whole
+// K-tile's scales in ONE dwordx{subs} load. Layout:
+//   out[(((g*k_tiles+kt)*64 + lane)*subs + sub)*group_pad + j] = scale(block g*group+j, k64)
+struct TiledScale { std::vector<uint8_t> data; };
+inline TiledScale tile_scale(const PreprocessedScale& ps, int group, int subs) {
+    int group_pad = (group + 3) / 4 * 4;
+    int k_tiles = ps.k64_iters / subs;
+    int ng = ps.num_tiles / group;
+    TiledScale ts;
+    ts.data.assign((size_t)ng * k_tiles * 64 * subs * group_pad, 0);
+    for (int g = 0; g < ng; g++)
+        for (int kt = 0; kt < k_tiles; kt++)
+            for (int lane = 0; lane < 64; lane++)
+                for (int sub = 0; sub < subs; sub++)
+                    for (int j = 0; j < group; j++) {
+                        int k64 = kt * subs + sub, tile = g * group + j;
+                        ts.data[(((size_t)(g * k_tiles + kt) * 64 + lane) * subs + sub) * group_pad + j] =
+                            ps.data[(size_t)(tile * ps.k64_iters + k64) * 64 + lane];
+                    }
+    return ts;
 }
 
 } // namespace mxfp6
