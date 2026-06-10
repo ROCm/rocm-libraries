@@ -54,9 +54,12 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
 /// Produces the same 2D engineered features as ExtractTunaNetND2dFeatures (ai_heuristics.cpp),
 /// except direction one-hot is omitted when direction is a CandidateSelection constant.
 /// Logic is duplicated so either path can evolve independently.
+/// precision_class_count is the metadata-driven width of the precision one-hot (3 without INT8,
+/// 4 with); pass 0 to default to 3.
 MIOPEN_INTERNALS_EXPORT std::vector<float>
 EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
-                                        const std::map<std::string, float>& features_by_name);
+                                        const std::map<std::string, float>& features_by_name,
+                                        std::size_t precision_class_count);
 
 /// Expands metadata-ordered encoded kernel params into the vector consumed by the
 /// kernel_config_encoder submodel (one-hot + raw numerical + derived features).
@@ -95,6 +98,9 @@ public:
     sequence_encodings() const;
     MIOPEN_INTERNALS_EXPORT float GetMissingValueToken() const;
     MIOPEN_INTERNALS_EXPORT const std::vector<int>& GetSplitKValues() const;
+    // Number of one-hot classes for an input feature (e.g. "precision"), from the metadata's
+    // input encodings. Returns 0 when the feature has no encoding (i.e. is not categorical).
+    MIOPEN_INTERNALS_EXPORT std::size_t GetInputEncodingClassCount(const std::string& name) const;
 
 private:
     // Internal mappings and encodings

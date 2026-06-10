@@ -535,12 +535,21 @@ std::vector<CandidateSelectionParams> GenerateCandidateSelectionParams()
     // Note: Using DeviceGroupedConvBwdWeight_Xdl_CShuffle for all as it's a common kernel
     // that exists in the metadata for testing infrastructure (not testing kernel accuracy)
     return {
-        // 2D solvers
+        // 2D solvers — cover Fwd/Bwd/Wrw so per-solver metadata differences (e.g. the Fwd
+        // input encoder gaining an INT8 precision class -> 44 vs 43 features) are exercised.
+        {"gfx942",
+         "ConvHipImplicitGemmGroupFwdXdlops",
+         "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle",
+         8},
+        {"gfx942",
+         "ConvHipImplicitGemmGroupBwdXdlops",
+         "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1",
+         8},
         {"gfx942",
          "ConvHipImplicitGemmGroupWrwXdlops",
          "DeviceGroupedConvBwdWeight_Xdl_CShuffle",
          8},
-        // 3D solvers
+        // 3D solvers (raw, non-engineered feature path)
         {"gfx942",
          "ConvHipImplicitGemm3DGroupWrwXdlops",
          "DeviceGroupedConvBwdWeight_Xdl_CShuffle",

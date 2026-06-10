@@ -246,14 +246,23 @@ const std::vector<int>& CandidateSelectionMetadata::GetSplitKValues() const
     return split_k_values_;
 }
 
+MIOPEN_INTERNALS_EXPORT
+std::size_t CandidateSelectionMetadata::GetInputEncodingClassCount(const std::string& name) const
+{
+    const auto it = feature_encodings_.find(name);
+    return it == feature_encodings_.end() ? 0 : it->second.size();
+}
+
 // --- Input feature engineering ----------------------------------------------
 
 namespace {
 
-// Widths expected by fdeep submodels. Update when retraining changes them.
-// ExtractTunaNetND2dFeatures emits 46 features; the input_encoder model expects 43 because
-// direction one-hot is omitted (direction is a constant in CandidateSelection metadata).
-constexpr std::size_t kCandidateSelectionEncoderInputSize = 43;
+// Width of the engineered input vector excluding the precision one-hot. The precision one-hot
+// width is metadata-driven (3 classes without INT8, 4 with) so the total is base + precision
+// classes (e.g. 40 + 3 = 43 for Wrw/Bwd, 40 + 4 = 44 for Fwd with INT8). Direction one-hot is
+// omitted here (direction is a constant in CandidateSelection metadata, unlike the TunaNet path).
+constexpr std::size_t kCandidateSelectionEncoderInputSizeNoPrecision = 40;
+constexpr std::size_t kDefaultPrecisionClassCount                    = 3;
 
 float FeatureAt(const std::map<std::string, float>& features, const std::string& key)
 {
@@ -276,6 +285,8 @@ std::vector<int> OneHot(std::size_t label, std::size_t num_classes)
 
 std::size_t EncodePrecisionLabel(float precision_feature)
 {
+    // Indices must match the "precision" input encoding in the metadata:
+    // {BF16:0, FP16:1, FP32:2, INT8:3}.
     const auto data_type = static_cast<miopenDataType_t>(static_cast<int>(precision_feature));
     if(data_type == miopenBFloat16)
         return 0;
@@ -283,6 +294,8 @@ std::size_t EncodePrecisionLabel(float precision_feature)
         return 1;
     if(data_type == miopenFloat)
         return 2;
+    if(data_type == miopenInt8)
+        return 3;
     MIOPEN_LOG_W("EngineerCandidateSelectionInputFeatures: unsupported precision, defaulting to 0");
     return 0;
 }
@@ -300,9 +313,15 @@ bool IsTwoDimensional(const CandidateSelectionMetadata& metadata)
 MIOPEN_INTERNALS_EXPORT
 std::vector<float>
 EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
-                                        const std::map<std::string, float>& features_by_name)
+                                        const std::map<std::string, float>& features_by_name,
+                                        std::size_t precision_class_count)
 {
     (void)raw_features;
+
+    // The number of precision one-hot classes is metadata-driven so the engineered width matches
+    // the trained model (3 classes for Wrw/Bwd, 4 when INT8 is present, e.g. Fwd).
+    if(precision_class_count == 0)
+        precision_class_count = kDefaultPrecisionClassCount;
 
     // Callers gate this 2D-only path via IsTwoDimensional(metadata); no runtime spatial_dim check
     // here so a model whose feature map omits/differs on spatial_dim still engineers correctly.
@@ -338,8 +357,8 @@ EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
         OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "fil_layout")), 2);
     const auto out_layout =
         OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "out_layout")), 2);
-    const auto precision =
-        OneHot(EncodePrecisionLabel(FeatureAt(features_by_name, "precision")), 3);
+    const auto precision = OneHot(EncodePrecisionLabel(FeatureAt(features_by_name, "precision")),
+                                  precision_class_count);
     // Direction one-hot is present in ExtractTunaNetND2dFeatures but omitted here because
     // CandidateSelection metadata holds direction as a constant input.
 
@@ -393,10 +412,13 @@ EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
         static_cast<float>(fil_layout[1]),
         static_cast<float>(out_layout[0]),
         static_cast<float>(out_layout[1]),
-        static_cast<float>(precision[0]),
-        static_cast<float>(precision[1]),
-        static_cast<float>(precision[2]),
+    };
 
+    // Precision one-hot (width is metadata-driven: 3 or 4 classes).
+    for(const auto bit : precision)
+        engineered.push_back(static_cast<float>(bit));
+
+    const std::vector<float> tail = {
         static_cast<float>(C_in),
         static_cast<float>(H_in),
         static_cast<float>(W_in),
@@ -433,11 +455,14 @@ EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
         static_cast<float>(safe_log1p(static_cast<double>(C_out))),
         static_cast<float>(safe_log1p(static_cast<double>(N))),
     };
+    engineered.insert(engineered.end(), tail.begin(), tail.end());
 
-    if(engineered.size() != kCandidateSelectionEncoderInputSize)
+    const std::size_t expected_size =
+        kCandidateSelectionEncoderInputSizeNoPrecision + precision_class_count;
+    if(engineered.size() != expected_size)
     {
         MIOPEN_THROW("EngineerCandidateSelectionInputFeatures: expected " +
-                     std::to_string(kCandidateSelectionEncoderInputSize) + " features, got " +
+                     std::to_string(expected_size) + " features, got " +
                      std::to_string(engineered.size()));
     }
 
@@ -656,8 +681,8 @@ CandidateSelectionModel::EncodeInputFeatures(const std::map<std::string, float>&
     // dimensionality is declared by the spatial_dim constant in the metadata.
     if(IsTwoDimensional(metadata_))
     {
-        const auto engineered_features =
-            EngineerCandidateSelectionInputFeatures(filtered_features, features);
+        const auto engineered_features = EngineerCandidateSelectionInputFeatures(
+            filtered_features, features, metadata_.GetInputEncodingClassCount("precision"));
         return EncodeInputFeaturesWithFdeep(engineered_features, arch_, solver_);
     }
     return EncodeInputFeaturesWithFdeep(filtered_features, arch_, solver_);
