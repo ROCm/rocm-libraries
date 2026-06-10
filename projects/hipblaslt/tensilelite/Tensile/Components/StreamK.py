@@ -2243,6 +2243,26 @@ class StreamK(Component):
         #         self.preLoopVmcntDict[self.currPreLoopVmcntCase] += storesIssued
 
         return module
+    
+    def stridedBatchOrGeneralBatch(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK stridedBatchOrGeneralBatch")
+        if kernel["ProblemType"]["SupportUserArgs"]:
+            module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+            module.add(SCBranchSCC0(labelName=stridedBatchedGemmLoad.getLabelName())) 
+            # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
+            # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D is not dereferenced as pointer array
+            # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D is dereferenced as pointer array                   
+            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+            module.add(SCBranchSCC0(labelName=generalBatchedGemmLoad.getLabelName()))
+        return module
+
+    @abc.abstractmethod
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        pass
+
+    @abc.abstractmethod
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        pass
 
     @abc.abstractmethod
     def kernelEnd(self, writer, kernel):
@@ -2330,6 +2350,15 @@ class StreamKOff(StreamK):
 
     def writePartials(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK Off writePartials")
+        return module
+
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        module = Module("StreamK Off initializeSrdAddressFlagsCheck")
+        module.add(SBranch(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="General Batched GEMM, Srd initialized to 0"))
+        return module
+
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK Off routeToGeneralBatchedOrStridedBatched")
         return module
 
     def kernelEnd(self, writer, kernel):
@@ -2433,6 +2462,17 @@ class StreamKBasic(StreamK):
     def writePartials(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK Basic writePartials")
         module.add(self.writePartialsCommon(writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel))
+        return module
+
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        module = Module("StreamK Basic initializeSrdAddressFlagsCheck")
+        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+        module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
+        return module
+
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK Basic routeToGeneralBatchedOrStridedBatched")
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
         return module
 
     def kernelEnd(self, writer, kernel):
@@ -2600,6 +2640,17 @@ class StreamKTwoTileOriginal(StreamK):
     def writePartials(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK TwoTileOriginal writePartials")
         module.add(self.writePartialsCommon(writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel))
+        return module
+
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        module = Module("StreamK TwoTileOriginal initializeSrdAddressFlagsCheck")
+        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+        module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
+        return module
+
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK TwoTileOriginal routeToGeneralBatchedOrStridedBatched")
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
         return module
 
     def kernelEnd(self, writer, kernel):
@@ -3008,6 +3059,17 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(self.writePartialsCommon(writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel))
         return module
 
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        module = Module("StreamK TwoTileDPFirst initializeSrdAddressFlagsCheck")
+        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+        module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
+        return module        
+
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK TwoTileDPFirst routeToGeneralBatchedOrStridedBatched")
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
+        return module
+
     def kernelEnd(self, writer, kernel):
         module = Module("StreamK TwoTileDPFirst kernelEnd")
         return module
@@ -3376,7 +3438,18 @@ class StreamKDynamic(StreamK):
             module.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements, False, False, edge, tmpVgpr, cvtVgprStruct, endLabel))
 
         return module
+        
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        module = Module("StreamK Dynamic initializeSrdAddressFlagsCheck")
+        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+        module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
+        return module        
 
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK Dynamic routeToGeneralBatchedOrStridedBatched")
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
+        return module
+        
     def kernelEnd(self, writer, kernel):
         module = Module("StreamK Dynamic kernelEnd")
 
@@ -4223,6 +4296,17 @@ class StreamKHybrid(StreamK):
                                                    False, False, edge, tmpVgpr, cvtVgprStruct,
                                                    endLabel))
 
+        return module
+
+    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
+        module = Module("StreamK Hybrid initializeSrdAddressFlagsCheck")
+        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+        module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
+        return module
+
+    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
+        module = Module("StreamK Hybrid routeToGeneralBatchedOrStridedBatched")
+        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
         return module
 
     def kernelEnd(self, writer, kernel):
