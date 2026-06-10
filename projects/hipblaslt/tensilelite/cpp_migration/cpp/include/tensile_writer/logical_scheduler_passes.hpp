@@ -211,14 +211,6 @@ struct CSlot {
   std::vector<Placement*> grs;
 };
 
-// One emitted module with before-link (data-only).
-struct CEmittedModule {
-  int moduleId = -1;
-  std::optional<int> before;
-  std::string opType;
-  std::string sourceStr;
-};
-
 // ── The scheduler ───────────────────────────────────────────
 
 class LogicalScheduler {
@@ -354,6 +346,18 @@ class LogicalScheduler {
   void emit();
   void build();
 
+  // Export the emitted before-link graph as bound value EmittedModules
+  // (list[partition][subIterK][EmittedModule]) so the Python writer can rebuild
+  // its EmittedModule dataclasses. Each module's `source` is a coordinate-only
+  // value Emittable: the Python converter re-uses its persistent placement
+  // dataclasses (by coordinate match) for placement sources and constructs
+  // fresh op dataclasses for before-chain ops, preserving placement identity so
+  // assign_vgpr_tiles results flow through to emission.
+  std::vector<std::vector<std::vector<tw::subtile::lsched::EmittedModule>>>
+  value_emitted() const {
+    return emitted;
+  }
+
   // ── Value-object export (for the Python writer integration) ──
   //
   // Materialize the internal pointer-based `partitions` model as the
@@ -419,8 +423,9 @@ class LogicalScheduler {
   bool needs_unrolling = false;
   bool vgpr_done = false;
 
-  // emit results
-  std::vector<std::vector<std::vector<CEmittedModule>>> emitted;
+  // emit results (value EmittedModules carrying coordinate-only sources)
+  std::vector<std::vector<std::vector<tw::subtile::lsched::EmittedModule>>>
+      emitted;
 };
 
 // ════════════════════════════════════════════════════════════
@@ -1653,38 +1658,73 @@ inline void LogicalScheduler::remove_unnecessary_wait_lr_sync() {
 // emit / build
 // ════════════════════════════════════════════════════════════
 
+// Convert a pass-pipeline Placement (identity pointer) into a coordinate-only
+// value Emittable source for an EmittedModule. Only the identity/coordinate
+// fields are copied — the Python converter uses them to look up its persistent
+// placement dataclass; str()/kind (the only fields print_emit consumes) match
+// the placement.
+inline tw::subtile::lsched::Emittable placement_to_emittable(
+    const Placement* p) {
+  using namespace tw::subtile::lsched;
+  if (p->kind == PKind::MFMA) {
+    return MFMAPlacement(p->subIterK, p->tileA, p->tileB);
+  }
+  if (p->kind == PKind::LR) {
+    return LRPlacement(p->tensor, p->mtIteration, p->tiles, p->subIterK_slot,
+                       p->partition);
+  }
+  return GRPlacement(p->tensor, p->mtIteration, p->tiles, p->subIterK_slot,
+                     p->partition);
+}
+
+// Convert a pass-pipeline before-chain Op into a value Emittable source. emit()
+// only ever produces wait_gr / wait_lr / sync / lr_inc / gr_inc ops.
+inline tw::subtile::lsched::Emittable op_to_emittable(const Op& o) {
+  using namespace tw::subtile::lsched;
+  if (o.kind == "wait_gr") {
+    std::optional<WaitGRCounts> c;
+    if (o.hasCounts) c = o.counts;
+    return WaitGROp(std::move(c), o.has_sync, o.adjustVmcnt);
+  }
+  if (o.kind == "wait_lr") return WaitLROp(o.has_sync);
+  if (o.kind == "sync") return SyncOp();
+  if (o.kind == "mask_k") return MaskKOp(o.subIterK);
+  if (o.kind == "lr_inc") return LRIncOp(o.tensor);
+  if (o.kind == "gr_inc") return GRIncOp(o.tensor);
+  throw std::runtime_error("unexpected before-chain op kind: '" + o.kind + "'");
+}
+
 inline void LogicalScheduler::emit() {
   ensure(Pass::REMOVE_WAIT_LR_SYNC);
+  using tw::subtile::lsched::EmittedModule;
 
-  std::vector<std::vector<std::vector<CEmittedModule>>> all_partitions;
+  std::vector<std::vector<std::vector<EmittedModule>>> all_partitions;
   for (int pi = 0; pi < (int)partitions.size(); ++pi) {
-    std::vector<std::vector<CEmittedModule>> partition_emitted;
+    std::vector<std::vector<EmittedModule>> partition_emitted;
     for (auto& slot : partitions[pi]) {
-      std::vector<CEmittedModule> emitted;
+      std::vector<EmittedModule> mods;
       std::map<Placement*, int> placement_to_id;
       std::map<Placement*, int> placement_tail_id;
 
       auto addPlacement = [&](Placement* p) -> int {
-        int mid = (int)emitted.size();
-        CEmittedModule em;
+        int mid = (int)mods.size();
+        EmittedModule em;
         em.moduleId = mid;
-        em.opType = p->kindStr();
-        em.sourceStr = p->str();
-        emitted.push_back(em);
+        em.source = placement_to_emittable(p);
+        mods.push_back(std::move(em));
         return mid;
       };
       auto addOp = [&](const Op& op) -> int {
-        int mid = (int)emitted.size();
-        CEmittedModule em;
+        int mid = (int)mods.size();
+        EmittedModule em;
         em.moduleId = mid;
-        em.opType = op.kind;
-        em.sourceStr = op.str();
-        emitted.push_back(em);
+        em.source = op_to_emittable(op);
+        mods.push_back(std::move(em));
         return mid;
       };
       auto setBefore = [&](int moduleId, std::optional<int> beforeId) {
         if (!beforeId.has_value() || *beforeId == moduleId) return;
-        auto& cur = emitted[moduleId].before;
+        auto& cur = mods[moduleId].before;
         if (!cur.has_value()) {
           cur = beforeId;
           return;
@@ -1774,7 +1814,7 @@ inline void LogicalScheduler::emit() {
         }
       }
 
-      partition_emitted.push_back(std::move(emitted));
+      partition_emitted.push_back(std::move(mods));
     }
     all_partitions.push_back(std::move(partition_emitted));
   }
@@ -2046,6 +2086,7 @@ inline std::string LogicalScheduler::print_group_lr_gr() const {
 }
 
 inline std::string LogicalScheduler::print_emit() const {
+  using tw::subtile::lsched::emittable_str;
   std::ostringstream buf;
   buf << "MAINLOOP:\n";
   for (int pi = 0; pi < (int)emitted.size(); ++pi) {
@@ -2056,8 +2097,10 @@ inline std::string LogicalScheduler::print_emit() const {
         std::string before_str =
             em.before.has_value() ? (" <- [" + std::to_string(*em.before) + "]")
                                   : "";
+        std::string src_str =
+            em.source.has_value() ? emittable_str(*em.source) : std::string();
         buf << "      [" << rjust(std::to_string(em.moduleId), 2) << "] "
-            << ljust(em.opType, 10) << " " << em.sourceStr << before_str << "\n";
+            << ljust(em.opType(), 10) << " " << src_str << before_str << "\n";
       }
     }
   }

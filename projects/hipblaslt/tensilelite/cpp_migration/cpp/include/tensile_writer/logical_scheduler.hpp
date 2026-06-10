@@ -565,6 +565,10 @@ inline std::string emittable_kind(const Emittable& e) {
   return std::visit([](const auto& v) { return v.kind; }, e);
 }
 
+inline std::string emittable_str(const Emittable& e) {
+  return std::visit([](const auto& v) { return v.str(); }, e);
+}
+
 // One emitted module with before-link for instruction scheduling.
 //
 // `instructions` are rocisa objects filled during (Python) emission; they are

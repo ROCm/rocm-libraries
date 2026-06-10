@@ -815,130 +815,58 @@ class LogicalScheduler:
           - Dependency modules (wait_gr, wait_lr, sync, lr_inc, gr_inc)
             emitted from preOps, chained via before-links
 
-        The before-link topology:
-          - wait_gr is standalone (no incoming before-link), but later deps chain from it
-          - WaitGROp with has_sync expands to two modules: wait_gr then sync
-          - WaitLROp with has_sync expands to two modules: wait_lr then sync
-          - Same-subIterK Dep deps become ordering constraints (no new module)
+        The before-link topology (wait_gr standalone with later deps chaining
+        from it, WaitGROp/WaitLROp has_sync expanding into a sync module, and
+        same-subIterK Dep deps becoming ordering constraints) is computed by the
+        ported C++ passes::LogicalScheduler emit pass; this method rebuilds the
+        Python EmittedModule dataclasses from the exported value modules. There
+        is no second Python implementation of the before-link wiring.
+
+        Placement sources reuse the persistent placement dataclasses (keyed on
+        their immutable coordinates via the registry built by the delegated
+        passes) so emit sources stay identical to self._partitions — keeping
+        Dep.ref identity and letting assign_vgpr_tiles' vgpr maps flow through to
+        emission. Before-chain op sources are rebuilt as fresh op dataclasses.
         """
         self._ensure_pass(Pass.REMOVE_WAIT_LR_SYNC)
 
+        cpp = self._ensure_cpp()
+        cpp.emit()
+
         all_partitions = []
-        for pi, slots in enumerate(self._partitions):
-            partition_emitted = []
-            for slot in slots:
-                emitted: List[EmittedModule] = []
-                placement_to_id = {}
-
-                def add(source: Emittable) -> int:
-                    mid = len(emitted)
-                    emitted.append(EmittedModule(moduleId=mid, source=source))
-                    return mid
-
-                def setBefore(moduleId: int, beforeId: int) -> None:
-                    if beforeId is None or beforeId == moduleId:
-                        return
-                    cur = emitted[moduleId].before
-                    if cur is None:
-                        emitted[moduleId].before = beforeId
-                        return
-                    assert cur == beforeId, \
-                        f"EmittedModule {moduleId} has multiple before deps: {cur} and {beforeId}"
-
-                # Step 1: emit primary modules
-                placements = []
-                if slot.mfma:
-                    placements.append(slot.mfma)
-                for lr in slot.lrs:
-                    placements.append(lr)
-                for gr in slot.grs:
-                    placements.append(gr)
-
-                placement_tail_id = {}
-                for placement in placements:
-                    mid = add(placement)
-                    placement_to_id[id(placement)] = mid
-                    placement_tail_id[id(placement)] = mid
-
-                # Step 1b: add postOps and update tail ids so that
-                # deps on a placement with postOps resolve to the last postOp.
-                for placement in placements:
-                    if not placement.postOps:
-                        continue
-                    curId = placement_to_id[id(placement)]
-                    postPrevId = curId
-                    for postOp in placement.postOps:
-                        postId = add(postOp)
-                        setBefore(postId, postPrevId)
-                        postPrevId = postId
-                    placement_tail_id[id(placement)] = postPrevId
-
-                # Step 2: wire before-chains from preOps + deps
-                for placement in placements:
-                    curId = placement_to_id[id(placement)]
-                    prevId = None
-                    lastDepId = None
-                    firstPreOpId = None
-
-                    # preOps
-                    for preOp in placement.preOps:
-                        if isinstance(preOp, WaitGROp):
-                            depId = add(preOp)
-                            prevId = depId
-                            if firstPreOpId is None:
-                                firstPreOpId = depId
-                            if preOp.has_sync:
-                                depId = add(SyncOp())
-                                setBefore(depId, prevId)
-                                prevId = depId
-                                lastDepId = depId
-                            continue
-                        elif isinstance(preOp, WaitLROp) and preOp.has_sync:
-                            depId = add(WaitLROp())
-                            setBefore(depId, prevId)
-                            prevId = depId
-                            lastDepId = depId
-                            if firstPreOpId is None:
-                                firstPreOpId = depId
-                            depId = add(SyncOp())
-                            setBefore(depId, prevId)
-                            prevId = depId
-                            lastDepId = depId
-                            continue
-                        else:
-                            depId = add(preOp)
-                            setBefore(depId, prevId)
-                            prevId = depId
-                            lastDepId = depId
-                            if firstPreOpId is None:
-                                firstPreOpId = depId
-
-                    # deps (same-subIterK Deps — ordering constraints)
-                    # Wire dep refs as roots of the preOp chain so the
-                    # dependency is not lost when preOps are present.
-                    for dep in placement.deps:
-                        ref_id = placement_tail_id.get(id(dep.ref))
-                        if ref_id is not None:
-                            if firstPreOpId is not None:
-                                setBefore(firstPreOpId, ref_id)
-                            else:
-                                prevId = ref_id
-
-                    # Final link: primary module points to last dep
-                    if lastDepId is not None:
-                        setBefore(curId, lastDepId)
-                    elif prevId is not None:
-                        setBefore(curId, prevId)
-
-                partition_emitted.append(emitted)
-            all_partitions.append(partition_emitted)
+        for pi, partition_emitted in enumerate(cpp.value_emitted()):
+            py_partition = []
+            for k, cpp_mods in enumerate(partition_emitted):
+                emitted: List[EmittedModule] = [
+                    EmittedModule(moduleId=cm.moduleId, before=cm.before,
+                                  source=self._emit_source_to_py(cm.source, pi, k))
+                    for cm in cpp_mods
+                ]
+                py_partition.append(emitted)
+            all_partitions.append(py_partition)
 
         self._emitted = all_partitions
         self._completed.add(Pass.EMIT)
         return all_partitions
 
+    def _emit_source_to_py(self, cpp_src, pi: int, k: int) -> Emittable:
+        """Map a C++ EmittedModule source (value Emittable) to its Python source.
+
+        Placement sources are looked up in the persistent placement registry
+        (so they share identity with self._partitions and pick up the vgpr maps
+        assigned by assign_vgpr_tiles); before-chain op sources are rebuilt as
+        fresh op dataclasses. emit() only ever produces placement, wait_gr,
+        wait_lr, sync, lr_inc and gr_inc sources.
+        """
+        kind = cpp_src.kind
+        if kind == 'mfma':
+            return self._placement_reg[('mfma', pi, k)]
+        if kind in ('lr', 'gr'):
+            return self._placement_reg[_ref_key(cpp_src)]
+        return _op_to_py(cpp_src)
+
     def build(self):
-        """Build mainloop """
+        """Build mainloop (emit delegates the before-link graph to C++)."""
         self.emit()
         self._completed.add(Pass.BUILD)
 

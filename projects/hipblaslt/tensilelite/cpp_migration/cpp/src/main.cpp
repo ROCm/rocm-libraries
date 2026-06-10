@@ -868,6 +868,14 @@ void bind_logical_scheduler_passes(nb::module_& s) {
            "dataclass partitions. Deps carry coordinate-only ref copies; the "
            "Python converter re-establishes object identity by coordinate "
            "match.")
+      .def("value_emitted", &LS::value_emitted,
+           "Materialize the emitted before-link graph as bound value "
+           "EmittedModules (list[partition][subIterK][EmittedModule]) so the "
+           "Python writer can rebuild its EmittedModule dataclasses. Each "
+           "module's source is a coordinate-only value Emittable; the Python "
+           "converter re-uses its persistent placement dataclasses for "
+           "placement sources (preserving identity for vgpr-map flow-through) "
+           "and builds fresh op dataclasses for before-chain ops.")
       .def_ro("needs_unrolling", &LS::needs_unrolling)
       .def_ro("unroll_factor", &LS::unroll_factor)
       .def_prop_ro("tile_peaks",
