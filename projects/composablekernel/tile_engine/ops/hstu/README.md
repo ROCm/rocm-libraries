@@ -26,9 +26,13 @@ flag is still defined, keeping the legacy non-splitkv compile path.
 - Benchmark: `tile_engine/ops/hstu/hstu_benchmark.py`
 - Configs — exactly two sweep grids (`--config`) plus the problem file:
   - `configs/sweep_fast.json` — **default `--config`**. Small d=64 grid for quick
-    iteration: `max_k ∈ {64, 96, 128}` × `mtile ∈ {64, 128}` × `splitkv ∈
-    {false, true}` (split-KV needs `mtile=64`) = 9 base-tile kernels, default
-    WarpK. Works for any d=64 shape, no `--filter`.
+    iteration (11 kernels, all compile, no `--filter`): 9 base-tile kernels
+    (`max_k ∈ {64, 96, 128}` × `mtile ∈ {64, 128}` × `splitkv ∈ {false, true}`,
+    split-KV needs `mtile=64`, default WarpK) — including the legacy-heuristic
+    baseline — **plus** a light tile-shape family pinned to the proven d=64
+    winner `sequence<192,32,32,64,32,64>` (`warp_k=32`, `max_k=64`) so the fast
+    sweep directly contains the fastest known tile kernel. Works for any d=64
+    shape.
   - `configs/sweep_exhaustive.json` — full d=64 block-tile-shape sweep
     (`sequence<kM0,kN0,kN0Sub,kN1,kK1>` grid, `warp_k=32`, ~90 kernels). Use to
     find the best tile shape per shape.
@@ -111,7 +115,7 @@ export CK=/workspaces/rocm-libraries/projects/composablekernel
 export PYTHONPATH=$CK/dispatcher/python:$PYTHONPATH
 cd $CK
 
-# Compile the fast sweep once (9 bf16 kernels: maxk {64,96,128} × mtile {64,128} × splitkv, default WarpK)
+# Compile the fast sweep once (11 bf16 kernels: 9 base-tile + 2 winner tile-shape variants)
 # --config defaults to sweep_fast.json, so it can be omitted.
 python tile_engine/ops/hstu/hstu_benchmark.py \
   --batch 128 --num-head 4 --seqlen 4096 --target-size 10 --compile-only

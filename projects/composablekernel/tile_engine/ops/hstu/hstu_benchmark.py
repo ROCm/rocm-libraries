@@ -248,12 +248,68 @@ def _find_heuristic_row(group_rows: List[dict], heur_name: str) -> Optional[dict
     return dict(best, approx=True)
 
 
+# Authoritative base block-tile shapes, keyed by (max_k, mtile), mirroring the
+# HstuAttentionNoSoftmaxFwdBlockTile<MaxK, MTile> specializations in
+# example/ck_tile/53_hstu_attention/hstu_attention_fwd_setting.hpp (the
+# non-gfx95 / BUILD_HSTU_FOR_GFX95_ONLY-undefined path, which is what gfx942
+# deployments compile). Each value is the header's 6-tuple
+# sequence<kM0,kN0,kN0Sub,kN1,kK1,MaxK>; the MaxK element equals the maxk* token.
+# A base kernel (no _km0/_n0/... override) runs exactly this tile; the C++ picks
+# it from the compiled-in default, so it never shows up in the kernel name.
+_BASE_BLOCK_TILE = {
+    # maxk64: MTile==64 slot is the bespoke kM0=192 max-reuse tile; else kM0=128.
+    (64, 64): (192, 64, 32, 64, 32, 64),
+    (64, 128): (128, 64, 32, 64, 32, 64),
+    # maxk96: MTile-independent.
+    (96, 64): (128, 64, 32, 128, 32, 96),
+    (96, 128): (128, 64, 32, 128, 32, 96),
+    # maxk128: explicit per-MTile specializations.
+    (128, 64): (64, 32, 16, 128, 16, 128),
+    (128, 128): (128, 32, 16, 128, 16, 128),
+    # maxk256: MTile-independent.
+    (256, 64): (128, 32, 16, 256, 16, 256),
+    (256, 128): (128, 32, 16, 256, 16, 256),
+}
+
+
+def _effective_tile(r: dict) -> Optional[tuple]:
+    """Effective block-tile <kM0,kN0,kN0Sub,kN1,kK1,MaxK> a kernel actually runs.
+
+    Starts from the compiled-in base tile for (max_k, mtile) and substitutes each
+    explicitly overridden dim (km0/kn0/kn0sub/kn1/kk1, when nonzero) from the
+    kernel config. Base kernels carry all-zero overrides and so report the pure
+    base tile. Returns None when (max_k, mtile) has no known base specialization."""
+    base = _BASE_BLOCK_TILE.get((r.get("max_k"), r.get("mtile")))
+    if base is None:
+        return None
+    km0, kn0, kn0sub, kn1, kk1, maxk = base
+    if r.get("km0"):
+        km0 = r["km0"]
+    if r.get("kn0"):
+        kn0 = r["kn0"]
+    if r.get("kn0sub"):
+        kn0sub = r["kn0sub"]
+    if r.get("kn1"):
+        kn1 = r["kn1"]
+    if r.get("kk1"):
+        kk1 = r["kk1"]
+    return (km0, kn0, kn0sub, kn1, kk1, maxk)
+
+
+def _format_eff_tile(r: dict) -> str:
+    """`<kM0,kN0,kN0Sub,kN1,kK1,MaxK>` string for any kernel row ('?' if unknown)."""
+    t = _effective_tile(r)
+    if t is None:
+        return "?"
+    return "<" + ",".join(str(x) for x in t) + ">"
+
+
 def _format_kernel_row(r: dict, suffix: str = "") -> str:
     """One Phase-2 listing line for a timed kernel row (+ optional marker suffix)."""
     return (
         f"{r['kernel']:<52} {r['mask']:<10} {r['batch']:>5} {r['num_head']:>3} "
         f"{r['max_seqlen_q']:>6} {r['hdim_qk']:>3} {r['latency_ms']:>10.3f} "
-        f"{r['tflops_genrec']:>10.2f} {r['tflops']:>8.2f}{suffix}"
+        f"{r['tflops_genrec']:>10.2f} {r['tflops']:>8.2f} {_format_eff_tile(r):<24}{suffix}"
     )
 
 
@@ -283,10 +339,10 @@ def _print_heur_comparison(rows: List[dict], num_cus: int) -> None:
     print(f"\n--- Heuristic vs best (legacy dispatch heuristic, num_CUs={num_cus}) ---")
     print(
         f"{'problem':<28} {'D':>3} "
-        f"{'heur kernel':<46} {'heur ms':>9}  "
-        f"{'best kernel':<46} {'best ms':>9}  {'best vs heur':>12}"
+        f"{'heur kernel':<46} {'heur tile':<24} {'heur ms':>9}  "
+        f"{'best kernel':<46} {'best tile':<24} {'best ms':>9}  {'best vs heur':>12}"
     )
-    print("-" * 162)
+    print("-" * 212)
     approx_any = False
     for (pid, _mask, dtype), grp in groups.items():
         best = max(grp, key=lambda r: r["tflops_genrec"])
@@ -304,8 +360,9 @@ def _print_heur_comparison(rows: List[dict], num_cus: int) -> None:
         if heur is None:
             print(
                 f"{pid:<28} {best['hdim_qk']:>3} "
-                f"{heur_name + ' (not swept)':<46} {'--':>9}  "
-                f"{best['kernel']:<46} {best['latency_ms']:>9.3f}  {'n/a':>12}"
+                f"{heur_name + ' (not swept)':<46} {'--':<24} {'--':>9}  "
+                f"{best['kernel']:<46} {_format_eff_tile(best):<24} "
+                f"{best['latency_ms']:>9.3f}  {'n/a':>12}"
             )
             continue
         heur_ms = float(heur["latency_ms"])
@@ -315,14 +372,105 @@ def _print_heur_comparison(rows: List[dict], num_cus: int) -> None:
         approx_any = approx_any or heur.get("approx", False)
         print(
             f"{pid:<28} {best['hdim_qk']:>3} "
-            f"{heur['kernel'] + mark:<46} {heur_ms:>9.3f}  "
-            f"{best['kernel']:<46} {best_ms:>9.3f}  {speedup:>+11.1f}%"
+            f"{heur['kernel'] + mark:<46} {_format_eff_tile(heur):<24} {heur_ms:>9.3f}  "
+            f"{best['kernel']:<46} {_format_eff_tile(best):<24} {best_ms:>9.3f}  "
+            f"{speedup:>+11.1f}%"
         )
     if approx_any:
         print(
             "  * exact heuristic kernel not in this sweep; "
             "showed closest swept kernel (same mtile/splitkv, nearest max_k)."
         )
+
+
+# --------------------------------------------------------------------------
+# Winner -> tuned_config row printer. Closes the "benchmark best kernel ->
+# hstu_tuned.csv row" gap: after the sweep picks the fastest kernel for a
+# problem we translate it directly into a paste-ready tuned-config row and PRINT
+# it (the user pastes it into hstu_tuned.csv by hand — this never writes files).
+#
+# Target CSV format (example/ck_tile/53_hstu_attention/hstu_tuned.csv):
+#   dtype,causal,B,H,Nmin,D,mtile,kn0,kn0sub,kn1,kk1,splitkv
+# Conventions: 0 == base dim (no override); kM0 follows mtile (NOT a column);
+# the deployed C++ override path is WarpK=16 only (no warp_k column).
+# --------------------------------------------------------------------------
+
+_TUNED_HEADER = "dtype,causal,B,H,Nmin,D,mtile,kn0,kn0sub,kn1,kk1,splitkv"
+
+
+def _winner_tuned_row(best: dict, nmin_override: Optional[int]) -> Optional[str]:
+    """Translate the BEST kernel of a problem into a tuned_config CSV row string.
+
+    Returns None when the best kernel pins WarpK=32 (_wk32, 16x16x32 MFMA): the
+    deployed override path is WarpK=16 only, so such a kernel is not pinnable and
+    the caller prints a warning instead of a row.
+
+    kn0/kn0sub/kn1/kk1 are emitted OVERRIDE-vs-BASE: the best kernel's effective
+    tile dims (kN0,kN0Sub,kN1,kK1) compared against the compiled-in base tile for
+    its (max_k, mtile); a dim equal to base emits 0 (== "use base dim"). km0 is
+    not emitted (it follows mtile). mtile/splitkv come from the best kernel.
+    """
+    if best.get("warp_k", 0) == 32:
+        return None
+
+    eff = _effective_tile(best)
+    base = _BASE_BLOCK_TILE.get((best.get("max_k"), best.get("mtile")))
+
+    def _ov(i: int) -> int:
+        # 0 == base dim (no override); only emit a value when it differs.
+        if eff is None or base is None:
+            return 0
+        return eff[i] if eff[i] != base[i] else 0
+
+    nmin = nmin_override if nmin_override is not None else best["max_seqlen_q"] // 2
+    vals = [
+        best["dtype"],
+        int(best.get("use_causal", True)),
+        best["batch"],
+        best["num_head"],
+        nmin,
+        best["hdim_qk"],
+        best["mtile"],
+        _ov(1),  # kn0
+        _ov(2),  # kn0sub
+        _ov(3),  # kn1
+        _ov(4),  # kk1
+        int(best.get("use_splitkv", False)),
+    ]
+    return ",".join(str(v) for v in vals)
+
+
+def _print_winner_tuned_rows(rows: List[dict], nmin_override: Optional[int]) -> None:
+    """Print the paste-ready tuned-config row for each problem's BEST kernel.
+
+    Print-only: the user adds the row to hstu_tuned.csv manually; this never
+    writes any file. WarpK=32 / non-WarpK=16 winners print a warning instead."""
+    groups: dict = {}
+    for r in rows:
+        key = (r.get("problem_id", ""), r["mask"], r["dtype"])
+        groups.setdefault(key, []).append(r)
+    if not groups:
+        return
+
+    print("\n--- Winner -> tuned_config row ---")
+    print(f"  # {_TUNED_HEADER}")
+    for (_pid, _mask, _dtype), grp in groups.items():
+        best = max(grp, key=lambda r: r["tflops_genrec"])
+        row = _winner_tuned_row(best, nmin_override)
+        if row is None:
+            print(
+                f"  WARNING: best kernel {best['kernel']} pins WarpK=32 "
+                f"(_wk32, 16x16x32 MFMA); the deployed hstu_tuned.csv override "
+                f"path is WarpK=16-only — NOT emitting a tuned row for it "
+                f"(not pinnable; this was the known-broken variant)."
+            )
+            continue
+        print(f"  tuned row (paste into hstu_tuned.csv):  {row}")
+    print(
+        "  note: Nmin is a deployment threshold, not a measured value — set it to "
+        "your deployment's activation max_seqlen_q (default seqlen//2; "
+        "override with --tuned-nmin)."
+    )
 
 
 def _pick_kernel_configs(
@@ -420,6 +568,14 @@ def main() -> None:
         "(on by default; use --no-heur to disable)",
     )
     parser.add_argument("--csv", type=str, default=None)
+    parser.add_argument(
+        "--tuned-nmin",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Nmin (deployment activation threshold) for the printed tuned row "
+        "(default: seqlen // 2).",
+    )
     parser.add_argument("--sparsity", type=float, default=0.95)
     parser.add_argument(
         "--workers",
@@ -560,9 +716,9 @@ def main() -> None:
     num_cus = _detect_num_cus()
     print(
         f"{'kernel':<52} {'mask':<10} {'B':>5} {'H':>3} {'N':>6} {'D':>3} "
-        f"{'ms':>10} {'genrec':>10} {'TFLOPS':>8}"
+        f"{'ms':>10} {'genrec':>10} {'TFLOPS':>8} {'eff_tile':<24}"
     )
-    print("-" * 120)
+    print("-" * 144)
 
     for p_cfg in problems_cfg:
         batch = p_cfg["batch"]
@@ -652,6 +808,10 @@ def main() -> None:
                         "kn0sub": kcfg.kn0sub,
                         "kn1": kcfg.kn1,
                         "kk1": kcfg.kk1,
+                        # WarpK selector (0/16 == 16x16x16; 32 == 16x16x32). Kept
+                        # so the winner->tuned-row emitter can refuse to pin a
+                        # _wk32 kernel into the WarpK=16-only deployed CSV path.
+                        "warp_k": kcfg.warp_k,
                     }
                     rows.append(row)
                     group_rows.append(row)
@@ -694,6 +854,9 @@ def main() -> None:
     )
     if args.heur and rows:
         _print_heur_comparison(rows, num_cus)
+
+    if rows:
+        _print_winner_tuned_rows(rows, args.tuned_nmin)
 
 
 if __name__ == "__main__":

@@ -1,20 +1,25 @@
 # HSTU no-softmax jagged forward tuned-config override table.
 #
-# Consulted before the legacy heuristic (get_hstu_attention_fwd_mtile /
-# shall_use_splitkv). On an exact (dtype,causal,B,H,N,D) match whose tile
-# signature is compiled into the binary, that kernel is launched; on any miss
-# the call falls through to the unchanged heuristic. Delete this file (and leave
-# $HSTU_TUNED_CONFIG unset) to get pure legacy-heuristic behavior.
+# How it is used: this table is consulted before the legacy heuristic
+# (get_hstu_attention_fwd_mtile / shall_use_splitkv). On a matching row whose
+# tile signature is compiled into the binary, that kernel is launched; on any
+# miss the call falls through to the unchanged heuristic. Delete this file (and
+# leave $HSTU_TUNED_CONFIG unset) for pure legacy-heuristic behavior.
 #
-# Tile columns use the codegen "0 = base dim" convention. The four rows below
-# pin the MI300X (gfx942) deployment shapes to the unified sweep winner
-# (mtile64, kN0=32, no split-KV) -> effective tile sequence<192,32,32,64,32,64>,
-# ~14-17% faster than the heuristic's mtile128 pick.
+# Columns (one kernel selection per row):
+#   dtype    : data type tag (e.g. bf16).
+#   causal   : 1 causal, 0 non-causal.
+#   B,H,D    : batch, num_head, head dim to match.
+#   Nmin     : row fires when runtime max_seqlen_q >= Nmin.
+#   mtile    : M-tile selection (e.g. 64 / 128). Note kM0 is NOT a column -- it
+#              follows mtile via the compiled-in tile setting (mtile=64 -> kM0=192
+#              bespoke max-reuse tile; mtile=128 -> kM0=128).
+#   kn0,kn0sub,kn1,kk1 : block-tile dim overrides; 0 = base dim (no override,
+#              use the compiled-in default for this (D->max_k, mtile)).
+#   splitkv  : 1 enable split-KV, 0 disable.
 #
-# The N column is Nmin: the row fires when runtime max_seqlen_q >= Nmin. We use
-# 8192 (not 16384) because for the sparse jagged deployment the binary's
-# max_seqlen_q is ~15.5k (= max(uih)+max_target), and 8192 cleanly excludes the
-# nominal-4096 proxy shapes while catching the nominal-16384 deployment shapes.
+# The rows below set mtile=64 (kM0=192) and override only kn0=32, leaving the
+# other dims at base -> effective tile sequence<192,32,32,64,32,64>, WarpK=16.
 #
 # dtype,causal,B,H,Nmin,D,mtile,kn0,kn0sub,kn1,kk1,splitkv
 bf16,1,120,4,8192,64,64,32,0,0,0,0
