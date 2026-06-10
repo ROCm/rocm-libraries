@@ -70,8 +70,8 @@
     X(EnableSwPrefetchInsertion, bool)    \
     X(SwPrefetchScratchSgpr, int)         \
     X(ClusterBarrier, bool)               \
-    X(PGR, int)                           \
-    X(PLR, int)
+    X(PrefetchGlobalRead, int)            \
+    X(PrefetchLocalRead, int)
 
 namespace stinkytofu {
 /**

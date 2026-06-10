@@ -55,9 +55,10 @@ constexpr size_t kHashLen = 16;
 /// emits the signal-only handshake immediately after it.
 constexpr const char* kGSU1LabelName = "label_GSU_1";
 /// Exact label name emitted by Tensile right before the unrolled
-/// summation loop opens. Rule 3 anchors here (both for the PLR>0
-/// backward scan that finds the LW-to-PLR `s_barrier_wait -1` and for
-/// the PLR=0 fallback that inserts directly before the label).
+/// summation loop opens. Rule 3 anchors here (both for the
+/// PrefetchLocalRead>0 backward scan that finds the workgroup sync
+/// `s_barrier_wait -1` and for the
+/// PrefetchLocalRead=0 fallback that inserts directly before the label).
 /// Internal labels inside the prefetch prologue (e.g. `label_skipPGR2_1`)
 /// do not match by exact-name comparison and are walked through.
 constexpr const char* kOpenLoopLLabelName = "label_openLoopL";
@@ -351,10 +352,10 @@ void insertClusterBarrierSignalOnlyBefore(IRBase* anchor, AsmIRBuilder& irBuilde
 ///   - Rule 1: workgroup pair gates the post-GSU==1 cluster signal so
 ///     all waves reach the join before any wave publishes (comment:
 ///     `"sync workgroup before cluster signal"`).
-///   - Rule 3's PLR=0 anchor-mode (b): when the backward scan from
+///   - Rule 3's PrefetchLocalRead=0 anchor-mode (b): when the backward scan from
 ///     `label_openLoopL:` finds no `s_barrier_wait -1` before crossing
 ///     the prefetch boundary, we synthesize the LDS publication point
-///     here (comment: `"LW to PLR, sync LDS0"`) so the cluster signal
+///     here (comment: `"workgroup sync"`) so the cluster signal
 ///     that immediately follows still sits at a valid LDS-coherence
 ///     point.
 void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
@@ -412,7 +413,7 @@ void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
 ///   label_skipCBPreSignal_<H1>:
 ///   label_skipCBPreSignal_LCL_<H2>:
 ///
-/// Instantiations used today (where `pgr = PGR` from module options):
+/// Instantiations used today (where `pgr = PrefetchGlobalRead` from module options):
 ///   - Rule 1: `s_cmp_eq_u32` / imm=0       (skip when LCL == 0;
 ///             workgroupSyncWaitComment = "sync workgroup before
 ///             cluster signal" -- the post-GSU==1 join needs the
@@ -425,7 +426,7 @@ void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
 ///             workgroup wait (mode a) or synthesized (mode b) -- so
 ///             cluster signal/wait pairing stays balanced when the
 ///             unrolled loop body is bypassed. Mode (b) passes
-///             workgroupSyncWaitComment = "LW to PLR, sync LDS0" to
+///             workgroupSyncWaitComment = "workgroup sync" to
 ///             synthesize the LDS publication point inside the LCL
 ///             skip region; mode (a) passes nullptr because the wait
 ///             already exists in the IR.)
@@ -668,7 +669,7 @@ bool isTextblockContaining(IRBase* ir, const char* marker) {
 ///   - `s_cmp_le_i32 s[sgprLoopCounterL], <imm>` (legacy Rule 4 Fix B gate)
 ///   - `s_cmp_eq_i32 s[sgprLoopCounterL], <imm>` (Rule 4 inherited-SCC clone)
 /// The imm operand is not checked, only the symbolic name, so the predicate
-/// is independent of the configured PGR value. In any of these cases the
+/// is independent of the configured PrefetchGlobalRead value. In any of these cases the
 /// anchor is already followed by a cluster-barrier emission and we must
 /// not duplicate it.
 bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
@@ -868,23 +869,23 @@ class InsertClusterBarrierPassImpl : public Pass {
             //
             // Anchor selection (backward scan from `label_openLoopL:`):
             //   (a) `s_barrier_wait -1` -- publication point already
-            //       exists (typical for PLR > 0 schedules). Anchor at
+            //       exists (typical for PrefetchLocalRead > 0 schedules). Anchor at
             //       the successor of that wait. No new workgroup sync
             //       is synthesized. The scan stops if a
             //       `tensor_load_to_lds` is reached first: that
             //       instruction marks the prefetch section, before any
-            //       LW-to-PLR sync could sit, so an earlier workgroup
+            //       workgroup sync could sit, so an earlier workgroup
             //       wait (if one existed) would be unrelated and must
             //       not be re-used as the publication point.
             //   (b) No `s_barrier_wait -1` between the prefetch tail
-            //       and `label_openLoopL:` (typical for PLR == 0
+            //       and `label_openLoopL:` (typical for PrefetchLocalRead == 0
             //       schedules where the prologue has no local-read
             //       preamble barrier). Only act when `plrValue_ == 0`;
             //       anchor at the label and synthesize an
             //       `s_barrier_signal -1` / `s_barrier_wait -1` pair
             //       INSIDE the LCL skip region (between the outer LCL
             //       skip-branch and the inner WaveIdx gate) by passing
-            //       `workgroupSyncWaitComment = "LW to PLR, sync LDS0"`
+            //       `workgroupSyncWaitComment = "workgroup sync"`
             //       to the LCL-gated helper. The pair therefore sits
             //       on the same control-flow path as the cluster
             //       signal: it is bypassed together with the signal on
@@ -1057,7 +1058,8 @@ class InsertClusterBarrierPassImpl : public Pass {
                     /*cmpComment=*/"LoopCounter <= " + immStr + "?",
                     /*branchComment=*/"skip cluster barrier when LoopCounterL <= " + immStr,
                     /*workgroupSyncWaitComment=*/
-                    setupNewTileNeedsWorkgroupSync ? "LW to PLR, sync LDS0" : nullptr);
+                    setupNewTileNeedsWorkgroupSync ? "workgroup sync"
+                                                    : nullptr);
             }
             // Rule 5a -- signal-only after the tail loop's preceding workgroup wait.
             if (tailWait != nullptr) {

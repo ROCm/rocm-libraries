@@ -140,8 +140,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
     // branches/labels are present when MSB configuration is materialized.
     if (moduleOptions.ClusterBarrier) {
         pm.addPass(createInsertClusterBarrierPass(/*isKernelScope=*/true,
-                                                  /*pgrValue=*/moduleOptions.PGR,
-                                                  /*plrValue=*/moduleOptions.PLR));
+                                                  /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
+                                                  /*plrValue=*/moduleOptions.PrefetchLocalRead));
     }
     pm.addPass(createInsertVgprMsbPass());
     pm.addPass(createCFGBuilderPass());

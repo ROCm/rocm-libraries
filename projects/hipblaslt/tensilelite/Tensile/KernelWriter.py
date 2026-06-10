@@ -5960,13 +5960,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # skip in fresh-gate mode; inherits upstream `LCL == PGR` cmp
                                # in inherited-SCC mode). Rule 1 uses `LCL == 0`, not PGR.
                                # Defaults to 1 when unset.
-                               "PGR": int(kernel.get("PrefetchGlobalRead", 1)),
+                               "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
                                # PrefetchLocalRead (PLR) passed to InsertClusterBarrierPass.
                                # When PLR == 0, enables Rule 3 anchor mode (b): if no
                                # `s_barrier_wait -1` precedes `label_openLoopL:`, synthesize
                                # a workgroup sync inside the LCL-gated signal block.
                                # Defaults to 1 (fallback off) when unset.
-                               "PLR": int(kernel.get("PrefetchLocalRead", 1)),
+                               "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
                               }
 
       print2(f"StinkyTofu module options: {stinky_module_options}")
