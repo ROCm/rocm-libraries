@@ -3,6 +3,9 @@
 
 #include "TestUtil.hpp"
 #include "hipdnn_backend.h"
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <optional>
 #include <test_plugins/TestPluginConstants.hpp>
 
 #include <gtest/gtest.h>
@@ -21,16 +24,33 @@ protected:
     hipdnnBackendDescriptor_t _engineHeuristic = nullptr;
     hipdnnBackendDescriptor_t _graph = nullptr;
     hipdnnHandle_t _handle = nullptr;
+    hipStream_t _stream = nullptr;
+    std::optional<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _policyOrderEnv;
 
     void SetUp() override
     {
-        const std::array<const char*, 1> paths
+        // finalize() resolves the device from the handle's stream, so the
+        // fixture binds a real stream and skips when no devices are present.
+        SKIP_IF_NO_DEVICES();
+
+        const std::array<const char*, 1> enginePaths
             = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                      enginePaths.size(), enginePaths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
                   HIPDNN_STATUS_SUCCESS);
 
+        const std::array<const char*, 1> heuristicPaths
+            = {hipdnn_tests::plugin_constants::testGoodHeuristicPluginPath().c_str()};
+        ASSERT_EQ(hipdnnSetHeuristicPluginPaths_ext(
+                      heuristicPaths.size(), heuristicPaths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
+
+        _policyOrderEnv.emplace("HIPDNN_HEUR_POLICY_ORDER",
+                                hipdnn_tests::plugin_constants::testGoodHeuristicPolicyName());
+
         ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
+        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
         EXPECT_EQ(
             hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, &_engineHeuristic),
             HIPDNN_STATUS_SUCCESS);
@@ -52,6 +72,11 @@ protected:
             EXPECT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
             _handle = nullptr;
         }
+        if(_stream != nullptr)
+        {
+            EXPECT_EQ(hipStreamDestroy(_stream), hipSuccess);
+            _stream = nullptr;
+        }
     }
 
     void setHeuristicMode()
@@ -72,7 +97,7 @@ protected:
                                             HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                             1,
-                                            &_graph),
+                                            static_cast<const void*>(&_graph)),
                   HIPDNN_STATUS_SUCCESS);
     }
 
@@ -95,7 +120,7 @@ TEST_F(IntegrationEngineHeuristicApi, SetEngineHeuristicOperationGraph)
                                         HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &nullGraph),
+                                        static_cast<const void*>(&nullGraph)),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     test_util::createTestGraph(&_graph, _handle);
@@ -104,7 +129,7 @@ TEST_F(IntegrationEngineHeuristicApi, SetEngineHeuristicOperationGraph)
                                         HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &_graph),
+                                        static_cast<const void*>(&_graph)),
               HIPDNN_STATUS_SUCCESS);
 }
 
@@ -186,7 +211,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetAttributeOnUnfinalizedDescriptor)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         nullptr,
-                                        &dummyGraph),
+                                        static_cast<void*>(&dummyGraph)),
               HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
 }
 
@@ -202,7 +227,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineHeuristicOperationGraph)
                                         HIPDNN_TYPE_INT64,
                                         1,
                                         nullptr,
-                                        &retrievedGraph),
+                                        static_cast<void*>(&retrievedGraph)),
               HIPDNN_STATUS_BAD_PARAM);
 
     EXPECT_EQ(hipdnnBackendGetAttribute(_engineHeuristic,
@@ -210,7 +235,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineHeuristicOperationGraph)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         2,
                                         nullptr,
-                                        &retrievedGraph),
+                                        static_cast<void*>(&retrievedGraph)),
               HIPDNN_STATUS_BAD_PARAM);
 
     EXPECT_EQ(hipdnnBackendGetAttribute(_engineHeuristic,
@@ -226,7 +251,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineHeuristicOperationGraph)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         nullptr,
-                                        &retrievedGraph),
+                                        static_cast<void*>(&retrievedGraph)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_NE(retrievedGraph, nullptr);
 
@@ -239,7 +264,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineHeuristicOperationGraph)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         &count,
-                                        &retrievedGraph2),
+                                        static_cast<void*>(&retrievedGraph2)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(count, 1);
 
@@ -342,7 +367,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineConfigs)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         3,
                                         nullptr,
-                                        configs.data()),
+                                        static_cast<void*>(configs.data())),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     int64_t count = 0;
@@ -375,7 +400,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineConfigs)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         3, // Ask for 3, but only one engine avaliable.
                                         &count,
-                                        configs.data()),
+                                        static_cast<void*>(configs.data())),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(count, 1); // Only one returned since there isn't more than that.
 
@@ -387,7 +412,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineConfigs)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         nullptr,
-                                        &engine),
+                                        static_cast<void*>(&engine)),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(engine, nullptr);
 
@@ -427,7 +452,7 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineConfigsRequestMoreThanAvailable)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         5,
                                         &count,
-                                        configs.data()),
+                                        static_cast<void*>(configs.data())),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(count, 1);
 

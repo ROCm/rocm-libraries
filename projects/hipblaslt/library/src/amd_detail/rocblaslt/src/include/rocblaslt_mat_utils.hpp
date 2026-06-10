@@ -88,6 +88,43 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
 }
 
 /*******************************************************************************
+ * Validate the Matmul Arguments for General Batched GEMM Case
+ * In General Batched GEMM case:
+ * 1. Only Tensorwide scaling is supported.
+ * 2. Only HIPBLASLT_EPILOGUE_DEFAULT is supported.
+ ******************************************************************************/
+ inline rocblaslt_status validateMatmulArgsForGeneralBatchedGemm(RocblasltContractionProblem::ScalingFormat scaleAType,
+                                                                 RocblasltContractionProblem::ScalingFormat scaleBType,
+                                                                 const rocblaslt_epilogue& epilogue)
+{
+    rocblaslt_status status = rocblaslt_status_continue;
+    
+    if((scaleAType == RocblasltContractionProblem::ScalingFormat::Scalar || 
+       scaleAType == RocblasltContractionProblem::ScalingFormat::None) &&
+       (scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar || 
+       scaleBType == RocblasltContractionProblem::ScalingFormat::None))
+        status = rocblaslt_status_continue;
+    else
+        status = rocblaslt_status_invalid_value;
+
+    if(epilogue != ROCBLASLT_EPILOGUE_DEFAULT)
+        status = rocblaslt_status_invalid_value;
+    
+    if(status != rocblaslt_status_continue)
+    {
+        log_error(__func__,
+                  "invalid args for General Batched GEMM",
+                  "scaleAType",
+                  rocblaslt_scaling_format_to_string(scaleAType),
+                  "scaleBtype",
+                  rocblaslt_scaling_format_to_string(scaleBType),
+                  "epilogue",
+                  rocblaslt_epilogue_to_string(epilogue));
+    }   
+    return status;
+}
+
+/*******************************************************************************
  * Validate Matmul Arguments
  ******************************************************************************/
 inline rocblaslt_status validateMatmulArgs(int64_t                       m,
@@ -437,7 +474,7 @@ inline void setTo1(const rocblaslt_compute_type& compute_type, const void* onePt
     }
 }
 
-inline std::complex<double> get_alpha_beta_scalar(hipDataType type, const void* ptr)
+inline hipblaslt_complex_double get_alpha_beta_scalar(hipDataType type, const void* ptr)
 {
     if (!ptr) {
         return {0.0, 0.0};
@@ -458,12 +495,12 @@ inline std::complex<double> get_alpha_beta_scalar(hipDataType type, const void* 
 
         case HIP_C_32F:
         {
-            auto val = *(reinterpret_cast<const std::complex<float>*>(ptr));
+            auto val = *(reinterpret_cast<const hipblaslt_complex_float*>(ptr));
             return {static_cast<double>(val.real()), static_cast<double>(val.imag())};
         }
         case HIP_C_64F:
         {
-            return *(reinterpret_cast<const std::complex<double>*>(ptr));
+            return *(reinterpret_cast<const hipblaslt_complex_double*>(ptr));
         }
             
         default:

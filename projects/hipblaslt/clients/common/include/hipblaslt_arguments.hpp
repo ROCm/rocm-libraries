@@ -69,6 +69,11 @@ struct Arguments
         Scalar                  = 1,
         Vector                  = 2,
         Block_32_UE8M0          = 3,
+        Block_16_UE8M0          = 4,
+        Block_32_UE4M3          = 5,
+        Block_16_UE4M3          = 6,
+        Block_32_UE5M3          = 7,
+        Block_16_UE5M3          = 8,
         Block_32_UE8M0_32_8_EXT = 1001,
     };
 
@@ -105,6 +110,7 @@ struct Arguments
     int64_t lde[MAX_SUPPORTED_NUM_PROBLEMS];
 
     int32_t batch_count;
+    int32_t batch_mode;
 
     int32_t iters;
     int32_t cold_iters;
@@ -156,6 +162,7 @@ struct Arguments
     hipDataType              aux_type;
     hipblaslt_bias_source    bias_source;
     bool                     bias_vector;
+    int32_t                  bias_stride; // Stride within bias vector for strided batch cases where each batch has unique bias value.
     hipblaslt_scaling_format scaleA;
     hipblaslt_scaling_format scaleB;
     bool                     scaleC;
@@ -229,6 +236,7 @@ struct Arguments
     OPER(ldd) SEP                    \
     OPER(lde) SEP                    \
     OPER(batch_count) SEP            \
+    OPER(batch_mode) SEP             \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
     OPER(algo) SEP                   \
@@ -263,6 +271,7 @@ struct Arguments
     OPER(aux_type) SEP               \
     OPER(bias_source) SEP            \
     OPER(bias_vector) SEP            \
+    OPER(bias_stride) SEP            \
     OPER(scaleA) SEP                 \
     OPER(scaleB) SEP                 \
     OPER(scaleC) SEP                 \

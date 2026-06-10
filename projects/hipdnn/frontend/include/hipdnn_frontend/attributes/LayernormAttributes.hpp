@@ -13,10 +13,8 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/layernorm_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
-#include <vector>
 
 namespace hipdnn_frontend::graph
 {
@@ -27,11 +25,19 @@ namespace hipdnn_frontend::graph
  *
  * LayernormAttributes configures a layer normalization operation.
  * Unlike batch normalization which normalizes across the batch dimension,
- * layer normalization normalizes across the feature dimensions.
+ * layer normalization normalizes across the last k feature dimensions.
+ *
+ * The number of normalized dimensions (k) is determined by:
+ * 1. **From scale shape**: k is inferred from the scale tensor. Dimensions
+ *    where scale != 1 are normalized. If scale has fewer dims than X, all
+ *    scale dims are normalized dims.
+ * 2. **Default**: If scale dims are also unset, they are inferred as
+ *    `[1, D1, ..., Dk]` (batch dim = 1), normalizing all non-batch dims.
  *
  * **Tensor Shapes:**
- * - **X** (input): `(N, ...)` — batch first, then feature dims
- * - **Scale, Bias**: `(1, C, H, W)` — batch dim = 1, feature dims match input
+ * - **X** (input): `(N, D1, D2, ..., Dk)` — batch first, then feature dims
+ * - **Scale, Bias**: Full-rank `(1, D1, ..., Dk)` with batch dim = 1,
+ *   or reduced-rank `(D1, ..., Dk)` with batch dims omitted
  * - **Y** (output): Same shape as X
  * - **Mean, InvVariance**: Batch dims from input, normalized dims = 1
  *
@@ -48,14 +54,17 @@ namespace hipdnn_frontend::graph
  *
  * @code{.cpp}
  * LayernormAttributes attr;
- * attr.set_forward_phase(NormFwdPhase_t::INFERENCE);
+ * attr.set_forward_phase(NormFwdPhase::INFERENCE);
+ * attr.set_epsilon(epsilon);
  *
- * auto [y, mean, inv_variance] = graph.layernorm(x, scale, bias, epsilon, attr);
+ * auto [y, mean, inv_variance] = graph.layernorm(x, scale, bias, attr);
  * @endcode
  */
 class LayernormAttributes : public Attributes<LayernormAttributes>
 {
 public:
+    LayernormAttributes() = default;
+
     enum class InputNames
     {
         X = 0,
@@ -196,52 +205,23 @@ public:
         return _forwardPhase;
     }
 
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::LayernormAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
+    /// @cond INTERNAL
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    LayernormAttributes& set_normalized_dim_count(int64_t value)
     {
-        const auto mean = get_mean();
-        const auto invVariance = get_inv_variance();
-
-        return hipdnn_data_sdk::data_objects::CreateLayernormAttributes(
-            builder,
-            get_x()->get_uid(),
-            get_scale()->get_uid(),
-            get_bias()->get_uid(),
-            get_epsilon()->get_uid(),
-            get_y()->get_uid(),
-            mean ? flatbuffers::Optional<int64_t>(mean->get_uid())
-                 : flatbuffers::Optional<int64_t>(flatbuffers::nullopt),
-            invVariance ? flatbuffers::Optional<int64_t>(invVariance->get_uid())
-                        : flatbuffers::Optional<int64_t>(flatbuffers::nullopt),
-            toSdkType(_forwardPhase));
+        _normalizedDimCount = value;
+        return *this;
     }
 
-    static LayernormAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::LayernormAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    int64_t get_normalized_dim_count() const
     {
-        LayernormAttributes attr;
-
-        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
-        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
-        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
-        attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
-        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
-        attr.set_forward_phase(fromSdkType(fb->forward_phase()));
-
-        if(fb->mean_tensor_uid().has_value())
-        {
-            attr.set_mean(tensorMap.at(fb->mean_tensor_uid().value()));
-        }
-        if(fb->inv_variance_tensor_uid().has_value())
-        {
-            attr.set_inv_variance(tensorMap.at(fb->inv_variance_tensor_uid().value()));
-        }
-
-        return attr;
+        return _normalizedDimCount;
     }
+    /// @endcond
 
 private:
+    int64_t _normalizedDimCount = 0;
     NormFwdPhase _forwardPhase = NormFwdPhase::NOT_SET;
 };
 

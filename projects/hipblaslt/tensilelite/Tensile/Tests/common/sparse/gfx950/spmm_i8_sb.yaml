@@ -1,6 +1,7 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported yet
 GlobalParameters:
+  SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
   SleepPercent: 50
   NumElementsToValidate: -1
@@ -27,8 +28,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -109,8 +110,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -191,8 +192,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -273,8 +274,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -355,8 +356,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -437,8 +438,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -519,8 +520,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       UseBias: 3
       Batched: True
@@ -601,8 +602,8 @@ BenchmarkProblems:
       DestDataType: i8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       UseBias: 3
       Batched: True

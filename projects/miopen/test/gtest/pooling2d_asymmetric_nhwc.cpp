@@ -79,8 +79,6 @@ void Run2dDriver(miopenDataType_t prec)
                   "miopenBFloat8_fnuz "
                   "data type not supported by "
                   "pooling2d_asymmetric_nhwc test";
-
-    default: params = GPU_AsymPooling2d_NHWC_FP32::GetParam();
     }
 
     for(const auto& test_value : params)
@@ -106,7 +104,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
 {
     const auto& flag_arg = env::value(MIOPEN_TEST_FLAGS_ARGS);
 
-    const std::vector<std::string> test_cases = {
+    return std::vector<std::string>{
         // clang-format off
         // Forward pooling with NHWC layout (batched transpose)
         {"test_pooling2d " + precision + " --all --dataset 1 --limit 0 --in_layout NHWC --out_layout NHWC " + flag_arg},
@@ -114,8 +112,6 @@ std::vector<std::string> GetTestCases(const std::string& precision)
         {"test_pooling2d " + precision + " --forw 0 --in_layout NHWC --out_layout NHWC " + flag_arg}
         // clang-format on
     };
-
-    return test_cases;
 }
 
 } // namespace pooling2d_asymmetric_nhwc

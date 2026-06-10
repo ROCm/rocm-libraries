@@ -95,17 +95,15 @@ miopenAlphaBetaCase_t ClassifyAlphaBeta(const Scalar& alpha, const Scalar& beta)
 
 std::string ProblemDescription::GetDirectionStr() const
 {
-    std::string s;
-
     switch(GetDirection())
     {
-    case Direction::Forward: s = "F"; break;
-    case Direction::BackwardData: s = "B"; break;
-    case Direction::BackwardWeights: s = "W"; break;
-    default: assert(false);
+    case Direction::Forward: return "F";
+    case Direction::BackwardData: return "B";
+    case Direction::BackwardWeights: return "W";
     }
 
-    return s;
+    assert(false);
+    return "";
 }
 
 std::string ProblemDescription::GetAlphaBetaCaseStr() const
@@ -115,7 +113,7 @@ std::string ProblemDescription::GetAlphaBetaCaseStr() const
     case BILINEAR: return "Bilinear";
     case SCALE: return "Scale";
     case DEFAULT: return "Default";
-    default: MIOPEN_THROW(miopenStatusInvalidValue, "Alpha Beta Case in ERROR_STATE");
+    case ERROR_STATE: MIOPEN_THROW(miopenStatusInvalidValue, "Alpha Beta Case in ERROR_STATE");
     }
 }
 
@@ -135,6 +133,9 @@ void ProblemDescription::HeuristicUpdateLayouts()
 
     // If we have preset layouts that are valid, and they are consistent with each other, then we do
     // not need to change them.
+    // Note: For transposed solvers that modify strides (e.g., NHWC→NCHW), the cached layout string
+    // may not be updated here. This is acceptable for degenerate dimensions (N=1, C=1, etc.) where
+    // strides satisfy multiple layouts, as solvers use actual strides rather than layout strings.
     if(!in_layout.empty() && in_layout == out_layout && in_layout == weights_layout &&
        std::find(supported_layouts.begin(), supported_layouts.end(), in_layout) !=
            supported_layouts.end() &&
@@ -153,6 +154,7 @@ void ProblemDescription::HeuristicUpdateLayouts()
             if(in.IsPossibleLayout4D5D(layout, mode) && out.IsPossibleLayout4D5D(layout, mode) &&
                weights.IsPossibleLayout4D5D(layout, mode))
             {
+                // Update the cached layout strings to match the detected layout
                 in_layout      = layout;
                 weights_layout = layout;
                 out_layout     = layout;
@@ -169,10 +171,10 @@ void SerializeStrides(
     std::ostringstream& stream, in_desc& in, out_desc& out, wei_desc& wei, const char delim)
 {
 
-    auto join_v = [](std::ostringstream& stream, const auto& vec, const char delim) {
-        stream << *vec.begin();
+    auto join_v = [](std::ostringstream& stream_, const auto& vec, const char delim_) {
+        stream_ << *vec.begin();
         std::for_each(std::next(vec.begin()), vec.end(), [&](const auto& value) {
-            stream << delim << value;
+            stream_ << delim_ << value;
         });
     };
 

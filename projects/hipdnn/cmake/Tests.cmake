@@ -13,6 +13,32 @@ find_package(Python3 COMPONENTS Interpreter)
 
 findandcheckllvmsymbolizer()
 
+# YAML-driven CTest test categorisation for the *installed* tree only.
+# The shared helper apply_ctest_category_labels(yaml, install_test_file)
+# appends explicit set_property(TEST ...) blocks to the hand-rolled
+# install-tree CTestTestfile.cmake we generate in
+# install_hipdnn_ctest_files() below. Build-tree tests are intentionally
+# not labelled here -- if you need `ctest -L <tier>` in the build tree,
+# add per-directory apply_ctest_category_labels() calls in each
+# tests/CMakeLists.txt instead.
+set(_HIPDNN_TEST_CATEGORIES_YAML "${PROJECT_SOURCE_DIR}/test_categories.yaml")
+set(_HIPDNN_SHARED_CTEST "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+if(EXISTS "${_HIPDNN_SHARED_CTEST}" AND EXISTS "${_HIPDNN_TEST_CATEGORIES_YAML}")
+    include("${_HIPDNN_SHARED_CTEST}")
+    message(STATUS "hipDNN: YAML-based CTest categorization enabled (install tree only)")
+else()
+    if(NOT EXISTS "${_HIPDNN_SHARED_CTEST}")
+        message(STATUS
+            "hipDNN: shared/ctest not found at ${_HIPDNN_SHARED_CTEST}; skipping CTest categories"
+        )
+    endif()
+    if(NOT EXISTS "${_HIPDNN_TEST_CATEGORIES_YAML}")
+        message(STATUS
+            "hipDNN: ${_HIPDNN_TEST_CATEGORIES_YAML} not found; skipping CTest categories"
+        )
+    endif()
+endif()
+
 set(CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE)
 set(CHECK_EXECUTABLE_PATHS_GLOBAL "" CACHE INTERNAL "Accumulated global check executable paths" FORCE)
 
@@ -41,7 +67,7 @@ function(_build_test_environment_list_internal OUT_VAR)
     set(${OUT_VAR} ${ENVIRONMENT_LIST} PARENT_SCOPE)
 endfunction() # _build_test_environment_list_internal
 
-# Creates a custom target to validate test names using a Python script
+# Creates a custom target and ctest test to validate test names using a Python script
 function(_create_test_name_validation_target_internal prefix_name)
     if(Python3_FOUND)
         # Write list of test executables with their paths to a file
@@ -68,6 +94,18 @@ function(_create_test_name_validation_target_internal prefix_name)
             ${prefix_name}-validate_test_names DEPENDS ${CMAKE_BINARY_DIR}/${prefix_name}_test_names_validated
             COMMENT "Validating test names"
         )
+
+        # Also register as a ctest test so it runs with ctest and appears in test results
+        add_test(
+            NAME ${prefix_name}_test_name_validation
+            COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/cmake/scripts/test_name_validator.py
+                --test-executables ${TEST_EXECUTABLES_FILE}
+                --build-dir ${CMAKE_BINARY_DIR}
+                --strict
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        )
+        set_tests_properties(${prefix_name}_test_name_validation PROPERTIES LABELS "unit_test;integration_test;quick")
     else()
         message(WARNING "Python3 not found. Test name validation will be skipped.")
         add_custom_target(
@@ -185,12 +223,16 @@ endfunction() # finalize_test_targets
 # - RPATH settings for relocatable test executables
 # - Installation rules for test binaries
 # - CTest registration with appropriate labels (e.g. unit / integration test labels)
+#
 # Parameters:
-#   APPEND_FUNCTION_SUFFIX - Label to apply to the test (e.g., "unit_test", "integration_test", "test")
+#   APPEND_FUNCTION_SUFFIX - Primary label to apply to the test (e.g., "unit_test", "integration_test", "test")
 #   TARGET - Name of the test executable target (must already exist)
 #   WORKING_DIR - Working directory for test execution
+#   EXTRA_LABELS - (Optional) Additional labels to apply to the test (semicolon-separated list)
 # ~~~
 function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
+    # Parse optional extra labels from remaining arguments
+    set(EXTRA_LABELS ${ARGN})
     set(TARGET_EXE ${TARGET})
 
     # Add executable suffix if needed (e.g., .exe on Windows)
@@ -230,23 +272,39 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     # Install test executables to bin directory
     install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+    # Combine primary label with any extra labels
+    set(ALL_LABELS ${APPEND_FUNCTION_SUFFIX})
+    if(EXTRA_LABELS)
+        list(APPEND ALL_LABELS ${EXTRA_LABELS})
+    endif()
+
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
-    set_tests_properties(${TARGET} PROPERTIES LABELS ${APPEND_FUNCTION_SUFFIX})
-endfunction() # _add_gtest_target_internal
+    set_tests_properties(${TARGET} PROPERTIES LABELS "${ALL_LABELS}")
+    if(DEFINED TEST_ENVIRONMENT)
+        set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+    endif()
+endfunction() # _add_test_target_internal
 
-# Adds a generic test target
-function(add_unclassified_test_target TARGET WORKING_DIR)
-    _add_test_target_internal(test ${TARGET} ${WORKING_DIR})
-endfunction() # add_unclassified_test_target
-
+# ~~~
 # Adds a unit test target
+#
+# Usage:
+#   add_unit_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...])
+# ~~~
 function(add_unit_test_target TARGET WORKING_DIR)
-    _add_test_target_internal(unit_test ${TARGET} ${WORKING_DIR})
+    cmake_parse_arguments(ARG "" "" "LABELS" ${ARGN})
+    _add_test_target_internal(unit_test ${TARGET} ${WORKING_DIR} ${ARG_LABELS})
 endfunction() # add_unit_test_target
 
+# ~~~
 # Adds an integration test target
+#
+# Usage:
+#   add_integration_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...])
+# ~~~
 function(add_integration_test_target TARGET WORKING_DIR)
-    _add_test_target_internal(integration_test ${TARGET} ${WORKING_DIR})
+    cmake_parse_arguments(ARG "" "" "LABELS" ${ARGN})
+    _add_test_target_internal(integration_test ${TARGET} ${WORKING_DIR} ${ARG_LABELS})
 endfunction() # add_integration_test_target
 
 # Install CTest configuration files for direct test execution This should be called once at the end
@@ -269,6 +327,23 @@ function(install_hipdnn_ctest_files)
     foreach(test_target ${all_tests})
         file(APPEND "${INSTALLED_CTEST_FILE}" "add_test(${test_target} \"../${test_target}\")\n")
     endforeach()
+
+    # Bake the YAML-driven category labels into the installed
+    # CTestTestfile.cmake so `ctest --test-dir $THEROCK_BIN_DIR/hipdnn -L
+    # <tier>` works against the install tree.
+    #
+    # Passing INSTALLED_CTEST_FILE as the 2nd argument signals the shared
+    # helper that the snippet will be evaluated by ctest's own script
+    # interpreter (which does not implement
+    # get_property(DIRECTORY ... PROPERTY TESTS)), so it emits explicit
+    # per-test set_property() lines after auto-discovering the test
+    # names from the add_test() lines we just wrote above.
+    if(COMMAND apply_ctest_category_labels AND all_tests)
+        apply_ctest_category_labels(
+            "${_HIPDNN_TEST_CATEGORIES_YAML}"
+            "${INSTALLED_CTEST_FILE}"
+        )
+    endif()
 
     # Install the generated CTestTestfile.cmake to HIPDNN_CTEST_FILE_INSTALL_PATH
     install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_CTEST_FILE_INSTALL_PATH}

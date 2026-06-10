@@ -171,7 +171,10 @@ struct BlockFmhaPipelineQRKSVSAsync
               typename OAccElementFunction,
               typename PositionEncoding,
               typename AttentionVariantParams,
-              typename BlockIndices>
+              typename BlockIndices,
+              typename QScaleDramBlockWindowTmp,
+              typename KScaleDramBlockWindowTmp,
+              typename VScaleDramBlockWindowTmp>
     CK_TILE_HOST_DEVICE auto
     operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp, // M0*K0 tile
                const QElementFunction& q_element_func,
@@ -198,6 +201,9 @@ struct BlockFmhaPipelineQRKSVSAsync
                const float* k_descale_ptr,
                const float* v_descale_ptr,
                const index_t block_scale_size_kv,
+               const QScaleDramBlockWindowTmp&, // M0*(K0/kQKScaleGranularity) tile
+               const KScaleDramBlockWindowTmp&, // N0*(K0/kQKScaleGranularity) tile
+               const VScaleDramBlockWindowTmp&, // N1*(K1/kVScaleGranularity) tile
                const float sink_v) const
     {
         static_assert(
@@ -214,6 +220,8 @@ struct BlockFmhaPipelineQRKSVSAsync
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
                       "wrong!");
+
+        static_assert(QScaleEnum != BlockAttentionQuantScaleEnum::MX);
 
         constexpr auto LdsSeq = Policy::template GetLdsBufferSequence<Problem>();
 
@@ -335,7 +343,16 @@ struct BlockFmhaPipelineQRKSVSAsync
                 {
                     auto lse =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
-                    set_tile(lse, SMPLComputeDataType{sink_v * scale_s});
+
+                    if(__builtin_isinf_sign(sink_v) >= 0)
+                    {
+                        set_tile(lse, SMPLComputeDataType{sink_v * scale_s});
+                    }
+                    else
+                    {
+                        set_tile(lse, -numeric<SMPLComputeDataType>::infinity());
+                    }
+
                     store_tile(lse_dram_window_tmp, tile_elementwise_in(lse_element_func, lse));
                 }
 
@@ -589,6 +606,12 @@ struct BlockFmhaPipelineQRKSVSAsync
                 s.get_tile_distribution()); // Pcompute{j}
 
             __builtin_amdgcn_sched_barrier(0x7F);
+            // Ensure gemm_0's LDS reads (K tile) from all threads are completed before V store
+            // Only needed when K tail and V use the same LDS buffer
+            if constexpr(LdsSeq.at(number<k0_loops - 1>{}) == LdsSeq.at(number<k0_loops>{}))
+            {
+                __builtin_amdgcn_s_barrier();
+            }
             // store & prefetch next v, after the max reduction
             if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
             {
@@ -641,6 +664,80 @@ struct BlockFmhaPipelineQRKSVSAsync
                 }
             };
 
+            // Conditional rescaling (FA4): skip when correction is negligible.
+            // For skip rows we stabilize P with m_old so P is computed directly in
+            // the m_{j-1} frame, eliminating the post-correction sweep.
+            // FP8 quant modes cast P to FP8 after softmax. In the skip
+            // branch P can exceed the FP8 representable range and saturate,
+            // corrupting the P*V GEMM. Disable skip for all FP8 paths.
+            static constexpr SMPLComputeDataType kRescaleThreshold =
+                type_convert<SMPLComputeDataType>(
+                    QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ? 8.0f : 0.0f);
+
+            auto m_stab =
+                make_static_distributed_tensor<SMPLComputeDataType>(m.get_tile_distribution());
+            auto rescale_factor =
+                make_static_distributed_tensor<SMPLComputeDataType>(m.get_tile_distribution());
+            auto needs_rescale = make_static_distributed_tensor<bool>(m.get_tile_distribution());
+            set_tile(needs_rescale, false);
+
+            constexpr auto m_spans = decltype(m)::get_distributed_spans();
+            sweep_tile_span(m_spans[number<0>{}], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+                const auto acc_scale_log2 = [&]() {
+                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                                 BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                    {
+                        return m_old[i_idx] - get_validated_m(m[i_idx]);
+                    }
+                    else
+                    {
+                        if constexpr(kHasLogitsSoftCap)
+                        {
+                            return m_old[i_idx] - get_validated_m(m[i_idx]);
+                        }
+                        else
+                        {
+                            auto row_max = scale_s * get_validated_m(m[i_idx]);
+                            return scale_s * m_old[i_idx] - row_max;
+                        }
+                    }
+                }();
+
+                const bool need_rescale =
+                    (acc_scale_log2 < type_convert<SMPLComputeDataType>(-kRescaleThreshold));
+
+                if(need_rescale)
+                {
+                    rescale_factor(i_idx) = exp2(acc_scale_log2);
+                    m_stab(i_idx)         = m[i_idx];
+                    needs_rescale(i_idx)  = true;
+                }
+                else
+                {
+                    m_stab(i_idx) = m_old[i_idx];
+                    m(i_idx)      = m_old[i_idx];
+                }
+#else
+                const auto diff = m_old[i_idx] - get_validated_m(m[i_idx]);
+                const bool need_rescale =
+                    (diff < type_convert<SMPLComputeDataType>(-kRescaleThreshold));
+
+                if(need_rescale)
+                {
+                    rescale_factor(i_idx) = exp(diff);
+                    m_stab(i_idx)         = m[i_idx];
+                    needs_rescale(i_idx)  = true;
+                }
+                else
+                {
+                    m_stab(i_idx) = m_old[i_idx];
+                    m(i_idx)      = m_old[i_idx];
+                }
+#endif
+            });
+
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
@@ -648,7 +745,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                 // For BLOCKSCALE: precompute (m - shift) once per row
                 // Bias/Alibi/SoftCap: exp2(s - m + shift) = exp2(s - (m - shift))
                 // else: exp2(scale_s*s - scale_s*m + shift) = exp2(scale_s*s - (scale_s*m - shift))
-                auto validated_m = get_validated_m(m[i_idx]);
+                auto validated_m = get_validated_m(m_stab[i_idx]);
                 auto row_max     = scale_s * validated_m;
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
                 {
@@ -681,7 +778,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                         }
                     }
 #else
-                    p_compute(i_j_idx)     = exp(s[i_j_idx] - get_validated_m(m[i_idx]));
+                    p_compute(i_j_idx)     = exp(s[i_j_idx] - get_validated_m(m_stab[i_idx]));
 #endif
                 });
             });
@@ -694,37 +791,20 @@ struct BlockFmhaPipelineQRKSVSAsync
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-#if CK_TILE_FMHA_FWD_FAST_EXP2
-                const auto tmp = [&]() {
-                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                                 BiasEnum == BlockAttentionBiasEnum::ALIBI)
-                    {
-                        return exp2(m_old[i_idx] - get_validated_m(m[i_idx]));
-                    }
-                    else
-                    {
-                        if constexpr(kHasLogitsSoftCap)
-                        {
-                            return exp2(m_old[i_idx] - get_validated_m(m[i_idx]));
-                        }
-                        else
-                        {
-                            auto row_max = scale_s * get_validated_m(m[i_idx]);
-                            return exp2(scale_s * m_old[i_idx] - row_max);
-                        }
-                    }
-                }();
-#else
-                const auto tmp = exp(m_old[i_idx] - get_validated_m(m[i_idx]));
-#endif
-                l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
-                sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
-                    constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                    // FIXME: this use different equation from FA v2 paper,
-                    // but produce correc result.
-                    // Is the equation wrong?
-                    o_acc(i_j_idx) *= tmp;
-                });
+                if(needs_rescale[i_idx])
+                {
+                    const auto tmp = rescale_factor[i_idx];
+                    l(i_idx)       = tmp * l[i_idx] + rowsum_p[i_idx];
+                    sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
+                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                        o_acc(i_j_idx) *= tmp;
+                    });
+                }
+                else
+                {
+                    // Skip: P already in m_{j-1} frame, no o_acc rescale needed.
+                    l(i_idx) = l[i_idx] + rowsum_p[i_idx];
+                }
             });
 
             if constexpr(kHasDropout)
@@ -980,6 +1060,9 @@ struct BlockFmhaPipelineQRKSVSAsync
                           nullptr,
                           nullptr,
                           1,
+                          make_null_tile_window(make_tuple()),
+                          make_null_tile_window(make_tuple()),
+                          make_null_tile_window(make_tuple()),
                           sink_v);
     }
 };

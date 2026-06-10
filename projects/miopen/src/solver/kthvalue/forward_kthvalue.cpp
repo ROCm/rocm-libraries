@@ -110,9 +110,9 @@ ConvSolution KthvalueFwd::GetSolution(const ExecutionContext& context,
 
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
-            decltype(auto) params = raw_params.CastTo<miopen::kthvalue::FwdInvokeParams>();
-            size_t dim_stride     = params.inputDesc->GetStrides()[params.dim];
+            decltype(auto) kernel_ = handle_.Run(kernels.front());
+            decltype(auto) params  = raw_params.CastTo<miopen::kthvalue::FwdInvokeParams>();
+            size_t dim_stride      = params.inputDesc->GetStrides()[params.dim];
 
             auto input_tv                      = get_inner_expanded_tv<5>(deref(params.inputDesc));
             auto input_tv_without_selected_dim = get_tv_without_dim<5>(input_tv, params.dim);
@@ -120,16 +120,16 @@ ConvSolution KthvalueFwd::GetSolution(const ExecutionContext& context,
             auto output_tv  = get_inner_expanded_tv<5>(deref(params.outputDesc));
             auto indices_tv = get_inner_expanded_tv<5>(deref(params.indicesDesc));
 
-            kernel(params.input,
-                   params.output,
-                   params.indices,
-                   params.k,
-                   dim_size,
-                   dim_stride,
-                   output_size,
-                   input_tv_without_selected_dim,
-                   output_tv,
-                   indices_tv);
+            kernel_(params.input,
+                    params.output,
+                    params.indices,
+                    params.k,
+                    dim_size,
+                    dim_stride,
+                    output_size,
+                    input_tv_without_selected_dim,
+                    output_tv,
+                    indices_tv);
         };
     };
 

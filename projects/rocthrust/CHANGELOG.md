@@ -3,6 +3,19 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## Since last release ROCm 7.13
+
+### Added
+
+* gfx1250 support
+
+## Since last release ROCm 7.12
+
+### Resolved issues
+
+* Fixed memory leak in unit test.
+* Fixed unit test compatibility with ASAN.
+
 ## rocThrust 4.3.0 for ROCm 7.12
 
 ### Added

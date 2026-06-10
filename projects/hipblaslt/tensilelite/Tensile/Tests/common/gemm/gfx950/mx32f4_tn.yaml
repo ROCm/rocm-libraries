@@ -1,0 +1,206 @@
+TestParameters:
+  marks: [skip-gfx1250, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  #PrintSolutionRejectionReason: True
+  Device: 0
+  CMakeBuildType: Release
+#  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  MaxFileName: 128
+  DeviceLDS: 163840
+  MaxLDS: 163840
+#  PrintTensorA: True
+#  PrintTensorB: True
+#  PrintTensorC: True
+#  PrintTensorD: True
+#  PrintTensorRef: True
+  MXScaleFormat: 1
+
+BenchmarkProblems:
+  ########################################
+  # F4SS TN
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: S
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+#      UseScaleAB: "Scalar"
+#      UseScaleCD: True
+      UseScaleAlphaVec: 1
+      UseBias: 1
+      BiasDataTypeList: [s]
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1,1, 1,1]  # 64x64
+          - [16, 16, 128, 1, 1, 4,2, 2,2]  # 64x64
+          - [16, 16, 128, 1, 1, 2,4, 2,2]  # 64x64
+#          - [16, 16, 128, 1, 1, 8,8, 2,2]  # 64x64
+          #- [32, 32,  64, 1, 1, 1,1, 1,1]  # 64x64
+          #- [32, 32,  64, 1, 1, 2,2, 2,2]  # 64x64
+          #- [32, 32,  64, 1, 1, 4,2, 2,2]  # 64x64
+#          - [32, 32,  64, 1, 1, 2,4, 2,2]  # 64x64
+        #- ForceDisableShadowInit: [True, False]
+        - UseSgprForGRO: [0,1]
+        - DepthU: [128, 256]
+        - AssertFree0ElementMultiple: [1]
+        - AssertFree1ElementMultiple: [1]
+        - AssertSummationElementMultiple: [32]
+        - LocalReadVectorWidth: [32]
+        - PrefetchGlobalRead: [0,2]
+        - PrefetchLocalRead: [0,1]
+        #- PreloadKernArgs: [0,1]
+        - ClusterLocalRead: [0,1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [32]
+        - GlobalReadVectorWidthB: [32]
+        - ScheduleIterAlg: [3]
+        - InnerUnroll: [1]
+        - ExpandPointerSwap: [0,1]
+#        - LdsBlockSizePerPadA: [0]
+#        - LdsBlockSizePerPadB: [0]
+        - TransposeLDS: [1]
+#        - LdsPadA: [0]
+#        - LdsPadB: [0]
+        - WaveSeparateGlobalReadA: [0]
+        - WaveSeparateGlobalReadB: [0]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1,2]
+#        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+#        - NumElementsPerBatchStore: [0]
+#        - StorePriorityOpt: [0]
+#        - StaggerU: [0]
+        - StreamK: [0,3]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # - Exact: [16, 16, 1, 128]
+          - Exact: [32, 16, 1, 1024]
+          - Exact: [256, 256, 1, 128]
+          - Exact: [1025, 513, 1, 2048]
+#          - Exact: [1026, 514, 1, 2048]
+#          - Exact: [1027, 515, 1, 2048]
+#          - Exact: [1028, 516, 1, 2048]
+#          - Exact: [1029, 517, 1, 2048]
+#          - Exact: [1030, 518, 1, 2048]
+#          - Exact: [1031, 519, 1, 2048]
+#          - Exact: [1032, 520, 1, 2048]
+#          - Exact: [1033, 521, 1, 2048]
+#          - Exact: [1034, 522, 1, 2048]
+#          - Exact: [1035, 523, 1, 2048]
+#          - Exact: [1036, 524, 1, 2048]
+#          - Exact: [1037, 525, 1, 2048]
+#          - Exact: [1038, 526, 1, 2048]
+#          - Exact: [1039, 527, 1, 2048]
+#          - Exact: [1040, 528, 1, 2048]
+#          - Exact: [1041, 529, 1, 2048]
+#          - Exact: [1042, 530, 1, 2048]
+#          - Exact: [1043, 531, 1, 2048]
+#          - Exact: [1044, 532, 1, 2048] # dropped: [1025, 513, 1, 2048] above covers the same odd-edge case
+          - Exact: [127, 127, 1, 640] #special cleanup case
+          - Exact: [128, 128, 1, 128]
+          - Exact: [129, 129, 1, 640]
+          # - Exact: [128, 128, 1, 127]
+          # - Exact: [128, 128, 1, 129]
+          # - Exact: [111, 111, 1, 111]
+          # - Exact: [777, 777, 1, 777]
+          - Exact: [128, 128, 1, 512]
+          #- Range: [[128], [128], [1], [1024,32,1280]]
+          - Range: [[128], [128], [1], [1024,128,1280]] #make K value is multiple of DepthU
+          - Range: [[128,8,256], [128], [1], [1024]]
+          - Range: [[128], [128,8,256], [1], [1024]]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+    - # BenchmarkProblemSizeGroup - DTL
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 8,8, 2,2]  # 256x256
+          - [16, 16, 128, 1, 1, 8,2, 2,2]  # 256x64
+          - [16, 16, 128, 1, 1, 2,8, 2,2]  # 64x256
+          - [32, 32, 64, 1, 1, 4,4, 2,2]  # 256x256
+          - [32, 32, 64, 1, 1, 2,2, 2,2]  # 128x128
+        - DepthU: [64,128,256]
+        - AssertSummationElementMultiple: [32]
+        - LocalReadVectorWidth: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - 1LDSBuffer: [0]
+        - DirectToLds: [0,1,2,3]
+        - Use64bShadowLimitMX: [0,1]
+        - StreamK: [0,3]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 16, 1, 1024]
+          - Exact: [256, 256, 1, 128]
+          - Exact: [1025, 513, 1, 2048]
+          - Exact: [127, 127, 1, 640] #special cleanup case
+          - Exact: [129, 129, 1, 640]
+          - Exact: [128, 128, 1, 512]
+          - Exact: [128, 128, 1, 32]
+          - Exact: [128, 128, 1, 64]
+          - Exact: [128, 128, 1, 96]
+          - Exact: [128, 128, 1, 160]
+          - Exact: [128, 128, 1, 192]
+          - Exact: [128, 128, 1, 224]
+          # mutiple of 16 (not working for now)
+          #- Exact: [128, 128, 1, 16]
+          #- Exact: [128, 128, 1, 48]
+          #- Exact: [128, 128, 1, 80]
+          #- Exact: [128, 128, 1, 112]
+          #- Exact: [128, 128, 1, 144]
+          #- Exact: [128, 128, 1, 176]
+          #- Exact: [128, 128, 1, 208]
+          #- Exact: [128, 128, 1, 240]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+
+# LibraryLogic:
+#     ScheduleName: "aquavanjaram"
+#     DeviceNames: ["Device 0049"]
+#     ArchitectureName: "gfx950"
+#     LibraryType: "GridBased"
+#
+# LibraryClient:

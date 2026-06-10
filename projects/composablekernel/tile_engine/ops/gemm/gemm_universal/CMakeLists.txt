@@ -4,6 +4,7 @@
 set(GEMM_UNIVERSAL_DATATYPE "fp8;fp16" CACHE STRING "List of datatypes for GEMM Universal (semicolon-separated)")
 set(GEMM_UNIVERSAL_LAYOUT "rcr;rrr;crr;ccr" CACHE STRING "List of layout for GEMM Universal (semicolon-separated)")
 set(GEMM_UNIVERSAL_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
+set(GEMM_UNIVERSAL_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 option(ENABLE_CCACHE_GEMM_UNIVERSAL "Enable ccache for GEMM Universal ops compilation" OFF)
 
 # Store the directory path for use in functions
@@ -68,7 +69,7 @@ function(create_individual_gemm_universal_target datatype layout trait tile_conf
     # Create the executable
     add_executable(${target_name}
         EXCLUDE_FROM_ALL
-        ${GEMM_UNIVERSAL_SOURCE_DIR}/gemm_benchmark_single.cpp
+        ${GEMM_UNIVERSAL_SOURCE_DIR}/gemm_universal_benchmark_single.cpp
         ${instance_header}
     )
 
@@ -171,6 +172,19 @@ function(build_individual_gemm_universal_targets datatype layout)
                 --gpu_target ${GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL}
                 --list_kernels ")
 
+    # Build optional args for instance builder
+    set(extra_list_args "")
+    if(NOT "${GEMM_UNIVERSAL_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${GEMM_UNIVERSAL_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     # First, just list the kernels (fast operation)
     message(VERBOSE "  Listing kernel configurations...")
     execute_process(
@@ -180,7 +194,8 @@ function(build_individual_gemm_universal_targets datatype layout)
                 --layout ${layout}
                 --config_json ${json_blob}
                 --gpu_target ${GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL}
-                --list_kernels  
+                --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
@@ -226,7 +241,7 @@ message(VERBOSE "SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 
 # Filter GPU targets to only gfx90a, gfx942, gfx950, gfx1201
 set(GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL "")
-set(DESIRED_TARGETS "gfx90a;gfx942;gfx950;gfx1201")
+set(DESIRED_TARGETS "gfx90a;gfx942;gfx950;gfx1201;gfx12-generic")
 
 foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
     if(target IN_LIST DESIRED_TARGETS)
@@ -237,7 +252,7 @@ endforeach()
 
 # Skip build if no matching targets found
 if(NOT GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL)
-    message(WARNING "Skipping Tile Engine GEMM Universal build: No supported GPU targets (gfx90a, gfx942, gfx950, gfx1201) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
+    message(WARNING "Skipping Tile Engine GEMM Universal build: No supported GPU targets (gfx90a, gfx942, gfx950, gfx1201, gfx12-generic) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 else()
     message(VERBOSE "Building individual GEMM Universal targets for GPU targets: ${GEMM_UNIVERSAL_GPU_TARGETS_INDIVIDUAL}")
 
@@ -299,6 +314,20 @@ else()
     foreach(scheduler IN LISTS GEMM_UNIVERSAL_SCHEDULERS)
         add_custom_target(benchmark_gemm_universal_${scheduler}_scheduler)
     endforeach()
+
+    # Divide MAX_INSTANCES budget across all active (dtype, layout) combos so that
+    # sampling fires per-combo rather than being a single cap larger than any combo's
+    # feasible set (which would make sampling a no-op for most combos).
+    if(NOT "${GEMM_UNIVERSAL_MAX_INSTANCES}" STREQUAL "")
+        list(LENGTH GEMM_UNIVERSAL_DATATYPE _gu_n_dt)
+        list(LENGTH GEMM_UNIVERSAL_LAYOUT _gu_n_lay)
+        math(EXPR _gu_n_combos "${_gu_n_dt} * ${_gu_n_lay}")
+        if(_gu_n_combos GREATER 0)
+            math(EXPR GEMM_UNIVERSAL_MAX_INSTANCES
+                "${GEMM_UNIVERSAL_MAX_INSTANCES} / ${_gu_n_combos}")
+            message(STATUS "  gemm_universal: per-combo budget = ${GEMM_UNIVERSAL_MAX_INSTANCES} (${_gu_n_combos} combos)")
+        endif()
+    endif()
 
     # Build individual targets for each datatype/layout combination
     foreach(dt IN LISTS GEMM_UNIVERSAL_DATATYPE)

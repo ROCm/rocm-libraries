@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -301,7 +301,7 @@ namespace rocsparse
             *rowBlocks = nRows;
             if((nRows - last_i) > static_cast<I>(ROWS_FOR_VECTOR))
             {
-                *(wgIds - 1) |= numThreadsForReduction(i - last_i);
+                *(wgIds - 1) |= numThreadsForReduction(nRows - last_i);
             }
 
             ++rowBlocks;
@@ -839,7 +839,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
     // Clean up temp_storage_ptr
     if(temp_alloc)
     {
-        RETURN_IF_HIP_ERROR(hipFreeAsync(temp_storage_ptr, handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(temp_storage_ptr, handle->stream));
     }
 
     return rocsparse_status_success;

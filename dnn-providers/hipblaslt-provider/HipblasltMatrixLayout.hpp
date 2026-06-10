@@ -4,7 +4,7 @@
 #pragma once
 
 #include <hipblaslt/hipblaslt.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp>
 
 namespace hipblaslt_plugin
 {
@@ -14,7 +14,7 @@ class HipblasltMatrixLayout
 public:
     HipblasltMatrixLayout() = default;
     HipblasltMatrixLayout(
-        const hipdnn_data_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
 
     HipblasltMatrixLayout(const HipblasltMatrixLayout&) = delete;
     HipblasltMatrixLayout& operator=(const HipblasltMatrixLayout&) = delete;
@@ -33,7 +33,7 @@ public:
 
 private:
     int64_t _uid{0};
-    hipblasLtMatrixLayout_t _matrix_layout{nullptr};
+    hipblasLtMatrixLayout_t _matrixLayout{nullptr};
 };
 
 } // namespace hipblaslt_plugin

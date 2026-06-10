@@ -257,6 +257,7 @@ ConvWinoRageRxS<Winodata, Winofilter>::GetSolution(const ExecutionContext& ctx,
 }
 
 template struct MIOPEN_INTERNALS_EXPORT ConvWinoRageRxS<2, 3>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinoRageRxS<2, 3>;
 
 } // namespace conv
 
@@ -302,7 +303,13 @@ bool ConvWinoRageRxSFused<Winodata, Winofilter>::IsApplicable(
         case miopenActivationTANH:
         case miopenActivationRELU:
         case miopenActivationLEAKYRELU: break;
-        default: return false;
+
+        case miopenActivationSOFTRELU:
+        case miopenActivationABS:
+        case miopenActivationPOWER:
+        case miopenActivationCLIPPEDRELU:
+        case miopenActivationELU:
+        case miopenActivationCLAMP: return false;
         }
     }
 

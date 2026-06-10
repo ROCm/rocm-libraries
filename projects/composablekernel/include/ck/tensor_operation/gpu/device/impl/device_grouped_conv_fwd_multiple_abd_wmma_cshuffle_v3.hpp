@@ -21,6 +21,7 @@
 #include "ck/tensor_operation/gpu/device/device_grouped_conv_fwd_multiple_abd.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include "ck/tensor_operation/gpu/device/matrix_padder.hpp"
+#include "ck/tensor_operation/gpu/grid/epilogue_type.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_wmma_cshuffle_v3.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_elementwise_2d.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_utils.hpp"
@@ -29,6 +30,16 @@
 #include "ck/host_utility/flush_cache.hpp"
 #include "ck/host_utility/io.hpp"
 
+#ifdef CK_EXPERIMENTAL_BUILDER
+#include "ck_tile/builder/reflect/description.hpp"
+#include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_fwd_multiple_abd_wmma_cshuffle_v3.hpp"
+#endif
+#include "ck/tensor_operation/gpu/device/tensor_size_check.hpp"
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace device {
@@ -82,17 +93,17 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
                     std::is_same_v<e_data_type, ck::bhalf_t>)))
     {
 #endif
-        using EpilogueType =
-            typename std::conditional<GridwiseGemm::IsBWaveTransferApplicable &&
-                                          GridwiseGemm::UseDirectStore,
-                                      typename GridwiseGemm::EpilogueDirectStore,
-                                      typename GridwiseGemm::EpilogueCShuffle>::type;
+        constexpr auto epilogue_type =
+            GridwiseGemm::IsBWaveTransferApplicable && GridwiseGemm::UseDirectStore
+                ? EpilogueType::DirectStore
+                : EpilogueType::CShuffle;
+        using SelectedEpilogue = get_epilogue_t<epilogue_type, GridwiseGemm>;
 
         constexpr index_t LDS_size =
-            GridwiseGemm::template GetSharedMemoryNumberOfByte<EpilogueType>();
+            GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>();
         __shared__ char p_shared[LDS_size];
 
-        auto epilogue_args = EpilogueType{};
+        auto epilogue_args = SelectedEpilogue{};
 
         const auto a_grid_desc_ak0_m_ak1 =
             GridwiseGemm::MakeAGridDescriptor_AK0_M_AK1(a_grid_desc_m_k);
@@ -100,24 +111,34 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         const auto b_grid_desc_bk0_n_bk1 =
             GridwiseGemm::MakeBGridDescriptor_BK0_N_BK1(b_grid_desc_n_k);
 
-        GridwiseGemm::template Run<decltype(a_grid_desc_ak0_m_ak1),
+        const auto block_2_ctile_map_ = typename GridwiseGemm::Block2CTileMap{karg.M, karg.N, 4};
+
+        GridwiseGemm::template Run<GridwiseGemm::ConvRegime::FORWARD,
+                                   decltype(a_grid_desc_ak0_m_ak1),
                                    decltype(b_grid_desc_bk0_n_bk1),
                                    DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock,
                                    EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
+                                   decltype(block_2_ctile_map_),
                                    ComputePtrOffset,
                                    ComputePtrOffset,
+                                   0,
                                    HasMainKBlockLoop,
                                    EGlobalMemoryDataOperation,
-                                   TailNum>(p_shared,
-                                            a_grid_desc_ak0_m_ak1,
-                                            b_grid_desc_bk0_n_bk1,
-                                            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-                                            e_grid_desc_mblock_mperblock_nblock_nperblock,
-                                            compute_ptr_offset_of_batch,
-                                            compute_ptr_offset_of_n,
-                                            num_k_per_block,
-                                            karg,
-                                            epilogue_args);
+                                   false,
+                                   TailNum,
+                                   decltype(epilogue_args)>(
+            p_shared,
+            a_grid_desc_ak0_m_ak1,
+            b_grid_desc_bk0_n_bk1,
+            ds_grid_desc_mblock_mperblock_nblock_nperblock,
+            e_grid_desc_mblock_mperblock_nblock_nperblock,
+            block_2_ctile_map_,
+            compute_ptr_offset_of_batch,
+            compute_ptr_offset_of_n,
+            num_k_per_block,
+            karg,
+            epilogue_args);
+
 #if defined(__gfx11__)
     }
 #endif
@@ -653,7 +674,8 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                  const std::array<index_t, NDimSpatial>& input_right_pads,
                  const AElementwiseOperation& a_element_op,
                  const BElementwiseOperation& b_element_op,
-                 const CDEElementwiseOperation& cde_element_op)
+                 const CDEElementwiseOperation& cde_element_op,
+                 bool stride_overflow_in = false)
             : p_as_grid_{},
               p_bs_grid_{},
               p_ds_grid_{p_ds},
@@ -700,7 +722,8 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
               compute_ptr_offset_of_n_{},
               a_element_op_{a_element_op},
               b_element_op_{b_element_op},
-              cde_element_op_{cde_element_op}
+              cde_element_op_{cde_element_op},
+              stride_overflow_{stride_overflow_in}
         {
             // A/B/E Batch/N Stride
             compute_ptr_offset_of_groups_.BatchStrideA_ =
@@ -1009,6 +1032,7 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
         AElementwiseOperation a_element_op_;
         BElementwiseOperation b_element_op_;
         CDEElementwiseOperation cde_element_op_;
+        bool stride_overflow_;
 
         // block-to-e-tile map
         Block2TileMapElementwise elementwise_block_2_ctile_map_transpose_a_,
@@ -1521,6 +1545,9 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(arg.stride_overflow_)
+            return false;
+
         namespace ctc = tensor_layout::convolution;
 
         const index_t G = arg.b_g_k_c_xs_lengths_[I0];
@@ -1566,6 +1593,10 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
             return false;
         }
 
+        if(!is_xdl_wmma_k_supported<ADataType, KPerBlock>())
+        {
+            return false;
+        }
         // check ConvolutionForwardSpecialization
         if constexpr(ConvForwardSpecialization ==
                      ConvolutionForwardSpecialization::Filter1x1Stride1Pad0)
@@ -2128,6 +2159,14 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
         array_convert(input_left_pads_i32, input_left_pads);
         array_convert(input_right_pads_i32, input_right_pads);
 
+        bool ds_ovf = false;
+        static_for<0, NumDTensor, 1>{}([&](auto i) {
+            using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+            ds_ovf |= tensor_exceeds_2gb<DDataType>(ds_g_n_k_wos_lengths[i]);
+        });
+        const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<EDataType>(e_g_n_k_wos_lengths) || ds_ovf;
         return Argument{p_as,
                         p_bs,
                         p_ds,
@@ -2146,7 +2185,8 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                         input_right_pads_i32,
                         a_element_op,
                         b_element_op,
-                        cde_element_op};
+                        cde_element_op,
+                        stride_ovf};
     }
 
     static auto MakeInvoker() { return Invoker{}; }
@@ -2245,6 +2285,14 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
         array_convert(input_left_pads_i32, input_left_pads);
         array_convert(input_right_pads_i32, input_right_pads);
 
+        bool ds_ovf = false;
+        static_for<0, NumDTensor, 1>{}([&](auto i) {
+            using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+            ds_ovf |= tensor_exceeds_2gb<DDataType>(ds_g_n_k_wos_lengths[i]);
+        });
+        const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<EDataType>(e_g_n_k_wos_lengths) || ds_ovf;
         return std::make_unique<Argument>(p_as,
                                           p_bs,
                                           p_ds,
@@ -2263,7 +2311,8 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                                           input_right_pads_i32,
                                           a_element_op,
                                           b_element_op,
-                                          cde_element_op);
+                                          cde_element_op,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseInvoker> MakeInvokerPointer() override
@@ -2341,8 +2390,31 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                 "The argument pointer is not an object of "
                 "DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle::Argument structure!");
     }
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string GetInstanceString() const override
+    {
+        static_assert(
+            ck_tile::reflect::HasInstanceTraits<DeviceOp>,
+            "InstanceTraits specialization is required. Include the .inc file for this device op.");
+        return ck_tile::reflect::instance_string<DeviceOp>();
+    }
+
+    std::unique_ptr<ck_tile::reflect::Description> describe() const override
+    {
+        return std::make_unique<ck_tile::reflect::InstanceStringDescription>(
+            ck_tile::reflect::instance_string<DeviceOp>());
+    }
+#endif
 };
 
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+#include "ck_tile/builder/reflect/reflect_device_grouped_conv_fwd_multiple_abd_wmma_cshuffle_v3.inc"
+#endif
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

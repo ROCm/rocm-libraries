@@ -24,26 +24,26 @@ public:
     MOCK_METHOD(bool,
                 isApplicable,
                 (HipdnnMiopenHandle & handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
+                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph),
                 (const, override));
     MOCK_METHOD(void,
                 getDetails,
                 (HipdnnMiopenHandle & handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                  hipdnnPluginConstData_t& detailsOut),
                 (const, override));
     MOCK_METHOD(size_t,
                 getMaxWorkspaceSize,
                 (const HipdnnMiopenHandle& handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig),
+                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig),
                 (const, override));
 
     MOCK_METHOD(void,
                 initializeExecutionContext,
                 (const HipdnnMiopenHandle& handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
                  HipdnnMiopenContext& executionContext),
                 (const, override));
 };

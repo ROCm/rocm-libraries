@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/arch/mma/mma_transforms.hpp"
 
 namespace ck_tile::core::arch::mma {
 
@@ -28,9 +29,11 @@ struct MmaDefaultTransformsGfx9
 // TODO: c++20 template <MmaOpI MmaOp, amdgcn_target_arch_id CompilerTarget>
 // TODO: c++20 requires
 template <typename MmaOp, typename CompilerTarget>
-struct MmaTransformsDefaultSelector<MmaOp,
-                                    CompilerTarget,
-                                    enable_if_target_family_gfx9_t<CompilerTarget>>
+struct MmaTransformsDefaultSelector<
+    MmaOp,
+    CompilerTarget,
+    enable_if_all<enable_if_target_family_gfx9_t<CompilerTarget>,
+                  std::enable_if_t<MmaOp::OpFamily == MmaOpFamily::DENSE>>>
 {
     using SelectedTransforms = MmaDefaultTransformsGfx9;
 };

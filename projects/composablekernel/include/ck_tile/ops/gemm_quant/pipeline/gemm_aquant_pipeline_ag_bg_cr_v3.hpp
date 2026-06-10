@@ -228,8 +228,7 @@ struct AQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Prob
             using BDramTileWindowStep  = typename BDramBlockWindowTmp::BottomTensorIndex;
             using AQDramTileWindowStep = typename AQDramBlockWindowTmp::BottomTensorIndex;
 
-            auto&& [a_lds_block, b_lds_block] =
-                Base::template GetABLdsTensorViews<OverrideADataType, BDataType>(p_smem);
+            auto&& [a_lds_block, b_lds_block] = Base::GetABLdsTensorViews(p_smem);
 
             constexpr auto a_lds_load_tile_distr =
                 make_static_tile_distribution(BlockGemm::MakeABlockDistributionEncode());

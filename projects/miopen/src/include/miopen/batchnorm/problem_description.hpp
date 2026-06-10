@@ -445,17 +445,14 @@ private:
 
     std::string GetDirectionStr() const
     {
-        std::string s;
-
         switch(direction)
         {
-        case Direction::ForwardInference: return "Inf"; ;
+        case Direction::ForwardInference: return "Inf";
         case Direction::ForwardTraining: return "Trn";
         case Direction::Backward: return "Bwd";
-        default: MIOPEN_THROW(miopenStatusInvalidValue, "Wrong Batchnorm Direction provided");
         }
 
-        return s;
+        MIOPEN_THROW(miopenStatusInvalidValue, "Wrong Batchnorm Direction provided");
     }
 
     std::string GetModeStr() const
@@ -464,8 +461,9 @@ private:
         {
         case miopenBNPerActivation: return "0";
         case miopenBNSpatial: return "1";
-        default: MIOPEN_THROW(miopenStatusInvalidValue, "Wrong Batchnorm Mode provided");
         }
+
+        MIOPEN_THROW(miopenStatusInvalidValue, "Wrong Batchnorm Mode provided");
     }
 };
 

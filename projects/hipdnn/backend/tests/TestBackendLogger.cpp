@@ -25,6 +25,7 @@ protected:
     int _oldStderr;
     std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logLevelGuard;
     std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logFileGuard;
+    bool _stderrContentRetrieved = false;
 
 public:
     void SetUp() override
@@ -57,9 +58,17 @@ public:
         }
     }
 
-    static std::string getStderrContent()
+    std::string getStderrContent()
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        EXPECT_FALSE(_stderrContentRetrieved)
+            << "getStderrContent() can only be called once per test";
+        if(_stderrContentRetrieved)
+        {
+            return {};
+        }
+        _stderrContentRetrieved = true;
+
+        hipdnn_backend::logging::loggerShutdown();
 
         return testing::internal::GetCapturedStderr();
     }
@@ -72,7 +81,7 @@ TEST_F(TestBackendLogger, MacrosDontLogWhenOff)
     HIPDNN_BACKEND_LOG_ERROR("Initializing with error message");
     HIPDNN_BACKEND_LOG_FATAL("Initializing with fatal message");
 
-    std::string logContent = getStderrContent();
+    const std::string logContent = getStderrContent();
     EXPECT_TRUE(logContent.empty())
         << std::string("Expected stderr to be empty, but it contained:\n") << logContent;
 }
@@ -90,7 +99,7 @@ TEST_F(TestBackendLogger, SetLogLevelOverridesEnvironmentVariable)
     HIPDNN_BACKEND_LOG_WARN("Warn message should appear");
     HIPDNN_BACKEND_LOG_ERROR("Error message should appear");
 
-    std::string logContent = getStderrContent();
+    const std::string logContent = getStderrContent();
 
     // All messages should appear because we set log level to INFO programmatically
     EXPECT_EQ(logContent.find("Info message should not appear"), std::string::npos)
@@ -113,7 +122,7 @@ TEST_F(TestBackendLogger, MacrosRespectLogLevelInfo)
     HIPDNN_BACKEND_LOG_ERROR("Error test message");
     HIPDNN_BACKEND_LOG_FATAL("Fatal test message");
 
-    std::string logContent = getStderrContent();
+    const std::string logContent = getStderrContent();
     EXPECT_NE(logContent.find("Info test message"), std::string::npos);
     EXPECT_NE(logContent.find("Warn test message"), std::string::npos);
     EXPECT_NE(logContent.find("Error test message"), std::string::npos);
@@ -129,7 +138,7 @@ TEST_F(TestBackendLogger, MacrosRespectLogLevelWarn)
     HIPDNN_BACKEND_LOG_ERROR("Error should appear");
     HIPDNN_BACKEND_LOG_FATAL("Fatal should appear");
 
-    std::string logContent = getStderrContent();
+    const std::string logContent = getStderrContent();
     EXPECT_EQ(logContent.find("Info should not appear"), std::string::npos);
     EXPECT_NE(logContent.find("Warn should appear"), std::string::npos);
     EXPECT_NE(logContent.find("Error should appear"), std::string::npos);
@@ -145,7 +154,7 @@ TEST_F(TestBackendLogger, MacrosRespectLogLevelError)
     HIPDNN_BACKEND_LOG_ERROR("Error should appear");
     HIPDNN_BACKEND_LOG_ERROR("Fatal should appear");
 
-    std::string logContent = getStderrContent();
+    const std::string logContent = getStderrContent();
     EXPECT_EQ(logContent.find("Info should not appear"), std::string::npos);
     EXPECT_EQ(logContent.find("Warn should not appear"), std::string::npos);
     EXPECT_NE(logContent.find("Error should appear"), std::string::npos);
@@ -167,7 +176,7 @@ TEST_F(TestBackendLogger, LoggingCanBeReinitialized)
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
     HIPDNN_BACKEND_LOG_INFO("This second info log should appear after reinitialization");
 
-    std::string logContent = getStderrContent();
+    const std::string logContent = getStderrContent();
     EXPECT_NE(logContent.find("This first info log should appear"), std::string::npos)
         << "Expected to find: \"This first info log should appear\" in stderr."
         << "\nActual stderr content:\n"
@@ -190,10 +199,10 @@ TEST_F(TestBackendLogger, LogPatternFormatIsCorrectOnStderr)
 
     HIPDNN_BACKEND_LOG_INFO("Pattern format test message");
 
-    std::string logContent = getStderrContent();
+    const std::string logContent = getStderrContent();
 
     // [timestamp format] [thread id] [log level] [hipdnn_backend] message
-    std::regex patternRegex(
+    const std::regex patternRegex(
         R"(\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] \[tid \d+\] \[info\] \[hipdnn_backend\] Pattern format test message)");
 
     EXPECT_TRUE(std::regex_search(logContent, patternRegex))
@@ -208,15 +217,15 @@ TEST_F(TestBackendLogger, MultipleMessagesAreLoggedToStderr)
     HIPDNN_BACKEND_LOG_INFO("Second backend message");
     HIPDNN_BACKEND_LOG_INFO("Third backend message");
 
-    std::string logContent = getStderrContent();
+    const std::string logContent = getStderrContent();
     EXPECT_NE(logContent.find("First backend message"), std::string::npos);
     EXPECT_NE(logContent.find("Second backend message"), std::string::npos);
     EXPECT_NE(logContent.find("Third backend message"), std::string::npos);
 
     // Verify expected order
-    size_t pos1 = logContent.find("First backend message");
-    size_t pos2 = logContent.find("Second backend message");
-    size_t pos3 = logContent.find("Third backend message");
+    const size_t pos1 = logContent.find("First backend message");
+    const size_t pos2 = logContent.find("Second backend message");
+    const size_t pos3 = logContent.find("Third backend message");
 
     EXPECT_TRUE(pos1 < pos2 && pos2 < pos3)
         << std::string("Messages not logged in expected order to stderr");
@@ -230,7 +239,6 @@ TEST_F(TestBackendLogger, LogFileCanBeSpecifiedByEnvVar)
 
     HIPDNN_BACKEND_LOG_INFO("Logging to custom file");
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     hipdnn_backend::logging::loggerShutdown();
 
     auto stdErrContent = getStderrContent();
@@ -260,10 +268,10 @@ TEST_F(TestBackendLogger, ParamsAreNotExpandedIfLogLevelIsDisabled)
     bool wasCalledForWarn = false;
     bool wasCalledForError = false;
     bool wasCalledForFatal = false;
-    std::string infoMessage("info log message");
-    std::string warnMessage("warn log message");
-    std::string errorMessage("error log message");
-    std::string fatalMessage("fatal log message");
+    const std::string infoMessage("info log message");
+    const std::string warnMessage("warn log message");
+    const std::string errorMessage("error log message");
+    const std::string fatalMessage("fatal log message");
     auto trackingLambda = [](bool& wasCalled, std::string message) {
         wasCalled = true;
         return message;
@@ -277,7 +285,7 @@ TEST_F(TestBackendLogger, ParamsAreNotExpandedIfLogLevelIsDisabled)
     HIPDNN_BACKEND_LOG_ERROR(trackingLambda(wasCalledForError, errorMessage));
     HIPDNN_BACKEND_LOG_FATAL(trackingLambda(wasCalledForFatal, fatalMessage));
 
-    std::string logContent = getStderrContent();
+    const std::string logContent = getStderrContent();
 
     EXPECT_THAT(logContent, ::testing::Not(::testing::HasSubstr(infoMessage)));
     EXPECT_THAT(logContent, ::testing::Not(::testing::HasSubstr(infoMessage)));
@@ -406,7 +414,6 @@ TEST_F(TestBackendLogger, ConcurrentLoggingToFile)
     }
 
     // Flush and shutdown to ensure all messages are written to file
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     hipdnn_backend::logging::loggerShutdown();
 
     // Read and verify the log file
@@ -421,7 +428,7 @@ TEST_F(TestBackendLogger, ConcurrentLoggingToFile)
     // Verify that messages from all threads appear in the log file
     for(int threadId = 0; threadId < NUM_THREADS; ++threadId)
     {
-        std::string expectedMarker = "Thread " + std::to_string(threadId) + " message";
+        const std::string expectedMarker = "Thread " + std::to_string(threadId) + " message";
         EXPECT_NE(logContent.find(expectedMarker), std::string::npos)
             << "Expected to find messages from thread " << threadId << " in log file";
     }

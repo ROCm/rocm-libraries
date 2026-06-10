@@ -1,19 +1,58 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
+/**
+ * @file BatchnormInferenceAttributesVarianceExt.hpp
+ * @brief Attributes for batch normalization inference with variance and epsilon tensors
+ *
+ * This file defines the BatchnormInferenceAttributesVarianceExt class for
+ * configuring batch normalization during inference using raw variance and
+ * epsilon as separate input tensors (rather than pre-computed inverse variance).
+ */
+
 #pragma once
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <memory>
 #include <unordered_map>
 
 namespace hipdnn_frontend::graph
 {
+
+/**
+ * @class BatchnormInferenceAttributesVarianceExt
+ * @brief Configuration for batch normalization inference with variance and epsilon
+ *
+ * Extended variant of BatchnormInferenceAttributes that accepts raw variance
+ * and an epsilon tensor instead of pre-computed inverse variance:
+ *
+ * y = scale * (x - mean) / sqrt(variance + epsilon) + bias
+ *
+ * **Required inputs:**
+ * - X: Input activation tensor
+ * - Mean: Pre-computed running mean
+ * - Variance: Pre-computed running variance
+ * - Scale: Scale (gamma) parameter
+ * - Bias: Bias (beta) parameter
+ * - Epsilon: Small constant for numerical stability (scalar tensor)
+ *
+ * **Outputs:**
+ * - Y: Normalized output tensor
+ *
+ * @code{.cpp}
+ * auto y = graph.batchnorm_inference_variance_ext(x, mean, variance, scale,
+ *              bias, epsilon, BatchnormInferenceAttributesVarianceExt());
+ * @endcode
+ *
+ * @see Graph::batchnorm_inference_variance_ext(), BatchnormInferenceAttributes
+ */
 class BatchnormInferenceAttributesVarianceExt
     : public Attributes<BatchnormInferenceAttributesVarianceExt>
 {
 public:
+    BatchnormInferenceAttributesVarianceExt() = default;
+
     enum class InputNames
     {
         X = 0,
@@ -139,41 +178,6 @@ public:
     BatchnormInferenceAttributesVarianceExt& set_y(std::shared_ptr<TensorAttributes>&& value)
     {
         return setOutput(OutputNames::Y, std::move(value));
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        auto mean = get_mean();
-        auto variance = get_variance();
-        auto epsilon = get_epsilon();
-
-        return hipdnn_data_sdk::data_objects::CreateBatchnormInferenceAttributesVarianceExt(
-            builder,
-            get_x()->get_uid(),
-            mean->get_uid(),
-            variance->get_uid(),
-            get_scale()->get_uid(),
-            get_bias()->get_uid(),
-            get_y()->get_uid(),
-            epsilon->get_uid());
-    }
-
-    static BatchnormInferenceAttributesVarianceExt fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        BatchnormInferenceAttributesVarianceExt attr;
-
-        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
-        attr.set_mean(tensorMap.at(fb->mean_tensor_uid()));
-        attr.set_variance(tensorMap.at(fb->variance_tensor_uid()));
-        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
-        attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
-        attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
-        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
-
-        return attr;
     }
 
 private:

@@ -1,21 +1,28 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+# Keep in sync with example/ck_tile/01_fmha/CMakeLists.txt
+if(NOT SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx12")
+    return()
+endif()
+
 set(FMHA_BWD_INSTANCES "tile_fmha_bwd_instances")
 set(FMHA_FWD_INSTANCES "tile_fmha_fwd_instances")
 
 set(TEST_NAME "test_ck_tile_fmha")
 
 function(add_gtest_fwd test_group)
-    if((GPU_TARGETS MATCHES "gfx90a" AND CK_USE_FP8_ON_UNSUPPORTED_ARCH) OR GPU_TARGETS MATCHES "gfx9[45]|gfx12")
-        set(V_TYPES "fp16" "bf16" "fp8bf16" "fp32")
-    elseif((GPU_TARGETS MATCHES "gfx90a" AND NOT CK_USE_FP8_ON_UNSUPPORTED_ARCH) OR GPU_TARGETS MATCHES "gfx11")
-        set(V_TYPES "fp16" "bf16" "fp32")
+    set(V_TYPES "fp16" "bf16" "fp8bf16" "fp32" "mxfp8" "mxfp4")
+    if(GPU_TARGETS MATCHES "gfx908|gfx90a" AND NOT CK_USE_FP8_ON_UNSUPPORTED_ARCH)
+        # fp8 instances are built for all gfx9, do not test on archs without hardware support
+        list(REMOVE_ITEM V_TYPES "fp8bf16")
     endif()
     set(CPP_TYPE_fp16 "FmhaFwdFp16")
     set(CPP_TYPE_bf16 "FmhaFwdBf16")
     set(CPP_TYPE_fp8bf16 "FmhaFwdFp8Bf16")
     set(CPP_TYPE_fp32 "FmhaFwdFp32")
+    set(CPP_TYPE_mxfp8 "FmhaFwdMxFp8")
+    set(CPP_TYPE_mxfp4 "FmhaFwdMxFp4")
 
     set(sources)
     if(TARGET ${FMHA_FWD_INSTANCES})
@@ -33,6 +40,8 @@ function(add_gtest_fwd test_group)
         add_gtest_executable(${name} test_fmha_fwd.cpp)
         get_test_property(${name} LABELS COMMON_LABELS)
         set_tests_properties(${name} PROPERTIES LABELS "${COMMON_LABELS};${TEST_NAME};${test_group};CK_TILE_FMHA_TESTS")
+        # increase timeout limit for fmha_fwd tests to prevent timeout on a slower gfx11 machine
+        set_tests_properties(${name} PROPERTIES TIMEOUT 3600)
         target_compile_definitions(${name} PRIVATE DataTypeConfig=${CPP_TYPE_${type}})
         target_link_libraries(${name} PRIVATE ${FMHA_FWD_INSTANCES})
         list(APPEND all_tests ${name})

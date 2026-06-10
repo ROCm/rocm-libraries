@@ -1,34 +1,12 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/conv/solver_finders.hpp>
 
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/config.h>
 #include <miopen/env.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 #include <miopen/mlo_internal.hpp>
 #include <miopen/perf_field.hpp>
 #include <miopen/conv/problem_description.hpp>
@@ -47,6 +25,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_SEARCH_CUTOFF, false)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_FIND_SKIP_PCT, 130)
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_CONV_DIRECT_MAX_SIZE, 0)
 
 namespace miopen {
 
@@ -63,10 +42,11 @@ protected:
     }
 
     bool IsEnabled(const ExecutionContext& /*ctx*/,
-                   const ProblemDescription& /*problem*/,
+                   const ProblemDescription& problem,
                    const ConvFindParameters& parameters) const override
     {
-        return !parameters.use_winograd_only && !env::disabled(MIOPEN_DEBUG_CONV_DIRECT);
+        return (!parameters.use_winograd_only &&
+                !IsAlgorithmDisabled(miopenConvolutionAlgoDirect, problem));
     }
 
     std::vector<solver::ConvSolution> FindImpl(const ExecutionContext& ctx,
@@ -227,15 +207,16 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                                        FindCoreResult& core_result,
                                        bool force_attach_binary)
 {
+    std::vector<Solution> ret;
+
     const auto arch = env::value(MIOPEN_DEVICE_ARCH);
     if(!arch.empty())
-        return {};
+        return ret;
 
     bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
     auto selected            = miopen::solver::ConvSolution{miopenStatusUnknownError};
     auto best                = std::numeric_limits<float>::max();
     auto best_invoker        = Invoker{};
-    auto ret                 = std::vector<Solution>{};
     std::vector<float> samples;
 
     for(const auto& sol : solutions)
@@ -283,6 +264,29 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
         try
         {
+            // Log solution name for grouped kernel logging
+            const auto solver_id_obj = solver::Id{sol.solver_id};
+
+            if(IsLoggingKernel())
+            {
+                LogSolutionName(sol.solver_id, solver_id_obj.Value(), sol.workspace_sz);
+
+                // Extract kernel name from first kernel in solution (if available)
+                std::string kernel_name;
+                if(!sol.construction_params.empty() &&
+                   !sol.construction_params[0].kernel_name.empty())
+                {
+                    kernel_name = sol.construction_params[0].kernel_name;
+                }
+                else
+                {
+                    kernel_name = sol.solver_id; // Fallback to solver name
+                }
+
+                // Log performance config before timing runs. We don't have config descriptor so
+                // leave it blank.
+                AddPerformanceConfig(kernel_name, "");
+            }
             // Run invoker max 8 times, with ~5 sec time limit.
             using elapsed_t                 = decltype(handle.GetKernelTime());
             constexpr elapsed_t TIME_MS_MAX = 5000.0;
@@ -319,6 +323,11 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
             if(samples.size() > 0)
             {
+                if(IsLoggingKernel())
+                {
+                    // Update the performance config with the collected samples
+                    AddInvokerTimes(samples);
+                }
                 // Remove outliers that are more than 2 positive modified z-score's away, and get
                 // the mean.
                 elapsed = miopen::removeHighOutliersAndGetMean(samples, 2.0f);
@@ -355,7 +364,10 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
     }
 
     if(!selected.Succeeded())
-        return {};
+    {
+        ret.clear();
+        return ret;
+    }
 
     handle.RegisterInvoker(best_invoker, network_config, selected.solver_id, algorithm_name);
     MIOPEN_LOG_I("Selected: " << selected << ": " << best
@@ -436,25 +448,58 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
 
 namespace conv {
 
-bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo)
+namespace detail {
+/// Determine if problem size exceeds threshold for Direct solver.
+///
+/// The result tensor is used to estimate problem size.
+/// The maximum size is determined by MIOPEN_CONV_DIRECT_MAX_SIZE environment variable.
+///
+/// @param problem The convolution problem description.
+bool IsDirectProblemTooLarge(const ProblemDescription& problem)
+{
+    const unsigned long long max_size = env::value(MIOPEN_CONV_DIRECT_MAX_SIZE);
+    // 0 means no limit
+    if(max_size == 0)
+        return false;
+
+    // For FWD/BWD: 'out' is the result (swapped in BWD)
+    // For WRW: 'weights' is the result (out is dy, not dw)
+    const size_t problem_size = problem.IsDirectionBackwardWrW()
+                                    ? problem.GetWeights().GetElementSize()
+                                    : problem.GetOut().GetElementSize();
+
+    // Problem size is within limit
+    if(problem_size <= max_size)
+        return false;
+
+    MIOPEN_LOG_I2("DirectSolverFinder disabled for problem size "
+                  << problem_size << " > " << max_size << " (MIOPEN_CONV_DIRECT_MAX_SIZE)");
+    return true;
+}
+} // namespace detail
+
+bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo, const ProblemDescription& problem)
 {
     switch(algo)
     { // clang-format off
-#if MIOPEN_USE_GEMM
     case miopenConvolutionAlgoGEMM:
+#if MIOPEN_USE_GEMM
         return env::disabled(MIOPEN_DEBUG_CONV_GEMM);
+#else
+        return true;
 #endif
     case miopenConvolutionAlgoDirect:
-        return env::disabled(MIOPEN_DEBUG_CONV_DIRECT);
+        return env::disabled(MIOPEN_DEBUG_CONV_DIRECT) || detail::IsDirectProblemTooLarge(problem);
     case miopenConvolutionAlgoFFT:
         return env::disabled(MIOPEN_DEBUG_CONV_FFT);
     case miopenConvolutionAlgoWinograd:
         return env::disabled(MIOPEN_DEBUG_CONV_WINOGRAD);
     case miopenConvolutionAlgoImplicitGEMM:
         return env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM);
-    default: // Disable future algos by default to enforce explicit handling:
-        return true;
     } // clang-format on
+
+    // Disable future algos by default to enforce explicit handling
+    return true;
 }
 
 bool IsEnoughWorkspace(std::string_view where,

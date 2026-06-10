@@ -278,9 +278,8 @@ struct ABQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Pro
             using AQDramTileWindowStep = typename AQDramBlockWindowTmp::BottomTensorIndex;
             using BQDramTileWindowStep = typename BQDramBlockWindowTmp::BottomTensorIndex;
 
-            // Note: A/B DataType PkInt4/PkFp4 gets converted during loading, before going to LDS
-            auto&& [a_lds_block, b_lds_block] =
-                Base::template GetABLdsTensorViews<OverrideADataType, OverrideBDataType>(p_smem);
+            // Note: BDataType PkInt4 gets converted during loading, before going to LDS
+            auto&& [a_lds_block, b_lds_block] = Base::GetABLdsTensorViews(p_smem);
 
             constexpr auto a_lds_load_tile_distr =
                 make_static_tile_distribution(BlockGemm::MakeABlockDistributionEncode());

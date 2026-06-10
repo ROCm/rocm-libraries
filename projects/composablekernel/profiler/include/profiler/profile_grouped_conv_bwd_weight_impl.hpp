@@ -118,11 +118,37 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
     std::cout << "weight: " << wei_g_k_c_xs_desc << std::endl;
     std::cout << "output: " << out_g_n_k_wos_desc << std::endl;
 
+    using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<NDimSpatial,
+                                                                              InLayout,
+                                                                              WeiLayout,
+                                                                              OutLayout,
+                                                                              InDataType,
+                                                                              WeiDataType,
+                                                                              OutDataType,
+                                                                              InElementOp,
+                                                                              WeiElementOp,
+                                                                              OutElementOp,
+                                                                              ComputeTypeA,
+                                                                              ComputeTypeB>;
+
+    // get device op instances
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    std::cout << "found " << op_ptrs.size() << " instances" << std::endl;
+
     // Create host tensors
-    Tensor<InDataType> input(in_g_n_c_wis_desc);
-    Tensor<WeiDataType> weight_host_result(wei_g_k_c_xs_desc);
-    Tensor<WeiDataType> weight_device_result(wei_g_k_c_xs_desc);
-    Tensor<OutDataType> output(out_g_n_k_wos_desc);
+    Tensor<InDataType> input({1});
+    Tensor<WeiDataType> weight_host_result({1});
+    Tensor<WeiDataType> weight_device_result({1});
+    Tensor<OutDataType> output({1});
+    if(init_method != 0 || do_verification != 0)
+    {
+        input                = Tensor<InDataType>(in_g_n_c_wis_desc);
+        weight_host_result   = Tensor<WeiDataType>(wei_g_k_c_xs_desc);
+        weight_device_result = Tensor<WeiDataType>(wei_g_k_c_xs_desc);
+        output               = Tensor<OutDataType>(out_g_n_k_wos_desc);
+    }
 
     // Get element space sizes for allocation
     const auto input_element_space_size  = in_g_n_c_wis_desc.GetElementSpaceSize();
@@ -177,9 +203,12 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
             output.GenerateTensorValue(GeneratorTensor_3<OutDataType>{-0.5, 0.5});
         }
 
-        // Copy initialized host data to device
-        in_device_buf.ToDevice(input.mData.data());
-        out_device_buf.ToDevice(output.mData.data());
+        if(init_method != 0)
+        {
+            // Copy initialized host data to device
+            in_device_buf.ToDevice(input.mData.data());
+            out_device_buf.ToDevice(output.mData.data());
+        }
     }
 
     // Allocate GPU reference buffer (used only if do_verification == 2)
@@ -244,25 +273,6 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
         }
     }
 
-    using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<NDimSpatial,
-                                                                              InLayout,
-                                                                              WeiLayout,
-                                                                              OutLayout,
-                                                                              InDataType,
-                                                                              WeiDataType,
-                                                                              OutDataType,
-                                                                              InElementOp,
-                                                                              WeiElementOp,
-                                                                              OutElementOp,
-                                                                              ComputeTypeA,
-                                                                              ComputeTypeB>;
-
-    // get device op instances
-    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOp>::GetInstances();
-
-    std::cout << "found " << op_ptrs.size() << " instances" << std::endl;
-
     std::string best_op_name;
     float best_avg_time   = 0;
     float best_tflops     = 0;
@@ -272,18 +282,19 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
     index_t valid_instances     = 0;
 
     // profile device Conv instances
-    bool all_pass = true;
+    bool all_pass           = true;
+    bool dummy_run_executed = false;
 
-    std::array<ck::index_t, NDimSpatial + 3> input_lengths{};
-    std::array<ck::index_t, NDimSpatial + 3> filter_lengths{};
-    std::array<ck::index_t, NDimSpatial + 3> output_lengths{};
-    std::array<ck::index_t, NDimSpatial + 3> input_strides{};
-    std::array<ck::index_t, NDimSpatial + 3> weights_strides{};
-    std::array<ck::index_t, NDimSpatial + 3> output_strides{};
-    std::array<ck::index_t, NDimSpatial> conv_filter_strides{};
-    std::array<ck::index_t, NDimSpatial> conv_filter_dilations{};
-    std::array<ck::index_t, NDimSpatial> input_left_pads{};
-    std::array<ck::index_t, NDimSpatial> input_right_pads{};
+    std::array<ck::long_index_t, NDimSpatial + 3> input_lengths{};
+    std::array<ck::long_index_t, NDimSpatial + 3> filter_lengths{};
+    std::array<ck::long_index_t, NDimSpatial + 3> output_lengths{};
+    std::array<ck::long_index_t, NDimSpatial + 3> input_strides{};
+    std::array<ck::long_index_t, NDimSpatial + 3> weights_strides{};
+    std::array<ck::long_index_t, NDimSpatial + 3> output_strides{};
+    std::array<ck::long_index_t, NDimSpatial> conv_filter_strides{};
+    std::array<ck::long_index_t, NDimSpatial> conv_filter_dilations{};
+    std::array<ck::long_index_t, NDimSpatial> input_left_pads{};
+    std::array<ck::long_index_t, NDimSpatial> input_right_pads{};
 
     auto range_copy = [](const auto& from, auto to) { std::copy(begin(from), end(from), to); };
 
@@ -320,8 +331,14 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
     }
 
     index_t num_kernel = 0;
-    for(auto& op_ptr : op_ptrs)
+    for(size_t i = 0; i < op_ptrs.size(); i++)
     {
+        if((instance_index != -1) && (instance_index != static_cast<int>(i)))
+        {
+            // skip test if instance_index is specified
+            continue;
+        }
+        auto& op_ptr = op_ptrs[i];
         for(std::size_t split_k_id = 0; split_k_id < split_k_list.size(); split_k_id++)
         {
             auto argument_ptr = op_ptr->MakeArgumentPointer(
@@ -372,8 +389,12 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
             }
 
             const std::size_t workspace_sz = op_ptr->GetWorkSpaceSize(argument_ptr.get());
-            DeviceMem workspace_dev(workspace_sz);
-            op_ptr->SetWorkSpacePointer(argument_ptr.get(), workspace_dev.GetDeviceBuffer());
+            DeviceMem workspace_dev(0);
+            if(workspace_sz)
+            {
+                workspace_dev.Realloc(workspace_sz);
+                op_ptr->SetWorkSpacePointer(argument_ptr.get(), workspace_dev.GetDeviceBuffer());
+            }
 
             if(op_ptr->IsSupportedArgument(argument_ptr.get()))
             {
@@ -400,8 +421,25 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
 
                 auto invoker_ptr = op_ptr->MakeInvokerPointer();
 
-                float avg_time =
-                    invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, time_kernel});
+                if(time_kernel && !dummy_run_executed)
+                {
+                    // Run first instance as dummy to get proper time from the first instance
+                    invoker_ptr->Run(argument_ptr.get(),
+                                     StreamConfig{nullptr,
+                                                  time_kernel,
+                                                  0 /*log_level*/,
+                                                  5 /*cold_iters*/,
+                                                  50 /*nrepeat_*/,
+                                                  time_kernel /*flush_cache*/});
+                    dummy_run_executed = true;
+                }
+                float avg_time = invoker_ptr->Run(argument_ptr.get(),
+                                                  StreamConfig{nullptr,
+                                                               time_kernel,
+                                                               0 /*log_level*/,
+                                                               5 /*cold_iters*/,
+                                                               50 /*nrepeat_*/,
+                                                               time_kernel /*flush_cache*/});
 
                 std::size_t flop      = conv_param.GetFlops();
                 std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
@@ -500,6 +538,9 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
                             LogRangeAsType<float>(std::cout << "input: ", input.mData, ",")
                                 << std::endl;
                         }
+
+                        std::cout << "Relative error threshold: " << rtol
+                                  << " Absolute error threshold: " << atol << std::endl;
                     }
                 }
                 else if(do_verification == 1)
@@ -594,11 +635,6 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
               << "\ntflops: " << best_tflops << "\nGB/s: " << best_gb_per_sec << ", SplitK "
               << best_split_k << std::endl;
 
-    if(instance_index != -1)
-    {
-        std::cout << "grouped_conv_bwd_weight_instance (" << instance_index << "/" << num_kernel
-                  << "): Passed" << std::endl;
-    }
     return all_pass;
 }
 

@@ -35,7 +35,9 @@ else( )
     "Install path prefix, prepended onto install directories" )
 endif( )
 
-
+if( NOT DEFINED ROCM_LIBRARIES_ROOT )
+  set( ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." )
+endif()
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
@@ -85,7 +87,10 @@ if( ROCM_PATH )
 endif()
 
 # Using standardized versioning from rocm-cmake
-set ( VERSION_STRING "1.0.37" )
+set ( ROCFFT_VERSION_MAJOR "1" )
+set ( ROCFFT_VERSION_MINOR "0" )
+set ( ROCFFT_VERSION_PATCH "38" )
+set ( VERSION_STRING "${ROCFFT_VERSION_MAJOR}.${ROCFFT_VERSION_MINOR}.${ROCFFT_VERSION_PATCH}" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Append our library helper cmake path and the cmake path for hip (for
@@ -138,7 +143,9 @@ set(DEFAULT_GPUS
   gfx1152
   gfx1153
   gfx1200
-  gfx1201)
+  gfx1201
+  gfx1250
+)
 
 if(BUILD_ADDRESS_SANITIZER)
   add_compile_options(-fsanitize=address)
@@ -253,6 +260,7 @@ if( BUILD_CLIENTS_SAMPLES
     set( HIPRAND_DEP hiprand )
   endif()
   if(BUILD_CLIENTS_TESTS)
+    enable_testing()
     rocm_package_setup_client_component(
       tests
       DEPENDS
