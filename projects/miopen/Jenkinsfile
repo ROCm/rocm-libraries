@@ -550,10 +550,9 @@ def buildAsanDockerImage(Map conf=[:]) {
                      "--build-arg AMDGPU_FAMILIES=\"${amdgpuFamilies}\" " +
                      "--build-arg GPU_ARCHS=\"${amdgpuArchs}\" " +
                      "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
-                     "--build-arg ASAN_SCCACHE_CACHE_BUSTER=\"MiOpen-ASAN-Docker-CK\" " +
+                     "--build-arg ASAN_SCCACHE_CACHE_BUSTER=\"MiOpen-ASAN-Docker\" " +
                      " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile.ASAN "
-    // Build context is projects/ so both composablekernel and miopen are reachable
-    def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+    def buildContext = "${env.WORKSPACE}/${env.MIOPEN_DIR}/."
     def dockerCacheArgs = "--cache-from type=registry,ref=${cacheRef} " +
                           "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=min "
 
