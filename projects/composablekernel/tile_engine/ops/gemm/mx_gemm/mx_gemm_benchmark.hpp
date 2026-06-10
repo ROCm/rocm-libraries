@@ -26,7 +26,8 @@ auto pack_mx_scales_mn_x_k(const ck_tile::HostTensor<ck_tile::e8m0_t>& src, bool
     const ck_tile::index_t k_scale = k_last ? src_lengths[1] : src_lengths[0];
 
     if(mn % MNPack != 0 || k_scale % KPack != 0)
-        throw std::runtime_error("MX scale packing requires mn and k_scale divisible by MNPack/KPack");
+        throw std::runtime_error(
+            "MX scale packing requires mn and k_scale divisible by MNPack/KPack");
 
     const ck_tile::index_t mn_packed = mn / MNPack;
     const ck_tile::index_t k_packed  = k_scale / KPack;

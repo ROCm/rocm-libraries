@@ -89,9 +89,7 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
     auto k_dims = parse_dims_string(arg_parser.get_str("k_dims"));
 
     // Validate dimension counts match the compiled kernel
-    auto validate_dims = [](const std::vector<int>& dims,
-                            int expected,
-                            const std::string& name) {
+    auto validate_dims = [](const std::vector<int>& dims, int expected, const std::string& name) {
         if(static_cast<int>(dims.size()) != expected)
             throw std::runtime_error("Expected " + std::to_string(expected) + " " + name +
                                      " dimension(s), got " + std::to_string(dims.size()));
