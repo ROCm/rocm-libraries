@@ -4442,9 +4442,19 @@ class KernelWriterAssembly(KernelWriter):
 
         # This is guaranteed to fit in 32-bit since the WG*MT is a number of elements in some unsigned direction:
         if useFixedSrd2:
-          # UseSubtileImpl fixedSrd2 case (including swizzle and nonSwizzle): tile start uses roundup(MT/swizzleSize0)
+          # UseSubtileImpl fixedSrd2 case: tile start uses roundup(MT/swizzleSize0)
           mt = roundUp(kernel[tP["mt"]] / swizzleSize0)
-          module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), mt, comment="WorkGroup[01] * roundup(MT/%u)"%swizzleSize0))
+          # For preswizzled MX scale with TLU=1 (constant unit stride on tile index):
+          # The preswizzled layout packs each group of swizzleSize0 M-positions with all
+          # K-blocks into a contiguous swizzleBlockSize-byte block. The tileStart must
+          # be a byte offset, so multiply the block count by the block size.
+          # Without this, WG>0 reads WG0's scale data (off by mt bytes vs mt*blockSize).
+          if isMxSwizzledScaleLayout:
+            strideF_pre = self.strideRef(tc, tP['tileIdx'])
+            if self.isConstUnitStride(strideF_pre):
+              mt = mt * swizzleBlockSize
+          module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), mt, \
+                    comment="WorkGroup[01] * %u"%mt))
         else:
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
 
@@ -4486,6 +4496,45 @@ class KernelWriterAssembly(KernelWriter):
                   module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), comment="buffer_load limit for %s (tile-boundary, avoids 32-bit overflow)"%tc))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
+
+        elif useFixedSrd2:
+          # TLU=1 / col-major operands (A, MXSA): the TILE index (M/I) is contiguous
+          # (unit stride), so the block above is skipped and Srd+2 was left
+          # UNINITIALIZED -> every global load goes OOB -> returns 0 -> D == 0.
+          #
+          # For TLU=1 the LARGE stride is on the SUMMATION (unroll/K) index. Build the
+          # tile-boundary limit from that stride (mirror of the TLU=0 path, tile<->K
+          # swapped):  Srd+2 = ( (kLines-1)*strideSummation + tileExtentElems ) * bpe
+          # This CLAMPS reads past the tile to 0 (required by the kernel), unlike
+          # BufferLimit which would read neighbouring memory as garbage.
+          unrollIdx = kernel["ProblemType"]["IndexUnroll"]
+          strideSum = self.strideRef(tc, unrollIdx)            # StrideAL (A) / StrideMXSAL (MXSA)
+
+          if isMxSwizzledScaleLayout:
+            # For swizzled MX scale DTL loads, the access pattern is:
+            #   v15 = (serial/numTPG)*stride + (serial%numTPG)*loadWidth
+            # The SRD limit must cover the full access range:
+            #   max_offset = (numGroups-1)*stride + numTPG*loadWidth - 1
+            # So: limit = (numGroups-1)*stride + numTPG*loadWidth
+            numTPG = 16   # threads per group in scale GR offset (SubtileScaleEmit)
+            loadWidth = 16  # buffer_load_dwordx4 = 16 bytes per lane
+            kLines    = kernel["DepthU"] // mxBlock  # total K-block rows in scale tensor
+            tileElems = numTPG * loadWidth                 # = 256 contiguous bytes
+          else:
+            kLines    = roundUp(kernel["DepthU"] / swizzleSize1)
+            tileElems = roundUp(kernel[tP["mt"]] / swizzleSize0)
+
+          module.add(SMulI32(dst=sgpr(stmp+0), src0=(kLines - 1), src1=strideSum,
+                             comment="(kLines-1)*strideSummation  (TLU=1 col-major limit)"))
+          module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=tileElems,
+                             comment="+ contiguous tile extent (M/I)"))
+          if isMxSwizzledScaleLayout:
+            module.add(SMovB32(dst=sgpr("Srd%s+2"%tc), src=sgpr(stmp+0),
+                               comment="buffer_load limit for %s (TLU=1, bpe=1)"%tc))
+          else:
+            module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]),
+                               comment="buffer_load limit for %s (TLU=1 tile-boundary)"%tc))
+
 
         skComponent = Component.StreamK.find(self)
         module.add(skComponent.computeLoadSrd(self, kernel, tP, stmp))

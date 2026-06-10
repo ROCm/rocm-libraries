@@ -849,6 +849,7 @@ class Solution(collections.abc.Mapping):
       dtype_a = state["ProblemType"]["DataTypeA"]
       numSubIterK = 1 if dtype_a.is8bitFloat() else 2
       duUnit = numSubIterK * state["MatrixInstK"] * state["LocalSplitU"]
+
       if state["DepthU"] == -1:
         state["DepthU"] = duUnit
       if state["DepthU"] % duUnit != 0:
@@ -860,6 +861,8 @@ class Solution(collections.abc.Mapping):
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
             state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
+          elif dtype.is6bitFloat() or dtype.isFloat4():
+            state[f"_ABTilePair{tc}"] = "AB_B4_TLU1"
           else:
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
             return
@@ -2053,6 +2056,17 @@ class Solution(collections.abc.Mapping):
     state["enableLDSTrMXSA"] = False
     state["enableLDSTrB"] = isLDSTrEnabled(isaInfoMap[isa].asmCaps, state["LDSTrInst"], state["UnrollMajorLDSB"], state["DirectToVgprB"], numBytesB)
     state["enableLDSTrMXSB"] = False
+
+    # Subtile LR path (SubtileLREmit.py) emits ds_read_*_tr_* directly without
+    # checking asmCaps. Force enableLDSTr for tensors whose LDS layout requires a
+    # transposed read (UnrollMajorLDS=False means tile-major LDS, needing transpose).
+    # This ensures the legacy initLocalReadMemoryInstruction selects from the
+    # TrLocalRead pool (avoiding sub-byte width crashes) even when asmCaps
+    # detection does not report the transposed-read capability.
+    if state["UseSubtileImpl"]:
+      for tc in ('A', 'B'):
+        if not state[f"UnrollMajorLDS{tc}"]:
+          state[f"enableLDSTr{tc}"] = True
 
     # This reject kernels in 950 logic yaml, temporarily comment it out.
     # finalLDSTrInst = state["enableLDSTrA"] or state["enableLDSTrB"]

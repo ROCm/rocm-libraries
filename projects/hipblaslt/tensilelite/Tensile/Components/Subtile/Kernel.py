@@ -321,6 +321,24 @@ AB_B16_TLU1_16x1 = ABTilePair(
     lr=ABLRGeometry(tag=LRTag_TLU1(), **_B16, tlu=True, subtileShape=(16, 1), loadShape=LoadShape(m=16, k=1), loadWidth=32),                            # 256-bit LR: 16 bf16 along M
 )
 
+# -- Column-major A (TLU=1) for FP4 ------------------------------------------
+# NN layout makes A column-major (contiguous along M). One 128-bit load grabs
+# loadWidth/bpe = 16/0.5 = 32 fp4 along M = exactly subtileShape[0]*instM (2*16)
+# rows, so one buffer_load fills the M-extent of one GR subtile.
+#
+# IMPORTANT: leave subtileCount / subtileStride to DERIVE (None). for_kernel()
+# sets subtileCount = MIWaveGroup[0] (=2) and subtileStride = MT0_mma/2 (=8).
+# Because numGRTotal = 4 * subtileCount, a derived count of 2 gives numGRTotal=8
+# (all 32768 B of A). Pinning subtileCount=1 (as AB_B16_TLU1 does) would give
+# numGRTotal=4 and silently load only HALF of A.
+AB_B4_TLU1 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_TLU1(), **_B4, tlu=True, subtileShape=(2, 1),
+                    loadShape=LoadShape(m=32, k=1)),   # 128-bit GR: 32 fp4 along M
+    lr=ABLRGeometry(tag=LRTag_TLU1(), **_B4, tlu=True, subtileShape=(2, 1),
+                    loadWidth=8,                       # ds_read_b64_tr_b4: 8 bytes/lane
+                    loadShape=LoadShape(m=16, k=1)),   # 8 B / 0.5 bpe = 16 fp4 along M
+)
+
 # MX scale factor inputs (one scale per mxBlock data elements)
 _MXS_B4 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp4',))
 _MXS_B8 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp8', 'bf8'))
@@ -357,6 +375,7 @@ AB_GEOMETRY_MAP = {
   "AB_B16_TLU1": AB_B16_TLU1,
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
   "AB_B16_W32":  AB_B16_W32,
+  "AB_B4_TLU1":  AB_B4_TLU1,
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:

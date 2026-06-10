@@ -397,6 +397,41 @@ namespace TensileLite
                                        reinterpret_cast<Float4x2 const*>(data),
                                        tensor,
                                        reinterpret_cast<Float4x2 const*>(ptrVal));
+                    // ---- MX scale tensors (E8M0 / E5M3) ---------------------
+                    // logTensorTyped<uint8_t> would print as 'char' in text
+                    // mode, so we handle both modes inline using raw bytes.
+                    // - Binary mode (DumpTensors=1): write tensor_NAME.bin
+                    //   exactly as the GPU/CPU side already lays it out
+                    //   (one byte per element, packed contiguously).
+                    // - Text mode  (DumpTensors=0): print as a hex byte
+                    //   stream with 32 bytes per line for easy diffing.
+                    else if(tensor.dataType() == rocisa::DataType::E8
+                            || tensor.dataType() == rocisa::DataType::E5M3)
+                    {
+                        if(m_dumpTensors)
+                        {
+                            std::string   fname
+                                = concatenate("tensor_", name, ".bin");
+                            std::ofstream ofile(fname.c_str());
+                            ofile.write(reinterpret_cast<const char*>(data),
+                                    tensor.totalAllocatedBytes());
+                            m_stream << "Dumped tensor to file " << fname
+                                << std::endl;
+                        }
+                        else
+                        {
+                            m_stream << name << ": " << tensor << std::endl;
+                            auto const*  p = reinterpret_cast<unsigned char const*>(data);
+                            size_t const n = tensor.totalAllocatedBytes();
+                            m_stream << std::hex;
+                            for(size_t i = 0; i < n; ++i)
+                                m_stream << "0x"
+                                    << static_cast<unsigned>(p[i])
+                                    << ((i + 1) % 32 == 0 ? '\n' : ' ');
+                            m_stream << std::dec << std::endl;
+                        }
+                    }
+                    // -------------------------------------------------------
 #endif // #ifdef TENSILE_USE_FP4
                     else
                         throw std::runtime_error(

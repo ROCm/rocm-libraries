@@ -12,9 +12,10 @@ from __future__ import annotations
 from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
 from Tensile.Components.Subtile.SubtileGREmit import (
     emitSingleBufferLoad, globalReadPtrUpdates, globalReadLDSBufferSwap,
+    _emitColMajorBufferLoad
 )
 from Tensile.Components.Subtile.SubtileLREmit import (
-    emitSingleDsRead, localReadLDSBufferSwap,
+    emitSingleDsRead, emitSingleDsReadTLU1, localReadLDSBufferSwap,
 )
 from Tensile.Components.Subtile.SubtileScaleEmit import (
     globalReadDoScaleSubtile, globalReadScalePtrUpdates,
@@ -80,7 +81,7 @@ class InstructionEmitter:
 
         # Derived state
         self.hasScale = scaleTileInfoA is not None and scaleTileInfoB is not None
-        self.subtileShapeK = tileInfoA.subtileShape[1]
+
         self.tileInfoMap = {'A': tileInfoA, 'B': tileInfoB}
         if self.hasScale:
             self.tileInfoMap['SA'] = scaleTileInfoA
@@ -101,9 +102,20 @@ class InstructionEmitter:
             'inline':       lambda em, ui: self.emit_inline(em.source),
         }
 
+
         # Sentinel for the long-lived per-lane diff vgpr. Set by
         # emit_mask_k_init, consumed by every emit_mask_k call in the tail body.
         self._tail_vDiff = None
+
+    def _subtileShapeK(self, tensor: str) -> int:
+        """Return the K-dimension of the subtile shape for the given tensor.
+        For data tensors (A, B), returns the data tile's subtileShape[1].
+        For scale tensors (SA, SB), returns the scale tile's subtileShape[1],
+        which reflects the scale's actual K coverage - the 4-byte VGPR packs
+        all K sub-iterations via op_sel/op_sel_hi byte selection, so no
+        LDS K-interleaving is needed for scale reads.
+        """
+        return self.tileInfoMap[tensor].subtileShape[1]
 
     def emit_mfma(self, placement, unroll_iter=0):
         """Emit MFMA instructions from MFMAPlacement."""
@@ -154,25 +166,35 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             vgprTiles = self.vgprTilesA if tensor == 'A' else self.vgprTilesB
             lrGran = self.config.lrA if tensor == 'A' else self.config.lrB
+            isTLU1 = ti.lr is not None and getattr(ti.lr.config, 'tlu', False)
+            tensor_shapeK = self._subtileShapeK(tensor)
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, lrGran.k):
-                    subtileK = k // self.subtileShapeK
-                    subIterK_within = k % self.subtileShapeK
+                    subtileK = k // tensor_shapeK
+                    subIterK_within = k % tensor_shapeK
                     dstTile = vgprTiles[tile_map[tileId]]
-                    swizzled = self.writer.states.subtileLdsSwizzle
-                    module.add(emitSingleDsRead(
-                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
+
+                    if isTLU1:
+                        module.add(emitSingleDsReadTLU1(
+                            ti, tileId, subtileK, subIterK_within, dstTile))
+                    else:
+                        swizzled = self.writer.states.subtileLdsSwizzle
+                        module.add(emitSingleDsRead(
+                            ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
+
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
+
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn
                 kGroupIdx = placement.tiles.subIterK_start // ti.lrSubtileShape[1]
                 numKGroups = ti.lrLocalSubtileGrid[1]
                 dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
+
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
                 module.add(DSLoadB32(
                     dst=vgpr(vdst),
@@ -188,10 +210,21 @@ class InstructionEmitter:
         if tensor in ('A', 'B'):
             ti = self.tileInfoMap[tensor]
             grGran = self.config.grA if tensor == 'A' else self.config.grB
-            for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
-                for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
-                    subtileK = k // self.subtileShapeK
-                    module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))
+            isTLU1 = ti.gr is not None and getattr(ti.gr.config, 'tlu', False)
+            if isTLU1:
+                # Column-major path: emit all subtiles using col-major buffer load.
+                # The scheduler's tile range covers all MMA tiles; we re-map to
+                # subtile coordinates (sId0=M-subtile, sId1=K-subtile).
+                for sId1 in range(int(ti.localSubtileGrid[1])):
+                    for sId0 in range(int(ti.localSubtileGrid[0])):
+                        module.add(_emitColMajorBufferLoad(ti, self.kernel, sId0, sId1))
+            else:
+                tensor_shapeK = self._subtileShapeK(tensor)
+                # Row-major path (existing, unchanged)
+                for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
+                    for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
+                        subtileK = k // tensor_shapeK
+                        module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
@@ -202,7 +235,7 @@ class InstructionEmitter:
         counts = source.wait_gr_counts
         if counts is None:
             return []
-        
+
         if self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False):
             tdmCnt = counts.A + counts.B + counts.SA + counts.SB
             return [SWaitTensorcnt(tensorcnt=tdmCnt,
@@ -211,8 +244,8 @@ class InstructionEmitter:
         # TODO. Hardcoded for now, but we should just get this from atomic emit codes (emitSingleBufferLoad, ...)
         grMap = {'A': max(1,int(1.0/self.tileInfoA.loadRatioGR)),
                  'B':  max(1,int(1.0/self.tileInfoB.loadRatioGR)),
-                 'SA': 1, 
-                 'SB': 1}  
+                 'SA': 1,
+                 'SB': 1}
         grCnt = (counts.A * grMap['A'] +
                  counts.B * grMap['B'] +
                  counts.SA * grMap['SA'] +
@@ -560,3 +593,4 @@ class InstructionEmitter:
                     handler = self._dispatch.get(em.opType)
                     if handler:
                         em.instructions = handler(em, unroll_iter)
+
