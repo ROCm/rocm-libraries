@@ -143,15 +143,15 @@ struct LoadAndConvertKernel
         using S = typename Problem::BlockShape;
 
         constexpr auto block_dims    = make_tuple(S::Block_M, S::Block_N);
-        constexpr auto block_strides = make_tuple(1, S::Block_M);
+        constexpr auto block_strides = make_tuple(S::Block_N, 1);
 
-        const index_t m_block_base = get_block_id() * S::Block_M;
+        const index_t m_block_base = __builtin_amdgcn_readfirstlane(get_block_id() * S::Block_M);
 
         // LDS buffer
         __shared__ XDataType a_lds[S::Block_M * S::Block_N];
 
         auto a_lds_view = make_naive_tensor_view<address_space_enum::lds>(
-            a_lds, block_dims, block_strides, number<1>{}, number<1>{});
+            a_lds, block_dims, block_strides, number<S::Vector_N>{}, number<1>{});
 
         auto a_block_lds_write_window = make_tile_window(a_lds_view, block_dims, {0, 0});
 
@@ -159,7 +159,7 @@ struct LoadAndConvertKernel
             if constexpr(LoadTranspose::value)
             {
                 constexpr auto block_dims_t    = make_tuple(S::Block_N, S::Block_M);
-                constexpr auto block_strides_t = make_tuple(S::Block_M, 1);
+                constexpr auto block_strides_t = make_tuple(1, S::Block_N);
 
                 auto view = make_naive_tensor_view<address_space_enum::lds>(
                     a_lds,
@@ -186,7 +186,7 @@ struct LoadAndConvertKernel
 
         // Input tensor
         const auto a_tensor = make_naive_tensor_view<address_space_enum::global>(
-            a, make_tuple(M, N), make_tuple(1, M), number<1>{}, number<1>{});
+            a, make_tuple(M, N), make_tuple(N, 1), number<S::Vector_N>{}, number<1>{});
 
         auto a_block_window =
             make_tile_window(a_tensor,
@@ -196,7 +196,7 @@ struct LoadAndConvertKernel
 
         // Output tensor
         const auto c_tensor = make_naive_tensor_view<address_space_enum::global>(
-            c, make_tuple(M, N), make_tuple(1, M), number<1>{}, number<1>{});
+            c, make_tuple(M, N), make_tuple(N, 1), number<S::Vector_N>{}, number<1>{});
 
         auto c_block_window =
             make_tile_window(c_tensor,
