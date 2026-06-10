@@ -148,8 +148,8 @@ OpTensorLeadingOnes::GetSolution([[maybe_unused]] const ExecutionContext& contex
         kernel.kernel_name = "OpTensorLeadingOnesGeneric";
     }
 
-    kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
-    kernel.kernel_file  = "MIOpenTensorKernels.cl";
+    kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
+    kernel.kernel_file  = "MIOpenTensorKernelsHip.cpp";
 
     using std::begin, std::end;
 
