@@ -27,7 +27,7 @@ import math
 import sys
 
 from enum import Enum
-from typing import List, Dict, Literal
+from typing import List, Dict, Literal, Tuple
 
 from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Activation import ActivationType
@@ -821,9 +821,11 @@ class Solution(collections.abc.Mapping):
         state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
 
     state["MfmaInitCVgprs"] = False
-    # Only enable UseSubtileImpl on gfx950; ignore user request on other ISAs.
-    isgfx950 = state["ISA"] == IsaVersion(9,5,0)
-    state["UseSubtileImpl"] = state["UseSubtileImpl"] and isgfx950
+    # Enable UseSubtileImpl on gfx950 and gfx1250; ignore user request on other ISAs.
+    isa = tuple(state["ISA"])
+    isgfx950 = isa[:2] == (9, 5)
+    isgfx1250 = isa[:2] == (12, 5)
+    state["UseSubtileImpl"] = state["UseSubtileImpl"] and (isgfx950 or isgfx1250)
 
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
@@ -860,7 +862,10 @@ class Solution(collections.abc.Mapping):
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
             return
         elif dtype.isBFloat16() or dtype.isHalf():
-          state[f"_ABTilePair{tc}"] = "AB_B16"
+          if state["WavefrontSize"] == 32:
+            state[f"_ABTilePair{tc}"] = "AB_B16_W32"
+          else:
+            state[f"_ABTilePair{tc}"] = "AB_B16"
         elif dtype.is8bitFloat():
           state[f"_ABTilePair{tc}"] = "AB_B8"
         elif dtype.is6bitFloat() or dtype.isFloat4():
@@ -2724,8 +2729,11 @@ class Solution(collections.abc.Mapping):
 
       state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
 
-      def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> int:
-        # SubtileImpl does not need LDS padding.
+      def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> Tuple[int, int, int, int, int]:
+        # SubtileImpl: LDS padding is disabled.
+        # gfx950 subtile uses software swizzle+rotation for bank conflict avoidance instead.
+        # gfx1250 subtile (TDM) currently has no bank conflict mitigation -- TDM hardware
+        # padding could be enabled here in the future by computing non-zero LdsPad values.
         if state["UseSubtileImpl"]:
           return 0, 0, 0, 0, 0
         numBytesA = state["ProblemType"]["MacDataTypeA"].numBytes()
