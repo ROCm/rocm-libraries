@@ -399,8 +399,9 @@ void ValidateMetadataEncoding(const std::string& solver_name,
         kernel_params.push_back(tokens);
     }
 
-    // Encode all supported kernels
-    auto encoded = EncodeKernelParams(kernel_params, metadata);
+    // Encode all supported kernels. This test appends a default split_k token to kernels whose
+    // mapping declares SplitK (mirroring ExpandKernelParamsWithSplitK), so use_split_k is true.
+    auto encoded = EncodeKernelParams(kernel_params, metadata, /*use_split_k=*/true);
 
     // Verify no NaN values (which indicate encoding failures)
     int nan_count = 0;

@@ -415,6 +415,8 @@ size_t MetadataND::EncodePrecision(miopenDataType_t data_type) const
             return precision_encodings_3d.at("FP16");
         else if(data_type == miopenFloat)
             return precision_encodings_3d.at("FP32");
+        else if(data_type == miopenInt8)
+            return precision_encodings_3d.at("INT8");
         else
         {
             MIOPEN_LOG_W("Unsupported data type in ND metadata, returning 0");

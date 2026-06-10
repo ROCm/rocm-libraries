@@ -287,6 +287,14 @@ std::size_t EncodePrecisionLabel(float precision_feature)
     return 0;
 }
 
+// True when this model targets 2D convolutions, per the spatial_dim constant in its metadata.
+// Feature engineering (input + kernel-config) is 2D-only; 3D models use raw features.
+bool IsTwoDimensional(const CandidateSelectionMetadata& metadata)
+{
+    const auto spatial_dim = metadata.GetInputConstant("spatial_dim");
+    return spatial_dim.has_value() && *spatial_dim == "2";
+}
+
 } // namespace
 
 MIOPEN_INTERNALS_EXPORT
@@ -296,11 +304,8 @@ EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
 {
     (void)raw_features;
 
-    if(FeatureAt(features_by_name, "spatial_dim") != 2.0f)
-    {
-        MIOPEN_THROW("EngineerCandidateSelectionInputFeatures: only 2D problems are supported");
-    }
-
+    // Callers gate this 2D-only path via IsTwoDimensional(metadata); no runtime spatial_dim check
+    // here so a model whose feature map omits/differs on spatial_dim still engineers correctly.
     MIOPEN_LOG_I2("Using engineered 2d features for Candidate Selection");
 
     // Mirror ExtractTunaNetND2dFeatures (ai_heuristics.cpp); keep in sync manually.
@@ -646,15 +651,27 @@ CandidateSelectionModel::EncodeInputFeatures(const std::map<std::string, float>&
         }
     }
 
-    const auto engineered_features =
-        EngineerCandidateSelectionInputFeatures(filtered_features, features);
-    return EncodeInputFeaturesWithFdeep(engineered_features, arch_, solver_);
+    // Feature engineering is a 2D-only path: the 2D models expect the engineered input vector,
+    // while the 3D models still consume the raw (filtered) features as-is. The per-model
+    // dimensionality is declared by the spatial_dim constant in the metadata.
+    if(IsTwoDimensional(metadata_))
+    {
+        const auto engineered_features =
+            EngineerCandidateSelectionInputFeatures(filtered_features, features);
+        return EncodeInputFeaturesWithFdeep(engineered_features, arch_, solver_);
+    }
+    return EncodeInputFeaturesWithFdeep(filtered_features, arch_, solver_);
 }
 
 MIOPEN_INTERNALS_EXPORT
 std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
     const std::vector<std::vector<float>>& encoded_candidates) const
 {
+    // 2D-only feature engineering (see EncodeInputFeatures). 3D models consume the raw
+    // metadata-ordered encoded candidates directly.
+    if(!IsTwoDimensional(metadata_))
+        return EncodeKernelConfigsWithFdeep(encoded_candidates, arch_, solver_);
+
     std::vector<std::vector<float>> engineered_candidates;
     engineered_candidates.reserve(encoded_candidates.size());
     for(const auto& candidate : encoded_candidates)

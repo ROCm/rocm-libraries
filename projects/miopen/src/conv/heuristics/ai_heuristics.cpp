@@ -826,7 +826,7 @@ static std::vector<float> ExtractTunaNetND2dFeatures(const conv::ProblemDescript
     const std::vector<int> out_layout =
         one_hot(metadata.EncodeOutLayout(problem.GetOutLayout()), 2);
     const std::vector<int> precision =
-        one_hot(metadata.EncodePrecision(problem.GetInDataType()), 3);
+        one_hot(metadata.EncodePrecision(problem.GetInDataType()), 4);
     const std::vector<int> direction = one_hot(metadata.EncodeDirection(problem.GetDirection()), 3);
 
     // Avoid division by zero
@@ -903,6 +903,7 @@ static std::vector<float> ExtractTunaNetND2dFeatures(const conv::ProblemDescript
             static_cast<float>(precision[0]),
             static_cast<float>(precision[1]),
             static_cast<float>(precision[2]),
+            static_cast<float>(precision[3]),
             static_cast<float>(direction[0]),
             static_cast<float>(direction[1]),
             static_cast<float>(direction[2]),
