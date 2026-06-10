@@ -43,10 +43,11 @@ bool fp64EmulationIsEager();
  * A return value of 0 means no Inf/NaN checking is performed. */
 uint32_t fp64EmulationSpecialValuesMask();
 
-/* Returns the number of INT8 GEMMs (moduli) to use, in the range [2, 20].
+/* Returns the number of INT8 GEMMs (moduli) to use, in the range [2, 18].
  * Reads HIPBLASLT_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT; maps the
  * requested precision in bits to the minimum number of moduli required.
- * Default (env var absent or 0): 20 moduli (~155 bits of CRT capacity).
+ * Default (env var absent or 0): 16 moduli (~125 bits of CRT capacity).
+ * Maximum supported: 18 moduli (~140 bits of CRT capacity).
  * Notable values: 55 bits → 7 GEMMs, 79 bits → 10 GEMMs, 110 bits → 14 GEMMs. */
 unsigned fp64EmulationNumModuli();
 
@@ -70,7 +71,7 @@ bool fp64EmulationWouldApply(const _rocblaslt_handle* h,
                               int64_t                  k,
                               int                      batch_count);
 
-/* Returns the effective number of CRT moduli (2..20) given the handle's emulation
+/* Returns the effective number of CRT moduli (2..18) given the handle's emulation
  * settings.
  *   FIXED mode (mantissa_control=1, max_mantissa_bits≥0): maps the bit count to
  *     the minimum s whose CRT capacity ≥ max_mantissa_bits.
@@ -82,7 +83,7 @@ unsigned fp64EmulationEffectiveNumModuli(const _rocblaslt_handle* h);
  * Fields with sentinel values (0 for num_moduli, ~0u for sv_mask) cause the
  * function to fall back to the process-wide env var defaults.              */
 struct Fp64EmulationSettings {
-    unsigned int      num_moduli;      /* 2..20; 0 = derive from env var          */
+    unsigned int      num_moduli;      /* 2..18; 0 = derive from env var          */
     unsigned int      sv_mask;         /* special-values mask; ~0u = env var      */
     void*             workspace;       /* caller workspace; nullptr = allocate     */
     size_t            workspace_bytes; /* size of caller workspace                */
