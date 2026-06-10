@@ -930,7 +930,8 @@ class RegisterTileInfo:
 
 def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
   """Zero a contiguous register range using MFMA (16/inst) or WMMA (8/inst)."""
-  useWmma = writer.states.asmCaps.get("HasWMMA_AccImmZero", False)
+  asmCaps = getattr(writer.states, "asmCaps", {})
+  useWmma = asmCaps.get("HasWMMA_AccImmZero", False)
   tileAlias = vgpr if useWmma else (accvgpr if isAgpr else vgpr)
   tileCopyInst = VMovB32 if useWmma else (VAccvgprWrite if isAgpr else VMovB32)
 

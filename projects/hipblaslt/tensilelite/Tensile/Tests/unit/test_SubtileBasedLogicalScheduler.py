@@ -296,6 +296,7 @@ def make_writer_and_tileinfos(kernel, fp4=False, max_vgpr=256, physical_max_vgpr
     writer.sgprPool = RegisterPool(0, RegisterType.Sgpr, False)
     writer.states = SimpleNamespace(
         regCaps={"MaxSgpr": 106, "MaxVgpr": max_vgpr, "PhysicalMaxVgpr": physical_max_vgpr},
+        asmCaps={"HasWMMA_AccImmZero": False},
         unrollIdx=0,
         laneSGPRCount=2,
         subtileLdsSwizzle=True,
