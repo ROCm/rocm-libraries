@@ -18,6 +18,73 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
+// ToCKIndexArray — narrow a long_index_t array to a ck::index_t (int32) array.
+//
+// Used at the BWD/WRW MakeArgPtr boundary because the installed CK BWD/WRW
+// MakeArgumentPointer interface (e.g.
+// device_grouped_conv_bwd_data_multiple_d.hpp) only accepts int32 length /
+// stride arrays. Narrowing here is safe because RequiresLargeTensorCKInstance
+// (implicitgemm_ck_util.hpp) blocks BWD/WRW selection when any stride exceeds
+// INT_MAX -- under that guard the candidate set for those directions is empty
+// (no BWD/WRW large-tensor CK instances are registered) and the narrowing
+// path is never reached on overflow shapes. For sub-INT_MAX shapes the
+// narrowing is exact.
+// ---------------------------------------------------------------------------
+template <typename T, std::size_t N>
+constexpr std::array<ck::index_t, N> ToCKIndexArray(const std::array<T, N>& src)
+{
+    std::array<ck::index_t, N> dst{};
+    for(std::size_t i = 0; i < N; ++i)
+    {
+        dst[i] = static_cast<ck::index_t>(src[i]);
+        assert(static_cast<T>(dst[i]) == src[i] &&
+               "ToCKIndexArray narrowed a value > INT_MAX -- "
+               "RequiresLargeTensorCKInstance filter contract was bypassed");
+    }
+    return dst;
+}
+
+// ---------------------------------------------------------------------------
+// NarrowedCKArrays3D / NarrowedCKArrays2D — bundles of int32-narrowed
+// length/stride arrays handed to CK's int32 MakeArgumentPointer overload.
+// Same caveat as ToCKIndexArray: only safe when RequiresLargeTensorCKInstance
+// is filtering out >INT_MAX shapes.
+//
+// These bundles MUST be stored as members of the owning CKArgs (not as
+// function-local temporaries), because CK's MakeArgumentPointer captures
+// references to the array elements into the returned Argument object. If
+// the bundle goes out of scope before IsSupportedArgument runs, CK reads
+// freed stack memory (caught by ASAN as stack-use-after-scope).
+// ---------------------------------------------------------------------------
+struct NarrowedCKArrays3D
+{
+    std::array<ck::index_t, 6> in_l;
+    std::array<ck::index_t, 6> in_s;
+    std::array<ck::index_t, 6> out_l;
+    std::array<ck::index_t, 6> out_s;
+    std::array<ck::index_t, 6> wei_l;
+    std::array<ck::index_t, 6> wei_s;
+    std::array<ck::index_t, 3> filter_strides;
+    std::array<ck::index_t, 3> filter_dilations;
+    std::array<ck::index_t, 3> lPadding;
+    std::array<ck::index_t, 3> rPadding;
+};
+
+struct NarrowedCKArrays2D
+{
+    std::array<ck::index_t, 5> in_l;
+    std::array<ck::index_t, 5> in_s;
+    std::array<ck::index_t, 5> out_l;
+    std::array<ck::index_t, 5> out_s;
+    std::array<ck::index_t, 5> wei_l;
+    std::array<ck::index_t, 5> wei_s;
+    std::array<ck::index_t, 2> filter_strides;
+    std::array<ck::index_t, 2> filter_dilations;
+    std::array<ck::index_t, 2> lPadding;
+    std::array<ck::index_t, 2> rPadding;
+};
+
+// ---------------------------------------------------------------------------
 // CKArgsSplitK — CRTP base for BWD and WRW CKArgs.
 //
 // Contains all shared members, the constructor (dimension extraction, NHWC
@@ -93,6 +160,28 @@ struct CKArgsSplitK
                     ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
     }
 
+    // Populate-and-return the narrowed bundle. Lazy so narrowing only runs
+    // for kernels that survived the RequiresLargeTensorCKInstance filter --
+    // BWD/WRW CKArgs is constructed unconditionally in FillValidKernelsIDs
+    // before filtering, so narrowing in the constructor would assert on
+    // >INT_MAX shapes even though no kernel is ultimately selected.
+    const NarrowedCKArrays2D& GetNarrowedArrays() const
+    {
+        narrowed = NarrowedCKArrays2D{
+            .in_l             = ToCKIndexArray(input),
+            .in_s             = ToCKIndexArray(in_strides),
+            .out_l            = ToCKIndexArray(output),
+            .out_s            = ToCKIndexArray(out_strides),
+            .wei_l            = ToCKIndexArray(weight),
+            .wei_s            = ToCKIndexArray(wei_strides),
+            .filter_strides   = ToCKIndexArray(strides),
+            .filter_dilations = ToCKIndexArray(dilation),
+            .lPadding         = ToCKIndexArray(lPadding),
+            .rPadding         = ToCKIndexArray(rPadding),
+        };
+        return narrowed;
+    }
+
     CKArgsSplitK(const CKArgsSplitK&)            = default;
     CKArgsSplitK(CKArgsSplitK&&)                 = default;
     CKArgsSplitK& operator=(const CKArgsSplitK&) = default;
@@ -126,30 +215,39 @@ struct CKArgsSplitK
         return conv_ptr->GetWorkSpaceSize(arg_ptr.get());
     }
 
-    int G;
-    int N;
-    int K;
-    int C;
-    int C1;
-    int K1;
-    int Hi;
-    int Wi;
-    int Ho;
-    int Wo;
-    int Y;
-    int X;
+    // Dim members are int64 (and length/stride arrays use ck::long_index_t)
+    // so the NCHW stride builder above (e.g. Hi*Wi*G*C) does not silently
+    // overflow on tensors whose contiguous stride exceeds INT_MAX. Argument
+    // construction then binds to CK's long_index_t MakeArgumentPointer
+    // overload, which is safe only when paired with a large-tensor instance
+    // (see implicitgemm_ck_util.hpp::RequiresLargeTensorCKInstance).
+    int64_t G;
+    int64_t N;
+    int64_t K;
+    int64_t C;
+    int64_t C1;
+    int64_t K1;
+    int64_t Hi;
+    int64_t Wi;
+    int64_t Ho;
+    int64_t Wo;
+    int64_t Y;
+    int64_t X;
     miopenDataType_t data_type;
     miopenAlphaBetaCase_t alpha_beta_case;
-    std::array<ck::index_t, 5> input;
-    std::array<ck::index_t, 5> in_strides;
-    std::array<ck::index_t, 5> output;
-    std::array<ck::index_t, 5> out_strides;
-    std::array<ck::index_t, 5> weight;
-    std::array<ck::index_t, 5> wei_strides;
-    std::array<ck::index_t, 2> strides;
-    std::array<ck::index_t, 2> dilation;
-    std::array<ck::index_t, 2> lPadding;
-    std::array<ck::index_t, 2> rPadding;
+    std::array<ck::long_index_t, 5> input;
+    std::array<ck::long_index_t, 5> in_strides;
+    std::array<ck::long_index_t, 5> output;
+    std::array<ck::long_index_t, 5> out_strides;
+    std::array<ck::long_index_t, 5> weight;
+    std::array<ck::long_index_t, 5> wei_strides;
+    std::array<ck::long_index_t, 2> strides;
+    std::array<ck::long_index_t, 2> dilation;
+    std::array<ck::long_index_t, 2> lPadding;
+    std::array<ck::long_index_t, 2> rPadding;
+    // mutable: populated lazily by GetNarrowedArrays() (const) so derived
+    // MakeArgPtr (also const) can hand CK references that outlive the call.
+    mutable NarrowedCKArrays2D narrowed;
 
 private:
     const Derived& derived() const { return static_cast<const Derived&>(*this); }
