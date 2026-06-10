@@ -17,9 +17,8 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
-#include <vector>
 
-// Helper for graph capture: stores closure data (never deleted - bounded leak)
+// Helper for graph capture: stores closure data for graph replay
 namespace {
 struct FmhaBwdGraphClosure
 {
@@ -717,7 +716,7 @@ struct fmha_bwd_launcher
             const size_t aligned_offset    = (data_size + closure_align - 1) & ~(closure_align - 1);
             void* closure_addr             = base + aligned_offset;
 
-            // Construct closure in-place (never destructed - bounded leak)
+            // Construct closure in-place (destructor not called - cleanup via buffer release)
             auto* graph_data = new(closure_addr) FmhaBwdGraphClosure{
                 pin_w,
                 seqstart_q_pinned,
