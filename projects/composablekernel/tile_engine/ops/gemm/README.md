@@ -6,6 +6,7 @@ The CK Tile Engine GEMM module provides a comprehensive system for generating, b
 
 ## Table of Contents
 
+0. [Dispatcher Bridge Workflow](#dispatcher-bridge-workflow)
 1. [Build System Architecture](#build-system-architecture)
 2. [Build Instructions](#build-instructions)
 3. [Running Benchmarks](#running-benchmarks)
@@ -15,6 +16,91 @@ The CK Tile Engine GEMM module provides a comprehensive system for generating, b
 7. [Understanding Kernel Names](#understanding-kernel-names)
 8. [Troubleshooting](#troubleshooting)
 9. [Performance Tips](#performance-tips)
+
+## Dispatcher Bridge Workflow
+
+The **Dispatcher bridge** is the recommended path for sweeping and benchmarking
+GEMM kernels. Instead of building monolithic or per-kernel executables through
+CMake, Tile Engine expands a sweep config into shared `GemmKernelConfig` objects
+and hands them to the Dispatcher, which codegens and compiles each into its own
+`.so`. The kernel name produced by the bridge is byte-for-byte identical to the
+codegen `KERNEL_NAME`, so the bridge runs exactly the same kernels the native
+Tile Engine does — it only swaps the harness.
+
+### Scripts
+
+| Script | Role |
+|---|---|
+| `gemm_full_benchmark.py` | Driver: compile (Phase 1) → load problems (Phase 2) → benchmark across all visible GPUs (Phase 3). |
+| `run_one_gemm_kernel.py` | Disposable worker: loads one `.so` in an isolated subprocess and times it. A GPU fault kills only the worker. |
+
+### Per-variant organization
+
+Each GEMM variant owns a `configs/` directory; the driver selects it with
+`--variant`:
+
+```
+gemm_universal/configs/    # default variant (wired through the bridge today)
+gemm_multi_d/configs/
+gemm_preshuffle/configs/
+grouped_gemm/configs/
+```
+
+Every `configs/` directory ships example sweep configs:
+
+- `default_ci_config.json` — small CI-sized sweep (the driver's default when no
+  config is passed).
+- `default_config.json` — full sweep.
+- `user_provided_config.json` — scratch space for custom sweeps.
+- `example_problems.json` — example M/N/K problem set (used when `--problems`
+  is omitted).
+
+> The JSON used by **nightly** tests is intended to drop into the same
+> `configs/` directory and be selected with `--variant` / positional config —
+> no driver changes needed.
+
+### Running
+
+```bash
+cd tile_engine/ops/gemm
+
+# Default: gemm_universal variant, its CI sweep + example problems,
+# auto-detect and use all visible GPUs.
+python gemm_full_benchmark.py
+
+# Full sweep, fp16/rcr, restricted to 4 GPUs, custom output:
+python gemm_full_benchmark.py --variant gemm_universal \
+    gemm_universal/configs/default_config.json \
+    --dtype fp16 --layout rcr --devices 4 --csv gemm_results.csv
+
+# Specific GPU ids and a custom problem file:
+python gemm_full_benchmark.py --devices 0,2,5 \
+    --problems gemm_universal/configs/example_problems.json
+```
+
+### Multi-GPU parallelism
+
+Phase 3 fans the `(kernel × problem)` work out across **every visible GPU** in
+parallel. One worker thread per device pulls batches from a shared queue and
+spawns a disposable subprocess pinned with `HIP_VISIBLE_DEVICES`, so an N-GPU box
+benchmarks roughly N× faster while keeping per-batch fault isolation. Devices are
+auto-detected (`HIP_VISIBLE_DEVICES`, then `rocm-smi`/`amd-smi`); override with
+`--devices`. This supersedes the serial-GPU design inherited from grouped_conv.
+
+### Supported surface
+
+| Axis | Supported |
+|---|---|
+| dtype | `fp16` (bf16 follows in #8190) |
+| layout | `rcr` (rrr/crr/ccr follow in #8191; row-major C only — ck_tile rejects column-major C at build) |
+
+### Deprecation note
+
+The per-variant `*_instance_builder.py` scripts (e.g.
+`gemm_universal/gemm_universal_instance_builder.py`) are the **legacy** kernel
+generators. They are slated for deprecation once the Dispatcher bridge reaches
+full parity across all variants; new sweeps should prefer the bridge workflow
+above.
 
 ## Build System Architecture
 
