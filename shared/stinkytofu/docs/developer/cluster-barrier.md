@@ -83,15 +83,15 @@ paired everywhere.
 
 ### Two anchor modes (backward scan from `label_openLoopL:`)
 
-**(a) Publication point already exists** (typical for PLR > 0 schedules)
+**(a) Publication point already exists** (typical for PrefetchLocalRead > 0 schedules)
 
 An `s_barrier_wait -1` is already present. Anchor at the successor of that wait;
 no new workgroup sync is synthesized. The scan stops as soon as a
 `tensor_load_to_lds` is reached: that instruction marks the prefetch section,
-before any LW-to-PLR sync could sit, so an earlier workgroup wait would be
+before any workgroup sync could sit, so an earlier workgroup wait would be
 unrelated. Defers to Rule 4 if the same wait would also be a Rule-4 trigger.
 
-**(b) No publication point** (typical for PLR == 0 schedules)
+**(b) No publication point** (typical for PrefetchLocalRead == 0 schedules)
 
 No `s_barrier_wait -1` between the prefetch tail and `label_openLoopL:` (the
 prologue has no local-read preamble barrier). Only active when `plrValue == 0`;
@@ -107,7 +107,7 @@ needed). Emitted shape immediately **before** the `label_openLoopL:` label:
     s_cmp_le_u32 s[sgprLoopCounterL], <pgrValue>          // outer LCL gate
     s_cbranch_scc1 label_skipCBPreSignal_LCL_<HASH_OUTER> // skip when LCL <= pgr
     s_barrier_signal -1                                  // workgroup signal
-    s_barrier_wait -1                                    // LW to PLR, sync LDS0
+    s_barrier_wait -1                                    // workgroup sync
     s_cmp_eq_u32 s[sgprWaveIdx], 0                        // inner wave gate
     s_cbranch_scc0 label_skipCBPreSignal_<HASH_INNER>
     s_barrier_signal -3
@@ -205,7 +205,7 @@ Must be `true` for the GFX1250 backend pipeline (whole-kernel insertion). When
 fires when this is `true` because the "first `tensor_load` of the whole kernel"
 anchor is meaningful only at kernel scope.
 
-### `pgrValue` (default `1`, i.e. PGR=1)
+### `pgrValue` (default `1`, i.e. PrefetchGlobalRead=1)
 
 Tensile's `PrefetchGlobalRead` setting. It is consulted only by Rule 4's
 drain-gated fallback mode (b) (the `LCL <= pgrValue` / `LCL <= pgrValue+1`
