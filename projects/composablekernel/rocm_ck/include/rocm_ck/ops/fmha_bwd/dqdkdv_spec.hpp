@@ -384,13 +384,14 @@ consteval FmhaBwdDQDKDVTileConfig generateTileConfig(int hdim, const FmhaBwdBase
 
 /// Look up base tile for a given (symmetric) head dimension.
 ///
-/// The GFX9 family (gfx90a, gfx942, gfx950) shares one base-tile table: for the
-/// current non-trload scope CK Tile's fmha_bwd.py KernelComponentFactoryGfx950
-/// reuses the gfx9 get_dq_dk_dv_tiles() rows verbatim and only *adds* tr_load
-/// entries on top. The device bridge pins kUseTrLoad = false, so routing gfx950
-/// through this table is correct today. Follow-up (out of scope here, flagged in
-/// PR #7823 review): when trload is enabled, gfx950 needs either its own table
-/// or a (target, tr_load)-keyed lookup for those extra entries.
+/// The GFX9 family (gfx90a, gfx942, gfx950) shares one base-tile table: in
+/// CK Tile's fmha_bwd.py KernelComponentFactoryGfx950 reuses the gfx9
+/// get_dq_dk_dv_tiles() rows verbatim for non-trload and only *adds* tr_load
+/// entries on top. So for the non-TrLoad path gfx950 correctly inherits this
+/// table. The gfx950-vs-gfx9 distinction lives in the TrLoad path of
+/// getTileConfig (gated by TargetSet::trload_eligible()); the gfx950 TrLoad
+/// table is not populated yet (separate task), so this shared table remains the
+/// only source today.
 consteval FmhaBwdBaseTile getBaseTile(int hdim, DataType dtype, GpuTarget target)
 {
     // Narrow the failure mode before scanning the table so the compile-time
@@ -447,8 +448,14 @@ consteval void validateWaveTiles(const FmhaBwdDQDKDVTileConfig& t, DataType dtyp
 /// full config from a compact base-tile table; GFX11 (RDNA3) and GFX12 (RDNA4)
 /// look up the exact CK Tile codegen rows. Every selected config is run through
 /// validateWaveTiles() so an invalid MFMA/WMMA shape fails the build.
+///
+/// TrLoad (transpose-load) is a gfx950-only feature: in fmha_bwd.py only
+/// KernelComponentFactoryGfx950 emits tr_load rows, so TargetSet::trload_eligible()
+/// is the single source of truth for which target may request tr_load == true.
+/// The TrLoad tile table itself is not populated yet (non-TrLoad scope), so the
+/// tr_load == true path currently rejects every target at compile time.
 consteval FmhaBwdDQDKDVTileConfig
-getTileConfig(int hdim_q, int hdim_v, DataType dtype, GpuTarget target)
+getTileConfig(int hdim_q, int hdim_v, DataType dtype, GpuTarget target, bool tr_load = false)
 {
     if(dtype != DataType::FP16 && dtype != DataType::BF16)
         throw "getTileConfig: dtype must be FP16 or BF16"
@@ -458,6 +465,20 @@ getTileConfig(int hdim_q, int hdim_v, DataType dtype, GpuTarget target)
         throw "FmhaBwdDQDKDV requires hdim_q == hdim_v"
               " (asymmetric head dimensions are unsupported: CK Tile defines"
               " tuned dQ/dK/dV tile configs only for symmetric head dims)";
+
+    if(tr_load)
+    {
+        // Only gfx950 carries TrLoad tile configs (mirrors fmha_bwd.py, where
+        // gfx90a/gfx942/gfx11/gfx12 emit no tr_load rows). The eligibility tag
+        // is the single source of truth for that distinction.
+        if(!TargetSet::trload_eligible().contains(target))
+            throw "getTileConfig: TrLoad is only available on gfx950"
+                  " (no TrLoad dQ/dK/dV tile configs for gfx90a/gfx942/gfx11/gfx12)";
+        // gfx950 is eligible, but the TrLoad table is intentionally not populated
+        // yet -- this PR is non-TrLoad scope only. Adding the rows is a follow-up.
+        throw "getTileConfig: gfx950 TrLoad tile configs are not yet populated"
+              " (non-TrLoad scope only; gfx950 currently reuses the gfx9 table)";
+    }
 
     if(TargetSet::family_gfx9().contains(target))
     {

@@ -27,6 +27,7 @@ using ::rocm_ck::FmhaMode;
 using ::rocm_ck::getTileConfig;
 using ::rocm_ck::GpuTarget;
 using ::rocm_ck::makeSpec;
+using ::rocm_ck::TargetSet;
 using ::rocm_ck::usesBatchSizeSlot;
 namespace S = ::rocm_ck::fmha_bwd_dqdkdv_slots;
 
@@ -235,15 +236,52 @@ TEST(FmhaBwdConsteval, MaskedSpec_BF16_WithMaskAndDeterministic)
 // getTileConfig: architecture dispatch
 // ============================================================================
 
+// gfx950 non-trload tiles must be identical to gfx942's for a given symmetric
+// head dim. getTileConfig is consteval, so the comparison runs at compile time
+// with a literal hdim; the helper returns a plain bool for gtest reporting.
+consteval bool gfx950NonTrloadMatchesGfx9(int hdim)
+{
+    const auto gfx9   = getTileConfig(hdim, hdim, DataType::FP16, GpuTarget::gfx942);
+    const auto gfx950 = getTileConfig(hdim, hdim, DataType::FP16, GpuTarget::gfx950);
+    return gfx950.bm0 == gfx9.bm0 && gfx950.bn0 == gfx9.bn0 && gfx950.bk4 == gfx9.bk4 &&
+           gfx950.wk0 == gfx9.wk0 && gfx950.rm2 == gfx9.rm2 && gfx950.rn2 == gfx9.rn2 &&
+           gfx950.occupancy == gfx9.occupancy && gfx950.max_seq_q == gfx9.max_seq_q;
+}
+
 TEST(TileConfig, GFX950_ReusesGFX9NonTrloadTiles)
 {
-    constexpr auto gfx9   = getTileConfig(128, 128, DataType::FP16, GpuTarget::gfx942);
-    constexpr auto gfx950 = getTileConfig(128, 128, DataType::FP16, GpuTarget::gfx950);
+    EXPECT_TRUE(gfx950NonTrloadMatchesGfx9(32));
+    EXPECT_TRUE(gfx950NonTrloadMatchesGfx9(64));
+    EXPECT_TRUE(gfx950NonTrloadMatchesGfx9(96));
+    EXPECT_TRUE(gfx950NonTrloadMatchesGfx9(128));
+    EXPECT_TRUE(gfx950NonTrloadMatchesGfx9(256));
 
-    EXPECT_EQ(gfx950.bm0, gfx9.bm0);
-    EXPECT_EQ(gfx950.bn0, gfx9.bn0);
-    EXPECT_EQ(gfx950.wk0, 32);
-    EXPECT_EQ(gfx950.block_size(GpuTarget::gfx950), 256);
+    constexpr auto gfx950_d128 = getTileConfig(128, 128, DataType::FP16, GpuTarget::gfx950);
+    EXPECT_EQ(gfx950_d128.wk0, 32);
+    EXPECT_EQ(gfx950_d128.block_size(GpuTarget::gfx950), 256);
+}
+
+TEST(TileConfig, TrLoadEligibility_OnlyGfx950)
+{
+    EXPECT_TRUE(TargetSet::trload_eligible().contains(GpuTarget::gfx950));
+    EXPECT_FALSE(TargetSet::trload_eligible().contains(GpuTarget::gfx90a));
+    EXPECT_FALSE(TargetSet::trload_eligible().contains(GpuTarget::gfx942));
+    EXPECT_FALSE(TargetSet::trload_eligible().contains(GpuTarget::gfx1100));
+    EXPECT_FALSE(TargetSet::trload_eligible().contains(GpuTarget::gfx1200));
+
+    EXPECT_TRUE(TargetSet::family_gfx9().contains(GpuTarget::gfx950));
+    EXPECT_EQ(TargetSet::trload_eligible().count(), 1);
+}
+
+TEST(TileConfig, NonTrLoadDefault_MatchesExplicitFalse)
+{
+    constexpr auto implicit_default = getTileConfig(64, 64, DataType::FP16, GpuTarget::gfx950);
+    constexpr auto explicit_false =
+        getTileConfig(64, 64, DataType::FP16, GpuTarget::gfx950, /*tr_load=*/false);
+
+    EXPECT_EQ(implicit_default.bn0, explicit_false.bn0);
+    EXPECT_EQ(implicit_default.bm0, explicit_false.bm0);
+    EXPECT_EQ(implicit_default.wk0, explicit_false.wk0);
 }
 
 TEST(TileConfig, GFX11_FP16_D64_UsesWave32Tile)

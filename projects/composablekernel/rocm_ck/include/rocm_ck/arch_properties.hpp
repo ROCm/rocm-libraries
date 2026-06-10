@@ -190,6 +190,15 @@ struct TargetSet
         return only(GpuTarget::gfx1200, GpuTarget::gfx1201);
     }
 
+    // ---- Named constructors: capability tags ------------------------------
+
+    /// TrLoad-eligible targets: gfx9-family members that have transpose-load
+    /// (tr_load) dQ/dK/dV tile configs. Mirrors CK Tile's fmha_bwd.py, where only
+    /// KernelComponentFactoryGfx950 emits tr_load rows -- gfx90a/gfx942 (and the
+    /// RDNA families) return none. This is the single source of truth for the
+    /// gfx950-vs-gfx9 distinction used by getTileConfig's TrLoad path.
+    static constexpr TargetSet trload_eligible() { return only(GpuTarget::gfx950); }
+
     // ---- Named constructors: specific targets -----------------------------
 
     /// Set containing exactly one target.
@@ -304,6 +313,13 @@ struct TargetSet
     explicit constexpr TargetSet(uint64_t b) : bits(b) {}
     static constexpr TargetSet fromBits(uint64_t b) { return TargetSet{b}; }
 };
+
+// TrLoad eligibility is a refinement of the gfx9 family (TrLoad is a CDNA
+// gfx950 feature). Enforce the invariant so the tag can never drift outside
+// gfx9 -- e.g. if a future edit accidentally adds an RDNA target to it.
+static_assert(TargetSet::family_gfx9().union_with(TargetSet::trload_eligible()) ==
+                  TargetSet::family_gfx9(),
+              "TargetSet::trload_eligible() must be a subset of family_gfx9()");
 
 // ============================================================================
 // Wave tile validation -- single source of truth

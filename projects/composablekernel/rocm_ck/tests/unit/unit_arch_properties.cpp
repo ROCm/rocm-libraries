@@ -216,6 +216,24 @@ TEST(TargetSet, FamilyGfx12ContainsRDNA4Only)
     EXPECT_FALSE(ts.contains(GpuTarget::gfx1151));
 }
 
+TEST(TargetSet, TrLoadEligibleContainsGfx950Only)
+{
+    constexpr auto ts = TargetSet::trload_eligible();
+    EXPECT_EQ(ts.count(), 1);
+    EXPECT_TRUE(ts.contains(GpuTarget::gfx950));
+    EXPECT_FALSE(ts.contains(GpuTarget::gfx90a));
+    EXPECT_FALSE(ts.contains(GpuTarget::gfx942));
+    EXPECT_FALSE(ts.contains(GpuTarget::gfx1100));
+    EXPECT_FALSE(ts.contains(GpuTarget::gfx1200));
+}
+
+TEST(TargetSet, TrLoadEligibleIsSubsetOfFamilyGfx9)
+{
+    constexpr auto trload = TargetSet::trload_eligible();
+    EXPECT_EQ(trload.union_with(TargetSet::family_gfx9()), TargetSet::family_gfx9());
+    EXPECT_TRUE(trload.is_all_cdna());
+}
+
 TEST(TargetSet, OnlyWithOneTarget)
 {
     constexpr auto ts = TargetSet::only(GpuTarget::gfx942);

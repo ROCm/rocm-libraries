@@ -108,6 +108,8 @@ add_compile_fail_test(dqdkdv_invalid_hdim_q         "hdim_q must be one of \\{32
 add_compile_fail_test(dqdkdv_invalid_hdim_v         "hdim_v must be one of \\{32, 64, 96, 128, 256\\}")
 add_compile_fail_test(dqdkdv_invalid_pad_q          "pad_hdim_q must be 0, 1, or 8")
 add_compile_fail_test(dqdkdv_invalid_pad_v          "pad_hdim_v must be 0, 1, or 8")
+add_compile_fail_test(dqdkdv_trload_not_eligible        "TrLoad is only available on gfx950")
+add_compile_fail_test(dqdkdv_trload_gfx950_unpopulated  "gfx950 TrLoad tile configs are not yet populated")
 
 # -- ops/fmha_bwd/ograd_dot_o_spec.hpp --
 add_compile_fail_test(ograd_dot_o_block_per_cu_negative  "block_per_cu must be positive")
