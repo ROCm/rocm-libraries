@@ -273,6 +273,7 @@ countDSStoreB128 = make_dummy_func(f"{_P}.countDSStoreB128")
 countDSStoreB192 = make_dummy_func(f"{_P}.countDSStoreB192")
 countDSStoreB256 = make_dummy_func(f"{_P}.countDSStoreB256")
 countVMovB32 = make_dummy_func(f"{_P}.countVMovB32")
+countMFMA = make_dummy_func(f"{_P}.countMFMA")
 getMFMAs = make_dummy_func(f"{_P}.getMFMAs")
 findInstCount = make_dummy_func(f"{_P}.findInstCount")
 
