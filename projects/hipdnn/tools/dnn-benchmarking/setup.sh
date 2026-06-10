@@ -225,6 +225,20 @@ for root in roots:
                 and child.joinpath("lib/cmake/hip/hip-config.cmake").is_file()
             ):
                 continue
+        elif kind == "core":
+            if not child.name.startswith("_rocm_sdk_core"):
+                continue
+            amd_smi_dir = child.joinpath("share/amd_smi")
+            if not (
+                child.joinpath("lib").is_dir()
+                and any(child.joinpath("lib").glob("libamd_smi.so*"))
+                and amd_smi_dir.is_dir()
+                and (
+                    amd_smi_dir.joinpath("setup.py").is_file()
+                    or amd_smi_dir.joinpath("pyproject.toml").is_file()
+                )
+            ):
+                continue
         else:
             print(f"ERROR: unknown ROCm wheel prefix kind: {kind}", file=sys.stderr)
             sys.exit(2)
@@ -251,6 +265,9 @@ discover_rocm_wheel_devel_prefix() {
     find_rocm_wheel_prefix devel
 }
 
+discover_rocm_wheel_core_prefix() {
+    find_rocm_wheel_prefix core
+}
 expand_rocm_sdk_devel() {
     python - <<'PY'
 import importlib.util
@@ -334,6 +351,66 @@ ensure_rocm_wheel_devel_prefix() {
     echo "Expected lib/llvm/bin/clang, lib/llvm/bin/clang++, and hip CMake configs under _rocm_sdk_devel." >&2
     exit 1
 }
+amdsmi_importable() {
+    python - <<'PY'
+import sys
+
+try:
+    import amdsmi  # noqa: F401
+except Exception:
+    sys.exit(1)
+PY
+}
+
+maybe_install_amdsmi() {
+    if amdsmi_importable; then
+        return
+    fi
+
+    local prefix candidate status seen
+    local -a candidates=()
+
+    if prefix=$(discover_rocm_wheel_core_prefix); then
+        candidate="$prefix/share/amd_smi"
+        candidates+=("$candidate")
+    else
+        status=$?
+        if [ "$status" -ne 1 ]; then
+            echo "Warning: ROCm SDK core discovery failed; skipping SDK amdsmi candidate." >&2
+        fi
+    fi
+
+    for prefix in "$@"; do
+        if [ -z "$prefix" ]; then
+            continue
+        fi
+        candidate="$prefix/share/amd_smi"
+        if [ -d "$candidate" ] && { [ -f "$candidate/setup.py" ] || [ -f "$candidate/pyproject.toml" ]; }; then
+            candidates+=("$candidate")
+        fi
+    done
+
+    seen="|"
+    for candidate in "${candidates[@]}"; do
+        case "$seen" in
+            *"|$candidate|"*) continue ;;
+        esac
+        seen="$seen$candidate|"
+
+        if [ ! -d "$candidate" ] || { [ ! -f "$candidate/setup.py" ] && [ ! -f "$candidate/pyproject.toml" ]; }; then
+            continue
+        fi
+
+        echo "Installing amdsmi Python bindings from $candidate..."
+        if pip install -e "$candidate" && amdsmi_importable; then
+            return
+        fi
+        echo "Warning: amdsmi install from $candidate failed; trying next candidate." >&2
+    done
+
+    echo "Warning: amdsmi Python bindings were not installed; GPU SMI snapshot will be disabled." >&2
+}
+
 
 detect_gpu_arch() {
     local arch
@@ -718,6 +795,8 @@ write_activation_local "$ROCM_PATH" "$BINDING_PREFIX/lib"
 if [ -z "$PROVIDER_TOOLCHAIN_PREFIX" ]; then
     PROVIDER_TOOLCHAIN_PREFIX=$(select_provider_toolchain_prefix)
 fi
+maybe_install_amdsmi "$BINDING_PREFIX" "$PROVIDER_TOOLCHAIN_PREFIX" "${ROCM_PREFIX:-}" "$DEFAULT_ROCM_PREFIX"
+
 PY_BINDING_CMAKE_PREFIX_PATH="$BINDING_PREFIX"
 if [ "$PROVIDER_TOOLCHAIN_PREFIX" != "$BINDING_PREFIX" ]; then
     PY_BINDING_CMAKE_PREFIX_PATH="$BINDING_PREFIX;$PROVIDER_TOOLCHAIN_PREFIX"
