@@ -567,7 +567,7 @@ inline void applyVmcntPostPass(const std::vector<ModuleRef>& modules,
 // ── instructionSchedule ──
 // Returns the final emission order (and the vmcnt post-pass result) for an
 // emitted-module chain. Throws std::invalid_argument when the chain violates a
-// structural precondition (caller should fall back to the Python path).
+// structural precondition (e.g. not exactly one MFMA module).
 inline ScheduleResult schedule(const std::vector<ModuleRef>& modules) {
   ScheduleResult result;
   if (modules.empty()) return result;

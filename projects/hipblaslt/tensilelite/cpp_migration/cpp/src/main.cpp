@@ -10,11 +10,12 @@
 //     _tensile_writer.subtile.geometry
 //
 // The Python package tensile_writer/ re-exports this. The geometry value/query
-// layer, the read-only TileInfo query layer (tile_info) and the MFMA F8F6F4
-// instType selection (emit) are all C++-only for the supported AB cases — the
+// layer, the read-only TileInfo query layer (tile_info), the MFMA F8F6F4
+// instType selection (emit) and the subtile instruction-scheduling
+// slot-placement algorithm (instruction_scheduler) are all C++-only — the
 // Python side forwards to them unconditionally with no Python fallback. The
-// GR/LR offset-assignment plans (also on ABTileInfoQuery) and the scheduler
-// ports remain opt-in via TENSILE_WRITER_CPP.
+// GR/LR offset-assignment plans (also on ABTileInfoQuery) and the
+// LogicalScheduler pass pipeline remain opt-in via TENSILE_WRITER_CPP.
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/map.h>
@@ -520,7 +521,7 @@ void bind_instruction_scheduler(nb::module_& s) {
         "Run the subtile instruction-scheduling slot-placement algorithm over "
         "a data-only emitted-module chain and return the final emission order "
         "plus the vmcnt post-pass result. Raises ValueError on structural "
-        "precondition violations (the caller should fall back to Python).");
+        "precondition violations (e.g. not exactly one MFMA module).");
 }
 
 // ---------------------------------------------------------------------------

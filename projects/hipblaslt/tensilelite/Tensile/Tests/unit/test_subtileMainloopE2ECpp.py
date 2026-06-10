@@ -60,7 +60,6 @@ pytest.importorskip("tensile_writer.subtile.instruction_scheduler")
 
 from Tensile.Components.Subtile import Kernel as _krn
 from Tensile.Components.Subtile import LogicalScheduler as _ls
-from Tensile.Components.Subtile import InstructionScheduler as _isched
 from Tensile.Components.Subtile.LogicalScheduler import LogicalScheduler
 
 # Reuse the existing pure-string mock-writer harness rather than duplicating it.
@@ -73,26 +72,27 @@ from test_SubtileBasedLogicalScheduler import (
 
 @contextlib.contextmanager
 def cpp_delegation():
-    """Enable C++ delegation across every Subtile slice for the duration.
+    """Enable C++ delegation across the still-optional Subtile slices.
 
     Mirrors the real opt-in (``TENSILE_WRITER_CPP=1`` + installed extension) by
     re-resolving each module's ``_CPP`` handle, but scoped to the test so the
-    process default stays pure-Python. Restores all switches on exit.
+    process default stays pure-Python for those layers. Restores all switches on
+    exit.
+
+    The geometry / TileInfo / emit layers and the instruction scheduler are
+    unconditionally C++ (not gated); only the Kernel and LogicalScheduler-pass
+    slices still flip here.
     """
     os.environ["TENSILE_WRITER_CPP"] = "1"
     saved_krn = _krn._USE_CPP
     saved = {
         _ls: (_ls._USE_CPP, _ls._CPP),
-        _isched: (_isched._USE_CPP, _isched._CPP),
     }
     try:
-        # Geometry is unconditionally C++; only the still-optional layers flip.
         _krn._USE_CPP = True
         _ls._CPP = _ls._resolve_cpp_logical_scheduler()
         _ls._USE_CPP = _ls._CPP is not None
-        _isched._CPP = _isched._resolve_cpp_scheduler()
-        _isched._USE_CPP = _isched._CPP is not None
-        assert _krn._USE_CPP and _ls._USE_CPP and _isched._USE_CPP, (
+        assert _krn._USE_CPP and _ls._USE_CPP, (
             "C++ delegation requested but one or more extensions did not resolve"
         )
         yield
@@ -171,8 +171,8 @@ def test_default_path_is_python_only():
     """Without the opt-in, the still-optional Subtile slices must stay
     pure-Python so the default build is byte-identical to the pre-C++ behavior.
 
-    (The geometry value/query layer is unconditionally C++ and is not gated.)
+    (The geometry / TileInfo / emit layers and the instruction scheduler are
+    unconditionally C++ and are not gated.)
     """
     assert _krn._USE_CPP is False
     assert _ls._USE_CPP is False
-    assert _isched._USE_CPP is False

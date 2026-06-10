@@ -1,22 +1,21 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Parity tests for the optional C++ (nanobind) subtile InstructionScheduler.
+"""Regression tests for the C++ (nanobind) subtile InstructionScheduler.
 
-These tests compare the pure-Python slot-placement algorithm in
-``Tensile.Components.Subtile.InstructionScheduler`` against the compiled
-``tensile_writer.subtile.instruction_scheduler`` port. They run only when both
-``rocisa`` and the ``tensile_writer`` extension are importable; otherwise they
-skip, so the default (Python-only) TensileLite build is unaffected.
+The subtile instruction-scheduling slot-placement algorithm is C++-only: the
+public ``Tensile.Components.Subtile.InstructionScheduler.instructionSchedule``
+is a thin adapter that classifies the live rocisa emitted-module objects into
+the data-only C++ model, runs the compiled ``tensile_writer.subtile.\
+instruction_scheduler`` algorithm, and rebuilds the rocisa ``Module`` in the
+returned order (with the waitcnt vmcnt post-pass applied). There is no
+pure-Python twin and no opt-in flag.
 
-Synthetic emitted-module chains are built from *real* rocisa instructions
-covering MFMA, local read (ds_read), global read (buffer_load), waitcnt, and
-common / m0-update instructions. Each instruction carries a unique ``comment``
-so the emitted ordering can be compared exactly between the two code paths,
-along with the waitcnt vmcnt post-pass result.
-
-PR creation for this slice is human-only: a ``human:pr`` task is filed for
-Bryant Nelson only after review says merge-ready. Agents never open PRs.
+These tests pin the final emission *order* and *vmcnt* of the C++ path against
+golden signatures built from real rocisa instructions (MFMA, local read
+(ds_read), global read (buffer_load), waitcnt, common / m0-update, and a
+generic label that classifies as ``Other``). They run only when both ``rocisa``
+and the ``tensile_writer`` extension are importable; otherwise they skip.
 """
 
 import pytest
@@ -36,11 +35,7 @@ from rocisa.instruction import (
     SWaitCnt,
 )
 
-from Tensile.Components.Subtile import InstructionScheduler as isched
-from Tensile.Components.Subtile.InstructionScheduler import (
-    _instructionSchedulePython,
-    instructionSchedule,
-)
+from Tensile.Components.Subtile.InstructionScheduler import instructionSchedule
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +56,7 @@ class FakeEmittedModule:
 
 
 # Instruction factories. Each takes a unique ``tag`` used as the rocisa comment
-# so the emitted order is identifiable across the two independent builds.
+# so the emitted order is identifiable.
 def mfma(tag):
     return MFMAInstruction(InstType.INST_BF16, InstType.INST_F32, [16, 16, 16, 1],
                            False, vgpr("acc", 4), vgpr("a", 2), vgpr("b", 2),
@@ -102,7 +97,7 @@ def _signature(module):
 
 # ---------------------------------------------------------------------------
 # Scenario builders. Each returns a fresh list of FakeEmittedModule with fresh
-# instruction objects (no shared state), so the two code paths never alias.
+# instruction objects (no shared state).
 #
 # moduleId is deliberately offset from the list index (10 * index) so the
 # C++ idToIdx / before-link resolution is exercised, not just positional ids.
@@ -176,27 +171,111 @@ def scenario_two_mfma_minimal():
     ]
 
 
+def scenario_generic_other():
+    """A non-MFMA path carrying a generic rocisa Label, which the classifier
+    treats as ``Other`` and the scheduler places generically (mirroring how the
+    original Python algorithm handled instructions matching none of its
+    isinstance predicates)."""
+    return [
+        FakeEmittedModule(_mid(0), "mfma", [mfma("mfma0"), mfma("mfma1")]),
+        FakeEmittedModule(_mid(1), "lr", [ds_read("lrA"), Label("lbl", "")]),
+        FakeEmittedModule(_mid(2), "gr", [buffer_load("gr0")]),
+    ]
+
+
 ALL_SCENARIOS = {
     "rich_multi": scenario_rich_multi,
     "single_mfma": scenario_single_mfma,
     "ds_read_wait_gap": scenario_ds_read_wait_gap,
     "chained_path": scenario_chained_path,
     "two_mfma_minimal": scenario_two_mfma_minimal,
+    "generic_other": scenario_generic_other,
+}
+
+
+# Golden final emission signatures (comment, vlcnt) through the C++ scheduler.
+# These pin the slot-placement order plus the waitcnt vmcnt post-pass for the
+# data model the scheduler is responsible for. Regenerate deliberately (and
+# review the diff) only when the slot-placement algorithm intentionally changes.
+GOLDEN_SIGNATURES = {
+    "rich_multi": [
+        ("prewait", -1),
+        ("mfma0", None),
+        ("lrA", None),
+        ("gr0", None),
+        ("lrB", None),
+        ("gr1", None),
+        ("mfma1", None),
+        ("gr2", None),
+        ("mfma2", None),
+        ("lrinc", None),
+        ("m0a", None),
+        ("wgr", 5),
+        ("mfma3", None),
+    ],
+    "single_mfma": [
+        ("prewait", 1),
+        ("mfma0", None),
+        ("lrA", None),
+        ("lrB", None),
+        ("gr0", None),
+        ("gr1", None),
+    ],
+    "ds_read_wait_gap": [
+        ("mfma0", None),
+        ("lr0", None),
+        ("w0", 0),
+        ("g0", None),
+        ("mfma1", None),
+        ("lr1", None),
+        ("lr2", None),
+        ("g1", None),
+        ("mfma2", None),
+        ("lr3", None),
+        ("g2", None),
+        ("mfma3", None),
+        ("g3", None),
+        ("mfma4", None),
+        ("mfma5", None),
+    ],
+    "chained_path": [
+        ("mfma0", None),
+        ("lrA", None),
+        ("m0a", None),
+        ("gr0", None),
+        ("mfma1", None),
+        ("gr1", None),
+        ("inc", None),
+        ("mfma2", None),
+    ],
+    "two_mfma_minimal": [
+        ("mfma0", None),
+        ("lrA", None),
+        ("gr0", None),
+        ("mfma1", None),
+    ],
+    # The rocisa Label carries an empty comment, so it surfaces as ('', None);
+    # it is placed generically (Other) like any non-rule instruction.
+    "generic_other": [
+        ("mfma0", None),
+        ("lrA", None),
+        ("gr0", None),
+        ("", None),
+        ("mfma1", None),
+    ],
 }
 
 
 # ---------------------------------------------------------------------------
-# Parity: C++ shim ordering + vmcnt post-pass match the pure-Python algorithm.
+# Order + vmcnt: the C++ scheduler matches the pinned golden signatures.
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("name", list(ALL_SCENARIOS))
-def test_cpp_shim_matches_python(name):
-    build = ALL_SCENARIOS[name]
-    py = _instructionSchedulePython(build())
-    cpp = cppsched.instructionSchedule(build())
-    assert _signature(cpp) == _signature(py), (
-        f"{name}: C++ scheduler order/vmcnt differs from Python.\n"
-        f"  python: {_signature(py)}\n"
-        f"  cpp:    {_signature(cpp)}"
+def test_cpp_schedule_matches_golden(name):
+    got = _signature(instructionSchedule(ALL_SCENARIOS[name]()))
+    assert got == GOLDEN_SIGNATURES[name], (
+        f"{name}: C++ schedule order/vmcnt drifted from golden.\n"
+        f"  golden: {GOLDEN_SIGNATURES[name]}\n"
+        f"  got:    {got}"
     )
 
 
@@ -204,12 +283,26 @@ def test_cpp_shim_matches_python(name):
 def test_cpp_order_is_a_permutation_of_input(name):
     """Sanity: every input instruction is emitted exactly once."""
     mods = ALL_SCENARIOS[name]()
-    cpp = cppsched.instructionSchedule(mods)
-    emitted = sorted(i.comment for i in cpp.flatitems())
-    # MFMA module contributes only its MFMA instructions; everything else is
-    # contributed by the non-MFMA modules.
+    out = instructionSchedule(mods)
+    emitted = sorted(i.comment for i in out.flatitems())
     expected = sorted(i.comment for m in mods for i in m.instructions)
     assert emitted == expected
+
+
+@pytest.mark.parametrize("name", list(ALL_SCENARIOS))
+def test_mfma_order_preserved(name):
+    """MFMA instructions appear in their original relative order."""
+    mods = ALL_SCENARIOS[name]()
+    mfma_in = [i.comment for m in mods for i in m.instructions
+               if isinstance(i, MFMAInstruction)]
+    out = instructionSchedule(mods)
+    mfma_out = [i.comment for i in out.flatitems()
+                if isinstance(i, MFMAInstruction)]
+    assert mfma_out == mfma_in
+
+
+def test_empty_chain_returns_empty_module():
+    assert _signature(instructionSchedule([])) == []
 
 
 # ---------------------------------------------------------------------------
@@ -281,46 +374,27 @@ class TestDataOnlyModel:
 
 
 # ---------------------------------------------------------------------------
-# Delegation wiring + clean fallback.
+# Classification: rocisa objects map to the kinds the slot rules key on, and
+# anything else is placed generically (Other).
 # ---------------------------------------------------------------------------
-def test_default_path_is_python_only():
-    """With the env flag unset, delegation must be disabled by default."""
-    import os
-    if os.environ.get("TENSILE_WRITER_CPP", "").strip().lower() not in (
-            "", "0", "false", "no", "off"):
-        pytest.skip("TENSILE_WRITER_CPP is set; default-off behavior not under test")
-    assert isched._USE_CPP is False
-    assert isched._CPP is None
+class TestClassification:
+    def test_known_kinds(self):
+        K = cppsched.InstKind
+        assert cppsched.classifyInstruction(mfma("m")).kind == K.Mfma
+        assert cppsched.classifyInstruction(ds_read("l")).kind == K.LocalRead
+        assert cppsched.classifyInstruction(buffer_load("g")).kind == K.GlobalRead
+        assert cppsched.classifyInstruction(m0_update("m0")).kind == K.M0Update
 
+    def test_waitcnt_carries_vmcnt_fields(self):
+        K = cppsched.InstKind
+        inst = cppsched.classifyInstruction(waitcnt("w", vlcnt=7))
+        assert inst.kind == K.WaitCnt
+        assert inst.vlcnt == 7
+        assert inst.adjustVmcnt is True
 
-def test_unclassifiable_instruction_falls_back(monkeypatch):
-    """The public instructionSchedule must fall back to Python when the C++
-    path cannot classify a live instruction (here: a rocisa Label)."""
-    monkeypatch.setattr(isched, "_CPP", cppsched)
-    monkeypatch.setattr(isched, "_USE_CPP", True)
-
-    def build():
-        return [
-            FakeEmittedModule(_mid(0), "mfma", [mfma("mfma0"), mfma("mfma1")]),
-            FakeEmittedModule(_mid(1), "lr", [ds_read("lrA"), Label("lbl", "")]),
-            FakeEmittedModule(_mid(2), "gr", [buffer_load("gr0")]),
-        ]
-
-    # Public wrapper (delegation enabled) must still produce the Python result.
-    got = instructionSchedule(build())
-    want = _instructionSchedulePython(build())
-    got_tags = [getattr(i, "comment", None) for i in got.flatitems()]
-    want_tags = [getattr(i, "comment", None) for i in want.flatitems()]
-    assert got_tags == want_tags
-
-
-@pytest.mark.parametrize("name", list(ALL_SCENARIOS))
-def test_delegation_enabled_matches_python(monkeypatch, name):
-    """With delegation explicitly enabled, the public ``instructionSchedule``
-    routes through C++ and still matches the pure-Python result."""
-    monkeypatch.setattr(isched, "_CPP", cppsched)
-    monkeypatch.setattr(isched, "_USE_CPP", True)
-    build = ALL_SCENARIOS[name]
-    got = instructionSchedule(build())
-    want = _instructionSchedulePython(build())
-    assert _signature(got) == _signature(want)
+    def test_unknown_is_other(self):
+        """A generic instruction / label classifies as Other (no raise),
+        matching the original Python algorithm's generic handling."""
+        K = cppsched.InstKind
+        assert cppsched.classifyInstruction(common("c")).kind == K.Other
+        assert cppsched.classifyInstruction(Label("lbl", "")).kind == K.Other
