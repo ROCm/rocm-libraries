@@ -12,6 +12,7 @@ import csv
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -154,6 +155,194 @@ def _print_reference_comparison(best_rows: List[dict], ref_path: Path) -> None:
         )
 
 
+# --------------------------------------------------------------------------
+# Legacy-heuristic ("heur") replication — best-effort reconstruction of the
+# lost head-to-head report. We replay, in Python, the exact dispatch choice the
+# C++ legacy heuristic would make for a problem, then look up that kernel's
+# timed row so we can compare it head-to-head against the swept best.
+#
+# Sources (example/ck_tile/53_hstu_attention/):
+#   * get_hstu_attention_fwd_mtile()  -> hstu_attention_fwd_setting.hpp:511
+#   * shall_use_splitkv()/coverage    -> hstu_attention_fwd_setting.hpp:530-549
+#   * max_k from head dim (HDIM_SWITCH)-> hstu_attention_hdim_switch.hpp
+#   * mtile==128 path never split-KV  -> hstu_attention_jagged_forward_dispatch.hpp:405-462
+# Kernel name format mirrors dispatcher/codegen/hstu/instance_gen.py:
+#   jagged_{dtype}_causal{0|1}_maxk{K}_mtile{M}_splitkv{0|1}
+# --------------------------------------------------------------------------
+
+
+def _detect_num_cus(default: int = 304) -> int:
+    """Compute-unit count for the active GPU (== props.multiProcessorCount,
+    which is what the C++ get_number_of_cu() reads). Parsed from rocminfo;
+    falls back to MI300X's 304 if rocminfo is unavailable."""
+    try:
+        out = subprocess.check_output(["rocminfo"], text=True, stderr=subprocess.DEVNULL)
+    except Exception:
+        return default
+    in_gpu = False
+    for line in out.splitlines():
+        s = line.strip()
+        if s.startswith("Name:"):
+            in_gpu = "gfx" in s and "amdgcn" not in s
+        elif in_gpu and s.startswith("Compute Unit:"):
+            try:
+                return int(s.split()[-1])
+            except ValueError:
+                pass
+    return default
+
+
+def _heuristic_max_k(hdim_qk: int, hdim_v: int) -> int:
+    """max_k bucket from head dim (HDIM_SWITCH in hstu_attention_hdim_switch.hpp)."""
+    h = max(hdim_qk, hdim_v)
+    for bucket in (64, 96, 128, 256):
+        if h <= bucket:
+            return bucket
+    raise ValueError(f"head dim {h} not supported by HDIM_SWITCH")
+
+
+def _heuristic_mtile(batch: int, num_head: int, max_seqlen_q: int, num_cus: int) -> int:
+    """Port of get_hstu_attention_fwd_mtile() (hstu_attention_fwd_setting.hpp:511)."""
+    if max_seqlen_q <= 64:
+        return 64
+    mblocks = batch * num_head * ((max_seqlen_q + 127) // 128)
+    if mblocks >= int(0.85 * num_cus * 2.0):
+        return 128
+    return 64
+
+
+def _heuristic_splitkv(batch: int, num_head: int, max_seqlen_q: int, num_cus: int) -> bool:
+    """Port of shall_use_splitkv()/get_estimated_cu_coverage_ratio()
+    (hstu_attention_fwd_setting.hpp:530-549). Only consulted on the mtile=64
+    branch — the mtile=128 dispatch path never selects split-KV."""
+    coverage = batch * num_head * ((max_seqlen_q + 63) // 64) / (2.0 * num_cus)
+    return coverage < 0.8
+
+
+def _heuristic_kernel_name(
+    dtype: str,
+    use_causal: bool,
+    batch: int,
+    num_head: int,
+    max_seqlen_q: int,
+    hdim_qk: int,
+    hdim_v: int,
+    num_cus: int,
+) -> str:
+    """Kernel the legacy C++ heuristic would dispatch for this problem."""
+    max_k = _heuristic_max_k(hdim_qk, hdim_v)
+    mtile = _heuristic_mtile(batch, num_head, max_seqlen_q, num_cus)
+    splitkv = mtile == 64 and _heuristic_splitkv(batch, num_head, max_seqlen_q, num_cus)
+    return (
+        f"jagged_{dtype}_causal{int(use_causal)}_maxk{max_k}"
+        f"_mtile{mtile}_splitkv{int(splitkv)}"
+    )
+
+
+def _find_heuristic_row(group_rows: List[dict], heur_name: str) -> Optional[dict]:
+    """Locate the timed row for the heuristic kernel. Returns the row, with an
+    'approx' flag set when the exact heuristic kernel was not in the sweep and
+    we substituted the closest swept kernel (same mtile/splitkv, nearest max_k
+    that still fits)."""
+    for r in group_rows:
+        if r["kernel"] == heur_name:
+            return dict(r, approx=False)
+    # Fallback: keep the heuristic's mtile/splitkv intent, pick nearest max_k.
+    target_mtile = int(heur_name.split("_mtile")[1].split("_")[0])
+    target_splitkv = int(heur_name.split("_splitkv")[1])
+    target_maxk = int(heur_name.split("_maxk")[1].split("_")[0])
+    cands = [
+        r
+        for r in group_rows
+        if r.get("mtile") == target_mtile
+        and r.get("use_splitkv", False) == bool(target_splitkv)
+    ]
+    if not cands:
+        cands = [r for r in group_rows if r.get("mtile") == target_mtile]
+    if not cands:
+        return None
+    fitting = [r for r in cands if r.get("max_k", 0) >= target_maxk] or cands
+    best = min(fitting, key=lambda r: abs(r.get("max_k", 0) - target_maxk))
+    return dict(best, approx=True)
+
+
+def _format_kernel_row(r: dict, suffix: str = "") -> str:
+    """One Phase-2 listing line for a timed kernel row (+ optional marker suffix)."""
+    return (
+        f"{r['kernel']:<52} {r['mask']:<10} {r['batch']:>5} {r['num_head']:>3} "
+        f"{r['max_seqlen_q']:>6} {r['hdim_qk']:>3} {r['latency_ms']:>10.3f} "
+        f"{r['tflops_genrec']:>10.2f} {r['tflops']:>8.2f}{suffix}"
+    )
+
+
+def _row_markers(r: dict, best: Optional[dict], heur_kernel: Optional[str], heur_approx: bool) -> str:
+    """Trailing ' BEST'/' HEUR' tags for a Phase-2 row (both when it's both)."""
+    tags: List[str] = []
+    if r is best:
+        tags.append("BEST")
+    if heur_kernel is not None and r["kernel"] == heur_kernel:
+        tags.append("HEUR*" if heur_approx else "HEUR")
+    return ("  " + " ".join(tags)) if tags else ""
+
+
+def _print_heur_comparison(rows: List[dict], num_cus: int) -> None:
+    """Head-to-head: legacy-heuristic kernel vs swept best, per problem.
+
+    Best-effort reconstruction of the lost 'heur vs best' report. For each
+    (problem_id, mask, dtype) we time-rank the best kernel and separately resolve
+    which kernel the legacy heuristic would have dispatched, then show both."""
+    groups: dict = {}
+    for r in rows:
+        key = (r.get("problem_id", ""), r["mask"], r["dtype"])
+        groups.setdefault(key, []).append(r)
+    if not groups:
+        return
+
+    print(f"\n--- Heuristic vs best (legacy dispatch heuristic, num_CUs={num_cus}) ---")
+    print(
+        f"{'problem':<28} {'D':>3} "
+        f"{'heur kernel':<46} {'heur ms':>9}  "
+        f"{'best kernel':<46} {'best ms':>9}  {'best vs heur':>12}"
+    )
+    print("-" * 162)
+    approx_any = False
+    for (pid, _mask, dtype), grp in groups.items():
+        best = max(grp, key=lambda r: r["tflops_genrec"])
+        heur_name = _heuristic_kernel_name(
+            dtype,
+            best.get("use_causal", True),
+            best["batch"],
+            best["num_head"],
+            best["max_seqlen_q"],
+            best["hdim_qk"],
+            best["hdim_v"],
+            num_cus,
+        )
+        heur = _find_heuristic_row(grp, heur_name)
+        if heur is None:
+            print(
+                f"{pid:<28} {best['hdim_qk']:>3} "
+                f"{heur_name + ' (not swept)':<46} {'--':>9}  "
+                f"{best['kernel']:<46} {best['latency_ms']:>9.3f}  {'n/a':>12}"
+            )
+            continue
+        heur_ms = float(heur["latency_ms"])
+        best_ms = float(best["latency_ms"])
+        speedup = (heur_ms / best_ms - 1.0) * 100.0 if best_ms > 0 else 0.0
+        mark = "*" if heur.get("approx") else ""
+        approx_any = approx_any or heur.get("approx", False)
+        print(
+            f"{pid:<28} {best['hdim_qk']:>3} "
+            f"{heur['kernel'] + mark:<46} {heur_ms:>9.3f}  "
+            f"{best['kernel']:<46} {best_ms:>9.3f}  {speedup:>+11.1f}%"
+        )
+    if approx_any:
+        print(
+            "  * exact heuristic kernel not in this sweep; "
+            "showed closest swept kernel (same mtile/splitkv, nearest max_k)."
+        )
+
+
 def _pick_kernel_configs(
     sweep_path: Optional[Path],
     arch: str,
@@ -215,6 +404,13 @@ def main() -> None:
         "--best",
         action="store_true",
         help="Report fastest kernel config per (problem, mask, dtype)",
+    )
+    parser.add_argument(
+        "--heur",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Head-to-head: legacy-heuristic kernel ms vs swept best ms "
+        "(on by default; use --no-heur to disable)",
     )
     parser.add_argument("--csv", type=str, default=None)
     parser.add_argument("--sparsity", type=float, default=0.95)
@@ -351,6 +547,7 @@ def main() -> None:
         print(f"  Single problem: index={idx} id={pid or '(none)'}")
     rows = []
     best_per_problem: List[dict] = []
+    num_cus = _detect_num_cus()
     print(
         f"{'kernel':<52} {'mask':<10} {'B':>5} {'H':>3} {'N':>6} {'D':>3} "
         f"{'ms':>10} {'genrec':>10} {'TFLOPS':>8}"
@@ -394,6 +591,10 @@ def main() -> None:
                 prob.target_size = target_sz
 
                 best = None
+                # Collect this (problem, mask, dtype) group's rows first so the
+                # listing can be tagged with BEST + HEUR once we know which kernel
+                # is fastest and which the legacy heuristic would dispatch.
+                group_rows: List[dict] = []
                 for kcfg, runner in setups:
                     # max_k=0 is legacy "auto"; otherwise kernel must fit hdim
                     # (max_k >= hdim_qk; padding handles max_k > hdim_qk case).
@@ -431,24 +632,34 @@ def main() -> None:
                         "dtype": dt,
                         "mtile": kcfg.mtile,
                         "max_k": kcfg.max_k,
+                        "use_splitkv": kcfg.use_splitkv,
+                        "use_causal": use_causal,
                     }
                     rows.append(row)
+                    group_rows.append(row)
                     if best is None or res.tflops_genrec > best["tflops_genrec"]:
                         best = row
-                    if not args.best:
-                        print(
-                            f"{kcfg.name:<52} {mask['label']:<10} {batch:>5} {num_head:>3} "
-                            f"{max_seq:>6} {hdim_qk:>3} {res.time_ms:>10.3f} "
-                            f"{res.tflops_genrec:>10.2f} {res.tflops:>8.2f}"
-                        )
+
+                if not group_rows:
+                    continue
+
+                # Resolve the legacy-heuristic kernel for this group so we can tag
+                # its row HEUR (mirrors the BEST tag on the fastest row).
+                heur_row = _find_heuristic_row(
+                    group_rows,
+                    _heuristic_kernel_name(
+                        dt, use_causal, batch, num_head, max_seq, hdim_qk, hdim_v, num_cus
+                    ),
+                )
+                heur_kernel = heur_row["kernel"] if heur_row else None
+                heur_approx = bool(heur_row and heur_row.get("approx"))
 
                 if args.best and best:
-                    print(
-                        f"{best['kernel']:<52} {mask['label']:<10} {batch:>5} {num_head:>3} "
-                        f"{max_seq:>6} {hdim_qk:>3} {best['latency_ms']:>10.3f} "
-                        f"{best['tflops_genrec']:>10.2f} {best['tflops']:>8.2f}  BEST"
-                    )
+                    print(_format_kernel_row(best, _row_markers(best, best, heur_kernel, heur_approx)))
                     best_per_problem.append(best)
+                else:
+                    for r in group_rows:
+                        print(_format_kernel_row(r, _row_markers(r, best, heur_kernel, heur_approx)))
 
     if args.csv and rows:
         out = Path(args.csv)
@@ -464,6 +675,9 @@ def main() -> None:
         f"{len(problems_cfg)} problems × {len(masks)} masks = "
         f"{len(rows)} timed runs"
     )
+    if args.heur and rows:
+        _print_heur_comparison(rows, num_cus)
+
     if ref_path and best_per_problem:
         _print_reference_comparison(best_per_problem, ref_path)
     elif ref_path and rows and args.best is False:
