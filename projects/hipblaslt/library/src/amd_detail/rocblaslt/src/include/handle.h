@@ -212,7 +212,7 @@ struct _rocblaslt_matmul_desc
     // CUs the device exposes". Negative values are rejected by the setter.
     int32_t sm_count_target = 0;
 
-    // StreamK tile scheduling mode (work-stealing StreamK scheduler).
+    // StreamK tile scheduling mode (hybrid SK3/SK4 tile scheduling for SK5).
     // Exposed via the _EXT attribute namespace (no equivalent in the base C API).
     // Tri-state: 0 = OFF (force SK3 static), 1 = ON (force SK4 dynamic),
     // 2 = AUTO (default; heuristic picks per launch).

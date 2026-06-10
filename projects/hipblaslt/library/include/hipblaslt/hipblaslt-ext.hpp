@@ -79,8 +79,8 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
 
         /*! \ingroup library_module
-         *  \brief Select the StreamK tile scheduling mode (work-stealing
-         *  StreamK scheduler).
+         *  \brief Select the StreamK tile scheduling mode (hybrid SK3/SK4
+         *  tile scheduling for StreamK=5 kernels).
          *
          *  \details
          *  Exposed via the ``hipblaslt_ext`` namespace because it controls a
