@@ -11,6 +11,7 @@
 #include "ck_tile/core/numeric/half.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
 
 #include <type_traits>
 
@@ -40,8 +41,15 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx)
     {
-        return {__builtin_amdgcn_smfmac_f32_16x16x32_f16(aVec, bVec, cVec, idx, 0, 0)};
-    }
+        using P = WarpGemmParamsParser<Params...>;
+        return __builtin_amdgcn_smfmac_f32_16x16x32_f16(
+            aVec,
+            bVec,
+            cVec,
+            idx,
+            P::cbsz,  // Ignore abid and use first portion Y/N
+            P::abid); // Portion of idx VGPR containing idx info
+    };
 };
 
 /**
