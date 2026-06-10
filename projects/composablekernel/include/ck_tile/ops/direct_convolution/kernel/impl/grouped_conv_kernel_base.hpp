@@ -190,8 +190,7 @@ struct TileConstantsBase
                     ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>,
                     ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1, 0>>,
                     ck_tile::sequence<3>,
-                    ck_tile::sequence<0>,
-                    ck_tile::number<STORE_VECS>>{});
+                    ck_tile::sequence<0>>{});
         }
     };
 };

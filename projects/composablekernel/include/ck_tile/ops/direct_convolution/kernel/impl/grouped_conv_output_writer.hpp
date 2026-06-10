@@ -158,11 +158,11 @@ struct OutputWriter
 // STORE_VECS = BLOCK_Q * BLOCK_C8 threads active, this gives a better 
 // memory throughput (ds_read_b128 + global_store_dwordx4).
 //
-// Thread activity is managed by the store distribution's MaxThreadId parameter,
-// which marks threads with tid >= STORE_VECS as inactive. The distribution
-// maps all block_size threads to [STORE_Q, BLOCK_C8, 8] tile positions,
-// but the swizzle and bounds checking are handled by the CK Tile descriptor
-// and coordinate infrastructure.
+// Thread activity is managed by the store_active boolean member (tid <
+// STORE_VECS), mirroring the load_active guard in the input loader. The
+// distribution maps all block_size threads to [STORE_Q, BLOCK_C8, 8] tile
+// positions, but the swizzle and bounds checking are handled by the CK Tile
+// descriptor and coordinate infrastructure.
 //
 // TC must provide:
 //   TC::Mfma::MakeAccTileDistribution()
@@ -192,7 +192,7 @@ struct OutputWriterLds
         {0, 0, 0},
         OutputLdsDist))>;
 
-    // Type aliases for the store path (store distribution with MaxThreadId).
+    // Type aliases for the store path (wide store distribution).
     static constexpr auto StoreDist = TC::Output::MakeDramWriteTileDistributionWide();
 
     using StoreLdsReadDesc = ck_tile::remove_cvref_t<decltype(TC::Output::MakeLdsReadDescriptorWide())>;
@@ -212,7 +212,8 @@ struct OutputWriterLds
     ck_tile::index_t  output_elem_offset;    // per-thread output DRAM element offset (C8-aligned)
     ck_tile::index_t  row_stride_elems;      // wo * C elements per output row
     ck_tile::index_t  lds_buf_size;          // LDS buffer size in elements
-    bool              store_valid;           // whether this thread should store to DRAM
+    bool              store_active;          // whether this thread is one of the STORE_VECS active store threads
+    bool              store_valid;           // whether this thread's DRAM coordinate is in bounds
 
     // Number of valid channels in this thread's 8-element wide store vector (0-8).
     // Full when k_per_group >= GROUP_SIZE; partial when some channels are padded.
@@ -271,8 +272,12 @@ struct OutputWriterLds
         }
 
         // DRAM store offset and validity (store distribution → padded DRAM layout).
-        // The pad transform marks threads with Q >= wo as invalid.
-        // The is_thread_active() query marks threads with tid >= STORE_VECS as inactive.
+        // The pad transform marks threads with Q >= wo as invalid (store_valid).
+        // Thread activity is a separate, simpler gate: the store distribution maps
+        // all block_size threads onto [STORE_Q, BLOCK_C8, 8], but only the first
+        // STORE_VECS threads carry meaningful coordinates. store_active marks the
+        // rest inactive — mirroring load_active in the input loader.
+        store_active = ck_tile::get_thread_id() < TC::STORE_VECS;
         {
             constexpr auto store_dist = TC::Output::MakeDramWriteTileDistributionWide();
 
@@ -293,10 +298,9 @@ struct OutputWriterLds
 
                 output_elem_offset = tmp_dram.get_pre_computed_coords()[ck_tile::number<0>{}]
                                                                        [ck_tile::number<1>{}].get_offset();
-                store_valid = store_dist.is_thread_active()
-                    && ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
-                           out_desc, tmp_dram.get_pre_computed_coords()[ck_tile::number<0>{}]
-                                                                       [ck_tile::number<1>{}]);
+                store_valid = ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
+                    out_desc, tmp_dram.get_pre_computed_coords()[ck_tile::number<0>{}]
+                                                                [ck_tile::number<1>{}]);
             };
 
             if constexpr(Padded)
@@ -345,7 +349,7 @@ struct OutputWriterLds
         // thread. s_waitcnt only guarantees this thread's own writes are visible.
         __syncthreads();
 
-        if(store_valid)
+        if(store_active && store_valid)
         {
             // 4. Read 16B (uint4) from LDS at distribution-computed swizzled offset.
             const uint4* output_lds_uint4 = reinterpret_cast<const uint4*>(lds_base);

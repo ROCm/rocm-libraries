@@ -11,7 +11,6 @@ add_gtest_executable(test_direct_conv_params test_conv_params.cpp)
 add_gtest_executable(test_direct_conv_matrix_layout test_matrix_layout.cpp)
 add_gtest_executable(test_direct_conv_swizzle test_swizzle.cpp)
 add_gtest_executable(test_direct_conv_transpose_lds test_transpose_lds_layout.cpp)
-add_gtest_executable(test_direct_conv_tile_distribution_max_thread_id test_tile_distribution_max_thread_id.cpp)
 
 # Integration test (gfx950 / CDNA4 only)
 if(GPU_TARGETS MATCHES "gfx950")

@@ -575,7 +575,7 @@ struct SharedDescriptors
         // LDS read descriptor (wide): [StoreQ, BLOCK_C8, 8] with optional swizzle.
         // StoreQ covers the full thread distribution range (typically 2 * BLOCK_Q).
         // Only threads with Q < BLOCK_Q read valid data; threads with Q >= BLOCK_Q
-        // are inactive (guarded by is_thread_active() from the distribution).
+        // are inactive (guarded by the store_active member in the output writer).
         template <int StoreQ>
         static constexpr auto MakeLdsReadDescriptorWide()
         {

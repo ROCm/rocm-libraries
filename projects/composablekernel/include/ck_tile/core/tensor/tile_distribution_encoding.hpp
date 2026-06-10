@@ -21,8 +21,7 @@ template <typename RsLengths_,                  // sequence<...>
           typename Ps2RHssMajor_,               // tuple<sequence<...>, ...>
           typename Ps2RHssMinor_,               // tuple<sequence<...>, ...>
           typename Ys2RHsMajor_,                // sequence<...>
-          typename Ys2RHsMinor_,                // sequence<...>
-          typename MaxThreadId_ = number<-1>>   // -1 = all threads active
+          typename Ys2RHsMinor_>                // sequence<...>
 struct tile_distribution_encoding
 {
     using RsLengths    = remove_cvref_t<RsLengths_>;
@@ -31,8 +30,6 @@ struct tile_distribution_encoding
     using Ps2RHssMinor = remove_cvref_t<Ps2RHssMinor_>;
     using Ys2RHsMajor  = remove_cvref_t<Ys2RHsMajor_>;
     using Ys2RHsMinor  = remove_cvref_t<Ys2RHsMinor_>;
-
-    static constexpr index_t MaxThreadId = MaxThreadId_::value;
 
     static_assert(Ps2RHssMajor::size() == Ps2RHssMinor::size(), "wrong!");
     static_assert(Ys2RHsMajor::size() == Ys2RHsMinor::size(), "wrong!");
@@ -448,8 +445,7 @@ class tile_distribution_encoding_shuffle<encoding, sequence<shuffle...>>
                                             typename encoding::Ps2RHssMajor,
                                             typename encoding::Ps2RHssMinor,
                                             shuffled<typename encoding::Ys2RHsMajor>,
-                                            shuffled<typename encoding::Ys2RHsMinor>,
-                                            number<encoding::MaxThreadId>>;
+                                            shuffled<typename encoding::Ys2RHsMinor>>;
 };
 template <typename encoding, typename shuffle>
 using tile_distribution_encoding_shuffle_t =
@@ -805,16 +801,14 @@ template <typename RsLengths_,
           typename Ps2RHssMajor_,
           typename Ps2RHssMinor_,
           typename Ys2RHsMajor_,
-          typename Ys2RHsMinor_,
-          typename MaxThreadId_>
+          typename Ys2RHsMinor_>
 CK_TILE_HOST_DEVICE void
 print(const typename tile_distribution_encoding<RsLengths_,
                                                 HsLengthss_,
                                                 Ps2RHssMajor_,
                                                 Ps2RHssMinor_,
                                                 Ys2RHsMajor_,
-                                                Ys2RHsMinor_,
-                                                MaxThreadId_>::detail& detail_obj)
+                                                Ys2RHsMinor_>::detail& detail_obj)
 {
     printf("tile_distribution_encoding::detail{");
     printf("ndim_rh_major_: ");
@@ -870,15 +864,13 @@ template <typename RsLengths_,
           typename Ps2RHssMajor_,
           typename Ps2RHssMinor_,
           typename Ys2RHsMajor_,
-          typename Ys2RHsMinor_,
-          typename MaxThreadId_>
+          typename Ys2RHsMinor_>
 CK_TILE_HOST_DEVICE void print(const tile_distribution_encoding<RsLengths_,
                                                                 HsLengthss_,
                                                                 Ps2RHssMajor_,
                                                                 Ps2RHssMinor_,
                                                                 Ys2RHsMajor_,
-                                                                Ys2RHsMinor_,
-                                                                MaxThreadId_>& encoding)
+                                                                Ys2RHsMinor_>& encoding)
 {
     printf("tile_distribution_encoding{");
 
