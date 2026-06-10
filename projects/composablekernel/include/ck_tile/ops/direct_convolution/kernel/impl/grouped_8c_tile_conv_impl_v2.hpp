@@ -23,11 +23,9 @@
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_weight_loader.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_output_writer.hpp"
 #include "ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp"
-#include "ck_tile/ops/direct_convolution/utils/detail.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mfma.hpp"
 #include "ck_tile/ops/direct_convolution/utils/launch_params.hpp"
-#include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include "ck_tile/ops/direct_convolution/utils/config_map.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/tensor/buffer_view.hpp"
@@ -51,7 +49,6 @@ using namespace ck_tile::direct_conv;
 using ck_tile::fp16x4_t;
 using ck_tile::fp16x8_t;
 using ck_tile::fp32x4_t;
-using ck_tile::direct_conv::static_for;
 
 // 64 threads per wave.
 constexpr int WAVE_SIZE = 64;

@@ -93,7 +93,7 @@ __global__ void test_chunked_prefetch_kernel(const _Float16* __restrict__ in,
     // the voffset to be at row `target_y`).
     for(int adv = 1; adv <= target_y; ++adv)
     {
-        ck_tile::direct_conv::wait_vmcnt<0>();
+        ck_tile::s_waitcnt<0>();
         __syncthreads();
         il.template fetch_tile_to_lds<0>(0);
     }
@@ -101,11 +101,11 @@ __global__ void test_chunked_prefetch_kernel(const _Float16* __restrict__ in,
     // At this point the loader is positioned at row `target_y`.  Now do the
     // two prefetches we actually want to inspect: chunk 0 of target_y into
     // buffer 0, chunk 1 of target_y into buffer 1.
-    ck_tile::direct_conv::wait_vmcnt<0>();
+    ck_tile::s_waitcnt<0>();
     __syncthreads();
     il.template prefetch_tile_to_lds<0>(0);
     il.template prefetch_tile_to_lds<1>(1);
-    ck_tile::direct_conv::wait_vmcnt<0>();
+    ck_tile::s_waitcnt<0>();
     __syncthreads();
 
     // Copy both LDS buffers to global memory for host verification.

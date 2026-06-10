@@ -5,7 +5,6 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/core/tensor/load_tile_transpose.hpp"
-#include "ck_tile/ops/direct_convolution/utils/detail.hpp"
 
 namespace ck_tile {
 namespace direct_conv {
@@ -133,8 +132,8 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
                 {0, 0},
                 weight_dram_dist);
 
-            static_for<TC::Weight::NUM_WEIGHT_PASSES>(
-                [&]<int Pass>()
+            ck_tile::static_for<0, TC::Weight::NUM_WEIGHT_PASSES, 1>{}(
+                [&](auto Pass)
                 {
                     // load_tile applies per-element OOB checking via the pad transforms,
                     // correctly zeroing padded K and C positions. This is correct for any
@@ -142,7 +141,7 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
                     // bypass per-element OOB checks.
                     auto weight_reg = ck_tile::load_tile(weight_padded_dram_window);
                     ck_tile::store_tile(weight_lds_window, weight_reg);
-                    if constexpr(Pass < TC::Weight::NUM_WEIGHT_PASSES - 1)
+                    if constexpr(Pass.value < TC::Weight::NUM_WEIGHT_PASSES - 1)
                     {
                         ck_tile::move_tile_window(weight_padded_dram_window, {cfg.block_size(), 0});
                         ck_tile::move_tile_window(weight_lds_window, {cfg.block_size(), 0});
@@ -182,11 +181,11 @@ __device__ void weight_load_to_lds(const BlockCoords_& bc,
         // block_size, we need multiple async loads with advancing offsets.
         // The pad transform on the DRAM descriptor suppresses OOB reads
         // in the final pass.
-        static_for<TC::Weight::NUM_WEIGHT_PASSES>(
-            [&]<int Pass>()
+        ck_tile::static_for<0, TC::Weight::NUM_WEIGHT_PASSES, 1>{}(
+            [&](auto Pass)
             {
                 ck_tile::async_load_tile(weight_lds_window, weight_dram_window);
-                if constexpr(Pass < TC::Weight::NUM_WEIGHT_PASSES - 1)
+                if constexpr(Pass.value < TC::Weight::NUM_WEIGHT_PASSES - 1)
                 {
                     ck_tile::move_tile_window(weight_dram_window, {cfg.block_size(), 0});
                     ck_tile::move_tile_window(weight_lds_window, {cfg.block_size(), 0});
@@ -281,19 +280,19 @@ __device__ void weight_read_dgrad(WeightAccessorT& wa, uint4* weight_lds)
     auto out_tensor = ck_tile::make_static_distributed_tensor<ElementType>(
         ck_tile::make_static_tile_distribution(OutputDstrEncode{}));
 
-    static_for<KH_KW>(
-        [&]<int khw>()
+    ck_tile::static_for<0, KH_KW, 1>{}(
+        [&](auto khw)
         {
             // Offset selects filter position khw within the [K][KH*KW][C] LDS layout.
             // Each filter position is GROUP_SIZE fp16 elements apart.
-            constexpr int filter_offset = khw * TC::GROUP_SIZE;
+            constexpr int filter_offset = khw.value * TC::GROUP_SIZE;
 
             ck_tile::load_tile_transpose_with_offset(
                 out_tensor, lds_window, filter_offset);
 
             // For 16c: thread buffer has 4 fp16 -> fp16x4_t.
             // For 32c: thread buffer has 8 fp16 -> fp16x8_t (2 ds_read calls handled by Y dim).
-            wa.weights[khw] = out_tensor.get_thread_buffer()
+            wa.weights[khw.value] = out_tensor.get_thread_buffer()
                                   .template get_as<VecType>(ck_tile::number<0>{});
         });
 }

@@ -8,7 +8,6 @@
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_output_writer.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_compute_loop.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mfma.hpp"
-#include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include "ck_tile/ops/direct_convolution/utils/config_map.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/tensor/tile_distribution.hpp"

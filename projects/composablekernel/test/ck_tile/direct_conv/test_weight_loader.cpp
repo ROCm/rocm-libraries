@@ -73,7 +73,7 @@ __global__ void test_weight_load_kernel(const _Float16* __restrict__ wei,
     __syncthreads();
 
     weight_load_to_lds<TC, cfg, Padding>(bc, lds_buf, wei, c_per_group, k_per_group);
-    ck_tile::direct_conv::wait_vmcnt<0>();
+    ck_tile::s_waitcnt<0>();
     __syncthreads();
 
     const _Float16* lds_fp16 = reinterpret_cast<const _Float16*>(lds_buf);
@@ -345,7 +345,7 @@ __global__ void test_weight_load_kernel_16c(const _Float16* __restrict__ wei,
     __syncthreads();
 
     weight_load_to_lds<TC, cfg, Padding>(bc, lds_buf, wei, c_per_group, k_per_group);
-    ck_tile::direct_conv::wait_vmcnt<0>();
+    ck_tile::s_waitcnt<0>();
     __syncthreads();
 
     const _Float16* lds_fp16 = reinterpret_cast<const _Float16*>(lds_buf);
@@ -488,7 +488,7 @@ __global__ void test_weight_load_kernel_8c(const _Float16* __restrict__ wei,
     __syncthreads();
 
     weight_load_to_lds<TC, cfg, Padded>(bc, lds_buf, wei, c_per_group, k_per_group);
-    ck_tile::direct_conv::wait_vmcnt<0>();
+    ck_tile::s_waitcnt<0>();
     __syncthreads();
 
     const _Float16* lds_fp16 = reinterpret_cast<const _Float16*>(lds_buf);

@@ -30,9 +30,7 @@
 #include "ck_tile/ops/direct_convolution/kernel/impl/non_grouped_conv_compute_loop_v3.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mfma.hpp"
-#include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include "ck_tile/ops/direct_convolution/utils/config_map.hpp"
-#include "ck_tile/ops/direct_convolution/utils/detail.hpp"
 #include "ck_tile/ops/direct_convolution/utils/logging.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/tensor/tile_distribution.hpp"
@@ -514,9 +512,10 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
         // coordinate (block_q + spatial_pos), so the inverse used to find the
         // LDS slot must also include block_q. Otherwise the inverse is wrong
         // whenever block_q is not a multiple of BLOCK_C8.
-        static_for<cfg.kw>(
-            [&]<int S>()
+        ck_tile::static_for<0, cfg.kw, 1>{}(
+            [&](auto s_n)
             {
+                constexpr int S = s_n.value;
                 int spatial_pos = lane_q + S;
                 int c8_lds = swizzle_c8_inverse<cfg>(bc.block_q + spatial_pos, c8_pos);
                 base::mfma_lds_offsets[S] = spatial_pos * TC::BLOCK_C8 * 8 + c8_lds * 8;
@@ -771,13 +770,15 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
             const int k_group = lane / MFMA_M;
             const int c_lane  = lane % MFMA_M;
 
-            static_for<KH_KW_L>(
-                [&]<int F>()
+            ck_tile::static_for<0, KH_KW_L, 1>{}(
+                [&](auto f_n)
                 {
+                    constexpr int F = f_n.value;
                     ElementType vals[8];
-                    static_for<8>(
-                        [&]<int J>()
+                    ck_tile::static_for<0, 8, 1>{}(
+                        [&](auto j_n)
                         {
+                            constexpr int J = j_n.value;
                             int k = k_group * 8 + J;
                             vals[J] = lds_ptr[k * KH_KW_L * BLOCK_C + F * BLOCK_C + c_lane];
                         });
@@ -800,13 +801,15 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
             const int k_out = lane % MFMA_M;
             const int c_grp = lane / MFMA_M;
 
-            static_for<KH_KW_L>(
-                [&]<int F>()
+            ck_tile::static_for<0, KH_KW_L, 1>{}(
+                [&](auto f_n)
                 {
+                    constexpr int F = f_n.value;
                     ElementType vals[8];
-                    static_for<8>(
-                        [&]<int J>()
+                    ck_tile::static_for<0, 8, 1>{}(
+                        [&](auto j_n)
                         {
+                            constexpr int J = j_n.value;
                             vals[J] = lds_ptr[k_out * KH_KW_L * C_SLICE + F * C_SLICE + c_grp * 8 + J];
                         });
                     __builtin_memcpy(&this->weights[F * N_ + CS], vals, sizeof(VecType));
@@ -907,9 +910,10 @@ struct OutputWriterV3
             // Group g: K-offset = g*8 + m_block*4, acc values [g*4 .. g*4+3].
             const ck_tile::index_t base_offset = output_spatial_offset + row_offset;
 
-            static_for<4>(
-                [&]<int G>()
+            ck_tile::static_for<0, 4, 1>{}(
+                [&](auto g_n)
                 {
+                    constexpr int G = g_n.value;
                     const int k_off = G * 8 + k_offset_or_m_block;
                     uint32_t words[2];
                     words[0] = ConvertFp32ToVec4<ElementType>::convert(
@@ -1040,9 +1044,10 @@ struct OutputWriterV3Lds
             else
             {
                 // Four 8B LDS writes: 4 groups of 4 contiguous K values.
-                static_for<4>(
-                    [&]<int G>()
+                ck_tile::static_for<0, 4, 1>{}(
+                    [&](auto g_n)
                     {
+                        constexpr int G = g_n.value;
                         const int k_off = G * 8 + lds_k_offset_or_m_block;
                         uint32_t words[2];
                         words[0] = ConvertFp32ToVec4<ElementType>::convert(

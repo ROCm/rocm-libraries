@@ -70,7 +70,7 @@ __global__ void test_chunked_weight_kernel(const _Float16* __restrict__ wei,
         const int wave_section = CS * cfg.waves_per_wg + wave_id;
         WeightLoader::load_kyxc_to_lds_wave(
             wave_weight_lds, wei, weight_block_k, wave_section, C_total);
-        ck_tile::direct_conv::wait_vmcnt<0>();
+        ck_tile::s_waitcnt<0>();
         __syncthreads();
 
         // Dispatch to the appropriate compile-time CS.

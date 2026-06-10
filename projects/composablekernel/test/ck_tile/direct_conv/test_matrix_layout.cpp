@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "gtest/gtest.h"
-#include "ck_tile/ops/direct_convolution/utils/matrix_layout.hpp"
+#include "matrix_layout.hpp"
 
 #include <set>
 #include <tuple>

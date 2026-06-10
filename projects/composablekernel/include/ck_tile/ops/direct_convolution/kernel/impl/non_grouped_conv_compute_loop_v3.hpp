@@ -13,7 +13,7 @@
 // derived from the MfmaFn::acc_type typedef.
 //
 // Structure per input row:
-//   wait_vmcnt + __syncthreads
+//   s_waitcnt + __syncthreads
 //   prefetch next input row → LDS[tic]
 //   for S in 0..kw:
 //     each wave reads its own C-section from LDS
@@ -27,9 +27,8 @@
 
 #pragma once
 
+#include "ck_tile/core.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
-#include "ck_tile/ops/direct_convolution/utils/detail.hpp"
-#include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include <hip/hip_runtime.h>
 
 namespace ck_tile::direct_conv::conv_32c_tile::v3
@@ -52,22 +51,23 @@ __device__ __forceinline__ void cross_wave_reduce(
 
     // Write: each thread writes ACC_SIZE floats to its wave's section.
     const int write_base = wave_id * 64 * ACC_SIZE + lane * ACC_SIZE;
-    static_for<ACC_SIZE>(
-        [&]<int I>()
-        { reduce_lds[write_base + I] = val[I]; });
+    ck_tile::static_for<0, ACC_SIZE, 1>{}(
+        [&](auto i_n)
+        { constexpr int I = i_n.value; reduce_lds[write_base + I] = val[I]; });
 
     __syncthreads();
 
     // Read + reduce: sum across all waves.
     AccType sum{};
-    static_for<NumWaves>(
-        [&]<int W>()
+    ck_tile::static_for<0, NumWaves, 1>{}(
+        [&](auto w_n)
         {
+            constexpr int W = w_n.value;
             constexpr int read_base_w = W * 64 * ACC_SIZE;
             const int read_base = read_base_w + lane * ACC_SIZE;
-            static_for<ACC_SIZE>(
-                [&]<int I>()
-                { sum[I] += reduce_lds[read_base + I]; });
+            ck_tile::static_for<0, ACC_SIZE, 1>{}(
+                [&](auto i_n)
+                { constexpr int I = i_n.value; sum[I] += reduce_lds[read_base + I]; });
         });
     val = sum;
 
@@ -153,9 +153,10 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
 
     uint4* wave_weight_lds = lds_buf + wave_id * WEIGHT_SLICE_UINT4;
 
-    static_for<N_CSPW>(
-        [&]<int CS>()
+    ck_tile::static_for<0, N_CSPW, 1>{}(
+        [&](auto cs_n)
         {
+            constexpr int CS = cs_n.value;
             // Wave w loading chunk CS reads C-section (CS * waves_per_wg + w)
             // from KYXC DRAM. For N=1 this collapses to the original c_slice
             // == wave_id pattern.
@@ -169,7 +170,7 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
                 WeightLoaderT::load_kyxc_to_lds_wave(
                     wave_weight_lds, wei, weight_block_k, wave_section, C);
 
-            wait_vmcnt<0>();
+            ck_tile::s_waitcnt<0>();
             __syncthreads();
 
             wl.template read_from_lds_chunk<CS>(wave_weight_lds);
@@ -189,9 +190,9 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     // --- Circular accumulator buffer ---
     constexpr AccType Zero{};
     AccType acc[cfg.kh];
-    static_for<cfg.kh>(
-        [&]<int I>()
-        { acc[I] = Zero; });
+    ck_tile::static_for<0, cfg.kh, 1>{}(
+        [&](auto i_n)
+        { acc[i_n.value] = Zero; });
 
     int tic = 1;
     int toc = 0;
@@ -219,15 +220,17 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     // loop; flush happens once per row.
     for(int y_base = 0; y_base + cfg.kh <= hi; y_base += cfg.kh)
     {
-        static_for<cfg.kh>(
-            [&]<int Y_LOCAL>()
+        ck_tile::static_for<0, cfg.kh, 1>{}(
+            [&](auto y_local_n)
             {
+                constexpr int Y_LOCAL = y_local_n.value;
                 int y = y_base + Y_LOCAL;
 
-                static_for<N_CSPW>(
-                    [&]<int CS>()
+                ck_tile::static_for<0, N_CSPW, 1>{}(
+                    [&](auto cs_n)
                     {
-                        wait_vmcnt<0>();
+                        constexpr int CS = cs_n.value;
+                        ck_tile::s_waitcnt<0>();
                         __syncthreads();
 
                         // Prefetch the next chunk into tic: either chunk CS+1
@@ -243,15 +246,17 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
                         }
 
                         // MFMA core: chunk CS lives in lds[toc].
-                        static_for<cfg.kw>(
-                            [&]<int S>()
+                        ck_tile::static_for<0, cfg.kw, 1>{}(
+                            [&](auto s_n)
                             {
+                                constexpr int S = s_n.value;
                                 typename InputLoaderT::input_type input_reg;
                                 il.read_from_lds(input_reg, S, toc);
 
-                                static_for<cfg.kh>(
-                                    [&]<int R>()
+                                ck_tile::static_for<0, cfg.kh, 1>{}(
+                                    [&](auto r_n)
                                     {
+                                        constexpr int R = r_n.value;
                                         constexpr int p_idx =
                                             (Y_LOCAL - R + cfg.kh) % cfg.kh;
                                         if constexpr(is_dgrad)
@@ -285,17 +290,19 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     // --- Remainder loop: hi % kh leftover rows ---
     {
         int y_rem_base = (hi / cfg.kh) * cfg.kh;
-        static_for<cfg.kh>(
-            [&]<int Y_LOCAL>()
+        ck_tile::static_for<0, cfg.kh, 1>{}(
+            [&](auto y_local_n)
             {
+                constexpr int Y_LOCAL = y_local_n.value;
                 if(Y_LOCAL >= hi % cfg.kh)
                     return;
                 int y = y_rem_base + Y_LOCAL;
 
-                static_for<N_CSPW>(
-                    [&]<int CS>()
+                ck_tile::static_for<0, N_CSPW, 1>{}(
+                    [&](auto cs_n)
                     {
-                        wait_vmcnt<0>();
+                        constexpr int CS = cs_n.value;
+                        ck_tile::s_waitcnt<0>();
                         __syncthreads();
 
                         if constexpr(CS + 1 < N_CSPW)
@@ -308,15 +315,17 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
                                 il.template fetch_tile_to_lds<0>(tic);
                         }
 
-                        static_for<cfg.kw>(
-                            [&]<int S>()
+                        ck_tile::static_for<0, cfg.kw, 1>{}(
+                            [&](auto s_n)
                             {
+                                constexpr int S = s_n.value;
                                 typename InputLoaderT::input_type input_reg;
                                 il.read_from_lds(input_reg, S, toc);
 
-                                static_for<cfg.kh>(
-                                    [&]<int R>()
+                                ck_tile::static_for<0, cfg.kh, 1>{}(
+                                    [&](auto r_n)
                                     {
+                                        constexpr int R = r_n.value;
                                         constexpr int p_idx =
                                             (Y_LOCAL - R + cfg.kh) % cfg.kh;
                                         if constexpr(is_dgrad)
@@ -350,12 +359,17 @@ __device__ void conv_compute_loop_v3(const ElementType* __restrict__ in,
     {
         int p_idx = (p_out - py + cfg.kh) % cfg.kh;
         AccType slot;
-        dispatch<cfg.kh>(p_idx,
-                         [&]<int P>()
-                         {
-                             slot   = acc[P];
-                             acc[P] = Zero;
-                         });
+        // Select the accumulator slot matching the runtime p_idx at compile time.
+        ck_tile::static_for<0, cfg.kh, 1>{}(
+            [&](auto p_n)
+            {
+                constexpr int P = p_n.value;
+                if(p_idx == P)
+                {
+                    slot   = acc[P];
+                    acc[P] = Zero;
+                }
+            });
         reduce_and_flush(slot, p_out);
     }
 }

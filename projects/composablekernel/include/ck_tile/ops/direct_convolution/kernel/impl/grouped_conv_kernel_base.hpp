@@ -24,11 +24,9 @@
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_output_writer.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_compute_loop.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
-#include "ck_tile/ops/direct_convolution/utils/detail.hpp"
 #include "ck_tile/ops/direct_convolution/utils/logging.hpp"
 #include "ck_tile/ops/direct_convolution/utils/launch_params.hpp"
 #include "ck_tile/ops/direct_convolution/utils/conv_params.hpp"
-#include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include <hip/hip_runtime.h>
 #include <string>
 
@@ -346,10 +344,10 @@ __device__ void weight_read_fprop(WeightAccessorT& wa, uint4* weight_lds)
     // element is one VecType (e.g. fp16x4_t or bf16x4_t) per filter position.
     using VecType = typename std::remove_reference_t<WeightAccessorT>::value_type;
     const auto& vec_buf = weight_tile.get_thread_buffer().template get_as<VecType>();
-    static_for<TC::KH_KW>(
-        [&]<int khw>()
+    ck_tile::static_for<0, TC::KH_KW, 1>{}(
+        [&](auto khw)
         {
-            wa.weights[khw] = vec_buf[ck_tile::number<khw>{}];
+            wa.weights[khw.value] = vec_buf[khw];
         });
 }
 

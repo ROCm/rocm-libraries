@@ -105,11 +105,8 @@ utils/                                   — utilities for kernel implementation
   types.hpp                              — fp16/bf16/fp32/fp8 type aliases and mapping
   launch_params.hpp                      — LaunchParams (grid, block, shared memory)
   kernel_variant.hpp                     — KernelVariant dispatch interface
-  matrix_layout.hpp                      — MFMA register layout mapping
   swizzle.hpp                            — LDS swizzle for bank-conflict-free access
   transpose_lds_layout.hpp               — DS_READ_TR_B16 layout for CDNA4 Dgrad
-  memory.hpp                             — vmcnt wait intrinsics
-  detail.hpp                             — static_for / dispatch compile-time helpers
 ```
 
 ## Building

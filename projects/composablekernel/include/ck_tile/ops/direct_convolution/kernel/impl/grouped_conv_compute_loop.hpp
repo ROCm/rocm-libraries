@@ -6,8 +6,6 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/direct_convolution/utils/conv_params.hpp"
-#include "ck_tile/ops/direct_convolution/utils/detail.hpp"
-#include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 
 namespace ck_tile {
 namespace direct_conv {
@@ -98,7 +96,7 @@ __device__ void grouped_conv_compute_loop(const ElementType* __restrict__ in,
     // Weight tensor layout is always GKYXC with the original c/k_per_group.
     WeightLoaderT wl;
     WeightLoaderT::template load_to_lds<Padded>(bc, lds_buf, wei, c_per_group, k_per_group);
-    wait_vmcnt<0>();
+    ck_tile::s_waitcnt<0>();
     __syncthreads();
 
     wl.read_from_lds(lds_buf);
@@ -143,10 +141,11 @@ __device__ void grouped_conv_compute_loop(const ElementType* __restrict__ in,
     {
         // The main loop iterates in steps over cfg.kh input rows.
         // This static loop unrolls the cfg.kh loops over the input rows.
-        static_for<cfg.kh>(
-            [&]<int Y_LOCAL>()
+        ck_tile::static_for<0, cfg.kh, 1>{}(
+            [&](auto y_local_n)
             {
-                wait_vmcnt<0>();
+                constexpr int Y_LOCAL = y_local_n.value;
+                ck_tile::s_waitcnt<0>();
                 __syncthreads();
 
                 // Input row index that maps to cfg.kh output rows, for this iteration of the main loop.
@@ -164,9 +163,10 @@ __device__ void grouped_conv_compute_loop(const ElementType* __restrict__ in,
                 // accumulate MFMA products for this input row with the corresponding filter weights.
                 // INNER_KW defaults to cfg.kw; for the 8c Toeplitz kernel it is 1
                 // (S is embedded in the MFMA K=32 dimension).
-                static_for<INNER_KW>(
-                    [&]<int S>()
+                ck_tile::static_for<0, INNER_KW, 1>{}(
+                    [&](auto s_n)
                     {
+                        constexpr int S = s_n.value;
                         // Read one input column strip from LDS into registers.
                         // Each thread reads input[n, y, q+S, :] into input_reg, where q is the horizontal offset of the tile.
                         // All input channes are read and distributed accross the threads in the block.
@@ -176,9 +176,10 @@ __device__ void grouped_conv_compute_loop(const ElementType* __restrict__ in,
 
                         // Accumulate the MFMA products for this input column strip
                         // with the corresponding filter weights.
-                        static_for<cfg.kh>(
-                            [&]<int R>()
+                        ck_tile::static_for<0, cfg.kh, 1>{}(
+                            [&](auto r_n)
                             {
+                                constexpr int R = r_n.value;
                                 // Which output row (p) this (y,R) pair contributes to.
                                 // Recall that this input row contributes to cfg.kh output rows, depending on the filter row (R) being applied.
                                 // p + R = y --> p = y - R = (y_local + y_base) - R
@@ -225,14 +226,15 @@ __device__ void grouped_conv_compute_loop(const ElementType* __restrict__ in,
     // --- Remainder loop: hi % kh leftover rows ---
     {
         int y_rem_base = (hi / cfg.kh) * cfg.kh;
-        static_for<cfg.kh>(
-            [&]<int Y_LOCAL>()
+        ck_tile::static_for<0, cfg.kh, 1>{}(
+            [&](auto y_local_n)
             {
+                constexpr int Y_LOCAL = y_local_n.value;
                 if(Y_LOCAL >= hi % cfg.kh)
                     return;
                 int y = y_rem_base + Y_LOCAL;
 
-                wait_vmcnt<0>();
+                ck_tile::s_waitcnt<0>();
                 __syncthreads();
 
                 if((y + 1) < hi)
@@ -240,15 +242,17 @@ __device__ void grouped_conv_compute_loop(const ElementType* __restrict__ in,
                     il.fetch_tile_to_lds(tic);
                 }
 
-                static_for<INNER_KW>(
-                    [&]<int S>()
+                ck_tile::static_for<0, INNER_KW, 1>{}(
+                    [&](auto s_n)
                     {
+                        constexpr int S = s_n.value;
                         typename InputLoaderT::input_type input_reg;
                         il.read_from_lds(input_reg, S, toc);
 
-                        static_for<cfg.kh>(
-                            [&]<int R>()
+                        ck_tile::static_for<0, cfg.kh, 1>{}(
+                            [&](auto r_n)
                             {
+                                constexpr int R = r_n.value;
                                 constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
                                 if constexpr(cfg.direction == Direction::Dgrad)
                                     acc[p_idx] = mfma_fn(
@@ -282,12 +286,17 @@ __device__ void grouped_conv_compute_loop(const ElementType* __restrict__ in,
         __syncthreads();
         int p_idx = (p_out - py + cfg.kh) % cfg.kh;
         fp32x4_t slot;
-        dispatch<cfg.kh>(p_idx,
-                        [&]<int P>()
-                        {
-                            slot   = acc[P];
-                            acc[P] = Zero;
-                        });
+        // Select the accumulator slot matching the runtime p_idx at compile time.
+        ck_tile::static_for<0, cfg.kh, 1>{}(
+            [&](auto p_n)
+            {
+                constexpr int P = p_n.value;
+                if(p_idx == P)
+                {
+                    slot   = acc[P];
+                    acc[P] = Zero;
+                }
+            });
         ow.flush(slot, p_out);
     }
 }

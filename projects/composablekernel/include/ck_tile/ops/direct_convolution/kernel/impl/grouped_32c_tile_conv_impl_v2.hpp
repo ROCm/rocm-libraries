@@ -20,7 +20,6 @@
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_output_writer.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_compute_loop.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mfma.hpp"
-#include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include "ck_tile/ops/direct_convolution/utils/config_map.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/tensor/tile_distribution.hpp"
@@ -419,10 +418,10 @@ __device__ void weight_read_fprop_32c(auto& wa, uint4* weight_lds)
     // get_as reinterprets the thread_buffer as the appropriate vec type.
     using VecType = typename std::remove_reference_t<decltype(wa)>::value_type;
     const auto& vec_buf = weight_tile.get_thread_buffer().template get_as<VecType>();
-    static_for<TC::KH_KW>(
-        [&]<int khw>()
+    ck_tile::static_for<0, TC::KH_KW, 1>{}(
+        [&](auto khw)
         {
-            wa.weights[khw] = vec_buf[ck_tile::number<khw>{}];
+            wa.weights[khw.value] = vec_buf[khw];
         });
 }
 
