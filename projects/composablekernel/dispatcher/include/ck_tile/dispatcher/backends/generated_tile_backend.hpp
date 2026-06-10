@@ -12,6 +12,8 @@
 #include <sstream>
 #include <vector>
 #include <cmath>
+#include <cstdlib>
+#include <string>
 
 namespace ck_tile {
 namespace dispatcher {
@@ -101,16 +103,23 @@ class GeneratedTileKernelInstance : public KernelInstance
                                    problem.N        // stride_E/C (row-major C: stride = N)
         );
 
+        // Benchmark parameters. Defaults match old Tile Engine
+        // (gemm_common.hpp: warmup=50, repeat=100, flush_cache=true,
+        // rotating_count=1000) so bridge-vs-old-TE comparisons are
+        // apples-to-apples and a too-small warmup can't leave the GPU clock
+        // un-ramped (the transient that produced PR #8123's spurious 2048^3 dip).
+        // Each is overridable at run time via env var so a caller can match a
+        // different harness without recompiling.
         const bool bench = this->benchmarking_;
         ck_tile::stream_config stream_cfg;
         stream_cfg.stream_id_      = reinterpret_cast<hipStream_t>(stream);
         stream_cfg.time_kernel_    = bench;
         stream_cfg.log_level_      = 0;
-        stream_cfg.cold_niters_    = bench ? 5 : 0;
-        stream_cfg.nrepeat_        = bench ? 10 : 1;
+        stream_cfg.cold_niters_    = bench ? env_int("CK_TILE_BENCH_WARMUP", 50) : 0;
+        stream_cfg.nrepeat_        = bench ? env_int("CK_TILE_BENCH_REPEAT", 100) : 1;
         stream_cfg.is_gpu_timer_   = bench;
-        stream_cfg.flush_cache_    = false;
-        stream_cfg.rotating_count_ = 1;
+        stream_cfg.flush_cache_    = bench && env_bool("CK_TILE_BENCH_FLUSH", true);
+        stream_cfg.rotating_count_ = bench ? env_int("CK_TILE_BENCH_ROTATING", 1000) : 1;
 
         // Call the generated kernel's launch method
         return SelectedKernel::launch(args, stream_cfg);
@@ -134,6 +143,30 @@ class GeneratedTileKernelInstance : public KernelInstance
     }
 
     private:
+    // Read an integer benchmark knob from the environment, falling back to
+    // `fallback` when unset or unparseable.
+    static int env_int(const char* name, int fallback)
+    {
+        const char* v = std::getenv(name);
+        if(v == nullptr || *v == '\0')
+            return fallback;
+        char* end      = nullptr;
+        const long out = std::strtol(v, &end, 10);
+        if(end == v)
+            return fallback;
+        return static_cast<int>(out);
+    }
+
+    // Read a boolean benchmark knob ("0"/"false"/"off" => false, else true).
+    static bool env_bool(const char* name, bool fallback)
+    {
+        const char* v = std::getenv(name);
+        if(v == nullptr || *v == '\0')
+            return fallback;
+        std::string s(v);
+        return !(s == "0" || s == "false" || s == "FALSE" || s == "off" || s == "OFF");
+    }
+
     KernelKey key_;
     std::string name_;
 };
