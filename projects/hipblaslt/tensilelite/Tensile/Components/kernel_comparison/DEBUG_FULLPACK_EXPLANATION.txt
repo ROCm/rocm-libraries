@@ -1,0 +1,225 @@
+================================================================================
+DEBUG EXPERIMENT: forcing doFullPackCodePrefetch=True for CMS builds
+================================================================================
+
+WHAT THE EXPERIMENT WAS
+-----------------------
+One-line patch at Tensile/KernelWriter.py:9080, changing
+
+    self.states.doFullPackCodePrefetch = kernel["UsePLRPack"] and not kernel["UseCustomMainLoopSchedule"]
+into
+    self.states.doFullPackCodePrefetch = kernel["UsePLRPack"]    # debug
+
+i.e. removed the `and not UseCustomMainLoopSchedule` guard so the pack-prefetch
+scheduling optimization is ON even for the CMS (UseCustomMainLoopSchedule=1)
+build that the BPG#11 TF32 4x4 TN canonical config uses.
+
+The patch was applied, the hxcx dumper re-run, the two resulting capture
+listings copied here, then the patch was REVERTED (KernelWriter.py is clean).
+
+FILES IN THIS DIRECTORY FROM THIS EXPERIMENT
+--------------------------------------------
+  cms1_capture_listing_DEBUG_fullpack.txt    CMS subject capture, flag forced on
+  shadow_capture_listing_DEBUG_fullpack.txt  SHADOW reference capture, flag forced on
+  cms1_kernel_DEBUG_fullpack.s               full emitted CMS assembly, flag forced on
+
+Compare against the baseline (flag in its normal state) files:
+  cms1_capture_listing.txt
+  shadow_capture_listing.txt
+  cms0_capture_listing.txt   (the genuine UseCustomMainLoopSchedule=0 kernel = ground truth)
+
+
+================================================================================
+HEADLINE RESULT (CORRECTED): the flag flip does NOT fix the missing waits
+================================================================================
+
+** An earlier version of this file claimed the flag flip "FIXED" the problem.
+   That was WRONG -- it was based on checking only the FIRST ds_read/pack pair.
+   Looking at the whole body shows the defect persists. This section is the
+   corrected analysis. **
+
+The original symptom (BASELINE shadow capture): in shadow ML_PREV, a
+v_cvt_pk_bf16_f32 consuming vgprValuA_T0_I0+0/+1 was emitted with NO
+s_waitcnt lgkmcnt between it and the ds_read that loaded those registers.
+
+Flipping doFullPackCodePrefetch=True adds ONE wait (at mfma_index 35) that
+covers ONE read/pack pair -- but many ds_reads still happen AFTER that wait,
+each feeding a pack with no covering wait. The two schedules have
+fundamentally DIFFERENT SHAPES:
+
+GENUINE cms0 (ground truth) -- ML body, reads/waits in order:
+    mfma 26  DS_READ
+    mfma 27  DS_READ
+    mfma 28..33  DS_READ   (all current-iter reads BATCHED together)
+    mfma 35  WAIT lgkmcnt(0)   <-- single drain, AFTER all reads
+    mfma 35+ v_cvt_pk ...      (all packs, every dependency covered)
+  -> ZERO ds_reads after the drain wait. Correct.
+
+DEBUG shadow (flag forced on) -- ML_PREV body, reads/waits in order:
+    mfma 35  DS_READ
+    mfma 35  WAIT lgkmcnt(0)   <-- covers ONLY the one read above it
+    mfma 35  v_cvt_pk T0_I0+0,+1   (covered)
+    mfma 36  DS_READ
+    mfma 36  v_cvt_pk T0_I0+8,+9   <-- NOT covered by any wait
+    mfma 37  DS_READ
+    mfma 37  v_cvt_pk ...          <-- NOT covered
+    mfma 38..42  DS_READ + v_cvt_pk each   <-- NOT covered
+  -> 7 ds_reads at mfma_index >= 36, and ZERO lgkmcnt waits at mfma_index >= 36.
+     Every one of those later reads feeds an uncovered pack.
+
+s_waitcnt lgkmcnt placement in the body (mfma_index):
+    baseline shadow  : 11 only        BROKEN
+    DEBUG shadow     : 9, 35          STILL BROKEN (reads continue past 35 uncovered)
+    genuine cms0     : 9, 35          correct -- because ALL reads precede mfma 35
+
+The wait positions look numerically similar (both "9, 35") but they mean
+different things: in cms0, mfma 35 is the drain AFTER the last read; in the
+shadow, mfma 35 is in the MIDDLE of an ongoing one-read-per-mfma stream.
+
+WHY THE FLAG FLIP DOESN'T REPRODUCE cms0's SHAPE
+------------------------------------------------
+cms0 and the shadow emit in different body roles with different LR batching:
+
+  - cms0's ML is a true main-loop iteration: numItersPLR batches all this-iter
+    reads up front, drains once, packs once.
+  - The shadow runs the SIA3 sub-iter schedule against the cms1
+    ForceUnrollSubIter instruction layout (ForceUnrollSubIter=True for this
+    config, SolutionStructs/Solution.py:1795). That layout reads one b128 per
+    sub-iter and packs it immediately, so reads stay INTERLEAVED with packs
+    across the whole body.
+
+  doFullPackCodePrefetch only toggles where ONE pack-wait lands and how packs
+  route to the packPre bucket. It does NOT restructure the interleaved body
+  into cms0's batch-read-then-drain shape. So it cannot, by itself, make every
+  ds_read->pack edge covered.
+
+CONCLUSION: the missing-wait defect is NOT a single-flag toggle. The shadow's
+interleaved read/pack structure needs a covering wait per read (or a properly
+counted lgkmcnt(N) per pack consumer), which neither the baseline nor the
+flag-flipped shadow produces. The flag flip was a useful probe -- it proves the
+pack-prefetch wait machinery is gated off in the shadow -- but enabling that
+machinery does not make the shadow faithful, because the shadow's body shape
+differs from the default kernel it is supposed to mirror.
+
+
+================================================================================
+WHY THE WAIT DEPENDS ON THIS FLAG (mechanism)
+================================================================================
+
+There are TWO different lgkmcnt waits in the default SIA3 scheduler:
+
+1. The regular local-read wait (waitCode, added at KernelWriter.py:2086).
+   For THIS config it is deliberately SKIPPED by
+   getConditionToSkipLocalReadWriteWait (KernelWriter.py:3387-3396):
+   SIA3 + oneBuffer + PLR + PGR>=2 and u > localWriteStartIter -> condSkip.
+   Both real kernels and the shadow skip it. So this is NOT the protecting wait.
+
+2. The pack-prefetch wait:
+       SWaitCnt(dscnt=0, comment="wait for current LocalRead packing")
+   inserted at KernelWriter.py:2093-2094, gated by `addWaitForPack` inside the
+   `doPackPreSchedule` block (KernelWriter.py:1660-1674). THIS is the wait that
+   covers the ds_read -> v_cvt_pk dependency.
+
+The pack-prefetch wait only exists when the pack-pre scheduling machinery runs,
+and that machinery is gated on doFullPackCodePrefetch / doPackPreScheduling*,
+which at KernelWriter.py:9080-9088 are all gated on `not UseCustomMainLoopSchedule`.
+
+So:
+  - real cms0 (UseCustomMainLoopSchedule=0): doFullPackCodePrefetch=True  -> wait emitted (correct)
+  - real cms1 (UseCustomMainLoopSchedule=1): doFullPackCodePrefetch=False, but CMS's
+        OWN scheduler inserts its own lgkmcnt waits (see cms1 ML waits at mfma_index
+        3,5,11,28,30,39,41) -> correct, just via a different code path
+  - SHADOW (SIA3 ordering run INSIDE the cms1 kernel): doFullPackCodePrefetch=False
+        AND it does not go through CMS's scheduler either -> gets NEITHER wait ->
+        the ds_read->pack edge is left uncovered. This is the synthetic-hybrid bug.
+
+What doFullPackCodePrefetch actually does, for reference: it hoists the pack
+(cvt) work one loop iteration ahead. usePLRPackA/B go true (KernelWriter.py:
+3674-3675) and the generated packCode is routed into the next-loop packPre[]
+bucket (3702/3758) instead of the current-iter pack[] bucket (3704/3762). The
+MFMA at the top of the next iteration then finds its operands already packed,
+hiding ds_read + cvt latency behind the current iteration's matrix math. The
+"wait for current LocalRead packing" lgkmcnt(0) is part of that machinery.
+
+
+================================================================================
+WHY THE BLANKET REMOVAL IS NOT THE FIX (two new problems it introduces)
+================================================================================
+
+Forcing the flag on globally is a real codegen change to the EMITTED CMS kernel,
+not just to the shadow reference. The dumper run surfaced this immediately:
+
+  compare_graphs: data-flow per-category node counts differ.
+  MFMA: ref=256 vs subj=264
+
+Diagnosis of that 8-count gap (ref = shadow, subj = cms1 subject):
+
+  v_mfma_f32_4x4x4 (pack-MFMA) counts, per body, DEBUG run:
+
+                  PRO  ML_PREV  ML  NGL  NLL   total
+    cms1 subject   8     16     16   16   16     72
+    shadow ref     8     16     16   16    8     64   <-- 8 short, all in NLL
+
+  The shadow's NLL lost 8 pack-MFMAs (16 -> 8). Root cause: the NLL/tail path
+  force-disables doFullPackCodePrefetch again at KernelWriter.py:9089-9093
+  (the tailloopInNll branch) and the NLL emission interacts with that
+  differently than the main-loop shadow capture does. The net effect is that,
+  with the flag forced on, the shadow NLL and the subject NLL diverge in
+  pack-MFMA count -- so the global change does not even keep shadow and subject
+  consistent in the tail body.
+
+  (Note the subject's own total MFMA stayed at 264 and its PRO shrank 42->40 --
+  the flag reshuffles where packs/pack-MFMAs land in the real CMS kernel too.
+  That is exactly why turning it on for real CMS emission is a behavior change,
+  not a no-op.)
+
+  validate_edge_wait_coverage on the subject went to 0 failures in the debug
+  run, but that is incidental -- the subject was already wait-correct on
+  baseline; the 16 EdgeRoutedDifferentlyFailures were always about the SHADOW
+  reference being unfaithful, not about the subject.
+
+
+================================================================================
+CONCLUSION / RECOMMENDED DIRECTION (CORRECTED)
+================================================================================
+
+The experiment is a useful PROBE, not a fix. What it actually establishes:
+
+  1. The pack-prefetch wait machinery IS gated off in the shadow (because the
+     shadow runs inside a UseCustomMainLoopSchedule=1 kernel, so
+     doFullPackCodePrefetch=False). Flipping the flag re-enables that machinery
+     and adds back ONE covering wait at mfma_index 35.
+
+  2. But that does NOT fix the missing-wait defect. The shadow body is
+     structured as an interleaved one-read-per-mfma stream (the cms1
+     ForceUnrollSubIter layout), so ds_reads continue past the mfma-35 wait
+     (mfma 36..42), each feeding an UNCOVERED pack. The genuine cms0 kernel
+     instead BATCHES all reads before a single drain wait, so all its packs are
+     covered. The flag does not transform one shape into the other.
+
+  3. Flipping the flag globally ALSO breaks the subject/shadow consistency:
+     compare_graphs reports MFMA ref=256 vs subj=264, because the NLL/tail path
+     (tailloopInNll, KernelWriter.py:9089-9093) re-disables the flag on the
+     emit side and the shadow NLL loses 8 pack-MFMAs (16->8). And it changes the
+     real emitted CMS kernel (subject PRO shrank 42->40 instructions), so it is
+     a behavior change, not a capture-only tweak.
+
+So the missing-wait defect is NOT a single-flag toggle. Two things differ
+between the shadow and the default kernel it claims to mirror:
+  (a) WHETHER the pack-prefetch wait machinery runs (the flag), AND
+  (b) the BODY SHAPE -- interleaved read/pack (shadow) vs batched-read-then-drain
+      (cms0). Even with (a) fixed, (b) leaves most ds_read->pack edges uncovered.
+
+OPEN QUESTION for the real fix: is the SHADOW reference even the right thing to
+diff against? It is a synthetic hybrid (SIA3 ordering applied to the cms1
+ForceUnrollSubIter instruction set) that corresponds to no runnable kernel. Its
+body shape does not match the genuine default (cms0) kernel, so "make the shadow
+carry cms0's waits" is not achievable by a flag -- it would require the shadow
+to also adopt cms0's read-batching, at which point it is just re-deriving cms0.
+The more promising direction may be to validate the CMS subject against the
+GENUINE cms0 capture (already dumped as cms0_capture_listing.txt) rather than
+against the synthetic shadow. That is a design decision, not a code tweak --
+flagged here for follow-up, not resolved by this experiment.
+
+(KernelWriter.py is reverted to baseline; the DEBUG_* capture files in this
+directory are the flag-forced artifacts, kept for inspection.)

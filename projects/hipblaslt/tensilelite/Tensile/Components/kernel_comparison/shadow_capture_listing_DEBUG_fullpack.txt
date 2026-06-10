@@ -1,0 +1,715 @@
+    1 | # SHADOW (reference / default) schedule capture listing for BPG#11 TF32 4x4 TN (CANONICAL_KERNEL_CONFIG)
+    2 | # Body order = unrolled timeline: PRO -> ML_PREV(iter0) -> ML(iter1) -> NGL -> NLL
+    3 | # Columns: <file_line> | body | body_idx | mfma_index | seq | canonical_render
+    4 | #==============================================================================
+    5 | 
+    6 | ### body PRO: 40 instructions
+    7 | PRO | 0 | -1 | 0 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+0], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+    8 | PRO | 1 | -1 | 1 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+1], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+    9 | PRO | 2 | -1 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+2], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+   10 | PRO | 3 | -1 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+3], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+   11 | PRO | 4 | -1 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+8], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+   12 | PRO | 5 | -1 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+9], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+   13 | PRO | 6 | -1 | 6 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+10], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+   14 | PRO | 7 | -1 | 7 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+11], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+   15 | PRO | 8 | -1 | 8 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+0], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+   16 | PRO | 9 | -1 | 9 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+1], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+   17 | PRO | 10 | -1 | 10 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+2], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+   18 | PRO | 11 | -1 | 11 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+3], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+   19 | PRO | 12 | -1 | 12 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+8], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+   20 | PRO | 13 | -1 | 13 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+9], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+   21 | PRO | 14 | -1 | 14 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+10], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+   22 | PRO | 15 | -1 | 15 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+11], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+   23 | PRO | 16 | -1 | 16 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[74:75], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+1], v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3]
+   24 | PRO | 17 | -1 | 17 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[74:75], v[vgprValuA_X0_I0+2:vgprValuA_X0_I0+2+1], v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3]
+   25 | PRO | 18 | -1 | 18 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[74:75], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+1], v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3]
+   26 | PRO | 19 | -1 | 19 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[74:75], v[vgprValuA_X0_I0+10:vgprValuA_X0_I0+10+1], v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3]
+   27 | PRO | 20 | -1 | 20 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[74:75], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+1], v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3]
+   28 | PRO | 21 | -1 | 21 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[74:75], v[vgprValuB_X0_I0+2:vgprValuB_X0_I0+2+1], v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3]
+   29 | PRO | 22 | -1 | 22 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[74:75], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+1], v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3]
+   30 | PRO | 23 | -1 | 23 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[74:75], v[vgprValuB_X0_I0+10:vgprValuB_X0_I0+10+1], v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3]
+   31 | PRO | 24 | -1 | 24 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+7], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+   32 | PRO | 25 | -1 | 25 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+6], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+   33 | PRO | 26 | -1 | 26 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+5], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+   34 | PRO | 27 | -1 | 27 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+4], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+   35 | PRO | 28 | -1 | 28 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+15], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+   36 | PRO | 29 | -1 | 29 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+14], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+   37 | PRO | 30 | -1 | 30 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+13], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+   38 | PRO | 31 | -1 | 31 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+12], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+   39 | PRO | 32 | -1 | 32 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+7], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+   40 | PRO | 33 | -1 | 33 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+6], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+   41 | PRO | 34 | -1 | 34 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+5], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+   42 | PRO | 35 | -1 | 35 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+4], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+   43 | PRO | 36 | -1 | 36 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+15], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+   44 | PRO | 37 | -1 | 37 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+14], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+   45 | PRO | 38 | -1 | 38 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+13], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+   46 | PRO | 39 | -1 | 39 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+12], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+   47 | 
+   48 | ### body ML_PREV: 192 instructions
+   49 | ML_PREV | 0 | -1 | 0 | s_waitcnt lgkmcnt(0)
+   50 | ML_PREV | 1 | 0 | 0 | v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[0:3]
+   51 | ML_PREV | 2 | 0 | 1 | ds_read_b128 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[vgprLocalReadAddrA+0] offset:256
+   52 | ML_PREV | 3 | 0 | 2 | s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter]
+   53 | ML_PREV | 4 | 0 | 3 | s_cselect_b32 s68, s[sgprWrapUA+0], s[sgprGlobalReadIncsA+0]
+   54 | ML_PREV | 5 | 0 | 4 | s_cselect_b32 s69, s[sgprWrapUA+1], 0
+   55 | ML_PREV | 6 | 1 | 0 | v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[0:3]
+   56 | ML_PREV | 7 | 1 | 1 | ds_read_b128 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[vgprLocalReadAddrA+0] offset:320
+   57 | ML_PREV | 8 | 1 | 2 | s_add_u32 s[sgprSrdA+0], s[sgprSrdA+0], s68
+   58 | ML_PREV | 9 | 1 | 3 | s_addc_u32 s[sgprSrdA+1], s[sgprSrdA+1], s69
+   59 | ML_PREV | 10 | 1 | 4 | s_sub_u32 s[sgprShadowLimitA+0], s[sgprShadowLimitA+0], s68
+   60 | ML_PREV | 11 | 2 | 0 | v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[0:3]
+   61 | ML_PREV | 12 | 2 | 1 | ds_read_b128 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[vgprLocalReadAddrA+0] offset:384
+   62 | ML_PREV | 13 | 2 | 2 | s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s69
+   63 | ML_PREV | 14 | 2 | 3 | s_cmp_eq_u32 s[sgprShadowLimitA+1], 0
+   64 | ML_PREV | 15 | 2 | 4 | s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit
+   65 | ML_PREV | 16 | 3 | 0 | v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[4:7]
+   66 | ML_PREV | 17 | 3 | 1 | ds_read_b128 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[vgprLocalReadAddrA+0] offset:448
+   67 | ML_PREV | 18 | 3 | 2 | s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter]
+   68 | ML_PREV | 19 | 3 | 3 | s_cselect_b32 s68, s[sgprWrapUB+0], s[sgprGlobalReadIncsB+0]
+   69 | ML_PREV | 20 | 3 | 4 | s_cselect_b32 s69, s[sgprWrapUB+1], 0
+   70 | ML_PREV | 21 | 4 | 0 | v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[4:7]
+   71 | ML_PREV | 22 | 4 | 1 | ds_read_b128 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[vgprLocalReadAddrB+0] offset:256
+   72 | ML_PREV | 23 | 4 | 2 | s_add_u32 s[sgprSrdB+0], s[sgprSrdB+0], s68
+   73 | ML_PREV | 24 | 4 | 3 | s_addc_u32 s[sgprSrdB+1], s[sgprSrdB+1], s69
+   74 | ML_PREV | 25 | 4 | 4 | s_sub_u32 s[sgprShadowLimitB+0], s[sgprShadowLimitB+0], s68
+   75 | ML_PREV | 26 | 5 | 0 | v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[4:7]
+   76 | ML_PREV | 27 | 5 | 1 | ds_read_b128 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[vgprLocalReadAddrB+0] offset:320
+   77 | ML_PREV | 28 | 5 | 2 | s_subb_u32 s[sgprShadowLimitB+1], s[sgprShadowLimitB+1], s69
+   78 | ML_PREV | 29 | 5 | 3 | s_cmp_eq_u32 s[sgprShadowLimitB+1], 0
+   79 | ML_PREV | 30 | 5 | 4 | s_cselect_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0], BufferLimit
+   80 | ML_PREV | 31 | 6 | 0 | v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[16:19]
+   81 | ML_PREV | 32 | 6 | 1 | ds_read_b128 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[vgprLocalReadAddrB+0] offset:384
+   82 | ML_PREV | 33 | 7 | 0 | v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[16:19]
+   83 | ML_PREV | 34 | 7 | 1 | ds_read_b128 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[vgprLocalReadAddrB+0] offset:448
+   84 | ML_PREV | 35 | 8 | 0 | v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[16:19]
+   85 | ML_PREV | 36 | 9 | 0 | v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[20:23]
+   86 | ML_PREV | 37 | 9 | 1 | s_waitcnt lgkmcnt(0)
+   87 | ML_PREV | 38 | 9 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+16], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+   88 | ML_PREV | 39 | 9 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+17], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+   89 | ML_PREV | 40 | 9 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+18], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+   90 | ML_PREV | 41 | 9 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+19], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+   91 | ML_PREV | 42 | 9 | 6 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+24], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+   92 | ML_PREV | 43 | 9 | 7 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+25], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+   93 | ML_PREV | 44 | 9 | 8 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+26], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+   94 | ML_PREV | 45 | 9 | 9 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+27], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+   95 | ML_PREV | 46 | 9 | 10 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[74:75], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+1], v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3]
+   96 | ML_PREV | 47 | 9 | 11 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[74:75], v[vgprValuA_X0_I0+18:vgprValuA_X0_I0+18+1], v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3]
+   97 | ML_PREV | 48 | 9 | 12 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[74:75], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+1], v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3]
+   98 | ML_PREV | 49 | 9 | 13 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[74:75], v[vgprValuA_X0_I0+26:vgprValuA_X0_I0+26+1], v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3]
+   99 | ML_PREV | 50 | 9 | 14 | s_nop 2
+  100 | ML_PREV | 51 | 9 | 15 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+23], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  101 | ML_PREV | 52 | 10 | 0 | v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[20:23]
+  102 | ML_PREV | 53 | 10 | 1 | v_xor_b32 v[vgprLocalReadAddrA], 0x10000, v[vgprLocalReadAddrA]
+  103 | ML_PREV | 54 | 10 | 2 | v_xor_b32 v[vgprLocalReadAddrB], 0x10000, v[vgprLocalReadAddrB]
+  104 | ML_PREV | 55 | 10 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+22], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  105 | ML_PREV | 56 | 10 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+21], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  106 | ML_PREV | 57 | 10 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+20], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  107 | ML_PREV | 58 | 10 | 6 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+31], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  108 | ML_PREV | 59 | 10 | 7 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+30], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  109 | ML_PREV | 60 | 10 | 8 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+29], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  110 | ML_PREV | 61 | 10 | 9 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+28], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  111 | ML_PREV | 62 | 11 | 0 | v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[20:23]
+  112 | ML_PREV | 63 | 11 | 1 | s_waitcnt lgkmcnt(0)
+  113 | ML_PREV | 64 | 11 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+16], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  114 | ML_PREV | 65 | 11 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+17], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  115 | ML_PREV | 66 | 12 | 0 | v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[8:11]
+  116 | ML_PREV | 67 | 12 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+18], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  117 | ML_PREV | 68 | 12 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+19], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  118 | ML_PREV | 69 | 13 | 0 | v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[8:11]
+  119 | ML_PREV | 70 | 13 | 1 | s_mov_b32 m0, s[sgprLocalWriteAddrA]
+  120 | ML_PREV | 71 | 13 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetA+0], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds
+  121 | ML_PREV | 72 | 13 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+24], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  122 | ML_PREV | 73 | 13 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+25], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  123 | ML_PREV | 74 | 14 | 0 | v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[8:11]
+  124 | ML_PREV | 75 | 14 | 1 | s_add_u32 m0, m0, 4224
+  125 | ML_PREV | 76 | 14 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetA+1], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds
+  126 | ML_PREV | 77 | 14 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+26], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  127 | ML_PREV | 78 | 15 | 0 | v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[12:15]
+  128 | ML_PREV | 79 | 15 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+27], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  129 | ML_PREV | 80 | 15 | 2 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[74:75], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+1], v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3]
+  130 | ML_PREV | 81 | 15 | 3 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[74:75], v[vgprValuB_X0_I0+18:vgprValuB_X0_I0+18+1], v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3]
+  131 | ML_PREV | 82 | 15 | 4 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[74:75], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+1], v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3]
+  132 | ML_PREV | 83 | 15 | 5 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[74:75], v[vgprValuB_X0_I0+26:vgprValuB_X0_I0+26+1], v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3]
+  133 | ML_PREV | 84 | 15 | 6 | s_nop 2
+  134 | ML_PREV | 85 | 15 | 7 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+23], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  135 | ML_PREV | 86 | 16 | 0 | v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[12:15]
+  136 | ML_PREV | 87 | 16 | 1 | s_add_u32 m0, m0, 4224
+  137 | ML_PREV | 88 | 16 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetA+2], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds
+  138 | ML_PREV | 89 | 16 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+22], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  139 | ML_PREV | 90 | 16 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+21], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  140 | ML_PREV | 91 | 17 | 0 | v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[12:15]
+  141 | ML_PREV | 92 | 17 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+20], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  142 | ML_PREV | 93 | 17 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+31], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  143 | ML_PREV | 94 | 18 | 0 | v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[24:27]
+  144 | ML_PREV | 95 | 18 | 1 | s_add_u32 m0, m0, 4224
+  145 | ML_PREV | 96 | 18 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetA+3], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds
+  146 | ML_PREV | 97 | 18 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+30], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  147 | ML_PREV | 98 | 18 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+29], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  148 | ML_PREV | 99 | 19 | 0 | v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[24:27]
+  149 | ML_PREV | 100 | 19 | 1 | s_mov_b32 m0, s[sgprLocalWriteAddrB]
+  150 | ML_PREV | 101 | 19 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetB+0], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds
+  151 | ML_PREV | 102 | 19 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+28], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  152 | ML_PREV | 103 | 20 | 0 | v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[24:27]
+  153 | ML_PREV | 104 | 21 | 0 | v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[28:31]
+  154 | ML_PREV | 105 | 21 | 1 | s_add_u32 m0, m0, 4224
+  155 | ML_PREV | 106 | 21 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetB+1], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds
+  156 | ML_PREV | 107 | 22 | 0 | v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[28:31]
+  157 | ML_PREV | 108 | 23 | 0 | v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[28:31]
+  158 | ML_PREV | 109 | 23 | 1 | s_add_u32 m0, m0, 4224
+  159 | ML_PREV | 110 | 23 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetB+2], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds
+  160 | ML_PREV | 111 | 24 | 0 | v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[32:35]
+  161 | ML_PREV | 112 | 25 | 0 | v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[32:35]
+  162 | ML_PREV | 113 | 25 | 1 | s_add_u32 m0, m0, 4224
+  163 | ML_PREV | 114 | 25 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetB+3], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds
+  164 | ML_PREV | 115 | 25 | 3 | s_xor_b32 s[sgprLocalWriteAddrA], 0x10000, s[sgprLocalWriteAddrA]
+  165 | ML_PREV | 116 | 25 | 4 | s_xor_b32 s[sgprLocalWriteAddrB], 0x10000, s[sgprLocalWriteAddrB]
+  166 | ML_PREV | 117 | 25 | 5 | s_waitcnt vmcnt(8)
+  167 | ML_PREV | 118 | 25 | 6 | s_barrier
+  168 | ML_PREV | 119 | 26 | 0 | v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[32:35]
+  169 | ML_PREV | 120 | 27 | 0 | v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[36:39]
+  170 | ML_PREV | 121 | 28 | 0 | v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[36:39]
+  171 | ML_PREV | 122 | 29 | 0 | v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[36:39]
+  172 | ML_PREV | 123 | 30 | 0 | v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[48:51]
+  173 | ML_PREV | 124 | 31 | 0 | v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[48:51]
+  174 | ML_PREV | 125 | 32 | 0 | v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[48:51]
+  175 | ML_PREV | 126 | 33 | 0 | v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[52:55]
+  176 | ML_PREV | 127 | 34 | 0 | v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[52:55]
+  177 | ML_PREV | 128 | 35 | 0 | v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[52:55]
+  178 | ML_PREV | 129 | 35 | 1 | ds_read_b128 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[vgprLocalReadAddrA+0] offset:0
+  179 | ML_PREV | 130 | 35 | 2 | s_waitcnt lgkmcnt(0)
+  180 | ML_PREV | 131 | 35 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+0], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  181 | ML_PREV | 132 | 35 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+1], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  182 | ML_PREV | 133 | 35 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+2], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  183 | ML_PREV | 134 | 35 | 6 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+3], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  184 | ML_PREV | 135 | 36 | 0 | v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[40:43]
+  185 | ML_PREV | 136 | 36 | 1 | ds_read_b128 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[vgprLocalReadAddrA+0] offset:64
+  186 | ML_PREV | 137 | 36 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+8], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  187 | ML_PREV | 138 | 36 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+9], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  188 | ML_PREV | 139 | 36 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+10], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  189 | ML_PREV | 140 | 36 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+11], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  190 | ML_PREV | 141 | 37 | 0 | v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[40:43]
+  191 | ML_PREV | 142 | 37 | 1 | ds_read_b128 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[vgprLocalReadAddrB+0] offset:0
+  192 | ML_PREV | 143 | 37 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+0], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  193 | ML_PREV | 144 | 37 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+1], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  194 | ML_PREV | 145 | 37 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+2], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  195 | ML_PREV | 146 | 37 | 5 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+3], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  196 | ML_PREV | 147 | 38 | 0 | v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[40:43]
+  197 | ML_PREV | 148 | 38 | 1 | ds_read_b128 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[vgprLocalReadAddrB+0] offset:64
+  198 | ML_PREV | 149 | 38 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+8], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  199 | ML_PREV | 150 | 38 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+9], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  200 | ML_PREV | 151 | 38 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+10], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  201 | ML_PREV | 152 | 39 | 0 | v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[44:47]
+  202 | ML_PREV | 153 | 39 | 1 | ds_read_b128 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[vgprLocalReadAddrA+0] offset:128
+  203 | ML_PREV | 154 | 39 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+11], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  204 | ML_PREV | 155 | 39 | 3 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[74:75], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+1], v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3]
+  205 | ML_PREV | 156 | 39 | 4 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[74:75], v[vgprValuA_X0_I0+2:vgprValuA_X0_I0+2+1], v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3]
+  206 | ML_PREV | 157 | 39 | 5 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[74:75], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+1], v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3]
+  207 | ML_PREV | 158 | 39 | 6 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[74:75], v[vgprValuA_X0_I0+10:vgprValuA_X0_I0+10+1], v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3]
+  208 | ML_PREV | 159 | 39 | 7 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[74:75], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+1], v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3]
+  209 | ML_PREV | 160 | 39 | 8 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[74:75], v[vgprValuB_X0_I0+2:vgprValuB_X0_I0+2+1], v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3]
+  210 | ML_PREV | 161 | 39 | 9 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[74:75], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+1], v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3]
+  211 | ML_PREV | 162 | 39 | 10 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[74:75], v[vgprValuB_X0_I0+10:vgprValuB_X0_I0+10+1], v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3]
+  212 | ML_PREV | 163 | 39 | 11 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+7], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  213 | ML_PREV | 164 | 39 | 12 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+6], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  214 | ML_PREV | 165 | 40 | 0 | v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[44:47]
+  215 | ML_PREV | 166 | 40 | 1 | ds_read_b128 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[vgprLocalReadAddrA+0] offset:192
+  216 | ML_PREV | 167 | 40 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+5], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  217 | ML_PREV | 168 | 40 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+4], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  218 | ML_PREV | 169 | 40 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+15], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  219 | ML_PREV | 170 | 41 | 0 | v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[44:47]
+  220 | ML_PREV | 171 | 41 | 1 | ds_read_b128 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[vgprLocalReadAddrB+0] offset:128
+  221 | ML_PREV | 172 | 41 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+14], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  222 | ML_PREV | 173 | 41 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+13], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  223 | ML_PREV | 174 | 41 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+12], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  224 | ML_PREV | 175 | 42 | 0 | v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[56:59]
+  225 | ML_PREV | 176 | 42 | 1 | ds_read_b128 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[vgprLocalReadAddrB+0] offset:192
+  226 | ML_PREV | 177 | 42 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+7], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  227 | ML_PREV | 178 | 42 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+6], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  228 | ML_PREV | 179 | 42 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+5], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  229 | ML_PREV | 180 | 43 | 0 | v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[56:59]
+  230 | ML_PREV | 181 | 43 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+4], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  231 | ML_PREV | 182 | 43 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+15], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  232 | ML_PREV | 183 | 43 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+14], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  233 | ML_PREV | 184 | 44 | 0 | v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[56:59]
+  234 | ML_PREV | 185 | 44 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+13], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  235 | ML_PREV | 186 | 44 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+12], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  236 | ML_PREV | 187 | 45 | 0 | v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[60:63]
+  237 | ML_PREV | 188 | 46 | 0 | v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[60:63]
+  238 | ML_PREV | 189 | 47 | 0 | v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[60:63]
+  239 | ML_PREV | 190 | 48 | 0 | s_sub_u32 s[sgprLoopCounterL], s[sgprLoopCounterL], 1
+  240 | ML_PREV | 191 | 48 | 1 | s_cmp_eq_i32 s[sgprLoopCounterL], 0x2
+  241 | 
+  242 | ### body ML: 192 instructions
+  243 | ML | 0 | -1 | 0 | s_waitcnt lgkmcnt(0)
+  244 | ML | 1 | 0 | 0 | v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[0:3]
+  245 | ML | 2 | 0 | 1 | ds_read_b128 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[vgprLocalReadAddrA+0] offset:256
+  246 | ML | 3 | 0 | 2 | s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter]
+  247 | ML | 4 | 0 | 3 | s_cselect_b32 s68, s[sgprWrapUA+0], s[sgprGlobalReadIncsA+0]
+  248 | ML | 5 | 0 | 4 | s_cselect_b32 s69, s[sgprWrapUA+1], 0
+  249 | ML | 6 | 1 | 0 | v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[0:3]
+  250 | ML | 7 | 1 | 1 | ds_read_b128 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[vgprLocalReadAddrA+0] offset:320
+  251 | ML | 8 | 1 | 2 | s_add_u32 s[sgprSrdA+0], s[sgprSrdA+0], s68
+  252 | ML | 9 | 1 | 3 | s_addc_u32 s[sgprSrdA+1], s[sgprSrdA+1], s69
+  253 | ML | 10 | 1 | 4 | s_sub_u32 s[sgprShadowLimitA+0], s[sgprShadowLimitA+0], s68
+  254 | ML | 11 | 2 | 0 | v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[0:3]
+  255 | ML | 12 | 2 | 1 | ds_read_b128 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[vgprLocalReadAddrA+0] offset:384
+  256 | ML | 13 | 2 | 2 | s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s69
+  257 | ML | 14 | 2 | 3 | s_cmp_eq_u32 s[sgprShadowLimitA+1], 0
+  258 | ML | 15 | 2 | 4 | s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit
+  259 | ML | 16 | 3 | 0 | v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[4:7]
+  260 | ML | 17 | 3 | 1 | ds_read_b128 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[vgprLocalReadAddrA+0] offset:448
+  261 | ML | 18 | 3 | 2 | s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter]
+  262 | ML | 19 | 3 | 3 | s_cselect_b32 s68, s[sgprWrapUB+0], s[sgprGlobalReadIncsB+0]
+  263 | ML | 20 | 3 | 4 | s_cselect_b32 s69, s[sgprWrapUB+1], 0
+  264 | ML | 21 | 4 | 0 | v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[4:7]
+  265 | ML | 22 | 4 | 1 | ds_read_b128 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[vgprLocalReadAddrB+0] offset:256
+  266 | ML | 23 | 4 | 2 | s_add_u32 s[sgprSrdB+0], s[sgprSrdB+0], s68
+  267 | ML | 24 | 4 | 3 | s_addc_u32 s[sgprSrdB+1], s[sgprSrdB+1], s69
+  268 | ML | 25 | 4 | 4 | s_sub_u32 s[sgprShadowLimitB+0], s[sgprShadowLimitB+0], s68
+  269 | ML | 26 | 5 | 0 | v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[4:7]
+  270 | ML | 27 | 5 | 1 | ds_read_b128 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[vgprLocalReadAddrB+0] offset:320
+  271 | ML | 28 | 5 | 2 | s_subb_u32 s[sgprShadowLimitB+1], s[sgprShadowLimitB+1], s69
+  272 | ML | 29 | 5 | 3 | s_cmp_eq_u32 s[sgprShadowLimitB+1], 0
+  273 | ML | 30 | 5 | 4 | s_cselect_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0], BufferLimit
+  274 | ML | 31 | 6 | 0 | v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[16:19]
+  275 | ML | 32 | 6 | 1 | ds_read_b128 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[vgprLocalReadAddrB+0] offset:384
+  276 | ML | 33 | 7 | 0 | v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[16:19]
+  277 | ML | 34 | 7 | 1 | ds_read_b128 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[vgprLocalReadAddrB+0] offset:448
+  278 | ML | 35 | 8 | 0 | v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[16:19]
+  279 | ML | 36 | 9 | 0 | v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[20:23]
+  280 | ML | 37 | 9 | 1 | s_waitcnt lgkmcnt(0)
+  281 | ML | 38 | 9 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+16], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  282 | ML | 39 | 9 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+17], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  283 | ML | 40 | 9 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+18], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  284 | ML | 41 | 9 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+19], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  285 | ML | 42 | 9 | 6 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+24], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  286 | ML | 43 | 9 | 7 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+25], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  287 | ML | 44 | 9 | 8 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+26], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  288 | ML | 45 | 9 | 9 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+27], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  289 | ML | 46 | 9 | 10 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[74:75], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+1], v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3]
+  290 | ML | 47 | 9 | 11 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[74:75], v[vgprValuA_X0_I0+18:vgprValuA_X0_I0+18+1], v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3]
+  291 | ML | 48 | 9 | 12 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[74:75], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+1], v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3]
+  292 | ML | 49 | 9 | 13 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[74:75], v[vgprValuA_X0_I0+26:vgprValuA_X0_I0+26+1], v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3]
+  293 | ML | 50 | 9 | 14 | s_nop 2
+  294 | ML | 51 | 9 | 15 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+23], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  295 | ML | 52 | 10 | 0 | v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[20:23]
+  296 | ML | 53 | 10 | 1 | v_xor_b32 v[vgprLocalReadAddrA], 0x10000, v[vgprLocalReadAddrA]
+  297 | ML | 54 | 10 | 2 | v_xor_b32 v[vgprLocalReadAddrB], 0x10000, v[vgprLocalReadAddrB]
+  298 | ML | 55 | 10 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+22], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  299 | ML | 56 | 10 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+21], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  300 | ML | 57 | 10 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+20], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  301 | ML | 58 | 10 | 6 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+31], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  302 | ML | 59 | 10 | 7 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+30], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  303 | ML | 60 | 10 | 8 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+29], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  304 | ML | 61 | 10 | 9 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+28], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  305 | ML | 62 | 11 | 0 | v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[20:23]
+  306 | ML | 63 | 11 | 1 | s_waitcnt lgkmcnt(0)
+  307 | ML | 64 | 11 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+16], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  308 | ML | 65 | 11 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+17], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  309 | ML | 66 | 12 | 0 | v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[8:11]
+  310 | ML | 67 | 12 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+18], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  311 | ML | 68 | 12 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+19], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  312 | ML | 69 | 13 | 0 | v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[8:11]
+  313 | ML | 70 | 13 | 1 | s_mov_b32 m0, s[sgprLocalWriteAddrA]
+  314 | ML | 71 | 13 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetA+0], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds
+  315 | ML | 72 | 13 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+24], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  316 | ML | 73 | 13 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+25], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  317 | ML | 74 | 14 | 0 | v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[8:11]
+  318 | ML | 75 | 14 | 1 | s_add_u32 m0, m0, 4224
+  319 | ML | 76 | 14 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetA+1], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds
+  320 | ML | 77 | 14 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+26], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  321 | ML | 78 | 15 | 0 | v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[12:15]
+  322 | ML | 79 | 15 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+27], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  323 | ML | 80 | 15 | 2 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[74:75], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+1], v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3]
+  324 | ML | 81 | 15 | 3 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[74:75], v[vgprValuB_X0_I0+18:vgprValuB_X0_I0+18+1], v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3]
+  325 | ML | 82 | 15 | 4 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[74:75], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+1], v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3]
+  326 | ML | 83 | 15 | 5 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[74:75], v[vgprValuB_X0_I0+26:vgprValuB_X0_I0+26+1], v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3]
+  327 | ML | 84 | 15 | 6 | s_nop 2
+  328 | ML | 85 | 15 | 7 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+23], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  329 | ML | 86 | 16 | 0 | v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[12:15]
+  330 | ML | 87 | 16 | 1 | s_add_u32 m0, m0, 4224
+  331 | ML | 88 | 16 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetA+2], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds
+  332 | ML | 89 | 16 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+22], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  333 | ML | 90 | 16 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+21], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  334 | ML | 91 | 17 | 0 | v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[12:15]
+  335 | ML | 92 | 17 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+20], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  336 | ML | 93 | 17 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+31], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  337 | ML | 94 | 18 | 0 | v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[24:27]
+  338 | ML | 95 | 18 | 1 | s_add_u32 m0, m0, 4224
+  339 | ML | 96 | 18 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetA+3], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds
+  340 | ML | 97 | 18 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+30], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  341 | ML | 98 | 18 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+29], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  342 | ML | 99 | 19 | 0 | v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[24:27]
+  343 | ML | 100 | 19 | 1 | s_mov_b32 m0, s[sgprLocalWriteAddrB]
+  344 | ML | 101 | 19 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetB+0], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds
+  345 | ML | 102 | 19 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+28], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  346 | ML | 103 | 20 | 0 | v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[24:27]
+  347 | ML | 104 | 21 | 0 | v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[28:31]
+  348 | ML | 105 | 21 | 1 | s_add_u32 m0, m0, 4224
+  349 | ML | 106 | 21 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetB+1], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds
+  350 | ML | 107 | 22 | 0 | v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[28:31]
+  351 | ML | 108 | 23 | 0 | v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[28:31]
+  352 | ML | 109 | 23 | 1 | s_add_u32 m0, m0, 4224
+  353 | ML | 110 | 23 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetB+2], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds
+  354 | ML | 111 | 24 | 0 | v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[32:35]
+  355 | ML | 112 | 25 | 0 | v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[32:35]
+  356 | ML | 113 | 25 | 1 | s_add_u32 m0, m0, 4224
+  357 | ML | 114 | 25 | 2 | buffer_load_dwordx4 v[vgprGlobalReadOffsetB+3], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds
+  358 | ML | 115 | 25 | 3 | s_xor_b32 s[sgprLocalWriteAddrA], 0x10000, s[sgprLocalWriteAddrA]
+  359 | ML | 116 | 25 | 4 | s_xor_b32 s[sgprLocalWriteAddrB], 0x10000, s[sgprLocalWriteAddrB]
+  360 | ML | 117 | 25 | 5 | s_waitcnt vmcnt(8)
+  361 | ML | 118 | 25 | 6 | s_barrier
+  362 | ML | 119 | 26 | 0 | v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[32:35]
+  363 | ML | 120 | 27 | 0 | v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[36:39]
+  364 | ML | 121 | 28 | 0 | v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[36:39]
+  365 | ML | 122 | 29 | 0 | v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[36:39]
+  366 | ML | 123 | 30 | 0 | v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[48:51]
+  367 | ML | 124 | 31 | 0 | v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[48:51]
+  368 | ML | 125 | 32 | 0 | v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[48:51]
+  369 | ML | 126 | 33 | 0 | v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[52:55]
+  370 | ML | 127 | 34 | 0 | v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[52:55]
+  371 | ML | 128 | 35 | 0 | v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[52:55]
+  372 | ML | 129 | 35 | 1 | ds_read_b128 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[vgprLocalReadAddrA+0] offset:0
+  373 | ML | 130 | 35 | 2 | s_waitcnt lgkmcnt(0)
+  374 | ML | 131 | 35 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+0], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  375 | ML | 132 | 35 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+1], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  376 | ML | 133 | 35 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+2], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  377 | ML | 134 | 35 | 6 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+3], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  378 | ML | 135 | 36 | 0 | v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[40:43]
+  379 | ML | 136 | 36 | 1 | ds_read_b128 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[vgprLocalReadAddrA+0] offset:64
+  380 | ML | 137 | 36 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+8], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  381 | ML | 138 | 36 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+9], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  382 | ML | 139 | 36 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+10], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  383 | ML | 140 | 36 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+11], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  384 | ML | 141 | 37 | 0 | v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[40:43]
+  385 | ML | 142 | 37 | 1 | ds_read_b128 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[vgprLocalReadAddrB+0] offset:0
+  386 | ML | 143 | 37 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+0], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  387 | ML | 144 | 37 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+1], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  388 | ML | 145 | 37 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+2], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  389 | ML | 146 | 37 | 5 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+3], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  390 | ML | 147 | 38 | 0 | v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[40:43]
+  391 | ML | 148 | 38 | 1 | ds_read_b128 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[vgprLocalReadAddrB+0] offset:64
+  392 | ML | 149 | 38 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+8], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  393 | ML | 150 | 38 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+9], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  394 | ML | 151 | 38 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+10], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  395 | ML | 152 | 39 | 0 | v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[44:47]
+  396 | ML | 153 | 39 | 1 | ds_read_b128 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[vgprLocalReadAddrA+0] offset:128
+  397 | ML | 154 | 39 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+11], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  398 | ML | 155 | 39 | 3 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[74:75], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+1], v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3]
+  399 | ML | 156 | 39 | 4 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[74:75], v[vgprValuA_X0_I0+2:vgprValuA_X0_I0+2+1], v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3]
+  400 | ML | 157 | 39 | 5 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[74:75], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+1], v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3]
+  401 | ML | 158 | 39 | 6 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[74:75], v[vgprValuA_X0_I0+10:vgprValuA_X0_I0+10+1], v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3]
+  402 | ML | 159 | 39 | 7 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[74:75], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+1], v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3]
+  403 | ML | 160 | 39 | 8 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[74:75], v[vgprValuB_X0_I0+2:vgprValuB_X0_I0+2+1], v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3]
+  404 | ML | 161 | 39 | 9 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[74:75], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+1], v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3]
+  405 | ML | 162 | 39 | 10 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[74:75], v[vgprValuB_X0_I0+10:vgprValuB_X0_I0+10+1], v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3]
+  406 | ML | 163 | 39 | 11 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+7], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  407 | ML | 164 | 39 | 12 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+6], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  408 | ML | 165 | 40 | 0 | v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[44:47]
+  409 | ML | 166 | 40 | 1 | ds_read_b128 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[vgprLocalReadAddrA+0] offset:192
+  410 | ML | 167 | 40 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+5], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  411 | ML | 168 | 40 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+4], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  412 | ML | 169 | 40 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+15], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  413 | ML | 170 | 41 | 0 | v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[44:47]
+  414 | ML | 171 | 41 | 1 | ds_read_b128 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[vgprLocalReadAddrB+0] offset:128
+  415 | ML | 172 | 41 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+14], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  416 | ML | 173 | 41 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+13], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  417 | ML | 174 | 41 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+12], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  418 | ML | 175 | 42 | 0 | v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[56:59]
+  419 | ML | 176 | 42 | 1 | ds_read_b128 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[vgprLocalReadAddrB+0] offset:192
+  420 | ML | 177 | 42 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+7], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  421 | ML | 178 | 42 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+6], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  422 | ML | 179 | 42 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+5], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  423 | ML | 180 | 43 | 0 | v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[56:59]
+  424 | ML | 181 | 43 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+4], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  425 | ML | 182 | 43 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+15], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  426 | ML | 183 | 43 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+14], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  427 | ML | 184 | 44 | 0 | v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[56:59]
+  428 | ML | 185 | 44 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+13], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  429 | ML | 186 | 44 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+12], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  430 | ML | 187 | 45 | 0 | v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[60:63]
+  431 | ML | 188 | 46 | 0 | v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[60:63]
+  432 | ML | 189 | 47 | 0 | v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[60:63]
+  433 | ML | 190 | 48 | 0 | s_sub_u32 s[sgprLoopCounterL], s[sgprLoopCounterL], 1
+  434 | ML | 191 | 48 | 1 | s_cmp_eq_i32 s[sgprLoopCounterL], 0x2
+  435 | 
+  436 | ### body NGL: 174 instructions
+  437 | NGL | 0 | -1 | 0 | s_waitcnt lgkmcnt(0)
+  438 | NGL | 1 | 0 | 0 | v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[0:3]
+  439 | NGL | 2 | 0 | 1 | ds_read_b128 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[vgprLocalReadAddrA+0] offset:256
+  440 | NGL | 3 | 0 | 2 | s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter]
+  441 | NGL | 4 | 0 | 3 | s_cselect_b32 s68, s[sgprWrapUA+0], s[sgprGlobalReadIncsA+0]
+  442 | NGL | 5 | 0 | 4 | s_cselect_b32 s69, s[sgprWrapUA+1], 0
+  443 | NGL | 6 | 1 | 0 | v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[0:3]
+  444 | NGL | 7 | 1 | 1 | ds_read_b128 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[vgprLocalReadAddrA+0] offset:320
+  445 | NGL | 8 | 1 | 2 | s_add_u32 s[sgprSrdA+0], s[sgprSrdA+0], s68
+  446 | NGL | 9 | 1 | 3 | s_addc_u32 s[sgprSrdA+1], s[sgprSrdA+1], s69
+  447 | NGL | 10 | 1 | 4 | s_sub_u32 s[sgprShadowLimitA+0], s[sgprShadowLimitA+0], s68
+  448 | NGL | 11 | 2 | 0 | v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[0:3]
+  449 | NGL | 12 | 2 | 1 | ds_read_b128 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[vgprLocalReadAddrA+0] offset:384
+  450 | NGL | 13 | 2 | 2 | s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s69
+  451 | NGL | 14 | 2 | 3 | s_cmp_eq_u32 s[sgprShadowLimitA+1], 0
+  452 | NGL | 15 | 2 | 4 | s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit
+  453 | NGL | 16 | 3 | 0 | v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[4:7]
+  454 | NGL | 17 | 3 | 1 | ds_read_b128 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[vgprLocalReadAddrA+0] offset:448
+  455 | NGL | 18 | 3 | 2 | s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter]
+  456 | NGL | 19 | 3 | 3 | s_cselect_b32 s68, s[sgprWrapUB+0], s[sgprGlobalReadIncsB+0]
+  457 | NGL | 20 | 3 | 4 | s_cselect_b32 s69, s[sgprWrapUB+1], 0
+  458 | NGL | 21 | 4 | 0 | v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[4:7]
+  459 | NGL | 22 | 4 | 1 | ds_read_b128 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[vgprLocalReadAddrB+0] offset:256
+  460 | NGL | 23 | 4 | 2 | s_add_u32 s[sgprSrdB+0], s[sgprSrdB+0], s68
+  461 | NGL | 24 | 4 | 3 | s_addc_u32 s[sgprSrdB+1], s[sgprSrdB+1], s69
+  462 | NGL | 25 | 4 | 4 | s_sub_u32 s[sgprShadowLimitB+0], s[sgprShadowLimitB+0], s68
+  463 | NGL | 26 | 5 | 0 | v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[4:7]
+  464 | NGL | 27 | 5 | 1 | ds_read_b128 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[vgprLocalReadAddrB+0] offset:320
+  465 | NGL | 28 | 5 | 2 | s_subb_u32 s[sgprShadowLimitB+1], s[sgprShadowLimitB+1], s69
+  466 | NGL | 29 | 5 | 3 | s_cmp_eq_u32 s[sgprShadowLimitB+1], 0
+  467 | NGL | 30 | 5 | 4 | s_cselect_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0], BufferLimit
+  468 | NGL | 31 | 6 | 0 | v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[16:19]
+  469 | NGL | 32 | 6 | 1 | ds_read_b128 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[vgprLocalReadAddrB+0] offset:384
+  470 | NGL | 33 | 7 | 0 | v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[16:19]
+  471 | NGL | 34 | 7 | 1 | ds_read_b128 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[vgprLocalReadAddrB+0] offset:448
+  472 | NGL | 35 | 8 | 0 | v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[16:19]
+  473 | NGL | 36 | 9 | 0 | v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[20:23]
+  474 | NGL | 37 | 9 | 1 | s_waitcnt lgkmcnt(0)
+  475 | NGL | 38 | 9 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+16], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  476 | NGL | 39 | 9 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+17], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  477 | NGL | 40 | 9 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+18], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  478 | NGL | 41 | 9 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+19], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  479 | NGL | 42 | 9 | 6 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+24], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  480 | NGL | 43 | 9 | 7 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+25], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  481 | NGL | 44 | 9 | 8 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+26], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  482 | NGL | 45 | 9 | 9 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+27], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  483 | NGL | 46 | 9 | 10 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[74:75], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+1], v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3]
+  484 | NGL | 47 | 9 | 11 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[74:75], v[vgprValuA_X0_I0+18:vgprValuA_X0_I0+18+1], v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3]
+  485 | NGL | 48 | 9 | 12 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[74:75], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+1], v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3]
+  486 | NGL | 49 | 9 | 13 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[74:75], v[vgprValuA_X0_I0+26:vgprValuA_X0_I0+26+1], v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3]
+  487 | NGL | 50 | 9 | 14 | s_nop 2
+  488 | NGL | 51 | 9 | 15 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+23], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  489 | NGL | 52 | 10 | 0 | v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[20:23]
+  490 | NGL | 53 | 10 | 1 | v_xor_b32 v[vgprLocalReadAddrA], 0x10000, v[vgprLocalReadAddrA]
+  491 | NGL | 54 | 10 | 2 | v_xor_b32 v[vgprLocalReadAddrB], 0x10000, v[vgprLocalReadAddrB]
+  492 | NGL | 55 | 10 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+22], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  493 | NGL | 56 | 10 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+21], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  494 | NGL | 57 | 10 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+20], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  495 | NGL | 58 | 10 | 6 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+31], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  496 | NGL | 59 | 10 | 7 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+30], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  497 | NGL | 60 | 10 | 8 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+29], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  498 | NGL | 61 | 10 | 9 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+28], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  499 | NGL | 62 | 11 | 0 | v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[20:23]
+  500 | NGL | 63 | 11 | 1 | s_waitcnt lgkmcnt(0)
+  501 | NGL | 64 | 11 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+16], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  502 | NGL | 65 | 11 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+17], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  503 | NGL | 66 | 12 | 0 | v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[8:11]
+  504 | NGL | 67 | 12 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+18], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  505 | NGL | 68 | 12 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+19], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  506 | NGL | 69 | 13 | 0 | v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[8:11]
+  507 | NGL | 70 | 13 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+24], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  508 | NGL | 71 | 13 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+25], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  509 | NGL | 72 | 14 | 0 | v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[8:11]
+  510 | NGL | 73 | 14 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+26], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  511 | NGL | 74 | 15 | 0 | v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[12:15]
+  512 | NGL | 75 | 15 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+27], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  513 | NGL | 76 | 15 | 2 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[74:75], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+1], v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3]
+  514 | NGL | 77 | 15 | 3 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[74:75], v[vgprValuB_X0_I0+18:vgprValuB_X0_I0+18+1], v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3]
+  515 | NGL | 78 | 15 | 4 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[74:75], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+1], v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3]
+  516 | NGL | 79 | 15 | 5 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[74:75], v[vgprValuB_X0_I0+26:vgprValuB_X0_I0+26+1], v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3]
+  517 | NGL | 80 | 15 | 6 | s_nop 2
+  518 | NGL | 81 | 15 | 7 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+23], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  519 | NGL | 82 | 16 | 0 | v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[12:15]
+  520 | NGL | 83 | 16 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+22], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  521 | NGL | 84 | 16 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+21], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  522 | NGL | 85 | 17 | 0 | v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[12:15]
+  523 | NGL | 86 | 17 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+20], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  524 | NGL | 87 | 17 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+31], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  525 | NGL | 88 | 18 | 0 | v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[24:27]
+  526 | NGL | 89 | 18 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+30], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  527 | NGL | 90 | 18 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+29], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  528 | NGL | 91 | 19 | 0 | v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[24:27]
+  529 | NGL | 92 | 19 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+28], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  530 | NGL | 93 | 20 | 0 | v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[24:27]
+  531 | NGL | 94 | 21 | 0 | v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[28:31]
+  532 | NGL | 95 | 22 | 0 | v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[28:31]
+  533 | NGL | 96 | 23 | 0 | v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[28:31]
+  534 | NGL | 97 | 23 | 1 | s_waitcnt lgkmcnt(0)
+  535 | NGL | 98 | 24 | 0 | v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[32:35]
+  536 | NGL | 99 | 25 | 0 | v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[32:35]
+  537 | NGL | 100 | 25 | 1 | s_waitcnt vmcnt(0)
+  538 | NGL | 101 | 25 | 2 | s_barrier
+  539 | NGL | 102 | 26 | 0 | v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[32:35]
+  540 | NGL | 103 | 27 | 0 | v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[36:39]
+  541 | NGL | 104 | 28 | 0 | v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[36:39]
+  542 | NGL | 105 | 29 | 0 | v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[36:39]
+  543 | NGL | 106 | 30 | 0 | v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[48:51]
+  544 | NGL | 107 | 31 | 0 | v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[48:51]
+  545 | NGL | 108 | 32 | 0 | v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[48:51]
+  546 | NGL | 109 | 33 | 0 | v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[52:55]
+  547 | NGL | 110 | 34 | 0 | v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[52:55]
+  548 | NGL | 111 | 35 | 0 | v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[52:55]
+  549 | NGL | 112 | 35 | 1 | ds_read_b128 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[vgprLocalReadAddrA+0] offset:0
+  550 | NGL | 113 | 35 | 2 | s_waitcnt lgkmcnt(0)
+  551 | NGL | 114 | 35 | 3 | s_waitcnt lgkmcnt(0)
+  552 | NGL | 115 | 35 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+0], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  553 | NGL | 116 | 35 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+1], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  554 | NGL | 117 | 35 | 6 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+2], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  555 | NGL | 118 | 35 | 7 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+3], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  556 | NGL | 119 | 36 | 0 | v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[40:43]
+  557 | NGL | 120 | 36 | 1 | ds_read_b128 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[vgprLocalReadAddrA+0] offset:64
+  558 | NGL | 121 | 36 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+8], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  559 | NGL | 122 | 36 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+9], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  560 | NGL | 123 | 36 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+10], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  561 | NGL | 124 | 36 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+11], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  562 | NGL | 125 | 37 | 0 | v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[40:43]
+  563 | NGL | 126 | 37 | 1 | ds_read_b128 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[vgprLocalReadAddrB+0] offset:0
+  564 | NGL | 127 | 37 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+0], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  565 | NGL | 128 | 37 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+1], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  566 | NGL | 129 | 37 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+2], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  567 | NGL | 130 | 37 | 5 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+3], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  568 | NGL | 131 | 38 | 0 | v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[40:43]
+  569 | NGL | 132 | 38 | 1 | ds_read_b128 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[vgprLocalReadAddrB+0] offset:64
+  570 | NGL | 133 | 38 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+8], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  571 | NGL | 134 | 38 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+9], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  572 | NGL | 135 | 38 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+10], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  573 | NGL | 136 | 39 | 0 | v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[44:47]
+  574 | NGL | 137 | 39 | 1 | ds_read_b128 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[vgprLocalReadAddrA+0] offset:128
+  575 | NGL | 138 | 39 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+11], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  576 | NGL | 139 | 39 | 3 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[74:75], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+1], v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3]
+  577 | NGL | 140 | 39 | 4 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[74:75], v[vgprValuA_X0_I0+2:vgprValuA_X0_I0+2+1], v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3]
+  578 | NGL | 141 | 39 | 5 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[74:75], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+1], v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3]
+  579 | NGL | 142 | 39 | 6 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[74:75], v[vgprValuA_X0_I0+10:vgprValuA_X0_I0+10+1], v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3]
+  580 | NGL | 143 | 39 | 7 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[74:75], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+1], v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3]
+  581 | NGL | 144 | 39 | 8 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[74:75], v[vgprValuB_X0_I0+2:vgprValuB_X0_I0+2+1], v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3]
+  582 | NGL | 145 | 39 | 9 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[74:75], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+1], v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3]
+  583 | NGL | 146 | 39 | 10 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[74:75], v[vgprValuB_X0_I0+10:vgprValuB_X0_I0+10+1], v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3]
+  584 | NGL | 147 | 39 | 11 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+7], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  585 | NGL | 148 | 39 | 12 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+6], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  586 | NGL | 149 | 40 | 0 | v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[44:47]
+  587 | NGL | 150 | 40 | 1 | ds_read_b128 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[vgprLocalReadAddrA+0] offset:192
+  588 | NGL | 151 | 40 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+5], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  589 | NGL | 152 | 40 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+4], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  590 | NGL | 153 | 40 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+15], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  591 | NGL | 154 | 41 | 0 | v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[44:47]
+  592 | NGL | 155 | 41 | 1 | ds_read_b128 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[vgprLocalReadAddrB+0] offset:128
+  593 | NGL | 156 | 41 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+14], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  594 | NGL | 157 | 41 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+13], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  595 | NGL | 158 | 41 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+12], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  596 | NGL | 159 | 42 | 0 | v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[56:59]
+  597 | NGL | 160 | 42 | 1 | ds_read_b128 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[vgprLocalReadAddrB+0] offset:192
+  598 | NGL | 161 | 42 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+7], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  599 | NGL | 162 | 42 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+6], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  600 | NGL | 163 | 42 | 4 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+5], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  601 | NGL | 164 | 43 | 0 | v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[56:59]
+  602 | NGL | 165 | 43 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+4], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  603 | NGL | 166 | 43 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+15], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  604 | NGL | 167 | 43 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+14], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  605 | NGL | 168 | 44 | 0 | v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[56:59]
+  606 | NGL | 169 | 44 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+13], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  607 | NGL | 170 | 44 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+12], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  608 | NGL | 171 | 45 | 0 | v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[60:63]
+  609 | NGL | 172 | 46 | 0 | v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[60:63]
+  610 | NGL | 173 | 47 | 0 | v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[60:63]
+  611 | 
+  612 | ### body NLL: 103 instructions
+  613 | NLL | 0 | -1 | 0 | s_waitcnt lgkmcnt(0)
+  614 | NLL | 1 | 0 | 0 | v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[0:3]
+  615 | NLL | 2 | 0 | 1 | ds_read_b128 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[vgprLocalReadAddrA+0] offset:256
+  616 | NLL | 3 | 1 | 0 | v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[0:3]
+  617 | NLL | 4 | 1 | 1 | ds_read_b128 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[vgprLocalReadAddrA+0] offset:320
+  618 | NLL | 5 | 2 | 0 | v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[0:3]
+  619 | NLL | 6 | 2 | 1 | ds_read_b128 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[vgprLocalReadAddrA+0] offset:384
+  620 | NLL | 7 | 3 | 0 | v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[4:7]
+  621 | NLL | 8 | 3 | 1 | ds_read_b128 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[vgprLocalReadAddrA+0] offset:448
+  622 | NLL | 9 | 4 | 0 | v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[4:7]
+  623 | NLL | 10 | 4 | 1 | ds_read_b128 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[vgprLocalReadAddrB+0] offset:256
+  624 | NLL | 11 | 5 | 0 | v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[4:7]
+  625 | NLL | 12 | 5 | 1 | ds_read_b128 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[vgprLocalReadAddrB+0] offset:320
+  626 | NLL | 13 | 6 | 0 | v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[16:19]
+  627 | NLL | 14 | 6 | 1 | ds_read_b128 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[vgprLocalReadAddrB+0] offset:384
+  628 | NLL | 15 | 7 | 0 | v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[16:19]
+  629 | NLL | 16 | 7 | 1 | ds_read_b128 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[vgprLocalReadAddrB+0] offset:448
+  630 | NLL | 17 | 8 | 0 | v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[16:19]
+  631 | NLL | 18 | 9 | 0 | v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[20:23]
+  632 | NLL | 19 | 9 | 1 | s_waitcnt lgkmcnt(0)
+  633 | NLL | 20 | 9 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+16], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  634 | NLL | 21 | 9 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+17], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  635 | NLL | 22 | 9 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+18], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  636 | NLL | 23 | 9 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+19], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  637 | NLL | 24 | 9 | 6 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+24], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  638 | NLL | 25 | 9 | 7 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+25], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  639 | NLL | 26 | 9 | 8 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+26], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  640 | NLL | 27 | 9 | 9 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+27], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  641 | NLL | 28 | 9 | 10 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[74:75], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+1], v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3]
+  642 | NLL | 29 | 9 | 11 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[74:75], v[vgprValuA_X0_I0+18:vgprValuA_X0_I0+18+1], v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3]
+  643 | NLL | 30 | 9 | 12 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[74:75], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+1], v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3]
+  644 | NLL | 31 | 9 | 13 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[74:75], v[vgprValuA_X0_I0+26:vgprValuA_X0_I0+26+1], v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3]
+  645 | NLL | 32 | 9 | 14 | s_nop 2
+  646 | NLL | 33 | 9 | 15 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+23], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+  647 | NLL | 34 | 10 | 0 | v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[20:23]
+  648 | NLL | 35 | 10 | 1 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+22], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+  649 | NLL | 36 | 10 | 2 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+21], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+  650 | NLL | 37 | 10 | 3 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+20], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+  651 | NLL | 38 | 10 | 4 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+31], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+  652 | NLL | 39 | 10 | 5 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+30], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+  653 | NLL | 40 | 10 | 6 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+29], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+  654 | NLL | 41 | 10 | 7 | v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+28], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+  655 | NLL | 42 | 11 | 0 | v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[20:23]
+  656 | NLL | 43 | 11 | 1 | s_waitcnt lgkmcnt(0)
+  657 | NLL | 44 | 11 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+16], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  658 | NLL | 45 | 11 | 3 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+17], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  659 | NLL | 46 | 12 | 0 | v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[8:11]
+  660 | NLL | 47 | 12 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+18], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  661 | NLL | 48 | 12 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+19], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  662 | NLL | 49 | 13 | 0 | v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[8:11]
+  663 | NLL | 50 | 13 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+24], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  664 | NLL | 51 | 13 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+25], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  665 | NLL | 52 | 14 | 0 | v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[8:11]
+  666 | NLL | 53 | 14 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+26], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  667 | NLL | 54 | 15 | 0 | v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[12:15]
+  668 | NLL | 55 | 15 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+27], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  669 | NLL | 56 | 15 | 2 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3], v[74:75], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+1], v[vgprValuB_T0_I0+0:vgprValuB_T0_I0+0+3]
+  670 | NLL | 57 | 15 | 3 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3], v[74:75], v[vgprValuB_X0_I0+18:vgprValuB_X0_I0+18+1], v[vgprValuB_T0_I0+4:vgprValuB_T0_I0+4+3]
+  671 | NLL | 58 | 15 | 4 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3], v[74:75], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+1], v[vgprValuB_T0_I0+8:vgprValuB_T0_I0+8+3]
+  672 | NLL | 59 | 15 | 5 | v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3], v[74:75], v[vgprValuB_X0_I0+26:vgprValuB_X0_I0+26+1], v[vgprValuB_T0_I0+12:vgprValuB_T0_I0+12+3]
+  673 | NLL | 60 | 15 | 6 | s_nop 2
+  674 | NLL | 61 | 15 | 7 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+23], v[vgprValuB_T0_I0+6], v[vgprValuB_T0_I0+7]
+  675 | NLL | 62 | 16 | 0 | v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[12:15]
+  676 | NLL | 63 | 16 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+22], v[vgprValuB_T0_I0+4], v[vgprValuB_T0_I0+5]
+  677 | NLL | 64 | 16 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+21], v[vgprValuB_T0_I0+2], v[vgprValuB_T0_I0+3]
+  678 | NLL | 65 | 17 | 0 | v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[12:15]
+  679 | NLL | 66 | 17 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+20], v[vgprValuB_T0_I0+0], v[vgprValuB_T0_I0+1]
+  680 | NLL | 67 | 17 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+31], v[vgprValuB_T0_I0+14], v[vgprValuB_T0_I0+15]
+  681 | NLL | 68 | 18 | 0 | v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[24:27]
+  682 | NLL | 69 | 18 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+30], v[vgprValuB_T0_I0+12], v[vgprValuB_T0_I0+13]
+  683 | NLL | 70 | 18 | 2 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+29], v[vgprValuB_T0_I0+10], v[vgprValuB_T0_I0+11]
+  684 | NLL | 71 | 19 | 0 | v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[24:27]
+  685 | NLL | 72 | 19 | 1 | v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+28], v[vgprValuB_T0_I0+8], v[vgprValuB_T0_I0+9]
+  686 | NLL | 73 | 20 | 0 | v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[24:27]
+  687 | NLL | 74 | 21 | 0 | v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[28:31]
+  688 | NLL | 75 | 22 | 0 | v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[28:31]
+  689 | NLL | 76 | 23 | 0 | v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[28:31]
+  690 | NLL | 77 | 23 | 1 | s_waitcnt lgkmcnt(0)
+  691 | NLL | 78 | 24 | 0 | v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[32:35]
+  692 | NLL | 79 | 25 | 0 | v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[32:35]
+  693 | NLL | 80 | 26 | 0 | v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[32:35]
+  694 | NLL | 81 | 27 | 0 | v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[36:39]
+  695 | NLL | 82 | 28 | 0 | v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[36:39]
+  696 | NLL | 83 | 29 | 0 | v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[36:39]
+  697 | NLL | 84 | 30 | 0 | v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[48:51]
+  698 | NLL | 85 | 31 | 0 | v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[48:51]
+  699 | NLL | 86 | 32 | 0 | v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[48:51]
+  700 | NLL | 87 | 33 | 0 | v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[52:55]
+  701 | NLL | 88 | 34 | 0 | v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[52:55]
+  702 | NLL | 89 | 35 | 0 | v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[52:55]
+  703 | NLL | 90 | 35 | 1 | s_waitcnt lgkmcnt(0)
+  704 | NLL | 91 | 36 | 0 | v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[40:43]
+  705 | NLL | 92 | 37 | 0 | v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[40:43]
+  706 | NLL | 93 | 38 | 0 | v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[40:43]
+  707 | NLL | 94 | 39 | 0 | v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[44:47]
+  708 | NLL | 95 | 40 | 0 | v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[44:47]
+  709 | NLL | 96 | 41 | 0 | v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[44:47]
+  710 | NLL | 97 | 42 | 0 | v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[56:59]
+  711 | NLL | 98 | 43 | 0 | v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[56:59]
+  712 | NLL | 99 | 44 | 0 | v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[56:59]
+  713 | NLL | 100 | 45 | 0 | v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[60:63]
+  714 | NLL | 101 | 46 | 0 | v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[60:63]
+  715 | NLL | 102 | 47 | 0 | v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[60:63]
