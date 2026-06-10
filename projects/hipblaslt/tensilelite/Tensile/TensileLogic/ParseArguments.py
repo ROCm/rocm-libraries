@@ -22,10 +22,21 @@
 #
 ################################################################################
 
-from argparse import ArgumentParser
+from argparse import ArgumentParser, ArgumentTypeError
 from pathlib import Path
 
 from Tensile.Toolchain.Validators import ToolchainDefaults
+
+
+def positive_int(value):
+    """Validate that the value is a positive integer."""
+    try:
+        ivalue = int(value)
+    except ValueError:
+        raise ArgumentTypeError(f"{value} is not a valid integer")
+    if ivalue <= 0:
+        raise ArgumentTypeError(f"{value} is not a positive integer (must be > 0)")
+    return ivalue
 
 
 def parseArguments():
@@ -53,7 +64,7 @@ def parseArguments():
         "--jobs",
         "-j",
         dest="Jobs",
-        type=int,
+        type=positive_int,
         default=48,
         help="number of worker processes to use during validation checks",
     )

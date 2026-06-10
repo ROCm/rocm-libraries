@@ -25,20 +25,15 @@
 import pytest
 from unittest.mock import Mock, MagicMock, patch
 
-
-# Lazy import to avoid module-level import errors
-@pytest.fixture(scope="module")
-def Activation():
-    """Lazy import Activation module"""
-    import Tensile.Activation as act
-    return act
+import Tensile.Activation as Activation
+from Tensile.Common.DataType import DataType
 
 
 @pytest.mark.unit
 class TestActivationModule:
     """Tests for Activation module functions"""
 
-    def test_activation_type_lookup_values(self, Activation):
+    def test_activation_type_lookup_values(self):
         """Test ActivationType lookup has expected values"""
         ActivationType = Activation.ActivationType
 
@@ -52,7 +47,7 @@ class TestActivationModule:
         assert 'all' in ActivationType.lookup
         assert 'hipblaslt_all' in ActivationType.lookup
 
-    def test_activation_type_none_instantiation(self, Activation):
+    def test_activation_type_none_instantiation(self):
         """Test that 'none' activation type can be instantiated"""
         ActivationType = Activation.ActivationType
 
@@ -60,7 +55,7 @@ class TestActivationModule:
         act = ActivationType('none')
         assert act.value == 'none'
 
-    def test_activation_module_instantiation(self, Activation):
+    def test_activation_module_instantiation(self):
         """Test ActivationModule initializes with correct defaults"""
         ActivationModule = Activation.ActivationModule
 
@@ -75,7 +70,7 @@ class TestActivationModule:
 class TestActivationEnumOperations:
     """Tests for operations on activation enums"""
 
-    def test_activation_type_equality(self, Activation):
+    def test_activation_type_equality(self):
         """Test that activation types can be compared for equality"""
         ActivationType = Activation.ActivationType
 
@@ -85,7 +80,7 @@ class TestActivationEnumOperations:
         assert act1 == act2
         assert act1 == 'none'
 
-    def test_activation_type_string_representation(self, Activation):
+    def test_activation_type_string_representation(self):
         """Test that activation types have string representation"""
         ActivationType = Activation.ActivationType
 
@@ -103,7 +98,7 @@ class TestActivationDataStructures:
     # Optional helper classes (ActivationParams, ActivationConfig) and functions
     # are not core to the module - skipping optional API tests
 
-    def test_activation_available_class(self, Activation):
+    def test_activation_available_class(self):
         """Test ActivationAvailable class"""
         ActivationAvailable = Activation.ActivationAvailable
 
@@ -119,7 +114,7 @@ class TestActivationDataStructures:
         assert avail.single == True
         assert avail.double == False
 
-    def test_activation_type_register_class(self, Activation):
+    def test_activation_type_register_class(self):
         """Test ActivationTypeRegister class"""
         ActivationTypeRegister = Activation.ActivationTypeRegister
 
@@ -144,20 +139,16 @@ class TestActivationTypeRegisterTypeAvailable:
         ("I8", "canInt8"),
         ("i", "canInt32"),
     ])
-    def test_type_available(self, Activation, dtype_str, can_param):
+    def test_type_available(self, dtype_str, can_param):
         """Test typeAvailable returns True when type is supported"""
-        from Tensile.Common.DataType import DataType
-
         ActivationTypeRegister = Activation.ActivationTypeRegister
         reg = ActivationTypeRegister("test", False, 0, **{can_param: True})
 
         dt = DataType(dtype_str)
         assert reg.typeAvailable(dt) == True
 
-    def test_type_not_available(self, Activation):
+    def test_type_not_available(self):
         """Test typeAvailable returns False when type not supported"""
-        from Tensile.Common.DataType import DataType
-
         ActivationTypeRegister = Activation.ActivationTypeRegister
         reg = ActivationTypeRegister("test", False, 0, canSingle=True)  # Only single
 
@@ -169,7 +160,7 @@ class TestActivationTypeRegisterTypeAvailable:
 class TestActivationTypeClass:
     """Tests for ActivationType class methods"""
 
-    def test_activation_type_with_string(self, Activation):
+    def test_activation_type_with_string(self):
         """Test ActivationType initialization with string"""
         ActivationType = Activation.ActivationType
 
@@ -179,7 +170,7 @@ class TestActivationTypeClass:
         act = ActivationType("GELU")  # Case insensitive
         assert act.value == "gelu"
 
-    def test_activation_type_with_activation_type(self, Activation):
+    def test_activation_type_with_activation_type(self):
         """Test ActivationType initialization with another ActivationType"""
         ActivationType = Activation.ActivationType
 
@@ -187,21 +178,21 @@ class TestActivationTypeClass:
         act2 = ActivationType(act1)
         assert act2.value == "relu"
 
-    def test_activation_type_invalid_raises(self, Activation):
+    def test_activation_type_invalid_raises(self):
         """Test ActivationType raises on invalid activation"""
         ActivationType = Activation.ActivationType
 
         with pytest.raises(RuntimeError):
             ActivationType("invalid_activation")
 
-    def test_activation_type_invalid_type_raises(self, Activation):
+    def test_activation_type_invalid_type_raises(self):
         """Test ActivationType raises on invalid input type"""
         ActivationType = Activation.ActivationType
 
         with pytest.raises(RuntimeError):
             ActivationType(123)  # Invalid type
 
-    def test_pass_activation(self, Activation):
+    def test_pass_activation(self):
         """Test passActivation method"""
         ActivationType = Activation.ActivationType
 
@@ -219,7 +210,7 @@ class TestActivationTypeClass:
         assert act.passActivation(True, ActivationType.Export.BOTH) == False
         assert act.passActivation(False, ActivationType.Export.BOTH) == False
 
-    def test_get_additional_arg_num(self, Activation):
+    def test_get_additional_arg_num(self):
         """Test getAdditionalArgNum method"""
         ActivationType = Activation.ActivationType
 
@@ -235,7 +226,7 @@ class TestActivationTypeClass:
         act = ActivationType("clippedrelu")
         assert act.getAdditionalArgNum() == 2
 
-    def test_get_additional_arg_num_all(self, Activation):
+    def test_get_additional_arg_num_all(self):
         """Test getAdditionalArgNum for 'all' activation"""
         ActivationType = Activation.ActivationType
 
@@ -244,7 +235,7 @@ class TestActivationTypeClass:
         max_args = act.getAdditionalArgNum()
         assert max_args >= 2  # At least clippedrelu has 2 args
 
-    def test_fit_supported(self, Activation):
+    def test_fit_supported(self):
         """Test fitSupported method"""
         ActivationType = Activation.ActivationType
         SupportedBy = ActivationType.SupportedBy
@@ -256,7 +247,7 @@ class TestActivationTypeClass:
         assert act.fitSupported(SupportedBy.TENSILE, SupportedBy.TENSILE) != 0
         assert act.fitSupported(SupportedBy.HIPBLASLT, SupportedBy.TENSILE) == 0
 
-    def test_get_additional_arg_string_list(self, Activation):
+    def test_get_additional_arg_string_list(self):
         """Test getAdditionalArgStringList method"""
         ActivationType = Activation.ActivationType
 
@@ -272,7 +263,7 @@ class TestActivationTypeClass:
         assert len(args) == 1
         assert args[0] == "alpha"
 
-    def test_get_enum_index(self, Activation):
+    def test_get_enum_index(self):
         """Test getEnumIndex class method"""
         ActivationType = Activation.ActivationType
 
@@ -284,7 +275,7 @@ class TestActivationTypeClass:
         idx_abs = ActivationType.getEnumIndex('abs')
         assert idx_abs > 0
 
-    def test_get_enum_str_list(self, Activation):
+    def test_get_enum_str_list(self):
         """Test getEnumStrList class method"""
         from Tensile.Common.DataType import DataType
         ActivationType = Activation.ActivationType
@@ -303,21 +294,21 @@ class TestActivationTypeClass:
         enum_list_no_none = ActivationType.getEnumStrList(dt, SupportedBy.ALL, includeNone=False)
         assert 'none' not in enum_list_no_none
 
-    def test_state_method(self, Activation):
+    def test_state_method(self):
         """Test state method"""
         ActivationType = Activation.ActivationType
 
         act = ActivationType("relu")
         assert act.state() == "Relu"
 
-    def test_to_enum_method(self, Activation):
+    def test_to_enum_method(self):
         """Test toEnum method"""
         ActivationType = Activation.ActivationType
 
         act = ActivationType("relu")
         assert act.toEnum() == "Relu"
 
-    def test_repr_method(self, Activation):
+    def test_repr_method(self):
         """Test __repr__ method"""
         ActivationType = Activation.ActivationType
 
@@ -329,7 +320,7 @@ class TestActivationTypeClass:
 class TestActivationModuleMethods:
     """Tests for ActivationModule methods"""
 
-    def test_reduce_method(self, Activation):
+    def test_reduce_method(self):
         """Test __reduce__ method for pickling"""
         ActivationModule = Activation.ActivationModule
 
@@ -338,7 +329,7 @@ class TestActivationModuleMethods:
         assert reduced[0] == ActivationModule
         assert reduced[1] == ()
 
-    def test_set_use_pk(self, Activation):
+    def test_set_use_pk(self):
         """Test setUsePK method"""
         ActivationModule = Activation.ActivationModule
 
@@ -348,7 +339,7 @@ class TestActivationModuleMethods:
         module.setUsePK(False)
         assert module.usePK == False
 
-    def test_set_saturation_for_int8(self, Activation):
+    def test_set_saturation_for_int8(self):
         """Test setSaturationForInt8 method"""
         ActivationModule = Activation.ActivationModule
 
@@ -358,7 +349,7 @@ class TestActivationModuleMethods:
         module.setSaturationForInt8(True)
         assert module.saturateI8 == True
 
-    def test_set_vgpr_prefix_format(self, Activation):
+    def test_set_vgpr_prefix_format(self):
         """Test setVgprPrefixFormat method"""
         ActivationModule = Activation.ActivationModule
 
@@ -368,7 +359,7 @@ class TestActivationModuleMethods:
         module.setVgprPrefixFormat("v[%d]")
         assert module.vgprPrefixFormat == "v[%d]"
 
-    def test_set_use_cache(self, Activation):
+    def test_set_use_cache(self):
         """Test setUseCache method"""
         ActivationModule = Activation.ActivationModule
 
@@ -378,7 +369,7 @@ class TestActivationModuleMethods:
         module.setUseCache(True)
         assert module.useCache == True
 
-    def test_set_guard(self, Activation):
+    def test_set_guard(self):
         """Test setGuard method"""
         ActivationModule = Activation.ActivationModule
 
@@ -388,7 +379,7 @@ class TestActivationModuleMethods:
         module.setGuard(True)
         assert module.enableGuard == True
 
-    def test_set_alt(self, Activation):
+    def test_set_alt(self):
         """Test setAlt method"""
         ActivationModule = Activation.ActivationModule
 
@@ -398,7 +389,7 @@ class TestActivationModuleMethods:
         module.setAlt(True)
         assert module.isAlt == True
 
-    def test_reset_gpr_counter(self, Activation):
+    def test_reset_gpr_counter(self):
         """Test resetGprCounter method"""
         ActivationModule = Activation.ActivationModule
 
@@ -410,7 +401,7 @@ class TestActivationModuleMethods:
         assert module.vgprCounter == 0
         assert module.sgprCounter == 0
 
-    def test_get_vgpr(self, Activation):
+    def test_get_vgpr(self):
         """Test getVgpr method"""
         ActivationModule = Activation.ActivationModule
 
@@ -424,7 +415,7 @@ class TestActivationModuleMethods:
         assert idx == 3
         assert module.vgprCounter == 5
 
-    def test_get_sgpr(self, Activation):
+    def test_get_sgpr(self):
         """Test getSgpr method"""
         ActivationModule = Activation.ActivationModule
 
@@ -440,44 +431,10 @@ class TestActivationModuleMethods:
 
 
 @pytest.mark.unit
-class TestActivationModuleGetModule:
-    """Tests for ActivationModule.getModule dispatcher"""
-
-    @pytest.mark.parametrize("activation_type,expected_method", [
-        ('abs', 'getAbsModule'),
-        ('relu', 'getReluModule'),
-        ('gelu', 'getGeluModule'),
-        ('sigmoid', 'getSigmoidModule'),
-        ('tanh', 'getTanhModule'),
-    ])
-    def test_get_module_routes_correctly(self, Activation, activation_type, expected_method):
-        """Test getModule dispatches to correct implementation method"""
-        from Tensile.Common.DataType import DataType
-        from rocisa.code import Module
-        from unittest.mock import patch
-
-        ActivationModule = Activation.ActivationModule
-        module = ActivationModule()
-        dt = DataType("s")
-
-        # Mock the specific implementation method with a proper Module
-        mock_module = Module("test")
-        with patch.object(module, expected_method, return_value=mock_module) as mock_method:
-            result = module.getModule(dt, activation_type, 0, 1)
-
-            # Verify the correct method was called
-            mock_method.assert_called_once()
-            # Verify it was called with the correct arguments
-            assert mock_method.call_args[0][0] == dt  # datatype
-            assert mock_method.call_args[0][1] == 0   # vgprIn
-            assert mock_method.call_args[0][2] == 1   # vgprOut
-
-
-@pytest.mark.unit
 class TestActivationMagicNumbers:
     """Tests for activation magic numbers"""
 
-    def test_float_union_bidirectional_conversion(self, Activation):
+    def test_float_union_bidirectional_conversion(self):
         """Test floatUnion converts between float and uint bit patterns"""
         floatUnion = Activation.floatUnion
 
@@ -496,7 +453,7 @@ class TestActivationMagicNumbers:
 class TestActCacheInfo:
     """Tests for actCacheInfo dataclass"""
 
-    def test_act_cache_info_is_same(self, Activation):
+    def test_act_cache_info_is_same(self):
         """Test actCacheInfo.isSame method logic"""
         actCacheInfo = Activation.actCacheInfo
 

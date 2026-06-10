@@ -25,20 +25,10 @@
 import pytest
 from unittest.mock import Mock, MagicMock, patch, PropertyMock
 from rocisa.code import Module
+from rocisa.container import vgpr
 
-
-@pytest.fixture(scope="module")
-def Activation():
-    """Lazy import Activation module"""
-    import Tensile.Activation as act
-    return act
-
-
-@pytest.fixture(scope="module")
-def DataType():
-    """Lazy import DataType"""
-    from Tensile.Common.DataType import DataType
-    return DataType
+import Tensile.Activation as Activation
+from Tensile.Common.DataType import DataType
 
 
 @pytest.mark.unit
@@ -47,7 +37,7 @@ class TestPostProcessFunctions:
 
     @patch('Tensile.Activation.CombineInstructions')
     @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_post_process_without_combine(self, mock_convert, mock_combine, Activation, DataType):
+    def test_post_process_without_combine(self, mock_convert, mock_combine):
         """Test postProcess skips CombineInstructions when needCombine is False"""
         converted_module = Module("converted")
         mock_convert.return_value = converted_module
@@ -69,7 +59,7 @@ class TestPostProcessFunctions:
 
     @patch('Tensile.Activation.CombineInstructions')
     @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_post_process_with_combine(self, mock_convert, mock_combine, Activation, DataType):
+    def test_post_process_with_combine(self, mock_convert, mock_combine):
         """Test postProcess calls CombineInstructions then ConvertCoeffToHex"""
         converted_module = Module("converted")
         # CombineInstructions modifies in place, no return value
@@ -92,7 +82,7 @@ class TestPostProcessFunctions:
         assert result == converted_module
 
     @patch('Tensile.Activation.HolderToGpr')
-    def test_assign_gpr(self, mock_holder_to_gpr, Activation):
+    def test_assign_gpr(self, mock_holder_to_gpr):
         """Test assignGpr calls HolderToGpr for vgpr and sgpr"""
         final_module = Module("final")
         mock_holder_to_gpr.return_value = final_module
@@ -115,10 +105,8 @@ class TestPostProcessFunctions:
         assert mock_holder_to_gpr.call_args_list[1][0][2] == "s"  # sgpr prefix
         assert result == final_module
 
-    def test_vgpr_prefix_returns_formatted_string(self, Activation):
+    def test_vgpr_prefix_returns_formatted_string(self):
         """Test vgprPrefix returns correctly formatted register names"""
-        from rocisa.container import vgpr
-
         ActivationModule = Activation.ActivationModule
         module_obj = ActivationModule()
 
@@ -126,7 +114,7 @@ class TestPostProcessFunctions:
         module_obj.setVgprPrefixFormat("ValuC+%d")
         result = module_obj.vgprPrefix(5)
         # Should apply format to integer
-        assert "ValuC" in str(result) or result == vgpr(5)
+        assert result == vgpr("ValuC+5")
 
         # With string input, wraps in vgpr()
         result_str = module_obj.vgprPrefix("myVgpr")
@@ -134,15 +122,15 @@ class TestPostProcessFunctions:
 
         # With two args (range)
         result_range = module_obj.vgprPrefix(5, 2)
-        # Should handle range notation
-        assert result_range is not None
+        # Should handle range notation with format applied
+        assert result_range == vgpr("ValuC+5", 2)
 
 
 @pytest.mark.unit
 class TestCacheFunctions:
     """Tests for cache-related functions"""
 
-    def test_create_cache(self, Activation, DataType):
+    def test_create_cache(self):
         """Test createCache method"""
         with patch('Tensile.Activation.createVgprIdxList') as mock_create:
             with patch('Tensile.Activation.deepcopy') as mock_deepcopy:
@@ -160,7 +148,7 @@ class TestCacheFunctions:
                 # Should have created cache entry
                 assert 'relu' in module_obj.cacheDict
 
-    def test_get_cache_miss(self, Activation, DataType):
+    def test_get_cache_miss(self):
         """Test getCache with cache miss"""
         ActivationModule = Activation.ActivationModule
         module_obj = ActivationModule()
@@ -171,7 +159,7 @@ class TestCacheFunctions:
         # Should return None
         assert result is None
 
-    def test_get_cache_hit(self, Activation, DataType):
+    def test_get_cache_hit(self):
         """Test getCache with cache hit"""
         with patch('Tensile.Activation.createVgprIdxList') as mock_create:
             with patch('Tensile.Activation.deepcopy') as mock_deepcopy:
@@ -202,7 +190,7 @@ class TestGetModuleWithCache:
     """Tests for getModule with caching"""
 
     @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_get_module_with_cache_enabled(self, mock_convert, Activation, DataType):
+    def test_get_module_with_cache_enabled(self, mock_convert):
         """Test getModule with cache enabled"""
         mock_convert.return_value = Module("test")
 
@@ -224,7 +212,7 @@ class TestGetModuleWithCache:
 
     @patch('Tensile.Activation.rocIsa')
     @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_get_module_all_activation_types(self, mock_convert, mock_rocisa, Activation, DataType):
+    def test_get_module_all_activation_types(self, mock_convert, mock_rocisa):
         """Test getModule for all activation types"""
         mock_convert.return_value = Module("test")
         mock_instance = Mock()
@@ -259,7 +247,7 @@ class TestGetModuleWithCache:
 class TestActivationTypeSupportedBy:
     """Tests for ActivationType.SupportedBy enum"""
 
-    def test_supported_by_bitwise_and(self, Activation):
+    def test_supported_by_bitwise_and(self):
         """Test SupportedBy bitwise AND operations"""
         SupportedBy = Activation.ActivationType.SupportedBy
 
@@ -278,7 +266,7 @@ class TestActivationTypeSupportedBy:
 class TestActivationTypeExport:
     """Tests for ActivationType.Export enum"""
 
-    def test_export_enum_comparison(self, Activation):
+    def test_export_enum_comparison(self):
         """Test Export enum values are distinct"""
         Export = Activation.ActivationType.Export
 
@@ -293,7 +281,7 @@ class TestActivationTypeExport:
 class TestActivationTypeStringList:
     """Tests for ActivationType.stringList"""
 
-    def test_string_list_contents(self, Activation):
+    def test_string_list_contents(self):
         """Test ActivationType.stringList"""
         ActivationType = Activation.ActivationType
 
@@ -303,7 +291,7 @@ class TestActivationTypeStringList:
         assert 'gamma' in ActivationType.stringList
         assert 'delta' in ActivationType.stringList
 
-    def test_get_additional_arg_string_list_clippedrelu(self, Activation):
+    def test_get_additional_arg_string_list_clippedrelu(self):
         """Test getAdditionalArgStringList for clippedrelu (2 args)"""
         ActivationType = Activation.ActivationType
 
@@ -323,7 +311,7 @@ class TestActivationTypeStringList:
 class TestActivationTypeLookup:
     """Tests for ActivationType.lookup dictionary"""
 
-    def test_lookup_structure(self, Activation):
+    def test_lookup_structure(self):
         """Test ActivationType.lookup structure"""
         ActivationType = Activation.ActivationType
 
@@ -337,7 +325,7 @@ class TestActivationTypeLookup:
             assert hasattr(value['instance'], 'isGradient')
             assert hasattr(value['instance'], 'extraArgs')
 
-    def test_lookup_gradient_activations(self, Activation):
+    def test_lookup_gradient_activations(self):
         """Test gradient activations in lookup"""
         ActivationType = Activation.ActivationType
 
@@ -358,7 +346,7 @@ class TestActivationTypeLookup:
 class TestVgprPrefixFormat:
     """Tests for vgprPrefix with formatting"""
 
-    def test_vgpr_prefix_format_application(self, Activation):
+    def test_vgpr_prefix_format_application(self):
         """Test vgprPrefix applies format correctly"""
         ActivationModule = Activation.ActivationModule
         module_obj = ActivationModule()
@@ -370,7 +358,7 @@ class TestVgprPrefixFormat:
         result = module_obj.vgprPrefix(5)
         assert result is not None
 
-    def test_vgpr_prefix_no_format_with_string(self, Activation):
+    def test_vgpr_prefix_no_format_with_string(self):
         """Test vgprPrefix doesn't apply format to strings"""
         ActivationModule = Activation.ActivationModule
         module_obj = ActivationModule()
@@ -386,7 +374,7 @@ class TestVgprPrefixFormat:
 class TestFuseInstructionHelpers:
     """Tests for FuseInstruction helper functions"""
 
-    def test_combine_instructions_between_modules(self, Activation):
+    def test_combine_instructions_between_modules(self):
         """Test CombineInstructionsBetweenModules executes without error - smoke test"""
         CombineInstructionsBetweenModules = Activation.CombineInstructionsBetweenModules
 
@@ -404,7 +392,7 @@ class TestGetModuleEdgeCases:
     """Tests for edge cases in getModule"""
 
     @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_get_module_same_vgpr_in_out(self, mock_convert, Activation, DataType):
+    def test_get_module_same_vgpr_in_out(self, mock_convert):
         """Test getModule when vgprIn == vgprOut (no cache created)"""
         mock_convert.return_value = Module("test")
 
@@ -424,7 +412,7 @@ class TestGetModuleEdgeCases:
 
     @patch('Tensile.Activation.rocIsa')
     @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_get_module_exp(self, mock_convert, mock_rocisa, Activation, DataType):
+    def test_get_module_exp(self, mock_convert, mock_rocisa):
         """Test getModule for 'exp' activation"""
         mock_convert.return_value = Module("test")
         # Mock rocIsa
@@ -445,7 +433,7 @@ class TestGetModuleEdgeCases:
 class TestGetEnumStrListVariations:
     """Tests for getEnumStrList with different parameters"""
 
-    def test_get_enum_str_list_tensile_only(self, Activation, DataType):
+    def test_get_enum_str_list_tensile_only(self):
         """Test getEnumStrList with TENSILE support only"""
         ActivationType = Activation.ActivationType
         SupportedBy = ActivationType.SupportedBy
@@ -457,7 +445,7 @@ class TestGetEnumStrListVariations:
         # TENSILE-supported activations should be included
         assert 'abs' in enum_list
 
-    def test_get_enum_str_list_hipblaslt_only(self, Activation, DataType):
+    def test_get_enum_str_list_hipblaslt_only(self):
         """Test getEnumStrList with HIPBLASLT support only"""
         ActivationType = Activation.ActivationType
         SupportedBy = ActivationType.SupportedBy
@@ -469,7 +457,7 @@ class TestGetEnumStrListVariations:
         # HIPBLASLT-supported activations should be included
         assert 'relu' in enum_list or 'gelu' in enum_list
 
-    def test_get_enum_str_list_gradonly_export(self, Activation, DataType):
+    def test_get_enum_str_list_gradonly_export(self):
         """Test getEnumStrList with GRADONLY export type"""
         ActivationType = Activation.ActivationType
         SupportedBy = ActivationType.SupportedBy
@@ -486,7 +474,7 @@ class TestGetEnumStrListVariations:
         # Should exclude non-gradient activations
         assert 'relu' not in enum_list
 
-    def test_get_enum_str_list_both_export(self, Activation, DataType):
+    def test_get_enum_str_list_both_export(self):
         """Test getEnumStrList with BOTH export type"""
         ActivationType = Activation.ActivationType
         SupportedBy = ActivationType.SupportedBy
@@ -504,7 +492,7 @@ class TestGetEnumStrListVariations:
 class TestActivationTypeComparisons:
     """Tests for ActivationType comparison edge cases"""
 
-    def test_activation_type_eq_invalid_type_raises(self, Activation):
+    def test_activation_type_eq_invalid_type_raises(self):
         """Test ActivationType __eq__ with invalid type raises"""
         ActivationType = Activation.ActivationType
 
@@ -513,7 +501,7 @@ class TestActivationTypeComparisons:
         with pytest.raises(RuntimeError):
             _ = (act == 123)
 
-    def test_activation_type_lt_invalid_type_raises(self, Activation):
+    def test_activation_type_lt_invalid_type_raises(self):
         """Test ActivationType __lt__ with invalid type raises"""
         ActivationType = Activation.ActivationType
 
@@ -522,7 +510,7 @@ class TestActivationTypeComparisons:
         with pytest.raises(RuntimeError):
             _ = (act < 123)
 
-    def test_activation_type_lt_with_string(self, Activation):
+    def test_activation_type_lt_with_string(self):
         """Test ActivationType __lt__ with string"""
         ActivationType = Activation.ActivationType
 
@@ -538,7 +526,7 @@ class TestActivationModuleWithDifferentDataTypes:
     """Tests for activation modules with various data types"""
 
     @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_abs_with_bfloat16_no_pk(self, mock_convert, Activation, DataType):
+    def test_abs_with_bfloat16_no_pk(self, mock_convert):
         """Test abs with bfloat16 and usePK=False"""
         mock_convert.return_value = Module("test")
 
@@ -552,7 +540,7 @@ class TestActivationModuleWithDifferentDataTypes:
 
     @patch('Tensile.Activation.rocIsa')
     @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_exp_with_half_no_pk(self, mock_convert, mock_rocisa, Activation, DataType):
+    def test_exp_with_half_no_pk(self, mock_convert, mock_rocisa):
         """Test exp with half precision and usePK=False"""
         mock_convert.return_value = Module("test")
         mock_instance = Mock()
@@ -572,7 +560,7 @@ class TestActivationModuleWithDifferentDataTypes:
 class TestGetCacheWithVgprPrefixFormat:
     """Tests for getCache with vgprPrefixFormat"""
 
-    def test_get_cache_with_prefix_format(self, Activation, DataType):
+    def test_get_cache_with_prefix_format(self):
         """Test getCache when vgprPrefixFormat is set"""
         with patch('Tensile.Activation.createVgprIdxList') as mock_create:
             with patch('Tensile.Activation.deepcopy') as mock_deepcopy:

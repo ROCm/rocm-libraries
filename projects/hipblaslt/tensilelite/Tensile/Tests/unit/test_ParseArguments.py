@@ -24,9 +24,43 @@
 
 import pytest
 import sys
+from argparse import ArgumentTypeError
 from pathlib import Path
 
-from Tensile.TensileLogic.ParseArguments import parseArguments
+from Tensile.TensileLogic.ParseArguments import parseArguments, positive_int
+
+
+@pytest.mark.unit
+class TestPositiveInt:
+    """Tests for positive_int validation function"""
+
+    def test_positive_int_valid(self):
+        """Test positive_int with valid positive integers"""
+        assert positive_int("1") == 1
+        assert positive_int("10") == 10
+        assert positive_int("100") == 100
+        assert positive_int("48") == 48
+
+    def test_positive_int_zero_raises(self):
+        """Test positive_int raises for zero"""
+        with pytest.raises(ArgumentTypeError, match="is not a positive integer"):
+            positive_int("0")
+
+    def test_positive_int_negative_raises(self):
+        """Test positive_int raises for negative integers"""
+        with pytest.raises(ArgumentTypeError, match="is not a positive integer"):
+            positive_int("-1")
+        with pytest.raises(ArgumentTypeError, match="is not a positive integer"):
+            positive_int("-10")
+
+    def test_positive_int_invalid_string_raises(self):
+        """Test positive_int raises for non-integer strings"""
+        with pytest.raises(ArgumentTypeError, match="is not a valid integer"):
+            positive_int("abc")
+        with pytest.raises(ArgumentTypeError, match="is not a valid integer"):
+            positive_int("12.5")
+        with pytest.raises(ArgumentTypeError, match="is not a valid integer"):
+            positive_int("")
 
 
 @pytest.mark.unit
@@ -121,3 +155,36 @@ class TestParseArguments:
         assert args.CheckAll is True
         assert args.CxxCompiler == "/opt/rocm/bin/amdclang++"
         assert args.KnownBugs == Path("known_issues.yaml")
+
+    def test_parse_arguments_jobs_zero_raises(self, monkeypatch, capsys):
+        """Test that jobs=0 raises error"""
+        test_args = ["test_script.py", "/path/to/logic", "--jobs", "0"]
+        monkeypatch.setattr(sys, "argv", test_args)
+
+        with pytest.raises(SystemExit):
+            parseArguments()
+
+        captured = capsys.readouterr()
+        assert "is not a positive integer" in captured.err
+
+    def test_parse_arguments_jobs_negative_raises(self, monkeypatch, capsys):
+        """Test that negative jobs value raises error"""
+        test_args = ["test_script.py", "/path/to/logic", "--jobs", "-5"]
+        monkeypatch.setattr(sys, "argv", test_args)
+
+        with pytest.raises(SystemExit):
+            parseArguments()
+
+        captured = capsys.readouterr()
+        assert "is not a positive integer" in captured.err
+
+    def test_parse_arguments_jobs_invalid_raises(self, monkeypatch, capsys):
+        """Test that non-integer jobs value raises error"""
+        test_args = ["test_script.py", "/path/to/logic", "--jobs", "abc"]
+        monkeypatch.setattr(sys, "argv", test_args)
+
+        with pytest.raises(SystemExit):
+            parseArguments()
+
+        captured = capsys.readouterr()
+        assert "is not a valid integer" in captured.err

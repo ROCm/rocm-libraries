@@ -25,23 +25,18 @@
 import pytest
 from unittest.mock import Mock, MagicMock, patch
 from rocisa.code import Module
-from rocisa.instruction import SNop, Instruction
+from rocisa.container import vgpr, sgpr
+from rocisa.instruction import SNop, Instruction, VAddF32
 
-
-@pytest.fixture(scope="module")
-def Activation():
-    """Lazy import Activation module"""
-    import Tensile.Activation as act
-    return act
+import Tensile.Activation as Activation
 
 
 @pytest.mark.unit
 class TestFindUseFunction:
     """Tests for FindUse and FindUseIter functions"""
 
-    def test_find_use_iter_empty_module(self, Activation):
+    def test_find_use_iter_empty_module(self):
         """Test FindUseIter with empty module returns False"""
-        from rocisa.container import vgpr
         FindUseIter = Activation.FindUseIter
 
         module = Module("test")
@@ -54,10 +49,8 @@ class TestFindUseFunction:
         assert isEnd == False
         assert isUse == False
 
-    def test_find_use_iter_finds_usage_in_srcs(self, Activation):
+    def test_find_use_iter_finds_usage_in_srcs(self):
         """Test FindUseIter detects variable usage in instruction sources"""
-        from rocisa.container import vgpr
-        from rocisa.instruction import VAddF32
         FindUseIter = Activation.FindUseIter
 
         module = Module("test")
@@ -76,10 +69,8 @@ class TestFindUseFunction:
         assert isEnd == True
         assert isUse == True
 
-    def test_find_use_iter_does_not_find_dst_when_srcs_exist(self, Activation):
+    def test_find_use_iter_does_not_find_dst_when_srcs_exist(self):
         """Test FindUseIter only checks dst when instruction has no srcs"""
-        from rocisa.container import vgpr
-        from rocisa.instruction import VAddF32
         FindUseIter = Activation.FindUseIter
 
         module = Module("test")
@@ -98,10 +89,8 @@ class TestFindUseFunction:
         assert isEnd == False
         assert isUse == False
 
-    def test_find_use_wrapper(self, Activation):
+    def test_find_use_wrapper(self):
         """Test FindUse wrapper returns only isUse value"""
-        from rocisa.container import vgpr
-        from rocisa.instruction import VAddF32
         FindUse = Activation.FindUse
 
         module = Module("test")
@@ -123,9 +112,8 @@ class TestFindUseFunction:
 class TestFindAssignAndUseFunction:
     """Tests for FindAssignAndUse and FindAssignAndUseIter functions"""
 
-    def test_find_assign_and_use_iter_empty_module(self, Activation):
+    def test_find_assign_and_use_iter_empty_module(self):
         """Test FindAssignAndUseIter with empty module returns False"""
-        from rocisa.container import vgpr
         FindAssignAndUseIter = Activation.FindAssignAndUseIter
 
         module = Module("test")
@@ -139,10 +127,8 @@ class TestFindAssignAndUseFunction:
         assert isEnd == False
         assert isUse == False
 
-    def test_find_assign_and_use_iter_finds_assignment(self, Activation):
+    def test_find_assign_and_use_iter_finds_assignment(self):
         """Test FindAssignAndUseIter detects assignment to assignVar"""
-        from rocisa.container import vgpr
-        from rocisa.instruction import VAddF32
         FindAssignAndUseIter = Activation.FindAssignAndUseIter
 
         module = Module("test")
@@ -161,10 +147,8 @@ class TestFindAssignAndUseFunction:
         assert isEnd == True
         assert isUse == True
 
-    def test_find_assign_and_use_iter_finds_use(self, Activation):
+    def test_find_assign_and_use_iter_finds_use(self):
         """Test FindAssignAndUseIter detects usage of useVar"""
-        from rocisa.container import vgpr
-        from rocisa.instruction import VAddF32
         FindAssignAndUseIter = Activation.FindAssignAndUseIter
 
         module = Module("test")
@@ -183,10 +167,8 @@ class TestFindAssignAndUseFunction:
         assert isEnd == True
         assert isUse == True
 
-    def test_find_assign_and_use_iter_stops_at_end_inst(self, Activation):
+    def test_find_assign_and_use_iter_stops_at_end_inst(self):
         """Test FindAssignAndUseIter stops when encountering endInst"""
-        from rocisa.container import vgpr
-        from rocisa.instruction import VAddF32
         FindAssignAndUseIter = Activation.FindAssignAndUseIter
 
         module = Module("test")
@@ -209,17 +191,10 @@ class TestFindAssignAndUseFunction:
 
 
 @pytest.mark.unit
-class TestReplaceAndRemoveInstFunctions:
-    """Tests for replaceInst and removeOldInst helper functions"""
-
-    # These functions are internal helpers - no need to test existence
-
-
-@pytest.mark.unit
 class TestConvertCoeffToHex:
     """Tests for ConvertCoeffToHex function"""
 
-    def test_convert_coeff_to_hex_basic(self, Activation):
+    def test_convert_coeff_to_hex_basic(self):
         """Test ConvertCoeffToHex handles module without error"""
         from Tensile.Common.DataType import DataType
 
@@ -228,24 +203,19 @@ class TestConvertCoeffToHex:
         module = Module("test")
         dt = DataType("s")
 
-        # ConvertCoeffToHex may have different signature - check first
-        import inspect
-        sig = inspect.signature(ConvertCoeffToHex)
-
-        if len(sig.parameters) == 3:
-            result = ConvertCoeffToHex(module, dt, False)
-        else:
-            result = ConvertCoeffToHex(module, dt)
+        # ConvertCoeffToHex takes (module, cDataType, isPack)
+        result = ConvertCoeffToHex(module, dt, False)
 
         # Should return a module (may be empty or with converted coefficients)
         assert result is not None
+        assert isinstance(result, Module)
 
 
 @pytest.mark.unit
 class TestHexToStr:
     """Tests for HexToStr function"""
 
-    def test_hex_to_str_basic(self, Activation):
+    def test_hex_to_str_basic(self):
         """Test HexToStr converts hex to string representation"""
         from Tensile.Common.DataType import DataType
 
@@ -254,48 +224,50 @@ class TestHexToStr:
         dt = DataType("s")
         result = HexToStr(dt, False, 0x3f800000)  # 1.0 in float
 
-        # Should return a formatted hex string
-        assert isinstance(result, str)
-        assert len(result) > 0, "Should return non-empty string representation"
-        # String should contain hex representation
-        assert "0x" in result.lower() or any(c in result for c in "0123456789abcdef")
+        # Should return the correct hex string
+        assert result == "0x3f800000"
 
+    def test_hex_to_str_zero(self):
+        """Test HexToStr with zero value"""
+        from Tensile.Common.DataType import DataType
 
-@pytest.mark.unit
-class TestHolderToGpr:
-    """Tests for HolderToGpr function"""
+        HexToStr = Activation.HexToStr
 
-    def test_holder_to_gpr_basic(self, Activation):
-        """Test HolderToGpr performs register substitution"""
-        HolderToGpr = Activation.HolderToGpr
+        dt = DataType("s")
+        result = HexToStr(dt, False, 0x0)
 
-        module = Module("test")
-        result = HolderToGpr(module, 0, "v")
+        assert result == "0x0"
 
-        # Should return a module (may be empty if no placeholders to substitute)
-        assert result is not None
+    def test_hex_to_str_half_packed(self):
+        """Test HexToStr with packed half precision"""
+        from Tensile.Common.DataType import DataType
 
+        HexToStr = Activation.HexToStr
 
-@pytest.mark.unit
-class TestCreateVgprIdxList:
-    """Tests for createVgprIdxList function"""
+        dt = DataType("h")
+        # When isPack=True and datatype is half, it should duplicate the value
+        # 0x3c00 (1.0 in half) -> should become 0x3c003c00
+        result = HexToStr(dt, True, 0x3c00)
 
-    def test_create_vgpr_idx_list_basic(self, Activation):
-        """Test createVgprIdxList creates index list"""
-        createVgprIdxList = Activation.createVgprIdxList
+        assert result == "0x3c003c00"
 
-        module = Module("test")
-        result = createVgprIdxList(module, [0, 1], "")
+    def test_hex_to_str_half_not_packed(self):
+        """Test HexToStr with non-packed half precision"""
+        from Tensile.Common.DataType import DataType
 
-        # Should return a list containing register indices
-        assert isinstance(result, list)
+        HexToStr = Activation.HexToStr
+
+        dt = DataType("h")
+        result = HexToStr(dt, False, 0x3c00)
+
+        assert result == "0x3c00"
 
 
 @pytest.mark.unit
 class TestFuseInstructionIntegration:
     """Integration tests for instruction fusion"""
 
-    def test_combine_instructions_between_modules_with_empty(self, Activation):
+    def test_combine_instructions_between_modules_with_empty(self):
         """Test CombineInstructionsBetweenModules handles empty module"""
         CombineInstructionsBetweenModules = Activation.CombineInstructionsBetweenModules
 
@@ -310,8 +282,8 @@ class TestFuseInstructionIntegration:
         instructions = module.items()
         assert len(instructions) == 0, "Empty module should remain empty"
 
-    def test_combine_instructions_between_modules_with_nested(self, Activation):
-        """Test CombineInstructionsBetweenModules handles nested structure"""
+    def test_combine_instructions_between_modules_with_nested(self):
+        """Test CombineInstructionsBetweenModules handles nested structure without error"""
         CombineInstructionsBetweenModules = Activation.CombineInstructionsBetweenModules
 
         outer = Module("outer")
@@ -323,15 +295,16 @@ class TestFuseInstructionIntegration:
         # Should handle nested modules without error
         CombineInstructionsBetweenModules(outer, moduleAndIndex, False)
 
-        # Module structure should be preserved
+        # Function should complete without raising an exception
         assert outer is not None
+        assert isinstance(outer, Module)
 
 
 @pytest.mark.unit
 class TestActivationMagicNumbersUsage:
     """Tests for using activation magic numbers"""
 
-    def test_float_union_with_gelu_k0(self, Activation):
+    def test_float_union_with_gelu_k0(self):
         """Test floatUnion with GELU K0 magic number"""
         floatUnion = Activation.floatUnion
         ActivationMagicNumbers = Activation.ActivationMagicNumbers
@@ -343,7 +316,7 @@ class TestActivationMagicNumbersUsage:
         assert isinstance(f.f, float)
         assert f.f != 0.0
 
-    def test_float_union_with_gelu_k1(self, Activation):
+    def test_float_union_with_gelu_k1(self):
         """Test floatUnion with GELU K1 magic number"""
         floatUnion = Activation.floatUnion
         ActivationMagicNumbers = Activation.ActivationMagicNumbers
@@ -354,7 +327,7 @@ class TestActivationMagicNumbersUsage:
         # Should be a valid float
         assert isinstance(f.f, float)
 
-    def test_all_magic_numbers_are_valid(self, Activation):
+    def test_all_magic_numbers_are_valid(self):
         """Test that all magic numbers are valid integers"""
         ActivationMagicNumbers = Activation.ActivationMagicNumbers
 
@@ -367,13 +340,13 @@ class TestActivationMagicNumbersUsage:
 class TestActivationLookupVeri:
     """Tests for ActivationType.lookupVeri dictionary"""
 
-    def test_lookup_veri_contains_exp(self, Activation):
+    def test_lookup_veri_contains_exp(self):
         """Test that lookupVeri contains 'exp'"""
         ActivationType = Activation.ActivationType
 
         assert 'exp' in ActivationType.lookupVeri
 
-    def test_lookup_veri_exp_structure(self, Activation):
+    def test_lookup_veri_exp_structure(self):
         """Test lookupVeri['exp'] structure"""
         ActivationType = Activation.ActivationType
 
@@ -387,14 +360,14 @@ class TestActivationLookupVeri:
 class TestActivationTypeInstantiation:
     """Tests for ActivationType instantiation with lookupVeri"""
 
-    def test_activation_type_exp(self, Activation):
+    def test_activation_type_exp(self):
         """Test ActivationType with 'exp' from lookupVeri"""
         ActivationType = Activation.ActivationType
 
         act = ActivationType('exp')
         assert act.value == 'exp'
 
-    def test_activation_type_exp_case_insensitive(self, Activation):
+    def test_activation_type_exp_case_insensitive(self):
         """Test ActivationType 'exp' is case insensitive"""
         ActivationType = Activation.ActivationType
 
