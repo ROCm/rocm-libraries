@@ -1007,7 +1007,9 @@ void bind_rocisa_module_builder(nb::module_& b) {
       .def("sgpr", &ModuleBuilder::sgpr, nb::arg("reg"), nb::arg("size") = 1,
            "rocisa container.sgpr(reg, size).")
       .def("ds_modifiers", &ModuleBuilder::ds_modifiers, nb::arg("offset") = 0,
-           "rocisa container.DSModifiers(offset=...).")
+           nb::arg("na") = 1,
+           "rocisa container.DSModifiers(na=..., offset=...); na defaults to 1 "
+           "(use na=2 for dual-address DS instructions).")
       .def("instruction", &ModuleBuilder::instruction,
            "instruction(class_name, *args, **kwargs): construct "
            "rocisa.instruction.<class_name>(*args, **kwargs). The open-ended "

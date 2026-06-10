@@ -107,9 +107,11 @@ class ModuleBuilder {
     return sgpr_fn_(reg, size);
   }
 
-  // rocisa container.DSModifiers(offset=...).
-  nb::object ds_modifiers(int offset = 0) const {
-    return ds_modifiers_cls_("na"_a = 1, "offset"_a = offset);
+  // rocisa container.DSModifiers(na=..., offset=...). na is the number of
+  // addresses (1 for single-address DS ops, 2 for dual-address DS ops used by
+  // the subtile LR/GR emit paths); defaults to 1.
+  nb::object ds_modifiers(int offset = 0, int na = 1) const {
+    return ds_modifiers_cls_("na"_a = na, "offset"_a = offset);
   }
 
   // Generic instruction factory: construct rocisa.instruction.<class_name> with

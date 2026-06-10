@@ -74,7 +74,8 @@ its pools, its label manager, or the kernel dict.
 `ModuleBuilder` provides:
 
 - **Factories:** `module(name)`, `text_block(text)`, `label(name, comment, alignment)`,
-  `vgpr(reg, size)`, `sgpr(reg, size)`, `ds_modifiers(offset)`.
+  `vgpr(reg, size)`, `sgpr(reg, size)`, `ds_modifiers(offset, na)` (`na`
+  defaults to 1; pass `na=2` for dual-address DS instructions).
 - **Generic instruction hook:** `instruction(class_name, args, kwargs)` builds
   `rocisa.instruction.<class_name>(*args, **kwargs)` — the open-ended path for
   any instruction a future ported leaf needs.

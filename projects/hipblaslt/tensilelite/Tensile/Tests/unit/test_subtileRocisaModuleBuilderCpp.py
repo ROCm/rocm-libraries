@@ -128,6 +128,15 @@ def test_generic_instruction_hook_and_containers_match_python(mb):
     assert "ds_load" in cpp.lower() or "ds_read" in cpp.lower()
 
 
+def test_ds_modifiers_dual_address_matches_python(mb):
+    """ds_modifiers(offset, na=2) builds a dual-address DSModifiers identical to
+    the rocisa Python construction the subtile LR/GR emit paths need."""
+    from rocisa.container import DSModifiers
+
+    assert str(mb.ds_modifiers(offset=64)) == str(DSModifiers(na=1, offset=64))
+    assert str(mb.ds_modifiers(offset=64, na=2)) == str(DSModifiers(na=2, offset=64))
+
+
 def test_flatitems_parity(mb):
     """flatitems() on a C++-built nested module yields the same rendered
     sequence as the equivalent Python-built module."""
