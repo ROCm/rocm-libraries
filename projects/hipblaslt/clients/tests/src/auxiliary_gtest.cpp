@@ -75,6 +75,12 @@ namespace
                 testing_aux_matmul_pref_get_attr_bad_arg(arg);
             else if(!strcmp(arg.function, "aux_matmul_pref_get_attr"))
                 testing_aux_matmul_pref_get_attr(arg);
+            else if(!strcmp(arg.function, "aux_matmul_sm_count_target"))
+                testing_aux_matmul_sm_count_target(arg);
+            else if(!strcmp(arg.function, "aux_matmul_dyn_persistent_tile_ext"))
+                testing_aux_matmul_dyn_persistent_tile_ext(arg);
+            else if(!strcmp(arg.function, "aux_matmul_pref_sm_count_target"))
+                testing_aux_matmul_pref_sm_count_target(arg);
             else if(!strcmp(arg.function, "aux_matmul_alg_init_bad_arg"))
                 testing_aux_matmul_alg_init_bad_arg(arg);
             else if(!strcmp(arg.function, "aux_matmul_alg_init"))
@@ -163,6 +169,9 @@ namespace
                    || !strcmp(arg.function, "aux_matmul_bad_ws_size")
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr_bad_arg")
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr")
+                   || !strcmp(arg.function, "aux_matmul_sm_count_target")
+                   || !strcmp(arg.function, "aux_matmul_dyn_persistent_tile_ext")
+                   || !strcmp(arg.function, "aux_matmul_pref_sm_count_target")
 #ifdef CODE_COVERAGE
                    || !strcmp(arg.function, "aux_auxiliary_func")
                    || !strcmp(arg.function, "aux_float8_func")

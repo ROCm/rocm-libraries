@@ -4,8 +4,21 @@
 """Benchmark configuration dataclasses."""
 
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
+
+
+class ReferenceProviderName(str, Enum):
+    """Supported reference provider names."""
+
+    NONE = "none"
+    PYTORCH = "pytorch"
+
+
+REFERENCE_PROVIDER_CHOICES = frozenset(
+    provider.value for provider in ReferenceProviderName
+)
 
 
 @dataclass
@@ -46,22 +59,21 @@ class ValidationConfig:
     """Configuration for reference validation.
 
     Attributes:
-        provider: Reference provider name ("pytorch", "cpu_plugin", or "none").
+        provider: Reference provider name ("pytorch" or "none").
         rtol: Relative tolerance for comparison.
         atol: Absolute tolerance for comparison.
     """
 
-    provider: str = "none"
+    provider: str = ReferenceProviderName.NONE.value
     rtol: float = 1e-5
     atol: float = 1e-8
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
-        valid_providers = {"none", "pytorch", "cpu_plugin"}
-        if self.provider not in valid_providers:
+        if self.provider not in REFERENCE_PROVIDER_CHOICES:
             raise ValueError(
                 f"Invalid provider: '{self.provider}'. "
-                f"Valid options: {valid_providers}"
+                f"Valid options: {REFERENCE_PROVIDER_CHOICES}"
             )
         if self.rtol < 0:
             raise ValueError("rtol must be non-negative")
@@ -71,7 +83,7 @@ class ValidationConfig:
     @property
     def enabled(self) -> bool:
         """Check if validation is enabled."""
-        return self.provider != "none"
+        return self.provider != ReferenceProviderName.NONE.value
 
 
 @dataclass
@@ -90,7 +102,7 @@ class MetricsConfig:
 
     Attributes:
         tier: ``basic`` enables always-on probes. ``off`` disables all
-            metric collection — useful for clean A/B timing comparisons.
+            metric collection — useful for clean engine-comparison timing.
         emit_trace: ``pftrace`` or ``kineto`` — re-run benchmark under
             ``rocprofv3 --kernel-trace --memory-copy-trace`` and write a
             trace file. ``kineto`` falls back to pftrace if the rocpd
@@ -245,8 +257,11 @@ class SuiteConfig:
         benchmark_iters: Number of benchmark iterations for timing.
         seed: Optional random seed for reproducible inputs.
         engine_filter: If set, ordered engine selections to run.
-        rtol: Relative tolerance for correctness comparison.
-        atol: Absolute tolerance for correctness comparison.
+        rtol: Optional relative tolerance override for correctness comparison.
+            If only one of ``rtol`` or ``atol`` is set, the provided tolerance is
+            used for both. If neither is set, validation uses dtype-aware
+            defaults.
+        atol: Optional absolute tolerance override for correctness comparison.
         gpu_backend: GPU timer backend to use.
         reference_provider: Reference provider name for correctness checking.
         verbose: If True, print rich per-engine block per graph instead of summary.
@@ -258,10 +273,10 @@ class SuiteConfig:
     benchmark_iters: int = 100
     seed: Optional[int] = None
     engine_filter: Optional[List[int]] = None
-    rtol: float = 1e-5
-    atol: float = 1e-8
+    rtol: Optional[float] = None
+    atol: Optional[float] = None
     gpu_backend: str = "auto"
-    reference_provider: str = "none"
+    reference_provider: str = ReferenceProviderName.NONE.value
     verbose: bool = False
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     plugin_paths: Optional[List[Path]] = None
@@ -272,9 +287,9 @@ class SuiteConfig:
             raise ValueError("warmup_iters must be non-negative")
         if self.benchmark_iters <= 0:
             raise ValueError("benchmark_iters must be positive")
-        if self.rtol < 0:
+        if self.rtol is not None and self.rtol < 0:
             raise ValueError("rtol must be non-negative")
-        if self.atol < 0:
+        if self.atol is not None and self.atol < 0:
             raise ValueError("atol must be non-negative")
         if self.engine_filter is not None:
             if len(self.engine_filter) == 0:
@@ -300,12 +315,23 @@ class SuiteConfig:
                 f"Invalid gpu_backend: '{self.gpu_backend}'. "
                 f"Valid options: {valid_gpu_backends}"
             )
-        valid_reference_providers = {"none", "pytorch", "cpu_plugin"}
-        if self.reference_provider not in valid_reference_providers:
+        if self.reference_provider not in REFERENCE_PROVIDER_CHOICES:
             raise ValueError(
                 f"Invalid reference_provider: '{self.reference_provider}'. "
-                f"Valid options: {valid_reference_providers}"
+                f"Valid options: {REFERENCE_PROVIDER_CHOICES}"
             )
+
+    @property
+    def tolerance_override(self) -> Optional[tuple[float, float]]:
+        """Return explicit validation tolerances, or None for dtype-aware defaults."""
+        if self.rtol is None and self.atol is None:
+            return None
+
+        value = self.rtol if self.rtol is not None else self.atol
+        return (
+            self.rtol if self.rtol is not None else value,
+            self.atol if self.atol is not None else value,
+        )
 
     @property
     def plugin_path(self) -> Optional[Path]:

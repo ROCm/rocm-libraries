@@ -3,10 +3,13 @@
 
 from invoke.tasks import task
 import os
+import pathlib
 import shlex
 import shutil
 import subprocess
 import sys
+
+_TASKS_DIR = pathlib.Path(__file__).parent.resolve()
 
 
 def _cmake_bool(value):
@@ -147,7 +150,7 @@ def build_client(
             "cmake",
             "--preset",
             "tensilelite",
-            "-S", "../",
+            "-S", str(_TASKS_DIR.parent),
             "-B", build_dir,
             f"-DCMAKE_BUILD_TYPE={build_type}",
             f"-DGPU_TARGETS={gpu_targets}",
