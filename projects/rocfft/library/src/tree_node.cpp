@@ -646,7 +646,7 @@ void CommPointToPoint::Wait()
 
 void CommPointToPoint::Print(rocfft_ostream& os, const int indent) const
 {
-    const std::string indentStr("    ", indent);
+    const std::string indentStr(indent * 4, ' ');
 
     os << indentStr << "CommPointToPoint " << precision_name(precision) << " "
        << PrintArrayType(arrayType) << ":"
@@ -731,7 +731,7 @@ void CommRCCLAllToAll::Wait()
 
 void CommRCCLAllToAll::Print(rocfft_ostream& os, const int indent) const
 {
-    const std::string indentStr("    ", indent);
+    const std::string indentStr(indent * 4, ' ');
     const auto        devices = rccl.get_devices();
 
     os << indentStr << "CommRCCLAllToAll " << precision_name(precision) << " "
@@ -849,7 +849,7 @@ void CommRCCLGrouped::Wait()
 
 void CommRCCLGrouped::Print(rocfft_ostream& os, const int indent) const
 {
-    const std::string indentStr("    ", indent);
+    const std::string indentStr(indent * 4, ' ');
 
     os << indentStr << "CommRCCLGrouped " << precision_name(precision) << " "
        << PrintArrayType(arrayType) << ":\n";

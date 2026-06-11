@@ -135,12 +135,12 @@ rocfft_rccl_comm_t rocfft_rccl_comm_t::create(const std::set<int>& devices)
             rocfft_scoped_device set_dev(dev);
             ncclComm_t           comm = nullptr;
             result = ncclCommInitRank(&comm, ndevices, new_comm.pimpl->uniqueId, rank);
-                if(result != ncclSuccess)
-                {
-                    // log and return empty so the caller falls back to P2P/A2A
-                    log_trace(__func__, "ncclCommInitRank failed on device", dev, result);
-                    return {};
-                }
+            if(result != ncclSuccess)
+            {
+                // log and return empty so the caller falls back to P2P/A2A
+                log_trace(__func__, "ncclCommInitRank failed on device", dev, result);
+                return {};
+            }
             new_comm.pimpl->device_to_comm[dev] = comm;
             ++rank;
         }
@@ -271,7 +271,7 @@ void rocfft_rccl_comm_t::alltoall(const std::vector<const void*>& sendbufs,
             + ", streams=" + std::to_string(streams.size()));
 
     // resolve precision/complex/device mapping once outside the loop
-    const auto devices    = get_devices();
+    const auto devices = get_devices();
     // interleaved complex = 2 real scalars per element; planar/real = 1
     const auto nccl_count = count * (array_type_is_interleaved(array_type) ? 2 : 1);
     const auto dtype      = get_nccl_dtype(precision);
