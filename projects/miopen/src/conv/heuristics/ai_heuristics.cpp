@@ -97,7 +97,7 @@ size_t Metadata::EncodeLayout(const std::string& layout) const
     return layout_encodings.at(layout);
 }
 
-const std::vector<int> one_hot(const size_t label, const size_t num_classes)
+std::vector<int> one_hot(const size_t label, const size_t num_classes)
 {
     std::vector<int> out = std::vector<int>(num_classes, 0);
     if(label < num_classes)
