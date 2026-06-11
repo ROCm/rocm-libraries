@@ -26,6 +26,7 @@
 #include "ck_tile/core/tensor/load_tile.hpp"
 #include "ck_tile/core/numeric/math.hpp"
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/host/kernel_launch.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <string>
@@ -473,32 +474,37 @@ __device__ void ck_tile_conv2d_grouped_32c_nhwc_impl(const ToType<cfg.data_type>
 }
 
 template <auto cfg, bool Padded = true>
-__global__ void ck_tile_conv2d_grouped_32c_nhwc(const ToType<cfg.data_type>* __restrict__ in,
-                                                 const ToType<cfg.data_type>* __restrict__ wei,
-                                                 double alpha,
-                                                 double beta,
-                                                 ToType<cfg.data_type>* __restrict__ out,
-                                                 int N,
-                                                 int groups,
-                                                 int c_per_group,
-                                                 int k_per_group,
-                                                 int hi,
-                                                 int wi,
-                                                 int ho,
-                                                 int wo,
-                                                 int fy,
-                                                 int fx,
-                                                 int sy,
-                                                 int sx,
-                                                 int dy,
-                                                 int dx,
-                                                 int py,
-                                                 int px)
+struct GroupedConv32cKernel
 {
-    ck_tile_conv2d_grouped_32c_nhwc_impl<cfg, Padded>(in, wei, alpha, beta, out,
-                                                     N, groups, c_per_group, k_per_group,
-                                                     hi, wi, ho, wo, fy, fx, sy, sx, dy, dx, py, px);
-}
+    static constexpr ck_tile::index_t kBlockSize = cfg.block_size();
+
+    CK_TILE_DEVICE void operator()(const ToType<cfg.data_type>* __restrict__ in,
+                                   const ToType<cfg.data_type>* __restrict__ wei,
+                                   double alpha,
+                                   double beta,
+                                   ToType<cfg.data_type>* __restrict__ out,
+                                   int N,
+                                   int groups,
+                                   int c_per_group,
+                                   int k_per_group,
+                                   int hi,
+                                   int wi,
+                                   int ho,
+                                   int wo,
+                                   int fy,
+                                   int fx,
+                                   int sy,
+                                   int sx,
+                                   int dy,
+                                   int dx,
+                                   int py,
+                                   int px) const
+    {
+        ck_tile_conv2d_grouped_32c_nhwc_impl<cfg, Padded>(
+            in, wei, alpha, beta, out, N, groups, c_per_group, k_per_group, hi, wi, ho, wo, fy, fx,
+            sy, sx, dy, dx, py, px);
+    }
+};
 
 static bool channels_can_be_padded(const Conv2dParams& par)
 {
@@ -535,29 +541,32 @@ inline void launch_kernel(const LaunchParams& lp,
 
     auto do_launch = [&]<bool Pad>()
     {
-        ck_tile_conv2d_grouped_32c_nhwc<cfg, Pad>
-            <<<lp.grid, lp.block_size, lp.dynamic_shared_bytes, stream>>>(
-                static_cast<const ElementType*>(in),
-                static_cast<const ElementType*>(wei),
-                1.0,
-                0.0,
-                static_cast<ElementType*>(out),
-                par.n,
-                par.groups,
-                par.channels_per_group(),
-                par.filters_per_group(),
-                view.h(),
-                view.w(),
-                view.p(),
-                view.q(),
-                par.kh,
-                par.kw,
-                par.stride_h,
-                par.stride_w,
-                par.dilation_h,
-                par.dilation_w,
-                view.pad_h(),
-                view.pad_w());
+        ck_tile::make_kernel(
+            GroupedConv32cKernel<cfg, Pad>{},
+            lp.grid,
+            lp.block_size,
+            lp.dynamic_shared_bytes,
+            static_cast<const ElementType*>(in),
+            static_cast<const ElementType*>(wei),
+            1.0,
+            0.0,
+            static_cast<ElementType*>(out),
+            par.n,
+            par.groups,
+            par.channels_per_group(),
+            par.filters_per_group(),
+            view.h(),
+            view.w(),
+            view.p(),
+            view.q(),
+            par.kh,
+            par.kw,
+            par.stride_h,
+            par.stride_w,
+            par.dilation_h,
+            par.dilation_w,
+            view.pad_h(),
+            view.pad_w())(ck_tile::stream_config{stream});
     };
 
     if(needs_padding)

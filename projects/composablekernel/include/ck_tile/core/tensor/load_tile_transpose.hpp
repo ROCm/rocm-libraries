@@ -50,7 +50,7 @@ constexpr bool is_sequence_suffix_v = is_sequence_suffix<Suffix, Sequence>::valu
 template <typename DataType>
 struct DefaultTranspose
 {
-#if defined(__gfx950__) || defined(CK_USE_GFX950)
+#if defined(__gfx950__)
     template <index_t LaneGroupSize, index_t NumBitType>
     struct Quad
     {
