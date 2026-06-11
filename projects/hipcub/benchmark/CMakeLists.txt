@@ -22,55 +22,65 @@
 
 function(add_hipcub_benchmark BENCHMARK_SOURCE)
   get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
+
   if(USE_HIPCXX)
     set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE HIP)
   endif()
+
   add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
   target_include_directories(${BENCHMARK_TARGET} SYSTEM BEFORE
     PUBLIC
-      "$<BUILD_INTERFACE:${GOOGLEBENCHMARK_ROOT}/include>"
+    "$<BUILD_INTERFACE:${GOOGLEBENCHMARK_ROOT}/include>"
   )
   target_link_libraries(${BENCHMARK_TARGET}
     PRIVATE
-      benchmark::benchmark
-      hipcub
+    benchmark::benchmark
+    hipcub
   )
 
-  if (WIN32)
+  if(WIN32)
     target_compile_definitions(${BENCHMARK_TARGET} PRIVATE BENCHMARK_STATIC_DEFINE)
   endif()
+
+  target_include_directories(${BENCHMARK_TARGET} PRIVATE ../../../shared/primbench)
 
   if((HIP_COMPILER STREQUAL "nvcc"))
     set_property(TARGET ${BENCHMARK_TARGET} PROPERTY CUDA_STANDARD 17)
     set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE CUDA)
     target_compile_options(${BENCHMARK_TARGET}
       PRIVATE
-        $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
+      $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
     )
     target_link_libraries(${BENCHMARK_TARGET}
       PRIVATE
-        hipcub_cub
+      hipcub_cub
     )
+  else()
+    target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
   endif()
+
   set_target_properties(${BENCHMARK_TARGET}
     PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmark"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmark"
   )
   rocm_install(TARGETS ${BENCHMARK_TARGET} COMPONENT benchmarks)
-  if (WIN32 AND NOT DEFINED DLLS_COPIED)
+
+  if(WIN32 AND NOT DEFINED DLLS_COPIED)
     set(DLLS_COPIED "YES")
     set(DLLS_COPIED ${DLLS_COPIED} PARENT_SCOPE)
+
     # for now adding in all .dll as dependency chain is not cmake based on win32
-    file( GLOB third_party_dlls
-    LIST_DIRECTORIES ON
-    CONFIGURE_DEPENDS
-    ${HIP_DIR}/bin/*.dll
-    ${CMAKE_SOURCE_DIR}/rtest.*
+    file(GLOB third_party_dlls
+      LIST_DIRECTORIES ON
+      CONFIGURE_DEPENDS
+      ${HIP_DIR}/bin/*.dll
+      ${CMAKE_SOURCE_DIR}/rtest.*
     )
-    foreach( file_i ${third_party_dlls})
-      add_custom_command( TARGET ${BENCHMARK_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/benchmark )
-    endforeach( file_i )
-  endif()         
+
+    foreach(file_i ${third_party_dlls})
+      add_custom_command(TARGET ${BENCHMARK_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/benchmark)
+    endforeach(file_i)
+  endif()
 endfunction()
 
 # ****************************************************************************
@@ -90,7 +100,7 @@ add_hipcub_benchmark(benchmark_block_shuffle.cpp)
 add_hipcub_benchmark(benchmark_device_adjacent_difference.cpp)
 add_hipcub_benchmark(benchmark_device_batch_copy.cpp)
 add_hipcub_benchmark(benchmark_device_batch_memcpy.cpp)
-add_hipcub_benchmark(benchmark_device_for.cpp)
+add_hipcub_benchmark(benchmark_device_for_each.cpp)
 add_hipcub_benchmark(benchmark_device_histogram.cpp)
 add_hipcub_benchmark(benchmark_device_memory.cpp)
 add_hipcub_benchmark(benchmark_device_merge.cpp)
@@ -105,6 +115,7 @@ add_hipcub_benchmark(benchmark_device_segmented_sort.cpp)
 add_hipcub_benchmark(benchmark_device_segmented_radix_sort.cpp)
 add_hipcub_benchmark(benchmark_device_segmented_reduce.cpp)
 add_hipcub_benchmark(benchmark_device_select.cpp)
+add_hipcub_benchmark(benchmark_device_spmv.cpp)
 add_hipcub_benchmark(benchmark_warp_exchange.cpp)
 add_hipcub_benchmark(benchmark_warp_load.cpp)
 add_hipcub_benchmark(benchmark_warp_reduce.cpp)

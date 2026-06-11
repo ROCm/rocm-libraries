@@ -23,9 +23,28 @@
 #ifndef HIPCUB_BENCHMARK_UTILS_HPP_
 #define HIPCUB_BENCHMARK_UTILS_HPP_
 
-#ifndef BENCHMARK_UTILS_INCLUDE_GUARD
-    #error benchmark_utils.hpp must ONLY be included by common_benchmark_header.hpp. Please include common_benchmark_header.hpp instead.
-#endif
+#include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <functional>
+#include <iostream>
+#include <numeric>
+#include <random>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+// Primbench
+#include "primbench.hpp"
+
+// HIP API
+#include <hip/hip_runtime.h>
+
+#include <hipcub/libcxx.hpp>
+
+#include _HIPCUB_LIBCXX_INCLUDE(cmath)
+#include _HIPCUB_STD_INCLUDE(limits)
 
 // hipCUB API
 #ifdef __HIP_PLATFORM_AMD__
@@ -194,7 +213,8 @@ OutputIt host_exclusive_scan_by_key(InputIt         first,
         if(key_compare_op(*k_first, *++k_first))
         {
             sum = op(sum, static_cast<result_type>(*first));
-        } else
+        }
+        else
         {
             sum = initial_value;
         }
@@ -227,46 +247,62 @@ struct custom_type
     HIPCUB_HOST_DEVICE inline ~custom_type() = default;
 #endif
 
-    HIPCUB_HOST_DEVICE inline custom_type& operator=(const custom_type& other)
+    HIPCUB_HOST_DEVICE
+    inline custom_type&
+        operator=(const custom_type& other)
     {
         x = other.x;
         y = other.y;
         return *this;
     }
 
-    HIPCUB_HOST_DEVICE inline custom_type operator+(const custom_type& rhs) const
+    HIPCUB_HOST_DEVICE
+    inline custom_type
+        operator+(const custom_type& rhs) const
     {
         return custom_type(x + rhs.x, y + rhs.y);
     }
 
-    HIPCUB_HOST_DEVICE inline custom_type operator-(const custom_type& other) const
+    HIPCUB_HOST_DEVICE
+    inline custom_type
+        operator-(const custom_type& other) const
     {
         return custom_type(x - other.x, y - other.y);
     }
 
-    HIPCUB_HOST_DEVICE inline bool operator<(const custom_type& rhs) const
+    HIPCUB_HOST_DEVICE
+    inline bool
+        operator<(const custom_type& rhs) const
     {
         // intentionally suboptimal choice for short-circuting,
         // required to generate more performant device code
         return ((x == rhs.x && y < rhs.y) || x < rhs.x);
     }
 
-    HIPCUB_HOST_DEVICE inline bool operator>(const custom_type& other) const
+    HIPCUB_HOST_DEVICE
+    inline bool
+        operator>(const custom_type& other) const
     {
         return (x > other.x || (x == other.x && y > other.y));
     }
 
-    HIPCUB_HOST_DEVICE inline bool operator==(const custom_type& rhs) const
+    HIPCUB_HOST_DEVICE
+    inline bool
+        operator==(const custom_type& rhs) const
     {
         return x == rhs.x && y == rhs.y;
     }
 
-    HIPCUB_HOST_DEVICE inline bool operator!=(const custom_type& other) const
+    HIPCUB_HOST_DEVICE
+    inline bool
+        operator!=(const custom_type& other) const
     {
         return !(*this == other);
     }
 
-    HIPCUB_HOST_DEVICE custom_type& operator+=(const custom_type& rhs)
+    HIPCUB_HOST_DEVICE
+    custom_type&
+        operator+=(const custom_type& rhs)
     {
         this->x += rhs.x;
         this->y += rhs.y;
@@ -292,7 +328,9 @@ struct custom_type_decomposer
     using T = typename CustomType::first_type;
     using U = typename CustomType::second_type;
 
-    HIPCUB_HOST_DEVICE ::hipcub::tuple<T&, U&> operator()(CustomType& key) const
+    HIPCUB_HOST_DEVICE
+    ::hipcub::tuple<T&, U&>
+        operator()(CustomType& key) const
     {
         return ::hipcub::tuple<T&, U&>{key.x, key.y};
     }
@@ -394,7 +432,7 @@ std::vector<T>
         const size_t new_segment_length = segment_length_distribution(prng);
         const size_t new_segment_end
             = _HIPCUB_STD::min(size, keys_start_index + new_segment_length);
-        const T      key                = key_distribution(prng);
+        const T key = key_distribution(prng);
         std::fill(std::next(keys.begin(), keys_start_index),
                   std::next(keys.begin(), new_segment_end),
                   key);
@@ -425,14 +463,10 @@ using engine_type = std::default_random_engine;
 // generate_random_data_n() generates only part of sequence and replicates it,
 // because benchmarks usually do not need "true" random sequence.
 template<class OutputIter, class U, class V, class Generator>
-inline auto generate_random_data_n(OutputIter it,
-                                   size_t     size,
-                                   U          min,
-                                   V          max,
-                                   Generator& gen,
-                                   size_t     max_random_size = 1024 * 1024) ->
-    typename std::enable_if_t<std::is_integral<::hipcub::detail::it_value_t<OutputIter>>::value,
-                              OutputIter>
+inline auto generate_random_data_n(
+    OutputIter it, size_t size, U min, V max, Generator& gen, size_t max_random_size = 1024 * 1024)
+    -> typename std::enable_if_t<std::is_integral<::hipcub::detail::it_value_t<OutputIter>>::value,
+                                 OutputIter>
 {
     using T = ::hipcub::detail::it_value_t<OutputIter>;
 
@@ -499,7 +533,8 @@ struct plus
 {
     template<class A, class B>
     HIPCUB_HOST_DEVICE
-    constexpr auto operator()(const A& a, const B& b) const -> decltype(a + b)
+    constexpr auto
+        operator()(const A& a, const B& b) const -> decltype(a + b)
     {
         return a + b;
     }
@@ -554,5 +589,43 @@ public:
     }
 };
 } // namespace std
+
+#define HIP_CHECK(condition)                                                           \
+    {                                                                                  \
+        hipError_t error = condition;                                                  \
+        if(error != hipSuccess)                                                        \
+        {                                                                              \
+            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+            exit(error);                                                               \
+        }                                                                              \
+    }
+
+PRIMBENCH_REGISTER_TYPE(int8_t, "i8")
+PRIMBENCH_REGISTER_TYPE(int16_t, "i16")
+PRIMBENCH_REGISTER_TYPE(int32_t, "i32")
+PRIMBENCH_REGISTER_TYPE(int64_t, "i64")
+PRIMBENCH_REGISTER_TYPE(uint8_t, "u8")
+PRIMBENCH_REGISTER_TYPE(uint16_t, "u16")
+PRIMBENCH_REGISTER_TYPE(uint32_t, "u32")
+PRIMBENCH_REGISTER_TYPE(uint64_t, "u64")
+PRIMBENCH_REGISTER_TYPE(float, "f32")
+PRIMBENCH_REGISTER_TYPE(double, "f64")
+PRIMBENCH_REGISTER_TYPE(long long, "i64")
+PRIMBENCH_REGISTER_TYPE(unsigned long long, "u64")
+PRIMBENCH_REGISTER_TYPE(__half, "f16")
+
+using custom_int_t       = benchmark_utils::custom_type<int>;
+using custom_float2      = benchmark_utils::custom_type<float, float>;
+using custom_double2     = benchmark_utils::custom_type<double, double>;
+using custom_char_double = benchmark_utils::custom_type<char, double>;
+using custom_double_char = benchmark_utils::custom_type<double, char>;
+using custom_int_double  = benchmark_utils::custom_type<int, double>;
+
+PRIMBENCH_REGISTER_TYPE(custom_int_t, "custom<i32>");
+PRIMBENCH_REGISTER_TYPE(custom_float2, "custom<f32,f32>")
+PRIMBENCH_REGISTER_TYPE(custom_double2, "custom<f64,f64>")
+PRIMBENCH_REGISTER_TYPE(custom_char_double, "custom<i8,f64>")
+PRIMBENCH_REGISTER_TYPE(custom_double_char, "custom<f64,i8>")
+PRIMBENCH_REGISTER_TYPE(custom_int_double, "custom<i32,f64>")
 
 #endif // HIPCUB_BENCHMARK_UTILS_HPP_

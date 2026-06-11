@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_benchmark_header.hpp"
+#include "benchmark_utils.hpp"
 
 #include "../test/hipcub/test_utils_sort_comparator.hpp"
 // HIP API
@@ -32,7 +32,7 @@
 #include <type_traits>
 
 #ifndef DEFAULT_N
-constexpr size_t DEFAULT_N = 1024 * 1024 * 128;
+constexpr size_t DEFAULT_N = 128 * primbench::MiB;
 #endif
 
 enum class benchmark_kinds
@@ -46,7 +46,8 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          typename T,
          typename Compare>
-__device__ auto sort_keys_benchmark(const T* input, T* output, Compare compare_op)
+__device__
+auto sort_keys_benchmark(const T* input, T* output, Compare compare_op)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
@@ -73,7 +74,8 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          typename T,
          typename Compare>
-__device__ auto sort_keys_benchmark(const T* /*input*/, T* /*output*/, Compare /*compare_op*/)
+__device__
+auto sort_keys_benchmark(const T* /*input*/, T* /*output*/, Compare /*compare_op*/)
     -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {}
 
@@ -83,7 +85,8 @@ template<unsigned int BlockSize,
          typename T,
          typename Compare>
 __global__
-    __launch_bounds__(BlockSize) void sort_keys(const T* input, T* output, Compare compare_op)
+    __launch_bounds__(BlockSize)
+void sort_keys(const T* input, T* output, Compare compare_op)
 {
     sort_keys_benchmark<BlockSize, LogicalWarpSize, ItemsPerThread>(input, output, compare_op);
 }
@@ -93,7 +96,8 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          typename T,
          typename Compare>
-__device__ auto sort_pairs_benchmark(const T* input, T* output, Compare compare_op)
+__device__
+auto sort_pairs_benchmark(const T* input, T* output, Compare compare_op)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
@@ -131,7 +135,8 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          typename T,
          typename Compare>
-__device__ auto sort_pairs_benchmark(const T* /*input*/, T* /*output*/, Compare /*compare_op*/)
+__device__
+auto sort_pairs_benchmark(const T* /*input*/, T* /*output*/, Compare /*compare_op*/)
     -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {}
 
@@ -141,7 +146,8 @@ template<unsigned int BlockSize,
          typename T,
          typename Compare>
 __global__
-    __launch_bounds__(BlockSize) void sort_pairs(const T* input, T* output, Compare compare_op)
+    __launch_bounds__(BlockSize)
+void sort_pairs(const T* input, T* output, Compare compare_op)
 {
     sort_pairs_benchmark<BlockSize, LogicalWarpSize, ItemsPerThread>(input, output, compare_op);
 }
@@ -157,10 +163,11 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          typename T,
          typename Compare>
-__device__ auto sort_keys_segmented_benchmark(const T*            input,
-                                              T*                  output,
-                                              const unsigned int* segment_sizes,
-                                              Compare             compare)
+__device__
+auto sort_keys_segmented_benchmark(const T*            input,
+                                   T*                  output,
+                                   const unsigned int* segment_sizes,
+                                   Compare             compare)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     constexpr unsigned int max_segment_size   = LogicalWarpSize * ItemsPerThread;
@@ -192,10 +199,11 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          typename T,
          typename Compare>
-__device__ auto sort_keys_segmented_benchmark(const T* /*input*/,
-                                              T* /*output*/,
-                                              const unsigned int* /*segment_sizes*/,
-                                              Compare /*compare*/)
+__device__
+auto sort_keys_segmented_benchmark(const T* /*input*/,
+                                   T* /*output*/,
+                                   const unsigned int* /*segment_sizes*/,
+                                   Compare /*compare*/)
     -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {}
 
@@ -204,10 +212,11 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          typename T,
          typename Compare>
-__global__ __launch_bounds__(BlockSize) void sort_keys_segmented(const T*            input,
-                                                                 T*                  output,
-                                                                 const unsigned int* segment_sizes,
-                                                                 Compare             compare)
+__global__ __launch_bounds__(BlockSize)
+void sort_keys_segmented(const T*            input,
+                         T*                  output,
+                         const unsigned int* segment_sizes,
+                         Compare             compare)
 {
     sort_keys_segmented_benchmark<BlockSize, LogicalWarpSize, ItemsPerThread>(input,
                                                                               output,
@@ -220,10 +229,11 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          typename T,
          typename Compare>
-__device__ auto sort_pairs_segmented_benchmark(const T*            input,
-                                               T*                  output,
-                                               const unsigned int* segment_sizes,
-                                               Compare             compare)
+__device__
+auto sort_pairs_segmented_benchmark(const T*            input,
+                                    T*                  output,
+                                    const unsigned int* segment_sizes,
+                                    Compare             compare)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     constexpr unsigned int max_segment_size   = LogicalWarpSize * ItemsPerThread;
@@ -272,10 +282,11 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          typename T,
          typename Compare>
-__device__ auto sort_pairs_segmented_benchmark(const T* /*input*/,
-                                               T* /*output*/,
-                                               const unsigned int* /*segment_sizes*/,
-                                               Compare /*compare*/)
+__device__
+auto sort_pairs_segmented_benchmark(const T* /*input*/,
+                                    T* /*output*/,
+                                    const unsigned int* /*segment_sizes*/,
+                                    Compare /*compare*/)
     -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {}
 
@@ -284,10 +295,11 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          typename T,
          typename Compare>
-__global__ __launch_bounds__(BlockSize) void sort_pairs_segmented(const T*            input,
-                                                                  T*                  output,
-                                                                  const unsigned int* segment_sizes,
-                                                                  Compare             compare)
+__global__ __launch_bounds__(BlockSize)
+void sort_pairs_segmented(const T*            input,
+                          T*                  output,
+                          const unsigned int* segment_sizes,
+                          Compare             compare)
 {
     sort_pairs_segmented_benchmark<BlockSize, LogicalWarpSize, ItemsPerThread>(input,
                                                                                output,
@@ -296,114 +308,134 @@ __global__ __launch_bounds__(BlockSize) void sort_pairs_segmented(const T*      
 }
 
 template<class T,
-         unsigned int BlockSize,
-         unsigned int LogicalWarpSize,
-         unsigned int ItemsPerThread,
-         class CompareOp     = test_utils::less,
-         unsigned int Trials = 10>
-void run_benchmark(benchmark::State&     state,
-                   const benchmark_kinds benchmark_kind,
-                   const hipStream_t     stream,
-                   const size_t          N)
+         unsigned int    BlockSize,
+         unsigned int    LogicalWarpSize,
+         unsigned int    ItemsPerThread,
+         benchmark_kinds BenchmarkKind,
+         class CompareOp = test_utils::less>
+struct sort_benchmark : public primbench::benchmark_interface
 {
-    constexpr auto items_per_block = BlockSize * ItemsPerThread;
-    const auto     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
-
-    const std::vector<T> input
-        = benchmark_utils::get_random_data<T>(size,
-                                              benchmark_utils::generate_limits<T>::min(),
-                                              benchmark_utils::generate_limits<T>::max());
-
-    T* d_input  = nullptr;
-    T* d_output = nullptr;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(input[0])));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(input[0])));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-
-    for(auto _ : state)
+    primbench::json meta() const override
     {
-        auto start = std::chrono::high_resolution_clock::now();
+        auto json = primbench::json{}
+                        .add("algo", "warp_merge_sort")
+                        .add("segmented", false)
+                        .add("pairs", BenchmarkKind == benchmark_kinds::sort_pairs)
+                        .add("data_type", primbench::name<T>())
+                        .add("block_size", BlockSize)
+                        .add("items_per_thread", ItemsPerThread)
+                        .add("warp_size", LogicalWarpSize);
 
-        if(benchmark_kind == benchmark_kinds::sort_keys)
+        return json;
+    }
+
+    void run(primbench::state& state) override
+    {
+        const auto& input_items = state.size;
+        const auto& stream      = state.stream;
+
+        constexpr auto items_per_block = BlockSize * ItemsPerThread;
+        const auto     items
+            = items_per_block * ((input_items + items_per_block - 1) / items_per_block);
+
+        const std::vector<T> input
+            = benchmark_utils::get_random_data<T>(items,
+                                                  benchmark_utils::generate_limits<T>::min(),
+                                                  benchmark_utils::generate_limits<T>::max());
+
+        T* d_input  = nullptr;
+        T* d_output = nullptr;
+        HIP_CHECK(hipMalloc(&d_input, items * sizeof(input[0])));
+        HIP_CHECK(hipMalloc(&d_output, items * sizeof(input[0])));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
+
+        const auto launch = [&]
         {
-            for(unsigned int i = 0; i < Trials; ++i)
+            if constexpr(BenchmarkKind == benchmark_kinds::sort_keys)
             {
                 sort_keys<BlockSize, LogicalWarpSize, ItemsPerThread>
-                    <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
-                                                                                   d_output,
-                                                                                   CompareOp{});
+                    <<<dim3(items / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
+                                                                                    d_output,
+                                                                                    CompareOp{});
             }
-        } else if(benchmark_kind == benchmark_kinds::sort_pairs)
-        {
-            for(unsigned int i = 0; i < Trials; ++i)
+            else
             {
+                static_assert(BenchmarkKind == benchmark_kinds::sort_pairs);
                 sort_pairs<BlockSize, LogicalWarpSize, ItemsPerThread>
-                    <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
-                                                                                   d_output,
-                                                                                   CompareOp{});
+                    <<<dim3(items / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
+                                                                                    d_output,
+                                                                                    CompareOp{});
             }
-        }
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        };
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
+        state.set_items(items);
+        state.add_writes<T>(items);
+        state.run(launch);
+
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
     }
-    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * Trials * size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-}
+};
 
 template<class T,
-         unsigned int BlockSize,
-         unsigned int LogicalWarpSize,
-         unsigned int ItemsPerThread,
-         class CompareOp     = test_utils::less,
-         unsigned int Trials = 10>
-void run_segmented_benchmark(benchmark::State&     state,
-                             const benchmark_kinds benchmark_kind,
-                             const hipStream_t     stream,
-                             const size_t          N)
+         unsigned int    BlockSize,
+         unsigned int    LogicalWarpSize,
+         unsigned int    ItemsPerThread,
+         benchmark_kinds BenchmarkKind,
+         class CompareOp = test_utils::less>
+struct segmented_sort_benchmark : public primbench::benchmark_interface
 {
-    constexpr auto max_segment_size   = LogicalWarpSize * ItemsPerThread;
-    constexpr auto segments_per_block = BlockSize / LogicalWarpSize;
-    constexpr auto items_per_block    = BlockSize * ItemsPerThread;
 
-    const auto num_blocks   = (N + items_per_block - 1) / items_per_block;
-    const auto num_segments = num_blocks * segments_per_block;
-    const auto size         = num_blocks * items_per_block;
-
-    const std::vector<T> input
-        = benchmark_utils::get_random_data<T>(size,
-                                              benchmark_utils::generate_limits<T>::min(),
-                                              benchmark_utils::generate_limits<T>::max());
-
-    const auto segment_sizes
-        = benchmark_utils::get_random_data<unsigned int>(num_segments, 0, max_segment_size);
-
-    T*            d_input         = nullptr;
-    T*            d_output        = nullptr;
-    unsigned int* d_segment_sizes = nullptr;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(input[0])));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(input[0])));
-    HIP_CHECK(hipMalloc(&d_segment_sizes, num_segments * sizeof(segment_sizes[0])));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_segment_sizes,
-                        segment_sizes.data(),
-                        num_segments * sizeof(segment_sizes[0]),
-                        hipMemcpyHostToDevice));
-
-    for(auto _ : state)
+    primbench::json meta() const override
     {
-        auto start = std::chrono::high_resolution_clock::now();
+        auto json = primbench::json{}
+                        .add("algo", "warp_merge_sort")
+                        .add("segmented", true)
+                        .add("pairs", BenchmarkKind == benchmark_kinds::sort_pairs)
+                        .add("data_type", primbench::name<T>())
+                        .add("block_size", BlockSize)
+                        .add("items_per_thread", ItemsPerThread)
+                        .add("warp_size", LogicalWarpSize);
 
-        if(benchmark_kind == benchmark_kinds::sort_keys)
+        return json;
+    }
+
+    void run(primbench::state& state) override
+    {
+        const auto& input_items = state.size;
+        const auto& stream      = state.stream;
+
+        constexpr auto max_segment_size   = LogicalWarpSize * ItemsPerThread;
+        constexpr auto segments_per_block = BlockSize / LogicalWarpSize;
+        constexpr auto items_per_block    = BlockSize * ItemsPerThread;
+
+        const auto num_blocks   = (input_items + items_per_block - 1) / items_per_block;
+        const auto num_segments = num_blocks * segments_per_block;
+        const auto items        = num_blocks * items_per_block;
+
+        const std::vector<T> input
+            = benchmark_utils::get_random_data<T>(items,
+                                                  benchmark_utils::generate_limits<T>::min(),
+                                                  benchmark_utils::generate_limits<T>::max());
+
+        const auto segment_sizes
+            = benchmark_utils::get_random_data<unsigned int>(num_segments, 0, max_segment_size);
+
+        T*            d_input         = nullptr;
+        T*            d_output        = nullptr;
+        unsigned int* d_segment_sizes = nullptr;
+        HIP_CHECK(hipMalloc(&d_input, items * sizeof(input[0])));
+        HIP_CHECK(hipMalloc(&d_output, items * sizeof(input[0])));
+        HIP_CHECK(hipMalloc(&d_segment_sizes, num_segments * sizeof(segment_sizes[0])));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), items * sizeof(T), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(d_segment_sizes,
+                            segment_sizes.data(),
+                            num_segments * sizeof(segment_sizes[0]),
+                            hipMemcpyHostToDevice));
+
+        const auto launch = [&]
         {
-            for(unsigned int i = 0; i < Trials; ++i)
+            if constexpr(BenchmarkKind == benchmark_kinds::sort_keys)
             {
                 sort_keys_segmented<BlockSize, LogicalWarpSize, ItemsPerThread>
                     <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input,
@@ -411,65 +443,57 @@ void run_segmented_benchmark(benchmark::State&     state,
                                                                        d_segment_sizes,
                                                                        CompareOp{});
             }
-        } else if(benchmark_kind == benchmark_kinds::sort_pairs)
-        {
-            for(unsigned int i = 0; i < Trials; ++i)
+            else
             {
+                static_assert(BenchmarkKind == benchmark_kinds::sort_pairs);
+
                 sort_pairs_segmented<BlockSize, LogicalWarpSize, ItemsPerThread>
                     <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input,
                                                                        d_output,
                                                                        d_segment_sizes,
                                                                        CompareOp{});
             }
-        }
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        };
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
+        state.set_items(items);
+        state.add_writes<T>(items);
+
+        state.run(launch);
+
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_segment_sizes));
     }
-    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * Trials * size);
+};
 
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-    HIP_CHECK(hipFree(d_segment_sizes));
-}
-
-#define CREATE_BENCHMARK(T, BS, WS, IPT)                                                           \
-    if(WS <= device_warp_size)                                                                     \
-    {                                                                                              \
-        benchmarks.push_back(benchmark::RegisterBenchmark(                                         \
-            std::string("warp_merge_sort<data_type:" #T ",block_size:" #BS ",warp_size:" #WS       \
-                        ",items_per_thread:" #IPT ">.sub_algorithm_name:"                          \
-                        + name)                                                                    \
-                .c_str(),                                                                          \
-            segmented ? &run_benchmark<T, BS, WS, IPT> : &run_segmented_benchmark<T, BS, WS, IPT>, \
-            benchmark_kind,                                                                        \
-            stream,                                                                                \
-            size));                                                                                \
+#define CREATE_BENCHMARK(T, BS, WS, IPT, BK)                                \
+    if(WS <= device_warp_size)                                              \
+    {                                                                       \
+        if(segmented)                                                       \
+        {                                                                   \
+            executor.queue<segmented_sort_benchmark<T, BS, WS, IPT, BK>>(); \
+        }                                                                   \
+        else                                                                \
+        {                                                                   \
+            executor.queue<sort_benchmark<T, BS, WS, IPT, BK>>();           \
+        }                                                                   \
     }
 
-#define BENCHMARK_TYPE_WS(type, block, warp) \
-    CREATE_BENCHMARK(type, block, warp, 1);  \
-    CREATE_BENCHMARK(type, block, warp, 4);  \
-    CREATE_BENCHMARK(type, block, warp, 8)
+#define BENCHMARK_TYPE_WS(type, block, warp, kind) \
+    CREATE_BENCHMARK(type, block, warp, 1, kind);  \
+    CREATE_BENCHMARK(type, block, warp, 4, kind);  \
+    CREATE_BENCHMARK(type, block, warp, 8, kind)
 
-#define BENCHMARK_TYPE(type, block)     \
-    BENCHMARK_TYPE_WS(type, block, 4);  \
-    BENCHMARK_TYPE_WS(type, block, 16); \
-    BENCHMARK_TYPE_WS(type, block, 32); \
-    BENCHMARK_TYPE_WS(type, block, 64)
+#define BENCHMARK_TYPE(type, block)                    \
+    BENCHMARK_TYPE_WS(type, block, 4, BenchmarkKind);  \
+    BENCHMARK_TYPE_WS(type, block, 16, BenchmarkKind); \
+    BENCHMARK_TYPE_WS(type, block, 32, BenchmarkKind); \
+    BENCHMARK_TYPE_WS(type, block, 64, BenchmarkKind)
 
-void add_benchmarks(const benchmark_kinds                         benchmark_kind,
-                    const std::string&                            name,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const hipStream_t                             stream,
-                    const size_t                                  size,
-                    const bool                                    segmented,
-                    const unsigned int                            device_warp_size)
+template<benchmark_kinds BenchmarkKind>
+void add_benchmarks(primbench::executor& executor,
+                    const bool           segmented,
+                    const unsigned int   device_warp_size)
 {
     BENCHMARK_TYPE(int, 256);
     BENCHMARK_TYPE(int8_t, 256);
@@ -479,33 +503,14 @@ void add_benchmarks(const benchmark_kinds                         benchmark_kind
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.run_and_exit_if_error();
-
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-
-    std::cout << "benchmark_warp_merge_sort" << std::endl;
-
-    // HIP
-    hipStream_t     stream = 0; // default
-    hipDeviceProp_t devProp;
-    int             device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
     const auto device_warp_size = []
     {
         const int result = HIPCUB_HOST_WARP_THREADS;
         if(result > 0)
         {
             std::cout << "[HIP] Device warp size: " << result << std::endl;
-        } else
+        }
+        else
         {
             std::cerr << "Failed to get device warp size! Aborting.\n";
             std::exit(1);
@@ -513,54 +518,17 @@ int main(int argc, char* argv[])
         return static_cast<unsigned int>(result);
     }();
 
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(benchmark_kinds::sort_keys,
-                   "sort(keys)",
-                   benchmarks,
-                   stream,
-                   size,
-                   false,
-                   device_warp_size);
-    add_benchmarks(benchmark_kinds::sort_pairs,
-                   "sort(keys, values)",
-                   benchmarks,
-                   stream,
-                   size,
-                   false,
-                   device_warp_size);
-    add_benchmarks(benchmark_kinds::sort_keys,
-                   "segmented_sort(keys)",
-                   benchmarks,
-                   stream,
-                   size,
-                   true,
-                   device_warp_size);
-    add_benchmarks(benchmark_kinds::sort_pairs,
-                   "segmented_sort(keys, values)",
-                   benchmarks,
-                   stream,
-                   size,
-                   true,
-                   device_warp_size);
+    primbench::settings settings;
+    settings.size                 = DEFAULT_N;
+    settings.min_gpu_ms_per_batch = 100;
 
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
+    primbench::executor executor(argc, argv, settings);
 
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
+    add_benchmarks<benchmark_kinds::sort_keys>(executor, false, device_warp_size);
+    add_benchmarks<benchmark_kinds::sort_pairs>(executor, false, device_warp_size);
+    add_benchmarks<benchmark_kinds::sort_keys>(executor, true, device_warp_size);
+    add_benchmarks<benchmark_kinds::sort_pairs>(executor, true, device_warp_size);
 
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
+    executor.run();
     return 0;
 }
