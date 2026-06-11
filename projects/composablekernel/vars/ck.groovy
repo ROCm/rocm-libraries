@@ -433,11 +433,13 @@ def gpuUsable(String image) { sh(returnStatus:true, script:"docker run --rm --de
 // required. Image/registry/container faults are classified in the body by pullImage
 // and the in-container GPU check, where the correct conf is available.
 def preflight() {
-    if (!daemonUp())      throw new org.ck.NodeFault('docker-daemon-down')
-    if (!driverUp())      throw new org.ck.NodeFault('driver-not-loaded')
-    if (!devicesUp())     throw new org.ck.NodeFault('gpu-devices-missing')
-    if (!diskOk())        throw new org.ck.NodeFault('disk-space-low')
-    if (!cacheWritable()) throw new org.ck.NodeFault('sccache-cache-unwritable')
+    if (!daemonUp())  throw new org.ck.NodeFault('docker-daemon-down')
+    if (!driverUp())  throw new org.ck.NodeFault('driver-not-loaded')
+    if (!devicesUp()) throw new org.ck.NodeFault('gpu-devices-missing')
+    if (!diskOk())    throw new org.ck.NodeFault('disk-space-low')
+    // sccache cache-dir writability is not checked here: sccache runs inside
+    // the container, so /.cache/sccache on the host is always root-owned and
+    // a host-level mkdir probe would always fail (false NodeFault on every node).
 }
 
 // Like getDockerImage but classifies failures: dead daemon -> NodeFault,
@@ -502,24 +504,21 @@ def runOnHealthyNode(String label, Closure body) {
 
     def excluded = []
     for (int attempt = 0; attempt < nodeAttempts; attempt++) {
+        def attemptNode = null
         try {
             node(exclude(label, excluded)) {
+                attemptNode = env.NODE_NAME   // capture before any exception clears context
                 preflight()
                 runInPlace(body, transientRetries)
             }
             return
         }
-        catch (org.ck.NodeFault e)      { echo "node fault on ${env.NODE_NAME}: ${e.message}";               excluded << env.NODE_NAME }
-        catch (org.ck.TransientFault e) { echo "glitch outlasted retries on ${env.NODE_NAME}: ${e.message}"; excluded << env.NODE_NAME }
-        catch (e) {
-            // Real failure or abort — report and propagate immediately, no more retries.
-            setGithubStatus("${env.STAGE_NAME}", 'failure', "Stage ${env.STAGE_NAME} failed")
-            throw e
-        }
+        catch (org.ck.NodeFault e)      { echo "node fault on ${attemptNode}: ${e.message}";               excluded << attemptNode }
+        catch (org.ck.TransientFault e) { echo "glitch outlasted retries on ${attemptNode}: ${e.message}"; excluded << attemptNode }
+        // FlowInterruptedException (abort) and real build errors: propagate, no retry.
+        // buildAndTest sets failure status for real failures; abort needs no status update.
     }
-    // All node attempts exhausted by infrastructure faults — report terminal failure.
-    setGithubStatus("${env.STAGE_NAME}", 'failure', "Stage ${env.STAGE_NAME} failed after ${nodeAttempts} node attempts")
-    error("exhausted ${nodeAttempts} nodes")
+    error("exhausted ${nodeAttempts} nodes: ${excluded.join(', ')}")
 }
 
 // Build and push a docker image, capturing its digest into the specified env var.
