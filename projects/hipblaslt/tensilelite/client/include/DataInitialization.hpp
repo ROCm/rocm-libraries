@@ -1175,9 +1175,12 @@ namespace TensileLite
             //   kGFX950  -- preSwizzleScalesGFX950 -- gfx950 subtile.
             //   kGFX1250 -- preSwizzleScalesGFX1250 (dimk) -- gfx1250 (and
             //               other non-rocroller WMMA architectures).
-            //   kNone    -- the user did not request an MX scale format
-            //               (`--mx-scale-format=0`); no swizzle is applied.
-            // Set once at construction time from `gcnArchName`.
+            //   kNone    -- default initializer only; never assigned by the
+            //               constructor.
+            // Set from gcnArchName at construction (gfx950 -> kGFX950,
+            // otherwise kGFX1250); only consulted on MX paths, which are gated
+            // separately by the MX scale format (`m_mxScaleFormat`,
+            // `--mx-scale-format`) being > 0.
             MXScaleLayout m_mxScaleLayout = MXScaleLayout::kNone;
             // Set by initializeMXData when a preswizzled scale was uploaded
             // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can

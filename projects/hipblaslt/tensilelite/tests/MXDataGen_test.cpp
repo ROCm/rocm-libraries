@@ -5,7 +5,11 @@
 
 #include <mxDataGen.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <vector>
 
 /**
@@ -237,10 +241,137 @@ INSTANTIATE_TEST_SUITE_P(
         // rows, cols, mxBlock, isTranspose, isMatrixA
         // Test size constraints for preSwizzle {32,8,4} + preTile {8,32}:
         //   rows % 256 == 0  (scaleRows = rows/mxBlock must be divisible by tileK=8)
-        //   cols % 32  == 0  (scaleCols must be divisible by swizzleTileMN=32)        std::make_tuple(256u,  256u,  32, true,  true),   // scale A transposed
+        //   cols % 32  == 0  (scaleCols must be divisible by swizzleTileMN=32)
+        std::make_tuple(256u,  256u,  32, true,  true),   // scale A transposed
         std::make_tuple(256u,  256u,  32, false, false),  // scale B non-transposed
         std::make_tuple(512u,  256u,  32, true,  true),   // larger scale A
         std::make_tuple(256u,  512u,  32, false, false),  // larger scale B
         std::make_tuple(4096u, 16384u, 32, true, true)    // benchmark-scale problem
     )
 );
+
+// ============================================================================
+// Init-mode coverage
+//
+// generateMXInput accepts hipblaslt-level init-method strings beyond the
+// "Bounded" default exercised above. These tests cover the newly-wired modes
+// "zero", "norm_dist", "rand_int", and "uniform_low_precision" for both FP4
+// (E2M1) and an FP8 (E4M3) dtype. The returned vector is the dequantized
+// reference float (data * per-block scale), which is what callers validate
+// against.
+// ============================================================================
+
+namespace
+{
+    // OCP FP4 E2M1 max-normal magnitude; "uniform_low_precision" draws data
+    // uniformly from [-6, 6], so dequantized values must stay within that range.
+    constexpr float kFP4E2M1Max = 6.0f;
+
+    // Run generateMXInput for one (dtype, mode) and return the dequantized
+    // reference floats. The packed data buffer is sized per dtype: FP4 packs
+    // two elements per byte, FP8 is one byte per element. isMatrixA == isTranspose
+    // takes the aligned path, so getReferenceFloat() is returned directly.
+    std::vector<float> runMXMode(hipDataType            dataType,
+                                 std::string_view const initMethod,
+                                 uint64_t               rows    = 256,
+                                 uint64_t               cols    = 256,
+                                 int                    mxBlock = 32)
+    {
+        const uint64_t numElements  = rows * cols;
+        const size_t   bytesPerData = (dataType == (hipDataType)HIP_R_4F_E2M1)
+                                           ? (numElements + 1) / 2
+                                           : numElements;
+        const size_t   numScales    = (rows / mxBlock) * cols;
+
+        std::vector<uint8_t> dataBuffer(bytesPerData, 0);
+        std::vector<uint8_t> scaleBuffer(numScales, 0);
+
+        return generateMXInput(dataType,
+                               HIP_R_8F_UE8M0,
+                               dataBuffer.data(),
+                               scaleBuffer.data(),
+                               rows,
+                               cols,
+                               rows, // stride = rows (column-major)
+                               /*isTranspose=*/true,
+                               mxBlock,
+                               1,
+                               /*isMatrixA=*/true,
+                               MXScaleLayout::kNone,
+                               initMethod,
+                               -1.0f,
+                               1.0f);
+    }
+} // namespace
+
+// Params: {dataType, initMethod}
+class MXDataGenModeTest
+    : public ::testing::TestWithParam<std::tuple<hipDataType, std::string>>
+{
+};
+
+/** @brief Every wired init mode must generate without throwing and yield finite data. */
+TEST_P(MXDataGenModeTest, GeneratesFiniteOutputWithoutThrowing)
+{
+    auto [dataType, initMethod] = GetParam();
+
+    std::vector<float> ref;
+    ASSERT_NO_THROW(ref = runMXMode(dataType, initMethod))
+        << "generateMXInput threw for init mode '" << initMethod << "'";
+    EXPECT_FALSE(ref.empty()) << "no reference data produced for '" << initMethod << "'";
+    for(float v : ref)
+        EXPECT_TRUE(std::isfinite(v))
+            << "non-finite value " << v << " for init mode '" << initMethod << "'";
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    InitModes,
+    MXDataGenModeTest,
+    ::testing::Combine(
+        ::testing::Values((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_E4M3),
+        ::testing::Values(std::string("zero"),
+                          std::string("norm_dist"),
+                          std::string("rand_int"),
+                          std::string("uniform_low_precision"))
+    )
+);
+
+/** @brief "zero" mode must produce all-zero dequantized output. */
+TEST(MXDataGenInitMode, ZeroFP4IsAllZero)
+{
+    auto ref = runMXMode((hipDataType)HIP_R_4F_E2M1, "zero");
+    ASSERT_FALSE(ref.empty());
+    for(float v : ref)
+        EXPECT_EQ(v, 0.0f) << "zero mode produced non-zero value " << v;
+}
+
+TEST(MXDataGenInitMode, ZeroFP8IsAllZero)
+{
+    auto ref = runMXMode(HIP_R_8F_E4M3, "zero");
+    ASSERT_FALSE(ref.empty());
+    for(float v : ref)
+        EXPECT_EQ(v, 0.0f) << "zero mode produced non-zero value " << v;
+}
+
+/**
+ * @brief "uniform_low_precision" draws from [-6, 6] (full FP4 E2M1 range).
+ *
+ * Dequantized values = fp4_quantized * UE8M0_scale. With input bounded to
+ * [-6, 6] the per-block scale is <= 1 and fp4 magnitudes are <= 6, so the
+ * dequantized magnitude can never exceed 6. A tiny epsilon guards float math.
+ */
+TEST(MXDataGenInitMode, UniformLowPrecisionFP4WithinRange)
+{
+    auto ref = runMXMode((hipDataType)HIP_R_4F_E2M1, "uniform_low_precision");
+    ASSERT_FALSE(ref.empty());
+
+    bool anyNonZero = false;
+    for(float v : ref)
+    {
+        EXPECT_TRUE(std::isfinite(v)) << "non-finite uniform_low_precision value " << v;
+        EXPECT_LE(std::abs(v), kFP4E2M1Max + 1e-3f)
+            << "uniform_low_precision value " << v << " outside [-6, 6]";
+        anyNonZero = anyNonZero || (v != 0.0f);
+    }
+    EXPECT_TRUE(anyNonZero) << "uniform_low_precision produced all-zero data";
+}

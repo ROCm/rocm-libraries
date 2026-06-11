@@ -375,7 +375,15 @@ bool hipblaslt_is_gfx1250()
     if(hipGetDeviceProperties(&props, deviceId) != hipSuccess)
         return false;
     std::string const archName(props.gcnArchName);
-    return archName.rfind("gfx1250", 0) == 0;
+    // Match "gfx1250" only at a token boundary so a hypothetical longer arch
+    // name (e.g. "gfx12500") can't false-match. Real names look like
+    // "gfx1250:sramecc+:xnack-", so the prefix is followed by end-of-string
+    // or ':'.
+    constexpr char kPrefix[] = "gfx1250";
+    constexpr size_t kPrefixLen = sizeof(kPrefix) - 1;
+    if(archName.rfind(kPrefix, 0) != 0)
+        return false;
+    return archName.size() == kPrefixLen || archName[kPrefixLen] == ':';
 }
 
 void hipblaslt_print_version()

@@ -2121,6 +2121,10 @@ void testing_matmul_with_bias(const Arguments& arg,
     // Calculating block count end
     matmul.resize(block_count, std::vector<hipblasLtMatmulDesc_t>(gemm_count));
 
+    // gfx1250 detection drives the dimk scale swizzle in generateMXInput; the
+    // arch is fixed for the process, so query it once outside the per-GEMM loop.
+    bool const isGfx1250Arch = hipblaslt_is_gfx1250();
+
     for(int i = 0; i < gemm_count; i++)
     {
         CHECK_HIPBLASLT_ERROR(
@@ -2646,9 +2650,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
 
         hipblaslt_seedrand();
-
-        // gfx1250 detection drives the dimk scale swizzle in generateMXInput.
-        bool const isGfx1250Arch = hipblaslt_is_gfx1250();
 
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));

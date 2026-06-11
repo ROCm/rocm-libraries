@@ -1939,10 +1939,10 @@ namespace TensileLite
                 return "Bounded";
             // UniformLowPrecision routes to mxDataGenerator's Bounded with the
             // hard-coded [-6, 6] window (full FP4 E2M1 range) inside
-            // generateMXInput. No UE8M0 guard is applied here because
-            // initModeToMXMethod takes no runtime dtype; the scaleType-based
-            // rejection lives inside generateMXInput's "uniform_low_precision"
-            // arm.
+            // generateMXInput. No UE8M0/scaleType guard is applied here;
+            // generateMXInput's "uniform_low_precision" arm intentionally has
+            // none because the [-6, 6] data range fits well inside UE8M0's
+            // exponent range.
             case InitMode::UniformLowPrecision:
                 return "uniform_low_precision";
             // Free / Count have no mxDataGenerator analogue; throw rather than

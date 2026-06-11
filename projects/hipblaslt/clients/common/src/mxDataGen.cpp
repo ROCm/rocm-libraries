@@ -39,6 +39,10 @@
 
 namespace
 {
+    // OCP FP4 E2M1 max-normal magnitude; the "uniform_low_precision" init
+    // method draws uniformly from [-kFP4E2M1Max, kFP4E2M1Max].
+    constexpr double kFP4E2M1Max = 6.0;
+
     // Per-DTYPE integer range for the legacy "rand_int" init method, mirroring
     // the hand-tuned ranges in `random_int<T>` (see hipblaslt_init_device.cpp).
     // Each range fits inside the DTYPE's max normal so satConvertToType doesn't
@@ -439,8 +443,8 @@ static std::vector<float> generateMXInputCpu(hipDataType            dataType,
         // represent the resulting per-block exponents (log2(6) ≈ 2.6 fits
         // well inside UE8M0's [-127, 127] unbiased-exponent range), so no
         // scale-dtype guard is needed here.
-        opt.min      = -6.0;
-        opt.max      = 6.0;
+        opt.min      = -kFP4E2M1Max;
+        opt.max      = kFP4E2M1Max;
         opt.initMode = DataInitMode(Bounded{});
     }
     else if(initMethod == "TrigonometricFromFloat" || initMethod == "trig_float")
@@ -848,8 +852,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
         // represent the resulting per-block exponents (log2(6) ≈ 2.6 fits
         // well inside UE8M0's [-127, 127] unbiased-exponent range), so no
         // scale-dtype guard is needed here.
-        opt.min      = -6.0;
-        opt.max      = 6.0;
+        opt.min      = -kFP4E2M1Max;
+        opt.max      = kFP4E2M1Max;
         opt.initMode = DGen::DataInitMode(DGen::Bounded{});
     }
     else if(initMethod == "TrigonometricFromFloat" || initMethod == "trig_float")
