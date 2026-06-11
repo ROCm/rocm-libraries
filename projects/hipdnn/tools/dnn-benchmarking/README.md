@@ -456,6 +456,25 @@ GPU tests auto-discover provider build-tree, active-venv ROCm SDK, and
 `/opt/rocm` plugin installs. Use `--dnn-plugin-paths` with a comma-separated
 directory list when testing custom engine plugin builds.
 
+GPU tests are tiered by marker: `gpu` (any GPU), `rocm` (AMD ROCm only),
+`cuda` (NVIDIA CUDA only). GPU-generic tests run on either platform and
+adapt their timing-backend assertion automatically (HIP on ROCm,
+torch.cuda on CUDA); platform-specific tests assert one backend's unique
+behavior. Every GPU test self-skips on the wrong platform, so bare
+`pytest` is safe on any host. Use `-m` for explicit, additive selection:
+
+```bash
+# On a ROCm host: unit + generic + rocm (drops cuda-only tests)
+pytest -m "not cuda"
+
+# On a CUDA host: unit + generic + cuda (drops rocm-only tests)
+pytest -m "not rocm"
+
+# Only one platform's dedicated tests
+pytest -m rocm
+pytest -m cuda
+```
+
 Strict profiling tests that require real profiler artifacts are skipped by
 default. Run them explicitly on a known-good profiling host:
 

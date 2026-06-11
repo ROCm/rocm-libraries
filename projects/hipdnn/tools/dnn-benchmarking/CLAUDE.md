@@ -61,7 +61,35 @@ LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --cov=dnn_benchmarking tes
 
 **Note:** GPU tests require ROCm libraries to be findable. Set `LD_LIBRARY_PATH=/opt/rocm/lib` before running tests that depend on `hipdnn_frontend`.
 
-Test markers: `gpu` (requires GPU), `slow` (slow integration tests).
+### Test tiers and platform selection
+
+Tests fall into three tiers, distinguished by markers:
+
+- **Unit** (`tests/unit/`, unmarked): fake torch, run on any host with no GPU.
+- **GPU-generic** (`gpu`): run on any live GPU (ROCm or CUDA). Platform-
+  specific assertions use `expected_timing_backend()` so the same test
+  validates HIP timing on ROCm and torch.cuda timing on CUDA.
+- **Platform-specific** (`gpu` + `rocm`, or `gpu` + `cuda`): assert
+  behavior unique to one backend (e.g. the selected timing backend).
+
+Every GPU test also self-skips on the wrong platform, so a bare `pytest`
+run is safe anywhere — the foreign-platform tests skip with a clear
+reason. Use `-m` for explicit, additive selection (no custom flag):
+
+```bash
+# On a ROCm host: unit + generic + rocm (drops cuda-only tests)
+LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest -m "not cuda"
+
+# On a CUDA host: unit + generic + cuda (drops rocm-only tests)
+pytest -m "not rocm"
+
+# Only one platform's dedicated tests
+pytest -m rocm
+pytest -m cuda
+```
+
+Test markers: `gpu` (requires any GPU), `rocm` (requires AMD ROCm GPU),
+`cuda` (requires NVIDIA CUDA GPU), `slow` (slow integration tests).
 
 Strict profiling tests that require real profiler artifacts are skipped by
 default. Run them explicitly on a known-good profiling host:

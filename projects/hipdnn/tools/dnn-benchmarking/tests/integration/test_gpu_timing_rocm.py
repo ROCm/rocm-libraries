@@ -14,7 +14,7 @@ from dnn_benchmarking.execution.buffer_manager import BufferManager
 from dnn_benchmarking.execution.executor import Executor
 from dnn_benchmarking.graph.loader import GraphLoader
 
-pytestmark = [pytest.mark.gpu, pytest.mark.amd]
+pytestmark = [pytest.mark.gpu, pytest.mark.rocm]
 
 
 def _skip_if_no_rocm(plugin_paths: List[str]) -> None:
