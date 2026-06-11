@@ -413,26 +413,7 @@ TEST(rocfft_UnitTest, setup_cleanup_counter)
                 ncleanups > nsetups);
         }
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS
 }
 
 // Check whether logs can be emitted from multiple threads properly
