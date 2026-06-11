@@ -26,6 +26,7 @@
 
 #include "../../shared/rocfft_hip.h"
 #include "../../shared/test_params.h"
+#include "../../shared/fft_enums.h"
 #include "../hipfft_params.h"
 
 #ifdef __HIP_PLATFORM_NVIDIA__
@@ -37,36 +38,6 @@ DISABLE_WARNING_RETURN_TYPE
 #ifdef __HIP_PLATFORM_NVIDIA__
 DISABLE_WARNING_POP
 #endif
-
-static std::string transform_type_name(const fft_transform_type transform_type)
-{
-    switch(transform_type)
-    {
-    case fft_transform_type_complex_forward:
-        return "fft_transform_type_complex_forward";
-    case fft_transform_type_complex_inverse:
-        return "fft_transform_type_complex_inverse";
-    case fft_transform_type_real_forward:
-        return "fft_transform_type_real_forward";
-    case fft_transform_type_real_inverse:
-        return "fft_transform_type_real_inverse";
-    default:
-        return "Invalid transform value";
-    }
-}
-
-static std::string fft_result_placement_name(const fft_result_placement placement)
-{
-    switch(placement)
-    {
-    case fft_placement_inplace:
-        return "fft_placement_inplace";
-    case fft_placement_notinplace:
-        return "fft_placement_notinplace";
-    default:
-        return "Invalid fft_result_placement value";
-    }
-}
 
 static std::string format_name(const hipfftXtSubFormat format)
 {
@@ -88,7 +59,6 @@ static std::string format_name(const hipfftXtSubFormat format)
         return "Unknown format";
     }
 }
-
 
 static std::string directionname(const int direction)
 {
@@ -175,7 +145,7 @@ TEST_P(hipfftxtunit, plancreation)
                                        nbatch,
                                        workSize.data());
         if constexpr(rocfft_backend)
-            ASSERT_NE(hipfft_rt, HIPFFT_SUCCESS)
+            ASSERT_EQ(hipfft_rt, HIPFFT_NOT_IMPLEMENTED)
                 << "multi-batch multi-gpu transforms should return not implemented";
         else
             ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
@@ -663,6 +633,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
             std::cout << "device: " << device << "\n";
             std::cout << "buffer size: " << bufsize << "\n";
         }
+        rocfft_scoped_device dev(device);
         ASSERT_NE(bufsize, 0) << "gpu buffer size is zero for gpu " << igpu;
         hostbufparts[igpu].resize(bufsize);
         auto devbuf = mydesc->descriptor->data[igpu];

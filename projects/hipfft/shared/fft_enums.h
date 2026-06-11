@@ -284,4 +284,34 @@ inline void validate_enums_or_throw(const std::string& func_name, T val, Args...
         validate_enums_or_throw(func_name, args...);
 }
 
+static std::string transform_type_name(const fft_transform_type transform_type)
+{
+    switch(transform_type)
+    {
+    case fft_transform_type_complex_forward:
+        return "fft_transform_type_complex_forward";
+    case fft_transform_type_complex_inverse:
+        return "fft_transform_type_complex_inverse";
+    case fft_transform_type_real_forward:
+        return "fft_transform_type_real_forward";
+    case fft_transform_type_real_inverse:
+        return "fft_transform_type_real_inverse";
+    default:
+        return "Invalid transform value";
+    }
+}
+
+static std::string fft_result_placement_name(const fft_result_placement placement)
+{
+    switch(placement)
+    {
+    case fft_placement_inplace:
+        return "fft_placement_inplace";
+    case fft_placement_notinplace:
+        return "fft_placement_notinplace";
+    default:
+        return "Invalid fft_result_placement value";
+    }
+}
+
 #endif // FFT_ENUMS_H
