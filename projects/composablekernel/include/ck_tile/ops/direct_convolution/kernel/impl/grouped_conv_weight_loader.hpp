@@ -76,12 +76,16 @@ using WeightAccessor8 = WeightAccessor<KH, KW, VecType, NumSlices>;
 //
 // cfg must provide:
 //   cfg.kh, cfg.kw, cfg.block_size()
-template <typename TC, auto cfg, bool Padded, typename BlockCoords_, typename ElementType = _Float16>
+template <typename TC,
+          auto cfg,
+          bool Padded,
+          typename BlockCoords_,
+          typename ElementType = _Float16>
 CK_TILE_DEVICE void weight_load_to_lds(const BlockCoords_& bc,
-                                   uint4* weight_lds,
-                                   const ElementType* __restrict__ wei,
-                                   const int c_per_group,
-                                   const int k_per_group)
+                                       uint4* weight_lds,
+                                       const ElementType* __restrict__ wei,
+                                       const int c_per_group,
+                                       const int k_per_group)
 {
     constexpr auto weight_dram_desc = TC::Weight::MakeDramReadDescriptor();
     constexpr auto weight_dram_dist = TC::Weight::MakeDramReadTileDistribution();
@@ -105,14 +109,16 @@ CK_TILE_DEVICE void weight_load_to_lds(const BlockCoords_& bc,
             // The buffer base is offset to bc.block_group so the BLOCK_GROUPS
             // dimension covers exactly this block's groups.
             const auto weight_padded_dram_desc =
-                TC::Weight::template MakeDramReadDescriptorPadded<cfg.vector_size>(k_per_group, c_per_group);
+                TC::Weight::template MakeDramReadDescriptorPadded<cfg.vector_size>(k_per_group,
+                                                                                   c_per_group);
 
             // Offset wei to bc.block_group * k_per_group * KH_KW * c_per_group.
-            const ElementType* wei_block =
-                wei + static_cast<size_t>(bc.block_group) * k_per_group * cfg.kh * cfg.kw * c_per_group;
+            const ElementType* wei_block = wei + static_cast<size_t>(bc.block_group) * k_per_group *
+                                                     cfg.kh * cfg.kw * c_per_group;
 
-            auto weight_padded_dram_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
-                wei_block, weight_padded_dram_desc);
+            auto weight_padded_dram_view =
+                ck_tile::make_tensor_view<ck_tile::address_space_enum::global>(
+                    wei_block, weight_padded_dram_desc);
 
             auto weight_padded_dram_window = ck_tile::make_tile_window(
                 weight_padded_dram_view,
@@ -132,21 +138,19 @@ CK_TILE_DEVICE void weight_load_to_lds(const BlockCoords_& bc,
                 {0, 0},
                 weight_dram_dist);
 
-            ck_tile::static_for<0, TC::Weight::NUM_WEIGHT_PASSES, 1>{}(
-                [&](auto Pass)
+            ck_tile::static_for<0, TC::Weight::NUM_WEIGHT_PASSES, 1>{}([&](auto Pass) {
+                // load_tile applies per-element OOB checking via the pad transforms,
+                // correctly zeroing padded K and C positions. This is correct for any
+                // c_per_group, unlike async_load_tile which issues vector loads that
+                // bypass per-element OOB checks.
+                auto weight_reg = ck_tile::load_tile(weight_padded_dram_window);
+                ck_tile::store_tile(weight_lds_window, weight_reg);
+                if constexpr(Pass.value < TC::Weight::NUM_WEIGHT_PASSES - 1)
                 {
-                    // load_tile applies per-element OOB checking via the pad transforms,
-                    // correctly zeroing padded K and C positions. This is correct for any
-                    // c_per_group, unlike async_load_tile which issues vector loads that
-                    // bypass per-element OOB checks.
-                    auto weight_reg = ck_tile::load_tile(weight_padded_dram_window);
-                    ck_tile::store_tile(weight_lds_window, weight_reg);
-                    if constexpr(Pass.value < TC::Weight::NUM_WEIGHT_PASSES - 1)
-                    {
-                        ck_tile::move_tile_window(weight_padded_dram_window, {cfg.block_size(), 0});
-                        ck_tile::move_tile_window(weight_lds_window, {cfg.block_size(), 0});
-                    }
-                });
+                    ck_tile::move_tile_window(weight_padded_dram_window, {cfg.block_size(), 0});
+                    ck_tile::move_tile_window(weight_lds_window, {cfg.block_size(), 0});
+                }
+            });
             return;
         }
     }
@@ -158,10 +162,9 @@ CK_TILE_DEVICE void weight_load_to_lds(const BlockCoords_& bc,
         auto weight_dram_buf = ck_tile::make_buffer_view<ck_tile::address_space_enum::global>(
             wei + static_cast<size_t>(bc.block_k) * cfg.kh * cfg.kw * TC::GROUP_SIZE,
             static_cast<ck_tile::index_t>(weight_dram_desc.get_element_space_size()));
-        auto weight_dram_view =
-            ck_tile::tensor_view<remove_cvref_t<decltype(weight_dram_buf)>,
-                                remove_cvref_t<decltype(weight_dram_desc)>>{
-                weight_dram_buf, weight_dram_desc};
+        auto weight_dram_view = ck_tile::tensor_view<remove_cvref_t<decltype(weight_dram_buf)>,
+                                                     remove_cvref_t<decltype(weight_dram_desc)>>{
+            weight_dram_buf, weight_dram_desc};
 
         auto weight_dram_window = ck_tile::make_tile_window(
             weight_dram_view,
@@ -194,20 +197,18 @@ CK_TILE_DEVICE void weight_load_to_lds(const BlockCoords_& bc,
         // block_size, we need multiple loads with advancing offsets.
         // The pad transform on the DRAM descriptor suppresses OOB reads
         // in the final pass.
-        ck_tile::static_for<0, TC::Weight::NUM_WEIGHT_PASSES, 1>{}(
-            [&](auto Pass)
-            {
+        ck_tile::static_for<0, TC::Weight::NUM_WEIGHT_PASSES, 1>{}([&](auto Pass) {
 #if defined(__gfx950__)
-                ck_tile::async_load_tile(weight_lds_window, weight_dram_window);
+            ck_tile::async_load_tile(weight_lds_window, weight_dram_window);
 #else
-                ck_tile::store_tile(weight_lds_window, ck_tile::load_tile(weight_dram_window));
+            ck_tile::store_tile(weight_lds_window, ck_tile::load_tile(weight_dram_window));
 #endif
-                if constexpr(Pass.value < TC::Weight::NUM_WEIGHT_PASSES - 1)
-                {
-                    ck_tile::move_tile_window(weight_dram_window, {cfg.block_size(), 0});
-                    ck_tile::move_tile_window(weight_lds_window, {cfg.block_size(), 0});
-                }
-            });
+            if constexpr(Pass.value < TC::Weight::NUM_WEIGHT_PASSES - 1)
+            {
+                ck_tile::move_tile_window(weight_dram_window, {cfg.block_size(), 0});
+                ck_tile::move_tile_window(weight_lds_window, {cfg.block_size(), 0});
+            }
+        });
     }
 }
 
@@ -238,12 +239,16 @@ CK_TILE_DEVICE void weight_load_to_lds(const BlockCoords_& bc,
 // WeightAccessorT must provide:
 //   value_type — fp16x4_t (16c) or fp16x8_t (32c)
 //   weights[]  — register array indexed by filter position
-template <typename TC, int KH, int KW, typename WeightAccessorT, int WavesPerGroup = 1,
+template <typename TC,
+          int KH,
+          int KW,
+          typename WeightAccessorT,
+          int WavesPerGroup    = 1,
           typename ElementType = _Float16>
 CK_TILE_DEVICE void weight_read_dgrad(WeightAccessorT& wa, uint4* weight_lds)
 {
     constexpr int K_STRIDE = KH * KW * TC::GROUP_SIZE; // stride per K row in fp16
-    constexpr int KH_KW = KH * KW;
+    constexpr int KH_KW    = KH * KW;
 
     // Compute per-warp base pointer.
     const int warp_id = __builtin_amdgcn_readfirstlane(threadIdx.x / 64);
@@ -253,65 +258,59 @@ CK_TILE_DEVICE void weight_read_dgrad(WeightAccessorT& wa, uint4* weight_lds)
     {
         // 16c: each warp = one conv group.
         // wave_group = warp_id, reads K[0:GROUP_SIZE-1] of this group.
-        warp_base = reinterpret_cast<ElementType*>(weight_lds)
-                  + warp_id * TC::GROUP_SIZE * K_STRIDE;
+        warp_base =
+            reinterpret_cast<ElementType*>(weight_lds) + warp_id * TC::GROUP_SIZE * K_STRIDE;
     }
     else
     {
         // 32c: 2 waves per group. wave_group selects group, wave_half selects C half.
         const int wave_group = warp_id / WavesPerGroup;
-        const int wave_half = warp_id % WavesPerGroup;
+        const int wave_half  = warp_id % WavesPerGroup;
         // wave_half * 16 offsets into the C dimension (C[0:15] or C[16:31]).
-        warp_base = reinterpret_cast<ElementType*>(weight_lds)
-                  + wave_group * TC::GROUP_SIZE * K_STRIDE
-                  + wave_half * 16;
+        warp_base = reinterpret_cast<ElementType*>(weight_lds) +
+                    wave_group * TC::GROUP_SIZE * K_STRIDE + wave_half * 16;
     }
 
     constexpr auto lds_desc = TC::Weight::template MakeLdsReadDescriptorDgrad<WavesPerGroup>();
-    auto lds_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-        warp_base, lds_desc);
+    auto lds_view =
+        ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(warp_base, lds_desc);
 
-    using DgradDist = decltype(TC::Weight::MakeLdsReadTileDistributionDgrad());
+    using DgradDist                = decltype(TC::Weight::MakeLdsReadTileDistributionDgrad());
     constexpr DgradDist dgrad_dist = TC::Weight::MakeLdsReadTileDistributionDgrad();
 
     // Window dimensions match the descriptor: [GROUP_SIZE, GROUP_SIZE] for 16c,
     // [32, 16] for 32c (where each wave_half reads 32 K_out × 16 C).
     using VecType = typename std::remove_reference_t<WeightAccessorT>::value_type;
     // Distinguish 16c (4-element vec, 8 bytes) from 32c (8-element vec, 16 bytes).
-    constexpr int WIN_DIM0 = (sizeof(VecType) == 4 * sizeof(ElementType))
-                                 ? TC::GROUP_SIZE : 32;
-    constexpr int WIN_DIM1 = (sizeof(VecType) == 4 * sizeof(ElementType))
-                                 ? TC::GROUP_SIZE : 16;
+    constexpr int WIN_DIM0 = (sizeof(VecType) == 4 * sizeof(ElementType)) ? TC::GROUP_SIZE : 32;
+    constexpr int WIN_DIM1 = (sizeof(VecType) == 4 * sizeof(ElementType)) ? TC::GROUP_SIZE : 16;
 
     auto lds_window = ck_tile::make_tile_window(
         lds_view,
-        ck_tile::make_tuple(ck_tile::number<WIN_DIM0>{},
-                            ck_tile::number<WIN_DIM1>{}),
+        ck_tile::make_tuple(ck_tile::number<WIN_DIM0>{}, ck_tile::number<WIN_DIM1>{}),
         {0, 0},
         dgrad_dist);
 
     // Derive the output (post-transpose) distribution from the input distribution.
     using InputDstrEncode = typename DgradDist::DstrEncode;
-    using OutputDstrEncode = typename ck_tile::OutputTileDistributionTraits<
-        InputDstrEncode, ElementType>::TransposedDstrEncode;
+    using OutputDstrEncode =
+        typename ck_tile::OutputTileDistributionTraits<InputDstrEncode,
+                                                       ElementType>::TransposedDstrEncode;
     auto out_tensor = ck_tile::make_static_distributed_tensor<ElementType>(
         ck_tile::make_static_tile_distribution(OutputDstrEncode{}));
 
-    ck_tile::static_for<0, KH_KW, 1>{}(
-        [&](auto khw)
-        {
-            // Offset selects filter position khw within the [K][KH*KW][C] LDS layout.
-            // Each filter position is GROUP_SIZE fp16 elements apart.
-            constexpr int filter_offset = khw.value * TC::GROUP_SIZE;
+    ck_tile::static_for<0, KH_KW, 1>{}([&](auto khw) {
+        // Offset selects filter position khw within the [K][KH*KW][C] LDS layout.
+        // Each filter position is GROUP_SIZE fp16 elements apart.
+        constexpr int filter_offset = khw.value * TC::GROUP_SIZE;
 
-            ck_tile::load_tile_transpose_with_offset(
-                out_tensor, lds_window, filter_offset);
+        ck_tile::load_tile_transpose_with_offset(out_tensor, lds_window, filter_offset);
 
-            // For 16c: thread buffer has 4 fp16 -> fp16x4_t.
-            // For 32c: thread buffer has 8 fp16 -> fp16x8_t (2 ds_read calls handled by Y dim).
-            wa.weights[khw.value] = out_tensor.get_thread_buffer()
-                                  .template get_as<VecType>(ck_tile::number<0>{});
-        });
+        // For 16c: thread buffer has 4 fp16 -> fp16x4_t.
+        // For 32c: thread buffer has 8 fp16 -> fp16x8_t (2 ds_read calls handled by Y dim).
+        wa.weights[khw.value] =
+            out_tensor.get_thread_buffer().template get_as<VecType>(ck_tile::number<0>{});
+    });
 }
 
 } // namespace direct_conv

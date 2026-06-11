@@ -29,23 +29,23 @@ using namespace ck_tile::direct_conv;
 // calls the MFMA functor, and writes the fp32x4 result to device memory.
 
 __global__ void test_mfma_4x4x4_kernel(const fp16x4_t* __restrict__ a,
-                                        const fp16x4_t* __restrict__ b,
-                                        fp32x4_t* __restrict__ c)
+                                       const fp16x4_t* __restrict__ b,
+                                       fp32x4_t* __restrict__ c)
 {
     const int lane = threadIdx.x;
     Mfma4x4x4 mfma;
     fp32x4_t acc = {0.f, 0.f, 0.f, 0.f};
-    c[lane] = mfma(a[lane], b[lane], acc);
+    c[lane]      = mfma(a[lane], b[lane], acc);
 }
 
 __global__ void test_mfma_16x16x16_kernel(const fp16x4_t* __restrict__ a,
-                                           const fp16x4_t* __restrict__ b,
-                                           fp32x4_t* __restrict__ c)
+                                          const fp16x4_t* __restrict__ b,
+                                          fp32x4_t* __restrict__ c)
 {
     const int lane = threadIdx.x;
     Mfma16x16x16 mfma;
     fp32x4_t acc = {0.f, 0.f, 0.f, 0.f};
-    c[lane] = mfma(a[lane], b[lane], acc);
+    c[lane]      = mfma(a[lane], b[lane], acc);
 }
 
 // ============================================================================
@@ -64,8 +64,8 @@ __global__ void test_mfma_16x16x16_kernel(const fp16x4_t* __restrict__ a,
 //   Output per lane: c[lane] = fp32x4 = { C[0][col], C[1][col], C[2][col], C[3][col] }
 //   where col = lane % 4.
 static void reference_mfma_4x4x4(const std::vector<fp16x4_t>& a_host,
-                                  const std::vector<fp16x4_t>& b_host,
-                                  std::vector<fp32x4_t>& c_ref)
+                                 const std::vector<fp16x4_t>& b_host,
+                                 std::vector<fp32x4_t>& c_ref)
 {
     // For each of the 16 batches, compute 4x4 matmul
     for(int batch = 0; batch < 16; batch++)
@@ -96,7 +96,8 @@ static void reference_mfma_4x4x4(const std::vector<fp16x4_t>& a_host,
             }
         }
 
-        // Write to per-lane output: lane (batch*4 + col) gets { C[0][col], C[1][col], C[2][col], C[3][col] }
+        // Write to per-lane output: lane (batch*4 + col) gets { C[0][col], C[1][col], C[2][col],
+        // C[3][col] }
         for(int col = 0; col < 4; col++)
         {
             int lane_idx       = batch * 4 + col;
@@ -124,8 +125,8 @@ static void reference_mfma_4x4x4(const std::vector<fp16x4_t>& a_host,
 //                                          C[lane_c4*4+2][lane_q],
 //                                          C[lane_c4*4+3][lane_q] }
 static void reference_mfma_16x16x16(const std::vector<fp16x4_t>& a_host,
-                                     const std::vector<fp16x4_t>& b_host,
-                                     std::vector<fp32x4_t>& c_ref)
+                                    const std::vector<fp16x4_t>& b_host,
+                                    std::vector<fp32x4_t>& c_ref)
 {
     // Reconstruct full A[16][16] and B[16][16] from per-lane operands.
     //
@@ -173,8 +174,8 @@ static void reference_mfma_16x16x16(const std::vector<fp16x4_t>& a_host,
     //             C[lane_c4*4+2][lane_q], C[lane_c4*4+3][lane_q] }
     for(int lane = 0; lane < 64; lane++)
     {
-        int lane_q  = lane % 16;
-        int lane_c4 = lane / 16;
+        int lane_q     = lane % 16;
+        int lane_c4    = lane / 16;
         c_ref[lane][0] = C[lane_c4 * 4 + 0][lane_q];
         c_ref[lane][1] = C[lane_c4 * 4 + 1][lane_q];
         c_ref[lane][2] = C[lane_c4 * 4 + 2][lane_q];
@@ -199,7 +200,7 @@ class MfmaTest : public ::testing::Test
             for(int j = 0; j < 4; j++)
             {
                 // Use small values (range -2..2) to keep fp16 matmul exact.
-                float val    = static_cast<float>(((i * 4 + j + seed) % 5) - 2);
+                float val  = static_cast<float>(((i * 4 + j + seed) % 5) - 2);
                 data[i][j] = static_cast<_Float16>(val);
             }
         }
@@ -225,12 +226,9 @@ TEST_F(MfmaTest, Mfma4x4x4_SmallIntegers)
     fp16x4_t* d_b = nullptr;
     fp32x4_t* d_c = nullptr;
 
-    ck_tile::hip_check_error(
-        hipMalloc(&d_a, WAVE_SIZE * sizeof(fp16x4_t)));
-    ck_tile::hip_check_error(
-        hipMalloc(&d_b, WAVE_SIZE * sizeof(fp16x4_t)));
-    ck_tile::hip_check_error(
-        hipMalloc(&d_c, WAVE_SIZE * sizeof(fp32x4_t)));
+    ck_tile::hip_check_error(hipMalloc(&d_a, WAVE_SIZE * sizeof(fp16x4_t)));
+    ck_tile::hip_check_error(hipMalloc(&d_b, WAVE_SIZE * sizeof(fp16x4_t)));
+    ck_tile::hip_check_error(hipMalloc(&d_c, WAVE_SIZE * sizeof(fp32x4_t)));
 
     ck_tile::hip_check_error(
         hipMemcpy(d_a, a_host.data(), WAVE_SIZE * sizeof(fp16x4_t), hipMemcpyHostToDevice));
@@ -274,12 +272,9 @@ TEST_F(MfmaTest, Mfma16x16x16_SmallIntegers)
     fp16x4_t* d_b = nullptr;
     fp32x4_t* d_c = nullptr;
 
-    ck_tile::hip_check_error(
-        hipMalloc(&d_a, WAVE_SIZE * sizeof(fp16x4_t)));
-    ck_tile::hip_check_error(
-        hipMalloc(&d_b, WAVE_SIZE * sizeof(fp16x4_t)));
-    ck_tile::hip_check_error(
-        hipMalloc(&d_c, WAVE_SIZE * sizeof(fp32x4_t)));
+    ck_tile::hip_check_error(hipMalloc(&d_a, WAVE_SIZE * sizeof(fp16x4_t)));
+    ck_tile::hip_check_error(hipMalloc(&d_b, WAVE_SIZE * sizeof(fp16x4_t)));
+    ck_tile::hip_check_error(hipMalloc(&d_c, WAVE_SIZE * sizeof(fp32x4_t)));
 
     ck_tile::hip_check_error(
         hipMemcpy(d_a, a_host.data(), WAVE_SIZE * sizeof(fp16x4_t), hipMemcpyHostToDevice));
@@ -352,15 +347,15 @@ TEST_F(MfmaTest, Mfma16x16x16_Identity)
     // A[row][k] = delta(row,k): a_host[(k/4)*16 + row][k%4] = 1 when row==k
     for(int row = 0; row < 16; row++)
     {
-        int k        = row;
-        int lane_idx = (k / 4) * 16 + row;
+        int k                   = row;
+        int lane_idx            = (k / 4) * 16 + row;
         a_host[lane_idx][k % 4] = static_cast<_Float16>(1.0f);
     }
     // B[k][col] = delta(k,col): b_host[(k/4)*16 + col][k%4] = 1 when k==col
     for(int col = 0; col < 16; col++)
     {
-        int k        = col;
-        int lane_idx = (k / 4) * 16 + col;
+        int k                   = col;
+        int lane_idx            = (k / 4) * 16 + col;
         b_host[lane_idx][k % 4] = static_cast<_Float16>(1.0f);
     }
 
@@ -374,7 +369,7 @@ TEST_F(MfmaTest, Mfma16x16x16_Identity)
         int lane_c4 = lane / 16;
         for(int elem = 0; elem < 4; elem++)
         {
-            int m        = lane_c4 * 4 + elem;
+            int m          = lane_c4 * 4 + elem;
             float expected = (m == lane_q) ? 1.0f : 0.0f;
             EXPECT_FLOAT_EQ(c_ref[lane][elem], expected)
                 << "Identity test: lane=" << lane << " elem=" << elem << " m=" << m

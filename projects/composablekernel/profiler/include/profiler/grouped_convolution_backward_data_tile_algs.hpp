@@ -34,7 +34,8 @@ namespace ckt = ck_tile::builder::test;
 ///
 /// @tparam SIGNATURE Backward data convolution signature.
 ///
-/// @returns A tuple of (is_valid, best_avg_time, best_tflops, best_gbs, best_op_name, best_split_k, best_instance_index) where:
+/// @returns A tuple of (is_valid, best_avg_time, best_tflops, best_gbs, best_op_name, best_split_k,
+/// best_instance_index) where:
 ///          - is_valid: whether all tested instances produced correct results.
 ///          - best_avg_time: the best average execution time among valid instances.
 ///          - best_tflops: the TFlops of the best performing instance.
@@ -161,30 +162,33 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                     {
                         best_instance_index = num_kernel - 1;
                     }
-                    best_avg_time = std::min(best_avg_time, avg_time);
-                    best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
-                    best_split_k  = best_avg_time < avg_time ? best_split_k : k_batch;
+                    best_avg_time             = std::min(best_avg_time, avg_time);
+                    best_op_name              = best_avg_time < avg_time ? best_op_name : op_name;
+                    best_split_k              = best_avg_time < avg_time ? best_split_k : k_batch;
                     const auto conv_param_loc = args_k_batch.to_ck_tile_conv_param();
-                    float tflops          = static_cast<float>(conv_param_loc.GetFlops()) / 1.E9 / avg_time;
-                    float gb_per_sec      = static_cast<float>(
-                        conv_param_loc.template GetByte<DataType, DataType, DataType>()) / 1.E6 / avg_time;
+                    float tflops = static_cast<float>(conv_param_loc.GetFlops()) / 1.E9 / avg_time;
+                    float gb_per_sec =
+                        static_cast<float>(
+                            conv_param_loc.template GetByte<DataType, DataType, DataType>()) /
+                        1.E6 / avg_time;
                     best_tflops = std::max(best_tflops, tflops);
                     best_gbs    = std::max(best_gbs, gb_per_sec);
-                    std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms, "
-                              << tflops << " TFlops, " << gb_per_sec << " GB/s, "
-                              << op_name << " (instance " << num_kernel - 1 << "), SplitK "
-                              << k_batch << std::endl;
+                    std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms, " << tflops
+                              << " TFlops, " << gb_per_sec << " GB/s, " << op_name << " (instance "
+                              << num_kernel - 1 << "), SplitK " << k_batch << std::endl;
                 }
                 else
                 {
                     const auto conv_param_loc = args_k_batch.to_ck_tile_conv_param();
-                    float tflops          = static_cast<float>(conv_param_loc.GetFlops()) / 1.E9 / avg_time;
-                    float gb_per_sec      = static_cast<float>(
-                        conv_param_loc.template GetByte<DataType, DataType, DataType>()) / 1.E6 / avg_time;
+                    float tflops = static_cast<float>(conv_param_loc.GetFlops()) / 1.E9 / avg_time;
+                    float gb_per_sec =
+                        static_cast<float>(
+                            conv_param_loc.template GetByte<DataType, DataType, DataType>()) /
+                        1.E6 / avg_time;
                     std::cout << "[Invalid] Perf: " << std::setw(10) << avg_time << " ms, "
-                              << tflops << " TFlops, " << gb_per_sec << " GB/s, "
-                              << op_name << " (instance " << num_kernel - 1 << "), SplitK "
-                              << k_batch << std::endl;
+                              << tflops << " TFlops, " << gb_per_sec << " GB/s, " << op_name
+                              << " (instance " << num_kernel - 1 << "), SplitK " << k_batch
+                              << std::endl;
                 }
             }
             else
@@ -221,11 +225,21 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
     else
     {
         std::cout << "Signature not supported" << std::endl;
-        return std::make_tuple(
-            false, best_avg_time, best_tflops, best_gbs, best_op_name, best_split_k, best_instance_index);
+        return std::make_tuple(false,
+                               best_avg_time,
+                               best_tflops,
+                               best_gbs,
+                               best_op_name,
+                               best_split_k,
+                               best_instance_index);
     }
-    return std::make_tuple(
-        all_instances_valid, best_avg_time, best_tflops, best_gbs, best_op_name, best_split_k, best_instance_index);
+    return std::make_tuple(all_instances_valid,
+                           best_avg_time,
+                           best_tflops,
+                           best_gbs,
+                           best_op_name,
+                           best_split_k,
+                           best_instance_index);
 }
 
 } // namespace ck_tile::builder::profiling

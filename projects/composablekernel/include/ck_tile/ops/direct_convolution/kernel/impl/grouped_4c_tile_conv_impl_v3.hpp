@@ -24,8 +24,7 @@
 #include <hip/hip_runtime.h>
 #include <string>
 
-namespace ck_tile::direct_conv::grouped_4c_tile::v3
-{
+namespace ck_tile::direct_conv::grouped_4c_tile::v3 {
 
 // 64 threads per wave.
 constexpr int WAVE_SIZE = 64;
@@ -48,7 +47,8 @@ struct Config
 
     // waves_q4 — spatial output column dimension
     // Each wave handles 4 output columns (WARP_Q = 4)
-    // This number tells how many waves of 4 ouput columns are processed by one workgroup (thread block).
+    // This number tells how many waves of 4 ouput columns are processed by one workgroup (thread
+    // block).
     int waves_q4;
 
     // Filter width & height
@@ -56,8 +56,8 @@ struct Config
     int kw = 3;
 
     // Batch folding:
-    // The batch dimension is folded into the grid by a factor of n_fold, meaning each block processes n_fold batches.
-    // The grid for launching the kernel becomes
+    // The batch dimension is folded into the grid by a factor of n_fold, meaning each block
+    // processes n_fold batches. The grid for launching the kernel becomes
     //      dim3(ceil(out_W / block_q) * n_fold,   ceil(C / block_c),   ceil(N / n_fold))
     // This means that W-tiles are interleaved with n_fold groups of images
     // The n_fold number tells how many image slots are packed into one X-dimension stride.
@@ -77,7 +77,8 @@ struct Config
     // Swizzle pattern - by default no swizzle.
     SwizzleType swizzle_type = SwizzleType::None;
 
-    // Epilogue type - by default skip LDS staging and write directly from registers to global memory.
+    // Epilogue type - by default skip LDS staging and write directly from registers to global
+    // memory.
     EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
 
     // Size of the vector loads/stores
@@ -102,17 +103,17 @@ struct Config
     std::string GetName() const
     {
         std::string swz = "no-swizzle";
-        if (swizzle_type == SwizzleType::XOR)
+        if(swizzle_type == SwizzleType::XOR)
             swz = "xor-swizzle";
-        else if (swizzle_type == SwizzleType::CyclicShift)
+        else if(swizzle_type == SwizzleType::CyclicShift)
             swz = "cyclicshift-swizzle";
 
         std::string vector_size_str = "_vec_" + std::to_string(vector_size);
-        std::string waves_c64_str = "_waves_c64_" + std::to_string(waves_c64);
-        std::string waves_q4_str = "_waves_q4_" + std::to_string(waves_q4);
+        std::string waves_c64_str   = "_waves_c64_" + std::to_string(waves_c64);
+        std::string waves_q4_str    = "_waves_q4_" + std::to_string(waves_q4);
         std::string base = "v3_grouped_4c_" + swz + waves_c64_str + waves_q4_str + vector_size_str;
-        if (epilogue == EpilogueType::RegistersToGlobalMemory)
-            return  base + "_skip_lds_epilogue";
+        if(epilogue == EpilogueType::RegistersToGlobalMemory)
+            return base + "_skip_lds_epilogue";
         else
             return base + "_lds_epilogue";
     }
@@ -132,9 +133,9 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
         return false;
 
     const bool padding_needed = par.channels_per_group() != 4 || par.filters_per_group() != 4;
-    if (padding_needed && par.channels_per_group() % cfg.vector_size != 0)
+    if(padding_needed && par.channels_per_group() % cfg.vector_size != 0)
         return false;
-    if (padding_needed && par.filters_per_group() % cfg.vector_size != 0)
+    if(padding_needed && par.filters_per_group() % cfg.vector_size != 0)
         return false;
 
     return true;
@@ -265,25 +266,32 @@ using BlockCoords = direct_conv::BlockCoords<cfg>;
 
 // Handles input loads from global memory into LDS and then into registers.
 template <auto cfg, bool Padded = true>
-using InputLoader = direct_conv::InputLoader<TileConstants<cfg>, cfg,
-    typename std::conditional_t<cfg.data_type == DataType::bf16, ck_tile::bf16x4_t, ck_tile::fp16x4_t>,
-    Padded, ToType<cfg.data_type>>;
+using InputLoader =
+    direct_conv::InputLoader<TileConstants<cfg>,
+                             cfg,
+                             typename std::conditional_t<cfg.data_type == DataType::bf16,
+                                                         ck_tile::bf16x4_t,
+                                                         ck_tile::fp16x4_t>,
+                             Padded,
+                             ToType<cfg.data_type>>;
 
 // Handles weight loading (DRAM → LDS → registers) and provides
 // register-resident weight access via inherited WeightAccessor.
 template <auto cfg>
-struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw,
-    std::conditional_t<cfg.data_type == DataType::bf16, bf16x4_t, fp16x4_t>>
+struct WeightLoader : direct_conv::WeightAccessor<
+                          cfg.kh,
+                          cfg.kw,
+                          std::conditional_t<cfg.data_type == DataType::bf16, bf16x4_t, fp16x4_t>>
 {
-    using TC = TileConstants<cfg>;
+    using TC          = TileConstants<cfg>;
     using ElementType = ToType<cfg.data_type>;
 
     template <bool Padded_ = true, typename BlockCoords_>
     CK_TILE_DEVICE static void load_to_lds(const BlockCoords_& bc,
-                                       uint4* weight_lds,
-                                       const ElementType* __restrict__ wei,
-                                       int c_per_group,
-                                       int k_per_group)
+                                           uint4* weight_lds,
+                                           const ElementType* __restrict__ wei,
+                                           int c_per_group,
+                                           int k_per_group)
     {
         direct_conv::weight_load_to_lds<TC, cfg, Padded_, BlockCoords_, ElementType>(
             bc, weight_lds, wei, c_per_group, k_per_group);
@@ -305,22 +313,20 @@ struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw,
             // transpose_get (ds_read_b64_tr_b16) is a raw bitwise LDS load,
             // so we always use _Float16 for the buffer view and bit_cast the
             // loaded thread_buffer to the actual VecType (bf16x4_t for BF16).
-            auto output_lds_fp16 = ck_tile::buffer_view<
-                ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
-                reinterpret_cast<_Float16*>(weight_lds),
-                static_cast<ck_tile::index_t>(TC::Weight::WEIGHT_LDS_SIZE_UINT4 *
-                                              (sizeof(uint4) / sizeof(ElementType)))};
+            auto output_lds_fp16 = ck_tile::
+                buffer_view<ck_tile::address_space_enum::lds, _Float16, ck_tile::index_t, true>{
+                    reinterpret_cast<_Float16*>(weight_lds),
+                    static_cast<ck_tile::index_t>(TC::Weight::WEIGHT_LDS_SIZE_UINT4 *
+                                                  (sizeof(uint4) / sizeof(ElementType)))};
 
             using TransposeLayout = TransposeLDSLayout<4, 4, 16>;
             const int tr_batch    = TransposeLayout::batch(lane);
             const int tr_row      = TransposeLayout::row(lane);
             int filter_local      = wave_c64 * 64 + tr_batch * TC::GROUP_SIZE + tr_row;
 
-            const ck_tile::index_t weight_base =
-                filter_local * cfg.kh * cfg.kw * TC::GROUP_SIZE;
+            const ck_tile::index_t weight_base = filter_local * cfg.kh * cfg.kw * TC::GROUP_SIZE;
 
-            using VecType = std::conditional_t<
-                cfg.data_type == DataType::bf16, bf16x4_t, fp16x4_t>;
+            using VecType = std::conditional_t<cfg.data_type == DataType::bf16, bf16x4_t, fp16x4_t>;
             for(int khw = 0; khw < cfg.kh * cfg.kw; khw++)
             {
                 auto loaded =
@@ -331,8 +337,8 @@ struct WeightLoader : direct_conv::WeightAccessor<cfg.kh, cfg.kw,
         }
         else
         {
-            direct_conv::weight_read_fprop<TC, cfg.kh, cfg.kw,
-                decltype(*this), ElementType>(*this, weight_lds);
+            direct_conv::weight_read_fprop<TC, cfg.kh, cfg.kw, decltype(*this), ElementType>(
+                *this, weight_lds);
         }
     }
 };
@@ -343,43 +349,50 @@ using OutputWriter = direct_conv::OutputWriter<TileConstants<cfg>, Padded, ToTyp
 
 // Handles output staging through LDS and writing to global memory.
 template <auto cfg, bool Padded = true>
-using OutputWriterLds = direct_conv::OutputWriterLds<TileConstants<cfg>, Padded, ToType<cfg.data_type>>;
+using OutputWriterLds =
+    direct_conv::OutputWriterLds<TileConstants<cfg>, Padded, ToType<cfg.data_type>>;
 
 template <auto cfg, bool Padded = true>
-CK_TILE_DEVICE void ck_tile_conv2d_grouped_4c_nhwc_impl(const ToType<cfg.data_type>* __restrict__ in,
-                                                     const ToType<cfg.data_type>* __restrict__ wei,
-                                                     double alpha,
-                                                     double beta,
-                                                     ToType<cfg.data_type>* __restrict__ out,
-                                                     int N,
-                                                     int groups,
-                                                     int c_per_group,
-                                                     int k_per_group,
-                                                     int hi,
-                                                     int wi,
-                                                     int ho,
-                                                     int wo,
-                                                     int fy,
-                                                     int fx,
-                                                     int sy,
-                                                     int sx,
-                                                     int dy,
-                                                     int dx,
-                                                     int py,
-                                                     int px)
+CK_TILE_DEVICE void
+ck_tile_conv2d_grouped_4c_nhwc_impl(const ToType<cfg.data_type>* __restrict__ in,
+                                    const ToType<cfg.data_type>* __restrict__ wei,
+                                    double alpha,
+                                    double beta,
+                                    ToType<cfg.data_type>* __restrict__ out,
+                                    int N,
+                                    int groups,
+                                    int c_per_group,
+                                    int k_per_group,
+                                    int hi,
+                                    int wi,
+                                    int ho,
+                                    int wo,
+                                    int fy,
+                                    int fx,
+                                    int sy,
+                                    int sx,
+                                    int dy,
+                                    int dx,
+                                    int py,
+                                    int px)
 {
     constexpr bool use_lds_epilogue = (cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory);
-    using TC = TileConstants<cfg>;
-    using ElementType = ToType<cfg.data_type>;
-    using MfmaFn = std::conditional_t<cfg.data_type == DataType::bf16,
-        Mfma4x4x4_bf16, Mfma4x4x4>;
-    using OutputWriterType = std::conditional_t<use_lds_epilogue,
-        OutputWriterLds<cfg, Padded>, OutputWriter<cfg, Padded>>;
+    using TC                        = TileConstants<cfg>;
+    using ElementType               = ToType<cfg.data_type>;
+    using MfmaFn = std::conditional_t<cfg.data_type == DataType::bf16, Mfma4x4x4_bf16, Mfma4x4x4>;
+    using OutputWriterType = std::
+        conditional_t<use_lds_epilogue, OutputWriterLds<cfg, Padded>, OutputWriter<cfg, Padded>>;
 
-    direct_conv::grouped_conv_compute_loop<
-        TC, cfg, Padded, MfmaFn,
-        BlockCoords<cfg>, InputLoader<cfg, Padded>, WeightLoader<cfg>, OutputWriterType,
-        cfg.kw, ElementType>(
+    direct_conv::grouped_conv_compute_loop<TC,
+                                           cfg,
+                                           Padded,
+                                           MfmaFn,
+                                           BlockCoords<cfg>,
+                                           InputLoader<cfg, Padded>,
+                                           WeightLoader<cfg>,
+                                           OutputWriterType,
+                                           cfg.kw,
+                                           ElementType>(
         in, wei, out, N, groups, c_per_group, k_per_group, hi, wi, ho, wo, py, px);
 }
 
@@ -410,18 +423,37 @@ struct GroupedConv4cKernel
                                    int py,
                                    int px) const
     {
-        ck_tile_conv2d_grouped_4c_nhwc_impl<cfg, Padded>(
-            in, wei, alpha, beta, out, N, groups, c_per_group, k_per_group, hi, wi, ho, wo, fy, fx,
-            sy, sx, dy, dx, py, px);
+        ck_tile_conv2d_grouped_4c_nhwc_impl<cfg, Padded>(in,
+                                                         wei,
+                                                         alpha,
+                                                         beta,
+                                                         out,
+                                                         N,
+                                                         groups,
+                                                         c_per_group,
+                                                         k_per_group,
+                                                         hi,
+                                                         wi,
+                                                         ho,
+                                                         wo,
+                                                         fy,
+                                                         fx,
+                                                         sy,
+                                                         sx,
+                                                         dy,
+                                                         dx,
+                                                         py,
+                                                         px);
     }
 };
 
 static bool channels_can_be_padded(const Conv2dParams& par)
 {
-    // Check if we can pad the input tensor in the channel dimensions such that we K=C=4 per conv group.
+    // Check if we can pad the input tensor in the channel dimensions such that we K=C=4 per conv
+    // group.
     int c_per_group = par.c_tot / par.groups;
     int k_per_group = par.k_tot / par.groups;
-    bool can_pad = c_per_group <= 4 && k_per_group <= 4;
+    bool can_pad    = c_per_group <= 4 && k_per_group <= 4;
     return can_pad;
 }
 
@@ -446,38 +478,36 @@ inline void launch_kernel(const LaunchParams& lp,
                           hipStream_t stream)
 {
     using ElementType = ToType<DT>;
-    const bool needs_padding = par.channels_per_group() != cfg.group_size() ||
-                               par.filters_per_group() != cfg.group_size();
+    const bool needs_padding =
+        par.channels_per_group() != cfg.group_size() || par.filters_per_group() != cfg.group_size();
     auto view = SizeView<cfg.direction>(par);
 
-    auto do_launch = [&]<bool Pad>()
-    {
-        ck_tile::make_kernel(
-            GroupedConv4cKernel<cfg, Pad>{},
-            lp.grid,
-            lp.block_size,
-            lp.dynamic_shared_bytes,
-            static_cast<const ElementType*>(in),
-            static_cast<const ElementType*>(wei),
-            1.0,
-            0.0,
-            static_cast<ElementType*>(out),
-            par.n,
-            par.groups,
-            par.channels_per_group(),
-            par.filters_per_group(),
-            view.h(),
-            view.w(),
-            view.p(),
-            view.q(),
-            par.kh,
-            par.kw,
-            par.stride_h,
-            par.stride_w,
-            par.dilation_h,
-            par.dilation_w,
-            view.pad_h(),
-            view.pad_w())(ck_tile::stream_config{stream});
+    auto do_launch = [&]<bool Pad>() {
+        ck_tile::make_kernel(GroupedConv4cKernel<cfg, Pad>{},
+                             lp.grid,
+                             lp.block_size,
+                             lp.dynamic_shared_bytes,
+                             static_cast<const ElementType*>(in),
+                             static_cast<const ElementType*>(wei),
+                             1.0,
+                             0.0,
+                             static_cast<ElementType*>(out),
+                             par.n,
+                             par.groups,
+                             par.channels_per_group(),
+                             par.filters_per_group(),
+                             view.h(),
+                             view.w(),
+                             view.p(),
+                             view.q(),
+                             par.kh,
+                             par.kw,
+                             par.stride_h,
+                             par.stride_w,
+                             par.dilation_h,
+                             par.dilation_w,
+                             view.pad_h(),
+                             view.pad_w())(ck_tile::stream_config{stream});
     };
 
     if(needs_padding)

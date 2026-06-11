@@ -18,7 +18,7 @@ TEST(TransposeLDSLayout, RowRange)
     {
         int r = TrLayout::row(lane);
         EXPECT_GE(r, 0) << "lane=" << lane;
-        EXPECT_LT(r, 4) << "lane=" << lane;  // K=4
+        EXPECT_LT(r, 4) << "lane=" << lane; // K=4
     }
 }
 
@@ -29,7 +29,7 @@ TEST(TransposeLDSLayout, ColMultipleOf4)
         int c = TrLayout::col(lane);
         EXPECT_EQ(c % 4, 0) << "lane=" << lane;
         EXPECT_GE(c, 0) << "lane=" << lane;
-        EXPECT_LT(c, 4) << "lane=" << lane;  // M=4
+        EXPECT_LT(c, 4) << "lane=" << lane; // M=4
     }
 }
 
@@ -39,7 +39,7 @@ TEST(TransposeLDSLayout, BatchRange)
     {
         int b = TrLayout::batch(lane);
         EXPECT_GE(b, 0) << "lane=" << lane;
-        EXPECT_LT(b, 16) << "lane=" << lane;  // B=16
+        EXPECT_LT(b, 16) << "lane=" << lane; // B=16
     }
 }
 

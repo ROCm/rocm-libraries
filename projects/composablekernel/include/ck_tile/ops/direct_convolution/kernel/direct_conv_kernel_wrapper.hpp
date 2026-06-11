@@ -39,10 +39,7 @@ struct DirectConvKernel
         void* out_ptr;
     };
 
-    std::string GetName() const
-    {
-        return Derived::GetNamePrefix() + Config.GetName();
-    }
+    std::string GetName() const { return Derived::GetNamePrefix() + Config.GetName(); }
 
     std::string GetTypeString() const { return GetName(); }
 
@@ -52,8 +49,8 @@ struct DirectConvKernel
     static KernelArgs MakeKernelArgs(const GroupedConvFwdHostArgs<>& host_args)
         requires(Derived::kIsFprop)
     {
-        auto par       = PopulateConv2dParams(host_args);
-        par.direction  = Direction::Fprop;
+        auto par      = PopulateConv2dParams(host_args);
+        par.direction = Direction::Fprop;
         par.compute_output_size();
 
         auto lp = Derived::V::template get_launch_params<Config>(par);
@@ -71,8 +68,8 @@ struct DirectConvKernel
     static KernelArgs MakeKernelArgs(const GroupedConvBwdDataHostArgs& host_args)
         requires(!Derived::kIsFprop)
     {
-        auto par       = PopulateConv2dParams(host_args);
-        par.direction  = Direction::Dgrad;
+        auto par      = PopulateConv2dParams(host_args);
+        par.direction = Direction::Dgrad;
         par.compute_output_size();
 
         auto lp = Derived::V::template get_launch_params<Config>(par);
@@ -88,36 +85,28 @@ struct DirectConvKernel
 
     static dim3 GridSize(const KernelArgs& kargs) { return kargs.lp.grid; }
 
-    static dim3 BlockSize()
-    {
-        return dim3(static_cast<unsigned>(Config.block_size()));
-    }
+    static dim3 BlockSize() { return dim3(static_cast<unsigned>(Config.block_size())); }
 
     static constexpr ck_tile::index_t GetSmemSize() { return 0; }
 
     /// Run the kernel with timing via stream_config.
     /// Returns {is_supported, avg_time_ms, instance_name}.
-    std::tuple<bool, float, std::string>
-    Run(const KernelArgs& kargs, const ck_tile::stream_config& s_conf) const
+    std::tuple<bool, float, std::string> Run(const KernelArgs& kargs,
+                                             const ck_tile::stream_config& s_conf) const
     {
         if(!IsSupportedArgument(kargs))
             return {false, 0.0f, GetInstanceString()};
 
         auto callable = [&](const ck_tile::stream_config& sc) {
             Derived::V::template launch_kernel<Config>(
-                kargs.lp,
-                kargs.par,
-                kargs.in_ptr,
-                kargs.wei_ptr,
-                kargs.out_ptr,
-                sc.stream_id_);
+                kargs.lp, kargs.par, kargs.in_ptr, kargs.wei_ptr, kargs.out_ptr, sc.stream_id_);
         };
 
         float avg_time = ck_tile::launch_kernel(s_conf, callable);
         return {true, avg_time, GetInstanceString()};
     }
 
-private:
+    private:
     template <typename HostArgs>
     static Conv2dParams PopulateConv2dParams(const HostArgs& host_args)
     {

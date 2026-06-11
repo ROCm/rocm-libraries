@@ -43,28 +43,26 @@ static constexpr int CFG_CSPW2_FPROP = 44;
 // the intermediate data into buffer 0, then issue the two final prefetches.
 template <int CfgIdx>
 __global__ void test_chunked_prefetch_kernel(const _Float16* __restrict__ in,
-                                              _Float16* __restrict__ lds_out,
-                                              int N,
-                                              int C,
-                                              int hi,
-                                              int wi,
-                                              int px,
-                                              int target_y)
+                                             _Float16* __restrict__ lds_out,
+                                             int N,
+                                             int C,
+                                             int hi,
+                                             int wi,
+                                             int px,
+                                             int target_y)
 {
 #ifdef __HIP_DEVICE_COMPILE__
     constexpr auto cfg = v3::KernelConfigurations<>::configs_map.get(CfgIdx);
-    using TC          = v3::TileConstants<cfg>;
-    using BlockCoords = v3::ConvBlockCoordsT<cfg>;
-    using InputLoader = v3::ConvInputLoader<cfg>;
+    using TC           = v3::TileConstants<cfg>;
+    using BlockCoords  = v3::ConvBlockCoordsT<cfg>;
+    using InputLoader  = v3::ConvInputLoader<cfg>;
 
-    static_assert(cfg.c_slices_per_wave == 2,
-                  "test_chunked_prefetch_kernel is written for N=2");
+    static_assert(cfg.c_slices_per_wave == 2, "test_chunked_prefetch_kernel is written for N=2");
 
-    constexpr int BLOCK_SIZE = cfg.block_size();
-    constexpr int LDS_BUF_FP16 = TC::INPUT_LDS_BUFFER_SIZE_FP16;
+    constexpr int BLOCK_SIZE     = cfg.block_size();
+    constexpr int LDS_BUF_FP16   = TC::INPUT_LDS_BUFFER_SIZE_FP16;
     constexpr int LDS_TOTAL_FP16 = TC::NUM_INPUT_LDS_BUFFERS * LDS_BUF_FP16;
-    constexpr int UNIFIED_UINT4 =
-        TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8;
+    constexpr int UNIFIED_UINT4  = TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8;
 
     __shared__ uint4 lds_buf[UNIFIED_UINT4];
 
@@ -81,8 +79,17 @@ __global__ void test_chunked_prefetch_kernel(const _Float16* __restrict__ in,
     if(bc.block_n >= N)
         return;
 
-    InputLoader il(bc, lds_buf, in, hi, wi, px, /*py=*/0,
-                   /*dx=*/1, /*dy=*/1, /*sx=*/1, /*sy=*/1);
+    InputLoader il(bc,
+                   lds_buf,
+                   in,
+                   hi,
+                   wi,
+                   px,
+                   /*py=*/0,
+                   /*dx=*/1,
+                   /*dy=*/1,
+                   /*sx=*/1,
+                   /*sy=*/1);
 
     // Initial prefetch: chunk 0 of row 0 into buffer 0.
     il.template prefetch_tile_to_lds<0>(0);
@@ -115,14 +122,20 @@ __global__ void test_chunked_prefetch_kernel(const _Float16* __restrict__ in,
         lds_out[i] = lds_fp16[i];
     }
 #else
-    (void)in; (void)lds_out; (void)N; (void)C; (void)hi; (void)wi; (void)px;
+    (void)in;
+    (void)lds_out;
+    (void)N;
+    (void)C;
+    (void)hi;
+    (void)wi;
+    (void)px;
     (void)target_y;
 #endif
 }
 
 class ConvInputLoaderChunkedTest : public ::testing::Test
 {
-protected:
+    protected:
     // Fill an NHWC input tensor with deterministic non-zero values so we can
     // catch zeros at positions that should be real data.
     static std::vector<_Float16> make_input(int N, int hi, int wi, int C)
@@ -137,9 +150,7 @@ protected:
         return v;
     }
 
-    static float read_input(const std::vector<_Float16>& in,
-                            int wi, int C,
-                            int h, int w, int c)
+    static float read_input(const std::vector<_Float16>& in, int wi, int C, int h, int w, int c)
     {
         return static_cast<float>(in[(h * wi + w) * C + c]);
     }
@@ -150,14 +161,14 @@ protected:
     void run_and_verify(int hi, int wi, int px, int target_y = 0)
     {
         constexpr auto cfg = v3::KernelConfigurations<>::configs_map.get(CfgIdx);
-        using TC = v3::TileConstants<cfg>;
+        using TC           = v3::TileConstants<cfg>;
 
-        constexpr int N_CSPW   = cfg.c_slices_per_wave;
-        constexpr int BLOCK_W  = TC::BLOCK_W;
-        constexpr int BLOCK_C8 = TC::BLOCK_C8;
-        constexpr int LDS_BUF_FP16 = TC::INPUT_LDS_BUFFER_SIZE_FP16;
-        constexpr int LDS_TOTAL_FP16 = TC::NUM_INPUT_LDS_BUFFERS * LDS_BUF_FP16;
-        constexpr int BLOCK_C_PER_CHUNK = BLOCK_C8 * 8;   // = waves * cpg
+        constexpr int N_CSPW            = cfg.c_slices_per_wave;
+        constexpr int BLOCK_W           = TC::BLOCK_W;
+        constexpr int BLOCK_C8          = TC::BLOCK_C8;
+        constexpr int LDS_BUF_FP16      = TC::INPUT_LDS_BUFFER_SIZE_FP16;
+        constexpr int LDS_TOTAL_FP16    = TC::NUM_INPUT_LDS_BUFFERS * LDS_BUF_FP16;
+        constexpr int BLOCK_C_PER_CHUNK = BLOCK_C8 * 8; // = waves * cpg
         constexpr int TOTAL_BLOCK_C     = BLOCK_C_PER_CHUNK * N_CSPW;
         constexpr int BLOCK_SIZE        = cfg.block_size();
 
@@ -168,20 +179,18 @@ protected:
         auto inp = make_input(N, hi, wi, C);
 
         _Float16 *d_in = nullptr, *d_lds = nullptr;
-        ck_tile::hip_check_error(hipMalloc(&d_in,  inp.size() * sizeof(_Float16)));
+        ck_tile::hip_check_error(hipMalloc(&d_in, inp.size() * sizeof(_Float16)));
         ck_tile::hip_check_error(hipMalloc(&d_lds, LDS_TOTAL_FP16 * sizeof(_Float16)));
-        ck_tile::hip_check_error(hipMemcpy(
-            d_in, inp.data(), inp.size() * sizeof(_Float16), hipMemcpyHostToDevice));
+        ck_tile::hip_check_error(
+            hipMemcpy(d_in, inp.data(), inp.size() * sizeof(_Float16), hipMemcpyHostToDevice));
 
         test_chunked_prefetch_kernel<CfgIdx>
-            <<<dim3(1, 1, 1), BLOCK_SIZE>>>(
-                d_in, d_lds, N, C, hi, wi, px, target_y);
+            <<<dim3(1, 1, 1), BLOCK_SIZE>>>(d_in, d_lds, N, C, hi, wi, px, target_y);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
         std::vector<_Float16> lds_host(LDS_TOTAL_FP16);
         ck_tile::hip_check_error(hipMemcpy(
-            lds_host.data(), d_lds, LDS_TOTAL_FP16 * sizeof(_Float16),
-            hipMemcpyDeviceToHost));
+            lds_host.data(), d_lds, LDS_TOTAL_FP16 * sizeof(_Float16), hipMemcpyDeviceToHost));
 
         // Verify each (chunk, spatial, c8, c) cell.
         for(int cs = 0; cs < N_CSPW; ++cs)
@@ -192,14 +201,13 @@ protected:
                 {
                     for(int c = 0; c < 8; ++c)
                     {
-                        const int lds_idx = cs * LDS_BUF_FP16
-                                          + (w * BLOCK_C8 + c8) * 8 + c;
+                        const int lds_idx  = cs * LDS_BUF_FP16 + (w * BLOCK_C8 + c8) * 8 + c;
                         const float actual = static_cast<float>(lds_host[lds_idx]);
 
                         // Chunk cs occupies absolute C-range
                         // [cs*BLOCK_C_PER_CHUNK, (cs+1)*BLOCK_C_PER_CHUNK).
-                        const int abs_c   = cs * BLOCK_C_PER_CHUNK + c8 * 8 + c;
-                        const int w_actual = w - px;  // block_q == 0 here
+                        const int abs_c    = cs * BLOCK_C_PER_CHUNK + c8 * 8 + c;
+                        const int w_actual = w - px; // block_q == 0 here
 
                         const float expected =
                             (w_actual >= 0 && w_actual < wi)
@@ -207,11 +215,8 @@ protected:
                                 : 0.0f;
 
                         EXPECT_EQ(actual, expected)
-                            << "cfg=" << CfgIdx
-                            << " target_y=" << target_y
-                            << " cs=" << cs << " w=" << w
-                            << " c8=" << c8 << " c=" << c
-                            << " abs_c=" << abs_c
+                            << "cfg=" << CfgIdx << " target_y=" << target_y << " cs=" << cs
+                            << " w=" << w << " c8=" << c8 << " c=" << c << " abs_c=" << abs_c
                             << " w_actual=" << w_actual;
                     }
                 }

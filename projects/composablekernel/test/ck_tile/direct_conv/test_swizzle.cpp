@@ -24,12 +24,12 @@ struct SwizzleParam
 };
 
 // Instantiation list: (swizzle type, #rows to test over)
-using SwizzleTypes = ::testing::Types<
-    SwizzleParam<SwizzleT<64>, 10>,    // C8=8,  NRows=10 > C8 → x%C8 wraps
-    SwizzleParam<SwizzleT<128>, 20>,   // C8=16, NRows=20 > C8 → x%C8 wraps
-    SwizzleParam<SwizzleXOR<64>, 10>,  // C8=8,  NRows=10 > C8 → x%C8 wraps
-    SwizzleParam<SwizzleXOR<128>, 20>  // C8=16, NRows=20 > C8 → x%C8 wraps
-    >;
+using SwizzleTypes =
+    ::testing::Types<SwizzleParam<SwizzleT<64>, 10>,   // C8=8,  NRows=10 > C8 → x%C8 wraps
+                     SwizzleParam<SwizzleT<128>, 20>,  // C8=16, NRows=20 > C8 → x%C8 wraps
+                     SwizzleParam<SwizzleXOR<64>, 10>, // C8=8,  NRows=10 > C8 → x%C8 wraps
+                     SwizzleParam<SwizzleXOR<128>, 20> // C8=16, NRows=20 > C8 → x%C8 wraps
+                     >;
 
 template <typename P>
 class SwizzleTest : public ::testing::Test
@@ -138,9 +138,8 @@ TYPED_TEST(SwizzleTest, NoBankConflicts)
                 // bank of the first 4-byte word: (byte_offset / 4) % 32
                 // byte_offset = off * 8  =>  bank = (off * 2) % 32
                 const int bank = (off * 2) % 32;
-                EXPECT_TRUE(banks.insert(bank).second)
-                    << "Bank conflict: x=" << x << " group=" << g
-                    << " c4=" << c4 << " bank=" << bank;
+                EXPECT_TRUE(banks.insert(bank).second) << "Bank conflict: x=" << x << " group=" << g
+                                                       << " c4=" << c4 << " bank=" << bank;
             }
         }
     }

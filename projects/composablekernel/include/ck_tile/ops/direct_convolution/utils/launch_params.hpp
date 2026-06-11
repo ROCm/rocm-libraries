@@ -5,8 +5,7 @@
 
 #include <hip/hip_runtime.h>
 
-namespace ck_tile::direct_conv
-{
+namespace ck_tile::direct_conv {
 
 struct LaunchParams
 {

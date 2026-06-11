@@ -7,8 +7,7 @@
 // (defined in types.hpp or via ck_tile/core.hpp). We avoid including
 // types.hpp directly to prevent include-order issues with <hip/hip_fp8.h>.
 
-namespace ck_tile::direct_conv
-{
+namespace ck_tile::direct_conv {
 
 // MFMA functor for 4-channel kernel (mfma_f32_4x4x4f16).
 //
@@ -59,7 +58,7 @@ struct Mfma16x16x32
 {
     // fp16x8_t is ck_tile::direct_conv::fp16x8_t (vector_size), matching InputLoaderToeplitz.
     using input_type = fp16x8_t;
-    using acc_type = fp32x4_t;
+    using acc_type   = fp32x4_t;
     __device__ fp32x4_t operator()(fp16x8_t weight, fp16x8_t input, fp32x4_t acc) const
     {
         return __builtin_amdgcn_mfma_f32_16x16x32_f16(weight, input, acc, 0, 0, 0);
@@ -81,7 +80,7 @@ struct Mfma16x16x32
 struct Mfma16x16x32_32c
 {
     using input_type = fp16x8_t;
-    using acc_type = fp32x4_t;
+    using acc_type   = fp32x4_t;
     __device__ fp32x4_t operator()(fp16x8_t weight, fp16x8_t input, fp32x4_t acc) const
     {
         return __builtin_amdgcn_mfma_f32_16x16x32_f16(weight, input, acc, 0, 0, 0);
@@ -122,7 +121,7 @@ struct Mfma16x16x16_bf16
 struct Mfma16x16x32_bf16
 {
     using input_type = bf16x8_t;
-    using acc_type = fp32x4_t;
+    using acc_type   = fp32x4_t;
     __device__ fp32x4_t operator()(bf16x8_t weight, bf16x8_t input, fp32x4_t acc) const
     {
         return __builtin_amdgcn_mfma_f32_16x16x32_bf16(weight, input, acc, 0, 0, 0);
@@ -151,7 +150,7 @@ struct Mfma16x16x32_bf16
 struct Mfma32x32x16
 {
     using input_type = fp16x8_t;
-    using acc_type = fp32x16_t;
+    using acc_type   = fp32x16_t;
     __device__ fp32x16_t operator()(fp16x8_t weight, fp16x8_t input, fp32x16_t acc) const
     {
         return __builtin_amdgcn_mfma_f32_32x32x16_f16(weight, input, acc, 0, 0, 0);
@@ -161,7 +160,7 @@ struct Mfma32x32x16
 struct Mfma32x32x16_bf16
 {
     using input_type = bf16x8_t;
-    using acc_type = fp32x16_t;
+    using acc_type   = fp32x16_t;
     __device__ fp32x16_t operator()(bf16x8_t weight, bf16x8_t input, fp32x16_t acc) const
     {
         return __builtin_amdgcn_mfma_f32_32x32x16_bf16(weight, input, acc, 0, 0, 0);

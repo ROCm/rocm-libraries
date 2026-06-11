@@ -42,12 +42,15 @@
 #include <hip/hip_runtime.h>
 #include <string>
 
-namespace ck_tile::direct_conv::conv_32c_tile::v3
-{
+namespace ck_tile::direct_conv::conv_32c_tile::v3 {
 
 constexpr int WAVE_SIZE = 64;
 
-enum class MfmaShape { M16N16K32, M32N32K16 };
+enum class MfmaShape
+{
+    M16N16K32,
+    M32N32K16
+};
 
 // ===================================================================
 // Config — kernel configuration for v3 cross-wave LDS reduction.
@@ -76,10 +79,10 @@ template <DataType DT = DataType::fp16>
 struct Config
 {
     static constexpr DataType data_type = DT;
-    MfmaShape mfma_shape = MfmaShape::M16N16K32;
+    MfmaShape mfma_shape                = MfmaShape::M16N16K32;
     int waves_per_wg;
-    int kh = 3;
-    int kw = 3;
+    int kh     = 3;
+    int kw     = 3;
     int n_fold = 8;
 
     // Number of channels_per_group C-chunks each wave streams through the
@@ -119,37 +122,36 @@ struct Config
     constexpr int block_k_size() const { return mfma_m(); }
 
     // Total C-sections per workgroup across all waves and chunks.
-    constexpr int c_local_count() const {
-        return block_groups() * c_slices_per_wave;
-    }
+    constexpr int c_local_count() const { return block_groups() * c_slices_per_wave; }
 
     Direction direction = Direction::Fprop;
 
     SwizzleType swizzle_type = SwizzleType::None;
-    EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
-    int vector_size = 8;
+    EpilogueType epilogue    = EpilogueType::RegistersToGlobalMemory;
+    int vector_size          = 8;
 
     std::string GetName() const
     {
         std::string mfma_str = (mfma_shape == MfmaShape::M32N32K16) ? "32x32x16" : "16x16x32";
         std::string swizzle_type_str = "_no_swizzle";
-        if (swizzle_type == SwizzleType::CyclicShift)
+        if(swizzle_type == SwizzleType::CyclicShift)
         {
             swizzle_type_str = "_cyclic_shift_swizzle";
         }
-        else if (swizzle_type == SwizzleType::XOR)
+        else if(swizzle_type == SwizzleType::XOR)
         {
             swizzle_type_str = "_xor_swizzle";
         }
 
-        std::string base = "mfma_" + mfma_str + "_waves_per_wg_" + std::to_string(waves_per_wg) + swizzle_type_str + "_cross_wave_lds_reduce";
+        std::string base = "mfma_" + mfma_str + "_waves_per_wg_" + std::to_string(waves_per_wg) +
+                           swizzle_type_str + "_cross_wave_lds_reduce";
 
         std::string epilogue_suffix;
-        if (epilogue == EpilogueType::RegistersToGlobalMemory)
+        if(epilogue == EpilogueType::RegistersToGlobalMemory)
         {
             epilogue_suffix = "_direct_dram_epilogue";
         }
-        else if (epilogue == EpilogueType::RegistersToLdsToGlobalMemory)
+        else if(epilogue == EpilogueType::RegistersToLdsToGlobalMemory)
         {
             epilogue_suffix = "_lds_staged_epilogue";
         }
@@ -169,20 +171,19 @@ struct Config
 // cpg = channels_per_group (32 for M16N16K32, 16 for M32N32K16).
 // ===================================================================
 template <auto cfg, typename ElementType = _Float16>
-CK_TILE_DEVICE void weight_load_to_lds_kyxc(
-    uint4* weight_lds,
-    const ElementType* __restrict__ wei,
-    int block_k_start,
-    int c_slice,
-    int C_total)
+CK_TILE_DEVICE void weight_load_to_lds_kyxc(uint4* weight_lds,
+                                            const ElementType* __restrict__ wei,
+                                            int block_k_start,
+                                            int c_slice,
+                                            int C_total)
 {
-    constexpr int WEIGHT_K = cfg.block_k_size();
-    constexpr int KH_KW = cfg.kh * cfg.kw;
-    constexpr int C_SLICE = cfg.channels_per_group();
+    constexpr int WEIGHT_K    = cfg.block_k_size();
+    constexpr int KH_KW       = cfg.kh * cfg.kw;
+    constexpr int C_SLICE     = cfg.channels_per_group();
     constexpr int TOTAL_UINT4 = WEIGHT_K * KH_KW * C_SLICE / 8;
-    constexpr int NUM_PASSES = (TOTAL_UINT4 + cfg.block_size() - 1) / cfg.block_size();
+    constexpr int NUM_PASSES  = (TOTAL_UINT4 + cfg.block_size() - 1) / cfg.block_size();
 
-    const int tid = static_cast<int>(threadIdx.x);
+    const int tid      = static_cast<int>(threadIdx.x);
     const int K_stride = KH_KW * C_total;
 
     for(int pass = 0; pass < NUM_PASSES; pass++)
@@ -192,17 +193,14 @@ CK_TILE_DEVICE void weight_load_to_lds_kyxc(
         {
             // Decompose: LDS layout is [WEIGHT_K, KH_KW, C_SLICE], C innermost.
             // Each uint4 = 8 fp16 values in the C dimension.
-            constexpr int C_UINT4 = C_SLICE / 8;  // 4
-            int c8     = flat_idx % C_UINT4;
-            int temp   = flat_idx / C_UINT4;
-            int filter = temp % KH_KW;
-            int k      = temp / KH_KW;
+            constexpr int C_UINT4 = C_SLICE / 8; // 4
+            int c8                = flat_idx % C_UINT4;
+            int temp              = flat_idx / C_UINT4;
+            int filter            = temp % KH_KW;
+            int k                 = temp / KH_KW;
 
-            const ElementType* src = wei
-                + static_cast<size_t>(block_k_start + k) * K_stride
-                + filter * C_total
-                + c_slice * C_SLICE
-                + c8 * 8;
+            const ElementType* src = wei + static_cast<size_t>(block_k_start + k) * K_stride +
+                                     filter * C_total + c_slice * C_SLICE + c8 * 8;
 
             weight_lds[flat_idx] = *reinterpret_cast<const uint4*>(src);
         }
@@ -220,21 +218,20 @@ CK_TILE_DEVICE void weight_load_to_lds_kyxc(
 // C dimension = block_k_size (output channels of input gradient).
 // ===================================================================
 template <auto cfg, typename ElementType = _Float16>
-CK_TILE_DEVICE void weight_load_to_lds_kyxc_dgrad(
-    uint4* weight_lds,
-    const ElementType* __restrict__ wei,
-    int k_slice_start,
-    int block_c_start,
-    int C_total)
+CK_TILE_DEVICE void weight_load_to_lds_kyxc_dgrad(uint4* weight_lds,
+                                                  const ElementType* __restrict__ wei,
+                                                  int k_slice_start,
+                                                  int block_c_start,
+                                                  int C_total)
 {
     constexpr int K_SLICE = cfg.channels_per_group();
-    constexpr int KH_KW = cfg.kh * cfg.kw;
+    constexpr int KH_KW   = cfg.kh * cfg.kw;
     constexpr int BLOCK_C = cfg.block_k_size();
     // Total uint4s = K_SLICE * KH_KW * BLOCK_C / 8 = same as Fprop weight LDS size.
     constexpr int TOTAL_UINT4 = K_SLICE * KH_KW * BLOCK_C / 8;
-    constexpr int NUM_PASSES = (TOTAL_UINT4 + cfg.block_size() - 1) / cfg.block_size();
+    constexpr int NUM_PASSES  = (TOTAL_UINT4 + cfg.block_size() - 1) / cfg.block_size();
 
-    const int tid = static_cast<int>(threadIdx.x);
+    const int tid      = static_cast<int>(threadIdx.x);
     const int K_stride = KH_KW * C_total;
 
     for(int pass = 0; pass < NUM_PASSES; pass++)
@@ -244,16 +241,13 @@ CK_TILE_DEVICE void weight_load_to_lds_kyxc_dgrad(
         {
             // Decompose: LDS layout is [K_SLICE, KH_KW, BLOCK_C], C innermost.
             constexpr int C_UINT4 = BLOCK_C / 8;
-            int c8     = flat_idx % C_UINT4;
-            int temp   = flat_idx / C_UINT4;
-            int filter = temp % KH_KW;
-            int k      = temp / KH_KW;
+            int c8                = flat_idx % C_UINT4;
+            int temp              = flat_idx / C_UINT4;
+            int filter            = temp % KH_KW;
+            int k                 = temp / KH_KW;
 
-            const ElementType* src = wei
-                + static_cast<size_t>(k_slice_start + k) * K_stride
-                + filter * C_total
-                + block_c_start
-                + c8 * 8;
+            const ElementType* src = wei + static_cast<size_t>(k_slice_start + k) * K_stride +
+                                     filter * C_total + block_c_start + c8 * 8;
 
             weight_lds[flat_idx] = *reinterpret_cast<const uint4*>(src);
         }
@@ -269,7 +263,7 @@ CK_TILE_DEVICE void weight_load_to_lds_kyxc_dgrad(
 template <auto cfg>
 CK_TILE_DEVICE int swizzle_c8_forward(int spatial, int c8)
 {
-    using TC = TileConstantsBase<cfg>;
+    using TC               = TileConstantsBase<cfg>;
     constexpr int BLOCK_C8 = TC::BLOCK_C8;
     if constexpr(cfg.swizzle_type == SwizzleType::CyclicShift)
         return (c8 + spatial) % BLOCK_C8;
@@ -282,12 +276,12 @@ CK_TILE_DEVICE int swizzle_c8_forward(int spatial, int c8)
 template <auto cfg>
 CK_TILE_DEVICE int swizzle_c8_inverse(int spatial, int c8)
 {
-    using TC = TileConstantsBase<cfg>;
+    using TC               = TileConstantsBase<cfg>;
     constexpr int BLOCK_C8 = TC::BLOCK_C8;
     if constexpr(cfg.swizzle_type == SwizzleType::CyclicShift)
         return (c8 - spatial % BLOCK_C8 + BLOCK_C8) % BLOCK_C8;
     else if constexpr(cfg.swizzle_type == SwizzleType::XOR)
-        return c8 ^ (spatial % BLOCK_C8);  // self-inverse
+        return c8 ^ (spatial % BLOCK_C8); // self-inverse
     else
         return c8;
 }
@@ -300,9 +294,11 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
 {
     if(par.direction != cfg.direction)
     {
-        LogInfo("Direction mismatch: conv direction != config direction, ", 
-            " conv direction = ", std::move(to_string(par.direction)), 
-            ", config direction = ", std::move(to_string(cfg.direction)));
+        LogInfo("Direction mismatch: conv direction != config direction, ",
+                " conv direction = ",
+                std::move(to_string(par.direction)),
+                ", config direction = ",
+                std::move(to_string(cfg.direction)));
         return false;
     }
 
@@ -316,9 +312,11 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
     const int C_in = (cfg.direction == Direction::Dgrad) ? par.k_tot : par.c_tot;
     if(C_in != cfg.total_block_c())
     {
-        LogInfo("Input channel mismatch: conv C_in != config block_c: ", 
-            " C_in = ", std::move(std::to_string(C_in)), 
-            ", config.total_block_c() = ", std::move(std::to_string(cfg.total_block_c())));
+        LogInfo("Input channel mismatch: conv C_in != config block_c: ",
+                " C_in = ",
+                std::move(std::to_string(C_in)),
+                ", config.total_block_c() = ",
+                std::move(std::to_string(cfg.total_block_c())));
         return false;
     }
 
@@ -326,8 +324,11 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
     const int K_out = (cfg.direction == Direction::Dgrad) ? par.c_tot : par.k_tot;
     if(K_out % cfg.block_k_size() != 0)
     {
-        LogInfo("Output channel mismatch: conv K_out not divisible by config block_k_size, ", 
-            " K_out = ", std::to_string(K_out), ", config.block_k_size() = ", std::to_string(cfg.block_k_size()));
+        LogInfo("Output channel mismatch: conv K_out not divisible by config block_k_size, ",
+                " K_out = ",
+                std::to_string(K_out),
+                ", config.block_k_size() = ",
+                std::to_string(cfg.block_k_size()));
         return false;
     }
 
@@ -377,7 +378,7 @@ struct TileConstants : direct_conv::TileConstantsBase<cfg>
     // Not used at runtime (ConvInputLoader passes init_mfma_offsets=false).
     // The distribution must be well-formed for type deduction to compile.
     // Input is the MFMA B operand: spatial position = N (columns of B/C).
-    static constexpr int SPATIAL_LANES = cfg.mfma_n();   // 16 or 32
+    static constexpr int SPATIAL_LANES = cfg.mfma_n();       // 16 or 32
     static constexpr int K_GROUPS      = 64 / SPATIAL_LANES; // 4 or 2
     struct Mfma
     {
@@ -423,15 +424,22 @@ using ConvBlockCoordsT = direct_conv::BlockCoordsNonGrouped<cfg>;
 //      OVERFLOW_COUNT threads.
 // ===================================================================
 template <auto cfg>
-struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
-    std::conditional_t<cfg.data_type == DataType::bf16, ck_tile::bf16x8_t, ck_tile::fp16x8_t>,
-    false, ToType<cfg.data_type>>
+struct ConvInputLoader
+    : direct_conv::InputLoader<
+          TileConstants<cfg>,
+          cfg,
+          std::conditional_t<cfg.data_type == DataType::bf16, ck_tile::bf16x8_t, ck_tile::fp16x8_t>,
+          false,
+          ToType<cfg.data_type>>
 {
     using ElementType = ToType<cfg.data_type>;
-    using base = direct_conv::InputLoader<TileConstants<cfg>, cfg,
-        std::conditional_t<cfg.data_type == DataType::bf16, ck_tile::bf16x8_t, ck_tile::fp16x8_t>,
-        false, ElementType>;
-    using TC = TileConstants<cfg>;
+    using base        = direct_conv::InputLoader<
+               TileConstants<cfg>,
+               cfg,
+               std::conditional_t<cfg.data_type == DataType::bf16, ck_tile::bf16x8_t, ck_tile::fp16x8_t>,
+               false,
+               ElementType>;
+    using TC         = TileConstants<cfg>;
     using input_type = typename base::input_type;
 
     // Number of spatial positions actually covered by the tile distribution.
@@ -443,8 +451,7 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
 
     // Number of extra tile positions beyond DIST_SPATIAL that must be loaded
     // by the overflow path.
-    static constexpr int OVERFLOW_COUNT =
-        (TC::BLOCK_W - DIST_SPATIAL) * TC::BLOCK_C8;
+    static constexpr int OVERFLOW_COUNT = (TC::BLOCK_W - DIST_SPATIAL) * TC::BLOCK_C8;
 
     // Byte offset added to input_voffset / overflow_voffset to point at chunk
     // CS of the current input row (constant across rows). For c_slices_per_wave
@@ -455,25 +462,36 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
         static_cast<ck_tile::index_t>(sizeof(ElementType));
 
     // State for overflow loads.
-    ck_tile::index_t  overflow_voffset;
+    ck_tile::index_t overflow_voffset;
     CK_TILE_LDS_ADDR ElementType* overflow_lds_dest;
-    ck_tile::index_t  overflow_is_valid;
-    bool              overflow_active;
+    ck_tile::index_t overflow_is_valid;
+    bool overflow_active;
 
     template <typename BlockCoords_>
     CK_TILE_DEVICE ConvInputLoader(const BlockCoords_& bc,
-                                uint4* input_lds,
-                                const ElementType* __restrict__ in,
-                                int hi,
-                                int wi,
-                                int px,
-                                int py,
-                                int dx,
-                                int dy,
-                                int sx,
-                                int sy)
-        : base(bc, input_lds, in, hi, wi, px, py, dx, dy, sx, sy,
-               TC::GROUP_SIZE, /*init_mfma_offsets=*/false)
+                                   uint4* input_lds,
+                                   const ElementType* __restrict__ in,
+                                   int hi,
+                                   int wi,
+                                   int px,
+                                   int py,
+                                   int dx,
+                                   int dy,
+                                   int sx,
+                                   int sy)
+        : base(bc,
+               input_lds,
+               in,
+               hi,
+               wi,
+               px,
+               py,
+               dx,
+               dy,
+               sx,
+               sy,
+               TC::GROUP_SIZE,
+               /*init_mfma_offsets=*/false)
     {
         // The base ctor sizes input_rsrc from the dram descriptor's
         // element-space, which is built with BLOCK_C8 (per-chunk) on the
@@ -490,9 +508,8 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
         {
             const ElementType* input_base =
                 in + static_cast<size_t>(bc.block_n) * hi * wi * bc.C + bc.block_k;
-            const size_t rsrc_bytes =
-                static_cast<size_t>(hi) * wi * bc.C * sizeof(ElementType);
-            base::input_rsrc = ck_tile::make_builtin_buffer_resource(
+            const size_t rsrc_bytes = static_cast<size_t>(hi) * wi * bc.C * sizeof(ElementType);
+            base::input_rsrc        = ck_tile::make_builtin_buffer_resource(
                 input_base, static_cast<uint32_t>(rsrc_bytes));
         }
 
@@ -502,31 +519,29 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
         // Input = MFMA B operand: lane % mfma_n → column (spatial position),
         // lane / mfma_n → K-reduction group.
         constexpr int MFMA_N = cfg.mfma_n();
-        const int lane_q  = lane % MFMA_N;
-        const int lane_c8 = lane / MFMA_N;
+        const int lane_q     = lane % MFMA_N;
+        const int lane_c8    = lane / MFMA_N;
 
         // v3: each wave is its own C-group (wave_group = wave, not wave / 2).
         const int wave_group = wave;
-        const int c8_pos = wave_group * TC::GROUP_SIZE_8 + lane_c8;
+        const int c8_pos     = wave_group * TC::GROUP_SIZE_8 + lane_c8;
 
         // The DRAM cyclic-shift swizzle is applied to the global wi_padded
         // coordinate (block_q + spatial_pos), so the inverse used to find the
         // LDS slot must also include block_q. Otherwise the inverse is wrong
         // whenever block_q is not a multiple of BLOCK_C8.
-        ck_tile::static_for<0, cfg.kw, 1>{}(
-            [&](auto s_n)
-            {
-                constexpr int S = s_n.value;
-                int spatial_pos = lane_q + S;
-                int c8_lds = swizzle_c8_inverse<cfg>(bc.block_q + spatial_pos, c8_pos);
-                base::mfma_lds_offsets[S] = spatial_pos * TC::BLOCK_C8 * 8 + c8_lds * 8;
-            });
+        ck_tile::static_for<0, cfg.kw, 1>{}([&](auto s_n) {
+            constexpr int S           = s_n.value;
+            int spatial_pos           = lane_q + S;
+            int c8_lds                = swizzle_c8_inverse<cfg>(bc.block_q + spatial_pos, c8_pos);
+            base::mfma_lds_offsets[S] = spatial_pos * TC::BLOCK_C8 * 8 + c8_lds * 8;
+        });
 
         // --- Overflow load setup ---
         // The tile distribution covers DIST_SPATIAL spatial positions, but
         // we need BLOCK_W positions. The first OVERFLOW_COUNT threads each
         // handle one extra (spatial, c8) tile position.
-        const int tid = static_cast<int>(threadIdx.x);
+        const int tid   = static_cast<int>(threadIdx.x);
         overflow_active = (tid < OVERFLOW_COUNT);
         if(overflow_active)
         {
@@ -534,7 +549,7 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
             const int ov_c8      = tid % TC::BLOCK_C8;
 
             // LDS destination for overflow position.
-            auto* lds_base = reinterpret_cast<CK_TILE_LDS_ADDR ElementType*>(input_lds);
+            auto* lds_base    = reinterpret_cast<CK_TILE_LDS_ADDR ElementType*>(input_lds);
             overflow_lds_dest = lds_base + ov_spatial * TC::BLOCK_C8 * 8 + ov_c8 * 8;
 
             // DRAM offset: input_x = block_q + ov_spatial - px (padding offset).
@@ -543,13 +558,13 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
             // Match the DRAM descriptor's global-coordinate swizzle so the
             // overflow DRAM read is consistent with the main load path when
             // block_q is not a multiple of BLOCK_C8.
-            int ov_c8_dram = swizzle_c8_forward<cfg>(bc.block_q + ov_spatial, ov_c8);
-            overflow_voffset = static_cast<ck_tile::index_t>(
-                (input_x * bc.C + ov_c8_dram * 8) * static_cast<int>(sizeof(ElementType)));
+            int ov_c8_dram   = swizzle_c8_forward<cfg>(bc.block_q + ov_spatial, ov_c8);
+            overflow_voffset = static_cast<ck_tile::index_t>((input_x * bc.C + ov_c8_dram * 8) *
+                                                             static_cast<int>(sizeof(ElementType)));
         }
         else
         {
-            overflow_voffset = 0;
+            overflow_voffset  = 0;
             overflow_lds_dest = nullptr;
             overflow_is_valid = 0;
         }
@@ -609,32 +624,31 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
 // The DRAM→LDS load functions are reused from v1 unchanged.
 // ===================================================================
 template <auto cfg>
-struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
-    std::conditional_t<cfg.data_type == DataType::bf16, bf16x8_t, fp16x8_t>,
-    cfg.c_slices_per_wave>
+struct WeightLoader : direct_conv::WeightAccessor8<
+                          cfg.kh,
+                          cfg.kw,
+                          std::conditional_t<cfg.data_type == DataType::bf16, bf16x8_t, fp16x8_t>,
+                          cfg.c_slices_per_wave>
 {
-    using TC = TileConstants<cfg>;
+    using TC          = TileConstants<cfg>;
     using ElementType = ToType<cfg.data_type>;
 
     // Load one c_slice of weights from KYXC DRAM into weight LDS (Fprop).
-    CK_TILE_DEVICE static void load_kyxc_to_lds(
-        uint4* weight_lds,
-        const ElementType* __restrict__ wei,
-        int block_k_start,
-        int c_slice,
-        int C_total)
+    CK_TILE_DEVICE static void load_kyxc_to_lds(uint4* weight_lds,
+                                                const ElementType* __restrict__ wei,
+                                                int block_k_start,
+                                                int c_slice,
+                                                int C_total)
     {
-        weight_load_to_lds_kyxc<cfg, ElementType>(
-            weight_lds, wei, block_k_start, c_slice, C_total);
+        weight_load_to_lds_kyxc<cfg, ElementType>(weight_lds, wei, block_k_start, c_slice, C_total);
     }
 
     // Load one k_slice of weights from KYXC DRAM into weight LDS (Dgrad).
-    CK_TILE_DEVICE static void load_kyxc_to_lds_dgrad(
-        uint4* weight_lds,
-        const ElementType* __restrict__ wei,
-        int k_slice_start,
-        int block_c_start,
-        int C_total)
+    CK_TILE_DEVICE static void load_kyxc_to_lds_dgrad(uint4* weight_lds,
+                                                      const ElementType* __restrict__ wei,
+                                                      int k_slice_start,
+                                                      int block_c_start,
+                                                      int C_total)
     {
         weight_load_to_lds_kyxc_dgrad<cfg, ElementType>(
             weight_lds, wei, k_slice_start, block_c_start, C_total);
@@ -643,17 +657,17 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
     // Wave-local Fprop load: only this wave's 64 threads load its own c_slice
     // into its private LDS region (weight_lds + wave_id * WEIGHT_LDS_SIZE_UINT4).
     // All waves call this simultaneously with no synchronization required.
-    CK_TILE_DEVICE static void load_kyxc_to_lds_wave(
-        uint4* wave_lds,        // base of this wave's LDS region
-        const ElementType* __restrict__ wei,
-        int block_k_start,
-        int c_slice,
-        int C_total)
+    CK_TILE_DEVICE static void
+    load_kyxc_to_lds_wave(uint4* wave_lds, // base of this wave's LDS region
+                          const ElementType* __restrict__ wei,
+                          int block_k_start,
+                          int c_slice,
+                          int C_total)
     {
-        constexpr int WEIGHT_K  = cfg.block_k_size();
-        constexpr int KH_KW     = cfg.kh * cfg.kw;
-        constexpr int C_SLICE   = cfg.channels_per_group();
-        constexpr int TOTAL_U4  = WEIGHT_K * KH_KW * C_SLICE / 8;
+        constexpr int WEIGHT_K   = cfg.block_k_size();
+        constexpr int KH_KW      = cfg.kh * cfg.kw;
+        constexpr int C_SLICE    = cfg.channels_per_group();
+        constexpr int TOTAL_U4   = WEIGHT_K * KH_KW * C_SLICE / 8;
         constexpr int NUM_PASSES = (TOTAL_U4 + WAVE_SIZE - 1) / WAVE_SIZE;
 
         const int lane     = static_cast<int>(threadIdx.x) % WAVE_SIZE;
@@ -665,16 +679,13 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
             if(flat_idx < TOTAL_U4)
             {
                 constexpr int C_UINT4 = C_SLICE / 8;
-                int c8     = flat_idx % C_UINT4;
-                int temp   = flat_idx / C_UINT4;
-                int filter = temp % KH_KW;
-                int k      = temp / KH_KW;
+                int c8                = flat_idx % C_UINT4;
+                int temp              = flat_idx / C_UINT4;
+                int filter            = temp % KH_KW;
+                int k                 = temp / KH_KW;
 
-                const ElementType* src = wei
-                    + static_cast<size_t>(block_k_start + k) * K_stride
-                    + filter * C_total
-                    + c_slice * C_SLICE
-                    + c8 * 8;
+                const ElementType* src = wei + static_cast<size_t>(block_k_start + k) * K_stride +
+                                         filter * C_total + c_slice * C_SLICE + c8 * 8;
 
                 wave_lds[flat_idx] = *reinterpret_cast<const uint4*>(src);
             }
@@ -683,17 +694,17 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
 
     // Wave-local Dgrad load: only this wave's 64 threads load its own k_slice
     // into its private LDS region.
-    CK_TILE_DEVICE static void load_kyxc_to_lds_dgrad_wave(
-        uint4* wave_lds,        // base of this wave's LDS region
-        const ElementType* __restrict__ wei,
-        int k_slice_start,
-        int block_c_start,
-        int C_total)
+    CK_TILE_DEVICE static void
+    load_kyxc_to_lds_dgrad_wave(uint4* wave_lds, // base of this wave's LDS region
+                                const ElementType* __restrict__ wei,
+                                int k_slice_start,
+                                int block_c_start,
+                                int C_total)
     {
-        constexpr int K_SLICE   = cfg.channels_per_group();
-        constexpr int KH_KW     = cfg.kh * cfg.kw;
-        constexpr int BLOCK_C   = cfg.block_k_size();
-        constexpr int TOTAL_U4  = K_SLICE * KH_KW * BLOCK_C / 8;
+        constexpr int K_SLICE    = cfg.channels_per_group();
+        constexpr int KH_KW      = cfg.kh * cfg.kw;
+        constexpr int BLOCK_C    = cfg.block_k_size();
+        constexpr int TOTAL_U4   = K_SLICE * KH_KW * BLOCK_C / 8;
         constexpr int NUM_PASSES = (TOTAL_U4 + WAVE_SIZE - 1) / WAVE_SIZE;
 
         const int lane     = static_cast<int>(threadIdx.x) % WAVE_SIZE;
@@ -705,16 +716,13 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
             if(flat_idx < TOTAL_U4)
             {
                 constexpr int C_UINT4 = BLOCK_C / 8;
-                int c8     = flat_idx % C_UINT4;
-                int temp   = flat_idx / C_UINT4;
-                int filter = temp % KH_KW;
-                int k      = temp / KH_KW;
+                int c8                = flat_idx % C_UINT4;
+                int temp              = flat_idx / C_UINT4;
+                int filter            = temp % KH_KW;
+                int k                 = temp / KH_KW;
 
-                const ElementType* src = wei
-                    + static_cast<size_t>(k_slice_start + k) * K_stride
-                    + filter * C_total
-                    + block_c_start
-                    + c8 * 8;
+                const ElementType* src = wei + static_cast<size_t>(k_slice_start + k) * K_stride +
+                                         filter * C_total + block_c_start + c8 * 8;
 
                 wave_lds[flat_idx] = *reinterpret_cast<const uint4*>(src);
             }
@@ -741,9 +749,9 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
         static_assert(CS >= 0 && CS < cfg.c_slices_per_wave, "CS out of range");
         constexpr int KH_KW_L = cfg.kh * cfg.kw;
         constexpr int N_      = cfg.c_slices_per_wave;
-        const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
-        const auto* lds_ptr = reinterpret_cast<const ElementType*>(weight_lds);
-        using VecType = typename std::remove_reference_t<decltype(*this)>::value_type;
+        const int lane        = static_cast<int>(threadIdx.x) % WAVE_SIZE;
+        const auto* lds_ptr   = reinterpret_cast<const ElementType*>(weight_lds);
+        using VecType         = typename std::remove_reference_t<decltype(*this)>::value_type;
 
         if constexpr(cfg.direction == Direction::Dgrad)
         {
@@ -754,25 +762,21 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
             //   k_group = lane / mfma_m → selects which 8 K-reduction values
             //   c_lane  = lane % mfma_m → C-output position
             constexpr int BLOCK_C = cfg.block_k_size();
-            constexpr int MFMA_M = cfg.mfma_m();
+            constexpr int MFMA_M  = cfg.mfma_m();
 
             const int k_group = lane / MFMA_M;
             const int c_lane  = lane % MFMA_M;
 
-            ck_tile::static_for<0, KH_KW_L, 1>{}(
-                [&](auto f_n)
-                {
-                    constexpr int F = f_n.value;
-                    ElementType vals[8];
-                    ck_tile::static_for<0, 8, 1>{}(
-                        [&](auto j_n)
-                        {
-                            constexpr int J = j_n.value;
-                            int k = k_group * 8 + J;
-                            vals[J] = lds_ptr[k * KH_KW_L * BLOCK_C + F * BLOCK_C + c_lane];
-                        });
-                    __builtin_memcpy(&this->weights[F * N_ + CS], vals, sizeof(VecType));
+            ck_tile::static_for<0, KH_KW_L, 1>{}([&](auto f_n) {
+                constexpr int F = f_n.value;
+                ElementType vals[8];
+                ck_tile::static_for<0, 8, 1>{}([&](auto j_n) {
+                    constexpr int J = j_n.value;
+                    int k           = k_group * 8 + J;
+                    vals[J]         = lds_ptr[k * KH_KW_L * BLOCK_C + F * BLOCK_C + c_lane];
                 });
+                __builtin_memcpy(&this->weights[F * N_ + CS], vals, sizeof(VecType));
+            });
         }
         else
         {
@@ -785,33 +789,26 @@ struct WeightLoader : direct_conv::WeightAccessor8<cfg.kh, cfg.kw,
             // Each thread reads 8 C values per filter position:
             //   vals[j] = weight[k_out, f, c_grp*8 + j]
             constexpr int C_SLICE = cfg.channels_per_group();
-            constexpr int MFMA_M = cfg.mfma_m();
+            constexpr int MFMA_M  = cfg.mfma_m();
 
             const int k_out = lane % MFMA_M;
             const int c_grp = lane / MFMA_M;
 
-            ck_tile::static_for<0, KH_KW_L, 1>{}(
-                [&](auto f_n)
-                {
-                    constexpr int F = f_n.value;
-                    ElementType vals[8];
-                    ck_tile::static_for<0, 8, 1>{}(
-                        [&](auto j_n)
-                        {
-                            constexpr int J = j_n.value;
-                            vals[J] = lds_ptr[k_out * KH_KW_L * C_SLICE + F * C_SLICE + c_grp * 8 + J];
-                        });
-                    __builtin_memcpy(&this->weights[F * N_ + CS], vals, sizeof(VecType));
+            ck_tile::static_for<0, KH_KW_L, 1>{}([&](auto f_n) {
+                constexpr int F = f_n.value;
+                ElementType vals[8];
+                ck_tile::static_for<0, 8, 1>{}([&](auto j_n) {
+                    constexpr int J = j_n.value;
+                    vals[J] = lds_ptr[k_out * KH_KW_L * C_SLICE + F * C_SLICE + c_grp * 8 + J];
                 });
+                __builtin_memcpy(&this->weights[F * N_ + CS], vals, sizeof(VecType));
+            });
         }
     }
 
     // Legacy single-chunk entry: equivalent to read_from_lds_chunk<0>().
     // Used by the v3 single-buffer compute loop and by the N=1 path.
-    CK_TILE_DEVICE void read_from_lds(uint4* weight_lds)
-    {
-        read_from_lds_chunk<0>(weight_lds);
-    }
+    CK_TILE_DEVICE void read_from_lds(uint4* weight_lds) { read_from_lds_chunk<0>(weight_lds); }
 };
 
 // ===================================================================
@@ -835,13 +832,12 @@ template <auto cfg>
 struct OutputWriterV3
 {
     using ElementType = ToType<cfg.data_type>;
-    using AccType = std::conditional_t<
-        cfg.mfma_shape == MfmaShape::M16N16K32, fp32x4_t, fp32x16_t>;
+    using AccType = std::conditional_t<cfg.mfma_shape == MfmaShape::M16N16K32, fp32x4_t, fp32x16_t>;
 
-    ElementType*      output_base;
-    ck_tile::index_t  output_spatial_offset; // q_pos * K (spatial + batch offset)
-    ck_tile::index_t  row_stride_elems;
-    bool              store_valid;
+    ElementType* output_base;
+    ck_tile::index_t output_spatial_offset; // q_pos * K (spatial + batch offset)
+    ck_tile::index_t row_stride_elems;
+    bool store_valid;
 
     // For M16N16K32: single K-offset (4 contiguous K values)
     // For M32N32K16: m_block value for computing 4 K-offsets
@@ -849,29 +845,30 @@ struct OutputWriterV3
 
     template <typename BlockCoords_>
     CK_TILE_DEVICE OutputWriterV3(const BlockCoords_& bc,
-                               uint4*, // Unused, matches OutputWriter signature.
-                               ElementType* __restrict__ out,
-                               int ho,
-                               int wo)
+                                  uint4*, // Unused, matches OutputWriter signature.
+                                  ElementType* __restrict__ out,
+                                  int ho,
+                                  int wo)
     {
-        output_base = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.K + bc.block_k_out;
+        output_base      = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.K + bc.block_k_out;
         row_stride_elems = wo * bc.K;
 
         const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
 
         if constexpr(cfg.mfma_shape == MfmaShape::M16N16K32)
         {
-            const int q_pos = bc.block_q + lane % 16;
+            const int q_pos     = bc.block_q + lane % 16;
             k_offset_or_m_block = (lane / 16) * 4;
-            output_spatial_offset = static_cast<ck_tile::index_t>(q_pos) * bc.K + k_offset_or_m_block;
+            output_spatial_offset =
+                static_cast<ck_tile::index_t>(q_pos) * bc.K + k_offset_or_m_block;
             store_valid = (q_pos < wo);
         }
         else
         {
-            const int q_pos = bc.block_q + lane % 32;
-            k_offset_or_m_block = (lane / 32) * 4; // m_block * 4
+            const int q_pos       = bc.block_q + lane % 32;
+            k_offset_or_m_block   = (lane / 32) * 4; // m_block * 4
             output_spatial_offset = static_cast<ck_tile::index_t>(q_pos) * bc.K;
-            store_valid = (q_pos < wo);
+            store_valid           = (q_pos < wo);
         }
     }
 
@@ -880,8 +877,7 @@ struct OutputWriterV3
         if(wave_id != 0 || !store_valid)
             return;
 
-        const ck_tile::index_t row_offset =
-            static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
+        const ck_tile::index_t row_offset = static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
 
         if constexpr(cfg.mfma_shape == MfmaShape::M16N16K32)
         {
@@ -899,18 +895,16 @@ struct OutputWriterV3
             // Group g: K-offset = g*8 + m_block*4, acc values [g*4 .. g*4+3].
             const ck_tile::index_t base_offset = output_spatial_offset + row_offset;
 
-            ck_tile::static_for<0, 4, 1>{}(
-                [&](auto g_n)
-                {
-                    constexpr int G = g_n.value;
-                    const int k_off = G * 8 + k_offset_or_m_block;
-                    uint32_t words[2];
-                    words[0] = ConvertFp32ToVec4<ElementType>::convert(
-                        acc_val[G * 4 + 0], acc_val[G * 4 + 1]);
-                    words[1] = ConvertFp32ToVec4<ElementType>::convert(
-                        acc_val[G * 4 + 2], acc_val[G * 4 + 3]);
-                    __builtin_memcpy(output_base + base_offset + k_off, words, sizeof(words));
-                });
+            ck_tile::static_for<0, 4, 1>{}([&](auto g_n) {
+                constexpr int G = g_n.value;
+                const int k_off = G * 8 + k_offset_or_m_block;
+                uint32_t words[2];
+                words[0] =
+                    ConvertFp32ToVec4<ElementType>::convert(acc_val[G * 4 + 0], acc_val[G * 4 + 1]);
+                words[1] =
+                    ConvertFp32ToVec4<ElementType>::convert(acc_val[G * 4 + 2], acc_val[G * 4 + 3]);
+                __builtin_memcpy(output_base + base_offset + k_off, words, sizeof(words));
+            });
         }
     }
 };
@@ -941,45 +935,44 @@ template <auto cfg>
 struct OutputWriterV3Lds
 {
     using ElementType = ToType<cfg.data_type>;
-    using AccType = std::conditional_t<
-        cfg.mfma_shape == MfmaShape::M16N16K32, fp32x4_t, fp32x16_t>;
+    using AccType = std::conditional_t<cfg.mfma_shape == MfmaShape::M16N16K32, fp32x4_t, fp32x16_t>;
 
-    static constexpr int BLOCK_K  = cfg.block_k_size();   // 16 or 32
-    static constexpr int BLOCK_Q_ = cfg.block_q();        // 16 or 32
-    static constexpr int BLOCK_K8 = BLOCK_K / 8;          // 2 or 4
+    static constexpr int BLOCK_K  = cfg.block_k_size(); // 16 or 32
+    static constexpr int BLOCK_Q_ = cfg.block_q();      // 16 or 32
+    static constexpr int BLOCK_K8 = BLOCK_K / 8;        // 2 or 4
 
     // Number of 16B stores needed to flush the staging buffer.
     static constexpr int STORE_VECS_V3 = BLOCK_Q_ * BLOCK_K8; // 32 or 128
 
     // Verify staging buffer fits within the cross-wave reduction LDS region.
-    static constexpr int ACC_FLOATS  = sizeof(AccType) / sizeof(float);
+    static constexpr int ACC_FLOATS    = sizeof(AccType) / sizeof(float);
     static constexpr int STAGING_UINT4 = BLOCK_Q_ * BLOCK_K8;
     static constexpr int REDUCE_UINT4  = cfg.waves_per_wg * 64 * ACC_FLOATS / 4;
     static_assert(STAGING_UINT4 <= REDUCE_UINT4,
-        "Output staging LDS must fit within cross-wave reduction LDS");
+                  "Output staging LDS must fit within cross-wave reduction LDS");
 
-    ElementType*      output_base;
-    ElementType*      staging_lds;
-    ck_tile::index_t  row_stride_elems;
+    ElementType* output_base;
+    ElementType* staging_lds;
+    ck_tile::index_t row_stride_elems;
 
     // Wave 0 LDS write state (MFMA accumulator layout).
     int lds_q_pos;
     int lds_k_offset_or_m_block;
 
     // Wide store state (tid-based 16B per thread).
-    ck_tile::index_t  store_lds_elem_offset;  // element offset in staging LDS
-    ck_tile::index_t  store_dram_offset;      // element offset in DRAM (relative to output_base)
-    bool              store_valid;
+    ck_tile::index_t store_lds_elem_offset; // element offset in staging LDS
+    ck_tile::index_t store_dram_offset;     // element offset in DRAM (relative to output_base)
+    bool store_valid;
 
     template <typename BlockCoords_>
     CK_TILE_DEVICE OutputWriterV3Lds(const BlockCoords_& bc,
-                                  uint4* staging_lds_buf,
-                                  ElementType* __restrict__ out,
-                                  int ho,
-                                  int wo)
+                                     uint4* staging_lds_buf,
+                                     ElementType* __restrict__ out,
+                                     int ho,
+                                     int wo)
     {
-        output_base = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.K + bc.block_k_out;
-        staging_lds = reinterpret_cast<ElementType*>(staging_lds_buf);
+        output_base      = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.K + bc.block_k_out;
+        staging_lds      = reinterpret_cast<ElementType*>(staging_lds_buf);
         row_stride_elems = wo * bc.K;
 
         const int lane = static_cast<int>(threadIdx.x) % WAVE_SIZE;
@@ -988,12 +981,12 @@ struct OutputWriterV3Lds
         // --- Wave 0 LDS write state ---
         if constexpr(cfg.mfma_shape == MfmaShape::M16N16K32)
         {
-            lds_q_pos = lane % 16;
+            lds_q_pos               = lane % 16;
             lds_k_offset_or_m_block = (lane / 16) * 4;
         }
         else
         {
-            lds_q_pos = lane % 32;
+            lds_q_pos               = lane % 32;
             lds_k_offset_or_m_block = (lane / 32) * 4; // m_block * 4
         }
 
@@ -1005,14 +998,14 @@ struct OutputWriterV3Lds
             const int global_q = bc.block_q + store_q;
 
             store_lds_elem_offset = store_q * BLOCK_K + store_k8 * 8;
-            store_dram_offset = static_cast<ck_tile::index_t>(global_q) * bc.K + store_k8 * 8;
-            store_valid = (global_q < wo);
+            store_dram_offset     = static_cast<ck_tile::index_t>(global_q) * bc.K + store_k8 * 8;
+            store_valid           = (global_q < wo);
         }
         else
         {
             store_lds_elem_offset = 0;
-            store_dram_offset = 0;
-            store_valid = false;
+            store_dram_offset     = 0;
+            store_valid           = false;
         }
     }
 
@@ -1028,24 +1021,23 @@ struct OutputWriterV3Lds
                 words[0] = ConvertFp32ToVec4<ElementType>::convert(acc_val[0], acc_val[1]);
                 words[1] = ConvertFp32ToVec4<ElementType>::convert(acc_val[2], acc_val[3]);
                 __builtin_memcpy(staging_lds + lds_q_pos * BLOCK_K + lds_k_offset_or_m_block,
-                                 words, sizeof(words));
+                                 words,
+                                 sizeof(words));
             }
             else
             {
                 // Four 8B LDS writes: 4 groups of 4 contiguous K values.
-                ck_tile::static_for<0, 4, 1>{}(
-                    [&](auto g_n)
-                    {
-                        constexpr int G = g_n.value;
-                        const int k_off = G * 8 + lds_k_offset_or_m_block;
-                        uint32_t words[2];
-                        words[0] = ConvertFp32ToVec4<ElementType>::convert(
-                            acc_val[G * 4 + 0], acc_val[G * 4 + 1]);
-                        words[1] = ConvertFp32ToVec4<ElementType>::convert(
-                            acc_val[G * 4 + 2], acc_val[G * 4 + 3]);
-                        __builtin_memcpy(staging_lds + lds_q_pos * BLOCK_K + k_off,
-                                         words, sizeof(words));
-                    });
+                ck_tile::static_for<0, 4, 1>{}([&](auto g_n) {
+                    constexpr int G = g_n.value;
+                    const int k_off = G * 8 + lds_k_offset_or_m_block;
+                    uint32_t words[2];
+                    words[0] = ConvertFp32ToVec4<ElementType>::convert(acc_val[G * 4 + 0],
+                                                                       acc_val[G * 4 + 1]);
+                    words[1] = ConvertFp32ToVec4<ElementType>::convert(acc_val[G * 4 + 2],
+                                                                       acc_val[G * 4 + 3]);
+                    __builtin_memcpy(
+                        staging_lds + lds_q_pos * BLOCK_K + k_off, words, sizeof(words));
+                });
             }
         }
 
@@ -1056,10 +1048,10 @@ struct OutputWriterV3Lds
         if(store_valid)
         {
             const uint4* lds_uint4 = reinterpret_cast<const uint4*>(staging_lds);
-            uint4 data = lds_uint4[store_lds_elem_offset / 8];
+            uint4 data             = lds_uint4[store_lds_elem_offset / 8];
 
-            ck_tile::index_t store_offset = store_dram_offset
-                + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
+            ck_tile::index_t store_offset =
+                store_dram_offset + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
             __builtin_memcpy(output_base + store_offset, &data, sizeof(data));
         }
 
@@ -1074,27 +1066,27 @@ struct OutputWriterV3Lds
 // ===================================================================
 template <auto cfg>
 CK_TILE_DEVICE void ck_tile_conv2d_32c_nhwc_v3_impl(const ToType<cfg.data_type>* __restrict__ in,
-                                                  const ToType<cfg.data_type>* __restrict__ wei,
-                                                  double alpha,
-                                                  double beta,
-                                                  ToType<cfg.data_type>* __restrict__ out,
-                                                  int N,
-                                                  int C,
-                                                  int K,
-                                                  int hi,
-                                                  int wi,
-                                                  int ho,
-                                                  int wo,
-                                                  int fy,
-                                                  int fx,
-                                                  int sy,
-                                                  int sx,
-                                                  int dy,
-                                                  int dx,
-                                                  int py,
-                                                  int px)
+                                                    const ToType<cfg.data_type>* __restrict__ wei,
+                                                    double alpha,
+                                                    double beta,
+                                                    ToType<cfg.data_type>* __restrict__ out,
+                                                    int N,
+                                                    int C,
+                                                    int K,
+                                                    int hi,
+                                                    int wi,
+                                                    int ho,
+                                                    int wo,
+                                                    int fy,
+                                                    int fx,
+                                                    int sy,
+                                                    int sx,
+                                                    int dy,
+                                                    int dx,
+                                                    int py,
+                                                    int px)
 {
-    using TC = TileConstants<cfg>;
+    using TC          = TileConstants<cfg>;
     using ElementType = ToType<cfg.data_type>;
 
     // Select MFMA functor based on shape and data type.
@@ -1104,17 +1096,19 @@ CK_TILE_DEVICE void ck_tile_conv2d_32c_nhwc_v3_impl(const ToType<cfg.data_type>*
         std::conditional_t<cfg.data_type == DataType::bf16, Mfma16x16x32_bf16, Mfma16x16x32>>;
 
     // Select output writer based on epilogue type.
-    using OutputWriterType = std::conditional_t<
-        cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory,
-        OutputWriterV3Lds<cfg>,
-        OutputWriterV3<cfg>>;
+    using OutputWriterType =
+        std::conditional_t<cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory,
+                           OutputWriterV3Lds<cfg>,
+                           OutputWriterV3<cfg>>;
 
-    conv_compute_loop_v3<
-        TC, cfg, MfmaFn,
-        ConvBlockCoordsT<cfg>, ConvInputLoader<cfg>, WeightLoader<cfg>,
-        OutputWriterType,
-        ElementType>(
-        in, wei, out, N, C, K, hi, wi, ho, wo, py, px);
+    conv_compute_loop_v3<TC,
+                         cfg,
+                         MfmaFn,
+                         ConvBlockCoordsT<cfg>,
+                         ConvInputLoader<cfg>,
+                         WeightLoader<cfg>,
+                         OutputWriterType,
+                         ElementType>(in, wei, out, N, C, K, hi, wi, ho, wo, py, px);
 }
 
 template <auto cfg>
@@ -1145,11 +1139,12 @@ struct Conv32cV3Kernel
     {
         // XOR swizzle bank-conflict avoidance relies on bitwise XOR of the wave index,
         // which only produces a valid permutation when waves_per_wg is a power of 2.
-        static_assert(cfg.swizzle_type != SwizzleType::XOR ||
-                          (cfg.waves_per_wg > 0 && (cfg.waves_per_wg & (cfg.waves_per_wg - 1)) == 0),
-                      "XOR swizzle requires waves_per_wg to be a power of 2");
-        ck_tile_conv2d_32c_nhwc_v3_impl<cfg>(in, wei, alpha, beta, out,
-                                              N, C, K, hi, wi, ho, wo, fy, fx, sy, sx, dy, dx, py, px);
+        static_assert(
+            cfg.swizzle_type != SwizzleType::XOR ||
+                (cfg.waves_per_wg > 0 && (cfg.waves_per_wg & (cfg.waves_per_wg - 1)) == 0),
+            "XOR swizzle requires waves_per_wg to be a power of 2");
+        ck_tile_conv2d_32c_nhwc_v3_impl<cfg>(
+            in, wei, alpha, beta, out, N, C, K, hi, wi, ho, wo, fy, fx, sy, sx, dy, dx, py, px);
     }
 };
 
@@ -1178,17 +1173,17 @@ inline bool is_applicable(const Conv2dParams& par)
     // Dgrad: roles swap — C_in=k_tot must be %32, K_out=c_tot must be %16.
     // The stricter requirement (C_in == block_c = waves*32 exactly) is
     // checked per-config in is_valid_config.
-    if (par.direction == Direction::Fprop)
+    if(par.direction == Direction::Fprop)
     {
         if(par.c_tot % 32 != 0 || par.k_tot % 16 != 0)
         {
             LogInfo("For Fprop, C-in must be multiple of 32 and K-out must be multiple of 16. "
-                    "But got C-in = " + std::to_string(par.c_tot) +
-                    " and K-out = " + std::to_string(par.k_tot));
+                    "But got C-in = " +
+                    std::to_string(par.c_tot) + " and K-out = " + std::to_string(par.k_tot));
             return false;
         }
     }
-    else if (par.direction == Direction::Dgrad)
+    else if(par.direction == Direction::Dgrad)
     {
         // For Dgrad the tensor roles are swapped relative to Fprop:
         //   C_in = par.k_tot  (output-gradient channels, MFMA reduction dim, needs %32)
@@ -1196,9 +1191,10 @@ inline bool is_applicable(const Conv2dParams& par)
         // This mirrors the is_valid_config() mapping: C_in = par.k_tot, K_out = par.c_tot.
         if(par.k_tot % 32 != 0 || par.c_tot % 16 != 0)
         {
-            LogInfo("For Dgrad, C_in (=k_tot) must be multiple of 32 and K_out (=c_tot) must be multiple of 16. "
-                    "But got k_tot = " + std::to_string(par.k_tot) +
-                    " and c_tot = " + std::to_string(par.c_tot));
+            LogInfo("For Dgrad, C_in (=k_tot) must be multiple of 32 and K_out (=c_tot) must be "
+                    "multiple of 16. "
+                    "But got k_tot = " +
+                    std::to_string(par.k_tot) + " and c_tot = " + std::to_string(par.c_tot));
             return false;
         }
     }
@@ -1223,36 +1219,35 @@ inline void launch_kernel(const LaunchParams& lp,
                           hipStream_t stream)
 {
     using ElementType = ToType<DT>;
-    auto view = SizeView<cfg.direction>(par);
+    auto view         = SizeView<cfg.direction>(par);
 
     // The non-grouped v3 kernel is compute-bound and register-hungry.
     // Using the default min-2-blocks/CU caps registers and spills.
     constexpr int MinBlockPerCu = 1;
-    ck_tile::make_kernel<MinBlockPerCu>(
-        Conv32cV3Kernel<cfg>{},
-        lp.grid,
-        lp.block_size,
-        lp.dynamic_shared_bytes,
-        static_cast<const ElementType*>(in),
-        static_cast<const ElementType*>(wei),
-        1.0,
-        0.0,
-        static_cast<ElementType*>(out),
-        par.n,
-        par.c_tot,
-        par.k_tot,
-        view.h(),
-        view.w(),
-        view.p(),
-        view.q(),
-        par.kh,
-        par.kw,
-        par.stride_h,
-        par.stride_w,
-        par.dilation_h,
-        par.dilation_w,
-        view.pad_h(),
-        view.pad_w())(ck_tile::stream_config{stream});
+    ck_tile::make_kernel<MinBlockPerCu>(Conv32cV3Kernel<cfg>{},
+                                        lp.grid,
+                                        lp.block_size,
+                                        lp.dynamic_shared_bytes,
+                                        static_cast<const ElementType*>(in),
+                                        static_cast<const ElementType*>(wei),
+                                        1.0,
+                                        0.0,
+                                        static_cast<ElementType*>(out),
+                                        par.n,
+                                        par.c_tot,
+                                        par.k_tot,
+                                        view.h(),
+                                        view.w(),
+                                        view.p(),
+                                        view.q(),
+                                        par.kh,
+                                        par.kw,
+                                        par.stride_h,
+                                        par.stride_w,
+                                        par.dilation_h,
+                                        par.dilation_w,
+                                        view.pad_h(),
+                                        view.pad_w())(ck_tile::stream_config{stream});
 }
 
 } // namespace ck_tile::direct_conv::conv_32c_tile::v3

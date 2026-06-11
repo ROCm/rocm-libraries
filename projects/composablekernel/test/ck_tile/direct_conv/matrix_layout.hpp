@@ -5,8 +5,7 @@
 
 #include <hip/hip_fp16.h>
 
-namespace ck_tile::direct_conv
-{
+namespace ck_tile::direct_conv {
 
 /// Matrix layout for MFMA operations.
 ///
@@ -51,7 +50,9 @@ struct MatrixLayout
     // Returns the inner-product (K-reduction) dimension index for a given lane and register index.
     // For result matrices C/D (first template arg = N), this gives the M-row instead.
     __host__ __device__ static int inner(int lane, int idx = 0)
-    { return idx * items_per_register() + (lane / (M * B)) * K_L; }
+    {
+        return idx * items_per_register() + (lane / (M * B)) * K_L;
+    }
 
     // Returns the batch index corresponding to a given lane.
     __host__ __device__ static int batch(int lane) { return (lane / M) % B; }

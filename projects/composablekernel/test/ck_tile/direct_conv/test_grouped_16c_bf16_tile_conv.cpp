@@ -18,12 +18,14 @@ struct TileConv16cBf16KernelTraits
     using FwdKernel = ck_tile::direct_conv::DirectTileConvForward16CKernel<
         ck_tile::direct_conv::grouped_16c_tile::v2::KernelConfigurations<
             ck_tile::direct_conv::DataType::bf16>::configs_map.get(ConfigIdx),
-        v2, ck_tile::direct_conv::DataType::bf16>;
+        v2,
+        ck_tile::direct_conv::DataType::bf16>;
     template <int ConfigIdx>
     using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData16CKernel<
         ck_tile::direct_conv::grouped_16c_tile::v2::KernelConfigurations<
             ck_tile::direct_conv::DataType::bf16>::configs_map.get(ConfigIdx),
-        v2, ck_tile::direct_conv::DataType::bf16>;
+        v2,
+        ck_tile::direct_conv::DataType::bf16>;
 };
 
 // =============================================================================
@@ -165,12 +167,14 @@ class DirectConvGrouped16cBf16TileConvV2CyclicShiftSwizzleTest
 {
 };
 
-TEST_F(DirectConvGrouped16cBf16TileConvV2CyclicShiftSwizzleTest, Fprop_Config72_Groups16_LargerSpatial_CyclicShift)
+TEST_F(DirectConvGrouped16cBf16TileConvV2CyclicShiftSwizzleTest,
+       Fprop_Config72_Groups16_LargerSpatial_CyclicShift)
 {
     ASSERT_TRUE((RunFprop<72>(4, 16, 16, 16, 16, 16, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvGrouped16cBf16TileConvV2CyclicShiftSwizzleTest, Dgrad_Config74_Groups16_LargerSpatial_CyclicShift)
+TEST_F(DirectConvGrouped16cBf16TileConvV2CyclicShiftSwizzleTest,
+       Dgrad_Config74_Groups16_LargerSpatial_CyclicShift)
 {
     ASSERT_TRUE((RunDgrad<74>(4, 16, 16, 16, 16, 16, 3, 3, 1, 1)));
 }

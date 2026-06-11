@@ -45,7 +45,7 @@ template <auto cfg>
 struct TileConstantsBase
 {
     // Channels per group (input channel must be equal to output channel for fp16 grouped conv).
-    static constexpr int GROUP_SIZE   = cfg.group_size();
+    static constexpr int GROUP_SIZE = cfg.group_size();
 
     // Channels per group in units of 4 (unit2)
     static constexpr int GROUP_SIZE_4 = GROUP_SIZE / 4;
@@ -53,11 +53,12 @@ struct TileConstantsBase
     // Channel per group in units of 8 (unit4)
     static constexpr int GROUP_SIZE_8 = GROUP_SIZE / 8;
 
-    // Number of conv groups processed by each thread block (block_group() * group_size() = total channels).
+    // Number of conv groups processed by each thread block (block_group() * group_size() = total
+    // channels).
     static constexpr int BLOCK_GROUPS = cfg.block_groups();
 
-    static constexpr int BLOCK_Q  = cfg.block_q();
-    static constexpr int BLOCK_W  = BLOCK_Q + (cfg.kw - 1);
+    static constexpr int BLOCK_Q = cfg.block_q();
+    static constexpr int BLOCK_W = BLOCK_Q + (cfg.kw - 1);
 
     static constexpr int BLOCK_C8 = cfg.block_c() / 8;
     static constexpr int BLOCK_C  = BLOCK_C8 * 8;
@@ -90,23 +91,30 @@ struct TileConstantsBase
 
         static constexpr int WEIGHT_LDS_SIZE_UINT2 =
             cfg.kh * cfg.kw * cfg.block_groups() * GROUP_SIZE * GROUP_SIZE_4;
-        static constexpr int WEIGHT_LDS_SIZE_UINT4   = WEIGHT_LDS_SIZE_UINT2 / 2;
+        static constexpr int WEIGHT_LDS_SIZE_UINT4 = WEIGHT_LDS_SIZE_UINT2 / 2;
         static constexpr int NUM_WEIGHT_PASSES =
             (WEIGHT_LDS_SIZE_UINT4 + cfg.block_size() - 1) / cfg.block_size();
         static constexpr int WEIGHT_LDS_PADDED_UINT4 = NUM_WEIGHT_PASSES * cfg.block_size();
-        static constexpr int WEIGHT_LDS_READ_K = cfg.block_c();
+        static constexpr int WEIGHT_LDS_READ_K       = cfg.block_c();
 
-        static constexpr auto MakeDramReadDescriptor()       { return Shared::MakeDramReadDescriptor(); }
-        static constexpr auto MakeDramReadTileDistribution() { return Shared::MakeDramReadTileDistribution(); }
-        static constexpr auto MakeLdsWriteDescriptor()       { return Shared::MakeLdsWriteDescriptor(); }
-        static constexpr auto MakeLdsReadDescriptor()        { return Shared::MakeLdsReadDescriptor(); }
+        static constexpr auto MakeDramReadDescriptor() { return Shared::MakeDramReadDescriptor(); }
+        static constexpr auto MakeDramReadTileDistribution()
+        {
+            return Shared::MakeDramReadTileDistribution();
+        }
+        static constexpr auto MakeLdsWriteDescriptor() { return Shared::MakeLdsWriteDescriptor(); }
+        static constexpr auto MakeLdsReadDescriptor() { return Shared::MakeLdsReadDescriptor(); }
         template <int WavesPerGroup = 1>
-        static constexpr auto MakeLdsReadDescriptorDgrad()   { return Shared::template MakeLdsReadDescriptorDgrad<WavesPerGroup>(); }
+        static constexpr auto MakeLdsReadDescriptorDgrad()
+        {
+            return Shared::template MakeLdsReadDescriptorDgrad<WavesPerGroup>();
+        }
 
         template <int VectorSize>
         static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(int k_per_group, int c_per_group)
         {
-            return Shared::template MakeDramReadDescriptorPadded<VectorSize>(k_per_group, c_per_group);
+            return Shared::template MakeDramReadDescriptorPadded<VectorSize>(k_per_group,
+                                                                             c_per_group);
         }
     };
 
@@ -117,17 +125,29 @@ struct TileConstantsBase
     {
         using Shared = typename SharedDescriptors<TileConstantsBase<cfg>>::Input;
 
-        static CK_TILE_DEVICE auto MakeDramReadDescriptor(int hi, int wi, int C_total, int px, int py, int dx, int dy, int sx, int sy)
+        static CK_TILE_DEVICE auto MakeDramReadDescriptor(
+            int hi, int wi, int C_total, int px, int py, int dx, int dy, int sx, int sy)
         {
             return Shared::MakeDramReadDescriptor(hi, wi, C_total, px, py, dx, dy, sx, sy);
         }
-        static constexpr auto MakeDramReadTileDistribution() { return Shared::MakeDramReadTileDistribution(); }
-        static constexpr auto MakeLdsWriteDescriptor()       { return Shared::MakeLdsWriteDescriptor(); }
-        static constexpr auto MakeLdsReadDescriptor()        { return Shared::MakeLdsReadDescriptor(); }
+        static constexpr auto MakeDramReadTileDistribution()
+        {
+            return Shared::MakeDramReadTileDistribution();
+        }
+        static constexpr auto MakeLdsWriteDescriptor() { return Shared::MakeLdsWriteDescriptor(); }
+        static constexpr auto MakeLdsReadDescriptor() { return Shared::MakeLdsReadDescriptor(); }
 
         template <int VectorSize>
-        static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(
-            int hi, int wi, int C_in, int c_per_group, int px, int py, int dx, int dy, int sx, int sy)
+        static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(int hi,
+                                                                int wi,
+                                                                int C_in,
+                                                                int c_per_group,
+                                                                int px,
+                                                                int py,
+                                                                int dx,
+                                                                int dy,
+                                                                int sx,
+                                                                int sy)
         {
             return Shared::template MakeDramReadDescriptorPadded<VectorSize>(
                 hi, wi, C_in, c_per_group, px, py, dx, dy, sx, sy);
@@ -163,16 +183,16 @@ struct TileConstantsBase
         }
 
         template <int VectorSize = 1>
-        static CK_TILE_DEVICE auto MakeDramWriteDescriptorNarrowPadded(
-            int ho, int wo, int K_total, int k_per_group)
+        static CK_TILE_DEVICE auto
+        MakeDramWriteDescriptorNarrowPadded(int ho, int wo, int K_total, int k_per_group)
         {
             return Shared::template MakeDramWriteDescriptorNarrowPadded<VectorSize>(
                 ho, wo, K_total, k_per_group);
         }
 
         template <int VectorSize = 1>
-        static CK_TILE_DEVICE auto MakeDramWriteDescriptorWidePadded(
-            int wo, int K_total, int k_per_group)
+        static CK_TILE_DEVICE auto
+        MakeDramWriteDescriptorWidePadded(int wo, int K_total, int k_per_group)
         {
             return Shared::template MakeDramWriteDescriptorWidePadded<VectorSize>(
                 wo, K_total, k_per_group);
@@ -218,11 +238,9 @@ struct BlockCoords
     int C8;
     int K;
 
-    CK_TILE_DEVICE BlockCoords(int groups,
-                           int c_per_group = cfg.group_size(),
-                           int k_per_group = cfg.group_size())
-        : C_in(groups * c_per_group), C_out(groups * k_per_group),
-          C(C_in), C8(C_in / 8), K(C_out)
+    CK_TILE_DEVICE
+    BlockCoords(int groups, int c_per_group = cfg.group_size(), int k_per_group = cfg.group_size())
+        : C_in(groups * c_per_group), C_out(groups * k_per_group), C(C_in), C8(C_in / 8), K(C_out)
     {
         const int block_q_n_idx = blockIdx.x;
         block_n     = static_cast<int>(blockIdx.z) * cfg.n_fold + block_q_n_idx % cfg.n_fold;
@@ -246,44 +264,43 @@ struct BlockCoordsNonGrouped
 {
     int block_n;
     int block_q;
-    int block_k_start;   // output channel start = blockIdx.y * block_k_size
+    int block_k_start; // output channel start = blockIdx.y * block_k_size
 
     // Total input/output channels.
-    int C_in;            // = C_total
-    int C_out;           // = K_total
+    int C_in;  // = C_total
+    int C_out; // = K_total
 
     // Channel offsets — block_k_in is mutable for c_block iteration.
-    int block_k_in;      // input channel offset (set per c_block)
-    int block_k_out;     // output channel offset (= block_k_start)
+    int block_k_in;  // input channel offset (set per c_block)
+    int block_k_out; // output channel offset (= block_k_start)
 
     // Compatibility fields for InputLoader / OutputWriter:
-    int C;               // = C_in  (input channel stride in NHWC)
-    int C8;              // = C_in / 8
-    int K;               // = C_out (output channel stride in NHWK)
-    int block_k;         // alias for block_k_in (used by InputLoader)
-    int block_c8;        // = block_k_in / 8
+    int C;        // = C_in  (input channel stride in NHWC)
+    int C8;       // = C_in / 8
+    int K;        // = C_out (output channel stride in NHWK)
+    int block_k;  // alias for block_k_in (used by InputLoader)
+    int block_c8; // = block_k_in / 8
 
     CK_TILE_DEVICE BlockCoordsNonGrouped(int C_total, int K_total)
-        : C_in(C_total), C_out(K_total),
-          C(C_total), C8(C_total / 8), K(K_total)
+        : C_in(C_total), C_out(K_total), C(C_total), C8(C_total / 8), K(K_total)
     {
         const int block_q_n_idx = static_cast<int>(blockIdx.x);
-        block_n     = static_cast<int>(blockIdx.z) * cfg.n_fold + block_q_n_idx % cfg.n_fold;
-        block_q     = (block_q_n_idx / cfg.n_fold) * cfg.block_q();
+        block_n       = static_cast<int>(blockIdx.z) * cfg.n_fold + block_q_n_idx % cfg.n_fold;
+        block_q       = (block_q_n_idx / cfg.n_fold) * cfg.block_q();
         block_k_start = static_cast<int>(blockIdx.y) * cfg.block_k_size();
-        block_k_in  = 0;
-        block_k_out = block_k_start;
-        block_k     = 0;
-        block_c8    = 0;
+        block_k_in    = 0;
+        block_k_out   = block_k_start;
+        block_k       = 0;
+        block_c8      = 0;
     }
 
     // Advance input channel offset for the next c_block.
     CK_TILE_DEVICE void set_c_block(int c_block)
     {
         const int c_block_size = cfg.block_groups() * cfg.group_size();
-        block_k_in = c_block * c_block_size;
-        block_k    = block_k_in;
-        block_c8   = block_k_in / 8;
+        block_k_in             = c_block * c_block_size;
+        block_k                = block_k_in;
+        block_c8               = block_k_in / 8;
     }
 };
 
@@ -296,14 +313,14 @@ struct BlockCoordsNonGrouped
 template <typename Config>
 LaunchParams get_launch_params_non_grouped(const Config& cfg, const Conv2dParams& par)
 {
-    const int out_q    = (cfg.direction == Direction::Dgrad) ? par.w : par.q;
-    auto blocks_w      = ck_tile::integer_divide_ceil(out_q, cfg.block_q());
-    auto blocks_w_n    = blocks_w * cfg.n_fold;
+    const int out_q = (cfg.direction == Direction::Dgrad) ? par.w : par.q;
+    auto blocks_w   = ck_tile::integer_divide_ceil(out_q, cfg.block_q());
+    auto blocks_w_n = blocks_w * cfg.n_fold;
 
     // Fprop tiles over K (output channels); Dgrad tiles over C (input gradient channels).
     const int tile_channels = (cfg.direction == Direction::Dgrad) ? par.c_tot : par.k_tot;
-    auto blocks_k      = ck_tile::integer_divide_ceil(tile_channels, cfg.block_k_size());
-    auto blocks_n_fold = ck_tile::integer_divide_ceil(par.n, cfg.n_fold);
+    auto blocks_k           = ck_tile::integer_divide_ceil(tile_channels, cfg.block_k_size());
+    auto blocks_n_fold      = ck_tile::integer_divide_ceil(par.n, cfg.n_fold);
 
     LaunchParams launch;
     launch.grid       = dim3(blocks_w_n, blocks_k, blocks_n_fold);
@@ -318,17 +335,15 @@ LaunchParams get_launch_params_non_grouped(const Config& cfg, const Conv2dParams
 // fp16x4_t into the WeightAccessor using get_as<fp16x4_t>() which
 // provides a zero-copy reinterpret view over the thread buffer.
 // ======================================================================
-template <typename TC, int KH, int KW, typename WeightAccessorT,
-          typename ElementType = _Float16>
+template <typename TC, int KH, int KW, typename WeightAccessorT, typename ElementType = _Float16>
 CK_TILE_DEVICE void weight_read_fprop(WeightAccessorT& wa, uint4* weight_lds)
 {
     constexpr auto weight_lds_read_desc = TC::Weight::MakeLdsReadDescriptor();
-    auto weight_lds_view =
-        ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-            reinterpret_cast<ElementType*>(weight_lds), weight_lds_read_desc);
+    auto weight_lds_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+        reinterpret_cast<ElementType*>(weight_lds), weight_lds_read_desc);
 
     constexpr auto weight_lds_read_dist = TC::Weight::MakeLdsReadTileDistribution();
-    auto weight_lds_read_window = ck_tile::make_tile_window(
+    auto weight_lds_read_window         = ck_tile::make_tile_window(
         weight_lds_view,
         ck_tile::make_tuple(ck_tile::number<TC::Weight::WEIGHT_LDS_READ_K>{},
                             ck_tile::number<TC::KH_KW>{},
@@ -341,13 +356,9 @@ CK_TILE_DEVICE void weight_read_fprop(WeightAccessorT& wa, uint4* weight_lds)
     // get_as<VecType>() reinterprets the thread_buffer<ElementType, KH_KW*4>
     // as thread_buffer<VecType, KH_KW> — a zero-copy view where each
     // element is one VecType (e.g. fp16x4_t or bf16x4_t) per filter position.
-    using VecType = typename std::remove_reference_t<WeightAccessorT>::value_type;
+    using VecType       = typename std::remove_reference_t<WeightAccessorT>::value_type;
     const auto& vec_buf = weight_tile.get_thread_buffer().template get_as<VecType>();
-    ck_tile::static_for<0, TC::KH_KW, 1>{}(
-        [&](auto khw)
-        {
-            wa.weights[khw.value] = vec_buf[khw];
-        });
+    ck_tile::static_for<0, TC::KH_KW, 1>{}([&](auto khw) { wa.weights[khw.value] = vec_buf[khw]; });
 }
 
 // ======================================================================
@@ -358,12 +369,16 @@ CK_TILE_DEVICE void weight_read_fprop(WeightAccessorT& wa, uint4* weight_lds)
 // ======================================================================
 inline bool is_applicable_base(const Conv2dParams& par)
 {
-    if(par.order    != TensorOrder::NHWC) return false;
-    if(par.direction != Direction::Fprop &&
-       par.direction != Direction::Dgrad) return false;
-    if(par.kh != 3 || par.kw != 3)       return false;
-    if(par.stride_h != 1 || par.stride_w != 1)       return false;
-    if(par.dilation_h != 1 || par.dilation_w != 1)   return false;
+    if(par.order != TensorOrder::NHWC)
+        return false;
+    if(par.direction != Direction::Fprop && par.direction != Direction::Dgrad)
+        return false;
+    if(par.kh != 3 || par.kw != 3)
+        return false;
+    if(par.stride_h != 1 || par.stride_w != 1)
+        return false;
+    if(par.dilation_h != 1 || par.dilation_w != 1)
+        return false;
     return true;
 }
 
@@ -398,9 +413,9 @@ bool xor_config_valid(const Config& cfg, const Conv2dParams& par)
     // when the output fits in a single spatial tile.
     const int block_c8 = cfg.block_c() / 8;
     const int out_q    = (par.direction == Direction::Dgrad) ? par.w : par.q;
-    const bool valid = (cfg.block_q() % block_c8 == 0) || (out_q <= cfg.block_q());
+    const bool valid   = (cfg.block_q() % block_c8 == 0) || (out_q <= cfg.block_q());
 
-    if (!valid)
+    if(!valid)
     {
         LogInfo("Invalid XOR swizzle config: spatial dimension too small for effective swizzle");
     }
@@ -418,16 +433,12 @@ bool cyclic_shift_config_valid(const Config& cfg, const Conv2dParams& par)
 template <typename Config>
 bool swizzle_config_valid(const Config& cfg, const Conv2dParams& par)
 {
-    switch (cfg.swizzle_type)
-    {    
-    case SwizzleType::None:
-        return true;
-    case SwizzleType::XOR:
-        return xor_config_valid(cfg, par);
-    case SwizzleType::CyclicShift:
-        return cyclic_shift_config_valid(cfg, par);
-    default:
-            throw std::runtime_error("Unrecognized swizzle type");
+    switch(cfg.swizzle_type)
+    {
+    case SwizzleType::None: return true;
+    case SwizzleType::XOR: return xor_config_valid(cfg, par);
+    case SwizzleType::CyclicShift: return cyclic_shift_config_valid(cfg, par);
+    default: throw std::runtime_error("Unrecognized swizzle type");
     }
 }
 

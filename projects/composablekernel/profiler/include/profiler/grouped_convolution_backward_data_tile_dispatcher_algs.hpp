@@ -140,8 +140,7 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
             }
             if(valid)
             {
-                const float tflops =
-                    static_cast<float>(conv_param.GetFlops()) / 1.E9 / avg_time;
+                const float tflops = static_cast<float>(conv_param.GetFlops()) / 1.E9 / avg_time;
                 const float gb_per_sec =
                     static_cast<float>(
                         conv_param.template GetByte<DataType, DataType, DataType>()) /

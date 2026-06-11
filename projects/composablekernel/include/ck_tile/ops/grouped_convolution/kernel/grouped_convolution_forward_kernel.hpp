@@ -968,8 +968,8 @@ struct GroupedConvolutionForwardKernel
             }
 
             if constexpr((GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                        is_any_of<OutDataType, fp16_t, bf16_t>::value) ||
-                        !IsSplitKSupported)
+                          is_any_of<OutDataType, fp16_t, bf16_t>::value) ||
+                         !IsSplitKSupported)
             {
                 if(kargs.k_batch != 1)
                 {
@@ -1031,7 +1031,7 @@ struct GroupedConvolutionForwardKernel
             }
 
             if constexpr(GroupedConvTraitsType_::ExplicitGemm &&
-                        ConvSpecialization != ConvolutionSpecialization::Filter1x1Stride1Pad0)
+                         ConvSpecialization != ConvolutionSpecialization::Filter1x1Stride1Pad0)
             {
                 LogInfo("ExplicitGemm is only supported for Filter1x1Stride1Pad0 specialization.");
                 return false;
@@ -1039,12 +1039,13 @@ struct GroupedConvolutionForwardKernel
 
             namespace ctc = tensor_layout::convolution;
 
-            if constexpr(std::is_same_v<InLayout, ctc::NWGC> || std::is_same_v<InLayout, ctc::NHWGC> ||
-                        std::is_same_v<InLayout, ctc::NDHWGC>)
+            if constexpr(std::is_same_v<InLayout, ctc::NWGC> ||
+                         std::is_same_v<InLayout, ctc::NHWGC> ||
+                         std::is_same_v<InLayout, ctc::NDHWGC>)
             {
                 // Check access for A tensor
                 if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0 &&
-                GroupedConvTraitsType_::NumGroupsToMerge == 1)
+                   GroupedConvTraitsType_::NumGroupsToMerge == 1)
                 {
                     LogInfo("Conv C is not a multiple of vector load size for input image! ConvC: ",
                             ConvC,
@@ -1078,8 +1079,8 @@ struct GroupedConvolutionForwardKernel
             // check vector access of B
             // FIXME: layout
             if constexpr(std::is_same_v<WeiLayout, ctc::GKXC> ||
-                        std::is_same_v<WeiLayout, ctc::GKYXC> ||
-                        std::is_same_v<WeiLayout, ctc::GKZYXC>)
+                         std::is_same_v<WeiLayout, ctc::GKYXC> ||
+                         std::is_same_v<WeiLayout, ctc::GKZYXC>)
             {
                 if(ConvC % GroupedConvTraitsType_::VectorSizeB != 0)
                 {
@@ -1098,8 +1099,8 @@ struct GroupedConvolutionForwardKernel
 
             // check vector access of E
             if constexpr(std::is_same_v<OutLayout, ctc::NWGK> ||
-                        std::is_same_v<OutLayout, ctc::NHWGK> ||
-                        std::is_same_v<OutLayout, ctc::NDHWGK>)
+                         std::is_same_v<OutLayout, ctc::NHWGK> ||
+                         std::is_same_v<OutLayout, ctc::NDHWGK>)
             {
                 if(ConvK % GroupedConvTraitsType_::VectorSizeC != 0)
                 {
@@ -1108,7 +1109,7 @@ struct GroupedConvolutionForwardKernel
                     {
                         const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
                         if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0 ||
-                        ConvG % GroupedConvTraitsType_::VectorSizeC != 0)
+                           ConvG % GroupedConvTraitsType_::VectorSizeC != 0)
                         {
                             LogInfo("ConvG must be a multiple of NumGroupsToMerge to allow "
                                     "writing over G dimension");

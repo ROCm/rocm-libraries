@@ -22,13 +22,13 @@ struct CyclicShiftParam
     static constexpr int Dim1 = Dim1_;
 };
 
-using CyclicShiftTypes = ::testing::Types<
-    CyclicShiftParam<10, 8>,  // BLOCK_W=10, BLOCK_C8=8 (typical 4c, C=64)
-    CyclicShiftParam<20, 16>, // BLOCK_W=20, BLOCK_C8=16 (typical 4c, C=128)
-    CyclicShiftParam<4, 4>,   // small square
-    CyclicShiftParam<8, 1>,   // degenerate: dim1=1 (shift is always 0)
-    CyclicShiftParam<1, 8>    // degenerate: dim0=1 (no shift)
-    >;
+using CyclicShiftTypes =
+    ::testing::Types<CyclicShiftParam<10, 8>,  // BLOCK_W=10, BLOCK_C8=8 (typical 4c, C=64)
+                     CyclicShiftParam<20, 16>, // BLOCK_W=20, BLOCK_C8=16 (typical 4c, C=128)
+                     CyclicShiftParam<4, 4>,   // small square
+                     CyclicShiftParam<8, 1>,   // degenerate: dim1=1 (shift is always 0)
+                     CyclicShiftParam<1, 8>    // degenerate: dim0=1 (no shift)
+                     >;
 
 template <typename P>
 class CyclicShiftTest : public ::testing::Test
@@ -160,15 +160,16 @@ TYPED_TEST(CyclicShiftTest, UpdateConsistentWithCalculate)
                         continue;
 
                     // Expected: fresh calculation at (x1, c1)
-                    auto idx_up_new      = make_multi_index(x1, c1);
-                    auto idx_low_expect  = make_zero_multi_index<2>();
+                    auto idx_up_new     = make_multi_index(x1, c1);
+                    auto idx_low_expect = make_zero_multi_index<2>();
                     transform.calculate_lower_index(idx_low_expect, idx_up_new);
 
                     // Actual: update from (x0, c0) by (dx, dc)
                     auto idx_diff_up  = make_multi_index(dx, dc);
                     auto idx_diff_low = make_zero_multi_index<2>();
                     auto idx_low_copy = idx_low_old;
-                    transform.update_lower_index(idx_diff_low, idx_diff_up, idx_low_copy, idx_up_new);
+                    transform.update_lower_index(
+                        idx_diff_low, idx_diff_up, idx_low_copy, idx_up_new);
 
                     EXPECT_EQ(idx_low_copy[0], idx_low_expect[0])
                         << "dim0 mismatch: (" << x0 << "," << c0 << ")+(" << dx << "," << dc << ")";
@@ -191,9 +192,9 @@ TYPED_TEST(CyclicShiftTest, UpdateConsistentWithCalculate)
 // ---------------------------------------------------------------------------
 TYPED_TEST(CyclicShiftTest, ValidityPredicates)
 {
-    EXPECT_TRUE(
-        (cyclic_shift_t<decltype(make_tuple(number<TypeParam::Dim0>{}, number<TypeParam::Dim1>{}))>::
-             is_valid_upper_index_always_mapped_to_valid_lower_index()));
+    EXPECT_TRUE((
+        cyclic_shift_t<decltype(make_tuple(number<TypeParam::Dim0>{}, number<TypeParam::Dim1>{}))>::
+            is_valid_upper_index_always_mapped_to_valid_lower_index()));
 
     constexpr auto lengths = make_tuple(number<TypeParam::Dim0>{}, number<TypeParam::Dim1>{});
     auto transform         = make_cyclic_shift_transform(lengths);
@@ -246,9 +247,9 @@ TEST(CyclicShiftVsXor, DiffersFromXor)
     {
         for(int c8 = 0; c8 < 8; c8++)
         {
-            auto idx_up   = make_multi_index(x, c8);
-            auto low_cs   = make_zero_multi_index<2>();
-            auto low_xor  = make_zero_multi_index<2>();
+            auto idx_up  = make_multi_index(x, c8);
+            auto low_cs  = make_zero_multi_index<2>();
+            auto low_xor = make_zero_multi_index<2>();
             cs.calculate_lower_index(low_cs, idx_up);
             xr.calculate_lower_index(low_xor, idx_up);
 

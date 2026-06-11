@@ -582,7 +582,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3CyclicShift8wave3x3FpropTest, Fprop_Config45
     ASSERT_TRUE((RunFprop<21>(1, 8, 8, 1, 256, 128, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3CyclicShift8wave3x3FpropTest, Fprop_Config45_C256_K256_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3CyclicShift8wave3x3FpropTest,
+       Fprop_Config45_C256_K256_LargerSpatial)
 {
     ASSERT_TRUE((RunFprop<21>(2, 16, 16, 1, 256, 256, 3, 3, 1, 1)));
 }
@@ -619,7 +620,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3CyclicShift8wave3x3DgradTest, Dgrad_Config44
     ASSERT_TRUE((RunDgrad<20>(1, 8, 8, 1, 128, 256, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3CyclicShift8wave3x3DgradTest, Dgrad_Config44_C256_K256_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3CyclicShift8wave3x3DgradTest,
+       Dgrad_Config44_C256_K256_LargerSpatial)
 {
     ASSERT_TRUE((RunDgrad<20>(2, 16, 16, 1, 256, 256, 3, 3, 1, 1)));
 }
@@ -670,7 +672,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3Waves3FpropTest, Fprop_Cfg25_CyclicShift_DRA
     ASSERT_TRUE((RunFprop<25>(1, 8, 8, 1, 96, 64, 3, 3, 0, 0)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3Waves3FpropTest, Fprop_Cfg25_CyclicShift_DRAM_C96_K64_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3Waves3FpropTest,
+       Fprop_Cfg25_CyclicShift_DRAM_C96_K64_LargerSpatial)
 {
     ASSERT_TRUE((RunFprop<25>(2, 16, 16, 1, 96, 64, 3, 3, 1, 1)));
 }
@@ -697,7 +700,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3Waves3DgradTest, Dgrad_Cfg24_CyclicShift_DRA
     ASSERT_TRUE((RunDgrad<24>(1, 8, 8, 1, 64, 96, 3, 3, 0, 0)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3Waves3DgradTest, Dgrad_Cfg24_CyclicShift_DRAM_C64_K96_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3Waves3DgradTest,
+       Dgrad_Cfg24_CyclicShift_DRAM_C64_K96_LargerSpatial)
 {
     ASSERT_TRUE((RunDgrad<24>(2, 16, 16, 1, 64, 96, 3, 3, 1, 1)));
 }
@@ -724,7 +728,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3Waves5FpropTest, Fprop_Cfg29_CyclicShift_DRA
     ASSERT_TRUE((RunFprop<29>(1, 8, 8, 1, 160, 64, 3, 3, 0, 0)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3Waves5FpropTest, Fprop_Cfg29_CyclicShift_DRAM_C160_K64_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3Waves5FpropTest,
+       Fprop_Cfg29_CyclicShift_DRAM_C160_K64_LargerSpatial)
 {
     ASSERT_TRUE((RunFprop<29>(2, 16, 16, 1, 160, 64, 3, 3, 1, 1)));
 }
@@ -751,7 +756,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3Waves5DgradTest, Dgrad_Cfg28_CyclicShift_DRA
     ASSERT_TRUE((RunDgrad<28>(1, 8, 8, 1, 64, 160, 3, 3, 0, 0)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3Waves5DgradTest, Dgrad_Cfg28_CyclicShift_DRAM_C64_K160_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3Waves5DgradTest,
+       Dgrad_Cfg28_CyclicShift_DRAM_C64_K160_LargerSpatial)
 {
     ASSERT_TRUE((RunDgrad<28>(2, 16, 16, 1, 64, 160, 3, 3, 1, 1)));
 }
@@ -778,7 +784,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3Waves6FpropTest, Fprop_Cfg33_CyclicShift_DRA
     ASSERT_TRUE((RunFprop<33>(1, 8, 8, 1, 192, 64, 3, 3, 0, 0)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3Waves6FpropTest, Fprop_Cfg33_CyclicShift_DRAM_C192_K64_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3Waves6FpropTest,
+       Fprop_Cfg33_CyclicShift_DRAM_C192_K64_LargerSpatial)
 {
     ASSERT_TRUE((RunFprop<33>(2, 16, 16, 1, 192, 64, 3, 3, 1, 1)));
 }
@@ -805,7 +812,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3Waves6DgradTest, Dgrad_Cfg32_CyclicShift_DRA
     ASSERT_TRUE((RunDgrad<32>(1, 8, 8, 1, 64, 192, 3, 3, 0, 0)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3Waves6DgradTest, Dgrad_Cfg32_CyclicShift_DRAM_C64_K192_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3Waves6DgradTest,
+       Dgrad_Cfg32_CyclicShift_DRAM_C64_K192_LargerSpatial)
 {
     ASSERT_TRUE((RunDgrad<32>(2, 16, 16, 1, 64, 192, 3, 3, 1, 1)));
 }
@@ -832,7 +840,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3Waves7FpropTest, Fprop_Cfg37_CyclicShift_DRA
     ASSERT_TRUE((RunFprop<37>(1, 8, 8, 1, 224, 64, 3, 3, 0, 0)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3Waves7FpropTest, Fprop_Cfg37_CyclicShift_DRAM_C224_K64_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3Waves7FpropTest,
+       Fprop_Cfg37_CyclicShift_DRAM_C224_K64_LargerSpatial)
 {
     ASSERT_TRUE((RunFprop<37>(2, 16, 16, 1, 224, 64, 3, 3, 1, 1)));
 }
@@ -859,7 +868,8 @@ TEST_F(DirectConvNonGrouped32cFp16V3Waves7DgradTest, Dgrad_Cfg36_CyclicShift_DRA
     ASSERT_TRUE((RunDgrad<36>(1, 8, 8, 1, 64, 224, 3, 3, 0, 0)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3Waves7DgradTest, Dgrad_Cfg36_CyclicShift_DRAM_C64_K224_LargerSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3Waves7DgradTest,
+       Dgrad_Cfg36_CyclicShift_DRAM_C64_K224_LargerSpatial)
 {
     ASSERT_TRUE((RunDgrad<36>(2, 16, 16, 1, 64, 224, 3, 3, 1, 1)));
 }
@@ -922,12 +932,14 @@ TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Dgrad_Cfg34_Waves6_
 }
 
 // waves=6 (C=192): large spatial — matches the failing profiler test case
-TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Fprop_Cfg33_Waves6_C192_K48_LargeSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest,
+       Fprop_Cfg33_Waves6_C192_K48_LargeSpatial)
 {
     ASSERT_TRUE((RunFprop<33>(8, 64, 64, 1, 192, 48, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Dgrad_Cfg32_Waves6_C48_K192_LargeSpatial)
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest,
+       Dgrad_Cfg32_Waves6_C48_K192_LargeSpatial)
 {
     ASSERT_TRUE((RunDgrad<32>(8, 64, 64, 1, 48, 192, 3, 3, 1, 1)));
 }

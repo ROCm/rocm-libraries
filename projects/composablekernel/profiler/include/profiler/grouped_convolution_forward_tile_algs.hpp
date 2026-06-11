@@ -54,7 +54,7 @@ void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
         hipMemcpy(&ref.data()[0], reference.output, output_bytes_num, hipMemcpyDeviceToHost));
     HIP_CHECK_ERROR(
         hipMemcpy(&out.data()[0], outputs.output, output_bytes_num, hipMemcpyDeviceToHost));
-    
+
     constexpr double rtol = ck::profiler::get_rtol<DataType>();
     constexpr double atol = ck::profiler::get_atol<DataType>();
     ck_tile::check_err(out, ref, "Error: Incorrect results!", rtol, atol);
@@ -78,9 +78,9 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
 
     // Run first instance as dummy to get proper time from the first instance
     bool dummy_run_executed = false;
-    float best_avg_time             = std::numeric_limits<float>::max();
-    float best_tflops               = std::numeric_limits<float>::min();
-    float best_gbs                  = std::numeric_limits<float>::min();
+    float best_avg_time     = std::numeric_limits<float>::max();
+    float best_tflops       = std::numeric_limits<float>::min();
+    float best_gbs          = std::numeric_limits<float>::min();
     std::string best_op_name, op_name;
     ck::index_t best_instance_index = -1;
     bool is_supported;
@@ -96,7 +96,7 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
         [[maybe_unused]] auto ref_result = ckt::run(ref_conv, args, inputs, reference.get());
     }
     index_t num_kernel = 0;
-    auto run_alg    = [&](auto&& run_alg_func) {
+    auto run_alg       = [&](auto&& run_alg_func) {
         num_kernel++;
         // Skip if a specific instance was requested and this isn't it
         const bool running_specific_instance = (instance_index != -1);
@@ -133,45 +133,49 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                                                          ck::profiler::get_atol<DataType>());
                                                  });
 
-            const bool instance_valid = report.get_errors().empty();
-            if(instance_valid)
-            {
-                if(avg_time < best_avg_time)
+                const bool instance_valid = report.get_errors().empty();
+                if(instance_valid)
                 {
-                    best_instance_index = num_kernel - 1;
+                    if(avg_time < best_avg_time)
+                    {
+                        best_instance_index = num_kernel - 1;
+                    }
+                    best_avg_time         = std::min(best_avg_time, avg_time);
+                    best_op_name          = best_avg_time < avg_time ? best_op_name : op_name;
+                    const auto conv_param = args.to_ck_tile_conv_param();
+                    float tflops = static_cast<float>(conv_param.GetFlops()) / 1.E9 / avg_time;
+                    float gb_per_sec =
+                        static_cast<float>(
+                            conv_param.template GetByte<DataType, DataType, DataType>()) /
+                        1.E6 / avg_time;
+                    best_tflops = std::max(best_tflops, tflops);
+                    best_gbs    = std::max(best_gbs, gb_per_sec);
+                    std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms, " << tflops
+                              << " TFlops, " << gb_per_sec << " GB/s, " << op_name << " (instance "
+                              << num_kernel - 1 << ")" << std::endl;
                 }
-                best_avg_time = std::min(best_avg_time, avg_time);
-                best_op_name  = best_avg_time < avg_time ? best_op_name : op_name;
-                const auto conv_param  = args.to_ck_tile_conv_param();
-                float tflops           = static_cast<float>(conv_param.GetFlops()) / 1.E9 / avg_time;
-                float gb_per_sec       = static_cast<float>(
-                    conv_param.template GetByte<DataType, DataType, DataType>()) / 1.E6 / avg_time;
-                best_tflops = std::max(best_tflops, tflops);
-                best_gbs    = std::max(best_gbs, gb_per_sec);
-                std::cout << "[Valid] Perf: " << std::setw(10) << avg_time << " ms, " << tflops
-                        << " TFlops, " << gb_per_sec << " GB/s, " << op_name
-                        << " (instance " << num_kernel - 1 << ")" << std::endl;
-            }
-            else
-            {
-                std::cout << "[Error] " << op_name << std::endl;
-                const auto conv_param  = args.to_ck_tile_conv_param();
-                float tflops           = static_cast<float>(conv_param.GetFlops()) / 1.E9 / avg_time;
-                float gb_per_sec       = static_cast<float>(
-                    conv_param.template GetByte<DataType, DataType, DataType>()) / 1.E6 / avg_time;
-                std::cout << "[Invalid] Perf: " << std::setw(10) << avg_time << " ms, " << tflops
-                        << " TFlops, " << gb_per_sec << " GB/s, " << op_name
-                        << " (instance " << num_kernel - 1 << ")" << std::endl;
-                for(const auto& error : report.get_errors())
+                else
                 {
-                    valid = false;
-                    std::cout << "\tNumber of incorrect values: " << error.wrong_elements
-                              << " Is all zero:" << error.is_all_zero()
-                              << " max err: " << error.max_error << std::endl;
-                    // Check with cpu verification to get a values
-                    run_cpu_validation<SIGNATURE>(args, outputs, reference.get());
+                    std::cout << "[Error] " << op_name << std::endl;
+                    const auto conv_param = args.to_ck_tile_conv_param();
+                    float tflops = static_cast<float>(conv_param.GetFlops()) / 1.E9 / avg_time;
+                    float gb_per_sec =
+                        static_cast<float>(
+                            conv_param.template GetByte<DataType, DataType, DataType>()) /
+                        1.E6 / avg_time;
+                    std::cout << "[Invalid] Perf: " << std::setw(10) << avg_time << " ms, "
+                              << tflops << " TFlops, " << gb_per_sec << " GB/s, " << op_name
+                              << " (instance " << num_kernel - 1 << ")" << std::endl;
+                    for(const auto& error : report.get_errors())
+                    {
+                        valid = false;
+                        std::cout << "\tNumber of incorrect values: " << error.wrong_elements
+                                  << " Is all zero:" << error.is_all_zero()
+                                  << " max err: " << error.max_error << std::endl;
+                        // Check with cpu verification to get a values
+                        run_cpu_validation<SIGNATURE>(args, outputs, reference.get());
+                    }
                 }
-            }
             }
         }
         else
@@ -219,9 +223,11 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
     else
     {
         std::cout << "Signature not supported" << std::endl;
-        return std::make_tuple(false, best_avg_time, best_tflops, best_gbs, best_op_name, best_instance_index);
+        return std::make_tuple(
+            false, best_avg_time, best_tflops, best_gbs, best_op_name, best_instance_index);
     }
-    return std::make_tuple(valid, best_avg_time, best_tflops, best_gbs, best_op_name, best_instance_index);
+    return std::make_tuple(
+        valid, best_avg_time, best_tflops, best_gbs, best_op_name, best_instance_index);
 }
 
 } // namespace ck_tile::builder::profiling

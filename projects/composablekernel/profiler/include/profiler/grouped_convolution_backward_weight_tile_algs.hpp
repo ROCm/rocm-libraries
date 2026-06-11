@@ -36,7 +36,6 @@ namespace ckt = ck_tile::builder::test;
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_bf16_streamk.inc"
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp16_streamk.inc"
 
-
 template <auto SIGNATURE>
 void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
                         const ckt::Outputs<SIGNATURE>& outputs,

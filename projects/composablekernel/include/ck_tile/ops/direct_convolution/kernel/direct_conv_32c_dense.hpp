@@ -23,20 +23,32 @@ template <DataType DT>
 struct TileConvVariant32cDense<Version::v3, DT>
 {
     static bool is_applicable(const Conv2dParams& par)
-    { return conv_32c_tile::v3::is_applicable<DT>(par); }
+    {
+        return conv_32c_tile::v3::is_applicable<DT>(par);
+    }
 
     template <auto Cfg>
     static bool is_config_compatible(const Conv2dParams& par)
-    { return conv_32c_tile::v3::is_valid_config<DT>(par, Cfg); }
+    {
+        return conv_32c_tile::v3::is_valid_config<DT>(par, Cfg);
+    }
 
     template <auto Cfg>
     static LaunchParams get_launch_params(const Conv2dParams& par)
-    { return conv_32c_tile::v3::get_launch_params<Cfg>(par); }
+    {
+        return conv_32c_tile::v3::get_launch_params<Cfg>(par);
+    }
 
     template <auto Cfg>
-    static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
-                              const void* in, const void* wei, void* out, hipStream_t stream)
-    { conv_32c_tile::v3::launch_kernel<Cfg, DT>(lp, par, in, wei, out, stream); }
+    static void launch_kernel(const LaunchParams& lp,
+                              const Conv2dParams& par,
+                              const void* in,
+                              const void* wei,
+                              void* out,
+                              hipStream_t stream)
+    {
+        conv_32c_tile::v3::launch_kernel<Cfg, DT>(lp, par, in, wei, out, stream);
+    }
 };
 
 // ============================================================================
@@ -47,8 +59,8 @@ template <auto Cfg, Version Ver = Version::v3, DataType DT = DataType::fp16>
 struct DirectTileConvForward32CDenseKernel
     : DirectConvKernel<DirectTileConvForward32CDenseKernel<Cfg, Ver, DT>, Cfg>
 {
-    using V = TileConvVariant32cDense<Ver, DT>;
-    static constexpr bool kIsFprop = true;
+    using V                             = TileConvVariant32cDense<Ver, DT>;
+    static constexpr bool kIsFprop      = true;
     static constexpr DataType kDataType = DT;
     static std::string GetNamePrefix()
     {
@@ -63,8 +75,8 @@ template <auto Cfg, Version Ver = Version::v3, DataType DT = DataType::fp16>
 struct DirectTileConvBwdData32CDenseKernel
     : DirectConvKernel<DirectTileConvBwdData32CDenseKernel<Cfg, Ver, DT>, Cfg>
 {
-    using V = TileConvVariant32cDense<Ver, DT>;
-    static constexpr bool kIsFprop = false;
+    using V                             = TileConvVariant32cDense<Ver, DT>;
+    static constexpr bool kIsFprop      = false;
     static constexpr DataType kDataType = DT;
     static std::string GetNamePrefix()
     {

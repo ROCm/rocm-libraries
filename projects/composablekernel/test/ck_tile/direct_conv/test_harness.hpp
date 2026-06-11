@@ -36,16 +36,13 @@ class DirectConvGroupedTestHarness : public ::testing::Test
     // ck::profiler::gpu_verify dispatches on the ck:: numeric types. The ck_tile
     // element types share the same underlying representation (_Float16 / __bf16),
     // so map ElementT to its ck:: equivalent for the device-side comparison.
-    using VerifyT = std::conditional_t<std::is_same_v<ElementT, ck_tile::bfloat16_t>,
-                                       ck::bhalf_t,
-                                       ck::half_t>;
+    using VerifyT =
+        std::conditional_t<std::is_same_v<ElementT, ck_tile::bfloat16_t>, ck::bhalf_t, ck::half_t>;
 
     // Compare two device buffers on the GPU. Only a small result struct is copied
     // back to the host, avoiding a full device-to-host transfer of both tensors.
-    static bool GpuCompare(const void* d_result,
-                           const void* d_ref,
-                           std::size_t size,
-                           const char* msg)
+    static bool
+    GpuCompare(const void* d_result, const void* d_ref, std::size_t size, const char* msg)
     {
         // BF16 needs wider tolerance because MFMA multiplies at BF16 precision
         // (7-bit mantissa) while the GPU reference promotes to fp32 first.
@@ -90,18 +87,17 @@ class DirectConvGroupedTestHarness : public ::testing::Test
         using Kernel = typename KernelTraits::template FwdKernel<ConfigIdx>;
 
         // ConvParam takes K and C per group
-        conv::ConvParam param(
-            2,                                         // num_dim_spatial
-            groups,                                    // group_count
-            N,                                         // n_batch
-            k_per_group,                               // n_out_channels (per group)
-            c_per_group,                               // n_in_channels (per group)
-            std::vector<index_t>{kh, kw},              // filter lengths
-            std::vector<index_t>{H, W},                // input lengths
-            std::vector<index_t>{1, 1},                // strides
-            std::vector<index_t>{1, 1},                // dilations
-            std::vector<index_t>{pad_h, pad_w},        // left pads
-            std::vector<index_t>{pad_h, pad_w});       // right pads
+        conv::ConvParam param(2,                                   // num_dim_spatial
+                              groups,                              // group_count
+                              N,                                   // n_batch
+                              k_per_group,                         // n_out_channels (per group)
+                              c_per_group,                         // n_in_channels (per group)
+                              std::vector<index_t>{kh, kw},        // filter lengths
+                              std::vector<index_t>{H, W},          // input lengths
+                              std::vector<index_t>{1, 1},          // strides
+                              std::vector<index_t>{1, 1},          // dilations
+                              std::vector<index_t>{pad_h, pad_w},  // left pads
+                              std::vector<index_t>{pad_h, pad_w}); // right pads
 
         int C_total = groups * c_per_group;
         int K_total = groups * k_per_group;
@@ -146,12 +142,8 @@ class DirectConvGroupedTestHarness : public ::testing::Test
             {static_cast<long_index_t>(pad_h), static_cast<long_index_t>(pad_w)});
 
         // Build kernel args and check support
-        GroupedConvFwdHostArgs<> host_args(param,
-                                          d_in.GetDeviceBuffer(),
-                                          d_wei.GetDeviceBuffer(),
-                                          {},
-                                          d_out.GetDeviceBuffer(),
-                                          1);
+        GroupedConvFwdHostArgs<> host_args(
+            param, d_in.GetDeviceBuffer(), d_wei.GetDeviceBuffer(), {}, d_out.GetDeviceBuffer(), 1);
         auto kargs = Kernel::MakeKernelArgs(host_args);
 
         if(!Kernel::IsSupportedArgument(kargs))
@@ -193,18 +185,17 @@ class DirectConvGroupedTestHarness : public ::testing::Test
         using namespace ck_tile;
         using Kernel = typename KernelTraits::template BwdDataKernel<ConfigIdx>;
 
-        conv::ConvParam param(
-            2,
-            groups,
-            N,
-            k_per_group,
-            c_per_group,
-            std::vector<index_t>{kh, kw},
-            std::vector<index_t>{H, W},
-            std::vector<index_t>{1, 1},
-            std::vector<index_t>{1, 1},
-            std::vector<index_t>{pad_h, pad_w},
-            std::vector<index_t>{pad_h, pad_w});
+        conv::ConvParam param(2,
+                              groups,
+                              N,
+                              k_per_group,
+                              c_per_group,
+                              std::vector<index_t>{kh, kw},
+                              std::vector<index_t>{H, W},
+                              std::vector<index_t>{1, 1},
+                              std::vector<index_t>{1, 1},
+                              std::vector<index_t>{pad_h, pad_w},
+                              std::vector<index_t>{pad_h, pad_w});
 
         int C_total = groups * c_per_group;
         int K_total = groups * k_per_group;
@@ -250,11 +241,11 @@ class DirectConvGroupedTestHarness : public ::testing::Test
 
         // Build kernel args and check support
         GroupedConvBwdDataHostArgs host_args(param,
-                                            d_in_grad.GetDeviceBuffer(),
-                                            d_wei.GetDeviceBuffer(),
-                                            {},
-                                            d_out_grad.GetDeviceBuffer(),
-                                            1);
+                                             d_in_grad.GetDeviceBuffer(),
+                                             d_wei.GetDeviceBuffer(),
+                                             {},
+                                             d_out_grad.GetDeviceBuffer(),
+                                             1);
         auto kargs = Kernel::MakeKernelArgs(host_args);
 
         if(!Kernel::IsSupportedArgument(kargs))

@@ -6,8 +6,7 @@
 #include "ck_tile/core/numeric/math.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 
-namespace ck_tile::direct_conv
-{
+namespace ck_tile::direct_conv {
 
 // LDS swizzle for global -> LDS -> MFMA register mapping.
 //
@@ -45,9 +44,9 @@ struct SwizzleT
 
     // Map (x, c8) coordinates to a uint4 offset in LDS.
     // Inverse of x() / c8(); equivalent to offset_uint2(x, c8*2) / 2.
-    static constexpr int offset_uint4(int x, int c8) 
+    static constexpr int offset_uint4(int x, int c8)
     {
-        auto offset_x = x * C8;
+        auto offset_x  = x * C8;
         auto offset_c8 = (x + c8) % C8;
         return offset_x + offset_c8;
     }
@@ -87,10 +86,7 @@ struct SwizzleXOR
     static_assert(is_power_of_two_integer(C8), "C_ / 8 must be power of 2 in SwizzleXOR");
 
     // Map (x, c8) → flat uint4 LDS offset.
-    static constexpr int offset_uint4(int x, int c8)
-    {
-        return x * C8 + (c8 ^ (x % C8));
-    }
+    static constexpr int offset_uint4(int x, int c8) { return x * C8 + (c8 ^ (x % C8)); }
 
     // Map (x, c4) → flat uint2 LDS offset.
     static constexpr int offset_uint2(int x, int c4)

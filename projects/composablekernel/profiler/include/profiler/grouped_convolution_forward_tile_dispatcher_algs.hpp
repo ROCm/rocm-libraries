@@ -36,10 +36,10 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
 {
     using DataType = DeduceDataType<SIGNATURE>;
 
-    bool dummy_run_executed       = false;
-    float best_avg_time           = std::numeric_limits<float>::max();
-    float best_tflops             = std::numeric_limits<float>::min();
-    float best_gbs                = std::numeric_limits<float>::min();
+    bool dummy_run_executed = false;
+    float best_avg_time     = std::numeric_limits<float>::max();
+    float best_tflops       = std::numeric_limits<float>::min();
+    float best_gbs          = std::numeric_limits<float>::min();
     std::string best_op_name;
     ck::index_t best_instance_index = -1;
     bool valid                      = true;
@@ -102,11 +102,10 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
             continue;
         }
 
-        const float tflops =
-            static_cast<float>(conv_param.GetFlops()) / 1.E9 / avg_time;
+        const float tflops = static_cast<float>(conv_param.GetFlops()) / 1.E9 / avg_time;
         const float gb_per_sec =
-            static_cast<float>(conv_param.template GetByte<DataType, DataType, DataType>()) /
-            1.E6 / avg_time;
+            static_cast<float>(conv_param.template GetByte<DataType, DataType, DataType>()) / 1.E6 /
+            avg_time;
 
         bool instance_valid = true;
         if(do_verification)

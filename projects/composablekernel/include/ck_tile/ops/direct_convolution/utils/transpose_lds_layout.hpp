@@ -32,7 +32,9 @@ struct TransposeLDSLayout
 
     /// The row of the source matrix this lane reads from for the i-th ds_read call.
     __host__ __device__ static constexpr int row(int lane, int read_idx = 0)
-    { return (lane / (M * B)) * K_L + read_idx * 4 + (lane / 4) % 4; }
+    {
+        return (lane / (M * B)) * K_L + read_idx * 4 + (lane / 4) % 4;
+    }
 
     /// The starting column of the source matrix this lane reads from.
     /// The lane reads 4 consecutive elements: col, col+1, col+2, col+3.
@@ -40,7 +42,9 @@ struct TransposeLDSLayout
 
     /// The batch index for this lane (only meaningful when B > 1).
     __host__ __device__ static constexpr int batch(int lane)
-    { return ((lane / 16) * (16 / M) + (lane % 4) / (M / 4)) % B; }
+    {
+        return ((lane / 16) * (16 / M) + (lane % 4) / (M / 4)) % B;
+    }
 };
 
 } // namespace ck_tile::direct_conv

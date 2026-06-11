@@ -18,12 +18,14 @@ struct TileConv4cBf16KernelTraits
     using FwdKernel = ck_tile::direct_conv::DirectTileConvForward4CKernel<
         ck_tile::direct_conv::grouped_4c_tile::v3::KernelConfigurations<
             ck_tile::direct_conv::DataType::bf16>::configs_map.get(ConfigIdx),
-        v3, ck_tile::direct_conv::DataType::bf16>;
+        v3,
+        ck_tile::direct_conv::DataType::bf16>;
     template <int ConfigIdx>
     using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData4CKernel<
         ck_tile::direct_conv::grouped_4c_tile::v3::KernelConfigurations<
             ck_tile::direct_conv::DataType::bf16>::configs_map.get(ConfigIdx),
-        v3, ck_tile::direct_conv::DataType::bf16>;
+        v3,
+        ck_tile::direct_conv::DataType::bf16>;
 };
 
 class DirectConvGrouped4cBf16TileConvTestV3

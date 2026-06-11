@@ -27,18 +27,16 @@ struct SharedDescriptors
     struct Input
     {
         // DRAM read descriptor: [hi_padded, wi_padded, BLOCK_C8, 8] with optional XOR.
-        static CK_TILE_DEVICE auto MakeDramReadDescriptor(int hi, int wi, int C_total, int px, int py, int dx, int dy, int sx, int sy)
+        static CK_TILE_DEVICE auto MakeDramReadDescriptor(
+            int hi, int wi, int C_total, int px, int py, int dx, int dy, int sx, int sy)
         {
             const int hi_padded_size = hi + 2 * py;
             const int wi_padded_size = wi + 2 * px;
 
             const auto desc_raw = ck_tile::make_naive_tensor_descriptor(
-                ck_tile::make_tuple(hi, wi,
-                                    ck_tile::number<TC::BLOCK_C8>{},
-                                    ck_tile::number<8>{}),
-                ck_tile::make_tuple(wi * C_total, C_total,
-                                    ck_tile::number<8>{},
-                                    ck_tile::number<1>{}),
+                ck_tile::make_tuple(hi, wi, ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
+                ck_tile::make_tuple(
+                    wi * C_total, C_total, ck_tile::number<8>{}, ck_tile::number<1>{}),
                 ck_tile::number<8>{},
                 ck_tile::number<1>{});
 
@@ -49,13 +47,16 @@ struct SharedDescriptors
                     ck_tile::make_pad_transform(wi, px, px),
                     ck_tile::make_pass_through_transform(ck_tile::number<TC::BLOCK_C8>{}),
                     ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}));
+                ck_tile::make_tuple(ck_tile::sequence<0>{},
+                                    ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{},
+                                    ck_tile::sequence<3>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{},
+                                    ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{},
+                                    ck_tile::sequence<3>{}));
 
-
-            if (sx != 1 || sy != 1 || dx != 1 || dy != 1)
+            if(sx != 1 || sy != 1 || dx != 1 || dy != 1)
             {
                 // TODO: implement the striding and dilation.
             }
@@ -64,29 +65,27 @@ struct SharedDescriptors
             {
                 return ck_tile::transform_tensor_descriptor(
                     desc_padded,
+                    ck_tile::make_tuple(ck_tile::make_pass_through_transform(hi_padded_size),
+                                        ck_tile::make_xor_transform(ck_tile::make_tuple(
+                                            wi_padded_size, ck_tile::number<TC::BLOCK_C8>{})),
+                                        ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(
-                        ck_tile::make_pass_through_transform(hi_padded_size),
-                        ck_tile::make_xor_transform(ck_tile::make_tuple(
-                            wi_padded_size, ck_tile::number<TC::BLOCK_C8>{})),
-                        ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
-                                        ck_tile::sequence<3>{}),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
-                                        ck_tile::sequence<3>{}));
+                        ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}, ck_tile::sequence<3>{}),
+                    ck_tile::make_tuple(
+                        ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}, ck_tile::sequence<3>{}));
             }
-            else if constexpr (TC::SWIZZLE_TYPE == SwizzleType::CyclicShift)
+            else if constexpr(TC::SWIZZLE_TYPE == SwizzleType::CyclicShift)
             {
                 return ck_tile::transform_tensor_descriptor(
                     desc_padded,
+                    ck_tile::make_tuple(ck_tile::make_pass_through_transform(hi_padded_size),
+                                        ck_tile::make_cyclic_shift_transform(ck_tile::make_tuple(
+                                            wi_padded_size, ck_tile::number<TC::BLOCK_C8>{})),
+                                        ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(
-                        ck_tile::make_pass_through_transform(hi_padded_size),
-                        ck_tile::make_cyclic_shift_transform(ck_tile::make_tuple(
-                            wi_padded_size, ck_tile::number<TC::BLOCK_C8>{})),
-                        ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
-                                        ck_tile::sequence<3>{}),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
-                                        ck_tile::sequence<3>{}));
+                        ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}, ck_tile::sequence<3>{}),
+                    ck_tile::make_tuple(
+                        ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}, ck_tile::sequence<3>{}));
             }
             else
             {
@@ -112,19 +111,26 @@ struct SharedDescriptors
         // The buffer base pointer must be set to:
         //   in + block_n * hi * wi * C_in + block_k_in
         template <int GuaranteedVectorLoadSize = 1>
-        static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(
-            int hi, int wi, int C_in, int c_per_group, int px, int py, int dx, int dy, int sx, int sy)
+        static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(int hi,
+                                                                int wi,
+                                                                int C_in,
+                                                                int c_per_group,
+                                                                int px,
+                                                                int py,
+                                                                int dx,
+                                                                int dy,
+                                                                int sx,
+                                                                int sy)
         {
             constexpr int GROUP_SIZE   = TC::GROUP_SIZE;
             constexpr int BLOCK_GROUPS = TC::BLOCK_GROUPS;
             constexpr int BLOCK_C8     = TC::BLOCK_C8;
-            const int hi_padded_size = hi + 2 * py;
-            const int wi_padded_size = wi + 2 * px;
+            const int hi_padded_size   = hi + 2 * py;
+            const int wi_padded_size   = wi + 2 * px;
 
             // Step 1: raw 4D descriptor with real DRAM strides.
             const auto desc_raw = ck_tile::make_naive_tensor_descriptor(
-                ck_tile::make_tuple(hi, wi,
-                                    ck_tile::number<BLOCK_GROUPS>{}, c_per_group),
+                ck_tile::make_tuple(hi, wi, ck_tile::number<BLOCK_GROUPS>{}, c_per_group),
                 ck_tile::make_tuple(wi * C_in, C_in, c_per_group, 1),
                 ck_tile::number<GuaranteedVectorLoadSize>{},
                 ck_tile::number<1>{});
@@ -136,14 +142,19 @@ struct SharedDescriptors
                     ck_tile::make_pad_transform(hi, py, py),
                     ck_tile::make_pad_transform(wi, px, px),
                     ck_tile::make_pass_through_transform(ck_tile::number<BLOCK_GROUPS>{}),
-                    ck_tile::make_pad_transform(c_per_group, ck_tile::number<0>{},
-                                               ck_tile::number<GROUP_SIZE>{} - c_per_group)),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}));
+                    ck_tile::make_pad_transform(c_per_group,
+                                                ck_tile::number<0>{},
+                                                ck_tile::number<GROUP_SIZE>{} - c_per_group)),
+                ck_tile::make_tuple(ck_tile::sequence<0>{},
+                                    ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{},
+                                    ck_tile::sequence<3>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{},
+                                    ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{},
+                                    ck_tile::sequence<3>{}));
 
-            if (sx != 1 || sy != 1 || dx != 1 || dy != 1)
+            if(sx != 1 || sy != 1 || dx != 1 || dy != 1)
             {
                 // TODO: implement the striding and dilation.
             }
@@ -154,56 +165,51 @@ struct SharedDescriptors
                 ck_tile::make_tuple(
                     ck_tile::make_pass_through_transform(hi_padded_size),
                     ck_tile::make_pass_through_transform(wi_padded_size),
-                    ck_tile::make_merge_transform(
-                        ck_tile::make_tuple(ck_tile::number<BLOCK_GROUPS>{},
-                                            ck_tile::number<GROUP_SIZE>{}))),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2, 3>{}),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}));
+                    ck_tile::make_merge_transform(ck_tile::make_tuple(
+                        ck_tile::number<BLOCK_GROUPS>{}, ck_tile::number<GROUP_SIZE>{}))),
+                ck_tile::make_tuple(
+                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2, 3>{}),
+                ck_tile::make_tuple(
+                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}));
 
             // Step 5: unmerge → [hi_padded, wi_padded, BLOCK_C8, 8].
             const auto desc_4d = ck_tile::transform_tensor_descriptor(
                 desc_merged,
+                ck_tile::make_tuple(ck_tile::make_pass_through_transform(hi_padded_size),
+                                    ck_tile::make_pass_through_transform(wi_padded_size),
+                                    ck_tile::make_unmerge_transform(ck_tile::make_tuple(
+                                        ck_tile::number<BLOCK_C8>{}, ck_tile::number<8>{}))),
                 ck_tile::make_tuple(
-                    ck_tile::make_pass_through_transform(hi_padded_size),
-                    ck_tile::make_pass_through_transform(wi_padded_size),
-                    ck_tile::make_unmerge_transform(
-                        ck_tile::make_tuple(ck_tile::number<BLOCK_C8>{},
-                                            ck_tile::number<8>{}))),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2, 3>{}));
+                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}),
+                ck_tile::make_tuple(
+                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2, 3>{}));
 
             // Step 6: optional swizzle on [wi_padded, BLOCK_C8].
             if constexpr(TC::SWIZZLE_TYPE == SwizzleType::XOR)
             {
                 return ck_tile::transform_tensor_descriptor(
                     desc_4d,
+                    ck_tile::make_tuple(ck_tile::make_pass_through_transform(hi_padded_size),
+                                        ck_tile::make_xor_transform(ck_tile::make_tuple(
+                                            wi_padded_size, ck_tile::number<BLOCK_C8>{})),
+                                        ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(
-                        ck_tile::make_pass_through_transform(hi_padded_size),
-                        ck_tile::make_xor_transform(ck_tile::make_tuple(
-                            wi_padded_size, ck_tile::number<BLOCK_C8>{})),
-                        ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
-                                        ck_tile::sequence<3>{}),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
-                                        ck_tile::sequence<3>{}));
+                        ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}, ck_tile::sequence<3>{}),
+                    ck_tile::make_tuple(
+                        ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}, ck_tile::sequence<3>{}));
             }
             else if constexpr(TC::SWIZZLE_TYPE == SwizzleType::CyclicShift)
             {
                 return ck_tile::transform_tensor_descriptor(
                     desc_4d,
+                    ck_tile::make_tuple(ck_tile::make_pass_through_transform(hi_padded_size),
+                                        ck_tile::make_cyclic_shift_transform(ck_tile::make_tuple(
+                                            wi_padded_size, ck_tile::number<BLOCK_C8>{})),
+                                        ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(
-                        ck_tile::make_pass_through_transform(hi_padded_size),
-                        ck_tile::make_cyclic_shift_transform(ck_tile::make_tuple(
-                            wi_padded_size, ck_tile::number<BLOCK_C8>{})),
-                        ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
-                                        ck_tile::sequence<3>{}),
-                    ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{},
-                                        ck_tile::sequence<3>{}));
+                        ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}, ck_tile::sequence<3>{}),
+                    ck_tile::make_tuple(
+                        ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}, ck_tile::sequence<3>{}));
             }
             else
             {
@@ -262,9 +268,8 @@ struct SharedDescriptors
                     desc_3d,
                     ck_tile::make_tuple(
                         ck_tile::make_pass_through_transform(ck_tile::number<TC::BLOCK_W>{}),
-                        ck_tile::make_merge_transform(
-                            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_C8>{},
-                                                ck_tile::number<8>{}))),
+                        ck_tile::make_merge_transform(ck_tile::make_tuple(
+                            ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}))),
                     ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
 
@@ -272,9 +277,8 @@ struct SharedDescriptors
                     desc_merged,
                     ck_tile::make_tuple(
                         ck_tile::make_pass_through_transform(ck_tile::number<TC::BLOCK_W>{}),
-                        ck_tile::make_unmerge_transform(
-                            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_C4>{},
-                                                ck_tile::number<4>{}))),
+                        ck_tile::make_unmerge_transform(ck_tile::make_tuple(
+                            ck_tile::number<TC::BLOCK_C4>{}, ck_tile::number<4>{}))),
                     ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}));
             };
@@ -284,22 +288,20 @@ struct SharedDescriptors
                 constexpr auto desc_xor = ck_tile::transform_tensor_descriptor(
                     desc_raw,
                     ck_tile::make_tuple(
-                        ck_tile::make_xor_transform(
-                            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_W>{},
-                                                ck_tile::number<TC::BLOCK_C8>{})),
+                        ck_tile::make_xor_transform(ck_tile::make_tuple(
+                            ck_tile::number<TC::BLOCK_W>{}, ck_tile::number<TC::BLOCK_C8>{})),
                         ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}));
                 return make_desc(desc_xor);
             }
-            else if constexpr (TC::SWIZZLE_TYPE == SwizzleType::CyclicShift)
+            else if constexpr(TC::SWIZZLE_TYPE == SwizzleType::CyclicShift)
             {
                 constexpr auto desc_cyclic_shift = ck_tile::transform_tensor_descriptor(
                     desc_raw,
                     ck_tile::make_tuple(
-                        ck_tile::make_inverse_cyclic_shift_transform(
-                            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_W>{},
-                                                ck_tile::number<TC::BLOCK_C8>{})),
+                        ck_tile::make_inverse_cyclic_shift_transform(ck_tile::make_tuple(
+                            ck_tile::number<TC::BLOCK_W>{}, ck_tile::number<TC::BLOCK_C8>{})),
                         ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}));
@@ -362,12 +364,12 @@ struct SharedDescriptors
         template <int GuaranteedVectorLoadSize = 1>
         static CK_TILE_DEVICE auto MakeDramReadDescriptorPadded(int k_per_group, int c_per_group)
         {
-            constexpr int filter_size   = TC::KH_KW;
-            constexpr int GROUP_SIZE    = TC::GROUP_SIZE;
-            constexpr int BLOCK_GROUPS  = TC::BLOCK_GROUPS;
-            constexpr int LDS_SIZE_UINT4  = TC::Weight::WEIGHT_LDS_SIZE_UINT4;
+            constexpr int filter_size      = TC::KH_KW;
+            constexpr int GROUP_SIZE       = TC::GROUP_SIZE;
+            constexpr int BLOCK_GROUPS     = TC::BLOCK_GROUPS;
+            constexpr int LDS_SIZE_UINT4   = TC::Weight::WEIGHT_LDS_SIZE_UINT4;
             constexpr int LDS_PADDED_UINT4 = TC::Weight::WEIGHT_LDS_PADDED_UINT4;
-            constexpr int right_pad_rows = LDS_PADDED_UINT4 - LDS_SIZE_UINT4;
+            constexpr int right_pad_rows   = LDS_PADDED_UINT4 - LDS_SIZE_UINT4;
 
             // Step 1: raw 4D descriptor with real DRAM strides (fp16 elements).
             const int CStride  = 1;
@@ -376,10 +378,12 @@ struct SharedDescriptors
             const int GStride  = k_per_group * KStride;
 
             const auto desc_raw = ck_tile::make_naive_tensor_descriptor(
-                ck_tile::make_tuple(ck_tile::number<BLOCK_GROUPS>{}, k_per_group,
-                                    ck_tile::number<filter_size>{}, c_per_group),
+                ck_tile::make_tuple(ck_tile::number<BLOCK_GROUPS>{},
+                                    k_per_group,
+                                    ck_tile::number<filter_size>{},
+                                    c_per_group),
                 ck_tile::make_tuple(GStride, KStride, XYStride, CStride),
-                ck_tile::number<GuaranteedVectorLoadSize>{}, 
+                ck_tile::number<GuaranteedVectorLoadSize>{},
                 ck_tile::number<1>{});
 
             // Step 2+3: pad K → GROUP_SIZE, pad C → GROUP_SIZE.
@@ -391,15 +395,19 @@ struct SharedDescriptors
                 desc_raw,
                 ck_tile::make_tuple(
                     ck_tile::make_pass_through_transform(ck_tile::number<BLOCK_GROUPS>{}),
-                    ck_tile::make_pad_transform(k_per_group, number<0>{},
-                                               number<GROUP_SIZE>{} - k_per_group),
+                    ck_tile::make_pad_transform(
+                        k_per_group, number<0>{}, number<GROUP_SIZE>{} - k_per_group),
                     ck_tile::make_pass_through_transform(ck_tile::number<filter_size>{}),
-                    ck_tile::make_pad_transform(c_per_group, number<0>{},
-                                               number<GROUP_SIZE>{} - c_per_group)),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}));
+                    ck_tile::make_pad_transform(
+                        c_per_group, number<0>{}, number<GROUP_SIZE>{} - c_per_group)),
+                ck_tile::make_tuple(ck_tile::sequence<0>{},
+                                    ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{},
+                                    ck_tile::sequence<3>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{},
+                                    ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{},
+                                    ck_tile::sequence<3>{}));
 
             // Step 4: merge all 4 dims → [BLOCK_GROUPS * GROUP_SIZE * KH_KW * GROUP_SIZE].
             const auto desc_merged = ck_tile::transform_tensor_descriptor(
@@ -416,17 +424,16 @@ struct SharedDescriptors
             const auto desc_2d = ck_tile::transform_tensor_descriptor(
                 desc_merged,
                 ck_tile::make_tuple(ck_tile::make_unmerge_transform(
-                    ck_tile::make_tuple(ck_tile::number<LDS_SIZE_UINT4>{},
-                                        ck_tile::number<8>{}))),
+                    ck_tile::make_tuple(ck_tile::number<LDS_SIZE_UINT4>{}, ck_tile::number<8>{}))),
                 ck_tile::make_tuple(ck_tile::sequence<0>{}),
                 ck_tile::make_tuple(ck_tile::sequence<0, 1>{}));
 
             // Step 6: pad rows → [WEIGHT_LDS_PADDED_UINT4, 8].
             const auto desc_final = ck_tile::transform_tensor_descriptor(
                 desc_2d,
-                ck_tile::make_tuple(
-                    ck_tile::make_pad_transform(ck_tile::number<LDS_SIZE_UINT4>{}, 0, right_pad_rows),
-                    ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
+                ck_tile::make_tuple(ck_tile::make_pad_transform(
+                                        ck_tile::number<LDS_SIZE_UINT4>{}, 0, right_pad_rows),
+                                    ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                 ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}),
                 ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
 
@@ -439,8 +446,7 @@ struct SharedDescriptors
             return ck_tile::make_static_tile_distribution(
                 ck_tile::tile_distribution_encoding<
                     ck_tile::sequence<>,
-                    ck_tile::tuple<ck_tile::sequence<TC::NUM_WAVES, 64>,
-                                   ck_tile::sequence<8>>,
+                    ck_tile::tuple<ck_tile::sequence<TC::NUM_WAVES, 64>, ck_tile::sequence<8>>,
                     ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1>>,
                     ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1>>,
                     ck_tile::sequence<2>,
@@ -523,9 +529,8 @@ struct SharedDescriptors
                     desc_3d,
                     ck_tile::make_tuple(
                         ck_tile::make_pass_through_transform(ck_tile::number<TC::BLOCK_Q>{}),
-                        ck_tile::make_merge_transform(
-                            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_C8>{},
-                                                ck_tile::number<8>{}))),
+                        ck_tile::make_merge_transform(ck_tile::make_tuple(
+                            ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}))),
                     ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
 
@@ -533,9 +538,8 @@ struct SharedDescriptors
                     desc_merged,
                     ck_tile::make_tuple(
                         ck_tile::make_pass_through_transform(ck_tile::number<TC::BLOCK_Q>{}),
-                        ck_tile::make_unmerge_transform(
-                            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_C4>{},
-                                                ck_tile::number<4>{}))),
+                        ck_tile::make_unmerge_transform(ck_tile::make_tuple(
+                            ck_tile::number<TC::BLOCK_C4>{}, ck_tile::number<4>{}))),
                     ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}));
             };
@@ -545,22 +549,20 @@ struct SharedDescriptors
                 constexpr auto desc_xor = ck_tile::transform_tensor_descriptor(
                     desc_raw,
                     ck_tile::make_tuple(
-                        ck_tile::make_xor_transform(
-                            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_Q>{},
-                                                ck_tile::number<TC::BLOCK_C8>{})),
+                        ck_tile::make_xor_transform(ck_tile::make_tuple(
+                            ck_tile::number<TC::BLOCK_Q>{}, ck_tile::number<TC::BLOCK_C8>{})),
                         ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}));
                 return make_desc(desc_xor);
             }
-            else if constexpr (TC::SWIZZLE_TYPE == SwizzleType::CyclicShift)
+            else if constexpr(TC::SWIZZLE_TYPE == SwizzleType::CyclicShift)
             {
                 constexpr auto desc_cs = ck_tile::transform_tensor_descriptor(
                     desc_raw,
                     ck_tile::make_tuple(
-                        ck_tile::make_cyclic_shift_transform(
-                            ck_tile::make_tuple(ck_tile::number<TC::BLOCK_Q>{},
-                                                ck_tile::number<TC::BLOCK_C8>{})),
+                        ck_tile::make_cyclic_shift_transform(ck_tile::make_tuple(
+                            ck_tile::number<TC::BLOCK_Q>{}, ck_tile::number<TC::BLOCK_C8>{})),
                         ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}));
@@ -594,9 +596,8 @@ struct SharedDescriptors
                 return ck_tile::transform_tensor_descriptor(
                     desc_raw,
                     ck_tile::make_tuple(
-                        ck_tile::make_xor_transform(
-                            ck_tile::make_tuple(ck_tile::number<StoreQ>{},
-                                                ck_tile::number<TC::BLOCK_C8>{})),
+                        ck_tile::make_xor_transform(ck_tile::make_tuple(
+                            ck_tile::number<StoreQ>{}, ck_tile::number<TC::BLOCK_C8>{})),
                         ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}));
@@ -606,9 +607,8 @@ struct SharedDescriptors
                 return ck_tile::transform_tensor_descriptor(
                     desc_raw,
                     ck_tile::make_tuple(
-                        ck_tile::make_cyclic_shift_transform(
-                            ck_tile::make_tuple(ck_tile::number<StoreQ>{},
-                                                ck_tile::number<TC::BLOCK_C8>{})),
+                        ck_tile::make_cyclic_shift_transform(ck_tile::make_tuple(
+                            ck_tile::number<StoreQ>{}, ck_tile::number<TC::BLOCK_C8>{})),
                         ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}),
                     ck_tile::make_tuple(ck_tile::sequence<0, 1>{}, ck_tile::sequence<2>{}));
@@ -625,12 +625,8 @@ struct SharedDescriptors
         static CK_TILE_DEVICE auto MakeDramWriteDescriptorWide(int wo, int C)
         {
             const auto desc_raw = ck_tile::make_naive_tensor_descriptor(
-                ck_tile::make_tuple(wo,
-                                    ck_tile::number<TC::BLOCK_C8>{},
-                                    ck_tile::number<8>{}),
-                ck_tile::make_tuple(C,
-                                    ck_tile::number<8>{},
-                                    ck_tile::number<1>{}),
+                ck_tile::make_tuple(wo, ck_tile::number<TC::BLOCK_C8>{}, ck_tile::number<8>{}),
+                ck_tile::make_tuple(C, ck_tile::number<8>{}, ck_tile::number<1>{}),
                 ck_tile::number<8>{},
                 ck_tile::number<1>{});
 
@@ -642,40 +638,36 @@ struct SharedDescriptors
                     ck_tile::make_pass_through_transform(ck_tile::number<TC::BLOCK_C8>{}),
                     ck_tile::make_pass_through_transform(ck_tile::number<8>{})),
                 ck_tile::make_tuple(
-                    ck_tile::sequence<0>{},
-                    ck_tile::sequence<1>{}, ck_tile::sequence<2>{}),
+                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}),
                 ck_tile::make_tuple(
-                    ck_tile::sequence<0>{},
-                    ck_tile::sequence<1>{}, ck_tile::sequence<2>{}));
+                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}));
         }
 
         // DRAM write descriptor (narrow): [ho, wo_padded, BLOCK_C4, 4].
         static CK_TILE_DEVICE auto MakeDramWriteDescriptorNarrow(int ho, int wo, int C)
         {
             const auto desc_raw = ck_tile::make_naive_tensor_descriptor(
-                ck_tile::make_tuple(ho, wo,
-                                    ck_tile::number<TC::BLOCK_C4>{},
-                                    ck_tile::number<4>{}),
-                ck_tile::make_tuple(wo * C, C,
-                                    ck_tile::number<4>{},
-                                    ck_tile::number<1>{}),
+                ck_tile::make_tuple(ho, wo, ck_tile::number<TC::BLOCK_C4>{}, ck_tile::number<4>{}),
+                ck_tile::make_tuple(wo * C, C, ck_tile::number<4>{}, ck_tile::number<1>{}),
                 ck_tile::number<4>{},
                 ck_tile::number<1>{});
 
             constexpr int right_pad_w = TC::BLOCK_Q;
-            const auto desc_padded = ck_tile::transform_tensor_descriptor(
+            const auto desc_padded    = ck_tile::transform_tensor_descriptor(
                 desc_raw,
                 ck_tile::make_tuple(
                     ck_tile::make_pass_through_transform(ho),
                     ck_tile::make_pad_transform(wo, 0, right_pad_w),
                     ck_tile::make_pass_through_transform(ck_tile::number<TC::BLOCK_C4>{}),
                     ck_tile::make_pass_through_transform(ck_tile::number<4>{})),
-                ck_tile::make_tuple(
-                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}),
-                ck_tile::make_tuple(
-                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}));
+                ck_tile::make_tuple(ck_tile::sequence<0>{},
+                                    ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{},
+                                    ck_tile::sequence<3>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{},
+                                    ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{},
+                                    ck_tile::sequence<3>{}));
 
             return desc_padded;
         }
@@ -693,8 +685,8 @@ struct SharedDescriptors
         //   4. Merge channel: [ho, wo_padded, BLOCK_C].
         //   5. Unmerge to C4: [ho, wo_padded, BLOCK_C4, 4].
         template <int VectorSize = 1>
-        static CK_TILE_DEVICE auto MakeDramWriteDescriptorNarrowPadded(
-            int ho, int wo, int K_total, int k_per_group)
+        static CK_TILE_DEVICE auto
+        MakeDramWriteDescriptorNarrowPadded(int ho, int wo, int K_total, int k_per_group)
         {
             constexpr int right_pad_w  = TC::BLOCK_Q;
             constexpr int GROUP_SIZE   = TC::GROUP_SIZE;
@@ -703,8 +695,7 @@ struct SharedDescriptors
 
             // Step 1: raw 4D with real DRAM strides.
             const auto desc_raw = ck_tile::make_naive_tensor_descriptor(
-                ck_tile::make_tuple(ho, wo,
-                                    ck_tile::number<BLOCK_GROUPS>{}, k_per_group),
+                ck_tile::make_tuple(ho, wo, ck_tile::number<BLOCK_GROUPS>{}, k_per_group),
                 ck_tile::make_tuple(wo * K_total, K_total, k_per_group, 1),
                 ck_tile::number<VectorSize>{},
                 ck_tile::number<1>{});
@@ -716,12 +707,17 @@ struct SharedDescriptors
                     ck_tile::make_pass_through_transform(ho),
                     ck_tile::make_pad_transform(wo, 0, right_pad_w),
                     ck_tile::make_pass_through_transform(ck_tile::number<BLOCK_GROUPS>{}),
-                    ck_tile::make_pad_transform(k_per_group, ck_tile::number<0>{},
-                                               ck_tile::number<GROUP_SIZE>{} - k_per_group)),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}, ck_tile::sequence<3>{}));
+                    ck_tile::make_pad_transform(k_per_group,
+                                                ck_tile::number<0>{},
+                                                ck_tile::number<GROUP_SIZE>{} - k_per_group)),
+                ck_tile::make_tuple(ck_tile::sequence<0>{},
+                                    ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{},
+                                    ck_tile::sequence<3>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{},
+                                    ck_tile::sequence<1>{},
+                                    ck_tile::sequence<2>{},
+                                    ck_tile::sequence<3>{}));
 
             // Step 4: merge channel → [ho, wo_padded, BLOCK_C].
             const auto desc_merged = ck_tile::transform_tensor_descriptor(
@@ -729,27 +725,24 @@ struct SharedDescriptors
                 ck_tile::make_tuple(
                     ck_tile::make_pass_through_transform(ho),
                     ck_tile::make_pass_through_transform(wo + right_pad_w),
-                    ck_tile::make_merge_transform(
-                        ck_tile::make_tuple(ck_tile::number<BLOCK_GROUPS>{},
-                                            ck_tile::number<GROUP_SIZE>{}))),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2, 3>{}),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}));
+                    ck_tile::make_merge_transform(ck_tile::make_tuple(
+                        ck_tile::number<BLOCK_GROUPS>{}, ck_tile::number<GROUP_SIZE>{}))),
+                ck_tile::make_tuple(
+                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2, 3>{}),
+                ck_tile::make_tuple(
+                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}));
 
             // Step 5: unmerge to C4 → [ho, wo_padded, BLOCK_C4, 4].
             return ck_tile::transform_tensor_descriptor(
                 desc_merged,
+                ck_tile::make_tuple(ck_tile::make_pass_through_transform(ho),
+                                    ck_tile::make_pass_through_transform(wo + right_pad_w),
+                                    ck_tile::make_unmerge_transform(ck_tile::make_tuple(
+                                        ck_tile::number<BLOCK_C4>{}, ck_tile::number<4>{}))),
                 ck_tile::make_tuple(
-                    ck_tile::make_pass_through_transform(ho),
-                    ck_tile::make_pass_through_transform(wo + right_pad_w),
-                    ck_tile::make_unmerge_transform(
-                        ck_tile::make_tuple(ck_tile::number<BLOCK_C4>{},
-                                            ck_tile::number<4>{}))),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2, 3>{}));
+                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}),
+                ck_tile::make_tuple(
+                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2, 3>{}));
         }
 
         // Padded DRAM write descriptor (wide): [wo_padded, BLOCK_C8, 8].
@@ -757,8 +750,8 @@ struct SharedDescriptors
         // Same as MakeDramWriteDescriptorWide but with channel padding for
         // k_per_group < GROUP_SIZE.
         template <int VectorSize = 1>
-        static CK_TILE_DEVICE auto MakeDramWriteDescriptorWidePadded(
-            int wo, int K_total, int k_per_group)
+        static CK_TILE_DEVICE auto
+        MakeDramWriteDescriptorWidePadded(int wo, int K_total, int k_per_group)
         {
             constexpr int right_pad_w  = TC::BLOCK_Q;
             constexpr int GROUP_SIZE   = TC::GROUP_SIZE;
@@ -767,8 +760,7 @@ struct SharedDescriptors
 
             // Step 1: raw 3D (no ho dim for wide path).
             const auto desc_raw = ck_tile::make_naive_tensor_descriptor(
-                ck_tile::make_tuple(wo,
-                                    ck_tile::number<BLOCK_GROUPS>{}, k_per_group),
+                ck_tile::make_tuple(wo, ck_tile::number<BLOCK_GROUPS>{}, k_per_group),
                 ck_tile::make_tuple(K_total, k_per_group, 1),
                 ck_tile::number<VectorSize>{},
                 ck_tile::number<1>{});
@@ -779,32 +771,30 @@ struct SharedDescriptors
                 ck_tile::make_tuple(
                     ck_tile::make_pad_transform(wo, 0, right_pad_w),
                     ck_tile::make_pass_through_transform(ck_tile::number<BLOCK_GROUPS>{}),
-                    ck_tile::make_pad_transform(k_per_group, ck_tile::number<0>{},
-                                               ck_tile::number<GROUP_SIZE>{} - k_per_group)),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}),
-                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{},
-                                    ck_tile::sequence<2>{}));
+                    ck_tile::make_pad_transform(k_per_group,
+                                                ck_tile::number<0>{},
+                                                ck_tile::number<GROUP_SIZE>{} - k_per_group)),
+                ck_tile::make_tuple(
+                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}),
+                ck_tile::make_tuple(
+                    ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}));
 
             // Step 4: merge channel → [wo_padded, BLOCK_C].
             const auto desc_merged = ck_tile::transform_tensor_descriptor(
                 desc_padded,
                 ck_tile::make_tuple(
                     ck_tile::make_pass_through_transform(wo + right_pad_w),
-                    ck_tile::make_merge_transform(
-                        ck_tile::make_tuple(ck_tile::number<BLOCK_GROUPS>{},
-                                            ck_tile::number<GROUP_SIZE>{}))),
+                    ck_tile::make_merge_transform(ck_tile::make_tuple(
+                        ck_tile::number<BLOCK_GROUPS>{}, ck_tile::number<GROUP_SIZE>{}))),
                 ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}),
                 ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
 
             // Step 5: unmerge to C8 → [wo_padded, BLOCK_C8, 8].
             return ck_tile::transform_tensor_descriptor(
                 desc_merged,
-                ck_tile::make_tuple(
-                    ck_tile::make_pass_through_transform(wo + right_pad_w),
-                    ck_tile::make_unmerge_transform(
-                        ck_tile::make_tuple(ck_tile::number<BLOCK_C8>{},
-                                            ck_tile::number<8>{}))),
+                ck_tile::make_tuple(ck_tile::make_pass_through_transform(wo + right_pad_w),
+                                    ck_tile::make_unmerge_transform(ck_tile::make_tuple(
+                                        ck_tile::number<BLOCK_C8>{}, ck_tile::number<8>{}))),
                 ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}),
                 ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1, 2>{}));
         }

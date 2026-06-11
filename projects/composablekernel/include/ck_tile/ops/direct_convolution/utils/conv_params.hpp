@@ -3,8 +3,7 @@
 
 #pragma once
 
-namespace ck_tile::direct_conv
-{
+namespace ck_tile::direct_conv {
 
 enum class DataType
 {
@@ -32,12 +31,9 @@ inline auto to_string(const Direction& dir) -> char const*
 {
     switch(dir)
     {
-    case Direction::Fprop:
-        return "Fprop";
-    case Direction::Dgrad:
-        return "Dgrad";
-    case Direction::Wgrad:
-        return "Wgrad";
+    case Direction::Fprop: return "Fprop";
+    case Direction::Dgrad: return "Dgrad";
+    case Direction::Wgrad: return "Wgrad";
     }
 }
 
@@ -98,7 +94,6 @@ struct Conv2dParams
     // The threshold is 32 (the smallest MFMA K-dimension, for 16x16x32).
     bool is_non_grouped() const { return groups == 1 && channels_per_group() > 32; }
 };
-
 
 template <Direction D>
 struct SizeView
@@ -206,6 +201,5 @@ struct SizeView
             return par.stride_w;
     }
 };
-
 
 } // namespace ck_tile::direct_conv

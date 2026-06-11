@@ -14,15 +14,9 @@ using OpLayout = MatrixLayout<4, 4, 16, __half>;
 // and MatrixLayout<4,4,16,float> for results
 using ResLayout = MatrixLayout<4, 4, 16, float>;
 
-TEST(MatrixLayout, ItemsPerRegister_Half)
-{
-    EXPECT_EQ(OpLayout::items_per_register(), 2);
-}
+TEST(MatrixLayout, ItemsPerRegister_Half) { EXPECT_EQ(OpLayout::items_per_register(), 2); }
 
-TEST(MatrixLayout, ItemsPerRegister_Float)
-{
-    EXPECT_EQ(ResLayout::items_per_register(), 1);
-}
+TEST(MatrixLayout, ItemsPerRegister_Float) { EXPECT_EQ(ResLayout::items_per_register(), 1); }
 
 TEST(MatrixLayout, OuterModM)
 {
@@ -60,7 +54,8 @@ TEST(MatrixLayout, UniqueTriples)
     std::set<std::tuple<int, int, int>> triples;
     for(int lane = 0; lane < 64; lane++)
     {
-        auto t = std::make_tuple(OpLayout::outer(lane), OpLayout::inner(lane, 0), OpLayout::batch(lane));
+        auto t =
+            std::make_tuple(OpLayout::outer(lane), OpLayout::inner(lane, 0), OpLayout::batch(lane));
         triples.insert(t);
     }
     EXPECT_EQ(triples.size(), 64u);

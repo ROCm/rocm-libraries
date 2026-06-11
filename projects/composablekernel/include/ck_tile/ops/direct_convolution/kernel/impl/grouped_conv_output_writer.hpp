@@ -25,10 +25,11 @@ struct OutputWriter
 {
     // Type aliases for temporary tile_window construction.
     using OutputDramDesc =
-        ck_tile::remove_cvref_t<decltype(TC::Output::MakeDramWriteDescriptorNarrow(int{}, int{}, int{}))>;
-    using OutputDramBuf =
-        ck_tile::buffer_view<ck_tile::address_space_enum::global, ElementType, ck_tile::index_t, true>;
-    using OutputDramView = ck_tile::tensor_view<OutputDramBuf, OutputDramDesc>;
+        ck_tile::remove_cvref_t<decltype(TC::Output::MakeDramWriteDescriptorNarrow(
+            int{}, int{}, int{}))>;
+    using OutputDramBuf = ck_tile::
+        buffer_view<ck_tile::address_space_enum::global, ElementType, ck_tile::index_t, true>;
+    using OutputDramView   = ck_tile::tensor_view<OutputDramBuf, OutputDramDesc>;
     using OutputDramWindow = ck_tile::remove_cvref_t<decltype(ck_tile::make_tile_window(
         OutputDramView{},
         ck_tile::make_tuple(ck_tile::number<1>{},
@@ -39,23 +40,23 @@ struct OutputWriter
         TC::Output::MakeDramWriteTileDistributionNarrow()))>;
 
     // Persistent members — scalar state only.
-    ElementType*      output_base;         // base output pointer for this block
-    ck_tile::index_t  output_elem_offset;  // per-thread element offset (within-tile spatial+channel)
-    ck_tile::index_t  row_stride_elems;    // elements per output row (wo * C)
-    bool              store_valid;         // whether this thread's output position is in bounds
+    ElementType* output_base;            // base output pointer for this block
+    ck_tile::index_t output_elem_offset; // per-thread element offset (within-tile spatial+channel)
+    ck_tile::index_t row_stride_elems;   // elements per output row (wo * C)
+    bool store_valid;                    // whether this thread's output position is in bounds
 
     // Additional state for padded path (k_per_group < GROUP_SIZE).
-    int               k_valid_count_;    // how many of thread's 4 output channels are valid (0-4)
+    int k_valid_count_; // how many of thread's 4 output channels are valid (0-4)
 
     template <typename BlockCoords_>
     CK_TILE_DEVICE OutputWriter(const BlockCoords_& bc,
-                            uint4*, // Unused, matches OutputWriterLds constructor signature.
-                            ElementType* __restrict__ out,
-                            int ho,
-                            int wo,
-                            int k_per_group = TC::GROUP_SIZE)
+                                uint4*, // Unused, matches OutputWriterLds constructor signature.
+                                ElementType* __restrict__ out,
+                                int ho,
+                                int wo,
+                                int k_per_group = TC::GROUP_SIZE)
     {
-        output_base = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.K + bc.block_k_out;
+        output_base      = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.K + bc.block_k_out;
         row_stride_elems = wo * bc.K;
 
         // Create temporary DRAM tile_window to extract per-thread offset and validity.
@@ -64,26 +65,27 @@ struct OutputWriter
 
             auto extract_offset_and_validity = [&](const auto& out_desc) {
                 auto out_buf = ck_tile::make_buffer_view<ck_tile::address_space_enum::global>(
-                    output_base,
-                    static_cast<ck_tile::index_t>(out_desc.get_element_space_size()));
-                auto out_view = ck_tile::tensor_view<
-                    ck_tile::remove_cvref_t<decltype(out_buf)>,
-                    ck_tile::remove_cvref_t<decltype(out_desc)>>{out_buf, out_desc};
+                    output_base, static_cast<ck_tile::index_t>(out_desc.get_element_space_size()));
+                auto out_view = ck_tile::tensor_view<ck_tile::remove_cvref_t<decltype(out_buf)>,
+                                                     ck_tile::remove_cvref_t<decltype(out_desc)>>{
+                    out_buf, out_desc};
 
-                auto tmp_window = ck_tile::make_tile_window(
-                    out_view,
-                    ck_tile::make_tuple(ck_tile::number<1>{},
-                                        ck_tile::number<TC::BLOCK_Q>{},
-                                        ck_tile::number<TC::BLOCK_C4>{},
-                                        ck_tile::number<4>{}),
-                    {0, bc.block_q, 0, 0},
-                    out_dist);
+                auto tmp_window =
+                    ck_tile::make_tile_window(out_view,
+                                              ck_tile::make_tuple(ck_tile::number<1>{},
+                                                                  ck_tile::number<TC::BLOCK_Q>{},
+                                                                  ck_tile::number<TC::BLOCK_C4>{},
+                                                                  ck_tile::number<4>{}),
+                                              {0, bc.block_q, 0, 0},
+                                              out_dist);
 
-                output_elem_offset = tmp_window.get_pre_computed_coords()[ck_tile::number<0>{}]
-                                                                         [ck_tile::number<1>{}].get_offset();
+                output_elem_offset =
+                    tmp_window.get_pre_computed_coords()[ck_tile::number<0>{}][ck_tile::number<1>{}]
+                        .get_offset();
                 store_valid = ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
-                    out_desc, tmp_window.get_pre_computed_coords()[ck_tile::number<0>{}]
-                                                                  [ck_tile::number<1>{}]);
+                    out_desc,
+                    tmp_window
+                        .get_pre_computed_coords()[ck_tile::number<0>{}][ck_tile::number<1>{}]);
             };
 
             if constexpr(Padded)
@@ -126,8 +128,8 @@ struct OutputWriter
         words[1] = ConvertFp32ToVec4<ElementType>::convert(acc_val[2], acc_val[3]);
 
         // 2. Direct store to DRAM: base + row offset + per-thread offset.
-        ck_tile::index_t store_offset = output_elem_offset
-            + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
+        ck_tile::index_t store_offset =
+            output_elem_offset + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
 
         if(k_valid_count_ == 4)
         {
@@ -144,7 +146,6 @@ struct OutputWriter
             }
         }
     }
-
 };
 
 // Shared OutputWriterLds for grouped convolution kernels.
@@ -155,7 +156,7 @@ struct OutputWriter
 //
 // The LDS write uses the MFMA distribution (all threads write 8B each).
 // The LDS read + DRAM store uses wider 16B (uint4) operations with only
-// STORE_VECS = BLOCK_Q * BLOCK_C8 threads active, this gives a better 
+// STORE_VECS = BLOCK_Q * BLOCK_C8 threads active, this gives a better
 // memory throughput (ds_read_b128 + global_store_dwordx4).
 //
 // Thread activity is managed by the store_active boolean member (tid <
@@ -180,86 +181,89 @@ struct OutputWriterLds
     // Type aliases for the LDS write path (MFMA distribution).
     static constexpr auto OutputLdsDist = TC::Mfma::MakeAccTileDistribution();
 
-    using OutputLdsBuf = ck_tile::buffer_view<ck_tile::address_space_enum::lds, ElementType, ck_tile::index_t, true>;
+    using OutputLdsBuf =
+        ck_tile::buffer_view<ck_tile::address_space_enum::lds, ElementType, ck_tile::index_t, true>;
 
-    using OutputLdsWriteDesc   = ck_tile::remove_cvref_t<decltype(TC::Output::MakeLdsWriteDescriptor())>;
+    using OutputLdsWriteDesc =
+        ck_tile::remove_cvref_t<decltype(TC::Output::MakeLdsWriteDescriptor())>;
     using OutputLdsWriteView   = ck_tile::tensor_view<OutputLdsBuf, OutputLdsWriteDesc>;
     using OutputLdsWriteWindow = ck_tile::remove_cvref_t<decltype(ck_tile::make_tile_window(
         OutputLdsWriteView{},
-        ck_tile::make_tuple(ck_tile::number<TC::BLOCK_Q>{},
-                            ck_tile::number<TC::BLOCK_C4>{},
-                            ck_tile::number<4>{}),
+        ck_tile::make_tuple(
+            ck_tile::number<TC::BLOCK_Q>{}, ck_tile::number<TC::BLOCK_C4>{}, ck_tile::number<4>{}),
         {0, 0, 0},
         OutputLdsDist))>;
 
     // Type aliases for the store path (wide store distribution).
     static constexpr auto StoreDist = TC::Output::MakeDramWriteTileDistributionWide();
 
-    using StoreLdsReadDesc = ck_tile::remove_cvref_t<decltype(TC::Output::MakeLdsReadDescriptorWide())>;
+    using StoreLdsReadDesc =
+        ck_tile::remove_cvref_t<decltype(TC::Output::MakeLdsReadDescriptorWide())>;
     using StoreLdsReadView = ck_tile::tensor_view<OutputLdsBuf, StoreLdsReadDesc>;
 
     using StoreDramDesc =
         ck_tile::remove_cvref_t<decltype(TC::Output::MakeDramWriteDescriptorWide(int{}, int{}))>;
-    using StoreDramBuf =
-        ck_tile::buffer_view<ck_tile::address_space_enum::global, ElementType, ck_tile::index_t, true>;
+    using StoreDramBuf = ck_tile::
+        buffer_view<ck_tile::address_space_enum::global, ElementType, ck_tile::index_t, true>;
     using StoreDramView = ck_tile::tensor_view<StoreDramBuf, StoreDramDesc>;
 
     // Persistent members — scalar state only.
-    ElementType*      output_base;           // base output pointer for this block
-    ElementType*      lds_base;              // LDS buffer base pointer
-    ck_tile::index_t  lds_write_offset;      // per-thread LDS write element offset (MFMA distribution)
-    ck_tile::index_t  lds_read_offset;       // precomputed swizzled LDS offset in elements
-    ck_tile::index_t  output_elem_offset;    // per-thread output DRAM element offset (C8-aligned)
-    ck_tile::index_t  row_stride_elems;      // wo * C elements per output row
-    ck_tile::index_t  lds_buf_size;          // LDS buffer size in elements
-    bool              store_active;          // whether this thread is one of the STORE_VECS active store threads
-    bool              store_valid;           // whether this thread's DRAM coordinate is in bounds
+    ElementType* output_base;            // base output pointer for this block
+    ElementType* lds_base;               // LDS buffer base pointer
+    ck_tile::index_t lds_write_offset;   // per-thread LDS write element offset (MFMA distribution)
+    ck_tile::index_t lds_read_offset;    // precomputed swizzled LDS offset in elements
+    ck_tile::index_t output_elem_offset; // per-thread output DRAM element offset (C8-aligned)
+    ck_tile::index_t row_stride_elems;   // wo * C elements per output row
+    ck_tile::index_t lds_buf_size;       // LDS buffer size in elements
+    bool store_active; // whether this thread is one of the STORE_VECS active store threads
+    bool store_valid;  // whether this thread's DRAM coordinate is in bounds
 
     // Number of valid channels in this thread's 8-element wide store vector (0-8).
     // Full when k_per_group >= GROUP_SIZE; partial when some channels are padded.
-    int               k_valid_in_vec_;
+    int k_valid_in_vec_;
 
     template <typename BlockCoords_>
     CK_TILE_DEVICE OutputWriterLds(const BlockCoords_& bc,
-                               uint4* output_lds,
-                               ElementType* __restrict__ out,
-                               int ho,
-                               int wo,
-                               int k_per_group = TC::GROUP_SIZE)
+                                   uint4* output_lds,
+                                   ElementType* __restrict__ out,
+                                   int ho,
+                                   int wo,
+                                   int k_per_group = TC::GROUP_SIZE)
     {
-        output_base = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.K + bc.block_k_out;
-        lds_base = reinterpret_cast<ElementType*>(output_lds);
+        output_base      = out + static_cast<size_t>(bc.block_n) * ho * wo * bc.K + bc.block_k_out;
+        lds_base         = reinterpret_cast<ElementType*>(output_lds);
         row_stride_elems = wo * bc.K;
-        lds_buf_size = static_cast<ck_tile::index_t>(
+        lds_buf_size     = static_cast<ck_tile::index_t>(
             ck_tile::max(TC::Weight::WEIGHT_LDS_SIZE_UINT4, TC::Output::OUTPUT_LDS_BUFFER_SIZE) *
             (sizeof(uint4) / sizeof(ElementType)));
 
         // LDS write offset (MFMA distribution → swizzled LDS layout).
         {
-            auto lds_buf = OutputLdsBuf{lds_base, lds_buf_size};
+            auto lds_buf                  = OutputLdsBuf{lds_base, lds_buf_size};
             constexpr auto lds_write_desc = TC::Output::MakeLdsWriteDescriptor();
-            auto lds_write_view = OutputLdsWriteView{lds_buf, lds_write_desc};
-            auto tmp_write = ck_tile::make_tile_window(
-                lds_write_view,
-                ck_tile::make_tuple(ck_tile::number<TC::BLOCK_Q>{},
-                                    ck_tile::number<TC::BLOCK_C4>{},
-                                    ck_tile::number<4>{}),
-                {0, 0, 0},
-                TC::Mfma::MakeAccTileDistribution());
+            auto lds_write_view           = OutputLdsWriteView{lds_buf, lds_write_desc};
+            auto tmp_write =
+                ck_tile::make_tile_window(lds_write_view,
+                                          ck_tile::make_tuple(ck_tile::number<TC::BLOCK_Q>{},
+                                                              ck_tile::number<TC::BLOCK_C4>{},
+                                                              ck_tile::number<4>{}),
+                                          {0, 0, 0},
+                                          TC::Mfma::MakeAccTileDistribution());
 
-            lds_write_offset = tmp_write.get_pre_computed_coords()[ck_tile::number<0>{}]
-                                                                  [ck_tile::number<1>{}].get_offset();
+            lds_write_offset =
+                tmp_write.get_pre_computed_coords()[ck_tile::number<0>{}][ck_tile::number<1>{}]
+                    .get_offset();
         }
 
         // LDS read offset (store distribution → swizzled LDS layout).
         // The store distribution maps all threads to [STORE_Q, BLOCK_C8, 8].
         // The descriptor applies the same swizzle as the write descriptor.
         {
-            constexpr auto store_dist = TC::Output::MakeDramWriteTileDistributionWide();
+            constexpr auto store_dist    = TC::Output::MakeDramWriteTileDistributionWide();
             constexpr auto lds_read_desc = TC::Output::MakeLdsReadDescriptorWide();
-            auto lds_buf = OutputLdsBuf{lds_base, lds_buf_size};
-            auto lds_read_view = StoreLdsReadView{lds_buf, lds_read_desc};
-            auto tmp_read = ck_tile::make_tile_window(
+            auto lds_buf                 = OutputLdsBuf{lds_base, lds_buf_size};
+            auto lds_read_view           = StoreLdsReadView{lds_buf, lds_read_desc};
+            auto tmp_read                = ck_tile::make_tile_window(
                 lds_read_view,
                 ck_tile::make_tuple(ck_tile::number<TC::Output::STORE_Q>{},
                                     ck_tile::number<TC::BLOCK_C8>{},
@@ -267,8 +271,9 @@ struct OutputWriterLds
                 {0, 0, 0},
                 store_dist);
 
-            lds_read_offset = tmp_read.get_pre_computed_coords()[ck_tile::number<0>{}]
-                                                                [ck_tile::number<1>{}].get_offset();
+            lds_read_offset =
+                tmp_read.get_pre_computed_coords()[ck_tile::number<0>{}][ck_tile::number<1>{}]
+                    .get_offset();
         }
 
         // DRAM store offset and validity (store distribution → padded DRAM layout).
@@ -283,11 +288,10 @@ struct OutputWriterLds
 
             auto extract_store_offset = [&](const auto& out_desc) {
                 auto out_buf = ck_tile::make_buffer_view<ck_tile::address_space_enum::global>(
-                    output_base,
-                    static_cast<ck_tile::index_t>(out_desc.get_element_space_size()));
-                auto out_view = ck_tile::tensor_view<
-                    ck_tile::remove_cvref_t<decltype(out_buf)>,
-                    ck_tile::remove_cvref_t<decltype(out_desc)>>{out_buf, out_desc};
+                    output_base, static_cast<ck_tile::index_t>(out_desc.get_element_space_size()));
+                auto out_view = ck_tile::tensor_view<ck_tile::remove_cvref_t<decltype(out_buf)>,
+                                                     ck_tile::remove_cvref_t<decltype(out_desc)>>{
+                    out_buf, out_desc};
                 auto tmp_dram = ck_tile::make_tile_window(
                     out_view,
                     ck_tile::make_tuple(ck_tile::number<TC::Output::STORE_Q>{},
@@ -296,11 +300,12 @@ struct OutputWriterLds
                     {bc.block_q, 0, 0},
                     store_dist);
 
-                output_elem_offset = tmp_dram.get_pre_computed_coords()[ck_tile::number<0>{}]
-                                                                       [ck_tile::number<1>{}].get_offset();
+                output_elem_offset =
+                    tmp_dram.get_pre_computed_coords()[ck_tile::number<0>{}][ck_tile::number<1>{}]
+                        .get_offset();
                 store_valid = ck_tile::coordinate_has_valid_offset_assuming_top_index_is_valid(
-                    out_desc, tmp_dram.get_pre_computed_coords()[ck_tile::number<0>{}]
-                                                                [ck_tile::number<1>{}]);
+                    out_desc,
+                    tmp_dram.get_pre_computed_coords()[ck_tile::number<0>{}][ck_tile::number<1>{}]);
             };
 
             if constexpr(Padded)
@@ -311,24 +316,21 @@ struct OutputWriterLds
                         TC::Output::MakeDramWriteDescriptorWidePadded(wo, bc.K, k_per_group));
                     // Compute how many of this thread's 8 output channels are valid.
                     // output_elem_offset % k_per_group gives the channel position within the group.
-                    int c_in_group = static_cast<int>(output_elem_offset % k_per_group);
+                    int c_in_group  = static_cast<int>(output_elem_offset % k_per_group);
                     k_valid_in_vec_ = ck_tile::min(8, k_per_group - c_in_group);
                 }
                 else
                 {
-                    extract_store_offset(
-                        TC::Output::MakeDramWriteDescriptorWide(wo, bc.K));
+                    extract_store_offset(TC::Output::MakeDramWriteDescriptorWide(wo, bc.K));
                     k_valid_in_vec_ = 8;
                 }
             }
             else
             {
-                extract_store_offset(
-                    TC::Output::MakeDramWriteDescriptorWide(wo, bc.K));
+                extract_store_offset(TC::Output::MakeDramWriteDescriptorWide(wo, bc.K));
                 k_valid_in_vec_ = 8;
             }
         }
-
     }
 
     // Convert fp32x4 accumulator to element type and write through LDS to global memory.
@@ -353,11 +355,11 @@ struct OutputWriterLds
         {
             // 4. Read 16B (uint4) from LDS at distribution-computed swizzled offset.
             const uint4* output_lds_uint4 = reinterpret_cast<const uint4*>(lds_base);
-            uint4 lds_data = output_lds_uint4[lds_read_offset / 8];
+            uint4 lds_data                = output_lds_uint4[lds_read_offset / 8];
 
             // 5. Store to DRAM: base + row offset + per-thread offset.
-            ck_tile::index_t store_offset = output_elem_offset
-                + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
+            ck_tile::index_t store_offset =
+                output_elem_offset + static_cast<ck_tile::index_t>(p_out) * row_stride_elems;
 
             if(k_valid_in_vec_ == 8)
             {

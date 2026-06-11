@@ -35,26 +35,26 @@ template <typename TC,
           typename InputLoaderT,
           typename WeightLoaderT,
           typename OutputWriterT,
-          int INNER_KW = cfg.kw,
+          int INNER_KW         = cfg.kw,
           typename ElementType = _Float16>
 CK_TILE_DEVICE void grouped_conv_compute_loop(const ElementType* __restrict__ in,
-                                          const ElementType* __restrict__ wei,
-                                          ElementType* __restrict__ out,
-                                          int N,
-                                          int groups,
-                                          int c_per_group,
-                                          int k_per_group,
-                                          int hi,
-                                          int wi,
-                                          int ho,
-                                          int wo,
-                                          int py,
-                                          int px)
+                                              const ElementType* __restrict__ wei,
+                                              ElementType* __restrict__ out,
+                                              int N,
+                                              int groups,
+                                              int c_per_group,
+                                              int k_per_group,
+                                              int hi,
+                                              int wi,
+                                              int ho,
+                                              int wo,
+                                              int py,
+                                              int px)
 {
     // --- Unified LDS buffer ---
     // Weights are loaded first into LDS, consumed, then never accessed again.
     // After that, the same LDS memory is reused for input double-buffering
-    // (and output staging for the LDS epilogue path). 
+    // (and output staging for the LDS epilogue path).
     constexpr bool use_lds_epilogue = (cfg.epilogue == EpilogueType::RegistersToLdsToGlobalMemory);
 
     static constexpr int INPUT_TOTAL = TC::NUM_INPUT_LDS_BUFFERS * TC::INPUT_LDS_BUFFER_SIZE_C8;
@@ -63,10 +63,9 @@ CK_TILE_DEVICE void grouped_conv_compute_loop(const ElementType* __restrict__ in
     // But the __shared__ allocation only needs WEIGHT_LDS_SIZE_UINT4 because
     // the DRAM pad transform marks padding rows as OOB, and the hardware
     // suppresses LDS writes for OOB buffer_load_lds lanes.
-    static constexpr int WEIGHT_LDS  = TC::Weight::WEIGHT_LDS_SIZE_UINT4;
-    static constexpr int IO_LDS      = use_lds_epilogue
-                                            ? INPUT_TOTAL + TC::Output::OUTPUT_LDS_BUFFER_SIZE
-                                            : INPUT_TOTAL;
+    static constexpr int WEIGHT_LDS = TC::Weight::WEIGHT_LDS_SIZE_UINT4;
+    static constexpr int IO_LDS =
+        use_lds_epilogue ? INPUT_TOTAL + TC::Output::OUTPUT_LDS_BUFFER_SIZE : INPUT_TOTAL;
     static constexpr int UNIFIED_LDS_SIZE = (WEIGHT_LDS > IO_LDS) ? WEIGHT_LDS : IO_LDS;
     __shared__ uint4 lds_buf[UNIFIED_LDS_SIZE];
     // Weight phase:  weight_lds = lds_buf (weights loaded at start, consumed before input)
@@ -85,8 +84,8 @@ CK_TILE_DEVICE void grouped_conv_compute_loop(const ElementType* __restrict__ in
     // not swapped (always GKYXC), so the weight loader keeps the original
     // c_per_group / k_per_group.
     constexpr bool is_dgrad = (cfg.direction == Direction::Dgrad);
-    const int in_cpg  = is_dgrad ? k_per_group : c_per_group;
-    const int out_kpg = is_dgrad ? c_per_group : k_per_group;
+    const int in_cpg        = is_dgrad ? k_per_group : c_per_group;
+    const int out_kpg       = is_dgrad ? c_per_group : k_per_group;
 
     BlockCoordsT bc(groups, in_cpg, out_kpg);
     if(bc.block_n >= N)
@@ -101,11 +100,11 @@ CK_TILE_DEVICE void grouped_conv_compute_loop(const ElementType* __restrict__ in
 
     wl.read_from_lds(lds_buf);
 
-    // Note on padding: 
+    // Note on padding:
     // py is not passed to InputLoader's DRAM descriptor because the
     // kernel iterates over physical input rows (0..hi-1), not padded rows.
     // The py offset is handled by the compute loop's output flush logic
-    // (p_out = y + py - (kh-1)).  
+    // (p_out = y + py - (kh-1)).
     //
     // px is needed because the tile window
     // spans block_q..block_q+BLOCK_W-1 horizontally and needs OOB checking
@@ -113,9 +112,10 @@ CK_TILE_DEVICE void grouped_conv_compute_loop(const ElementType* __restrict__ in
     //
     // We must have unit stride and dilation for now.
     constexpr int y_padding = 0;
-    constexpr int stride = 1;
-    constexpr int dilation = 1;
-    InputLoaderT il(bc, input_lds, in, hi, wi, px, y_padding, dilation, dilation, stride, stride, in_cpg);
+    constexpr int stride    = 1;
+    constexpr int dilation  = 1;
+    InputLoaderT il(
+        bc, input_lds, in, hi, wi, px, y_padding, dilation, dilation, stride, stride, in_cpg);
     OutputWriterT ow(bc, output_lds, out, ho, wo, out_kpg);
 
     __syncthreads();
@@ -136,167 +136,146 @@ CK_TILE_DEVICE void grouped_conv_compute_loop(const ElementType* __restrict__ in
 
     // --- Main loop: iterate over input rows ---
     // Each input row constributes up to cfg.kh output rows.
-    // The acc[kh] array has one slot per output row (each slot holds the partial sum over input channels for that output row)
+    // The acc[kh] array has one slot per output row (each slot holds the partial sum over input
+    // channels for that output row)
     for(int y_base = 0; y_base + cfg.kh <= hi; y_base += cfg.kh)
     {
         // The main loop iterates in steps over cfg.kh input rows.
         // This static loop unrolls the cfg.kh loops over the input rows.
-        ck_tile::static_for<0, cfg.kh, 1>{}(
-            [&](auto y_local_n)
+        ck_tile::static_for<0, cfg.kh, 1>{}([&](auto y_local_n) {
+            constexpr int Y_LOCAL = y_local_n.value;
+            ck_tile::s_waitcnt<0>();
+            __syncthreads();
+
+            // Input row index that maps to cfg.kh output rows, for this iteration of the main loop.
+            // acc[p_idx] holds the partials sums for the output rows.
+            int y = y_base + Y_LOCAL;
+
+            // Fetch the next input slice into LDS while computing on the current slice.
+            // The first slice has been pre-fetch already.
+            if((y + 1) < hi)
             {
-                constexpr int Y_LOCAL = y_local_n.value;
-                ck_tile::s_waitcnt<0>();
-                __syncthreads();
+                il.fetch_tile_to_lds(tic);
+            }
 
-                // Input row index that maps to cfg.kh output rows, for this iteration of the main loop.
-                // acc[p_idx] holds the partials sums for the output rows.
-                int y = y_base + Y_LOCAL;
+            // Loop over the filter width dimension (S) and
+            // accumulate MFMA products for this input row with the corresponding filter weights.
+            // INNER_KW defaults to cfg.kw; for the 8c Toeplitz kernel it is 1
+            // (S is embedded in the MFMA K=32 dimension).
+            ck_tile::static_for<0, INNER_KW, 1>{}([&](auto s_n) {
+                constexpr int S = s_n.value;
+                // Read one input column strip from LDS into registers.
+                // Each thread reads input[n, y, q+S, :] into input_reg, where q is the horizontal
+                // offset of the tile. All input channes are read and distributed accross the
+                // threads in the block. The register type is InputLoaderT::input_type (fp16x4_t for
+                // 4c/16c, fp16x8_t for 8c Toeplitz and 32c).
+                typename InputLoaderT::input_type input_reg;
+                il.read_from_lds(input_reg, S, toc);
 
-                // Fetch the next input slice into LDS while computing on the current slice.
-                // The first slice has been pre-fetch already.
-                if((y + 1) < hi)
-                {
-                    il.fetch_tile_to_lds(tic);
-                }
+                // Accumulate the MFMA products for this input column strip
+                // with the corresponding filter weights.
+                ck_tile::static_for<0, cfg.kh, 1>{}([&](auto r_n) {
+                    constexpr int R = r_n.value;
+                    // Which output row (p) this (y,R) pair contributes to.
+                    // Recall that this input row contributes to cfg.kh output rows, depending on
+                    // the filter row (R) being applied. p + R = y --> p = y - R = (y_local +
+                    // y_base) - R Since the acc array is circular, we wrap p_idx around cfg.kh
+                    // Because y_base = iy * cfg.kh, the y_local is the only thing that affects the
+                    // p_idx, so we can express it purely in terms of y_local and R. Normalizing the
+                    // index on interval 0,...,cfg.kh-1 range:, we get:
+                    constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
 
-                // Loop over the filter width dimension (S) and
-                // accumulate MFMA products for this input row with the corresponding filter weights.
-                // INNER_KW defaults to cfg.kw; for the 8c Toeplitz kernel it is 1
-                // (S is embedded in the MFMA K=32 dimension).
-                ck_tile::static_for<0, INNER_KW, 1>{}(
-                    [&](auto s_n)
-                    {
-                        constexpr int S = s_n.value;
-                        // Read one input column strip from LDS into registers.
-                        // Each thread reads input[n, y, q+S, :] into input_reg, where q is the horizontal offset of the tile.
-                        // All input channes are read and distributed accross the threads in the block.
-                        // The register type is InputLoaderT::input_type (fp16x4_t for 4c/16c, fp16x8_t for 8c Toeplitz and 32c).
-                        typename InputLoaderT::input_type input_reg;
-                        il.read_from_lds(input_reg, S, toc);
+                    // The final sum over the input channels for this (y,R,S) position is computed
+                    // by MFMAing the input_reg with the corresponding filter weights, and
+                    // accumulating into acc[p_idx].
+                    if constexpr(cfg.direction == Direction::Dgrad)
+                        acc[p_idx] =
+                            mfma_fn(wl.template get_transposed<R, S>(), input_reg, acc[p_idx]);
+                    else
+                        acc[p_idx] = mfma_fn(wl.template get<R, S>(), input_reg, acc[p_idx]);
+                });
+            });
 
-                        // Accumulate the MFMA products for this input column strip
-                        // with the corresponding filter weights.
-                        ck_tile::static_for<0, cfg.kh, 1>{}(
-                            [&](auto r_n)
-                            {
-                                constexpr int R = r_n.value;
-                                // Which output row (p) this (y,R) pair contributes to.
-                                // Recall that this input row contributes to cfg.kh output rows, depending on the filter row (R) being applied.
-                                // p + R = y --> p = y - R = (y_local + y_base) - R
-                                // Since the acc array is circular, we wrap p_idx around cfg.kh
-                                // Because y_base = iy * cfg.kh, the y_local is the only thing that affects the p_idx, 
-                                // so we can express it purely in terms of y_local and R.
-                                // Normalizing the index on interval 0,...,cfg.kh-1 range:, we get:
-                                constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
+            tic ^= 1;
+            toc ^= 1;
 
-                                // The final sum over the input channels for this (y,R,S) position is computed
-                                // by MFMAing the input_reg with the corresponding filter weights, and accumulating into acc[p_idx].
-                                if constexpr(cfg.direction == Direction::Dgrad)
-                                    acc[p_idx] = mfma_fn(
-                                        wl.template get_transposed<R, S>(),
-                                        input_reg,
-                                        acc[p_idx]);
-                                else
-                                    acc[p_idx] = mfma_fn(
-                                        wl.template get<R, S>(),
-                                        input_reg,
-                                        acc[p_idx]);
-                            });
-                    });
-
-                tic ^= 1;
-                toc ^= 1;
-
-                // Flush completed output row to global memory.
-                // After processing input row y = y_base + Y_LOCAL,
-                // the output row p_out = y - (kh-1) + py  (py is padding in y-direction) has received contributions from all R values
-                // (since the earliest contributor to p_out was input row p_out - py, processed kh-1 steps ago).
-                // That slot is done and can be flushed to global memory.
-                // The slot index is a compile-time const that is computed from the accumulator index definition
-                // p_idx = (y_local - R + kh) % kh, with R = kh-1 (the last contributor to p_out).
-                constexpr int P_IDX_FLUSH = (Y_LOCAL + 1) % cfg.kh;
-                int p_out             = y + py - (cfg.kh - 1);
-                if(p_out >= 0 && p_out < ho)
-                    ow.flush(acc[P_IDX_FLUSH], p_out);
-                acc[P_IDX_FLUSH] = Zero;
-
-            }); // end of loop over Y_LOCAL (contributions from one input row to multiple output rows)
+            // Flush completed output row to global memory.
+            // After processing input row y = y_base + Y_LOCAL,
+            // the output row p_out = y - (kh-1) + py  (py is padding in y-direction) has received
+            // contributions from all R values (since the earliest contributor to p_out was input
+            // row p_out - py, processed kh-1 steps ago). That slot is done and can be flushed to
+            // global memory. The slot index is a compile-time const that is computed from the
+            // accumulator index definition p_idx = (y_local - R + kh) % kh, with R = kh-1 (the last
+            // contributor to p_out).
+            constexpr int P_IDX_FLUSH = (Y_LOCAL + 1) % cfg.kh;
+            int p_out                 = y + py - (cfg.kh - 1);
+            if(p_out >= 0 && p_out < ho)
+                ow.flush(acc[P_IDX_FLUSH], p_out);
+            acc[P_IDX_FLUSH] = Zero;
+        }); // end of loop over Y_LOCAL (contributions from one input row to multiple output rows)
     } // end of the main loop
 
     // --- Remainder loop: hi % kh leftover rows ---
     {
         int y_rem_base = (hi / cfg.kh) * cfg.kh;
-        ck_tile::static_for<0, cfg.kh, 1>{}(
-            [&](auto y_local_n)
+        ck_tile::static_for<0, cfg.kh, 1>{}([&](auto y_local_n) {
+            constexpr int Y_LOCAL = y_local_n.value;
+            if(Y_LOCAL >= hi % cfg.kh)
+                return;
+            int y = y_rem_base + Y_LOCAL;
+
+            ck_tile::s_waitcnt<0>();
+            __syncthreads();
+
+            if((y + 1) < hi)
             {
-                constexpr int Y_LOCAL = y_local_n.value;
-                if(Y_LOCAL >= hi % cfg.kh)
-                    return;
-                int y = y_rem_base + Y_LOCAL;
+                il.fetch_tile_to_lds(tic);
+            }
 
-                ck_tile::s_waitcnt<0>();
-                __syncthreads();
+            ck_tile::static_for<0, INNER_KW, 1>{}([&](auto s_n) {
+                constexpr int S = s_n.value;
+                typename InputLoaderT::input_type input_reg;
+                il.read_from_lds(input_reg, S, toc);
 
-                if((y + 1) < hi)
-                {
-                    il.fetch_tile_to_lds(tic);
-                }
-
-                ck_tile::static_for<0, INNER_KW, 1>{}(
-                    [&](auto s_n)
-                    {
-                        constexpr int S = s_n.value;
-                        typename InputLoaderT::input_type input_reg;
-                        il.read_from_lds(input_reg, S, toc);
-
-                        ck_tile::static_for<0, cfg.kh, 1>{}(
-                            [&](auto r_n)
-                            {
-                                constexpr int R = r_n.value;
-                                constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
-                                if constexpr(cfg.direction == Direction::Dgrad)
-                                    acc[p_idx] = mfma_fn(
-                                        wl.template get_transposed<R, S>(),
-                                        input_reg,
-                                        acc[p_idx]);
-                                else
-                                    acc[p_idx] = mfma_fn(
-                                        wl.template get<R, S>(),
-                                        input_reg,
-                                        acc[p_idx]);
-                            });
-                    });
-
-                tic ^= 1;
-                toc ^= 1;
-
-                constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
-                int p_out             = y + py - (cfg.kh - 1);
-                if(p_out >= 0 && p_out < ho)
-                    ow.flush(acc[P_FLUSH], p_out);
-                acc[P_FLUSH] = Zero;
+                ck_tile::static_for<0, cfg.kh, 1>{}([&](auto r_n) {
+                    constexpr int R     = r_n.value;
+                    constexpr int p_idx = (Y_LOCAL - R + cfg.kh) % cfg.kh;
+                    if constexpr(cfg.direction == Direction::Dgrad)
+                        acc[p_idx] =
+                            mfma_fn(wl.template get_transposed<R, S>(), input_reg, acc[p_idx]);
+                    else
+                        acc[p_idx] = mfma_fn(wl.template get<R, S>(), input_reg, acc[p_idx]);
+                });
             });
+
+            tic ^= 1;
+            toc ^= 1;
+
+            constexpr int P_FLUSH = (Y_LOCAL + 1) % cfg.kh;
+            int p_out             = y + py - (cfg.kh - 1);
+            if(p_out >= 0 && p_out < ho)
+                ow.flush(acc[P_FLUSH], p_out);
+            acc[P_FLUSH] = Zero;
+        });
     }
 
     // --- Tail flush: output rows not flushed by the main/remainder loops ---
     // The __syncthreads() before each flush separates the previous iteration's
-    // LDS reads from this iteration's LDS writes. 
+    // LDS reads from this iteration's LDS writes.
     for(int p_out = hi - cfg.kh + 1 + py; p_out < ho; p_out++)
     {
         __syncthreads();
         int p_idx = (p_out - py + cfg.kh) % cfg.kh;
         fp32x4_t slot;
         // Select the accumulator slot matching the runtime p_idx at compile time.
-        ck_tile::static_for<0, cfg.kh, 1>{}(
-            [&](auto p_n)
+        ck_tile::static_for<0, cfg.kh, 1>{}([&](auto p_n) {
+            constexpr int P = p_n.value;
+            if(p_idx == P)
             {
-                constexpr int P = p_n.value;
-                if(p_idx == P)
-                {
-                    slot   = acc[P];
-                    acc[P] = Zero;
-                }
-            });
+                slot   = acc[P];
+                acc[P] = Zero;
+            }
+        });
         ow.flush(slot, p_out);
     }
 }

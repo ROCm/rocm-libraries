@@ -253,9 +253,8 @@ struct pad : public base_transform<1, 1>
     //  cross a pad boundary — the runtime validity check handles that.)
     template <typename LowVectorLengths, typename LowVectorStrides>
     CK_TILE_HOST_DEVICE static constexpr auto
-    calculate_upper_dimension_safe_vector_length_strides(
-        const LowVectorLengths& low_vector_lengths,
-        const LowVectorStrides& low_vector_strides)
+    calculate_upper_dimension_safe_vector_length_strides(const LowVectorLengths& low_vector_lengths,
+                                                         const LowVectorStrides& low_vector_strides)
     {
         return make_tuple(low_vector_lengths, low_vector_strides);
     }
@@ -1559,10 +1558,9 @@ struct inverse_cyclic_shift_t : public base_transform<2, 2>
                       "wrong! inconsistent # of dimension");
 
         idx_low(number<0>{}) = idx_up[number<0>{}];
-        idx_low(number<1>{}) =
-            (idx_up[number<1>{}] + up_lengths_[number<1>{}] -
-             idx_up[number<0>{}] % up_lengths_[number<1>{}]) %
-            up_lengths_[number<1>{}];
+        idx_low(number<1>{}) = (idx_up[number<1>{}] + up_lengths_[number<1>{}] -
+                                idx_up[number<0>{}] % up_lengths_[number<1>{}]) %
+                               up_lengths_[number<1>{}];
     }
 
     template <typename LowIdxDiff, typename UpIdxDiff, typename LowIdx, typename UpIdx>
@@ -1981,7 +1979,8 @@ CK_TILE_HOST_DEVICE constexpr auto make_cyclic_shift_transform(const LowLengths&
 }
 
 template <typename LowLengths>
-CK_TILE_HOST_DEVICE constexpr auto make_inverse_cyclic_shift_transform(const LowLengths& low_lengths)
+CK_TILE_HOST_DEVICE constexpr auto
+make_inverse_cyclic_shift_transform(const LowLengths& low_lengths)
 {
     return inverse_cyclic_shift_t<LowLengths>{low_lengths};
 }

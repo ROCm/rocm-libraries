@@ -22,20 +22,32 @@ template <DataType DT>
 struct TileConvVariant16c<Version::v2, DT>
 {
     static bool is_applicable(const Conv2dParams& par)
-    { return grouped_16c_tile::v2::is_applicable<DT>(par); }
+    {
+        return grouped_16c_tile::v2::is_applicable<DT>(par);
+    }
 
     template <auto Cfg>
     static bool is_config_compatible(const Conv2dParams& par)
-    { return grouped_16c_tile::v2::is_valid_config<DT>(par, Cfg); }
+    {
+        return grouped_16c_tile::v2::is_valid_config<DT>(par, Cfg);
+    }
 
     template <auto Cfg>
     static LaunchParams get_launch_params(const Conv2dParams& par)
-    { return grouped_16c_tile::v2::get_launch_params<Cfg>(par); }
+    {
+        return grouped_16c_tile::v2::get_launch_params<Cfg>(par);
+    }
 
     template <auto Cfg>
-    static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
-                              const void* in, const void* wei, void* out, hipStream_t stream)
-    { grouped_16c_tile::v2::launch_kernel<Cfg, DT>(lp, par, in, wei, out, stream); }
+    static void launch_kernel(const LaunchParams& lp,
+                              const Conv2dParams& par,
+                              const void* in,
+                              const void* wei,
+                              void* out,
+                              hipStream_t stream)
+    {
+        grouped_16c_tile::v2::launch_kernel<Cfg, DT>(lp, par, in, wei, out, stream);
+    }
 };
 
 // ============================================================================
@@ -46,8 +58,8 @@ template <auto Cfg, Version Ver = Version::v2, DataType DT = DataType::fp16>
 struct DirectTileConvForward16CKernel
     : DirectConvKernel<DirectTileConvForward16CKernel<Cfg, Ver, DT>, Cfg>
 {
-    using V = TileConvVariant16c<Ver, DT>;
-    static constexpr bool kIsFprop = true;
+    using V                             = TileConvVariant16c<Ver, DT>;
+    static constexpr bool kIsFprop      = true;
     static constexpr DataType kDataType = DT;
     static std::string GetNamePrefix()
     {
@@ -62,8 +74,8 @@ template <auto Cfg, Version Ver = Version::v2, DataType DT = DataType::fp16>
 struct DirectTileConvBwdData16CKernel
     : DirectConvKernel<DirectTileConvBwdData16CKernel<Cfg, Ver, DT>, Cfg>
 {
-    using V = TileConvVariant16c<Ver, DT>;
-    static constexpr bool kIsFprop = false;
+    using V                             = TileConvVariant16c<Ver, DT>;
+    static constexpr bool kIsFprop      = false;
     static constexpr DataType kDataType = DT;
     static std::string GetNamePrefix()
     {

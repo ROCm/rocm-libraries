@@ -41,13 +41,14 @@ using namespace grouped_4c_tile::v3;
 // Config indices
 //
 // KernelConfigurations<>::configs_map.get(9)  — Fprop, no swizzle, direct DRAM (OutputWriter)
-// KernelConfigurations<>::configs_map.get(49) — Fprop, CyclicShift, vector_size=1, direct DRAM (OutputWriter)
+// KernelConfigurations<>::configs_map.get(49) — Fprop, CyclicShift, vector_size=1, direct DRAM
+// (OutputWriter)
 // ============================================================================
-static constexpr int CFG_DIRECT   = 9;
-static constexpr int CFG_VEC8     = 43;
-static constexpr int CFG_VEC4     = 47;
-static constexpr int CFG_VEC2     = 48;
-static constexpr int CFG_VEC1     = 49;
+static constexpr int CFG_DIRECT = 9;
+static constexpr int CFG_VEC8   = 43;
+static constexpr int CFG_VEC4   = 47;
+static constexpr int CFG_VEC2   = 48;
+static constexpr int CFG_VEC1   = 49;
 
 // ============================================================================
 // Test kernel: calls OutputWriter::flush for row 0 with a known accumulator.
@@ -56,15 +57,11 @@ static constexpr int CFG_VEC1     = 49;
 // After flush, the host verifies which output positions were written.
 // ============================================================================
 template <int CfgIdx>
-__global__ void test_output_write_kernel(_Float16* __restrict__ out,
-                                          int groups,
-                                          int k_per_group,
-                                          int ho,
-                                          int wo,
-                                          int c_per_group = 0)
+__global__ void test_output_write_kernel(
+    _Float16* __restrict__ out, int groups, int k_per_group, int ho, int wo, int c_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    using TC = TileConstants<KernelConfigurations<>::configs_map.get(CfgIdx)>;
+    using TC           = TileConstants<KernelConfigurations<>::configs_map.get(CfgIdx)>;
     constexpr auto cfg = KernelConfigurations<>::configs_map.get(CfgIdx);
 
     // When c_per_group is 0 (default), use GROUP_SIZE for backward compatibility.
@@ -89,14 +86,13 @@ __global__ void test_output_write_kernel(_Float16* __restrict__ out,
 #endif
 }
 
-
 // ============================================================================
 // Test fixture
 // ============================================================================
 class OutputWriterTest : public ::testing::Test
 {
-protected:
-    static constexpr int GROUP_SIZE = 4;  // fixed for 4c kernel
+    protected:
+    static constexpr int GROUP_SIZE    = 4; // fixed for 4c kernel
     static constexpr _Float16 SENTINEL = static_cast<_Float16>(-999.0f);
 
     // Launch the kernel and verify output contents.
@@ -105,14 +101,14 @@ protected:
     template <int CfgIdx>
     void run_and_verify(int k_per_group, int c_per_group = 0)
     {
-        using TC = TileConstants<KernelConfigurations<>::configs_map.get(CfgIdx)>;
-        constexpr auto cfg = KernelConfigurations<>::configs_map.get(CfgIdx);
-        constexpr int BLOCK_SIZE = cfg.block_size();
-        constexpr int BLOCK_Q = TC::BLOCK_Q;
+        using TC                   = TileConstants<KernelConfigurations<>::configs_map.get(CfgIdx)>;
+        constexpr auto cfg         = KernelConfigurations<>::configs_map.get(CfgIdx);
+        constexpr int BLOCK_SIZE   = cfg.block_size();
+        constexpr int BLOCK_Q      = TC::BLOCK_Q;
         constexpr int BLOCK_GROUPS = cfg.block_groups();
 
-        const int groups = BLOCK_GROUPS;
-        const int K_total = groups * k_per_group;  // actual output channels
+        const int groups  = BLOCK_GROUPS;
+        const int K_total = groups * k_per_group; // actual output channels
 
         // Output dimensions: just big enough for the tile.
         const int wo = BLOCK_Q + 4;
@@ -124,15 +120,15 @@ protected:
 
         _Float16* d_out = nullptr;
         ck_tile::hip_check_error(hipMalloc(&d_out, out_size * sizeof(_Float16)));
-        ck_tile::hip_check_error(hipMemcpy(
-            d_out, out_host.data(), out_size * sizeof(_Float16), hipMemcpyHostToDevice));
+        ck_tile::hip_check_error(
+            hipMemcpy(d_out, out_host.data(), out_size * sizeof(_Float16), hipMemcpyHostToDevice));
 
-        test_output_write_kernel<CfgIdx><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
-            d_out, groups, k_per_group, ho, wo, c_per_group);
+        test_output_write_kernel<CfgIdx>
+            <<<dim3(1, 1, 1), BLOCK_SIZE>>>(d_out, groups, k_per_group, ho, wo, c_per_group);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
-        ck_tile::hip_check_error(hipMemcpy(
-            out_host.data(), d_out, out_size * sizeof(_Float16), hipMemcpyDeviceToHost));
+        ck_tile::hip_check_error(
+            hipMemcpy(out_host.data(), d_out, out_size * sizeof(_Float16), hipMemcpyDeviceToHost));
 
         // Verify: row 0, columns [0, BLOCK_Q) should be written (non-sentinel).
         // Row 1 and columns >= BLOCK_Q should remain sentinel.
@@ -156,15 +152,15 @@ protected:
         // writing k_per_group * BLOCK_GROUPS channels total per spatial position.
 
         // Count how many positions were written (non-sentinel) vs should have been.
-        int written_count = 0;
+        int written_count    = 0;
         int expected_written = 0;
 
         for(int q = 0; q < wo; q++)
         {
             for(int k = 0; k < K_total; k++)
             {
-                int idx = 0 * wo * K_total + q * K_total + k;
-                float val = static_cast<float>(out_host[idx]);
+                int idx          = 0 * wo * K_total + q * K_total + k;
+                float val        = static_cast<float>(out_host[idx]);
                 bool is_sentinel = (val == static_cast<float>(SENTINEL));
 
                 // Expected behavior: row 0, q < BLOCK_Q should be written.
@@ -178,9 +174,8 @@ protected:
                 if(q >= BLOCK_Q)
                 {
                     // Beyond tile: must remain sentinel.
-                    EXPECT_TRUE(is_sentinel)
-                        << "q=" << q << " k=" << k << " val=" << val
-                        << " (should be sentinel beyond BLOCK_Q)";
+                    EXPECT_TRUE(is_sentinel) << "q=" << q << " k=" << k << " val=" << val
+                                             << " (should be sentinel beyond BLOCK_Q)";
                 }
             }
         }
@@ -190,7 +185,7 @@ protected:
         {
             for(int k = 0; k < K_total; k++)
             {
-                int idx = 1 * wo * K_total + q * K_total + k;
+                int idx   = 1 * wo * K_total + q * K_total + k;
                 float val = static_cast<float>(out_host[idx]);
                 EXPECT_EQ(val, static_cast<float>(SENTINEL))
                     << "Row 1 should be untouched: q=" << q << " k=" << k;
@@ -201,8 +196,8 @@ protected:
         if(k_per_group == GROUP_SIZE)
         {
             EXPECT_EQ(written_count, expected_written)
-                << "Unpadded: all " << expected_written
-                << " positions should be written, got " << written_count;
+                << "Unpadded: all " << expected_written << " positions should be written, got "
+                << written_count;
         }
 
         // Verify written values are non-zero (converted from fp32 accumulator).
@@ -211,7 +206,7 @@ protected:
         {
             for(int k = 0; k < K_total; k++)
             {
-                int idx = 0 * wo * K_total + q * K_total + k;
+                int idx   = 0 * wo * K_total + q * K_total + k;
                 float val = static_cast<float>(out_host[idx]);
                 if(val != static_cast<float>(SENTINEL))
                 {
@@ -260,11 +255,11 @@ TEST_F(OutputWriterTest, Direct_K1) { run_and_verify<CFG_DIRECT>(1); }
 
 // C != K tests: verify OutputWriter works correctly when BlockCoords has C_in != C_out.
 // The OutputWriter should only depend on k_per_group (C_out), not c_per_group (C_in).
-TEST_F(OutputWriterTest, Vec1_C3_K2)  { run_and_verify<CFG_VEC1>(2, 3); }
-TEST_F(OutputWriterTest, Vec1_C1_K4)  { run_and_verify<CFG_VEC1>(4, 1); }
-TEST_F(OutputWriterTest, Vec1_C2_K3)  { run_and_verify<CFG_VEC1>(3, 2); }
-TEST_F(OutputWriterTest, Vec2_C2_K4)  { run_and_verify<CFG_VEC2>(4, 2); }
-TEST_F(OutputWriterTest, Vec1_C3_K1)  { run_and_verify<CFG_VEC1>(1, 3); }
+TEST_F(OutputWriterTest, Vec1_C3_K2) { run_and_verify<CFG_VEC1>(2, 3); }
+TEST_F(OutputWriterTest, Vec1_C1_K4) { run_and_verify<CFG_VEC1>(4, 1); }
+TEST_F(OutputWriterTest, Vec1_C2_K3) { run_and_verify<CFG_VEC1>(3, 2); }
+TEST_F(OutputWriterTest, Vec2_C2_K4) { run_and_verify<CFG_VEC2>(4, 2); }
+TEST_F(OutputWriterTest, Vec1_C3_K1) { run_and_verify<CFG_VEC1>(1, 3); }
 TEST_F(OutputWriterTest, Direct_C3_K2) { run_and_verify<CFG_DIRECT>(2, 3); }
 TEST_F(OutputWriterTest, Direct_C1_K4) { run_and_verify<CFG_DIRECT>(4, 1); }
 
@@ -283,12 +278,8 @@ static constexpr int CFG_16C_VEC4   = 81;
 static constexpr int CFG_16C_VEC1   = 83;
 
 template <int CfgIdx>
-__global__ void test_output_write_kernel_16c(_Float16* __restrict__ out,
-                                              int groups,
-                                              int k_per_group,
-                                              int ho,
-                                              int wo,
-                                              int c_per_group = 0)
+__global__ void test_output_write_kernel_16c(
+    _Float16* __restrict__ out, int groups, int k_per_group, int ho, int wo, int c_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
     using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::configs_map.get(CfgIdx)>;
@@ -313,48 +304,48 @@ __global__ void test_output_write_kernel_16c(_Float16* __restrict__ out,
 
 class OutputWriter16cTest : public ::testing::Test
 {
-protected:
-    static constexpr int GROUP_SIZE = 16;
+    protected:
+    static constexpr int GROUP_SIZE    = 16;
     static constexpr _Float16 SENTINEL = static_cast<_Float16>(-999.0f);
 
     template <int CfgIdx>
     void run_and_verify(int k_per_group, int c_per_group = 0)
     {
         using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::configs_map.get(CfgIdx)>;
-        constexpr auto cfg = ns_16c::KernelConfigurations<>::configs_map.get(CfgIdx);
-        constexpr int BLOCK_SIZE = cfg.block_size();
-        constexpr int BLOCK_Q = TC::BLOCK_Q;
+        constexpr auto cfg         = ns_16c::KernelConfigurations<>::configs_map.get(CfgIdx);
+        constexpr int BLOCK_SIZE   = cfg.block_size();
+        constexpr int BLOCK_Q      = TC::BLOCK_Q;
         constexpr int BLOCK_GROUPS = cfg.block_groups();
 
-        const int groups = BLOCK_GROUPS;
+        const int groups  = BLOCK_GROUPS;
         const int K_total = groups * k_per_group;
-        const int wo = BLOCK_Q + 4;
-        const int ho = 2;
+        const int wo      = BLOCK_Q + 4;
+        const int ho      = 2;
 
         const int out_size = ho * wo * K_total;
         std::vector<_Float16> out_host(out_size, SENTINEL);
 
         _Float16* d_out = nullptr;
         ck_tile::hip_check_error(hipMalloc(&d_out, out_size * sizeof(_Float16)));
-        ck_tile::hip_check_error(hipMemcpy(
-            d_out, out_host.data(), out_size * sizeof(_Float16), hipMemcpyHostToDevice));
+        ck_tile::hip_check_error(
+            hipMemcpy(d_out, out_host.data(), out_size * sizeof(_Float16), hipMemcpyHostToDevice));
 
-        test_output_write_kernel_16c<CfgIdx><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
-            d_out, groups, k_per_group, ho, wo, c_per_group);
+        test_output_write_kernel_16c<CfgIdx>
+            <<<dim3(1, 1, 1), BLOCK_SIZE>>>(d_out, groups, k_per_group, ho, wo, c_per_group);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
-        ck_tile::hip_check_error(hipMemcpy(
-            out_host.data(), d_out, out_size * sizeof(_Float16), hipMemcpyDeviceToHost));
+        ck_tile::hip_check_error(
+            hipMemcpy(out_host.data(), d_out, out_size * sizeof(_Float16), hipMemcpyDeviceToHost));
 
-        int written_count = 0;
+        int written_count    = 0;
         int expected_written = 0;
 
         for(int q = 0; q < wo; q++)
         {
             for(int k = 0; k < K_total; k++)
             {
-                int idx = 0 * wo * K_total + q * K_total + k;
-                float val = static_cast<float>(out_host[idx]);
+                int idx          = 0 * wo * K_total + q * K_total + k;
+                float val        = static_cast<float>(out_host[idx]);
                 bool is_sentinel = (val == static_cast<float>(SENTINEL));
 
                 bool should_write = (q < BLOCK_Q);
@@ -365,9 +356,8 @@ protected:
 
                 if(q >= BLOCK_Q)
                 {
-                    EXPECT_TRUE(is_sentinel)
-                        << "q=" << q << " k=" << k << " val=" << val
-                        << " (should be sentinel beyond BLOCK_Q)";
+                    EXPECT_TRUE(is_sentinel) << "q=" << q << " k=" << k << " val=" << val
+                                             << " (should be sentinel beyond BLOCK_Q)";
                 }
             }
         }
@@ -376,7 +366,7 @@ protected:
         {
             for(int k = 0; k < K_total; k++)
             {
-                int idx = 1 * wo * K_total + q * K_total + k;
+                int idx   = 1 * wo * K_total + q * K_total + k;
                 float val = static_cast<float>(out_host[idx]);
                 EXPECT_EQ(val, static_cast<float>(SENTINEL))
                     << "Row 1 should be untouched: q=" << q << " k=" << k;
@@ -386,15 +376,15 @@ protected:
         if(k_per_group == GROUP_SIZE)
         {
             EXPECT_EQ(written_count, expected_written)
-                << "Unpadded: all " << expected_written
-                << " positions should be written, got " << written_count;
+                << "Unpadded: all " << expected_written << " positions should be written, got "
+                << written_count;
         }
 
         for(int q = 0; q < BLOCK_Q && q < wo; q++)
         {
             for(int k = 0; k < K_total; k++)
             {
-                int idx = 0 * wo * K_total + q * K_total + k;
+                int idx   = 0 * wo * K_total + q * K_total + k;
                 float val = static_cast<float>(out_host[idx]);
                 if(val != static_cast<float>(SENTINEL))
                 {
@@ -410,18 +400,18 @@ protected:
 
 // Unpadded 16c
 TEST_F(OutputWriter16cTest, Direct_K16) { run_and_verify<CFG_16C_DIRECT>(16); }
-TEST_F(OutputWriter16cTest, Vec1_K16)   { run_and_verify<CFG_16C_VEC1>(16); }
+TEST_F(OutputWriter16cTest, Vec1_K16) { run_and_verify<CFG_16C_VEC1>(16); }
 
 // Padded: k_per_group < 16
-TEST_F(OutputWriter16cTest, Vec1_K12)  { run_and_verify<CFG_16C_VEC1>(12); }
-TEST_F(OutputWriter16cTest, Vec1_K10)  { run_and_verify<CFG_16C_VEC1>(10); }
-TEST_F(OutputWriter16cTest, Vec1_K9)   { run_and_verify<CFG_16C_VEC1>(9); }
-TEST_F(OutputWriter16cTest, Vec4_K12)  { run_and_verify<CFG_16C_VEC4>(12); }
+TEST_F(OutputWriter16cTest, Vec1_K12) { run_and_verify<CFG_16C_VEC1>(12); }
+TEST_F(OutputWriter16cTest, Vec1_K10) { run_and_verify<CFG_16C_VEC1>(10); }
+TEST_F(OutputWriter16cTest, Vec1_K9) { run_and_verify<CFG_16C_VEC1>(9); }
+TEST_F(OutputWriter16cTest, Vec4_K12) { run_and_verify<CFG_16C_VEC4>(12); }
 
 // C != K
-TEST_F(OutputWriter16cTest, Vec1_C9_K12)  { run_and_verify<CFG_16C_VEC1>(12, 9); }
-TEST_F(OutputWriter16cTest, Vec1_C12_K9)  { run_and_verify<CFG_16C_VEC1>(9, 12); }
-TEST_F(OutputWriter16cTest, Vec1_C16_K9)  { run_and_verify<CFG_16C_VEC1>(9, 16); }
+TEST_F(OutputWriter16cTest, Vec1_C9_K12) { run_and_verify<CFG_16C_VEC1>(12, 9); }
+TEST_F(OutputWriter16cTest, Vec1_C12_K9) { run_and_verify<CFG_16C_VEC1>(9, 12); }
+TEST_F(OutputWriter16cTest, Vec1_C16_K9) { run_and_verify<CFG_16C_VEC1>(9, 16); }
 TEST_F(OutputWriter16cTest, Direct_C9_K16) { run_and_verify<CFG_16C_DIRECT>(16, 9); }
 
 // =============================================================================
@@ -439,12 +429,8 @@ static constexpr int CFG_8C_VEC4   = 79;
 static constexpr int CFG_8C_VEC1   = 81;
 
 template <int CfgIdx>
-__global__ void test_output_write_kernel_8c(_Float16* __restrict__ out,
-                                             int groups,
-                                             int k_per_group,
-                                             int ho,
-                                             int wo,
-                                             int c_per_group = 0)
+__global__ void test_output_write_kernel_8c(
+    _Float16* __restrict__ out, int groups, int k_per_group, int ho, int wo, int c_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
     using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::configs_map.get(CfgIdx)>;
@@ -469,48 +455,48 @@ __global__ void test_output_write_kernel_8c(_Float16* __restrict__ out,
 
 class OutputWriter8cTest : public ::testing::Test
 {
-protected:
-    static constexpr int GROUP_SIZE = 8;
+    protected:
+    static constexpr int GROUP_SIZE    = 8;
     static constexpr _Float16 SENTINEL = static_cast<_Float16>(-999.0f);
 
     template <int CfgIdx>
     void run_and_verify(int k_per_group, int c_per_group = 0)
     {
         using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::configs_map.get(CfgIdx)>;
-        constexpr auto cfg = ns_8c::KernelConfigurations<>::configs_map.get(CfgIdx);
-        constexpr int BLOCK_SIZE = cfg.block_size();
-        constexpr int BLOCK_Q = TC::BLOCK_Q;
+        constexpr auto cfg         = ns_8c::KernelConfigurations<>::configs_map.get(CfgIdx);
+        constexpr int BLOCK_SIZE   = cfg.block_size();
+        constexpr int BLOCK_Q      = TC::BLOCK_Q;
         constexpr int BLOCK_GROUPS = cfg.block_groups();
 
-        const int groups = BLOCK_GROUPS;
+        const int groups  = BLOCK_GROUPS;
         const int K_total = groups * k_per_group;
-        const int wo = BLOCK_Q + 4;
-        const int ho = 2;
+        const int wo      = BLOCK_Q + 4;
+        const int ho      = 2;
 
         const int out_size = ho * wo * K_total;
         std::vector<_Float16> out_host(out_size, SENTINEL);
 
         _Float16* d_out = nullptr;
         ck_tile::hip_check_error(hipMalloc(&d_out, out_size * sizeof(_Float16)));
-        ck_tile::hip_check_error(hipMemcpy(
-            d_out, out_host.data(), out_size * sizeof(_Float16), hipMemcpyHostToDevice));
+        ck_tile::hip_check_error(
+            hipMemcpy(d_out, out_host.data(), out_size * sizeof(_Float16), hipMemcpyHostToDevice));
 
-        test_output_write_kernel_8c<CfgIdx><<<dim3(1, 1, 1), BLOCK_SIZE>>>(
-            d_out, groups, k_per_group, ho, wo, c_per_group);
+        test_output_write_kernel_8c<CfgIdx>
+            <<<dim3(1, 1, 1), BLOCK_SIZE>>>(d_out, groups, k_per_group, ho, wo, c_per_group);
         ck_tile::hip_check_error(hipDeviceSynchronize());
 
-        ck_tile::hip_check_error(hipMemcpy(
-            out_host.data(), d_out, out_size * sizeof(_Float16), hipMemcpyDeviceToHost));
+        ck_tile::hip_check_error(
+            hipMemcpy(out_host.data(), d_out, out_size * sizeof(_Float16), hipMemcpyDeviceToHost));
 
-        int written_count = 0;
+        int written_count    = 0;
         int expected_written = 0;
 
         for(int q = 0; q < wo; q++)
         {
             for(int k = 0; k < K_total; k++)
             {
-                int idx = 0 * wo * K_total + q * K_total + k;
-                float val = static_cast<float>(out_host[idx]);
+                int idx          = 0 * wo * K_total + q * K_total + k;
+                float val        = static_cast<float>(out_host[idx]);
                 bool is_sentinel = (val == static_cast<float>(SENTINEL));
 
                 bool should_write = (q < BLOCK_Q);
@@ -521,9 +507,8 @@ protected:
 
                 if(q >= BLOCK_Q)
                 {
-                    EXPECT_TRUE(is_sentinel)
-                        << "q=" << q << " k=" << k << " val=" << val
-                        << " (should be sentinel beyond BLOCK_Q)";
+                    EXPECT_TRUE(is_sentinel) << "q=" << q << " k=" << k << " val=" << val
+                                             << " (should be sentinel beyond BLOCK_Q)";
                 }
             }
         }
@@ -532,7 +517,7 @@ protected:
         {
             for(int k = 0; k < K_total; k++)
             {
-                int idx = 1 * wo * K_total + q * K_total + k;
+                int idx   = 1 * wo * K_total + q * K_total + k;
                 float val = static_cast<float>(out_host[idx]);
                 EXPECT_EQ(val, static_cast<float>(SENTINEL))
                     << "Row 1 should be untouched: q=" << q << " k=" << k;
@@ -542,15 +527,15 @@ protected:
         if(k_per_group == GROUP_SIZE)
         {
             EXPECT_EQ(written_count, expected_written)
-                << "Unpadded: all " << expected_written
-                << " positions should be written, got " << written_count;
+                << "Unpadded: all " << expected_written << " positions should be written, got "
+                << written_count;
         }
 
         for(int q = 0; q < BLOCK_Q && q < wo; q++)
         {
             for(int k = 0; k < K_total; k++)
             {
-                int idx = 0 * wo * K_total + q * K_total + k;
+                int idx   = 0 * wo * K_total + q * K_total + k;
                 float val = static_cast<float>(out_host[idx]);
                 if(val != static_cast<float>(SENTINEL))
                 {
@@ -566,7 +551,7 @@ protected:
 
 // Unpadded 8c
 TEST_F(OutputWriter8cTest, Direct_K8) { run_and_verify<CFG_8C_DIRECT>(8); }
-TEST_F(OutputWriter8cTest, Vec1_K8)   { run_and_verify<CFG_8C_VEC1>(8); }
+TEST_F(OutputWriter8cTest, Vec1_K8) { run_and_verify<CFG_8C_VEC1>(8); }
 
 // Padded: k_per_group < 8
 TEST_F(OutputWriter8cTest, Vec1_K6) { run_and_verify<CFG_8C_VEC1>(6); }

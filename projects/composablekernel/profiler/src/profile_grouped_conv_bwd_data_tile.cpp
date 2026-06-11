@@ -100,12 +100,9 @@ int call_profiler(const ckt::Args<SIGNATURE>& args,
     if(time_kernel)
     {
         std::cout << "\nBest configuration parameters:" << "\n\tname: " << op_name << " (instance "
-                  << best_instance_index << ")" 
-                  << "\n\tavg_time: " << avg_time << "ms"
-                  << "\n\ttflops: " << tflops
-                  << "\n\tGB/s: " << gbs
-                  << "\n\tSplitK " << best_split_k 
-                  << std::endl;
+                  << best_instance_index << ")" << "\n\tavg_time: " << avg_time << "ms"
+                  << "\n\ttflops: " << tflops << "\n\tGB/s: " << gbs << "\n\tSplitK "
+                  << best_split_k << std::endl;
     }
     return !valid;
 }

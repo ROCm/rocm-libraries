@@ -52,7 +52,6 @@ struct ConfigMap
         }
         return true;
     }
-
 };
 
 /// Factory function: build a ConfigMap<Config, N> from a braced list of {key, cfg} pairs.

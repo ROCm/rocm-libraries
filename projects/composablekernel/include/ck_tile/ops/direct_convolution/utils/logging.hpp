@@ -5,8 +5,7 @@
 
 #include "ck_tile/core.hpp"
 
-namespace ck_tile::direct_conv 
-{
+namespace ck_tile::direct_conv {
 
 template <typename... Args>
 CK_TILE_HOST void LogInfo(Args&&... args) noexcept
@@ -17,4 +16,4 @@ CK_TILE_HOST void LogInfo(Args&&... args) noexcept
     }
 }
 
-}
+} // namespace ck_tile::direct_conv

@@ -309,22 +309,26 @@ class DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest
 {
 };
 
-TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest, Fprop_Config72_Groups16_LargerSpatial_CyclicShift)
+TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest,
+       Fprop_Config72_Groups16_LargerSpatial_CyclicShift)
 {
     ASSERT_TRUE((RunFprop<72>(4, 16, 16, 16, 16, 16, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest, Fprop_Config73_Groups16_LargerSpatial_CyclicShift)
+TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest,
+       Fprop_Config73_Groups16_LargerSpatial_CyclicShift)
 {
     ASSERT_TRUE((RunFprop<73>(4, 16, 16, 16, 16, 16, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest, Dgrad_Config74_Groups16_LargerSpatial_CyclicShift)
+TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest,
+       Dgrad_Config74_Groups16_LargerSpatial_CyclicShift)
 {
     ASSERT_TRUE((RunDgrad<74>(4, 16, 16, 16, 16, 16, 3, 3, 1, 1)));
 }
 
-TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest, Dgrad_Config75_Groups16_LargerSpatial_CyclicShift)
+TEST_F(DirectConvGrouped16cFp16TileConvV2CyclicShiftSwizzleTest,
+       Dgrad_Config75_Groups16_LargerSpatial_CyclicShift)
 {
     ASSERT_TRUE((RunDgrad<75>(4, 16, 16, 16, 16, 16, 3, 3, 1, 1)));
 }
@@ -464,4 +468,3 @@ TEST_F(DirectConvGrouped16cFp16TileConvV2PaddedTest, Dgrad_C12_K12_Pad3)
 {
     ASSERT_TRUE((RunDgrad<77>(1, 8, 8, 8, 12, 12, 3, 3, 3, 3)));
 }
-

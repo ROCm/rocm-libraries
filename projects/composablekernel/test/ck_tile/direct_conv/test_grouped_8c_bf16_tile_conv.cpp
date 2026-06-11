@@ -18,12 +18,14 @@ struct TileConv8cBf16KernelTraits
     using FwdKernel = ck_tile::direct_conv::DirectTileConvForward8CKernel<
         ck_tile::direct_conv::grouped_8c_tile::v2::KernelConfigurations<
             ck_tile::direct_conv::DataType::bf16>::configs_map.get(ConfigIdx),
-        v2, ck_tile::direct_conv::DataType::bf16>;
+        v2,
+        ck_tile::direct_conv::DataType::bf16>;
     template <int ConfigIdx>
     using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData8CKernel<
         ck_tile::direct_conv::grouped_8c_tile::v2::KernelConfigurations<
             ck_tile::direct_conv::DataType::bf16>::configs_map.get(ConfigIdx),
-        v2, ck_tile::direct_conv::DataType::bf16>;
+        v2,
+        ck_tile::direct_conv::DataType::bf16>;
 };
 
 class DirectConvGrouped8cBf16TileConvV2Test
