@@ -22,14 +22,17 @@ add_executable(mosaic-tests)
 
 target_sources(
     mosaic-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/test_model.cpp"
+                         "${CMAKE_CURRENT_SOURCE_DIR}/test_real_kernels.cpp"
 )
 
 target_link_libraries(mosaic-tests PRIVATE roc::mosaic Catch2::Catch2WithMain)
 
 # Inject the in-tree default weights path so the test can locate the .bin
-# without an explicit MOSAIC_WEIGHTS env override.
+# without an explicit MOSAIC_WEIGHTS env override, and the bundled real-kernel
+# fixture (actual Tensile UserArgs.yaml params) for the ranking test.
 target_compile_definitions(mosaic-tests PRIVATE
     MOSAIC_TEST_WEIGHTS="${CMAKE_CURRENT_SOURCE_DIR}/../backends/hipblaslt/data/mosaic_weights.bin"
+    MOSAIC_TEST_KERNELS="${CMAKE_CURRENT_SOURCE_DIR}/data/sample_kernels.tsv"
 )
 
 include(CTest)

@@ -1263,14 +1263,11 @@ namespace {
 // Eager init: warm the weights at library load when the mosaic path is enabled,
 // so the first rank_configs() call isn't penalized by the .bin parse. Lazy
 // loading in route()/rank_configs() is the safety net, so this is best-effort.
-// Gated on TENSILE_MOSAIC; honors MOSAIC_NO_EAGER_INIT to opt out.
-// (TENSILE_ML_RECOMMENDER is still honored transitionally until the hipBLASLt
-// integration switches the runtime gate to TENSILE_MOSAIC.)
+// Gated on TENSILE_USE_MOSAIC; honors MOSAIC_NO_EAGER_INIT to opt out.
 struct EagerInit {
   EagerInit() {
     if (std::getenv("MOSAIC_NO_EAGER_INIT") != nullptr) return;
-    if (!truthy_env(std::getenv("TENSILE_MOSAIC")) &&
-        !truthy_env(std::getenv("TENSILE_ML_RECOMMENDER"))) return;
+    if (!truthy_env(std::getenv("TENSILE_USE_MOSAIC"))) return;
     ensure_weights();
   }
 };

@@ -88,7 +88,6 @@ NB_MODULE(origami, m) {
   nanobind::enum_<origami::prediction_modes_t>(m, "prediction_modes_t")
       .value("estimation", origami::prediction_modes_t::estimation)
       .value("simulation", origami::prediction_modes_t::simulation)
-      .value("ml_recommender", origami::prediction_modes_t::ml_recommender)
       .export_values();
 
   // Add new struct bindings

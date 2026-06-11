@@ -213,7 +213,7 @@ namespace TensileLite
         if(prediction_only)
             m_predictionLib = strtol(prediction_only, nullptr, 0) != 0;
 
-        const char* mosaic = std::getenv("TENSILE_MOSAIC");
+        const char* mosaic = std::getenv("TENSILE_USE_MOSAIC");
         if(mosaic)
             m_mosaic = strtol(mosaic, nullptr, 0) != 0;
 

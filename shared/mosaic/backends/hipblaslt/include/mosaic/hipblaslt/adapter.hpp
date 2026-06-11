@@ -17,7 +17,7 @@
 // backends live alongside this one under backends/<framework>/.
 //
 // Header-only: callers (e.g. TensileLite's ProblemPredictionLibrary) include
-// this and link `roc::mosaic`. Gating (TENSILE_MOSAIC) is the caller's job.
+// this and link `roc::mosaic`. Gating (TENSILE_USE_MOSAIC) is the caller's job.
 // =============================================================================
 
 #pragma once
