@@ -1576,13 +1576,9 @@ class KernelWriterAssembly(KernelWriter):
       module.addSpaceLine()
       module.addComment0("StreamK Parallel Reduction Assignments")
       module.add(RegSet("s", "sgprSkSplit", "sgprskTiles", 0))
-      # Reuse Beta slot for SkPartialIdx temp storage; fall back to Alpha when UseBeta=False
-      # (Alpha is always allocated and is free after the MAC loop completes)
-      skPartialAlias = "sgprBeta" if kernel["ProblemType"]["UseBeta"] else "sgprAlpha"
-      module.add(RegSet("s", "sgprSkPartialIdx", skPartialAlias, 0))
+      module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
     elif kernel["StreamK"] == 4:
-      skPartialAlias = "sgprBeta" if kernel["ProblemType"]["UseBeta"] else "sgprAlpha"
-      module.add(RegSet("s", "sgprSkPartialIdx", skPartialAlias, 0))
+      module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
 
     module.addSpaceLine()
     module.addComment0("Size Assignments")
