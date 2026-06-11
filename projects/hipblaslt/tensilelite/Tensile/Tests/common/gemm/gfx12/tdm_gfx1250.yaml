@@ -46,13 +46,14 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1,  1,  1, 1,  1, 1 ]
-          - [16, 16, 32, 1,  1,  1, 1,  2, 2 ]
-          - [16, 16, 32, 1,  1,  8, 4,  2, 2 ]
-          # - [16, 16, 32, 1,  1,  1, 1,  4, 1 ]
-          # - [16, 16, 32, 1,  1,  2, 2,  2, 2 ]
-          # - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 32, 1,  1,  1, 1,  1, 1]
+              WorkGroup: 
+                - [16, 16, 1]
+                - [16, 16, 4]
+            - MatrixInstruction: [16, 16, 32, 1,  1,  1, 1,  2, 2]
+            - MatrixInstruction: [16, 16, 32, 1,  1,  8, 4,  2, 2]            
         - DepthU: [64, 128]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
@@ -124,13 +125,13 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1,  1,  1, 1,  1, 1 ]
-          - [16, 16, 32, 1,  1,  1, 1,  2, 2 ]
-          # - [16, 16, 32, 1,  1,  8, 8,  2, 2 ]
-          # - [16, 16, 32, 1,  1,  1, 1,  4, 1 ]
-          # - [16, 16, 32, 1,  1,  2, 2,  2, 2 ]
-          # - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 32, 1,  1,  1, 1,  1, 1 ]
+              WorkGroup: 
+                - [16, 16, 1]
+                - [16, 16, 4]
+            - MatrixInstruction: [16, 16, 32, 1,  1,  1, 1,  2, 2 ]
         - DepthU: [64, 128]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]

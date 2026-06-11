@@ -1,58 +1,22 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
-#define PPCAT_NX(A, B) A##B
-#define PPCAT(A, B) PPCAT_NX(A, B)
-#define TWO 2
-#define FOUR 4
-#define EIGHT 8
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
+#include <hip/hip_fp16.h>
+#include <hip/hip_runtime.h>
+#endif
 
+#include "float_types.h"
+
+// Since float_types.h has enabled true mixed precision for all
+// direct ocl kernels, this kernel needs to retain its older behavior as it is
+// dependent upon tunability which isn't slated for MIOpen 2.0 PR #1725
 #if MIOPEN_USE_FP16 == 1
-#pragma OPENCL EXTENSION cl_khr_fp16 : enable
-#define _FLOAT half
-#ifndef HALF_MAX
-#define _FLOAT_PREC half
-#define MAX_VAL 65504 /* max value */
-#else
-#define MAX_VAL HALF_MAX
+#undef FLOAT_ACCUM
+#define FLOAT_ACCUM FLOAT
+#define CVT_FLOAT2ACCUM(x) ((FLOAT_ACCUM)(x))
+#define CVT_ACCUM2FLOAT(x) ((FLOAT)(x))
 #endif
-#endif
-#if MIOPEN_USE_FP32 == 1
-#define _FLOAT float
-#define _FLOAT_PREC float
-#ifndef FLT_MAX
-#define MAX_VAL 3.402823466e+38F /* max value */
-#else
-#define MAX_VAL FLT_MAX
-#endif
-#endif
-
-#define _FLOAT2 PPCAT(_FLOAT, TWO)
-#define _FLOAT4 PPCAT(_FLOAT, FOUR)
-#define _FLOAT8 PPCAT(_FLOAT, EIGHT)
 
 #define UNUSED __attribute__((__unused__))
 
@@ -62,6 +26,9 @@
 #ifndef MLO_FILTER_STRIDE1
 #define MLO_FILTER_STRIDE1 1
 #endif
+
+/// \todo Pass available LDS size to kernel during compilation.
+#define MLO_LDS_MAX_SIZE 65536
 
 #define MLO_FILTER_SZ (MLO_FILTER_SIZE1 * MLO_FILTER_SIZE0)
 
@@ -128,8 +95,8 @@
 #if MLO_DIR_FORWARD == 1
 #define MLO_IN_LCL_WIDTH \
     ((MLO_IN_TILE0 - 1) * MLO_FILTER_STRIDE0 + MLO_FILTER_SIZE0) // here we use kernel size. it's
-                                                                 // important when padding == 0  2*
-                                                                 // MLO_FILTER_PAD0
+// important when padding == 0  2*
+// MLO_FILTER_PAD0
 #define MLO_IN_LCL_HEIGHT ((MLO_IN_TILE1 - 1) * MLO_FILTER_STRIDE1 + MLO_FILTER_SIZE1)
 #else
 #define MLO_IN_LCL_WIDTH                                              \
@@ -174,17 +141,136 @@
 #define uniform(x) (x)
 #endif
 
-#include "math_ops.h"
-#include "data_ops.h"
+#ifdef GRP_MOD_ENABLE
+#define MLO_GRPWISE_N_OUTPUTS (MLO_N_OUTPUTS / MLO_GROUP_COUNTS)
+#define MLO_GRPWISE_N_INPUTS (MLO_N_INPUTS / MLO_GROUP_COUNTS)
+#endif
 
-static inline void Conv(uint o_map_base,
-                        uint in_stg_off,
-                        __private _FLOAT* __restrict pvt_in_stage,
-                        __local _FLOAT* __restrict lcl_indata,
-                        __private _FLOAT* __restrict pvt_wei_stage,
-                        __local _FLOAT* __restrict lcl_wei,
-                        __private float* __restrict pvt_accum)
-/*__private _FLOAT* __restrict pvt_accum)*/
+inline __device__ uint iDiv_legacy(uint v, uint d)
+{
+    uint r = (uint)((float)v * (1.0f / (float)d) + 0.00001f);
+    return (r);
+}
+
+inline __device__ uint iMod(uint v, uint u, uint d)
+{
+    uint r = v - __mul24((uint)u, (uint)d);
+    return (r);
+}
+
+inline __device__ void
+calculateXYPos(uint linPos, uint width, uint* __restrict x, uint* __restrict y)
+{
+    (*y) = (uint)((float)linPos * (1.0f / (float)width) + 0.00001f);
+    (*x) = linPos - __mul24((*y), width);
+}
+
+inline __device__ uint calculateOffset(uint stride, uint x, uint y)
+{
+    uint ret = y * stride + x;
+    return (ret);
+}
+
+inline __device__ void readDataElem(uint linPos,
+                                    FLOAT* lcl_data,
+                                    uint lcl_base,
+                                    UNUSED uint lcl_height,
+                                    uint lcl_width,
+                                    uint lcl_stride,
+                                    uint lcl_y,
+                                    uint lcl_x,
+                                    const FLOAT* gbl_data,
+                                    uint gbl_base,
+                                    uint gbl_height,
+                                    uint gbl_width,
+                                    uint gbl_stride,
+                                    uint gbl_y,
+                                    uint gbl_x,
+                                    bool vis,
+                                    UNUSED bool debug)
+{
+    uint x, y;
+    calculateXYPos(linPos, lcl_width, &x, &y);
+    uint g_x      = x + gbl_x;
+    uint g_y      = y + gbl_y;
+    uint gbl_off0 = calculateOffset(gbl_stride, g_x, g_y);
+    uint gbl_off  = gbl_off0 + gbl_base;
+
+#if MLO_LARGE_MAP == 1
+    uint lcl_off = lcl_base + linPos;
+    (void)lcl_stride;
+    (void)lcl_x;
+    (void)lcl_y;
+#else
+    uint l_x     = x + lcl_x;
+    uint l_y     = y + lcl_y;
+    uint lcl_off = lcl_base + __mul24(l_y, lcl_stride) + l_x;
+#endif
+
+#if MLO_LARGE_MAP == 1
+    //	vis &= (g_x >= 0 && g_x < gbl_width && g_y >= 0 && g_y < gbl_height);
+    vis &= (g_x < gbl_width && g_y < gbl_height);
+#else
+    (void)gbl_width;
+    (void)gbl_height;
+#endif
+    gbl_off       = (vis) ? gbl_off : 0;
+    FLOAT gbl_val = gbl_data[gbl_off];
+    gbl_val       = (vis) ? gbl_val : 0;
+
+    lcl_data[lcl_off] = gbl_val;
+}
+
+inline __device__ void readData(uint lcl_id,
+                                uint size,
+                                uint lcl_p_stride,
+                                FLOAT* lcl_data,
+                                uint lcl_base,
+                                uint lcl_height,
+                                uint lcl_width,
+                                uint lcl_stride,
+                                uint lcl_y,
+                                uint lcl_x,
+                                const FLOAT* gbl_data,
+                                uint gbl_base,
+                                uint gbl_height,
+                                uint gbl_width,
+                                uint gbl_stride,
+                                uint gbl_y,
+                                uint gbl_x,
+                                bool vis,
+                                bool debug)
+{
+
+    for(uint i = lcl_id; i < size; i += lcl_p_stride)
+    {
+        readDataElem(i,
+                     lcl_data,
+                     lcl_base,
+                     lcl_height,
+                     lcl_width,
+                     lcl_stride,
+                     lcl_y,
+                     lcl_x,
+                     gbl_data,
+                     gbl_base,
+                     gbl_height,
+                     gbl_width,
+                     gbl_stride,
+                     gbl_y,
+                     gbl_x,
+                     vis,
+                     debug);
+    }
+}
+
+static __device__ void Conv(uint o_map_base,
+                            uint in_stg_off,
+                            FLOAT* __restrict pvt_in_stage,
+                            FLOAT* __restrict lcl_indata,
+                            FLOAT* __restrict pvt_wei_stage,
+                            FLOAT* __restrict lcl_wei,
+                            FLOAT_ACCUM* __restrict pvt_accum)
 {
     // convolution
 
@@ -193,10 +279,10 @@ static inline void Conv(uint o_map_base,
     for(uint i_c = 0; i_c < MLO_N_IN_TILES_PERSTACK; ++i_c, in_stg_off1 += MLO_IN_LCL_TILE_SZ)
     {
         // preload input
-        uint wei_stg_base_off = mad24(o_map_base,
-                                      (uint)(MLO_N_IN_TILES_PERSTACK * MLO_FILTER_SZ),
-                                      mul24(i_c, (uint)MLO_FILTER_SZ));
-        uint in_stg_off2      = in_stg_off1;
+        uint wei_stg_base_off =
+            __mul24(o_map_base, (uint)(MLO_N_IN_TILES_PERSTACK * MLO_FILTER_SZ)) +
+            __mul24(i_c, (uint)MLO_FILTER_SZ);
+        uint in_stg_off2 = in_stg_off1;
         for(uint j = 0; j < MLO_PVT_IN_HEIGHT - 1; ++j,
 #if MLO_DIR_FORWARD == 1
                  in_stg_off2 += MLO_IN_LCL_WIDTH
@@ -268,8 +354,7 @@ static inline void Conv(uint o_map_base,
                         for(uint i = 0; i < MLO_OUT_TILE0; ++i)
                         {
 #if MLO_DIR_FORWARD == 1
-                            /*_FLOAT sum = (_FLOAT)0;*/
-                            float sum = (float)0;
+                            FLOAT_ACCUM sum = CVT_FLOAT2ACCUM(0);
 #endif
                             for(uint l = 0; l < MLO_FILTER_SIZE0; ++l)
                             {
@@ -287,19 +372,20 @@ static inline void Conv(uint o_map_base,
 #if MLO_DIR_FORWARD == 1
                                 // Directly accumulating to `pvt_accum` here sometimes results in
                                 // validation error for half precision.
-                                sum +=
-                                    (float)(pvt_in_stage[j * MLO_PVT_IN_WIDTH * MLO_FILTER_STRIDE1 +
-                                                         i * MLO_FILTER_STRIDE0 + l] *
-                                            pvt_wei_stage[l_act]);
+                                sum += CVT_FLOAT2ACCUM(
+                                           pvt_in_stage[j * MLO_PVT_IN_WIDTH * MLO_FILTER_STRIDE1 +
+                                                        i * MLO_FILTER_STRIDE0 + l]) *
+                                       CVT_FLOAT2ACCUM(pvt_wei_stage[l_act]);
 #else
                             if(((i + l + 1 - MLO_PADDING_SHIFT0 +
                                  (MLO_FILTER_SIZE0 % MLO_FILTER_STRIDE0)) %
                                 MLO_FILTER_STRIDE0) == 0)
                             {
                                 pvt_accum[(o_c * MLO_OUT_TILE1 + j) * MLO_OUT_TILE0 + i] +=
-                                    pvt_in_stage[(j / MLO_FILTER_STRIDE1) * MLO_PVT_IN_WIDTH +
-                                                 (i + l) / MLO_FILTER_STRIDE0] *
-                                    pvt_wei_stage[l_act];
+                                    CVT_FLOAT2ACCUM(
+                                        pvt_in_stage[(j / MLO_FILTER_STRIDE1) * MLO_PVT_IN_WIDTH +
+                                                     (i + l) / MLO_FILTER_STRIDE0]) *
+                                    CVT_FLOAT2ACCUM(pvt_wei_stage[l_act]);
                             }
 #endif
                             }
@@ -325,64 +411,28 @@ static inline void Conv(uint o_map_base,
         } // for(uint k = 0; k < MLO_FILER_SIZE1; ++k,in_stg_off2+=MLO_IN_LCL_WIDTH)
 
     } // for(uint i_c = 0; i_c < MLO_N_IN_TILES_PERSTACK; ++i_c, in_stg_off1 +=
-      // MLO_IN_LCL_PERSTACK_SZ)
+    // MLO_IN_LCL_PERSTACK_SZ)
 }
 
-#ifndef MLO_CONV_BIAS
-#define MLO_CONV_BIAS 0
-#endif
-
-#if MIOPEN_USE_FP16 == 1
-#pragma OPENCL EXTENSION cl_khr_fp16 : enable
-#define _FLOAT half
-#define EPSILON (_FLOAT)0.0001
-#endif
-#if MIOPEN_USE_FP32 == 1
-#define _FLOAT float
-#define EPSILON (_FLOAT)0.000001
-#endif
-
-#include "activation_functions.h"
-
-// if the BN / Bias ops are not used define appropriate symbols
-
-#if !defined SPATIAL_BN && !defined PERACT_BN
-#define NO_BN
-#endif
-
-__attribute__((reqd_work_group_size(MLO_GRP_SZ0, MLO_GRP_SZ1, MLO_GRP_SZ2))) __kernel void
-MIOpenConvUniBatchNormActiv(
-#ifdef MIOPEN_YES_ACTIV
-    const _FLOAT alpha,
-    const _FLOAT beta,
-    const _FLOAT gamma,
-#endif
-#ifndef NO_BN
-    double epsilon,
-#endif
-    const __global _FLOAT* __restrict in,
-    __global _FLOAT* __restrict out,
-    const __global _FLOAT* __restrict weights
+extern "C" __global__ void __launch_bounds__(MLO_GRP_SZ0)
+    MIOpenConvUni(const FLOAT* __restrict in,
+                  const FLOAT* __restrict weights,
 #if MLO_CONV_BIAS
-    ,
-    const __global _FLOAT* __restrict conv_bias
+                  const FLOAT* __restrict bias,
 #endif
-#ifndef NO_BN
-    ,
-    const __global _FLOAT* __restrict bn_bias,
-    const __global _FLOAT* __restrict scale,
-    const __global _FLOAT* __restrict estimatedMean,
-    const __global _FLOAT* __restrict estimatedVariance
-#endif
-)
+                  FLOAT* __restrict out,
+                  UNUSED FLOAT padding_val)
 {
-    __local _FLOAT lcl_indata[MLO_IN_LCL_SZ];
-    __local _FLOAT lcl_wei[MLO_WEIGHTS_SZ];
-    __private float pvt_accum[MLO_PVT_ACCUM_DATA_SZ];
-    __private _FLOAT pvt_in_stage[MLO_PVT_IN_HEIGHT * MLO_PVT_IN_WIDTH];
-    __private _FLOAT pvt_wei_stage[MLO_FILTER_SIZE0];
+#if((MLO_IN_LCL_SZ + MLO_WEIGHTS_SZ) * SIZEOF_FLOAT) > MLO_LDS_MAX_SIZE
+#error "Local memory size should not exceed 64k."
+#endif
+    __shared__ FLOAT lcl_indata[MLO_IN_LCL_SZ];
+    __shared__ FLOAT lcl_wei[MLO_WEIGHTS_SZ];
+    FLOAT_ACCUM pvt_accum[MLO_PVT_ACCUM_DATA_SZ];
+    FLOAT pvt_in_stage[MLO_PVT_IN_HEIGHT * MLO_PVT_IN_WIDTH];
+    FLOAT pvt_wei_stage[MLO_FILTER_SIZE0];
 
-    uint grp_id0 = get_group_id(0);
+    uint grp_id0 = blockIdx.x;
 #if MLO_N_OUT_TILE_BLOCKS0 & (MLO_N_OUT_TILE_BLOCKS0 - 1)
     uint y_tile_blk = iDiv_legacy(grp_id0, MLO_N_OUT_TILE_BLOCKS0);
     uint x_tile_blk = iMod(grp_id0, y_tile_blk, MLO_N_OUT_TILE_BLOCKS0);
@@ -390,10 +440,10 @@ MIOpenConvUniBatchNormActiv(
     uint y_tile_blk = grp_id0 / MLO_N_OUT_TILE_BLOCKS0;
     uint x_tile_blk = grp_id0 & (MLO_N_OUT_TILE_BLOCKS0 - 1);
 #endif
-    uint o_pack = get_group_id(1); // block of outputs
-    uint b_pack = get_group_id(2); // batch block
+    uint o_pack = blockIdx.y; // block of outputs
+    uint b_pack = blockIdx.z; // batch block
 
-    uint lcl_id = get_local_id(0);
+    uint lcl_id = threadIdx.x;
 #if MLO_ALUTILES_STACK_SZ >= MLO_GRP_SZ
     uint stack        = 0;
     uint alu_stack_id = lcl_id;
@@ -425,8 +475,14 @@ MIOpenConvUniBatchNormActiv(
     uint alu_tl0 = alu_out_id & (MLO_ALU_VTILE0 - 1);
 #endif
 
+#ifdef GRP_MOD_ENABLE
+    uint ig          = o_pack / MLO_STACK_PERGROUP;
+    uint within_ig   = o_pack % MLO_STACK_PERGROUP;
+    uint o_map_plane = ig * MLO_GROUP_TILES + within_ig * MLO_N_OUT_TILES_PERSTACK;
+#else
     uint o_map_plane =
         o_pack * MLO_N_OUT_TILES_PERSTACK; // first output maps index per full ALU plane stack
+#endif
     uint o_map_base = alu_out_plane_id * MLO_N_OUT_TILES; // local output map offset
     uint o_map      = o_map_plane + o_map_base;           // output map index per ALU plane
     uint b_index    = b_pack * MLO_N_STACKS;
@@ -470,25 +526,49 @@ MIOpenConvUniBatchNormActiv(
     // base offset to read data from local input data
     uint in_stg_off = stack * MLO_IN_LCL_PERSTACK_SZ + (y_in_lcl)*MLO_IN_LCL_WIDTH + x_in_lcl;
 
-    uint in_off = b_index * MLO_IN_BATCH_STRIDE;
-
-#if MLO_DIR_FORWARD == 1
-    uint wei_off = mul24(o_map_plane, (uint)(MLO_N_INPUTS * MLO_FILTER_SZ));
-#else
-    uint wei_off = mul24(o_map_plane, (uint)MLO_FILTER_SZ);
-#endif
-
 #if MLO_LARGE_MAP == 0
     for(uint i = lcl_id; i < MLO_IN_LCL_SZ; i += MLO_GRP_SZ)
     {
-        lcl_indata[i] = 0;
+        lcl_indata[i] = CVT_ACCUM2FLOAT(0);
     }
 #endif
 
     for(uint i = 0; i < MLO_PVT_ACCUM_DATA_SZ; ++i)
     {
-        pvt_accum[i] = 0;
+        pvt_accum[i] = (FLOAT_ACCUM)0;
     }
+
+#ifdef GRP_MOD_ENABLE
+#if MLO_DIR_FORWARD == 1
+    uint wei_off0 =
+        (MLO_GRPWISE_N_OUTPUTS * ig +
+         ((o_map % MLO_GRPWISE_N_OUTPUTS) / MLO_N_OUT_TILES_PERSTACK) * MLO_N_OUT_TILES_PERSTACK) *
+        MLO_GRPWISE_N_INPUTS * MLO_FILTER_SZ;
+#else
+    uint wei_off0 =
+        (MLO_GRPWISE_N_OUTPUTS * MLO_GRPWISE_N_INPUTS * ig +
+         ((o_map % MLO_GRPWISE_N_OUTPUTS) / MLO_N_OUT_TILES_PERSTACK) * MLO_N_OUT_TILES_PERSTACK) *
+        MLO_FILTER_SZ;
+#endif
+
+    uint in_off0 =
+        MLO_GRPWISE_N_INPUTS * ig * MLO_IN_CHANNEL_STRIDE + b_index * MLO_IN_BATCH_STRIDE;
+
+    for(uint ic = MLO_GRPWISE_N_INPUTS * ig; ic < MLO_GRPWISE_N_INPUTS * (ig + 1);
+        ic += MLO_N_IN_TILES_PERSTACK,
+             in_off0 += MLO_IN_CHANNEL_STRIDE * MLO_N_IN_TILES_PERSTACK,
+             wei_off0 += MLO_N_IN_TILES_PERSTACK * MLO_FILTER_SZ
+#if MLO_DIR_FORWARD == 0
+                         * MLO_GRPWISE_N_OUTPUTS
+#endif
+#else
+    uint in_off = b_index * MLO_IN_BATCH_STRIDE;
+
+#if MLO_DIR_FORWARD == 1
+    uint wei_off = __mul24(o_map_plane, (uint)(MLO_N_INPUTS * MLO_FILTER_SZ));
+#else
+    uint wei_off = __mul24(o_map_plane, (uint)MLO_FILTER_SZ);
+#endif
 
     for(uint ic = 0; ic < MLO_N_INPUTS; ic += MLO_N_IN_TILES_PERSTACK,
              in_off += MLO_IN_CHANNEL_STRIDE * MLO_N_IN_TILES_PERSTACK,
@@ -496,9 +576,10 @@ MIOpenConvUniBatchNormActiv(
 #if MLO_DIR_FORWARD == 0
                                         * MLO_N_OUTPUTS
 #endif
+#endif
     )
     {
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
 
         // small map has been read in full continiously into the lDS buffer within padded rect,
         // padding has been done on initilization.
@@ -508,7 +589,13 @@ MIOpenConvUniBatchNormActiv(
 
 #if MLO_LARGE_MAP == 1
         uint in_lcl_off1 = 0;
-        uint in_off1     = in_off;
+        uint in_off1 =
+#ifdef GRP_MOD_ENABLE
+            in_off0
+#else
+            in_off
+#endif
+            ;
         for(uint i_b = 0; i_b < MLO_N_STACKS;
             ++i_b, in_off1 += MLO_IN_BATCH_STRIDE, in_lcl_off1 += MLO_IN_LCL_PERSTACK_SZ)
         {
@@ -523,10 +610,13 @@ MIOpenConvUniBatchNormActiv(
             for(uint i_c = 0; i_c < MLO_N_IN_TILES_PERSTACK;
                 ++i_c, in_off2 += MLO_IN_CHANNEL_STRIDE, in_lcl_off2 += MLO_IN_LCL_TILE_SZ)
             {
-#if MLO_INPUTS_ALIGNED == 0
+#ifdef GRP_MOD_ENABLE
+                vis &= (ig < MLO_GROUP_COUNTS);
+                vis &= (ic + i_c < MLO_GRPWISE_N_INPUTS * (ig + 1));
+                vis &= (ic + i_c >= MLO_GRPWISE_N_INPUTS * ig);
+#elif MLO_INPUTS_ALIGNED == 0
                 vis &= (ic + i_c < MLO_N_INPUTS);
 #endif
-
                 uint elem_id      = lcl_id;
                 uint lcl_p_stride = MLO_GRP_SZ0;
                 uint lcl_base     = 0;
@@ -572,10 +662,17 @@ MIOpenConvUniBatchNormActiv(
             vis &= (b_index + i_b < MLO_BATCH_SZ);
 #endif
 
+#ifdef GRP_MOD_ENABLE
+            vis &= (ig < MLO_GROUP_COUNTS);
+            vis &= (ic + i_c < MLO_GRPWISE_N_INPUTS * (ig + 1));
+            vis &= (ic + i_c >= MLO_GRPWISE_N_INPUTS * ig);
+            uint in_off2 = in_off0 + i_b * MLO_IN_BATCH_STRIDE + i_c * MLO_IN_CHANNEL_STRIDE;
+#else
 #if MLO_INPUTS_ALIGNED == 0
             vis &= (ic + i_c < MLO_N_INPUTS);
 #endif
-            uint in_off2     = in_off + i_b * MLO_IN_BATCH_STRIDE + i_c * MLO_IN_CHANNEL_STRIDE;
+            uint in_off2 = in_off + i_b * MLO_IN_BATCH_STRIDE + i_c * MLO_IN_CHANNEL_STRIDE;
+#endif
             uint in_lcl_off2 = i_b * MLO_IN_LCL_PERSTACK_SZ + i_c * MLO_IN_LCL_TILE_SZ;
 
             uint elem_id      = wave_lcl_id;
@@ -628,11 +725,19 @@ MIOpenConvUniBatchNormActiv(
             uint lcl_o = i / (MLO_N_IN_TILES_PERSTACK * MLO_FILTER_SZ);
             uint gbl_i = i & ((MLO_N_IN_TILES_PERSTACK * MLO_FILTER_SZ) - 1);
 #endif
+#ifdef GRP_MOD_ENABLE
+            uint gbl_we_off   = wei_off0 + lcl_o * MLO_GRPWISE_N_INPUTS * MLO_FILTER_SZ + gbl_i;
+            bool within_range = gbl_we_off < (MLO_GRPWISE_N_OUTPUTS * MLO_GRPWISE_N_INPUTS *
+                                              (ig + 1) * MLO_FILTER_SZ);
+            within_range &=
+                gbl_we_off >= (MLO_GRPWISE_N_OUTPUTS * MLO_GRPWISE_N_INPUTS * ig * MLO_FILTER_SZ);
+            within_range &= (ig < MLO_GROUP_COUNTS);
+#else
             uint gbl_we_off   = wei_off + lcl_o * MLO_N_INPUTS * MLO_FILTER_SZ + gbl_i;
             bool within_range = gbl_we_off < (MLO_N_OUTPUTS * MLO_N_INPUTS * MLO_FILTER_SZ);
-
+#endif
             gbl_we_off = (within_range) ? gbl_we_off : 0;
-            _FLOAT wei = weights[gbl_we_off];
+            FLOAT wei  = weights[gbl_we_off];
             wei        = (within_range) ? wei : 0;
             lcl_wei[i] = wei;
 #else
@@ -653,13 +758,26 @@ MIOpenConvUniBatchNormActiv(
             uint lcl_i = gbl_i & (MLO_FILTER_SZ - 1);
 #endif
 
-            uint lcl_we_off = mad24(
-                mad24(lcl_c, (uint)MLO_N_IN_TILES_PERSTACK, lcl_o), (uint)MLO_FILTER_SZ, lcl_i);
-            uint gbl_we_off = mad24(
-                mad24(lcl_o, (uint)MLO_N_OUTPUTS, lcl_c), (uint)MLO_FILTER_SZ, wei_off + lcl_i);
-            bool within_range   = gbl_we_off < (MLO_N_OUTPUTS * MLO_N_INPUTS * MLO_FILTER_SZ);
+            uint lcl_we_off = (__mul24(__mul24(lcl_c, (uint)MLO_N_IN_TILES_PERSTACK) + lcl_o,
+                                       (uint)MLO_FILTER_SZ) +
+                               lcl_i);
+#ifdef GRP_MOD_ENABLE
+            uint gbl_we_off =
+                (__mul24(__mul24(lcl_o, (uint)MLO_GRPWISE_N_OUTPUTS) + lcl_c, (uint)MLO_FILTER_SZ) +
+                 wei_off0 + lcl_i);
+            bool within_range = gbl_we_off < (MLO_GRPWISE_N_OUTPUTS * MLO_GRPWISE_N_INPUTS *
+                                              (ig + 1) * MLO_FILTER_SZ);
+            within_range &=
+                gbl_we_off >= (MLO_GRPWISE_N_OUTPUTS * MLO_GRPWISE_N_INPUTS * ig * MLO_FILTER_SZ);
+            within_range &= (ig < MLO_GROUP_COUNTS);
+#else
+            uint gbl_we_off =
+                (__mul24(__mul24(lcl_o, (uint)MLO_N_OUTPUTS) + lcl_c, (uint)MLO_FILTER_SZ) +
+                 wei_off + lcl_i);
+            bool within_range = gbl_we_off < (MLO_N_OUTPUTS * MLO_N_INPUTS * MLO_FILTER_SZ);
+#endif
             gbl_we_off          = (within_range) ? gbl_we_off : 0;
-            _FLOAT wei          = weights[gbl_we_off];
+            FLOAT wei           = weights[gbl_we_off];
             wei                 = (within_range) ? wei : 0;
             lcl_wei[lcl_we_off] = wei;
 
@@ -672,12 +790,12 @@ MIOpenConvUniBatchNormActiv(
 
 #endif // all input
 
-        barrier(CLK_LOCAL_MEM_FENCE);
+        __syncthreads();
 
         // convolution
         Conv(o_map_base, in_stg_off, pvt_in_stage, lcl_indata, pvt_wei_stage, lcl_wei, pvt_accum);
 
-        //		barrier(CLK_LOCAL_MEM_FENCE);
+        //		__syncthreads();
     }
 // write results out
 #if MLO_DIR_FORWARD == 1
@@ -700,14 +818,6 @@ MIOpenConvUniBatchNormActiv(
 
     uint out_off = (b_index + stack) * MLO_OUT_BATCH_STRIDE + o_map * MLO_OUT_CHANNEL_STRIDE +
                    (y_out_grp + y_out_lcl) * MLO_OUT_STRIDE + x_out_grp + x_out_lcl;
-
-    _FLOAT conv_res   = 0.;
-    _FLOAT bn_res     = 0.;
-    _FLOAT output_res = 0.;
-#ifdef MIOPEN_YES_ACTIV
-    _FLOAT actv_res;
-#endif
-
 // over all local stacks
 #if MLO_BATCH_ALIGNED == 0
     if(b_index + stack < MLO_BATCH_SZ)
@@ -718,85 +828,44 @@ MIOpenConvUniBatchNormActiv(
         uint out_off1 = out_off;
         for(uint o = 0; o < MLO_N_OUT_TILES; ++o, out_off1 += MLO_OUT_CHANNEL_STRIDE)
         {
-#ifndef NO_BN
-#ifdef SPATIAL_BN
-            uint c_i            = o_map + o;
-            _FLOAT pmean        = estimatedMean[c_i];
-            _FLOAT pvar         = estimatedVariance[c_i];
-            _FLOAT pscale       = scale[c_i];
-            _FLOAT pbias        = bn_bias[c_i];
-            _FLOAT pinvVariance = rsqrt(fabs(pvar + epsilon));
-#endif
-#endif
-
+#ifdef GRP_MOD_ENABLE
+            if(o_map + o < MLO_GRPWISE_N_OUTPUTS * (ig + 1) &&
+               o_map + o >= MLO_GRPWISE_N_OUTPUTS * ig && ig < MLO_GROUP_COUNTS)
+#else
 #if MLO_OUTPUTS_ALIGNED == 0
             if(o_map + o < MLO_N_OUTPUTS)
 #endif
+#endif
             {
                 // over output tile
-                uint out_off2 = out_off1;
+                uint out_off2      = out_off1;
+                const uint end_off = (uint)MLO_OUT_BATCH_STRIDE * (uint)MLO_BATCH_SZ;
 #if MLO_OUT_TILE0 == 1
                 for(uint j = 0; j < MLO_OUT_TILE1 && y_out_grp + y_out_lcl + j < MLO_OUT_HEIGHT;
                     ++j, out_off2 += MLO_OUT_STRIDE)
                 {
                     for(uint i = 0;
                         i < MLO_OUT_TILE0 && x_out_grp + x_out_lcl + i < MLO_OUT_WIDTH &&
-                        out_off2 + i < MLO_OUT_BATCH_STRIDE * MLO_BATCH_SZ;
+                        out_off2 + i < end_off;
                         ++i)
                     {
-                        if(1)
-                        {
 #else
                 for(uint j = 0; j < MLO_OUT_TILE1; ++j, out_off2 += MLO_OUT_STRIDE)
                 {
                     if(y_out_grp + y_out_lcl + j < MLO_OUT_HEIGHT)
                         for(uint i = 0; i < MLO_OUT_TILE0; ++i)
                         {
-                            if(x_out_grp + x_out_lcl + i < MLO_OUT_WIDTH &&
-                               out_off2 + i < MLO_OUT_BATCH_STRIDE * MLO_BATCH_SZ)
-                            {
+                            if(x_out_grp + x_out_lcl + i < MLO_OUT_WIDTH && out_off2 + i < end_off)
 #endif
 
-#ifndef NO_BN
-#ifdef PERACT_BN
-                            uint chw_i = (out_off2 + i)
-#if MLO_BATCH_SZ > 1
-                                         % (MLO_OUT_BATCH_STRIDE)
-#endif
-                                ;
-                            _FLOAT pmean        = estimatedMean[chw_i];
-                            _FLOAT pvar         = estimatedVariance[chw_i];
-                            _FLOAT pscale       = scale[chw_i];
-                            _FLOAT pbias        = bn_bias[chw_i];
-                            _FLOAT pinvVariance = rsqrt(fabs(pvar + epsilon));
-#endif
-#endif
-                            conv_res =
-                                (_FLOAT)pvt_accum[o * MLO_OUT_TILE_SZ + j * MLO_OUT_TILE0 + i]
 #if MLO_CONV_BIAS
-                                + conv_bias[o_map + o]
-#endif
-                                ;
-
-#ifdef NO_BN
-                            bn_res = conv_res;
+                        out[out_off2 + i] =
+                            CVT_ACCUM2FLOAT(pvt_accum[o * MLO_OUT_TILE_SZ + j * MLO_OUT_TILE0 + i] +
+                                            CVT_FLOAT2ACCUM(bias[o_map + o]));
 #else
-                                bn_res = pscale * (conv_res - pmean) * pinvVariance + pbias;
+                                out[out_off2 + i] = CVT_ACCUM2FLOAT(
+                                    pvt_accum[o * MLO_OUT_TILE_SZ + j * MLO_OUT_TILE0 + i]);
 #endif
-
-#if(MIOPEN_NRN_OP_ID > 0)
-#ifdef MIOPEN_YES_ACTIV
-                            ActivationFunction(
-                                1, &actv_res, (const _FLOAT*)&bn_res, gamma, beta, alpha);
-                            output_res = actv_res;
-
-#endif
-
-#else
-                                output_res = bn_res;
-#endif
-                            out[out_off2 + i] = output_res;
-                        }
                     }
                 }
             }
