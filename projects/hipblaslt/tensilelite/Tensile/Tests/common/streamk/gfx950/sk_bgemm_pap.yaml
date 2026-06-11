@@ -37,6 +37,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
         - GlobalSplitU: [0]
         - WavefrontSize: [64]
         - DepthU: [64]
@@ -71,4 +72,5 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 512]
+          - Exact: [4096, 2048, 1, 512]
+          - Exact: [4104, 2056, 1, 512]

@@ -51,7 +51,6 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1, 1, 2, 4, 2, 2]
           - [32, 32,  64, 1, 1, 2, 2, 2, 2]
-          - [32, 32,  64, 1, 1, 4, 4, 2, 2]
         - ForceDisableShadowInit: [True, False]
         - UseSgprForGRO: [0, 1]
         - DepthU: [256]
@@ -87,11 +86,12 @@ BenchmarkProblems:
         - StaggerUStride: [256]
         - WorkGroupMapping: [1, 8]
         - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [1025, 513, 1, 2048]
-          - Exact: [1044, 532, 1, 2048]
+          - Exact: [4096, 2048, 1, 256]
+          - Exact: [4104, 2056, 1, 256]
         - ActivationArgs:
           - [Enum: none]

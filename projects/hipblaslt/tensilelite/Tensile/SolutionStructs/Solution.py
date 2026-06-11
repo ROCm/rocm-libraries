@@ -1602,6 +1602,8 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent requires BufferLoad")
         if state["PrefetchGlobalRead"] < 1:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent requires PGR >= 1")
+        if state["PrefetchGlobalRead"] > 2:
+          reject(state, printRejectionReason, "PrefetchAcrossPersistent requires PrefetchGlobalRead in [1, 2]")
         if state["1LDSBuffer"] == 1:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent requires 1LDSBuffer != 1 (double LDS buffer)")
         if state["DirectToVgprA"] or state["DirectToVgprB"]:
@@ -1616,6 +1618,17 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with sparse")
         if state["StoreRemapVectorWidth"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with StoreRemap")
+        # DP-only (StreamKForceDPOnly) + PAP is supported (mirror phase): DP-only
+        # StreamK==3 is a persistent grid-stride kernel (graWorkGroup pre-advances
+        # StreamKIter += skGrid*ItersPerTile each persistent iteration), so the
+        # standard PAP next-tile handoff applies unchanged. AddressFlags is
+        # non-zero for DP-only (tree reduction passes the Synchronizer pointer),
+        # so the PAP AddressFlags guard falls through correctly. All
+        # partial/fixup/workspace machinery is already bypassed by
+        # StreamKForceDPOnly guards in storeBranches/writePartials/
+        # computeStoreSrdStart, and StreamKLocalStart/End are constant
+        # (0 / ItersPerTile). No DP-only-specific gating is required here;
+        # Phase 2 strips the now-redundant snapshot/restore of those constants.
       if state["DebugPersistentKernelLoopForever"] and state["StreamK"] not in (1, 2, 3):
         # Mode 4 exits via KernelEnd in graWorkGroup, so the flag would no-op.
         reject(state, printRejectionReason,
@@ -4681,19 +4694,6 @@ class Solution(collections.abc.Mapping):
     else:
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
-
-    problemType = state["ProblemType"]
-    hasAuxLdsStaging = problemType["UseBias"] \
-      or problemType["UseScaleAlphaVec"] \
-      or problemType.get("UseScaleAB", "") == "Vector"
-    if state["PrefetchAcrossPersistent"] \
-       and (state["DirectToLdsA"] or state["DirectToLdsB"] or state["DirectToLds"]) \
-       and state["NumLdsBlk"] >= 3 \
-       and hasAuxLdsStaging:
-      reject(state, printRejectionReason,
-             "PrefetchAcrossPersistent with DirectToLds and NumLdsBlk >= 3 is not supported "
-             "with aux LDS staging (Bias/ScaleAlphaVec/ScaleABVec); aux LDS staging can overwrite PAP-primed A/B data")
-      return
 
     # lds buffer size for reduction
     # if User want to control the LDS usage, we may open this para in the future

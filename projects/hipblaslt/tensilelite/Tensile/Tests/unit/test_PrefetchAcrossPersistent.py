@@ -19,7 +19,7 @@ import Tensile.KernelWriter as kw_module
 from Tensile.KernelWriter import KernelWriter
 import Tensile.KernelWriterAssembly as kwa_module
 from Tensile.Components.StreamK import StreamKTwoTileDPFirst
-from Tensile.Common.GlobalParameters import defaultSolution
+from Tensile.Common.GlobalParameters import defaultSolution, globalParameters
 from Tensile.Common.RequiredParameters import getRequiredParametersMin
 from Tensile.Common.Types import IsaInfo, IsaVersion, SemanticVersion
 from Tensile.Common.ValidParameters import validParameters
@@ -29,6 +29,36 @@ from Tensile.SolutionStructs.Solution import (
     _disableUnsupportedRuntimeStaggerU,
     validateParameterTypes,
 )
+
+pytestmark = pytest.mark.unit
+
+
+# Tensile keeps process-global, module-level default dicts (`defaultSolution`,
+# `globalParameters`) that `Solution.__init__` reads while constructing a solution.
+# Some sibling unit tests mutate these in place -- e.g. test_MatrixInstructionConversion
+# injects a "ProblemType" key into `defaultSolution`, which makes Solution.__init__'s
+# `for key in defaultSolution` loop overwrite the already-converted ProblemType object
+# with the raw config dict, leaving DataType a str and crashing
+# assignProblemIndependentDerivedParameters. That manifested as order-dependent
+# failures of the Solution-validation tests below under pytest-xdist. Snapshot the
+# pristine defaults at import time (collection runs before any test executes, so they
+# are clean here) and restore them around every test so Solution construction in this
+# module is hermetic regardless of suite ordering.
+_PRISTINE_DEFAULT_SOLUTION = deepcopy(defaultSolution)
+_PRISTINE_GLOBAL_PARAMETERS = deepcopy(globalParameters)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_global_solution_state():
+    def _restore(target, pristine):
+        target.clear()
+        target.update(deepcopy(pristine))
+
+    _restore(defaultSolution, _PRISTINE_DEFAULT_SOLUTION)
+    _restore(globalParameters, _PRISTINE_GLOBAL_PARAMETERS)
+    yield
+    _restore(defaultSolution, _PRISTINE_DEFAULT_SOLUTION)
+    _restore(globalParameters, _PRISTINE_GLOBAL_PARAMETERS)
 
 
 def _module_with_comment(name, comment):
@@ -343,7 +373,9 @@ _CLASSIC_KERNEL_BASE = {
     "GuaranteeNoPartialA": False,
     "GuaranteeNoPartialB": False,
     "PrefetchGlobalRead": 2,
+    "PrefetchGL2": 0,
     "ProblemType": _problem_type(),
+    "StreamKForceDPOnly": 0,
     "UseGeneralizedNLCOneA": False,
     "UseGeneralizedNLCOneB": False,
     "_UseSgprForGRO": False,
@@ -361,8 +393,10 @@ _SETUP_NEW_TILE_TDM_BASE = _kernel_from(
     enableTDMMetadata=False,
     GuaranteeNoPartialA=True,
     GuaranteeNoPartialB=True,
+    GuaranteeNoPartialMetadata=False,
     MIWaveGroup=[2, 1],
     Multicast=False,
+    NumWaves=2,
     PrefetchAcrossPersistent=1,
     PrefetchGlobalRead=1,
     StreamK=3,
@@ -525,27 +559,6 @@ def _pap_solution(**overrides):
     )
 
 
-_PAP_DTL_MULTI_LDS_AUX_REJECTION = (
-    "PrefetchAcrossPersistent with DirectToLds and NumLdsBlk >= 3 is not supported "
-    "with aux LDS staging (Bias/ScaleAlphaVec/ScaleABVec); aux LDS staging can overwrite PAP-primed A/B data"
-)
-
-
-def _pap_dtl_multi_lds_solution(**overrides):
-    return _pap_solution(
-        DirectToLds=1,
-        GlobalReadVectorWidthA=1,
-        GlobalReadVectorWidthB=1,
-        LocalReadVectorWidth=1,
-        LocalReadVectorWidthA=1,
-        LocalReadVectorWidthB=1,
-        PrefetchGlobalRead=3,
-        ScheduleIterAlg=3,
-        TDMInst=0,
-        **overrides,
-    )
-
-
 def _module_items(module):
     return [module.getItem(i) for i in range(module.itemsSize())]
 
@@ -595,12 +608,12 @@ def _setup_new_tile_module_names(prefetch_across_persistent):
     return _module_names(module)
 
 
-def _prefetch_across_persistent(monkeypatch, *, skip_barrier=False):
+def _prefetch_across_persistent(monkeypatch, *, skip_barrier=False, **kernel_overrides):
     monkeypatch.setattr(kwa_module.Component.StreamK, "find", lambda writer: _StubStreamK())
     writer = _ClassicPapWrapperWriter()
     module = kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(
         writer,
-        _pap_wrapper_kernel(),
+        _pap_wrapper_kernel(**kernel_overrides),
         *_tensor_parameters(),
         skipBarrier=skip_barrier,
     )
@@ -619,10 +632,25 @@ def _streamk_with_stubbed_tile_indexing():
 
 
 def _streamk_wgm_writer():
-    return SimpleNamespace(
+    writer = SimpleNamespace(
         sgprPool=RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False),
         states=SimpleNamespace(WGMTransformLevels=-1),
     )
+
+    # prefetchAcrossPersistentSetupNextTile now takes its SKPrefetchTemp through the
+    # growable allocTmpSgpr path (see StreamK.py); provide a counter-based stub
+    # matching the other PAP mock writers (skTileIndex/skIndexToWG are stubbed, so
+    # the actual register index is irrelevant here).
+    next_tmp = [100]
+
+    @contextmanager
+    def _alloc_tmp_sgpr(size, alignment=1, tag=""):
+        base = next_tmp[0]
+        next_tmp[0] += size + alignment
+        yield SimpleNamespace(idx=base, size=size)
+
+    writer.allocTmpSgpr = _alloc_tmp_sgpr
+    return writer
 
 
 def test_pap_is_valid_solution_parameter():
@@ -650,6 +678,13 @@ def test_solution_validation_accepts_minimal_pap_tdm_contract():
             "TDM + PrefetchAcrossPersistent with StaggerU is not implemented",
             id="rejects_nonzero_staggeru",
         ),
+        pytest.param(
+            # ScheduleIterAlg 3 so the SIA0+StreamK rule (which already caps PGR at 2)
+            # doesn't reject first; this exercises the PAP PGR<=2 contract directly.
+            {"PrefetchGlobalRead": 3, "ScheduleIterAlg": 3},
+            "PrefetchAcrossPersistent requires PrefetchGlobalRead in [1, 2]",
+            id="rejects_pgr_above_two",
+        ),
     ],
 )
 def test_solution_validation_rejects_unsupported_pap_tdm_contracts(capsys, overrides, reason):
@@ -657,29 +692,6 @@ def test_solution_validation_rejects_unsupported_pap_tdm_contracts(capsys, overr
 
     assert solution["Valid"] is False
     assert reason in capsys.readouterr().out
-
-
-@pytest.mark.parametrize(
-    "problem_type",
-    [
-        pytest.param({"UseBias": 1}, id="bias"),
-        pytest.param({"UseScaleAlphaVec": 1}, id="scale_alpha_vec"),
-        pytest.param({"UseScaleAB": "Vector"}, id="scale_ab_vector"),
-    ],
-)
-def test_solution_validation_rejects_pap_dtl_multi_lds_with_aux_staging(capsys, problem_type):
-    solution = _pap_dtl_multi_lds_solution(ProblemType=problem_type)
-
-    assert solution["Valid"] is False
-    assert _PAP_DTL_MULTI_LDS_AUX_REJECTION in capsys.readouterr().out
-
-
-def test_solution_validation_accepts_pap_dtl_multi_lds_without_aux_staging():
-    solution = _pap_dtl_multi_lds_solution()
-
-    assert solution["Valid"] is True
-    assert solution["DirectToLds"] == 1
-    assert solution["NumLdsBlk"] >= 3
 
 
 @pytest.mark.parametrize(
@@ -844,6 +856,20 @@ def test_classic_pap_checkpoints_loop_counters_in_vgprs_around_next_tile_recount
     assert setup_pap_loads < loop_restore
     assert loop_restore < orig_loop_restore
     assert writer.vgprPool.checked_in == [loop_vgpr]
+
+
+def test_dp_only_pap_skips_loop_counter_checkpoint(monkeypatch):
+    # DP-only StreamK keeps LoopCounter/OrigLoopCounter constant (idempotent
+    # recompute, PAP never runs on the last tile), so prefetchAcrossPersistent
+    # skips the 2-VGPR checkpoint/restore entirely
+    # (KernelWriterAssembly: snapshotLoopCounter = not StreamKForceDPOnly).
+    writer, items = _prefetch_across_persistent(monkeypatch, StreamKForceDPOnly=1)
+
+    assert not any(tag == "PAP loop counters" for _, _, tag in writer.vgprPool.checked_out)
+    assert not _instruction_indices(items, kwa_module.VReadfirstlaneB32, dst_contains="sgprLoopCounterL")
+    assert not _instruction_indices(items, kwa_module.VReadfirstlaneB32, dst_contains="sgprOrigLoopCounter")
+    # the next-tile prefetch setup still runs; only the loop-counter snapshot is skipped
+    _module_index(items, "setupPrefetchAcrossPersistentLoads")
 
 
 def test_classic_pap_can_skip_internal_barrier_after_caller_sync(monkeypatch):

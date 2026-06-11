@@ -34,6 +34,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
         - GlobalSplitU: [0]
         - WavefrontSize: [64]
         - DepthU: [16]
@@ -69,11 +70,8 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 512]
-          - Exact: [1152, 268160, 1, 1920] # aligned control
-          - Exact: [1160, 268160, 1, 1920] # M edge, M % 16 = 8
-          - Exact: [1152, 268168, 1, 1920] # N edge, N % 16 = 8
-          - Exact: [1160, 268168, 1, 1920] # M and N edges
+          - Exact: [4096, 2048, 1, 512]
+          - Exact: [4104, 2056, 1, 512]
 
     - # BenchmarkProblemSizeGroup - 64-bit shadow-limit restore path
       InitialSolutionParameters:
@@ -81,6 +79,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
         - GlobalSplitU: [0]
         - WavefrontSize: [64]
         - DepthU: [16]
@@ -115,4 +114,5 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 512]
+          - Exact: [4096, 2048, 1, 512]
+          - Exact: [4104, 2056, 1, 512]

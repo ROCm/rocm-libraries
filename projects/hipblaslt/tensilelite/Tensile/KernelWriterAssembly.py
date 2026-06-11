@@ -17494,9 +17494,13 @@ class KernelWriterAssembly(KernelWriter):
       "WorkGroup0",
       "WorkGroup1",
       "WorkGroup2",
-      "StreamKLocalStart",
-      "StreamKLocalEnd",
     ]
+    # DP-only tiles are always full: StreamKLocalStart/End are constant
+    # (0 / ItersPerTile) and the next-tile setup recomputes the same values,
+    # so they need no checkpoint/restore. (DP-only PAP: skip unneeded state.)
+    if not kernel["StreamKForceDPOnly"]:
+      names.append("StreamKLocalStart")
+      names.append("StreamKLocalEnd")
     if len(kernel["SpaceFillingAlgo"]):
       names.append("StreamKTileID")
     return names
@@ -17509,13 +17513,8 @@ class KernelWriterAssembly(KernelWriter):
 
   def papCheckpointCurrentTileIdentity(self, kernel, prevTile):
     module = Module("papCheckpointCurrentTileIdentity")
-    module.add(SMovB32(dst=sgpr(prevTile["WorkGroup0"]), src=sgpr("WorkGroup0"), comment="checkpoint WG0 for PAP restore"))
-    module.add(SMovB32(dst=sgpr(prevTile["WorkGroup1"]), src=sgpr("WorkGroup1"), comment="checkpoint WG1 for PAP restore"))
-    module.add(SMovB32(dst=sgpr(prevTile["WorkGroup2"]), src=sgpr("WorkGroup2"), comment="checkpoint WG2 for PAP restore"))
-    module.add(SMovB32(dst=sgpr(prevTile["StreamKLocalStart"]), src=sgpr("StreamKLocalStart"), comment="checkpoint LocalStart for PAP restore"))
-    module.add(SMovB32(dst=sgpr(prevTile["StreamKLocalEnd"]), src=sgpr("StreamKLocalEnd"), comment="checkpoint LocalEnd for PAP restore"))
-    if len(kernel["SpaceFillingAlgo"]):
-      module.add(SMovB32(dst=sgpr(prevTile["StreamKTileID"]), src=sgpr("StreamKTileID"), comment="checkpoint TileID for PAP restore"))
+    for name in self.papTileIdentityNames(kernel):
+      module.add(SMovB32(dst=sgpr(prevTile[name]), src=sgpr(name), comment="checkpoint %s for PAP restore" % name))
     return module
 
   def papRestoreCurrentTileIdentity(self, kernel, prevTile):
@@ -17523,13 +17522,8 @@ class KernelWriterAssembly(KernelWriter):
     # PAP temporarily maps WorkGroup*/StreamKLocal* to the next persistent tile
     # so it can issue the first PGR early. Restore the current tile for the
     # remaining NLL/tail code; StreamKIter already points at the next chunk.
-    module.add(SMovB32(dst=sgpr("WorkGroup0"), src=sgpr(prevTile["WorkGroup0"]), comment="restore current WG0 after PAP"))
-    module.add(SMovB32(dst=sgpr("WorkGroup1"), src=sgpr(prevTile["WorkGroup1"]), comment="restore current WG1 after PAP"))
-    module.add(SMovB32(dst=sgpr("WorkGroup2"), src=sgpr(prevTile["WorkGroup2"]), comment="restore current WG2 after PAP"))
-    module.add(SMovB32(dst=sgpr("StreamKLocalStart"), src=sgpr(prevTile["StreamKLocalStart"]), comment="restore current LocalStart after PAP"))
-    module.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr(prevTile["StreamKLocalEnd"]), comment="restore current LocalEnd after PAP"))
-    if len(kernel["SpaceFillingAlgo"]):
-      module.add(SMovB32(dst=sgpr("StreamKTileID"), src=sgpr(prevTile["StreamKTileID"]), comment="restore current TileID after PAP"))
+    for name in self.papTileIdentityNames(kernel):
+      module.add(SMovB32(dst=sgpr(name), src=sgpr(prevTile[name]), comment="restore current %s after PAP" % name))
     return module
 
   ##############################################################################
@@ -17564,14 +17558,21 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
           module.add(self.papTdmUpdateDescriptor(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
       loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
-      prevLoopVgpr = self.vgprPool.checkOutAligned(2, 1, "PAP loop counters")
-      module.add(VMovB32(dst=vgpr(prevLoopVgpr), src=sgpr(loopCounterName), comment="checkpoint LoopCounter for PAP restore"))
-      module.add(VMovB32(dst=vgpr(prevLoopVgpr + 1), src=sgpr("OrigLoopCounter"), comment="checkpoint OrigLoopCounter for PAP restore"))
+      # DP-only: LoopCounter is constant ItersPerTile and OrigLoopCounter is a
+      # per-problem constant, so calculateLoopNumIter recomputes the same values
+      # (idempotent) and PAP never runs on the last tile. Skip the 2-VGPR
+      # checkpoint/restore. (DP-only PAP saving.)
+      snapshotLoopCounter = not kernel["StreamKForceDPOnly"]
+      if snapshotLoopCounter:
+        prevLoopVgpr = self.vgprPool.checkOutAligned(2, 1, "PAP loop counters")
+        module.add(VMovB32(dst=vgpr(prevLoopVgpr), src=sgpr(loopCounterName), comment="checkpoint LoopCounter for PAP restore"))
+        module.add(VMovB32(dst=vgpr(prevLoopVgpr + 1), src=sgpr("OrigLoopCounter"), comment="checkpoint OrigLoopCounter for PAP restore"))
       module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
       module.add(self.setupPrefetchAcrossPersistentLoads(kernel, tensorParametersA, tensorParametersB, isOptNLL=True))
-      module.add(VReadfirstlaneB32(dst=sgpr(loopCounterName), src=vgpr(prevLoopVgpr), comment="restore LoopCounter after PAP"))
-      module.add(VReadfirstlaneB32(dst=sgpr("OrigLoopCounter"), src=vgpr(prevLoopVgpr + 1), comment="restore OrigLoopCounter after PAP"))
-      self.vgprPool.checkIn(prevLoopVgpr)
+      if snapshotLoopCounter:
+        module.add(VReadfirstlaneB32(dst=sgpr(loopCounterName), src=vgpr(prevLoopVgpr), comment="restore LoopCounter after PAP"))
+        module.add(VReadfirstlaneB32(dst=sgpr("OrigLoopCounter"), src=vgpr(prevLoopVgpr + 1), comment="restore OrigLoopCounter after PAP"))
+        self.vgprPool.checkIn(prevLoopVgpr)
       if kernel["enableTDMA"] and kernel["enableTDMB"]:
         module.add(self.papTdmSaveLdsBank(kernel))
       module.add(self.papRestoreCurrentTileIdentity(kernel, prevTile))

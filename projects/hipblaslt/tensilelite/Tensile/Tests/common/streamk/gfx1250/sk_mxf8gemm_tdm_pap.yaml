@@ -81,6 +81,7 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
@@ -91,8 +92,8 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 2048]
-          - Exact: [512, 512, 1, 2048]
+          - Exact: [2048, 2048, 1, 2048]
+          - Exact: [2056, 2056, 1, 2048]
         - ActivationArgs:
           - [Enum: none]
 
@@ -136,6 +137,7 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
+        - StreamKForceDPOnly: [0] # full-SK only (g2/g3/g4 test fixup variants; DP-only bypasses fixup)
         - StreamKFixupTreeReduction: [0]
         - StaggerU: [0]
         - DirectToVgprA: [False]
@@ -147,7 +149,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 2112]
+          - Exact: [2048, 2048, 1, 2112]
         - ActivationArgs:
           - [Enum: none]
 
@@ -191,6 +193,7 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
+        - StreamKForceDPOnly: [0] # full-SK only (g2/g3/g4 test fixup variants; DP-only bypasses fixup)
         - StreamKFixupTreeReduction: [1]
         - StaggerU: [0]
         - DirectToVgprA: [False]
@@ -202,8 +205,8 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 2048]
-          - Exact: [128, 128, 1, 2112]
+          - Exact: [2048, 2048, 1, 2048]
+          - Exact: [2048, 2048, 1, 2112]
         - ActivationArgs:
           - [Enum: none]
 
@@ -247,6 +250,7 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
+        - StreamKForceDPOnly: [0] # full-SK only (g2/g3/g4 test fixup variants; DP-only bypasses fixup)
         - StreamKFixupTreeReduction: [1]
         - StaggerU: [0]
         - DirectToVgprA: [False]
@@ -258,7 +262,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 2112]
+          - Exact: [2056, 2056, 1, 2112]
         - ActivationArgs:
           - [Enum: none]
 
@@ -316,6 +320,7 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
         - StreamKFixupTreeReduction: [0, 1]
         - StaggerU: [0]
         - DirectToVgprA: [False]
@@ -327,8 +332,8 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 2048]
-          - Exact: [128, 128, 1, 2112]
+          - Exact: [2048, 2048, 1, 2048]
+          - Exact: [2048, 2048, 1, 2112]
         - ActivationArgs:
           - [Enum: none]
 
@@ -386,6 +391,7 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
         - StreamKFixupTreeReduction: [0, 1]
         - StaggerU: [0]
         - DirectToVgprA: [False]
@@ -397,8 +403,8 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 2048]
-          - Exact: [128, 128, 1, 2112]
+          - Exact: [2048, 2048, 1, 2048]
+          - Exact: [2048, 2048, 1, 2112]
         - ActivationArgs:
           - [Enum: none]
 
@@ -456,6 +462,7 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
         - StreamKFixupTreeReduction: [0, 1]
         - StaggerU: [0]
         - DirectToVgprA: [False]
@@ -467,7 +474,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 2048]
-          - Exact: [128, 128, 1, 2112]
+          - Exact: [2048, 2048, 1, 2048]
+          - Exact: [2048, 2048, 1, 2112]
         - ActivationArgs:
           - [Enum: none]

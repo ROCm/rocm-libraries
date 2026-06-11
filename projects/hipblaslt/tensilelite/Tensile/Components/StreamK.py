@@ -313,10 +313,10 @@ class StreamK(Component):
         from Tensile.Components.WorkGroupMappingAlgos import DefaultWGM, SpaceFillingCurveWalk
 
         module = Module("StreamK prefetchAcrossPersistentSetupNextTile")
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKPrefetchTemp")
-        module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB, skipLroReset=skipLroReset))
-        module.add(self.skIndexToWG(writer, kernel, sTmp))
-        writer.sgprPool.checkIn(sTmp)
+        with writer.allocTmpSgpr(4, 2, "SKPrefetchTemp") as sTmpRes:
+            sTmp = sTmpRes.idx
+            module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB, skipLroReset=skipLroReset))
+            module.add(self.skIndexToWG(writer, kernel, sTmp))
         if len(kernel["SpaceFillingAlgo"]):
             writer.states.WGMTransformLevels = len(kernel["SpaceFillingAlgo"])
             module.add(SpaceFillingCurveWalk(writer, kernel, "WGM"))
@@ -2867,7 +2867,7 @@ class StreamKTwoTileDPFirst(StreamK):
 
             module.add(self.skIndexToWG(writer, kernel, sTmp))
 
-            alphaLabel = Label("SKAlphaCheck", "")
+            alphaLabel = Label(writer.labels.getNameInc("SKAlphaCheck"), "")
             module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel))
             module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
             skCloseLoopLabel = Label("SK_CloseLoop", "")
