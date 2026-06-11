@@ -50,7 +50,7 @@ def check_host() {
 }
 
 //default
-// CXX=/opt/rocm/llvm/bin/clang++ CXXFLAGS='-Werror' cmake -DMIOPEN_GPU_SYNC=Off -DCMAKE_PREFIX_PATH=/usr/local -DBUILD_DEV=On -DCMAKE_BUILD_TYPE=release ..
+// CXX=/opt/rocm/llvm/bin/clang++ CXXFLAGS='-Werror' cmake -G Ninja -DMIOPEN_GPU_SYNC=Off -DCMAKE_PREFIX_PATH=/usr/local -DBUILD_DEV=On -DCMAKE_BUILD_TYPE=release ..
 //
 def cmake_build(Map conf=[:]){
 
@@ -199,7 +199,7 @@ def cmake_fin_build_cmd(prefixpath){
             rm -rf build
             mkdir build
             cd build
-            CXX=${compilerpath} cmake ${configargs} ${flags} ..
+            CXX=${compilerpath} cmake -G Ninja ${configargs} ${flags} ..
             dumb-init ninja -j\$(nproc) ${make_targets}
     """
     return fin_cmd
