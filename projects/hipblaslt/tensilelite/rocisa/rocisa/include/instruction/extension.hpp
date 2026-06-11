@@ -34,6 +34,24 @@ namespace rocisa
     ////////////////////////////////////////
     // Branch
     ////////////////////////////////////////
+
+    // Add an s_setpc_b64 to \p module with \p labelName recorded as the
+    // long-branch target hint (SSetPCB64::longBranchLabel). Used by every
+    // SLongBranch* helper below so the StinkyTofu IR converter can recover the
+    // static target without re-pattern-matching the surrounding sequence.
+    //
+    // The hint has no effect on the emitted assembly; it only travels along
+    // with the IR through the rocisa -> stinkytofu lowering boundary.
+    inline void addSSetPCB64WithLongBranchLabel(const std::shared_ptr<Module>&    module,
+                                                const std::shared_ptr<Container>& src,
+                                                const std::string&                labelName,
+                                                const std::string&                comment)
+    {
+        auto inst             = std::make_shared<SSetPCB64>(src, comment);
+        inst->longBranchLabel = labelName;
+        module->add(inst);
+    }
+
     //////////////////////////////////////////////////////////////////////////////
     // longBranch - 32 bit offset
     // s_branch class instructions take a label operand which is truncated to 16 bit
@@ -69,14 +87,16 @@ namespace rocisa
         module->addT<SSubU32>(
             sgpr(tmpSgpr), sgpr(tmpSgpr), sgpr(tmpSgpr + 2), "sub target branch offset");
         module->addT<SSubBU32>(sgpr(tmpSgpr + 1), sgpr(tmpSgpr + 1), 0, "sub high and carry");
-        module->addT<SSetPCB64>(sgpr(tmpSgpr, 2), "branch to " + labelName);
+        addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgpr, 2), labelName,
+                                        "branch to " + labelName);
 
         // positive offset
         module->addT<Label>(positiveLabel);
         module->addT<SAddU32>(
             sgpr(tmpSgpr), sgpr(tmpSgpr), sgpr(tmpSgpr + 2), "add target branch offset");
         module->addT<SAddCU32>(sgpr(tmpSgpr + 1), sgpr(tmpSgpr + 1), 0, "add high and carry");
-        module->addT<SSetPCB64>(sgpr(tmpSgpr, 2), "branch to " + labelName);
+        addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgpr, 2), labelName,
+                                        "branch to " + labelName);
 
         return module;
     }
@@ -153,7 +173,8 @@ namespace rocisa
             }
             auto cr = ContinuousRegister(tmpSgprX1, 1);
             module->add(SGetPositivePCOffset(tmpSgprX2, label, cr));
-            module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
+            addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgprX2, 2), labelName,
+                                            "branch to " + labelName);
         }
 
         return module;
@@ -195,7 +216,8 @@ namespace rocisa
         module->addT<SSubU32>(
             sgpr(tmpSgprX2), sgpr(tmpSgprX2), sgpr(tmpSgprX1), "sub target branch offset");
         module->addT<SSubBU32>(sgpr(tmpSgprX2 + 1), sgpr(tmpSgprX2 + 1), 0, "sub high and carry");
-        module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
+        addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgprX2, 2), labelName,
+                                        "branch to " + labelName);
 
         return module;
     }
@@ -224,7 +246,8 @@ namespace rocisa
         if(offSgpr.size < 1)
             throw std::runtime_error("offSgpr must have at least 1 register.");
         module->add(SGetPositivePCOffset(pcPair.idx, label, offSgpr.idx));
-        module->addT<SSetPCB64>(sgpr(pcPair.idx, 2), "branch to " + labelName);
+        addSSetPCB64WithLongBranchLabel(module, sgpr(pcPair.idx, 2), labelName,
+                                        "branch to " + labelName);
         return module;
     }
 
@@ -249,7 +272,8 @@ namespace rocisa
         module->addT<SSubU32>(
             sgpr(tmpSgprX2), sgpr(tmpSgprX2), sgpr(tmpSgprX1), "sub target branch offset");
         module->addT<SSubBU32>(sgpr(tmpSgprX2 + 1), sgpr(tmpSgprX2 + 1), 0, "sub high and carry");
-        module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
+        addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgprX2, 2), labelName,
+                                        "branch to " + labelName);
         return module;
     }
 
@@ -279,13 +303,15 @@ namespace rocisa
         module->addT<SSubU32>(
             sgpr(tmpSgprX2), sgpr(tmpSgprX2), sgpr(tmpSgprX1), "sub target branch offset");
         module->addT<SSubBU32>(sgpr(tmpSgprX2 + 1), sgpr(tmpSgprX2 + 1), 0, "sub high and carry");
-        module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
+        addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgprX2, 2), labelName,
+                                        "branch to " + labelName);
         // positive offset
         module->addT<Label>(positiveLabel);
         module->addT<SAddU32>(
             sgpr(tmpSgprX2), sgpr(tmpSgprX2), sgpr(tmpSgprX1), "add target branch offset");
         module->addT<SAddCU32>(sgpr(tmpSgprX2 + 1), sgpr(tmpSgprX2 + 1), 0, "add high and carry");
-        module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
+        addSSetPCB64WithLongBranchLabel(module, sgpr(tmpSgprX2, 2), labelName,
+                                        "branch to " + labelName);
         return module;
     }
 
