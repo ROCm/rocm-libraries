@@ -31,6 +31,7 @@
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
+#include "stinkytofu/pipeline/PassBuilder.hpp"
 
 /*
  * @brief Define the options for the ModuleOptions struct
@@ -263,6 +264,19 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      * @brief Get total instruction size in bytes, or -1 if not set.
      */
     int64_t getTotalInstructionBytes() const;
+
+    // ---- Plugin data (opaque key-value store for pass plugins) ----
+
+    void setPluginDataI64(const std::string& key, int64_t value);
+    int64_t getPluginDataI64(const std::string& key, int64_t defaultVal = 0) const;
+
+    void setPluginDataStr(const std::string& key, const std::string& value);
+    std::string getPluginDataStr(const std::string& key, const std::string& defaultVal = "") const;
+
+    // ---- Pass plugin support ----
+
+    PassBuilder& getPassBuilder();
+    const PassBuilder& getPassBuilder() const;
 
    private:
     struct Impl;
