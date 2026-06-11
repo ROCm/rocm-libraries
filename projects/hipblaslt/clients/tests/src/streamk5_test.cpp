@@ -24,265 +24,21 @@
 // Self-contained (does not go through the YAML/gentest pipeline) so it
 // can be filtered cleanly with --gtest_filter='*streamk5*'.
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include "testing_auxiliary.hpp"
 #include <cmath>
+#include <cstring>
 #include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
-#include <hipblaslt/hipblaslt-ext.hpp>
-#include <hipblaslt/hipblaslt.h>
 #include <random>
-#include <string>
 #include <vector>
 
 namespace
 {
-    constexpr int32_t kStaticMode  = 0;
-    constexpr int32_t kDynamicMode = 1;
-    constexpr int32_t kAutoMode    = 2;
-
-    // Kernel-name marker emitted by KernelHelperNaming for StreamK=5
-    // solutions. Used to skip the bitwise-equivalence test when no SK5
-    // kernel is present in the loaded device library (the toggle is a
-    // no-op for non-SK5 kernels, which would let the test pass
-    // vacuously).
-    constexpr const char* kSk5KernelMarker = "_SK5_";
-
-    struct GpuBuf
-    {
-        void*  ptr  = nullptr;
-        size_t size = 0;
-
-        GpuBuf() = default;
-        explicit GpuBuf(size_t bytes)
-            : size(bytes)
-        {
-            if(hipMalloc(&ptr, bytes) != hipSuccess)
-            {
-                ptr = nullptr;
-            }
-        }
-        ~GpuBuf()
-        {
-            if(ptr)
-                (void)hipFree(ptr);
-        }
-        GpuBuf(const GpuBuf&)            = delete;
-        GpuBuf& operator=(const GpuBuf&) = delete;
-        GpuBuf(GpuBuf&& other) noexcept
-            : ptr(other.ptr)
-            , size(other.size)
-        {
-            other.ptr  = nullptr;
-            other.size = 0;
-        }
-        GpuBuf& operator=(GpuBuf&& other) noexcept
-        {
-            if(this != &other)
-            {
-                if(ptr)
-                    (void)hipFree(ptr);
-                ptr        = other.ptr;
-                size       = other.size;
-                other.ptr  = nullptr;
-                other.size = 0;
-            }
-            return *this;
-        }
-    };
-
-    // Set up SGEMM layouts and descriptor for an MxNxK problem.
-    // All matrices are column-major HIP_R_32F, op_a = op_b = N.
-    bool createSgemmLayouts(int                          m,
-                            int                          n,
-                            int                          k,
-                            hipblasLtMatrixLayout_t&     layoutA,
-                            hipblasLtMatrixLayout_t&     layoutB,
-                            hipblasLtMatrixLayout_t&     layoutC,
-                            hipblasLtMatrixLayout_t&     layoutD,
-                            hipblasLtMatmulDesc_t&       desc)
-    {
-        if(hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_32F, m, k, m) != HIPBLAS_STATUS_SUCCESS
-           || hipblasLtMatrixLayoutCreate(&layoutB, HIP_R_32F, k, n, k) != HIPBLAS_STATUS_SUCCESS
-           || hipblasLtMatrixLayoutCreate(&layoutC, HIP_R_32F, m, n, m) != HIPBLAS_STATUS_SUCCESS
-           || hipblasLtMatrixLayoutCreate(&layoutD, HIP_R_32F, m, n, m) != HIPBLAS_STATUS_SUCCESS
-           || hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
-                  != HIPBLAS_STATUS_SUCCESS)
-            return false;
-
-        hipblasOperation_t opN = HIPBLAS_OP_N;
-        if(hipblasLtMatmulDescSetAttribute(
-               desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opN, sizeof(opN))
-               != HIPBLAS_STATUS_SUCCESS
-           || hipblasLtMatmulDescSetAttribute(
-                  desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN))
-                  != HIPBLAS_STATUS_SUCCESS)
-            return false;
-
-        return true;
-    }
-
-    // Query heuristic algos for an SGEMM and return the first whose
-    // kernel name marks it as a StreamK=5 hybrid kernel. The output
-    // `algo` is only valid when the function returns true; on false the
-    // device library does not contain an SK5 kernel for this problem.
-    bool pickSk5Algo(hipblasLtHandle_t           handle,
-                     hipblasLtMatmulDesc_t       desc,
-                     hipblasLtMatrixLayout_t     layoutA,
-                     hipblasLtMatrixLayout_t     layoutB,
-                     hipblasLtMatrixLayout_t     layoutC,
-                     hipblasLtMatrixLayout_t     layoutD,
-                     hipblasLtMatmulAlgo_t&      algo,
-                     size_t&                     workspaceSize)
-    {
-        hipblasLtMatmulPreference_t pref = nullptr;
-        if(hipblasLtMatmulPreferenceCreate(&pref) != HIPBLAS_STATUS_SUCCESS)
-            return false;
-
-        uint64_t workspace = 256ULL * 1024 * 1024;
-        (void)hipblasLtMatmulPreferenceSetAttribute(
-            pref,
-            HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-            &workspace,
-            sizeof(workspace));
-
-        constexpr int                    kReqAlgos = 32;
-        hipblasLtMatmulHeuristicResult_t results[kReqAlgos]{};
-        int                              returnedAlgos = 0;
-        const auto                       st            = hipblasLtMatmulAlgoGetHeuristic(handle,
-                                                          desc,
-                                                          layoutA,
-                                                          layoutB,
-                                                          layoutC,
-                                                          layoutD,
-                                                          pref,
-                                                          kReqAlgos,
-                                                          results,
-                                                          &returnedAlgos);
-        (void)hipblasLtMatmulPreferenceDestroy(pref);
-        if(st != HIPBLAS_STATUS_SUCCESS || returnedAlgos <= 0)
-            return false;
-
-        for(int i = 0; i < returnedAlgos; ++i)
-        {
-            const std::string name
-                = hipblaslt_ext::getKernelNameFromAlgo(handle, results[i].algo);
-            if(name.find(kSk5KernelMarker) != std::string::npos)
-            {
-                algo          = results[i].algo;
-                workspaceSize = results[i].workspaceSize;
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // Run a single SGEMM against `algo` with the SK5 hybrid-mode toggle
-    // set to `mode`, returning the host-side D buffer in `outD`. The
-    // caller is expected to pass the same algo across the two mode
-    // values so the only intentional difference is the bit packed into
-    // MagicShiftItersPerTile by the host arg-pack path.
-    bool runSgemm(hipblasLtHandle_t            handle,
-                  const hipblasLtMatmulAlgo_t& algo,
-                  size_t                       workspaceSize,
-                  int32_t                      mode,
-                  int                          m,
-                  int                          n,
-                  int                          k,
-                  const float*                 hA,
-                  const float*                 hB,
-                  const float*                 hC,
-                  std::vector<float>&          outD)
-    {
-        const size_t bytesA = size_t(m) * k * sizeof(float);
-        const size_t bytesB = size_t(k) * n * sizeof(float);
-        const size_t bytesC = size_t(m) * n * sizeof(float);
-
-        GpuBuf dA(bytesA), dB(bytesB), dC(bytesC), dD(bytesC);
-        if(!dA.ptr || !dB.ptr || !dC.ptr || !dD.ptr)
-            return false;
-
-        if(hipMemcpy(dA.ptr, hA, bytesA, hipMemcpyHostToDevice) != hipSuccess
-           || hipMemcpy(dB.ptr, hB, bytesB, hipMemcpyHostToDevice) != hipSuccess
-           || hipMemcpy(dC.ptr, hC, bytesC, hipMemcpyHostToDevice) != hipSuccess)
-            return false;
-
-        hipblasLtMatrixLayout_t layoutA = nullptr, layoutB = nullptr;
-        hipblasLtMatrixLayout_t layoutC = nullptr, layoutD = nullptr;
-        hipblasLtMatmulDesc_t   desc    = nullptr;
-        bool                    ok      = createSgemmLayouts(
-            m, n, k, layoutA, layoutB, layoutC, layoutD, desc);
-
-        // StreamK=5 hybrid-mode toggle (0 = static, 1 = dynamic). Must
-        // be set after the descriptor is created and before the matmul
-        // call; the host OR's it into MagicShiftItersPerTile at
-        // arg-pack time.
-        if(ok)
-        {
-            ok = ok
-                 && hipblasLtMatmulDescSetAttribute(
-                        desc,
-                        HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
-                        &mode,
-                        sizeof(mode))
-                        == HIPBLAS_STATUS_SUCCESS;
-        }
-
-        GpuBuf workspaceBuf;
-        if(ok && workspaceSize > 0)
-        {
-            workspaceBuf = GpuBuf(workspaceSize);
-            ok           = ok && workspaceBuf.ptr != nullptr;
-        }
-
-        float alpha = 1.0f, beta = 0.0f;
-        if(ok)
-        {
-            auto st = hipblasLtMatmul(handle,
-                                      desc,
-                                      &alpha,
-                                      dA.ptr,
-                                      layoutA,
-                                      dB.ptr,
-                                      layoutB,
-                                      &beta,
-                                      dC.ptr,
-                                      layoutC,
-                                      dD.ptr,
-                                      layoutD,
-                                      &algo,
-                                      workspaceBuf.ptr,
-                                      workspaceBuf.size,
-                                      nullptr);
-            ok      = ok && st == HIPBLAS_STATUS_SUCCESS;
-            ok      = ok && hipDeviceSynchronize() == hipSuccess;
-        }
-
-        if(ok)
-        {
-            outD.resize(size_t(m) * n);
-            ok = ok && hipMemcpy(outD.data(), dD.ptr, bytesC, hipMemcpyDeviceToHost) == hipSuccess;
-        }
-
-        if(desc)
-            (void)hipblasLtMatmulDescDestroy(desc);
-        if(layoutD)
-            (void)hipblasLtMatrixLayoutDestroy(layoutD);
-        if(layoutC)
-            (void)hipblasLtMatrixLayoutDestroy(layoutC);
-        if(layoutB)
-            (void)hipblasLtMatrixLayoutDestroy(layoutB);
-        if(layoutA)
-            (void)hipblasLtMatrixLayoutDestroy(layoutA);
-        return ok;
-    }
-
-    bool gpuAvailable()
-    {
-        int deviceCount = 0;
-        return hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0;
-    }
+    using hipblaslt_sk5_test::gpuAvailable;
+    using hipblaslt_sk5_test::kAutoMode;
+    using hipblaslt_sk5_test::kDynamicMode;
+    using hipblaslt_sk5_test::kStaticMode;
+    using hipblaslt_sk5_test::prepareSk5OrSkip;
+    using hipblaslt_sk5_test::runSgemm;
 
     void fillRandom(std::vector<float>& v, unsigned seed)
     {
@@ -303,40 +59,7 @@ namespace
             GTEST_SKIP() << "No GPU available";
 
         const auto [m, n, k] = GetParam();
-
-        hipblasLtHandle_t handle = nullptr;
-        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
-
-        // Locate a real SK5 kernel for this problem. Without one the
-        // toggle is a no-op and a bitwise-equivalence assertion would
-        // pass vacuously, so skip cleanly instead.
-        hipblasLtMatrixLayout_t lA = nullptr, lB = nullptr, lC = nullptr, lD = nullptr;
-        hipblasLtMatmulDesc_t   desc       = nullptr;
-        bool                    layoutsOk  = createSgemmLayouts(m, n, k, lA, lB, lC, lD, desc);
-
-        hipblasLtMatmulAlgo_t algo{};
-        size_t                workspaceSize = 0;
-        bool                  foundSk5      = false;
-        if(layoutsOk)
-            foundSk5 = pickSk5Algo(handle, desc, lA, lB, lC, lD, algo, workspaceSize);
-
-        if(desc)
-            (void)hipblasLtMatmulDescDestroy(desc);
-        if(lD)
-            (void)hipblasLtMatrixLayoutDestroy(lD);
-        if(lC)
-            (void)hipblasLtMatrixLayoutDestroy(lC);
-        if(lB)
-            (void)hipblasLtMatrixLayoutDestroy(lB);
-        if(lA)
-            (void)hipblasLtMatrixLayoutDestroy(lA);
-
-        if(!layoutsOk || !foundSk5)
-        {
-            (void)hipblasLtDestroy(handle);
-            GTEST_SKIP() << "No StreamK=5 kernel in loaded device library for "
-                         << m << "x" << n << "x" << k;
-        }
+        auto       setup     = prepareSk5OrSkip(m, n, k);
 
         std::vector<float> hA(size_t(m) * k);
         std::vector<float> hB(size_t(k) * n);
@@ -345,9 +68,9 @@ namespace
         fillRandom(hB, 0xB0B);
 
         std::vector<float> outStatic, outDynamic;
-        ASSERT_TRUE(runSgemm(handle,
-                             algo,
-                             workspaceSize,
+        ASSERT_TRUE(runSgemm(setup.handle,
+                             setup.algo,
+                             setup.workspaceSize,
                              kStaticMode,
                              m,
                              n,
@@ -357,9 +80,9 @@ namespace
                              hC.data(),
                              outStatic))
             << "static path matmul failed";
-        ASSERT_TRUE(runSgemm(handle,
-                             algo,
-                             workspaceSize,
+        ASSERT_TRUE(runSgemm(setup.handle,
+                             setup.algo,
+                             setup.workspaceSize,
                              kDynamicMode,
                              m,
                              n,
@@ -370,7 +93,7 @@ namespace
                              outDynamic))
             << "dynamic path matmul failed";
 
-        (void)hipblasLtDestroy(handle);
+        (void)hipblasLtDestroy(setup.handle);
 
         ASSERT_EQ(outStatic.size(), outDynamic.size());
         // The static (SK3) and dynamic (SK4) sub-paths can select different
@@ -420,32 +143,7 @@ namespace
             GTEST_SKIP() << "No GPU available";
 
         constexpr int M = 256, N = 256, K = 256;
-
-        hipblasLtHandle_t handle = nullptr;
-        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
-
-        hipblasLtMatrixLayout_t lA = nullptr, lB = nullptr, lC = nullptr, lD = nullptr;
-        hipblasLtMatmulDesc_t   desc      = nullptr;
-        bool                    layoutsOk = createSgemmLayouts(M, N, K, lA, lB, lC, lD, desc);
-
-        hipblasLtMatmulAlgo_t algo{};
-        size_t                workspaceSize = 0;
-        bool                  foundSk5      = false;
-        if(layoutsOk)
-            foundSk5 = pickSk5Algo(handle, desc, lA, lB, lC, lD, algo, workspaceSize);
-
-        if(desc) (void)hipblasLtMatmulDescDestroy(desc);
-        if(lD)   (void)hipblasLtMatrixLayoutDestroy(lD);
-        if(lC)   (void)hipblasLtMatrixLayoutDestroy(lC);
-        if(lB)   (void)hipblasLtMatrixLayoutDestroy(lB);
-        if(lA)   (void)hipblasLtMatrixLayoutDestroy(lA);
-
-        if(!layoutsOk || !foundSk5)
-        {
-            (void)hipblasLtDestroy(handle);
-            GTEST_SKIP() << "No StreamK=5 kernel in loaded device library for "
-                         << M << "x" << N << "x" << K;
-        }
+        auto          setup = prepareSk5OrSkip(M, N, K);
 
         std::vector<float> hA(size_t(M) * K);
         std::vector<float> hB(size_t(K) * N);
@@ -454,14 +152,14 @@ namespace
         fillRandom(hB, 0xDECAF);
 
         std::vector<float> outAuto, outStatic;
-        ASSERT_TRUE(runSgemm(handle, algo, workspaceSize, kAutoMode,
+        ASSERT_TRUE(runSgemm(setup.handle, setup.algo, setup.workspaceSize, kAutoMode,
                              M, N, K, hA.data(), hB.data(), hC.data(), outAuto))
             << "AUTO matmul failed";
-        ASSERT_TRUE(runSgemm(handle, algo, workspaceSize, kStaticMode,
+        ASSERT_TRUE(runSgemm(setup.handle, setup.algo, setup.workspaceSize, kStaticMode,
                              M, N, K, hA.data(), hB.data(), hC.data(), outStatic))
             << "explicit static matmul failed";
 
-        (void)hipblasLtDestroy(handle);
+        (void)hipblasLtDestroy(setup.handle);
 
         ASSERT_EQ(outAuto.size(), outStatic.size());
         const auto byteSize = outAuto.size() * sizeof(float);
@@ -477,32 +175,7 @@ namespace
             GTEST_SKIP() << "No GPU available";
 
         constexpr int M = 8192, N = 8192, K = 64;
-
-        hipblasLtHandle_t handle = nullptr;
-        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
-
-        hipblasLtMatrixLayout_t lA = nullptr, lB = nullptr, lC = nullptr, lD = nullptr;
-        hipblasLtMatmulDesc_t   desc      = nullptr;
-        bool                    layoutsOk = createSgemmLayouts(M, N, K, lA, lB, lC, lD, desc);
-
-        hipblasLtMatmulAlgo_t algo{};
-        size_t                workspaceSize = 0;
-        bool                  foundSk5      = false;
-        if(layoutsOk)
-            foundSk5 = pickSk5Algo(handle, desc, lA, lB, lC, lD, algo, workspaceSize);
-
-        if(desc) (void)hipblasLtMatmulDescDestroy(desc);
-        if(lD)   (void)hipblasLtMatrixLayoutDestroy(lD);
-        if(lC)   (void)hipblasLtMatrixLayoutDestroy(lC);
-        if(lB)   (void)hipblasLtMatrixLayoutDestroy(lB);
-        if(lA)   (void)hipblasLtMatrixLayoutDestroy(lA);
-
-        if(!layoutsOk || !foundSk5)
-        {
-            (void)hipblasLtDestroy(handle);
-            GTEST_SKIP() << "No StreamK=5 kernel in loaded device library for "
-                         << M << "x" << N << "x" << K;
-        }
+        auto          setup = prepareSk5OrSkip(M, N, K);
 
         std::vector<float> hA(size_t(M) * K);
         std::vector<float> hB(size_t(K) * N);
@@ -511,14 +184,14 @@ namespace
         fillRandom(hB, 0x5678);
 
         std::vector<float> outAuto, outDynamic;
-        ASSERT_TRUE(runSgemm(handle, algo, workspaceSize, kAutoMode,
+        ASSERT_TRUE(runSgemm(setup.handle, setup.algo, setup.workspaceSize, kAutoMode,
                              M, N, K, hA.data(), hB.data(), hC.data(), outAuto))
             << "AUTO matmul failed";
-        ASSERT_TRUE(runSgemm(handle, algo, workspaceSize, kDynamicMode,
+        ASSERT_TRUE(runSgemm(setup.handle, setup.algo, setup.workspaceSize, kDynamicMode,
                              M, N, K, hA.data(), hB.data(), hC.data(), outDynamic))
             << "explicit dynamic matmul failed";
 
-        (void)hipblasLtDestroy(handle);
+        (void)hipblasLtDestroy(setup.handle);
 
         ASSERT_EQ(outAuto.size(), outDynamic.size());
         const auto byteSize = outAuto.size() * sizeof(float);

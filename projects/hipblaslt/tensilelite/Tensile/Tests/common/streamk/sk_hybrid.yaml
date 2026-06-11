@@ -28,6 +28,33 @@ GlobalParameters:
   # also reachable here ad-hoc via `--streamk-hybrid-mode 2`.
   StreamKHybridMode: [0, 1]
 
+# Shared SK5-hybrid fork entries (single-value) plus common benchmark params.
+.SkHybridCommonFork: &sk_hybrid_common_fork
+  - KernelLanguage: ["Assembly"]
+  - PrefetchLocalRead: [True]
+  - 1LDSBuffer: [1]
+  - ExpandPointerSwap: [False]
+  - GlobalSplitU: [0]
+  - MIArchVgpr: [0]
+  - PrefetchGlobalRead: [2]
+  - ScheduleIterAlg: [3]
+  - SourceSwap: [True]
+  - StoreRemapVectorWidth: [0]
+  - StreamK: [5]
+  - TransposeLDS: [0]
+  - WorkGroupMapping: [1]
+
+.SkHybridBpsg: &sk_hybrid_bpsg
+  InitialSolutionParameters:
+  BenchmarkCommonParameters: *sk_hybrid_common_fork
+  BenchmarkForkParameters:
+  JoinParameters:
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [512, 512, 1, 512]
+      - Exact: [4103, 4103, 1, 1031]
+
 BenchmarkProblems:
 
   - # SGEMM NT - StreamK=5 hybrid (both SK3 and SK4 paths in one kernel)
@@ -40,40 +67,18 @@ BenchmarkProblems:
       Batched: True
 
     - # SK5 hybrid - small MI matrix to keep kernel-object size bounded
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+      <<: *sk_hybrid_bpsg
       ForkParameters:
-        - 1LDSBuffer: [1]
         - DepthU: [16]
-        - ExpandPointerSwap: [False]
         - GlobalReadVectorWidthA: [1]
         - GlobalReadVectorWidthB: [1]
-        - GlobalSplitU: [0]
         - LocalReadVectorWidth: [1]
         - MatrixInstruction:
           - [32, 32, 2, 1, 1, 2,2, 2,2]
           - [16, 16, 4, 1, 1, 2,2, 2,2]
-        - MIArchVgpr: [0]
-        - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
-        - SourceSwap: [True]
-        - StoreRemapVectorWidth: [0]
-        - StreamK: [5]
-        - TransposeLDS: [0]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
-        - WorkGroupMapping: [1]
-
-      BenchmarkForkParameters:
-      JoinParameters:
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [512, 512, 1, 512]
-          - Exact: [4103, 4103, 1, 1031]
 
   - # HGEMM NT - StreamK=5 hybrid
     - # ProblemType
@@ -88,34 +93,12 @@ BenchmarkProblems:
       Batched: True
 
     - # SK5 hybrid - small MI matrix
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+      <<: *sk_hybrid_bpsg
       ForkParameters:
-        - 1LDSBuffer: [1]
         - DepthU: [64]
-        - ExpandPointerSwap: [False]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - GlobalSplitU: [0]
         - MatrixInstruction:
           - [32, 32, 8, 1, 1, 2,2, 2,2]
           - [16, 16, 16, 1, 1, 2,2, 2,2]
-        - MIArchVgpr: [0]
-        - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
-        - SourceSwap: [True]
-        - StoreRemapVectorWidth: [0]
-        - StreamK: [5]
-        - TransposeLDS: [0]
-        - WorkGroupMapping: [1]
-
-      BenchmarkForkParameters:
-      JoinParameters:
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [512, 512, 1, 512]
-          - Exact: [4103, 4103, 1, 1031]

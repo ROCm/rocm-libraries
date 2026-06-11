@@ -313,6 +313,17 @@ namespace
 {
     constexpr size_t kGfx950AnalyticalCuCount = 256;
 
+    struct StreamKHostPack
+    {
+        origami::reduction_t reduction{};
+        size_t               grid{};
+        size_t               tiles{};
+        size_t               itersPerTile{};
+        uint32_t             skTiles{};
+        uint32_t             skItersPerWG{};
+        bool                 effectiveDynamic{};
+    };
+
     origami::hardware_t makeGfx950AnalyticalHardware()
     {
         using arch_t = origami::hardware_t::architecture_t;
@@ -332,10 +343,19 @@ namespace
     hip::HipAMDGPU makeHipDeviceWithAnalytical(origami::hardware_t const& hw)
     {
         hip::HipAMDGPU device;
-        device.processor        = AMDGPU::Processor::gfx950;
-        device.computeUnitCount = static_cast<int>(hw.N_CU);
-        device.deviceName       = "test-gfx950-analytical";
+        device.processor          = AMDGPU::Processor::gfx950;
+        device.computeUnitCount   = static_cast<int>(hw.N_CU);
+        device.deviceName         = "test-gfx950-analytical";
         device.analyticalHardware = std::make_shared<origami::hardware_t>(hw);
+        return device;
+    }
+
+    hip::HipAMDGPU makeHipDeviceWithoutAnalytical()
+    {
+        hip::HipAMDGPU device;
+        device.processor        = AMDGPU::Processor::gfx950;
+        device.computeUnitCount = static_cast<int>(kGfx950AnalyticalCuCount);
+        device.deviceName       = "test-gfx950-no-analytical";
         return device;
     }
 
@@ -350,183 +370,17 @@ namespace
         return solution;
     }
 
+    struct StreamK5AnalyticalEnv
+    {
+        ContractionSolution solution = makeStreamK5Solution();
+        origami::hardware_t hw       = makeGfx950AnalyticalHardware();
+        hip::HipAMDGPU      device   = makeHipDeviceWithAnalytical(hw);
+    };
+
     ContractionProblemGemm makeGemmProblem(size_t m, size_t n, size_t k)
     {
         auto problem = ContractionProblemGemm::GEMM(
             false, false, m, n, k, m, n, m, 1.0, false, 1);
-        problem.setComputeInputTypeA(rocisa::DataType::Float);
-        problem.setComputeInputTypeB(rocisa::DataType::Float);
-        return problem;
-    }
-} // namespace
-
-TEST(StreamK5HybridModeTest, ProblemParamsDefaultToAuto)
-{
-    auto problem = dummyProblem();
-    EXPECT_EQ(problem.getParams().streamKTileSchedulingMode(), 2)
-        << "StreamK=5 hybrid mode should default to AUTO (2)";
-    EXPECT_EQ(problem.getParams().smCountTarget(), 0)
-        << "smCountTarget should default to 0 (use all device CUs)";
-}
-
-TEST(StreamK5HybridModeTest, ProblemParamsRoundTripModeAndSmCountTarget)
-{
-    auto problem = dummyProblem();
-    problem.setParams().setStreamKTileSchedulingMode(1);
-    problem.setParams().setSmCountTarget(128);
-    EXPECT_EQ(problem.getParams().streamKTileSchedulingMode(), 1);
-    EXPECT_EQ(problem.getParams().smCountTarget(), 128);
-}
-
-TEST(StreamK5HybridModeTest, TriStateOffResolvesStatic)
-{
-    ContractionSolution solution;
-    solution.sizeMapping.streamK           = 5;
-    solution.sizeMapping.macroTile         = TensileLite::dim3(128, 128, 1);
-    solution.sizeMapping.depthU            = 64;
-    solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
-    solution.sizeMapping.CUOccupancy       = 1;
-
-    auto problem = dummyProblem();
-    auto device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
-
-    problem.setParams().setStreamKTileSchedulingMode(0); // OFF -> static (SK3)
-    EXPECT_FALSE(solution.streamK5EffectiveDynamic(problem, device))
-        << "StreamK=5 OFF must resolve to the static (SK3) sub-path";
-}
-
-TEST(StreamK5HybridModeTest, TriStateOnResolvesDynamic)
-{
-    ContractionSolution solution;
-    solution.sizeMapping.streamK           = 5;
-    solution.sizeMapping.macroTile         = TensileLite::dim3(128, 128, 1);
-    solution.sizeMapping.depthU            = 64;
-    solution.sizeMapping.matrixInstruction = {16, 16, 32, 1};
-    solution.sizeMapping.CUOccupancy       = 1;
-
-    auto problem = dummyProblem();
-    auto device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
-
-    problem.setParams().setStreamKTileSchedulingMode(1); // ON -> dynamic (SK4)
-    EXPECT_TRUE(solution.streamK5EffectiveDynamic(problem, device))
-        << "StreamK=5 ON must resolve to the dynamic (SK4) sub-path";
-}
-
-TEST(StreamK5HybridModeTest, TriStateAutoRequiresAnalyticalHardware)
-{
-    auto solution = makeStreamK5Solution();
-    hip::HipAMDGPU device;
-    device.processor        = AMDGPU::Processor::gfx950;
-    device.computeUnitCount = static_cast<int>(kGfx950AnalyticalCuCount);
-    device.deviceName       = "test-gfx950-no-analytical";
-
-    auto problem = makeGemmProblem(4096, 4096, 64);
-    problem.setParams().setStreamKTileSchedulingMode(2);
-
-    EXPECT_THROW(solution.streamK5EffectiveDynamic(problem, device), std::runtime_error)
-        << "StreamK=5 AUTO must assert when analyticalHardware is null";
-}
-
-TEST(StreamK5HybridModeTest, TriStateAutoResolvesStaticViaOrigami)
-{
-    auto solution = makeStreamK5Solution();
-    auto hw       = makeGfx950AnalyticalHardware();
-    auto device   = makeHipDeviceWithAnalytical(hw);
-
-    // 2560^2 @ MT128 -> 400 tiles; tiles/CU ~= 1.56 < 2.08 threshold -> static.
-    auto problem = makeGemmProblem(2560, 2560, 64);
-    problem.setParams().setStreamKTileSchedulingMode(2);
-
-    EXPECT_FALSE(solution.streamK5EffectiveDynamic(problem, device))
-        << "StreamK=5 AUTO must delegate to origami and pick static for low tiles/CU";
-}
-
-TEST(StreamK5HybridModeTest, TriStateAutoResolvesDynamicViaOrigami)
-{
-    auto solution = makeStreamK5Solution();
-    auto hw       = makeGfx950AnalyticalHardware();
-    auto device   = makeHipDeviceWithAnalytical(hw);
-
-    // 4096^2 @ MT128 -> 1024 tiles; tiles/CU = 4 > 2.08 threshold -> dynamic.
-    auto problem = makeGemmProblem(4096, 4096, 64);
-    problem.setParams().setStreamKTileSchedulingMode(2);
-
-    EXPECT_TRUE(solution.streamK5EffectiveDynamic(problem, device))
-        << "StreamK=5 AUTO must delegate to origami and pick dynamic for high tiles/CU";
-}
-
-TEST(StreamK5HybridModeTest, SmCountTargetForwardsIntoAutoHeuristic)
-{
-    auto solution = makeStreamK5Solution();
-    auto hw       = makeGfx950AnalyticalHardware();
-    auto device   = makeHipDeviceWithAnalytical(hw);
-
-    // Borderline static with full CU count; halving effective CUs flips to dynamic.
-    auto problem = makeGemmProblem(2560, 2560, 64);
-    problem.setParams().setStreamKTileSchedulingMode(2);
-    problem.setParams().setSmCountTarget(0);
-
-    EXPECT_FALSE(solution.streamK5EffectiveDynamic(problem, device))
-        << "smCountTarget=0 should use full N_CU and keep AUTO static";
-
-    problem.setParams().setSmCountTarget(static_cast<int>(kGfx950AnalyticalCuCount / 2));
-    EXPECT_TRUE(solution.streamK5EffectiveDynamic(problem, device))
-        << "smCountTarget must clamp available CUs and flip AUTO to dynamic";
-}
-
-TEST(StreamK5HybridModeTest, SmCountTargetZeroMatchesFullCuCount)
-{
-    auto solution = makeStreamK5Solution();
-    auto hw       = makeGfx950AnalyticalHardware();
-    auto device   = makeHipDeviceWithAnalytical(hw);
-
-    auto problem = makeGemmProblem(4096, 4096, 64);
-    problem.setParams().setStreamKTileSchedulingMode(2);
-
-    problem.setParams().setSmCountTarget(0);
-    const bool withZero = solution.streamK5EffectiveDynamic(problem, device);
-
-    problem.setParams().setSmCountTarget(static_cast<int>(kGfx950AnalyticalCuCount));
-    const bool withFull = solution.streamK5EffectiveDynamic(problem, device);
-
-    EXPECT_EQ(withZero, withFull)
-        << "smCountTarget=0 and smCountTarget=N_CU must resolve AUTO identically";
-}
-
-// ===========================================================================
-// Sk3Sk5OffPartition512Test -- dump and compare host partition state for the
-// Equality MT64x64x16 kernel at 512^3 NN on the live device (MI355X/gfx950).
-// ===========================================================================
-
-namespace
-{
-    struct StreamKHostPack
-    {
-        origami::reduction_t reduction{};
-        size_t               grid{};
-        size_t               tiles{};
-        size_t               itersPerTile{};
-        uint32_t             skTiles{};
-        uint32_t             skItersPerWG{};
-        bool                 effectiveDynamic{};
-    };
-
-    void initEquality512Solution(ContractionSolution& solution, int streamK)
-    {
-        solution.sizeMapping.streamK            = streamK;
-        solution.sizeMapping.macroTile          = TensileLite::dim3(64, 64, 1);
-        solution.sizeMapping.depthU             = 16;
-        solution.sizeMapping.matrixInstruction  = {16, 16, 4, 1};
-        solution.sizeMapping.workGroupMapping   = 1;
-        solution.sizeMapping.CUOccupancy        = -1;
-        solution.sizeMapping.streamKForceDPOnly = 0;
-        solution.sizeMapping.streamKAtomic      = 0;
-    }
-
-    ContractionProblemGemm make512Problem()
-    {
-        auto problem = ContractionProblemGemm::GEMM(
-            false, false, 512, 512, 512, 512, 512, 512, 1.0, false, 1);
         problem.setComputeInputTypeA(rocisa::DataType::Float);
         problem.setComputeInputTypeB(rocisa::DataType::Float);
         return problem;
@@ -586,6 +440,18 @@ namespace
         return pack;
     }
 
+    void initEquality512Solution(ContractionSolution& solution, int streamK)
+    {
+        solution.sizeMapping.streamK            = streamK;
+        solution.sizeMapping.macroTile          = TensileLite::dim3(64, 64, 1);
+        solution.sizeMapping.depthU             = 16;
+        solution.sizeMapping.matrixInstruction  = {16, 16, 4, 1};
+        solution.sizeMapping.workGroupMapping   = 1;
+        solution.sizeMapping.CUOccupancy        = -1;
+        solution.sizeMapping.streamKForceDPOnly = 0;
+        solution.sizeMapping.streamKAtomic      = 0;
+    }
+
     void printStreamKHostPack(char const* label, StreamKHostPack const& pack)
     {
         std::cout << label << ": tiles=" << pack.tiles << " itersPerTile=" << pack.itersPerTile
@@ -595,6 +461,140 @@ namespace
                   << " SKItersPerWG=" << pack.skItersPerWG << std::endl;
     }
 } // namespace
+
+TEST(StreamK5HybridModeTest, ProblemParamsDefaultToAuto)
+{
+    auto problem = dummyProblem();
+    EXPECT_EQ(problem.getParams().streamKTileSchedulingMode(), 2)
+        << "StreamK=5 hybrid mode should default to AUTO (2)";
+    EXPECT_EQ(problem.getParams().smCountTarget(), 0)
+        << "smCountTarget should default to 0 (use all device CUs)";
+}
+
+TEST(StreamK5HybridModeTest, ProblemParamsRoundTripModeAndSmCountTarget)
+{
+    auto problem = dummyProblem();
+    problem.setParams().setStreamKTileSchedulingMode(1);
+    problem.setParams().setSmCountTarget(128);
+    EXPECT_EQ(problem.getParams().streamKTileSchedulingMode(), 1);
+    EXPECT_EQ(problem.getParams().smCountTarget(), 128);
+}
+
+struct StreamK5ExplicitModeParam
+{
+    int  mode;
+    bool expectDynamic;
+};
+
+class StreamK5ExplicitModeTest : public ::testing::TestWithParam<StreamK5ExplicitModeParam>
+{
+};
+
+TEST_P(StreamK5ExplicitModeTest, ResolvesEffectiveSubPath)
+{
+    auto const& param = GetParam();
+    auto        solution = makeStreamK5Solution();
+    auto        problem  = dummyProblem();
+    auto        device   = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    problem.setParams().setStreamKTileSchedulingMode(param.mode);
+
+    EXPECT_EQ(solution.streamK5EffectiveDynamic(problem, device), param.expectDynamic)
+        << "StreamK=5 mode " << param.mode << " must resolve to the "
+        << (param.expectDynamic ? "dynamic (SK4)" : "static (SK3)") << " sub-path";
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    StreamK5HybridModeTest,
+    StreamK5ExplicitModeTest,
+    ::testing::Values(StreamK5ExplicitModeParam{0, false}, StreamK5ExplicitModeParam{1, true}),
+    [](::testing::TestParamInfo<StreamK5ExplicitModeParam> const& info) {
+        return info.param.mode == 0 ? "OffStatic" : "OnDynamic";
+    });
+
+TEST(StreamK5HybridModeTest, TriStateAutoRequiresAnalyticalHardware)
+{
+    auto solution = makeStreamK5Solution();
+    auto device   = makeHipDeviceWithoutAnalytical();
+    auto problem  = makeGemmProblem(4096, 4096, 64);
+    problem.setParams().setStreamKTileSchedulingMode(2);
+
+    EXPECT_THROW(solution.streamK5EffectiveDynamic(problem, device), std::runtime_error)
+        << "StreamK=5 AUTO must assert when analyticalHardware is null";
+}
+
+struct StreamK5AutoOrigamiParam
+{
+    size_t      m;
+    size_t      n;
+    bool        expectDynamic;
+    const char* suffix;
+};
+
+class StreamK5AutoOrigamiTest : public ::testing::TestWithParam<StreamK5AutoOrigamiParam>
+{
+};
+
+TEST_P(StreamK5AutoOrigamiTest, ResolvesViaOrigamiAndHostPack)
+{
+    auto const& param = GetParam();
+    StreamK5AnalyticalEnv env;
+    auto                  problem = makeGemmProblem(param.m, param.n, 64);
+    problem.setParams().setStreamKTileSchedulingMode(2);
+
+    EXPECT_EQ(env.solution.streamK5EffectiveDynamic(problem, env.device), param.expectDynamic)
+        << "StreamK=5 AUTO " << param.suffix;
+
+    StreamKHostPack pack = computeStreamKHostPack(env.solution, problem, env.device);
+    EXPECT_EQ(pack.effectiveDynamic, param.expectDynamic);
+    EXPECT_EQ(pack.grid,
+              env.solution.getSKGrid(problem, env.device, pack.tiles, pack.reduction));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    StreamK5HybridModeTest,
+    StreamK5AutoOrigamiTest,
+    ::testing::Values(
+        StreamK5AutoOrigamiParam{2560, 2560, false, "LowTilesPerCu"},
+        StreamK5AutoOrigamiParam{4096, 4096, true, "HighTilesPerCu"}),
+    [](::testing::TestParamInfo<StreamK5AutoOrigamiParam> const& info) {
+        return info.param.suffix;
+    });
+
+TEST(StreamK5HybridModeTest, SmCountTargetForwardsIntoAutoHeuristic)
+{
+    StreamK5AnalyticalEnv env;
+    auto                  problem = makeGemmProblem(2560, 2560, 64);
+    problem.setParams().setStreamKTileSchedulingMode(2);
+    problem.setParams().setSmCountTarget(0);
+
+    EXPECT_FALSE(env.solution.streamK5EffectiveDynamic(problem, env.device))
+        << "smCountTarget=0 should use full N_CU and keep AUTO static";
+
+    problem.setParams().setSmCountTarget(static_cast<int>(kGfx950AnalyticalCuCount / 2));
+    EXPECT_TRUE(env.solution.streamK5EffectiveDynamic(problem, env.device))
+        << "smCountTarget must clamp available CUs and flip AUTO to dynamic";
+}
+
+TEST(StreamK5HybridModeTest, SmCountTargetZeroMatchesFullCuCount)
+{
+    StreamK5AnalyticalEnv env;
+    auto                  problem = makeGemmProblem(4096, 4096, 64);
+    problem.setParams().setStreamKTileSchedulingMode(2);
+
+    problem.setParams().setSmCountTarget(0);
+    const bool withZero = env.solution.streamK5EffectiveDynamic(problem, env.device);
+
+    problem.setParams().setSmCountTarget(static_cast<int>(kGfx950AnalyticalCuCount));
+    const bool withFull = env.solution.streamK5EffectiveDynamic(problem, env.device);
+
+    EXPECT_EQ(withZero, withFull)
+        << "smCountTarget=0 and smCountTarget=N_CU must resolve AUTO identically";
+}
+
+// ===========================================================================
+// Sk3Sk5OffPartition512Test -- dump and compare host partition state for the
+// Equality MT64x64x16 kernel at 512^3 NN on the live device (MI355X/gfx950).
+// ===========================================================================
 
 TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
 {
@@ -613,8 +613,8 @@ TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
     initEquality512Solution(sk3Solution, 3);
     initEquality512Solution(sk5Solution, 5);
 
-    auto problemSk3 = make512Problem();
-    auto problemSk5 = make512Problem();
+    auto problemSk3 = makeGemmProblem(512, 512, 512);
+    auto problemSk5 = makeGemmProblem(512, 512, 512);
     problemSk5.setParams().setStreamKTileSchedulingMode(0); // SK5-off
 
     auto sk3Pack = computeStreamKHostPack(sk3Solution, problemSk3, *hardware);
