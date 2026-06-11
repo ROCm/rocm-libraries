@@ -47,16 +47,23 @@ class ISABackend:
 
         return _TRIPLE
 
-    @property
-    def datalayout(self) -> str:
-        from ..lower_llvm import _DATALAYOUT
+    def datalayout(self, llvm_flavor: str) -> str:
+        """Module ``target datalayout`` for this target under ``llvm_flavor``.
 
-        return _DATALAYOUT
+        The string is LLVM-version-keyed, not gfx-keyed (every wired arch
+        shares one datalayout; only the ``p8`` field drifts between LLVM
+        20 and 22), so the backend defers to
+        :func:`~ck_dsl.core.lower_llvm._datalayout_for_flavor`.
+        """
+        from ..lower_llvm import _datalayout_for_flavor
 
-    def module_preamble(self) -> str:
+        return _datalayout_for_flavor(llvm_flavor)
+
+    def module_preamble(self, llvm_flavor: str) -> str:
         """The two leading IR lines: ``target datalayout`` + ``target triple``."""
         return (
-            f'target datalayout = "{self.datalayout}"\ntarget triple = "{self.triple}"'
+            f'target datalayout = "{self.datalayout(llvm_flavor)}"\n'
+            f'target triple = "{self.triple}"'
         )
 
     # --- buffer resource descriptor --------------------------------------

@@ -146,11 +146,17 @@ class TestISABackend(unittest.TestCase):
             backend_for("gfx999")
 
     def test_preamble_and_waitcnt_shared_for_cdna(self):
+        from ck_dsl.core.lower_llvm import LLVM_FLAVOR_LLVM22
+
         b942, b950 = backend_for("gfx942"), backend_for("gfx950")
         # datalayout/triple/waitcnt are hardware-verified identical across these
         # CDNA targets today (see multi_arch_data_layout.md "ISA Backend").
-        self.assertEqual(b942.module_preamble(), b950.module_preamble())
-        self.assertIn("target datalayout", b942.module_preamble())
+        # datalayout is LLVM-keyed (not gfx-keyed), so compare under the same flavor.
+        self.assertEqual(
+            b942.module_preamble(LLVM_FLAVOR_LLVM22),
+            b950.module_preamble(LLVM_FLAVOR_LLVM22),
+        )
+        self.assertIn("target datalayout", b942.module_preamble(LLVM_FLAVOR_LLVM22))
         self.assertIn("amdgcn-amd-amdhsa", b942.triple)
         self.assertEqual(b942.encode_waitcnt(0, -1, 0), b950.encode_waitcnt(0, -1, 0))
 
@@ -483,6 +489,92 @@ class TestArchitecturalIsolation(unittest.TestCase):
         self.assertNotIn(
             "llvm.amdgcn", blob, "core/arch must not contain intrinsic text"
         )
+
+
+class TestDatalayoutDriftGuard(unittest.TestCase):
+    """Drift guard: assert ck_dsl's hardcoded datalayout matches the toolchain.
+
+    The LLVM IR datalayout is LLVM-version-keyed (not gfx-keyed): ROCm 7.2
+    ships ``p8:128:128:128:48``, while 7.0/7.1 shipped ``p8:128:128``. The
+    difference is auto-upgraded away when compiling textual IR through comgr,
+    so a wrong-but-well-formed hardcoded string compiles fine — but relying
+    on that parser leniency is fragile across ingestion paths.
+
+    This test re-derives the ground truth from the project's own ``hipcc``:
+    it lowers a tiny kernel to HIP C++, runs ``hipcc --offload-arch=<arch>
+    -S -emit-llvm --cuda-device-only`` (the same toolchain that compiles
+    real kernels), extracts the ``target datalayout`` line, and asserts
+    ck_dsl's flavor-keyed constant matches byte-for-byte.
+
+    When ROCm bumps the canonical datalayout (or a new drift item appears),
+    this fails with a clear "regenerate the constant" message on any dev/CI
+    box with hipcc, instead of silently leaning on comgr's override.
+
+    Skipped cleanly when hipcc is absent (e.g., pure-Python test envs).
+    """
+
+    def _find_hipcc(self) -> bool:
+        """Return whether hipcc is in PATH."""
+        import shutil
+
+        return shutil.which("hipcc") is not None
+
+    def _extract_datalayout_from_ir(self, ir_text: str) -> str:
+        """Extract 'target datalayout = "..."' from LLVM IR text."""
+        import re
+
+        for line in ir_text.splitlines():
+            m = re.match(r'^target datalayout = "([^"]+)"', line)
+            if m:
+                return m.group(1)
+        raise ValueError("no target datalayout line found in IR")
+
+    def test_datalayout_matches_hipcc_emitted_ir(self):
+        """Assert ck_dsl's hardcoded datalayout matches hipcc's emitted IR."""
+        if not self._find_hipcc():
+            self.skipTest("hipcc not in PATH")
+
+        from ck_dsl.core.ir import F32, KernelDef, Param, PtrType, Region
+        from ck_dsl.core.isa.backend import wired_arches
+        from ck_dsl.core.lower_llvm import (
+            _datalayout_for_flavor,
+            _detect_llvm_flavor,
+        )
+        from ck_dsl.helpers.compile import emit_device_llvm_ir_via_hipcc
+
+        # Build a minimal kernel (any wired arch works; datalayout is gfx-invariant).
+        kernel = KernelDef(
+            name="drift_guard",
+            params=[Param("p", PtrType(F32, "global"))],
+            body=Region([]),
+            attrs={},
+        )
+
+        detected_flavor = _detect_llvm_flavor()
+        ckdsl_dl = _datalayout_for_flavor(detected_flavor)
+
+        # Test across all wired arches to confirm datalayout really is gfx-invariant
+        # (the assumption the flavor split rests on).
+        for arch in wired_arches():
+            with self.subTest(arch=arch):
+                try:
+                    ir = emit_device_llvm_ir_via_hipcc(kernel, arch=arch, timeout_s=60)
+                except Exception as e:
+                    self.fail(
+                        f"hipcc -emit-llvm failed for {arch} (toolchain issue): {e}"
+                    )
+                toolchain_dl = self._extract_datalayout_from_ir(ir)
+                self.assertEqual(
+                    ckdsl_dl,
+                    toolchain_dl,
+                    f"Datalayout drift detected for {arch} under {detected_flavor}.\n"
+                    f"  ck_dsl constant: {ckdsl_dl}\n"
+                    f"  hipcc emitted:   {toolchain_dl}\n"
+                    f"Regenerate _DATALAYOUT_{detected_flavor.upper().replace('llvm','')} "
+                    f"in core/lower_llvm.py by running:\n"
+                    f'  echo "" | /opt/rocm/llvm/bin/clang -target amdgcn-amd-amdhsa '
+                    f"-mcpu={arch} -emit-llvm -S - -o - | grep 'target datalayout'",
+                )
 
 
 if __name__ == "__main__":
