@@ -94,14 +94,14 @@ const std::vector<PassInfo> availablePasses = {
     {"CFGBuilderPass", []() { return createCFGBuilderPass(); }},
     {"RemoveWaitAluPass", []() { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass", []() { return createInsertWaitAluPass(); }},
-    {"InsertClusterBarrierPass", []() {
+    {"InsertClusterBarrierPass",
+     []() {
          auto geti = [](const char* k, int d) {
              const char* v = std::getenv(k);
              return v != nullptr ? std::atoi(v) : d;
          };
-         return createInsertClusterBarrierPass(/*isKernelScope=*/true,
-                                               geti("PrefetchGlobalRead", 1),
-                                               geti("PrefetchLocalRead", 1));
+         return createInsertClusterBarrierPass(
+             /*isKernelScope=*/true, geti("PrefetchGlobalRead", 1), geti("PrefetchLocalRead", 1));
      }},
 };
 
