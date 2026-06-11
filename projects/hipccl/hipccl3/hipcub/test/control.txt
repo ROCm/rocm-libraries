@@ -123,6 +123,10 @@
 #   test sizes (eg >=0). With the "*", the test will not be run at all (GTEST_SKIP will be called). However, with the size expression
 #   that filters out all sizes, the test will be run, but this individual test sizes will all be skipped (i.e. the vector returned
 #   by CHECK_SIZE_FILTERS will be empty. This means that other test code that is unrelated to the sizes will still be run.
+#
+# - Some tests specify sizes using types other than size_t. However, values in size expressions in this control file are always interpreted as type size_t.
+#   To work around this, you can create a "transformer" functor that's passed into the filter functions. For more information, see the documentation
+#   in test_utils_controller.cpp.
 
 # ---------------
 # Add rules here:
@@ -131,7 +135,8 @@
 /HipcubDeviceRadixSort\/.*/                : /<apus>/                                        : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
 /HipcubDeviceRadixSortLargeInput.*/        : /<apus>/                                        : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
 /HipcubDeviceMergeSort\/.*/                : /<apus>/                                        : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
-/HipcubDeviceMerge\/.*/                    : /<apus>/                                        : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubDeviceMerge\/.*/                    : /<apus>/                                        : >= 17867 + 41   : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubDeviceMergeNonTyped\..*/            : /<apus>/                                        : >= (1 << 28)    : *              : "Skipping sizes over 2^28 on APUs"
 /HipcubIteratorTests\/\d+\.TestTex.+/      : /<mi300-family>|<navi4x-family>|<apus>|gfx1250/ : *               : *              : "Test not run on gfx94x, gfx95x, gfx120x, or gfx1250 as texture cache API is not supported."
 /HipcubCachingDeviceAllocatorTests\.Test1/ : /<all>/                                         : *               : valgrind, asan : "Skipping timing-sensitive test under Valgrind and ASAN."
 /HipcubDeviceSelectLargeIndicesTest\/.*/   : /<nvidia>/                                      : *               : *              : "Test disabled for large sizes until support is present in CUB."

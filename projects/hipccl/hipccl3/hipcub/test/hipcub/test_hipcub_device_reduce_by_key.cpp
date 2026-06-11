@@ -47,7 +47,7 @@ struct params
 };
 
 template<class Params>
-class HipcubDeviceReduceByKey : public test_controller::ControlledTest {
+class HipcubDeviceReduceByKey : public test_controller::ControlledTest<> {
 public:
     using params = Params;
 };

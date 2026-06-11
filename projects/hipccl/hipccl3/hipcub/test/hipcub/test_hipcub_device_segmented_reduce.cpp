@@ -51,7 +51,7 @@ struct params1
 };
 
 template<class Params>
-class HipcubDeviceSegmentedReduceOp : public test_controller::ControlledTest
+class HipcubDeviceSegmentedReduceOp : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
@@ -249,7 +249,7 @@ struct params2
 };
 
 template<class Params>
-class HipcubDeviceSegmentedReduce : public test_controller::ControlledTest
+class HipcubDeviceSegmentedReduce : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
