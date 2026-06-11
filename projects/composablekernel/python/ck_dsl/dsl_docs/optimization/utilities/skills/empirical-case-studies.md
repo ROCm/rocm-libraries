@@ -304,6 +304,8 @@ neutral/negative on this kernel).
 Generality: +2.3% fp16, +2.1% bf16 (0.846→0.864), +1.9–2.5% on rectangular shapes.
 Works on the default comgr path (no hipcc).
 
+![gfx950 GEMM schedule-hint uplift](assets/gfx950_gemm_sched_hints_uplift.png)
+
 ### Why (measured mechanism)
 
 The kernel is MFMA+LDS **latency-bound**, not memory-bound (`MemUnitStalled` ≈ 0). The
