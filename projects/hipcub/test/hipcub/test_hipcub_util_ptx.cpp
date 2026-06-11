@@ -76,7 +76,7 @@ struct params
 };
 
 template<class Params>
-class HipcubUtilPtxTests : public test_controller::ControlledTest
+class HipcubUtilPtxTests : public test_controller::ControlledTest<>
 {
 public:
     using type                                      = typename Params::type;

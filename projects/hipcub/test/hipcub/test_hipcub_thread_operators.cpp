@@ -45,7 +45,7 @@ struct ThreadOperatorsParams
 };
 
 template<class Params>
-class HipcubThreadOperatorsTests : public test_controller::ControlledTest
+class HipcubThreadOperatorsTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type  = typename Params::input_type;

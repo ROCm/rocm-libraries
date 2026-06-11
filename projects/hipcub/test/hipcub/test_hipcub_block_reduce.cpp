@@ -46,7 +46,7 @@ struct params
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubBlockReduceSingleValueTests : public test_controller::ControlledTest
+class HipcubBlockReduceSingleValueTests : public test_controller::ControlledTest<>
 {
 public:
     using type                                               = typename Params::type;
@@ -549,7 +549,7 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, SumValid)
 }
 
 template<class Params>
-class HipcubBlockReduceInputArrayTests : public test_controller::ControlledTest
+class HipcubBlockReduceInputArrayTests : public test_controller::ControlledTest<>
 {
 public:
     using type                                                     = typename Params::type;

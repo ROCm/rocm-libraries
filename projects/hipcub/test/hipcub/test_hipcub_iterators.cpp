@@ -53,7 +53,7 @@ struct IteratorParams
 };
 
 template<class Params>
-class HipcubIteratorTests : public test_controller::ControlledTest
+class HipcubIteratorTests : public test_controller::ControlledTest<>
 {
     public:
     using input_type = typename Params::input_type;

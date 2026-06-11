@@ -74,13 +74,13 @@ struct params
 };
 
 template<class Params>
-class HipcubDeviceRadixSort : public test_controller::ControlledTest
+class HipcubDeviceRadixSort : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
 };
 
-class HipcubDeviceRadixSortLargeInput : public test_controller::ControlledTest
+class HipcubDeviceRadixSortLargeInput : public test_controller::ControlledTest<>
 {};
 
 TYPED_TEST_SUITE_P(HipcubDeviceRadixSort);

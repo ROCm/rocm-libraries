@@ -124,8 +124,21 @@ struct params1
     static constexpr bool use_graphs          = UseGraphs;
 };
 
+struct TupleTransformer
+{
+	using size_type = std::tuple<size_t, size_t, size_t>;
+	size_t operator()(const size_type& size) const
+	{
+		const size_t rows = std::get<0>(size);
+        const size_t columns = std::get<1>(size);
+        const size_t row_stride = columns + std::get<2>(size);
+        const size_t input_size = std::max<size_t>(1, rows * row_stride);
+		return input_size;
+	}
+};
+
 template<class Params>
-class HipcubDeviceHistogramEven : public test_controller::ControlledTest {
+class HipcubDeviceHistogramEven : public test_controller::ControlledTest<TupleTransformer> {
 public:
     using params = Params;
 };
@@ -184,7 +197,7 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(auto dim : get_dims())
+    for(auto dim : CHECK_SIZE_FILTERS(get_dims()))
     {
         SCOPED_TRACE(
             testing::Message() << "with dim = {" <<
@@ -337,7 +350,7 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
 
 // Test HistogramEven overflow
 template<class Params>
-class HipcubDeviceHistogramEvenOverflow : public test_controller::ControlledTest
+class HipcubDeviceHistogramEvenOverflow : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
@@ -460,7 +473,7 @@ struct params2
 };
 
 template<class Params>
-class HipcubDeviceHistogramRange : public test_controller::ControlledTest {
+class HipcubDeviceHistogramRange : public test_controller::ControlledTest<TupleTransformer> {
 public:
     using params = Params;
 };
@@ -512,7 +525,7 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
         TestFixture::params::max_bin_length
     );
 
-    for(auto dim : get_dims())
+    for(auto dim : CHECK_SIZE_FILTERS(get_dims()))
     {
         SCOPED_TRACE(
             testing::Message() << "with dim = {" <<
@@ -702,8 +715,24 @@ struct params3
     static constexpr bool use_graphs              = UseGraphs;
 };
 
+struct TupleTransformerWithChannels
+{
+	using size_type = std::tuple<size_t, size_t, size_t>;
+	size_t operator()(const size_type& size) const
+	{
+		const size_t rows = std::get<0>(size);
+        const size_t columns = std::get<1>(size);
+        const size_t row_stride = columns * TupleTransformerWithChannels::channels + std::get<2>(size);
+        const size_t input_size = std::max<size_t>(1, rows * row_stride);
+		return input_size;
+	}
+
+	inline static unsigned int channels = 1;
+};
+
 template<class Params>
-class HipcubDeviceHistogramMultiEven : public test_controller::ControlledTest {
+class HipcubDeviceHistogramMultiEven : public test_controller::ControlledTest<TupleTransformerWithChannels>
+{
 public:
     using params = Params;
 };
@@ -777,7 +806,8 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(auto dim : get_dims())
+	TupleTransformerWithChannels::channels = channels;
+    for(auto dim : CHECK_SIZE_FILTERS(get_dims()))
     {
         SCOPED_TRACE(
             testing::Message() << "with dim = {" <<
@@ -1016,7 +1046,8 @@ struct params4
 };
 
 template<class Params>
-class HipcubDeviceHistogramMultiRange : public test_controller::ControlledTest {
+class HipcubDeviceHistogramMultiRange : public test_controller::ControlledTest<TupleTransformerWithChannels>
+{
 public:
     using params = Params;
 };
@@ -1079,7 +1110,8 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(auto dim : get_dims())
+	TupleTransformerWithChannels::channels = channels;
+    for(auto dim : CHECK_SIZE_FILTERS(get_dims()))
     {
         SCOPED_TRACE(
             testing::Message() << "with dim = {" <<

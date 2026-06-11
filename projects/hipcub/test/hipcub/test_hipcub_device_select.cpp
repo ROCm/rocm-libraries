@@ -47,7 +47,7 @@ struct DeviceSelectParams
 };
 
 template<class Params>
-class HipcubDeviceSelectTests : public test_controller::ControlledTest
+class HipcubDeviceSelectTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type                 = typename Params::input_type;

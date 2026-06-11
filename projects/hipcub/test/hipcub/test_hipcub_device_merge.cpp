@@ -39,8 +39,20 @@ struct params
     static constexpr bool use_graphs = UseGraphs;
 };
 
+struct PairTransformer
+{
+	using size_type = std::tuple<size_t, size_t>;
+	size_t operator()(const size_type& size) const
+	{
+		// We're allocating buffers of both sizes in the pair.
+		// To ensure we don't run out of memory, we want to make sure
+		// the sum of the two doesn't exceed the threshold.
+		return std::get<0>(size) + std::get<1>(size);
+	}
+};
+
 template<class Params>
-class HipcubDeviceMerge : public test_controller::ControlledTest
+class HipcubDeviceMerge : public test_controller::ControlledTest<PairTransformer>
 {
 public:
     using params = Params;
@@ -105,7 +117,7 @@ TYPED_TEST(HipcubDeviceMerge, MergeKeys)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(auto sizes : test_common_utils::TempDisablement::filter_sizes(get_sizes()))
+    for(auto sizes : CHECK_SIZE_FILTERS(get_sizes()))
     {
         if((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
         {
@@ -117,8 +129,6 @@ TYPED_TEST(HipcubDeviceMerge, MergeKeys)
 
         const size_t size1 = std::get<0>(sizes);
         const size_t size2 = std::get<1>(sizes);
-        CHECK_SIZE_ENABLEMENT(size1);
-        CHECK_SIZE_ENABLEMENT(size2);
 
         // compare function
         compare_function compare_op;
@@ -261,7 +271,7 @@ TYPED_TEST(HipcubDeviceMerge, MergePairs)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(auto sizes : test_common_utils::TempDisablement::filter_sizes(get_sizes()))
+    for(auto sizes : CHECK_SIZE_FILTERS(get_sizes()))
     {
         if((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
         {
@@ -273,8 +283,6 @@ TYPED_TEST(HipcubDeviceMerge, MergePairs)
 
         const size_t size1 = std::get<0>(sizes);
         const size_t size2 = std::get<1>(sizes);
-        CHECK_SIZE_ENABLEMENT(size1);
-        CHECK_SIZE_ENABLEMENT(size2);
 
         // compare function
         compare_function compare_op;
@@ -472,7 +480,11 @@ std::vector<std::tuple<size_t, size_t>> get_large_sizes()
     return sizes;
 }
 
-TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
+class HipcubDeviceMergeNonTyped : public test_controller::ControlledTest<PairTransformer>
+{
+};
+
+TEST_F(HipcubDeviceMergeNonTyped, MergeLargeSizeIterators)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -483,7 +495,7 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
 
     hipStream_t stream = 0; // default
 
-    for(auto sizes : test_common_utils::TempDisablement::filter_sizes(get_large_sizes()))
+    for(auto sizes : CHECK_SIZE_FILTERS(get_large_sizes()))
     {
         if((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
         {
@@ -496,8 +508,6 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
         const size_t size1       = std::get<0>(sizes);
         const size_t size2       = std::get<1>(sizes);
         const size_t output_size = size1 + size2;
-        CHECK_SIZE_ENABLEMENT(size1);
-        CHECK_SIZE_ENABLEMENT(size2);
 
         // compare function
         compare_function compare_op;

@@ -48,7 +48,7 @@ struct DevicePartitionParams
 };
 
 template<class Params>
-class HipcubDevicePartitionTests : public test_controller::ControlledTest
+class HipcubDevicePartitionTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type                            = typename Params::input_type;

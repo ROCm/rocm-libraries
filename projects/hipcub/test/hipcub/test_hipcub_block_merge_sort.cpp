@@ -50,7 +50,7 @@ struct params
 };
 
 template<class Params>
-class HipcubBlockMergeSort : public test_controller::ControlledTest
+class HipcubBlockMergeSort : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;

@@ -40,7 +40,7 @@ struct params
 };
 
 template<class Params>
-class HipcubBlockDiscontinuity : public test_controller::ControlledTest
+class HipcubBlockDiscontinuity : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;

@@ -56,7 +56,7 @@ struct DeviceScanParams
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubDeviceScanTests : public test_controller::ControlledTest
+class HipcubDeviceScanTests : public test_controller::ControlledTest<>
 {
 public:
     using input_type                 = typename Params::input_type;
@@ -66,7 +66,7 @@ public:
     static constexpr bool use_graphs = Params::use_graphs;
 };
 
-class HipcubDeviceScanNonTypedTests : public test_controller::ControlledTest
+class HipcubDeviceScanNonTypedTests : public test_controller::ControlledTest<>
 {};
 
 using HipcubDeviceScanTestsParams
