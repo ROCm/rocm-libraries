@@ -22,7 +22,7 @@
 
 from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, \
-  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister
+  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, DSBPermuteB32, FlatAtomicCmpswapB32, \
@@ -695,6 +695,8 @@ class GlobalWriteBatchWriter:
                                              factor_gwvw)
 
     module.addComment2(commentStr)
+    module.add(SMovB32(dst=mgpr(0), src=hex(0x0),
+        comment="LDS clamp at hex(0x0)"))
 
     module.addComment1("calc coords, apply mask, and issue loads (if necessary)")
 
