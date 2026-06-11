@@ -50,6 +50,12 @@ else()
         set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "Build SHARED libraries" FORCE)
         # Turn off gtest installation
         set(INSTALL_GTEST OFF)
+        # On MSVC-style toolchains gtest defaults to the static CRT (/MT), but the
+        # rest of hipTensor compiles against the dynamic CRT (/MD). Force gtest to
+        # use the dynamic CRT so lld-link does not reject a RuntimeLibrary mismatch.
+        if(WIN32)
+            set(gtest_force_shared_crt ON CACHE BOOL "Use shared (DLL) run-time lib for gtest" FORCE)
+        endif()
         # Add gtest targets as static libs
         add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR})
         # Restore shared libs setting
