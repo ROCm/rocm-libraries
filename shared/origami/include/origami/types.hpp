@@ -588,6 +588,30 @@ struct config_t {
 };
 
 /**
+ * @brief Optional per-config ML feature fields for the ml_recommender scorer.
+ *
+ * RECONSTRUCTED from the authoritative Python mirror (lib/dat.py
+ * compute_config_kwargs docstring), which lists the exact C++ config_ml_t
+ * field ORDER. ML-only (never consulted by Origami's analytical scorer).
+ * Defaults mirror Tensile's source-of-truth (nonTemporalC/E=0, PLR=1,
+ * LDS-RVW=1, LSU=1). Field names match scripts/experiments/
+ * bench_selection_time.cpp's usage (lds_buffer_pad_* == lds_block_size_per_pad_*).
+ */
+struct config_ml_t {
+  int cache_hints_c         = 0;
+  int cache_hints_d         = 0;
+  int cache_hints_e         = 0;
+  int prefetch_global_read  = 1;
+  int prefetch_local_read   = 1;
+  int lds_read_vector_width = 1;
+  int local_split_u         = 1;
+  int lds_pad_a             = 0;
+  int lds_pad_b             = 0;
+  int lds_buffer_pad_a      = 0;
+  int lds_buffer_pad_b      = 0;
+};
+
+/**
  * @brief Latency prediction result given kernel configuration.
  *
  * Combines a configuration with its estimated latency.

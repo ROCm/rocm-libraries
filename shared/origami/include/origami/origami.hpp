@@ -91,6 +91,13 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const std::vector<config_t>& configs);
 
+// 4-arg overload (RECONSTRUCTED decl to match the deployed liborigami symbol):
+// optional per-config ML features. `configs_ml` may be nullptr (analytical).
+std::vector<prediction_result_t> rank_configs(const problem_t& problem,
+                                              const hardware_t& hardware,
+                                              const std::vector<config_t>& configs,
+                                              const std::vector<config_ml_t>* configs_ml);
+
 /**
  * @brief Select best configuration based only on M, N, K dimensions with default settings.
  *
