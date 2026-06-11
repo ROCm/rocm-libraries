@@ -38,7 +38,7 @@ Only two non-test, non-Subtile modules import from the Subtile package:
 | Caller | Import | Allowed surface |
 |---|---|---|
 | `Tensile/KernelWriter.py:50` | `from .Components.Subtile.Kernel import *` | `Kernel.py` facade symbols (see below) |
-| `Tensile/Components/StreamK.py:37` | `from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile` | `localReadResetOffsetsSubtile` only |
+| `Tensile/Components/StreamK.py:37` | `from .Subtile.Kernel import localReadResetOffsetsSubtile` | `localReadResetOffsetsSubtile` only |
 
 ### Allowed `Kernel.py` facade surface used by `KernelWriter.py`
 
@@ -114,14 +114,14 @@ internals move to C++, and that is expected.
 | Test file | Subtile module(s) imported |
 |---|---|
 | `test_subtileMainloopE2ECpp.py` | `LogicalScheduler.LogicalScheduler` (+ helpers from `test_SubtileBasedLogicalScheduler`) |
-| `test_subtileOffsetAssignCpp.py` | `Kernel` (`TileInfo`, `AB_B16`, `AB_B8`), `SubtileGREmit`, `SubtileLREmit` |
+| `test_subtileOffsetAssignCpp.py` | `Kernel` (`TileInfo`, `AB_B16`, `AB_B8`, `lraTileAssignment`), `SubtileGREmit` |
 | `test_subtileEmitMfmaRocisa.py` | `Kernel.emitMfmaInstruction` (rocisa integration — see note below) |
 | `test_SubtileBasedLogicalScheduler.py` | `Kernel`, `LogicalScheduler`, `InstructionScheduler.instructionSchedule`, `LogicalScheduler.WaitGROp` (writer/rocisa integration) |
 | `test_gr_offset.py` | `SubtileGREmit.graTileAssignment` |
 | `test_emitMfmaInstruction.py` | `Kernel.emitMfmaInstruction` |
 | `test_selectMXScaleGeometry.py` | `Kernel` (MX scale selectors/configs) |
 | `test_storeD_roundtrip.py` | `Kernel` (`TileInfo`, `CD_F32`) |
-| `gpu_test_helpers.py` | `Kernel` (`TileInfo`, `AB_B16`, `AB_B8`), `SubtileGREmit`, `SubtileLREmit` |
+| `gpu_test_helpers.py` | `Kernel` (`TileInfo`, `AB_B16`, `AB_B8`, `lraTileAssignment`, `localReadDoSubtile`), `SubtileGREmit` |
 
 ## Internal-only modules (NOT stable external APIs)
 
@@ -142,10 +142,6 @@ into C++:
 - GR / LR / scale emit module internals:
   - `Tensile/Components/Subtile/SubtileGREmit.py` (except as re-exported by
     `Kernel.py`)
-  - `Tensile/Components/Subtile/SubtileLREmit.py` — internal, **except**
-    `localReadResetOffsetsSubtile`, which is the single sanctioned symbol for
-    `StreamK.py`.
-  - `Tensile/Components/Subtile/SubtileScaleEmit.py`
 - `cpp_migration/tensile_writer/subtile/*` (`tile_info.py`, `geometry.py`,
   `emit.py`, `logical_scheduler.py`, `instruction_scheduler.py`) — Python
   reference shims / nanobind binding glue for the compiled
@@ -162,8 +158,6 @@ Tensile.Components.Subtile.Kernel:
     selectMXScaleGeometry
     initVgprTilesToZero
     mainLoop
-
-Tensile.Components.Subtile.SubtileLREmit:
     localReadResetOffsetsSubtile
 ```
 
