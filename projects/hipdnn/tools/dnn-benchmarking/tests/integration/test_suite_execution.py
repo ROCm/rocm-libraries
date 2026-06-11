@@ -507,18 +507,29 @@ class TestSuiteCLIIntegration:
             eid in (0, 1) for eid in engine_ids
         ), f"Expected engines 0 or 1, got {engine_ids}"
 
+
+@pytest.mark.gpu
+class TestPyTorchBackendCLIIntegration:
+    """Suite-CLI tests for --backend pytorch (no hipDNN/plugins required).
+
+    Separate from TestSuiteCLIIntegration so these run on CUDA-only hosts,
+    where setup.sh --torch-mode cuda intentionally skips hipDNN and plugins.
+    Each test only needs a torch GPU.
+    """
+
+    @pytest.fixture(autouse=True)
+    def check_deps(self):
+        """Skip unless a torch GPU is available (no hipDNN dependency)."""
+        _require_gpu()
+
+    @pytest.fixture
+    def project_root(self) -> Path:
+        return Path(__file__).parent.parent.parent
+
     def test_pytorch_backend_single_graph_uses_suite_path(
         self, project_root: Path
     ) -> None:
         """--backend pytorch on a single graph runs through the suite path."""
-        try:
-            import torch
-
-            if not torch.cuda.is_available():
-                pytest.skip("PyTorch GPU not available")
-        except ImportError:
-            pytest.skip("PyTorch not available")
-
         result = subprocess.run(
             [
                 sys.executable,
@@ -551,14 +562,6 @@ class TestSuiteCLIIntegration:
         self, project_root: Path, tmp_path: Path
     ) -> None:
         """--backend pytorch with multiple graphs emits one SuiteResult JSON."""
-        try:
-            import torch
-
-            if not torch.cuda.is_available():
-                pytest.skip("PyTorch GPU not available")
-        except ImportError:
-            pytest.skip("PyTorch not available")
-
         output_file = tmp_path / "pytorch_results.json"
         result = subprocess.run(
             [

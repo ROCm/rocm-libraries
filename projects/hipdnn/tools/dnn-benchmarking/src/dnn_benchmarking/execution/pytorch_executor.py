@@ -16,8 +16,6 @@ from .timing import (
     GpuTimerInterface,
     HipGpuTimer,
     Timer,
-    _is_hip_available,
-    _is_torch_available,
     create_gpu_timer,
 )
 
@@ -179,13 +177,8 @@ class PyTorchCudaExecutor:
         with torch.cuda.device(self._device):
             if self._timing_backend != "none":
                 try:
-                    requested_backend = (
-                        self._timing_backend
-                        if self._timing_backend in ("hip", "torch")
-                        else "auto"
-                    )
                     gpu_timer = create_gpu_timer(
-                        requested_backend,
+                        self._resolve_timing_backend(),
                         stream=self._timing_stream(),
                         torch_stream=self._get_stream(),
                     )
@@ -231,19 +224,26 @@ class PyTorchCudaExecutor:
             metadata=metadata,
         )
 
+    def _resolve_timing_backend(self) -> Literal["hip", "torch"]:
+        """Resolve the timing backend for this run to a concrete choice.
+
+        Explicit "hip"/"torch" pass through. "auto"/"none" resolve from the
+        torch runtime driving the stream, not from raw HIP device visibility:
+        ROCm torch uses HIP events, CUDA torch must use torch.cuda events.
+        Resolving from torch_support avoids recording HIP events on a CUDA
+        stream pointer on a mixed host (CUDA torch with visible ROCm/hipDNN).
+        """
+        if self._timing_backend in ("hip", "torch"):
+            return self._timing_backend
+        return "hip" if torch_support.is_rocm_build() else "torch"
+
     def _hip_sync_selected(self) -> bool:
         """Return True when stream synchronization should use HIP events.
 
-        Explicit "hip" timing requires HIP sync (and surfaces an error when
-        the bindings are unavailable); explicit "torch" timing never uses
-        it; "auto" and "none" use HIP events only when they are available,
-        falling back to torch stream synchronization otherwise.
+        Mirrors :meth:`_resolve_timing_backend`: HIP sync is used only when
+        the resolved backend is "hip" (explicit, or auto/none on ROCm torch).
         """
-        if self._timing_backend == "hip":
-            return True
-        if self._timing_backend == "torch":
-            return False
-        return _is_hip_available()
+        return self._resolve_timing_backend() == "hip"
 
     def _get_stream(self) -> Any:
         """Return the PyTorch stream used by all graph execution."""

@@ -95,7 +95,7 @@ class FakeHipTimer:
 
 
 def _load_executor_module(
-    monkeypatch: pytest.MonkeyPatch, fake_cuda: FakeCuda, hip_available: bool = True
+    monkeypatch: pytest.MonkeyPatch, fake_cuda: FakeCuda, is_rocm: bool = True
 ):
     fake_torch = types.SimpleNamespace(
         Tensor=object,
@@ -107,8 +107,10 @@ def _load_executor_module(
     module_name = "dnn_benchmarking.execution.pytorch_executor"
     old_module = sys.modules.pop(module_name, None)
     module = importlib.import_module(module_name)
-    monkeypatch.setattr(module, "_is_torch_available", lambda: True)
-    monkeypatch.setattr(module, "_is_hip_available", lambda: hip_available)
+    # The executor resolves the auto/none timing backend from the torch
+    # build (ROCm -> HIP events, CUDA -> torch events), so drive that here.
+    monkeypatch.setattr(module.torch_support, "gpu_available", lambda: True)
+    monkeypatch.setattr(module.torch_support, "is_rocm_build", lambda: is_rocm)
     monkeypatch.setattr(module, "HipGpuTimer", FakeHipTimer)
     monkeypatch.setattr(
         module,
@@ -240,7 +242,7 @@ def test_warmup_and_execute_once_use_stream_sync(
 
 @pytest.fixture
 def pytorch_executor_module_no_hip(monkeypatch: pytest.MonkeyPatch):
-    """Executor module fixture for hosts without HIP bindings (CUDA torch)."""
+    """Executor module fixture for a CUDA torch build (no HIP events)."""
     fake_cuda = FakeCuda()
     FakeHipTimer.created_streams = []
     FakeHipTimer.start_calls = 0
@@ -248,7 +250,7 @@ def pytorch_executor_module_no_hip(monkeypatch: pytest.MonkeyPatch):
     FakeHipTimer.sync_calls = 0
     FakeHipTimer.fake_cuda = fake_cuda
 
-    yield from _load_executor_module(monkeypatch, fake_cuda, hip_available=False)
+    yield from _load_executor_module(monkeypatch, fake_cuda, is_rocm=False)
 
 
 def test_prepare_without_hip_skips_hip_sync_timer(
@@ -282,6 +284,54 @@ def test_no_hip_synchronizes_through_torch_stream(
     assert FakeHipTimer.created_streams == []
     assert FakeHipTimer.sync_calls == 0
     assert module.torch.cuda.default_stream_obj.synchronize_calls == 2
+
+
+def test_auto_on_cuda_build_requests_torch_not_hip(
+    pytorch_executor_module_no_hip, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Auto timing on a CUDA torch build must resolve to torch, never HIP.
+
+    Guards the mixed-host case (CUDA torch with visible ROCm/hipDNN): the
+    executor must not record HIP events on a CUDA stream pointer.
+    """
+    module = pytorch_executor_module_no_hip
+    requested = []
+
+    class FakeTorchTimer:
+        backend_name = "torch"
+
+        def __init__(self, stream) -> None:
+            self.stream = stream
+
+        def start(self) -> None:
+            pass
+
+        def stop(self) -> None:
+            pass
+
+        def elapsed_ms(self) -> float:
+            return 0.5
+
+    monkeypatch.setattr(
+        module,
+        "create_gpu_timer",
+        lambda backend, stream=0, torch_stream=None: requested.append(backend)
+        or FakeTorchTimer(torch_stream),
+    )
+    monkeypatch.setattr(
+        module.pytorch_ops, "execute_graph", lambda graph, tensors: None
+    )
+    executor = _make_executor(module, timing_backend="auto")
+    executor.prepare()
+
+    result = executor.benchmark(tensors={}, graph_name="pytorch_mixed_host")
+
+    # Resolved to torch despite the factory preferring HIP when available.
+    assert requested == ["torch"]
+    # No HIP sync timer created in prepare() either.
+    assert FakeHipTimer.created_streams == []
+    assert result.metadata is not None
+    assert result.metadata.timing_backend == "torch"
 
 
 def test_torch_timing_backend_requests_torch_timer(

@@ -87,14 +87,16 @@ bash setup.sh --torch-mode cpu --rocm-prefix /opt/rocm
 source /workspace/.venv/bin/activate
 ```
 
-CPU-only torch never enables the PyTorch execution backend; GPU execution paths still
-require a ROCm-enabled torch build and a visible GPU. Timing still comes from
-the HIP APIs bound through `hipdnn_frontend`, not from torch.
+CPU-only torch never enables the PyTorch execution backend; it is only for
+Python reference validation. The `--backend pytorch` executor needs a GPU torch
+build: ROCm torch (HIP-event timing) or CUDA torch (torch.cuda-event timing,
+see below).
 
 Use `--torch-mode existing` to reuse torch already installed in the target
 virtual environment. Existing ROCm torch uses its bundled ROCm SDK libraries;
-existing CPU/non-ROCm torch builds the hipDNN bindings against `--rocm-prefix`,
-`$ROCM_PATH`, or `/opt/rocm`.
+existing CUDA torch takes the CUDA skip path (no hipDNN bindings); existing
+CPU-only torch builds the hipDNN bindings against `--rocm-prefix`, `$ROCM_PATH`,
+or `/opt/rocm` for the hipDNN backend.
 
 ### CUDA PyTorch (NVIDIA GPUs, `--backend pytorch` only)
 
