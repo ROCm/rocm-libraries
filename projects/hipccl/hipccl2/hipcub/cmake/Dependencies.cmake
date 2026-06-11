@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -44,14 +44,16 @@ if(DEFINED BUILD_SHARED_LIBS)
 endif()
 set(USER_ROCM_WARN_TOOLCHAIN_VAR ${ROCM_WARN_TOOLCHAIN_VAR})
 
+# Suppress ROCmChecks warnings for local toolchain modifications.
+set(ROCM_WARN_TOOLCHAIN_VAR OFF)
+
+# Force older versions of option() in googletest to respect the local variable setting.
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+
+# Resolve Ninja generator errors regarding RPATH relinking during the install phase for merged subprojects.
+set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+
 set(ROCM_WARN_TOOLCHAIN_VAR OFF CACHE BOOL "")
-# Suppress ROCMChecks WARNING on third-party dependencies
-set(_HIPCUB_DISABLE_ROCM_CHECKS FALSE)
-macro(rocm_check_toolchain_var var access value list_file)
-  if(NOT _HIPCUB_DISABLE_ROCM_CHECKS)
-    _rocm_check_toolchain_var("${var}" "${access}" "${value}" "${list_file}")
-  endif()
-endmacro()
 # Turn off warnings and errors for all warnings in dependencies
 separate_arguments(CXX_FLAGS_LIST NATIVE_COMMAND ${CMAKE_CXX_FLAGS})
 list(REMOVE_ITEM CXX_FLAGS_LIST /WX -Werror -Werror=pendantic -pedantic-errors)
@@ -70,8 +72,6 @@ foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
   set(${SHARED_OPTION} OFF)
 endforeach()
-
-include(FetchContent)
 
 # This function checks to see if the download branch given by "branch" exists in the repository.
 # It does so using the git ls-remote command.
@@ -293,6 +293,8 @@ function(fetch_dep method repo_name repo_path download_branch)
   endif()
 endfunction()
 
+include(cmake/FetchContentIsolated.cmake)
+
 # Test dependencies
 if(USER_BUILD_TEST)
   # NOTE1: Google Test has created a mess with legacy FindGTest.cmake and newer GTestConfig.cmake
@@ -318,21 +320,19 @@ if(USER_BUILD_TEST)
     option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
     option(INSTALL_GTEST "Enable installation of googletest." OFF)
     if(EXISTS /usr/src/googletest AND NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
-      FetchContent_Declare(
-        googletest
-        SOURCE_DIR /usr/src/googletest
-      )
+      set(GTEST_FETCH_ARGS SOURCE_DIR /usr/src/googletest)
     else()
       message(STATUS "Google Test not found. Fetching...")
-      FetchContent_Declare(
-        googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG        release-1.11.0
+      set(GTEST_FETCH_ARGS 
+          GIT_REPOSITORY https://github.com/google/googletest.git
+          GIT_TAG        release-1.11.0
       )
     endif()
-    set(_HIPCUB_DISABLE_ROCM_CHECKS TRUE)
-    FetchContent_MakeAvailable(googletest)
-    set(_HIPCUB_DISABLE_ROCM_CHECKS FALSE)
+    fetch_content_isolated(
+      googletest
+      ${GTEST_FETCH_ARGS}
+      CMAKE_ARGS -DBUILD_GTEST=ON -DBUILD_GMOCK=OFF -DINSTALL_GTEST=OFF
+    )
     add_library(GTest::GTest ALIAS gtest)
     add_library(GTest::Main  ALIAS gtest_main)
   else()
@@ -351,18 +351,15 @@ if(USER_BUILD_BENCHMARK)
   endif()
   if(NOT TARGET benchmark::benchmark)
     message(STATUS "Google Benchmark not found. Fetching...")
-    option(BENCHMARK_ENABLE_TESTING "Enable testing of the benchmark library." OFF)
-    option(BENCHMARK_ENABLE_INSTALL "Enable installation of benchmark." OFF)
-    FetchContent_Declare(
+    fetch_content_isolated(
       googlebench
       GIT_REPOSITORY https://github.com/google/benchmark.git
       GIT_TAG        v${BENCHMARK_VERSION}
+      CMAKE_ARGS     -DBENCHMARK_ENABLE_TESTING=OFF
+                     -DBENCHMARK_ENABLE_INSTALL=OFF
+                     -DHAVE_STD_REGEX=ON
+                     -DRUN_HAVE_STD_REGEX=1
     )
-    set(HAVE_STD_REGEX ON)
-    set(RUN_HAVE_STD_REGEX 1)
-    set(_HIPCUB_DISABLE_ROCM_CHECKS TRUE)
-    FetchContent_MakeAvailable(googlebench)
-    set(_HIPCUB_DISABLE_ROCM_CHECKS FALSE)
     if(NOT TARGET benchmark::benchmark)
       add_library(benchmark::benchmark ALIAS benchmark)
     endif()
@@ -413,16 +410,11 @@ else()
   if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
     # The fetch_dep call above should have downloaded/located the source. We just need to make it available.
     message(STATUS "Configuring rocPRIM")
-    FetchContent_Declare(
+    fetch_content_isolated(
       prim
       SOURCE_DIR    ${ROCPRIM_PATH}
-      INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
-      CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
-      LOG_CONFIGURE TRUE
-      LOG_BUILD     TRUE
-      LOG_INSTALL   TRUE
+      CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_PREFIX_PATH=/opt/rocm
     )
-    FetchContent_MakeAvailable(prim)
     if(NOT TARGET roc::rocprim)
       add_library(roc::rocprim ALIAS rocprim)
     endif()

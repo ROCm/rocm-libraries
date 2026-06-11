@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
@@ -23,27 +23,23 @@ endif()
 
 # Verify that supported compilers are used
 include(VerifyCompiler)
-include(DownloadProject)
+include(cmake/FetchContentIsolated.cmake)
 
 # Download rocPRIM (only for ROCm platform)
-if(NOT DEFINED ROCPRIM_ROOT)
+if(NOT DEFINED rocprim_LOCAL_DIR)
   message(STATUS "Downloading and building rocPRIM.")
-  set(ROCPRIM_ROOT "${CMAKE_CURRENT_BINARY_DIR}/rocprim" CACHE PATH "")
-  download_project(
-    PROJ                rocprim
+  set(rocprim_LOCAL_DIR "${CMAKE_CURRENT_BINARY_DIR}/rocprim" CACHE PATH "")
+
+  fetch_content_isolated(
+    rocprim
     GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
     GIT_TAG             master
-    INSTALL_DIR         ${ROCPRIM_ROOT}
-    CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-    LOG_DOWNLOAD        TRUE
-    LOG_CONFIGURE       TRUE
-    LOG_BUILD           TRUE
-    LOG_INSTALL         TRUE
-    BUILD_PROJECT       TRUE
+    CMAKE_ARGS          -DBUILD_TEST=OFF
     UPDATE_DISCONNECTED TRUE
   )
+  FetchContent_MakeAvailable(rocprim)
 endif()
-find_package(rocprim REQUIRED CONFIG PATHS "${ROCPRIM_ROOT}")
+find_package(rocprim REQUIRED CONFIG PATHS "${rocprim_LOCAL_DIR}")
 
 # Find rocThrust
 find_package(rocthrust REQUIRED CONFIG HINTS ${rocthrust_DIR} PATHS "/opt/rocm/rocthrust")
