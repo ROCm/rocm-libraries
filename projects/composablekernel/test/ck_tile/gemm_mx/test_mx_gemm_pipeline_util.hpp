@@ -171,6 +171,21 @@ struct MxGemmPipelineDefaultParams
     static constexpr bool Preshuffle = PT == MxGemmPipelineType::WeightPreshuffle;
 };
 
+template <ck_tile::index_t N_Warp_Tile_,
+          ck_tile::index_t K_Warp_Tile_,
+          ck_tile::index_t N_Tile_,
+          ck_tile::index_t N_Warp_,
+          typename BDataType_>
+struct Config
+{
+    static constexpr ck_tile::index_t N_Warp_Tile = N_Warp_Tile_;
+    static constexpr ck_tile::index_t K_Warp_Tile = K_Warp_Tile_;
+    static constexpr ck_tile::index_t N_Tile      = N_Tile_;
+    static constexpr ck_tile::index_t N_Warp      = N_Warp_;
+    static constexpr ck_tile::index_t BContiguousItemsPerAccess =
+        std::is_same_v<BDataType_, ck_tile::pk_fp4_t> ? 32 : 16;
+};
+
 template <typename Tuple, typename Derived>
 class TestCkTileMxGemmPipeline : public ::testing::Test
 {
@@ -218,22 +233,6 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         PipelineType == MxGemmPipelineType::WeightPreshuffle ? 4 : 2;
     static constexpr ck_tile::index_t K_Warp = 1;
 
-    static constexpr ck_tile::index_t N_Warp_Tile_ = N_Warp_Tile;
-    static constexpr ck_tile::index_t K_Warp_Tile_ = K_Warp_Tile;
-    static constexpr ck_tile::index_t N_Tile_      = N_Tile;
-    static constexpr ck_tile::index_t N_Warp_      = N_Warp;
-    using BDataType_                               = BDataType;
-
-    struct Config
-    {
-        static constexpr ck_tile::index_t N_Warp_Tile = N_Warp_Tile_;
-        static constexpr ck_tile::index_t K_Warp_Tile = K_Warp_Tile_;
-        static constexpr ck_tile::index_t N_Tile      = N_Tile_;
-        static constexpr ck_tile::index_t N_Warp      = N_Warp_;
-        static constexpr ck_tile::index_t BContiguousItemsPerAccess =
-            std::is_same_v<BDataType_, ck_tile::pk_fp4_t> ? 32 : 16;
-    };
-
     protected:
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
     void invoke_mx_gemm(const ck_tile::MxGemmHostArgs<1, 1, 0>& args,
@@ -259,7 +258,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         constexpr bool TransposeC =
             std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> &&
             M_Warp_Tile == N_Warp_Tile;
-#else
+#elif defined(CK_USE_GFX950)
         constexpr ck_tile::index_t BlockedXDLNPerWarp = Preshuffle ? 2 : 1;
         constexpr bool TransposeC                     = false;
 #endif
@@ -542,7 +541,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k);
         ck_tile::preShuffleScaleBuffer_gfx1250<BScaleDataType, ScaleBlockSize, true>(
             scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k);
-#else
+#elif defined(CK_USE_GFX950)
         constexpr ck_tile::index_t MPerXdl      = M_Warp_Tile;
         constexpr ck_tile::index_t NPerXdl      = N_Warp_Tile;
         constexpr ck_tile::index_t KPerXdl      = K_Warp_Tile;
@@ -599,16 +598,18 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         scale_a_dev_buf.ToDevice(scale_a_shuffled.data());
         scale_b_dev_buf.ToDevice(scale_b_shuffled.data());
 
+        using GemmConfig = Config<N_Warp_Tile, K_Warp_Tile, N_Tile, N_Warp, BDataType>;
+
         const auto b_host_for_dev = [&]() {
             if constexpr(Preshuffle)
             {
                 if constexpr(PermuteN)
                 {
-                    return ck_tile::shuffle_b_permuteN<Config, BDataType, NXdlPackEff>(b_k_n);
+                    return ck_tile::shuffle_b_permuteN<GemmConfig, BDataType, NXdlPackEff>(b_k_n);
                 }
                 else
                 {
-                    return ck_tile::shuffle_b<Config>(b_k_n);
+                    return ck_tile::shuffle_b<GemmConfig>(b_k_n);
                 }
             }
             else
