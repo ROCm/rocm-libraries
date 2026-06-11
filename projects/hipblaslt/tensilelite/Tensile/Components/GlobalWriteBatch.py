@@ -28,7 +28,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, DSBPermuteB32, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAndB32, \
   SAndB64, SAtomicDec, SBarrier, SBranch, SCBranchExecNZ, SCBranchExecZ, \
-  SCBranchSCC0, SCBranchSCC1, SCmpGtU32, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, SMinU32, \
+  SCBranchSCC0, SCBranchSCC1, SCmpGtU32, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, SMinU32, SEndpgm, \
   SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLShiftRightB64, SMovB32, SMovB64, SMulI32, \
   SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSubI32, SSubU32, \
   SSwapPCB64, SWaitCnt, SWaitAlu, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
@@ -74,13 +74,13 @@ class GlobalWriteBatchComponent(GlobalWriteComponents):
     batchIdx, applyAlpha, beta, edge, atomic, gwvw, atomicW, \
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
-    codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion,
+    codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion, numBatches: int,
     inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0) -> Module:
     return GlobalWriteBatchWriter(kernel, tPA, tPB, activation, ss, batchIdx, applyAlpha, \
       beta, edge, atomic, gwvw, atomicW, \
       batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit, \
       tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, \
-      codeAccVgprRead, codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion,
+      codeAccVgprRead, codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion, numBatches,
       inter_iter_rowInc, direct_next_rowInc).emit()
 
 class GlobalWriteBatchWriter:
@@ -88,7 +88,7 @@ class GlobalWriteBatchWriter:
     batchIdx, applyAlpha, beta, edge, atomic, gwvw, atomicW, \
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
-    codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion,
+    codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion, numBatches: int,
     inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0):
     self.kernel = kernel
     self.tPA    = tPA
@@ -140,6 +140,7 @@ class GlobalWriteBatchWriter:
     self._subtileCloadPrevD1 = -1         # sentinel: last d1 group seen in C load guard
     self._subtilePendingSrdDInc = None    # deferred SrdD incToNextRow (emitted after N-group label)
     self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
+    self.numBatches = numBatches
 
     # CompactLoopStore: stash the "next batch's first elt rowInc" passed in via
     # `inter_iter_rowInc`. Used as the look-ahead fall-through value at the
@@ -203,6 +204,64 @@ class GlobalWriteBatchWriter:
   def getSOrSaveExecType(self):
     return SOrSaveExecB32 if self.wavelen == 32 else SOrSaveExecB64
 
+  @staticmethod
+  def computeBatchesPerCLSBody(kernel, numBatches: int) -> int:
+    """How many batches one CLS loop body covers (= numBatches / CLS iter count).
+
+    The body must align to the SrdD-advance period, else the CLS loop would run
+    s_add SrdD too many times. Which dim is the CLS iter dim (the one taken out
+    of the body) depends on the output layout. Unsupported store paths (non-MI,
+    StoreRemap, StreamK) or non-divisible cases fall back to numBatches (iter=1).
+    """
+    if not kernel["EnableMatrixInstruction"]:
+      return numBatches
+    if kernel.get("StoreRemapVectorWidth", 0) != 0:
+      return numBatches
+    if kernel.get("StreamK", 0) != 0:
+      return numBatches
+    VW0 = kernel["VectorWidthA"]
+    VW1 = kernel["VectorWidthB"]
+    outerTT0 = kernel["MIWaveTile"][0] // VW0
+    outerTT1 = kernel["MIWaveTile"][1] // VW1
+    miT  = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+    miM_ = (kernel["MatrixInstM"] * kernel["MatrixInstBM"]) if (kernel["MatrixInstM"] == 4) else miT
+    miN_ = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (kernel["MatrixInstN"] == 4) else miT
+    OPM   = miM_ * miN_ // kernel["WavefrontSize"]
+    NEPBS = kernel["NumElementsPerBatchStore"]
+    #   (a) outerTT1  > 1, (VWB < MIWaveTile[1], e.g. TT/NT VWB=1):
+    #   (b) outerTT1 == 1, VW1 > 1, SS=False: CLS iter = vw1
+    #   (c) outerTT1 == 1, VW1 == 1, SS=True: CLS iter = tIdx-block
+    if outerTT1 > 1 and VW1 == 1:
+      if numBatches % outerTT1 != 0:
+        return numBatches
+      return max(1, numBatches // outerTT1)
+    elif outerTT1 == 1 and VW1 > 1 and not kernel["SourceSwap"]:
+      srd_period = max(1, numBatches // VW1)
+      if numBatches % VW1 != 0:
+        return numBatches
+      return srd_period
+    elif outerTT1 == 1 and VW1 == 1 and kernel["SourceSwap"]:
+      matrixInstBM = 1 if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstBM"]
+      matrixInstBN = 1 if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"]
+      inner_dims = VW0 * outerTT0 * matrixInstBM * matrixInstBN
+      regular = (NEPBS % inner_dims == 0)
+      if not regular:
+        return numBatches
+      return max(1, ceil(numBatches / NEPBS))
+    return numBatches
+
+  def _computeBatchesPerCLSBody(self) -> int:
+    return GlobalWriteBatchWriter.computeBatchesPerCLSBody(self.kernel, self.numBatches)
+
+  @staticmethod
+  def computeCLSIterCount(kernel, numBatches: int) -> int:
+    """CLS loop iter count = numBatches / batchesPerCLSBody. Minimum 1."""
+    body = GlobalWriteBatchWriter.computeBatchesPerCLSBody(kernel, numBatches)
+    return max(1, numBatches // body)
+
+  def _computeCLSIterCount(self) -> int:
+    return GlobalWriteBatchWriter.computeCLSIterCount(self.kernel, self.numBatches)
+
   def emit(self) -> Module:
     assert self._checkAtomicPreconditions()
     module = Module(self.moduleName)
@@ -247,6 +306,14 @@ class GlobalWriteBatchWriter:
           # coutRowPtrE / coutRowPtrBias / packed-C1 for free (same conditions).
           module.add(addrCalc.emitRowPtrAdvance(self.kernel, self.ss, self.tmpS01, rowInc, lookahead=True))
 
+      clsLabel = getattr(self.ss, "_clsLoopLabel", None)
+      if clsLabel is not None and (self._computeBatchesPerCLSBody() - 1 == self.batchIdx) and self.ss.elementAddr:
+        module.add(SSubI32(dst=sgpr("ArgType"), src0=sgpr("ArgType"), src1=1))
+        module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=0))
+        module.add(SCBranchSCC0(clsLabel.getLabelName(), "loop while counter != 0"))
+        # if not self.kernel["StreamK"] == 3:
+        #   module.add(SEndpgm(comment="stop here after CLS loop"))
+        self.ss._clsLoopLabel = None
     return module
 
   def globalStoreWait(self, elementIdx, waitCnter, vlcntTotalIssued, dscntTotalIssued, interleaveStoreVmcnt: bool):
@@ -611,7 +678,12 @@ class GlobalWriteBatchWriter:
                                ":vaw:%u"%self.atomicW if self.atomic else "",
                                "" if idx == len(self.batchElements) -1 else "; ")
                                for idx, element in enumerate(self.batchElements)])
-
+    # setupStoreElementsForBatch must run before the CLS preamble call so
+    # ss.elementAddr[0] is populated. For non-CLS the batch banner is emitted
+    # right after in the else branch (matches baseline ordering); for CLS the
+    # banner is moved into the CLS header block below (after sgpr setup, before
+    # the CLS label) so the per-iter store body is visually a single labelled
+    # unit.
     if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel":
       self.ss.setupStoreElementsForBatch(self.kernel, self.gwvw, self.batchElements, self.batchElementSgprs, isOptNLL=False, factorDim=self.factorDim)
     else:
@@ -685,18 +757,56 @@ class GlobalWriteBatchWriter:
     #when factorDim = 1 the bias's gwvw is alwasy be 1.
     factor_gwvw = 1 if self.factorDim else self.ss.cfg.gwvw
 
-    # CompactLoopStore preamble: hoist the elt-0 LDS barrier + addr-calc out of
-    # the per-element loop so the CLS countdown loop avoids redundant per-iter
-    # LDS work. Gated on the parameter so non-CLS codegen is bit-for-bit
-    # unchanged.
+    # CompactLoopStore CLS header (batch 0 only): preamble + sgpr setup + CLS
+    # label + M0 assignment + M0 step. Wrapped in `if CompactLoopStore` as a
+    # unit so non-CLS .s emits ONLY the original module.addComment2(commentStr)
+    # in the else branch (matches baseline)
     if self.kernel["CompactLoopStore"] and self.batchIdx == 0:
       self._emitElt0LdsPreambleBeforeBanner(module, None, #bufferOOB,
                                              loadInputCode,
                                              factor_gwvw)
 
-    module.addComment2(commentStr)
-    module.add(SMovB32(dst=mgpr(0), src=hex(0x0),
-        comment="LDS clamp at hex(0x0)"))
+      module.add(SMovB32(dst=sgpr("WorkGroup2"), src=hex(0x0), comment="CLS M0 base = 0"))
+      module.add(SMovB32(dst=sgpr("ArgType"), src=hex(self._computeCLSIterCount()), comment="CLS loop iter count"))
+      module.addComment2(commentStr)
+      self.ss._clsLoopLabel = Label(self.parentWriter.labels.getNameInc("CLS"), "")
+      module.add(self.ss._clsLoopLabel)
+      module.add(SMovB32(dst=mgpr(0), src=sgpr("WorkGroup2"),
+          comment="LDS clamp at sgpr(WorkGroup2)"))
+      # CLS M0 step: M0 indirectly offsets the src VGPR index of v_movrelsd_2_b32.
+      # Step = the stride of the CLS iter dim in the SRC formula.
+      #   - outerTT1 > 1 (VWB < MIWaveTile[1], e.g. TT/NT VWB=1):
+      #       CLS iter = wgIdx1, src stride = OPM*BM*BN*VW0*outerTT0*VW1
+      #   - outerTT1 == 1, SS=True: CLS iter = tIdx, src stride = 1 (default)
+      #   - outerTT1 == 1, SS=False: CLS iter = vw1,
+      #       src stride = OPM*BM*BN*VW0*outerTT0
+      cls_m0_step = 1
+      if self.kernel["EnableMatrixInstruction"]:
+        matrixInstT  = min(self.kernel["MatrixInstM"], self.kernel["MatrixInstN"])
+        matrixInstM_ = (self.kernel["MatrixInstM"] * self.kernel["MatrixInstBM"]) if (self.kernel["MatrixInstM"] == 4) else matrixInstT
+        matrixInstN_ = (self.kernel["MatrixInstN"] * self.kernel["MatrixInstBN"]) if (self.kernel["MatrixInstN"] == 4) else matrixInstT
+        matrixInstBM = 1 if (self.kernel["MatrixInstM"] == 4) else self.kernel["MatrixInstBM"]
+        matrixInstBN = 1 if (self.kernel["MatrixInstN"] == 4) else self.kernel["MatrixInstBN"]
+        OPM   = matrixInstM_ * matrixInstN_ // self.kernel["WavefrontSize"]
+        NEPBS = self.kernel["NumElementsPerBatchStore"]
+        VW0 = self.kernel["VectorWidthA"]
+        VW1 = self.kernel["VectorWidthB"]
+        outerTT0 = self.kernel["MIWaveTile"][0] // VW0
+        outerTT1 = self.kernel["MIWaveTile"][1] // VW1
+        if outerTT1 > 1 and VW1 == 1:
+          # CLS iter = wgIdx1, src coef of wgIdx1
+          cls_m0_step = OPM * matrixInstBM * matrixInstBN * VW0 * outerTT0 * VW1
+        elif outerTT1 == 1 and VW1 > 1 and not self.kernel["SourceSwap"]:
+          # CLS iter = vw1, src coef of vw1
+          cls_m0_step = OPM * matrixInstBM * matrixInstBN * VW0 * outerTT0
+        elif outerTT1 == 1 and VW1 == 1 and self.kernel["SourceSwap"]:
+          inner_dims = VW0 * outerTT0 * matrixInstBM * matrixInstBN
+          if NEPBS % inner_dims == 0:
+            cls_m0_step = max(1, NEPBS // inner_dims)
+      module.add(SAddU32(dst=sgpr("WorkGroup2"), src0=sgpr("WorkGroup2"), src1=cls_m0_step,
+                         comment="CLS M0 step (src coef of CLS iter dim)"))
+    else:
+      module.addComment2(commentStr)
 
     module.addComment1("calc coords, apply mask, and issue loads (if necessary)")
 

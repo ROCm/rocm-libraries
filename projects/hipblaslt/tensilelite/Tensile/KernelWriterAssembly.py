@@ -72,6 +72,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
 from .Components.GL2Prefetch import GL2PrefetchLoad
+from .Components.GlobalWriteBatch import GlobalWriteBatchWriter
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .SolutionStructs import isPackedIndex
@@ -15892,6 +15893,19 @@ class KernelWriterAssembly(KernelWriter):
         # We need a variable to read from correct VGPR index when numBatches > 1.
         ss.lsuStartVgprOffset = 0
 
+        # CompactLoopStore: only emit ONE CLS body's worth of batches
+        # (= batchesPerCLSBody, computed from SourceSwap / outerTT1 layout in
+        # GlobalWriteBatchWriter.computeBatchesPerCLSBody). The CLS loop tail
+        # emitted by GlobalWriteBatch.emit() at batchIdx == batchesPerCLSBody-1
+        # branches the loop back at runtime to re-execute the body CLS-iter-count
+        # times via M0 indirection. Iterating past this would just emit dead
+        # code after the CLS tail's s_endpgm.
+        # For non-CLS, numBatchesCLS == numBatches so behaviour is unchanged.
+        if kernel["CompactLoopStore"]:
+          numBatchesCLS = GlobalWriteBatchWriter.computeBatchesPerCLSBody(kernel, numBatches)
+        else:
+          numBatchesCLS = numBatches
+
         # CompactLoopStore: pre-compute per-batch "next_rowInc" (rowInc from
         # this batch's last elt to the NEXT batch's first elt). Passed as
         # `inter_iter_rowInc` to globalWriteBatch so the per-elt look-ahead
@@ -15938,7 +15952,7 @@ class KernelWriterAssembly(KernelWriter):
               elementsThisBatch, self.vgprs.addrE, self.vgprs.addrD, self.vgprs.addrC, self.vgprs.addrBias, \
               self.vgprs.addrScaleAVec, self.vgprs.addrScaleBVec, self.vgprs.addrScaleAlphaVec, \
               biasLocalBarrierInit, tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, \
-              activationTypeStr, elementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, \
+              activationTypeStr, elementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, numBatches, \
               _next_firing_rowInc, _direct_next_rowInc))
           biasLocalBarrierInit = True
 
@@ -16584,7 +16598,7 @@ class KernelWriterAssembly(KernelWriter):
       batchElements, addrE, addrD, addrC, addrBias, \
       addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, biasLocalBarrierInit: bool, \
       tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, \
-      batchElementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, \
+      batchElementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, factorDim, numBatches, \
       inter_iter_rowInc=0, direct_next_rowInc=0) -> Module:
       packdata = Component.PackData.find(self)
       gwriter  = Component.GlobalWriteComponents.find(self)
@@ -16594,7 +16608,7 @@ class KernelWriterAssembly(KernelWriter):
         addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, biasLocalBarrierInit, \
         tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, \
         batchElementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, packdata, self, factorDim, \
-        self.assembler.version, inter_iter_rowInc, direct_next_rowInc)
+        self.assembler.version, numBatches, inter_iter_rowInc, direct_next_rowInc)
 
   ##############################################################################
   def openPrefetchGlobalRead2orMore(self, kernel, idxPgr):
