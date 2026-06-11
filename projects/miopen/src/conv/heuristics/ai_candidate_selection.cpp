@@ -217,6 +217,23 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
                 }
             }
 
+            // ResolveConditionalParamIndex infers optional-param presence from the candidate
+            // length, which is unambiguous only for a single optional. Reject >1 here so a future
+            // multi-optional kernel fails loudly at load instead of silently mis-decoding.
+            const auto num_present_if_gt_one =
+                std::ranges::count_if(layout.conditional_params, [](const auto& entry) {
+                    return entry.second.kind ==
+                           ConditionalLayout::ConditionalKind::present_if_gt_one;
+                });
+            if(num_present_if_gt_one > 1)
+            {
+                MIOPEN_THROW((std::ostringstream()
+                              << "conditional_layouts[" << kernel_name
+                              << "]: more than one 'present_if_gt_one' param is not supported "
+                                 "(ResolveConditionalParamIndex assumes at most one optional).")
+                                 .str());
+            }
+
             conditional_layouts_.emplace(kernel_name, std::move(layout));
         }
     }
@@ -436,8 +453,17 @@ EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
         OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "fil_layout")), 2);
     const auto out_layout =
         OneHot(static_cast<std::size_t>(FeatureAt(features_by_name, "out_layout")), 2);
-    const auto precision = OneHot(EncodePrecisionLabel(FeatureAt(features_by_name, "precision")),
-                                  precision_class_count);
+    const auto precision_label = EncodePrecisionLabel(FeatureAt(features_by_name, "precision"));
+    if(precision_label >= precision_class_count)
+    {
+        // The problem's precision isn't one this model was trained on (e.g. INT8 on a model with
+        // only 3 precision classes). Throw so the caller falls back to the non-AI heuristic rather
+        // than feeding an all-zero precision one-hot (a silently degraded prediction).
+        MIOPEN_THROW("EngineerCandidateSelectionInputFeatures: precision class " +
+                     std::to_string(precision_label) + " not supported by this model (" +
+                     std::to_string(precision_class_count) + " precision classes)");
+    }
+    const auto precision = OneHot(precision_label, precision_class_count);
     // Direction one-hot is present in ExtractTunaNetND2dFeatures but omitted here because
     // CandidateSelection metadata holds direction as a constant input.
 
@@ -929,6 +955,11 @@ const CandidateSelectionModel& GetCandidateSelectionModel(const std::string& arc
 // num_inline_after_optionals is the count of always-present inline_after_optionals params in the
 // layout. They each occupy one token, so they (and the appended suffix) are discounted from the
 // candidate length to recover how many optional (present_if_gt_one) params actually appear.
+//
+// TODO: this infers presence from the candidate length, which is only unambiguous for a single
+// optional param. Supporting >1 present_if_gt_one param would need per-optional presence detection
+// (e.g. value-based, from the raw type string) rather than a length count. The metadata loader
+// rejects >1 such param today (see the CandidateSelectionMetadata constructor) so this stays safe.
 inline std::optional<size_t>
 ResolveConditionalParamIndex(const ConditionalLayout::ConditionalParam& spec,
                              size_t base_param_count,
@@ -1171,6 +1202,7 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
         }
 
         std::vector<float> encoded;
+        bool encode_failed = false;
         for(const auto& param_name : output_params)
         {
             // Skip constant parameters
@@ -1203,10 +1235,17 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
                         }
                         catch(const std::exception&)
                         {
-                            std::ostringstream msg;
-                            msg << "No sequence encoding found for output parameter: " << param_name
-                                << " and value '" << param_value << "' is not a valid float.";
-                            MIOPEN_THROW(msg.str());
+                            // Localize the failure to this candidate: rank it last via the NaN
+                            // sentinel (as the invalid-mapping path above does) instead of
+                            // throwing, which would abort candidate selection for the whole
+                            // problem.
+                            MIOPEN_LOG_WE("Kernel: "
+                                          << kernel_name << " - output parameter '" << param_name
+                                          << "' value '" << param_value
+                                          << "' has no encoding and is not a valid float; "
+                                             "ranking this candidate last.");
+                            encode_failed = true;
+                            break;
                         }
                     }
                     else
@@ -1260,6 +1299,15 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
             }
             // If not present, value remains missing_value_encoding
             encoded.push_back(value);
+        }
+        if(encode_failed)
+        {
+            // All-NaN sentinel ensures this candidate sorts last; mirrors the unsupported-kernel
+            // path above so one un-encodable candidate cannot disable selection for the problem.
+            encoded_candidates.emplace_back(output_params.size() -
+                                                metadata.GetConstantOutputIndices().size(),
+                                            std::numeric_limits<float>::quiet_NaN());
+            continue;
         }
         encoded_candidates.push_back(encoded);
     }

@@ -407,27 +407,31 @@ size_t MetadataND::EncodePrecision(miopenDataType_t data_type) const
     if(!is_valid)
         return 0;
 
-    try
+    const char* key = nullptr;
+    if(data_type == miopenBFloat16)
+        key = "BF16";
+    else if(data_type == miopenHalf)
+        key = "FP16";
+    else if(data_type == miopenFloat)
+        key = "FP32";
+    else if(data_type == miopenInt8)
+        key = "INT8";
+
+    // An unsupported data type, or a precision absent from this model's encoding map, returns an
+    // out-of-range index (one past the last class). For a correctly-sized one-hot this yields an
+    // all-zero precision rather than silently colliding with a valid class such as BF16 (index 0).
+    if(key == nullptr)
     {
-        if(data_type == miopenBFloat16)
-            return precision_encodings_3d.at("BF16");
-        else if(data_type == miopenHalf)
-            return precision_encodings_3d.at("FP16");
-        else if(data_type == miopenFloat)
-            return precision_encodings_3d.at("FP32");
-        else if(data_type == miopenInt8)
-            return precision_encodings_3d.at("INT8");
-        else
-        {
-            MIOPEN_LOG_W("Unsupported data type in ND metadata, returning 0");
-            return 0;
-        }
+        MIOPEN_LOG_W("Unsupported data type in ND metadata precision encoding");
+        return precision_encodings_3d.size();
     }
-    catch(...)
+    const auto it = precision_encodings_3d.find(key);
+    if(it == precision_encodings_3d.end())
     {
-        MIOPEN_LOG_W("Precision encoding failed in ND metadata, returning 0");
-        return 0;
+        MIOPEN_LOG_W("Precision '" << key << "' not present in ND metadata precision encoding");
+        return precision_encodings_3d.size();
     }
+    return it->second;
 }
 
 MIOPEN_INTERNALS_EXPORT

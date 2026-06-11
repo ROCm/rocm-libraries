@@ -33,6 +33,8 @@
 #include <map>
 #include <vector>
 #include <sstream>
+#include <algorithm>
+#include <cmath>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 using namespace miopen::ai::tuning::candidate_selection;
@@ -471,6 +473,21 @@ std::vector<std::string> MakeV3LargeTensorCandidate(bool include_num_groups,
     c.push_back(version);   // inline-after-optionals "BlkGemmPipelineVersion:..."
     return c;
 }
+
+// A complete input-feature map for EngineerCandidateSelectionInputFeatures (every FeatureAt key),
+// so a throw can only come from the precision-class check, not a missing feature.
+std::map<std::string, float> MakeFullInputFeatureMap()
+{
+    return {
+        {"direction", 0.0f},     {"batchsize", 1.0f},   {"in_channels", 64.0f},
+        {"out_channels", 64.0f}, {"in_h", 56.0f},       {"in_w", 56.0f},
+        {"out_h", 56.0f},        {"out_w", 56.0f},      {"fil_h", 3.0f},
+        {"fil_w", 3.0f},         {"group_count", 1.0f}, {"in_layout", 1.0f},
+        {"fil_layout", 1.0f},    {"out_layout", 1.0f},  {"conv_stride_h", 1.0f},
+        {"conv_stride_w", 1.0f}, {"dilation_h", 1.0f},  {"dilation_w", 1.0f},
+        {"pad_h", 1.0f},         {"pad_w", 1.0f},       {"precision", 0.0f},
+    };
+}
 } // namespace
 
 TEST_P(GPU_CandidateSelection_FP32, WaveletSplitTileLoadMath_Test)
@@ -609,6 +626,56 @@ TEST_P(GPU_CandidateSelection_FP32, V3LargeTensorPipelineParamDecode_Test)
         EXPECT_NE(e_intra[0][sched_slot], e_inter[0][sched_slot])
             << "Intrawave vs Interwave must encode to different values";
     }
+}
+
+// A candidate carrying a non-numeric value in a numeric output slot must be ranked last via the
+// all-NaN sentinel, not abort encoding for every candidate. Here the appended SplitK token is
+// non-numeric; the other (valid) candidate must still encode normally.
+TEST_P(GPU_CandidateSelection_FP32, EncodeFailureSkipsCandidate_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    if(!MetadataHasKernel(meta, kWaveletKernel))
+        GTEST_SKIP() << "Wavelet kernel not present in metadata for " << params.solver;
+
+    auto good = MakeWaveletCandidate(/*include_num_groups=*/true, "2");
+    good.push_back("8"); // valid appended SplitK
+    auto bad = MakeWaveletCandidate(/*include_num_groups=*/true, "2");
+    bad.push_back("not_a_number"); // non-numeric appended SplitK -> unparseable numeric slot
+
+    std::vector<std::vector<float>> encoded;
+    ASSERT_NO_THROW(encoded = EncodeKernelParams({good, bad}, meta, /*use_split_k=*/true));
+    ASSERT_EQ(encoded.size(), 2u) << "both candidates must produce an encoding row";
+
+    const auto is_nan = [](float v) { return std::isnan(v); };
+    EXPECT_FALSE(std::all_of(encoded[0].begin(), encoded[0].end(), is_nan))
+        << "valid candidate must not be sentinel'd";
+    ASSERT_FALSE(encoded[1].empty());
+    EXPECT_TRUE(std::all_of(encoded[1].begin(), encoded[1].end(), is_nan))
+        << "candidate with unparseable numeric value must be the all-NaN sentinel";
+    EXPECT_EQ(encoded[0].size(), encoded[1].size()) << "sentinel width must match a normal row";
+}
+
+// A precision the model wasn't trained on (e.g. INT8 on a 3-class Wrw/Bwd model) must throw so the
+// caller falls back to the non-AI heuristic, rather than encoding an all-zero precision one-hot.
+// (Param-independent; uses the existing fixture only to stay in its registered test category.)
+TEST_P(GPU_CandidateSelection_FP32, UnsupportedPrecisionThrows_Test)
+{
+    auto feats = MakeFullInputFeatureMap();
+
+    feats["precision"] = static_cast<float>(miopenInt8);
+    // 4-class model (e.g. Fwd) represents INT8 -> no throw (also proves the feature map is
+    // complete).
+    EXPECT_NO_THROW(
+        EngineerCandidateSelectionInputFeatures({}, feats, /*precision_class_count=*/4));
+    // 3-class model (e.g. Wrw/Bwd) cannot represent INT8 -> throw -> caller falls back.
+    EXPECT_ANY_THROW(
+        EngineerCandidateSelectionInputFeatures({}, feats, /*precision_class_count=*/3));
+
+    // A supported precision must not throw on the 3-class model.
+    feats["precision"] = static_cast<float>(miopenFloat);
+    EXPECT_NO_THROW(
+        EngineerCandidateSelectionInputFeatures({}, feats, /*precision_class_count=*/3));
 }
 
 // The conditional-layout descriptor is loaded from metadata: present for the Wavelet kernel,
