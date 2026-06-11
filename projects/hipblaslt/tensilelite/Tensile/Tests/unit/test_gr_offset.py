@@ -18,7 +18,8 @@ import pytest
 import numpy as np
 
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     BPE, WAVESIZE, NUM_THREADS,
     create_writer,
@@ -26,6 +27,7 @@ from gpu_test_helpers import (
     assemble_and_run,
     generate_kernel_asm,
     generate_load_params,
+    requires_gpu,
 )
 
 from Tensile.Components.Subtile.SubtileGREmit import graTileAssignment
@@ -67,7 +69,19 @@ def fill_mma_tile_buffer(tileInfo, mt, du, stride):
     mma_k = tileInfo.mmaTileShape[1]
     nK = int(tileInfo.globalMMATileGrid[1])
 
-    buf = np.zeros(mt * stride, dtype=np.float16)
+    # Some GR shapes over-fetch a partial final subtile group. Keep that
+    # region zero-filled so the raw-buffer test does not read allocator data.
+    padded_mt = max(
+        mt,
+        int(
+            math.ceil(int(tileInfo.localSubtileGrid[0]) / tileInfo.loadRatioGR)
+            * tileInfo.loadRatioGR
+            * tileInfo.subtileShape[0]
+            * mma_m
+        ),
+    )
+
+    buf = np.zeros(padded_mt * stride, dtype=np.float16)
     for m in range(mt):
         for k in range(du):
             mma_r = m // mma_m
@@ -117,7 +131,7 @@ def generate_gr_to_vgpr_loads_v2(writer, ti):
             offsetK = j * int(ti.mmaTileShape[1] * ti.subtileShape[0] * ti.bpe)
 
             for gr_idx in range(ti.numGRPerSubtile):
-                dst_start = writer.vgprPool.checkOutAligned(4, 2, preventOverflow=False)
+                dst_start = writer.vgprPool.checkOutAligned(4, 2, tag="_generate_gr_to_vgpr_loads_v2_dst_start", preventOverflow=False)
 
                 if len(rl) > 0 and rl.is_sgpr:
                     soff_str = f"s{rl.indices[0]}"
@@ -195,7 +209,7 @@ def generate_gr_offset_kernel(cfg):
     ti = tileInfoA
 
     # Reserve s0-s7 for hardware + kernarg
-    writer.sgprPool.checkOut(12)
+    writer.sgprPool.checkOut(12, tag="_generate_gr_offset_kernel_sgprs")
     stride_sgpr = 10
     writer.sgprs["StrideA0I"] = stride_sgpr
     writer.sgprs["StrideB1J"] = 11
@@ -306,7 +320,7 @@ def verify_gr_output(output_bytes, ti, kernel, dest_vgprs, mt, stride, debug=Fal
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@requires_gpu
 class TestGrOffset:
 
     @pytest.fixture(params=CONFIGS, ids=lambda c: c.label)
@@ -340,10 +354,6 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--config", type=int, default=None, help="Config index")
     args = parser.parse_args()
-
-    if not HAS_HIP:
-        print("HIP not available")
-        sys.exit(1)
 
     config_list = CONFIGS if args.config is None else [CONFIGS[args.config]]
 
