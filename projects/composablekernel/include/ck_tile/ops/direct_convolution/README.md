@@ -117,25 +117,47 @@ The CK Tile Dispatcher is the way to build and profile direct convolution
 kernels. It generates each kernel as a separate compilation unit for better build
 parallelism. Enable it with `CK_TILE_DISPATCHER=ON`:
 
+To build only the direct convolution instances (without implicit-GEMM), set
+`DISABLE_IMPLICIT_GEMM_INSTANCES=ON`. This flag is a codegen filter in the
+Dispatcher pipeline that emits only `kind=direct_conv` instances:
+
+```
+-D DISABLE_IMPLICIT_GEMM_INSTANCES=ON                                                           
+```
+
+When building the CK Profiler, one may build only the relevant CK Tile convolution profilers by 
+CMake flag
+
+```
+-D CK_PROFILER_OP_FILTER="_tile"
+```
+
+The full configure step for direct convolution instances is 
+
 ```
 cmake                                                                                             \
   -D CMAKE_PREFIX_PATH=/opt/rocm                                                                  \
   -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc                                                       \
   -D CMAKE_BUILD_TYPE=Release                                                                     \
   -D GPU_TARGETS="gfx950"                                                                         \
+  -D CK_EXPERIMENTAL_BUILDER=ON                                                                   \
   -D CK_TILE_DISPATCHER=ON                                                                        \
   -D CMAKE_CXX_STANDARD=20                                                                        \
+  -D CK_PROFILER_OP_FILTER="_tile"                                                                \
+  -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON                                                           \
   -G Ninja                                                                                        \
   ..
 ```
 
-To build only the direct convolution instances (without implicit-GEMM), set
-`DISABLE_IMPLICIT_GEMM_INSTANCES=ON`. This flag is a codegen filter in the
-Dispatcher pipeline that emits only `kind=direct_conv` instances:
+The dispatcher creates unique kernel names for each instance. To use the CK Tile's `GetName` instance string, 
+we specify flag
 
 ```
-  -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON                                                           \
+-D CK_EXPERIMENTAL_BUILDER=ON
 ```
+
+The CK Tile kernel names are required for the benchmarking and regression test script that rely on the CK Tile kernel
+name format when parsing the results from the CK Profiler output.
 
 ## Testing
 
