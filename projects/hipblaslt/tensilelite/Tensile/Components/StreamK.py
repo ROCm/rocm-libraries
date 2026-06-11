@@ -3512,6 +3512,28 @@ class StreamKHybrid(StreamK):
                            comment="SK5: clear only bit 30 (mode); keep bits 0-4 shift and bit 31 magic add bit"))
         return module
 
+    def _emitSk3Sk4Branch(self, writer, module, tag, emitDynamic, emitStatic):
+        """Emit mode-gated dual path: dynamic (SK4) first, static (SK3) second."""
+        sk5Static = Label(writer.labels.getNameInc(f"SK5_Static{tag}"), "")
+        sk5Done   = Label(writer.labels.getNameInc(f"SK5_{tag}Done"), "")
+
+        module.add(SCmpEQU32(src0=sgpr("StreamKHybridMode"), src1=0,
+                             comment=f"SK5: mode bit == 0 -> SK3 (static) {tag}"))
+        module.add(SCBranchSCC1(labelName=sk5Static.getLabelName(),
+                                comment=f"SK5: branch to static {tag}"))
+
+        module.addComment2(f"SK5 dynamic (SK4) {tag}")
+        emitDynamic(module)
+
+        module.add(SBranch(labelName=sk5Done.getLabelName(),
+                           comment=f"SK5: skip static {tag}"))
+
+        module.add(sk5Static)
+        module.addComment2(f"SK5 static (SK3) {tag}")
+        emitStatic(module)
+
+        module.add(sk5Done)
+
     # ------------------------------------------------------------------
     # preLoop
     # ------------------------------------------------------------------
@@ -3535,31 +3557,12 @@ class StreamKHybrid(StreamK):
         # ----- Extract the mode bit once for the whole kernel -----
         module.add(self._emitModeExtraction(writer, kernel))
 
-        sk5StaticPreLoop = Label(writer.labels.getNameInc("SK5_StaticPreLoop"), "")
-        sk5PreLoopDone   = Label(writer.labels.getNameInc("SK5_PreLoopDone"), "")
+        def emitDynamicPreLoop(mod):
+            sk4InitDone = Label(writer.labels.getNameInc("SK_InitDone"), "")
+            mod.add(sk4InitDone)
 
-        module.add(SCmpEQU32(src0=sgpr("StreamKHybridMode"), src1=0,
-                             comment="SK5: mode bit == 0 -> SK3 (static) path"))
-        module.add(SCBranchSCC1(labelName=sk5StaticPreLoop.getLabelName(),
-                                comment="SK5: branch to static preLoop"))
-
-        # ===================================================================
-        # DYNAMIC (SK4) PRELOOP BODY
-        # ===================================================================
-        module.addComment2("SK5 dynamic (SK4) preLoop")
-        sk4InitDone = Label(writer.labels.getNameInc("SK_InitDone"), "")
-        module.add(sk4InitDone)
-        module.add(SBranch(labelName=sk5PreLoopDone.getLabelName(),
-                           comment="SK5: skip static preLoop"))
-
-        # ===================================================================
-        # STATIC (SK3) PRELOOP BODY
-        # ===================================================================
-        module.add(sk5StaticPreLoop)
-        module.addComment2("SK5 static (SK3) preLoop")
-
-        sk3InitDone  = Label(writer.labels.getNameInc("SK_InitDone"), "")
-        sk3SplitInit = Label(writer.labels.getNameInc("SK_SplitInit"), "")
+        def emitStaticPreLoop(mod):
+            sk3InitDone  = Label(writer.labels.getNameInc("SK_InitDone"), "")
 
         # Choose reduction strategy: parallel (no synchronizer) vs tree (synchronizer)
         module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0),

@@ -32,7 +32,8 @@ class _StopAfterSk5Aliases(Exception):
 
 @pytest.fixture
 def mock_streamk_writer():
-    """Minimal KernelWriter mock with a StreamK kernel state."""
+    """Factory fixture: mock_streamk_writer(5) -> writer with StreamK=5."""
+
     def _factory(streamk: int) -> MagicMock:
         writer = MagicMock()
         writer.states = SimpleNamespace(kernel={"StreamK": streamk})

@@ -20,22 +20,14 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   and persistent-grid sizing — useful when another kernel (e.g. RCCL)
   is co-running on the device or when a persistent grid should be sized
   for a known CU budget. (This is a hint, not a CU reservation.)
-* `HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT` extension attribute
-  (`int32_t`, default `2`) now accepts the tri-state values from the
-  new `hipblasLtStreamKTileSchedulingMode_t` enum:
-  `HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF` (0, force the SK3 static sub-path),
-  `HIPBLASLT_STREAMK_TILE_SCHEDULING_ON` (1, request the SK4 dynamic
-  sub-path), and `HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO` (2, library default;
-  delegate to a calibrated origami heuristic per launch). Values outside `{0,1,2}` are
-  rejected with `HIPBLAS_STATUS_INVALID_VALUE` (previously any non-zero
-  value was silently clamped to 1). The matching C++ ext API on
-  `hipblaslt_ext::GemmPreference` is
-  `setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t)` /
-  `getStreamKTileSchedulingMode()`, and the value is consumed on dispatch. See
-  `clients/bench/README.md` for the `--streamk_tile_scheduling` CLI mapping.
-* `hipblaslt-bench` `--sm_count_target` and `--streamk_tile_scheduling` CLI
-  options that forward the values into the matmul descriptor before
-  launch.
+* `HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT` now accepts the
+  tri-state `hipblasLtStreamKTileSchedulingMode_t` enum (OFF=0 static SK3,
+  ON=1 dynamic SK4, AUTO=2 library default via origami). Invalid values
+  return `HIPBLAS_STATUS_INVALID_VALUE` (previously non-zero was clamped
+  to 1). Matching ext API:
+  `setStreamKTileSchedulingMode()` / `getStreamKTileSchedulingMode()`.
+* `hipblaslt-bench` `--sm_count_target` and `--streamk_tile_scheduling` forward
+  into the matmul descriptor (see `clients/bench/README.md`).
 
 ## hipBLASLt 1.3.0
 
