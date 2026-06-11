@@ -20,11 +20,12 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+import os
 import re
 import collections
 
 from pathlib import Path
-from subprocess import run, PIPE
+from subprocess import run, PIPE, TimeoutExpired
 from typing import List, Optional, Set, Tuple, Union, NamedTuple, Dict
 
 from .Types import IsaVersion
@@ -240,7 +241,11 @@ def _detectGlobalCurrentISA(detectionTool, deviceId: int):
     """
     Returns returncode if detection failure
     """
-    process = run([detectionTool], stdout=PIPE)
+    try:
+        process = run([detectionTool], stdout=PIPE, timeout=10)
+    except TimeoutExpired:
+        print(f"{detectionTool} timed out after 10 seconds")
+        return 1
     archList = []
     for line in process.stdout.decode().split("\n"):
         arch = gfxToIsa(line.strip())
@@ -259,15 +264,22 @@ def detectGlobalCurrentISA(deviceId: int, enumerator: str):
     Given an integer ID for a device, the ISA version tuple
     of the form (X, Y, Z) is computed using first amdgpu-arch.
     If amdgpu-arch fails, rocm_agent_enumerator is used.
+    Falls back to TARGET_ARCH environment variable if both tools fail.
 
     Args:
         deviceID: an integer indicating the device to inspect.
 
     Raises:
-        Exception if both tools fail to detect ISA.
+        Exception if all methods fail to detect ISA.
     """
     result = _detectGlobalCurrentISA(enumerator, deviceId)
     if not isinstance(result, IsaVersion):
+        target_arch = os.environ.get("TARGET_ARCH")
+        if target_arch:
+            isa = gfxToIsa(target_arch)
+            if isa is not None:
+                print(f"# Using TARGET_ARCH fallback: {target_arch} -> {isaToGfx(isa)}")
+                return isa
         raise Exception("Failed to detect currect ISA")
     return result
 

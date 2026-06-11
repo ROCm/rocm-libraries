@@ -3,6 +3,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
+  SleepPercent: 0
   KernelTime: True
   NewClient: 2
   BoundsCheck: False

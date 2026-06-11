@@ -621,6 +621,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             configPaths = [str(sourcePath / "ClientParameters.ini")]
             if enableTileSelection:
                 configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
+
             returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
 
             if returncode:

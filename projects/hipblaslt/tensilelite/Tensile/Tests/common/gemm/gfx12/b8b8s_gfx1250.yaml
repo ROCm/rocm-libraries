@@ -4,6 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
+  SleepPercent: 0
   KernelTime: True
   NewClient: 2
   BoundsCheck: False
@@ -15,6 +16,7 @@ GlobalParameters:
   EnqueuesPerSync: 1
   MinKForGSU: 1
   Architecture: gfx1250
+  CpuThreads: 1
   PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
@@ -83,7 +85,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [127, 127, 1, 127]
+          - Exact: [128, 128, 1, 128]
 
   ########################################
   # TN - standard
@@ -214,7 +216,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [127, 512, 1, 64]
+          - Exact: [128, 512, 1, 64]
 
   ########################################
   # TT - standard
@@ -281,4 +283,4 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [129, 127, 1, 128]
+          - Exact: [128, 128, 1, 128]

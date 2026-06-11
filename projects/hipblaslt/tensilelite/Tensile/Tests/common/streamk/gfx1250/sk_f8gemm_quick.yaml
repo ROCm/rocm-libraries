@@ -3,6 +3,7 @@ TestParameters:
 
 GlobalParameters:
   NumElementsToValidate: -1
+  SleepPercent: 0
   BoundsCheck: False
   KernelTime: False
   CpuThreads: 32

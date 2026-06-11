@@ -4,6 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
+  SleepPercent: 0
   KernelTime: True
   NewClient: 2
   BoundsCheck: False
@@ -15,6 +16,7 @@ GlobalParameters:
   EnqueuesPerSync: 1
   MinKForGSU: 1
   Architecture: gfx1250
+  CpuThreads: 1
 
 BenchmarkProblems:
   ########################################

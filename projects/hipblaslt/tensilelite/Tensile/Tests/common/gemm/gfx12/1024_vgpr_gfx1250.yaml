@@ -4,6 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
+  SleepPercent: 0
   Architecture: gfx1250
   DeviceLDS: 327680
   PrintSolutionRejectionReason: True

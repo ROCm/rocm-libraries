@@ -72,7 +72,7 @@ globalParameters["SyncsPerBenchmark"] = (
 globalParameters["EnqueuesPerSync"] = 1  # how many solution enqueues to perform per synchronization
 globalParameters["MaxEnqueuesPerSync"] = -1  # max solution enqueues to perform per synchronization
 globalParameters["SleepPercent"] = (
-    300  # how long to sleep after every data point: 25 means 25% of solution time. Sleeping lets gpu cool down more.
+    0  # how long to sleep after every data point: 25 means 25% of solution time. Sleeping lets gpu cool down more.
 )
 globalParameters["SkipSlowSolutionRatio"] = 0.0  # Skip slow solution during warm-up stage.
 # The valid range of this ratio is (0.0 ~ 1.0), and 0.0 means no skipping.
