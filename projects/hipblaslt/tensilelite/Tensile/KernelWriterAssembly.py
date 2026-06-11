@@ -7216,6 +7216,24 @@ class KernelWriterAssembly(KernelWriter):
               if kernel["ProblemType"]["MXBlockB"]:
                 module.add(SMovB32(dst=sgpr("tdmMXSBGroup0+0"), src=1, comment=""))
                 module.add(self.tdmSwapLdsOffset(kernel, tPB["MX"]))
+            # Undo HPLR last-body dangling +=split (matching -= lives in next body).
+            # Leak only happens when >= 2 unrolled bodies executed (LC_init > 1), since
+            # the first body's end-of-body +=split is undone by the next body's incCode.
+            if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"] \
+                and kernel["PrefetchGlobalRead"] >= 2:
+              SkipUndoLabel = Label("Skip_TDMSplit_Undo", "")
+              module.add(SCmpLeU32(src0=sgpr("OrigLoopCounter"), src1=1,
+                                    comment="skip TDMSplit undo if only 1 main iter ran (no cross-body leak)"))
+              module.add(SCBranchSCC1(labelName=SkipUndoLabel.getLabelName(), comment=""))
+              if prod(kernel["MIWaveGroup"]) > 1:
+                module.add(SSubU32(sgpr("tdmAGroup0+1"), sgpr("tdmAGroup0+1"), sgpr("tdmABLdsSplitIncs"), "TDMSplit tail: undo dangling +=ldsSplit"))
+                module.add(SSubU32(sgpr("tdmAGroup0+2"), sgpr("tdmAGroup0+2"), sgpr("tdmABGlobalSplitIncs"), "TDMSplit tail: undo dangling +=globalSplit"))
+              else:
+                module.add(SSubU32(sgpr("tdmAGroup0+1"), sgpr("tdmAGroup0+1"), sgpr("tdmALdsSplitIncs"), "TDMSplit tail: undo dangling +=ldsSplit (A)"))
+                module.add(SSubU32(sgpr("tdmAGroup0+2"), sgpr("tdmAGroup0+2"), sgpr("tdmAGlobalSplitIncs"), "TDMSplit tail: undo dangling +=globalSplit (A)"))
+                module.add(SSubU32(sgpr("tdmBGroup0+1"), sgpr("tdmBGroup0+1"), sgpr("tdmBLdsSplitIncs"), "TDMSplit tail: undo dangling +=ldsSplit (B)"))
+                module.add(SSubU32(sgpr("tdmBGroup0+2"), sgpr("tdmBGroup0+2"), sgpr("tdmBGlobalSplitIncs"), "TDMSplit tail: undo dangling +=globalSplit (B)"))
+              module.add(SkipUndoLabel)
             module.add((SWaitCnt(dscnt=0, comment="HalfPLR: prevent dummy ds_load from polluting LDS buffer")))
             module.add((SBarrier()))
             module.add(SkipHalfPLRAdjustLabel)
@@ -18327,7 +18345,7 @@ class KernelWriterAssembly(KernelWriter):
     if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]):
       extraPadSize: int = round(mt * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize if ldsBlockSizePerPad != 0 and ldsPadSize != 0 else 0
       mod.add(SMovB32(sgpr(f"tdm{tc}LdsSplitIncs"), round(mt * du * bpe // dim1Divisor) + extraPadSize, comment=f"tdm{tc} Lds Split Incs({mt * du * bpe // dim1Divisor})"))
-      mod.add(SMulI32(sgpr(f"tdm{tc}GlobalSplitIncs"), sgpr(strideRefName()), round(mt * bpe) // dim1Divisor, comment=f"tdm{tc} Global Split Incs(stride * {mt * bpe // dim1Divisor})"))
+      mod.add(SMulI32(sgpr(f"tdm{tc}GlobalSplitIncs"), strideRefName(), round(mt * bpe) // dim1Divisor, comment=f"tdm{tc} Global Split Incs(stride * {mt * bpe // dim1Divisor})"))
 
     if isTdmIter:
       self._emitTdmIterateInit(mod, kernel, tc, dtype, du, mt,
