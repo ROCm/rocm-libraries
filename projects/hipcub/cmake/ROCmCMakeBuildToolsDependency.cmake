@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,14 +32,13 @@ if(NOT ROCmCMakeBuildTools_FOUND)
   else()
     set(SOURCE_SUBDIR_ARG)
   endif()
-  include(FetchContent)
-  FetchContent_Declare(
+  include(cmake/FetchContentIsolated.cmake)
+  fetch_content_isolated(
     rocm-cmake
     GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
     GIT_TAG        rocm-6.4.4
     ${SOURCE_SUBDIR_ARG}
   )
-  FetchContent_GetProperties(rocm-cmake)
   if(NOT rocm-cmake_POPULATED)
     # rocm-cmake 0.12.0 and higher needs to built from source
     FetchContent_Populate(rocm-cmake)
