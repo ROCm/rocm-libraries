@@ -33,4 +33,18 @@ set(TransformsTestSources ${UnitCommonSources}
                           ${CMAKE_CURRENT_SOURCE_DIR}/test/emulation/regressiontest-transforms.cpp
                        )
 
-add_rocwmma_unit_test(transforms_test ${TransformsTestSources})
+# WAR: gfx1250 hits an LLVM backend bug where SCRATCH_LOAD_USHORT_ST is emitted
+# with an invalid register class for 16-bit VGPR sub-registers.
+# Skip this test until the compiler fix lands.
+set(_skip_transforms_test FALSE)
+foreach(_gpu_target ${GPU_TARGETS})
+    if(_gpu_target MATCHES "gfx1250")
+        set(_skip_transforms_test TRUE)
+    endif()
+endforeach()
+
+if(_skip_transforms_test)
+    message(STATUS "Skipping transforms_test: gfx1250 LLVM backend bug (SCRATCH_LOAD_USHORT_ST register class)")
+else()
+    add_rocwmma_unit_test(transforms_test ${TransformsTestSources})
+endif()
