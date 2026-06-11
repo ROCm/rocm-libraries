@@ -109,7 +109,7 @@ namespace TensileLite
 
             // Total module sets available for rotation
             // (1 = original only, 2 = +1 extra copy, etc.).
-            int numRotationModules() const;
+            int numRotationModules();
 
         private:
             hipError_t getKernel(hipFunction_t& rv, std::string const& name);

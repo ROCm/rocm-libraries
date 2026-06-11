@@ -1291,20 +1291,21 @@ int main(int argc, const char* argv[])
                         // kCacheBudgetBytes = icache-rotate-size * 2 * 1024.
                         // Default icache-rotate-size=64 -> 128 KB
                         // Loosely targets ~2x typical L1 I-cache.
-                        std::uintmax_t kCacheBudgetBytes
-                            = std::uintmax_t(args["icache-rotate-size"].as<int>())
-                                * 2 * 1024;
-
+                        int rotateSizeKB = args["icache-rotate-size"].as<int>();
+                        if(rotateSizeKB < 0)
+                            rotateSizeKB = 0;
+                        std::uintmax_t kCacheBudgetBytes = std::uintmax_t(rotateSizeKB) * 2 * 1024;
+                        int extrasFromCache = 0;
                         if(K == 0)
                         {
                             std::cerr << "[icache-rotate] warning: no label_GW_End "
-                                      << "found in any --code-object; cache-based "
-                                      << "term contributes 0" << std::endl;
-                            K = std::uintmax_t(args["icache-rotate-size"].as<int>()) - 1; // sentinel to avoid "/0" in the diagnostic print
+                                    << "found in any --code-object; cache-based "
+                                    << "term contributes 0" << std::endl;
                         }
-
-                        int extrasFromCache
-                            = (K > 0) ? static_cast<int>(kCacheBudgetBytes / K - 1) : 0;
+                        else if(kCacheBudgetBytes > K)
+                        {
+                            extrasFromCache = static_cast<int>(kCacheBudgetBytes / K - 1);
+                        }
 #else
                         // <elf.h> unavailable on this platform; use the raw
                         // --icache-rotate-size value as the extras count.

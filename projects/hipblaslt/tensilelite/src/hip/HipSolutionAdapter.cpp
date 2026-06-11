@@ -73,6 +73,17 @@ namespace TensileLite
                                 << " error: " << hipGetErrorString(error) << std::endl;
                     }
                 );
+            // Extra rotation copies are independent hipModule_t handles loaded
+            // by loadCodeObjectFileExtraCopies(); they own their own device
+            // memory and must be unloaded too or we leak it per copy.
+            for(auto const& copyModules : m_extraModuleCopies)
+                for(auto module : copyModules)
+                    HIP_CHECK_PRINT(hipModuleUnload(module),
+                        [&](hipError_t error) {
+                            std::cerr << "hipModuleUnload failed: " << std::endl
+                                    << " error: " << hipGetErrorString(error) << std::endl;
+                        }
+                    );
             Debug::Instance().markerStop();
         }
 
@@ -108,12 +119,39 @@ namespace TensileLite
                         }
                     );
                 }
+                // Also unload the extra rotation copies; otherwise we leak
+                // their device memory and leave rotation state inconsistent
+                // after the retry below. These are NOT reloaded on retry, so
+                // warn that I-cache rotation is disabled after this recovery.
+                if(!m_extraModuleCopies.empty())
+                {
+                    std::cerr << "[icache-rotate] WARNING: out-of-memory retry is dropping "
+                              << m_extraModuleCopies.size()
+                              << " rotation copy set(s); I-cache rotation is now disabled "
+                              << "until loadCodeObjectFileExtraCopies() is called again."
+                              << std::endl;
+                }
+                for(auto const& copyModules : m_extraModuleCopies)
+                {
+                    for(auto m_module : copyModules)
+                    {
+                        HIP_CHECK_PRINT(hipModuleUnload(m_module),
+                            [&](hipError_t error_t) {
+                                std::cerr << "hipModuleUnload failed: " << std::endl
+                                          << " error: " << hipGetErrorString(error_t) << std::endl;
+                            }
+                        );
+                    }
+                }
                 // Need to clean up all these old modules' data structures, otherwise next problem will getKernel failed
                 m_access.lock();
                 m_modules.clear();
                 m_loadedModuleNames.clear();
                 m_loadedCOFiles.clear();
                 m_kernels.clear();
+                m_extraModuleCopies.clear();
+                m_extraKernels.clear();
+                m_currentRotationCopy.store(0);
                 m_access.unlock();
                 // Need to re-run lazy-loading for hsaco(helper kernels) module reload
                 std::string lazyArch;
@@ -390,13 +428,14 @@ namespace TensileLite
             m_currentRotationCopy.store(idx);
         }
 
-        int SolutionAdapter::numRotationModules() const
+        int SolutionAdapter::numRotationModules()
         {
             // Total module sets available = 1 (original m_modules) + extras.
             // m_extraModuleCopies is normally guarded by m_access, but this read
             // is safe without locking because the benchmark client is single-
             // threaded and only calls this after all rotation copies have been
             // loaded.
+            std::lock_guard<std::mutex> guard(m_access);
             return 1 + (int)m_extraModuleCopies.size();
         }
 

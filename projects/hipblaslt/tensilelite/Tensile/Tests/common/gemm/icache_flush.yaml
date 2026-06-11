@@ -21,7 +21,6 @@ GlobalParameters:
   DataInitTypeA: 12
   DataInitTypeB: 13
   SleepPercent: 0
-  RotatingBufferSize: 512
   IcacheRotateCopies: -1
 
 BenchmarkProblems:
