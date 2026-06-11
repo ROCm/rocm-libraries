@@ -2681,9 +2681,9 @@ class LogicalScheduler:
                 if tid in freed:
                     continue
                 pool = tile.regList.pool
-                for val in tile:
-                    if tile.index(val) % 4 == 0:
-                        pool.checkIn(val)
+                # Tiles are allocated as single contiguous blocks;
+                # only the base register is the pool checkout handle.
+                pool.checkIn(tile.regList.indices[0])
 
         _dealloc_tiles(self.vgprTilesA,  self._tail_freed_tile_ids['A'])
         _dealloc_tiles(self.vgprTilesB,  self._tail_freed_tile_ids['B'])
@@ -2808,9 +2808,8 @@ class LogicalScheduler:
         def _dealloc_all(tiles):
             for tile in tiles:
                 pool = tile.regList.pool
-                for j, v in enumerate(tile):
-                    if j % 4 == 0:
-                        pool.checkIn(v)
+                # Contiguous allocation: base register is the checkout handle.
+                pool.checkIn(tile.regList.indices[0])
 
         def _alloc_tiles(count, numRegs):
             tiles = []
