@@ -27,7 +27,7 @@
 // Global utility defines
 #define test_suite_type_def_helper(name, suffix) \
 template<class Params> \
-class name ## suffix : public test_controller::ControlledTest { \
+class name ## suffix : public test_controller::ControlledTest<> { \
 public: \
     using params = Params; \
 };

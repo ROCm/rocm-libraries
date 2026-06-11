@@ -55,7 +55,7 @@ struct DeviceBatchMemcpyParams
 };
 
 template<class Params>
-struct DeviceBatchMemcpyTests : public test_controller::ControlledTest
+struct DeviceBatchMemcpyTests : public test_controller::ControlledTest<>
 {
     using value_type                      = typename Params::value_type;
     using size_type                       = typename Params::size_type;

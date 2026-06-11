@@ -54,7 +54,7 @@ struct params
 };
 
 template<class Params>
-class HipcubDeviceSegmentedRadixSort : public test_controller::ControlledTest
+class HipcubDeviceSegmentedRadixSort : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;

@@ -27,6 +27,7 @@
 #include <array>
 #include <numeric>
 #include <optional>
+#include <utility>
 
 // Google Test
 #include <gtest/gtest.h>
@@ -89,6 +90,36 @@ public:
     {
         return static_cast<bool>(IS_ASAN_BUILD);
     }
+
+	template<class SizeType>
+	static void test_filter(
+		TestController& controller,
+		const std::string& text,
+		std::vector<SizeType>& sizes,
+		const std::vector<SizeType>& expected_sizes
+		)
+	{
+		SCOPED_TRACE(testing::Message() << "with text=" << std::endl << text);
+		SCOPED_TRACE(testing::Message() << "with sizes=" << [&sizes](){
+			std::stringstream ss;
+			ss << "{ ";
+			for (int i = 0; i < sizes.size(); i++)
+			{
+				ss << sizes[i];
+				if (i < sizes.size() - 1)
+					ss << ", ";
+			}
+			ss << " }";
+			return ss.str();
+		}());
+        
+		controller.reset(std::make_optional(text));
+		const bool expect_filtering = (sizes != expected_sizes);
+		std::string msg;
+		const std::vector<SizeType> result = controller.filter_sizes(sizes, msg);
+		ASSERT_EQ(result, expected_sizes);
+		ASSERT_EQ(expect_filtering, !msg.empty());
+	}
 };
 
 TEST_F(HipcubTestControllerTests, GetArch)
@@ -98,7 +129,7 @@ TEST_F(HipcubTestControllerTests, GetArch)
     HIP_CHECK(hipSetDevice(device_id));
     
     const std::string arch = TestController::get_arch();
-    const std::regex arch_regex("^(gfx[0-9a-f]+)|nvidia$");
+    const std::regex arch_regex(R"(^(gfx[0-9a-f]+)|nvidia$)");
     std::smatch match;
     ASSERT_TRUE(std::regex_match(arch, match, arch_regex));
 }
@@ -218,7 +249,7 @@ TEST_F(HipcubTestControllerTests, CheckTestEnablement)
         false
     );
 }
-
+	
 TEST_F(HipcubTestControllerTests, FilterSizes)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -235,31 +266,31 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
     
     TestController& controller = TestController::get_or_create_instance(false);
     
-    const auto test_filter = [&controller](const std::string& text,
-                                           std::vector<size_t>& sizes,
-                                           const std::vector<size_t>& expected_sizes)
-    {
-        SCOPED_TRACE(testing::Message() << "with text=" << std::endl << text);
-        SCOPED_TRACE(testing::Message() << "with sizes=" << [&sizes](){
-            std::stringstream ss;
-            ss << "{ ";
-            for (int i = 0; i < sizes.size(); i++)
-            {
-                ss << sizes[i];
-                if (i < sizes.size() - 1)
-                    ss << ", ";
-            }
-            ss << " }";
-            return ss.str();
-        }());
+    // const auto test_filter = [&controller](const std::string& text,
+    //                                        std::vector<size_t>& sizes,
+    //                                        const std::vector<size_t>& expected_sizes)
+    // {
+    //     SCOPED_TRACE(testing::Message() << "with text=" << std::endl << text);
+    //     SCOPED_TRACE(testing::Message() << "with sizes=" << [&sizes](){
+    //         std::stringstream ss;
+    //         ss << "{ ";
+    //         for (int i = 0; i < sizes.size(); i++)
+    //         {
+    //             ss << sizes[i];
+    //             if (i < sizes.size() - 1)
+    //                 ss << ", ";
+    //         }
+    //         ss << " }";
+    //         return ss.str();
+    //     }());
             
-        controller.reset(std::make_optional(text));
-        const bool expect_filtering = (sizes != expected_sizes);
-        std::string msg;
-        const std::vector<size_t> result = controller.filter_sizes(sizes, msg);
-        ASSERT_EQ(result, expected_sizes);
-        ASSERT_EQ(expect_filtering, !msg.empty());
-    };
+    //     controller.reset(std::make_optional(text));
+    //     const bool expect_filtering = (sizes != expected_sizes);
+    //     std::string msg;
+    //     const std::vector<size_t> result = controller.filter_sizes(sizes, msg);
+    //     ASSERT_EQ(result, expected_sizes);
+    //     ASSERT_EQ(expect_filtering, !msg.empty());
+    // };
 
     // Create vector with sizes 0 - 9.
     std::vector<size_t> sizes(10);
@@ -268,7 +299,8 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
     // Filter out individual sizes across multiple lines.
     // Include a line for an alternate arch, which should not affect the result.
     std::vector<size_t> sizes_copy(sizes);
-    test_filter(
+    HipcubTestControllerTests::test_filter(
+		controller,
         HipcubTestControllerTests::generate_control_text({
             {"HipcubTestControllerTests\\.FilterSizes", arch, "0,5", "*", "Skipping for unit test."},
             {"HipcubTestControllerTests\\.FilterSizes", arch, "7", "*", "Skipping for unit test."},
@@ -281,7 +313,8 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
     // Filter using operators <, > across multiple lines.
     // Include a line for an alternate test, which should not affect the result.
     sizes_copy = sizes;
-    test_filter(
+    HipcubTestControllerTests::test_filter(
+		controller,
         HipcubTestControllerTests::generate_control_text({
             {"HipcubTestControllerTests\\.FilterSizes", arch, "<1", "*", "Skipping for unit test."},
             {"HipcubTestControllerTests\\.FilterSizes", arch, ">6", "*", "Skipping for unit test."},
@@ -293,7 +326,8 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
 
     // Filter using operators <=, >= across multiple lines.
     sizes_copy = sizes;
-    test_filter(
+    HipcubTestControllerTests::test_filter(
+		controller,
         HipcubTestControllerTests::generate_control_text({
             {"HipcubTestControllerTests\\.FilterSizes", arch, "<=1", "*", "Skipping for unit test."},
             {"HipcubTestControllerTests\\.FilterSizes", arch, ">=6", "*", "Skipping for unit test."},
@@ -304,7 +338,8 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
 
     // Filter using multiple operators on same line.
     sizes_copy = sizes;
-    test_filter(
+    HipcubTestControllerTests::test_filter(
+		controller,
         HipcubTestControllerTests::generate_control_text({
             {"HipcubTestControllerTests\\.FilterSizes", arch, "<=1,5,>7", "*", "Skipping for unit test."}
         }),
@@ -314,7 +349,8 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
 
     // Filter using operator that removes all sizes, with additional lines before and after.
     sizes_copy = sizes;
-    test_filter(
+    HipcubTestControllerTests::test_filter(
+		controller,
         HipcubTestControllerTests::generate_control_text({
             {"HipcubTestControllerTests\\.FilterSizes", arch, ">=4", "*", "Skipping for unit test."},
             {"HipcubTestControllerTests\\.FilterSizes", arch, ">=0", "*", "Skipping for unit test."},
@@ -326,7 +362,8 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
 
     // Filter using operators and *.
     sizes_copy = sizes;
-    test_filter(
+    HipcubTestControllerTests::test_filter(
+		controller,
         HipcubTestControllerTests::generate_control_text({
             {"HipcubTestControllerTests\\.FilterSizes", arch, ">=4", "*", "Skipping for unit test."},
             {"HipcubTestControllerTests\\.FilterSizes", arch, "*", "*", "Skipping for unit test."},
@@ -338,7 +375,8 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
 
     // Use keywords in arch.
     sizes_copy = sizes;
-    test_filter(
+    HipcubTestControllerTests::test_filter(
+		controller,
         HipcubTestControllerTests::generate_control_text({
             {"HipcubTestControllerTests\\.FilterSizes", "<mi300-family>|" + arch, "<9", "*", "Skipping for unit test."},
             {"HipcubTestControllerTests\\.FilterSizes", arch, ">9", "*", "Skipping for unit test."}
@@ -349,7 +387,8 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
 
     // Use a single arithmetic expressions per line.
     sizes_copy = sizes;
-    test_filter(
+    HipcubTestControllerTests::test_filter(
+		controller,
         HipcubTestControllerTests::generate_control_text({
             //                                                Expression:               Parenthesized Equivalent:
             {"HipcubTestControllerTests\\.FilterSizes", arch, "2 << 1 + 1", "*", "Skipping for unit test."},            // 2 << (1 + 1)             = 8
@@ -364,7 +403,8 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
 
     // Use multiple arithmetic expressions per line.
     sizes_copy = sizes;
-    test_filter(
+    HipcubTestControllerTests::test_filter(
+		controller,
         HipcubTestControllerTests::generate_control_text({
             {"HipcubTestControllerTests\\.FilterSizes", arch, "1 << 1 + 2, 3 * 2", "*", "Skipping for unit test."},             // 8, 6
             {"HipcubTestControllerTests\\.FilterSizes", arch, "7 - 0 * 4, 6 >> 2", "*", "Skipping for unit test."},             // 7, 1
@@ -377,7 +417,8 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
     // Test intermediate results that drop below 0.
     // This should be fine, as long as the rest of the expression causes the final result to end up being >= 0.
     sizes_copy = sizes;
-    test_filter(
+    HipcubTestControllerTests::test_filter(
+		controller,
         HipcubTestControllerTests::generate_control_text({
             {"HipcubTestControllerTests\\.FilterSizes", arch, "(1 - 2) + 3", "*", "Skipping for unit test."}, // 2
             {"HipcubTestControllerTests\\.FilterSizes", arch, "0 - (1 << 32) + (1 << 32)", "*", "Skipping for unit test."} // 0
@@ -405,7 +446,8 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
         expected.erase(std::find(expected.begin(), expected.end(), 1));
     }
         
-    test_filter(
+    HipcubTestControllerTests::test_filter(
+		controller,
         HipcubTestControllerTests::generate_control_text({
             {"HipcubTestControllerTests\\.FilterSizes", arch, "0", "windows", "Skipping for unit test."},
             {"HipcubTestControllerTests\\.FilterSizes", arch, "1", "linux", "Skipping for unit test."},
@@ -418,6 +460,59 @@ TEST_F(HipcubTestControllerTests, FilterSizes)
         sizes_copy,
         expected
     );
+
+	// Test using a custom size transform functor.
+	// Here, the test uses std::pair<size_t, size_t>.
+	// The control file stores sizes as size_t values.
+	// The PairTransformer functor converts the pair to a single size_t,
+	// which is then compared against the control file values.
+	struct PairTransformer
+	{
+		using size_type = std::pair<size_t, size_t>;
+		size_t operator()(const size_type& size) const
+		{
+			// Use the largest value for the comparison.
+			return std::max(size.first, size.second);
+		}
+	};
+
+	controller.set_size_transformer(PairTransformer());
+	
+	std::vector<std::pair<size_t, size_t>> pairs = {
+		{0, 1},
+		{2, 3},
+		{4, 5},
+		{6, 7},
+		{8, 9}
+	};
+
+	// Test removing based on the max value in each pair.
+	HipcubTestControllerTests::test_filter(
+		controller,
+		HipcubTestControllerTests::generate_control_text({
+			{"HipcubTestControllerTests\\.FilterSizes", arch, "1", "*", "Skipping for unit test."},
+			{"HipcubTestControllerTests\\.FilterSizes", arch, ">=7", "*", "Skipping for unit test."}
+		}),
+		pairs,
+		{
+			{2, 3},
+			{4, 5}
+		}
+	);
+	controller.reset_size_transformer();
+
+	// Test after reseting the transformer. This should now use IdentityTransformer.
+	sizes_copy = sizes;
+	HipcubTestControllerTests::test_filter(
+		controller,
+		HipcubTestControllerTests::generate_control_text({
+			{"HipcubTestControllerTests\\.FilterSizes", arch, "2", "*", "Skipping for unit test."},
+			{"HipcubTestControllerTests\\.FilterSizes", arch, ">=4", "*", "Skipping for unit test."}
+		}),
+		sizes_copy,
+		{0, 1, 3}
+	);
+	controller.reset_size_transformer();
 }
 
 // Note: Both TestController::check_size_enablement, amd TestController::filter_sizes

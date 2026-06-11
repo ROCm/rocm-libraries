@@ -47,7 +47,7 @@ struct params_subtract
 };
 
 template<class ParamsSubtract>
-class HipcubBlockAdjacentDifferenceSubtract : public test_controller::ControlledTest {
+class HipcubBlockAdjacentDifferenceSubtract : public test_controller::ControlledTest<> {
 public:
     using params_subtract = ParamsSubtract;
 };

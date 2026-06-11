@@ -89,7 +89,7 @@ void EmptyKernel()
 
 // Hipified test/test_allocator.cu
 
-class HipcubCachingDeviceAllocatorTests : public test_controller::ControlledTest
+class HipcubCachingDeviceAllocatorTests : public test_controller::ControlledTest<>
 {};
 
 TEST_F(HipcubCachingDeviceAllocatorTests, Test1)

@@ -42,7 +42,7 @@ struct params
 // ---------------------------------------------------------
 
 template<class Params>
-class HipcubWarpScanTests : public test_controller::ControlledTest {
+class HipcubWarpScanTests : public test_controller::ControlledTest<> {
 public:
     using type = typename Params::type;
     static constexpr unsigned int warp_size = Params::warp_size;

@@ -130,7 +130,7 @@ struct params
 };
 
 template<class Params>
-class HipcubDeviceAdjacentDifference : public test_controller::ControlledTest
+class HipcubDeviceAdjacentDifference : public test_controller::ControlledTest<>
 {
 public:
     using params = Params;
@@ -272,7 +272,7 @@ struct DeviceAdjacentDifferenceLargeParams
 };
 
 template<class Params>
-class HipcubDeviceAdjacentDifferenceLargeTests : public test_controller::ControlledTest
+class HipcubDeviceAdjacentDifferenceLargeTests : public test_controller::ControlledTest<>
 {
 public:
     static constexpr bool left = Params::left;
