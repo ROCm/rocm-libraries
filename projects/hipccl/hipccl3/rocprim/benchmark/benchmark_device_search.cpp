@@ -30,7 +30,7 @@
 #include <stdint.h>
 
 #define CREATE_BENCHMARK_SEARCH(TYPE, KEY_SIZE, REPEATING) \
-    executor.queue<device_search_benchmark<TYPE>>(KEY_SIZE, REPEATING);
+    executor.queue<device_search_benchmark<TYPE, false>>(KEY_SIZE, REPEATING);
 
 #define CREATE_BENCHMARK_PATTERN(TYPE, REPEATING)                                               \
     {CREATE_BENCHMARK_SEARCH(TYPE, 10, REPEATING) CREATE_BENCHMARK_SEARCH(TYPE, 100, REPEATING) \

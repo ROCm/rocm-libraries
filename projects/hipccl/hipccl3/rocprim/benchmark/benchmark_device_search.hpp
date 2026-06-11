@@ -32,30 +32,48 @@
 #include <hip/hip_runtime.h>
 
 #include <rocprim/device/config_types.hpp>
+#include <rocprim/device/device_find_end.hpp>
 #include <rocprim/device/device_search.hpp>
 #include <rocprim/functional.hpp>
 
 #include <algorithm>
 #include <cstddef>
-#include <string>
 #include <vector>
 
-template<typename Key = int, typename Config = rocprim::default_config>
+template<typename Key = int, bool find_end = false, typename Config = rocprim::default_config>
 struct device_search_benchmark : public primbench::benchmark_interface
 {
     device_search_benchmark(size_t key_size, bool repeating)
         : m_key_size(key_size), m_repeating(repeating)
     {}
 
+    constexpr const char* get_algo_name() const
+    {
+        return find_end ? "device_find_end" : "device_search";
+    }
+
     primbench::json meta() const override
     {
         return primbench::json{}
             .add("lvl", "device")
-            .add("algo", "device_search")
+            .add("algo", get_algo_name())
             .add("repeating", m_repeating)
             .add("key_size", m_key_size)
             .add("value_type", primbench::name<Key>())
             .add("cfg", "default");
+    }
+
+    template<class... Args>
+    constexpr auto search_dispatch(Args&&... args)
+    {
+        if constexpr(find_end)
+        {
+            return rocprim::find_end(std::forward<Args>(args)...);
+        }
+        else
+        {
+            return rocprim::search(std::forward<Args>(args)...);
+        }
     }
 
     void run(primbench::state& state) override
@@ -80,13 +98,16 @@ struct device_search_benchmark : public primbench::benchmark_interface
         std::vector<key_type> input(items);
         if(m_repeating)
         {
+            // If we're using the find_end variant we must modify the start of the key instead of the end
+            const size_t index = find_end ? 0 : key_size - 1;
+
             // Repeating similar pattern without early exits.
-            keys_input[key_size - 1] = 0;
+            keys_input[index] = 0;
             for(size_t i = 0; i < items; ++i)
             {
                 input[i] = keys_input[i % key_size];
             }
-            keys_input[key_size - 1] = 1;
+            keys_input[index] = 1;
         }
         else
         {
@@ -104,7 +125,7 @@ struct device_search_benchmark : public primbench::benchmark_interface
 
         size_t temporary_storage_bytes = 0;
 
-        HIP_CHECK(rocprim::search(nullptr,
+        HIP_CHECK(search_dispatch(nullptr,
                                   temporary_storage_bytes,
                                   d_input.get(),
                                   d_keys_input.get(),
@@ -123,7 +144,7 @@ struct device_search_benchmark : public primbench::benchmark_interface
         state.run(
             [&]
             {
-                HIP_CHECK(rocprim::search(d_temporary_storage.get(),
+                HIP_CHECK(search_dispatch(d_temporary_storage.get(),
                                           temporary_storage_bytes,
                                           d_input.get(),
                                           d_keys_input.get(),
