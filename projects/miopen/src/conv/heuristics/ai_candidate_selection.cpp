@@ -398,12 +398,9 @@ bool IsTwoDimensional(const CandidateSelectionMetadata& metadata)
 
 MIOPEN_INTERNALS_EXPORT
 std::vector<float>
-EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
-                                        const std::map<std::string, float>& features_by_name,
+EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& features_by_name,
                                         std::size_t precision_class_count)
 {
-    (void)raw_features;
-
     // The number of precision one-hot classes is metadata-driven so the engineered width matches
     // the trained model (3 classes for Wrw/Bwd, 4 when INT8 is present, e.g. Fwd).
     if(precision_class_count == 0)
@@ -413,7 +410,9 @@ EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
     // here so a model whose feature map omits/differs on spatial_dim still engineers correctly.
     MIOPEN_LOG_I2("Using engineered 2d features for Candidate Selection");
 
-    // Mirror ExtractTunaNetND2dFeatures (ai_heuristics.cpp); keep in sync manually.
+    // Shares the derived-feature math with ExtractTunaNetND2dFeatures (ai_heuristics.cpp) via
+    // common::EngineeredConvFeatures; only the input source and the omitted direction one-hot
+    // differ.
     const float direction_code = FeatureAt(features_by_name, "direction");
     const bool is_fwd          = direction_code == 0.0f;
 
@@ -458,49 +457,6 @@ EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
     // Direction one-hot is present in ExtractTunaNetND2dFeatures but omitted here because
     // CandidateSelection metadata holds direction as a constant input.
 
-    if(groups < 1)
-        groups = 1;
-
-    const auto safe_ratio = [](double numerator, double denominator) -> double {
-        if(denominator == 0.0)
-            return 0.0;
-        const double value = numerator / denominator;
-        return std::isfinite(value) ? value : 0.0;
-    };
-
-    const auto safe_log1p = [](double value) -> double {
-        if(value <= -1.0 || !std::isfinite(value))
-            return 0.0;
-        const double logged = std::log1p(value);
-        return std::isfinite(logged) ? logged : 0.0;
-    };
-
-    const double flops = safe_ratio(2.0 * static_cast<double>(N) * static_cast<double>(C_out) *
-                                        static_cast<double>(C_in) * static_cast<double>(K_h) *
-                                        static_cast<double>(K_w) * static_cast<double>(H_out) *
-                                        static_cast<double>(W_out),
-                                    static_cast<double>(groups));
-
-    const double M =
-        safe_ratio(static_cast<double>(N) * static_cast<double>(H_out) * static_cast<double>(W_out),
-                   static_cast<double>(groups));
-    const double N_gemm = safe_ratio(static_cast<double>(C_out), static_cast<double>(groups));
-    const double K_gemm =
-        static_cast<double>(C_in) * static_cast<double>(K_h) * static_cast<double>(K_w);
-    const double gemm_size = M * N_gemm * K_gemm;
-    const double work_per_cu =
-        safe_ratio(static_cast<double>(N) * static_cast<double>(H_out) *
-                       static_cast<double>(W_out) * static_cast<double>(C_out),
-                   static_cast<double>(groups) * static_cast<double>(num_cu));
-    const double spatial_reduction =
-        safe_ratio(static_cast<double>(H_in) * static_cast<double>(W_in),
-                   static_cast<double>(H_out) * static_cast<double>(W_out));
-    const double filter_coverage =
-        safe_ratio(static_cast<double>(K_h) * static_cast<double>(K_w),
-                   static_cast<double>(H_in) * static_cast<double>(W_in));
-    const double channel_ratio = safe_ratio(static_cast<double>(C_in), static_cast<double>(C_out));
-    const double group_density = safe_ratio(static_cast<double>(groups), static_cast<double>(C_in));
-
     std::vector<float> engineered = {
         static_cast<float>(in_layout[0]),
         static_cast<float>(in_layout[1]),
@@ -514,7 +470,8 @@ EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
     for(const auto bit : precision)
         engineered.push_back(static_cast<float>(bit));
 
-    const std::vector<float> tail = {
+    // Raw passthrough features.
+    const std::vector<float> raw_tail = {
         static_cast<float>(C_in),
         static_cast<float>(H_in),
         static_cast<float>(W_in),
@@ -531,27 +488,13 @@ EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
         FeatureAt(features_by_name, "dilation_w"),
         FeatureAt(features_by_name, "batchsize"),
         FeatureAt(features_by_name, "group_count"),
-
-        static_cast<float>(safe_log1p(flops)),
-        static_cast<float>(safe_log1p(M)),
-        static_cast<float>(safe_log1p(N_gemm)),
-        static_cast<float>(safe_log1p(K_gemm)),
-        static_cast<float>(safe_ratio(M, N_gemm)),
-        static_cast<float>(safe_ratio(M, K_gemm)),
-        static_cast<float>(safe_ratio(N_gemm, K_gemm)),
-        static_cast<float>(safe_log1p(gemm_size)),
-        static_cast<float>(safe_log1p(work_per_cu)),
-        static_cast<float>(spatial_reduction),
-        static_cast<float>(filter_coverage),
-        static_cast<float>(channel_ratio),
-        static_cast<float>(group_density),
-        static_cast<float>(safe_log1p(static_cast<double>(H_in))),
-        static_cast<float>(safe_log1p(static_cast<double>(W_in))),
-        static_cast<float>(safe_log1p(static_cast<double>(C_in))),
-        static_cast<float>(safe_log1p(static_cast<double>(C_out))),
-        static_cast<float>(safe_log1p(static_cast<double>(N))),
     };
-    engineered.insert(engineered.end(), tail.begin(), tail.end());
+    engineered.insert(engineered.end(), raw_tail.begin(), raw_tail.end());
+
+    // Derived feature block (shared with the TunaNet path).
+    const auto derived = common::EngineeredConvFeatures(
+        N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu);
+    engineered.insert(engineered.end(), derived.begin(), derived.end());
 
     const std::size_t expected_size =
         kCandidateSelectionEncoderInputSizeNoPrecision + precision_class_count;
@@ -772,7 +715,7 @@ CandidateSelectionModel::EncodeInputFeatures(const std::map<std::string, float>&
     if(IsTwoDimensional(metadata_))
     {
         const auto engineered_features = EngineerCandidateSelectionInputFeatures(
-            filtered_features, features, metadata_.GetInputEncodingClassCount("precision"));
+            features, metadata_.GetInputEncodingClassCount("precision"));
         return EncodeInputFeaturesWithFdeep(engineered_features, arch_, solver_);
     }
     return EncodeInputFeaturesWithFdeep(filtered_features, arch_, solver_);

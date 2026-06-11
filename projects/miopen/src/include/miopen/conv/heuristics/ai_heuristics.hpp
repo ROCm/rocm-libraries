@@ -56,6 +56,23 @@ namespace common {
 // Defined in ai_heuristics.cpp.
 std::vector<int> OneHot(long long label, std::size_t num_classes);
 
+// Derived 2D-convolution feature block shared by the TunaNet (ExtractTunaNetND2dFeatures) and
+// candidate-selection (EngineerCandidateSelectionInputFeatures) input encoders. Given the problem
+// dimensions it returns the engineered tail (log-transformed FLOPs/GEMM sizes, utilization and
+// spatial/channel ratios) in a fixed order. Single source of truth so the two paths cannot drift.
+// Defined in ai_heuristics.cpp.
+std::vector<float> EngineeredConvFeatures(std::size_t N,
+                                          std::size_t C_in,
+                                          std::size_t C_out,
+                                          std::size_t H_in,
+                                          std::size_t W_in,
+                                          std::size_t H_out,
+                                          std::size_t W_out,
+                                          std::size_t K_h,
+                                          std::size_t K_w,
+                                          std::size_t groups,
+                                          std::size_t num_cu);
+
 /**
  * @brief Load JSON from file path
  * @param path File system path to JSON file

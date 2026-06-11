@@ -85,14 +85,13 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
                              const std::string& solver);
 
 /// Expands problem features into the vector consumed by the input_encoder submodel.
-/// Produces the same 2D engineered features as ExtractTunaNetND2dFeatures (ai_heuristics.cpp),
-/// except direction one-hot is omitted when direction is a CandidateSelection constant.
-/// Logic is duplicated so either path can evolve independently.
+/// Produces the same 2D engineered features as ExtractTunaNetND2dFeatures (ai_heuristics.cpp) --
+/// they share the derived-feature math via common::EngineeredConvFeatures -- except the direction
+/// one-hot is omitted here when direction is a CandidateSelection constant.
 /// precision_class_count is the metadata-driven width of the precision one-hot (3 without INT8,
 /// 4 with); pass 0 to default to 3.
 MIOPEN_INTERNALS_EXPORT std::vector<float>
-EngineerCandidateSelectionInputFeatures(const std::vector<float>& raw_features,
-                                        const std::map<std::string, float>& features_by_name,
+EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& features_by_name,
                                         std::size_t precision_class_count);
 
 /// Expands metadata-ordered encoded kernel params into the vector consumed by the

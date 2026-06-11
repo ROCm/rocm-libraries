@@ -61,6 +61,85 @@ std::vector<int> OneHot(long long label, std::size_t num_classes)
                                       << " classes, returning all-zero vector");
     return out;
 }
+
+std::vector<float> EngineeredConvFeatures(std::size_t N,
+                                          std::size_t C_in,
+                                          std::size_t C_out,
+                                          std::size_t H_in,
+                                          std::size_t W_in,
+                                          std::size_t H_out,
+                                          std::size_t W_out,
+                                          std::size_t K_h,
+                                          std::size_t K_w,
+                                          std::size_t groups,
+                                          std::size_t num_cu)
+{
+    if(groups < 1) // avoid division by zero
+        groups = 1;
+
+    const auto safe_ratio = [](double numerator, double denominator) -> double {
+        if(denominator == 0.0)
+            return 0.0;
+        const double value = numerator / denominator;
+        return std::isfinite(value) ? value : 0.0;
+    };
+    const auto safe_log1p = [](double value) -> double {
+        if(value <= -1.0 || !std::isfinite(value))
+            return 0.0;
+        const double logged = std::log1p(value);
+        return std::isfinite(logged) ? logged : 0.0;
+    };
+
+    // Computational complexity: FLOPs (multiply-accumulate = 2 ops), per group.
+    const double flops = safe_ratio(2.0 * static_cast<double>(N) * static_cast<double>(C_out) *
+                                        static_cast<double>(C_in) * static_cast<double>(K_h) *
+                                        static_cast<double>(K_w) * static_cast<double>(H_out) *
+                                        static_cast<double>(W_out),
+                                    static_cast<double>(groups));
+    // Implicit GEMM dimensions: Conv -> GEMM(M, N, K).
+    const double M =
+        safe_ratio(static_cast<double>(N) * static_cast<double>(H_out) * static_cast<double>(W_out),
+                   static_cast<double>(groups));
+    const double N_gemm = safe_ratio(static_cast<double>(C_out), static_cast<double>(groups));
+    const double K_gemm =
+        static_cast<double>(C_in) * static_cast<double>(K_h) * static_cast<double>(K_w);
+    const double gemm_size = M * N_gemm * K_gemm;
+    // Hardware utilization: work per compute unit.
+    const double work_per_cu =
+        safe_ratio(static_cast<double>(N) * static_cast<double>(H_out) *
+                       static_cast<double>(W_out) * static_cast<double>(C_out),
+                   static_cast<double>(groups) * static_cast<double>(num_cu));
+    // Spatial / channel ratios.
+    const double spatial_reduction =
+        safe_ratio(static_cast<double>(H_in) * static_cast<double>(W_in),
+                   static_cast<double>(H_out) * static_cast<double>(W_out));
+    const double filter_coverage =
+        safe_ratio(static_cast<double>(K_h) * static_cast<double>(K_w),
+                   static_cast<double>(H_in) * static_cast<double>(W_in));
+    const double channel_ratio = safe_ratio(static_cast<double>(C_in), static_cast<double>(C_out));
+    const double group_density = safe_ratio(static_cast<double>(groups), static_cast<double>(C_in));
+
+    return {
+        static_cast<float>(safe_log1p(flops)),
+        static_cast<float>(safe_log1p(M)),
+        static_cast<float>(safe_log1p(N_gemm)),
+        static_cast<float>(safe_log1p(K_gemm)),
+        static_cast<float>(safe_ratio(M, N_gemm)),
+        static_cast<float>(safe_ratio(M, K_gemm)),
+        static_cast<float>(safe_ratio(N_gemm, K_gemm)),
+        static_cast<float>(safe_log1p(gemm_size)),
+        static_cast<float>(safe_log1p(work_per_cu)),
+        static_cast<float>(spatial_reduction),
+        static_cast<float>(filter_coverage),
+        static_cast<float>(channel_ratio),
+        static_cast<float>(group_density),
+        static_cast<float>(safe_log1p(static_cast<double>(H_in))),
+        static_cast<float>(safe_log1p(static_cast<double>(W_in))),
+        static_cast<float>(safe_log1p(static_cast<double>(C_in))),
+        static_cast<float>(safe_log1p(static_cast<double>(C_out))),
+        static_cast<float>(safe_log1p(static_cast<double>(N))),
+    };
+}
 } // namespace common
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
@@ -835,136 +914,46 @@ static std::vector<float> ExtractTunaNetND2dFeatures(const conv::ProblemDescript
     const std::vector<int> direction =
         common::OneHot(metadata.EncodeDirection(problem.GetDirection()), 3);
 
-    // Avoid division by zero
-    if(groups < 1)
-        groups = 1;
+    std::vector<float> features = {
+        // One-hot encodings
+        static_cast<float>(in_layout[0]),
+        static_cast<float>(in_layout[1]),
+        static_cast<float>(fil_layout[0]),
+        static_cast<float>(fil_layout[1]),
+        static_cast<float>(out_layout[0]),
+        static_cast<float>(out_layout[1]),
+        static_cast<float>(precision[0]),
+        static_cast<float>(precision[1]),
+        static_cast<float>(precision[2]),
+        static_cast<float>(precision[3]),
+        static_cast<float>(direction[0]),
+        static_cast<float>(direction[1]),
+        static_cast<float>(direction[2]),
 
-    // 1. COMPUTATIONAL COMPLEXITY FEATURES
-    // FLOPs for convolution (multiply-accumulate = 2 ops)
-    const auto safe_ratio = [](double numerator, double denominator) -> double {
-        if(denominator == 0.0)
-            return 0.0;
-        const double value = numerator / denominator;
-        return std::isfinite(value) ? value : 0.0;
+        // Raw passthrough features
+        static_cast<float>(C_in),                       // in_channels
+        static_cast<float>(H_in),                       // in_h
+        static_cast<float>(W_in),                       // in_w
+        static_cast<float>(C_out),                      // out_channels
+        static_cast<float>(H_out),                      // out_h
+        static_cast<float>(W_out),                      // out_w
+        static_cast<float>(K_h),                        // fil_h
+        static_cast<float>(K_w),                        // fil_w
+        static_cast<float>(problem.GetPadH()),          // pad_h
+        static_cast<float>(problem.GetPadW()),          // pad_w
+        static_cast<float>(problem.GetKernelStrideH()), // stride_h
+        static_cast<float>(problem.GetKernelStrideW()), // stride_w
+        static_cast<float>(problem.GetDilationH()),     // dilation_h
+        static_cast<float>(problem.GetDilationW()),     // dilation_w
+        static_cast<float>(problem.GetOutBatchSize()),  // batchsize
+        static_cast<float>(problem.GetGroupCount()),    // group_count
     };
 
-    const auto safe_log1p = [](double value) -> double {
-        if(value <= -1.0 || !std::isfinite(value))
-            return 0.0;
-        const double logged = std::log1p(value);
-        return std::isfinite(logged) ? logged : 0.0;
-    };
-
-    const double flops = safe_ratio(2.0 * static_cast<double>(N) * static_cast<double>(C_out) *
-                                        static_cast<double>(C_in) * static_cast<double>(K_h) *
-                                        static_cast<double>(K_w) * static_cast<double>(H_out) *
-                                        static_cast<double>(W_out),
-                                    static_cast<double>(groups));
-
-    // 2. GEMM DIMENSION FEATURES
-    // Implicit GEMM dimensions: Conv -> GEMM(M, N, K)
-    const double M =
-        safe_ratio(static_cast<double>(N) * static_cast<double>(H_out) * static_cast<double>(W_out),
-                   static_cast<double>(groups));
-    const double N_gemm = safe_ratio(static_cast<double>(C_out), static_cast<double>(groups));
-    const double K_gemm =
-        static_cast<double>(C_in) * static_cast<double>(K_h) * static_cast<double>(K_w);
-
-    // Total GEMM size
-    const double gemm_size = M * N_gemm * K_gemm;
-
-    // 3. HARDWARE UTILIZATION FEATURES
-    // Work per compute unit
-    const double work_per_cu =
-        safe_ratio(static_cast<double>(N) * static_cast<double>(H_out) *
-                       static_cast<double>(W_out) * static_cast<double>(C_out),
-                   static_cast<double>(groups) * static_cast<double>(num_cu));
-
-    // 4. SPATIAL FEATURES
-    // Input/output spatial ratios
-    const double spatial_reduction =
-        safe_ratio(static_cast<double>(H_in) * static_cast<double>(W_in),
-                   static_cast<double>(H_out) * static_cast<double>(W_out));
-
-    // Filter size relative to input
-    const double filter_coverage =
-        safe_ratio(static_cast<double>(K_h) * static_cast<double>(K_w),
-                   static_cast<double>(H_in) * static_cast<double>(W_in));
-
-    // 5. CHANNEL RATIOS
-    const double channel_ratio = safe_ratio(static_cast<double>(C_in), static_cast<double>(C_out));
-
-    // Group density
-    const double group_density = safe_ratio(static_cast<double>(groups), static_cast<double>(C_in));
-
-    // 6. LOG-TRANSFORMED RAW FEATURES
-
-    return {// One hots
-            static_cast<float>(in_layout[0]),
-            static_cast<float>(in_layout[1]),
-            static_cast<float>(fil_layout[0]),
-            static_cast<float>(fil_layout[1]),
-            static_cast<float>(out_layout[0]),
-            static_cast<float>(out_layout[1]),
-            static_cast<float>(precision[0]),
-            static_cast<float>(precision[1]),
-            static_cast<float>(precision[2]),
-            static_cast<float>(precision[3]),
-            static_cast<float>(direction[0]),
-            static_cast<float>(direction[1]),
-            static_cast<float>(direction[2]),
-
-            // Input dimensions
-            static_cast<float>(C_in), // in_channels
-            static_cast<float>(H_in), // in_h
-            static_cast<float>(W_in), // in_w
-
-            // Output dimensions
-            static_cast<float>(C_out), // out_channels
-            static_cast<float>(H_out), // out_h
-            static_cast<float>(W_out), // out_w
-
-            // Filter dimensions
-            static_cast<float>(K_h), // fil_h
-            static_cast<float>(K_w), // fil_w
-
-            // Padding
-            static_cast<float>(problem.GetPadH()), // pad_h
-            static_cast<float>(problem.GetPadW()), // pad_w
-
-            // Stride
-            static_cast<float>(problem.GetKernelStrideH()), // stride_h
-            static_cast<float>(problem.GetKernelStrideW()), // stride_w
-
-            // Dilation
-            static_cast<float>(problem.GetDilationH()), // dilation_h
-            static_cast<float>(problem.GetDilationW()), // dilation_w
-
-            // Batch size
-            static_cast<float>(problem.GetOutBatchSize()), // batchsize
-
-            // Group count
-            static_cast<float>(problem.GetGroupCount()), // group_count
-
-            // Feature engineered features
-            static_cast<float>(safe_log1p(flops)),
-            static_cast<float>(safe_log1p(M)),
-            static_cast<float>(safe_log1p(N_gemm)),
-            static_cast<float>(safe_log1p(K_gemm)),
-            static_cast<float>(safe_ratio(M, N_gemm)),
-            static_cast<float>(safe_ratio(M, K_gemm)),
-            static_cast<float>(safe_ratio(N_gemm, K_gemm)),
-            static_cast<float>(safe_log1p(gemm_size)),
-            static_cast<float>(safe_log1p(work_per_cu)),
-            static_cast<float>(spatial_reduction),
-            static_cast<float>(filter_coverage),
-            static_cast<float>(channel_ratio),
-            static_cast<float>(group_density),
-            static_cast<float>(safe_log1p(static_cast<double>(H_in))),
-            static_cast<float>(safe_log1p(static_cast<double>(W_in))),
-            static_cast<float>(safe_log1p(static_cast<double>(C_in))),
-            static_cast<float>(safe_log1p(static_cast<double>(C_out))),
-            static_cast<float>(safe_log1p(static_cast<double>(N)))};
+    // Derived feature block (shared with the candidate-selection path).
+    const auto derived = common::EngineeredConvFeatures(
+        N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu);
+    features.insert(features.end(), derived.begin(), derived.end());
+    return features;
 }
 
 class TunaNetNDModel : public ModelND
