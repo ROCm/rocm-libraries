@@ -41,7 +41,7 @@ std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> makeTensor(
 
 } // namespace
 
-TEST(GoldenTensorComparator, IdenticalTensorsPass)
+TEST(TestGoldenTensorComparator, IdenticalTensorsPass)
 {
     auto expected = makeTensor({2, 3}, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f});
     auto actual = makeTensor({2, 3}, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f});
@@ -52,7 +52,7 @@ TEST(GoldenTensorComparator, IdenticalTensorsPass)
     EXPECT_EQ(result.totalElements, 6u);
 }
 
-TEST(GoldenTensorComparator, MismatchDetected)
+TEST(TestGoldenTensorComparator, MismatchDetected)
 {
     auto expected = makeTensor({4}, {1.0f, 2.0f, 3.0f, 4.0f});
     auto actual = makeTensor({4}, {1.0f, 2.0f, 3.5f, 4.0f});
@@ -65,7 +65,7 @@ TEST(GoldenTensorComparator, MismatchDetected)
     EXPECT_NEAR(result.worstActual, 3.5, 1e-5);
 }
 
-TEST(GoldenTensorComparator, AbsToleranceAllowsSmallDiff)
+TEST(TestGoldenTensorComparator, AbsToleranceAllowsSmallDiff)
 {
     auto expected = makeTensor({3}, {1.0f, 2.0f, 3.0f});
     auto actual = makeTensor({3}, {1.001f, 2.001f, 3.001f});
@@ -74,7 +74,7 @@ TEST(GoldenTensorComparator, AbsToleranceAllowsSmallDiff)
     EXPECT_TRUE(result.passed);
 }
 
-TEST(GoldenTensorComparator, RelToleranceAllowsProportionalDiff)
+TEST(TestGoldenTensorComparator, RelToleranceAllowsProportionalDiff)
 {
     auto expected = makeTensor({2}, {100.0f, 200.0f});
     auto actual = makeTensor({2}, {100.5f, 201.0f});
@@ -83,7 +83,7 @@ TEST(GoldenTensorComparator, RelToleranceAllowsProportionalDiff)
     EXPECT_TRUE(result.passed);
 }
 
-TEST(GoldenTensorComparator, MultipleMismatchesReportsWorst)
+TEST(TestGoldenTensorComparator, MultipleMismatchesReportsWorst)
 {
     auto expected = makeTensor({3}, {1.0f, 2.0f, 3.0f});
     auto actual = makeTensor({3}, {1.1f, 5.0f, 3.2f});
@@ -95,7 +95,7 @@ TEST(GoldenTensorComparator, MultipleMismatchesReportsWorst)
     EXPECT_NEAR(result.maxAbsError, 3.0, 1e-5);
 }
 
-TEST(GoldenTensorComparator, NegativeZeroEqualsPositiveZero)
+TEST(TestGoldenTensorComparator, NegativeZeroEqualsPositiveZero)
 {
     auto expected = makeTensor({2}, {0.0f, -0.0f});
     auto actual = makeTensor({2}, {-0.0f, 0.0f});
@@ -104,7 +104,7 @@ TEST(GoldenTensorComparator, NegativeZeroEqualsPositiveZero)
     EXPECT_TRUE(result.passed);
 }
 
-TEST(GoldenTensorComparator, FlatIndexToMultiDimCorrect)
+TEST(TestGoldenTensorComparator, FlatIndexToMultiDimCorrect)
 {
     auto indices = flatIndexToMultiDim(5, {2, 3});
     ASSERT_EQ(indices.size(), 2u);
@@ -112,7 +112,7 @@ TEST(GoldenTensorComparator, FlatIndexToMultiDimCorrect)
     EXPECT_EQ(indices[1], 2);
 }
 
-TEST(GoldenTensorComparator, FlatIndexToMultiDim4D)
+TEST(TestGoldenTensorComparator, FlatIndexToMultiDim4D)
 {
     // shape [2, 3, 4, 5], flat index 47
     // 47 = 0*60 + 2*20 + 1*5 + 2  => (0, 2, 1, 2)
@@ -124,7 +124,7 @@ TEST(GoldenTensorComparator, FlatIndexToMultiDim4D)
     EXPECT_EQ(indices[3], 2);
 }
 
-TEST(GoldenTensorComparator, FormatComparisonFailureContainsAllFields)
+TEST(TestGoldenTensorComparator, FormatComparisonFailureContainsAllFields)
 {
     ComparisonResult result;
     result.passed = false;

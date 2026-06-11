@@ -106,7 +106,7 @@ void writeMinimalBatchNormBundle(const std::filesystem::path& dir, const std::st
 // end-to-end by running the same CPU executor against a real batch-norm
 // bundle and comparing the result to the golden tensor data on disk.
 // ---------------------------------------------------------------------------
-TEST(TestGoldenVerificationCpuRef, BatchNormSmallFp32MatchesGoldenData)
+TEST(TestGoldenVerificationCpuRefFp32, BatchNormSmallMatchesGoldenData)
 {
     const auto bundlePath = batchNormSmallBundle();
     if(!std::filesystem::exists(bundlePath))
@@ -144,7 +144,7 @@ TEST(TestGoldenVerificationCpuRef, BatchNormSmallFp32MatchesGoldenData)
 // GPU ref pipeline is wired up correctly; it skips for ops that lack a GPU
 // plan (confirming those ops correctly fall to the CPU reference path).
 // ---------------------------------------------------------------------------
-TEST(TestGoldenVerificationGpuRef, SkipsWhenNoGpuPlanAvailable)
+TEST(TestGpuGoldenVerificationRef, SkipsWhenNoPlanAvailable)
 {
     SKIP_IF_NO_DEVICES();
 

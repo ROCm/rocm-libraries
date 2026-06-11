@@ -19,7 +19,7 @@ using namespace hipdnn_integration_tests::golden;
 namespace
 {
 
-class GoldenBundleDiscoveryFixture : public ::testing::Test
+class TestGoldenBundleDiscoveryFixture : public ::testing::Test
 {
 protected:
     std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
@@ -76,14 +76,14 @@ protected:
 
 } // namespace
 
-TEST_F(GoldenBundleDiscoveryFixture, MissingTierThrows)
+TEST_F(TestGoldenBundleDiscoveryFixture, MissingTierThrows)
 {
     // Only quick populated; standard/comprehensive/full are absent -> hard fail.
     createMinimalBundle(_tempDir / "quick" / "Bn" / "q", "q");
     EXPECT_THROW(discoverGoldenBundles(_tempDir), std::runtime_error);
 }
 
-TEST_F(GoldenBundleDiscoveryFixture, EmptyTierThrows)
+TEST_F(TestGoldenBundleDiscoveryFixture, EmptyTierThrows)
 {
     // All four tier folders exist but quick has no bundles -> hard fail.
     for(const char* tier : {"quick", "standard", "comprehensive", "full"})
@@ -93,7 +93,7 @@ TEST_F(GoldenBundleDiscoveryFixture, EmptyTierThrows)
     EXPECT_THROW(discoverGoldenBundles(_tempDir), std::runtime_error);
 }
 
-TEST_F(GoldenBundleDiscoveryFixture, StrayTopLevelDirThrows)
+TEST_F(TestGoldenBundleDiscoveryFixture, StrayTopLevelDirThrows)
 {
     populateAllTiers();
     // A typo'd tier directory at the top level must be rejected.
@@ -101,7 +101,7 @@ TEST_F(GoldenBundleDiscoveryFixture, StrayTopLevelDirThrows)
     EXPECT_THROW(discoverGoldenBundles(_tempDir), std::runtime_error);
 }
 
-TEST_F(GoldenBundleDiscoveryFixture, UnparseableJsonThrows)
+TEST_F(TestGoldenBundleDiscoveryFixture, UnparseableJsonThrows)
 {
     populateAllTiers();
     // Corrupt one bundle in the quick tier (processed first).
@@ -111,7 +111,7 @@ TEST_F(GoldenBundleDiscoveryFixture, UnparseableJsonThrows)
     EXPECT_THROW(discoverGoldenBundles(_tempDir), std::runtime_error);
 }
 
-TEST_F(GoldenBundleDiscoveryFixture, CollisionThrows)
+TEST_F(TestGoldenBundleDiscoveryFixture, CollisionThrows)
 {
     populateAllTiers();
     // Two bundles in the same tier with identical graph content + scenario name
@@ -121,7 +121,7 @@ TEST_F(GoldenBundleDiscoveryFixture, CollisionThrows)
     EXPECT_THROW(discoverGoldenBundles(_tempDir), std::runtime_error);
 }
 
-TEST_F(GoldenBundleDiscoveryFixture, DiscoversBundlesAcrossAllTiers)
+TEST_F(TestGoldenBundleDiscoveryFixture, DiscoversBundlesAcrossAllTiers)
 {
     populateAllTiers();
 
@@ -150,7 +150,7 @@ TEST_F(GoldenBundleDiscoveryFixture, DiscoversBundlesAcrossAllTiers)
     EXPECT_EQ(stdBundle->suiteName, "Standard/BatchnormInference_nchw_fp32");
 }
 
-TEST_F(GoldenBundleDiscoveryFixture, SkipsMetaJson)
+TEST_F(TestGoldenBundleDiscoveryFixture, SkipsMetaJson)
 {
     populateAllTiers();
     // Both a bare meta.json and a {Name}.meta.json companion must be ignored.
@@ -164,7 +164,7 @@ TEST_F(GoldenBundleDiscoveryFixture, SkipsMetaJson)
     EXPECT_EQ(result.size(), 5u);
 }
 
-TEST_F(GoldenBundleDiscoveryFixture, ScanFilesByExtensionIsGenericAndSorted)
+TEST_F(TestGoldenBundleDiscoveryFixture, ScanFilesByExtensionIsGenericAndSorted)
 {
     // The generic scanner carries no golden-ref knowledge: it returns every
     // matching file (including meta files), recursively, in sorted order.
@@ -182,7 +182,7 @@ TEST_F(GoldenBundleDiscoveryFixture, ScanFilesByExtensionIsGenericAndSorted)
     EXPECT_EQ(json.front().filename(), "a.json");
 }
 
-TEST(IsGoldenMetaFile, IdentifiesCompanionMetadata)
+TEST(TestGoldenMetaFile, IdentifiesCompanionMetadata)
 {
     EXPECT_TRUE(isGoldenMetaFile("dir/meta.json"));
     EXPECT_TRUE(isGoldenMetaFile("dir/resnet50.meta.json"));
@@ -192,14 +192,14 @@ TEST(IsGoldenMetaFile, IdentifiesCompanionMetadata)
     EXPECT_FALSE(isGoldenMetaFile("dir/meta.bin"));
 }
 
-TEST(SanitizeForGtest, ReplacesInvalidChars)
+TEST(TestSanitizeForGtest, ReplacesInvalidChars)
 {
     EXPECT_EQ(sanitizeForGtest("hello world!"), "hello_world_");
     EXPECT_EQ(sanitizeForGtest("Conv-Fprop.v2"), "Conv_Fprop_v2");
     EXPECT_EQ(sanitizeForGtest("already_valid_123"), "already_valid_123");
 }
 
-TEST(TierPrefix, MatchesRfcScheme)
+TEST(TestTierPrefix, MatchesRfcScheme)
 {
     EXPECT_EQ(tierPrefix("quick"), "");
     EXPECT_EQ(tierPrefix("standard"), "Standard/");
