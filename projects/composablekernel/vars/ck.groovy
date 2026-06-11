@@ -519,14 +519,15 @@ def runOnHealthyNode(String label, Closure body) {
         def attemptNode = null
         try {
             node(exclude(label, excluded)) {
-                attemptNode = env.NODE_NAME   // capture before any exception clears context
+                attemptNode = env.NODE_NAME
+                echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
                 preflight()
                 runInPlace(body, transientRetries)
             }
             return
         }
-        catch (org.ck.NodeFault e)      { echo "node fault on ${attemptNode}: ${e.message}";               excluded << attemptNode }
-        catch (org.ck.TransientFault e) { echo "glitch outlasted retries on ${attemptNode}: ${e.message}"; excluded << attemptNode }
+        catch (org.ck.NodeFault e)      { echo "Node attempt ${attempt + 1}/${nodeAttempts} failed (node fault on ${attemptNode}): ${e.message}";               excluded << attemptNode }
+        catch (org.ck.TransientFault e) { echo "Node attempt ${attempt + 1}/${nodeAttempts} failed (glitch outlasted retries on ${attemptNode}): ${e.message}"; excluded << attemptNode }
         // FlowInterruptedException (abort) and real build errors: propagate, no retry.
         // buildAndTest sets failure status for real failures; abort needs no status update.
     }
